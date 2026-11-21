@@ -31,7 +31,7 @@ match; the bridge extension is reinstalled whenever its content changes.
 5. Tag and push: `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`.
 6. The `release` workflow (`.github/workflows/release.yml`) builds the
    video encoders of Linux machines (`encoder.yml`), then the four
-   platforms: each core embeds the agents, the pinned herdr-core of every
+   platforms: each core embeds its machine builds, the pinned herdr-core of every
    agent platform and the encoders, and is packaged with `LICENSE`,
    `THIRD_PARTY_NOTICES.md`, the web UI's `licenses.md` and `licenses/`
    (`herdr-core/`, `herdr-detect/`, `encoder/`). No herdr is built or

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Builds the web UI, the VS Code bridge extension, the per-platform agents
-# (embedded gzip), fetches the pinned herdr-core of each agent platform
+# Builds the web UI, the VS Code bridge extension, the machine builds of the
+# one binary for every agent platform (the tag "machine": the commands a
+# machine runs, without the server, the UI and what the core embeds; embedded
+# gzip), fetches the pinned herdr-core of each agent platform
 # (embedded gzip), then builds the core for TARGETS (default: host platform),
 # packaged with its license notices (a Windows core, which goes into the
 # desktop installer only, gets no archive). Names come from internal/brand.
@@ -33,14 +35,14 @@ if [[ -z "${SKIP_EXT:-}" && -d "extensions/${SLUG}-bridge" ]]; then
   cp "extensions/${SLUG}-bridge/${SLUG}-bridge.vsix" internal/embedded/ext/
 fi
 
-echo "==> agents"
+echo "==> machine builds"
 mkdir -p dist/agents internal/embedded/agents
 rm -f internal/embedded/agents/*.gz
 for p in $AGENT_PLATFORMS; do
   os=${p%/*}; arch=${p#*/}
-  out=dist/agents/${SLUG}-agent-$os-$arch
-  CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "$out" "./cmd/${SLUG}-agent"
-  gzip -9 -n -c "$out" > "internal/embedded/agents/${SLUG}-agent-$os-$arch.gz"
+  out=dist/agents/${SLUG}-$os-$arch
+  CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -tags machine -ldflags "$LDFLAGS" -o "$out" "./cmd/${SLUG}"
+  gzip -9 -n -c "$out" > "internal/embedded/agents/${SLUG}-$os-$arch.gz"
   echo "    $os/$arch $(du -h "$out" | cut -f1)"
 done
 

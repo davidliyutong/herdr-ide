@@ -13,9 +13,9 @@ herdr-core, the terminal core the agents install on machines, into
 
 ```bash
 make deps            # pnpm install for web/, the extension and desktop/ (with Electron's binary)
-make build           # web UI, extension, agents, core; release archives
+make build           # web UI, extension, machine builds, core; release archives
 make test            # Go, web and desktop unit tests
-make check           # formatting, vet, typecheck, brand/doc consistency
+make check           # formatting, vet, typecheck, import cycles of the web UI, brand/doc consistency
 ```
 
 Day-to-day development, without touching the state or the terminals of your
@@ -60,7 +60,10 @@ workspaces can live in the ignored `.worktrees/` directory.
 - Keep each PR focused; describe the user-visible change and how you tested
   it (the template asks for this).
 - `make check test` must pass (`make check` also vets the Go code for
-  linux/amd64, darwin/arm64 and windows/amd64); CI
+  linux/amd64, darwin/arm64 and windows/amd64, and fails when modules of
+  the web UI import each other in a cycle: `web/scripts/cycles.mjs`
+  counts the imports that exist at run time, so move what both sides
+  need into a module below them); CI
   (`.github/workflows/ci.yml`) runs the same on Linux, plus
   `go test -race`, `make it` against the pinned herdr-core, the
   cross-compiled release archives and Windows core, and a `desktop` job on
@@ -93,7 +96,8 @@ workspaces can live in the ignored `.worktrees/` directory.
   `web/src/brand.ts` in the UI and `src/brand.ts` in the extension
   (`scripts/check.sh` enforces this). Renames go through `scripts/rename.sh`.
 - **Text:** user-visible strings go through i18n — `t('key')` with the key in
-  `web/src/i18n/en.ts` and a translation in `zh-CN.ts`; extension strings in
+  `web/src/i18n/en.ts` and a translation in `zh-CN.ts` (a plugin's in its
+  `web/src/plugins/<id>/i18n/`); extension strings in
   `package.nls*.json` / `l10n/`. The server sends codes, not sentences.
   Code comments, logs and identifiers are English.
 - **READMEs:** `README.md` (English) is canonical; keep `README.zh-CN.md` in

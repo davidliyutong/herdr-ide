@@ -6,7 +6,7 @@ desktop app (Electron shell)                            ├─ machines: registr
                                                         ├─ settings, keybindings (files on the core host)
                                                         ├─ server: event channel, terminal protocol, files, code-server proxy, bridge hub
                                                         ├─ gui: virtual displays per machine, window list, frame routing
-                                                        └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide-agent`)
+                                                        └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide agent`)
                                                                                                     ├─ herdr-core in a session of its own (raw pipe to its API socket)
                                                                                                     ├─ agent detection in its terminals
                                                                                                     ├─ files (stat/list/range read/upload/zip)
@@ -25,8 +25,7 @@ machines only ([02](features/02-multi-machine-transport.md)).
 
 | Directory | Role |
 | --- | --- |
-| `cmd/herdr-ide` | Core entry point: flags, `serve`, `fetch-assets`, `mcp` (the vault's MCP server, also run by the name `<slug>-mcp`), `version`; the local machine's in-process agent (`local_unix.go`; `local_windows.go` dials none). Builds for Linux, macOS and Windows. |
-| `cmd/herdr-ide-agent` | Agent entry point (`serve` over stdio; `mcp`, the vault's MCP server, also run by the name `<slug>-mcp`); Linux and macOS only (`//go:build unix`). |
+| `cmd/herdr-ide` | The one entry point (`main.go`): `mcp` (the vault's MCP server, also run by the name `<slug>-mcp`) and `version`; the core's commands `serve` and `fetch-assets` with its flags (`serve.go`) and the local machine's in-process agent (`local_unix.go`; `local_windows.go` dials none); a machine's commands `agent` (the agent over stdio) and `gui-keep` (`machine_unix.go`, `//go:build unix`). Builds for Linux, macOS and Windows. With the tag `machine` the core's files are left out (`machine_only.go` stands in): the build the core embeds for every agent platform and uploads to machines, so it carries no server, no UI and no embedded payloads. |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/agentproto` | Stream protocol shared by core and agent, and the yamux configuration of both ends (`yamux.go`). |
 | `internal/agent` | Agent: the terminal core, agent detection, files, code-server supervision, virtual displays, the bridge and vault listeners and the MCP link, housekeeping. Every file is `//go:build unix` (unix sockets with peer checks, process groups, Xvfb), so code the core runs on Windows does not import it. |
@@ -45,20 +44,21 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/userfile` | Atomic writes and change detection of the hand-editable files; the configuration directory made private on Linux and macOS (`private_unix.go`; on Windows its access control list keeps it the user's). |
 | `internal/plugin` | The core's side of plugins: their routes below `/api/p/<id>` and `/api/m/{id}/p/<id>` (guarded as the core's own; changes audited once their handler returned, with what they acted on and how they ended), `/ws` messages, switches (`plugins.<id>.enabled`) and the calls to their machine sides ([27](features/27-plugins.md)). |
 | `internal/agent/plugin` | The machine side of plugins: handlers of the agent's `plugin` op, registered per plugin; a handler's panic fails its action, not the agent. |
-| `internal/plugins/files`, `internal/agent/plugin/files` | The file explorer plugin: its routes below `/api/m/{id}/p/files/` and its actions on machines (`mkdir`, `mkdirs`, `create`, `rename`, `move`, `copy`, `trash`, `remove`, `write` with a precondition and `upload`, both writing a file that is there in place, as VS Code does, `stat` with a bound on stats running at once), refusing the root, the home directory and what holds it, and the agent's data directory, by file identity ([28](features/28-file-explorer.md)). |
+| `internal/plugins/files`, `internal/agent/plugin/files` | The file explorer plugin: its routes below `/api/m/{id}/p/files/` and its actions on machines (`mkdir`, `mkdirs`, `create`, `rename`, `move`, `copy`, `trash`, `remove`, `write` with a precondition and `upload`, both writing a file that is there in place, as VS Code does, `stat` with a bound on stats running at once, `reveal`, which shows a path in the file manager of the core's host for its own machine and a client on that host only), refusing in its changes the root, the home directory and what holds it, and the agent's data directory, by file identity ([28](features/28-file-explorer.md)). |
 | `internal/plugins/git`, `internal/agent/plugin/git` | The Git plugin: its routes below `/api/m/{id}/p/git/` (reads GET, changes POST, audited as `git.<action>`) and its actions on machines, each the `git` executable with an argument vector built in the agent (no shell, paths after `--` and literal, revisions and names checked, no credential prompts, timeouts that kill the process group) ([31](features/31-git.md)). |
 | `internal/plugins/browser`, `internal/agent/plugin/browser`, `internal/loopback` | The browser plugin's port forwards ([32](features/32-browser-and-ports.md)): a listener of the core on the core host's loopback per forward (both loopback addresses), each connection one stream to the agent's `dial` action, which connects to the port on the machine's own loopback; the machine's listening ports; idle forwards ended. `internal/loopback` takes the other loopback address of a listener's port, which the core's own listener does too. |
-| `internal/vault` | The variable vault's store on the core host: values encrypted one by one (AES-256-GCM, the name, machines and inject-only flag as additional data) in `vault[-<instance>].json`, the master key derived from the passphrase (Argon2id) and kept in memory only, and the encrypted export files (a versioned envelope, Argon2id and AES-256-GCM under a passphrase of their own) ([30](features/30-variable-vault.md)). Builds for Windows too. |
-| `internal/plugins/vault` | The vault plugin's core side: its routes behind the gate (sessions opened with the passphrase, `X-Vault-Session`), the MCP servers' requests (op `vault`, a `plugin.Streamer`), approvals, export and import, and the access log (`vault[-<instance>]-access.jsonl`, written before a value leaves). |
+| `internal/vault` | The variable vault's store on the core host: values encrypted one by one (AES-256-GCM, the name, machines and inject-only flag as additional data) in `vault[-<instance>].json`, the master key derived from the passphrase (Argon2id) and kept in memory only (also while suspended: locked with the key held), and the encrypted export files (a versioned envelope, Argon2id and AES-256-GCM under a passphrase of their own) ([30](features/30-variable-vault.md)). Builds for Windows too. |
+| `internal/plugins/vault` | The vault plugin's core side: its routes behind the gate (sessions opened with the passphrase or an authenticator's proof, `X-Vault-Session`), the key's hold after the passphrase, the MCP servers' requests (op `vault`, a `plugin.Streamer`), approvals and exempt apps, export and import, and the access log (`vault[-<instance>]-access.jsonl`, written before a value leaves). |
 | `internal/vaultmcp` | The vault's MCP server (the `mcp` command of the core and the agent): JSON-RPC over stdio, the tools `list_variables`, `get_variable`, `run_with_env`. |
-| `internal/usage` | What AI subscriptions have left on one machine: the CLIs' credentials read only (Kimi Code's sign-in renewed under its own lock), the providers' usage endpoints, Antigravity's local language server, the logs' token cost at the prices of `pricing.json` with an incremental cache; portable, run by the agent ([29](features/29-ai-usage.md)). |
+| `internal/usage` | What AI subscriptions have left on one machine: the CLIs' credentials read only (Kimi Code's sign-in renewed under its own lock), the providers' usage endpoints, Antigravity's local language server, the logs' token cost at the prices of `pricing.json` with an incremental cache (OpenCode's SQLite database read by a reader of the file format of its own, without a lock); portable, run by the agent ([29](features/29-ai-usage.md)). |
 | `internal/agent/plugin/usage` | The AI usage plugin's machine side: actions `limits`, `cost` and `setDeepseekKey` of the `plugin` op. |
 | `internal/plugins/usage` | The AI usage plugin's core side: its settings, a scheduler that asks the machines and merges the accounts several share, history for pace, the alerts (once per window's period), the providers' status pages, its routes and `/ws` messages. |
 | `internal/gui` | Virtual displays on machines, their windows, frames and input between agents and browser windows. |
 | `internal/jpegstrip` | JPEG encoding of a window capture in independent row groups, encoded in parallel (from Go's `image/jpeg`, BSD). |
 | `internal/server` | HTTP/WS front: guards, the event channel, terminal streams, files, proxy, bridge, audit. |
+| `internal/perf` | What the core's own process uses (processor time, memory, goroutines, uptime, processors), answered by `GET /api/perf` for the settings' Performance page ([13](features/13-settings-and-appearance.md)). |
 | `internal/embedded` | Build artifacts compiled into the core (agents, herdr-core, the video encoder, bridge VSIX). |
-| `web` | Browser UI (Vite, React, zustand): the plugins' web sides (`src/plugins`, the right sidebar `src/components/RightBar.tsx`, [27](features/27-plugins.md); the components panels share: searchable dropdowns `src/components/Picker.tsx`, tree rows, selection and sections `src/components/tree`, file-type icons `src/fileIcons.tsx`; Monaco loaded on first use for plugins' editors, `src/plugins/monaco.ts`, [28](features/28-file-explorer.md)); the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document, whose panes are terminals, VS Code and previews; `src/state/terms.ts`: the machines' terminals and layouts; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); VS Code panes' iframes in a layer over the panes (`src/codeFrames.ts`, `src/components/CodeLayer.tsx`, [05](features/05-vscode-panes.md)); `web/embed.go` embeds `web/dist`. |
+| `web` | Browser UI (Vite, React, zustand): the plugins' web sides (`src/plugins`, the right sidebar `src/components/RightBar.tsx`, [27](features/27-plugins.md); the components panels share: searchable dropdowns `src/components/Picker.tsx`, tree rows, selection and sections `src/components/tree`, file-type icons `src/fileIcons.tsx`; Monaco loaded on first use for plugins' editors, `src/plugins/monaco.ts`, [28](features/28-file-explorer.md)); the terminals of the machines' terminal cores (`src/term`: the client of `/api/v1/term` and the layout document, whose panes are terminals, VS Code and previews; `src/state/terms.ts`: the machines' terminals and layouts; `src/restore.ts`: the layout's terminals and coding agents brought back after a terminal core started again, [33](features/33-workspace-restore.md); `src/keptPanes.ts`: the terminals shown last kept attached while hidden, as many as `performance.keptTerminals` says; `src/perf.ts`: what the page, the core and the desktop app's processes use, for the settings' Performance page, [13](features/13-settings-and-appearance.md); `src/ime.ts`: an input method's keys kept from the page's handlers; `src/vt`: Ghostty's terminal library as WebAssembly with its renderer and input encoders, also for the PTY dialogs, [26](features/26-web-terminals.md)); VS Code panes' iframes in a layer over the panes (`src/codeFrames.ts`, `src/components/CodeLayer.tsx`, [05](features/05-vscode-panes.md)); `web/embed.go` embeds `web/dist`. |
 | `desktop` | Electron shell for macOS, Windows and Linux (`src`: the owned core process, what differs per system (`platform.ts`), the client of its settings and keybindings, the application menu, the main window's preload and policy) and electron-builder config: macOS DMG and zip, Windows NSIS setup, Linux AppImage and deb, each wrapping the core built for its system. |
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 | `scripts` | Build, packaging and check scripts (`build.sh`, which also builds a Windows core; `package.sh`, archives for Linux and macOS; `desktop.sh`, the desktop app of each system; `icons.sh`; `check.sh`, which vets for Linux, macOS and Windows too), the pinned downloads (`fetch-hc`, `fetch-ghostty-vt.sh` for the web UI's emulator, `build-ffmpeg.sh` for the video encoder) and the generators (`tokens`, `registry`). |
@@ -125,7 +125,10 @@ on the command line by a file manager's Open With on Linux), also when they
 launched it, and on macOS three requests for Full Disk Access without
 arguments (System Settings at that list, the local terminal core's
 executable in Finder, quitting and reopening the app), for which the shell
-opens one fixed URL, a path it works out itself and its own bundle.
+opens one fixed URL, a path it works out itself and its own bundle. It
+also answers what the app's own processes use (their kinds, helpers'
+names, shares of a processor and memory), for the settings' Performance
+page ([13](features/13-settings-and-appearance.md)).
 Same-origin popups become equally restricted native windows;
 HTTP(S) links outside the core open in the default browser. Packaging and
 lifecycle details are in [16](features/16-desktop-packaging.md).
@@ -140,7 +143,7 @@ after a successful reply it carries op-specific bytes.
 | Op | Direction | Payload after the reply |
 | --- | --- | --- |
 | `hello` | core → agent | – (reply has host info and data dirs, and apart from them, since clients see those, the `SSH_CONNECTION` of the ssh session the agent runs in, which the core gives the machine's new terminals); the machine is ready once it answers |
-| `fs.stat`, `fs.list` | core → agent | – (a failed `fs.stat` has the code `not_found` or `denied`, which `/file` answers with 404 or 403) |
+| `fs.stat`, `fs.list` | core → agent | – (a failed `fs.stat` has the code `not_found` or `denied`, which `/file` answers with 404 or 403); a listing over 32 KiB (`MaxInline`, a directory of some hundreds of names) is not in the line, which holds at most 1 MiB: the reply's `entries_length` says that many bytes of JSON (at most 64 MiB) follow it, which `transport.Session.Open` reads into `Entries` |
 | `fs.read` | core → agent | `Length` bytes from `Offset` |
 | `fs.write` | core → agent | chunked upload, then a second reply; `unique` keeps existing files (`-1`, `-2`… names) |
 | `fs.archive` | core → agent | a zip of `Paths` (each at the root under its name, directories recursively), streamed until the agent closes the stream; with `Chunked` as `ChunkWriter` chunks ended by the empty chunk once the archive is complete |
@@ -248,6 +251,14 @@ field; binary frames are `[stream u32 LE][kind u8][payload]`.
 | binary kind 0 (input bytes), kind 6 (the client terminal's automatic answers) | binary kind 0 (output bytes: a first paint, then the program's output), kind 3 (`cols u16 LE, rows u16 LE`: an observed terminal's new grid) |
 | `ping {rid}` | `pong {rid}` |
 
+`detach`, or the client leaving, ends the client's stream. The core closes
+it at the terminal core, except the last one that set a live terminal's
+size: that one stays attached there, unread and out of every client's
+reach, until the terminal's next such viewer has attached, the terminal
+ends or the backend's connection closes, so that a terminal keeps its size
+while no client shows it instead of getting herdr-core's headless size
+([22](features/22-terminal-protocol.md)).
+
 Terminal labels the UI sets with `terminal.label`: `name` (a pane's name)
 and `closing` (the time, in ms since the epoch, when a terminal whose pane
 was closed ends unless Undo Close brings it back; empty when brought back,
@@ -296,6 +307,8 @@ names to the `Legacy*` lists, from which:
 
 The web UI uses `web/src/i18n`: `en.ts` defines every key, other locales are
 typed against it (missing keys fail the build, a test checks placeholders);
+a plugin's messages are files of its own directory
+(`web/src/plugins/<id>/i18n`), which `en.ts` and the locales gather;
 the desktop app's menu and dialogs use the same strings. The settings' and
 commands' labels are the keys `design/generated/registry.json` lists, and
 the web UI's tests fail when one is missing. The VS Code extension uses

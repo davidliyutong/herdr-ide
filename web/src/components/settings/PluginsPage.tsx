@@ -89,7 +89,6 @@ export function PluginsPage({ readOnly, onOpen }: { readOnly: boolean; onOpen?(p
   const open = onOpen ?? ((page: string) => useStore.getState().openSettings({ page }));
   return (
     <div className="settings-section plugins-page">
-      <p className="muted small">{t('plugins.page.about')}</p>
       {error && <p className="error small">{error}</p>}
       {list.map((p) => {
         const Icon = p.icon;

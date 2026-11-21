@@ -3,8 +3,8 @@
 // /api/m/{id}/p/files/ that run the actions of its machine side
 // (internal/agent/plugin/files). Listing directories and reading files
 // use the core's own routes (/api/m/{id}/list, /file, /download); the
-// plugin adds the changes, the stat the explorer polls, and saving an
-// editor's text.
+// plugin adds the changes, the stat the explorer polls, saving an editor's
+// text, and showing a path of the core's own machine in its file manager.
 package files
 
 import (
@@ -14,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -86,7 +87,55 @@ func (Plugin) Routes() []plugin.Route {
 		change("remove"),
 		{Method: http.MethodPost, Path: "write", Machine: true, Mutating: true, Audit: "write", Handler: write},
 		{Method: http.MethodPost, Path: "upload", Machine: true, Mutating: true, Audit: "upload", Handler: upload},
+		{Method: http.MethodGet, Path: "reveal", Machine: true, Handler: revealAvailable},
+		// It runs a program on the core's host: refused in read-only mode
+		// and audited, as the changes are.
+		{Method: http.MethodPost, Path: "reveal", Machine: true, Mutating: true, Audit: "reveal", Handler: reveal},
 	}
+}
+
+// revealable reports whether paths of the call's machine can be shown in
+// the system's file manager for its client: the machine is the core's own
+// (its agent runs in the core's process, on a system with a file manager),
+// and the client is on the core's host, whose screen the window opens on.
+func revealable(c *plugin.Call) (bool, string) {
+	switch {
+	case !c.Machine.Local():
+		return false, "remote_machine"
+	case !c.SameHost:
+		return false, "local_only"
+	case runtime.GOOS != "darwin" && runtime.GOOS != "linux":
+		return false, "reveal_unavailable"
+	}
+	return true, ""
+}
+
+// revealAvailable answers whether Reveal in Finder is offered for the
+// machine's paths to this client ({"available"}).
+func revealAvailable(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	ok, _ := revealable(c)
+	plugin.WriteJSON(w, http.StatusOK, map[string]bool{"available": ok})
+}
+
+// reveal shows {"path"} in the file manager of the core's host (Finder on
+// macOS, the default file manager elsewhere), through the local machine's
+// agent, which checks the path as every action's.
+func reveal(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	var p params
+	if err := plugin.ReadJSON(r, maxBody, &p); err != nil {
+		plugin.WriteError(w, err)
+		return
+	}
+	c.AuditField("path", p.Path)
+	if ok, code := revealable(c); !ok {
+		status := http.StatusBadRequest
+		if code == "local_only" {
+			status = http.StatusForbidden
+		}
+		plugin.WriteJSON(w, status, map[string]string{"error": code, "message": "only the core's own machine, from its host's screen"})
+		return
+	}
+	plugin.ForwardJSON(c, w, r, "files", "reveal", params{Path: p.Path}, 30*time.Second)
 }
 
 // stat answers the state of the paths ({"paths"}, at most MaxStat): the
@@ -123,19 +172,7 @@ func run(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 		}
 		p.Expect, p.Force, p.Replace = nil, false, false
 		auditTargets(c, p)
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		defer cancel()
-		var out json.RawMessage
-		if err := plugin.Request(ctx, c.Machine, "files", action, p, &out); err != nil {
-			plugin.WriteError(w, err)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		if len(out) == 0 {
-			out = json.RawMessage("{}")
-		}
-		w.Write(out)
+		plugin.ForwardJSON(c, w, r, "files", action, p, timeout)
 	}
 }
 
@@ -213,9 +250,7 @@ func write(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 		plugin.WriteError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(res)
+	plugin.WriteRaw(w, res)
 }
 
 // uploadParams reads an upload's query: path, and replace=1 to write the
@@ -253,9 +288,7 @@ func upload(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 		plugin.WriteError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(res)
+	plugin.WriteRaw(w, res)
 }
 
 // send runs an agent action that takes a body (write, upload): its reply,

@@ -1006,6 +1006,93 @@ func TestStatusStamps(t *testing.T) {
 	}
 }
 
+// What git ignores comes with the status, apart from the changes: an
+// ignored directory as itself (its contents are neither listed nor
+// walked), ignored files one by one, also in a directory with tracked
+// files; nothing of the git directory.
+func TestStatusIgnored(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+	write(t, filepath.Join(dir, ".gitignore"), "node_modules/\n*.log\nlogs\n")
+	write(t, filepath.Join(dir, "kept", "tracked.txt"), "t\n")
+	sh(t, dir, "add", ".gitignore", "kept/tracked.txt")
+	sh(t, dir, "commit", "-q", "-m", "ignore")
+	for i := 0; i < 50; i++ {
+		write(t, filepath.Join(dir, "node_modules", fmt.Sprintf("p%d", i), "index.js"), "x\n")
+	}
+	write(t, filepath.Join(dir, "src", "debug.log"), "d\n")
+	write(t, filepath.Join(dir, "logs", "today.txt"), "l\n")
+	write(t, filepath.Join(dir, "kept", "x.log"), "x\n")
+	write(t, filepath.Join(dir, "new.txt"), "n\n")
+	var st Status
+	ok(t, env, "status", Params{Repo: dir}, &st)
+	if want := []string{"kept/x.log", "logs/", "node_modules/", "src/debug.log"}; !reflect.DeepEqual(st.Ignored, want) || st.IgnoredTruncated {
+		t.Errorf("ignored %q (truncated %v), want %q", st.Ignored, st.IgnoredTruncated, want)
+	}
+	if len(st.Files) != 1 || st.Files[0].Path != "new.txt" || st.Files[0].Kind != "untracked" {
+		t.Errorf("files %+v", st.Files)
+	}
+}
+
+// Output cut at its limit among the ignored paths keeps the changes whole;
+// cut before them, the status is too large; ignored paths are capped.
+func TestParseStatusCut(t *testing.T) {
+	changed := "1 .M N... 100644 100644 100644 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 a.txt\x00"
+	st, whole := parseStatus([]byte("# branch.head main\x00"+changed+"? b.txt\x00! x/\x00! y/partl"), true)
+	if !whole || len(st.Files) != 2 || !reflect.DeepEqual(st.Ignored, []string{"x/"}) || !st.IgnoredTruncated || st.Branch != "main" {
+		t.Errorf("cut among the ignored: whole %v %+v", whole, st)
+	}
+	if _, whole := parseStatus([]byte(changed+"? b.t"), true); whole {
+		t.Error("cut among the changes is whole")
+	}
+	if st, whole := parseStatus([]byte(changed+"! x/\x00"), false); !whole || st.IgnoredTruncated || len(st.Ignored) != 1 {
+		t.Errorf("not cut: whole %v %+v", whole, st)
+	}
+	many := strings.Repeat("! f\x00", maxIgnored+5)
+	if st, _ := parseStatus([]byte(changed+many), false); len(st.Ignored) != maxIgnored || !st.IgnoredTruncated || len(st.Files) != 1 {
+		t.Errorf("capped: %d ignored, truncated %v", len(st.Ignored), st.IgnoredTruncated)
+	}
+}
+
+// A run with keep that prints more than its limit is cut, not failed.
+func TestKeepCut(t *testing.T) {
+	env := testEnv(t)
+	dir := fakeGit(t, "while :; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done\n")
+	res, err := execGit(context.Background(), env, dir, true, run{args: []string{"status"}, limit: 1000, keep: true})
+	if err != nil || !res.cut || len(res.out) == 0 || len(res.out) > 1000 {
+		t.Fatalf("cut %v, %d bytes, err %v", res.cut, len(res.out), err)
+	}
+}
+
+// git before 2.16 refuses --ignored=matching (--ignored took no value
+// then), as would a git that does not know the mode: the status is read
+// without what git ignores.
+func TestStatusWithoutIgnoredMode(t *testing.T) {
+	for name, refusal := range map[string]string{
+		"before 2.16":  "echo \"error: option \\`ignored' takes no value\" >&2; echo 'usage: git status [<options>] [--] <pathspec>...' >&2; exit 129",
+		"unknown mode": "echo \"fatal: Invalid ignored mode 'matching'\" >&2; exit 128",
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := testEnv(t)
+			dir := fakeGit(t, `for a in "$@"; do
+  if [ "$a" = --ignored=matching ]; then `+refusal+`; fi
+done
+printf '# branch.head main\0? new.txt\0'
+`)
+			if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			noIgnoredMode.Store(false)
+			t.Cleanup(func() { noIgnoredMode.Store(false) })
+			var st Status
+			ok(t, env, "status", Params{Repo: dir}, &st)
+			if st.Branch != "main" || len(st.Files) != 1 || st.Ignored != nil || !noIgnoredMode.Load() {
+				t.Errorf("status %+v, without the mode %v", st, noIgnoredMode.Load())
+			}
+		})
+	}
+}
+
 // Stage and discard many paths: they are split over runs of git.
 func TestManyPaths(t *testing.T) {
 	env := testEnv(t)

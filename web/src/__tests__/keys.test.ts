@@ -10,6 +10,7 @@ import defaultVectors from '../../../design/testdata/keys/defaults.json';
 import registry from '../../../design/generated/registry.json';
 import { altOnly, KeyError, keyLabel, normalizeKeys, strokeOf } from '../keys';
 import { commandEnabled, feedStroke, handleKey, keyHint, REPEATING_COMMANDS, withKey, type KeyContext } from '../keymap';
+import { commands } from '../commands';
 import { actions } from '../actions';
 import { useStore } from '../state/store';
 import { keysOf, platform, resetRules, rulesFor, useKeys, type Binding, type Platform } from '../keybindings';
@@ -159,6 +160,13 @@ describe('keybindings', () => {
     }
     // A page without the desktop app's shell has no zoom to change.
     for (const id of ['view.zoomIn', 'view.zoomOut', 'view.zoomReset']) expect(commandEnabled(id), id).toBe(false);
+  });
+
+  it('handles only declared commands, and every one no plugin brings', () => {
+    const declared = registry.commands.map((c) => c.id);
+    for (const id of Object.keys(commands)) expect(declared, id).toContain(id);
+    const plugins = /^(browser|code|git|view\.panel)\./;
+    for (const id of declared) if (!plugins.test(id)) expect(commands[id], id).toBeDefined();
   });
 
   it('turns key changes into the user’s rules', () => {

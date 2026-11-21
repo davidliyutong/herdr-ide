@@ -10,6 +10,9 @@
   --usage-antigravity: #5cb85f;
   --usage-kimi: #f0663c;
   --usage-deepseek: #6b84ff;
+  /* OpenCode's mark is black and white too: a hue apart from Grok's (the
+     token has its light theme's). */
+  --usage-opencode: var(--ds-chart-purple);
 }
 :root[data-theme='light'] {
   --usage-claude: #c15f3c;
@@ -498,7 +501,7 @@
 .usage-noprice {
   font-size: var(--fs-xs);
   border: 1px solid var(--line-2);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 0 4px;
 }
 .usage-rank {
@@ -622,6 +625,46 @@
   padding-top: 4px;
   border-top: 1px solid var(--line);
 }
-.usage-hover-hint {
-  font-size: var(--fs-sm);
+
+/* The settings page (SettingsPage.tsx): a row per provider, drawn as the
+   settings' rows, that opens its settings, a page with a Back button and the provider's
+   name. */
+.usage-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% + 24px);
+  min-height: 0;
+  padding: 8px 12px;
+  line-height: inherit;
+  text-align: left;
+  border: none;
+  background: transparent;
+}
+.usage-settings-row.modified::before {
+  top: 8px;
+  bottom: 8px;
+}
+.usage-settings-row .setting-title {
+  flex: 1;
+  min-width: 0;
+}
+.usage-settings-row.off .ai-logo,
+.usage-settings-row.off .setting-title {
+  opacity: 0.6;
+}
+.usage-settings-row > .lucide {
+  color: var(--fg-mute);
+}
+.usage-settings-back {
+  margin-bottom: 12px;
+}
+.usage-settings-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--fg);
 }

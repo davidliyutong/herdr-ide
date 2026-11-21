@@ -1,0 +1,37 @@
+/* ---------- settings: plugins ---------- */
+.plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.plugin-row .plugin-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: none;
+  color: var(--fg-dim);
+}
+.plugin-row .plugin-text {
+  flex: 1;
+  min-width: 0;
+}
+/* A plugin's settings button on the Plugins page; its page starts with
+   the plugin and its switch, and says when it is off. */
+.plugin-row .plugin-settings {
+  flex: none;
+}
+.plugin-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.plugin-header.off .plugin-icon {
+  opacity: 0.6;
+}
+/* Plugins' pages in the navigation: under the Plugins page, indented. */
+.settings-nav button.sub {
+  padding-left: 22px;
+}
+.settings-nav button.off .ellipsis {
+  opacity: 0.6;
+}

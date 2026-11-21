@@ -26,6 +26,7 @@ import {
 import { RightBar } from '../components/RightBar';
 import { PluginPane } from '../components/PluginPane';
 import { commandEnabled, runCommand } from '../keymap';
+import '../commands';
 import { fakeSettingsApi } from './fakeSettings';
 import type { PluginDef } from '../plugins/api';
 import '../plugins';

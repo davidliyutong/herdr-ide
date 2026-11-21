@@ -109,7 +109,8 @@ import { anyUnsaved, unsavedPanes } from '../state/panes';
 import { confirmUnsaved, dropEdit, dropGoneEdits, keptEdit } from '../unsaved';
 import { useDialog } from '../dialog';
 import { EditorPane } from '../plugins/files/EditorPane';
-import { DiffPane, dirtyDiffs } from '../plugins/git/DiffPane';
+import { DiffPane } from '../plugins/git/DiffPane';
+import { dirtyDiffs } from '../plugins/git/ops';
 import { useGit } from '../plugins/git/state';
 import { settle } from './fakeTerms';
 

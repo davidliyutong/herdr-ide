@@ -14,7 +14,7 @@ import { openPaneMenu, paneMenu } from '../menus';
 import { isMenuKey } from '../rowKeys';
 import { PaneActions } from './PaneActions';
 import { t } from '../i18n';
-import { LeafIcon } from './PluginPane';
+import { FileTitle, LeafIcon, ViewTitle } from './PluginPane';
 import { describeView } from '../plugins/registry';
 
 interface Props {
@@ -128,9 +128,14 @@ export function PaneHeader({ m, pane, leaf, ws, focused, zoomed }: Props) {
       ) : (
         <>
           <Eye className="pane-kind" />
-          <span className="pane-title" title={t('preview.paneTitle', { machine, path: leaf.preview.path })}>
+          <FileTitle
+            m={m}
+            path={leaf.preview.path}
+            className="pane-title"
+            tooltip={(gone) => [t('preview.paneTitle', { machine, path: leaf.preview.path }), gone].filter(Boolean).join(' · ')}
+          >
             {title}
-          </span>
+          </FileTitle>
           <span className="pane-cwd" title={dirname(leaf.preview.path)}>
             <bdi>{shortPath(dirname(leaf.preview.path), home)}</bdi>
           </span>
@@ -194,9 +199,9 @@ function PluginHeading({ m, view, home }: { m: string; view: L.PluginView; home?
   return (
     <>
       <LeafIcon m={m} leaf={{ view }} className="pane-kind" />
-      <span className={`pane-title ${d.preview ? 'is-preview' : ''}`} title={d.path ? `${d.title} · ${d.path}` : d.title}>
+      <ViewTitle m={m} view={view} className="pane-title" tooltip={(gone) => [d.title, d.path, gone].filter(Boolean).join(' · ')}>
         {d.title}
-      </span>
+      </ViewTitle>
       {d.path && (
         <span className="pane-cwd" title={d.path}>
           <bdi>{shortPath(d.path, home)}</bdi>

@@ -20,6 +20,10 @@ const (
 	// SettingAutoLock: minutes without use after which the vault locks
 	// (0: never).
 	SettingAutoLock = "vault.autoLock"
+	// SettingPassphraseHours: hours after the passphrase was last given
+	// that the core holds the key; then it forgets it and only the
+	// passphrase unlocks the vault again.
+	SettingPassphraseHours = "vault.passphraseHours"
 	// SettingRunTimeout and SettingRunMaxTimeout: run_with_env's default
 	// and longest timeout, in seconds; SettingRunOutput: the KiB of
 	// output it returns.
@@ -30,7 +34,11 @@ const (
 
 // Defaults of what the settings change.
 const (
-	DefaultAutoLock      = 60
+	DefaultAutoLock        = 60
+	DefaultPassphraseHours = 24
+	// MaxPassphraseHours bounds the setting: a program that sets it before
+	// the user's next passphrase gets at most this long.
+	MaxPassphraseHours   = 168
 	DefaultRunTimeout    = 120 * time.Second
 	DefaultRunMaxTimeout = 600 * time.Second
 	DefaultRunOutput     = 64 << 10
@@ -49,6 +57,7 @@ var Settings = func() settings.Module {
 		Defs: []settings.Def{
 			num(SettingApprovalTimeout, DefaultTimeout.Seconds(), 10, 600, "", 10),
 			num(SettingAutoLock, DefaultAutoLock, 0, 1440, "", 20),
+			num(SettingPassphraseHours, DefaultPassphraseHours, 1, MaxPassphraseHours, "", 25),
 			num(SettingSessionIdle, SessionIdle.Minutes(), 1, 240, "vaultSessions", 30),
 			num(SettingSessionMax, SessionMax.Hours(), 1, 24, "vaultSessions", 31),
 			num(SettingRunTimeout, DefaultRunTimeout.Seconds(), 5, 3600, "vaultRun", 40),
@@ -97,11 +106,47 @@ func (p *Plugin) autoLockAfter(h plugin.Host) time.Duration {
 	if set {
 		return d
 	}
+	return p.cappedSetting(h, capped, limit)
+}
+
+// settingAfter is the auto-lock's time the setting gives this unlock: the
+// setting's, at most its time when the passphrase unlocked the vault.
+func (p *Plugin) settingAfter(h plugin.Host) time.Duration {
+	p.mu.Lock()
+	capped, limit := p.lockCapSet, p.lockCap
+	p.mu.Unlock()
+	return p.cappedSetting(h, capped, limit)
+}
+
+func (p *Plugin) cappedSetting(h plugin.Host, capped bool, limit time.Duration) time.Duration {
 	after := p.autoLockSetting(h)
 	if capped && limit > 0 && (after == 0 || after > limit) {
 		return limit
 	}
 	return after
+}
+
+// passphraseFor is how long after the passphrase was last given the core
+// holds the key: vault.passphraseHours, at most its value when the
+// passphrase was given (keyFrom), so a setting changed without the gate
+// shortens the current hold but does not lengthen it.
+func (p *Plugin) passphraseFor(h plugin.Host) time.Duration {
+	d := p.passphraseSetting(h)
+	p.mu.Lock()
+	capped, limit := p.keyCapSet, p.keyCap
+	p.mu.Unlock()
+	if capped && limit < d {
+		return limit
+	}
+	return d
+}
+
+// passphraseSetting is the hold vault.passphraseHours sets.
+func (p *Plugin) passphraseSetting(h plugin.Host) time.Duration {
+	if p.keyHold > 0 {
+		return p.keyHold
+	}
+	return time.Duration(setting(h, SettingPassphraseHours, DefaultPassphraseHours, 1, MaxPassphraseHours)) * time.Hour
 }
 
 // autoLockSetting is the auto-lock's time vault.autoLock sets.

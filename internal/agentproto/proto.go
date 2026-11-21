@@ -161,6 +161,13 @@ type Reply struct {
 	// reply line, that many bytes of JSON (at most MaxBody); the agent
 	// sends results larger than MaxInline so.
 	PluginLength int64 `json:"plugin_length,omitempty"`
+
+	// EntriesLength (fs.list): the entries are not in Entries but follow
+	// the reply line, that many bytes of JSON (at most MaxBody); the agent
+	// sends listings larger than MaxInline so: the names of a directory of
+	// some ten thousand entries are more than a line's MaxHeaderLine.
+	// Session.Open reads them into Entries.
+	EntriesLength int64 `json:"entries_length,omitempty"`
 }
 
 // Full Disk Access as an OpPrivacy reply reports it.

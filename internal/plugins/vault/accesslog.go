@@ -31,7 +31,7 @@ import (
 // will, never push a release out of the log.
 const (
 	// MaxReleases is how many records of values let out are kept
-	// (allowed, approved, approved_always, revealed, exported).
+	// (allowed, approved, approved_always, exempted, revealed, exported).
 	MaxReleases = 1000
 	// MaxOthers is how many of the others are kept (lists, refusals,
 	// denials).
@@ -61,6 +61,8 @@ const (
 	// export).
 	ResultRevealed = "revealed"
 	ResultExported = "exported"
+	// ResultExempted: values given without asking to an exempt app.
+	ResultExempted = "exempted"
 	// ResultLogFailed: values were not released because their record
 	// could not be written.
 	ResultLogFailed = "log_failed"
@@ -69,7 +71,7 @@ const (
 // released reports whether a record of result let values out.
 func released(result string) bool {
 	switch result {
-	case ResultAllowed, ResultApproved, ResultApprovedAlways, ResultRevealed, ResultExported:
+	case ResultAllowed, ResultApproved, ResultApprovedAlways, ResultExempted, ResultRevealed, ResultExported:
 		return true
 	}
 	return false
@@ -115,8 +117,9 @@ type Access struct {
 	Remote    string `json:"remote,omitempty"`
 	UserAgent string `json:"userAgent,omitempty"`
 	// Result: allowed (by the machines of the variables), approved
-	// (once), approved_always, listed, denied, expired, cancelled,
-	// revealed, exported, log_failed or the error's code (busy…).
+	// (once), approved_always, exempted (an exempt app's), listed, denied,
+	// expired, cancelled, revealed, exported, log_failed or the error's
+	// code (busy…).
 	Result string `json:"result"`
 	// Count is how many identical list calls or refusals in a row this
 	// record stands for (1 when absent).

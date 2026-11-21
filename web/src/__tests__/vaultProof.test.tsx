@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 //
 // The vault's authenticators in the page (plugins/vault/proof.ts, the
-// request card, the panel's section): which proofs a page can make, how it
-// makes them (WebAuthn, the desktop app's prompt), the card's choices
-// between a click, a proof and the passphrase, and the panel's changes,
-// which need a session the passphrase opened.
+// request card, the gate, the biometrics of the vault's settings page):
+// which proofs a page can make, how it makes them (WebAuthn, the desktop
+// app's prompt), the card's choices between a click, a proof and the
+// passphrase, unlocking with a proof, and the settings' changes, which need
+// a session the passphrase opened.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -16,8 +17,18 @@ import { useStore } from '../state/store';
 import { useDialog } from '../dialog';
 import { t } from '../i18n';
 import { VaultPanel } from '../plugins/vault/VaultPanel';
+import { VaultSettingsExtra } from '../plugins/vault/SettingsExtra';
 import { RequestCard } from '../plugins/vault/Approvals';
-import { endSession, useVault, type VaultGuard, type VaultRequest, type VaultVariable } from '../plugins/vault/api';
+import {
+  endSession,
+  openSession,
+  useVault,
+  type Authenticator,
+  type VaultGuard,
+  type VaultGuardFull,
+  type VaultRequest,
+  type VaultVariable,
+} from '../plugins/vault/api';
 import { b64urlDecode, b64urlEncode, localhostUrl, prove, ways, webauthnState } from '../plugins/vault/proof';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -41,7 +52,7 @@ const type = (el: HTMLInputElement, v: string) => {
   el.dispatchEvent(new Event('input', { bubbles: true }));
 };
 
-const auth = (over: Partial<VaultGuard['authenticators'][number]> = {}) => ({
+const auth = (over: Partial<Authenticator> = {}): Authenticator => ({
   id: 'a1',
   kind: 'webauthn' as const,
   label: 'Laptop',
@@ -51,12 +62,23 @@ const auth = (over: Partial<VaultGuard['authenticators'][number]> = {}) => ({
   lastUsed: '2026-03-05T00:00:00Z',
   ...over,
 });
-const guardOf = (over: Partial<VaultGuard> = {}): VaultGuard => ({
+const guardOf = (over: Partial<VaultGuardFull> = {}): VaultGuardFull => ({
+  full: true,
   authenticators: [],
   verifyEachAllow: false,
   desktop: false,
   webauthn: true,
+  exempt: [],
   ...over,
+});
+
+/** The guard as the core shows it to a page without a session. */
+const waysOf = (g: VaultGuardFull): VaultGuard => ({
+  authenticators: g.authenticators
+    .filter((a) => (a.kind === 'desktop' ? g.desktop : g.webauthn && a.origin === location.origin))
+    .map((a) => (a.kind === 'desktop' ? { kind: a.kind } : { kind: a.kind, origin: a.origin })),
+  desktop: g.desktop,
+  webauthn: g.webauthn,
 });
 
 const REQ: VaultRequest = {
@@ -82,13 +104,16 @@ describe('vault authenticators', () => {
   let host: HTMLDivElement;
   let root: Root;
   let calls: Call[];
-  let guard: VaultGuard | null;
+  /** What guards the vault, as the core keeps it (null: the key not held). */
+  let guard: VaultGuardFull | null;
   let creds: string[];
   let desktopUsable: boolean;
   let refuseProof: boolean;
   let variables: VaultVariable[];
   // The core's rule, which the page may not know yet.
   let serverRule: boolean;
+  // The vault is locked, the core holding its key or not (guard null).
+  let locked: boolean;
   let get: ReturnType<typeof vi.fn>;
   let create: ReturnType<typeof vi.fn>;
 
@@ -100,6 +125,7 @@ describe('vault authenticators', () => {
     refuseProof = false;
     variables = [];
     serverRule = false;
+    locked = false;
     get = vi.fn(async () => assertion());
     create = vi.fn(async () => ({
       rawId: new Uint8Array([9, 9, 9]).buffer,
@@ -125,7 +151,7 @@ describe('vault authenticators', () => {
       sessionProof: false,
       guard: undefined,
     });
-    useStore.setState({ readOnly: false, connected: false });
+    useStore.setState({ readOnly: false, connected: false, machines: { m1: { label: 'gpu' } } as never, order: ['m1'] });
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       const headers = (init?.headers ?? {}) as Record<string, string>;
@@ -136,22 +162,48 @@ describe('vault authenticators', () => {
       const open = token === PASS_TOKEN || token === PROOF_TOKEN;
       if (url === '/api/p/vault' && method === 'GET')
         return json({
-          status: { mode: 'passphrase', locked: false },
+          status: { mode: 'passphrase', locked },
           session: open,
           sessionProof: token === PROOF_TOKEN,
           idle: 600,
           variables,
-          guard,
+          // Without a session, only the ways this page can prove with.
+          guard: open || !guard ? guard : waysOf(guard),
         });
-      if (url === '/api/p/vault/log') return json({ log: [] });
+      if (url === '/api/p/vault/log')
+        return json({
+          log: [
+            {
+              time: '2026-03-05T00:00:00Z',
+              m: 'm1',
+              tool: 'get',
+              result: 'denied',
+              process: [
+                { pid: 2, name: 'mcp' },
+                { pid: 1, name: 'codex' },
+              ],
+            },
+          ],
+        });
+      if (url === '/api/p/vault/lock') {
+        locked = true;
+        if (body?.forget) guard = null;
+        return json({ mode: 'passphrase', locked: true });
+      }
       if (url === '/api/p/vault/requests') return json({ requests: [] });
       if (url === '/api/p/vault/proof')
         return json({ nonce: NONCE, rpId: 'localhost', credentials: creds, desktop: desktopUsable, ttl: 120 });
       if (url === '/api/p/vault/session' && method === 'POST') {
-        if (body.proof) return json({ session: PROOF_TOKEN, proof: true, status: { mode: 'passphrase', locked: false } });
-        return body.passphrase === PASS
-          ? json({ session: PASS_TOKEN, status: { mode: 'passphrase', locked: false } })
-          : json({ error: 'wrong_passphrase' }, 403);
+        if (body.proof) {
+          // A proof unlocks a vault whose key the core holds, and no other.
+          if (!guard) return json({ error: 'vault_locked' }, 409);
+          locked = false;
+          return json({ session: PROOF_TOKEN, proof: true, status: { mode: 'passphrase', locked: false } });
+        }
+        if (body.passphrase !== PASS) return json({ error: 'wrong_passphrase' }, 403);
+        locked = false;
+        guard ??= guardOf();
+        return json({ session: PASS_TOKEN, status: { mode: 'passphrase', locked: false } });
       }
       if (url.startsWith('/api/p/vault/vars/')) {
         const name = decodeURIComponent(url.split('/')[5]);
@@ -178,6 +230,22 @@ describe('vault authenticators', () => {
       }
       if (url.startsWith('/api/p/vault/authenticators/') && method === 'DELETE') {
         guard = { ...guard!, authenticators: guard!.authenticators.filter((a) => a.id !== url.split('/').pop()) };
+        return json({ guard });
+      }
+      if (url === '/api/p/vault/exempt' && method === 'POST') {
+        if (!body.passphrase) return json({ error: 'passphrase_required' }, 403);
+        if (body.passphrase !== PASS) return json({ error: 'wrong_passphrase' }, 403);
+        const added = body.machines.map((m: string) => ({
+          id: `${body.app}@${m}`,
+          machine: m,
+          app: body.app,
+          created: '2026-03-06T00:00:00Z',
+        }));
+        guard = { ...guard!, exempt: [...guard!.exempt, ...added] };
+        return json({ guard });
+      }
+      if (url.startsWith('/api/p/vault/exempt/') && method === 'DELETE') {
+        guard = { ...guard!, exempt: guard!.exempt.filter((e) => e.id !== decodeURIComponent(url.split('/').pop()!)) };
         return json({ guard });
       }
       if (url === '/api/p/vault/guard') {
@@ -212,6 +280,15 @@ describe('vault authenticators', () => {
   };
   const renderPanel = async () => {
     await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+  };
+  const renderSettings = async () => {
+    await act(async () => root.render(createElement(VaultSettingsExtra, { readOnly: false })));
+    await flush();
+  };
+  /** A session the passphrase opened, as the panel's gate opens it. */
+  const passSession = async () => {
+    await act(async () => openSession(PASS));
     await flush();
   };
   const renderCard = async () => {
@@ -378,6 +455,17 @@ describe('vault authenticators', () => {
       expect(host.querySelector('[data-request="r1"]')).not.toBeNull();
     });
 
+    it('without a session, opens one with the passphrase, then sends it with the answer where every Allow is verified', async () => {
+      guard = guardOf({ verifyEachAllow: true });
+      // What a page without a session knows: no way to prove, nor the rule.
+      useVault.setState({ guard: waysOf(guard), requests: { r1: REQ } });
+      await renderCard();
+      await act(async () => type(ctl().field!, PASS));
+      await click('[data-answer="once"]');
+      expect(calls.map((c) => c.url)).toContain('/api/p/vault/session');
+      expect(answerCall()?.body).toEqual({ answer: 'once', passphrase: PASS });
+    });
+
     it('denies without anything', async () => {
       useVault.setState({ guard: guardOf({ verifyEachAllow: true }), requests: { r1: REQ } });
       await renderCard();
@@ -386,18 +474,60 @@ describe('vault authenticators', () => {
     });
   });
 
-  describe('the panel', () => {
+  describe('the gate', () => {
+    it('continues with biometrics where the page can prove, and the session is a proof’s', async () => {
+      creds = [CRED];
+      guard = guardOf({ authenticators: [auth()] });
+      await renderPanel();
+      await click('[data-action="proof-session"]');
+      expect(calls.find((c) => c.url === '/api/p/vault/session')?.body.proof).toMatchObject({ nonce: NONCE, credential: CRED });
+      expect(useVault.getState()).toMatchObject({ session: true, sessionProof: true });
+    });
+
+    it('unlocks a vault locked while the core holds its key with biometrics, or requires the passphrase', async () => {
+      creds = [CRED];
+      guard = guardOf({ authenticators: [auth()] });
+      locked = true;
+      await renderPanel();
+      expect(host.querySelector('[data-action="proof-session"]')).not.toBeNull();
+      await click('[data-action="proof-session"]');
+      expect(useVault.getState()).toMatchObject({ session: true, status: { locked: false } });
+      // Locked again: Require Passphrase has the core forget the key.
+      await click('.vault-session button.sm:not(.ghost)');
+      expect(calls.filter((c) => c.url === '/api/p/vault/lock').pop()?.body).toBeUndefined();
+      expect(host.querySelector('[data-action="forget-key"]')).not.toBeNull();
+      await click('[data-action="forget-key"]');
+      expect(calls.filter((c) => c.url === '/api/p/vault/lock').pop()?.body).toEqual({ forget: true });
+      // Now only the passphrase unlocks it.
+      expect(useVault.getState().guard).toBeNull();
+      expect(host.querySelector('[data-action="proof-session"]')).toBeNull();
+      expect(host.querySelector('[data-action="forget-key"]')).toBeNull();
+    });
+
+    it('offers no proof, nor Require Passphrase, where the page cannot prove', async () => {
+      guard = guardOf({ authenticators: [auth({ origin: 'http://localhost:1' })] });
+      locked = true;
+      await renderPanel();
+      expect(host.querySelector('[data-action="proof-session"]')).toBeNull();
+      expect(host.querySelector('[data-action="forget-key"]')).toBeNull();
+    });
+  });
+
+  describe('the settings page', () => {
     const section = () => host.querySelector<HTMLElement>('[data-guard]');
 
     it('lists the authenticators and removes one after a confirmation', async () => {
-      guard = guardOf({ authenticators: [auth(), auth({ id: 'a2', kind: 'desktop', rpId: undefined, label: 'This app' })] });
-      await renderPanel();
-      await unlock();
+      guard = guardOf({
+        authenticators: [auth(), auth({ id: 'a2', kind: 'desktop', rpId: undefined, origin: undefined, label: 'This app' })],
+      });
+      await renderSettings();
+      await passSession();
+      // In a browser the desktop app's authenticator is listed, to be removed.
       const rows = [...section()!.querySelectorAll<HTMLElement>('[data-auth]')];
       expect(rows.map((r) => r.dataset.auth)).toEqual(['a1', 'a2']);
       expect(rows[0].textContent).toContain('Laptop');
-      expect(rows[0].textContent).toContain('localhost');
-      expect(rows[0].textContent).toContain(t('vault.guard.kind.webauthn'));
+      expect(rows[0].textContent).toContain(location.origin);
+      expect(section()!.textContent).toContain(t('vault.guard.title'));
       await click('[data-auth="a1"] [data-action="remove-auth"]');
       expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
       const dlg = useDialog.getState().current;
@@ -412,12 +542,12 @@ describe('vault authenticators', () => {
 
     it('adds a WebAuthn credential: it is created, then signs the same nonce', async () => {
       creds = [CRED];
-      await renderPanel();
-      await unlock();
+      await renderSettings();
+      await passSession();
       await click('[data-action="add-webauthn"]');
       await act(async () => type(host.querySelector<HTMLInputElement>('[data-field="auth-label"]')!, 'Phone'));
       await act(async () => type(host.querySelector<HTMLInputElement>('[data-field="guard-passphrase"]')!, PASS));
-      await act(async () => host.querySelector<HTMLButtonElement>('.vault-auth-form button[type="submit"]')!.click());
+      await act(async () => host.querySelector<HTMLButtonElement>('[data-form="webauthn"] button[type="submit"]')!.click());
       await flush();
       const o = create.mock.calls[0][0].publicKey;
       expect([...new Uint8Array(o.challenge)]).toEqual([...b64urlDecode(NONCE)]);
@@ -449,8 +579,8 @@ describe('vault authenticators', () => {
 
     it('offers localhost on a loopback IP, instead of adding', async () => {
       vi.stubGlobal('location', { hostname: '127.0.0.1', port: '9000', pathname: '/', search: '' });
-      await renderPanel();
-      await unlock();
+      await renderSettings();
+      await passSession();
       expect(section()!.querySelector('[data-action="add-webauthn"]')).toBeNull();
       expect(section()!.querySelector<HTMLAnchorElement>('[data-link="localhost"]')?.getAttribute('href')).toBe('http://localhost:9000/');
     });
@@ -458,8 +588,8 @@ describe('vault authenticators', () => {
     it('turns the desktop authenticator on with the prompt’s MAC and the passphrase', async () => {
       shell('touchid', 'cafe');
       guard = guardOf({ desktop: true });
-      await renderPanel();
-      await unlock();
+      await renderSettings();
+      await passSession();
       const sw = section()!.querySelector<HTMLInputElement>('[data-switch="desktop"] input')!;
       expect(section()!.textContent).toContain(t('vault.guard.desktop', { way: t('vault.way.touchid') }));
       await act(async () => sw.click());
@@ -473,17 +603,21 @@ describe('vault authenticators', () => {
         mac: 'cafe',
       });
       expect(section()!.querySelector<HTMLInputElement>('[data-switch="desktop"] input')!.checked).toBe(true);
+      // The switch stands for it: it is not listed again, and the app's page,
+      // which has no WebAuthn, shows nothing of browsers without credentials.
+      expect(section()!.querySelector('[data-auth]')).toBeNull();
+      expect(section()!.querySelector('[data-webauthn]')).toBeNull();
     });
 
     it('shows no desktop switch in a browser', async () => {
-      await renderPanel();
-      await unlock();
+      await renderSettings();
+      await passSession();
       expect(section()!.querySelector('[data-switch="desktop"]')).toBeNull();
     });
 
     it('sets the rule that every Allow is verified', async () => {
-      await renderPanel();
-      await unlock();
+      await renderSettings();
+      await passSession();
       await click('[data-switch="verify"] input');
       expect(calls.find((c) => c.url.endsWith('/guard'))).toMatchObject({
         method: 'POST',
@@ -493,19 +627,27 @@ describe('vault authenticators', () => {
       expect(section()!.querySelector<HTMLInputElement>('[data-switch="verify"] input')!.checked).toBe(true);
     });
 
-    it('continues with the fingerprint, then asks for the passphrase before a change', async () => {
+    it('asks for the passphrase before a change in a session that biometrics opened', async () => {
       creds = [CRED];
       guard = guardOf({ authenticators: [auth()] });
-      await renderPanel();
+      await act(async () =>
+        root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultSettingsExtra, { readOnly: false }))),
+      );
+      await flush();
       await click('[data-action="proof-session"]');
-      expect(calls.find((c) => c.url === '/api/p/vault/session')?.body.proof).toMatchObject({ nonce: NONCE, credential: CRED });
       expect(useVault.getState()).toMatchObject({ session: true, sessionProof: true });
       const box = () => section()!.querySelector<HTMLInputElement>('[data-switch="verify"] input')!;
       const field = () => host.querySelector<HTMLInputElement>('[data-field="guard-passphrase"]');
-      expect(field()).not.toBeNull();
-      expect(box().disabled).toBe(true);
-      await act(async () => type(field()!, PASS));
+      // No field holds a passphrase until a change is made: it is asked
+      // beside the control then.
+      expect(field()).toBeNull();
+      expect(box().disabled).toBe(false);
       await click('[data-switch="verify"] input');
+      expect(calls.some((c) => c.url.endsWith('/guard'))).toBe(false);
+      expect(section()!.querySelector('[data-switch="verify"] [data-form="guard-ask"]')).not.toBeNull();
+      await act(async () => type(field()!, PASS));
+      await click('[data-action="ask-confirm"]');
+      expect(field()).toBeNull();
       const urls = calls.map((c) => `${c.method} ${c.url}`);
       expect(urls.indexOf('POST /api/p/vault/session', urls.indexOf('POST /api/p/vault/session') + 1)).toBeGreaterThan(-1);
       expect(calls.find((c) => c.url.endsWith('/guard'))).toMatchObject({ token: PASS_TOKEN, body: { verifyEachAllow: true } });
@@ -514,8 +656,8 @@ describe('vault authenticators', () => {
 
     it('shows the origin of a credential and offers adding only where the core vouches for the page', async () => {
       guard = guardOf({ authenticators: [auth(), auth({ id: 'a2', origin: 'http://localhost:1', label: 'Other port' })] });
-      await renderPanel();
-      await unlock();
+      await renderSettings();
+      await passSession();
       const rows = [...section()!.querySelectorAll<HTMLElement>('[data-auth]')];
       expect(rows[0].textContent).toContain(location.origin);
       expect(rows[1].textContent).toContain('http://localhost:1');
@@ -530,26 +672,122 @@ describe('vault authenticators', () => {
 
     it('ending the rule asks for the passphrase and sends it; turning it on needs none', async () => {
       guard = guardOf({ verifyEachAllow: true });
-      await renderPanel();
-      await unlock();
+      await renderSettings();
+      await passSession();
       const box = () => section()!.querySelector<HTMLInputElement>('[data-switch="verify"] input')!;
-      expect(host.querySelector('[data-field="guard-passphrase"]')).not.toBeNull();
+      const field = () => host.querySelector<HTMLInputElement>('[data-field="guard-passphrase"]');
+      // The rule being on puts no passphrase field on the page.
+      expect(field()).toBeNull();
       await click('[data-switch="verify"] input');
       expect(calls.some((c) => c.url.endsWith('/guard'))).toBe(false);
-      expect(section()!.querySelector('.callout.error')?.textContent).toBe(t('vault.guard.needPassphrase'));
       expect(box().checked).toBe(true);
-      await act(async () => type(host.querySelector<HTMLInputElement>('[data-field="guard-passphrase"]')!, PASS));
+      // Asked beside the switch; Cancel leaves the rule and takes the field.
+      const asked = () => section()!.querySelector('[data-switch="verify"] [data-form="guard-ask"]');
+      expect(asked()).not.toBeNull();
+      expect(asked()!.querySelector<HTMLButtonElement>('[data-action="ask-confirm"]')!.disabled).toBe(true);
+      await act(async () => type(field()!, 'typed and left'));
+      await act(async () => asked()!.querySelector<HTMLButtonElement>('button[type="button"]')!.click());
+      expect(field()).toBeNull();
+      expect(calls.some((c) => c.url.endsWith('/guard'))).toBe(false);
       await click('[data-switch="verify"] input');
-      expect(calls.find((c) => c.url.endsWith('/guard'))?.body).toEqual({ verifyEachAllow: false, passphrase: PASS });
+      // What was typed before is not kept.
+      expect(field()!.value).toBe('');
+      await act(async () => type(field()!, 'wrong one'));
+      await click('[data-action="ask-confirm"]');
+      await flush();
+      expect(section()!.querySelector('.callout.error')?.textContent).toBe(t('vault.error.wrong_passphrase'));
+      expect(field()!.value).toBe('');
+      expect(box().checked).toBe(true);
+      await act(async () => type(field()!, PASS));
+      await click('[data-action="ask-confirm"]');
+      expect(calls.filter((c) => c.url.endsWith('/guard')).pop()?.body).toEqual({ verifyEachAllow: false, passphrase: PASS });
       expect(box().checked).toBe(false);
+      expect(field()).toBeNull();
       await click('[data-switch="verify"] input');
       expect(calls.filter((c) => c.url.endsWith('/guard')).pop()?.body).toEqual({ verifyEachAllow: true });
+      expect(field()).toBeNull();
+    });
+
+    it('exempts an app on the machines chosen, offering the apps seen asking there, and ends it', async () => {
+      await renderSettings();
+      await passSession();
+      const form = () => host.querySelector<HTMLFormElement>('[data-form="exempt"]')!;
+      expect([...form().querySelectorAll('datalist option')].map((o) => o.getAttribute('value'))).toEqual(['codex']);
+      await act(async () => type(form().querySelector<HTMLInputElement>('[data-field="exempt-app"]')!, ' claude '));
+      expect(form().querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+      await act(async () => form().querySelector<HTMLButtonElement>('.vault-machines-picker')!.click());
+      await act(async () => document.querySelector<HTMLElement>('.picker-row')!.click());
+      await act(async () =>
+        document
+          .querySelector<HTMLInputElement>('.picker-search')!
+          .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+      );
+      // The passphrase comes with an exemption, also in a session of the
+      // passphrase: its field shows once one is being written.
+      const field = () => host.querySelector<HTMLInputElement>('[data-field="guard-passphrase"]');
+      expect(field()).not.toBeNull();
+      expect(form().contains(field())).toBe(true);
+      expect(form().querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+      await act(async () => type(field()!, 'wrong one'));
+      await act(async () => form().querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+      await flush();
+      expect(section()!.querySelector('.callout.error')?.textContent).toBe(t('vault.error.wrong_passphrase'));
+      expect(field()!.value).toBe('');
+      await act(async () => type(field()!, PASS));
+      await act(async () => form().querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+      await flush();
+      expect(calls.filter((c) => c.url === '/api/p/vault/exempt').pop()).toMatchObject({
+        token: PASS_TOKEN,
+        body: { app: 'claude', machines: ['m1'], passphrase: PASS },
+      });
+      // Added, the field goes, and the passphrase with it.
+      expect(field()).toBeNull();
+      const row = section()!.querySelector<HTMLElement>('[data-exemption="claude@m1"]')!;
+      expect(row.textContent).toContain(t('vault.exempt.on', { app: 'claude', machine: 'gpu' }));
+      await act(async () => row.querySelector<HTMLButtonElement>('[data-action="remove-exempt"]')!.click());
+      await flush();
+      expect(calls.find((c) => c.method === 'DELETE')).toMatchObject({ url: '/api/p/vault/exempt/claude%40m1', token: PASS_TOKEN });
+      expect(section()!.querySelector('[data-exemption]')).toBeNull();
+    });
+
+    it('shows nothing of what guards the vault to a page without a session', async () => {
+      creds = [CRED];
+      guard = guardOf({
+        authenticators: [auth()],
+        verifyEachAllow: true,
+        exempt: [{ id: 'e1', machine: 'm1', app: 'claude', created: '' }],
+      });
+      await renderSettings();
+      // The core held the key, but the page has no session: unlock first.
+      expect(useVault.getState().guard).toEqual({
+        authenticators: [{ kind: 'webauthn', origin: location.origin }],
+        desktop: false,
+        webauthn: true,
+      });
+      expect(section()!.querySelector('[data-form="unlock"]')).not.toBeNull();
+      expect(section()!.querySelector('[data-exemption], [data-auth], [data-switch="verify"]')).toBeNull();
+      await passSession();
+      expect(section()!.querySelector('[data-exemption="e1"]')).not.toBeNull();
+    });
+
+    it('asks for the passphrase to unlock when the core does not hold the key', async () => {
+      guard = null;
+      locked = true;
+      await renderSettings();
+      expect(section()!.querySelector('[data-switch="verify"]')).toBeNull();
+      const unlock = host.querySelector<HTMLFormElement>('[data-form="unlock"]')!;
+      await act(async () => type(unlock.querySelector<HTMLInputElement>('input[type="password"]')!, PASS));
+      await act(async () => unlock.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+      await flush();
+      expect(calls.find((c) => c.url === '/api/p/vault/session')?.body).toEqual({ passphrase: PASS });
+      expect(section()!.querySelector('[data-switch="verify"]')).not.toBeNull();
+      expect(host.querySelector('[data-field="guard-passphrase"]')).toBeNull();
     });
   });
 
   describe('a variable where every Allow is verified', () => {
     const VAR: VaultVariable = { name: 'API', description: '', machines: [], injectOnly: true, created: '', updated: '' };
-    const ruled = (over: Partial<VaultGuard> = {}) => guardOf({ verifyEachAllow: true, ...over });
+    const ruled = (over: Partial<VaultGuardFull> = {}) => guardOf({ verifyEachAllow: true, ...over });
     const reveals = () => calls.filter((c) => c.url === '/api/p/vault/vars/API/reveal');
     const puts = () => calls.filter((c) => c.method === 'PUT');
     const proofs = () => calls.filter((c) => c.url === '/api/p/vault/proof');

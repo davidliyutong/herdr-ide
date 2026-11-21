@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/perf"
 	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/sshconfig"
 )
@@ -45,6 +46,12 @@ func (s *Server) broadcastMachines() {
 
 func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.mg.States())
+}
+
+// handlePerf says what the core's own process uses now (internal/perf), for
+// the settings' Performance page.
+func (s *Server) handlePerf(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, perf.Sample())
 }
 
 // handleSSHHosts lists the Host aliases of the core host's ssh configuration

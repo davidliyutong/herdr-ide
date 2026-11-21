@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && !machine
 
 package main
 

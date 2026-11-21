@@ -1,0 +1,11 @@
+/* ---------- app grid ---------- */
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w, 20rem) minmax(0, 1fr) var(--panel-w, 0) var(--rail-w, 0);
+  grid-template-rows: minmax(0, 1fr) var(--h-status);
+  grid-template-areas: 'sidebar main panel rail' 'status status status status';
+  height: 100%;
+}
+.app.no-sidebar {
+  grid-template-columns: 0 minmax(0, 1fr) var(--panel-w, 0) var(--rail-w, 0);
+}

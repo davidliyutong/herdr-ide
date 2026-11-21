@@ -339,6 +339,17 @@ system's rules run in the tests on any of them:
   folders dropped on a pane of the local machine are pasted as their own
   paths instead of being uploaded ([06](06-quick-look-and-files.md)). It
   is answered in the preload; nothing goes to the main process.
+- The bridge's `metrics` answers what the app's processes use now, for
+  the settings' Performance page ([13](13-settings-and-appearance.md)).
+  The main process answers the main window's page, and anyone else with
+  an empty list, from Electron's `app.getAppMetrics()`: per process its
+  kind (`Browser`, the shell's main process; `Tab`, a page; `GPU`;
+  `Utility`, a helper), a helper's name, its share of one processor since
+  the last asking and its working set in bytes. The preload passes on at
+  most 64 processes that have a kind, with text cut to 64 characters and
+  a number that is no amount as 0. The core the shell starts is no
+  process of Electron's and is not among them: the page asks the core
+  itself (`GET /api/perf`).
 - Folders opened with the app: on macOS the app's Info.plist declares
   folders (`public.folder`, rank `None`: the Dock accepts dropped folders,
   but the app never becomes Finder's opener for them), so folders dropped
@@ -535,7 +546,9 @@ has a preload, whose bridge carries menu commands (strings) and opened
 folders (paths and a count, both checked in the preload) to the page and,
 from it, one boolean (whether it takes opened folders); it also tells the
 page the disk path of a file the user dropped on it, which a browser keeps
-from pages but which reveals nothing the user did not hand over; sandboxing,
+from pages but which reveals nothing the user did not hand over, and
+answers the page's request for what the app's processes use with their
+kinds, helpers' names and amounts, nothing of what they hold; sandboxing,
 context isolation and web security are enabled on every system, and the
 app is never started with `--no-sandbox` (the deb's AppArmor profile lets
 Chromium's sandbox run on Ubuntu 24.04 and later). The shell reads its

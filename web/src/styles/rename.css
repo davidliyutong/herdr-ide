@@ -1,0 +1,14 @@
+/* ---------- inline rename ---------- */
+.inline-edit {
+  min-width: 0;
+  padding: 0 4px;
+  border-color: var(--accent);
+  outline: none;
+}
+.machine-head .inline-edit {
+  flex: 1;
+  font-weight: 500;
+}
+.ws-item .inline-edit {
+  flex: 1;
+}

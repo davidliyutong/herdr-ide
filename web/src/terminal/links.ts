@@ -1,17 +1,10 @@
 // Path and URL detection in pane output, also over rows a long path was
-// wrapped on. Cmd/Ctrl+click (or the pane's context menu) opens media in a
-// preview pane and code files in a VS Code pane, beside the terminal or in
-// one its workspace has, resolving relative paths against the terminal's
+// wrapped on. Cmd/Ctrl+click (or the pane's context menu) opens what is
+// found (openLink.ts), resolving relative paths against the terminal's
 // working directory.
 
-import { actions } from '../actions';
 import { t } from '../i18n';
-import { isPluginOn } from '../plugins/registry';
-import { desktopShell } from '../shell';
 import { safeWebUrl } from '../lib/webUrl';
-import { settingValue } from '../settings';
-import { useStore } from '../state/store';
-import { forwardsAvailable, openBrowserTab, otherHost, parseAddress, useForwards } from '../plugins/browser/api';
 
 export interface LinkContext {
   m: string;
@@ -161,38 +154,4 @@ export function linkTitle(l: { kind: FoundLink['kind']; text: string }): string 
  * never on the page's own origin (see safeWebUrl). */
 export function safeUrl(url: string): boolean {
   return safeWebUrl(url) !== undefined;
-}
-
-/** Opens a web address: in a browser pane of a new tab when the browser
- * plugin is on and browser.openLinks is "pane", where a pane can show it:
- * a loopback address of a remote machine is that machine's port (when this
- * client can use forwards); one of the local machine, when the UI itself
- * is on a loopback host; any other address in the desktop app. Else, and
- * with the plugin off, outside the app, in a tab of the browser. */
-function openUrl(url: string, ctx: LinkContext) {
-  const outside = () => void window.open(url, '_blank', 'noopener');
-  if (!isPluginOn('browser') || settingValue('browser.openLinks') !== 'pane') return outside();
-  const p = parseAddress(url);
-  if (p.kind !== 'page') return outside();
-  const pane = () => void openBrowserTab(ctx.m, url);
-  if (!p.loopback) return desktopShell?.browser ? pane() : outside();
-  if (useStore.getState().machines[ctx.m]?.kind !== 'ssh') return otherHost() ? pane() : outside();
-  // Whether forwards can be used is the core's word: known once asked.
-  const decide = (available: boolean) => (available ? pane() : outside());
-  const known = useForwards.getState().available;
-  if (known !== undefined) {
-    decide(known);
-  } else void forwardsAvailable().then(decide);
-}
-
-/** Opens a URL in a new tab, or a path in a preview or VS Code pane. */
-export function openLink(l: { kind: FoundLink['kind']; text: string }, ctx: LinkContext) {
-  if (l.kind === 'url') {
-    // Targets come from pane output (OSC 8): web links only.
-    const url = safeWebUrl(l.text);
-    if (url !== undefined) openUrl(url, ctx);
-    return;
-  }
-  const r = resolvePath(l.text, ctx);
-  void actions.openPath(ctx.m, r.path, r.line, r.col, ctx.pane);
 }

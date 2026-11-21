@@ -8,6 +8,7 @@
 import * as L from './term/layout';
 import { describeView, isPluginOn } from './plugins/registry';
 import { isLive, type TerminalRecord } from './term/protocol';
+import { procName, SHELLS } from './term/place';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
 import { withView } from './state/panes';
@@ -176,35 +177,6 @@ function awaitLogin(m: string) {
   off = useStore.subscribe(() => void settle(decide()));
   timer = setTimeout(() => off(), LOGIN_WAIT_MS);
 }
-
-/** Shells a terminal waits at the prompt in. */
-const SHELLS = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'fish',
-  'dash',
-  'ash',
-  'ksh',
-  'mksh',
-  'yash',
-  'csh',
-  'tcsh',
-  'nu',
-  'xonsh',
-  'elvish',
-  'osh',
-  'pwsh',
-  'powershell',
-  'cmd',
-]);
-
-const procName = (n: string) =>
-  n
-    .replace(/^-/, '')
-    .replace(/\.exe$/i, '')
-    .split('/')
-    .pop() ?? n;
 
 /** What runs in a terminal in front of its shell: the agent's name for an
  * agent, the foreground program's otherwise; '' when only the shell waits

@@ -6,7 +6,8 @@ import { hasMessage, t } from '../../i18n';
 import { actions, current } from '../../actions';
 import { useStore } from '../../state/store';
 import { desktopShell } from '../../shell';
-import { isOwnAddress } from '../../lib/webUrl';
+import { answer, failureOf, jsonInit, PluginError } from '../../lib/pluginApi';
+import { isLoopbackName, isOwnAddress } from '../../lib/webUrl';
 
 /** A port of a machine reachable on the core's host: Port on machine M is
  * on the loopback port Local there. */
@@ -25,26 +26,14 @@ export interface ListeningPort {
 
 /** A failure with the code the core gave (forward_local_only, offline,
  * too_many, local_machine, ...) or `network` when it did not answer. */
-export class BrowserError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
+export class BrowserError extends PluginError {
+  constructor(code: string, message: string) {
+    super(code, message);
     this.name = 'BrowserError';
   }
 }
 
-async function answer<T>(r: Response): Promise<T> {
-  let j: { error?: string; message?: string } = {};
-  try {
-    j = await r.json();
-  } catch {
-    /* the status says it */
-  }
-  if (!r.ok) throw new BrowserError(j.error ?? `http_${r.status}`, j.message ?? r.statusText);
-  return j as T;
-}
+const failure = failureOf((code, message) => new BrowserError(code, message));
 
 async function send<T>(url: string, init?: RequestInit): Promise<T> {
   let r: Response;
@@ -53,7 +42,7 @@ async function send<T>(url: string, init?: RequestInit): Promise<T> {
   } catch (e) {
     throw new BrowserError('network', e instanceof Error ? e.message : String(e));
   }
-  return answer<T>(r);
+  return answer<T>(r, failure);
 }
 
 const forwardsUrl = (m: string) => `/api/m/${encodeURIComponent(m)}/p/browser/forwards`;
@@ -61,12 +50,7 @@ const forwardsUrl = (m: string) => `/api/m/${encodeURIComponent(m)}/p/browser/fo
 export const browserApi = {
   forwards: () => send<{ forwards: Forward[]; available: boolean }>('/api/p/browser/forwards', { cache: 'no-store' }),
   /** Makes or finds the forward of a machine's port; it counts as a use. */
-  ensure: (m: string, port: number) =>
-    send<Forward>(forwardsUrl(m), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ port }),
-    }),
+  ensure: (m: string, port: number) => send<Forward>(forwardsUrl(m), jsonInit('POST', { port })),
   stop: (m: string, port: number) => send<{ ok: boolean }>(`${forwardsUrl(m)}/${port}`, { method: 'DELETE' }),
   listening: (m: string) =>
     send<{ ports: ListeningPort[] }>(`/api/m/${encodeURIComponent(m)}/p/browser/listening`, { cache: 'no-store' }).then(
@@ -112,11 +96,12 @@ export function noteForward(f: Forward) {
 
 // Which forwards this page may make. A forward leads into a machine, so it
 // is made only for a port the user asked for in this page: typed into a
-// pane's address field or chosen in its Ports, a link clicked in a
-// terminal, or confirmed in a pane that asked (Forward and open). A view
+// pane's address field or chosen in its Ports, a link Cmd/Ctrl-clicked in
+// a terminal, or confirmed in a pane that asked (Forward and open). A view
 // found in the layout, which every client and every script of the page
-// writes, and a popup of a page shown in a pane are nobody's request: for
-// those a pane only uses a forward that exists.
+// writes, a popup of a page shown in a pane and a link clicked in a
+// document (its text may hide where it leads) are no such request: for
+// those a pane uses a forward that exists, or asks.
 
 const granted = new Set<string>();
 const grantKey = (m: string, port: number) => `${m}|${port}`;
@@ -181,6 +166,10 @@ const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
 
 export const isLoopbackHost = (host: string): boolean => LOOPBACK.has(host.toLowerCase());
 
+/** A name below localhost (app.localhost), which browsers resolve to the
+ * loopback of the computer they run on. */
+const belowLocalhost = (host: string): boolean => host.toLowerCase().endsWith('.localhost');
+
 /**
  * The other loopback name of the one the UI's page is on, or undefined on
  * any other host. A cookie ignores ports, so a page of another service on
@@ -211,15 +200,17 @@ const REFUSED = /^(?:javascript|data|file|blob|about|vbscript|view-source|chrome
 
 /**
  * Reads an address as typed: a bare port (`3000`), `localhost:3000/docs`,
- * a host without a scheme (http:// for loopback names, https:// for any
- * other), or a full address; only http and https are taken. A loopback
- * name other than localhost (127.0.0.1, [::1], 0.0.0.0) is written as
- * localhost: for a machine it means that machine's own. The core's own
- * address, under any loopback name, is no page for a pane (isOwnAddress):
- * the UI is not shown inside itself, where a page of a pane could send it. With
- * theirs the address is a machine's own (a pane of a remote machine, a
- * view shown through a forward): its loopback is that machine's, where
- * the core's port number is some other program's.
+ * a host without a scheme (http:// for loopback names and the names below
+ * localhost, https:// for any other), or a full address; only http and
+ * https are taken. A loopback name other than localhost (127.0.0.1, [::1],
+ * 0.0.0.0) is written as localhost: for a machine it means that machine's
+ * own. The core's own address, under any loopback name, is no page for a
+ * pane (isOwnAddress): the UI is not shown inside itself, where a page of a
+ * pane could send it. With theirs the address is a machine's own (a pane of
+ * a remote machine, a view shown through a forward): its loopback is that
+ * machine's, where the core's port number is some other program's, and a
+ * name below localhost (app.localhost) is that loopback too. Of this
+ * computer such a name stays as written, a page a webview loads itself.
  */
 export function parseAddress(input: string, theirs = false): Parsed {
   const s = input.trim();
@@ -237,14 +228,14 @@ export function parseAddress(input: string, theirs = false): Parsed {
     if (hasScheme) u = new URL(s);
     else {
       const host = /^(\[[^\]]*\]|[^/:?#]*)/.exec(s)?.[0] ?? '';
-      u = new URL(`${isLoopbackHost(host) ? 'http' : 'https'}://${s}`);
+      u = new URL(`${isLoopbackHost(host) || belowLocalhost(host) ? 'http' : 'https'}://${s}`);
     }
   } catch {
     return { kind: 'refused' };
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { kind: 'refused' };
   if (!u.hostname) return { kind: 'refused' };
-  const loopback = isLoopbackHost(u.hostname);
+  const loopback = isLoopbackHost(u.hostname) || (theirs && belowLocalhost(u.hostname));
   const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
   if (loopback && u.hostname !== 'localhost') u.hostname = 'localhost';
   // As it is written now: 0.0.0.0 with the core's port is the core too. A
@@ -333,14 +324,49 @@ export function pageView(m: string, input: string): { url: string; m?: string; p
   return { url: `http://localhost:${p.port}${rest(new URL(p.url))}`, m, port: p.port };
 }
 
+/** browser.openLinks: loopback addresses in a pane (the default), every
+ * address a pane can show, or every address outside the app. */
+export type LinkMode = 'loopback' | 'all' | 'external';
+
+/** The mode a setting's value names; any other value (none, or one of an
+ * earlier version) is the default. */
+export const linkMode = (v: unknown): LinkMode => (v === 'all' || v === 'external' ? v : 'loopback');
+
+/**
+ * Where a web address the user clicked in a text of machine m (a
+ * terminal's output, a document) opens: `pane`, a browser pane in a new
+ * tab; `forward`, a pane of m's port, when this client can use forwards
+ * (else outside); `outside`, the browser outside the app (the system's, in
+ * the desktop app). An address of a computer's loopback opens in a pane: a
+ * remote machine's through its forward, this computer's when the UI is on a
+ * loopback host (one with a name below localhost in the desktop app only,
+ * whose webview loads it as written). Any other address, another
+ * computer's, opens outside; with `all`, in a pane where one shows it (the
+ * desktop app's webview shows any).
+ */
+export function linkPlace(m: string, url: string, mode: LinkMode): 'pane' | 'forward' | 'outside' {
+  if (mode === 'external') return 'outside';
+  const remote = isRemote(m);
+  const p = parseAddress(url, remote);
+  if (p.kind !== 'page') return 'outside';
+  const webview = !!desktopShell?.browser;
+  if (p.loopback) return remote ? 'forward' : otherHost() ? 'pane' : 'outside';
+  if (isLoopbackName(new URL(p.url).hostname)) return !remote && webview ? 'pane' : 'outside';
+  return mode === 'all' && webview ? 'pane' : 'outside';
+}
+
 /** Opens a browser pane in a new tab of machine m: empty, or at an
- * address (see pageView). Its callers act for the user (a link clicked in
- * a terminal, the new-tab menu, a command), so a port of the machine it
- * leads to is one the user asked for. Returns the pane's key. */
-export async function openBrowserTab(m: string, input = ''): Promise<string | undefined> {
+ * address (see pageView). Its callers act for the user (a link
+ * Cmd/Ctrl-clicked in a terminal, whose tooltip names it, the new-tab
+ * menu, a command), so a port of the machine it leads to is one the user
+ * asked for. With ask, the address is one the user did not see whole (a
+ * document's link, whose text may hide it): the port is not granted, and
+ * the pane uses the forward that exists or asks before it makes one, as
+ * for a view found in the layout. Returns the pane's key. */
+export async function openBrowserTab(m: string, input = '', opts: { ask?: boolean } = {}): Promise<string | undefined> {
   const fields = input ? pageView(m, input) : { url: '' };
   if (!fields) return undefined;
-  if (fields.m && fields.port) grantForward(fields.m, fields.port);
+  if (fields.m && fields.port && !opts.ask) grantForward(fields.m, fields.port);
   return actions.openView(m, { plugin: 'browser', kind: 'page', ...fields }, { tab: true });
 }
 

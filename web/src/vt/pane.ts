@@ -20,8 +20,10 @@ import { measureCell, type Metrics } from './atlas';
 import { keyInput, isMac, modsOf, mouseButton, textInput, wheelLines } from './input';
 import { forgetProgramClipboard, programClipboard, programClipboardCopied, programCopied, userInput, userRelease } from './clipboard';
 import { findResult, useFind } from './find';
+import { findPlace, noteScroll, takeScroll } from './scrollMemory';
 import { carriesFiles } from '../drop';
-import { linksAround, linkTitle, openLink, safeUrl, selectedLink, type LinkContext, type RowText } from '../terminal/links';
+import { linksAround, linkTitle, safeUrl, selectedLink, type LinkContext, type RowText } from '../terminal/links';
+import { openLink } from '../terminal/openLink';
 import { mathAt } from '../terminal/math';
 import { renderMath } from '../terminal/mathRender';
 import { openMenu } from '../contextMenu';
@@ -44,6 +46,26 @@ export const MATH_APPROACH_MS = 800;
 
 /** A program may hold the screen still (synchronized output) this long. */
 const HOLD_MS = 1000;
+// The first paint of an attach (the screen and its history) comes as output
+// like any other, in as many frames as its size and the stream's credit
+// make of it; drawn as it comes, it is the history running past before the
+// screen stands. Nothing says where it ends, but it comes in bulk: so
+// nothing is drawn until the bulk pauses, for PAINT_QUIET_MS after a paint
+// that fits the stream's credit (it comes at once) and for
+// PAINT_QUIET_LONG_MS after more than that (the next part waits for the
+// credit returned). Frames under PAINT_BULK bytes are a program's own
+// output (a spinner, a clock: an agent at work writes every few
+// tens of milliseconds) and put the end off no further; PAINT_MAX_MS is the most a
+// program that writes in bulk without a pause is waited for.
+const PAINT_QUIET_MS = 40;
+const PAINT_QUIET_LONG_MS = 250;
+const PAINT_MAX_MS = 600;
+const PAINT_BULK = 4096;
+const PAINT_ONE_CREDIT = 192 * 1024;
+// An attach that is refused (a kept terminal whose shell the core is
+// starting again answers unavailable for a moment) is tried again.
+const ATTACH_RETRY_MS = 1500;
+const ATTACH_RETRIES = 5;
 
 /** Where a terminal's stream comes from: the core's terminal protocol
  * (term/connection.ts), or a PTY of the core host (components/AuthDialog.tsx). */
@@ -100,6 +122,8 @@ export interface PaneOptions {
   onCell?(cw: number, ch: number): void;
   /** Renderer in use. */
   onRenderer?(kind: 'webgl' | 'canvas'): void;
+  /** The terminal is attached: input reaches its program. */
+  onAttached?(): void;
 }
 
 const overPopover = (target: EventTarget | null | undefined) => !!(target as Element | null)?.closest?.('.math-popover');
@@ -137,6 +161,20 @@ interface PaneLink {
 
 const cellsKey = (c: Cells[] | undefined) => (c ? c.map((x) => `${x.y}:${x.from}-${x.to}`).join(' ') : '');
 
+/** What a terminal's pane holds now. */
+export interface PaneUsage {
+  hidden: boolean;
+  attached: boolean;
+  renderer?: 'webgl' | 'canvas';
+}
+
+const panes = new Set<TermPane>();
+
+/** The page's terminal panes, shown and kept. */
+export function paneUsage(): PaneUsage[] {
+  return [...panes].map((p) => p.usage);
+}
+
 export class TermPane {
   private vt?: Vt;
   term?: Terminal;
@@ -149,6 +187,8 @@ export class TermPane {
   /** The display facts the core has for the stream (JSON), to send changes only. */
   private sentDisplay = '';
   private attaching = false;
+  private attachFailures = 0;
+  private attachTimer?: number;
   /** Output bytes written but not yet acknowledged. */
   private unacked = 0;
   private raf?: number;
@@ -160,6 +200,17 @@ export class TermPane {
   private blinkTimer?: number;
   private held = false;
   private heldSince = 0;
+  /** An attach's first paint is on its way: nothing is drawn. */
+  private painting = false;
+  /** The emulator's first paint is over and the view went back where it
+   * was: from then on where its view is counts (noteScroll). */
+  private viewed = false;
+  /** When the first paint is taken to be over (performance.now()). */
+  private paintEnd = 0;
+  private paintBytes = 0;
+  private paintTimer?: number;
+  /** Kept while its tab is not shown: output is taken, nothing is drawn or measured. */
+  private hidden = false;
   private composing = false;
   private readonly preedit: HTMLDivElement;
   private readonly ro: ResizeObserver;
@@ -204,9 +255,14 @@ export class TermPane {
     this.ro = new ResizeObserver(() => this.measureSize());
     this.ro.observe(host);
     this.offConnection = o.onConnection((up) => {
-      if (up) this.attach();
+      if (!up) return;
+      // The connection or the machine's terminals are back: a new round
+      // of attempts.
+      this.attachFailures = 0;
+      this.attach();
     });
     this.offFind = useFind.subscribe((st, prev) => this.findChanged(st, prev));
+    panes.add(this);
     this.install();
     void loadVt().then((vt) => {
       if (this.disposed) return;
@@ -221,6 +277,12 @@ export class TermPane {
     this.appearance = a;
     this.look = lookOf(a.colors.selection, a.colors.background, a.cursorWidth);
     if (!this.vt) return;
+    // Not shown: the emulator takes the colors; cells are measured and a
+    // renderer made when it is shown again.
+    if (this.hidden) {
+      if (this.term) this.configure(this.term);
+      return;
+    }
     const dpr = window.devicePixelRatio || 1;
     if (dpr !== this.dpr || !this.dprQuery) {
       this.dpr = dpr;
@@ -294,7 +356,7 @@ export class TermPane {
   /** The grid that fits the pane; a new one resizes the terminal and the program's. */
   private measureSize() {
     const m = this.metrics;
-    if (this.disposed || !m || !this.renderer) return;
+    if (this.disposed || this.hidden || !m || !this.renderer) return;
     // A zoom changes the pixel ratio and the pane's size at once; the size
     // may be seen first. The cells are measured again for the new ratio
     // (setAppearance measures the size after them), so text stays sharp.
@@ -322,11 +384,15 @@ export class TermPane {
     if (this.disposed || this.stream !== undefined || this.attaching || !this.vt || !this.grid.cols || this.closedFor) return;
     if (!this.o.connection.connected) return;
     this.attaching = true;
-    // A new emulator per attach: the first paint brings the screen and its history.
+    // A new emulator per attach: the first paint brings the screen and its
+    // history, and the view goes back where it was (scrollMemory.ts).
+    this.noteScroll();
+    this.viewed = false;
     this.term?.dispose();
     const term = new Terminal(this.vt, this.grid.cols, this.grid.rows, {
       reply: (data) => this.stream !== undefined && !this.o.readOnly() && this.o.connection.write(this.stream, data, true),
-      bell: () => this.o.onBell(),
+      // Not for a bell of the history painted, nor of a terminal not shown.
+      bell: () => !this.painting && !this.hidden && this.o.onBell(),
       title: (s) => this.o.onTitle?.(s),
       clipboard: (text) => !this.o.readOnly() && programCopied(this.o.m, text),
       dark: () => this.appearance.theme === 'dark',
@@ -341,6 +407,10 @@ export class TermPane {
     this.term = term;
     this.frame = newFrame(this.grid.cols, this.grid.rows);
     this.renderer?.invalidate();
+    this.painting = true;
+    const paintLimit = performance.now() + PAINT_MAX_MS;
+    this.paintBytes = 0;
+    this.awaitPaint(paintLimit);
     const observe = this.o.readOnly();
     this.o.connection
       .attach(
@@ -358,7 +428,14 @@ export class TermPane {
             if (this.term !== term) return;
             term.write(data);
             this.unacked += data.length;
-            this.schedule();
+            if (!this.painting) return this.schedule();
+            // Credit is returned at once: the rest of the paint waits for it.
+            this.ack();
+            this.paintBytes += data.length;
+            const now = performance.now();
+            // Bulk puts the end off; a program's own small output only brings it nearer.
+            const quiet = now + (this.paintBytes > PAINT_ONE_CREDIT ? PAINT_QUIET_LONG_MS : PAINT_QUIET_MS);
+            this.awaitPaint(data.length >= PAINT_BULK ? Math.min(paintLimit, quiet) : Math.min(this.paintEnd, now + PAINT_QUIET_MS));
           },
           resized: (cols, rows) => {
             if (this.term !== term) return;
@@ -379,17 +456,112 @@ export class TermPane {
         (s) => {
           this.attaching = false;
           if (this.disposed || this.term !== term) return this.o.connection.detach(s);
+          this.attachFailures = 0;
           this.stream = s;
           if (!observe && (this.grid.cols !== term.cols || this.grid.rows !== term.rows))
             this.o.connection.resize(s, this.grid.cols, this.grid.rows);
           if (this.focused) this.o.connection.focus(s, true);
           // The theme or font may have changed while attaching.
           if (!observe && JSON.stringify(this.display()) !== this.sentDisplay) this.configure(term);
+          this.o.onAttached?.();
         },
         () => {
           this.attaching = false;
+          // No first paint comes: the remembered view waits for the next
+          // emulator, which an empty one must not take.
+          if (this.term === term) {
+            window.clearTimeout(this.paintTimer);
+            this.painting = false;
+          }
+          if (this.disposed || ++this.attachFailures > ATTACH_RETRIES) return;
+          window.clearTimeout(this.attachTimer);
+          this.attachTimer = window.setTimeout(() => this.attach(), ATTACH_RETRY_MS);
         },
       );
+  }
+
+  /** Ends the first paint at a time (performance.now()), unless more of it comes first. */
+  private awaitPaint(at: number) {
+    this.paintEnd = at;
+    window.clearTimeout(this.paintTimer);
+    this.paintTimer = window.setTimeout(
+      () => {
+        if (this.disposed || !this.painting) return;
+        this.painting = false;
+        this.viewed = true;
+        this.restoreScroll();
+        // A program that asked to be told has the focus again: it was told
+        // of its loss when the pane before this one lost it, and the paint
+        // brought the mode this emulator answers by.
+        if (this.focused && this.term) this.send(this.term.encodeFocus(true), false);
+        this.renderer?.invalidate();
+        this.schedule();
+      },
+      Math.max(0, at - performance.now()),
+    );
+  }
+
+  /** The rows a frame shows, as text. */
+  private frameText(): string[] {
+    return this.frame.lines.map((r) => rowCols(r).text.trimEnd());
+  }
+
+  /** Notes where the view is before its emulator goes (scrollMemory.ts). */
+  private noteScroll() {
+    const term = this.term;
+    // An emulator before its first paint shows nothing of where the view was.
+    if (!term || !this.viewed) return;
+    if (term.altScreen || term.atBottom) return noteScroll(this.o.m, this.o.address, undefined);
+    // A pane not shown has not read its rows since.
+    term.update(this.frame);
+    noteScroll(this.o.m, this.o.address, { ...term.scrollbar(), rows: this.frameText() });
+  }
+
+  /** Scrolls a new emulator, its first paint in, where the view was left. */
+  private restoreScroll() {
+    const was = takeScroll(this.o.m, this.o.address);
+    const term = this.term;
+    if (!was || !term || term.altScreen) return;
+    const show = (offset: number) => term.scroll(offset - term.scrollbar().offset);
+    const offset = findPlace(was, {
+      bar: () => term.scrollbar(),
+      rowsAt: (at) => {
+        show(at);
+        term.update(this.frame);
+        return this.frameText();
+      },
+    });
+    show(offset);
+  }
+
+  /** Whether input reaches the terminal's program now. */
+  get attached(): boolean {
+    return this.stream !== undefined;
+  }
+
+  /** Shows the pane again, or keeps it while its tab is not shown: a kept
+   * pane stays attached and its emulator takes the output, so it is shown
+   * as it was left, but it draws nothing, keeps the size it had and gives
+   * up what it draws with (a WebGL context, of which a page has few, and
+   * its glyphs' texture), made again when it is shown. */
+  setShown(shown: boolean) {
+    if (this.hidden === !shown || this.disposed) return;
+    this.hidden = !shown;
+    if (shown) return this.setAppearance(this.appearance);
+    this.hideMath();
+    if (this.renderer) {
+      this.renderer.dispose();
+      this.renderer = undefined;
+      // A canvas keeps the context it gave up: the next renderer gets a new one.
+      this.canvas = replaceCanvas(this.canvas);
+      // No pixels are held for it meanwhile; shown again, it is sized anew.
+      this.canvas.width = this.canvas.height = 0;
+    }
+  }
+
+  /** What the pane holds, for the settings' Performance page. */
+  get usage(): PaneUsage {
+    return { hidden: this.hidden, attached: this.stream !== undefined, renderer: this.renderer?.kind };
   }
 
   // ---- drawing ----
@@ -404,8 +576,12 @@ export class TermPane {
 
   private draw() {
     const term = this.term;
+    if (!term) return;
+    // Nothing is drawn, the output is taken: its credit goes back, so a
+    // hidden terminal (which has no renderer) keeps up with its program.
+    if (this.painting || this.hidden) return this.ack();
     const r = this.renderer;
-    if (!term || !r) return;
+    if (!r) return;
     if (this.held && performance.now() - this.heldSince < HOLD_MS) {
       // The program holds the screen: draw once it lets go.
       this.ack();
@@ -1115,6 +1291,8 @@ export class TermPane {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    panes.delete(this);
+    this.noteScroll();
     if (this.stream !== undefined) this.o.connection.detach(this.stream);
     this.stream = undefined;
     this.offConnection();
@@ -1125,6 +1303,8 @@ export class TermPane {
     window.clearInterval(this.blinkTimer);
     window.clearTimeout(this.mathTimer);
     window.clearTimeout(this.autoTimer);
+    window.clearTimeout(this.paintTimer);
+    window.clearTimeout(this.attachTimer);
     this.preedit.remove();
     this.listeners.abort();
     this.renderer?.dispose();

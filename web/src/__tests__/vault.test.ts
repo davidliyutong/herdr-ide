@@ -18,6 +18,7 @@ import { useDialog } from '../dialog';
 import { t } from '../i18n';
 import { VaultPanel, passStrength } from '../plugins/vault/VaultPanel';
 import { VaultApprovals } from '../plugins/vault/Approvals';
+import { SetupGuide } from '../plugins/vault/SetupGuide';
 import { endSession, loadVault, openSession, useVault, vaultApi, vaultMessage } from '../plugins/vault/api';
 import { mcpCommand, setupSnippets } from '../plugins/vault/setup';
 import { clockText, minutesText, parseMinutes } from '../plugins/vault/lockTimes';
@@ -118,8 +119,13 @@ describe('vault', () => {
       if (!open) return json({ error: 'vault_session' }, 401);
       if (url.endsWith('/reveal')) return json({ value: 'ghp_secret' });
       if (url === '/api/p/vault/autolock') {
-        const { minutes } = JSON.parse(String(init!.body)) as { minutes: number | null };
+        const { minutes, passphrase } = JSON.parse(String(init!.body)) as { minutes: number | null; passphrase?: string };
         const after = minutes === null ? 3600 : minutes * 60;
+        // Longer, or never, takes the passphrase again.
+        if (autoLock.after > 0 && (after === 0 || after > autoLock.after)) {
+          if (!passphrase) return json({ error: 'passphrase_required' }, 403);
+          if (passphrase !== PASS) return json({ error: 'wrong_passphrase' }, 403);
+        }
         autoLock = {
           after,
           custom: minutes !== null,
@@ -165,8 +171,6 @@ describe('vault', () => {
     expect(host.querySelector('.vault-gate .callout.error')?.textContent).toBe(t('vault.error.wrong_passphrase'));
     await unlock();
     expect(useVault.getState().session).toBe(true);
-    // How long the session lasts unused is the core's setting.
-    expect(host.querySelector('.vault-session')?.textContent).toContain(t('vault.session.idle', { n: 10 }));
 
     const reveal = host.querySelector<HTMLButtonElement>('[data-name="GITHUB_TOKEN"] [data-action="reveal"]')!;
     await act(async () => reveal.click());
@@ -360,18 +364,30 @@ describe('vault', () => {
       await key('Enter');
       await flush();
     };
-    // A time typed: an hour and a half.
-    await choose('1h30m');
-    expect(calls.filter((c) => c.url === '/api/p/vault/autolock').at(-1)).toMatchObject({
-      method: 'POST',
-      token: TOKEN,
-      body: { minutes: 90 },
-    });
-    expect(btn().textContent).toMatch(/^1:(29:59|30:00)$/);
+    const lockCalls = () => calls.filter((c) => c.url === '/api/p/vault/autolock');
+    const confirmWith = async (passphrase: string) => {
+      const form = host.querySelector<HTMLFormElement>('[data-fresh="autolock"]')!;
+      await act(async () => type(form.querySelector<HTMLInputElement>('input[type="password"]')!, passphrase));
+      await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+      await flush();
+    };
+    // A shorter time typed: the session is enough.
+    await choose('30');
+    expect(lockCalls().at(-1)).toMatchObject({ method: 'POST', token: TOKEN, body: { minutes: 30 } });
     expect(btn().classList.contains('custom')).toBe(true);
-    // Never, from the list.
+    // A longer one, an hour and a half, asks for the passphrase first.
+    await choose('1h30m');
+    expect(lockCalls()).toHaveLength(1);
+    await confirmWith('wrong one');
+    expect(host.querySelector('[data-fresh="autolock"] .callout.error')?.textContent).toBe(t('vault.error.wrong_passphrase'));
+    await confirmWith(PASS);
+    expect(lockCalls().at(-1)!.body).toEqual({ minutes: 90, passphrase: PASS });
+    expect(host.querySelector('[data-fresh="autolock"]')).toBeNull();
+    expect(btn().textContent).toMatch(/^1:(29:59|30:00)$/);
+    // Never, from the list, likewise.
     await choose(t('vault.autoLock.never'));
-    expect(calls.at(-1)!.body).toEqual({ minutes: 0 });
+    await confirmWith(PASS);
+    expect(lockCalls().at(-1)!.body).toEqual({ minutes: 0, passphrase: PASS });
     expect(btn().textContent).toBe(t('vault.autoLock.off'));
     // Back to the setting's time.
     await choose(t('vault.autoLock.default', { time: t('vault.autoLock.hours', { n: 1 }) }));
@@ -539,15 +555,31 @@ describe('vault', () => {
     act(() => vaultMessage('m1', { type: 'resolved', id: 'r8', answer: 'deny' }));
   });
 
-  it('says what the local machine may read', async () => {
-    useStore.setState({ machines: { local: { label: 'This Mac', kind: 'local' } } as never });
+  it('copies a variable’s name, not its value, without a session', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    const button = host.querySelector<HTMLButtonElement>('[data-name="GITHUB_TOKEN"] .vault-row-head [data-action="copy-name"]')!;
+    expect(button.getAttribute('aria-label')).toBe(t('vault.copyName'));
+    await act(async () => button.click());
+    expect(writeText).toHaveBeenCalledWith('GITHUB_TOKEN');
+    expect(calls.some((c) => c.url.endsWith('/reveal'))).toBe(false);
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  });
+
+  it('says what the local machine may read in its setup, not in every prompt', async () => {
+    useStore.setState({ machines: { local: { label: 'This Mac', kind: 'local' } } as never, order: ['local'] });
     await act(async () => root.render(createElement(VaultApprovals)));
     await flush();
     act(() =>
       vaultMessage('local', { type: 'request', request: { id: 'r3', m: 'local', tool: 'get', names: ['X'], created: '', expires: '' } }),
     );
-    expect(document.querySelector('[data-request="r3"] [data-note="local"]')?.textContent).toBe(t('vault.localNote'));
+    expect(document.querySelector('[data-request="r3"]')).not.toBeNull();
+    expect(document.querySelector('[data-request="r3"] [data-note="local"]')).toBeNull();
     act(() => vaultMessage('local', { type: 'resolved', id: 'r3', answer: 'deny' }));
+    await act(async () => root.render(createElement(SetupGuide)));
+    expect(host.querySelector('[data-note="local"]')?.textContent).toBe(t('vault.localNote'));
   });
 
   it('gives each machine its setup', () => {

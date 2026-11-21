@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 // @vitest-environment-options {"url": "http://127.0.0.1:5173/"}
 //
-// Cmd/Ctrl+click on a URL in a terminal (terminal/links.ts openLink): a
-// browser pane in a new tab where one can show it, else outside the app.
+// Cmd/Ctrl+click on a URL in a terminal (terminal/links.ts openLink): by
+// default a loopback address in a browser pane of a new tab (a remote
+// machine's through its forward), any other address outside the app; with
+// browser.openLinks at all, every address a pane can show in one.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -21,7 +23,7 @@ import { useSettings } from '../settings';
 import { definePlugins } from '../plugins/registry';
 import { browserPlugin } from '../plugins/browser';
 import { forwardGranted, resetGrants, useForwards } from '../plugins/browser/api';
-import { openLink } from '../terminal/links';
+import { openLink } from '../terminal/openLink';
 import { FakeCore, settle } from './fakeTerms';
 import { fakeBrowserApi, json } from './browserHarness';
 
@@ -44,7 +46,7 @@ beforeEach(async () => {
   open = vi.spyOn(window, 'open').mockReturnValue(null);
   definePlugins([browserPlugin]);
   set('plugins.browser.enabled', true);
-  set('browser.openLinks', 'pane');
+  set('browser.openLinks', 'loopback');
   resetGrants();
   useForwards.setState({ forwards: [], available: true });
   core = new FakeCore();
@@ -95,7 +97,7 @@ describe('a loopback URL in a terminal of a remote machine', () => {
   it('opens outside when forwards are not available to this client', async () => {
     useForwards.setState({ available: false });
     await click('http://localhost:3000/');
-    expect(open).toHaveBeenCalledWith('http://localhost:3000/', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('http://localhost:3000/', '_blank', 'noopener,noreferrer');
     expect(tabs().length).toBe(1);
     expect(forwardGranted('a', 3000)).toBe(false);
   });
@@ -134,40 +136,86 @@ describe('a loopback URL in a terminal of the local machine', () => {
   });
 });
 
+describe('a URL below localhost', () => {
+  it('is a remote machine’s port, as its other loopback names', async () => {
+    await click('http://app.localhost:3000/x');
+    expect(views()).toMatchObject([{ url: 'http://localhost:3000/x', m: 'a', port: 3000 }]);
+    expect(forwardGranted('a', 3000)).toBe(true);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('opens in a pane of the desktop app as written for the local machine, and outside in a browser', async () => {
+    useStore.getState().selectMachine('l');
+    const local = () => L.pluginViews(core.model.layout('l')!.workspaces[0], 'browser', 'page').map((v) => v.view);
+    // A browser frames the other loopback name only.
+    await click('http://app.localhost:3000/x', 'l');
+    expect(open).toHaveBeenCalledWith('http://app.localhost:3000/x', '_blank', 'noopener,noreferrer');
+    expect(local()).toEqual([]);
+    shell.current = { browser: {} };
+    await click('http://app.localhost:3000/x', 'l');
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(local()).toMatchObject([{ url: 'http://app.localhost:3000/x' }]);
+    expect(local()[0].m).toBeUndefined();
+  });
+});
+
 describe('any other URL', () => {
   it('opens outside in a browser', async () => {
     await click('https://example.com/a');
-    expect(open).toHaveBeenCalledWith('https://example.com/a', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('https://example.com/a', '_blank', 'noopener,noreferrer');
     expect(tabs().length).toBe(1);
   });
 
-  it('opens in a browser pane in the desktop app, whose webview takes any address', async () => {
+  it('opens outside in the desktop app too, in the system’s browser', async () => {
+    shell.current = { browser: {} };
+    for (const url of ['https://example.com/a', 'http://192.168.1.5:3000/', 'http://intranet.corp/x']) await click(url);
+    expect(open.mock.calls.map((c: unknown[]) => c[0])).toEqual([
+      'https://example.com/a',
+      'http://192.168.1.5:3000/',
+      'http://intranet.corp/x',
+    ]);
+    expect(tabs().length).toBe(1);
+  });
+
+  it('opens in a browser pane of the desktop app with the setting at all', async () => {
+    set('browser.openLinks', 'all');
+    // A browser cannot frame it: outside still.
+    await click('https://example.com/a');
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(tabs().length).toBe(1);
     shell.current = { browser: {} };
     await click('https://example.com/a');
-    expect(open).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledTimes(1);
     expect(views()).toMatchObject([{ url: 'https://example.com/a' }]);
     expect(views()[0].m).toBeUndefined();
+    // Loopback addresses as by default.
+    await click('http://localhost:3000/');
+    expect(views().map((v) => [v.url, v.m, v.port])).toEqual([
+      ['https://example.com/a', undefined, undefined],
+      ['http://localhost:3000/', 'a', 3000],
+    ]);
   });
 
   it('never opens other schemes in a pane', async () => {
     shell.current = { browser: {} };
+    set('browser.openLinks', 'all');
     await click('mailto:a@example.com');
-    expect(open).toHaveBeenCalledWith('mailto:a@example.com', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('mailto:a@example.com', '_blank', 'noopener,noreferrer');
     await click('javascript:alert(1)');
     expect(open).toHaveBeenCalledTimes(1);
     expect(tabs().length).toBe(1);
   });
 });
 
-describe('with the setting at external, or the plugin off', () => {
-  it('opens everything outside', async () => {
+describe('the setting', () => {
+  it('opens everything outside at external, and with the plugin off', async () => {
     shell.current = { browser: {} };
     set('browser.openLinks', 'external');
     await click('http://localhost:3000/');
     await click('https://example.com/');
     expect(open).toHaveBeenCalledTimes(2);
     expect(tabs().length).toBe(1);
-    set('browser.openLinks', 'pane');
+    set('browser.openLinks', 'all');
     set('plugins.browser.enabled', false);
     await click('http://localhost:3000/');
     await click('https://example.com/');
@@ -177,5 +225,16 @@ describe('with the setting at external, or the plugin off', () => {
     await click('http://localhost:3000/');
     expect(open).toHaveBeenCalledTimes(4);
     expect(tabs().length).toBe(2);
+  });
+
+  it('reads a value it does not know, as pane of earlier versions, as the default', async () => {
+    shell.current = { browser: {} };
+    for (const value of ['pane', undefined, 'tab']) {
+      set('browser.openLinks', value);
+      await click('https://example.com/');
+    }
+    expect(open).toHaveBeenCalledTimes(3);
+    await click('http://localhost:3000/');
+    expect(views()).toMatchObject([{ url: 'http://localhost:3000/', m: 'a', port: 3000 }]);
   });
 });

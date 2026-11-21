@@ -39,7 +39,7 @@ export type Tab = Extra & {
   /** Set only when the user named the tab. */
   name?: string;
   /** Pinned: it stays left of the others, Close Others and Close to the
-   * Right leave it, and its button unpins it instead of closing it. */
+   * Right leave it, and it shows a pin where the others have ×. */
   pinned?: true;
   root: Node;
   /** The pane with the keyboard focus (paneKey). */
@@ -611,6 +611,40 @@ export function pruneLayout(layout: Layout, live: ReadonlySet<string>): Layout {
   return layoutTerminals(layout)
     .filter((a) => !live.has(a))
     .reduce(closePane, layout);
+}
+
+/** The layout with its terminals' leaves changed by change (which returns
+ * the same leaf for none); a tab's focus follows a leaf whose address
+ * changed. The same layout when no leaf changed. */
+export function mapTerminals(layout: Layout, change: (leaf: TerminalLeaf) => TerminalLeaf): Layout {
+  const moved = new Map<string, string>();
+  const at = (node: Node): Node => {
+    if (isTerminalLeaf(node)) {
+      const next = change(node);
+      if (next !== node && next.terminal !== node.terminal) moved.set(node.terminal, next.terminal);
+      return next;
+    }
+    if (!isSplit(node)) return node;
+    const [a, b] = node.children;
+    const na = at(a);
+    const nb = at(b);
+    return na === a && nb === b ? node : { ...node, children: [na, nb] };
+  };
+  let changed = false;
+  const workspaces = layout.workspaces.map((ws) => {
+    let any = false;
+    const tabs = ws.tabs.map((tab) => {
+      moved.clear();
+      const root = at(tab.root);
+      if (root === tab.root) return tab;
+      any = true;
+      return { ...tab, root, focused: moved.get(tab.focused) ?? tab.focused };
+    });
+    if (!any) return ws;
+    changed = true;
+    return { ...ws, tabs };
+  });
+  return changed ? { ...layout, workspaces } : layout;
 }
 
 /** Sets the ratio of the split at path (false: first child, true: second) in the selected tab. */

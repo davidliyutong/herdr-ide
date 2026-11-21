@@ -1,0 +1,101 @@
+:root {
+  /* The UI's colors are the design tokens (tokens.css, generated from
+     design/tokens.json; docs/features/24-design-tokens.md). Neutrals are
+     the same in every color theme; the accent is the theme's. */
+  --bg: var(--ds-color-background);
+  --bg-1: var(--ds-color-sidebar);
+  --bg-2: var(--ds-color-hover);
+  --bg-3: var(--ds-color-accent);
+  --line: var(--ds-color-border);
+  --line-2: var(--ds-color-border-strong);
+  --fg: var(--ds-color-foreground);
+  --fg-dim: var(--ds-color-muted);
+  --fg-mute: var(--ds-color-faint);
+  /* The accent marks focus, the selection, the one emphasized control and
+     what asks for the user (an agent waiting, a badge); not every state. */
+  --accent: var(--ds-accent);
+  --on-accent: var(--ds-on-accent);
+  --accent-soft: color-mix(in srgb, var(--ds-accent) 16%, transparent);
+  --focus-ring: var(--ds-accent);
+  --working: var(--ds-status-working);
+  --blocked: var(--ds-accent);
+  --done: var(--ds-status-done);
+  --idle: var(--ds-status-idle);
+  --error: var(--ds-status-error);
+  --warning: var(--ds-color-warning);
+  --blocked-glow: color-mix(in srgb, var(--blocked) 25%, transparent);
+  --overlay: color-mix(in srgb, var(--ds-color-background) 75%, transparent);
+  --float: color-mix(in srgb, var(--ds-color-accent) 94%, transparent);
+  --backdrop: rgba(0, 0, 0, 0.4);
+  --shadow: rgba(0, 0, 0, 0.5);
+  --checker-a: #171717;
+  --checker-b: #101010;
+  --radius-sm: var(--ds-metric-radius-small);
+  --radius: var(--ds-metric-radius);
+  --radius-lg: var(--ds-metric-radius-large);
+  /* Sizes are in rem so that the UI font size setting scales the chrome
+     alike everywhere: a header row (the sidebars' heads, the tab bar), a
+     toolbar (a pane's header, a panel's tools), the status bar, list rows,
+     icon buttons and their icons. */
+  --h-header: var(--ds-size-header);
+  --h-toolbar: var(--ds-size-toolbar);
+  --h-status: var(--ds-size-status-bar);
+  --h-row: var(--ds-size-row);
+  --ctl: var(--ds-size-control);
+  --ctl-sm: var(--ds-size-control-small);
+  --ic: var(--ds-size-icon);
+  --ic-sm: var(--ds-size-icon-small);
+  --fs-xs: var(--ds-font-size-xs);
+  --fs-sm: var(--ds-font-size-sm);
+  --fs-md: var(--ds-font-size-md);
+  --fs-base: var(--ds-font-size-base);
+  --fs-lg: var(--ds-font-size-lg);
+  --fs-xl: var(--ds-font-size-xl);
+  --fs-display: var(--ds-font-size-display);
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
+  font-size: 13px;
+}
+/* The tokens change with the theme; only what is not a token is set here. */
+:root[data-theme='light'] {
+  --overlay: color-mix(in srgb, var(--ds-color-background) 80%, transparent);
+  --float: color-mix(in srgb, var(--ds-color-sidebar) 96%, transparent);
+  --backdrop: rgba(10, 10, 10, 0.38);
+  --shadow: rgba(10, 10, 10, 0.18);
+  --checker-a: #f3f3f3;
+  --checker-b: #e8e8e8;
+  --accent-soft: color-mix(in srgb, var(--ds-accent) 12%, transparent);
+  --blocked-glow: color-mix(in srgb, var(--blocked) 20%, transparent);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+body.resizing,
+body.resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+body.resizing-row,
+body.resizing-row * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+body.resizing iframe,
+body.resizing-row iframe,
+body.dragging iframe {
+  pointer-events: none;
+}

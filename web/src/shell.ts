@@ -44,6 +44,23 @@ export interface DesktopShell {
   /** The browser panes' webviews (plugins/browser): present when the shell
    * lets the page show any web address in an Electron <webview>. */
   browser?: DesktopBrowser;
+  /** What the app's own processes use now, for the settings' Performance
+   * page: Electron's count of each (the window's page, the GPU process, the
+   * shell itself, helpers); the core is not among them. */
+  metrics?(): Promise<ProcessUsage[]>;
+}
+
+/** One process of the desktop app. */
+export interface ProcessUsage {
+  /** Electron's kind of process: "Browser" (the shell), "Tab" (a page),
+   * "GPU", "Utility"… */
+  type: string;
+  /** A helper's name, when it has one. */
+  name: string;
+  /** Share of one processor since the last asking, in percent. */
+  cpu: number;
+  /** Memory in use, in bytes. */
+  memory: number;
 }
 
 export interface DesktopBrowser {

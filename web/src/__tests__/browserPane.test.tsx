@@ -238,9 +238,11 @@ describe('the address field', () => {
   it('opens a typed port as the machine’s port, and goes back and forward over what was loaded', async () => {
     fakeBrowserApi();
     h = await mountPane({ url: '' });
-    // An empty pane: the field has the keyboard and the start page is there.
+    // An empty pane: the field has the keyboard and the start page lists
+    // the machine's listening ports.
     expect(h.host.querySelector('.browser-address')?.hasAttribute('data-autofocus')).toBe(true);
-    expect(text()).toContain(t('browser.start'));
+    expect(h.host.querySelector('.browser-home [data-testid="browser-listening"]')).not.toBeNull();
+    expect(text()).toBe(t('browser.portsListening', { machine: 'Box' }) + t('browser.portsNone'));
     expect(forwardGranted('a', 3000)).toBe(false);
     await typeAddress(h.host, '3000');
     expect(h.view()).toMatchObject({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
@@ -353,8 +355,13 @@ describe('Ports', () => {
     await flush();
     expect(calls.some((c) => c.method === 'GET' && c.url === '/api/m/a/p/browser/listening')).toBe(true);
     const popover = h.host.querySelector('.browser-popover')!;
-    const buttons = [...popover.querySelectorAll<HTMLButtonElement>('.browser-port')];
-    expect(buttons.map((b) => b.textContent)).toEqual(['5174node', '8080']);
+    // A row each: the port and the program, in columns.
+    const buttons = [...popover.querySelectorAll<HTMLButtonElement>('button.browser-port')];
+    expect(buttons.map((b) => [...b.children].map((c) => c.textContent))).toEqual([
+      ['5174', 'node'],
+      ['8080', ''],
+    ]);
+    expect(buttons.map((b) => b.title)).toEqual([t('browser.portsOpen', { port: 5174 }), t('browser.portsOpen', { port: 8080 })]);
     expect(forwardGranted('a', 5174)).toBe(false);
     await click(buttons[0]);
     await flush();
@@ -373,10 +380,45 @@ describe('Ports', () => {
     await click(h.host.querySelector(`[aria-label="${t('browser.ports')}"]`));
     await flush();
     const popover = h.host.querySelector('.browser-popover')!;
-    expect(popover.textContent).toContain(t('browser.forwardLine', { machine: 'Box', port: 3000, local: 41000 }));
+    // The machine's port, the machine and the local port when it is another.
+    const row = popover.querySelector<HTMLElement>('.browser-forward')!;
+    expect([...row.querySelectorAll('span')].map((c) => c.textContent)).toEqual(['3000', 'Box', '→ 41000']);
+    expect(row.title).toBe(t('browser.forwardLine', { machine: 'Box', port: 3000, local: 41000 }));
     await click(popover.querySelector(`[aria-label="${t('browser.forwardStop', { machine: 'Box', port: 3000 })}"]`));
     await flush();
     expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/m/a/p/browser/forwards/3000')).toBe(true);
+  });
+
+  it('says what each list holds when it has no row, in a line of it', async () => {
+    const open = async () => {
+      await click(h!.host.querySelector(`[aria-label="${t('browser.ports')}"]`));
+      await flush();
+      const popover = h!.host.querySelector('.browser-popover')!;
+      return [...popover.querySelectorAll('.browser-ports-note')].map((n) => n.textContent);
+    };
+    fakeBrowserApi({ listening: () => json({ ports: [] }), forwards: () => json({ forwards: [], available: true }) });
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+    await flush();
+    expect(await open()).toEqual([t('browser.portsNone'), t('browser.forwardsNone')]);
+    h.unmount();
+    fakeBrowserApi({
+      listening: () => json({ error: 'offline', message: 'x' }, 409),
+      forwards: () => json({ forwards: [], available: false }),
+    });
+    h = await mountPane({ url: 'http://localhost:3000/', m: 'a', port: 3000 });
+    await flush();
+    expect(await open()).toEqual([t('browser.portsFailed'), t('browser.forwardsUnavailable')]);
+  });
+
+  it('names a forward’s local port only when it is another than the machine’s', async () => {
+    fakeBrowserApi({
+      forwards: () => json({ forwards: [{ m: 'a', port: 5174, local: 5174, created: '', connections: 0 }], available: true }),
+    });
+    h = await mountPane({ url: '' });
+    await click(h.host.querySelector(`[aria-label="${t('browser.ports')}"]`));
+    await flush();
+    const row = h.host.querySelector<HTMLElement>('.browser-forward')!;
+    expect([...row.querySelectorAll('span')].map((c) => c.textContent)).toEqual(['5174', 'Box', '']);
   });
 
   it('takes a stopped forward’s page off at once and asks before making it again', async () => {

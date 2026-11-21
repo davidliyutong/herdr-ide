@@ -263,7 +263,7 @@ func rem(px, root float64) string {
 
 // css renders web/src/tokens.css in the form Prettier keeps. The dark
 // theme is the default and <html data-theme="light"> selects the light
-// one, as in web/src/styles.css; <html data-accent="id"> selects a color
+// one, as in web/src/styles/base.css; <html data-accent="id"> selects a color
 // theme other than the first.
 func css(t *Tokens) []byte {
 	var b bytes.Buffer

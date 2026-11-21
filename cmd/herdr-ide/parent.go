@@ -1,3 +1,5 @@
+//go:build !machine
+
 package main
 
 import (

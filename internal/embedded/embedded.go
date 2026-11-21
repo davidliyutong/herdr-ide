@@ -1,5 +1,7 @@
 // Package embedded carries build artifacts compiled into the herdr-ide binary:
-// the per-platform agents (gzip), the VS Code bridge extension and, when
+// the machine builds of this program for every agent platform (gzip; the
+// tag "machine" leaves this package out of them), the VS Code bridge
+// extension and, when
 // built (scripts/build-ffmpeg.sh), the encoder machines send program
 // windows as video with, and the upstream herdr-core executables
 // (scripts/fetch-hc) the core installs on machines.
@@ -23,8 +25,8 @@ import (
 //go:embed all:agents
 var agentsFS embed.FS
 
-// AgentDir, when set, is searched before the embedded agents. It holds
-// uncompressed herdr-ide-agent-<os>-<arch> files (development builds).
+// AgentDir, when set, is searched before the embedded machine builds. It
+// holds uncompressed herdr-ide-<os>-<arch> files (development builds).
 var AgentDir string
 
 type agentEntry struct {
@@ -37,8 +39,9 @@ var (
 	cache   = map[string]agentEntry{}
 )
 
-// Agent returns the agent binary for goos/goarch and a content-derived
-// version tag, so a rebuilt agent is always re-uploaded.
+// Agent returns the machine build for goos/goarch, which runs the agent
+// there, and a content-derived version tag, so a rebuilt one is always
+// re-uploaded.
 func Agent(goos, goarch string) ([]byte, string, error) {
 	key := goos + "-" + goarch
 	cacheMu.Lock()
@@ -46,7 +49,7 @@ func Agent(goos, goarch string) ([]byte, string, error) {
 	if e, ok := cache[key]; ok {
 		return e.bin, e.version, nil
 	}
-	name := brand.AgentBin + "-" + key
+	name := brand.CoreBin + "-" + key
 	var bin []byte
 	if AgentDir != "" {
 		if b, err := os.ReadFile(filepath.Join(AgentDir, name)); err == nil {

@@ -15,7 +15,7 @@ import { pick, type PickAnchor, type PickerItem } from '../../components/Picker'
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
 import { gitApi, errorText, type Branch, type RepoInfo, type Tag } from './api';
-import { ago } from './History';
+import { ago } from './shared';
 import { checkoutRemote, createBranch } from './ops';
 import { badRefName } from './prompt';
 import { runGit } from './state';

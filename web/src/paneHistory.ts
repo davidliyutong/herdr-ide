@@ -3,7 +3,11 @@
 // keeps the pages it showed: going back and forward moves along it, and a
 // pane focused otherwise after going back drops what lay ahead. A pane is
 // one of a machine; going to it shows its machine, workspace and tab.
-// Panes closed since are passed over. The history lives in the page only.
+// Panes closed since are passed over, and so is the pane that has the focus
+// already: closing a pane focuses one beside it, which is then both the
+// latest place and the one before the closed pane, and a step that went
+// "back" to where the user is would look like a key that does nothing.
+// The history lives in the page only.
 import * as L from './term/layout';
 
 export interface Spot {
@@ -26,9 +30,10 @@ export function noteFocus(spot: Spot) {
 }
 
 /** The place step away (-1 back, 1 forward), passing over panes that are
- * gone (open says whether one is still open); undefined at an end. */
+ * gone (open says whether one is still open) and the pane the history is
+ * at; undefined at an end. */
 function target(step: -1 | 1, open: (s: Spot) => boolean): number | undefined {
-  for (let i = at + step; i >= 0 && i < spots.length; i += step) if (open(spots[i])) return i;
+  for (let i = at + step; i >= 0 && i < spots.length; i += step) if (!same(spots[at], spots[i]) && open(spots[i])) return i;
   return undefined;
 }
 

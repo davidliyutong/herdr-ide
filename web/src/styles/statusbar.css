@@ -1,0 +1,78 @@
+/* ---------- status bar ---------- */
+.statusbar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  font-size: var(--fs-md);
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+  min-width: 0;
+}
+/* Every item of the status bar is a stretch of text or a button as high
+   as a small control, with the same padding and the bar's text color;
+   only the focused pane's description gives way to a narrow window. */
+.statusbar > * {
+  height: var(--ctl-sm);
+  line-height: var(--ctl-sm);
+  padding: 0 6px;
+  color: var(--fg-dim);
+}
+.statusbar > :not(.ellipsis):not(.spacer) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  white-space: nowrap;
+}
+.statusbar > .spacer {
+  padding: 0;
+}
+/* The connection: a dot of its state beside plain text. */
+.conn::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--done);
+}
+.conn.off::before {
+  background: var(--warning);
+  animation: pulse 1.2s infinite;
+}
+.statusbar .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.prefix-badge {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+/* The commands the status bar offers (the list of shortcuts, the palette),
+   with their keys when they have one. */
+.status-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  white-space: nowrap;
+  line-height: 1;
+}
+.status-command:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.status-command kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  padding: 1px 4px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+}

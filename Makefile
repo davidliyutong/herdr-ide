@@ -26,6 +26,7 @@ check:
 	scripts/check.sh
 	pnpm -C web typecheck
 	pnpm -C web format:check
+	pnpm -C web cycles
 	pnpm -C $(EXT) typecheck
 	pnpm -C $(EXT) format:check
 	pnpm -C desktop typecheck

@@ -19,7 +19,12 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   scroll past the edge and copy whole), IME, OSC 52 copy (a selection in
   Claude Code, or in Codex on an SSH machine, goes straight to the
   clipboard), resizable splits, and
-  programs see the UI theme's colors. Workspaces, tabs and splits are a
+  programs see the UI theme's colors. The terminals shown last stay
+  attached while another tab is shown, so coming back shows them at once,
+  where you had scrolled. A terminal keeps its size while no tab shows
+  it, so a full-screen program such as Claude Code or Codex stays as you
+  left it, and a terminal shown longer ago than the ones kept comes back
+  where you had scrolled as well. Workspaces, tabs and splits are a
   layout document kept on each machine, the same in every browser and the
   desktop app. Drag a pane by its header to swap or move it; double-click
   a tab, workspace, pane title or machine to rename it in place (a
@@ -40,7 +45,11 @@ workspaces and terminals of every machine in one browser tab, with VS Code
 - **Terminal core included.** The binary carries herdr-core for Linux/macOS
   on amd64/arm64 and installs it on a machine the first time its terminals
   are shown; machines need nothing installed and no internet. Programs keep running
-  when the browser closes or the core stops. A machine's menu has
+  when the browser closes or the core stops. After a machine restarted,
+  its workspaces and tabs come back as shells in their directories, and
+  Claude Code and Codex continue the directory's latest conversation
+  (`claude --continue`, `codex resume --last`); other programs are not
+  started again ([33](docs/features/33-workspace-restore.md)). A machine's menu has
   **Troubleshooting** ▸ **Restart Terminal Service…** (its programs keep
   running), **Start Terminal Service** and **Stop Terminal Service…**.
 - **Multi-machine.** Keeps its own list of SSH machines (the machines saved
@@ -124,23 +133,27 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   and Upload Folder…) to upload them with their structure, asking whether
   to replace, keep both or skip names already there (or cancel), drag rows out to
   download them, Move to Trash, copy paths,
-  download, open in a terminal or VS Code. A click shows a file in a
+  download, open in a terminal or VS Code, and for the computer the app
+  runs on, Reveal in Finder (the file manager on Linux). Switching to
+  another workspace or machine shows its directory at once. A click shows a file in a
   preview editor that the next click replaces, a double click keeps it
   open, as in VS Code (text in Monaco, images, video and PDFs as Quick Look
   shows them); saves never overwrite a change made on the machine since it
   was opened, and write the file in place as VS Code does, so hard links,
-  owners, permissions and symbolic links stay.
+  owners, permissions and symbolic links stay. An open file deleted or
+  moved away has its tab struck through, its text kept.
   Changed files are colored by their Git status and the editor's gutter
   marks changed lines. Its settings page has hidden files, excluded names,
   the sort order, following the focused pane and asking before the trash.
 - **Browser.** A tab can be a browser: a development server on a remote
   machine's `localhost` shows in a pane through a port forward, as
-  `ssh -L` would give it, and ⌘/Ctrl-click on a link in a terminal opens it
-  there in a new tab. Forwards are made only when you open a port yourself
-  (a tab that finds none asks first), listen on the core's computer only,
-  end when unused, and their pages stay another site than the UI. The pane
-  lists the machine's listening ports; the desktop app shows any web page
-  in it.
+  `ssh -L` would give it, and ⌘/Ctrl-click on a link to `localhost` in a
+  terminal (or a click on one in a document) opens it there in a new tab;
+  links to other computers open in your browser. Forwards are made only
+  when you open a port yourself (a tab that finds none asks first), listen
+  on the core's computer only, end when unused, and their pages stay
+  another site than the UI. The pane lists the machine's listening ports;
+  the desktop app shows any web page typed into it.
   ⌘/Ctrl-click the new-tab button (or its chevron) to choose the kind of
   tab: terminal, VS Code, browser
   ([32](docs/features/32-browser-and-ports.md)).
@@ -158,8 +171,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   revert, reset); diffs in Monaco, side by side or inline, where selected
   ranges are staged, unstaged or discarded and the working tree's side is
   editable, files that mix line endings keeping each line's own. Changed
-  files are colored in the file explorer; Settings › Plugins › Git has the
-  plugin's settings ([31](docs/features/31-git.md)).
+  files are colored, ignored ones muted, in the file explorer; Settings ›
+  Plugins › Git has the plugin's settings ([31](docs/features/31-git.md)).
 - **Variable vault.** API keys and other environment variables, encrypted
   on the core's computer under a key made from your passphrase, for coding
   agents on every machine: Claude Code, Codex and other MCP clients read
@@ -169,11 +182,15 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   with the variables set without showing their values to the model. One
   gate stands before every approval, reveal and change: the passphrase,
   so no program, not even one on the core's computer, approves a request
-  or reads a variable that asks every time without you. While the vault is
-  unlocked a fingerprint can stand in for it: Touch ID or Windows Hello in
-  the desktop app, whose prompt names the machine and the variables, or a
-  WebAuthn credential in a browser; with Verify every Allow each approval
-  needs one. Every value that
+  or reads a variable that asks every time without you. The passphrase
+  unlocks the vault once after a start; for 24 hours after it (a setting)
+  biometrics stand in for it, to approve and to unlock the vault after it
+  locked: Touch ID or Windows Hello in the desktop app, whose prompt names
+  the machine and the variables, or a WebAuthn credential in a browser;
+  then the passphrase is needed again. Biometrics and Verify every Allow
+  (each approval needs them) are set in the vault's page of Settings, as
+  are exempt apps: an app on a machine (claude, say) whose requests need no
+  approval while the vault is unlocked. Every value that
   leaves the vault is first written to its access log. It locks after an
   hour without use; the panel counts down and sets another time for the
   current unlock (presets or one you type). Variables move
@@ -189,7 +206,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   thresholds you choose. Laid out as CodexBar: a tile per service with its
   logo and color, an overview of what the CLIs' local logs would cost at
   API prices (by day, model, project and machine; or the tokens by kind,
-  which also count the models without a price) and a page per service.
+  which also count the models without a price), OpenCode's sessions
+  among them, and a page per service. Its settings list the providers,
+  each opening its own.
   Credentials are read where they are and never leave the machine; only Kimi Code's
   15-minute sign-in is renewed there, as Kimi Code renews it.
 - **Settings.** Language (English, Chinese), light/dark theme followed by
@@ -200,13 +219,18 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   color schemes (Dracula, Nord, Solarized, One, Gruvbox, Tomorrow…) with
   your own colors on top, notification sounds, system notifications and
   the Dock/taskbar badge each on or off, silent agents, how each machine
-  gets VS Code, program windows per machine and every keyboard shortcut,
+  gets VS Code, program windows per machine, how many terminals stay
+  attached in the background and every keyboard shortcut,
   in one dialog laid out as VS Code's (the sidebar's gear, `cmd+,` or
   `ctrl+,` in the desktop app; a machine's own settings from its menu) with
   search. Settings and keys are kept on the core's
   host in two JSON files you can also edit by hand, and are the same in
   every browser and the desktop app. Terminals use
   the included JetBrains Mono font unless you choose another.
+  The **Performance** page also shows what the app uses now: in the
+  desktop app each of its processes with CPU and memory, in a browser the
+  window's script memory, and in both the core and the terminals shown
+  and kept.
 
 ## Screenshots
 

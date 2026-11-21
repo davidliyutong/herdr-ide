@@ -5,8 +5,9 @@
 // files and directories the explorer makes (new files and folders, rename
 // and move without replacing anything, copies, the trash, permanent
 // removal, saving an editor's text with a check that nobody changed the
-// file since it was loaded) and the stat of the directories it shows,
-// which it polls while it is visible.
+// file since it was loaded), the stat of the directories it shows, which
+// it polls while it is visible, and showing a path in the system's file
+// manager (reveal.go).
 //
 // Every path goes through the agent's expansion. Nothing touches the root,
 // a directory holding the home directory (the home directory itself
@@ -135,6 +136,9 @@ func handle(ctx context.Context, st net.Conn, action string, raw json.RawMessage
 		return g.write(st, p)
 	case "upload":
 		return g.upload(st, p)
+	case "reveal":
+		v, err := g.reveal(ctx, p.Path)
+		return plugin.Reply(st, v, err)
 	}
 	return plugin.Reply(st, nil, plugin.Errorf("bad_params", "unknown action %q", action))
 }

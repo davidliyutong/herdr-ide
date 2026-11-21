@@ -119,11 +119,13 @@ export interface CostReport {
   days: number;
   weekHours: number;
   monthHours: number;
-  machines: Record<string, { error?: string; files: number; unpriced?: string[] }>;
+  /** failed: the logs a machine could not read, provider:code. */
+  machines: Record<string, { error?: string; files: number; unpriced?: string[]; failed?: string[] }>;
   rows: CostRow[];
 }
 
-export const PROVIDERS = ['claude', 'codex', 'grok', 'antigravity', 'kimi', 'deepseek'] as const;
+/** In the core's order (usage.Providers); OpenCode has spend only. */
+export const PROVIDERS = ['claude', 'codex', 'grok', 'antigravity', 'kimi', 'deepseek', 'opencode'] as const;
 
 /** A window whose reset has passed since it was read: its use is of the
  * period before, until the next poll reads the new one. */

@@ -1,7 +1,8 @@
 // The browser (docs/features/32-browser-and-ports.md): a pane that shows a
 // web page in a tab, mainly a development server on a machine's localhost,
 // reached through a port forward the core makes (internal/plugins/browser,
-// which has the model). Links in terminals open in it (terminal/links.ts).
+// which has the model). Links to localhost in terminals and documents open
+// in it (terminal/openLink.ts).
 import { Globe } from 'lucide-react';
 import { actions, current } from '../../actions';
 import { useStore } from '../../state/store';

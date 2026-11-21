@@ -43,9 +43,21 @@ const (
 	// carried, or a client asking for the forward; a connection that only
 	// stays open is none.
 	SettingIdle = "browser.forwardIdle"
-	// SettingLinks is where a link of a terminal opens: in a browser pane
-	// or outside the app. The web UI reads it.
+	// SettingLinks is where a web link clicked in a terminal or a document
+	// opens: LinksLoopback, LinksAll or LinksExternal. The web UI reads it.
 	SettingLinks = "browser.openLinks"
+	// LinksLoopback (the default) opens a loopback address in a browser
+	// pane, a remote machine's through a forward, and any other address in
+	// the browser outside the app.
+	LinksLoopback = "loopback"
+	// LinksAll opens every address a pane can show in one (the desktop app
+	// shows any), the rest outside.
+	LinksAll = "all"
+	// LinksExternal opens every address outside the app.
+	LinksExternal = "external"
+	// linksPane is the value of earlier versions, whose default it was: a
+	// pane for what one could show. It reads as the default now.
+	linksPane = "pane"
 	// DefaultIdle is SettingIdle's default.
 	DefaultIdle = 30
 	// reapEvery is how often idle forwards are looked for.
@@ -60,19 +72,30 @@ const (
 	acceptPauseMax = time.Second
 )
 
-// Settings is the plugin's settings module (internal/registry).
+// Settings is the plugin's settings module (internal/registry). The links'
+// value of earlier versions, "pane", becomes the default in place.
 var Settings = func() settings.Module {
 	mn, mx := settings.Range(0, 1440)
 	return settings.Module{
 		Sections: []settings.Section{{ID: ID, Order: 65, Plugin: ID}},
 		Defs: []settings.Def{
-			{Key: SettingLinks, Type: settings.TypeEnum, Default: "pane", Enum: []string{"pane", "external"},
+			{Key: SettingLinks, Type: settings.TypeEnum, Default: LinksLoopback, Enum: []string{LinksLoopback, LinksAll, LinksExternal},
 				Scope: settings.ScopeApp, Section: ID, Order: 10},
 			{Key: SettingIdle, Type: settings.TypeNumber, Default: float64(DefaultIdle), Min: mn, Max: mx, Integer: true,
 				Scope: settings.ScopeApp, Section: ID, Order: 20},
 		},
+		Migrations: []settings.Migration{{From: SettingLinks, To: SettingLinks, Convert: linksOfPane}},
 	}
 }()
+
+// linksOfPane turns the links' value of earlier versions into the default;
+// any other value is of the current format.
+func linksOfPane(v any) (any, bool) {
+	if v == linksPane {
+		return LinksLoopback, true
+	}
+	return nil, false
+}
 
 // Forward is a forward as clients see it: Port on machine M is reachable
 // on the core host's loopback port Local.

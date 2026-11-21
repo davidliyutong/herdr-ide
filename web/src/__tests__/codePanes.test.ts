@@ -37,6 +37,7 @@ import { registerPane } from '../state/panes';
 import { definePlugins } from '../plugins/registry';
 import { t } from '../i18n';
 import { commandEnabled } from '../keymap';
+import '../commands';
 import { useSettings } from '../settings';
 import { vscodePlugin } from '../plugins/vscode';
 import { vscodeOn } from './fakeSettings';
@@ -211,7 +212,7 @@ describe('a VS Code pane', () => {
     await actions.split('a', 'code:c1', 'right');
     await settle();
     expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
-      keep: false,
+      keep: true,
       cwd: '/home/u/w1/docs',
       display: expect.any(Object),
     });

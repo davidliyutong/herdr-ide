@@ -1,0 +1,572 @@
+/* ---------- workspace ---------- */
+.workspace {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.workspace.empty {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+/* A workspace without tabs: what it is and how to start. */
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--fg-dim);
+}
+.empty-state button {
+  padding: 4px 14px;
+}
+/* Tabs that do not fit continue on more rows and the bar grows: every tab
+   stays visible and nothing scrolls. One row is as tall as an icon button;
+   the toggle stays on the first row. */
+.tabbar {
+  --tab-row: var(--ctl);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: var(--h-header);
+  padding: calc((var(--h-header) - 1px - var(--tab-row)) / 2) 4px calc((var(--h-header) - 1px - var(--tab-row)) / 2) 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ds-color-tab-bar);
+  flex: none;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 2px;
+  flex: 1;
+  min-width: 0;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--tab-row);
+  max-width: 100%;
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+/* A long label is cut so that one tab cannot take a whole row; the tooltip
+   has it in full. */
+.tab-label {
+  max-width: 16em;
+}
+.tab:hover {
+  background: var(--bg-2);
+}
+/* The active tab: its own background, an outline and a bar under it, so
+   it stands out of the bar by more than its color. */
+.tab.active {
+  background: var(--ds-color-tab-active);
+  color: var(--fg);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    inset 0 -2px 0 var(--accent);
+}
+.tab-close,
+.tab-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  min-height: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-mute);
+  padding: 0;
+  visibility: hidden;
+}
+.tab-close .lucide,
+.tab-pin .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.tab-close:hover {
+  color: var(--fg);
+  background: var(--line);
+}
+/* A pinned tab shows its pin, a mark and not a button, where others have
+   ×, and a gap parts the pinned tabs from the others. */
+.tab-pin {
+  visibility: visible;
+}
+.tab.pinned + .tab:not(.pinned) {
+  margin-left: 6px;
+}
+.tab:hover .tab-close,
+.tab.active .tab-close,
+.tab:focus-visible .tab-close {
+  visibility: visible;
+}
+/* Tabs selected together (state/multiSelect.ts): the accent's tint. */
+.tab.multi:not(.active) {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.tab.multi.active {
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    inset 0 -2px 0 var(--accent);
+}
+/* A tab the user has not named shows its position, as a short number. */
+.tab-num {
+  min-width: 1.4ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* A tab of VS Code or a preview alone: its mark before its name. */
+.tab-kind.lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  margin-right: -2px;
+}
+/* A tab of several panes: a small split mark (the count is in its tooltip). */
+.tab-split.lucide {
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--fg-mute);
+  margin: 0 -2px;
+}
+/* A preview pane's title (a file shown by a single click, replaced by the
+   next one), as VS Code's preview editors. */
+.is-preview {
+  font-style: italic;
+}
+/* The title of a pane whose file is gone (deleted or moved away), as VS
+   Code marks the editors of deleted files. */
+.is-gone {
+  text-decoration: line-through;
+}
+.tab .inline-edit {
+  width: 10em;
+  padding: 0 4px;
+}
+.pane-actions button:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.workspace-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+/* The selected tab's panes, each placed by its share of the split tree
+ * (Workspace.tsx): a header above a terminal. */
+.tab-panes {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--line);
+}
+.pane {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 0 1px 1px 0;
+}
+.tab-panes.alone .pane {
+  padding: 0;
+}
+/* A terminal kept while another tab is shown (keptPanes.ts): mounted and
+   attached, not seen and not in the pointer's way. */
+.pane.kept {
+  visibility: hidden;
+  pointer-events: none;
+}
+.pane > .pane-header {
+  border-top: 2px solid transparent;
+}
+.pane.focused > .pane-header {
+  border-top-color: var(--accent);
+}
+/* A split's handle: dragged, it sets the split's ratio. */
+.split-handle {
+  position: absolute;
+  z-index: 4;
+}
+.split-handle.h {
+  width: 7px;
+  margin-left: -4px;
+  cursor: col-resize;
+}
+.split-handle.v {
+  height: 7px;
+  margin-top: -4px;
+  cursor: row-resize;
+}
+.split-handle:hover,
+.split-handle.dragging {
+  background: var(--accent-soft);
+}
+/* One terminal: a canvas the renderer draws, a hidden textarea for keys
+ * and input methods, and what goes over them. */
+.term-host {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+.term-host.bell {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.term-scrollbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.term-host:hover .term-scrollbar {
+  opacity: 1;
+}
+.term-scrollbar-thumb {
+  position: absolute;
+  right: 1px;
+  width: 6px;
+  border-radius: 3px;
+  background: var(--line-2);
+}
+/* The formula under the pointer (MathPopover). */
+.math-popover {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: min(720px, calc(100% - 8px));
+  max-height: 60%;
+  overflow: auto;
+  padding: 8px 6px 8px 12px;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+/* Find in a terminal (FindBar), at its top right corner. */
+.find-bar {
+  position: absolute;
+  z-index: 5;
+  top: 6px;
+  right: 12px;
+  max-width: calc(100% - 24px);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 3px 3px 5px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px var(--shadow);
+}
+/* The query and its option toggles look like one field. */
+.find-field {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 3rem;
+  padding-right: 2px;
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+}
+.find-field:focus-within {
+  border-color: var(--accent);
+}
+.find-field.none {
+  border-color: var(--error);
+}
+.find-input {
+  flex: 1 1 auto;
+  width: 14rem;
+  min-width: 2rem;
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  outline: none;
+  padding: 2px 6px;
+}
+.find-count {
+  flex: none;
+  min-width: 4.5em;
+  padding: 0 4px;
+  text-align: center;
+  white-space: nowrap;
+}
+.find-bar .icon {
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+}
+.find-bar .icon .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.math-render {
+  /* Not a scroll box of its own: KaTeX's struts reach a few pixels past
+     the text, and rounding would show scroll bars for formulas that fit.
+     The popover scrolls formulas larger than it, and its padding holds
+     the struts. */
+  flex: none;
+  font-size: 1.25em;
+  line-height: 1.4;
+}
+.math-render .katex-display {
+  margin: 0;
+}
+.math-copy {
+  flex: none;
+  margin-top: -4px;
+}
+.term-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+}
+.term-input {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1em;
+  padding: 0;
+  border: 0;
+  margin: 0;
+  opacity: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  z-index: -1;
+  caret-color: transparent;
+}
+/* An input method's text being composed, at the cursor (vt/pane.ts). */
+.term-compose {
+  position: absolute;
+  display: none;
+  white-space: pre;
+  pointer-events: none;
+  text-decoration: underline;
+  z-index: 3;
+}
+/* Files from outside the page dragged over a terminal. */
+.pane-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--fg);
+  text-align: center;
+  pointer-events: none;
+}
+.pane-drop span {
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.split-ghost {
+  position: absolute;
+  pointer-events: none;
+  background: var(--accent);
+  z-index: 2;
+}
+.split-ghost.h {
+  width: 2px;
+}
+.split-ghost.v {
+  height: 2px;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  /* A toolbar (.toolbar's height), its buttons icon buttons. */
+  height: var(--h-toolbar);
+  box-sizing: border-box;
+  padding: 0 4px 0 10px;
+  font-size: var(--fs-md);
+  line-height: 1;
+  background: var(--bg-1);
+  color: var(--fg-dim);
+  user-select: none;
+  z-index: 1;
+  container-type: inline-size;
+}
+/* Nothing is clipped, so the program windows' menu hangs below the header,
+ * over the panes under it. */
+.pane-header:has(.gui-menu) {
+  z-index: 5;
+}
+.pane-header .pane-title {
+  min-width: 0;
+}
+.pane-header .pane-actions {
+  height: 100%;
+  margin-left: auto;
+}
+.pane-header.draggable {
+  cursor: grab;
+}
+.pane-header.focused {
+  color: var(--fg);
+}
+/* What a pane other than a terminal is: VS Code's mark, a preview's eye. */
+.pane-kind.lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  margin-right: -2px;
+}
+.pane-header .code-icon {
+  color: var(--fg-dim);
+}
+.pane-header.focused .code-icon {
+  color: var(--fg);
+}
+.pane-title.editable {
+  cursor: text;
+  border-radius: var(--radius-sm);
+  padding: 1px 3px;
+  margin: 0 -3px;
+}
+.pane-title.editable:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.pane-title-edit {
+  width: 14em;
+  max-width: 50%;
+  padding: 1px 4px;
+}
+.pane-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+.pane-agent {
+  color: var(--accent);
+}
+.pane-cwd {
+  color: var(--fg-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  min-width: 0;
+  flex: 1;
+}
+.pane-cwd > bdi {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+}
+/* Icon buttons, as large as every toolbar's. */
+.pane-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl);
+  height: var(--ctl);
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+}
+.pane-actions .lucide {
+  width: var(--ic);
+  height: var(--ic);
+}
+/* With several panes, only the focused one and the one pointed at show
+   their buttons, so the keyboard's pane stands out; a program window that
+   wants attention stays visible. */
+.tab-panes:not(.alone) .pane:not(.focused):not(:hover) .pane-actions :is(button:not(.attention), .sep) {
+  visibility: hidden;
+}
+.pane-actions button:hover {
+  color: var(--fg);
+  background: var(--bg-3);
+}
+.pane-actions button.danger:hover {
+  color: var(--error);
+}
+.pane-actions .sep {
+  width: 1px;
+  height: 1.1rem;
+  background: var(--line-2);
+  margin: 0 3px;
+}
+/* The pane's menu, with every command of the pane: shown once the header
+ * has no room for all its buttons. */
+.pane-actions .more {
+  display: none;
+}
+/* Narrow panes drop the folder, then the agent and the VS Code buttons (the
+ * menu's button takes their place), the split buttons, zoom and the title,
+ * in this order; the menu's button and close stay. */
+@container (max-width: 30rem) {
+  .pane-header .pane-cwd {
+    display: none;
+  }
+}
+@container (max-width: 26rem) {
+  .pane-header .pane-agent,
+  .pane-header .pane-actions .code {
+    display: none;
+  }
+  .pane-header .pane-actions .more {
+    display: inline-flex;
+  }
+}
+@container (max-width: 18rem) {
+  .pane-header .pane-actions .split {
+    display: none;
+  }
+}
+@container (max-width: 12rem) {
+  .pane-header .pane-actions .zoom {
+    display: none;
+  }
+}
+@container (max-width: 9rem) {
+  .pane-header .pane-title,
+  .pane-header .pane-title-edit,
+  .pane-header .pane-kind {
+    display: none;
+  }
+}

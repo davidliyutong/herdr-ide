@@ -7,7 +7,7 @@
 // for Full Disk Access. verifyUser takes a nonce to the main process, which
 // asks the core what it is for and shows that in the system's prompt.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
+import type { DesktopShell, OpenedFolders, ProcessUsage } from '../../web/src/shell';
 import { channels } from './bridge';
 
 /** Listens on channel for payloads that pass valid; returns a function that
@@ -44,6 +44,15 @@ const isWebURL = (v: unknown): v is string => {
     return false;
   }
 };
+
+/** A process's usage as the page gets it: text cut short and numbers that are amounts. */
+function processUsage(v: unknown): ProcessUsage | undefined {
+  const o = v as Partial<ProcessUsage> | null;
+  if (typeof o !== 'object' || o === null) return undefined;
+  const amount = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0);
+  const text = (s: unknown) => (typeof s === 'string' ? s.slice(0, 64) : '');
+  return text(o.type) ? { type: text(o.type), name: text(o.name), cpu: amount(o.cpu), memory: amount(o.memory) } : undefined;
+}
 
 const isHex = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 
@@ -82,6 +91,14 @@ const shell: DesktopShell = {
     if (answer === 'asking' || answer === 'close' || answer === 'stay') ipcRenderer.send(channels.closeAnswer, answer);
   },
   browser: { onOpen: (fn) => listen(channels.browserOpen, isWebURL, fn) },
+  async metrics() {
+    try {
+      const v: unknown = await ipcRenderer.invoke(channels.metrics);
+      return Array.isArray(v) ? v.slice(0, 64).flatMap((p) => processUsage(p) ?? []) : [];
+    } catch {
+      return [];
+    }
+  },
   verifyUser: {
     async available() {
       try {

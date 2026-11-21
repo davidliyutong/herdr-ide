@@ -17,12 +17,15 @@ Goals: a tree of the shown machine's files that follows the focused
 terminal's directory, with what VS Code's explorer does (expand, collapse,
 filter, hidden files, the keyboard, new files and folders, rename, the
 trash, delete, cut, copy and paste, drag and drop, copy paths, download,
-open in a terminal or VS Code); files and folders from the computer
+open in a terminal or VS Code, reveal in Finder or the file manager for
+the computer the core runs on); files and folders from the computer
 dropped on it or chosen in its menus are uploaded with their structure,
-asking about names taken, and rows dragged out of the page download; a click shows a file in a preview editor that the next click
+asking about names taken, and rows dragged out of the page download; a
+click shows a file in a preview editor that the next click
 replaces and a double click keeps, as VS Code's preview editors (media
 too, as Quick Look shows them); the editor never overwrites a change made
-on the machine since it loaded the file; files changed in version control
+on the machine since it loaded the file, and marks a file deleted or
+moved away since, as VS Code does; files changed in version control
 are colored in the tree and the editor's gutter marks the changed lines.
 The editor does not mark characters of the user's languages (the browser's
 languages and the app's language), such as Chinese punctuation, as
@@ -55,14 +58,40 @@ Plugins; `internal/plugins/files/settings.go`):
 
 **Tree** (`tree.ts`, `FilesPanel.tsx`)
 
-- The root is the focused terminal's directory (its foreground program's,
-  as for splits), a VS Code pane's folder, or the workspace's directory
-  when no pane has the focus. While a preview or an editor has the focus
-  the tree stays where it is, so a click that opens a preview does not
-  move it. **Follow** (the crosshair) turns this off; a crumb of the
-  breadcrumb roots the tree at that directory and turns it off too. Follow
-  and hidden files are kept per browser once its buttons were used, else
-  the settings `files.followFocus` and `files.showHidden` decide.
+- The root is the focused terminal's directory (as for splits), a VS Code
+  pane's folder, or the workspace's directory when no pane has the focus.
+  A terminal's directory is where its user is (`web/src/term/place.ts`,
+  kept by `TermModel`), worked out from the terminal core's record, which
+  has the directory of the foreground program: the shell's while it waits
+  at its prompt, any program's while that runs. A shell's directory (and a
+  terminal file manager's: ranger, yazi, lf, nnn, mc and the like) is
+  followed as it changes. Another program's is taken only once it stayed
+  where it was first seen for 1.5 s (`SETTLE_MS`; the core looks twice a
+  second), so an agent started as `cd project && claude` moves the tree
+  there; a program that moves before that is not followed while it runs,
+  nor is a move a program makes later, and while the core cannot read the
+  foreground program (another user's, as under `sudo`) the directory
+  stays. So a program walking a tree (`tar -zcf x.tar.gz dir`, which
+  changes its directory to every folder it packs, `find`, a build) leaves
+  the tree, the Git panel, the status bar and what new terminals start in
+  where the shell was. A page opened while such a program runs has only
+  what it sees: the directory the program is in then, until the shell is
+  back. While a preview or an editor has the focus
+  the tree stays where it is in that workspace, so a click that opens a
+  preview does not move it. Another workspace or machine shown takes its
+  own directory at once, also while an editor has the focus there: that
+  of its terminal or VS Code pane focused last (the focus history), else
+  the workspace's, else the machine's home (`FilesPanel.tsx` `rootFor`;
+  the tree records the workspace its root was taken for). The root is
+  taken before the panel is painted, and the panel draws a tree only of
+  the machine shown, so it never shows one machine's directory under
+  another, nor asks a machine about another's paths. **Follow** (the
+  crosshair) turns following off; a crumb of the breadcrumb roots the tree
+  at that directory and turns it off too. Without it the root stays where
+  the user put it, across the machine's workspaces; another machine starts
+  at its workspace's directory as above. Follow and hidden files are kept
+  per browser once its buttons were used, else the settings
+  `files.followFocus` and `files.showHidden` decide.
 - Directories are listed with the core's `GET /api/m/{id}/list` when they
   are expanded. Expanded directories are kept by path (at most 500; beyond
   that the oldest outside the root are forgotten), so going back to a
@@ -70,9 +99,15 @@ Plugins; `internal/plugins/files/settings.go`):
   root and the expanded directories below it are kept: another root, or
   Collapse Folders, drops the rest. Another root also clears the selection
   and the cursor, so a key never acts on rows the tree no longer shows. A
-  listing that fails keeps the entries listed before, with the error
-  beside them (the root's is shown). Folders come first (`files.sortOrder`), names sort as
-  people sort them (`a2` before `a10`).
+  listing that fails keeps the entries listed before and is tried again by
+  the next poll, whatever started it (its recorded time is forgotten). A
+  failure alone says nothing: a machine busy unpacking an archive, or a
+  request that timed out, answers the next time. The root's error shows
+  when nothing of it is listed (its first listing failed, or a poll found
+  it gone) or when its listing failed again (`tree.ts` `shownError`), and
+  goes with the next listing that succeeds. An empty directory's listing
+  is an empty list, polled as any other. Folders come first
+  (`files.sortOrder`), names sort as people sort them (`a2` before `a10`).
 - The filter keeps entries whose names contain its text (case ignored) in
   the directories listed and kept, opens the folders that lead to them,
   and marks the text in each name.
@@ -119,15 +154,17 @@ Plugins; `internal/plugins/files/settings.go`):
   each in a tab), Open to the Side (a kept editor split beside the focused
   pane, unless that tab shows the file already), Open Preview, Open in VS Code, Open in Terminal (a terminal
   split beside the focused pane, in the folder; these three for one row),
+  Reveal in Finder (one row, below),
   Open Changes (a file version control marks as changed, with a letter:
   the quick diff provider's diff, the Git plugin's), New File, New
   Folder, Upload Files…, Upload Folder… (on a folder), Cut, Copy, Paste,
   Copy Path, Copy Relative Path (to the root), Download (`download.ts`, a
   zip for folders and several rows; not for the desktop app's own
   machine), Rename, Move to Trash, Delete Permanently; on the empty part
-  of the tree, the root's entries and Refresh (the shown directories
-  listed again), Collapse Folders, Show Uploads and Show Downloads (the
-  status bar's panels). The panel's **…** button has New File, New Folder,
+  of the tree, the root's entries (Open in Terminal and Reveal in Finder
+  of the root among them) and Refresh (the shown directories listed
+  again), Collapse Folders, Show Uploads and Show Downloads (the status
+  bar's panels). The panel's **…** button has New File, New Folder,
   Upload Files… and Upload Folder… (into the cursor's folder, else the
   root), Download of the selection, Refresh, Collapse Folders and the
   transfers.
@@ -140,6 +177,18 @@ Plugins; `internal/plugins/files/settings.go`):
   mode, but not from the desktop app's own machine. Such a download is the
   browser's own: it does not show in the downloads panel, which hears
   only of downloads the page started.
+- **Reveal in Finder** (Reveal in File Manager on Linux; `ops.ts`
+  `revealEntries`), in the menus of the tree's rows and root and of an
+  editor's tab and header: the file manager of the computer the core runs
+  on shows the path, Finder with it selected (`open -R`), the default file
+  manager elsewhere with the folder, or the file's folder (`xdg-open`).
+  Offered only for the core's own machine (the local one) and only to a
+  page on that computer: the desktop app, or a browser talking to the
+  core's loopback address directly, not through a proxy (the core's
+  `SameHost`); the page asks the core once (`GET …/p/files/reveal`), and
+  the core checks again when asked to reveal. Remote machines' files, and
+  pages on other computers, have no such entry: the window would open on a
+  screen nobody there sees. It runs a program, so read-only mode has none.
 - **Uploads** (`upload.ts`): files and folders dropped from the computer,
   or chosen with Upload Files… and Upload Folder… (the browser's dialog),
   go into the folder with their structure: a dropped folder is read with
@@ -166,7 +215,8 @@ Plugins; `internal/plugins/files/settings.go`):
   the panel asks `POST …/p/files/stat` for the modification times of the
   shown directories, the root and the expanded ones below it that are not
   in a collapsed folder (nor, without hidden files, in a hidden one; at
-  most 200), and lists again those that changed; one gone is dropped, one
+  most 200) that are listed or whose listing failed, and lists again those
+  that changed; one gone is dropped, one
   whose state is not known (an `error`: a mount that does not answer, no
   permission) stays as it is. A directory is listed once more the first
   time a poll sees it (its listing may be older than the time). A time is
@@ -207,6 +257,7 @@ removal reached stays removed. The agent's actions
 | `remove` | Deletes for good (folders with their contents): each folder opened relative to its parent without following a link, links removed and never followed, as `os.RemoveAll` does. |
 | `write` | An editor's save, below. |
 | `upload` | A file from the computer (at most 4 GiB) received in full into the agent's private `staging/` directory, then written into a new file at the path or, when taken, the first free `name-1.ext`, `name-2.ext`… (created only where nothing is); with `replace` written over the file there as a save writes it (through a link its target, in place). Cut short (cancelled, the connection lost), it leaves nothing at the path. |
+| `reveal` | Shows a path in the system's file manager (`reveal.go`): `/usr/bin/open -R <path>` on macOS, elsewhere `xdg-open <folder>/` (the file's folder for a file; the trailing slash makes a folder swapped for a file meanwhile fail rather than open in that file's program), `xdg-open` found in `/usr/bin`, `/bin` or `/usr/local/bin`, never through `PATH`. Started as a program with its arguments (no shell), the environment of the agent's processes and its standard streams on `/dev/null`, so a file manager it starts as its child holds no pipe of it. The path is expanded as every action's and must be there; the paths changes refuse (the home directory, the data directory) may be shown, as they may be stat'ed: it changes nothing. It answers once the program exits (with its exit status when it failed) or after 10 s; one still running then (an `xdg-open` that runs the file manager itself) is left to the user and reaped when it ends. At most 4 are waited for at once (`busy`), each freeing its place when it answers. The core asks for it only on its own machine. |
 | `stat` | Size, modification time and kind of up to 200 paths, for the polls and the editor; `error` on a path whose state is not known: `denied`, `failed`, or `busy` and `timeout` when stats do not answer. At most 8 stats run at once on the machine, and a path being stat'ed is not stat'ed again meanwhile: a mount that does not answer holds at most 8 threads, and a stat answers within 10 s. |
 
 Every path is expanded as the agent's other operations do (`~`, relative to
@@ -311,6 +362,27 @@ button.
   again wins: the text stays and the bar offers the change. **Keep
   Editing** dismisses the bar for that state of the file: it comes back
   for a newer change (and for a save, which the change still refuses).
+  While the bar shows, the checks go on: it says how the file is now
+  (removed, or changed when it came back otherwise), and it goes once the
+  file is back as it was loaded (restored from the trash), the unsaved
+  changes staying unsaved.
+- **A file gone** (deleted, or moved or renamed away; `gone.ts`): its
+  editor's title is struck through in the pane's header and in its tab,
+  and their tooltips end with "Deleted", as VS Code marks the editors of
+  deleted files (`PaneViewDef.useGone`, [27](27-plugins.md)). The text
+  stays as it is, unsaved changes too, and the pane is not closed: a save
+  (Overwrite in the bar) makes the file again. The mark goes once the file
+  is there again. The paths of the editors whose titles are drawn (every
+  tab of the workspace shown, also those not selected, and the panes'
+  headers) are checked together, one `stat` per machine every 5 s while
+  the page is visible; an editor's own checks, loads and saves and the
+  explorer's renames, moves and deletions tell at once. A path whose state
+  is not known (the machine does not answer) keeps its mark; an editor
+  opened on a path not there (404) is marked from the start. Preview panes
+  (the app's own, [06](06-quick-look-and-files.md)) are marked the same
+  way and their paths checked with the editors': the plugin answers for
+  them (`PluginDef.useFileGone`, [27](27-plugins.md)); with the explorer
+  off, nothing is marked.
 - Closing the pane (or its tab or workspace) with unsaved changes asks
   **Save**, **Don't Save** or **Cancel** first
   ([04](04-layout-and-keyboard.md)).
@@ -399,12 +471,17 @@ editors, the diffs, the preview pane and code in rendered Markdown:
 | `POST /api/m/{id}/p/files/remove` | writes | `{"paths"}`. |
 | `POST /api/m/{id}/p/files/write` | writes | The body (at most 8 MiB) into `?path=`, with `&mtime=&size=`, `&new=1` or `&force=1`; `409 {"error": "conflict", "current"}`. |
 | `POST /api/m/{id}/p/files/upload` | writes | The body (at most 4 GiB, streamed to the machine) into `?path=` under a free name, or over the file there with `&replace=1`; audited with `size` and `replace`. |
+| `GET /api/m/{id}/p/files/reveal` | – | `{"available"}`: whether this client is offered Reveal in Finder for the machine (the core's own, the client on its host, macOS or Linux). |
+| `POST /api/m/{id}/p/files/reveal` | writes | `{"path"}` shown in the file manager of the core's host; `400 remote_machine` for another machine, `403 local_only` for a client elsewhere; audited as `files.reveal`. |
 
 Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 `{"error": code}` with `not_found` (404), `exists`, `refused`, `denied`,
 `trash_unavailable`, `too_large`, `bad_params`, `no_space`, `read_only`,
 `partial_write` (a write that stopped after the file was truncated, with
-the cause's code as its message), `offline` (409).
+the cause's code as its message), `offline` (409); a reveal also
+`remote_machine`, `local_only` (403), `reveal_unavailable` (no `open` or
+`xdg-open` where they are looked for), `reveal_failed` (the program failed,
+with its exit status), `busy` (4 of them waited for).
 
 ## Alternatives considered
 
@@ -434,8 +511,19 @@ the cause's code as its message), `offline` (409).
 - A mount that does not answer (NFS): its stats answer `busy` or `timeout`
   within 10 s and the tree keeps what it shows; at most 8 stats wait on
   the machine.
-- A listing that fails (the machine hiccups): the folder keeps its
-  entries, and the next poll lists it again.
+- A listing that fails (the machine hiccups, an archive being unpacked
+  keeps its disk busy): the folder keeps its entries without a word, and
+  the next poll lists it again; failing again, the root says why.
+- A directory of thousands of entries (an archive unpacked into it): its
+  listing follows the agent's reply line as a body, as a line holds at
+  most 1 MiB, up to 20 000 entries (the rest are not listed).
+- Another workspace or machine shown while an editor has the focus: the
+  tree takes that workspace's directory before it is painted.
+- A file of an open editor deleted, or moved away: its title is struck
+  through within 5 s (at once when the explorer did it); its text stays.
+- Reveal in Finder where the core's environment has no display (a core
+  started without one on Linux): `xdg-open` fails and the menu's action
+  says so.
 - A move to another file system: copied and removed; a name taken there
   fails as a rename's does.
 - A save whose write fails after the file was truncated (a full disk):
@@ -471,7 +559,16 @@ the cause's code as its message), `offline` (409).
 
 Every change is a mutating route: refused in read-only mode, audited
 (`files.mkdir`, `files.rename`, …, with the paths and the outcome), behind
-the core's guards. The agent
+the core's guards. So is Reveal in Finder, which runs a program on the
+core's host: only for the core's own machine (whose agent runs in the
+core's process) and only for a client on that host (`SameHost`: a request
+from the host's loopback, not through a proxy; the desktop app's window is
+one), with the path as an argument of its own after the expansion every
+action has, never a shell's text; it opens a window of the file manager
+and changes nothing on disk. A browser of another computer reaching the
+core through an ssh forward of its port counts as on the host (its
+connections come from the host's loopback): Reveal in Finder then opens
+the window on the host's screen. The agent
 refuses the root, directories above the home directory, the home directory
 itself and its own data directory, by name and by file identity (a home
 reached through a link, another case on a case-insensitive volume), so
@@ -546,6 +643,39 @@ the trash stay in the user's trash
   nested trees that follow no link, copies and removals that stop once
   cancelled.
 - `internal/plugins/files/audit_test.go`: the paths of the audit records.
+- `internal/agent/plugin/files/reveal_test.go`: the command of each system
+  (the program by its absolute path, none from `PATH` nor a file that is
+  not executable; the path an argument of its own, a file's folder and a
+  trailing slash for `xdg-open`), the paths it shows (expanded, home too)
+  and refuses (not there, none, NUL) without running anything, a program
+  that fails or is missing, an `xdg-open` leaving a file manager that
+  holds its streams answered at once with its place free
+  (`TestRevealLeavesTheFileManager`), one that does not exit answered
+  after the wait with its place free, the bound of 4 waited for at once
+  (`TestRevealWaitsBounded`; scripts stand in for the file manager).
+- `internal/plugins/files/files_test.go` `TestRevealGate`: Reveal in
+  Finder refused for another machine and for a client elsewhere, offered
+  and passed to the agent for the core's own machine from its host.
+- `internal/server/list_test.go`: `/list` of 15 000 entries through a real
+  agent (the body after the reply line), an empty directory's empty list.
+- `web/src/__tests__/termPlace.test.ts`: a terminal's directory: the
+  shell's as it changes; unchanged while a program walks a tree, also one
+  first seen inside the tree and one that later stays long somewhere; an
+  agent started in another directory once it stayed there, with the page
+  told; unchanged while the foreground program cannot be read; and the
+  model's directory through the core's events.
+- `web/src/__tests__/filesFollow.test.ts`: the root across two machines'
+  workspaces whose editors have the focus, another workspace of the same
+  machine, the terminal focused last there, the editor's focus keeping the
+  root in its workspace, a root chosen by the user kept on its machine,
+  and no machine asked about another's paths.
+- `web/src/__tests__/filesGone.test.ts`: the struck-through titles of
+  editors and previews of files gone, of a tab not shown and of the
+  header, with their tooltips, going once the files are back; a preview
+  keeping what it showed when drawn again and loading the file again once
+  it is back; no preview marked with the explorer off; Reveal in Finder in the tab's
+  and the tree's menus only for the core's own machine when the core
+  offers it, none in read-only mode, none asked for another machine.
 - `web/src/__tests__/editorPlacement.test.ts`: editors in tabs of their
   own, the preview's tab reused, a file open already shown, Open to the
   Side split beside the focused pane; Source Control's diffs in a reused
@@ -586,4 +716,10 @@ the trash stay in the user's trash
   mixes line endings saved with each line's own ending, unified or opened
   read-only as the setting says, a change on
   disk loaded as an edit undo takes back, typing during that load kept
-  and the change offered, Keep Editing not undone by the next check.
+  and the change offered, Keep Editing not undone by the next check; a
+  file removed keeping the text (unsaved changes too) and marked gone, the
+  conflict bar following the file back, Overwrite making it again.
+- `web/src/__tests__/files.test.ts` also: a listing that failed once kept
+  without a word, failing again shown, and tried again by the next poll
+  whatever started it; a folder whose first listing failed, and an empty
+  one, polled; an empty root said to be empty.

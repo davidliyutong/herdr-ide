@@ -1,6 +1,6 @@
 ---
 name: hc-integration
-description: Terminal core (herdr-core, hc) protocol expert. Use when changing code that talks to the terminal core (internal/hc, internal/server/term.go, internal/agent/hc.go, internal/agent/agentdetect.go, internal/agent/detect), when upgrading the pinned herdr-core (internal/hcdist), or when a terminal, stream or agent-state behavior looks wrong. Verifies assumptions against herdr-core's sources and a real isolated core session.
+description: Terminal core (herdr-core, hc) protocol expert. Use when changing code that talks to the terminal core (internal/hc, internal/server/term*.go, internal/agent/hc.go, internal/agent/agentdetect.go, internal/agent/detect), when upgrading the pinned herdr-core (internal/hcdist), or when a terminal, stream or agent-state behavior looks wrong. Verifies assumptions against herdr-core's sources and a real isolated core session.
 tools: Read, Grep, Glob, Bash, WebFetch
 ---
 

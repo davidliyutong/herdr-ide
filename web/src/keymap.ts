@@ -5,23 +5,18 @@
 // terminal; so is the second press of a chord's first stroke, which the
 // terminal encodes as any other key. No default binding is a chord. In the
 // desktop app the page sees a key before the application menu, which gets
-// only the keys the page leaves (desktop.ts).
+// only the keys the page leaves (desktop.ts). What a command does is not
+// here: plugins bring their commands' handlers, commands.ts the others'.
 
-import { actions, attentionList, current, spotOpen } from './actions';
-import { hasClosed } from './closedPanes';
-import { canGo } from './paneHistory';
-import { useStore } from './state/store';
+import { actions } from './actions';
 import * as L from './term/layout';
 import { hasMessage, t } from './i18n';
 import { keyLabel, strokeOf } from './keys';
 import { platform, useKeys, type Binding, type When } from './keybindings';
-import { findStep, openFind, useFind } from './vt/find';
-import { paneHandle } from './state/panes';
-import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
-import { fullDiskAccessAvailable, openFullDiskAccess } from './fullDiskAccess';
-import { activePanels, commandOfOffPlugin, pluginCommand } from './plugins/registry';
+import { fullDiskAccessAvailable } from './fullDiskAccess';
+import type { CommandDef } from './plugins/api';
+import { commandOfOffPlugin, pluginCommand } from './plugins/registry';
 import { useFrames, windowFocused } from './codeFrames';
-import { openPaneMenu } from './menus';
 
 /** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -208,284 +203,27 @@ export function commandShown(id: string): boolean {
   return id !== 'app.fullDiskAccess' || fullDiskAccessAvailable();
 }
 
-/** When pane.close last ran, and how soon after it another run counts as
- * the key held (the desktop app's menu repeats without saying so; the first
- * repeat comes after the system's delay, about 400 ms by default). */
-let lastPaneClose = 0;
-const HELD_CLOSE_MS = 600;
+/** The handlers of the commands that are no plugin's, by id. */
+const builtins = new Map<string, CommandDef>();
 
-/** Whether the selected workspace has no tab left: closing a pane closes it. */
-function emptyWorkspace(): boolean {
-  const ws = current()?.ws;
-  return !!ws && ws.tabs.length === 0;
+/** Adds handlers of commands that are no plugin's (commands.ts defines the
+ * app's at its start). A plugin's handler of the same id comes first. */
+export function defineCommands(table: Record<string, CommandDef>) {
+  for (const [id, def] of Object.entries(table)) builtins.set(id, def);
 }
 
 /** Whether a command can run now: a pane, tab or workspace for it to act
  * on, something to switch to, a page that may change things. The desktop
- * app's menu shows the others disabled, the palette leaves them out. */
+ * app's menu shows the others disabled, the palette leaves them out. A
+ * command of a plugin that is off cannot; one nothing handles can. */
 export function commandEnabled(id: string): boolean {
-  const s = useStore.getState();
-  const c = actions.focusedContext();
-  const cur = current();
-  const layout = cur?.layout;
-  const tabs = cur?.ws?.tabs.length ?? 0;
-  const panes = cur?.tab ? L.tabPanes(cur.tab).length : 0;
-  const changes = !s.readOnly;
-  if (/^tab\.select[1-9]$/.test(id)) return tabs > 1;
   const plugin = pluginCommand(id);
   if (plugin) return plugin.enabled?.() ?? true;
   if (commandOfOffPlugin(id)) return false;
-  switch (id) {
-    case 'view.togglePanel':
-      return activePanels().length > 0;
-    case 'workspace.new':
-      return changes && !!s.machineId && s.machines[s.machineId]?.status === 'ready';
-    case 'tab.new':
-      return changes && !!layout;
-    case 'workspace.edit':
-    case 'workspace.close':
-      return changes && !!cur?.ws;
-    case 'workspace.closeOthers':
-      return changes && (layout?.workspaces.length ?? 0) > 1;
-    case 'workspace.next':
-    case 'workspace.previous':
-      return (layout?.workspaces.length ?? 0) > 1;
-    case 'workspace.switch':
-      return Object.values(s.machines).length > 0;
-    case 'tab.rename':
-    case 'tab.close':
-      return changes && !!cur?.tab;
-    case 'tab.closeOthers':
-      return changes && !!cur?.ws && cur.ws.tabs.some((t, i) => i !== cur.tabIndex && !t.pinned);
-    case 'tab.closeRight':
-      return changes && !!cur?.ws && cur.ws.tabs.some((t, i) => i > cur.tabIndex && !t.pinned);
-    case 'tab.pin':
-      return changes && !!cur?.tab && !cur.tab.pinned;
-    case 'tab.unpin':
-      return changes && !!cur?.tab?.pinned;
-    case 'pane.rename':
-      return changes && !!c?.terminal;
-    case 'pane.actions':
-      return changes && !!c?.pane;
-    case 'tab.next':
-    case 'tab.previous':
-      return tabs > 1;
-    case 'pane.splitRight':
-    case 'pane.splitDown':
-      return changes && !!c?.pane;
-    case 'pane.close':
-      // With no pane left, it closes the empty workspace.
-      return changes && (!!c?.pane || emptyWorkspace());
-    case 'pane.zoom':
-      return !!c?.pane && panes > 1;
-    case 'pane.focusLeft':
-    case 'pane.focusRight':
-    case 'pane.focusUp':
-    case 'pane.focusDown':
-    case 'pane.focusNext':
-    case 'pane.focusPrevious':
-      return panes > 1;
-    case 'pane.back':
-      return canGo(-1, spotOpen);
-    case 'pane.forward':
-      return canGo(1, spotOpen);
-    case 'pane.undoClose':
-      return changes && hasClosed();
-    case 'find.open':
-    case 'find.next':
-    case 'find.previous':
-      return !!c?.terminal;
-    case 'app.agentAttention':
-      return attentionList().length > 0;
-    case 'app.addMachine':
-      return changes;
-    case 'app.fullDiskAccess':
-      return fullDiskAccessAvailable();
-    case 'view.zoomIn':
-      return zoomAvailable(s.readOnly) && currentZoom() < ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
-    case 'view.zoomOut':
-      return zoomAvailable(s.readOnly) && currentZoom() > ZOOM_LEVELS[0];
-    case 'view.zoomReset':
-      return zoomAvailable(s.readOnly) && currentZoom() !== 100;
-  }
-  return true;
+  return builtins.get(id)?.enabled?.() ?? true;
 }
 
 /** Runs a command; unknown ones do nothing. */
 export function runCommand(id: string) {
-  const ctx = actions.focusedContext();
-  const s = useStore.getState();
-  const select = /^tab\.select([1-9])$/.exec(id);
-  if (select) {
-    // The ninth is the last tab, as in browsers.
-    actions.switchTab(select[1] === '9' ? { last: true } : { index: Number(select[1]) - 1 });
-    return;
-  }
-  const plugin = pluginCommand(id);
-  if (plugin) {
-    plugin.run();
-    return;
-  }
-  switch (id) {
-    case 'view.togglePanel': {
-      const panels = activePanels();
-      if (s.panel && panels.some((p) => p.id === s.panel)) s.setPanel(undefined);
-      else s.setPanel((panels.find((p) => p.id === s.lastPanel) ?? panels[0])?.id);
-      break;
-    }
-    case 'app.commandPalette':
-      s.setPalette?.('commands');
-      break;
-    case 'app.keyboardShortcuts':
-      s.openSettings({ page: 'keys' });
-      break;
-    case 'app.settings':
-      s.openSettings({});
-      break;
-    case 'app.agentAttention':
-      actions.openAttention();
-      break;
-    case 'app.addMachine':
-      s.openAddMachine(true);
-      break;
-    case 'app.fullDiskAccess':
-      openFullDiskAccess();
-      break;
-    case 'workspace.switch':
-      s.setPalette?.('workspaces');
-      break;
-    case 'workspace.next':
-      actions.cycleWorkspace(1);
-      break;
-    case 'workspace.previous':
-      actions.cycleWorkspace(-1);
-      break;
-    case 'workspace.new':
-      actions.newWorkspace();
-      break;
-    case 'workspace.edit':
-      if (s.machineId && s.workspaceId) void actions.editWorkspace(s.machineId, s.workspaceId);
-      break;
-    case 'workspace.close':
-      if (s.machineId && s.workspaceId) void actions.closeWorkspace(s.machineId, s.workspaceId);
-      break;
-    case 'workspace.closeOthers': {
-      const cur = current();
-      if (cur?.ws) void actions.closeOtherWorkspaces(cur.m, cur.ws.id);
-      break;
-    }
-    case 'tab.new':
-      void actions.newTab();
-      break;
-    case 'tab.rename': {
-      const c = actions.currentTab();
-      if (c) actions.startRename('tab', c.m, `${c.ws}:${c.index}`);
-      break;
-    }
-    case 'tab.next':
-      actions.switchTab(1);
-      break;
-    case 'tab.previous':
-      actions.switchTab(-1);
-      break;
-    case 'tab.close': {
-      const c = actions.currentTab();
-      if (c) void actions.closeTab(c.m, c.ws, c.index);
-      break;
-    }
-    case 'tab.closeOthers':
-    case 'tab.closeRight': {
-      const c = actions.currentTab();
-      if (c) void actions.closeTabsBeside(c.m, c.ws, c.index, id === 'tab.closeOthers' ? 'others' : 'right');
-      break;
-    }
-    case 'tab.pin':
-    case 'tab.unpin': {
-      const c = actions.currentTab();
-      if (c) actions.pinTab(c.m, c.ws, c.index, id === 'tab.pin');
-      break;
-    }
-    case 'pane.rename':
-      if (ctx?.terminal) actions.startRename('pane', ctx.m, ctx.terminal);
-      break;
-    case 'pane.actions':
-      if (ctx?.pane) openPaneMenu(ctx.m, ctx.pane);
-      break;
-    case 'pane.splitRight':
-      if (ctx?.pane) void actions.split(ctx.m, ctx.pane, 'right');
-      break;
-    case 'pane.splitDown':
-      if (ctx?.pane) void actions.split(ctx.m, ctx.pane, 'down');
-      break;
-    case 'pane.close': {
-      const now = Date.now();
-      const held = now - lastPaneClose < HELD_CLOSE_MS;
-      lastPaneClose = now;
-      if (ctx?.pane) void actions.closePane(ctx.m, ctx.pane);
-      // A press of its own closes the empty workspace, not a held key that
-      // closed its last pane.
-      else if (!held && emptyWorkspace()) {
-        const cur = current();
-        if (cur?.ws) void actions.closeWorkspace(cur.m, cur.ws.id);
-      }
-      break;
-    }
-    case 'pane.zoom':
-      if (ctx?.pane) actions.zoom(ctx.m, ctx.pane);
-      break;
-    case 'pane.focusLeft':
-      actions.focusDirection('left');
-      break;
-    case 'pane.focusRight':
-      actions.focusDirection('right');
-      break;
-    case 'pane.focusUp':
-      actions.focusDirection('up');
-      break;
-    case 'pane.focusDown':
-      actions.focusDirection('down');
-      break;
-    case 'pane.focusNext':
-      actions.cyclePane(1);
-      break;
-    case 'pane.back':
-      actions.goPane(-1);
-      break;
-    case 'pane.forward':
-      actions.goPane(1);
-      break;
-    case 'pane.undoClose':
-      actions.undoClose();
-      break;
-    case 'pane.focusPrevious':
-      actions.cyclePane(-1);
-      break;
-    case 'view.toggleSidebar':
-      actions.toggleSidebar();
-      break;
-    case 'view.zoomIn':
-      zoom(1);
-      break;
-    case 'view.zoomOut':
-      zoom(-1);
-      break;
-    case 'view.zoomReset':
-      zoom(0);
-      break;
-    case 'find.open': {
-      if (!ctx?.terminal) break;
-      const h = paneHandle(ctx.m, ctx.terminal);
-      if (h) h.openFind();
-      else openFind(ctx.m, ctx.terminal);
-      break;
-    }
-    case 'find.next':
-      if (useFind.getState().terminal) findStep(true);
-      else if (ctx?.terminal) openFind(ctx.m, ctx.terminal);
-      break;
-    case 'find.previous':
-      if (useFind.getState().terminal) findStep(false);
-      else if (ctx?.terminal) openFind(ctx.m, ctx.terminal);
-      break;
-  }
+  (pluginCommand(id) ?? builtins.get(id))?.run();
 }

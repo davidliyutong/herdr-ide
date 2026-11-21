@@ -20,7 +20,7 @@ import { eolName, hasLoneCR, isMixed, restoreEols, unifiedEol, useMixedLineEndin
 import { createDiffEditor, setLanguage, type DiffEditor, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, FilesError, filesApi, errorText as filesError } from '../files/api';
 import { gitApi, errorText, type Blob, type StatusFile } from './api';
-import { baseName, join, openFile, short, type DiffMode, type DiffView } from './ops';
+import { baseName, dirtyDiffs, join, openFile, short, type DiffMode, type DiffView } from './ops';
 import { rangePatch, type Direction, type LineRange, type Side } from './patch';
 import { refresh, runGit, useRepo } from './state';
 import './git.css';
@@ -120,9 +120,6 @@ export function mixedRules(mode: MixedLineEndings, left: string, right: string) 
     bytes: mixed && mode === 'keep',
   };
 }
-
-/** The keys of diff panes with unsaved edits. */
-export const dirtyDiffs = new Set<string>();
 
 /** A diff's unsaved edits while its pane's component is not mounted. */
 interface KeptDiff extends KeptEdit {

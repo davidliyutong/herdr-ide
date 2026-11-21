@@ -4,8 +4,8 @@
 // a tab and closes as any pane does, while its rail button still shows it
 // in the sidebar. It becomes one by a drag of its rail button or of its
 // title onto the panes (a pane's edge: split there; a tab: beside its
-// focused pane; the new-tab button or another workspace: a tab of its
-// own), or by Open in Pane in its header (split beside the focused pane);
+// focused pane; the rest of the tab bar or another workspace: a tab of
+// its own), or by Open in Pane in its header (split beside the focused pane);
 // Move to Sidebar in the pane's header closes the pane and shows the panel
 // in the sidebar.
 

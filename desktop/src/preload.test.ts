@@ -9,6 +9,7 @@ const shell = exposed.desktopShell as DesktopShell;
 const common = [
   'answerClose',
   'browser',
+  'metrics',
   'onCloseRequest',
   'onCommand',
   'onOpenFolders',
@@ -110,6 +111,24 @@ test('closing with unsaved changes: a count and an answer from the page, a reque
   receive(channels.closeRequest, undefined);
   assert.equal(asked, 1);
   sent.length = 0;
+});
+
+test('metrics passes on processes with a kind, as amounts and short text', async () => {
+  answers.set(channels.metrics, [
+    { type: 'GPU', cpu: 12.5, memory: 2048, extra: 'dropped' },
+    { type: 'Tab', name: 'x'.repeat(100), cpu: -1, memory: 'much' },
+    { name: 'no kind', cpu: 1, memory: 1 },
+    'text',
+    null,
+  ]);
+  assert.deepEqual(await shell.metrics!(), [
+    { type: 'GPU', name: '', cpu: 12.5, memory: 2048 },
+    { type: 'Tab', name: 'x'.repeat(64), cpu: 0, memory: 0 },
+  ]);
+  for (const bad of [null, 'text', {}, new Error('no handler')]) {
+    answers.set(channels.metrics, bad);
+    assert.deepEqual(await shell.metrics!(), []);
+  }
 });
 
 test('verifyUser asks the main process and passes on only what has the right form', async () => {

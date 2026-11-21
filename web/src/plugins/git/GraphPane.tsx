@@ -7,17 +7,17 @@
 // opens its diff), a Cmd/Ctrl-click on a second commit compares the two,
 // and context menus on commits, badges and stashes act on them.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronUp, GitBranch, RefreshCw, Search, Tag as TagIcon, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, GitBranch, RefreshCw, Search, Tag as TagIcon } from 'lucide-react';
 import { loadPref, savePref, useStore } from '../../state/store';
 import { useSettings } from '../../settings';
 import { Picker, type PickerItem } from '../../components/Picker';
 import { useSize } from '../../lib/sizes';
+import { useScrollView } from '../../lib/windowed';
 import { openMenu, type MenuEntry } from '../../contextMenu';
-import { t, type MessageKey } from '../../i18n';
-import { FileIcon } from '../../fileIcons';
+import { t } from '../../i18n';
 import type { PaneViewProps } from '../api';
-import { gitApi, errorText, GitError, type Commit, type Ref, type Shown, type Stash, type StatusFile } from './api';
+import { gitApi, errorText, GitError, type Commit, type Ref, type Stash, type StatusFile } from './api';
 import { appendCommits, layoutGraph, newPaging, type GraphCommit, type Paging } from './graph';
 import { GraphCell, LANE_COLORS, laneColor } from './GraphCell';
 import {
@@ -27,17 +27,16 @@ import {
   createTag,
   deleteBranch,
   deleteTag,
-  openDiff,
-  openStatusDiff,
   renameBranch,
   reset,
   short,
   stashDrop,
   stashParams,
 } from './ops';
-import { folderOf, leafName, letterColor, letterMark } from './GitPanel';
+import { badgesOf, fmtDate, type Badge } from './shared';
 import { changed, runGit, useRepo } from './state';
 import { pushTag, pushTo, remoteOf } from './pickers';
+import { Detail } from './GraphDetail';
 import './git.css';
 
 export const LANE_W = 14;
@@ -119,38 +118,6 @@ export function graphRows(commits: Commit[], stashes: Stash[], head: string | un
   return rows;
 }
 
-/** A badge of a ref. */
-export interface Badge {
-  kind: 'head' | 'branch' | 'remote' | 'tag';
-  /** Short name (main, origin/main, v1). */
-  name: string;
-  /** The current branch. */
-  current?: boolean;
-}
-
-/** The badges of each commit: branches (the current one first), remote
- * branches (when shown) and tags. */
-export function badgesOf(refs: Ref[], branch: string | undefined, head: string | undefined, remotes: boolean): Map<string, Badge[]> {
-  const out = new Map<string, Badge[]>();
-  const add = (h: string, b: Badge) => {
-    const l = out.get(h) ?? [];
-    l.push(b);
-    out.set(h, l);
-  };
-  if (head && !branch) add(head, { kind: 'head', name: 'HEAD', current: true });
-  for (const r of refs) {
-    if (r.name.startsWith('refs/heads/')) {
-      const name = r.name.slice(11);
-      add(r.hash, { kind: 'branch', name, current: name === branch });
-    } else if (r.name.startsWith('refs/remotes/')) {
-      if (remotes) add(r.hash, { kind: 'remote', name: r.name.slice(13) });
-    } else if (r.name.startsWith('refs/tags/')) add(r.hash, { kind: 'tag', name: r.name.slice(10) });
-  }
-  const order = { head: 0, branch: 1, remote: 2, tag: 3 };
-  for (const l of out.values()) l.sort((a, b) => Number(!!b.current) - Number(!!a.current) || order[a.kind] - order[b.kind]);
-  return out;
-}
-
 /** Whether a row matches a search (subject, author, e-mail, hash). */
 export function matches(r: Row, q: string): boolean {
   if (!q) return true;
@@ -164,11 +131,6 @@ export function matches(r: Row, q: string): boolean {
   if (r.kind === 'stash') return r.s.message.toLowerCase().includes(s) || r.hash.startsWith(s);
   return false;
 }
-
-const fmtDate = (secs: number) => {
-  const d = new Date(secs * 1000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-};
 
 interface Loaded {
   commits: Commit[];
@@ -204,7 +166,8 @@ export function GraphPane({ m, view }: PaneViewProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string>();
   const [compare, setCompare] = useState<string>();
-  const [scroll, setScroll] = useState({ top: 0, height: 600 });
+  // Drawn for a view 600 high until the list is measured.
+  const scroll = useScrollView(600);
   const [loadingMore, setLoadingMore] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   // The log follows the refs (HEAD, branches, tags, stashes), not the
@@ -304,18 +267,18 @@ export function GraphPane({ m, view }: PaneViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hits, hit]);
 
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => setScroll((s) => ({ ...s, height: el.clientHeight })));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const setList = useCallback(
+    (el: HTMLDivElement | null) => {
+      listRef.current = el;
+      scroll.ref(el);
+    },
+    [scroll.ref],
+  );
   // Near the end: the next page.
   useEffect(() => {
     if (data?.more && scroll.top + scroll.height > total - 20 * ROW_H) void loadMore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scroll, total, data?.more]);
+  }, [scroll.top, scroll.height, total, data?.more]);
 
   const first = Math.max(0, Math.floor((scroll.top - (selIndex >= 0 && scroll.top > top(selIndex) ? DETAIL_H : 0)) / ROW_H) - 10);
   const visible: number[] = [];
@@ -536,11 +499,7 @@ export function GraphPane({ m, view }: PaneViewProps) {
       {error && <div className="git-error small">{error}</div>}
       {!data && !error && <div className="git-note muted">{t('git.loading')}</div>}
       {data && !rows.length && <div className="git-note muted">{t('git.noCommits')}</div>}
-      <div
-        className="git-graph-list"
-        ref={listRef}
-        onScroll={(e) => setScroll({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}
-      >
+      <div className="git-graph-list" ref={setList} onScroll={scroll.onScroll}>
         <div style={{ height: total, position: 'relative' }}>
           {visible.map((i) => {
             const r = rows[i];
@@ -609,182 +568,6 @@ export function GraphPane({ m, view }: PaneViewProps) {
         </div>
         {loadingMore && <div className="git-note muted">{t('git.loading')}</div>}
       </div>
-    </div>
-  );
-}
-
-/** A commit's details, a compare's files or the working tree's changes. */
-function Detail({
-  m,
-  repo,
-  row,
-  compare,
-  onClose,
-  onSelect,
-}: {
-  m: string;
-  repo: string;
-  row: Row;
-  compare?: string;
-  onClose(): void;
-  onSelect(h: string): void;
-}) {
-  const [shown, setShown] = useState<Shown>();
-  const [error, setError] = useState<string>();
-  const [parent, setParent] = useState(1);
-  const rev = row.hash;
-  useEffect(() => setParent(1), [rev]);
-  useEffect(() => {
-    if (row.kind === 'uncommitted') return;
-    let gone = false;
-    setShown(undefined);
-    setError(undefined);
-    gitApi
-      .show(m, repo, compare ? compare : rev, compare ? { rev2: rev } : { parent })
-      .then((s) => !gone && setShown(s))
-      .catch((e) => !gone && setError(errorText(e)));
-    return () => {
-      gone = true;
-    };
-  }, [m, repo, rev, compare, parent, row.kind]);
-
-  if (row.kind === 'uncommitted') {
-    return (
-      <div className="git-detail">
-        <div className="git-detail-head">
-          <b>{t('git.graph.uncommitted', { n: row.files.length })}</b>
-          <span className="spacer" />
-          <button className="icon" title={t('dialog.cancel')} aria-label={t('dialog.cancel')} onClick={onClose}>
-            <X />
-          </button>
-        </div>
-        <div className="git-detail-files">
-          {row.files.map((f) => {
-            const staged = f.x !== '.' && f.x !== '?' && f.kind !== 'unmerged';
-            const letter = f.kind === 'untracked' ? 'U' : f.kind === 'unmerged' ? '!' : f.y !== '.' ? f.y : f.x;
-            return (
-              <FileLine
-                key={f.path}
-                path={f.path}
-                letter={letter}
-                title={f.orig ? `${f.orig} → ${f.path}` : f.path}
-                onClick={() => void openStatusDiff(m, repo, f, staged && f.y === '.', { beside: true })}
-              />
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-  const c = shown?.commit;
-  return (
-    <div className="git-detail">
-      <div className="git-detail-head">
-        {compare ? (
-          <b>{t('git.graph.comparing', { a: short(compare), b: short(rev) })}</b>
-        ) : (
-          <b className="ellipsis">{c?.subject ?? short(rev)}</b>
-        )}
-        <span className="spacer" />
-        <button className="icon" title={t('dialog.cancel')} aria-label={t('dialog.cancel')} onClick={onClose}>
-          <X />
-        </button>
-      </div>
-      {error && <div className="git-error small">{error}</div>}
-      <div className="git-detail-body">
-        {c && !compare && (
-          <div className="git-detail-meta small">
-            <div>
-              <span className="muted">{t('git.graph.commit')}</span> <code>{c.hash}</code>
-            </div>
-            <div>
-              <span className="muted">{t('git.graph.parents')}</span>{' '}
-              {c.parents.map((p, i) => (
-                <button
-                  key={p}
-                  className={`link${c.parents.length > 1 && parent === i + 1 ? ' on' : ''}`}
-                  onClick={() => (c.parents.length > 1 ? setParent(i + 1) : onSelect(p))}
-                  title={c.parents.length > 1 ? t('git.graph.diffAgainst') : undefined}
-                >
-                  {short(p)}
-                </button>
-              ))}
-            </div>
-            <div>
-              <span className="muted">{t('git.graph.author')}</span> {c.author} &lt;{c.email}&gt; · {fmtDate(c.date)}
-            </div>
-            {(c.committer !== c.author || c.commitDate !== c.date) && (
-              <div>
-                <span className="muted">{t('git.graph.committer')}</span> {c.committer} &lt;{c.committerEmail}&gt; · {fmtDate(c.commitDate)}
-              </div>
-            )}
-            <pre className="git-detail-message">{c.message}</pre>
-          </div>
-        )}
-        <div className="git-detail-files">
-          {!shown && !error && <div className="muted small">{t('git.loading')}</div>}
-          {shown?.files.map((f) => (
-            <FileLine
-              key={f.path}
-              path={f.path}
-              letter={f.status}
-              title={f.orig ? `${f.orig} → ${f.path}` : f.path}
-              onClick={() =>
-                void openDiff(
-                  m,
-                  compare
-                    ? { repo, path: f.path, orig: f.orig, mode: 'compare', rev: compare, rev2: rev }
-                    : { repo, path: f.path, orig: f.orig, mode: 'commit', rev, parent: c && c.parents.length > 1 ? parent : undefined },
-                  undefined,
-                  { beside: true },
-                )
-              }
-            >
-              {f.binary ? (
-                <span className="muted small">{t('git.graph.binary')}</span>
-              ) : (
-                <span className="small git-stat">
-                  <span className="add">+{f.added}</span> <span className="del">−{f.deleted}</span>
-                </span>
-              )}
-            </FileLine>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** A file of a commit or of the working tree's changes: its icon, name
- * (in its letter's color) and folder, what the caller adds (lines added
- * and deleted) and its letter. */
-export function FileLine({
-  path,
-  letter,
-  title,
-  onClick,
-  children,
-}: {
-  path: string;
-  letter: string;
-  title?: string;
-  onClick?(): void;
-  children?: ReactNode;
-}) {
-  const color = letterColor(letter);
-  const folder = folderOf(path);
-  return (
-    <div className={`git-file${letter === 'D' ? ' deleted' : ''}`} title={title ?? path} onClick={onClick}>
-      <FileIcon name={leafName(path)} kind={path.endsWith('/') ? 'dir' : 'file'} />
-      <span className="git-name ellipsis" style={{ color }}>
-        {leafName(path)}
-      </span>
-      {folder && <span className="git-path ellipsis muted">{folder}</span>}
-      <span className="spacer" />
-      {children}
-      <span className="git-letter" style={{ color }} aria-label={t(`git.mark.${letterMark(letter)}` as MessageKey)}>
-        {letter}
-      </span>
     </div>
   );
 }

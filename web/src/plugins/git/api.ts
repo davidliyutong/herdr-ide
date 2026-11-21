@@ -1,7 +1,7 @@
 // The Git plugin's requests to the core (internal/plugins/git): reads are
 // GETs with their parameters in the query, changes POSTs with a JSON body.
 // The types are those of the machine side (internal/agent/plugin/git).
-import { hasMessage, t } from '../../i18n';
+import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
 
 export interface RepoInfo {
   root: string;
@@ -47,6 +47,12 @@ export interface Status {
   state?: RepoInfo['state'];
   files: StatusFile[];
   truncated?: boolean;
+  /** What git ignores, relative to the top level (git status
+   * --ignored=matching): a directory an ignore pattern matches with a
+   * trailing "/" (its contents are not listed), else each file; cut at
+   * 20 000 paths (ignoredTruncated). */
+  ignored?: string[];
+  ignoredTruncated?: boolean;
 }
 
 export interface Commit {
@@ -145,12 +151,9 @@ export interface Watch {
 }
 
 /** A failure with the code the core or the machine gave. */
-export class GitError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
+export class GitError extends PluginError {
+  constructor(code: string, message: string) {
+    super(code, message);
     this.name = 'GitError';
   }
 }
@@ -163,30 +166,16 @@ export function noRepo(e: unknown): boolean {
 }
 
 /** A failure as the user reads it: the code's text, with what git said. */
-export function errorText(e: unknown): string {
-  if (e instanceof GitError) {
-    const k = `git.error.${e.code}`;
-    if (hasMessage(k)) {
-      const detail = e.code === 'git_failed' || e.code === 'conflicts' ? e.message.replace(/^[a-z_]+: /, '') : '';
-      return detail ? `${t(k)} ${detail}` : t(k);
-    }
-    return e.message || e.code;
-  }
-  return e instanceof Error ? e.message : String(e);
-}
+export const errorText = makeErrorText(GitError, 'git.error', {
+  detail: (e, text) => {
+    const detail = e.code === 'git_failed' || e.code === 'conflicts' ? e.message.replace(/^[a-z_]+: /, '') : '';
+    return detail ? `${text} ${detail}` : text;
+  },
+});
 
 const base = (m: string) => `/api/m/${encodeURIComponent(m)}/p/git`;
 
-async function answer<T>(r: Response): Promise<T> {
-  let j: { error?: string; message?: string } = {};
-  try {
-    j = await r.json();
-  } catch {
-    /* the status says it */
-  }
-  if (!r.ok) throw new GitError(j.error ?? `http_${r.status}`, j.message ?? r.statusText);
-  return j as T;
-}
+const failure = failureOf((code, message) => new GitError(code, message));
 
 type Query = Record<string, string | number | boolean | string[] | undefined>;
 
@@ -197,16 +186,11 @@ async function get<T>(m: string, action: string, q: Query): Promise<T> {
     if (Array.isArray(v)) for (const x of v) p.append(k, x);
     else p.set(k, v === true ? '1' : String(v));
   }
-  return answer<T>(await fetch(`${base(m)}/${action}?${p}`, { cache: 'no-store' }));
+  return answer<T>(await fetch(`${base(m)}/${action}?${p}`, { cache: 'no-store' }), failure);
 }
 
 async function post<T = { output?: string }>(m: string, action: string, body: Record<string, unknown>): Promise<T> {
-  const r = await fetch(`${base(m)}/${action}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return answer<T>(r);
+  return answer<T>(await fetch(`${base(m)}/${action}`, jsonInit('POST', body)), failure);
 }
 
 /** Where a blob comes from: the working tree, the index, HEAD or a

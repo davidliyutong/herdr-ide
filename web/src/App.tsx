@@ -35,6 +35,7 @@ import { describeView, pluginMessage, useActivePlugins, usePanels, usePluginOn }
 import { RightBar } from './components/RightBar';
 import { PluginBoundary } from './components/PluginBoundary';
 import './plugins';
+import './commands';
 import { actions, current, workspaceTitle } from './actions';
 import { noteFocus } from './paneHistory';
 

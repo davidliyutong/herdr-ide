@@ -28,6 +28,7 @@ import * as L from '../../term/layout';
 import { t } from '../../i18n';
 import { desktopShell } from '../../shell';
 import { useDismiss } from '../../components/useDismiss';
+import { isLoopbackName, safeWebUrl } from '../../lib/webUrl';
 import type { PaneViewProps } from '../api';
 import {
   attachForward,
@@ -48,7 +49,7 @@ import {
   useForwards,
   type ListeningPort,
 } from './api';
-import { clearPage, frameKey, reloadPage, showPage, stepPage, unloadForward, useFrames } from './frames';
+import { clearPage, frameKey, reloadPage, showPage, stepPage, unloadForward, useFrames, type LoadFailure } from './frames';
 import { BrowserSlot } from './BrowserLayer';
 
 type Status =
@@ -211,7 +212,7 @@ export function BrowserPane({ m, pane, view }: PaneViewProps) {
       {forwarded && local !== undefined && local !== port && (
         <div className="browser-note muted">{t('browser.portNotice', { local, port: port! })}</div>
       )}
-      {(note || nav?.error) && <div className="browser-note browser-error">{note || t('browser.loadFailed', { error: nav!.error! })}</div>}
+      {note ? <div className="browser-note browser-error">{note}</div> : nav?.error && <LoadFailed failure={nav.error} />}
       <BrowserSlot m={m} id={view.id}>
         <Body
           m={m}
@@ -258,11 +259,8 @@ function Body({
   if (status.s === 'ready') return null;
   if (status.s === 'start') {
     return (
-      <div className="browser-cover">
-        <div className="browser-start">
-          <div className="muted">{t('browser.start')}</div>
-          <ListeningPorts m={m} onOpen={(p) => onGo(String(p))} />
-        </div>
+      <div className="browser-cover browser-home">
+        <ListeningPorts m={m} onOpen={(p) => onGo(String(p))} />
       </div>
     );
   }
@@ -300,6 +298,36 @@ function Body({
         <div className="browser-failure">{status.text}</div>
         {status.code !== OTHER_MACHINE && <button onClick={onRetry}>{t('browser.retry')}</button>}
       </div>
+    </div>
+  );
+}
+
+/** DNS errors of Chromium (net/base/net_error_list.h): the name did not
+ * resolve (-105, -137), and the resolver's own (-800 to -899). */
+const nameError = (code?: number) => code === -105 || code === -137 || (code !== undefined && code <= -800 && code > -900);
+
+/** A page of the webview that did not load: what happened and, when the
+ * name of another computer did not resolve, a way to the address in the
+ * system's browser, whose network (its resolver, a VPN's names) may reach
+ * it where the app's does not. The address may be one the page went to by
+ * itself: the line names its host, and only a click opens it. */
+function LoadFailed({ failure }: { failure: LoadFailure }) {
+  const url = failure.url ? safeWebUrl(failure.url) : undefined;
+  let host = '';
+  try {
+    host = url ? new URL(url).hostname : '';
+  } catch {
+    /* no address */
+  }
+  const unresolved = nameError(failure.code) && !!host;
+  return (
+    <div className="browser-note browser-error browser-failed" role="alert">
+      <span className="ellipsis">{unresolved ? t('browser.notResolved', { host }) : t('browser.loadFailed', { error: failure.text })}</span>
+      {unresolved && url && !isLoopbackName(host) && (
+        <button className="sm" title={url} onClick={() => outside(url)}>
+          {t('browser.openSystem')}
+        </button>
+      )}
     </div>
   );
 }
@@ -411,7 +439,11 @@ function Toolbar(props: {
   );
 }
 
-/** The machine's listening ports, to open one. */
+/** A line of a list of ports that holds no row: loading, failed, empty. */
+const PortsNote = ({ text }: { text: string }) => <div className="browser-ports-note">{text}</div>;
+
+/** The machine's listening ports, a row each (the port, the program) that
+ * opens it. */
 function ListeningPorts({ m, onOpen }: { m: string; onOpen(port: number): void }) {
   const label = useStore((s) => s.machines[m]?.label ?? m);
   const [ports, setPorts] = useState<ListeningPort[] | 'loading' | 'failed'>('loading');
@@ -432,16 +464,16 @@ function ListeningPorts({ m, onOpen }: { m: string; onOpen(port: number): void }
     <div className="browser-ports" data-testid="browser-listening">
       <div className="browser-ports-head">{t('browser.portsListening', { machine: label })}</div>
       {ports === 'loading' ? (
-        <div className="muted">{t('browser.portsLoading')}</div>
+        <PortsNote text={t('browser.portsLoading')} />
       ) : ports === 'failed' ? (
-        <div className="muted">{t('browser.portsFailed')}</div>
+        <PortsNote text={t('browser.portsFailed')} />
       ) : ports.length === 0 ? (
-        <div className="muted">{t('browser.portsNone')}</div>
+        <PortsNote text={t('browser.portsNone')} />
       ) : (
         ports.map((p) => (
           <button key={p.port} className="browser-port" title={t('browser.portsOpen', { port: p.port })} onClick={() => onOpen(p.port)}>
             <span className="browser-port-n">{p.port}</span>
-            {p.process && <span className="muted ellipsis">{p.process}</span>}
+            <span className="browser-port-name ellipsis">{p.process ?? ''}</span>
           </button>
         ))
       )}
@@ -449,7 +481,9 @@ function ListeningPorts({ m, onOpen }: { m: string; onOpen(port: number): void }
   );
 }
 
-/** Ports: what the machine listens on, and the forwards there are. */
+/** Ports: what the machine listens on, and the forwards there are, a row
+ * each (the machine's port, the machine, the local port when it is another
+ * one) with its stop button. */
 function PortsPopover({
   m,
   owner,
@@ -485,24 +519,34 @@ function PortsPopover({
       <ListeningPorts m={m} onOpen={onOpen} />
       <div className="browser-ports">
         <div className="browser-ports-head">{t('browser.forwards')}</div>
-        {available === false && <div className="muted">{t('browser.forwardsUnavailable')}</div>}
-        {available !== false && forwards.length === 0 && <div className="muted">{t('browser.forwardsNone')}</div>}
-        {forwards.map((f) => {
-          const name = labels[f.m]?.label ?? f.m;
-          return (
-            <div className="browser-forward" key={`${f.m}|${f.port}`}>
-              <span className="ellipsis">{t('browser.forwardLine', { machine: name, port: f.port, local: f.local })}</span>
-              <button
-                className="icon sm"
-                title={t('browser.forwardStop', { machine: name, port: f.port })}
-                aria-label={t('browser.forwardStop', { machine: name, port: f.port })}
-                onClick={() => void stop(f.m, f.port)}
+        {available === false ? (
+          <PortsNote text={t('browser.forwardsUnavailable')} />
+        ) : forwards.length === 0 ? (
+          <PortsNote text={t('browser.forwardsNone')} />
+        ) : (
+          forwards.map((f) => {
+            const name = labels[f.m]?.label ?? f.m;
+            return (
+              <div
+                className="browser-port browser-forward"
+                key={`${f.m}|${f.port}`}
+                title={t('browser.forwardLine', { machine: name, port: f.port, local: f.local })}
               >
-                <X />
-              </button>
-            </div>
-          );
-        })}
+                <span className="browser-port-n">{f.port}</span>
+                <span className="browser-port-name ellipsis">{name}</span>
+                <span className="browser-port-local">{f.local !== f.port ? `→ ${f.local}` : ''}</span>
+                <button
+                  className="icon sm browser-port-stop"
+                  title={t('browser.forwardStop', { machine: name, port: f.port })}
+                  aria-label={t('browser.forwardStop', { machine: name, port: f.port })}
+                  onClick={() => void stop(f.m, f.port)}
+                >
+                  <X />
+                </button>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

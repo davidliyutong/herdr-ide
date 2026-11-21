@@ -317,7 +317,8 @@ func TestCodexOfflineFallback(t *testing.T) {
 
 func TestGrok(t *testing.T) {
 	api := newFakeAPI(t)
-	api.json("/v1/billing", `{"config":{"creditUsagePercent":33.3,"currentPeriod":{"start":"2026-11-01T00:00:00Z","end":"2026-12-01T00:00:00Z"},
+	// The subscriptions' credits start over every week: currentPeriod is 7 days.
+	api.json("/v1/billing", `{"config":{"creditUsagePercent":33.3,"currentPeriod":{"start":"2026-11-14T02:17:00Z","end":"2026-11-21T02:17:00Z"},
 	  "onDemandUsed":{"val":"3"},"onDemandCap":{"val":10},"productUsage":[{"product":"grok-code","usagePercent":12}]}}`)
 	api.json("/v1/settings", `{"subscription_tier_display":"SuperGrok Heavy"}`)
 	e := testEnv(t, api)
@@ -331,7 +332,9 @@ func TestGrok(t *testing.T) {
 	if api.header("/v1/billing", "Authorization") != "Bearer xai-key" || api.header("/v1/billing", "X-XAI-Token-Auth") != "xai-grok-cli" {
 		t.Errorf("headers %v", api.headers["/v1/billing"])
 	}
-	if len(a.Windows) != 2 || a.Windows[0].UsedPct != 33.3 || a.Windows[0].WindowSec != 30*86400 || a.Windows[1].Label != "grok-code" {
+	end := time.Date(2026, 11, 21, 2, 17, 0, 0, time.UTC).Unix()
+	if len(a.Windows) != 2 || a.Windows[0].Kind != KindWeekly || a.Windows[0].UsedPct != 33.3 || a.Windows[0].WindowSec != 7*86400 ||
+		a.Windows[0].ResetsAt != end || a.Windows[1].Kind != KindModel || a.Windows[1].Label != "grok-code" || a.Windows[1].ResetsAt != end {
 		t.Errorf("windows %+v", a.Windows)
 	}
 	if *a.Credits.Used != 3 || *a.Credits.Limit != 10 {
@@ -347,8 +350,25 @@ func TestGrok(t *testing.T) {
 	// Without the percentage: on-demand used over its cap.
 	b := Account{}
 	parseGrokBilling(&b, map[string]any{"config": map[string]any{"onDemandUsed": map[string]any{"val": 5.0}, "onDemandCap": map[string]any{"val": 20.0}}})
-	if len(b.Windows) != 1 || b.Windows[0].UsedPct != 25 {
+	if len(b.Windows) != 1 || b.Windows[0].UsedPct != 25 || b.Windows[0].Kind != KindWeekly {
 		t.Errorf("fallback %+v", b.Windows)
+	}
+	// The window's kind follows its period's length: no period is a week.
+	for _, c := range []struct {
+		start, end string
+		kind       string
+	}{
+		{"2026-11-14T00:00:00Z", "2026-11-21T00:00:00Z", KindWeekly},
+		{"2026-11-01T00:00:00Z", "2026-12-01T00:00:00Z", KindMonthly},
+		{"2026-11-16T10:00:00Z", "2026-11-16T15:00:00Z", KindSession},
+		{"", "", KindWeekly},
+	} {
+		b := Account{}
+		parseGrokBilling(&b, map[string]any{"config": map[string]any{"creditUsagePercent": 10.0,
+			"currentPeriod": map[string]any{"start": c.start, "end": c.end}}})
+		if len(b.Windows) != 1 || b.Windows[0].Kind != c.kind {
+			t.Errorf("period %s–%s: %+v, want %s", c.start, c.end, b.Windows, c.kind)
+		}
 	}
 }
 

@@ -59,14 +59,21 @@ describe('switching machines', () => {
     vi.unstubAllGlobals();
   });
 
-  const mounted = () => Array.from(host.querySelectorAll('canvas')).map((c) => c.dataset.mountedFor);
+  const mounted = () => Array.from(host.querySelectorAll<HTMLCanvasElement>('.pane:not(.kept) canvas')).map((c) => c.dataset.mountedFor);
+  const kept = () => Array.from(host.querySelectorAll<HTMLCanvasElement>('.pane.kept canvas')).map((c) => c.dataset.mountedFor);
 
   it('gives a terminal of the same name on another machine a pane of its own', async () => {
     await act(async () => root.render(createElement(Workspace)));
     expect(mounted()).toEqual(['local']);
+    const canvas = host.querySelector('canvas');
     await act(async () => useStore.getState().selectMachine('remote'));
     expect(mounted()).toEqual(['remote']);
+    // The terminal shown before stays mounted, hidden, with its own canvas.
+    expect(kept()).toEqual(['local']);
+    expect(host.querySelector('.pane.kept canvas')).toBe(canvas);
     await act(async () => useStore.getState().selectMachine('local'));
     expect(mounted()).toEqual(['local']);
+    // Shown again, it is the element it was: nothing attached anew.
+    expect(host.querySelector('.pane:not(.kept) canvas')).toBe(canvas);
   });
 });

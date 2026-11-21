@@ -160,7 +160,6 @@ export function KeyboardShortcuts({ query, readOnly, embedded }: { query: string
       {embedded ? <h3>{t('settings.section.keyboard')}</h3> : <h2 className="settings-page-title">{t('settings.section.keyboard')}</h2>}
       {!embedded && (
         <div className="keys-toolbar">
-          <span className="muted small">{t('keys.note')}</span>
           <span className="spacer" />
           <KeySearch
             active={byKeys}

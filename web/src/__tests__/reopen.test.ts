@@ -10,6 +10,7 @@ import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { actions } from '../actions';
 import { commandEnabled, runCommand } from '../keymap';
+import '../commands';
 import { resetClosed } from '../closedPanes';
 import { useDialog } from '../dialog';
 import { canGo, go, noteFocus, resetHistory } from '../paneHistory';
@@ -189,8 +190,8 @@ describe('closing with a way back, and going back, with a terminal core', () => 
     await actions.closeWorkspace('m', 'wwwwwwww');
     await settle();
     expect(useDialog.getState().current).toBeUndefined();
-    // The layout keeps a blank workspace to open terminals in.
-    expect(core.layout('m')!.workspaces.map((w) => [w.name, w.tabs.length])).toEqual([['', 0]]);
+    // The machine's last workspace closes as any other: none is left.
+    expect(core.layout('m')!.workspaces).toEqual([]);
     expect(killed()).toEqual([]);
     for (const a of terminals) expect(Number(closing(a)[0])).toBeGreaterThan(Date.now());
     expect(commandEnabled('pane.undoClose')).toBe(true);
@@ -250,5 +251,20 @@ describe('paneHistory', () => {
     noteFocus({ m: 'n', pane: 'd' });
     expect(canGo(1, open())).toBe(false);
     expect(go(-1, open(['b']))?.pane).toBe('a');
+  });
+
+  it('passes over a closed pane and the one beside it that took the focus', () => {
+    for (const pane of ['a', 'b', 'c']) noteFocus({ m: 'm', pane });
+    // c closes and b, beside it, has the focus again.
+    noteFocus({ m: 'm', pane: 'b' });
+    const left = open(['c']);
+    // Back is a, not c (gone) and not b (where the user is).
+    expect(go(-1, left)?.pane).toBe('a');
+    noteFocus({ m: 'm', pane: 'a' });
+    expect(canGo(-1, left)).toBe(false);
+    expect(go(1, left)?.pane).toBe('b');
+    noteFocus({ m: 'm', pane: 'b' });
+    // Ahead are only c and b itself.
+    expect(canGo(1, left)).toBe(false);
   });
 });

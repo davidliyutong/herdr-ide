@@ -45,13 +45,14 @@ import {
 } from 'lucide-react';
 import { actions, current, workspaceTitle } from './actions';
 import { CodeIcon } from './components/icons';
-import { isPluginOn, newTabGroups } from './plugins/registry';
+import { isPluginOn, newTabGroups, paneView } from './plugins/registry';
 import { openMenu, type MenuEntry } from './contextMenu';
 import { downloadDialog } from './dialog';
 import { canDownload, downloadPath } from './download';
 import { t, type MessageKey } from './i18n';
 import { keyHint } from './keymap';
-import { mediaExt, openLink, resolvePath, safeUrl, type LinkContext } from './terminal/links';
+import { mediaExt, resolvePath, safeUrl, type LinkContext } from './terminal/links';
+import { openLink } from './terminal/openLink';
 import { useStore } from './state/store';
 import { conn } from './lib/conn';
 import { terms } from './state/terms';
@@ -80,6 +81,16 @@ export function newTabMenu(m: string, ws: string): MenuEntry[] {
     for (const item of group) out.push({ label: t(item.title), icon: <item.icon />, run: () => void item.run(m, ws) });
   }
   return out;
+}
+
+/** The entries a plugin's pane adds to its header's and tab's menus
+ * (PaneViewDef.menu), with a separator after them; none while its plugin
+ * is off. */
+function viewEntries(m: string, leaf: L.Leaf | null | undefined): MenuEntry[] {
+  if (!leaf || !L.isPluginLeaf(leaf)) return [];
+  const { def, on } = paneView(leaf.view.plugin, leaf.view.kind);
+  const own = on ? (def?.menu?.(m, leaf.view) ?? []) : [];
+  return own.length ? [...own, 'sep'] : [];
 }
 
 /** A pane's menu: what it is (a terminal's name, VS Code's window, a
@@ -149,7 +160,7 @@ export function paneMenu(m: string, pane: string): MenuEntry[] {
     const toSidebar: MenuEntry[] = panelOfView(view)
       ? [{ label: t('plugins.moveToSidebar'), icon: <PanelRight />, run: () => void moveToSidebar(m, pane, view) }, 'sep']
       : [];
-    return [...toSidebar, ...arrange, 'sep', close];
+    return [...viewEntries(m, leaf), ...toSidebar, ...arrange, 'sep', close];
   }
   if (leaf && L.isPreviewLeaf(leaf)) {
     const path = leaf.preview.path;
@@ -435,7 +446,10 @@ export function tabMenu(m: string, ws: string, index: number): MenuEntry[] {
     const now = workspaceOf(m, ws)?.tabs.indexOf(tab) ?? -1;
     if (now >= 0) terms.mutate(m, (l) => L.moveTab(l, ws, now, now + by));
   };
+  const shown = w.tabs[index];
   return [
+    // What the pane the tab shows adds (an editor's file).
+    ...viewEntries(m, shown ? L.leafOf(shown.root, shown.focused) : null),
     {
       label: t('command.tab.rename'),
       hint: hintIf(isCurrent, 'tab.rename'),

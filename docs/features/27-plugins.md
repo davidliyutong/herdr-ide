@@ -124,16 +124,38 @@ A plugin (`PluginDef`, `web/src/plugins/api.ts`) contributes:
   the caller accepts, the one of the focused pane's tab first, else opens
   one in a tab of its own, as editors, diffs and graphs open, or split
   beside the focused pane, whose tab alone is then searched for one to
-  reuse);
+  reuse); a kind gives the pane's title, path and directory, whether it
+  is a preview (its title in italics), a hook saying that what it shows
+  is gone (`useGone`: its title struck through in its header and tab,
+  with a note in their tooltips, as the file explorer's editors of
+  deleted files are; `components/PluginPane.tsx` `ViewTitle` draws them)
+  and the entries its header's and tab's menus start with (`menu`); a
+  plugin's `useFileGone` says the same of any file of a machine, for the
+  app's own panes that show one (previews, `components/PluginPane.tsx`
+  `FileTitle`): the first plugin that is on with one answers (the file
+  explorer), and with none on nothing is marked, so the app imports no
+  plugin's module for it;
 - **commands**: handlers of commands declared in
   `internal/keybindings/commands.go`, checked before the app's own;
 - **status bar items**, **palette items** and a handler of its `/ws`
   messages;
-- **a settings page** (`settings: {section, extra?}`): the section of its
-  settings, which the Plugins page opens, and a component drawn at the
-  end of that page (`extra`, given `readOnly`: actions that are no
+- **a settings page** (`settings: {section, layout?, extra?}`): the
+  section of its settings, which the Plugins page opens, a component that
+  lays out the page's settings in place of their rows one after the other
+  (`layout`, given the settings the scope shows and `rows`, which draws
+  some of them as the dialog's rows: pages of its own within the page;
+  it also gets `lead`, the plugin with its switch, to draw where its first
+  page starts, and `visit`, which changes when the page is chosen in the
+  dialog's list again, so that it shows its first page then;
+  a search lists the rows it finds as on any page), and a component drawn
+  at the end of that page (`extra`, given `readOnly`: actions that are no
   setting, such as an import and an export). A plugin that names a
   section without settings gets a page for its `extra` alone.
+
+A plugin's messages are files of its directory
+(`web/src/plugins/<id>/i18n/en.ts` and one per locale,
+[12](12-internationalization.md)), so that changes to two plugins meet in
+no file of messages.
 
 `web/src/plugins/index.ts` lists the plugins in order. `registry.ts` filters
 them by their setting: a plugin that is off loses its panels, commands,
@@ -166,7 +188,9 @@ without the switch, which is the User setting); while the plugin is off
 the page says so, its entry in the navigation is dimmed, and its settings
 stay editable, kept for when it is on. The page ends with the plugin's
 `extra`. The settings search finds a plugin's settings as any others. The
-AI usage plugin's page is its section `usage`.
+AI usage plugin's page is its section `usage`, laid out as its own
+settings and a list of its providers, each opening the provider's
+settings ([29](29-ai-usage.md)).
 
 **Building blocks.** Plugins' panels and panes draw with the app's shared
 components rather than their own, so they look and behave alike
@@ -218,6 +242,19 @@ components rather than their own, so they look and behave alike
   it selected; `openEditor`, `openFiles`, `openToSide`, `quickLook`,
   `openTerminal` and `copyText` are the entries' actions. The Git panel's
   rows use them.
+- `lib/pluginApi.ts`: what the plugins' requests to the core share
+  (`plugins/*/api.ts`). `PluginError` is a failure with the core's error
+  code, of which each plugin has its own class (`FilesError`, `GitError`,
+  `VaultError`, `BrowserError`), so `instanceof` tells whose it is;
+  `answer(response, fail)` gives an answer's JSON or throws the failure
+  `fail` makes of one that is not ok (`failureOf`: the body's `error` and
+  `message`, else `http_<status>` and the status text); `jsonInit(method,
+  body?, headers?)` is the fetch options of a JSON body; and
+  `makeErrorText(Class, prefix, {special?, detail?, fallback?})` makes the
+  function that says a failure by the message `<prefix>.<code>`. What a
+  plugin does differently stays in its own module: a save's conflict (409)
+  in the explorer's, what git said after Git's message, the vault's session
+  header and its texts that never show a failure's own words.
 
 What a plugin draws is inside an error boundary (`PluginBoundary`): a pane's
 body, the panel shown and each status bar item. One that throws while
@@ -259,8 +296,9 @@ panel's component in a pane, where it splits, moves, takes a tab, is zoomed
 and closes as any pane does, also with Undo Close. A panel becomes one by a
 drag of its rail button or its title onto the panes: a pane's edge splits
 it there (its middle, as there is nothing to swap, on its right), a tab
-puts it beside that tab's focused pane, the new-tab button or another
-workspace in the sidebar gives it a tab of its own; its pane in the tab
+puts it beside that tab's focused pane, the rest of the tab bar (the
+new-tab button, the empty part after it) or another workspace in the
+sidebar gives it a tab of its own; its pane in the tab
 shown moves there instead of a second one opening. **Open in Pane** in the
 panel's header splits it beside the focused pane. Either way the sidebar
 stops showing it; its rail button stays and still shows it there, so a
@@ -339,7 +377,11 @@ does not have says so. Read-only pages do not drag panels into panes.
 - `web/src/__tests__/pluginSettings.test.ts`: plugins' pages under the
   Plugins page (and under a heading in a machine's scope), opened from a
   plugin's row, the page's switch and its note while the plugin is off,
-  a page of an `extra` alone, the search finding a plugin's settings.
+  a page of an `extra` alone, the search finding a plugin's settings;
+  `usageSettings.test.ts`: a page a plugin lays out itself (`layout`,
+  the AI usage plugin's), its rows' controls, the way back from a page of
+  its own (its button, and the page chosen in the list again), search and
+  read-only mode.
 - `web/src/__tests__/picker.test.ts`, `tree.test.ts`, `fileIcons.test.ts`:
   the building blocks.
 - `web/src/__tests__/pluginFramework.test.ts`: error boundaries of panes,

@@ -1,0 +1,69 @@
+/* ---------- narrow screens (phones) ---------- */
+.sidebar-backdrop {
+  display: none;
+}
+@media (max-width: 760px) {
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0 0 var(--h-status) 0;
+    z-index: 39;
+    background: var(--backdrop);
+  }
+  .app,
+  .app.no-sidebar {
+    grid-template-columns: minmax(0, 1fr) var(--rail-w, 0);
+    grid-template-rows: minmax(0, 1fr) var(--h-status);
+    grid-template-areas: 'main rail' 'status status';
+  }
+  .panel {
+    position: fixed;
+    inset: 0 var(--rail-w, 0) var(--h-status) auto;
+    width: min(var(--panel-px, 320px), 82vw);
+    z-index: 40;
+    box-shadow: -8px 0 30px var(--shadow);
+  }
+  .panel-resizer {
+    display: none;
+  }
+  .panel-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0 var(--rail-w, 0) var(--h-status) 0;
+    z-index: 39;
+    background: var(--backdrop);
+  }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto var(--h-status) 0;
+    width: 82vw;
+    z-index: 40;
+    box-shadow: 8px 0 30px var(--shadow);
+  }
+  .settings-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .settings-control {
+    max-width: none;
+  }
+  .settings-main {
+    flex-direction: column;
+  }
+  /* The pages are a searchable list above the page. */
+  .settings-nav {
+    display: none;
+  }
+  .settings-nav-pick {
+    display: block;
+    flex: none;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .settings-nav-pick .picker-button {
+    width: 100%;
+  }
+  .settings-search input {
+    width: 8rem;
+  }
+}

@@ -1,0 +1,227 @@
+/* ---------- sidebar ---------- */
+.sidebar {
+  grid-area: sidebar;
+  position: relative;
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* Folders from Finder dragged over the sidebar (desktop app). */
+.sidebar-drop {
+  position: absolute;
+  inset: 6px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  backdrop-filter: blur(2px);
+  color: var(--fg);
+  text-align: center;
+  pointer-events: none;
+}
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: var(--h-header);
+  padding: 0 4px 0 14px;
+}
+.brand {
+  font-weight: 600;
+  font-size: var(--fs-base);
+  letter-spacing: 0.02em;
+  flex: 1;
+}
+.sidebar-scroll {
+  overflow: auto;
+  flex: 1;
+  padding-bottom: 12px;
+}
+/* The sidebar's right edge, dragged to set its width. */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 8px;
+  z-index: 6;
+  cursor: col-resize;
+}
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s 0.1s;
+}
+.sidebar-resizer:hover::after,
+body.resizing .sidebar-resizer::after {
+  background: var(--accent);
+}
+/* Buttons of a row (machine, workspace) shown while the row is pointed at. */
+.row-action {
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  margin: -2px -4px -2px 0;
+  visibility: hidden;
+}
+.row-action .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.machine-head:hover .row-action,
+.ws-item:hover .row-action,
+.row-action:focus-visible {
+  visibility: visible;
+}
+.section-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+  padding: 8px 14px 4px;
+}
+.inbox {
+  border-bottom: 1px solid var(--line);
+  max-height: 40%;
+  overflow: auto;
+  padding-bottom: 6px;
+}
+.inbox-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: var(--h-row);
+  padding: 3px 14px;
+  cursor: pointer;
+}
+.inbox-item:hover {
+  background: var(--bg-3);
+}
+.inbox-text {
+  min-width: 0;
+  flex: 1;
+}
+.inbox-title {
+  font-size: var(--fs-base);
+}
+
+.machine {
+  margin-top: 4px;
+}
+.machine-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: var(--h-row);
+  padding: 2px 8px 2px 8px;
+  cursor: pointer;
+  font-weight: 600;
+  user-select: none;
+}
+.machine-platform {
+  font-weight: 400;
+}
+.machine-head:hover {
+  background: var(--bg-2);
+}
+.machine-label {
+  flex: 1;
+}
+.caret {
+  color: var(--fg-mute);
+  display: inline-flex;
+}
+.mstatus {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--idle);
+}
+.ms-ready {
+  background: var(--done);
+}
+.ms-connecting {
+  background: var(--working);
+  animation: pulse 1.2s infinite;
+}
+.ms-auth_required {
+  background: var(--warning);
+}
+.ms-error {
+  background: var(--error);
+}
+.machine-status {
+  margin: 2px 12px 4px 30px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  font-size: var(--fs-md);
+  color: var(--fg-dim);
+}
+.machine-status.ms-auth_required,
+.machine-status.ms-error,
+.machine-status.ms-notice {
+  background: var(--bg-2);
+}
+.ws-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--h-row);
+  padding: 2px 8px 2px 30px;
+  cursor: pointer;
+  color: var(--fg-dim);
+}
+.ws-item:hover {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.ws-item.selected {
+  background: var(--bg-3);
+  color: var(--fg);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.ws-item.add {
+  color: var(--fg-mute);
+}
+/* Workspaces and machines selected together (state/multiSelect.ts). */
+.ws-item.multi,
+.machine-head.multi {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.ws-item:focus-visible .row-action,
+.machine-head:focus-visible .row-action {
+  visibility: visible;
+}
+.ws-item.add .lucide {
+  margin-left: -1px;
+}
+.ws-num {
+  color: var(--fg-mute);
+  font-variant-numeric: tabular-nums;
+  width: 14px;
+}
+.ws-name {
+  flex: 1;
+  min-width: 0;
+}
+.ws-meta {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}

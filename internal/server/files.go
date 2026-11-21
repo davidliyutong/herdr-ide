@@ -416,7 +416,13 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"dir": rep.Stat, "entries": rep.Entries})
+	// An empty directory's entries are an empty list, not null (the
+	// agent's reply leaves them out).
+	entries := rep.Entries
+	if entries == nil {
+		entries = []agentproto.Stat{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"dir": rep.Stat, "entries": entries})
 }
 
 const maxUpload = 4 << 30

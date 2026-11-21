@@ -32,6 +32,8 @@ func call(t *testing.T, e *plugin.Env, action, params string) agentproto.Reply {
 func TestActions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("OPENCODE_DB", "")
 	e := &plugin.Env{Home: home, Base: filepath.Join(home, ".app"), Environ: func() []string { return nil }}
 	if plugin.Lookup("usage") == nil {
 		t.Fatal("not registered")
@@ -83,6 +85,18 @@ func TestActions(t *testing.T) {
 	}
 	if rep = call(t, e, "cost", `{"prices":{"grok-5":{"input":3,"cached":0.75,"output":9}}}`); !rep.OK {
 		t.Errorf("good prices %+v", rep)
+	}
+	// OpenCode's sessions, from its database in the XDG data directory.
+	db, err := os.ReadFile("../../../usage/testdata/opencode/opencode.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(home, ".local/share/opencode"), 0o700)
+	os.WriteFile(filepath.Join(home, ".local/share/opencode/opencode.db"), db, 0o600)
+	rep = call(t, e, "cost", `{"since":0,"providers":["opencode"]}`)
+	var cost usage.CostReport
+	if !rep.OK || json.Unmarshal(rep.Plugin, &cost) != nil || len(cost.Rows) == 0 || cost.Rows[0].Provider != usage.OpenCode {
+		t.Errorf("OpenCode's cost %+v %s", rep, rep.Plugin)
 	}
 }
 

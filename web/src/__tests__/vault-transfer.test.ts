@@ -301,7 +301,7 @@ describe('vault files and choices', () => {
     expect(host.querySelector('.callout.error')?.textContent).toContain(`C: ${t('vault.error.failed')}`);
   });
 
-  it("ends the vault's settings page with Import and Export, saying when the vault is locked", async () => {
+  it("ends the vault's settings page with Import and Export, which a locked vault takes too", async () => {
     expect(vaultPlugin.settings).toEqual({ section: 'vault', extra: VaultSettingsExtra });
     vaultStatus = { mode: 'passphrase', locked: true };
     await act(async () =>
@@ -309,7 +309,7 @@ describe('vault files and choices', () => {
     );
     await flush();
     const button = (a: string) => host.querySelector<HTMLButtonElement>(`[data-vault-files] [data-action="${a}"]`)!;
-    expect(host.querySelector('[data-vault-files] [data-note]')?.textContent).toBe(t('vault.settings.locked'));
+    expect(host.querySelector('[data-vault-files] [data-note]')).toBeNull();
     // Locked, the dialogs ask for the passphrase, which unlocks it.
     expect(button('import').disabled).toBe(false);
     await act(async () => button('export').click());

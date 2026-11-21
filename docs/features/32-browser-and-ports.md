@@ -20,8 +20,9 @@ forward needs nothing more on the machine.
 - **Port forwards**: a port of a machine's loopback interface reachable on
   the core host's, made when the user opens a page of it and ended when
   unused.
-- A link printed in a terminal opens where it works: a remote machine's
-  `localhost` through a forward.
+- A link to `localhost` printed in a terminal, or written in a document,
+  opens where it works: a remote machine's `localhost` through a forward.
+  A link to another computer opens in the user's own browser.
 - A menu of the kinds of tab at the tab bar's new-tab button.
 
 Non-goals: forwards for clients that are not on the core's host (a page
@@ -121,8 +122,11 @@ A forwarded service is another site than the UI and must stay one.
   `port` is not the user asking for a way into that machine. The page
   keeps, while it lives and nowhere else, the ports the user asked for in
   it (`grantForward`): typed into a pane's address field, chosen in
-  **Ports**, opened from a link clicked in a terminal, or confirmed in a
-  pane; stopping a forward in **Ports** takes its port back
+  **Ports**, opened from a link ⌘/Ctrl-clicked in a terminal (whose
+  tooltip names it), or confirmed in a pane. A link clicked in a document
+  is not among them: the document is not trusted and the link's text may
+  hide its address (`[guide](http://localhost:2375/containers/json)`).
+  Stopping a forward in **Ports** takes its port back
   (`revokeForward`). For such a port the pane makes or finds the forward. For any other
   it reads the core's list: a forward that exists is used; one that does
   not is not made, and the pane says that the port is not forwarded now,
@@ -162,12 +166,50 @@ A forwarded service is another site than the UI and must stay one.
   forward that exists is that forward's machine and port, bound to it
   without the right to make it again; any other address is its own, a
   loopback one the user's own computer's, whatever machine is shown.
+- The desktop app resolves host names with the system's resolver
+  (`app.configureHostResolver({enableBuiltInResolver: false})`, before
+  anything loads, `desktop/src/policy.ts` `hostResolver`), for every
+  session, the partition `persist:browser` included. Electron's default on
+  macOS is Chromium's built-in resolver, which reads the system's DNS
+  servers and asks them itself: a name the system resolves otherwise (a
+  VPN's or a company's DNS for some domains, a tool that takes over the
+  system's DNS) may then not resolve in a pane while the system's browser
+  opens it. The choice follows Electron's documented defaults and
+  Chromium's known behavior; it was not tried on a network where names
+  failed. Windows and Linux use the system's resolver by Electron's
+  default already; DNS over HTTPS keeps Electron's default. No session sets
+  a proxy and no switch names one, so every session, the guests' too, uses
+  the system's proxy settings. The app's own pages are on `127.0.0.1` and
+  `localhost`, which Chromium resolves without DNS.
+- A guest's page that did not load says so in a line under the toolbar:
+  a name that did not resolve (Chromium's `-105`, `-137` and its
+  resolver's own `-800`s) as that name not resolving, any other failure
+  with Chromium's code (`ERR_CONNECTION_REFUSED`). For a name of another
+  computer that did not resolve the line has **Open in System Browser**,
+  whose network may reach what the app's does not. The address may be one
+  the page went to by itself: the line names its host, the button's
+  tooltip the address, which passes the rule for a text's links
+  (`safeWebUrl`: never the core's own), and only the click opens it. A
+  page shown in a pane can still navigate itself to a name that does not
+  resolve, to have the button offered, and so bring a user who clicks it
+  to an address of its choosing in the system's browser, with the user's
+  sessions there.
 - The toolbar: back, forward, reload, the address field (a bare `3000` or
   `localhost:3000` is that port; a host without a scheme gets `http://` on
-  loopback and `https://` otherwise), a chip naming the machine and port of
-  a forwarded page, **Ports** (the machine's listening ports to open, the
-  forwards with a stop button) and open outside. An empty pane shows a
-  start page with the machine's listening ports.
+  loopback and below `localhost`, `https://` otherwise), a chip naming the
+  machine and port of a forwarded page, **Ports** and open outside. A name
+  below `localhost` (`app.localhost`) is a remote machine's loopback, its
+  port shown through the forward as the other names are; of this computer
+  it stays as written, a page only the desktop app's webview shows.
+- Ports are listed as a tree's rows ([28](28-file-explorer.md)): a row
+  high, no frame, the fill on hover, in columns. **Ports** is a floating
+  list under its button, as a picker's: the machine's listening ports (the
+  port, the program), a click opening one, then the forwards (the machine's
+  port, the machine, the local port when it is another one, the full line
+  as the row's tooltip) with a stop button shown on hover. A list without
+  rows says so in a line of it (looking, failed, none, forwards not
+  available here). An empty pane shows the machine's listening ports alone,
+  a column near the top, under the address field that has the keyboard.
 - A frame with `m` and `port` has its forward before it loads and uses it
   again every 5 minutes while it is mounted, which keeps the forward from
   ending idle; a failure shows its reason with Retry. When the forward
@@ -177,24 +219,52 @@ A forwarded service is another site than the UI and must stay one.
 - Commands: `browser.open` (a new tab with an empty browser pane),
   `browser.reload`.
 
-### Links in terminals (`web/src/terminal/links.ts`)
+### Links in terminals and documents (`web/src/terminal/openLink.ts`)
 
-⌘/Ctrl+click on a URL opens it, by `browser.openLinks` (**pane**, the
-default, or **external**):
+⌘/Ctrl+click on a URL in a terminal (`web/src/terminal/links.ts`), and a
+click on a web link of a document shown in a preview pane
+(`web/src/markdown/MarkdownBody.tsx`, the document's machine), open it by
+`browser.openLinks` (`linkPlace` in `web/src/plugins/browser/api.ts`):
 
-- a loopback URL in a terminal of a remote machine opens in a new tab as a
-  browser pane of that machine's port, when forwards are available to this
-  client;
-- a loopback URL in a terminal of the local machine opens in a new tab when
-  the UI itself is on a loopback host;
-- any other URL opens in a new tab in the desktop app, and outside in a
-  browser;
-- with **external**, with the plugin off, and where the above does not
-  apply, the URL opens outside as before.
+- **loopback** (the default): an address of a computer's loopback
+  (`localhost`, a name below it, `127.0.0.1`, `[::1]`, `0.0.0.0`) opens in a
+  browser pane of a new tab: of a remote machine as that machine's port,
+  through its forward, when forwards are available to this client; of the
+  local machine when the UI itself is on a loopback host (a name below
+  `localhost`, which the frame cannot take, in the desktop app only). Any
+  other address, another computer's, opens outside the app: in a tab of
+  the browser, in the system's browser from the desktop app, where the
+  user's sign-ins, proxy and resolver are.
+- **all**: also any other address in a pane where one shows it, the
+  desktop app's; a browser frames loopback pages only.
+- **external**: every address outside the app.
+- With the plugin off, and where a pane cannot show the address (forwards
+  not available, the UI on another host), it opens outside. The value
+  `pane` of earlier versions, their default, became `loopback`
+  (`internal/plugins/browser` migrates the settings file).
 
-A URL is opened only when it is absolute `http(s)://` (or `mailto:`), as
-the browser resolves it, and not the core's own address (see Origins). The
-click is the user asking for the port it leads to.
+A URL is opened only when it is absolute `http(s)://` (or `mailto:`, which
+opens outside), as the browser resolves it, and not the core's own
+address (see Origins); outside it opens without a referrer.
+
+- A terminal's link is ⌘/Ctrl-clicked under a tooltip that names its
+  address: the click is the user asking for the port it leads to, and the
+  pane makes the forward.
+- A document's link is a plain click on a text the document chose, which
+  may hide the address. The link names its address in its tooltip
+  (`title`, also a remote image's link), and the click is no request for
+  the port (`openBrowserTab` with `ask`): the pane uses the forward that
+  exists, or says that the port is not forwarded now, with
+  **Forward and open**, and the address field shows the whole address.
+  A port the user asked for in this page before is made again, as for any
+  view.
+- A document's link to this computer's own loopback (the UI on a loopback
+  host) loads in a pane without a forward: no listener is made, the page
+  is a sandboxed frame or the browser partition without the UI's cookies,
+  and the same click outside the app makes the same request with the
+  browser's cookies; the tooltip names the address before the click.
+- A document's link that is no machine's (a text without a base) and a
+  `mailto:` link are the browser's own.
 
 ### The new-tab menu (`web/src/components/Workspace.tsx`)
 
@@ -209,7 +279,7 @@ right click and the chevron beside it open a menu of the kinds of tab:
 `/api/m/{id}/p/browser/forwards[/{port}]` (writes, audited as
 `browser.forward` and `browser.forward_stop` with the ports),
 `GET /api/m/{id}/p/browser/listening`. Settings: `plugins.browser.enabled`,
-`browser.openLinks`, `browser.forwardIdle`.
+`browser.openLinks` (`loopback`, `all`, `external`), `browser.forwardIdle`.
 
 ## Alternatives considered
 
@@ -229,6 +299,11 @@ right click and the chevron beside it open a menu of the kinds of tab:
 | Remembering what the user asked for across reloads (in the layout, in storage) | Whatever the page can read back, a script of the page can write; the list of forwards that exist is the core's, and a pane attaches to those without asking. |
 | The same policy for every request (`frame-src` with both loopback names) | A framed page could navigate itself to the UI's own host name on another port and share that host's cookies there. |
 | Counting an open connection as use | One connection held open by any program of the core host, or by a page, would keep a way into the machine for as long as it liked. |
+| Every link the desktop app's pane can show in one (the earlier default) | A site of another computer is the user's browser's: their sign-ins, extensions, proxy and resolver are there, and the pane is for the machines' local services. The setting's `all` keeps it. |
+| A pane's popups and in-page links of other computers in the system's browser | A page opens windows without the user, and Electron does not say whether one came from a click: a page shown in a pane could open anything in the browser that holds the user's sessions. |
+| Chromium's built-in resolver, or turning off DNS over HTTPS | The built-in resolver may not see what the system resolves through VPNs and DNS tools; nothing points at DNS over HTTPS, which Chrome uses alike. |
+| A document's link granting its port as a terminal's does | A document is anyone's text (a cloned repository's README), its links are plain clicks and their text hides the address: one click on `[guide](http://localhost:2375/…)` would put the machine's Docker API on the core host's loopback for the idle time, for every program there and, blind, every web page in the user's browsers. |
+| `app.localhost` of a remote machine kept as written | The frame can take the other loopback name only (cookies, the page's `frame-src`); written as `localhost` it reaches the machine's port, where the name kept would reach this computer's. |
 
 ## Failure modes
 
@@ -260,6 +335,17 @@ right click and the chevron beside it open a menu of the kinds of tab:
   is the core, refused, and left out of Ports.
 - **A forward's listener fails** (not for now only) → the forward ends and
   is logged; its pane makes it again or asks, as above.
+- **A name does not resolve in a pane** (desktop app) → the line under the
+  toolbar says so, with **Open in System Browser**. Links of another
+  computer open in the system's browser by default, so this is left to
+  addresses typed into a pane, a page's own links and windows, and the
+  setting at `all`.
+- **A service of the local machine listens on `::1` only** (Node 17 and
+  later bind `localhost` there on some systems) → a UI on `localhost`
+  frames `127.0.0.1`, where nothing answers: the frame shows the browser's
+  refusal. A UI on `127.0.0.1` frames `localhost`, which browsers try on
+  both addresses. A remote machine's service is reached on either address
+  (`dial`).
 
 ## Security
 
@@ -310,11 +396,20 @@ own; the UI itself is never a page of a pane
   not bringing a forward back), the address field and Ports granting;
   popups (a loopback address as this computer's, a forward's local port
   bound to that forward, nothing for other schemes); links by machine, UI
-  host, client and setting, and the click granting; the new-tab menu.
+  host, client and setting (another computer's outside by default, in the
+  desktop app too, in a pane with `all`, names below `localhost`, values of
+  earlier versions), and the click granting; a document's links the same
+  way, naming their addresses in their tooltips, a remote machine's port
+  asked for in its pane and made only once confirmed, an existing forward
+  used (`browserDocLinks.test.tsx`); the Ports rows and their empty lines;
+  a webview's failed load, a name not resolving with the system's browser
+  offered (`browserWebview.test.tsx`); the new-tab menu.
   `terminalLinks.test.ts` and `markdown.test.tsx`: links to the core's
   port under another loopback name refused.
+- `internal/plugins/browser/settings_test.go`: the links' setting, its
+  default and the value `pane` of earlier versions migrated.
 - `desktop/src/policy.test.ts`: which attaches are allowed and the
   guest's preferences after one, navigation, the core's address refused to
   guests under every loopback name, permissions, the popups' bound, the
-  main window alone holding webviews; `preload.test.ts`: the popup
+  main window alone holding webviews, the system's resolver; `preload.test.ts`: the popup
   channel.

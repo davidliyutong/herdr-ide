@@ -386,6 +386,35 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// WriteRaw answers 200 with JSON that is already encoded.
+func WriteRaw(w http.ResponseWriter, raw json.RawMessage) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(raw)
+}
+
+// ForwardJSON runs action of plugin on c's machine within timeout and
+// answers its result as the agent encoded it ({} for none), or the error,
+// which it also returns.
+func ForwardJSON(c *Call, w http.ResponseWriter, r *http.Request, plugin, action string, params any, timeout time.Duration) error {
+	if c.Machine == nil {
+		WriteError(w, ErrOffline)
+		return ErrOffline
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	var out json.RawMessage
+	if err := Request(ctx, c.Machine, plugin, action, params, &out); err != nil {
+		WriteError(w, err)
+		return err
+	}
+	if len(out) == 0 {
+		out = json.RawMessage("{}")
+	}
+	WriteRaw(w, out)
+	return nil
+}
+
 // WriteError answers with {"error": code, "message"}: an agent's Error
 // keeps its code (offline: 409, transport: 502, others 400); other errors
 // are 500s with the code "failed".

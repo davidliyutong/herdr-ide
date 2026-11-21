@@ -9,7 +9,7 @@
 // copied where they are instead.
 
 import { choiceDialog } from '../../dialog';
-import { desktopShell } from '../../desktop';
+import { desktopShell } from '../../shell';
 import { filesAreOn } from '../../drop';
 import { t } from '../../i18n';
 import { shortPath } from '../../lib/machine';

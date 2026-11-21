@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit -p . && vite build",
     "typecheck": "tsc --noEmit -p .",
+    "cycles": "node scripts/cycles.mjs",
     "test": "vitest run",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" vite.config.ts",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" vite.config.ts"

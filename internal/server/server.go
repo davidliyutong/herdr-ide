@@ -175,6 +175,7 @@ func (s *Server) routes() []route {
 		{"DELETE /api/settings", s.writable(s.handleResetSetting)},
 		{"GET /api/keybindings", s.handleKeybindings},
 		{"PUT /api/keybindings", s.writable(s.handleSetKeybindings)},
+		{"GET /api/perf", s.handlePerf},
 		{"GET /api/machines", s.handleMachines},
 		{"POST /api/machines", s.writable(s.handleMachineAdd)},
 		{"PUT /api/machines/order", s.writable(s.handleMachineOrder)},
@@ -458,11 +459,9 @@ func (s *Server) Run(ctx context.Context) {
 	}
 }
 
+// writeJSON answers with v, as plugins do (plugin.WriteJSON).
 func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	plugin.WriteJSON(w, code, v)
 }
 
 // spaHandler serves the web UI's files, and the app shell for any other

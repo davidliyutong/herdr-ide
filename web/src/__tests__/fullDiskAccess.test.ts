@@ -24,6 +24,7 @@ import { useStore } from '../state/store';
 import { useDialog } from '../dialog';
 import { useKeys } from '../keybindings';
 import { commandEnabled, commandShown, runCommand } from '../keymap';
+import '../commands';
 import type { MachineState } from '../lib/machine';
 import type { PrivacyState } from '../fullDiskAccess';
 
@@ -154,7 +155,7 @@ describe('Full Disk Access in the settings', () => {
     await open({ page: 'terminal' });
     expect(qa('.settings-group').map((h) => h.textContent)).toEqual(['Text', 'Cursor', 'Permissions']);
     expect(row()?.querySelector('.setting-title')?.textContent).toBe('Full Disk Access');
-    expect(row()?.textContent).toContain('Mail, Messages and Safari');
+    expect(row()?.textContent).toContain('other apps’ data');
     expect(qa('.fda-access code').map((c) => c.textContent)).toEqual(['herdr-core', 'herdr-ide']);
     expect(states()).toEqual(['denied', 'granted']);
     expect(qa('.fda-state').map((s) => s.textContent)).toEqual(['Not granted', 'Granted']);

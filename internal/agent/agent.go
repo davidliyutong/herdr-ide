@@ -1,6 +1,7 @@
 //go:build unix
 
-// Package agent implements herdr-ide-agent: the per-machine helper that the
+// Package agent implements the agent (the command "agent" of the one
+// binary): the per-machine helper that the
 // core reaches over a yamux session (ssh stdio for remote machines, an
 // in-process pipe for the local machine). It runs on Linux and macOS only
 // (every file is built for unix): its sockets, peer checks, process groups,
@@ -59,7 +60,7 @@ type Options struct {
 func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	logger := opts.Logger
 	if logger == nil {
-		logger = log.New(os.Stderr, brand.AgentBin+": ", log.LstdFlags)
+		logger = log.New(os.Stderr, brand.CoreBin+" agent: ", log.LstdFlags)
 	}
 	if !brand.ValidInstance(opts.Instance) {
 		return fmt.Errorf("invalid instance name %q", opts.Instance)

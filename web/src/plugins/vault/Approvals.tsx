@@ -2,10 +2,11 @@
 // not allowed to read a variable asks, and the first answer of any page
 // wins; the others close the prompt when the core says it is resolved. No
 // answer within the core's timeout is a denial. Allowing passes the gate:
-// a page without a session proves it is the user, by an authenticator (the
-// fingerprint, the app's prompt) when it has one, else with the passphrase,
-// asked in the prompt itself; where the vault verifies every Allow a
-// session is not enough either; denying needs nothing.
+// a page without a session proves it is the user, by an authenticator
+// (biometrics: the app's prompt, a WebAuthn credential) when it has one,
+// else with the passphrase, asked in the prompt itself; where the vault
+// verifies every Allow a session is not enough either; denying needs
+// nothing.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Cpu, KeyRound, Terminal } from 'lucide-react';
@@ -73,7 +74,6 @@ function useLeft(expires: string): number {
 
 export function RequestCard({ req }: { req: VaultRequest }) {
   const readOnly = useStore((s) => s.readOnly);
-  const local = useStore((s) => s.machines[req.m]?.kind === 'local');
   const session = useVault((s) => s.session);
   const guard = useVault((s) => s.guard);
   const verify = !!guard?.verifyEachAllow;
@@ -98,12 +98,13 @@ export function RequestCard({ req }: { req: VaultRequest }) {
         const proof = await prove({ for: 'answer', request: req.id, answer: a });
         if (!proof) return setErr(t('vault.proof.cancelled'));
         await answerRequest(req.id, a, { proof });
-      } else if (verify) {
-        // The passphrase stands for the proof, so no session is opened.
-        await answerRequest(req.id, a, { passphrase: pass });
       } else {
-        await openSession(pass);
-        await answerRequest(req.id, a);
+        // A page without a session opens one with the passphrase; only then
+        // does the core say whether every Allow is verified, where the
+        // passphrase comes with the answer too.
+        if (!session) await openSession(pass);
+        const ruled = !!useVault.getState().guard?.verifyEachAllow;
+        await answerRequest(req.id, a, ruled ? { passphrase: pass } : undefined);
       }
     } catch (e) {
       // The request is gone (answered elsewhere or expired).
@@ -138,11 +139,6 @@ export function RequestCard({ req }: { req: VaultRequest }) {
           <span className="ellipsis">{processText(req.process)}</span>
         </div>
       )}
-      {local && (
-        <div className="vault-request-meta" data-note="local">
-          {t('vault.localNote')}
-        </div>
-      )}
       {readOnly ? (
         <div className="vault-request-meta">{t('vault.readOnly')}</div>
       ) : (
@@ -155,7 +151,6 @@ export function RequestCard({ req }: { req: VaultRequest }) {
         >
           {byProof && (
             <div className="vault-request-proof" data-proof="">
-              <span className="muted">{t('vault.request.proveWith', { way: wayName })}</span>
               <button type="button" className="sm ghost" data-action="use-passphrase" onClick={() => setUsePass(true)}>
                 {t('vault.request.usePassphrase')}
               </button>

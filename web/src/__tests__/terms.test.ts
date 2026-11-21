@@ -38,9 +38,11 @@ describe('TermModel', () => {
     expect(model.store.terminals('gone')).toEqual([]);
   });
 
-  it('reads the layout after the terminals, with a workspace named in the language, without ended terminals', async () => {
+  it('reads the layout after the terminals, with a first workspace where none was written, without ended terminals', async () => {
     const core = new FakeCore();
-    core.machine('m', [FakeCore.term('t1')], { version: 2, workspaces: [], selected: 0 });
+    core.machine('m', [FakeCore.term('t1')]);
+    // Every workspace of this one was closed: it stays without one.
+    core.machine('e', [], { version: 2, workspaces: [], selected: 0 });
     core.machine('n', [FakeCore.term('a'), FakeCore.term('b')], {
       version: 2,
       workspaces: [{ id: 'xxxxxxxx', name: 'x', cwd: '', tabs: [tab('a', 'gone'), tab('b')], selected: 1 }],
@@ -49,8 +51,13 @@ describe('TermModel', () => {
     const model = core.install();
     model.subscribe('m');
     model.subscribe('n');
+    model.subscribe('e');
     await settle();
     expect(useTerms.getState().connected).toBe(true);
+    expect(useTerms.getState().machines.e.layout?.workspaces).toEqual([]);
+    // A pane opened there makes its workspace.
+    model.mutate('e', (l) => L.openTerminal(l, 't9'));
+    expect(model.layout('e')?.workspaces.map((w) => L.workspaceTerminals(w))).toEqual([['t9']]);
     const m = useTerms.getState().machines.m;
     expect(m.backend?.phase).toBe('ready');
     expect(Object.keys(m.terminals)).toEqual(['t1']);
@@ -116,7 +123,7 @@ describe('TermModel', () => {
     await settle();
     await opened;
     expect(model.isSubscribed('m')).toBe(true);
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/srv', display: expect.any(Object) });
+    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: true, cwd: '/srv', display: expect.any(Object) });
     expect(model.layout('m')?.workspaces[0].tabs.map((x) => x.focused)).toEqual(['t1']);
     expect(terminalOnScreen('m', 't1')).toBe(true);
     expect(terminalOnScreen('m', 'other')).toBe(false);
@@ -137,7 +144,7 @@ describe('TermModel', () => {
     await settle();
     await actions.newTab('m', 'xxxxxxxx');
     expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
-      keep: false,
+      keep: true,
       cwd: '/home/u/proj',
       display: expect.any(Object),
     });

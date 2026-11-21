@@ -120,7 +120,9 @@ func (c *client) register(t *testing.T, a *testAuthenticator) {
 // An authenticator added in a session of the passphrase proves the user in
 // its stead: its proof opens a session, which changes variables but not
 // what guards the vault; a proof is good once, for its purpose, from its
-// page's origin, while its nonce lives and the vault is unlocked.
+// page's origin, while its nonce lives and the core holds the key. It
+// unlocks a vault locked while the key is held, until the key's hold is
+// over or a lock forgot the key.
 func TestProofOpensASession(t *testing.T) {
 	p, h, s := newTest(t)
 	now := time.Now()
@@ -208,13 +210,16 @@ func TestProofOpensASession(t *testing.T) {
 		"/api/p/vault/autolock": `{"minutes":0}`, "/api/p/vault/guard": `{"verifyEachAllow":false}`,
 		"/api/p/vault/authenticators": `{"kind":"webauthn"}`, "/api/p/vault/proof": `{"for":"register"}`,
 		"/api/p/vault/export": `{"passphrase":"x","filePassphrase":"long enough"}`, "/api/p/vault/import/preview": `{}`,
+		"/api/p/vault/exempt": `{"app":"claude","machines":["m1"]}`,
 	} {
 		if code, out := c.do("POST", path, body); code != 401 || out["error"] != "vault_passphrase" {
 			t.Errorf("%s in a session of a proof: %d %v", path, code, out)
 		}
 	}
-	if code, out := c.do("DELETE", "/api/p/vault/authenticators/x", ""); code != 401 || out["error"] != "vault_passphrase" {
-		t.Errorf("deleting an authenticator: %d %v", code, out)
+	for _, path := range []string{"/api/p/vault/authenticators/x", "/api/p/vault/exempt/x"} {
+		if code, out := c.do("DELETE", path, ""); code != 401 || out["error"] != "vault_passphrase" {
+			t.Errorf("%s in a session of a proof: %d %v", path, code, out)
+		}
 	}
 	if !strings.Contains(h.auditLog(), `vault.proved {"for":"session","kind":"webauthn","ok":true}`) || !strings.Contains(h.auditLog(), "denied.vault_passphrase") {
 		t.Errorf("audit %s", h.auditLog())
@@ -277,18 +282,61 @@ func TestProofOpensASession(t *testing.T) {
 	nonce, _ = c.nonce(t, `{"for":"session"}`)
 	refused("another port's assertion posted as the UI's", a.assertion(t, nonce, "http://localhost:3000"))
 
-	// A locked vault takes no proof (it holds no key), and its nonces end.
+	// A lock keeps the key of a vault with an authenticator: the vault is
+	// locked (machines get nothing, every session and nonce ends) and the
+	// authenticator's proof unlocks it again.
 	nonce, _ = c.nonce(t, `{"for":"session"}`)
-	c.do("POST", "/api/p/vault/lock", "")
-	if !s.Status().Locked {
-		t.Fatal("not locked")
+	if code, out := c.do("POST", "/api/p/vault/lock", ""); code != 200 || out["locked"] != true || !s.Held() {
+		t.Fatalf("lock %d %v, held %v", code, out, s.Held())
+	}
+	if code, _ := c.do("PUT", "/api/p/vault/vars/KEY", `{"value":"x"}`); code != 401 {
+		t.Errorf("a session outlived the lock: %d", code)
+	}
+	if r := p.Handle(context.Background(), h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}}); r.Code != "vault_locked" {
+		t.Errorf("a machine reads a locked vault: %+v", r)
+	}
+	refused("a nonce issued before the lock", a.assertion(t, nonce, c.origin))
+	if _, list := c.do("GET", "/api/p/vault", ""); list["guard"] == nil || list["status"].(map[string]any)["locked"] != true {
+		t.Errorf("a locked vault whose key is held: %v", list)
+	}
+	nonce, _ = c.nonce(t, `{"for":"session"}`)
+	code, out = c.do("POST", "/api/p/vault/session", mustJSON(map[string]any{"proof": a.assertion(t, nonce, c.origin)}))
+	if code != 200 || out["status"].(map[string]any)["locked"] != false || s.Status().Locked {
+		t.Fatalf("unlocked by a proof: %d %v", code, out)
+	}
+	c.tok = out["session"].(string)
+	if !strings.Contains(h.auditLog(), `vault.unlocked {"kind":"webauthn","ok":true}`) {
+		t.Errorf("audit %s", h.auditLog())
+	}
+	if r := p.Handle(context.Background(), h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}}); !r.OK {
+		t.Errorf("a machine after the proof: %+v", r)
+	}
+	// Once the key's hold is over (24 hours after the passphrase) the core
+	// forgets it: the vault locks, and no proof unlocks it.
+	now = now.Add(DefaultPassphraseHours * time.Hour)
+	if code, out := c.do("POST", "/api/p/vault/proof", `{"for":"session"}`); code != 409 || out["error"] != "vault_locked" {
+		t.Errorf("a nonce once the hold is over: %d %v", code, out)
+	}
+	if s.Held() || !s.Status().Locked {
+		t.Fatal("the key outlived its hold")
+	}
+	if !strings.Contains(h.auditLog(), `vault.locked {"hours":24,"keyHeld":false,"reason":"passphrase"}`) {
+		t.Errorf("audit %s", h.auditLog())
+	}
+	if _, list := c.do("GET", "/api/p/vault", ""); list["guard"] != nil || list["session"] != false {
+		t.Errorf("the guard of a vault whose key is forgotten: %v", list)
+	}
+	// Lock can forget the key at once.
+	c.session(t)
+	nonce, _ = c.nonce(t, `{"for":"session"}`)
+	if code, _ := c.do("POST", "/api/p/vault/lock", `{"forget":true}`); code != 200 || s.Held() {
+		t.Fatalf("a lock that forgets: %d", code)
 	}
 	if code, out := c.do("POST", "/api/p/vault/proof", `{"for":"session"}`); code != 409 || out["error"] != "vault_locked" {
-		t.Errorf("a nonce of a locked vault: %d %v", code, out)
+		t.Errorf("a nonce of a vault whose key is forgotten: %d %v", code, out)
 	}
-	refused("a locked vault", a.assertion(t, nonce, c.origin))
-	if _, list := c.do("GET", "/api/p/vault", ""); list["guard"] != nil {
-		t.Errorf("the guard of a locked vault: %v", list["guard"])
+	if code, out := c.do("POST", "/api/p/vault/session", mustJSON(map[string]any{"proof": a.assertion(t, nonce, c.origin)})); code != 409 || out["error"] != "vault_locked" {
+		t.Errorf("a proof of a vault whose key is forgotten: %d %v", code, out)
 	}
 
 	// A new passphrase ends the authenticators.
@@ -600,5 +648,68 @@ func TestVerifyEveryAllowCoversValuesAndGrants(t *testing.T) {
 	}
 	if !strings.Contains(h.auditLog(), "denied.vault_proof") {
 		t.Errorf("audit %s", h.auditLog())
+	}
+}
+
+// Without a session the list says only what offering biometrics needs: the
+// kinds of authenticator this page can prove with, not their ids, labels
+// or use, nor the rule, the exempt apps or when the key goes; the nonce
+// names the credentials, for the origin the core vouches for.
+func TestListWithoutASession(t *testing.T) {
+	p, h, _ := newTest(t)
+	withMachines(h, "mac")
+	c := newClient(p, h)
+	c.origin = testOrigin
+	c.session(t)
+	a := newAuthenticator(t)
+	c.register(t, a)
+	if code, out := c.do("POST", "/api/p/vault/exempt", mustJSON(map[string]any{"app": "claude", "machines": []string{"m1"}, "passphrase": pass})); code != 200 {
+		t.Fatalf("exempt %d %v", code, out)
+	}
+	if code, _ := c.do("POST", "/api/p/vault/guard", `{"verifyEachAllow":true}`); code != 200 {
+		t.Fatal(code)
+	}
+	_, full := c.do("GET", "/api/p/vault", "")
+	g := full["guard"].(map[string]any)
+	auths := g["authenticators"].([]any)
+	if g["full"] != true || len(g["exempt"].([]any)) != 1 || g["verifyEachAllow"] != true || auths[0].(map[string]any)["label"] != "Touch ID" {
+		t.Fatalf("with a session: %v", g)
+	}
+	if full["autoLock"].(map[string]any)["keyUntil"] == nil {
+		t.Errorf("auto-lock with a session: %v", full["autoLock"])
+	}
+	bare := func() map[string]any {
+		t.Helper()
+		_, out := c.do("GET", "/api/p/vault", "")
+		b, _ := json.Marshal(out)
+		for _, hidden := range []string{"claude", "Touch ID", enc(a.id), auths[0].(map[string]any)["id"].(string), "verifyEachAllow", "exempt", "keyUntil", "lockAt", "lastUsed"} {
+			if strings.Contains(string(b), hidden) {
+				t.Errorf("without a session the list shows %q: %s", hidden, b)
+			}
+		}
+		return out["guard"].(map[string]any)
+	}
+	tok := c.tok
+	c.tok = ""
+	g = bare()
+	if ways := g["authenticators"].([]any); len(ways) != 1 || len(ways[0].(map[string]any)) != 2 || ways[0].(map[string]any)["kind"] != "webauthn" || ways[0].(map[string]any)["origin"] != testOrigin || g["webauthn"] != true {
+		t.Errorf("without a session: %v", g)
+	}
+	// The nonce names the credential, which WebAuthn needs.
+	if _, out := c.nonce(t, `{"for":"session"}`); len(out["credentials"].([]any)) != 1 || out["credentials"].([]any)[0] != enc(a.id) {
+		t.Errorf("the nonce: %v", out)
+	}
+	// From an origin the core does not vouch for, nothing to prove with.
+	c.untrusted = true
+	if g = bare(); len(g["authenticators"].([]any)) != 0 || g["webauthn"] != false {
+		t.Errorf("an origin not vouched for: %v", g)
+	}
+	c.untrusted = false
+	// Locked with the key held, the same.
+	c.tok = tok
+	c.do("POST", "/api/p/vault/lock", "")
+	c.tok = ""
+	if g = bare(); len(g["authenticators"].([]any)) != 1 {
+		t.Errorf("a suspended vault: %v", g)
 	}
 }

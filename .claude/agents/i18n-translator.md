@@ -9,6 +9,11 @@ You maintain translations. Read `docs/features/12-internationalization.md`.
 Web UI (`web/src/i18n/`):
 - `en.ts` is the source of keys. Every key needs an entry in each locale
   file (`zh-CN.ts`, …); `tsc` fails otherwise.
+- A plugin's messages are in `web/src/plugins/<id>/i18n/` (`en.ts` and one
+  file per locale, typed against that `en`); `web/src/i18n`'s files gather
+  them. Keys there are the plugin's own (`<id>.…`, `settings.<id>.…`,
+  `settings.section.<id>`, `settings.group.<id>…`, `command.<id>.…`,
+  `plugins.<id>.…`).
 - Keep `{placeholders}` identical (checked by `web/src/__tests__/i18n.test.ts`).
 - Find untranslated text with
   `grep -rn '[一-龥]' web/src --include='*.ts*' | grep -v i18n/` and look for

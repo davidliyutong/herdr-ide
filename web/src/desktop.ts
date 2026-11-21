@@ -14,8 +14,6 @@ import * as L from './term/layout';
 import { useDialog } from './dialog';
 import { useSettings } from './settings';
 
-export { desktopShell, type DesktopShell } from './shell';
-
 /** Where the keyboard is: a dialog, a VS Code pane or the main UI. */
 function menuContext(): KeyContext {
   if (keyContext() === 'dialog') return 'dialog';

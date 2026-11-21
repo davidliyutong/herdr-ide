@@ -261,7 +261,6 @@ function ImportDialog() {
     return (
       <Modal title={t('vault.import.title')} onSubmit={() => void read()}>
         <div className="dialog-body vault-fields">
-          <p className="vault-hint">{t('vault.import.about')}</p>
           <label className="vault-field">
             <span>{t('vault.import.file')}</span>
             <input
@@ -295,10 +294,6 @@ function ImportDialog() {
   return (
     <Modal title={t('vault.import.title')} wide onSubmit={() => void commit()}>
       <div className="dialog-body vault-fields">
-        <p className="vault-hint">
-          {t('vault.import.holds', { n: preview.variables.length, file: file?.name ?? '' })}
-          {preview.exported && ` ${t('vault.import.exported', { date: new Date(preview.exported).toLocaleString() })}`}
-        </p>
         {anyExists && (
           <label className="vault-import-bulk">
             <span>{t('vault.import.existing')}</span>

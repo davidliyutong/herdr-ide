@@ -481,7 +481,7 @@ body.resizing-row .git-history-resizer {
   color: var(--fg-dim);
 }
 .git-badge.tag {
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 .git-badge.head,
 .git-badge.stash {

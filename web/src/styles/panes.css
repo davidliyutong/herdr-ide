@@ -1,0 +1,141 @@
+/* ---------- VS Code and preview panes ---------- */
+/* VS Code panes' windows (CodeLayer.tsx), placed over their panes' bodies
+ * (.code-slot) by codeFrames.ts: above the panes' bodies, below the split
+ * handles (4), a header's menu (5) and everything that floats. */
+/* The VS Code panes' iframes lie over the workspace's area of the grid and
+ * are clipped to it: placed relative to it, they move with it when the
+ * sidebar opens or changes width, and a frame not placed again yet never
+ * covers the sidebar or the status bar. */
+.code-layer {
+  grid-area: main;
+  position: relative;
+  overflow: hidden;
+  z-index: 2;
+  pointer-events: none;
+}
+.code-frame {
+  position: absolute;
+  display: none;
+  border: 0;
+  background: var(--bg);
+  pointer-events: auto;
+}
+.code-slot {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+/* In place of VS Code when it has none: why, and how to get it back. */
+.code-off {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+  color: var(--fg-dim);
+}
+.code-off button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pdf-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg);
+}
+.preview {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  outline: none;
+}
+.preview-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  height: var(--h-toolbar);
+  padding: 0 4px 0 10px;
+  font-size: var(--fs-md);
+  border-bottom: 1px solid var(--line);
+}
+.preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  position: relative;
+  background: repeating-conic-gradient(var(--checker-a) 0% 25%, var(--checker-b) 0% 50%) 50% / 20px 20px;
+}
+.preview-body img,
+.preview-body video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  margin: auto;
+}
+.preview-body audio {
+  margin: auto;
+}
+.text-preview {
+  margin: 0;
+  padding: 10px 14px;
+  width: 100%;
+  min-height: 100%;
+  font:
+    12px/1.45 'JetBrains Mono',
+    'SF Mono',
+    Menlo,
+    monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--bg);
+}
+.markdown-preview {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  padding: 16px 20px;
+  background: var(--bg);
+  font-size: var(--ds-font-size-base);
+}
+.markdown-preview img {
+  max-height: none;
+  margin: 0;
+}
+.markdown-preview > .markdown {
+  max-width: 820px;
+  margin: 0 auto;
+}
+.dir-list {
+  width: 100%;
+  background: var(--bg);
+  min-height: 100%;
+}
+.dir-entry {
+  display: flex;
+  gap: 8px;
+  min-height: var(--h-row);
+  padding: 2px 12px;
+  cursor: pointer;
+  align-items: center;
+}
+.dir-entry:hover {
+  background: var(--bg-3);
+}
+.dir-entry .ellipsis {
+  flex: 1;
+}

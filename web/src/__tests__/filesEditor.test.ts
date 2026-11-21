@@ -130,6 +130,7 @@ import type { MachineState } from '../lib/machine';
 import { t } from '../i18n';
 import { CHECK_MS, EditorPane, loadText, versionOf } from '../plugins/files/EditorPane';
 import { registerQuickDiff } from '../plugins/files/quickDiff';
+import { useGoneFiles } from '../plugins/files/gone';
 import { useSettings } from '../settings';
 import { MIXED_LINE_ENDINGS } from '../eol';
 import { settle } from './fakeTerms';
@@ -466,6 +467,51 @@ describe('EditorPane', () => {
       expect(editor.model?.getValue()).toBe('hello there');
       expect(editor.model?.edits).toBe(1);
       expect(host.querySelector('.files-dirty')).toBeNull();
+    });
+
+    it('keeps the text of a file removed on the machine, and marks it gone until it is back', async () => {
+      const gone = () => !!useGoneFiles.getState().gone['m\n/home/u/notes.txt'];
+      await renderNow();
+      expect(gone()).toBe(false);
+      file = undefined;
+      await advance(CHECK_MS);
+      expect(gone()).toBe(true);
+      expect(editor.model?.getValue()).toBe('hello');
+      expect(host.querySelector('.files-conflict')).toBeNull();
+      file = { text: 'hello', size: 5, mtime: 7000 };
+      await advance(CHECK_MS);
+      expect(gone()).toBe(false);
+      expect(editor.model?.getValue()).toBe('hello');
+    });
+
+    it('keeps unsaved changes of a file removed, and says when it is back as loaded', async () => {
+      const gone = () => !!useGoneFiles.getState().gone['m\n/home/u/notes.txt'];
+      await renderNow();
+      await act(async () => editor.model!.setValue('typed'));
+      file = undefined;
+      await advance(CHECK_MS);
+      expect(gone()).toBe(true);
+      expect(host.querySelector('.files-conflict')?.textContent).toContain(t('files.conflict.removed', { name: 'notes.txt' }));
+      expect(editor.model?.getValue()).toBe('typed');
+      // Back with other text: the bar says so.
+      file = { text: 'other', size: 5, mtime: 9000 };
+      await advance(CHECK_MS);
+      expect(gone()).toBe(false);
+      expect(host.querySelector('.files-conflict')?.textContent).toContain(t('files.conflict.changed', { name: 'notes.txt' }));
+      // Back as it was loaded (from the trash): nothing to resolve, the changes still unsaved.
+      file = { text: 'hello', size: 5, mtime: 7000 };
+      await advance(CHECK_MS);
+      expect(host.querySelector('.files-conflict')).toBeNull();
+      expect(host.querySelector('.files-dirty')).not.toBeNull();
+      expect(editor.model?.getValue()).toBe('typed');
+      // Removed again and saved over: the file is made again, the mark goes.
+      file = undefined;
+      await advance(CHECK_MS);
+      expect(gone()).toBe(true);
+      await act(async () => button(t('files.conflict.overwrite'))!.click());
+      await advance(0);
+      expect(writes.at(-1)?.q.get('force')).toBe('1');
+      expect(gone()).toBe(false);
     });
 
     it('keeps what was typed while the file was loading again, and offers the change', async () => {

@@ -21,23 +21,30 @@ type terminalColors struct {
 // Setting keys the core itself does not read are named here for tests and
 // the clients' documentation; the clients use the same strings.
 const (
-	Language     = "appearance.language"
-	Theme        = "appearance.theme"
-	ColorTheme   = "appearance.colorTheme"
-	UIFontSize   = "appearance.uiFontSize"
-	Zoom         = "window.zoom"
-	FontFamily   = "terminal.fontFamily"
-	FontSize     = "terminal.fontSize"
-	Scrollback   = "terminal.scrollback"
-	UndoClose    = "layout.undoClose"
-	MutedAgents  = "notifications.mutedAgents"
-	SchemePrefix = "terminal.colorScheme."
-	ColorsPrefix = "terminal.colors."
+	Language   = "appearance.language"
+	Theme      = "appearance.theme"
+	ColorTheme = "appearance.colorTheme"
+	UIFontSize = "appearance.uiFontSize"
+	Zoom       = "window.zoom"
+	FontFamily = "terminal.fontFamily"
+	FontSize   = "terminal.fontSize"
+	Scrollback = "terminal.scrollback"
+	UndoClose  = "layout.undoClose"
+	// KeptTerminals is how many terminals a page keeps attached, hidden,
+	// besides the ones it shows.
+	KeptTerminals = "performance.keptTerminals"
+	MutedAgents   = "notifications.mutedAgents"
+	SchemePrefix  = "terminal.colorScheme."
+	ColorsPrefix  = "terminal.colors."
 )
 
 // SSHEnv is read by the core: whether the new terminals of an ssh machine
 // get the variables of its ssh session (internal/server/sshenv.go).
 const SSHEnv = "terminal.sshEnv"
+
+// MaxKeptTerminals is the most terminals a page keeps attached while they
+// are not shown: each holds a stream and an emulator with its scrollback.
+const MaxKeptTerminals = 64
 
 // MaxScrollback is the most lines a terminal keeps above its screen.
 const MaxScrollback = 100_000
@@ -80,7 +87,13 @@ func defs() []settings.Def {
 	cursorMin, cursorMax := rng(0.5, 4)
 	scrollMin, scrollMax := rng(0, MaxScrollback)
 	undoMin, undoMax := rng(MinUndoClose, MaxUndoClose)
+	keptMin, keptMax := rng(0, MaxKeptTerminals)
 	out := []settings.Def{
+		// Performance: the terminals a page keeps attached while another tab,
+		// workspace or machine is shown (the web UI's keptPanes.ts); 0 keeps none.
+		{Key: KeptTerminals, Type: settings.TypeNumber, Default: 12, Min: keptMin, Max: keptMax, Integer: true, Step: 1,
+			Section: "performance", Order: 10},
+
 		// Appearance.
 		{Key: Theme, Type: settings.TypeEnum, Default: "system", Enum: []string{"system", "light", "dark"},
 			Section: "appearance", Order: 10},
@@ -200,6 +213,7 @@ var Module = settings.Module{
 		{ID: "terminal", Order: 30},
 		{ID: "colors", Order: 40},
 		{ID: "notifications", Order: 50},
+		{ID: "performance", Order: 90, Advanced: true},
 	},
 	Defs: defs(),
 	Migrations: []settings.Migration{

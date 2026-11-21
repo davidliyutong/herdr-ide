@@ -338,6 +338,52 @@ describe('usage panel and status item', () => {
     expect(host.querySelector('.usage-money')!.textContent).toBe('Credits: 12.50 CNY · Extra usage: 3.00 CNY of 50.00 CNY');
   });
 
+  it('shows OpenCode from its spend alone: a tile after the others, a page without accounts', async () => {
+    const today = new Date();
+    const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const row = (provider: string, model: string, cost: number): CostRow => ({
+      day,
+      provider,
+      model,
+      machine: 'local',
+      input: 100,
+      cached: 1000,
+      cacheWrite: 10,
+      output: 25,
+      reasoning: 5,
+      requests: 1,
+      cost,
+      priced: cost > 0,
+    });
+    useUsage.setState({
+      snapshot: snapshot([account('claude:b', [30])]),
+      cost: {
+        generatedAt: Math.floor(Date.now() / 1000),
+        days: 90,
+        weekHours: 168,
+        monthHours: 750,
+        machines: { local: { files: 2, unpriced: ['opencode/glm-5'], failed: ['opencode:too_large'] } },
+        rows: [row('opencode', 'deepseek-v4-flash', 0.25), row('opencode', 'glm-5', 0), row('claude', 'claude-opus-4-6', 1)],
+      },
+    });
+    await act(async () => root.render(createElement(UsagePanel)));
+    const tiles = [...host.querySelectorAll<HTMLButtonElement>('.usage-tile')];
+    expect(tiles.map((b) => b.dataset.provider ?? 'overview')).toEqual(['overview', 'claude', 'opencode']);
+    // A log the machine could not read says so, with why.
+    const errors = [...host.querySelectorAll('.callout.error')].map((e) => e.textContent);
+    expect(errors).toEqual(['local: could not read OpenCode (too_large); its spend is as last read.']);
+    const tile = tiles[2];
+    expect(tile.textContent).toBe('OpenCode');
+    expect(tile.style.getPropertyValue('--brand')).toBe('var(--usage-opencode)');
+    expect(tile.querySelector('.ai-logo svg')).not.toBeNull();
+    expect(tile.querySelector('.usage-tile-meter i')).toBeNull();
+    await act(async () => tile.click());
+    expect(host.querySelector('.usage-card[data-account]')).toBeNull();
+    const spend = host.querySelector<HTMLElement>('.usage-spend')!;
+    expect(spend.textContent).toContain('$0.25');
+    expect(spend.textContent).toContain('deepseek-v4-flash');
+  });
+
   it('does not keep the core asking from a hidden page', async () => {
     vi.useFakeTimers();
     const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');

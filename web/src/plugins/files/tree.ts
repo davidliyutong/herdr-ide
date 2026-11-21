@@ -15,11 +15,21 @@ import { selectAll, selectOnly, selectRange, selectToggle, type NavRow } from '.
 import { filesApi, type Entry } from './api';
 
 /** A directory's listing; error is why the last listing failed (the
- * entries listed before are kept). */
+ * entries listed before are kept), failures how many failed in a row. */
 export interface Dir {
   entries?: RemoteStat[];
   error?: string;
+  failures?: number;
   loading?: boolean;
+}
+
+/** The error the tree shows for a directory: when nothing of it is listed,
+ * or when its listing failed again. A listing that fails once (a machine
+ * busy unpacking an archive, a request that timed out) keeps the entries
+ * without a word, and the next poll lists it again. */
+export function shownError(d: Dir | undefined): string | undefined {
+  if (!d?.error) return undefined;
+  return !d.entries || (d.failures ?? 0) > 1 ? d.error : undefined;
 }
 
 /** A name being typed in the tree: a rename of path, or a new file or
@@ -37,6 +47,8 @@ export interface Clipboard {
 
 export interface TreeState {
   m?: string;
+  /** The workspace (of machine m) the root was taken for. */
+  ws?: string;
   root?: string;
   /** The root follows the focused terminal's directory: this browser's
    * choice, else the setting files.followFocus. */
@@ -332,24 +344,31 @@ function pruned(s: TreeState, root: string): Pick<TreeState, 'dirs' | 'mtimes' |
   return { dirs, mtimes, expanded };
 }
 
-/** Shows machine m's tree rooted at root; another machine starts afresh.
- * Another root clears the selection (its rows may be gone, and a key
- * must not act on rows not shown) and keeps only what is below it. */
-export function showRoot(m: string, root: string) {
+/** Shows machine m's tree rooted at root, taken for its workspace ws (the
+ * one recorded before on the same machine when not given); another machine
+ * starts afresh. Another root clears the selection (its rows may be gone,
+ * and a key must not act on rows not shown) and keeps only what is below
+ * it. */
+export function showRoot(m: string, root: string, ws?: string) {
   const s = useTree.getState();
-  if (s.m === m && s.root === root) return;
+  const place = ws ?? (s.m === m ? s.ws : undefined);
+  if (s.m === m && s.root === root) {
+    if (s.ws !== place) set({ ws: place });
+    return;
+  }
   if (s.m !== m) {
     generation++;
-    set({ m, root, dirs: {}, mtimes: {}, expanded: {}, selection: [], cursor: undefined, anchor: undefined, edit: undefined });
-  } else set((st) => ({ root, ...pruned(st, root), selection: [], cursor: undefined, anchor: undefined, edit: undefined }));
+    set({ m, ws: place, root, dirs: {}, mtimes: {}, expanded: {}, selection: [], cursor: undefined, anchor: undefined, edit: undefined });
+  } else set((st) => ({ ws: place, root, ...pruned(st, root), selection: [], cursor: undefined, anchor: undefined, edit: undefined }));
   const st = useTree.getState();
   for (const p of shownDirs(st)) if (!st.dirs[p]?.entries && !st.dirs[p]?.loading) void loadDir(p);
 }
 
 /** Lists a directory (again). A failure keeps the entries listed before,
- * with the error beside them. mtime is the modification time a poll saw,
- * recorded once the listing succeeds: after a failure the next poll tries
- * again. A listing of a directory no longer below the root is dropped. */
+ * with the error beside them (shownError), and forgets the time recorded
+ * for it: the next poll lists it again, whatever started this listing.
+ * mtime is the modification time a poll saw, recorded once the listing
+ * succeeds. A listing of a directory no longer below the root is dropped. */
 export async function loadDir(path: string, mtime?: number) {
   const { m } = useTree.getState();
   if (!m) return;
@@ -357,7 +376,8 @@ export async function loadDir(path: string, mtime?: number) {
   set((s) => ({ dirs: { ...s.dirs, [path]: { ...s.dirs[path], loading: true } } }));
   const wanted = (s: TreeState) => gen === generation && !!s.root && within(path, s.root);
   try {
-    const { entries } = await listDir(m, path);
+    // An empty directory's entries may come as null.
+    const entries = (await listDir(m, path)).entries ?? [];
     set((s) => {
       if (!wanted(s)) return {};
       const dirs = { ...s.dirs, [path]: { entries } };
@@ -365,7 +385,13 @@ export async function loadDir(path: string, mtime?: number) {
     });
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
-    set((s) => (wanted(s) ? { dirs: { ...s.dirs, [path]: { entries: s.dirs[path]?.entries, error } } } : {}));
+    set((s) => {
+      if (!wanted(s)) return {};
+      const was = s.dirs[path];
+      const mtimes = { ...s.mtimes };
+      delete mtimes[path];
+      return { dirs: { ...s.dirs, [path]: { entries: was?.entries, error, failures: (was?.failures ?? 0) + 1 } }, mtimes };
+    });
   }
 }
 
@@ -430,11 +456,11 @@ export function setClipboard(clipboard: Clipboard | undefined) {
 
 /** The directories a poll checks: the shown ones (the root, and the
  * expanded directories below it not in a collapsed folder) that are
- * listed, at most MAX_POLLED. */
+ * listed or whose listing failed, at most MAX_POLLED. */
 export const MAX_POLLED = 200;
 export function polledDirs(s: Pick<TreeState, 'root' | 'expanded' | 'dirs' | 'hidden' | 'exclude'>): string[] {
   return shownDirs(s)
-    .filter((p) => p === s.root || s.dirs[p]?.entries)
+    .filter((p) => p === s.root || s.dirs[p]?.entries || s.dirs[p]?.error)
     .slice(0, MAX_POLLED);
 }
 

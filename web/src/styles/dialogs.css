@@ -1,0 +1,212 @@
+/* ---------- dialogs ---------- */
+.modal.dialog {
+  width: min(480px, 94vw);
+  box-shadow: 0 18px 50px var(--shadow);
+}
+.dialog-body {
+  padding: 14px 16px 4px;
+  line-height: 1.5;
+}
+.dialog-check {
+  margin-top: 10px;
+  align-items: flex-start;
+}
+.dialog-check input {
+  margin-top: 4px;
+}
+.risk-dialog p,
+.risk-dialog ul {
+  margin: 0 0 8px;
+}
+.risk-dialog ul {
+  padding-left: 20px;
+}
+.risk-dialog .dialog-check {
+  font-weight: 600;
+}
+.dialog-body.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dialog-body.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dialog-body.form label > span {
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+}
+.dialog-body.form input {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  height: var(--h-toolbar);
+  padding: 0 8px;
+  outline: none;
+}
+.dialog-body.form input:focus {
+  border-color: var(--accent);
+}
+/* Before the app closes: the files with unsaved changes, each with where
+   it is and Show. */
+.unsaved-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  max-height: 14rem;
+  overflow: auto;
+}
+.unsaved-file {
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 8px;
+}
+.unsaved-file + .unsaved-file {
+  border-top: 1px solid var(--line);
+}
+.unsaved-place {
+  font-size: var(--fs-md);
+}
+.dir-suggestions {
+  margin-top: -6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  max-height: 14rem;
+  overflow: auto;
+}
+.dir-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.dir-suggestion .lucide {
+  color: var(--fg-mute);
+}
+.dir-suggestion:hover,
+.dir-suggestion.sel {
+  background: var(--bg-3);
+}
+/* The Add Machine dialog's hosts of ~/.ssh/config: alias, then where it
+   connects, dimmed at the right. */
+.ssh-hosts-caption {
+  padding: 4px 8px 2px;
+}
+.ssh-hosts .dir-suggestion {
+  min-width: 0;
+}
+.ssh-host-detail {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--mono);
+}
+.download-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.download-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+}
+.download-path-text {
+  direction: rtl;
+  text-align: left;
+}
+/* Narrows a long folder's entries by name. */
+.download-filter {
+  width: 100%;
+}
+.download-list {
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  height: min(18rem, 50vh);
+  overflow: auto;
+  padding: 2px 0;
+}
+.download-list > .muted,
+.download-list > .error {
+  padding: 6px 8px;
+}
+.download-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  min-width: 0;
+}
+.download-row:hover,
+.download-row.sel {
+  background: var(--bg-3);
+}
+.download-row .lucide {
+  flex: none;
+  color: var(--fg-mute);
+}
+.download-row.download-all {
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--line-2);
+}
+.download-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+}
+button.download-name {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.download-name:hover {
+  text-decoration: underline;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 16px 16px;
+}
+.dialog-actions button {
+  min-height: var(--h-toolbar);
+  padding: 0 14px;
+}
+/* A fourth answer (Skip) stands apart, at the start of the row. */
+.dialog-actions .dialog-extra {
+  margin-right: auto;
+}
+button.primary,
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+button.primary.danger {
+  background: var(--error);
+  border-color: var(--error);
+}
+button.primary:hover,
+.btn.primary:hover {
+  background: var(--accent);
+  filter: brightness(1.1);
+}

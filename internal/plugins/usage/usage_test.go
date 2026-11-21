@@ -418,7 +418,7 @@ func TestSettings(t *testing.T) {
 	st.Set(SettingKimiRefresh, "", false)
 	st.Set(SettingCodexHomes, "", []any{"~/work-codex"})
 	o := p.options()
-	if slices.Contains(o.Providers, "deepseek") || len(o.Providers) != 5 || o.ClaudeKeychain || o.KimiRefresh || !slices.Equal(o.CodexHomes, []string{"~/work-codex"}) {
+	if slices.Contains(o.Providers, "deepseek") || len(o.Providers) != len(usage.Providers)-1 || o.ClaudeKeychain || o.KimiRefresh || !slices.Equal(o.CodexHomes, []string{"~/work-codex"}) {
 		t.Errorf("options %+v", o)
 	}
 	// A read-only core never has Kimi Code's sign-in renewed (it rewrites
@@ -428,7 +428,7 @@ func TestSettings(t *testing.T) {
 		t.Errorf("writable core: %+v", o)
 	}
 	p.host = &fakeHost{st: st, readOnly: true}
-	if o := p.options(); o.KimiRefresh || len(o.Providers) != 5 {
+	if o := p.options(); o.KimiRefresh || len(o.Providers) != len(usage.Providers)-1 {
 		t.Errorf("read-only core: %+v", o)
 	}
 	p.host = &fakeHost{readOnly: true}
@@ -812,12 +812,25 @@ func TestSkippedAnswersReplaceStandIns(t *testing.T) {
 }
 
 // Each provider's switch and options share one group, and the groups
-// follow usage.Providers.
+// follow usage.Providers, after the groups of the other settings: every
+// setting has a group, so none shows under another's heading.
 func TestProviderGroups(t *testing.T) {
 	groups := map[string]string{}
 	orders := map[string][]int{}
+	general := 0
 	for _, d := range Settings.Defs {
-		if d.Group == "" || strings.HasPrefix(d.Group, "usageAdaptive") {
+		if d.Group == "" {
+			t.Errorf("%s has no group", d.Key)
+		}
+		if slices.Contains([]string{groupRefresh, groupAlerts, groupSpend}, d.Group) {
+			general = max(general, d.Order)
+		}
+	}
+	for _, d := range Settings.Defs {
+		if strings.HasPrefix(d.Key, "usage.providers.") && d.Order <= general {
+			t.Errorf("%s (order %d) before the other settings (to %d)", d.Key, d.Order, general)
+		}
+		if d.Group == "" || slices.Contains([]string{groupRefresh, groupAlerts, groupSpend}, d.Group) {
 			continue
 		}
 		orders[d.Group] = append(orders[d.Group], d.Order)

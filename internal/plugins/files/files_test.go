@@ -2,11 +2,15 @@ package files
 
 import (
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
+	"herdr-ide/internal/machines"
 	"herdr-ide/internal/plugin"
 )
 
@@ -16,21 +20,62 @@ func TestRoutes(t *testing.T) {
 		if !rt.Machine {
 			t.Errorf("%s is not a machine's route", rt.Path)
 		}
-		// Everything but the stat (a POST for the length of its paths)
-		// changes files: guarded and audited.
-		if rt.Path == "stat" {
-			if rt.Mutating || rt.Method != http.MethodPost {
+		// Everything but the stat (a POST for the length of its paths) and
+		// asking whether Reveal in Finder is offered changes files or runs a
+		// program: guarded and audited.
+		if rt.Path == "stat" || rt.Method == http.MethodGet {
+			if rt.Mutating || (rt.Path == "stat") != (rt.Method == http.MethodPost) {
 				t.Errorf("%s %s: mutating %v", rt.Method, rt.Path, rt.Mutating)
 			}
 		} else if rt.Method != http.MethodPost || !rt.Mutating || rt.Audit != rt.Path {
 			t.Errorf("%s %s: mutating %v, audit %q", rt.Method, rt.Path, rt.Mutating, rt.Audit)
 		}
-		seen[rt.Path] = true
+		seen[rt.Method+" "+rt.Path] = true
 	}
-	for _, p := range []string{"stat", "mkdir", "mkdirs", "create", "rename", "move", "copy", "trash", "remove", "write", "upload"} {
-		if !seen[p] {
+	for _, p := range []string{"stat", "mkdir", "mkdirs", "create", "rename", "move", "copy", "trash", "remove", "write", "upload", "reveal"} {
+		if !seen["POST "+p] {
 			t.Errorf("no route %s", p)
 		}
+	}
+	if !seen["GET reveal"] {
+		t.Error("no route GET reveal")
+	}
+}
+
+// Reveal in Finder only for the core's own machine and a client on the
+// core's host: anything else is refused before the machine is asked.
+func TestRevealGate(t *testing.T) {
+	logger := log.New(io.Discard, "", 0)
+	mg := machines.NewManager([]machines.Spec{
+		{ID: "far", Label: "far", Kind: machines.KindSSH, Target: "far", Enabled: false},
+		{ID: "here", Label: "here", Kind: machines.KindLocal, Enabled: false},
+	}, nil, logger)
+	run := func(m string, sameHost bool) (int, string, bool) {
+		c := &plugin.Call{Machine: mg.Get(m), SameHost: sameHost}
+		w := httptest.NewRecorder()
+		reveal(c, w, httptest.NewRequest("POST", "/reveal", strings.NewReader(`{"path":"/tmp"}`)))
+		var body map[string]string
+		json.Unmarshal(w.Body.Bytes(), &body)
+		a := httptest.NewRecorder()
+		revealAvailable(c, a, httptest.NewRequest("GET", "/reveal", nil))
+		var avail map[string]bool
+		json.Unmarshal(a.Body.Bytes(), &avail)
+		if c.AuditFields()["path"] != "/tmp" {
+			t.Errorf("%s: audit %v", m, c.AuditFields())
+		}
+		return w.Code, body["error"], avail["available"]
+	}
+	if code, e, ok := run("far", true); code != 400 || e != "remote_machine" || ok {
+		t.Errorf("remote machine: %d %s %v", code, e, ok)
+	}
+	if code, e, ok := run("here", false); code != 403 || e != "local_only" || ok {
+		t.Errorf("another computer's browser: %d %s %v", code, e, ok)
+	}
+	// Past the gate, the local machine's agent is asked (here not connected).
+	code, e, ok := run("here", true)
+	if supported := runtime.GOOS == "darwin" || runtime.GOOS == "linux"; supported && (code != http.StatusConflict || e != "offline" || !ok) ||
+		!supported && (e != "reveal_unavailable" || ok) {
+		t.Errorf("the core's host: %d %s %v", code, e, ok)
 	}
 }
 

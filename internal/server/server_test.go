@@ -851,3 +851,27 @@ func closeReason(err error) string {
 	}
 	return ""
 }
+
+// The core's own usage is an amount of each thing, for any client that reads.
+func TestPerfEndpoint(t *testing.T) {
+	s := newTestServer()
+	s.opts.ReadOnly = true
+	h := s.Handler()
+	r := httptest.NewRequest("GET", "/api/perf", nil)
+	r.Host = "localhost:7780"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/perf: %d %s", w.Code, w.Body)
+	}
+	var u struct {
+		CPUMs      *int64 `json:"cpu_ms"`
+		Memory     uint64 `json:"memory"`
+		Goroutines int    `json:"goroutines"`
+		UptimeMs   *int64 `json:"uptime_ms"`
+		CPUs       int    `json:"cpus"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &u); err != nil || u.CPUMs == nil || u.UptimeMs == nil || u.Memory == 0 || u.Goroutines < 1 || u.CPUs < 1 {
+		t.Fatalf("usage: %s (%v)", w.Body, err)
+	}
+}

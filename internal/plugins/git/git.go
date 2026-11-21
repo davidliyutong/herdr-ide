@@ -7,8 +7,6 @@
 package git
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -93,9 +91,7 @@ func read(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.Req
 			plugin.WriteError(w, err)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), readTimeout)
-		defer cancel()
-		forward(ctx, c, w, action, p)
+		plugin.ForwardJSON(c, w, r, "git", action, p, readTimeout)
 	}
 }
 
@@ -106,9 +102,7 @@ func change(action string) func(c *plugin.Call, w http.ResponseWriter, r *http.R
 			plugin.WriteError(w, err)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), writeTimeout)
-		defer cancel()
-		err := forward(ctx, c, w, action, p)
+		err := plugin.ForwardJSON(c, w, r, "git", action, p, writeTimeout)
 		// The framework audits git.<action> with its status once this
 		// returns; this records what was changed and how it ended.
 		fields := auditFields(p)
@@ -160,25 +154,4 @@ func auditFields(p map[string]any) map[string]any {
 		f["paths"] = n
 	}
 	return f
-}
-
-// forward runs the action on the machine and answers its result, or the
-// error it returns.
-func forward(ctx context.Context, c *plugin.Call, w http.ResponseWriter, action string, p map[string]any) error {
-	if c.Machine == nil {
-		plugin.WriteError(w, plugin.ErrOffline)
-		return plugin.ErrOffline
-	}
-	var out json.RawMessage
-	if err := plugin.Request(ctx, c.Machine, "git", action, p, &out); err != nil {
-		plugin.WriteError(w, err)
-		return err
-	}
-	if len(out) == 0 {
-		out = json.RawMessage("{}")
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(out)
-	return nil
 }

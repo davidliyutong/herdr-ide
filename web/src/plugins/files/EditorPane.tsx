@@ -21,9 +21,10 @@ import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../u
 import type { PaneViewProps } from '../api';
 import { createEditor, setLanguage, type CodeEditor, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, errorText, FilesError, filesApi, type Entry } from './api';
-import { keepEditor, reveal } from './ops';
+import { keepEditor, loadRevealable, reveal } from './ops';
 import { lineChanges, quickDiff, type LineChange } from './quickDiff';
 import { useDecorationVersion } from './decorations';
+import { noteFile } from './gone';
 import { startPolling } from './poller';
 import { isMediaPath, MediaView } from '../../components/PreviewPane';
 import { isMixed, restoreEols, useMixedLineEndings } from '../../eol';
@@ -125,6 +126,13 @@ export async function loadText(m: string, path: string): Promise<Loaded> {
   return { kind: 'text', text: bom ? text.slice(1) : text, version: { ...(version ?? { size: buf.length, mtime: 0 }), bom } };
 }
 
+/** Tells gone.ts what a load found: a file there, or none (404); a file
+ * that could not be read says nothing. */
+function noteLoaded(m: string, path: string, r: Loaded) {
+  if (r.kind === 'missing') noteFile(m, path, false);
+  else if (r.kind !== 'error') noteFile(m, path, true);
+}
+
 type Status =
   | { kind: 'loading' }
   | { kind: 'ready' }
@@ -144,6 +152,8 @@ export function EditorPane(props: PaneViewProps) {
 function EditorBar({ m, pane, view, children }: Pick<PaneViewProps, 'm' | 'pane' | 'view'> & { children?: React.ReactNode }) {
   const path = String(view.path ?? '');
   const readOnly = useStore((s) => s.readOnly);
+  // Whether the pane's menus offer Reveal in Finder.
+  useEffect(() => loadRevealable(m), [m]);
   return (
     <div className="files-editor-bar">
       {children}
@@ -321,6 +331,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       const model = background ? ed.current?.editor.getModel() : undefined;
       const at = model?.getVersionId();
       const r = await loadText(m, path).catch((e): Loaded => ({ kind: 'error', message: errorText(e) }));
+      noteLoaded(m, path, r);
       if (background && model) {
         if (ed.current?.editor.getModel() !== model) return r; // closed meanwhile
         if (model.getVersionId() !== at) {
@@ -349,6 +360,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       setSaving(true);
       try {
         const r = await filesApi.write(m, path, text, force ? 'force' : (version.current ?? 'new'));
+        noteFile(m, path, true);
         if (r.entry) version.current = { size: r.entry.size, mtime: r.entry.mtime, bom: bom.current };
         raw.current = body;
         setMixed(isMixed(body));
@@ -397,6 +409,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
     (async () => {
       const first = await loadText(m, path).catch((e): Loaded => ({ kind: 'error', message: errorText(e) }));
       if (disposed) return;
+      noteLoaded(m, path, first);
       const held = keptEdit<KeptText>(m, pane)?.path === path;
       if (first.kind !== 'text' && first.kind !== 'missing' && !held) return setStatus(first);
       const el = host.current;
@@ -450,6 +463,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
           try {
             const body = keep ? restoreEols(loaded, model.getValue()) : model.getValue();
             await filesApi.write(m, path, (base?.bom ? BOM : '') + body, base ?? 'new');
+            noteFile(m, path, true);
             return true;
           } catch (err) {
             useStore.getState().toast(t('files.saveFailed', { error: errorText(err) }), undefined, undefined, 'error');
@@ -471,19 +485,31 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   }, [focused]);
 
   // A change on disk: loaded again without unsaved changes, else offered
-  // (not again for the change Keep Editing dismissed). One check at a time,
-  // less often after failures (poller.ts).
+  // (not again for the change Keep Editing dismissed). A file removed keeps
+  // the text, unsaved changes too, and marks the pane's title (gone.ts).
+  // While the conflict bar shows, it says how the file is now, and goes once
+  // the file is back as loaded. One check at a time, less often after
+  // failures (poller.ts).
+  const statusRef = useRef(status);
+  statusRef.current = status;
   useEffect(() => {
-    if (status.kind !== 'ready') return;
+    if (status.kind !== 'ready' && status.kind !== 'conflict') return;
     let live = true;
     const check = async () => {
       if (saving) return;
       const [e] = await filesApi.stat(m, [path]);
       if (!live || !e || e.error) return;
+      noteFile(m, path, e.exists);
       const v = version.current;
       const same = v ? e.exists && e.size === v.size && e.mtime === v.mtime : !e.exists;
-      if (same) return;
+      const now = statusRef.current;
       const disk = diskKey(e);
+      if (now.kind === 'conflict') {
+        if (same) setStatus({ kind: 'ready' });
+        else if (now.disk !== disk) setStatus({ kind: 'conflict', removed: !e.exists, disk });
+        return;
+      }
+      if (same) return;
       if (dirty) {
         if (disk !== dismissed.current) setStatus({ kind: 'conflict', removed: !e.exists, disk });
       } else if (e.exists) await reload(true);

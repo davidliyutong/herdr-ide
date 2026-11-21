@@ -1,0 +1,7 @@
+/* ---------- file-type icons (fileIcons.tsx): colored by --ds-file-icon-* ---------- */
+.file-icon {
+  width: var(--ic);
+  height: var(--ic);
+  flex: none;
+  color: var(--fg-dim);
+}

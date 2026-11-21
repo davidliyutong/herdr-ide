@@ -15,7 +15,7 @@ import { moveToSidebar, panelOfView } from '../panelPanes';
 /** A pane's commands: a terminal's program windows and its folder in VS Code
  * (folder, changes, Git Graph), reloading VS Code, then split, zoom, the
  * pane's menu and close. A header too narrow for them all hides the less
- * important ones (styles.css) and shows the menu's button, which has them;
+ * important ones (styles/workspace.css) and shows the menu's button, which has them;
  * close always stays. Read-only pages get the program windows only. A press
  * leaves the keyboard where it is. */
 export function PaneActions({ m, pane, leaf, zoomed }: { m: string; pane: string; leaf: L.Leaf; zoomed?: boolean }) {

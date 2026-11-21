@@ -44,7 +44,7 @@ identifiers (its executable, `HC_*` variables and state directory).
 - **Rename**: `scripts/rename.sh NEW [--name "Display"] [--module PATH]
   [--dry-run]` replaces the slug, the env prefix and the module path (through
   a placeholder, so an explicit `--module` is never rewritten), moves
-  `cmd/<slug>`, `cmd/<slug>-agent` and `extensions/<slug>-bridge`, sets the
+  `cmd/<slug>` and `extensions/<slug>-bridge`, sets the
   display name in the Go and web brand files, removes generated
   artifacts, and runs the build and brand test.
 - **Migration**: the script appends the old names to the `Legacy*` lists

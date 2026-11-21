@@ -94,7 +94,7 @@ describe('PaneHeader', () => {
     await act(settle);
     // The split starts in p1's folder and goes below p1.
     expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
-      keep: false,
+      keep: true,
       cwd: '/home/u/src',
       display: expect.any(Object),
     });

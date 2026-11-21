@@ -55,10 +55,12 @@ const (
 	// MaxPage the largest.
 	PageSize = 300
 	MaxPage  = 1000
-	// maxStatus bounds the entries of a status; maxPaths the paths of one
-	// change (as many as a status lists).
-	maxStatus = 20000
-	maxPaths  = maxStatus
+	// maxStatus bounds the entries of a status; maxIgnored the paths git
+	// ignores it lists besides them; maxPaths the paths of one change (as
+	// many as a status lists).
+	maxStatus  = 20000
+	maxIgnored = maxStatus
+	maxPaths   = maxStatus
 	// maxArgBytes bounds the paths of one run of git: a change with more
 	// runs git several times (the system limits a command line's length).
 	maxArgBytes = 96 << 10
@@ -293,16 +295,21 @@ type run struct {
 	args    []string
 	stdin   []byte
 	timeout time.Duration
-	// limit bounds the output; over it the run fails with too_large.
+	// limit bounds the output; over it the run fails with too_large, or
+	// with keep git is killed and what it printed so far is the result
+	// (cut).
 	limit int
+	keep  bool
 	// ok are exit codes that are not failures (diff's 1).
 	ok []int
 }
 
-// result is what a run printed.
+// result is what a run printed; cut: the output stopped at the run's
+// limit (a run with keep).
 type result struct {
 	out, err []byte
 	code     int
+	cut      bool
 }
 
 // git runs git in the repository.
@@ -402,6 +409,9 @@ func execGit(ctx context.Context, env *plugin.Env, dir string, read bool, rn run
 	case <-out.over:
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-done
+		if rn.keep {
+			return result{out: out.buf.Bytes(), cut: true}, nil
+		}
 		return result{}, plugin.Errorf("too_large", "git %s printed more than %d bytes", rn.args[0], rn.limit)
 	}
 	if errors.Is(werr, exec.ErrWaitDelay) {

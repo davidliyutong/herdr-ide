@@ -1,4 +1,4 @@
-import type { WebPreferences } from 'electron';
+import type { ConfigureHostResolverOptions, WebPreferences } from 'electron';
 
 // Only the owned core may be shown in native windows. External HTTP(S) links
 // leave the app; file:, javascript:, custom schemes and credential URLs do not.
@@ -61,6 +61,16 @@ export const mainWindowPreferences = {
 /** The session partition of the browser panes' webviews; its cookies,
  * storage and permissions are apart from the app's own. */
 export const BROWSER_PARTITION = 'persist:browser';
+
+/** How the app resolves host names (app.configureHostResolver, once ready;
+ * every session, the browser panes' guests among them): with the system's
+ * resolver (getaddrinfo), as the system's browser and other programs do.
+ * Electron's default on macOS is Chromium's built-in resolver, which reads
+ * the system's DNS servers and asks them itself, so a name the system
+ * resolves another way (a VPN's or a company's DNS for some domains, a
+ * tool that takes over the system's DNS) may not resolve in a pane. It is
+ * Electron's default on Windows and Linux. DNS over HTTPS keeps its default. */
+export const hostResolver: ConfigureHostResolverOptions = { enableBuiltInResolver: false };
 
 /** Whether a URL's host name is one of a computer's own loopback, as the
  * core's guard reads a Host: `localhost` and the names below it, an address

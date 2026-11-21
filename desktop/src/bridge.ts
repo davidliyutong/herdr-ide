@@ -31,6 +31,9 @@ export const channels = {
   /** page → shell, answered: a nonce (a string) to prove; the proof's MAC
    * or null. */
   verifyProve: 'desktop:verify-prove',
+  /** page → shell, answered: what the app's processes use now
+   * (ProcessUsage[] of web/src/shell.ts), for the settings' Performance page. */
+  metrics: 'desktop:metrics',
   /** shell → page: the address a page in a browser pane's webview opened in
    * a window of its own (a URL string); the page shows it in a new tab. */
   browserOpen: 'desktop:browser-open',

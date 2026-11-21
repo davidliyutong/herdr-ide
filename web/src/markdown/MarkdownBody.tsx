@@ -2,7 +2,11 @@
 // once they are loaded. The text is untrusted:
 //  - raw HTML is not enabled (no rehype-raw), so it shows as text;
 //  - a link keeps its href only for http(s) and mailto (links.ts); a relative
-//    one opens a file through the caller, and any other is its text;
+//    one opens a file through the caller, and any other is its text; a web
+//    link names its address in its tooltip, and of a document of a machine
+//    opens as one of its terminals' does (terminal/openLink.ts: localhost
+//    in a browser pane, the rest outside), except that the pane asks before
+//    it makes a port forward: the link's text may hide where it leads;
 //  - an image loads only from a data URL, a blob or a file next to the
 //    document; a remote one becomes a link;
 //  - formulas go through KaTeX with trust off (terminal/mathRender.ts).
@@ -14,6 +18,7 @@ import { Check, Copy } from 'lucide-react';
 import { Code } from '../highlight/Code';
 import { languageByAlias } from '../highlight/languages';
 import { renderMath } from '../terminal/mathRender';
+import { openWebLink } from '../terminal/openLink';
 import { t } from '../i18n';
 import { imageSource, relativePath, safeLink, type MarkdownBase } from './links';
 
@@ -121,6 +126,18 @@ function jumpTo(from: HTMLElement, fragment: string) {
 }
 
 function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) => void) | undefined): Components {
+  // A click on a web link of a machine's document: it opens as a link in
+  // one of that machine's terminals does, but a port forward waits for the
+  // user's word in the pane.
+  const openWeb = (url: string) => {
+    const m = base && !url.startsWith('mailto:') ? base.m : undefined;
+    return m === undefined
+      ? undefined
+      : (e: { preventDefault(): void }) => {
+          e.preventDefault();
+          openWebLink(url, m, { ask: true });
+        };
+  };
   return {
     h1: heading('h1'),
     h2: heading('h2'),
@@ -146,7 +163,7 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
       const safe = safeLink(href);
       if (safe !== undefined) {
         return (
-          <a href={safe} target="_blank" rel="noopener noreferrer">
+          <a href={safe} title={safe} target="_blank" rel="noopener noreferrer" onClick={openWeb(safe)}>
             {children}
           </a>
         );
@@ -173,7 +190,7 @@ function components(base: MarkdownBase | undefined, onOpenPath: ((path: string) 
       const remote = typeof src === 'string' && /^https?:/i.test(src.trim()) ? safeLink(src) : undefined;
       if (remote !== undefined) {
         return (
-          <a href={remote} target="_blank" rel="noopener noreferrer">
+          <a href={remote} title={remote} target="_blank" rel="noopener noreferrer" onClick={openWeb(remote)}>
             {alt || remote}
           </a>
         );

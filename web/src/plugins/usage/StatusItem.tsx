@@ -110,7 +110,6 @@ export function UsageStatusItem() {
             );
           })}
           {today && <div className="usage-hover-today">{today}</div>}
-          <div className="usage-hover-hint muted">{t('usage.hover.hint')}</div>
         </div>
       )}
     </span>

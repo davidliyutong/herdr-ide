@@ -23,7 +23,7 @@ states and settings.
 
 ## Design
 
-**Endpoint** (`internal/server/term.go`). `GET /api/v1/term` is a
+**Endpoint** (`internal/server/term_client.go`). `GET /api/v1/term` is a
 WebSocket behind the guards of every request. Text frames are JSON
 messages, binary frames `[stream u32 LE][kind u8][payload]` with
 herdr-core's kind numbers (0 data, 3 resize, 6 automatic input). The
@@ -60,7 +60,8 @@ A backend that fails reports `backend {state: error, code}`
 (`machine_offline`, `not_bundled`, `not_running`, `install_failed`,
 `start_failed`, `connect_failed`, `disconnected`, `stopped`) and tries
 again after 1 s, doubling to 16 s, or at once when its machine connects. 10 s after its
-last subscriber left it closes its connection; the terminal core and its
+last subscriber left it closes its connection (`termIdle`), and with it
+the streams it kept for terminals' sizes (below); the terminal core and its
 programs keep running. The backend's state is also part of its machine's
 state on `/ws` (`hc {state, code, version}`), for clients that are not
 subscribed, while the backend runs.
@@ -103,8 +104,11 @@ backlog. The core returns at most the output it sent on that stream and
 has not had credit for yet, so an `ack` beyond it is cut to it.
 Input is a binary frame of kind 0, or kind 6 for the answers the
 client's terminal produces by itself. `resize`, `focus` and `facts` go to
-herdr-core as they are; the viewer that was active last sets the
-terminal's size and its display. herdr-core answers programs' color
+herdr-core as they are; the viewer that was active last, among those not
+observing, sets the terminal's size and its display, and a terminal
+without such a viewer gets herdr-core's headless size (200x120 unless the
+user's herdr-core configuration says otherwise,
+[21](21-terminal-core.md)). herdr-core answers programs' color
 queries (OSC 10/11, `CSI ? 996 n`), device attributes and size reports
 itself and keeps those queries from the viewers, from the display facts
 of the viewer active last (colors and cell size), else from its defaults
@@ -119,6 +123,50 @@ or later, no input, size or focus; its focus does not mark a finished
 turn seen either. A connection reads messages of at most 16 MiB.
 `closed` ends a stream with
 herdr-core's reason, or `disconnected` when the backend's connection went.
+
+**The last viewer's stream** (`termBackend.joined`, `left` and `unpark` in
+`internal/server/term_backend.go`, `termClient.release` in
+`term_client.go`). herdr-core's API sets a terminal's size nowhere but in
+a stream, so a terminal whose last viewer detached got the headless size
+at once and its pane's size again at the next attach: with a pane of
+127x38 attached the terminal's record said 127x38, and 200x120 as soon as
+the pane detached. A full-screen program (Claude Code, which draws on the
+alternate screen and scrolls its transcript itself; Codex) was thus laid
+out twice around every detach and attach. It lost its own scroll position
+(Claude Code went to the end when the 120-row layout reached it), and the
+first paint after the attach showed the 200x120 layout until the program
+drew again. The core therefore keeps a terminal's last viewer attached:
+
+- A backend counts, per terminal, its clients' streams that set the size
+  (the ones not observing; `typing`), for the connection it has now.
+- When a client lets go of such a stream, by `detach` or by leaving, and
+  it is the terminal's last one on that connection and the terminal is
+  live in the backend's records, the core does not close it. It tells
+  herdr-core that the viewer's focus is gone when the client had reported
+  it focused, so that the program is told, which herdr-core does not do
+  by itself for a viewer that stays; it stops forwarding the stream's
+  output; and it keeps the stream attached and unread (`parked`), a
+  viewer of the size the terminal has.
+- herdr-core sends an unread stream at most what is left of its 256 KiB
+  of credit, which waits in the core's memory, queues up to 4 MiB behind
+  that and then drops the backlog for a repaint, as for any viewer that
+  falls behind.
+- The kept stream is closed once the terminal's next viewer that sets the
+  size has attached (after herdr-core answered the attach, so the
+  terminal is not without a viewer in between), when the terminal is
+  removed or finishes (`term_events.go`), and with the backend's
+  connection. It belongs to no client: no input, size, focus, display
+  fact or credit of a client reaches it.
+- A stream that ends by itself (its program's end, the backend's
+  connection), an observer's stream and every stream of a terminal but
+  the last are closed as before.
+
+An attach of the size the terminal has resizes nothing, and its first
+paint is exact; a viewer of another size resizes the terminal once. The
+streams are kept by the backend's connection, which closes 10 s after its
+last subscriber: with no client subscribed to the machine at all, its
+terminals still get the headless size. Why the size is not kept another
+way is in [26](26-web-terminals.md#alternatives-considered).
 
 **Layout document.** Clients arrange a machine's terminals in herdr-core's
 document `layout` on that machine, read with `doc.get`, written with
@@ -165,7 +213,15 @@ so every client of the machine shows the same arrangement. Version 2:
   `horizontal` places the children side by side, and `ratio`, the first
   child's share, is clamped to 0.1–0.9. A leaf is a pane, of one of these
   kinds, named by its key in `focused` and the operations:
-  - a terminal `{"terminal": address}`, named by its address;
+  - a terminal `{"terminal": address}`, named by its address. Its leaf
+    may also hold what brings a coding agent back after the terminal core
+    started again ([33](33-workspace-restore.md)): `agent` (the id of an
+    agent running in it that can continue a conversation, `claude` or
+    `codex`) with `pid` (the pid of the terminal's program then), or
+    `resume` (the id of the agent the terminal lost with its program,
+    until a client typed that agent's resume command into it). The ids
+    select a command of the client's own table; a client that does not
+    restore keeps the fields as it keeps unknown ones;
   - VS Code `{"code": {"id", "folder"}}` for a folder of the machine
     (`""`: the one code-server opens), named `code:<id>`
     ([05](05-vscode-panes.md));
@@ -191,7 +247,8 @@ so every client of the machine shows the same arrangement. Version 2:
   them alone stays as well. Clients write version 2.
 - Operations, with the same results in every client: workspaces are
   created (at the end, selected), renamed, closed (the selection moves to
-  the next one, else the one before), moved and selected; a pane opens in
+  the next one, else the one before; closing the last one leaves a
+  document with no workspace, which is valid), moved and selected; a pane opens in
   a new tab of a workspace, or is focused where it already is; tabs are
   named (an empty name removes the name), closed, moved and selected; a
   pane is split, the new pane after it (or before) and focused, its tab
@@ -217,7 +274,15 @@ frame), `store.ts` (terminal records from snapshots and events) and
 `layout.ts` (the layout document's workspaces, tabs and splits as immutable
 values and the operations on them); `web/src/state/terms.ts` follows the
 machines the user turned to, reads their layout documents before editing
-them and writes one change at a time with the version last read.
+them and writes one change at a time with the version last read. It gives
+a machine whose document was never written (`doc.get` answers no value) a
+first workspace without a name; a document without workspaces stays so
+until a pane is opened, which makes one
+([04](04-layout-and-keyboard.md)). It starts terminals with
+`terminal.run`'s `keep: true`, so that herdr-core gives them a new shell
+when it starts again without their programs, and replaces those that
+ended with the core in the layout (`web/src/restore.ts`,
+[33](33-workspace-restore.md)).
 
 ## Alternatives considered
 
@@ -234,13 +299,27 @@ them and writes one change at a time with the version last read.
 
 - **Machine offline or agent session lost** → the backend reports
   `machine_offline` or `disconnected`, open streams close with
-  `disconnected`, and the backend returns when the machine does.
+  `disconnected`, the kept ones go with the connection (the terminals
+  have the headless size meanwhile), and the backend returns when the
+  machine does, with a new snapshot, at which the web UI attaches its
+  panes again ([26](26-web-terminals.md)).
 - **Build without herdr-core** (a plain `go build`) on a machine without a
   terminal core → `not_bundled`.
 - **Client stops reading** → its send queue (8192 messages) fills and the
-  core closes the connection; its streams detach.
-- **Client disconnects** → its streams detach and its subscriptions end;
-  programs keep running.
+  core closes the connection; its streams are let go as for a client that
+  disconnects.
+- **Client disconnects** → the core lets go of its streams and its
+  subscriptions end; programs keep running. The last stream that set a
+  live terminal's size stays attached at the terminal core, the others
+  are closed.
+- **No client is subscribed to a machine for 10 s** (every page closed,
+  the core stopped or started again) → the backend's connection closes
+  with the streams it kept, and the machine's terminals get herdr-core's
+  headless size; the next pane that attaches resizes its terminal once,
+  and a full-screen program lays itself out again.
+- **A client attaches with another size than the kept stream's** (another
+  window size, another font) → the terminal is resized once, as between
+  two viewers.
 - **Call to a machine the client did not subscribe to, or whose backend is
   not ready** → `unavailable`.
 - **Unknown or refused method** → `refused`, audited as `denied.term`.
@@ -263,17 +342,22 @@ variables in `terminal.run`, detected agents in records and events and
 seen by focus, typing into a terminal's shell, a stream's reply before
 its first frame, input, automatic input, credit, size, focus and display
 facts reaching the terminal core, credit cut to the output sent,
-detaching, a program's end, the terminal
-core going away and coming back, read-only (writing calls refused, attaches
+detaching (the last viewer's focus told gone and its stream kept at the
+terminal core until the terminal's next viewer attached), a program's end,
+the terminal core going away and coming back, read-only (writing calls refused, attaches
 observe without display facts, input, size, focus and facts dropped, a
-finished turn not seen, nothing installed), and a machine without a
-terminal core. `web/src/__tests__/term.test.ts` covers the TypeScript client against a
+finished turn not seen, nothing installed), a machine without a
+terminal core, and `TestTermKeepsTheLastViewer` (of two viewers and an
+observer the ones that leave first closed, the last viewer's stream kept,
+an observer not taking its place, the next viewer ending it). `web/src/__tests__/term.test.ts` covers the TypeScript client against a
 scripted socket (frames, names, the store's events, every layout vector,
 subscribing, calls, a stream's reply before its frames, input, credit,
 reconnecting), `terms.test.ts` the browser UI's model (the layout read
 after the terminals, one write at a time with another client's newer
 version taken, ended programs' panes closed, terminals asked for before
-the machine was ready). `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
+the machine was ready, `keep: true` in `terminal.run`), `restore.test.ts`
+terminals that ended with the core replaced in the layout and the leaf's
+`agent`, `pid` and `resume` ([33](33-workspace-restore.md)). `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
 whole path against a real herdr-core: install and start through the agent,
 a shell started, typed into and read by one client, found and watched by a
 second, and killed; `TestIntegrationDetect` an agent's states

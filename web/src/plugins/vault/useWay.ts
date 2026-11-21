@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { t } from '../../i18n';
 import { verifyUser, type Ways } from './proof';
 
-/** "Touch ID", "Windows Hello" or "fingerprint or security key", by the
+/** "Touch ID", "Windows Hello" or "biometrics or security key", by the
  * way offered (the app's prompt first). */
 export function useWayName(ways: Ways): string {
   const [prompt, setPrompt] = useState<'touchid' | 'hello' | null>(null);

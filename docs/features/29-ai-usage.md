@@ -12,7 +12,8 @@ over ssh, and the same account is often signed in on several of them.
 
 The CLIs' logs also record every response's tokens: at API prices they say
 what a subscription is worth (the user's `ai-usage` report did this from a
-script run over ssh).
+script run over ssh). OpenCode, a client of many providers, keeps the
+same in its sessions' database.
 
 ## Goals / non-goals
 
@@ -22,7 +23,8 @@ script run over ssh).
 - Notifications when a window reaches a threshold, starts over, or its pace
   runs it out before its reset.
 - The logs' cost by day, model, project and machine, with weekly and monthly
-  equivalents.
+  equivalents; OpenCode's sessions too, a service with spend and no
+  windows (it has no quota of its own to ask).
 - Credentials stay where they are and are never sent to the core; they
   are read only, except Kimi Code's sign-in, which is renewed in place as
   Kimi Code renews it (its token lasts 15 minutes).
@@ -52,24 +54,42 @@ script run over ssh).
   `skipped` without a request. The agent asks the providers through one
   HTTP client, so polls reuse its connections.
 - `cost {since, tzOffset, codexHomes, providers}`: the logs' tokens and
-  cost by day (the user's), provider, model and project. The scan stops
-  between files when the request ends, keeping what it read.
+  cost by day (the user's), provider, model and project, OpenCode's
+  database among the logs. The scan stops between files when the request
+  ends, keeping what it read.
 - `setDeepseekKey {key}`: writes or removes the key file.
 
 | Provider | Credentials | Asks | Account id |
 | --- | --- | --- | --- |
 | Claude | `~/.claude/.credentials.json` (`$CLAUDE_CONFIG_DIR`) `claudeAiOauth`; on macOS the keychain item `Claude Code-credentials` when the file has none (`usage.claudeKeychain`) | `GET api.anthropic.com/api/oauth/usage` (`anthropic-beta: oauth-2025-04-20`): `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet` (`utilization`, `resets_at`), `extra_usage` (amounts in cents) | `~/.claude.json`'s `oauthAccount.accountUuid`, else `/api/oauth/profile` |
 | Codex | `$CODEX_HOME` or `~/.codex/auth.json`, and each of `usage.codexHomes` | `GET chatgpt.com/backend-api/wham/usage` with `ChatGPT-Account-Id`: `rate_limit.primary_window`/`secondary_window`, `additional_rate_limits`, `credits`, `plan_type`. Without an answer (network) or with an expired token: the newest session log's `rate_limits` (read backwards from its end, and not again while the log is unchanged), as `stale` with `code: from_log` | `tokens.account_id`; email and plan from the id token's claims |
-| Grok | `$GROK_HOME` or `~/.grok/auth.json`, x.ai's issuer first | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` (`X-XAI-Token-Auth: xai-grok-cli`): `creditUsagePercent` (else on-demand used over cap) for the period, `productUsage`; `/v1/settings` for the plan | `user_id` |
+| Grok | `$GROK_HOME` or `~/.grok/auth.json`, x.ai's issuer first | `GET cli-chat-proxy.grok.com/v1/billing?format=credits` (`X-XAI-Token-Auth: xai-grok-cli`): `creditUsagePercent` (else on-demand used over cap) for `currentPeriod`, a window whose kind its length tells: weekly (the subscriptions' credits start over every 7 days, and when the answer gives no period), a session up to a day, monthly from 20 days; `productUsage` per product over the same period; `/v1/settings` for the plan | `user_id` |
 | Antigravity | none: the running language server | `/bin/ps` (else `ps` on the `PATH`) for the agent's user's own Antigravity `language_server` and its `--csrf_token`; its loopback ports (`/proc` on Linux, `/usr/sbin/lsof` on macOS); `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (then HTTP, then an empty body; no connection is kept); without one, `agy -p /usage --output-format json` (20 s, in a process group of its own that is killed when it exits or times out), at most every 10 minutes (the polls in between get its last answer) and not again for 30 minutes after it failed: it takes seconds and a few hundred MB | a hash of the email; agy 1.5 names none, so the email comes from the end of agy's log, `~/.gemini/antigravity-cli/cli.log` (`authenticated successfully as …`), and the account merges with the language server's across machines |
 | Kimi Code | `$KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code*.json`; an ended token of `kimi-code.json` is renewed first (below) | `GET api.kimi.com/coding/v1/usages`, in either shape, the one with more windows (Kimi Code 2.2.0's when they tie): `usages` as Kimi Code 2.2.0 reads it (`limit_5h`, `limit_7d`, `limit_month_total`, and `limit_month_code`, Kimi Code's part of the month, labelled Code; each `used_ratio` 0–1 and `reset_time`; a month taken as 30 days) with `boosterWallet` (extra usage: its balance, used this month and monthly limit, in its currency), or `usage` (weekly) and `limits[]` (`window.duration` × `timeUnit`); numbers may be strings | the token's `user_id` (or `sub`) claim |
 | DeepSeek | the key file the panel writes (the user's choice, first), `DEEPSEEK_API_KEY`, or Claude Code's `settings.json` when its `ANTHROPIC_BASE_URL` is DeepSeek's (`https` on `api.deepseek.com` or another host below `deepseek.com`; a gateway that only has deepseek in its name does not count) | `GET api.deepseek.com/user/balance`: `balance_infos`, `is_available` (no windows) | a hash of the key |
 
-In Settings, each provider has a group of its own, in the table's order,
-holding its switch `usage.providers.<id>` and the options that concern only
-it: Claude `usage.claudeKeychain`, Codex `usage.codexHomes`, Kimi Code
-`usage.kimiRefresh`; the other providers' groups hold the switch only
-(`TestProviderGroups`).
+OpenCode has no row: it is a client of the providers the user set up in
+it, each with an account of its own, and has no quota of its own to ask,
+so it has no account and no windows here, only the spend of its sessions
+(below).
+
+Each provider has a group of settings of its own, in the table's order
+and OpenCode last, holding its switch `usage.providers.<id>` and the
+options that concern only it: Claude `usage.claudeKeychain`, Codex
+`usage.codexHomes`, Kimi Code `usage.kimiRefresh`; the other providers'
+groups hold the switch only. The other settings are in groups too
+(Refresh, Status bar and alerts, Spend), before the providers', so that
+none shows under another's heading (`TestProviderGroups`). The plugin's
+page in Settings is in two levels (`SettingsPage.tsx`, the plugin's
+`settings.layout`, [27](27-plugins.md)): those groups, then **Providers**,
+a row per provider with its mark, its name and On or Off (dimmed when
+off, with the bar of a changed setting when one of its settings is
+changed); a row opens the provider's settings as a page of their own: a
+**Back** button, the provider's mark and name, then its settings, without
+the plugin's own switch, which is on the first page. Back, and choosing AI
+Usage in the dialog's list again, show the first page. Opened at a
+provider's setting (`openSettings({row})`) the page shows that provider;
+a search lists the settings it finds as on any page.
 
 Tokens are read from the files at each poll, sent only to their provider's
 host and never returned; expiry is checked first, so an expired token is not
@@ -156,11 +176,87 @@ model by `turn_id`; before the first of them the legacy `token_count`
 events, an event whose total did not move being a replay); Grok's
 `sessions/*/*/updates.jsonl` (`turn_completed`, by model, the tier by the
 turn's average prompt) and the legacy `logs/unified.jsonl*` (also gzipped;
-the model from the session's `events.jsonl`, retries only counted).
-`internal/usage/pricing.json` has the prices by provider and the longest
+the model from the session's `events.jsonl`, retries only counted);
+OpenCode's database (below). `internal/usage/pricing.json` has the prices by provider and the longest
 model prefix, with tiers by prompt length and cache-write prices (5 minutes:
 the input price unless given; 1 hour: twice it). A week is 168 hours and a
 month 750 for the equivalents (cost × 168 or 750 / the range's hours).
+
+### OpenCode's sessions
+
+OpenCode keeps its sessions in an SQLite database in WAL mode:
+`opencode.db` in its data directory, which follows XDG on Linux and macOS
+alike (`$XDG_DATA_HOME/opencode`, else `~/.local/share/opencode`),
+`opencode-<channel>.db` there for a build of another channel (all are
+read), or `$OPENCODE_DB` (relative to that directory; `:memory:` is none).
+Each assistant message of its table `message` is a step of a turn: its
+`data` (JSON) has `modelID`, `providerID`, `time.created` (ms),
+`path.cwd`, `cost` (what OpenCode computed from its own price list, 0 for
+a subscription or a plan it was told is free) and `tokens`: `input`
+without the cache, `output` without the reasoning, `reasoning`,
+`cache.read` and `cache.write`. A record takes them as the other logs'
+(output with its reasoning, the project the directory's name), keyed by
+the message's id; a step without tokens, a prompt, and any row whose
+record is over 64 KiB (a prompt with what it attached; an answer's is a
+few hundred bytes) are left out, the last unread.
+
+The agent has no SQLite: `internal/usage/sqlite.go` reads the file format
+itself, read-only (the table b-trees from the schema's root pages, their
+records and overflow pages, and the WAL's frames up to its last valid
+commit: the header's salts, the running checksum), and takes no lock,
+writes nothing and opens no `-shm`, so it never stands in OpenCode's way.
+In a well-formed database only the schema's and `message`'s pages are
+read (its other tables, `credential` and `account` among them, are not):
+a few MiB of a database of hundreds. A writer that checkpointed meanwhile
+(the database file changed) or started the WAL over (its header changed)
+is seen after the read, and the read is done again, at most three times.
+The database is read whole whenever its size or time, or its WAL's,
+changed (a step's tokens are written into its row when it ends, so rows
+change after they were read), its records replacing the last read's.
+
+The file is another program's, and the reader runs in the agent and, for
+the core's own machine, beside the core: a damaged or crafted file must
+fail the read, never take the process down or its memory. So:
+
+- The database and its WAL are opened only as regular files, without
+  blocking (`O_NONBLOCK`, then the open file's mode): a FIFO or a device
+  at either name, also one put there after the scan looked, is refused at
+  once (`unreadable`).
+- Every offset and length is checked before use, as a comparison with
+  what is left (no sum that could overflow: a serial type of nine `0xff`
+  bytes is a length of about 2^63).
+- The cells of a page lie within its cell content area, after the
+  pointer array, none overlapping another, so a page yields at most as
+  many rows as fit on it; a page is read at most once in a walk, overflow
+  pages included; the pages a walk has read and has yet to read are no
+  more than the database has.
+- A read has a budget: at most 3 times the database's and the WAL's size,
+  plus 1 MiB, in bytes read (a well-formed file needs at most twice: each
+  page once per tree, the WAL once); at most 2,000,000 rows (the schema's
+  and the table's; the database this was written against has 7,532
+  messages from nine months), at most 300,000 steps kept (those of the
+  last 90 days: over 3,000 a day), records over 64 KiB skipped unread, a
+  WAL over 1 GiB not read. Past a bound the read fails as `too_large`
+  rather than leaving rows out.
+- The scan's context is checked before every page, so a scan the core
+  stopped waiting for ends within a database too.
+- A read that fails keeps the database's last records and is in the cost
+  report (`failed`: `opencode:too_large`, `busy` after three reads a
+  writer changed, `damaged`, or `unreadable`), which the spend shows per
+  machine.
+- `FuzzSQLite` (`go test -fuzz=FuzzSQLite ./internal/usage`; with
+  `-fuzzminimizetime` of a few seconds, the minimizing of a large find
+  does not take the run) reads any database and WAL with the reader alone
+  and checks that it does not panic and that the bytes it reads, the rows
+  it produces and the time it takes are bounded by the input's size;
+  `make test` runs its seeds.
+
+Its steps are priced, in this order, by the user's prices and the table
+of the API that served them (Anthropic's as Claude, OpenAI's as Codex,
+xAI's as Grok: OpenCode records them free when signed in with a
+subscription), else at the cost OpenCode recorded, else not (the tokens
+count, the model is listed without a price: a coding plan's model, or a
+free one, which a price of 0 in `usage.prices` silences).
 
 Prices change and models come out between releases, so the table is kept
 up in three ways:
@@ -282,13 +378,15 @@ not read; SSH machines are.
 `view.panel.usage`, no default key) is laid out as CodexBar.
 
 - **Tiles** at the top: the overview and each service with an account or
-  spend (in the order Claude, Codex, Grok, Antigravity, Kimi, DeepSeek):
-  its mark and name and, in its color, a bar of what is left of its
-  tightest window. The marks are Lobe Icons' (`web/src/assets/ai-logos`,
-  MIT, drawn in one color, `logos.tsx`); each service's color is its own
+  spend (in the order Claude, Codex, Grok, Antigravity, Kimi, DeepSeek,
+  OpenCode): its mark and name and, in its color, a bar of what is left of
+  its tightest window (none for OpenCode, which has spend only). The marks
+  are Lobe Icons' (`web/src/assets/ai-logos`, MIT, drawn in one color,
+  `logos.tsx`), OpenCode's a square frame around a block drawn in
+  `logos.tsx` in their manner; each service's color is its own
   where it has one (Claude's clay, DeepSeek's blue, Grok's black or white: the theme's text color), else a hue that keeps
   the services apart (`--usage-<provider>`, `usage.css`, darker in the
-  light theme). Under the tiles: when the numbers were read and the next
+  light theme; OpenCode's the design tokens' chart purple). Under the tiles: when the numbers were read and the next
   read, the switch between used and left, the refresh mode
   (`usage.refresh`) and Refresh, which also reads the cost again; the
   shown panel reads it again too once it is older than `usage.costRefresh`
@@ -411,6 +509,12 @@ window over a threshold is said at the next poll.
 | Writing the cost cache after every scan that changed it | A log in use grows at every scan, and the cache (tens of thousands of records) was written whole each time; reading on from the file's older offsets costs a few minutes of lines. |
 | Every machine asked for every account | The same account would be asked once per machine at every poll, against the providers' rate limits. |
 | A chart library for the bars | A few SVG paths and rectangles; no dependency. |
+| Grok's credits as a monthly window, whatever their period | Its subscriptions' `currentPeriod` is 7 days: the panel, the status bar's card and the alerts called a week's window, with a week's reset and pace, monthly. The period's length names it. |
+| An SQLite library for OpenCode's database | A pure-Go one is several MB of code in every machine's binary, a cgo one breaks the cross builds; the agent needs one table, and reading the file format for it is a few hundred lines that never write or lock. |
+| `sqlite3` or `opencode db` on the machine | `sqlite3` is missing on many Linux machines; OpenCode's own shell starts its whole runtime (hundreds of MB) at each scan. Both would also take the database's locks. |
+| Reading only the rows added since the last read | A step's tokens and cost are written into its row when it ends, after the row was there, and rows are keyed by text: only a read of the whole table sees them. It is a few MiB. |
+| A quota window for OpenCode | OpenCode asks the providers the user set up in it, each with an account of its own; it has no quota of its own to read. The accounts of the providers the plugin reads (Claude, Codex…) show their windows as themselves. |
+| Every provider's settings on the plugin's page, one group after another | Seven providers' groups after the plugin's own settings made a long page in which a provider's option was hard to find, and settings without a group showed under the heading before them; a list of providers, each opening its own settings, keeps the page short. |
 | Each page deciding the alerts from the snapshots it saw (until 0.4) | Each page and app kept its own record, pages raced for it, a pace notice compared the reset to the second (a provider that says how long until it gives a time a second off each poll notified at every poll), use around a threshold re-armed it at each dip, a reset that moved 10 minutes counted as a new period, and a second of drift with a small dip read as a window that started over. The core sees every poll, keeps one record per window and period and survives a reload. |
 
 ## Failure modes
@@ -429,6 +533,11 @@ window over a threshold is said at the next poll.
   one without an id, on its machine.
 - `agy` fails or times out (20 s): `agy_failed` (or `bad_response`), the
   last numbers stay, and it is not run again for 30 minutes.
+- OpenCode's database unreadable (damaged, over a read's budget, a WAL
+  over 1 GiB, not a regular file, a schema without the table or its
+  `data`, a writer changing it at each of three reads): its last records
+  stay until a read succeeds, and the spend says which machine could not
+  read it and why.
 - A redirect: not followed; `http_3xx`, so credentials reach only the
   fixed hosts.
 - A machine offline: its poll fails with `offline`; its accounts keep their
@@ -439,14 +548,15 @@ window over a threshold is said at the next poll.
 ## Security
 
 [SECURITY.md](../../SECURITY.md) lists the credential files read, the hosts
-asked, the language server's loopback client, the DeepSeek key file and the
-status pages. Resources and retention:
+asked, the language server's loopback client, the DeepSeek key file, the
+status pages and how OpenCode's database is read. Resources and retention:
 [deployment](../deployment.md#remote-resources).
 
 ## Testing
 
 - `internal/usage/usage_test.go`: each provider against an `httptest`
-  server or fixture files: headers, windows, credits, expired tokens (not
+  server or fixture files: headers, windows (Grok's weekly by its
+  period's length), credits, expired tokens (not
   sent), 401, 429 with `Retry-After`, Kimi's string numbers, both of its answers' shapes and its booster wallet, Codex's log
   fallback, the keychain, Antigravity's `ps` (other users' servers left
   out), `lsof`, `/proc` and `agy` paths, the loopback client, the key
@@ -471,6 +581,27 @@ status pages. Resources and retention:
   removed once taken over; refusals (`invalid_grant`, 401) not sent again
   until the file changes; retried 5xx, other statuses, an answer without
   a refresh token, a redirect, the network; no token in a reply.
+- `internal/usage/opencode_test.go`: OpenCode's databases of
+  `testdata/opencode` (made by `make.sh` with the `sqlite3` shell, 512-byte
+  pages): the schema's columns (one added later, quoted names, table
+  constraints), every row through interior and overflow pages, records
+  over the bound skipped, the WAL's last commit over the database (an
+  added row, a row changed) without a later generation's frame, an empty
+  WAL, a checkpoint or a WAL started over seen and frames added not,
+  damaged files failing without a panic or a loop; the cost: the table's
+  price for Anthropic's API, the recorded cost, a model without a price
+  and the user's price for it, tokens with the reasoning in the output,
+  prompts and empty steps left out, the database not read again while it
+  and its WAL are unchanged and read whole after a commit; the
+  databases found (XDG, channels, `OPENCODE_DB`), no account.
+- `internal/usage/sqlite_test.go`, `sqlite_unix_test.go`: databases made
+  by hand: a length of about 2^63 in a record, cell pointers that repeat
+  a cell or point into another, an overflow chain that comes back, a
+  child named twice, an interior page naming more children than the file
+  has pages (none read), the budget of rows, steps and bytes
+  (`too_large`), a read stopped between two pages and a scan stopped in
+  one, a FIFO as the WAL, the database or a log (refused at once), an
+  unreadable database in the report; `FuzzSQLite`.
 - `internal/usage/proc_unix_test.go`: a fake `agy` leaving `sleep 300`
   behind; its process group is killed after it exits and when it times
   out.
@@ -521,6 +652,12 @@ status pages. Resources and retention:
   while the panel stays open (`usage.costRefresh`), DeepSeek's key form
   without an account, an older snapshot ignored, the machines that could
   not read an account, the interval picker.
+- `web/src/__tests__/usageSettings.test.ts`: the settings page: the
+  plugin's groups, then the providers with On or Off and the bar of a
+  changed one, a provider's page and back, opened at a provider's row or
+  another, the search finding a provider's setting, read-only; and
+  `usage.test.ts`: OpenCode's tile and page from its spend alone, a
+  machine's log it could not read.
 - `web/src/__tests__/hoverOpen.test.ts`: the trays opening on hover, closing
   after the pointer leaves, kept by a click, touch ignored, and the status
   bar item's card (accounts tightest first, today's spend once the cost is

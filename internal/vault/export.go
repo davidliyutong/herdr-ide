@@ -214,7 +214,7 @@ func (e *NameError) Unwrap() error { return e.Err }
 func (s *Store) Export(names []string) ([]ExportVariable, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.key == nil {
+	if !s.usable() {
 		return nil, s.noKey()
 	}
 	out := make([]ExportVariable, 0, len(names))
@@ -284,7 +284,7 @@ func (s *Store) Import(list []Import) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.key == nil {
+	if !s.usable() {
 		return s.noKey()
 	}
 	if err := s.applyForgotten(); err != nil {

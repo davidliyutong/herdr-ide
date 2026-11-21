@@ -1,5 +1,5 @@
-/* The variable vault (web/src/plugins/vault): its panel, the editor's
-   dialog and the approval prompts. */
+/* The variable vault (web/src/plugins/vault): its panel, its page of
+   Settings, the editor's dialog and the approval prompts. */
 .vault {
   display: flex;
   flex-direction: column;
@@ -45,16 +45,10 @@
   gap: 8px;
   font-size: var(--fs-lg);
 }
-.vault-gate-head .lucide {
+.vault-gate-head > .lucide {
   width: var(--ic);
   height: var(--ic);
   color: var(--accent);
-}
-.vault-gate-text {
-  margin: 0;
-  color: var(--fg-dim);
-  font-size: var(--fs-md);
-  line-height: 1.5;
 }
 .vault-gate-actions {
   display: flex;
@@ -68,6 +62,9 @@
 .vault-unlock-row .input {
   flex: 1;
   min-width: 0;
+}
+.vault-unlock-row [data-action='forget-key'] {
+  margin-left: auto;
 }
 /* A passphrase's strength: four bars, filled as it grows. */
 .vault-strength {
@@ -131,9 +128,6 @@
 }
 .vault-session .vault-autolock.custom {
   color: var(--accent);
-}
-.vault-session-text .muted {
-  font-size: var(--fs-sm);
 }
 
 /* ---- tabs and tools ---- */
@@ -240,6 +234,16 @@
 .vault-name {
   font-family: var(--mono);
   font-weight: 600;
+}
+/* The copy button beside a variable's name: quiet until the row is
+   pointed at. */
+.vault-row-head .vault-copy {
+  flex: none;
+  opacity: 0.45;
+}
+.vault-row:hover .vault-row-head .vault-copy,
+.vault-row-head .vault-copy:focus-visible {
+  opacity: 1;
 }
 .vault-desc {
   color: var(--fg-dim);
@@ -610,7 +614,7 @@
   gap: 6px;
 }
 
-/* The prompt's choice between the fingerprint and the passphrase. */
+/* The prompt's choice between biometrics and the passphrase. */
 .vault-request-proof {
   display: flex;
   align-items: center;
@@ -619,25 +623,15 @@
   font-size: var(--fs-sm);
 }
 
-/* ---- fingerprint and security keys ---- */
-/* A details element: its children are spaced by margins, not a flex gap. */
-.vault-guard > :not(summary) {
-  margin-top: 8px;
-}
-.vault-guard > summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font-weight: 600;
-}
+/* ---- biometrics and exempt apps (the vault's page of Settings) ---- */
 .vault-auths {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 0;
+  margin: 4px 0;
   padding: 0;
   list-style: none;
+  max-width: 46rem;
 }
 .vault-auths li {
   display: flex;
@@ -649,17 +643,9 @@
   flex: 1;
   flex-direction: column;
   min-width: 0;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
 }
-.vault-auth-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.vault-check {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
+.vault-auth-text .muted {
   font-size: var(--fs-sm);
 }
 

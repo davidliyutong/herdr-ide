@@ -14,7 +14,7 @@ import type { MachineState } from '../lib/machine';
 import { useSettings } from '../settings';
 import { definePlugins } from '../plugins/registry';
 import { browserPlugin } from '../plugins/browser';
-import { openLink } from '../terminal/links';
+import { openLink } from '../terminal/openLink';
 import { settle } from './fakeTerms';
 
 beforeEach(() => {
@@ -32,14 +32,14 @@ describe('a link with the UI on another host', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     openLink({ kind: 'url', text: 'http://localhost:3000/' }, { m: 'l' });
     await settle();
-    expect(open).toHaveBeenCalledWith('http://localhost:3000/', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('http://localhost:3000/', '_blank', 'noopener,noreferrer');
   });
 
   it('opens a loopback URL with the UI’s port: there localhost is the viewer’s computer, not the core', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     openLink({ kind: 'url', text: 'http://localhost:5173/x' }, { m: 'l' });
     await settle();
-    expect(open).toHaveBeenCalledWith('http://localhost:5173/x', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/x', '_blank', 'noopener,noreferrer');
     // The page's own origin stays refused.
     openLink({ kind: 'url', text: 'http://example.test:5173/api/x' }, { m: 'l' });
     await settle();

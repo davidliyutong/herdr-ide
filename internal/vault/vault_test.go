@@ -465,7 +465,8 @@ func TestForgetMachine(t *testing.T) {
 	if v, err := s4.Value("D"); err != nil || v != "d" {
 		t.Errorf("D value %q %v", v, err)
 	}
-	if b, _ := os.ReadFile(path); strings.Contains(string(b), "forgotten") || strings.Contains(string(b), "m4") {
+	// The machine's id as a JSON string: base64 around it may hold its letters.
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "forgotten") || strings.Contains(string(b), `"m4"`) {
 		t.Errorf("m4 kept after the unlock: %s", b)
 	}
 	// The machine added again under the same id: allowing it, or choosing
@@ -534,7 +535,7 @@ func TestForgottenAppliedAtTheNextChange(t *testing.T) {
 	if err := s.Delete("B"); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(path); strings.Contains(string(b), "forgotten") || strings.Contains(string(b), "m2") {
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "forgotten") || strings.Contains(string(b), `"m2"`) {
 		t.Errorf("m2 kept after a deletion: %s", b)
 	}
 }

@@ -7,6 +7,7 @@ import {
   BROWSER_PARTITION,
   guestMayNavigate,
   guestPreferences,
+  hostResolver,
   isExternal,
   isInternal,
   mainWindowPreferences,
@@ -226,4 +227,10 @@ test('a guest opens a few popups at a time, and more once time has passed', () =
   assert.equal(may(), true);
   // Each guest has a gate of its own.
   assert.equal(popupGate(() => at)(), true);
+});
+
+test('names resolve with the system’s resolver, DNS over HTTPS as by default', () => {
+  // Chromium's built-in resolver, Electron's default on macOS, asks the
+  // DNS servers itself; the system's honors what it is set up with.
+  assert.deepEqual(hostResolver, { enableBuiltInResolver: false });
 });

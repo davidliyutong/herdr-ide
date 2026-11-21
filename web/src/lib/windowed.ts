@@ -52,16 +52,19 @@ export function revealTop(scrollTop: number, clientHeight: number, top: number, 
 }
 
 /** An element's scroll position and height, followed (scrolls, resizes);
- * height is 0 until it is measured (and in tests without layout). Give the
- * element ref (a callback: the element may come later than the
- * component) and onScroll. */
-export function useScrollView() {
-  const [view, setView] = useState({ top: 0, height: 0 });
+ * height is initialHeight (0, or what a caller draws for until then) until
+ * it is measured (and in tests without layout). Give the element ref (a
+ * callback: the element may come later than the component, or again as
+ * another one, which starts at its own scroll position) and onScroll. */
+export function useScrollView(initialHeight = 0) {
+  const [view, setView] = useState({ top: 0, height: initialHeight });
   const observer = useRef<ResizeObserver | undefined>(undefined);
   const ref = useCallback((el: HTMLElement | null) => {
     observer.current?.disconnect();
     observer.current = undefined;
-    if (!el || typeof ResizeObserver === 'undefined') return;
+    if (!el) return;
+    setView((v) => (v.top === el.scrollTop ? v : { ...v, top: el.scrollTop }));
+    if (typeof ResizeObserver === 'undefined') return;
     observer.current = new ResizeObserver(() => setView((v) => (v.height === el.clientHeight ? v : { ...v, height: el.clientHeight })));
     observer.current.observe(el);
   }, []);

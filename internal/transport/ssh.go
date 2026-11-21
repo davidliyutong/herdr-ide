@@ -176,7 +176,7 @@ func DialSSH(ctx context.Context, o SSHOptions) (*Session, *Platform, error) {
 	if err != nil {
 		return nil, p, fmt.Errorf("no agent for %s/%s: %w", p.OS, p.Arch, err)
 	}
-	remotePath := "$HOME/" + agentDir + "/" + version + "/" + brand.AgentBin
+	remotePath := "$HOME/" + agentDir + "/" + version + "/" + brand.CoreBin
 
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	out, err = o.run(checkCtx, nil, `if [ -x "`+remotePath+`" ]; then echo present; else echo absent; fi`)
@@ -199,7 +199,7 @@ func DialSSH(ctx context.Context, o SSHOptions) (*Session, *Platform, error) {
 		}
 	}
 
-	cmd := exec.Command("ssh", o.runArgs(`exec "`+remotePath+`" serve --instance '`+o.Instance+`'`)...)
+	cmd := exec.Command("ssh", o.runArgs(`exec "`+remotePath+`" agent --instance '`+o.Instance+`'`)...)
 	noConsole(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

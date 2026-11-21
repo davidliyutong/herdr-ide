@@ -32,6 +32,8 @@ type MachineCost struct {
 	Files    int      `json:"files"`
 	Retries  int64    `json:"retries,omitempty"`
 	Unpriced []string `json:"unpriced,omitempty"`
+	// Failed are the logs the machine could not read (provider:code).
+	Failed []string `json:"failed,omitempty"`
 }
 
 // CostReport is GET /api/p/usage/cost.
@@ -105,7 +107,7 @@ func (p *Plugin) cost(ctx context.Context, days, tz int) *CostReport {
 				rep.Machines[m] = MachineCost{Error: code}
 				return
 			}
-			rep.Machines[m] = MachineCost{Files: r.Files, Retries: r.Retries, Unpriced: r.Unpriced}
+			rep.Machines[m] = MachineCost{Files: r.Files, Retries: r.Retries, Unpriced: r.Unpriced, Failed: r.Failed}
 			for _, row := range r.Rows {
 				rep.Rows = append(rep.Rows, CostRow{CostRow: row, Machine: m})
 			}

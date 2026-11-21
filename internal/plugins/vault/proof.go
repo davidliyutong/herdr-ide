@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,9 +18,10 @@ import (
 )
 
 // Proofs: an authenticator's word, in the passphrase's stead, that the user
-// is there. The vault must be unlocked (its authenticators are sealed with
-// the key), so a proof never unlocks it; after a start or a lock the
-// passphrase is needed once.
+// is there. The core must hold the key (the authenticators are sealed with
+// it): a proof opens a session, unlocking a vault that was locked while the
+// key was held (autolock.go), but never brings a key back; after a start,
+// or once the key's hold is over, the passphrase is needed once.
 //
 // A proof answers a nonce the core issued for one purpose: to open a
 // session, to give one request one answer, or to add an authenticator. It
@@ -31,8 +33,8 @@ import (
 //     that the page that asked is the one the credential was added from.
 //     A credential is the browser's for a host name, whatever the port, so
 //     its origin is kept and compared, and only an origin the core vouches
-//     for takes part (plugin.Call.TrustedOrigin): the user's fingerprint
-//     on a page another program serves on localhost proves nothing here;
+//     for takes part (plugin.Call.TrustedOrigin): the user's biometrics
+//     on a page another program serves on localhost prove nothing here;
 //   - the desktop app's shell, after a prompt of the system the user
 //     answered (Touch ID, Windows Hello), signs the nonce and its purpose
 //     with the key of its launch (plugin.Call.DesktopProof). The shell asks
@@ -41,8 +43,8 @@ import (
 //
 // A session a proof opened is marked: it answers requests and changes and
 // shows variables, but what guards the vault (the authenticators, the rule
-// to verify each Allow, the automatic lock, imports and exports) takes a
-// session the passphrase opened.
+// to verify each Allow, the exempt apps, the automatic lock, imports and
+// exports) takes a session the passphrase opened.
 
 // The purposes of a proof.
 const (
@@ -78,7 +80,7 @@ type purpose struct {
 type pendingProof struct {
 	purpose
 	challenge []byte
-	issued    time.Time
+	issued    stamp
 }
 
 // proofBody is a proof as a page sends it.
@@ -116,7 +118,7 @@ func (p *Plugin) issueProof(pu purpose) string {
 	challenge := make([]byte, 32)
 	rand.Read(challenge)
 	nonce := base64.RawURLEncoding.EncodeToString(challenge)
-	now := p.clock()
+	now := p.at()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.proofs == nil {
@@ -124,11 +126,11 @@ func (p *Plugin) issueProof(pu purpose) string {
 	}
 	oldest := ""
 	for k, pp := range p.proofs {
-		if now.Sub(pp.issued) > proofTTL {
+		if pp.issued.since(now) > proofTTL {
 			delete(p.proofs, k)
 			continue
 		}
-		if oldest == "" || pp.issued.Before(p.proofs[oldest].issued) {
+		if oldest == "" || pp.issued.since(now) > p.proofs[oldest].issued.since(now) {
 			oldest = k
 		}
 	}
@@ -149,7 +151,7 @@ func (p *Plugin) takeProof(nonce string, want purpose) ([]byte, bool) {
 		return nil, false
 	}
 	delete(p.proofs, nonce)
-	if p.clock().Sub(pp.issued) > proofTTL || pp.purpose != want {
+	if pp.issued.since(p.at()) > proofTTL || pp.purpose != want {
 		return nil, false
 	}
 	return pp.challenge, true
@@ -160,7 +162,7 @@ func (p *Plugin) peekProof(nonce string) (purpose, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	pp, ok := p.proofs[nonce]
-	if !ok || p.clock().Sub(pp.issued) > proofTTL {
+	if !ok || pp.issued.since(p.at()) > proofTTL {
 		return purpose{}, false
 	}
 	return pp.purpose, true
@@ -183,7 +185,7 @@ func desktopCan(c *plugin.Call) bool {
 }
 
 // checkProof checks pb as a proof for want and returns the kind of
-// authenticator that made it. The vault must be unlocked (ErrLocked);
+// authenticator that made it. The core must hold the key (ErrLocked);
 // anything else that fails is errProof. A proof that holds marks its
 // authenticator used.
 func (p *Plugin) checkProof(c *plugin.Call, r *http.Request, s *vaultstore.Store, pb *proofBody, want purpose) (string, error) {
@@ -239,20 +241,14 @@ func (p *Plugin) checkProof(c *plugin.Call, r *http.Request, s *vaultstore.Store
 	return "", errProof
 }
 
-// usedAuthenticator records an authenticator's use (and its counter).
+// usedAuthenticator records an authenticator's use (and its counter), also
+// while the vault is suspended; one that is gone proves nothing.
 func (p *Plugin) usedAuthenticator(s *vaultstore.Store, id string, at time.Time, count *uint32) error {
-	return s.UpdateGuard(func(g *vaultstore.Guard) error {
-		for i := range g.Authenticators {
-			if a := &g.Authenticators[i]; a.ID == id {
-				a.LastUsed = at
-				if count != nil {
-					a.SignCount = *count
-				}
-				return nil
-			}
-		}
+	err := s.RecordProof(id, at, count)
+	if errors.Is(err, vaultstore.ErrNotFound) {
 		return errProof
-	})
+	}
+	return err
 }
 
 // fresh is the user's word for one action, sent with it: an
@@ -341,19 +337,45 @@ type authenticatorInfo struct {
 }
 
 // guardState is what guards the vault as the page of this call sees it;
-// nil while the vault is locked.
-func (p *Plugin) guardState(c *plugin.Call, s *vaultstore.Store) map[string]any {
+// nil while the core does not hold the key. Without a session (full false)
+// it says only what a page needs to offer biometrics before it unlocks:
+// the kinds of authenticator this page can prove with (the desktop app's
+// prompt for the desktop client, a WebAuthn credential added from this
+// very origin), never their ids, labels, origins or use, nor the rule or
+// the exempt apps, which would tell a program what name to take. The
+// credentials' ids, which WebAuthn needs, come with each nonce (handleProof)
+// and only for the origin the core vouches for.
+func (p *Plugin) guardState(c *plugin.Call, s *vaultstore.Store, full bool) map[string]any {
 	g, err := s.Guard()
 	if err != nil {
 		return nil
+	}
+	origin, _ := originOf(c)
+	if !full {
+		ways := []map[string]string{}
+		desktop, webauthn := false, false
+		for _, a := range g.Authenticators {
+			switch {
+			case a.Kind == vaultstore.KindDesktop && desktopCan(c) && !desktop:
+				desktop = true
+				ways = append(ways, map[string]string{"kind": a.Kind})
+			case a.Kind == vaultstore.KindWebAuthn && origin != "" && a.Origin == origin && !webauthn:
+				webauthn = true
+				ways = append(ways, map[string]string{"kind": a.Kind, "origin": origin})
+			}
+		}
+		return map[string]any{"authenticators": ways, "desktop": desktopCan(c), "webauthn": origin != ""}
 	}
 	list := []authenticatorInfo{}
 	for _, a := range g.Authenticators {
 		list = append(list, authenticatorInfo{ID: a.ID, Kind: a.Kind, Label: a.Label, Origin: a.Origin, RPID: a.RPID, Created: a.Created, LastUsed: a.LastUsed})
 	}
-	origin, _ := originOf(c)
+	exempt := g.Exempt
+	if exempt == nil {
+		exempt = []vaultstore.Exemption{}
+	}
 	return map[string]any{
-		"authenticators": list, "verifyEachAllow": g.VerifyEachAllow,
+		"full": true, "authenticators": list, "verifyEachAllow": g.VerifyEachAllow, "exempt": exempt,
 		// Whether the app this page runs in can prompt the user itself,
 		// and whether this page's origin is one a WebAuthn credential can
 		// be added for and used from.
@@ -432,6 +454,7 @@ func (p *Plugin) handleProof(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 // with the request it would answer: the shell shows that in the system's
 // prompt, whatever the page said. Only the desktop app gets it.
 func (p *Plugin) handleProofPurpose(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.open(c.Host) // a hold that is over has ended the nonces
 	pu, ok := p.peekProof(r.PathValue("nonce"))
 	if !ok || !desktopCan(c) {
 		plugin.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such nonce"})
@@ -529,7 +552,7 @@ func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r
 	case vaultstore.KindWebAuthn:
 		origin, rpID := originOf(c)
 		if origin == "" {
-			plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "webauthn_origin", "message": "a fingerprint is added from the UI's own address by name: http://localhost on the core's port, or the reverse proxy's"})
+			plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "webauthn_origin", "message": "a WebAuthn credential is added from the UI's own address by name: http://localhost on the core's port, or the reverse proxy's"})
 			return
 		}
 		e := webauthn.Expect{Challenge: challenge, Origin: origin, RPID: rpID}
@@ -569,7 +592,7 @@ func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r
 	}
 	c.AuditField("authenticator", a.ID)
 	changed(c.Host)
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s)})
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s, true)})
 }
 
 func (p *Plugin) handleDeleteAuthenticator(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
@@ -601,7 +624,7 @@ func (p *Plugin) handleDeleteAuthenticator(c *plugin.Call, w http.ResponseWriter
 		return
 	}
 	changed(c.Host)
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s)})
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s, true)})
 }
 
 // handleGuard sets the rule that every Allow needs a proof made for it
@@ -641,5 +664,116 @@ func (p *Plugin) handleGuard(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 		return
 	}
 	changed(c.Host)
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s)})
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s, true)})
+}
+
+// handleAddExempt exempts an app on machines ({"app", "machines",
+// "passphrase"}): its requests there read without asking while the vault is
+// unlocked. It is a lasting grant across every variable, as adding an
+// authenticator is, so it takes a session the passphrase opened and the
+// passphrase again with the request: a session alone is what a program
+// driving the page has too. The app's name is one the kernels keep whole
+// and no shell or interpreter (CheckApp); the machines are this core's.
+// Exempting one that is there already changes nothing.
+func (p *Plugin) handleAddExempt(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	s, err := p.open(c.Host)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var body struct {
+		App        string   `json:"app"`
+		Machines   []string `json:"machines"`
+		Passphrase string   `json:"passphrase"`
+	}
+	if err := plugin.ReadJSON(r, 16<<10, &body); err != nil {
+		plugin.WriteError(w, err)
+		return
+	}
+	if len(body.Machines) == 0 || len(body.Machines) > vaultstore.MaxExemptions {
+		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "1 to 64 machines"})
+		return
+	}
+	if err := vaultstore.CheckApp(body.App); err != nil {
+		fail(w, err)
+		return
+	}
+	mg := c.Host.Machines()
+	for _, m := range body.Machines {
+		if m == "" || m == vaultstore.AllMachines || (mg != nil && mg.Get(m) == nil) {
+			plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown_machine", "message": "no machine " + clip(m, 64)})
+			return
+		}
+	}
+	c.AuditField("app", body.App)
+	c.AuditField("machines", body.Machines)
+	if !p.passphraseAgain(c, w, r, s, body.Passphrase) {
+		return
+	}
+	now := p.clock().UTC()
+	err = s.UpdateGuard(func(g *vaultstore.Guard) error {
+		for _, m := range body.Machines {
+			if slices.ContainsFunc(g.Exempt, func(e vaultstore.Exemption) bool { return e.Machine == m && e.App == body.App }) {
+				continue
+			}
+			idBytes := make([]byte, 8)
+			rand.Read(idBytes)
+			g.Exempt = append(g.Exempt, vaultstore.Exemption{ID: hex.EncodeToString(idBytes), Machine: m, App: body.App, Created: now})
+		}
+		return nil
+	})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	changed(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s, true)})
+}
+
+// passphraseAgain checks the vault's passphrase brought with a request that
+// lets more out than its session may decide alone (an exemption, a longer
+// automatic lock), slowed down as every check. None is 403
+// passphrase_required, a wrong one 403 wrong_passphrase; either is answered
+// here, so the caller only returns on false.
+func (p *Plugin) passphraseAgain(c *plugin.Call, w http.ResponseWriter, r *http.Request, s *vaultstore.Store, passphrase string) bool {
+	given, ok := p.verified(c, w, r, s, fresh{Passphrase: passphrase}, purpose{})
+	if !given {
+		c.Host.Audit(r, "denied.passphrase_required", map[string]any{"route": r.Method + " " + r.URL.Path})
+		plugin.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "passphrase_required", "message": "this needs the vault's passphrase with the request"})
+		return false
+	}
+	return ok
+}
+
+// handleDeleteExempt ends an exemption.
+func (p *Plugin) handleDeleteExempt(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	s, err := p.open(c.Host)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	id := r.PathValue("id")
+	found := false
+	err = s.UpdateGuard(func(g *vaultstore.Guard) error {
+		g.Exempt = slices.DeleteFunc(g.Exempt, func(e vaultstore.Exemption) bool {
+			if e.ID == id {
+				found = true
+				c.AuditField("app", e.App)
+				c.AuditField("machine", e.Machine)
+				return true
+			}
+			return false
+		})
+		return nil
+	})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if !found {
+		plugin.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such exemption"})
+		return
+	}
+	changed(c.Host)
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s, true)})
 }

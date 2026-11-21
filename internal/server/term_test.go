@@ -45,6 +45,8 @@ type fakeTermCore struct {
 	// snap, when set, is the terminals of events.subscribe (JSON), sent
 	// without the status event that otherwise follows.
 	snap string
+	// notify sends a notification (JSON) on each events subscription.
+	notify []func(string)
 }
 
 func (f *fakeTermCore) seen(want string) bool {
@@ -135,8 +137,10 @@ func (f *fakeTermCore) serve(c net.Conn) {
 		switch req.Method {
 		case "events.subscribe":
 			next++
+			ch := next
 			f.mu.Lock()
 			snap := f.snap
+			f.notify = append(f.notify, func(line string) { write(frameOf(ch, 0, []byte(line+"\n"))) })
 			f.mu.Unlock()
 			if snap != "" {
 				write(reply(`"result":{"channel":` + string('0'+byte(next)) + `,"seq":1,"terminals":` + snap + `}`))
@@ -446,15 +450,23 @@ func TestTermProtocol(t *testing.T) {
 	core.waitFor("4:\x01")
 	c.send(map[string]any{"t": "facts", "s": sid, "display": map[string]any{"bg": "#101010"}})
 	core.waitFor(`5:{"bg":"#101010"}`)
+	// The terminal's last viewer detaches: the program is told its focus is
+	// gone, and the stream stays at the core, so that the terminal keeps
+	// its size while no page shows it.
 	c.send(map[string]any{"t": "detach", "s": sid})
-	core.waitFor("2:")
+	core.waitFor("4:\x00")
 
 	c.send(map[string]any{"t": "attach", "rid": 4, "m": "x", "terminal": "t404", "cols": 80, "rows": 24})
 	if m := c.until("res"); m["rid"] != float64(4) || m["error"].(map[string]any)["kind"] != "not_found" {
 		t.Fatalf("attach to a missing terminal: %v", m)
 	}
-	// A program that ends closes its stream with how.
+	if core.seen("2:") {
+		t.Fatalf("the last viewer's stream was closed on detach: %q", core.frames)
+	}
+	// A program that ends closes its stream with how. The terminal's new
+	// viewer attached, the kept stream ends.
 	c.send(map[string]any{"t": "attach", "rid": 5, "m": "x", "terminal": "t1", "cols": 80, "rows": 24, "history": 1})
+	core.waitFor("2:")
 	if m := c.until("closed"); m["reason"] != "exited" || m["exit_code"] != float64(0) {
 		t.Fatalf("closed %v", m)
 	}
@@ -969,4 +981,137 @@ func TestTermAgents(t *testing.T) {
 	if len(ws) != 6 || !strings.Contains(ws[0], `"terminal":"t1"`) || !strings.Contains(ws[0], `"agent_status":"working"`) || !strings.Contains(ws[1], `"done"`) {
 		t.Fatalf("/ws agent messages %q", ws)
 	}
+}
+
+// A terminal's size is its last active viewer's, and herdr-core gives a
+// terminal without one its headless size: the stream of the last viewer
+// that sets the size stays attached until another has attached or the
+// terminal ends. Any other viewer's stream is closed when it leaves, and
+// an observer's always.
+func TestTermKeepsTheLastViewer(t *testing.T) {
+	s, core, _ := termServer(t, Options{}, true)
+	closes := func() int {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		n := 0
+		for _, fr := range core.frames {
+			if fr == "2:" {
+				n++
+			}
+		}
+		return n
+	}
+	waitCloses := func(want int) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); closes() != want; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%d streams closed, want %d; frames %q", closes(), want, core.frames)
+			}
+		}
+	}
+	attach := func(c *termConn, rid int, observe bool) any {
+		c.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": "t1", "cols": 80, "rows": 24, "observe": observe})
+		return c.until("attached")["s"]
+	}
+	a, b := dialTerm(t, s), dialTerm(t, s)
+	for _, c := range []*termConn{a, b} {
+		c.send(map[string]any{"t": "sub", "m": "x"})
+		c.until("snapshot")
+	}
+	sa, sb, so := attach(a, 1, false), attach(b, 1, false), attach(a, 2, true)
+	// One of two viewers leaves, and an observer: both streams are closed.
+	a.send(map[string]any{"t": "detach", "s": sa})
+	waitCloses(1)
+	a.send(map[string]any{"t": "detach", "s": so})
+	waitCloses(2)
+	// The last one leaves: its stream stays.
+	b.send(map[string]any{"t": "detach", "s": sb})
+	a.send(map[string]any{"t": "attach", "rid": 3, "m": "x", "terminal": "t404", "cols": 80, "rows": 24})
+	a.until("res")
+	if closes() != 2 {
+		t.Fatalf("the last viewer's stream was closed: %q", core.frames)
+	}
+	// An observer does not take its place; the next viewer does.
+	so = attach(a, 4, true)
+	a.send(map[string]any{"t": "detach", "s": so})
+	waitCloses(3)
+	attach(a, 5, false)
+	waitCloses(4)
+	// A client that leaves with the terminal's last viewer: the stream
+	// stays as after a detach, until the next client's viewer has attached.
+	a.ws.Close(websocket.StatusNormalClosure, "")
+	b.send(map[string]any{"t": "attach", "rid": 6, "m": "x", "terminal": "t404", "cols": 80, "rows": 24})
+	b.until("res")
+	time.Sleep(50 * time.Millisecond)
+	if closes() != 4 {
+		t.Fatalf("the stream of a client that left was closed: %q", core.frames)
+	}
+	attach(b, 7, false)
+	waitCloses(5)
+}
+
+// The stream kept for a terminal's size is handed back by a client that
+// stopped following the machine, and ends with its terminal also when the
+// events saying so were missed: a missed's snapshot is the whole state.
+func TestTermKeptViewerEnds(t *testing.T) {
+	s, core, _ := termServer(t, Options{}, true)
+	closes := func() int {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		n := 0
+		for _, fr := range core.frames {
+			if fr == "2:" {
+				n++
+			}
+		}
+		return n
+	}
+	waitCloses := func(want int) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); closes() != want; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%d streams closed, want %d; frames %q", closes(), want, core.frames)
+			}
+		}
+	}
+	a := dialTerm(t, s)
+	sub := func() {
+		a.send(map[string]any{"t": "sub", "m": "x"})
+		a.until("snapshot")
+	}
+	attach := func(rid int) any {
+		a.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": "t1", "cols": 80, "rows": 24})
+		return a.until("attached")["s"]
+	}
+	// Messages are taken in order: an answered attach comes after those before it.
+	barrier := func(rid int) {
+		a.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": "t404", "cols": 80, "rows": 24})
+		a.until("res")
+	}
+	sub()
+	sa := attach(1)
+	a.send(map[string]any{"t": "unsub", "m": "x"})
+	a.send(map[string]any{"t": "detach", "s": sa})
+	barrier(2)
+	if closes() != 0 {
+		t.Fatalf("the last viewer's stream was closed after unsub: %q", core.frames)
+	}
+	// The next viewer takes its place and is the last one in turn: the
+	// count went back to none.
+	sub()
+	sa = attach(3)
+	waitCloses(1)
+	a.send(map[string]any{"t": "detach", "s": sa})
+	barrier(4)
+	if closes() != 1 {
+		t.Fatalf("the last viewer's stream was closed: %q", core.frames)
+	}
+	// t1 ended while the events were missed.
+	core.mu.Lock()
+	notify := core.notify
+	core.mu.Unlock()
+	for _, fn := range notify {
+		fn(`{"jsonrpc":"2.0","method":"missed","params":{"seq":9,"terminals":[]}}`)
+	}
+	waitCloses(2)
 }

@@ -5,7 +5,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { appendCommits, layoutGraph, type GraphCommit } from '../plugins/git/graph';
-import { badgesOf, graphRows, matches, UNCOMMITTED } from '../plugins/git/GraphPane';
+import { graphRows, matches, UNCOMMITTED } from '../plugins/git/GraphPane';
+import { badgesOf } from '../plugins/git/shared';
 import type { Commit, StatusFile } from '../plugins/git/api';
 
 const c = (hash: string, ...parents: string[]): GraphCommit => ({ hash, parents });

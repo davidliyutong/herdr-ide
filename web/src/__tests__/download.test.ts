@@ -35,7 +35,7 @@ vi.mock('../lib/conn', () => ({
 }));
 
 let shell: unknown;
-vi.mock('../desktop', () => ({
+vi.mock('../shell', () => ({
   get desktopShell() {
     return shell;
   },

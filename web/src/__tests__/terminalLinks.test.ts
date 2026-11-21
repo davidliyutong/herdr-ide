@@ -10,7 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { openLink, safeUrl } from '../terminal/links';
+import { safeUrl } from '../terminal/links';
+import { openLink } from '../terminal/openLink';
 
 describe('safeUrl', () => {
   const cases: [string, boolean][] = [
@@ -60,7 +61,7 @@ describe('openLink', () => {
 
   it('opens the URL as the browser will resolve it', () => {
     openLink({ kind: 'url', text: 'HTTPS://A.EXAMPLE' }, { m: 'a' });
-    expect(open).toHaveBeenCalledWith('https://a.example/', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('https://a.example/', '_blank', 'noopener,noreferrer');
   });
 
   it('opens nothing that is relative to the page or on its origin', () => {

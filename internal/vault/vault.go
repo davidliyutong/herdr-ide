@@ -2,7 +2,9 @@
 // values (API keys and the like) encrypted one by one with AES-256-GCM in
 // vault[-<instance>].json beside the settings file, under a master key
 // derived from the user's passphrase with Argon2id and kept only in the
-// core's memory while unlocked. Names, descriptions and the machines
+// core's memory while it holds the key (unlocked, or suspended: locked
+// with the key kept for an authenticator's proof). Names, descriptions and
+// the machines
 // allowed to read a variable are stored in the clear; values never are,
 // and each value's encryption covers its name, its machines and its
 // inject-only flag (adOf), so a file edited to let a machine read a
@@ -21,6 +23,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unicode"
@@ -70,6 +73,8 @@ var (
 	ErrNoPassphrase  = errors.New("the vault has no passphrase yet")
 	ErrHasPassphrase = errors.New("the vault has a passphrase; change it with the current one")
 	ErrVersion       = errors.New("the vault's file is of another version")
+	ErrAppTooLong    = errors.New("an app's name is at most 15 bytes, as the kernels keep a process's name")
+	ErrAppGeneric    = errors.New("a shell or an interpreter runs any script, so it cannot be exempted")
 )
 
 // Code is the error's code for clients: vault_locked, not_found, …
@@ -113,6 +118,10 @@ func Code(err error) string {
 		return "has_passphrase"
 	case errors.Is(err, ErrVersion):
 		return "version"
+	case errors.Is(err, ErrAppTooLong):
+		return "app_too_long"
+	case errors.Is(err, ErrAppGeneric):
+		return "app_generic"
 	}
 	return "failed"
 }
@@ -206,16 +215,89 @@ type file struct {
 
 // Guard is what the user set to guard the vault beside its passphrase. It
 // is sealed with the key, so a file edited without it cannot gain an
-// authenticator, and it is read only while the vault is unlocked: what it
-// allows, proving the user without the passphrase, is for an unlocked
-// vault only.
+// authenticator or an exemption, and it is read only while the core holds
+// the key: what it allows, proving the user without the passphrase, needs
+// the key in memory.
 type Guard struct {
 	// Authenticators prove that the user is there in the passphrase's
-	// stead: to open a session and to allow a request.
+	// stead: to open a session (which reopens a vault locked while the key
+	// is held) and to allow a request.
 	Authenticators []Authenticator `json:"authenticators,omitempty"`
 	// VerifyEachAllow: allowing a request needs a proof made for it (an
 	// authenticator's or the passphrase); a session is not enough.
 	VerifyEachAllow bool `json:"verifyEachAllow,omitempty"`
+	// Exempt are the apps whose requests on a machine are allowed without
+	// asking while the vault is unlocked.
+	Exempt []Exemption `json:"exempt,omitempty"`
+}
+
+// MaxExemptions bounds a vault's exemptions. MaxApp bounds the name of an
+// app exempted: process names as the kernels keep them, 15 bytes on Linux
+// (16 on macOS), so a longer one would never match, and one cut there
+// would match every program whose name begins with it.
+const (
+	MaxExemptions = 64
+	MaxApp        = 15
+	// maxAppField bounds the names a guard holds (CheckApp checks new
+	// ones), so a guard written with longer ones still opens and changes.
+	maxAppField = 64
+)
+
+// Exemption lets the requests of one app on one machine read every
+// variable without asking (inject-only ones only into commands) while the
+// vault is unlocked. The app is the name of the process that started the
+// one connected to the machine's vault.sock, as the machine's kernel names
+// it: any program of the user there can take that name, so an exemption
+// spares the user prompts, it does not tell programs apart.
+type Exemption struct {
+	ID      string    `json:"id"`
+	Machine string    `json:"machine"`
+	App     string    `json:"app"`
+	Created time.Time `json:"created"`
+}
+
+// validAppField reports whether a guard may hold name as an app's: not
+// empty, bounded, no control characters, no space at either end.
+func validAppField(name string) bool {
+	if name == "" || len(name) > maxAppField || strings.TrimSpace(name) != name {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// genericApps are shells, interpreters and launchers: they run any script
+// or command, so exempting one would let every script read the variables.
+// A version after the name (python3.12, node22) is the same program.
+var genericApps = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "fish": true, "dash": true, "ksh": true, "mksh": true, "csh": true, "tcsh": true,
+	"busybox": true, "env": true, "sudo": true, "doas": true, "nohup": true, "xargs": true, "script": true, "login": true,
+	"node": true, "nodejs": true, "deno": true, "bun": true, "python": true, "pypy": true, "ruby": true, "perl": true,
+	"php": true, "lua": true, "luajit": true, "tclsh": true, "wish": true, "osascript": true, "pwsh": true, "powershell": true,
+	"java": true, "uv": true, "npx": true, "npm": true, "pnpm": true, "yarn": true, "make": true,
+}
+
+// CheckApp says why name cannot be exempted as an app (ErrAppTooLong,
+// ErrAppGeneric, ErrInvalid), nil when it can.
+func CheckApp(name string) error {
+	switch {
+	case !validAppField(name):
+		return fmt.Errorf("%w: app %q", ErrInvalid, name)
+	case len(name) > MaxApp:
+		return ErrAppTooLong
+	case genericApps[strings.TrimRight(strings.ToLower(name), "0123456789.")]:
+		return ErrAppGeneric
+	}
+	return nil
+}
+
+// empty reports whether the guard holds nothing worth sealing.
+func (g Guard) empty() bool {
+	return len(g.Authenticators) == 0 && !g.VerifyEachAllow && len(g.Exempt) == 0
 }
 
 // Kinds of authenticator.
@@ -294,8 +376,10 @@ func adOf(e *Entry) string {
 
 // Status is the vault's state.
 type Status struct {
-	Mode   string `json:"mode"`
-	Locked bool   `json:"locked"`
+	Mode string `json:"mode"`
+	// Locked: no value can be read or sealed, whether the key is gone or
+	// held while suspended.
+	Locked bool `json:"locked"`
 	// Setup: no passphrase yet; SetPassphrase sets it.
 	Setup bool `json:"setup,omitempty"`
 	// PassphraseSet is when the passphrase was set or last changed.
@@ -321,8 +405,15 @@ type Store struct {
 	mu  sync.Mutex
 	f   file
 	key []byte // nil while locked
-	now func() time.Time
+	// suspended: locked with the key held (Suspend), so that Resume opens
+	// it again without the passphrase; the guard stays readable.
+	suspended bool
+	now       func() time.Time
 }
+
+// usable reports whether values can be read and sealed: the key is held
+// and the vault not suspended. Called with s.mu held.
+func (s *Store) usable() bool { return s.key != nil && !s.suspended }
 
 // Open reads the vault at path (none yet: an empty vault, without a
 // passphrase). A vault with a passphrase stays locked until Unlock.
@@ -373,7 +464,7 @@ func (s *Store) Status() Status {
 	defer s.mu.Unlock()
 	return Status{
 		Mode:          s.f.Mode,
-		Locked:        s.f.Mode != ModeNone && s.key == nil,
+		Locked:        s.f.Mode != ModeNone && !s.usable(),
 		Setup:         s.f.Mode == ModeNone,
 		PassphraseSet: s.f.PassphraseSet,
 	}
@@ -427,7 +518,7 @@ func (s *Store) Value(name string) (string, error) {
 	if e == nil {
 		return "", ErrNotFound
 	}
-	if s.key == nil {
+	if !s.usable() {
 		return "", ErrLocked
 	}
 	b, err := open(s.key, e.Value, adOf(e))
@@ -516,7 +607,7 @@ func (s *Store) Set(name string, u Update) error {
 	if to != name && s.find(to) != nil {
 		return ErrExists
 	}
-	if s.key == nil {
+	if !s.usable() {
 		return s.noKey()
 	}
 	if err := s.applyForgotten(); err != nil {
@@ -586,7 +677,7 @@ func (s *Store) Allow(name, m string) error {
 	if info(e, s.f.Forgotten).Allows(m) {
 		return nil
 	}
-	if s.key == nil {
+	if !s.usable() {
 		return ErrLocked
 	}
 	if err := s.applyForgotten(); err != nil {
@@ -614,9 +705,9 @@ func (s *Store) Allow(name, m string) error {
 	return nil
 }
 
-// ForgetMachine removes machine m from every variable's machines (a
-// removed machine: an id that comes back is not allowed again) and returns
-// the names it was removed from.
+// ForgetMachine removes machine m from every variable's machines and the
+// guard's exemptions (a removed machine: an id that comes back is not
+// allowed again) and returns the names it was removed from.
 func (s *Store) ForgetMachine(m string) ([]string, error) {
 	if m == "" || m == AllMachines {
 		return nil, nil
@@ -629,11 +720,16 @@ func (s *Store) ForgetMachine(m string) ([]string, error) {
 			names = append(names, s.f.Entries[i].Name)
 		}
 	}
-	if len(names) == 0 {
+	// Without the key the guard cannot be read: it may exempt an app there.
+	exempt := s.key == nil && s.f.Guard != nil
+	if g, err := s.guard(); err == nil {
+		exempt = slices.ContainsFunc(g.Exempt, func(e Exemption) bool { return e.Machine == m })
+	}
+	if len(names) == 0 && !exempt {
 		return nil, nil
 	}
-	// Taking it out of the machines seals the values again, which needs
-	// the key: until then, the machine is forgotten.
+	// Taking it out of the machines seals the values (and the guard) again,
+	// which needs the key: until then, the machine is forgotten.
 	if !slices.Contains(s.f.Forgotten, m) {
 		prev := s.f.Forgotten
 		s.f.Forgotten = append(slices.Clone(s.f.Forgotten), m)
@@ -649,18 +745,26 @@ func (s *Store) ForgetMachine(m string) ([]string, error) {
 }
 
 // applyForgotten takes the forgotten machines out of every variable's
-// machines and empties the list. A value that opens is sealed again for its
-// new machines; one that does not (the file was edited) loses them too and
-// stays unreadable, or opens again when they were what the edit added:
-// taking machines out never lets more read. Called with s.mu held and the
-// key there; on failure nothing changed and the list is still enforced by
-// info.
+// machines and the guard's exemptions, and empties the list. A value that
+// opens is sealed again for its new machines; one that does not (the file
+// was edited) loses them too and stays unreadable, or opens again when they
+// were what the edit added: taking machines out never lets more read. A
+// guard that does not open stays as it is (it exempts nothing: exempt
+// reads it). Called with s.mu held and the key there; on failure nothing
+// changed and the list is still enforced by info and Exempt.
 func (s *Store) applyForgotten() error {
 	if len(s.f.Forgotten) == 0 {
 		return nil
 	}
 	forgotten := s.f.Forgotten
 	gone := func(x string) bool { return slices.Contains(forgotten, x) }
+	prevGuard := s.f.Guard
+	if g, err := s.guard(); err == nil && slices.ContainsFunc(g.Exempt, func(e Exemption) bool { return gone(e.Machine) }) {
+		g.Exempt = slices.DeleteFunc(g.Exempt, func(e Exemption) bool { return gone(e.Machine) })
+		if err := s.setGuard(g); err != nil {
+			return err
+		}
+	}
 	prev := slices.Clone(s.f.Entries)
 	for i := range s.f.Entries {
 		e := &s.f.Entries[i]
@@ -675,13 +779,13 @@ func (s *Store) applyForgotten() error {
 		err = s.reseal(e, plain)
 		clear(plain)
 		if err != nil {
-			s.f.Entries = prev
+			s.f.Entries, s.f.Guard = prev, prevGuard
 			return err
 		}
 	}
 	s.f.Forgotten = nil
 	if err := s.save(); err != nil {
-		s.f.Entries, s.f.Forgotten = prev, forgotten
+		s.f.Entries, s.f.Forgotten, s.f.Guard = prev, forgotten, prevGuard
 		return err
 	}
 	return nil
@@ -728,7 +832,8 @@ func sealGuard(key []byte, g Guard) (*Sealed, error) {
 }
 
 // Guard returns what guards the vault beside its passphrase; ErrLocked
-// while the vault is locked.
+// while the key is not held (a suspended vault's guard is read: a proof is
+// checked with it).
 func (s *Store) Guard() (Guard, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -745,11 +850,23 @@ func (s *Store) guard() (Guard, error) {
 	return openGuard(s.key, s.f.Guard)
 }
 
-// UpdateGuard changes the guard with fn and writes it; an error of fn
-// leaves it as it was. ErrLocked while the vault is locked.
+// UpdateGuard is the user's change of the guard: fn changes it, and it is
+// written; an error of fn leaves it as it was. The vault must be unlocked
+// (ErrLocked while suspended too: a lock that came after the request's
+// gate ends its say). Exemptions of machines forgotten while the key was
+// not held are taken out first. RecordProof is what a proof writes.
 func (s *Store) UpdateGuard(fn func(*Guard) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.usable() {
+		return s.noKey()
+	}
+	if _, err := s.guard(); err != nil {
+		return err
+	}
+	if err := s.applyForgotten(); err != nil {
+		return err
+	}
 	g, err := s.guard()
 	if err != nil {
 		return err
@@ -760,11 +877,16 @@ func (s *Store) UpdateGuard(fn func(*Guard) error) error {
 	if len(g.Authenticators) > MaxAuthenticators {
 		return fmt.Errorf("%w: at most %d authenticators", ErrInvalid, MaxAuthenticators)
 	}
+	if len(g.Exempt) > MaxExemptions {
+		return fmt.Errorf("%w: at most %d exemptions", ErrInvalid, MaxExemptions)
+	}
+	for _, e := range g.Exempt {
+		if !validAppField(e.App) || !validMachineID(e.Machine) || e.Machine == AllMachines {
+			return fmt.Errorf("%w: exemption %q on %q", ErrInvalid, e.App, e.Machine)
+		}
+	}
 	prev := s.f.Guard
-	if len(g.Authenticators) == 0 && !g.VerifyEachAllow {
-		s.f.Guard = nil
-	} else if s.f.Guard, err = sealGuard(s.key, g); err != nil {
-		s.f.Guard = prev
+	if err := s.setGuard(g); err != nil {
 		return err
 	}
 	if err := s.save(); err != nil {
@@ -774,16 +896,115 @@ func (s *Store) UpdateGuard(fn func(*Guard) error) error {
 	return nil
 }
 
+// RecordProof notes that authenticator id made a proof at at, with the
+// signature counter it signed (count, for WebAuthn), and writes the guard.
+// It changes nothing else, and works while the vault is suspended: a proof
+// is how a suspended vault is unlocked. ErrNotFound for no such
+// authenticator.
+func (s *Store) RecordProof(id string, at time.Time, count *uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, err := s.guard()
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(g.Authenticators, func(a Authenticator) bool { return a.ID == id })
+	if i < 0 {
+		return ErrNotFound
+	}
+	g.Authenticators[i].LastUsed = at
+	if count != nil {
+		g.Authenticators[i].SignCount = *count
+	}
+	prev := s.f.Guard
+	if err := s.setGuard(g); err != nil {
+		return err
+	}
+	if err := s.save(); err != nil {
+		s.f.Guard = prev
+		return err
+	}
+	return nil
+}
+
+// setGuard seals g as the file's guard (none when it holds nothing),
+// without writing the file. Called with s.mu held and the key there.
+func (s *Store) setGuard(g Guard) error {
+	if g.empty() {
+		s.f.Guard = nil
+		return nil
+	}
+	v, err := sealGuard(s.key, g)
+	if err != nil {
+		return err
+	}
+	s.f.Guard = v
+	return nil
+}
+
+// Exempt reports whether app's requests on machine m are allowed without
+// asking: the guard names them, the machine was not forgotten, and the
+// vault is unlocked. A guard that does not open exempts nothing.
+func (s *Store) Exempt(m, app string) bool {
+	if m == "" || app == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.usable() || slices.Contains(s.f.Forgotten, m) {
+		return false
+	}
+	g, err := s.guard()
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(g.Exempt, func(e Exemption) bool { return e.Machine == m && e.App == app })
+}
+
 // Lock forgets the key until Unlock.
 func (s *Store) Lock() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	clear(s.key)
 	s.key = nil
+	s.suspended = false
 }
 
-// Unlock takes the key derived from the passphrase; an unlocked vault only
-// checks it. Forgotten machines are then taken out of the lists.
+// Suspend locks the vault but keeps the key in memory: no value is read or
+// sealed until Resume (or Unlock with the passphrase), and the guard stays
+// readable, so an authenticator's proof can be checked. A vault whose key
+// is not held stays as it is.
+func (s *Store) Suspend() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.key != nil {
+		s.suspended = true
+	}
+}
+
+// Resume unlocks a suspended vault with the key it holds; ErrLocked when it
+// holds none.
+func (s *Store) Resume() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.key == nil {
+		return s.noKey()
+	}
+	s.suspended = false
+	return nil
+}
+
+// Held reports whether the key is in memory, the vault unlocked or
+// suspended.
+func (s *Store) Held() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.key != nil
+}
+
+// Unlock takes the key derived from the passphrase; a vault that holds the
+// key only checks it, and a suspended one is then unlocked. Forgotten
+// machines are then taken out of the lists.
 func (s *Store) Unlock(passphrase string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -791,7 +1012,11 @@ func (s *Store) Unlock(passphrase string) error {
 		return ErrNoPassphrase
 	}
 	if s.key != nil {
-		return s.verify(passphrase)
+		if err := s.verify(passphrase); err != nil {
+			return err
+		}
+		s.suspended = false
+		return nil
 	}
 	key := derive(passphrase, *s.f.KDF)
 	if b, err := open(key, s.f.Check, checkAD); err != nil || string(b) != checkText {
@@ -890,8 +1115,8 @@ func (s *Store) rekey(cur []byte, passphrase string) error {
 		clear(key)
 		return err
 	}
-	// A new passphrase ends every authenticator: whoever knew the old one
-	// may have added theirs. The rule stays.
+	// A new passphrase ends every authenticator and exemption: whoever knew
+	// the old one may have added theirs. The rule stays.
 	var guard *Sealed
 	if s.f.Guard != nil {
 		g, err := openGuard(cur, s.f.Guard)
@@ -915,7 +1140,7 @@ func (s *Store) rekey(cur []byte, passphrase string) error {
 		return err
 	}
 	clear(s.key)
-	s.key = key
+	s.key, s.suspended = key, false
 	_ = s.applyForgotten() // else still enforced by info, applied at the next change
 	return nil
 }

@@ -6,6 +6,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 import { keyName } from '../keys';
 import { disabledCommands, runMenuCommand } from '../desktop';
 import { closeWindowPane, leaveWindowPane } from '../keymap';
+import '../commands';
 import { noteFocus, resetHistory } from '../paneHistory';
 import { useDialog } from '../dialog';
 import { useStore } from '../state/store';
@@ -123,7 +124,7 @@ describe('runMenuCommand', () => {
       await settle();
       expect(core.layout('m')?.workspaces.map((w) => w.id)).toEqual(['wwwwwwww']);
       // Pressed again: it goes, without asking, as it has nothing to lose
-      // (a machine left with none gets a new, empty one).
+      // (a machine may be left with none).
       now.mockReturnValue(1_002_000);
       runMenuCommand('pane.close');
       await settle();

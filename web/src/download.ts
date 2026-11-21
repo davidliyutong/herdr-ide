@@ -13,7 +13,7 @@
 // per browser (the last HISTORY_MAX, in localStorage; names and paths, no
 // contents).
 
-import { desktopShell } from './desktop';
+import { desktopShell } from './shell';
 import { downloadUrl } from './lib/files';
 import { frameOfWindow } from './codeFrames';
 import { useStore } from './state/store';

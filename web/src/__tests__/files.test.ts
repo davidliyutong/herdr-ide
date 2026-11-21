@@ -83,7 +83,8 @@ function stubFetch() {
       const p = url.searchParams.get('path')!;
       if (failList.has(p)) return json({ error: 'input/output error' }, 404);
       if (!tree[p]) return json({ error: 'no such directory' }, 404);
-      return json({ dir: { name: p, path: p, is_dir: true }, entries: tree[p] });
+      // An empty directory's entries came as null.
+      return json({ dir: { name: p, path: p, is_dir: true }, entries: tree[p].length ? tree[p] : null });
     }
     if (url.pathname === '/api/m/m/p/files/stat') {
       return json({
@@ -557,6 +558,71 @@ describe('FilesPanel', () => {
     await act(async () => poll());
     await flush();
     expect(lists('/home/u/src/lib')).toBe(before + 1);
+  });
+
+  it('says nothing of a listing that failed once, and why one failed again or left nothing to show', async () => {
+    const note = () => host.querySelector('.files-note.error')?.textContent;
+    await act(async () => poll());
+    await flush();
+    // The root changes (an archive unpacked into it) and its listing fails
+    // once: the entries stay, without a word.
+    mtimes['/home/u/src'] = 2;
+    failList.add('/home/u/src');
+    await act(async () => poll());
+    await flush();
+    expect(rows()).toContain('/home/u/src/main.go');
+    expect(note()).toBeUndefined();
+    // Again: it says why, the entries still there.
+    await act(async () => poll());
+    await flush();
+    expect(rows()).toContain('/home/u/src/main.go');
+    expect(note()).toBe('input/output error');
+    // Once it answers, the error goes: the folder unchanged since is listed
+    // again, as a failed listing forgot its time.
+    failList.clear();
+    await act(async () => poll());
+    await flush();
+    expect(note()).toBeUndefined();
+    expect(useTree.getState().mtimes['/home/u/src']).toBe(2);
+    // A listing started otherwise (Refresh) that fails is tried again by the next poll.
+    failList.add('/home/u/src');
+    await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${t('files.refresh')}"]`)!.click());
+    await flush();
+    failList.clear();
+    const before = lists('/home/u/src');
+    await act(async () => poll());
+    await flush();
+    expect(lists('/home/u/src')).toBe(before + 1);
+    expect(useTree.getState().dirs['/home/u/src'].error).toBeUndefined();
+  });
+
+  it('polls a folder whose first listing failed, and an empty one', async () => {
+    failList.add('/home/u/src/lib');
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    expect(rows()).toEqual(['/home/u/src/lib', '/home/u/src/main.go']);
+    failList.clear();
+    await act(async () => poll());
+    await flush();
+    expect(rows()).toEqual(['/home/u/src/lib', '/home/u/src/lib/a.go', '/home/u/src/lib/b.go', '/home/u/src/main.go']);
+    // Emptied (its entries come as null), then filled again: still polled.
+    tree['/home/u/src/lib'] = [];
+    mtimes['/home/u/src/lib'] = 2;
+    await act(async () => poll());
+    await flush();
+    expect(useTree.getState().dirs['/home/u/src/lib'].entries).toEqual([]);
+    tree['/home/u/src/lib'] = [f('out.txt')];
+    mtimes['/home/u/src/lib'] = 3;
+    await act(async () => poll());
+    await flush();
+    expect(rows()).toContain('/home/u/src/lib/out.txt');
+  });
+
+  it('says that an empty root is empty', async () => {
+    tree['/home/u/src'] = [];
+    await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${t('files.refresh')}"]`)!.click());
+    await flush();
+    expect(host.textContent).toContain(t('files.emptyDir'));
   });
 
   it('refreshes the folders shown, not every folder seen', async () => {

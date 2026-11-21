@@ -58,6 +58,19 @@ describe('the address field', () => {
     expect(parseAddress('http://127.0.0.1:3000/x')).toEqual(page('http://localhost:3000/x', true, 3000));
   });
 
+  it('takes a name below localhost as a machine’s loopback, and as written for this computer', () => {
+    // Browsers resolve it to the loopback of their own computer: a webview
+    // of the desktop app loads it as it is.
+    expect(parseAddress('app.localhost:3000/x')).toEqual(page('http://app.localhost:3000/x', false, 3000));
+    expect(parseAddress('http://A.Localhost:8080/')).toEqual(page('http://a.localhost:8080/', false, 8080));
+    // A remote machine's is that machine's port.
+    expect(parseAddress('app.localhost:3000/x', true)).toEqual(page('http://localhost:3000/x', true, 3000));
+    expect(parseAddress('https://app.localhost/', true)).toEqual(page('https://localhost/', true, 443));
+    expect(parseAddress('app.localhost:5173', true)).toEqual(page('http://localhost:5173/', true, 5173));
+    // A name that only ends so is another host.
+    expect(parseAddress('notlocalhost:3000', true)).toEqual(page('https://notlocalhost:3000/', false, 3000));
+  });
+
   it('takes nothing for an empty field and refuses other schemes and ports out of range', () => {
     expect(parseAddress('   ')).toEqual({ kind: 'empty' });
     for (const s of [

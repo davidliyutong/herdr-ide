@@ -1,16 +1,28 @@
 // The auto-lock's countdown in the vault panel's session bar: when the
-// vault locks if nothing uses it; a click picks another time for this
-// unlock (presets, never, or a time typed), which holds until the vault
-// locks (docs/features/30-variable-vault.md).
+// vault locks if nothing uses it (and, on hover, when the passphrase is
+// needed again); a click picks another time for this unlock (presets,
+// never, or a time typed), which holds until the vault locks
+// (docs/features/30-variable-vault.md).
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Timer, TimerOff } from 'lucide-react';
 import { pick, type PickerItem } from '../../components/Picker';
 import { t } from '../../i18n';
 import { useStore } from '../../state/store';
-import { errorText, loadVault, setAutoLock, useVault } from './api';
+import { errorText, loadVault, setAutoLock, useVault, VaultError, type AutoLock } from './api';
 import { clockText, minutesText, parseMinutes, PRESETS } from './lockTimes';
 
-export function AutoLockButton() {
+/** Whether minutes (null: the setting's) lets the vault stay unlocked
+ * longer than now, which takes the passphrase again (the core's rule; it
+ * also refuses with passphrase_required where the page cannot tell). */
+export function lengthens(al: AutoLock, minutes: number | null): boolean {
+  if (al.after === 0) return false;
+  const next = minutes === null ? al.setting : minutes * 60;
+  return next === 0 || next > al.after;
+}
+
+/** The countdown; a time that keeps the vault unlocked longer is handed to
+ * onPassphrase, which asks for the passphrase and sets it. */
+export function AutoLockButton({ onPassphrase }: { onPassphrase(minutes: number | null): void }) {
   const al = useVault((s) => s.autoLock);
   const lockAt = al?.lockAt ? Date.parse(al.lockAt) : undefined;
   const [now, setNow] = useState(() => Date.now());
@@ -59,16 +71,25 @@ export function AutoLockButton() {
     if (r === undefined) return;
     const minutes = typeof r === 'object' ? (parseMinutes(r.create) ?? null) : r === 'default' ? null : r === 'never' ? 0 : Number(r);
     if (typeof r === 'object' && minutes === null) return;
+    if (lengthens(al, minutes)) return onPassphrase(minutes);
     try {
       await setAutoLock(minutes);
     } catch (err) {
+      if (err instanceof VaultError && err.code === 'passphrase_required') return onPassphrase(minutes);
       useStore.getState().toast(errorText(err), undefined, undefined, 'error');
     }
   };
+  // When the passphrase is needed again: the core forgets the key then.
+  const title = [
+    off ? t('vault.autoLock.offTitle') : t('vault.autoLock.title', { time: minutesText(Math.round(al.after / 60)) }),
+    al.keyUntil && t('vault.autoLock.passphraseAt', { date: new Date(al.keyUntil).toLocaleString() }),
+  ]
+    .filter(Boolean)
+    .join('\n');
   return (
     <button
       className={'sm ghost vault-autolock' + (al.custom ? ' custom' : '')}
-      title={off ? t('vault.autoLock.offTitle') : t('vault.autoLock.title', { time: minutesText(Math.round(al.after / 60)) })}
+      title={title}
       aria-label={left !== undefined ? t('vault.autoLock.left', { time: clockText(left) }) : text}
       onClick={(e) => void choose(e)}
     >

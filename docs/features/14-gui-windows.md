@@ -59,7 +59,7 @@ input methods.
   instance's terminal core runs, so the display belongs to the server whose
   terminals have `DISPLAY`: it stays while they may start programs and ends
   soon after the terminal core stopped (once the programs have exited too).
-- The keeper (`internal/agent/guikeep.go`) is the agent binary run as
+- The keeper (`internal/agent/guikeep.go`) is the machine's binary run as
   `gui-keep`, in its own session: it holds a connection to the display and
   checks every 5 s that the instance's terminal core (`run/hc.sock`) still
   runs (the user's process listening on the socket, by peer credentials and
@@ -74,7 +74,7 @@ input methods.
   lacks the delay: such a server exits as soon as its last client leaves,
   and one that never got a client stays until an agent attaches.
 
-**Terminals** (`internal/server/gui.go`, `internal/server/term.go`,
+**Terminals** (`internal/server/gui.go`, `internal/server/term_backend.go`,
 `internal/gui`)
 
 - When the GUI setting is on for a machine, the core adds `DISPLAY` and
@@ -248,7 +248,7 @@ input methods.
   exiting (then pictures for 5 s, doubling up to 5 minutes, before trying
   again). `#stats` shows the encoder in use or why pictures are sent.
 
-**Routing** (`internal/gui/gui.go`)
+**Routing** (`internal/gui/display.go`, `internal/gui/frames.go`)
 
 - The core prepares a machine's display when the machine connects (status,
   install, start, attach; phases `installing`, `starting`, `ready`, `error`,

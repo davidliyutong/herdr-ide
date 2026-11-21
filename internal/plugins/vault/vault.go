@@ -7,10 +7,12 @@
 // One gate stands before everything that reads a value or lets one be
 // read, for every caller, the core host's own programs included: a
 // machine's MCP server gets a value only for a variable that lists it, or
-// with the user's approval; and the UI's approvals, reveals and changes
-// need a vault session, which a page gets only by giving the vault's
-// passphrase (session), so a program that calls the core's API on the
-// core host cannot approve its own request or read a value.
+// with the user's approval (or for an app the user exempted on it with the
+// passphrase); and the UI's approvals, reveals and changes need a vault
+// session, which a page gets only by giving the vault's passphrase or an
+// authenticator's proof (proof.go), so a program that calls the core's API
+// on the core host cannot approve its own request or read a value. The
+// core holds the key for a while after the passphrase (autolock.go).
 // docs/features/30-variable-vault.md has the design.
 package vault
 
@@ -130,6 +132,9 @@ type Plugin struct {
 	waitUntil time.Time
 	guessing  bool
 	now       func() time.Time
+	// mono replaces the monotonic clock (tests): how long the process has
+	// run, not counting the computer's sleep.
+	mono func() time.Duration
 	// noisyEvery and changedEvery replace noisyAuditEvery and changedEvery
 	// (tests).
 	noisyEvery, changedEvery time.Duration
@@ -140,7 +145,7 @@ type Plugin struct {
 	// lastUse is the vault's last use (touch), lockTimer the auto-lock's
 	// timer while the vault is unlocked; lockAfter and lockCheck replace
 	// the setting and lockCheckEvery (tests).
-	lastUse              time.Time
+	lastUse              stamp
 	lockTimer            *time.Timer
 	lockAfter, lockCheck time.Duration
 	// lockFor replaces vault.autoLock until the vault locks, once a page
@@ -153,10 +158,18 @@ type Plugin struct {
 	// it.
 	lockCap    time.Duration
 	lockCapSet bool
+	// keyAt is when the passphrase was last given while the core holds the
+	// key, which it holds for vault.passphraseHours from then, at most for
+	// keyCap (the setting's time then: keyCapSet); keyHold replaces the
+	// setting (tests). See autolock.go.
+	keyAt     stamp
+	keyCap    time.Duration
+	keyCapSet bool
+	keyHold   time.Duration
 }
 
 type session struct {
-	started, used time.Time
+	started, used stamp
 	// proof: an authenticator's proof opened it, not the passphrase
 	// (proof.go); such a session does not change what guards the vault.
 	proof bool
@@ -251,8 +264,18 @@ func (p *Plugin) accessLog(h plugin.Host) *accessLog {
 	return p.alog
 }
 
-// open returns the store, opened at the first use.
+// open returns the store, opened at the first use, having forgotten its
+// key once the key's hold is over (expire): every route and request starts
+// here, so none uses a key the core should no longer hold.
 func (p *Plugin) open(h plugin.Host) (*vaultstore.Store, error) {
+	s, err := p.openStore(h)
+	if err == nil {
+		p.expire(h, s)
+	}
+	return s, err
+}
+
+func (p *Plugin) openStore(h plugin.Host) (*vaultstore.Store, error) {
 	path := p.vaultPath(h)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -291,6 +314,8 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "POST", Path: "authenticators", Mutating: true, Audit: "authenticator_add", Handler: p.gatedPassphrase(p.handleAddAuthenticator)},
 		{Method: "DELETE", Path: "authenticators/{id}", Mutating: true, Audit: "authenticator_delete", Handler: p.gatedPassphrase(p.handleDeleteAuthenticator)},
 		{Method: "POST", Path: "guard", Mutating: true, Audit: "guard", Handler: p.gatedPassphrase(p.handleGuard)},
+		{Method: "POST", Path: "exempt", Mutating: true, Audit: "exempt_add", Handler: p.gatedPassphrase(p.handleAddExempt)},
+		{Method: "DELETE", Path: "exempt/{id}", Mutating: true, Audit: "exempt_delete", Handler: p.gatedPassphrase(p.handleDeleteExempt)},
 		{Method: "GET", Path: "requests", Handler: p.handleRequests},
 		{Method: "POST", Path: "requests/{id}", Mutating: true, Audit: "answer", Handler: p.handleAnswer},
 		{Method: "GET", Path: "log", Handler: p.handleLog},
@@ -343,12 +368,20 @@ func (p *Plugin) handleList(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 	idle, _ := p.sessionLimits(c.Host)
 	st := s.Status()
 	open, byProof := p.sessionKind(c.Host, r, false)
+	autoLock := p.autoLockState(c.Host, s)
+	if !open {
+		// When the vault was last used and when the key goes are a
+		// session's to see.
+		delete(autoLock, "lockAt")
+		delete(autoLock, "keyUntil")
+	}
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{
 		"status": st, "variables": s.List(), "session": open, "sessionProof": open && byProof, "idle": idle.Seconds(),
-		"autoLock": p.autoLockState(c.Host, st.Locked || st.Setup),
-		// What guards the vault beside the passphrase (proof.go); none
-		// while it is locked.
-		"guard": p.guardState(c, s),
+		"autoLock": autoLock,
+		// What guards the vault beside the passphrase (proof.go): all of it
+		// with a session, without one what offering biometrics needs; none
+		// while the core does not hold the key.
+		"guard": p.guardState(c, s, open),
 	})
 }
 
@@ -357,6 +390,37 @@ func (p *Plugin) clock() time.Time {
 		return p.now()
 	}
 	return time.Now()
+}
+
+// A stamp is a moment by two clocks: the wall clock (without Go's
+// monotonic reading), which goes on while the computer sleeps, and the
+// monotonic clock, which macOS and Linux stop while it sleeps but which is
+// never set back. The vault's time limits (the key's hold, the automatic
+// lock, sessions, nonces) count by the one that says longer.
+type stamp struct {
+	wall time.Time
+	mono time.Duration
+}
+
+// monoStart is the monotonic clock's origin.
+var monoStart = time.Now()
+
+// at is now as a stamp.
+func (p *Plugin) at() stamp {
+	mono := time.Since(monoStart)
+	if p.mono != nil {
+		mono = p.mono()
+	}
+	return stamp{wall: p.clock().Round(0), mono: mono}
+}
+
+func (s stamp) zero() bool { return s.wall.IsZero() }
+
+// since is how long before now s was, by the clock that says longer: the
+// computer's sleep counts (the wall clock), and a wall clock set back does
+// not lengthen anything (the monotonic clock).
+func (s stamp) since(now stamp) time.Duration {
+	return max(now.wall.Sub(s.wall), now.mono-s.mono)
 }
 
 // sessionOf reports whether the request carries a session that is open;
@@ -376,8 +440,8 @@ func (p *Plugin) sessionKind(h plugin.Host, r *http.Request, use bool) (open, by
 	idle, most := p.sessionLimits(h)
 	p.mu.Lock()
 	ss, ok := p.sessions[tok]
-	now := p.clock()
-	if !ok || now.Sub(ss.used) > idle || now.Sub(ss.started) > most {
+	now := p.at()
+	if !ok || ss.used.since(now) > idle || ss.started.since(now) > most {
 		delete(p.sessions, tok)
 		p.mu.Unlock()
 		return false, false
@@ -394,9 +458,12 @@ func (p *Plugin) sessionKind(h plugin.Host, r *http.Request, use bool) (open, by
 }
 
 // gated refuses a request without an open session (401 vault_session):
-// the gate before the UI's changes and reveals.
+// the gate before the UI's changes and reveals. The key's hold is looked at
+// first (open), so a session its end ended does not pass, also on the first
+// request after the computer slept past it.
 func (p *Plugin) gated(h func(*plugin.Call, http.ResponseWriter, *http.Request)) func(*plugin.Call, http.ResponseWriter, *http.Request) {
 	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+		p.open(c.Host)
 		if !p.sessionOf(c.Host, r, true) {
 			refuseSession(c, w, r)
 			return
@@ -411,6 +478,7 @@ func (p *Plugin) gated(h func(*plugin.Call, http.ResponseWriter, *http.Request))
 // passphrase opened (401 vault_passphrase for one a proof opened).
 func (p *Plugin) gatedPassphrase(h func(*plugin.Call, http.ResponseWriter, *http.Request)) func(*plugin.Call, http.ResponseWriter, *http.Request) {
 	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+		p.open(c.Host) // the key's hold first, as gated
 		if open, byProof := p.sessionKind(c.Host, r, true); !open || byProof {
 			refusePassphraseSession(c, w, r, open)
 			return
@@ -450,7 +518,7 @@ func (p *Plugin) newSession(h plugin.Host, epoch uint64, byProof bool) string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	tok := hex.EncodeToString(b)
-	now := p.clock()
+	now := p.at()
 	idle, most := p.sessionLimits(h)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -461,14 +529,14 @@ func (p *Plugin) newSession(h plugin.Host, epoch uint64, byProof bool) string {
 		p.sessions = map[string]*session{}
 	}
 	for k, ss := range p.sessions {
-		if now.Sub(ss.used) > idle || now.Sub(ss.started) > most {
+		if ss.used.since(now) > idle || ss.started.since(now) > most {
 			delete(p.sessions, k)
 		}
 	}
 	if len(p.sessions) >= MaxSessions {
 		oldest := ""
 		for k, ss := range p.sessions {
-			if oldest == "" || ss.started.Before(p.sessions[oldest].started) {
+			if oldest == "" || ss.started.since(now) > p.sessions[oldest].started.since(now) {
 				oldest = k
 			}
 		}
@@ -708,6 +776,11 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 		p.capLock(c.Host)
 	}
 	if err == nil {
+		// The passphrase given: the core holds the key for the setting's
+		// time from now.
+		p.keyFrom(c.Host)
+	}
+	if err == nil {
 		if tok = p.newSession(c.Host, epoch, false); tok == "" {
 			// The sessions ended while the check ran, which keyMu leaves
 			// to a lock or a new passphrase after it.
@@ -727,15 +800,27 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 }
 
 // sessionByProof opens a session for an authenticator's proof made for it
-// (proof.go). The vault stays as it is: a locked one is refused, since a
-// proof holds no key.
+// (proof.go). A vault locked while the core holds its key (suspended) is
+// unlocked by it within the key's hold; one whose key the core forgot is
+// refused, since a proof holds no key.
 func (p *Plugin) sessionByProof(c *plugin.Call, w http.ResponseWriter, r *http.Request, s *vaultstore.Store, pb *proofBody) {
 	want := purpose{For: ForSession}
-	// As with the passphrase, the check and the session it opens are one
-	// step for a lock.
+	// As with the passphrase, the check, the unlock and the session it
+	// opens are one step for a lock.
 	p.keyMu.Lock()
 	epoch := p.currentEpoch()
-	kind, err := p.checkProof(c, r, s, pb, want)
+	var kind string
+	err := error(vaultstore.ErrLocked)
+	// The hold may have ended since the last look (open): a key the core
+	// should have forgotten unlocks nothing.
+	if s.Held() && p.keyLeft(c.Host) > 0 {
+		kind, err = p.checkProof(c, r, s, pb, want)
+	}
+	resumed := false
+	if err == nil && s.Status().Locked {
+		resumed = true
+		err = s.Resume()
+	}
 	tok := ""
 	if err == nil {
 		if tok = p.newSession(c.Host, epoch, true); tok == "" {
@@ -748,6 +833,9 @@ func (p *Plugin) sessionByProof(c *plugin.Call, w http.ResponseWriter, r *http.R
 		return
 	}
 	c.Host.Audit(r, "vault.proved", map[string]any{"ok": true, "for": want.For, "kind": kind})
+	if resumed {
+		c.Host.Audit(r, "vault.unlocked", map[string]any{"ok": true, "kind": kind})
+	}
 	p.touch(c.Host)
 	changed(c.Host)
 	idle, _ := p.sessionLimits(c.Host)
@@ -802,6 +890,7 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 		tok = p.newSession(c.Host, p.endSessions(), false)
 		// A new key, set with the passphrase, unlocks as an unlock does.
 		p.capLock(c.Host)
+		p.keyFrom(c.Host)
 	}
 	p.keyMu.Unlock()
 	c.Host.Audit(r, "vault.passphrase_set", map[string]any{"ok": err == nil, "change": change})
@@ -815,18 +904,36 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": idle.Seconds(), "status": s.Status()})
 }
 
+// handleLock locks the vault and ends every session: it suspends a vault
+// with an authenticator, whose key the core keeps for a proof to unlock it
+// within the key's hold, and forgets the key of any other, or with
+// {"forget": true}, after which only the passphrase unlocks it.
 func (p *Plugin) handleLock(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	s, err := p.open(c.Host)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	var body struct {
+		Forget bool `json:"forget"`
+	}
+	if r.ContentLength != 0 {
+		if err := plugin.ReadJSON(r, 1<<10, &body); err != nil {
+			plugin.WriteError(w, err)
+			return
+		}
+	}
 	// After a check that runs, never between its key and its session.
 	p.keyMu.Lock()
-	s.Lock()
-	p.endSessions()
-	p.clearLockFor()
+	held := s.Held()
+	forgot := p.lockStore(s, body.Forget)
 	p.keyMu.Unlock()
+	if held {
+		c.AuditField("keyHeld", !forgot)
+	}
+	if held && !forgot {
+		p.armAutoLock(c.Host, p.keyLeft(c.Host)) // the hold's end is still due
+	}
 	changed(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, s.Status())
 }
@@ -1028,6 +1135,18 @@ func (p *Plugin) Handle(ctx context.Context, h plugin.Host, m string, req agentp
 	return resp
 }
 
+// appOf is the app of a request's process chain: the name of the process
+// that started the one connected to vault.sock (the CLI that runs the MCP
+// server), as the machine's kernel names it; "" without one, and for a
+// name longer than an app exempted can be (macOS keeps 16 bytes): cut, it
+// would be the app of every name it begins.
+func appOf(ps []agentproto.VaultProcess) string {
+	if len(ps) < 2 || len(ps[1].Name) > vaultstore.MaxApp {
+		return ""
+	}
+	return ps[1].Name
+}
+
 // clipProcess bounds a process chain an agent reported.
 func clipProcess(ps []agentproto.VaultProcess) []agentproto.VaultProcess {
 	if len(ps) == 0 {
@@ -1190,10 +1309,13 @@ func (p *Plugin) handle(ctx context.Context, h plugin.Host, m string, req agentp
 	if err != nil {
 		return refuse("unavailable", err.Error())
 	}
+	// The app that asked, as the machine's kernel names it: an exempt one
+	// reads without asking while the vault is unlocked.
+	exempt := s.Exempt(m, appOf(req.Process))
 	if req.Tool == agentproto.VaultList {
 		vars := []agentproto.VaultVariable{}
 		for _, i := range s.List() {
-			vars = append(vars, agentproto.VaultVariable{Name: i.Name, Description: i.Description, InjectOnly: i.InjectOnly, Approval: !i.Allows(m)})
+			vars = append(vars, agentproto.VaultVariable{Name: i.Name, Description: i.Description, InjectOnly: i.InjectOnly, Approval: !i.Allows(m) && !exempt})
 		}
 		return agentproto.VaultResponse{OK: true, Variables: vars}, ResultListed
 	}
@@ -1233,7 +1355,9 @@ func (p *Plugin) handle(ctx context.Context, h plugin.Host, m string, req agentp
 		return refuse("vault_locked", "the vault is locked; unlock it in the UI")
 	}
 	result := ResultAllowed
-	if len(ask) > 0 {
+	if len(ask) > 0 && exempt {
+		result = ResultExempted
+	} else if len(ask) > 0 {
 		answer := p.ask(ctx, h, m, req, ask)
 		switch answer {
 		case AnswerOnce:
@@ -1362,6 +1486,7 @@ func (p *Plugin) ForgetMachine(h plugin.Host, id string) {
 	}
 	if len(names) > 0 {
 		h.Audit(nil, "vault.machine_forgotten", map[string]any{"machine": id, "names": names})
-		changed(h)
 	}
+	// Its exemptions went too.
+	changed(h)
 }

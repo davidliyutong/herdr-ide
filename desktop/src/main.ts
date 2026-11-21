@@ -46,6 +46,7 @@ import {
   BROWSER_PARTITION,
   guestMayNavigate,
   guestPreferences,
+  hostResolver,
   isExternal,
   isInternal,
   mainWindowPreferences,
@@ -313,6 +314,20 @@ ipcMain.on(channels.relaunch, (event) => {
   if (fromMainPage(event)) privacy.relaunch();
 });
 
+// What the app's processes use, for the page's Performance settings: the
+// kind of each process, its share of a processor since the last asking and
+// its memory. Nothing of what the processes hold.
+ipcMain.handle(channels.metrics, (event) =>
+  fromMainPage(event)
+    ? app.getAppMetrics().map((p) => ({
+        type: p.type,
+        name: p.name ?? p.serviceName ?? '',
+        cpu: p.cpu.percentCPUUsage,
+        memory: p.memory.workingSetSize * 1024,
+      }))
+    : [],
+);
+
 // The system's prompt for the variable vault (verify.ts). The verifier
 // exists once the core runs, with the key of this launch, which only this
 // process holds.
@@ -537,6 +552,8 @@ if (!app.requestSingleInstanceLock()) {
     .then(async () => {
       if (quitting) return;
       if (typeof instance !== 'string') throw instance;
+      // Before anything loads: names resolve as in the system's browser.
+      app.configureHostResolver(hostResolver);
       // Linux and macOS report a logout, restart or shutdown here.
       powerMonitor.on('shutdown', () => {
         systemShutdown = true;

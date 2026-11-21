@@ -112,7 +112,7 @@ vector the agent builds: no shell, no option from the request.
 | Read | What it answers |
 | --- | --- |
 | `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes with their fetch URLs (`remote -v`) without a URL's user information (also with a raw `/`, `?`, `#` or `@` in its password), query and fragment (tokens are often put there: `?access_token=`) or an scp-like address's user with a password, enclosing repositories. |
-| `status` | `status --porcelain=v2 -z --branch --untracked-files=all`: files with the index's and the working tree's letters, renames with their old path, conflicts, untracked files; branch, upstream, ahead/behind. A file whose working tree side differs from the index (and an untracked or conflicted one) has that file's modification time and size (`lstat`, nothing read), which move when it is edited again while its letters stay. |
+| `status` | `status --porcelain=v2 -z --branch --untracked-files=all --ignored=matching`: files with the index's and the working tree's letters, renames with their old path, conflicts, untracked files; branch, upstream, ahead/behind; apart from them (`ignored`) the paths git ignores, a directory an ignore pattern matches as itself with a trailing `/` (git neither lists nor walks what is inside, so `node_modules/` costs one entry), else each file, at most 20 000 (`ignoredTruncated`). git prints the ignored paths last: output over the run's limit among them keeps the changes and cuts those (`ignoredTruncated`); git before 2.16, which refuses `--ignored=matching`, is asked without it from then on (nothing is ignored). A file whose working tree side differs from the index (and an untracked or conflicted one) has that file's modification time and size (`lstat`, nothing read), which move when it is edited again while its letters stay. |
 | `log` | `log --date-order` of the branches, tags and HEAD (with `remotes=1` the remote branches; `branch=` names some instead; on a branch without commits yet, the other branches' commits), pages of 300 (at most 1000, `skip=`): hash, parents, author, e-mail, date, subject; with the first page the refs (`for-each-ref`, tags peeled), the stashes, HEAD and its branch. |
 | `show` | `rev=` a commit's message and committer and its files (status, lines added and deleted, binary) against its parent `parent=` (1 by default; the empty tree for a root commit), or with `rev2=` the files between two commits. |
 | `blob` | `path=` at `source=`: `worktree` (with its size and modification time; a link is answered as its target, a path through a directory link that leads out of the repository does not exist, FIFOs and devices are not read), `index` (stage 0), `head`, or a revision (with `parent=`: its parent's); `exists`, `binary` (a NUL in the first 8000 bytes or not UTF-8), `tooLarge` over 8 MiB. |
@@ -150,15 +150,34 @@ the answer through.
 **Panel** (`GitPanel.tsx`), as VS Code's Source Control view:
 
 - The repository of the focused pane's directory (a terminal's, a VS Code
-  pane's folder, the workspace's), kept while another pane (a diff, the
-  graph) has the focus; a panel drawn afresh then (the panel opened as a
-  pane, in a tab of its own) takes that of the terminal or VS Code pane of
-  the workspace focused last (`recentDirectory`); a searchable list (`Picker`) when the directory is in nested
-  repositories. A directory in no repository is remembered until
-  **Refresh**; a failure that says nothing about it (offline, busy,
-  timeout) is shown and the directory asked again 10 s later. What the
-  panel holds for a repository (the Amend box, the history, the stashes)
-  is its own: another repository starts afresh.
+  pane's folder, the workspace's), kept while another pane (an editor, a
+  diff, the graph) has the focus in the same workspace of the same
+  machine; a panel drawn afresh then (the panel opened as a pane, in a
+  tab of its own), or the panel after the machine or workspace shown
+  changed, takes that of the terminal or VS Code pane of the workspace
+  focused last (`recentDirectory`): the panel belongs to the machine and
+  workspace shown, and a machine is never asked about another one's
+  directory. A searchable list (`Picker`) when the directory is in nested
+  repositories, whose choice is kept. A directory in no repository is
+  remembered until **Refresh**; a failure that says nothing about it
+  (offline, busy, timeout) is asked again 10 s later. While a directory's
+  repository is asked, or after such a failure, the panel keeps showing
+  what it last showed in this workspace of this machine (another
+  workspace's or machine's repository never; the failure is shown, or
+  that it is loading, when there was nothing): a terminal's `cd` inside
+  the repository (deeper, or back to the top level) changes nothing in
+  the panel, which is never filtered by the directory; a `cd` into a
+  nested repository or a submodule shows that one (the picker offers the
+  outer ones), out of repositories the panel says so with the directory.
+- What the panel shows of a repository is kept per machine and
+  repository in the page's memory (`memory.ts`, the 32 used last) while
+  the panel is away (another panel, the sidebar hidden, another
+  repository) and comes back as it was: the folders collapsed in the
+  tree, the rows selected and the cursor, the list or tree chosen in
+  read-only mode, the commit message, its box's height and the Amend box,
+  the scroll positions of the changes and the history, the history's
+  commits and the commit opened in it with its files, and the stashes
+  (shown, then read again). Sections stay open or closed per browser.
 - The branch (or the detached commit) with a sync button (`behind↓ ahead↑`:
   pull, then push) or **Publish Branch** without an upstream, Pull and
   Push; More: Fetch (all remotes, pruned), **Fetch From…**, Pull, Pull
@@ -173,7 +192,7 @@ the answer through.
   there, or a name typed: `pull <remote> refs/heads/<name>`); Push To…
   for a remote, which becomes the upstream. With `git.confirmSync` on,
   Pull, Push and the sync button ask first, naming where they go.
-- **Remotes**, a section closed by default: each remote with its fetch
+- **Remotes** (`Remotes.tsx`), a section closed by default: each remote with its fetch
   URL (without a user or password, which the machine drops); a button
   fetches from it, the context menu fetches, pulls from it, pushes the
   branch to it, or copies its URL or name.
@@ -200,9 +219,9 @@ the answer through.
   commit's hash typed. In read-only mode the branch is not a button.
 - A banner while a merge, rebase, cherry-pick or revert is in progress, with
   Abort and Continue.
-- The commit box: Cmd/Ctrl+Enter or **Commit**; **Amend last commit**.
-  With nothing staged it offers to stage everything and commit. The text
-  typed is kept per repository while the panel is hidden.
+- The commit box: Cmd/Ctrl+Enter or **Commit**; **Amend last commit**,
+  cleared with the text after a commit. With nothing staged it offers to
+  stage everything and commit.
 - **Merge Changes**, **Staged Changes**, **Changes** (untracked files
   among them, `U`, or with `git.untrackedChanges` at `separate` in
   **Untracked Changes**) are collapsible sections (`components/tree`
@@ -248,7 +267,7 @@ the answer through.
   while untracked files are shown apart, whose own Stage All names
   them); with conflicts Stage All names the Changes' paths, so conflicts
   are not marked resolved.
-- **Stashes** (apply, pop, drop), a section closed by default, each named
+- **Stashes** (`Stashes.tsx`; apply, pop, drop), a section closed by default, each named
   by its index and commit; none are shown when they could not be read.
 - **History** (`History.tsx`), docked at the bottom of the panel as VS
   Code's Source Control Graph: its heading stays at the bottom while it is
@@ -265,16 +284,34 @@ the answer through.
   commit's files under it with their icons, the lanes running through (a
   file opens its diff against the first parent); the context menu copies
   the hash or opens the graph pane.
-- While shown and the page visible, the panel asks `watch` every 2 s and
-  reads `status` (which has the branch, upstream and ahead/behind) when
-  the token moved, at least every 10 s (changes of the working tree do
-  not move it), and after every change it makes; `repo` (remotes, git
-  directories) first and when the configuration token moved (`state.ts`).
-  A read that took over 2 s is not repeated by the polls for five times
-  as long, and one that timed out (or found git busy) waits 20 s, then
+- While the panel, a pane, the explorer or an editor shows the repository
+  and the page is visible, the page asks `watch` every 2 s and reads
+  `status` (which has the branch, upstream and ahead/behind) when the
+  token moved, at least every 10 s (changes of the working tree do not
+  move it), and after every change it makes; `repo` (remotes, git
+  directories) first and when the configuration token moved
+  (`state.ts`). For 30 s after something happened the repository is
+  active: `watch` every 1 s, `status` every 2 s. Something happened: the
+  token moved or a status differed from the one before, the UI changed
+  the repository, it was just shown, keys or the pointer were used in the
+  page, or a terminal in the repository (its directory inside the top
+  level) ended a command or an agent's turn (its foreground program, its
+  state, the agent's status or turn, or its program's own status
+  changed). Those terminals, and the page shown again or focused
+  (another program may have changed files), also have the repository
+  looked at 250 ms later. Every read keeps the polls' next one away for
+  five times as long as it took (a slow status is not read most of the
+  time), and one that timed out (or found git busy) waits 20 s, then
   twice as long each time, at most 5 minutes; a change still reads at
-  once. A change gets a read that starts after it (not one already
-  running), and the tokens it sees become the polls' own. Readers follow
+  once. So the index, HEAD and the refs moving (`git add`, `commit`,
+  `checkout` in a terminal) are seen within 2 s, within 1 s while active
+  and about 250 ms after the command ended when the terminal core reports
+  its foreground program; an edit of the working tree within 2 s while
+  active and 10 s otherwise (before, every case waited for the polls: up
+  to 2 s and 10 s, and up to 2 s more after the page came back), each
+  plus the status's own time. A change gets a read that starts after it
+  (not one already running), and the tokens it sees become the polls'
+  own. Readers follow
   what they show: the history, the graph and the stashes read again when
   the refs token moved; diffs of the working tree and the index when any
   token moved, a working tree diff also when its file's entry in the
@@ -316,7 +353,7 @@ Graph's editor; `actions.openView` with `tab`):
   This Branch**, and **Add to Filter** (while the filter holds others) or
   **Remove from Filter**. **Remote branches** turns them off in the
   history of every branch.
-- A click opens the commit's details under it: hash, parents (a merge's
+- A click opens the commit's details under it (`GraphDetail.tsx`): hash, parents (a merge's
   parent chooses what its files are compared with), author, committer,
   message, and its files (their icons, names in their letter's color,
   folders) with lines added and deleted; a file opens the
@@ -432,7 +469,18 @@ counts the same added and deleted colors, an operation in progress
 explorer colors the changed files of the repositories followed (conflicts,
 deletions, modifications, renames, additions, untracked) with their letter,
 and their folders with the most pressing change inside, in VS Code's Git
-decoration colors (`--ds-git-*`, [24](24-design-tokens.md)). Besides the
+decoration colors (`--ds-git-*`, [24](24-design-tokens.md)). What git
+ignores is in the muted text color (`--ds-color-muted`, as VS Code's
+`gitDecoration.ignoredResourceForeground`) without a letter: the paths of
+the status's `ignored` and everything in a folder git ignores, whose
+entries git does not list (the explorer's listing of that folder gives
+them, `files/tree.ts`); a change marks its folder whatever is ignored in
+it. What is ignored comes from the innermost repository a directory is in
+(a repository inside an ignored folder rules its own files). The git
+directory (`.git` at a top level, and everything in it) is muted too: the
+explorer hides it as VS Code's does (`files.exclude`), and shown, it is
+the repository's storage, not its files (git never lists it as ignored,
+so VS Code would give it no color). Besides the
 panel's and the panes' repositories, the plugin follows those of the
 directories the explorer shows while it is open (its root and the expanded
 ones; [28](28-file-explorer.md)): the repository of a directory is asked
@@ -456,7 +504,7 @@ file's working tree diff.
 | --- | --- |
 | A library (go-git, libgit2) on machines instead of the executable | The agent would carry another implementation of git with its own gaps (hooks, credential helpers, worktrees, config); the user's git is what their terminals use. |
 | A generic "run git with these arguments" route | Every request could pass options (`--upload-pack`, `-c`, `--exec`) that run programs; actions with argument vectors built on the machine keep what runs in the agent's code. |
-| Pushing changes from a watcher on machines | A watcher per repository needs an owner and limits; one stat of a few files every 2 s while the panel is shown costs less and stops with it. |
+| Pushing changes from a watcher on machines | A watcher per repository needs an owner and limits, and one of the working tree a watch per directory (inotify's are limited per user); one stat of a few files every 1 or 2 s while the repository is shown costs less and stops with it, and the terminals' commands and agents' turns, which the page already hears of, say when to look at once. |
 | Typing credentials into the UI | Passwords and passphrases would cross the core; the terminal next to the panel is where git can ask. |
 | Using VS Code's Source Control and Git Graph only | They stay ([05](05-vscode-panes.md)); code-server per machine is slow to start and large for a look at a diff. |
 | The latest commits only in the panel, the rest in the graph pane | Looking back a little further meant leaving the panel; the history docked at the bottom scrolls through every commit and the graph pane stays for filters, search and comparisons. |
@@ -482,7 +530,12 @@ file's working tree diff.
   the agent kills it.
 - A repository whose status is slow (a very large working tree): the polls
   read it less often (five times as long as it took; after a timeout 20 s,
-  doubling up to 5 minutes) instead of every 10 s.
+  doubling up to 5 minutes) instead of every 2 or 10 s.
+- Many ignored files that no ignore pattern's folder holds (`*.o` all over
+  a build tree): at most 20 000 are listed, the rest of them are not
+  muted.
+- git before 2.16: no `--ignored=matching`; the status is read without
+  it and nothing is muted.
 - Many runs at once (several pages, a slow remote): beyond 8 a run waits
   up to 3 s, then fails with `busy` and the panel's next poll tries again.
 - Many paths (Discard All of thousands of files): split over runs of git;
@@ -563,7 +616,11 @@ terminal; what the plugin adds is a way to reach it from the browser:
   and a textconv driver configured (`TestReadsRunNoMonitor`); a link to `/`
   in the working tree (`TestWorktreeBlobLinks`); literal paths, and a
   pre-commit hook whose glob pathspecs match (`TestLiteralPaths`); the
-  shared range patches applied with `git apply`.
+  shared range patches applied with `git apply`; the ignored paths of the
+  status (an ignored folder as itself, files one by one, none of `.git`,
+  `TestStatusIgnored`), output cut among them and their cap
+  (`TestParseStatusCut`, `TestKeepCut`), git without
+  `--ignored=matching` (`TestStatusWithoutIgnoredMode`).
 - `internal/agent/plugins_git_test.go`: the core's routes are the agent's
   actions, reads as reads.
 - `internal/plugins/git/git_test.go`: routes (reads GET, changes mutating
@@ -584,7 +641,9 @@ terminal; what the plugin adds is a way to reach it from the browser:
   `gitDiff.test.ts` (Monaco replaced): groups (untracked files apart,
   staged with `add --update` and by their paths) and the tree (joined and
   collapsed folders, a folder's files, Collapse All, the view set),
-  decorations, the panel's actions (Stage All and Unstage All without
+  decorations (what git ignores muted, inside ignored folders and the
+  git directory too, a repository inside another ruling its own), the
+  panel's actions (Stage All and Unstage All without
   paths, with conflicts by paths, a rename unstaged with its old path,
   stashes by their commit), several rows selected by clicks and keys
   with every action on them, the context menu's file entries (the
@@ -619,4 +678,17 @@ terminal; what the plugin adds is a way to reach it from the browser:
   watch's tokens start (the status, the info, the diffs' and the log's
   versions), backing off after timeouts, a change's read starting after
   it, failures not remembered as "no repository" (the panel's and the
-  explorer's), the explorer's watches stopped while the plugin is off.
+  explorer's), the explorer's watches stopped while the plugin is off;
+  the pace while active and quiet (keys, a status that changed), slow
+  reads kept apart, a terminal's command or an agent's turn ended in the
+  repository and the page focused again (not a terminal elsewhere).
+- `web/src/__tests__/gitPanelMemory.test.ts` (the followed directory
+  scripted): a `cd` inside the repository changes nothing (the same view,
+  its draft, Amend and selection, nothing loading, also while asked and
+  after a failure); a nested repository and a directory outside; two
+  machines shown in turn with an editor focused on each, each asked about
+  its own directories only; two workspaces of a machine, neither showing
+  the other's repository (also while asked); the view
+  as it was after the panel was away (folders collapsed, the selection,
+  the message and its box's height, Amend, the stashes, the commit opened
+  without reading it again, scroll positions), a commit clearing Amend.

@@ -1,7 +1,8 @@
 // Package usage reads what AI coding subscriptions have left on one
 // machine: the rate-limit windows, credits and balances of the accounts the
 // CLIs there are signed in to (Claude Code, Codex, Grok, Antigravity, Kimi
-// Code, DeepSeek), and the token cost of the CLIs' local logs at API prices.
+// Code, DeepSeek), and the token cost of the CLIs' local logs at API prices
+// (Claude Code's, Codex's, Grok's, and OpenCode's sessions in its database).
 //
 // It runs where the credentials are (the agent's plugin usage,
 // internal/agent/plugin/usage): it reads the CLIs' credential files, asks
@@ -38,10 +39,13 @@ const (
 	Antigravity = "antigravity"
 	Kimi        = "kimi"
 	DeepSeek    = "deepseek"
+	// OpenCode is a client of many providers without a quota of its own:
+	// it has the spend of its sessions only (cost_opencode.go).
+	OpenCode = "opencode"
 )
 
 // Providers lists every provider.
-var Providers = []string{Claude, Codex, Grok, Antigravity, Kimi, DeepSeek}
+var Providers = []string{Claude, Codex, Grok, Antigravity, Kimi, DeepSeek, OpenCode}
 
 // Status of an account.
 const (
@@ -250,6 +254,7 @@ func (e *Env) expand(p string) string {
 // provider reads the accounts of one provider.
 type provider func(ctx context.Context, e *Env, o *Options) []Account
 
+// providers read the providers' accounts; one without (OpenCode) has none.
 var providers = map[string]provider{
 	Claude:      claudeAccounts,
 	Codex:       codexAccounts,
@@ -268,7 +273,7 @@ func Limits(ctx context.Context, e *Env, o Options) []Account {
 	results := make([][]Account, len(Providers))
 	var wg sync.WaitGroup
 	for i, p := range Providers {
-		if !slices.Contains(want, p) {
+		if !slices.Contains(want, p) || providers[p] == nil {
 			continue
 		}
 		wg.Add(1)

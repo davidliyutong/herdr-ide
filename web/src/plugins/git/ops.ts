@@ -13,7 +13,6 @@ import { openEditor } from '../files/ops';
 import type { Stash, StatusFile } from './api';
 import { badRefName, promptDialog } from './prompt';
 import { runGit } from './state';
-import { dirtyDiffs } from './DiffPane';
 
 export type DiffMode = 'worktree' | 'staged' | 'commit' | 'compare';
 
@@ -33,6 +32,9 @@ export interface DiffView {
   /** Shown untracked: nothing on the left. */
   untracked?: boolean;
 }
+
+/** The keys of diff panes with unsaved edits. */
+export const dirtyDiffs = new Set<string>();
 
 export const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1) || p;
 export const join = (root: string, rel: string) => `${root.replace(/\/+$/, '')}/${rel}`;

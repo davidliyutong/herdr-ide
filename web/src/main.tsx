@@ -22,6 +22,7 @@ import { GuiWindowPage } from './gui/GuiWindowPage';
 import { refuseStrayFileDrops } from './drop';
 import { useFrames } from './codeFrames';
 import { actions } from './actions';
+import { guardImeKeys } from './ime';
 
 // Debug handle for the browser console (also used by end-to-end tests).
 (window as unknown as Record<string, unknown>)[`__${APP_SLUG}`] = {
@@ -36,6 +37,7 @@ import { actions } from './actions';
 
 initAppearance();
 refuseStrayFileDrops();
+guardImeKeys();
 // The settings come from the core; until it answers the built-in defaults
 // apply. The language must be known before anything is rendered.
 const settingsLoaded = loadSettings().then((ok) => {

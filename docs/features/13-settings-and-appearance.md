@@ -50,7 +50,11 @@ settings per browser; theming terminal applications.
   and `notifications`; code-server's advanced `codeServer`
   (`codeServer.install`, `codeServer.path`, scope `machine`: one machine is
   offline, another has its own code-server); the program windows' advanced
-  `gui` (`gui.enabled`, `gui.gpu`, `gui.video`, scope `remote-machine`).
+  `gui` (`gui.enabled`, `gui.gpu`, `gui.video`, scope `remote-machine`);
+  the user interfaces' advanced `performance`
+  (`performance.keptTerminals`: how many terminals a page keeps attached
+  while they are not shown, 12 by default, 0 to 64,
+  [26](26-web-terminals.md)).
   Every setting with its type, default, flag and scope is listed in
   [reference](../reference.md#settings).
 - Descriptions are not in Go: the UI translates `settings.<key>`,
@@ -267,12 +271,15 @@ settings per browser; theming terminal applications.
     **Permissions → Full Disk Access**, which is no setting: whether
     terminals and the app have it, System Settings, and what to restart
     ([16](16-desktop-packaging.md)); the search finds it too;
+  - the user's advanced **Performance** page has its setting and, below
+    it, what the app uses now, which is no setting (below);
   - a list of sections, the advanced ones last under **Advanced**, each
     with a dot when one of its settings is changed in the scope shown,
     **Plugins** (User only) with the plugins' own pages indented below it
     (in a machine's scope under a heading; a plugin's page starts with its
-    switch, says when it is off and is dimmed in the list then,
-    [27](27-plugins.md)), and **Keyboard Shortcuts** (User only); in a
+    switch, says when it is off and is dimmed in the list then, and may
+    lay out its settings on pages of its own, as the AI usage plugin's
+    providers, [27](27-plugins.md)), and **Keyboard Shortcuts** (User only); in a
     window 760 pixels wide or less, where a column of pages has no room,
     the pages are a searchable list above the page (the plugins' pages and
     the advanced ones under their headings, a page with changed settings
@@ -390,6 +397,52 @@ settings per browser; theming terminal applications.
   error dialogs, `window.zoom` the windows' zoom
   ([16](16-desktop-packaging.md)).
 
+**What the app uses** (`web/src/perf.ts`,
+`components/settings/Performance.tsx`, `internal/perf`)
+
+The user's **Performance** page shows, below `performance.keptTerminals`,
+what the app uses now, so that the cost of a number of kept terminals,
+or of the app itself, can be read where it is set. It is read when the
+page is shown and every 2 s while it is; a machine's scope has no such
+page. What a kept terminal costs is its emulator's memory, which grows
+with its history: measured in Chromium on a local core, 4 terminals of 127
+columns with a full scrollback of 10 000 lines (`terminal.scrollback`'s
+default) grew the emulators' WebAssembly memory from 0.4 MB to 47 MB,
+about 11 MB each, and an idle terminal with little history takes a small
+fraction of that. A hidden terminal holds no WebGL context, and its output
+is parsed but not drawn ([26](26-web-terminals.md)).
+
+- In the desktop app, a row per process of the app as Electron counts
+  them (the bridge's `metrics`, [16](16-desktop-packaging.md)): the app
+  (the shell's main process), the window, the GPU process, helpers with
+  their names and any other kind under Electron's name for it. Each row
+  has the process's share of one processor since the reading before and
+  its memory. The core's row follows, then a total of all rows.
+- In a browser, a row for the window with its script memory, where the
+  browser tells it (Chromium's `performance.memory`; a dash elsewhere),
+  and the core's row. A page cannot learn its own processor or GPU use,
+  which a note below the table says; there is no total.
+- The core's row comes from `GET /api/perf`
+  ([reference](../reference.md#http-and-websocket-endpoints)), which answers what the
+  core's own process uses (`perf.Sample`): `cpu_ms`, the processor time
+  used since it started (user and system; `getrusage`, on Windows
+  `GetProcessTimes`), `memory`, the bytes the Go runtime holds from the
+  system, `goroutines`, `uptime_ms` and `cpus`, the processors it may use
+  at once. The agents, terminal cores and ssh connections the core
+  starts are other processes and are not in it, nor are the programs in
+  terminals and VS Code, as the note says. The page shows the memory and
+  turns two answers into a share of one processor (the processor time
+  between them over the time between them); it shows none for the first
+  reading and for one after the core started again, whose counters
+  started again too.
+- Below the table: the terminals shown and the ones kept hidden; the
+  graphics processor as WebGL names it (asked once, with a context that
+  is given back at once); how many terminals hold a WebGL context, and
+  how many draw with Canvas 2D instead when some do
+  ([26](26-web-terminals.md)); in the desktop app also the window's
+  script memory. The counts are the page's own panes' (`paneUsage` in
+  `vt/pane.ts`).
+
 **Appearance** (`web/src/appearance.ts`)
 
 - Theme `system`, `dark` or `light`; `system` follows
@@ -487,6 +540,8 @@ settings per browser; theming terminal applications.
 | A per-machine table at the bottom of each page | Machine values were far from the settings they change and the table only took bools and options; a machine's scope shows its settings with the same controls, reachable from the machine's menu. |
 | Showing every setting's id beside its name | Ids are for the JSON file; they are copied from the setting's menu and still found by the search. |
 | A comma-separated string for the silent agents | The user had to know the agents' ids and the syntax; a list of the agents the terminals recognize, with others addable, says both. |
+| The core answering its processor use as a percentage | A percentage is of an interval: the core would keep a sample per client or measure on a timer of its own while nobody asks. It answers the processor time used since its start, and a client takes the difference of two answers over its own interval. |
+| A browser page showing its processor and GPU use | Browsers give a page neither; Chromium tells its script memory. The page shows that and the core, and says what it cannot know; the desktop app's shell asks Electron, which counts every process of the app. |
 
 ## Failure modes
 
@@ -507,6 +562,12 @@ settings per browser; theming terminal applications.
   new colors when it asks again or restarts.
 - **The terminal font loads slowly or not at all** → the page renders after
   1.5 s with the fallback fonts; terminals switch when the font arrives.
+- **`GET /api/perf` fails or answers anything but amounts** → the core's
+  row shows dashes, and the desktop app's total counts its own processes
+  only.
+- **The browser tells no script memory** (Firefox, Safari), **or has no
+  WebGL** → a dash for the window's memory, or for the graphics
+  processor.
 - **A page loaded before the core was replaced** has no labels for new
   settings and lacks new features. After every reconnect the page compares
   its entry script with the one the core serves and offers to reload
@@ -519,7 +580,13 @@ same Host/Origin and proxy-secret guards, refused in read-only mode,
 audited, bodies bounded (64 KiB, 256 KiB). Values are typed and validated;
 strings refuse every control character (C0, DEL, C1), so a value carries
 no line breaks or escape sequences. Machine ids in the
-file and in requests are bounded and refuse brackets and line breaks. See
+file and in requests are bounded and refuse brackets and line breaks.
+`GET /api/perf` is a read behind the same guards, answered to read-only
+clients like the other reads: amounts and counts of the core's own
+process, no path, name or process id. The desktop bridge's `metrics`
+answers only the main window's page, with each process's kind, a
+helper's name, a share and an amount; the preload passes on at most 64
+processes, text cut to 64 characters and numbers that are amounts. See
 [SECURITY.md](../../SECURITY.md).
 
 ## Testing
@@ -572,7 +639,15 @@ browser keys removed),
 `tokens.test.ts`, `desktop/src/follow.test.ts` (keybindings and settings
 from the replies and pushes, reconnecting), `desktop/src/menu.test.ts`
 (accelerators, rebinding and unbinding, items without a key, titles per
-language). A dev core was changed through the API and by editing its
+language), `web/src/__tests__/perf.test.tsx` (amounts written shortly;
+the terminals shown and kept and what draws them counted; two answers of
+the core turned into its share of a processor, none across a restart, an
+answer that is no usage dropped; in a browser the window's and the core's
+rows without a total), `internal/perf/perf_test.go` (`TestSample`: a
+sample with memory, goroutines and processors, processor time and uptime
+that do not go back), `desktop/src/preload.test.ts` (`metrics`: processes
+with a kind passed on as amounts and short text, anything else as none),
+`keptPanes.test.ts` (the setting's number kept, none with 0). A dev core was changed through the API and by editing its
 file, with the pushes observed on `/ws`; the dialog's pages were checked in
 headless Chromium, and so were the browser's terminals following a font
 size and a palette color changed through the API; the dialog's pages, both

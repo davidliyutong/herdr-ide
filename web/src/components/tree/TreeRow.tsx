@@ -3,7 +3,7 @@
 // characters a filter matched marked), a description, actions shown while
 // the row is pointed at or has the keyboard, and a decoration (a letter in
 // its color, as version control marks files). The state classes
-// (selected, cursor, drop target, dimmed) are styled in styles.css (.tree-row).
+// (selected, cursor, drop target, dimmed) are styled in styles/tree.css (.tree-row).
 // Every other attribute is the caller's: role, data-*, the handlers of
 // clicks, the context menu and drags (draggable, onDragStart, onDragOver,
 // onDrop), the style that places a windowed row.

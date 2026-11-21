@@ -79,6 +79,21 @@ func grokAccounts(ctx context.Context, e *Env, o *Options) []Account {
 	return []Account{a}
 }
 
+// grokPeriodKind is the kind of the credits' window, told by the length of
+// its period: a week for the subscriptions Grok's CLI has (their
+// currentPeriod is 7 days), also when the answer gives none.
+func grokPeriodKind(sec int64) string {
+	switch {
+	case sec <= 0:
+		return KindWeekly
+	case sec <= 86400:
+		return KindSession
+	case sec < 20*86400:
+		return KindWeekly
+	}
+	return KindMonthly
+}
+
 // parseGrokBilling reads config.creditUsagePercent (else onDemandUsed and
 // onDemandCap), config.currentPeriod and config.productUsage.
 func parseGrokBilling(a *Account, m map[string]any) {
@@ -101,7 +116,7 @@ func parseGrokBilling(a *Account, m map[string]any) {
 		}
 	}
 	if ok {
-		a.Windows = append(a.Windows, Window{Kind: KindMonthly, UsedPct: clampPct(pct), ResetsAt: end, WindowSec: sec})
+		a.Windows = append(a.Windows, Window{Kind: grokPeriodKind(sec), UsedPct: clampPct(pct), ResetsAt: end, WindowSec: sec})
 	}
 	for _, x := range arr(c["productUsage"]) {
 		x := obj(x)

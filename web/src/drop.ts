@@ -16,7 +16,7 @@
 // page.
 
 import { actions } from './actions';
-import { desktopShell } from './desktop';
+import { desktopShell } from './shell';
 import { t } from './i18n';
 import { shellQuote } from './lib/files';
 import { shortPath, type MachineState } from './lib/machine';

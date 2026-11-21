@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"unicode/utf8"
 
@@ -288,11 +289,11 @@ type File struct {
 	// Orig is a renamed or copied path's earlier name.
 	Orig string `json:"orig,omitempty"`
 	// X is the index's status letter, Y the working tree's ("." when
-	// unchanged): M, T, A, D, R, C, U; "?" for an untracked file, "!"
-	// for an ignored one.
+	// unchanged): M, T, A, D, R, C, U; "?" for an untracked file.
 	X string `json:"x"`
 	Y string `json:"y"`
-	// Kind: changed, renamed, unmerged, untracked or ignored.
+	// Kind: changed, renamed, unmerged or untracked (ignored paths are
+	// the status's Ignored).
 	Kind      string `json:"kind"`
 	Submodule bool   `json:"submodule,omitempty"`
 	// MTime (unix milliseconds) and Size of the working tree's file when
@@ -312,14 +313,51 @@ type Status struct {
 	State     string `json:"state,omitempty"`
 	Files     []File `json:"files"`
 	Truncated bool   `json:"truncated,omitempty"`
+	// Ignored are the paths git ignores, as git status --ignored=matching
+	// lists them: a directory an ignore pattern matches with a trailing
+	// "/" and none of its contents (node_modules/ is one entry, however
+	// large), else each file. IgnoredTruncated: more than maxIgnored, or
+	// more than the output's limit, were left out.
+	Ignored          []string `json:"ignored,omitempty"`
+	IgnoredTruncated bool     `json:"ignoredTruncated,omitempty"`
+}
+
+// statusArgs are the arguments of the status: what changed, then what git
+// ignores (matching: an ignored directory is not walked).
+var statusArgs = []string{"status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all", "--ignored=matching"}
+
+// noIgnoredMode is set once git refused --ignored=matching (before git
+// 2.16): statuses are read without what it ignores.
+var noIgnoredMode atomic.Bool
+
+// refusesIgnoredMode tells whether git's error is its refusal of
+// --ignored=matching: before 2.16 --ignored took no value ("option
+// `ignored' takes no value"); a git that knows modes but not this one
+// says "Invalid ignored mode".
+func refusesIgnoredMode(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "ignored' takes no value") || strings.Contains(msg, "ignored mode")
 }
 
 func (r *repo) status(ctx context.Context) (*Status, error) {
-	res, err := r.git(ctx, run{args: []string{"status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"}})
+	args := statusArgs
+	if noIgnoredMode.Load() {
+		args = args[:len(args)-1]
+	}
+	// git prints what it ignores last: output over the limit there keeps
+	// the changes whole and cuts the ignored paths.
+	res, err := r.git(ctx, run{args: args, keep: true})
+	if err != nil && !noIgnoredMode.Load() && refusesIgnoredMode(err) {
+		noIgnoredMode.Store(true)
+		return r.status(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
-	st := parseStatus(res.out)
+	st, whole := parseStatus(res.out, res.cut)
+	if !whole {
+		return nil, plugin.Errorf("too_large", "git status printed more than %d bytes", MaxOutput)
+	}
 	if gd, _ := gitDirs(r.root); gd != "" {
 		st.State = progress(gd)
 	}
@@ -332,7 +370,7 @@ func (r *repo) status(ctx context.Context) (*Status, error) {
 func (r *repo) stamp(files []File) {
 	for i := range files {
 		f := &files[i]
-		if f.Kind == "ignored" || f.Y == "." || f.Y == "D" {
+		if f.Y == "." || f.Y == "D" {
 			continue
 		}
 		fi, err := os.Lstat(filepath.Join(r.root, filepath.FromSlash(strings.TrimSuffix(f.Path, "/"))))
@@ -346,13 +384,29 @@ func (r *repo) stamp(files []File) {
 	}
 }
 
-// parseStatus reads git status --porcelain=v2 -z --branch.
-func parseStatus(out []byte) *Status {
-	st := &Status{Files: []File{}}
-	recs := strings.Split(string(out), "\x00")
+// parseStatus reads git status --porcelain=v2 -z --branch [--ignored]. cut:
+// the output stopped at its limit (its last record may be partial); whole
+// says that every change is there (cut only among the ignored paths, which
+// git prints last).
+func parseStatus(out []byte, cut bool) (st *Status, whole bool) {
+	st = &Status{Files: []File{}}
+	text := string(out)
+	if cut {
+		// Up to the last whole record.
+		text = text[:strings.LastIndexByte(text, 0)+1]
+	}
+	recs := strings.Split(text, "\x00")
 	for i := 0; i < len(recs); i++ {
 		rec := recs[i]
 		if rec == "" {
+			continue
+		}
+		if rec[0] == '!' {
+			if len(st.Ignored) >= maxIgnored {
+				st.IgnoredTruncated = true
+				break
+			}
+			st.Ignored = append(st.Ignored, rec[2:])
 			continue
 		}
 		if len(st.Files) >= maxStatus {
@@ -403,11 +457,18 @@ func parseStatus(out []byte) *Status {
 			}
 		case '?':
 			st.Files = append(st.Files, File{Path: rec[2:], X: "?", Y: "?", Kind: "untracked"})
-		case '!':
-			st.Files = append(st.Files, File{Path: rec[2:], X: "!", Y: "!", Kind: "ignored"})
 		}
 	}
-	return st
+	if !cut {
+		return st, true
+	}
+	// Cut among the ignored paths (or after the changes were cut short
+	// anyway): the changes are whole.
+	if st.Truncated || len(st.Ignored) > 0 {
+		st.IgnoredTruncated = true
+		return st, true
+	}
+	return st, false
 }
 
 // ---- log ----

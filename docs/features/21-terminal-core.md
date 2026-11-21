@@ -10,8 +10,8 @@ session name.
 
 Facts the design relies on (herdr-core 0.1.21, `schema/README.md` and,
 below `crates/herdr-core/src/`, `wire.rs`, `server.rs`, `paths.rs`,
-`client.rs` and `api/run.rs`, checked against a running core by the
-integration tests):
+`client.rs`, `viewers.rs` and `api/run.rs`, checked against a running core
+by the integration tests):
 
 - The API is JSON-RPC 2.0, one message per line, on a unix socket. `hello`
   with `framed: true` switches the connection to frames
@@ -20,8 +20,18 @@ integration tests):
 - `terminal.attach` answers with a channel. On it the core sends a first
   paint (the screen as escape sequences, starting with CAN and a reset) and
   then the program's output; the viewer sends input bytes, its size, focus
-  and display facts. The core encodes no keys. The viewer that was active
-  last sets the terminal's size; an `observe` viewer never does.
+  and display facts. The core encodes no keys.
+- A terminal's size is that of its viewer active last among those not
+  observing (`apply_size` in `viewers.rs`); an `observe` viewer never
+  holds it. A terminal without such a viewer gets the *headless* size:
+  `headless` in herdr-core's `config.toml`, 200x120 by default. That file
+  is the user's own (`$XDG_CONFIG_HOME/herdr-core/config.toml`), shared by
+  their other herdr-core sessions, and herdr-ide never writes it. The
+  `size` of `terminal.run` is only the size a terminal has before its
+  first viewer. An attach of the size the terminal has causes no resize
+  and gets an exact first paint. No call sets a terminal's size outside a
+  stream, so the core keeps a terminal's last viewer attached while no
+  client shows it ([22](22-terminal-protocol.md)).
 - Output is sent against credit: 256 KiB per channel at first, returned by
   the viewer as it passes bytes on. A viewer more than 4 MiB behind gets a
   new paint instead of the backlog. Event channels use credit too; input
@@ -32,6 +42,19 @@ integration tests):
   subscriber that fell behind.
 - A terminal's status is what its program reported through OSC 7501; the
   core infers nothing from the screen.
+- A terminal's address is never given twice. A finished terminal's record
+  stays for 24 h, with the `reason` it ended for (`exited`, `killed`, or
+  the core's own end: `stopped_by_restart`, `holder_lost`, `server_stop`,
+  `host_shutdown`), unless a client removes it (`terminal.rm`).
+- A terminal started with `keep: true` whose program was lost with the
+  core gets a new shell from the core when it runs again, at the same
+  address, in the directory it was last in (events `lost` and
+  `restarted`); an exit with a code and an explicit kill stay final. The
+  web UI starts its terminals this way
+  ([33](33-workspace-restore.md)).
+- Documents (`doc.get`, `doc.set`) are kept with their versions in the
+  core's state directory (`docs.json`), across restarts of the core and
+  of the machine.
 - `HC_SESSION` selects the core, its terminals and its state directory
   (`~/.local/state/herdr-core/<session>/`); `HC_SOCKET` moves the API
   socket, with the holders' sockets beside it. `herdr-core server start`
@@ -145,7 +168,10 @@ directory, short enough for the holders' sockets beside it. Op `hc`:
   carries; the agent hashes `hc/herdr-core` again (not from its cache)
   and answers `bad_digest` without running it when it differs. A build
   without an executable sends none, and the installed one runs. `stop`
-  runs `server stop`, which ends the session's programs.
+  runs `server stop`, which ends the session's programs; the terminals'
+  records and the documents stay in the state directory, from which the
+  web UI brings the workspaces back when the core runs again
+  ([33](33-workspace-restore.md)).
 - `status`, and the reply of every action, report the installed digest and
   whether a core answers on the socket, with its version.
 
@@ -193,7 +219,11 @@ machine's menu ([02](02-multi-machine-transport.md)).
   `Stream.Exit` has the reason (`exited`, `killed`, `server_stop`, …).
 - **Machine reboot or logout where logind ends user processes** → the core
   and its programs end; herdr-core reports in `hello` whether lingering is
-  enabled.
+  enabled. When the core runs again, terminals started with `keep: true`
+  have a new shell in their last directory, the others are finished
+  records with the core's end as the reason, and the documents are as they
+  were written; the web UI restores its layout from that
+  ([33](33-workspace-restore.md)).
 
 ## Security
 

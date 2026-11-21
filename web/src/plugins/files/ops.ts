@@ -4,9 +4,10 @@
 // uploads, and the context menu that offers them. Nothing that changes
 // files is offered in read-only mode.
 
-import { Download, FilePlus, FolderPlus, FolderUp, Pencil, Trash2, Upload } from 'lucide-react';
+import { Download, FilePlus, FolderOpen, FolderPlus, FolderUp, Pencil, Trash2, Upload } from 'lucide-react';
 import { showPanel } from '../../panelPanes';
 import { createElement } from 'react';
+import { create as createStore } from 'zustand';
 import { actions, current } from '../../actions';
 import { confirmDialog } from '../../dialog';
 import { canDownload, startDownload, useDownloads } from '../../download';
@@ -21,6 +22,7 @@ import { useTransfers } from '../../transfers';
 import type { MenuEntry } from '../../contextMenu';
 import { errorText, filesApi, type Result } from './api';
 import { decorationsOf } from './decorations';
+import { recheckGone } from './gone';
 import { quickDiff } from './quickDiff';
 import { isPluginOn } from '../registry';
 import { settingValue } from '../../settings';
@@ -175,6 +177,49 @@ export function revealInExplorer(m: string, path: string) {
 /** Show in Explorer of the editor pane. */
 export const reveal = revealInExplorer;
 
+/** Whether Reveal in Finder is offered for each machine's paths here, as
+ * the core said: only for its own machine, to a page on its computer
+ * (internal/plugins/files revealable). Unknown until asked (loadRevealable). */
+export const useRevealable = createStore<Record<string, boolean>>(() => ({}));
+const askingRevealable = new Set<string>();
+
+/** Asks the core, once per page, whether machine m's paths can be shown in
+ * the system's file manager; another machine than the core's own cannot. */
+export function loadRevealable(m: string | undefined) {
+  if (!m || m in useRevealable.getState() || askingRevealable.has(m)) return;
+  if (useStore.getState().machines[m]?.kind !== 'local') return useRevealable.setState({ [m]: false });
+  askingRevealable.add(m);
+  filesApi
+    .revealAvailable(m)
+    .then((ok) => useRevealable.setState({ [m]: ok }))
+    .catch(() => {})
+    .finally(() => askingRevealable.delete(m));
+}
+
+/** Reveal in Finder (Reveal in File Manager elsewhere) for path, when the
+ * core offers it for m: the system's file manager of the core's computer
+ * shows it. It runs a program there, so read-only mode has none. */
+export function revealEntries(m: string, path: string): MenuEntry[] {
+  loadRevealable(m);
+  if (readOnly() || !useRevealable.getState()[m]) return [];
+  const finder = useStore.getState().machines[m]?.info?.os === 'darwin';
+  return [
+    {
+      label: t(finder ? 'files.revealInFinder' : 'files.revealInFileManager'),
+      icon: createElement(FolderOpen),
+      run: () => void revealInSystem(m, path),
+    },
+  ];
+}
+
+export async function revealInSystem(m: string, path: string) {
+  try {
+    await filesApi.reveal(m, path);
+  } catch (e) {
+    toast(errorText(e));
+  }
+}
+
 // ---- changes ----
 
 /** Creates a file or folder named name in dir; a file opens in the editor. */
@@ -195,6 +240,7 @@ export async function rename(m: string, path: string, name: string) {
   if (bad) return toast(bad);
   const to = join(parentOf(path), name);
   if (!(await attempt(() => filesApi.rename(m, path, to)))) return;
+  void recheckGone().catch(() => {});
   await loadDir(parentOf(path));
   select(to);
 }
@@ -224,6 +270,7 @@ export async function trash(m: string, paths: string[]) {
   }
   const failed = Object.entries(r.failed ?? {});
   reloadDirs(paths.map(parentOf));
+  void recheckGone().catch(() => {});
   const noTrash = failed.filter(([, c]) => c === 'trash_unavailable').map(([p]) => p);
   if (noTrash.length) return remove(m, noTrash, t('files.confirm.noTrash'));
   if (failed.length) toast(t('files.someFailed', { n: failed.length, first: baseName(failed[0][0]) }));
@@ -243,6 +290,7 @@ export async function remove(m: string, paths: string[], why?: string) {
   if (!ok) return;
   await attempt(() => filesApi.remove(m, paths));
   reloadDirs(paths.map(parentOf));
+  void recheckGone().catch(() => {});
 }
 
 /** Moves paths into dir (a drop in the tree): what it did, undefined when
@@ -253,6 +301,7 @@ export async function moveInto(m: string, paths: string[], dir: string): Promise
   if (!paths.length) return {};
   const r = await attempt(() => filesApi.move(m, paths, dir));
   reloadDirs([dir, ...paths.map(parentOf)]);
+  void recheckGone().catch(() => {});
   if (r?.paths?.length) select(r.paths[r.paths.length - 1]);
   return r;
 }
@@ -409,9 +458,10 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
   const out: MenuEntry[] = [];
   if (target) {
     out.push(...openEntries(m, paths, { isDir, el }));
+    if (paths.length === 1) out.push(...revealEntries(m, target));
     if (paths.length === 1 && !isDir(target) && changed(m, target))
       out.push({ label: t('files.openChangesItem'), run: () => quickDiff()?.openChanges?.(m, target) });
-  } else out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, root) });
+  } else out.push({ label: t('files.openInTerminal'), run: () => void openTerminal(m, root) }, ...revealEntries(m, root));
   out.push('sep');
   if (!ro) {
     out.push({ label: t('files.newFile'), icon: createElement(FilePlus), run: () => setEdit({ kind: 'file', path: dir }) });

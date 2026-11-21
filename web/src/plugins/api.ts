@@ -3,8 +3,10 @@
 // palette items and handlers of their messages from the core (/ws
 // plugin {plugin, m, data}). The core's side of each is in internal/plugin;
 // docs/features/27-plugins.md has the design. Plugins are compiled in.
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
+import type { MenuEntry } from '../contextMenu';
 import type { MessageKey } from '../i18n';
+import type { SettingDef } from '../settings';
 import type { PluginView } from '../term/layout';
 
 /** An icon: lucide's, or one drawn the same way (components/icons.tsx). */
@@ -42,6 +44,14 @@ export interface PaneViewDef {
   /** Whether the pane is a preview, which the next one replaces (its title
    * is in italics, as VS Code's preview editors). */
   preview?(m: string, view: PluginView): boolean;
+  /** A React hook, called wherever the pane's title is drawn (its header,
+   * its tab): undefined while what the pane shows is there, else what is
+   * said of it (the file was deleted or moved away). The title is then
+   * struck through and its tooltip ends with that, as VS Code marks the
+   * editors of deleted files. */
+  useGone?(m: string, view: PluginView): string | undefined;
+  /** Entries the menus of the pane's header and tab start with. */
+  menu?(m: string, view: PluginView): MenuEntry[];
   component: ComponentType<PaneViewProps>;
 }
 
@@ -76,12 +86,31 @@ export interface PluginSettingsProps {
   readOnly: boolean;
 }
 
+/** What lays out a plugin's settings on its page: the settings of its
+ * section the scope shows, in their order, and what draws some of them as
+ * the dialog's rows (each with its control, a heading where a group
+ * starts). */
+export interface PluginSettingsLayoutProps extends PluginSettingsProps {
+  defs: SettingDef[];
+  rows(defs: SettingDef[]): ReactNode;
+  /** The plugin and its switch, which a page shows before its settings:
+   * the layout draws it on its first page. */
+  lead?: ReactNode;
+  /** Counts the times the page was chosen in the dialog's list: a layout
+   * with pages of its own shows its first one again when it changes. */
+  visit: number;
+}
+
 /** A plugin's page in Settings. */
 export interface PluginSettingsDef {
   /** The section of its settings (internal/settings), whose page the
    * Plugins page's settings button opens. The core's section names its
    * plugin as well; a section without settings is a page for extra alone. */
   section: string;
+  /** Lays out the page's settings in place of their rows one after the
+   * other (pages of its own within the page); a search shows the rows it
+   * finds as on any page. */
+  layout?: ComponentType<PluginSettingsLayoutProps>;
   /** Drawn at the end of the page. */
   extra?: ComponentType<PluginSettingsProps>;
 }
@@ -129,4 +158,9 @@ export interface PluginDef {
   newTabItems?(m: string): NewTabItem[];
   /** A message of its core side for machine m ("" for the core's). */
   onMessage?(m: string, data: unknown): void;
+  /** A React hook, as PaneViewDef.useGone, for a file of machine m: the
+   * app's own panes that show a file (previews) mark their titles with
+   * what the first plugin that is on with one says (the file explorer's);
+   * with none on, nothing is marked. */
+  useFileGone?(m: string, path: string): string | undefined;
 }

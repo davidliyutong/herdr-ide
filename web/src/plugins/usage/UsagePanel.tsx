@@ -662,11 +662,24 @@ function Spend() {
                   {t('usage.cost.machineFailed', { m: labels[m] ?? m, code: x.error ?? '' })}
                 </div>
               ))}
+              {Object.entries(cost.machines)
+                .filter(([, x]) => x.failed?.length)
+                .map(([m, x]) => (
+                  <div key={`${m}-logs`} className="callout error">
+                    {t('usage.cost.logsFailed', { m: labels[m] ?? m, logs: x.failed!.map(failedLog).join(', ') })}
+                  </div>
+                ))}
             </>
           );
         })()}
     </section>
   );
+}
+
+/** A log a machine could not read (provider:code): the service and why. */
+function failedLog(f: string): string {
+  const [provider, code] = f.split(':');
+  return `${providerName(provider)} (${code ?? ''})`;
 }
 
 /** A service's own spend: today, 30 days, tokens, its chart and model. */

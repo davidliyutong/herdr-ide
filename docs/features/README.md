@@ -18,7 +18,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 10 | [Remote resource lifecycle](10-remote-resource-lifecycle.md) | Ownership and reclamation of every process and file created on machines. |
 | 11 | [Naming and renames](11-naming-and-renames.md) | Centralized product names, one-step renames and migration of persisted state. |
 | 12 | [Internationalization](12-internationalization.md) | English and Chinese UI, translated extension, codes instead of server prose. |
-| 13 | [Settings, keybindings and appearance](13-settings-and-appearance.md) | One settings and one keybinding system in the core, VS Code style files, a settings UI generated from the definitions; themes, terminal font, colors and cursor. |
+| 13 | [Settings, keybindings and appearance](13-settings-and-appearance.md) | One settings and one keybinding system in the core, VS Code style files, a settings UI generated from the definitions; themes, terminal font, colors and cursor; a Performance page with what the app uses now. |
 | 14 | [GUI windows](14-gui-windows.md) | Windows of programs on remote machines in browser windows: user-space Xvfb tied to the terminal core, per-window capture as pictures or video, VirtualGL. |
 | 16 | [Desktop app](16-desktop-packaging.md) | The web UI in an Electron shell for macOS, Windows and Linux: an owned core (SSH machines only on Windows), each system's menu, quitting and installers (DMG, NSIS setup, AppImage, deb), theme and language from the core's settings and keybindings. |
 | 19 | [Formulas in panes](19-formulas-in-panes.md) | LaTeX under the resting pointer typeset by KaTeX in a popover; the spellings agents print, also without dropped backslashes. |
@@ -33,6 +33,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 30 | [Variable vault](30-variable-vault.md) | Environment variables encrypted on the core host (key in the system keychain or from a passphrase) that coding agents on every machine read through an MCP server, per machine allowed or approved in the UI. |
 | 31 | [Git](31-git.md) | VS Code's Source Control and the Git Graph extension without VS Code: a panel for the focused pane's repository (stage, commit, branches, stashes, fetch, pull, push), a graph pane with lanes, badges, details and context menus, diffs in Monaco with selected ranges staged as patches; git run with fixed arguments on machines. |
 | 32 | [Browser pane and port forwards](32-browser-and-ports.md) | A tab that shows a web page: a machine's `localhost` service through a forward on the core host's loopback (as `ssh -L`), kept another origin than the UI; links of terminals open there; a menu of the kinds of tab. |
+| 33 | [Workspaces after the terminal core starts again](33-workspace-restore.md) | After a reboot or a stopped terminal core the layout's tabs come back as shells in their directories (kept terminals at their addresses, the others replaced by the page), and Claude Code and Codex continue the directory's latest conversation, by a command from a fixed table. |
 
 ## Writing a feature document
 

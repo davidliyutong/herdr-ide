@@ -179,7 +179,9 @@ function Webview({ k, frame, page }: { k: string; frame: Frame; page: Page }) {
       on('did-fail-load', (e) => {
         // -3: a load that was cancelled by another.
         if (e.isMainFrame === false || e.errorCode === -3) return;
-        reportNav(k, { error: String(e.errorDescription ?? e.errorCode) });
+        const code = typeof e.errorCode === 'number' ? e.errorCode : undefined;
+        const url = typeof e.validatedURL === 'string' ? e.validatedURL : undefined;
+        reportNav(k, { error: { code, text: String(e.errorDescription || e.errorCode), url } });
       }),
     ];
     return () => offs.forEach((off) => off());

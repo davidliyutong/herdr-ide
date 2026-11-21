@@ -45,6 +45,16 @@ export interface Page {
   forward?: { m: string; port: number; local: number };
 }
 
+/** A load of a webview's page that failed. */
+export interface LoadFailure {
+  /** Chromium's net error code (-105: the name did not resolve). */
+  code?: number;
+  /** Its description (ERR_NAME_NOT_RESOLVED). */
+  text: string;
+  /** The address that failed, as the webview had it. */
+  url?: string;
+}
+
 /** What the toolbar shows of a frame. */
 export interface Nav {
   /** The last address loaded, as the user means it. */
@@ -53,7 +63,7 @@ export interface Nav {
   back: boolean;
   forward: boolean;
   /** A load that failed (a webview's). */
-  error?: string;
+  error?: LoadFailure;
   /** A webview left its forwarded page for another address. */
   away?: boolean;
 }

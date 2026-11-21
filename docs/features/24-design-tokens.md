@@ -91,7 +91,7 @@ colors programs draw with in panes, which stay the terminal settings'
   build needs Go to run first:
   - `web/src/tokens.css`: custom properties on `:root` for the dark theme
     and on `:root[data-theme='light']` for the light one, the same
-    selectors as `web/src/styles.css`, so the theme setting switches both
+    selectors as `web/src/styles/base.css`, so the theme setting switches both
     (`--ds-color-background`, `--ds-status-working`, `--ds-git-added`,
     `--ds-chart-blue`, `--ds-file-icon-sky`, `--ds-terminal-ansi-0` to `-15`,
     `--ds-metric-radius`, `--ds-size-toolbar`, `--ds-font-size-base`).
@@ -102,7 +102,9 @@ colors programs draw with in panes, which stay the terminal settings'
     theme settings combine. Lengths are written once: metrics with `px`,
     sizes and font sizes in `rem` (the pixels divided by `font.root`), so
     the UI font size setting, which is the root font size, scales them.
-    `web/src/main.tsx` imports it before `styles.css`.
+    `web/src/main.tsx` imports it before `styles.css`, which imports its
+    parts (`web/src/styles/*.css`, one per area of the UI) in the order
+    of the cascade.
   - `internal/uisettings/tokens.go`: the terminal palettes as the
     defaults of the `terminal.colors.*` settings
     ([13](13-settings-and-appearance.md)), from which the web UI's terminal
@@ -144,7 +146,7 @@ colors programs draw with in panes, which stay the terminal settings'
   `--ds-chart-*` and `--ds-file-icon-*`.
   Code that lays rows out by number (virtual lists) takes the same sizes
   in pixels at the UI font size in use from `web/src/lib/sizes.ts`.
-- **The design language** (`styles.css`): the accent marks focus (the
+- **The design language** (`styles.css` and its parts): the accent marks focus (the
   focused pane's top edge, fields, the focus ring), the selection (the
   active tab's bar, the selected workspace's bar, the shown panel's bar on
   the rail, the highlighted item of a menu or of the palette), the one
@@ -192,7 +194,7 @@ colors programs draw with in panes, which stay the terminal settings'
   directly; the active tab also has an outline (`--line-2`) and an accent
   bar under it, so it stands out by more than its fill (WCAG 1.4.11), as
   the selected workspace and settings section do with a 3-pixel accent bar.
-  The light theme's block in `styles.css` sets only what is not
+  The light theme's block in `styles/base.css` sets only what is not
   a token: the transparency of overlays, the dialog backdrop, shadows and
   the checkerboard behind images, all neutral.
 - **Terminals.** The terminal colors are settings whose defaults are

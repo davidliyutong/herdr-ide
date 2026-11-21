@@ -5,6 +5,7 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -136,8 +137,32 @@ func (s *Session) OpenWith(ctx context.Context, h agentproto.Header, body []byte
 		st.Close()
 		return nil, &rep, fmt.Errorf("agent %s: %s", h.Op, rep.Error)
 	}
+	if rep.EntriesLength > 0 {
+		// A listing too large for the line follows it (fs.list).
+		if err := readEntries(st, &rep); err != nil {
+			st.Close()
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			return nil, nil, fmt.Errorf("agent %s: %w", h.Op, err)
+		}
+	}
 	_ = st.SetDeadline(time.Time{})
 	return st, &rep, nil
+}
+
+// readEntries reads the entries that follow a reply line
+// (Reply.EntriesLength, at most agentproto.MaxBody bytes) into rep.Entries.
+func readEntries(r io.Reader, rep *agentproto.Reply) error {
+	b, err := agentproto.ReadBody(r, rep.EntriesLength)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, &rep.Entries); err != nil {
+		return fmt.Errorf("agentproto: entries: %w", err)
+	}
+	rep.EntriesLength = 0
+	return nil
 }
 
 // Request opens a stream, returns the reply and closes the stream.

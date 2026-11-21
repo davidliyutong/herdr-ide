@@ -3,12 +3,12 @@ import { ChevronDown, Columns2, PanelLeft, Pin, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
-import { actions, paneRects, paneTitle, tabLabel, tabName, workspaceTitle } from '../actions';
+import { actions, paneRects, paneTitle, tabLabel, tabName } from '../actions';
 import { TerminalView } from './TerminalView';
 import { PaneHeader } from './PaneHeader';
 import { CodeSlot } from './CodeLayer';
 import { PreviewPane } from './PreviewPane';
-import { LeafIcon, PluginPane } from './PluginPane';
+import { FileTitle, LeafIcon, PluginPane, ViewTitle } from './PluginPane';
 import { describeView, newTabGroups, useActivePlugins } from '../plugins/registry';
 import { StatusDot } from './StatusDot';
 import { aggregate, agentStatus, codeText, shortPath, terminalTitle } from '../lib/machine';
@@ -16,6 +16,8 @@ import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
 import { startTabDrag } from '../tabDrag';
+import { keepPanes, resetKeptPanes } from '../keptPanes';
+import { usePrefs } from '../prefs';
 import { openMenu } from '../contextMenu';
 import { newTabMenu, tabMenu, tabsMenu } from '../menus';
 import {
@@ -120,6 +122,23 @@ export function Workspace() {
   // One tab is the bar's tab stop: the one focused last, else the one shown.
   useEffect(() => ensureTabStop(tabsRef.current, '.tab.active'));
 
+  if (m && machine && layout && !ws) {
+    // Every workspace of the machine was closed.
+    return (
+      <main className="workspace">
+        <div className="workspace-body">
+          <div className="empty-state">
+            <div>{t('workspace.none', { machine: machine.label })}</div>
+            {!readOnly && (
+              <button className="primary" onClick={() => void actions.newWorkspace(m)}>
+                {withKey(t('command.workspace.new'), 'workspace.new')}
+              </button>
+            )}
+          </div>
+        </div>
+      </main>
+    );
+  }
   if (!m || !machine || !layout || !ws) {
     const backend = mt?.backend;
     const status = !machine
@@ -143,6 +162,7 @@ export function Workspace() {
   const kinds = newTabGroups(m).length > 0;
   const picked = new Set(selectedIds(tabsOf(m, ws.id), sel));
   const tabStatus = (tb: L.Tab) => aggregate(L.tabTerminals(tb).map((a) => agentStatus(mt.terminals[a])));
+  const tabTip = (label: string) => (readOnly ? label : t('workspace.tabHint', { label }));
 
   return (
     <main className="workspace">
@@ -155,9 +175,6 @@ export function Workspace() {
         >
           <PanelLeft />
         </button>
-        <span className="crumb">
-          <span className="muted">{machine.label}</span> / {workspaceTitle(m, ws)}
-        </span>
         <div
           ref={tabsRef}
           className="tabs"
@@ -233,7 +250,7 @@ export function Workspace() {
                 // A middle click's scrolling is not started either.
                 onMouseDown={keepFocus}
                 onContextMenu={(e) => !editing && openMenu(e, tabMenuFor(m, ws.id, i, key))}
-                title={readOnly ? about : t('workspace.tabHint', { label: about })}
+                title={tabTip(about)}
                 aria-label={tb.name ? name : t('workspace.tabNumber', { n: i + 1, title })}
                 data-tab={i}
                 data-ws={ws.id}
@@ -254,32 +271,39 @@ export function Workspace() {
                 ) : view ? (
                   <>
                     <LeafIcon m={m} leaf={view} className="tab-kind" />
-                    <span
-                      className={`tab-label ellipsis ${L.isPluginLeaf(view) && describeView(m, view.view).preview ? 'is-preview' : ''}`}
-                    >
-                      {paneTitle(m, view, tb.focused)}
-                    </span>
+                    {L.isPluginLeaf(view) ? (
+                      <ViewTitle
+                        m={m}
+                        view={view.view}
+                        className="tab-label ellipsis"
+                        tooltip={(gone) => tabTip(gone ? `${about} · ${gone}` : about)}
+                      >
+                        {paneTitle(m, view, tb.focused)}
+                      </ViewTitle>
+                    ) : L.isPreviewLeaf(view) ? (
+                      <FileTitle
+                        m={m}
+                        path={view.preview.path}
+                        className="tab-label ellipsis"
+                        tooltip={(gone) => tabTip(gone ? `${about} · ${gone}` : about)}
+                      >
+                        {paneTitle(m, view, tb.focused)}
+                      </FileTitle>
+                    ) : (
+                      <span className="tab-label ellipsis">{paneTitle(m, view, tb.focused)}</span>
+                    )}
                   </>
                 ) : (
                   <span className="tab-label tab-num">{tabLabel(tb, i)}</span>
                 )}
                 {count > 1 && <Columns2 className="tab-split" aria-label={t('workspace.paneCount', { n: count })} />}
                 {tb.pinned ? (
-                  // A pinned tab's button unpins it (Close Tab still closes it).
-                  <button
-                    tabIndex={-1}
-                    className="tab-pin"
-                    title={withKey(t('command.tab.unpin'), 'tab.unpin')}
-                    aria-label={t('command.tab.unpin')}
-                    aria-pressed
-                    disabled={readOnly}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      actions.pinTab(m, ws.id, i, false);
-                    }}
-                  >
+                  // A pinned tab shows its pin where others have ×. The pin is
+                  // a mark, not a button: a click there shows the tab as one
+                  // anywhere else on it, and Unpin Tab is in the tab's menu.
+                  <span className="tab-pin" role="img" aria-label={t('workspace.pinned')}>
                     <Pin />
-                  </button>
+                  </span>
                 ) : (
                   !readOnly && (
                     <button
@@ -402,6 +426,21 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
   const zoom = zoomed && panes.includes(zoomed) ? zoomed : undefined;
   const rects = zoom ? new Map([[zoom, { x: 0, y: 0, w: 1, h: 1 }]]) : paneRects(tab.root);
   const bars = zoom || readOnly ? [] : splitBars(tab.root);
+  const keptLimit = usePrefs((s) => s.prefs.keptTerminals);
+  // The terminals shown last stay mounted, hidden (keptPanes.ts). They are
+  // children of the same list under the same keys as when they are shown,
+  // so a terminal keeps its emulator and its stream from one to the other.
+  const shownTerminals = [...rects].flatMap(([pane, rect]) => {
+    const leaf = L.leafOf(tab.root, pane);
+    return leaf && L.isTerminalLeaf(leaf) ? [{ m, pane, rect }] : [];
+  });
+  const kept = keepPanes(shownTerminals, keptLimit, (k) => {
+    const layout = terms.layout(k.m);
+    return !!layout && L.locate(layout, k.pane) !== null;
+  });
+  // Without a tab shown the kept terminals unmount with this view: they are
+  // forgotten, not mounted again hidden, where they would not attach.
+  useEffect(() => resetKeptPanes, []);
   const body = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<{ path: boolean[]; ratio: number }>();
   const alone = panes.length === 1;
@@ -444,41 +483,57 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
 
   return (
     <div className={`tab-panes ${alone ? 'alone' : ''}`} ref={body}>
-      {[...rects].map(([key, r]) => {
-        const leaf = L.leafOf(tab.root, key);
-        if (!leaf) return null;
-        const focused = key === tab.focused;
-        return (
+      {[
+        ...[...rects].map(([key, r]) => {
+          const leaf = L.leafOf(tab.root, key);
+          if (!leaf) return null;
+          const focused = key === tab.focused;
+          return (
+            <div
+              // Machines name their terminals alike ("t1" on each): the
+              // machine is part of the key, so a pane of another machine gets
+              // its own canvas, not one whose WebGL context the pane before
+              // it gave up.
+              key={`${m}\n${key}`}
+              className={`pane ${focused && !alone ? 'focused' : ''}`}
+              style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
+              data-pane={key}
+              data-m={m}
+              data-ws={ws}
+            >
+              <PaneHeader m={m} pane={key} leaf={leaf} ws={ws} focused={focused} zoomed={!!zoom} />
+              {L.isTerminalLeaf(leaf) ? (
+                <TerminalView
+                  m={m}
+                  terminal={key}
+                  focused={focused}
+                  onActivate={() => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key))}
+                />
+              ) : L.isCodeLeaf(leaf) ? (
+                <CodeSlot m={m} pane={key} view={leaf.code} />
+              ) : L.isPluginLeaf(leaf) ? (
+                <PluginPane m={m} pane={key} view={leaf.view} focused={focused} />
+              ) : (
+                <PreviewPane m={m} pane={key} path={leaf.preview.path} />
+              )}
+            </div>
+          );
+        }),
+        // One list: a pane keeps its element between shown and kept only
+        // among the same siblings.
+        ...kept.map((k) => (
           <div
-            // Machines name their terminals alike ("t1" on each): the
-            // machine is part of the key, so a pane of another machine gets
-            // its own canvas, not one whose WebGL context the pane before
-            // it gave up.
-            key={`${m}\n${key}`}
-            className={`pane ${focused && !alone ? 'focused' : ''}`}
-            style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
-            data-pane={key}
-            data-m={m}
-            data-ws={ws}
+            key={`${k.m}\n${k.pane}`}
+            className="pane kept"
+            style={{ left: pct(k.rect.x), top: pct(k.rect.y), width: pct(k.rect.w), height: pct(k.rect.h) }}
+            aria-hidden
           >
-            <PaneHeader m={m} pane={key} leaf={leaf} ws={ws} focused={focused} zoomed={!!zoom} />
-            {L.isTerminalLeaf(leaf) ? (
-              <TerminalView
-                m={m}
-                terminal={key}
-                focused={focused}
-                onActivate={() => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key))}
-              />
-            ) : L.isCodeLeaf(leaf) ? (
-              <CodeSlot m={m} pane={key} view={leaf.code} />
-            ) : L.isPluginLeaf(leaf) ? (
-              <PluginPane m={m} pane={key} view={leaf.view} focused={focused} />
-            ) : (
-              <PreviewPane m={m} pane={key} path={leaf.preview.path} />
-            )}
+            {/* The header's place, so that the terminal stays the second child. */}
+            {null}
+            <TerminalView m={k.m} terminal={k.pane} focused={false} shown={false} onActivate={() => {}} />
           </div>
-        );
-      })}
+        )),
+      ]}
       {bars.map((b) => {
         const ratio = dragging && dragging.path.join() === b.path.join() ? dragging.ratio : b.ratio;
         const style =

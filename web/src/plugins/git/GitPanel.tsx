@@ -9,15 +9,13 @@
 // history of every commit is docked at the bottom (History.tsx), as VS
 // Code's Source Control Graph.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Archive,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
   Check,
   ChevronsDownUp,
-  Cloud,
   CloudUpload,
   Ellipsis,
   FileText,
@@ -52,20 +50,22 @@ import {
   selectToggle,
   useSectionOpen,
   type NavRow,
-  type Selection,
 } from '../../components/tree';
 import { FileIcon } from '../../fileIcons';
 import { Picker } from '../../components/Picker';
 import { confirmSync, fetchFrom, pickBranch, pullFrom, pushTo } from './pickers';
 import { followedDir, recentDirectory } from '../files/FilesPanel';
-import { gitApi, type Stash, type StatusFile } from './api';
-import { MARK_COLOR, type Mark } from './decorations';
-import { baseName, createBranch, discard, join, openGraph, openStatusDiff, short, stashDrop, stashParams, stashPush } from './ops';
+import { current } from '../../actions';
+import { gitApi, type StatusFile } from './api';
+import { folderOf, leafName, letterColor, letterMark } from './shared';
+import { baseName, createBranch, discard, join, openGraph, openStatusDiff, short, stashPush } from './ops';
 import { fileEntries } from './fileMenu';
-import { copyText, openFiles as openEditors } from '../files/ops';
+import { openFiles as openEditors } from '../files/ops';
 import { History } from './History';
 import { changed, forgetRepos, repoKey, runGit, useGit, useRepo, useReposOf, type RepoState } from './state';
-import type { RepoInfo } from './api';
+import { lastShown, panelMemory, pickedRepo, useKept } from './memory';
+import { Remotes } from './Remotes';
+import { Stashes } from './Stashes';
 import './git.css';
 
 export type Group = 'merge' | 'staged' | 'changes' | 'untracked';
@@ -98,41 +98,6 @@ export function groupFiles(files: StatusFile[], separate = false): Record<Group,
   }
   for (const g of Object.values(out)) g.sort((a, b) => a.file.path.localeCompare(b.file.path));
   return out;
-}
-
-/** The explorer's mark of a status letter. */
-export function letterMark(letter: string): Mark {
-  switch (letter) {
-    case '!':
-      return 'conflict';
-    case 'U':
-      return 'untracked';
-    case 'A':
-    case 'C':
-      return 'added';
-    case 'D':
-      return 'deleted';
-    case 'R':
-      return 'renamed';
-    default:
-      return 'modified';
-  }
-}
-
-/** The color of a status letter: the explorer's Git marks'. */
-export const letterColor = (letter: string): string => MARK_COLOR[letterMark(letter)];
-
-/** A path's last name (a directory, listed with its trailing /, keeps it). */
-export function leafName(p: string): string {
-  const dir = p.endsWith('/');
-  const q = dir ? p.slice(0, -1) : p;
-  return q.slice(q.lastIndexOf('/') + 1) + (dir ? '/' : '');
-}
-
-/** The folder a path is in ('' at the top). */
-export function folderOf(p: string): string {
-  const q = p.endsWith('/') ? p.slice(0, -1) : p;
-  return q.includes('/') ? q.slice(0, q.lastIndexOf('/')) : '';
 }
 
 /** A row of a group: a folder of the tree, or a file. */
@@ -212,9 +177,28 @@ export function rowFiles(rows: readonly ChangeRow[]): GroupedFile[] {
   return out;
 }
 
-/** The commit message typed per repository, kept while the panel is
- * hidden. */
-const drafts = new Map<string, string>();
+/** The machine and workspace shown (as files/FilesPanel followedDir
+ * reads them): what the panel follows belongs to them. */
+function placeOf(): string {
+  const m = useStore.getState().machineId;
+  return m ? `${m}\u0000${current()?.ws?.id ?? ''}` : '';
+}
+
+/** The repositories of the directory the panel follows: the answer for
+ * it, else (while it is asked, or after a failure that says nothing about
+ * it) what the panel last showed in this workspace of this machine
+ * (memory.ts lastShown), so a terminal's cd inside the repository changes
+ * nothing and another workspace or machine never shows this one's. */
+function useShownRepos(m: string | undefined, place: string, dir: string | undefined): { roots?: string[]; error?: string } {
+  const found = useReposOf(m, dir);
+  const known = found.roots !== undefined && !found.error;
+  useEffect(() => {
+    if (place && known) lastShown.set(place, found.roots!);
+  }, [place, known, found.roots]);
+  if (known) return found;
+  const last = place ? lastShown.get(place) : undefined;
+  return last ? { roots: last } : found;
+}
 
 export function GitPanel() {
   const m = useStore((s) => s.machineId);
@@ -222,13 +206,26 @@ export function GitPanel() {
   const paneDir = useTerms(followedDir);
   const paneDir2 = useStore(followedDir);
   const dir = paneDir ?? paneDir2;
-  const [lastDir, setLastDir] = useState<string>();
+  // The workspace selected is in the layout (the machine shown, m, in the
+  // UI's store).
+  const place = useTerms(placeOf);
+  // The directory followed last in this workspace of this machine, kept
+  // while another pane (an editor, a diff) has the focus; never another
+  // machine's or workspace's.
+  const [lastDir, setLastDir] = useState<{ place: string; dir: string }>();
   useEffect(() => {
-    if (dir) setLastDir(dir);
-  }, [dir]);
-  const shownDir = dir ?? lastDir ?? recentDirectory() ?? home;
-  const { roots, error } = useReposOf(m, shownDir);
-  const [picked, setPicked] = useState<string>();
+    if (dir) setLastDir({ place, dir });
+  }, [dir, place]);
+  const kept = lastDir?.place === place ? lastDir.dir : undefined;
+  const shownDir = dir ?? kept ?? recentDirectory() ?? home;
+  const { roots, error } = useShownRepos(m ?? undefined, place, shownDir);
+  const pickKey = m && roots?.length ? `${m}\u0000${roots[0]}` : '';
+  const [, pickedAgain] = useState(0);
+  const picked = pickedRepo.get(pickKey);
+  const setPicked = (r: string) => {
+    pickedRepo.set(pickKey, r);
+    pickedAgain((n) => n + 1);
+  };
   const root = roots && roots.length ? (picked && roots.includes(picked) ? picked : roots[0]) : undefined;
   const st = useRepo(m ?? undefined, root);
 
@@ -290,13 +287,24 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
   // The list or the tree: the setting, which the toolbar's button sets
   // (in read-only mode, where settings stay as they are, for this view).
   const viewSetting = useSettings((s) => s.values[CHANGES_VIEW]?.value);
-  const [viewHere, setViewHere] = useState<string>();
+  // What the view shows of the repository is kept while the panel is away
+  // (memory.ts): collapsed folders, the selection, the commit box.
+  const [viewHere, setViewHere] = useKept(m, root, 'view');
   const tree = (viewHere ?? viewSetting) === 'tree';
   const separate = useSettings((s) => s.values[UNTRACKED_CHANGES]?.value) === 'separate';
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const [sel, setSel] = useState<Selection>({ selection: [] });
-  const [message, setMessage] = useState(drafts.get(root) ?? '');
-  const [amend, setAmend] = useState(false);
+  const [collapsed, setCollapsed] = useKept(m, root, 'collapsed');
+  const [sel, setSel] = useKept(m, root, 'selection');
+  const [message, setDraft] = useKept(m, root, 'draft');
+  const [amend, setAmend] = useKept(m, root, 'amend');
+  const box = useRef<HTMLTextAreaElement>(null);
+  const [boxHeight] = useState(() => panelMemory(m, root).draftHeight);
+  useLayoutEffect(() => {
+    // The box's height as dragged, kept when the view goes.
+    const el = box.current;
+    return () => {
+      if (el) panelMemory(m, root).draftHeight = el.style.height || undefined;
+    };
+  }, [m, root, readOnly]);
   const status = st?.status;
   const info = st?.info;
   const groups = useMemo(() => groupFiles(status?.files ?? [], separate), [status, separate]);
@@ -306,6 +314,19 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
   const busy = st?.busy;
   const view = useScrollView();
   const list = useRef<HTMLDivElement | null>(null);
+  // The list's scroll position, kept (memory.ts) and given back once.
+  const scrolled = useRef(false);
+  const setList = useCallback(
+    (el: HTMLDivElement | null) => {
+      list.current = el;
+      if (el && !scrolled.current) {
+        scrolled.current = true;
+        el.scrollTop = panelMemory(m, root).scroll;
+      }
+      view.ref(el);
+    },
+    [m, root, view.ref],
+  );
   const typeahead = useMemo(() => new TypeAhead(), []);
 
   // The groups shown and whether each is open (only open groups' rows
@@ -325,11 +346,6 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
   const navigable = GROUPS.filter((g) => shown(g) && open[g]).flatMap((g) => rows[g]);
   const byId = new Map(navigable.map((r) => [r.id, r]));
   const selected = new Set(sel.selection);
-
-  const setDraft = (v: string) => {
-    setMessage(v);
-    drafts.set(root, v);
-  };
 
   const commit = async () => {
     if (readOnly || busy) return;
@@ -779,7 +795,9 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
       {!readOnly && (
         <div className="git-commit">
           <textarea
+            ref={box}
             className="git-message"
+            style={boxHeight ? { height: boxHeight } : undefined}
             rows={Math.min(8, Math.max(2, message.split('\n').length))}
             spellCheck={false}
             value={message}
@@ -805,17 +823,17 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
         </div>
       )}
       <div
-        ref={(el) => {
-          list.current = el;
-          view.ref(el);
-        }}
+        ref={setList}
         className="git-groups tree"
         role="tree"
         tabIndex={0}
         aria-label={t('git.changes')}
         aria-multiselectable
         onKeyDown={onKey}
-        onScroll={view.onScroll}
+        onScroll={(e) => {
+          panelMemory(m, root).scroll = e.currentTarget.scrollTop;
+          view.onScroll(e);
+        }}
       >
         {status?.truncated && <div className="git-error small">{t('git.truncated')}</div>}
         {GROUPS.filter(shown).map((g) => (
@@ -896,132 +914,5 @@ function StateBanner({ m, root, state }: { m: string; root: string; state: strin
         </>
       )}
     </div>
-  );
-}
-
-/** The stashes, read again when the refs moved (version); none shown when
- * they could not be read (an entry shown must be one the machine has). */
-function Stashes({ m, root, version }: { m: string; root: string; version: number }) {
-  const readOnly = useStore((s) => s.readOnly);
-  const rowH = useSize('row');
-  const [stashes, setStashes] = useState<Stash[]>([]);
-  useEffect(() => {
-    let gone = false;
-    gitApi
-      .stashes(m, root)
-      .then((s) => !gone && setStashes(s))
-      .catch(() => !gone && setStashes([]));
-    return () => {
-      gone = true;
-    };
-  }, [m, root, version]);
-  if (!stashes.length) return null;
-  const menu = (s: Stash): MenuEntry[] => [
-    { label: t('git.stash.apply'), disabled: readOnly, run: () => void runGit(m, root, 'stashApply', stashParams(s)) },
-    { label: t('git.stash.pop'), disabled: readOnly, run: () => void runGit(m, root, 'stashPop', stashParams(s)) },
-    { label: t('git.stash.drop'), danger: true, disabled: readOnly, run: () => void stashDrop(m, root, s) },
-  ];
-  return (
-    <Section id="git.stashes" title={t('git.group.stashes')} count={stashes.length} defaultOpen={false}>
-      <div className="git-rows" style={{ height: stashes.length * rowH }}>
-        {stashes.map((s, i) => (
-          <TreeRow
-            key={s.hash}
-            className="git-row"
-            style={{ top: i * rowH, height: rowH }}
-            depth={0}
-            icon={<Archive className="git-row-icon" />}
-            label={s.message}
-            title={s.message}
-            onContextMenu={(e) => openMenu(e, menu(s))}
-            actions={
-              readOnly ? undefined : (
-                <>
-                  <button
-                    className="icon"
-                    title={t('git.stash.apply')}
-                    aria-label={t('git.stash.apply')}
-                    onClick={() => void runGit(m, root, 'stashApply', stashParams(s))}
-                  >
-                    <Check />
-                  </button>
-                  <button
-                    className="icon"
-                    title={t('git.stash.pop')}
-                    aria-label={t('git.stash.pop')}
-                    onClick={() => void runGit(m, root, 'stashPop', stashParams(s))}
-                  >
-                    <ArrowUp />
-                  </button>
-                </>
-              )
-            }
-          />
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-/** The remotes, each with its URL (without a credential): fetch from one,
- * pull one's branch, push the branch to it; closed by default. */
-function Remotes({ m, root, info, branch, upstream }: { m: string; root: string; info?: RepoInfo; branch?: string; upstream?: string }) {
-  const readOnly = useStore((s) => s.readOnly);
-  const rowH = useSize('row');
-  const remotes = info?.remotes ?? [];
-  if (!remotes.length) return null;
-  const only = (remote: string): RepoInfo => ({ ...info!, remotes: [remote] });
-  const menu = (e: React.MouseEvent, remote: string): MenuEntry[] => {
-    const anchor = e.currentTarget;
-    const url = info?.remoteUrls?.[remote];
-    return [
-      {
-        label: t('git.graph.fetchRemote', { remote }),
-        disabled: readOnly,
-        run: () => void runGit(m, root, 'fetch', { remote, prune: true }),
-      },
-      { label: t('git.pullFrom'), disabled: readOnly, run: () => void pullFrom(m, root, anchor, only(remote), { branch }) },
-      {
-        label: t('git.graph.pushBranch', { remote }),
-        disabled: readOnly || !branch,
-        run: () => void pushTo(m, root, anchor, only(remote), branch!),
-      },
-      'sep',
-      { label: t('git.remote.copyUrl'), disabled: !url, run: () => void copyText(url!) },
-      { label: t('git.graph.copyName'), run: () => void copyText(remote) },
-    ];
-  };
-  return (
-    <Section id="git.remotes" title={t('git.group.remotes')} count={remotes.length} defaultOpen={false}>
-      <div className="git-rows" style={{ height: remotes.length * rowH }}>
-        {remotes.map((r, i) => (
-          <TreeRow
-            key={r}
-            className="git-row"
-            style={{ top: i * rowH, height: rowH }}
-            depth={0}
-            icon={<Cloud className="git-row-icon" />}
-            label={r}
-            description={info?.remoteUrls?.[r]}
-            title={[r, info?.remoteUrls?.[r], upstream?.startsWith(r + '/') ? t('git.remote.upstream', { upstream }) : '']
-              .filter(Boolean)
-              .join('\n')}
-            onContextMenu={(e) => openMenu(e, menu(e, r))}
-            actions={
-              readOnly ? undefined : (
-                <button
-                  className="icon"
-                  title={t('git.graph.fetchRemote', { remote: r })}
-                  aria-label={t('git.graph.fetchRemote', { remote: r })}
-                  onClick={() => void runGit(m, root, 'fetch', { remote: r, prune: true })}
-                >
-                  <RefreshCw />
-                </button>
-              )
-            }
-          />
-        ))}
-      </div>
-    </Section>
   );
 }

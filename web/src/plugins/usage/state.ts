@@ -8,6 +8,7 @@ import { loadPref, savePref, useStore } from '../../state/store';
 import { getPrefs } from '../../prefs';
 import { settingValue } from '../../settings';
 import { storage } from '../../brand';
+import { failureCode, jsonBody } from '../../lib/pluginApi';
 import { alertText, type CostReport, type UsageAlert, type UsageSnapshot } from './model';
 
 /** The panel shows the overview or one service (its id). */
@@ -137,8 +138,7 @@ export async function refreshNow(): Promise<string | undefined> {
   try {
     const r = await fetch('/api/p/usage/refresh', { method: 'POST' });
     if (r.ok) return undefined;
-    const j = (await r.json().catch(() => ({}))) as { error?: string };
-    return j.error ?? `http_${r.status}`;
+    return failureCode(r, await jsonBody(r));
   } catch {
     return 'network';
   }
@@ -180,8 +180,7 @@ export async function setDeepseekKey(m: string, key: string): Promise<string | u
       body: JSON.stringify({ key }),
     });
     if (r.ok) return undefined;
-    const j = (await r.json().catch(() => ({}))) as { error?: string };
-    return j.error ?? `http_${r.status}`;
+    return failureCode(r, await jsonBody(r));
   } catch {
     return 'network';
   }

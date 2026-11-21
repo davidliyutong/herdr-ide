@@ -43,16 +43,19 @@ import {
   setHidden,
   showRoot,
   shownDirs,
+  shownError,
   treeRows,
   useTree,
   setClipboard,
   type Row,
+  type TreeState,
 } from './tree';
 import {
   copyInto,
   create,
   dirOf,
   dropFiles,
+  loadRevealable,
   menuFor,
   moveInto,
   openFiles,
@@ -93,8 +96,8 @@ export function dragOutUrl(m: string, paths: string[], isDir: (p: string) => boo
 /** The directory the tree follows: the focused terminal's (a VS Code
  * pane's folder), the workspace's without a focused pane; undefined while
  * another pane (a preview, an editor) has the focus, which keeps the tree
- * where it is. */
-
+ * where it is in that workspace (another workspace or machine takes
+ * recentDirectory instead). */
 export function followedDir(): string | undefined {
   const c = current();
   if (!c) return undefined;
@@ -122,6 +125,31 @@ export function recentDirectory(): string | undefined {
   return c.ws.cwd || undefined;
 }
 
+/** The workspace shown (its id), of the machine shown. */
+const shownWorkspace = (): string | undefined => current()?.ws?.id;
+
+/** Where the tree is rooted for machine m and workspace ws, from where it
+ * is (st) and the directory followed. In the workspace the root was taken
+ * for, it follows the focused terminal or VS Code pane and stays where it
+ * is while another pane has the focus; another workspace or machine takes
+ * the directory of its terminal or VS Code pane focused last
+ * (recentDirectory), else its own, so the tree never shows another
+ * workspace's or machine's directory. Without following, the root stays
+ * where the user put it on its machine, and another machine starts at its
+ * workspace's directory (recentDirectory). */
+export function rootFor(
+  st: Pick<TreeState, 'm' | 'ws' | 'root' | 'follow'>,
+  m: string,
+  ws: string | undefined,
+  followed: string | undefined,
+  home: string | undefined,
+): string {
+  const sameMachine = st.m === m;
+  const samePlace = sameMachine && st.ws === ws;
+  const here = st.follow ? (followed ?? (samePlace ? st.root : undefined)) : sameMachine ? st.root : undefined;
+  return here ?? recentDirectory() ?? home ?? '/';
+}
+
 export function FilesPanel() {
   const m = useStore((s) => s.machineId);
   const home = useStore((s) => (s.machineId ? s.machines[s.machineId]?.info?.home : undefined));
@@ -130,6 +158,9 @@ export function FilesPanel() {
   const paneDir = useTerms(followedDir);
   const paneDir2 = useStore(followedDir);
   const followed = paneDir ?? paneDir2;
+  const ws1 = useTerms(shownWorkspace);
+  const ws2 = useStore(shownWorkspace);
+  const ws = ws1 ?? ws2;
   const s = useTree();
   useDecorationVersion((d) => d.v);
   const treeRef = useRef<HTMLDivElement>(null);
@@ -144,18 +175,17 @@ export function FilesPanel() {
   }, [m, shownKey]);
   useEffect(() => () => useShownDirs.setState({ m: undefined, dirs: [] }), []);
 
-  // The root: the followed directory, else where the tree is, else home.
-  useEffect(() => {
-    if (!m) return;
-    const st = useTree.getState();
-    const here = st.m === m ? st.root : undefined;
-    const root = (st.follow ? followed : undefined) ?? here ?? home ?? '/';
-    showRoot(m, root);
-  }, [m, followed, s.follow, home]);
+  // The root (rootFor), taken before the panel is painted: another
+  // machine's tree is never drawn, nor asked about, under this one's.
+  useLayoutEffect(() => {
+    if (m) showRoot(m, rootFor(useTree.getState(), m, ws, followed, home), ws);
+  }, [m, ws, followed, s.follow, home]);
 
   // While the panel is shown and the page visible, the shown directories
   // are checked for changes, one poll at a time.
   useEffect(() => startPolling(POLL_MS, poll), []);
+  // Whether its menus offer Reveal in Finder.
+  useEffect(() => loadRevealable(m ?? undefined), [m]);
 
   // Rows are --h-row high, which scales with the UI font size.
   const ROW_HEIGHT = useSize('row');
@@ -179,9 +209,10 @@ export function FilesPanel() {
     if (el) el.scrollLeft = el.scrollWidth;
   }, [s.root]);
 
-  if (!m || !s.root) return <div className="files-empty muted small">{t('files.noMachine')}</div>;
+  if (!m || !s.root || s.m !== m) return <div className="files-empty muted small">{t('files.noMachine')}</div>;
   const root = s.root;
   const rootDir = s.dirs[root];
+  const rootError = shownError(rootDir);
 
   const targets = (path?: string): string[] => {
     if (!path) return [];
@@ -520,7 +551,7 @@ export function FilesPanel() {
         <div className="files-rows" style={{ height: rows.length * ROW_HEIGHT }}>
           {rows.slice(first, last).map((r, i) => drawRow(r, first + i))}
         </div>
-        {rootDir?.error && <div className="files-note error small">{rootDir.error}</div>}
+        {rootError && <div className="files-note error small">{rootError}</div>}
         {rootDir?.entries && !rows.length && (
           <div className="files-note muted small">{t(s.filter ? 'files.noMatch' : 'files.emptyDir')}</div>
         )}

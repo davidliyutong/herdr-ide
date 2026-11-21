@@ -20,9 +20,11 @@ import { useMenu, isItem, type MenuEntry, type MenuItem } from '../contextMenu';
 import { fileMenuEntries } from '../plugins/files/ops';
 import { useSettings } from '../settings';
 import { isMac } from '../keys';
-import { decorate, markOf } from '../plugins/git/decorations';
-import { forgetRepos, useGit } from '../plugins/git/state';
-import { ago } from '../plugins/git/History';
+import { decorate, gitDecorations, IGNORED_COLOR, markOf } from '../plugins/git/decorations';
+import { forgetRepos, repoKey, useGit } from '../plugins/git/state';
+import { useTree } from '../plugins/files/tree';
+import { forgetPanels } from '../plugins/git/memory';
+import { ago } from '../plugins/git/shared';
 import type { StatusFile } from '../plugins/git/api';
 import { settle } from './fakeTerms';
 
@@ -86,6 +88,37 @@ describe('grouping', () => {
     expect(decorate([{ root: ROOT, files }], '/home/u')).toEqual({ repo: expect.objectContaining({ color: 'var(--ds-git-conflict)' }) });
     expect(decorate([{ root: ROOT, files }], '/elsewhere')).toEqual({});
   });
+
+  // What git ignores is muted, without a letter: the paths the status
+  // lists, everything inside an ignored folder (git lists the folder
+  // alone: the explorer's entries are), and the git directory.
+  it('mutes what git ignores and the git directory', () => {
+    const dim = { color: IGNORED_COLOR, tooltip: t('git.mark.ignored') };
+    const repo = { root: ROOT, files, ignored: ['node_modules/', 'src/debug.log', 'logs/'] };
+    const top = decorate([repo], ROOT, () => ['node_modules', 'logs', '.git', 'src', 'README.md']);
+    expect([top['node_modules'], top['logs'], top['.git']]).toEqual([dim, dim, dim]);
+    expect(top['README.md']).toBeUndefined();
+    // A change marks its folder whatever is ignored in it.
+    expect(top['src'].color).toBe('var(--ds-git-modified)');
+    expect(decorate([repo], `${ROOT}/src`)['debug.log']).toEqual(dim);
+    expect(decorate([repo], `${ROOT}/node_modules/pkg/lib`, () => ['index.js', 'util'])).toEqual({ 'index.js': dim, util: dim });
+    expect(decorate([repo], `${ROOT}/.git/refs`, () => ['heads', 'tags'])).toEqual({ heads: dim, tags: dim });
+    // A repository inside another rules its own files.
+    const dep = { root: `${ROOT}/node_modules/dep`, files: [{ path: 'x.js', x: '.', y: 'M', kind: 'changed' } as StatusFile] };
+    expect(decorate([repo, dep], dep.root, () => ['x.js', 'y.js'])).toEqual({
+      'x.js': { color: 'var(--ds-git-modified)', badge: 'M', tooltip: t('git.mark.modified') },
+      '.git': dim,
+    });
+    // The provider takes the entries the explorer listed.
+    useGit.setState({
+      repos: { [repoKey('m', ROOT)]: { status: { ahead: 0, behind: 0, files: [], ignored: ['out/'] }, version: 0, refs: 0, readAt: 0 } },
+    });
+    useTree.setState({ m: 'm', dirs: { [`${ROOT}/out`]: { entries: [{ name: 'app.js', size: 1, mode: 0, mtime: 0, is_dir: false }] } } });
+    expect(gitDecorations('m', `${ROOT}/out`)).toEqual({ 'app.js': dim });
+    expect(gitDecorations('other', `${ROOT}/out`)).toBeUndefined();
+    useTree.setState({ m: undefined, dirs: {} });
+    useGit.setState({ repos: {} });
+  });
 });
 
 describe('GitPanel', () => {
@@ -116,6 +149,7 @@ describe('GitPanel', () => {
     upstream = 'origin/main';
     logImpl = undefined;
     forgetRepos();
+    forgetPanels();
     useGit.setState({ repos: {} });
     vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
       const url = new URL(input, 'http://x');

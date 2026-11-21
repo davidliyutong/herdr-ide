@@ -39,6 +39,7 @@ export const prefKeys = {
   programClipboard: 'terminal.programClipboard',
   mathHover: 'terminal.mathHover',
   undoClose: 'layout.undoClose',
+  keptTerminals: 'performance.keptTerminals',
   notifySound: 'notifications.sound',
   notifySystem: 'notifications.system',
   notifyBadge: 'notifications.badge',
@@ -69,6 +70,8 @@ export interface Prefs {
   mathHover: boolean;
   /** layout.undoClose: seconds a close can be undone. */
   undoClose: number;
+  /** performance.keptTerminals: terminals kept attached while not shown. */
+  keptTerminals: number;
   notifySound: boolean;
   notifySystem: boolean;
   notifyBadge: boolean;

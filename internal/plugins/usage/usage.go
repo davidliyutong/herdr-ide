@@ -62,29 +62,39 @@ type Cadence struct{ Open, Working, Idle time.Duration }
 // while an agent works, else every 30.
 var DefaultCadence = Cadence{Open: 5 * time.Minute, Working: 10 * time.Minute, Idle: 30 * time.Minute}
 
+// Groups of the settings that are no provider's: how often to read, the
+// status bar and alerts, the spend's prices. The Settings page shows them,
+// then the list of providers, each of whose groups is a page of its own
+// (web/src/plugins/usage/SettingsPage.tsx).
+const (
+	groupRefresh = "usageRefresh"
+	groupAlerts  = "usageAlerts"
+	groupSpend   = "usageSpend"
+)
+
 // Settings is the plugin's settings module (internal/registry).
 var Settings = func() settings.Module {
 	m := settings.Module{Sections: []settings.Section{{ID: "usage", Order: 68, Plugin: ID}}}
 	m.Defs = append(m.Defs,
 		settings.Def{Key: SettingRefresh, Type: settings.TypeEnum, Default: RefreshAdaptive, Enum: refreshModes,
-			Scope: settings.ScopeApp, Section: "usage", Order: 10},
+			Scope: settings.ScopeApp, Section: "usage", Group: groupRefresh, Order: 10},
 		minutes(SettingRefreshOpen, DefaultCadence.Open, 1, 60, 11),
 		minutes(SettingRefreshWorking, DefaultCadence.Working, 1, 120, 12),
 		minutes(SettingRefreshIdle, DefaultCadence.Idle, 5, 240, 13),
 		// Read by the pages: how old the spend may get while the panel is
 		// open, and the status bar item.
 		settings.Def{Key: SettingCostRefresh, Type: settings.TypeNumber, Default: 15.0, Min: costMin, Max: costMax, Integer: true,
-			Scope: settings.ScopeApp, Section: "usage", Order: 15},
+			Scope: settings.ScopeApp, Section: "usage", Group: groupRefresh, Order: 15},
+		settings.Def{Key: SettingStatusBar, Type: settings.TypeBool, Default: true,
+			Scope: settings.ScopeApp, Section: "usage", Group: groupAlerts, Order: 18},
+		settings.Def{Key: SettingAlerts, Type: settings.TypeBool, Default: true,
+			Scope: settings.ScopeApp, Section: "usage", Group: groupAlerts, Order: 19},
+		settings.Def{Key: SettingThresholds, Type: settings.TypeList, Item: settings.TypeString, Default: []string{"80", "95"},
+			Options: []string{"50", "80", "90", "95"}, Scope: settings.ScopeApp, Section: "usage", Group: groupAlerts, Order: 20, Validate: validThresholds},
 		// The user's prices, for models the price table does not know yet
 		// or prices it has wrong (usage.ParsePrices).
 		settings.Def{Key: SettingPrices, Type: settings.TypeList, Item: settings.TypeString, Default: []string{},
-			Scope: settings.ScopeApp, Section: "usage", Order: 16, Validate: validPrices},
-		settings.Def{Key: SettingStatusBar, Type: settings.TypeBool, Default: true,
-			Scope: settings.ScopeApp, Section: "usage", Order: 18},
-		settings.Def{Key: SettingAlerts, Type: settings.TypeBool, Default: true,
-			Scope: settings.ScopeApp, Section: "usage", Order: 19},
-		settings.Def{Key: SettingThresholds, Type: settings.TypeList, Item: settings.TypeString, Default: []string{"80", "95"},
-			Options: []string{"50", "80", "90", "95"}, Scope: settings.ScopeApp, Section: "usage", Order: 20, Validate: validThresholds},
+			Scope: settings.ScopeApp, Section: "usage", Group: groupSpend, Order: 22, Validate: validPrices},
 	)
 	// One group per provider, in usage.Providers order: its switch, then
 	// its own options.
@@ -114,7 +124,7 @@ var costMin, costMax = settings.Range(1, 1440)
 func minutes(key string, def time.Duration, lo, hi float64, order int) settings.Def {
 	mn, mx := settings.Range(lo, hi)
 	return settings.Def{Key: key, Type: settings.TypeNumber, Default: def.Minutes(), Min: mn, Max: mx, Integer: true,
-		Scope: settings.ScopeApp, Section: "usage", Group: "usageAdaptive", Order: order}
+		Scope: settings.ScopeApp, Section: "usage", Group: groupRefresh, Order: order}
 }
 
 // validThresholds accepts percentages from 1 to 100.

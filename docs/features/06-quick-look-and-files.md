@@ -25,7 +25,7 @@ download chooser picks entries, nothing more.
 
 ## Design
 
-**Links** (`web/src/terminal/links.ts`)
+**Links** (`web/src/terminal/links.ts` finds them, `openLink.ts` opens them)
 
 - With ⌘ or Ctrl held, the row under the pointer is scanned for URLs, paths
   with a slash, `~`-paths and bare file names with known extensions,
@@ -44,9 +44,10 @@ download chooser picks entries, nothing more.
   media) and **Copy full path**, or **Open** and **Copy link** for URLs. A
   path wrapped in a way detection does not join (a margin before the last
   column, a diff's `+` in front of the next row) is opened by selecting it.
-- Relative paths resolve against the directory of the terminal's
-  foreground program (the terminal core's record), else where it started;
-  `~` against the machine's home.
+- Relative paths resolve against the terminal's directory (its shell's,
+  or that of a program which stayed where it started,
+  [28](28-file-explorer.md)), else where it started; `~` against the
+  machine's home.
 - Activation requires ⌘ or Ctrl, so plain clicks still reach mouse-aware
   applications. What a path opens in is a pane of the terminal's
   workspace (`actions.openPath`):
@@ -72,21 +73,32 @@ download chooser picks entries, nothing more.
   header, maximized and closed like any pane, can be a tab's only pane,
   and comes back after a reload or a restart ([04](04-layout-and-keyboard.md)).
   A split from it starts a terminal in its file's directory. Closing it
-  ends nothing.
+  ends nothing. A file deleted or moved away since strikes its title
+  through in its header and tab, as the file explorer's editors are
+  ([28](28-file-explorer.md); only while the explorer is on), and the
+  preview keeps what it showed: also when it is drawn again (another tab
+  shown, then this one), the last text or directory shown of the path
+  (the page keeps those of the last 8 paths) stands in for the 404. Once
+  the file is there again, the preview loads it again.
 - `GET /api/m/<machine>/file?path=` streams through the agent (`fs.stat`,
   `fs.read` with offset/length) and supports single HTTP ranges, ETags and
   `download=1`.
 - Images, video and audio use native elements; PDFs an iframe; text files
   read the first 2 MiB and refuse binary content; directories list entries
-  that open on click. Text is colored in the language of the file's name or
+  that open on click (`GET /api/m/<machine>/list`, at most 20 000; a
+  listing larger than the agent's reply line holds, as of an archive just
+  unpacked, follows the line, [architecture](../architecture.md)). Text is colored in the language of the file's name or
   first line ([28](28-file-explorer.md), `web/src/highlight`). A Markdown
   file shows rendered, with a toolbar button for its source
   (`web/src/markdown`): GitHub's tables, task lists, strikethrough and
   footnotes, formulas (KaTeX, with the terminal's limits), and code blocks
   colored by their fence's language with a copy button. A file is text the
   page does not trust, so the renderer shows HTML in it as text; a link
-  keeps its target only for `http`, `https` and `mailto` (opened outside
-  the page), a link to a file beside the document shows that file in the
+  keeps its target only for `http`, `https` and `mailto` (a web one opens as
+  a link in a terminal of the document's machine does,
+  [32](32-browser-and-ports.md): an address of that machine's `localhost`
+  in a browser pane, any other outside the app; `mailto` outside), a link
+  to a file beside the document shows that file in the
   pane, and any other link is its text; an image loads only from a `data:`
   URL of a raster type, a `blob:` URL or a file beside the document, through
   the file route. A remote image is a link instead: loading it would tell
@@ -351,7 +363,9 @@ links, selected links), `web/src/__tests__/codePanes.test.ts` (a path
 from a terminal in a VS Code pane of the workspace or beside the terminal,
 media in a preview pane beside it that then shows the next file),
 `web/src/__tests__/vt.test.ts` (hyperlinks and the
-link underline), `web/src/__tests__/drop.test.ts`
+link underline), `web/src/__tests__/filesGone.test.ts` (a preview of a
+file deleted: its titles struck through, what it showed kept, the file
+loaded again once back), `web/src/__tests__/drop.test.ts`
 (dropped files' paths on the local machine, uploads and skipped folders for
 another, refused stray drops), `web/src/__tests__/transfers.test.ts`
 (progress and speed, cancelling running and waiting uploads, the fallback

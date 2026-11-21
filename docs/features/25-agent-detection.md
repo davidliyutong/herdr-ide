@@ -92,7 +92,7 @@ attaches as an observer, whose output only says that the screen changed
 `terminal.read` when needed. Each change goes to the core as one line
 `{terminal, agent, status}`; an agent that leaves sends `{terminal}`.
 
-**In the core** (`internal/server/term.go`). The backend keeps the agents
+**In the core** (`internal/server/term_events.go`). The backend keeps the agents
 per terminal, merges them into the terminal records as `agent` and
 `agent_status` (snapshots for later subscribers included) and sends
 subscribers an `event {type: "agent", terminal, data: {agent,
@@ -121,7 +121,10 @@ from the program's own status (OSC 7501), and its agent from `agent`
 status dots, orders the attention inbox blocked, done, working, idle
 (`attentionList` in `web/src/actions.ts`), and notifies and plays sounds
 from the `/ws` agent message (`notify.ts`, `sound.ts`,
-[07](07-agent-native-workflow.md)).
+[07](07-agent-native-workflow.md)). The agent detected in a terminal is
+also what the layout's leaf remembers of it (`claude` and `codex`), so
+that the agent continues its conversation after the terminal core started
+again ([33](33-workspace-restore.md)).
 
 ## Alternatives considered
 

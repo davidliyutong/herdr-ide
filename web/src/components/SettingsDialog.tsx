@@ -41,10 +41,11 @@ import { ThemePicker } from './settings/ThemePicker';
 import { FullDiskAccess, fullDiskAccessMatches } from './settings/FullDiskAccess';
 import { fullDiskAccessAvailable, localMachine } from '../fullDiskAccess';
 import { PluginHeader, PluginsPage } from './settings/PluginsPage';
+import { Performance } from './settings/Performance';
 import { Picker, type PickerItem } from './Picker';
 import { useReturnFocus } from './useDismiss';
 import { acceptRisk, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
-import type { PluginDef } from '../plugins/api';
+import type { PluginDef, PluginSettingsDef } from '../plugins/api';
 
 export function settingLabel(key: string): string {
   const k = `settings.${key}`;
@@ -172,6 +173,7 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   const [scope, setScope] = useState(askedMachine ?? '');
   const [page, setPage] = useState(askedPage ?? (askedMachine ? MACHINE_PAGE : 'appearance'));
   const [query, setQuery] = useState('');
+  const [visit, setVisit] = useState(0);
   const keysFile = useKeys((k) => k.file);
   const plugins = usePluginList((s) => s.list);
   const search = useRef<HTMLInputElement>(null);
@@ -211,6 +213,7 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   const current = pages.some((p) => p.id === page) ? page : pages[0]?.id;
   const currentPlugin = plugins.find((p) => p.id === pages.find((x) => x.id === current)?.plugin);
   const CurrentExtra = currentPlugin?.settings?.section === current ? currentPlugin.settings.extra : undefined;
+  const currentLayout = currentPlugin?.settings?.section === current ? currentPlugin.settings.layout : undefined;
   /** A page's name: its section's, else its plugin's (a page for extra alone). */
   const pageLabel = (id: string) => {
     if (hasMessage(`settings.section.${id}`)) return sectionLabel(id);
@@ -234,6 +237,8 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   const go = (id: string) => {
     setQuery('');
     setPage(id);
+    // A page with pages of its own (a plugin's layout) starts over.
+    setVisit((v) => v + 1);
   };
   // The machines that can have their own values, chosen in a searchable
   // list beside User (as VS Code's folder settings): any number fits.
@@ -386,8 +391,13 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
                 machine={machine}
                 readOnly={readOnly}
                 fullDiskAccess={current === 'terminal' && !machine}
+                layout={currentLayout}
+                visit={visit}
                 header={currentPlugin && <PluginHeader p={currentPlugin} readOnly={readOnly} withSwitch={!machine} />}
-                footer={CurrentExtra && !machine && <CurrentExtra readOnly={readOnly} />}
+                footer={
+                  (CurrentExtra && !machine && <CurrentExtra readOnly={readOnly} />) ||
+                  (current === 'performance' && !machine && <Performance />)
+                }
               />
             )}
           </div>
@@ -435,6 +445,8 @@ function SectionView({
   machine,
   readOnly,
   fullDiskAccess,
+  layout: Layout,
+  visit = 0,
   header,
   footer,
 }: {
@@ -444,6 +456,11 @@ function SectionView({
   /** Before the settings (a plugin and its switch) and after them (a plugin's extra). */
   header?: ReactNode;
   footer?: ReactNode;
+  /** A plugin's own layout of the rows (PluginSettingsDef.layout), which
+   * draws the header where its first page starts, and how often the page
+   * was chosen in the list. */
+  layout?: PluginSettingsDef['layout'];
+  visit?: number;
   defs: SettingDef[];
   heading?: boolean;
   machine?: MachineState;
@@ -456,32 +473,33 @@ function SectionView({
   const [error, setError] = useState<string>();
   const rows = defs.filter(shownInRows);
   const schemes = rows.filter((d) => d.key.startsWith('terminal.colorScheme.'));
+  const rowsOf = (list: SettingDef[]) =>
+    list.map((d, i) => (
+      <div key={d.key}>
+        {d.group && d.group !== list[i - 1]?.group && <h4 className="settings-group">{groupLabel(d.group)}</h4>}
+        <SettingRow
+          d={d}
+          state={values[d.key]}
+          problems={problems.filter((p) => p.key === d.key && (machine ? p.machine === machine.id : !p.machine))}
+          machine={machine}
+          readOnly={readOnly}
+        />
+      </div>
+    ));
+  const plain = rows.filter((d) => !schemes.includes(d));
   return (
     <section className="settings-section">
       {heading && <h3>{sectionLabel(id)}</h3>}
       {!heading && <h2 className="settings-page-title">{title ?? sectionLabel(id)}</h2>}
       {machine && !heading && <p className="settings-note">{t('settings.scope.machineNote', { machine: machine.label })}</p>}
-      {header}
+      {!Layout && header}
       {error && <p className="error small">{error}</p>}
       {/* The colors page: a scheme and own colors per theme. */}
       {!machine &&
         schemes.map((d) => (
           <ThemeColors key={d.key} theme={d.key.endsWith('.dark') ? 'dark' : 'light'} scheme={d} readOnly={readOnly} onError={setError} />
         ))}
-      {rows
-        .filter((d) => !schemes.includes(d))
-        .map((d, i, list) => (
-          <div key={d.key}>
-            {d.group && d.group !== list[i - 1]?.group && <h4 className="settings-group">{groupLabel(d.group)}</h4>}
-            <SettingRow
-              d={d}
-              state={values[d.key]}
-              problems={problems.filter((p) => p.key === d.key && (machine ? p.machine === machine.id : !p.machine))}
-              machine={machine}
-              readOnly={readOnly}
-            />
-          </div>
-        ))}
+      {Layout ? <Layout readOnly={readOnly} defs={plain} rows={rowsOf} lead={header} visit={visit} /> : rowsOf(plain)}
       {fullDiskAccess && <FullDiskAccess readOnly={readOnly} />}
       {footer}
       {id === 'gui' && machine && machine.kind !== 'local' && (

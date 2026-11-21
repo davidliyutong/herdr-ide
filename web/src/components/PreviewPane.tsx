@@ -17,6 +17,7 @@ import { usePluginOn } from '../plugins/registry';
 import { Code } from '../highlight/Code';
 import { languageOf } from '../highlight/languages';
 import { Markdown } from '../markdown/Markdown';
+import { FileBack } from './PluginPane';
 
 const imageExt = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)$/i;
 const videoExt = /\.(mp4|webm|mov|m4v|mkv|ogv)$/i;
@@ -50,6 +51,21 @@ export function MediaView({ m, path }: { m: string; path: string }) {
   );
 }
 
+/** The text or directory entries previews showed last, by machine and path
+ * (at most KEPT_SHOWN): a preview shown again while its file is gone (a tab
+ * switch draws it afresh) keeps showing them, as an editor keeps a deleted
+ * file's text, rather than an error. */
+const shownLast = new Map<string, { text?: string; dirEntries?: RemoteStat[] }>();
+const KEPT_SHOWN = 8;
+function keepShown(key: string, shown: { text?: string; dirEntries?: RemoteStat[] }) {
+  shownLast.delete(key);
+  shownLast.set(key, shown);
+  for (const k of shownLast.keys()) {
+    if (shownLast.size <= KEPT_SHOWN) break;
+    shownLast.delete(k);
+  }
+}
+
 export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: string }) {
   const readOnly = useStore((s) => s.readOnly);
   const code = usePluginOn('vscode');
@@ -60,6 +76,8 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
   // Whether a Markdown file shows rendered (per pane, not kept).
   const [rendered, setRendered] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Bumped when the file, gone, is there again: it is loaded again.
+  const [loads, setLoads] = useState(0);
 
   const isMedia = mediaExt.test(path);
   const url = fileUrl(m, path);
@@ -71,6 +89,7 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
 
   useEffect(() => {
     let cancelled = false;
+    const key = `${m}\n${path}`;
     setError(undefined);
     setText(undefined);
     setDirEntries(undefined);
@@ -79,17 +98,30 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
       if (!isMedia) {
         try {
           const d = await listDir(m, path);
-          if (!cancelled) setDirEntries(d.entries);
+          if (cancelled) return;
+          setDirEntries(d.entries);
+          keepShown(key, { dirEntries: d.entries });
           return;
         } catch {
           /* not a directory */
         }
         try {
           const r = await fetch(url, { headers: { Range: 'bytes=0-2097151' } });
+          const last = shownLast.get(key);
+          if (r.status === 404 && last) {
+            // Gone since it was shown: what it showed stays.
+            if (cancelled) return;
+            if (last.text !== undefined) setText(last.text);
+            else setDirEntries(last.dirEntries);
+            return;
+          }
           if (!r.ok) throw new Error(await r.text());
           const buf = new Uint8Array(await r.arrayBuffer());
           if (buf.subarray(0, 8000).includes(0)) throw new Error(t('preview.binary'));
-          if (!cancelled) setText(new TextDecoder().decode(buf));
+          if (cancelled) return;
+          const shown = new TextDecoder().decode(buf);
+          setText(shown);
+          keepShown(key, { text: shown });
         } catch (e) {
           if (!cancelled) setError(e instanceof Error ? e.message : String(e));
         }
@@ -101,7 +133,7 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
     return () => {
       cancelled = true;
     };
-  }, [m, path, url, isMedia]);
+  }, [m, path, url, isMedia, loads]);
 
   const index = useMemo(() => siblings.findIndex((s) => dirname(path) + '/' + s.name === path), [siblings, path]);
   const go = (step: number) => {
@@ -121,6 +153,7 @@ export function PreviewPane({ m, pane, path }: { m: string; pane: string; path: 
         if (e.key === 'ArrowRight') go(1);
       }}
     >
+      <FileBack m={m} path={path} onBack={() => setLoads((n) => n + 1)} />
       <div className="preview-toolbar">
         {siblings.length > 1 && index >= 0 && (
           <>

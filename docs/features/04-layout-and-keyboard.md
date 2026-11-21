@@ -45,9 +45,16 @@ Non-goals: arbitrary docking of panes; floating panes.
   when selected in the sidebar or the palette): it subscribes to their
   terminals, which installs and starts their terminal cores
   ([02](02-multi-machine-transport.md)), then reads their layout documents.
-  A machine whose document has no workspace gets one without a name or a
-  directory (shown as `~` until its first pane gives it one). Terminals that no longer run are dropped from
-  it.
+  A machine whose document was never written gets a first workspace
+  without a name or a directory (shown as `~` until its first pane gives
+  it one). A document whose workspaces were all closed stays without one:
+  the panes' area says that the machine has no workspaces and offers
+  **New Workspace…**, and the next pane opened there (a new tab, an agent
+  started) makes a workspace without a name, as the first
+  one (`TermModel.firstWorkspace`, `mutate`). Terminals that no longer run
+  are dropped from it; those that ended with their terminal core are
+  started again instead
+  ([33](33-workspace-restore.md)).
 - The shown machine's selected workspace, its selected tab and the focused
   pane are the document's: selecting a workspace or tab, or focusing a
   pane, writes it, and every client follows. Edits are written one at a time
@@ -80,13 +87,18 @@ Non-goals: arbitrary docking of panes; floating panes.
   too, and a middle click closes a tab, as in browsers. Closing the last
   tab leaves its workspace in the sidebar, empty: the panes' area says it
   has no open terminals and offers **New Tab**; the workspace goes only
-  with **Close Workspace**. A program that ends by
+  with **Close Workspace**, the machine's last one too: a machine can be
+  left without workspaces (above). A program that ends by
   itself closes its pane the same way, and the finished terminal is removed
-  from the terminal core.
+  from the terminal core. A terminal that ended because its terminal core
+  or its machine did keeps its pane and is started again
+  ([33](33-workspace-restore.md)).
 - A tab can be pinned (Pin Tab in its menu, `tab.pin` and `tab.unpin`
   without a default key), as VS Code pins editors and browsers pin tabs:
-  it keeps its name and shows a pin where others have ×, and a click on
-  the pin unpins it. Pinned tabs stay first, left of a small gap: pinning
+  it keeps its name and shows a pin where others have ×. The pin is a
+  mark, not a button: a click on it shows the tab, and only Unpin Tab (the
+  tab's menu, or the command) unpins it, so a tab is not unpinned by a
+  press that missed. Pinned tabs stay first, left of a small gap: pinning
   moves a tab to the end of the pinned ones, unpinning to the start of the
   others, and a tab dragged among the others' places stops at their edge
   (`L.pinTab`; the layout's tab carries `pinned: true`, so every browser
@@ -100,7 +112,7 @@ Non-goals: arbitrary docking of panes; floating panes.
 - Tabs and workspaces are shown in the document's order. Tabs that do not
   fit on one row continue on more rows and the tab bar grows, as with VS
   Code's wrapped tabs: every tab stays visible and the bar never scrolls.
-  The sidebar toggle and the breadcrumb stay on the first row, `+` follows
+  The sidebar toggle stays on the first row, `+` follows
   the last tab, and a label longer than 16em is cut with an ellipsis (the
   tooltip has it in full). The active tab has its own background, an
   outline and an accent bar under it. A tab the user has not named shows
@@ -130,8 +142,10 @@ Non-goals: arbitrary docking of panes; floating panes.
   component of its directory, `~` for
   the home directory or none, `/` for the root (`layout.workspaceTitle`;
   `Workspace` and `工作区`, which earlier versions named the workspaces they
-  made, count as none), in the sidebar, the tab bar's breadcrumb (machine /
-  workspace), the palette, menus and messages. The sidebar lists every
+  made, count as none), in the sidebar, the palette, menus and messages.
+  The tab bar does not name the machine and the workspace: the sidebar's
+  selected row does, and a name that follows the focused pane's directory
+  moved every tab whenever another pane took the focus. The sidebar lists every
   workspace of a followed machine one below the other (the selected one
   with an accent bar); a machine not followed yet offers to show its
   terminals. The browser remembers the machines it followed (the desktop
@@ -180,8 +194,10 @@ Non-goals: arbitrary docking of panes; floating panes.
 - Dragging a pane by its header (after a few pixels, so a click stays a
   click) shows a highlight of where the pane goes. The middle of another
   pane swaps the two; an edge places the pane beside it, on that side.
-  Dropping on a tab places it beside that tab's focused pane, on `+` into a
-  new tab, on another workspace of its machine in the sidebar into a new
+  Dropping on a tab places it beside that tab's focused pane (on its own
+  tab it stays), anywhere else on the tab bar (`+`, the empty part after
+  it, the gaps between tabs) into a new tab, which comes where `+` is and
+  is marked there, on another workspace of its machine in the sidebar into a new
   tab at the end of that workspace, which is then shown. Escape cancels. All of these are edits of the layout document.
   VS Code and preview panes move the same way; a VS Code pane keeps its
   window wherever it goes ([05](05-vscode-panes.md)). A panel of the right
@@ -206,8 +222,12 @@ Non-goals: arbitrary docking of panes; floating panes.
   machine is a step (a click, a tab, a workspace or a machine shown), going
   back and forward moves along the steps, and a pane focused otherwise
   after going back drops what lay ahead. Going to a pane shows its machine,
-  workspace and tab; panes closed since are passed over. The history keeps
-  the last 100 steps, in the page only.
+  workspace and tab. Panes closed since are passed over, and so is a step
+  that would land on the pane that has the focus already: closing a pane
+  focuses one beside it, which is then both the latest place and the one
+  before the closed pane, and going back goes to the place before that
+  instead of doing nothing. The history keeps the last 100 steps, in the
+  page only.
 - **Close Pane**, **Close Tab** and **Close Workspace** close at once,
   without asking, also when a program runs: they can be undone for the time of the setting
   `layout.undoClose` (5 s by default, 3 to 120; `closedPanes.ts`), which
@@ -268,7 +288,10 @@ Non-goals: arbitrary docking of panes; floating panes.
   item's **Rename** in its menu, or a rename binding; a workspace's menu
   edits it in a dialog, below) puts a field in its
   place with the name selected; Enter or leaving the field saves, Escape
-  cancels. A pane's name is the terminal's `name` label in the terminal
+  cancels. Keys an input method takes while it composes are not the
+  field's: the Enter that commits Latin letters typed with a Chinese input
+  method puts them into the field and leaves it open, and Escape that
+  drops a composition does not cancel (`web/src/ime.ts`, below). A pane's name is the terminal's `name` label in the terminal
   core, which also names it in tabs, the sidebar and the palette (empty
   shows the terminal's title again); tab and workspace names are in the
   layout document (a tab's field starts with its name or its terminal's
@@ -472,7 +495,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   a pane added later does not give it one back). Double-clicking the
   workspace still renames it in place.
 
-**Keyboard** (`internal/keybindings`, `web/src/keymap.ts`; the system is
+**Keyboard** (`internal/keybindings`, `web/src/keymap.ts`, `web/src/commands.ts`; the system is
 described in [13](13-settings-and-appearance.md))
 
 - Commands (`tab.new`, `pane.splitRight`, `code.open`…) have default
@@ -484,6 +507,11 @@ described in [13](13-settings-and-appearance.md))
   platform, and follows the core's `keybindings` messages after every
   change. The full table is in
   [reference](../reference.md#keyboard-shortcuts).
+- What runs a command, and whether it can run now, is a table by command
+  id: a plugin's commands are in its definition
+  (`web/src/plugins/api.ts`), the others in `web/src/commands.ts`, which
+  the app defines at its start; `web/src/keymap.ts` only looks both up (a
+  plugin's first), so a command nothing handles does nothing.
 - No default is a chord, and no default is `ctrl` or `alt` with a letter
   alone or a function key: `ctrl+b` and every key that is not a default
   reach the program in the terminal on their first press. The defaults
@@ -568,6 +596,16 @@ described in [13](13-settings-and-appearance.md))
   nothing fall back to the physical key, so `cmd+w` on a Russian layout is
   still `cmd+w`; Shift does not change the name (`cmd+shift+1`, not
   `cmd+!`).
+- A keydown that belongs to an input method (the browser reports it as
+  composing, or with the key code 229) in one of the page's own text
+  fields (inputs and text areas, such as renames, dialogs and search
+  fields) reaches no handler of the page: a listener on the
+  window, in the capture phase and installed before the UI
+  (`guardImeKeys` in `web/src/ime.ts`, from `main.tsx`), stops it, so no
+  field saves or closes and no shortcut runs on the Enter, Escape or
+  arrow that only served the composition; what the browser does with the
+  key stays. Terminals ([26](26-web-terminals.md)) and Monaco editors
+  handle composition themselves and see every key.
 - In the desktop app the page matches every key it sees itself
   (`web/src/keymap.ts`), direct shortcuts and users' chords alike, with the
   desktop platform's bindings, and cancels the keys it runs. A held key
@@ -697,8 +735,9 @@ described in [13](13-settings-and-appearance.md))
   and the tab it showed; a closed terminal kept running until the time to
   undo is over, the same terminal put back by Undo Close (also a
   workspace's, several closed together coming back with one Undo), one labeled
-  closing by a page that is gone ended; going back and forward past closed
-  panes.
+  closing by a page that is gone ended; the machine's last workspace
+  closed, leaving none, and put back by Undo Close; going back and forward
+  past closed panes and past the pane that took the focus when one closed.
 - `web/src/__tests__/tabLabels.test.ts`: tabs numbered unless named, a tab
   of VS Code or a preview alone shown by its mark and name, the
   terminal's title and pane count in the tooltip, renaming from the title
@@ -713,11 +752,19 @@ described in [13](13-settings-and-appearance.md))
   place and an emptied name giving the folder's back, the Agents section's
   arrows and Tab stop.
 - `web/src/__tests__/terms.test.ts`: reading the document after the
-  terminals, with a workspace without a name and without ended
+  terminals, with a first workspace without a name where no document was
+  written, none where every workspace was closed, and without ended
   terminals; one write at a time and another client's newer version; ended
   programs closing their panes; terminals asked for early.
+- `web/src/__tests__/ime.test.tsx`: a composing keydown known by its flag
+  or its key code, a rename left open by the Enter that commits a
+  composition, composing keys of text fields kept from the page's
+  handlers and those of a terminal let through.
 - `web/src/__tests__/core.test.ts` (pane geometry of split trees),
   `web/src/__tests__/settings.test.ts` (drop zones).
+- `web/src/__tests__/paneDrag.test.ts`: a pane dropped on the tab bar goes
+  into another tab, stays on its own and gets a new tab anywhere else on
+  the bar, on its machine's bar with `+` only.
 - `web/src/__tests__/keys.test.ts`: key names, chords from the page's keys,
   every platform's defaults (`design/testdata/keys/defaults.json`: `ctrl+b`
   and other keys without a binding left to the terminal), the second press

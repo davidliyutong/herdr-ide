@@ -1,0 +1,837 @@
+/* ---------- settings ---------- */
+/* The settings dialog floats in the middle of the window and shrinks with
+ * it, keeping a gutter on every side, rather than hanging from the top. */
+.modal-backdrop.settings-backdrop {
+  align-items: center;
+  padding: 16px;
+}
+.modal.settings {
+  width: min(1040px, 100%);
+  height: min(760px, 100%);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  box-shadow: 0 18px 50px var(--shadow);
+}
+.modal.settings .settings-nav {
+  background: var(--bg-1);
+}
+.modal.settings .modal-head {
+  gap: 6px;
+}
+.settings-search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 34rem;
+  margin: 0 auto 0 8px;
+  padding: 1px 2px 1px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg-mute);
+}
+.settings-search:focus-within {
+  border-color: var(--focus-ring);
+}
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  height: 1.75rem;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+}
+.settings-search .icon {
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+}
+/* The pages as a searchable list, at a phone's width only. */
+.settings-nav-pick {
+  display: none;
+}
+/* The scope tabs: the user's settings, then each machine's. */
+.settings-scopes {
+  display: flex;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.settings-scopes button {
+  flex: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  padding: 7px 12px 6px;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.settings-scopes button:hover {
+  color: var(--fg);
+}
+/* The machine scope: a searchable list styled as a tab. */
+.settings-scopes .settings-scope-machine {
+  min-width: 0;
+  max-width: 16rem;
+  gap: 6px;
+}
+.settings-scopes .settings-scope-machine .ellipsis.muted {
+  color: inherit;
+}
+.settings-scopes button.on {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+.settings-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.settings-nav {
+  flex: none;
+  width: 13rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--line);
+  overflow: auto;
+}
+.settings-nav button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  min-height: 1.85rem;
+}
+.settings-nav button:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.settings-nav button.on {
+  background: var(--bg-3);
+  color: var(--fg);
+  font-weight: 500;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.settings-nav-heading {
+  margin: 12px 10px 4px;
+  font-size: var(--fs-sm);
+  color: var(--fg-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.nav-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.settings-body {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 6px 28px 28px;
+}
+.settings-page-title {
+  margin: 14px 0 6px;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+}
+.settings-section h3 {
+  margin: 20px 0 4px;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.settings-group {
+  margin: 22px 0 2px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--fg-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.settings-note {
+  margin: 8px 0 4px;
+  font-size: var(--fs-md);
+  color: var(--fg-dim);
+}
+/* One setting: its title, its description, its control. A setting changed
+   from its default (or a machine's own value) has a bar on its left. */
+.setting {
+  position: relative;
+  padding: 10px 12px 12px;
+  margin: 0 -12px;
+  border-radius: var(--radius);
+}
+.setting:hover,
+.setting:focus-within {
+  background: color-mix(in srgb, var(--bg-3) 45%, transparent);
+}
+/* The row the dialog was opened at (openSettings({row})). */
+.setting.asked {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.setting.modified::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.setting-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 1.6rem;
+}
+.setting-title {
+  font-weight: 600;
+}
+.setting-badge {
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.setting-more {
+  margin-left: auto;
+  opacity: 0;
+}
+.setting:hover .setting-more,
+.setting:focus-within .setting-more,
+.setting-more:focus-visible {
+  opacity: 1;
+}
+.setting-desc {
+  margin: 2px 0 6px;
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  max-width: 46rem;
+}
+.setting-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.row-gap {
+  gap: 8px;
+}
+/* Full Disk Access (settings/FullDiskAccess.tsx): who has it, what to do,
+   then what to restart once it is on, with the actions. */
+.fda-access {
+  display: grid;
+  grid-template-columns: max-content max-content max-content;
+  gap: 4px 14px;
+  align-items: center;
+  margin: 6px 0 8px;
+  font-size: var(--fs-md);
+}
+.fda-access code {
+  color: var(--fg-dim);
+}
+.fda-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fda-after {
+  margin-top: 12px;
+}
+.setting-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  max-width: 46rem;
+  cursor: pointer;
+}
+.setting-check input {
+  margin: 0.18rem 0 0;
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent);
+  flex: none;
+}
+.settings-input {
+  width: 22rem;
+  max-width: 100%;
+}
+.setting-control select {
+  min-width: 12rem;
+  height: 1.9rem;
+}
+.settings-color {
+  width: 2.4rem;
+  height: 1.7rem;
+  padding: 0 2px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  cursor: pointer;
+}
+.settings-problems {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius);
+}
+.settings-problems > svg {
+  flex: none;
+  color: var(--warning);
+}
+.settings-locked {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--warning);
+}
+button.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+}
+button.link:hover {
+  text-decoration-color: currentColor;
+}
+button.disclosure {
+  margin-top: 8px;
+  text-decoration: none;
+  color: var(--fg-dim);
+}
+button.disclosure:hover {
+  color: var(--fg);
+}
+.segmented {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.segmented button {
+  white-space: nowrap;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  padding: 0 12px;
+  min-height: var(--ctl);
+}
+.segmented button + button {
+  border-left: 1px solid var(--line-2);
+}
+.segmented button.on {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.segmented.sm button {
+  min-height: var(--ctl-sm);
+  line-height: calc(var(--ctl-sm) - 2px);
+  padding: 0 8px;
+  font-size: var(--fs-sm);
+}
+.segmented button:hover:not(.on):not(:disabled) {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.stepper .icon {
+  border: 1px solid var(--line-2);
+  min-width: 1.85rem;
+}
+.stepper-value {
+  width: 6.5em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.stepper-range {
+  margin-left: 6px;
+}
+/* A list of strings: a searchable list of the offered values (or a field
+   adding one), the values as chips. */
+.list-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 46rem;
+}
+.list-editor > .picker-button {
+  min-width: 14rem;
+}
+.list-items {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.list-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  min-height: var(--ctl-sm);
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--bg);
+}
+.list-chip .icon {
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  margin-right: -8px;
+}
+.list-add {
+  display: inline-flex;
+  gap: 6px;
+}
+.list-add .settings-input {
+  width: 12rem;
+}
+/* The terminal font: a button showing the font in itself, a list of the
+   installed monospace fonts, a preview line. */
+.font-picker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(30rem, 100%);
+}
+.font-picker-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 2rem;
+  padding: 0 8px 0 10px;
+  background: var(--bg);
+  text-align: left;
+  font-size: var(--fs-lg);
+}
+.font-picker-button .ellipsis {
+  flex: 1;
+}
+.font-list {
+  position: absolute;
+  top: 2.2rem;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.font-list .settings-input {
+  width: 100%;
+}
+.font-rows {
+  max-height: 16rem;
+  overflow: auto;
+}
+.font-row {
+  font-variant-ligatures: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--fs-lg);
+}
+.font-row.sel {
+  background: var(--bg-3);
+}
+.font-check {
+  display: inline-flex;
+  width: 1.1rem;
+  flex: none;
+}
+.font-note {
+  padding: 2px 6px 0;
+}
+/* Terminals draw each cell alone: no ligatures in the preview either. */
+.font-preview {
+  font-variant-ligatures: none;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+button.danger-text:not(:disabled) {
+  color: var(--error);
+}
+/* The color theme: a card per theme, its accent on both backgrounds. */
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 8px;
+  width: min(46rem, 100%);
+}
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-height: 0;
+  padding: 6px;
+  line-height: 1.3;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  color: var(--fg-dim);
+  text-align: left;
+}
+.theme-card:hover:not(:disabled) {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.theme-card.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--fg);
+}
+.theme-swatch {
+  display: flex;
+  height: 2.6rem;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.theme-swatch-half {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+}
+.theme-swatch-half:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.theme-swatch-half:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.theme-swatch-bar {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+}
+.theme-swatch-button {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.theme-name {
+  font-size: var(--fs-md);
+}
+/* Terminal colors: a scheme with a preview, then named swatches. */
+.scheme-control .picker-button {
+  min-width: 14rem;
+}
+/* A scheme in its list: its background and four of its colors. */
+.scheme-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 3px;
+  height: 1rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+}
+.scheme-mini > span {
+  width: 4px;
+  height: 0.6rem;
+  border-radius: 1px;
+}
+.scheme-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 1.9rem;
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+}
+.scheme-text {
+  margin-right: 6px;
+  font-weight: 600;
+}
+.scheme-chip {
+  width: 0.7rem;
+  height: 0.9rem;
+  border-radius: 2px;
+}
+.swatches {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.swatch-group,
+.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 11rem));
+  gap: 6px 10px;
+}
+.swatch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 1.85rem;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.swatch:hover {
+  background: var(--bg-3);
+}
+.swatch input[type='color'] {
+  flex: none;
+  width: 2rem;
+  height: 1.4rem;
+  padding: 0 1px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  cursor: pointer;
+}
+.swatch-name {
+  flex: 1;
+  color: var(--fg-dim);
+  font-size: var(--fs-md);
+}
+.swatch.own .swatch-name {
+  color: var(--fg);
+  font-weight: 500;
+}
+.swatch-reset {
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+}
+/* The keyboard shortcuts: a table of commands, keys and where they come from. */
+.keys-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 8px;
+}
+.key-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.key-search .icon.on {
+  background: var(--bg-3);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.keys-table {
+  display: flex;
+  flex-direction: column;
+}
+.keys-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 7.5rem;
+  align-items: center;
+  gap: 12px;
+  min-height: 2.2rem;
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+/* A double click records keys: it selects no text. */
+.keys-row {
+  user-select: none;
+}
+.keys-row:not(.keys-head):hover {
+  background: var(--bg-3);
+}
+.keys-row.modified::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.keys-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-mute);
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.keys-section {
+  /* Padding, not margins: the table's rows are placed by their heights. */
+  padding: 14px 10px 2px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--fg-mute);
+}
+.keys-keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.keys-source {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.key-add,
+.keys-source .icon {
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  opacity: 0;
+}
+.keys-row:hover .key-add,
+.keys-row:hover .keys-source .icon,
+.key-add:focus-visible,
+.keys-source .icon:focus-visible {
+  opacity: 1;
+}
+.key-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.key-chip kbd,
+.key-recorder {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  white-space: nowrap;
+}
+.key-remove {
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  visibility: hidden;
+}
+.key-chip:hover .key-remove,
+.key-remove:focus-visible {
+  visibility: visible;
+}
+.key-chip.conflict kbd {
+  border-color: var(--warning);
+}
+.key-chip.conflict svg {
+  color: var(--warning);
+}
+.key-recorder {
+  min-width: 10rem;
+  outline: 2px solid var(--focus-ring);
+  cursor: text;
+}
+.key-recorder.invalid {
+  outline-color: var(--error);
+}
+.modal-title {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+/* The Performance page: what the app uses now, as a table of its parts and
+   a list of facts about its terminals. */
+.perf-table {
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  margin: 4px 0;
+}
+.perf-table th,
+.perf-table td {
+  padding: 4px 24px 4px 0;
+  text-align: left;
+  font-weight: normal;
+}
+.perf-table td {
+  text-align: right;
+}
+.perf-table thead th {
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--line);
+}
+.perf-table thead th:not(:first-child) {
+  text-align: right;
+}
+.perf-total th,
+.perf-total td {
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+}
+.perf-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 24px;
+  margin: 4px 0;
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+.perf-facts dt {
+  color: var(--fg-dim);
+}
+.perf-facts dd {
+  margin: 0;
+}

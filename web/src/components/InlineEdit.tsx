@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { imeKey } from '../ime';
 
 interface Props {
   value: string;
@@ -29,6 +30,9 @@ export function InlineEdit({ value, className, onDone }: Props) {
       spellCheck={false}
       onKeyDown={(e) => {
         e.stopPropagation();
+        // A key an input method takes (Enter commits the letters typed as
+        // they are, Escape drops them) is its own, not the field's.
+        if (imeKey(e.nativeEvent)) return;
         if (e.key === 'Enter') finish(true);
         else if (e.key === 'Escape') finish(false);
       }}

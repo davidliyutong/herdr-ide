@@ -11,6 +11,7 @@ import { useSettings } from '../settings';
 import { useKeys } from '../keybindings';
 import { useStore } from '../state/store';
 import { commandEnabled, handleKey, runCommand } from '../keymap';
+import '../commands';
 import { currentZoom, zoomStep, ZOOM_LEVELS } from '../zoom';
 import { fakeSettingsApi } from './fakeSettings';
 

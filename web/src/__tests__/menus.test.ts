@@ -15,6 +15,7 @@ import { machineMenu, paneMenu, sidebarMenu, tabMenu, workspaceMenu } from '../m
 import { actions } from '../actions';
 import { useKeys } from '../keybindings';
 import { commandEnabled, keyHint, runCommand } from '../keymap';
+import '../commands';
 import { useDialog } from '../dialog';
 import { ContextMenu } from '../components/ContextMenu';
 import { definePlugins } from '../plugins/registry';
@@ -246,7 +247,7 @@ describe('menus', () => {
     find(paneMenu('m', 'p1'), 'Split Down').run!();
     await vi.waitFor(() => expect(core.calls.some((c) => c.method === 'terminal.run')).toBe(true));
     // The new terminal starts in the split one's folder and goes below it.
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: false, cwd: '/src', display: expect.any(Object) });
+    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: true, cwd: '/src', display: expect.any(Object) });
     await settle();
     expect(core.layout('m')!.workspaces[0].tabs[0]).toMatchObject({
       root: { split: 'vertical', children: [{ terminal: 'p1' }, { terminal: 't1' }] },
@@ -400,13 +401,13 @@ describe('menus', () => {
   it("creates a tab in its workspace's folder, else the focused terminal's", async () => {
     await actions.newTab('m', 'w2w2w2w2');
     expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
-      keep: false,
+      keep: true,
       cwd: '/tmp',
       display: expect.any(Object),
     });
     await actions.newTab('m', 'w1w1w1w1');
     expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
-      keep: false,
+      keep: true,
       cwd: '/src',
       display: expect.any(Object),
     });

@@ -8,19 +8,20 @@
 // shows a commit's files under it (a file opens its diff), the context
 // menu copies the hash or opens the graph pane there.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, GitGraph, Tag as TagIcon } from 'lucide-react';
 import { openMenu } from '../../contextMenu';
 import { t } from '../../i18n';
 import { useSize } from '../../lib/sizes';
+import { useScrollView, visibleRange } from '../../lib/windowed';
 import { useSectionOpen } from '../../components/tree';
 import { gitApi, errorText, type Change, type Commit, type Ref } from './api';
 import { appendCommits, layoutGraph, newPaging, type Paging } from './graph';
 import { GraphCell, laneColor } from './GraphCell';
-import { badgesOf, type Badge } from './GraphPane';
-import { folderOf, leafName, letterColor } from './GitPanel';
+import { ago, badgesOf, folderOf, leafName, letterColor, type Badge } from './shared';
 import { FileIcon } from '../../fileIcons';
 import { copy, openDiff, openGraph, short } from './ops';
+import { panelMemory, useKept } from './memory';
 
 /** The commits of a page. */
 export const PAGE = 200;
@@ -49,16 +50,6 @@ function store(key: string, v: unknown) {
   }
 }
 
-/** How long ago a time was, short (5m, 3h, 2d, 4w, 2y). */
-export function ago(secs: number, now = Date.now() / 1000): string {
-  const d = Math.max(0, now - secs);
-  if (d < 3600) return `${Math.max(1, Math.round(d / 60))}m`;
-  if (d < 86400) return `${Math.round(d / 3600)}h`;
-  if (d < 86400 * 14) return `${Math.round(d / 86400)}d`;
-  if (d < 86400 * 365) return `${Math.round(d / (86400 * 7))}w`;
-  return `${Math.round(d / (86400 * 365))}y`;
-}
-
 type Line =
   | { kind: 'commit'; i: number }
   | { kind: 'file'; i: number; f: Change; hash: string; multi: boolean }
@@ -71,18 +62,27 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
   // Kept as the panel's sections are (components/tree useSectionOpen).
   const [open, setOpen] = useSectionOpen('git.history', stored(OPEN_KEY, true));
   const [height, setHeight] = useState(() => stored<number | undefined>(HEIGHT_KEY, undefined));
-  const [commits, setCommits] = useState<Commit[]>([]);
-  const [refs, setRefs] = useState<Ref[]>([]);
-  const [more, setMore] = useState(false);
+  // The list, the commit opened and the scroll position are kept while the
+  // panel is away (memory.ts): shown again at once, then read again.
+  const mem = panelMemory(m, root);
+  const [commits, setCommits] = useState<Commit[]>(() => mem.history?.commits ?? []);
+  const [refs, setRefs] = useState<Ref[]>(() => mem.history?.refs ?? []);
+  const [more, setMore] = useState(() => mem.history?.more ?? false);
   const [error, setError] = useState<string>();
-  const [expanded, setExpanded] = useState<string>();
-  const [files, setFiles] = useState<{ hash: string; files?: Change[]; error?: string }>();
-  const [scroll, setScroll] = useState({ top: 0, height: 0 });
+  const [expanded, setExpanded] = useKept(m, root, 'opened');
+  const [files, setFiles] = useState<{ hash: string; files?: Change[]; error?: string } | undefined>(() =>
+    mem.openedFiles && mem.openedFiles.hash === expanded ? mem.openedFiles : undefined,
+  );
+  const scroll = useScrollView();
   const list = useRef<HTMLDivElement>(null);
   const section = useRef<HTMLElement>(null);
   // The list's paging, replaced when the first page is read again: an
-  // answer for an earlier one is dropped.
-  const page = useRef<Paging>(newPaging());
+  // answer for an earlier one is dropped. The list kept is read again as
+  // long as it was.
+  const page = useRef<Paging>({ ...newPaging(), next: mem.history?.commits.length ?? 0 });
+  useEffect(() => {
+    panelMemory(m, root).history = { commits, refs, more };
+  }, [m, root, commits, refs, more]);
 
   // The first page (as many commits as were loaded, up to MAX_RELOAD),
   // again whenever the refs changed.
@@ -125,14 +125,21 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
     }
   };
 
-  // A commit's files, under it (a commit never changes).
+  // A commit's files, under it (a commit never changes: those kept are
+  // shown again).
   useEffect(() => {
     if (!expanded) return setFiles(undefined);
+    const kept = panelMemory(m, root).openedFiles;
+    if (kept?.hash === expanded) return setFiles(kept);
     let gone = false;
     setFiles({ hash: expanded });
     gitApi
       .show(m, root, expanded)
-      .then((s) => !gone && setFiles({ hash: expanded, files: s.files }))
+      .then((s) => {
+        if (gone) return;
+        panelMemory(m, root).openedFiles = { hash: expanded, files: s.files };
+        setFiles({ hash: expanded, files: s.files });
+      })
       .catch((e) => !gone && setFiles({ hash: expanded, error: errorText(e) }));
     return () => {
       gone = true;
@@ -153,15 +160,15 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
     return out;
   }, [commits, expanded, files]);
 
-  useEffect(() => {
-    const el = list.current;
-    if (!el) return;
-    const update = () => setScroll({ top: el.scrollTop, height: el.clientHeight });
-    update();
-    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
-    ro?.observe(el);
-    return () => ro?.disconnect();
-  }, [open]);
+  const setList = useCallback(
+    (el: HTMLDivElement | null) => {
+      list.current = el;
+      // Where the list was scrolled to when it was last shown.
+      if (el) el.scrollTop = panelMemory(m, root).historyScroll;
+      scroll.ref(el);
+    },
+    [m, root, scroll.ref],
+  );
   useEffect(() => {
     if (more && scroll.top + scroll.height > lines.length * rowH - 20 * rowH) void loadMore();
   });
@@ -194,8 +201,7 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
     window.addEventListener('pointerup', up);
   };
 
-  const first = Math.max(0, Math.floor(scroll.top / rowH) - 10);
-  const last = Math.min(lines.length, Math.ceil((scroll.top + (scroll.height || 600)) / rowH) + 10);
+  const [first, last] = visibleRange(lines.length, rowH, scroll.top, scroll.height || 600, 10);
   // The lanes as wide as the rows drawn need, not the whole history.
   let lanes = 1;
   for (let k = first; k < last; k++) {
@@ -281,8 +287,11 @@ export function History({ m, root, version, branch, head }: { m: string; root: s
           {error && <div className="callout error">{error}</div>}
           <div
             className="git-history-list"
-            ref={list}
-            onScroll={(e) => setScroll({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}
+            ref={setList}
+            onScroll={(e) => {
+              panelMemory(m, root).historyScroll = e.currentTarget.scrollTop;
+              scroll.onScroll(e);
+            }}
           >
             <div style={{ position: 'relative', height: lines.length * rowH }}>
               {lines.slice(first, last).map((l, k) => {

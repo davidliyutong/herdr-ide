@@ -1,0 +1,48 @@
+/* ---------- dragging panes, tabs and workspaces ---------- */
+body.dragging,
+body.dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 80;
+  pointer-events: none;
+  max-width: 260px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  border: 1px solid var(--accent);
+  box-shadow: 0 8px 24px var(--shadow);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drop-marker {
+  position: fixed;
+  z-index: 70;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  transition:
+    left 0.08s,
+    top 0.08s,
+    width 0.08s,
+    height 0.08s;
+}
+.drop-marker[data-zone='center'] {
+  border-style: dashed;
+}
+/* Insertion bar between two tabs or workspaces. */
+.drop-marker[data-zone='slot'] {
+  border: none;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.tab,
+.ws-item {
+  user-select: none;
+}
