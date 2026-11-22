@@ -3,6 +3,32 @@
  "env": null,
  "events": [
   {
+   "t": "info",
+   "chat": {
+    "id": "",
+    "kind": "",
+    "title": "回复问候语",
+    "cwd": "",
+    "sessionId": "",
+    "state": "",
+    "status": "",
+    "created": "0001-01-01T00:00:00Z",
+    "updated": "0001-01-01T00:00:00Z",
+    "seq": 0,
+    "seen": 0,
+    "capabilities": {
+     "images": false,
+     "compact": false,
+     "queue": false,
+     "plan": false,
+     "questions": false,
+     "effort": false,
+     "model": false,
+     "cancelQueued": false
+    }
+   }
+  },
+  {
    "t": "turn",
    "state": "start"
   },

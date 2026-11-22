@@ -8,8 +8,13 @@
 // Two processes never write one session: a session that a terminal's
 // agent runs (its record's agent_session) is not imported, and the toast
 // that says so names that terminal and shows it; the chat host refuses
-// such a session too (in_terminal), and a session that is already a
-// chat's shows that chat.
+// such a session too (in_terminal). Nor do two chats have one session: a
+// session that is already a chat's (the listing says so, or the
+// machine's chats the page knows have it: one handed off to a terminal,
+// say) shows that chat, whose next prompt resumes the session with what
+// it did meanwhile; the host refuses a second chat of a session, and the
+// page then reads the machine's list of its chats to show the one that
+// has it.
 import { actions, terminalPlace } from '../../actions';
 import { sessionTerminal } from '../../agentTerminal';
 import { chatAdapter } from '../../conversation/kinds';
@@ -17,8 +22,8 @@ import { t } from '../../i18n';
 import { useStore } from '../../state/store';
 import { ChatFailure, chatApi, reasonText } from './api';
 import { openChat } from './ops';
-import type { Session } from './protocol';
-import { upsertState } from './state';
+import type { ChatState, Session } from './protocol';
+import { chatGone, upsertState, useChats } from './state';
 
 /** The most sessions of a kind kept from all the pages of its list. */
 export const MAX_SESSIONS = 1000;
@@ -90,21 +95,47 @@ export interface ImportTarget {
   chat?: string;
 }
 
+/** The chat of machine m that has the session of an agent's kind, as the
+ * page knows the machine's chats (the one updated last); undefined for
+ * none. */
+export function sessionChat(m: string, kind: string, session: string): string | undefined {
+  const st = useChats.getState();
+  let found: ChatState | undefined;
+  for (const c of Object.values(st.states[m] ?? {}))
+    if (c.sessionId === session && c.kind === kind && !chatGone(st, m, c.id) && (!found || c.updated > found.updated)) found = c;
+  return found?.id;
+}
+
+/** The chat of machine m that has the session of an agent's kind, from
+ * the machine's own list of its chats (one the page does not know of
+ * yet); undefined for none, or when the list cannot be read. */
+async function listedSessionChat(m: string, kind: string, session: string): Promise<ChatState | undefined> {
+  try {
+    // The latest first.
+    return (await chatApi.chats(m)).find((c) => c.sessionId === session && c.kind === kind);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Opens an agent's session as a chat of machine m and shows the chat
- * (openChat, from from): the chat that has it already (a read-only page
- * too), else a new one the host resumes the session in and imports its
- * conversation into. Refused, with a toast that says why, while a
- * terminal's agent runs the session (the toast names it and shows it);
- * nothing on a read-only page or for a kind without chats. Resolves to
- * the chat's id, undefined when there is none (a failure is said in a
+ * (openChat, from from): the chat that has it already (target.chat, else
+ * sessionChat; a read-only page too), else a new one the host resumes the
+ * session in and imports its conversation into. Refused, with a toast that
+ * says why, while a terminal's agent runs the session (the toast names it
+ * and shows it); nothing on a read-only page or for a kind without chats.
+ * The chat panel's sessions (Sessions.tsx) and Continue in Chat in a
+ * terminal's header (the agents plugin) both open sessions so. Resolves
+ * to the chat's id, undefined when there is none (a failure is said in a
  * toast). */
 export async function importSession(m: string, target: ImportTarget, from?: string): Promise<string | undefined> {
   const { kind, session, cwd } = target;
   const s = useStore.getState();
   if (!chatAdapter(kind) || !session) return undefined;
-  if (target.chat) {
-    await openChat(m, target.chat, kind, from);
-    return target.chat;
+  const known = target.chat ?? sessionChat(m, kind, session);
+  if (known) {
+    await openChat(m, known, kind, from);
+    return known;
   }
   if (s.readOnly) return undefined;
   const busy = sessionTerminal(m, session);
@@ -128,6 +159,14 @@ export async function importSession(m: string, target: ImportTarget, from?: stri
     return chat.id;
   } catch (e) {
     const inTerminal = e instanceof ChatFailure && e.code === 'in_terminal';
+    // A chat the page does not know of yet may have the session: the host
+    // refuses a second one.
+    const other = inTerminal ? undefined : await listedSessionChat(m, kind, session);
+    if (other) {
+      upsertState(m, other);
+      await openChat(m, other.id, kind, from);
+      return other.id;
+    }
     s.toast(
       inTerminal ? t('chat.import.inTerminalElsewhere') : t('chat.import.failed', { error: reasonText(e) }),
       undefined,

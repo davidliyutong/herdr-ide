@@ -1,4 +1,5 @@
 {"event":{"t":"notice","method":"_herdr-ide/imported","params":{"lossy":true}}}
+{"event":{"t":"info","chat":{"id":"","kind":"","title":"Reply with the word hi","cwd":"","sessionId":"","state":"","status":"","created":"0001-01-01T00:00:00Z","updated":"0001-01-01T00:00:00Z","seq":0,"seen":0,"capabilities":{"images":false,"compact":false,"queue":false,"plan":false,"questions":false,"effort":false,"model":false,"cancelQueued":false}}}}
 {"event":{"t":"user","content":[{"type":"text","text":"Reply with the word hi"}]}}
 {"event":{"t":"turn","state":"start"}}
 {"event":{"t":"update","item":"h-t-2","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"I need respond to user \"Reply with the word hi\". I'll respond with exactly hi likely. Should consider system reminders no tools dynamic etc irrelevant. Respond just hi. Should not include anything else. Ensure word hi lowercase."}}}}

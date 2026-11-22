@@ -72,13 +72,16 @@ func resolver(env []string) *sessions.Resolver {
 // as the live session names them: a message's block "<message id>/<index>",
 // a tool call by its id. Turns that end without a line saying so end at
 // the next prompt, or at the transcript's end; the usage of each response
-// is left out (the session states its own once it runs).
+// is left out (the session states its own once it runs). The whole
+// conversation starts with an info event of the session's title, when the
+// transcript has one (the user's custom-title before Claude Code's
+// ai-title, as Sessions reads them).
 func (Adapter) History(ctx context.Context, p chatadapter.HistoryParams, emit func(chatproto.Event)) error {
 	if !agentkinds.ValidSessionID(p.SessionID) {
 		return badRequest("not a session id")
 	}
 	r := resolver(p.Env)
-	f, _, err := r.OpenLocated(agentkinds.AdapterClaude, p.SessionID)
+	f, loc, err := r.OpenLocated(agentkinds.AdapterClaude, p.SessionID)
 	if err != nil {
 		if errors.Is(err, sessions.ErrNotFound) || errors.Is(err, sessions.ErrCompressed) {
 			return &chatproto.Error{Code: chatproto.CodeNotFound, Message: "claude: no transcript of the session"}
@@ -108,6 +111,11 @@ func (Adapter) History(ctx context.Context, p chatadapter.HistoryParams, emit fu
 			return &chatproto.Error{Code: chatproto.CodeNotFound, Message: "claude: the transcript has no item " + p.After}
 		}
 		from = last
+	}
+	if p.After == "" {
+		if d, ok := describe(loc.Path); ok && d.agentTitle != "" {
+			emit(chatproto.Event{T: chatproto.EventInfo, Chat: &chatproto.Chat{Title: d.agentTitle}})
+		}
 	}
 	// The turn's end the chat has after the item already.
 	skipping := from >= 0

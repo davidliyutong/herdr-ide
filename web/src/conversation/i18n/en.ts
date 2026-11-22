@@ -129,7 +129,7 @@ export const en = {
   'conversation.ask.kind.reject_once': 'Reject',
   'conversation.ask.kind.reject_always': 'Always reject',
   'conversation.ask.youChose': 'Your choice: {option}',
-  'conversation.ask.answeredElsewhere': 'Answered in another window: {option}',
+  'conversation.ask.answered': 'Answered: {option}',
   'conversation.ask.youDismissed': 'You dismissed it.',
   'conversation.ask.dismissed': 'Dismissed.',
   'conversation.ask.cancelled': 'Cancelled with the turn.',

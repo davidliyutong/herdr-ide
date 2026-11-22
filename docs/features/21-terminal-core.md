@@ -225,7 +225,28 @@ directory, short enough for the holders' sockets beside it. Op `hc`:
 
 Installs, starts and stops run one at a time. Op `hc-api` pipes the socket
 and starts nothing; op `detect` connects to it to follow the agents in its
-terminals ([25](25-agent-detection.md)). The agent never stops the core on its own: the core
+terminals ([25](25-agent-detection.md)).
+
+**Helpers as hidden terminals** (`internal/agent/hidden.go`). A helper of
+the product's own that must outlive the agent, the chat host
+([37](37-agent-chats.md)), runs as a terminal of the instance's terminal
+core (`plugin.Env.RunHidden`): `terminal.run` with a reserved name
+(`herdr-ide-chat-host`), the label `herdr-ide.hidden` (`chat-host`),
+`no_parent`, `no_notify` and `rm`, in the user's home, with only the
+user's name, home, shell, `PATH`, locale, `TMPDIR` and `XDG_*` variables
+of the agent's environment on top of the terminal core's. Its parent is
+the terminal core, so it has the lifetime, owner and, on macOS, the
+privacy attribution of the user's terminals, and it ends with its program
+or with the terminal core's stop (SIGHUP, SIGTERM half a second later,
+then SIGKILL). The terminal core gives a name to one live terminal at a
+time, so a run that finds the name taken leaves the running helper be.
+`plugin.Env.KillHidden` ends a helper's terminal that holds the name
+without doing its work, only when it carries the label and runs the
+helper's arguments. Clients never see these terminals: the name and the
+label together hide one (`agentproto.Hidden`) from the core's terminal
+protocol ([22](22-terminal-protocol.md)), from agent detection and from
+terminal history. No agent starts a terminal core for a helper: without
+one the helper does not run (`no_terminal_core`). The agent never stops the core on its own: the core
 asks for `stop` only when the user stops the terminal core from the
 machine's menu ([02](02-multi-machine-transport.md)).
 
@@ -307,7 +328,12 @@ see; `internal/agent/agent_test.go` the hello telling the session.
 `internal/agent/procutil_test.go` (`TestCleanEnv`): the variables of
 terminals and multiplexers removed (every `HC_*`), `TMUX_TMPDIR`,
 `TERM_PROGRAM` and the product's own kept; `TestCleanEnvAgentSessionMarkers`:
-the agents' session markers removed, their configuration kept. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`
+the agents' session markers removed, their configuration kept.
+`internal/agent/hidden_test.go`: a helper run as a hidden terminal with
+its name, label, flags and variables, a name taken, no terminal core, and
+`KillHidden` ending only the helper's terminal; `TestIntegrationChatHost`
+(`make it`): the chat host as such a terminal of a real herdr-core,
+started again after the terminal core restarted. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`
 (`internal/agent`) run with `make it` against a real herdr-core
 (`HC_TEST_BIN`, else `hc` on `PATH`) in the sessions `herdr-ide-it` with
 temporary state: first paint, input and output, sizes of two viewers,

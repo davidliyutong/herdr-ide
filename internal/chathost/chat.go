@@ -853,7 +853,12 @@ func (c *chat) history(ctx context.Context, session string, way int) {
 			return
 		}
 		switch ev.T {
-		case chatproto.EventAck, chatproto.EventState, chatproto.EventInfo:
+		case chatproto.EventInfo:
+			if way == importAll && ev.Chat != nil && c.importTitle(ctx, ev.Chat.Title) {
+				n++
+			}
+			return
+		case chatproto.EventAck, chatproto.EventState:
 			return
 		}
 		c.mu.Lock()
@@ -886,6 +891,23 @@ func (c *chat) history(ctx context.Context, session string, way int) {
 		c.save()
 		c.notify()
 	}
+}
+
+// importTitle takes the title an import's adapter stated of the session
+// (the agent's own, or one the user gave it there) as the chat's, unless
+// the user named the chat here; the clients are told at once, with an
+// info event that counts as seen. It reports whether the title changed.
+func (c *chat) importTitle(ctx context.Context, title string) bool {
+	title = strings.TrimSpace(clip(title, agentTitleRunes))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if title == "" || title == c.r.Title || c.r.Renamed || c.deleted || ctx.Err() != nil {
+		return false
+	}
+	c.r.Title = title
+	c.emitInfo()
+	c.r.Seen = c.r.Seq
+	return true
 }
 
 // catchUpLater brings what a handed off chat's session did in a terminal

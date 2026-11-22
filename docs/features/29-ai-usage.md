@@ -371,9 +371,12 @@ up in three ways:
   the spend's note naming such models has a link that opens the settings
   at `usage.prices`.
 
-The scanner keeps `usage/cost-cache.json` below the agent's data directory
-(0600) and retains it in memory across scans (reloading from disk only if
-the file's identity, size or modification time changed externally): per log
+The scanner keeps its cache in the machine's database
+(`machine-<host>.db` in the agent's data directory, tables
+`usage_cost_files`, a row per log, and `usage_cost_state`, the cache's
+version and a generation each save bumps; [38](38-sqlite-state.md)) and
+retains it in memory across scans (reading the database again only when
+another agent of the instance saved since, by its generation): per log
 its size, time, the offset after its last complete line,
 its records, one per key (Claude logs a streamed response once per content
 block), and for a Codex rollout the parser's state there (the last turn's
@@ -383,12 +386,15 @@ is still a newline (else from the start), and its last line counts once it
 ends; gzipped logs are read whole. Claude's lines are decoded only when
 they have both `"usage"` and `"assistant"` as JSON's own strings, so a
 tool's long output is not. Logs and records older than 90 days leave the
-cache. A scan that changed the cache streams it to disk when the file is older than
+cache. A scan that changed the cache saves the entries that changed and
+removes those gone, in one transaction, when the last save is older than
 5 minutes or the scan read at least 8 MiB of logs; otherwise the dirty
 state stays in memory and the next scan reads on from it, avoiding writing
 every record again whenever a log in use grew a line. A long scan saves the cache
 every 20 s, and one that is cancelled saves what it read, so the next one
-goes on from there.
+goes on from there. The file it was kept in before,
+`usage/cost-cache.json`, is imported once and removed; with tables of a
+newer version the cache stays in memory.
 
 ### Core
 
@@ -431,12 +437,18 @@ numbers another machine read. The machines whose answer was not ok are the
 account's `issues`, which its card lists by reason. Accounts no machine reported for 7 days are
 forgotten; those of a provider turned off leave the snapshot at once.
 
-The history (`usage-history[-<instance>].json` beside the settings, 0600)
-keeps a point per window and poll when the use changed or 15 minutes
+The history (in the core's database, `core[-<instance>].db` beside the
+settings, tables `usage_windows`, `usage_accounts` and `usage_alerts`;
+[38](38-sqlite-state.md)) keeps a point per window and poll when the use
+changed or 15 minutes
 passed, only for numbers read in that poll (not those kept from an
 earlier one), for 30 days, and the last accounts, shown again after a
 restart. A window is told apart by its kind and label, and by its length
-where two share them (Kimi's limits have no labels).
+where two share them (Kimi's limits have no labels). A save writes the
+rows that changed once the history was read back (never before: what
+memory lacks would be removed); the file it was kept in before,
+`usage-history[-<instance>].json`, is imported once and removed, one of
+another version or that does not parse left as it is.
 A window's pace compares its use with the share of its time gone, and
 projects when it runs out at the rate of its history in this period (else
 since the period began).
@@ -584,6 +596,13 @@ not asked again; other failures keep the last numbers. The page keeps the number
 focused again shows its own at once. `usage.statusBar` does not govern it;
 the status bar's menu shows and hides it as its other items.
 
+A chat pane ([37](37-agent-chats.md)) has an item of its own, the chat
+plugin's `chat.usage` (`web/src/plugins/chat/UsageItem.tsx`): the cost of
+the focused chat's session so far, its context in use and the limit
+window closest to its end, as the chat's agent states them through its
+protocol (no transcript is read and no machine asked). It shows nothing
+while the focused pane is no chat or its chat told none of these.
+
 ### Alerts
 
 With `usage.alerts` on (the default) the core fires an alert after a poll
@@ -606,7 +625,7 @@ armed again when its use fell 10 points below the threshold. So use that
 hovers around a threshold, a reset time a few seconds or minutes off at
 each poll, a rolling window whose reset moves forward, machines answering
 for an account in turn and a pace that comes and goes say nothing new. The
-records are kept in the history file (a day past their period), so a
+records are kept with the history (a day past their period), so a
 restart does not repeat them.
 
 The snapshot carries the alerts of the last hour (`alerts`: id, kind,

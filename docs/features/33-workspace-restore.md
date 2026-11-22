@@ -161,6 +161,28 @@ command that continues the directory's latest conversation.
   newest pane to type into. Two agents of one kind that ran in one
   directory thus each come back in their own conversation.
 
+**A chat's session continued in a terminal** ([37](37-agent-chats.md)).
+**Continue in Terminal** of a chat pane uses the same request: once the
+chat host ended the chat's headless agent, the page starts the machine's
+shell in a new tab in the chat's workspace and directory (`terminal.run`
+with `keep: true` and no `argv`, `web/src/agentTerminal.ts`
+`resumeInTerminal`), whose leaf gets, in the write that places it, the
+chat's `session` and `resume: <agent>`. Its pane then types the kind's
+command that resumes the session by its id, after the machine confirmed
+it for the directory as above, else the directory's latest. The shell
+stays when the agent exits. Until the machine detects an agent in that
+terminal, the leaf's session marks it as the terminal about to run the
+session (`sessionTerminal`): another handoff or an import of that
+session shows it instead of starting a second process on the session,
+and the page's handoff stays under way until the agent is detected, the
+terminal ends or 15 s pass.
+
+**A terminal's session continued in a chat.** While a leaf remembers its
+agent and session after the agent quit (the 30 s of `AGENT_FORGET_MS`)
+and no agent runs in the terminal, the pane's header offers **Continue in
+Chat** for a kind with chats: the session is opened as a chat, its
+earlier conversation imported ([37](37-agent-chats.md)).
+
 **Read-only pages** restore nothing: they start no replacement, write no
 leaf and type nothing; a terminal that ended with its core is back there
 once a writing page restored it.
@@ -244,6 +266,12 @@ writing methods refused to them. See the row for terminals restored from
 the layout in [SECURITY.md](../../SECURITY.md).
 
 ## Testing
+
+`web/src/__tests__/chatHandoff.test.ts`: the handoff's shell tab with the
+session and the request in its leaf, the terminal about to run the
+session shown instead of a second one, the handoff kept under way until
+the agent is detected or 15 s pass; `chatImport.test.tsx`: **Continue in
+Chat**.
 
 `web/src/__tests__/restore.test.ts`: a terminal that ended with its core
 told from one whose program ended; an agent remembered with its pid and

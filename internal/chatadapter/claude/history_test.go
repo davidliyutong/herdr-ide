@@ -167,6 +167,55 @@ func TestHistoryAfter(t *testing.T) {
 	}
 }
 
+// A whole conversation starts with the session's title, the user's own
+// before the one Claude Code made; none without one, nor after an item.
+func TestHistoryTitle(t *testing.T) {
+	home, env := claudeHome(t)
+	dir := filepath.Join(home, ".claude", "projects", "-work")
+	write := func(id, lines string) {
+		if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(lines), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	answer := string(rawOf(map[string]any{"type": "assistant", "cwd": "/work", "message": map[string]any{"id": "msg_1", "role": "assistant",
+		"content": []any{map[string]any{"type": "text", "text": "hi"}}}}))
+	const titled, untitled = "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012"
+	write(titled, transcriptLines("/work", "the first prompt", answer, `{"type":"ai-title","aiTitle":"Made by Claude"}`, `{"type":"custom-title","customTitle":"  Mine  "}`))
+	write(untitled, transcriptLines("/work", "the first prompt", answer))
+	title := func(id, after string) (string, int) {
+		t.Helper()
+		evs, err := readHistory(t, chatadapter.HistoryParams{Kind: "claude", Env: env, Cwd: "/work", SessionID: id, After: after})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, got := 0, ""
+		for i, ev := range evs {
+			if ev.T != chatproto.EventInfo {
+				continue
+			}
+			n++
+			if i != 0 || ev.Chat == nil {
+				t.Errorf("info %d of %d: %+v", i, len(evs), ev)
+				continue
+			}
+			got = ev.Chat.Title
+		}
+		return got, n
+	}
+	if got, n := title(titled, ""); got != "Mine" || n != 1 {
+		t.Errorf("titled: %q (%d)", got, n)
+	}
+	if got, n := title(untitled, ""); n != 0 {
+		t.Errorf("untitled: %q (%d)", got, n)
+	}
+	if got, n := title(headlessID, ""); got != "回复问候语" || n != 1 {
+		t.Errorf("recorded: %q (%d)", got, n)
+	}
+	if got, n := title(titled, "msg_1/0"); n != 0 {
+		t.Errorf("after an item: %q (%d)", got, n)
+	}
+}
+
 func hasCode(err error, code string) bool {
 	var e *chatproto.Error
 	return errors.As(err, &e) && e.Code == code

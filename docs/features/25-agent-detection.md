@@ -92,7 +92,11 @@ attaches as an observer, whose output only says that the screen changed
 `terminal.read` when needed. Each change goes to the core as one line
 `{terminal, agent, status}`, in the order the changes were made (they are
 queued and sent by one writer at a time); an agent that leaves sends
-`{terminal}`.
+`{terminal}`. The terminals of the product's own helpers (the chat host's,
+named and labeled as hidden: `agentproto.Hidden`,
+[22](22-terminal-protocol.md)) are not watched (`watchable`), so no line
+about them reaches the core; the agents a chat host runs headless have
+no terminal and report their state through it ([37](37-agent-chats.md)).
 
 **Sessions.** When the core opens the stream while the agents plugin is
 on (`plugins.agents.enabled`), it sets `Header.Sessions`, and the agent
@@ -229,6 +233,9 @@ region; the regex rewriting; identification of names, aliases, paths,
 wrapped scripts, package entry points and inline code; the startup grace,
 the idle confirmation and its cap, done after working and after blocked,
 done on exit, precedence and clearing of the program's own report.
+`internal/agent/agentdetect_session_test.go`
+(`TestDetectSkipsHelperTerminals`): the chat host's terminal is not
+watched, a terminal that only carries the label is.
 `internal/server/term_test.go` (`TestTermAgents`): records, events, `/ws`
 messages, done seen by focus, cleared agents; `TestTermSeenTurnOutlivesTheCore`:
 a program's reported done of the turn labeled `seen` is idle after a

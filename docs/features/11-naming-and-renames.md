@@ -40,7 +40,12 @@ identifiers (its executable, `HC_*` variables and state directory).
   (`~/.<slug>[-<instance>]`), the terminal core's session name
   (`<slug>[-<instance>]`, [21](21-terminal-core.md)), the proxy-secret
   header, the environment variables (`HERDR_IDE_*`), the core's
-  configuration directory and download cache, and browser storage keys.
+  configuration directory and download cache, browser storage keys, the
+  label that hides the product's own terminals (`<slug>.hidden`) and the
+  chat host's terminal name (`<slug>-chat-host`), the notices' methods
+  (`_<slug>/<name>`), and what agents are told of their client
+  (`CLAUDE_CODE_ENTRYPOINT=<slug>`, Codex's client name;
+  [37](37-agent-chats.md)).
 - **Rename**: `scripts/rename.sh NEW [--name "Display"] [--module PATH]
   [--dry-run]` replaces the slug, the env prefix and the module path (through
   a placeholder, so an explicit `--module` is never rewritten), moves
@@ -56,6 +61,21 @@ identifiers (its executable, `HC_*` variables and state directory).
   code-server uninstalls the old bridge extension id once, and the web UI
   moves `localStorage` keys from the old prefix. The terminal core's
   session name is not in these lists.
+- **State moved into SQLite**: state that features kept in files of their
+  own is kept in SQLite databases ([38](38-sqlite-state.md)), and each
+  feature imports its earlier file once, in a transaction recorded in the
+  database (`store_imports`), and removes the file only after that
+  committed: the terminal history's `history/` directory and the AI usage
+  cost cache's `usage/cost-cache.json` into the machine's
+  `machine-<host>.db`, the vault's `vault[-<instance>]-access.jsonl` and
+  the AI usage plugin's `usage-history[-<instance>].json` into the core's
+  `core[-<instance>].db`. A failed import changes nothing and leaves the
+  file for the next try; an access log an earlier version wrote again
+  after a downgrade is merged in; a usage history of another version is
+  left as it is. A database is named after its host on a machine (its
+  data directory may be on a shared home), and the file of an earlier
+  version without a host's name goes with the other hosts' once nobody
+  used it for 30 days.
 
 ## Alternatives considered
 
@@ -80,6 +100,13 @@ identifiers (its executable, `HC_*` variables and state directory).
   product name, so `keybindings[-<instance>].json` stays valid.
 
 ## Testing
+
+The imports: `TestImportFiles`, `TestImportFailureLeavesFiles`
+(`internal/agent/plugin/history`), `TestAccessLogImport`,
+`TestAccessLogImportAfterDowngrade` (`internal/plugins/vault`),
+`TestHistoryImport`, `TestHistoryImportOtherVersion`
+(`internal/plugins/usage`), `TestCostCacheImport` (`internal/usage`),
+`TestImportOnce` (`internal/store`).
 
 `internal/brand/brand_test.go` (`TestBrandMirrorsAgree`: Go, the web UI
 and the extension); `internal/agent/lifecycle_test.go`

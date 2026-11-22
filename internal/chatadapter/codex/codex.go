@@ -13,8 +13,11 @@
 //
 //   - Threads start and resume with sandbox "read-only", approval policy
 //     "on-request" and the user as reviewer; each turn carries the chat's
-//     mode as policies: default asks (on-request, read-only sandbox),
-//     acceptEdits writes the working directory (workspace-write), plan
+//     mode as policies: default asks before edits and commands (untrusted,
+//     workspace-write: the one combination where Codex 0.171 asks for a
+//     file write and a command alike instead of refusing them),
+//     acceptEdits writes the working directory (on-request,
+//     workspace-write), plan
 //     plans (collaboration mode plan, read-only), full asks for nothing
 //     (never, danger-full-access). Model and effort go with every turn:
 //     thread/start takes no effort.
@@ -231,7 +234,8 @@ const (
 // every item), mapped as a live session maps them; after p.After (an item
 // or a turn id an earlier History or the session emitted) only what came
 // after it. A turn still running is left for a later History. Subagents'
-// own threads are not read: their tool calls are.
+// own threads are not read: their tool calls are. The whole thread starts
+// with an info event of the thread's name, when it has one (threadName).
 func (a *Adapter) History(ctx context.Context, p chatadapter.HistoryParams, emit func(chatproto.Event)) error {
 	c, done, err := a.client(ctx, p.Argv, p.Env, p.Cwd, p.Logger)
 	if err != nil {
@@ -240,9 +244,33 @@ func (a *Adapter) History(ctx context.Context, p chatadapter.HistoryParams, emit
 	defer done()
 	h := history{m: mapper{cwd: p.Cwd}, emit: emit}
 	if p.After == "" {
+		if name := threadName(ctx, c, p.SessionID, p.Logger); name != "" {
+			emit(chatproto.Event{T: chatproto.EventInfo, Chat: &chatproto.Chat{Title: name}})
+		}
 		return h.forward(ctx, c, p.SessionID)
 	}
 	return h.since(ctx, c, p.SessionID, p.After, p.Logger)
+}
+
+// threadName is the name a thread was given (by the user, or by Codex),
+// read with thread/list restricted to the thread's id: not its preview,
+// which is its first prompt. "" for none, or when it cannot be read.
+func threadName(ctx context.Context, c *conn, thread string, logger *log.Logger) string {
+	var res threadListResult
+	err := c.call(ctx, mThreadList, map[string]any{"includedThreadIds": []string{thread}, "limit": 1}, &res)
+	if err != nil {
+		if logger != nil {
+			logger.Printf("codex: the name of thread %s: %v", thread, err)
+		}
+		return ""
+	}
+	for _, t := range res.Data {
+		if t.ID == thread && t.Name != nil {
+			name, _, _ := strings.Cut(strings.TrimSpace(*t.Name), "\n")
+			return cutText(strings.TrimSpace(name), maxSessionTitle)
+		}
+	}
+	return ""
 }
 
 type history struct {

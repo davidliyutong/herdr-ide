@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -510,8 +511,8 @@ func TestSessions(t *testing.T) {
 	}
 }
 
-// History emits a thread's turns, every item, oldest first; after an item
-// or a turn, only what came after it.
+// History emits a thread's turns, every item, oldest first, after the
+// thread's name; after an item or a turn, only what came after it.
 func TestHistory(t *testing.T) {
 	turnItems := func(n int) []any {
 		id := func(s string) string { return s + string(rune('0'+n)) }
@@ -528,6 +529,8 @@ func TestHistory(t *testing.T) {
 	cursor := "cursor-2"
 	var sc script
 	sc.reply(sc.request(mInitialize), map[string]any{"userAgent": "x/1"})
+	// The thread's name, not its preview.
+	sc.reply(sc.request(mThreadList), map[string]any{"data": []any{map[string]any{"id": testThread, "name": "  Named thread\nmore", "preview": "hello 1", "cwd": "/work"}}, "nextCursor": nil})
 	// Oldest first: two pages.
 	sc.reply(sc.request(mThreadTurnsList), map[string]any{"data": []any{turnOf(1, turnCompleted), turnOf(2, turnInterrupted)}, "nextCursor": cursor})
 	sc.reply(sc.request(mThreadTurnsList), map[string]any{"data": []any{turnOf(3, turnFailed), turnOf(4, turnInProgress)}, "nextCursor": nil})
@@ -544,7 +547,11 @@ func TestHistory(t *testing.T) {
 		}
 		got = append(got, ev.T+":"+ev.State+ev.StopReason+":"+ev.Item)
 	}
+	if evs[0].T != chatproto.EventInfo || evs[0].Chat == nil || evs[0].Chat.Title != "Named thread" {
+		t.Errorf("first %+v", evs[0])
+	}
 	want := []string{
+		"info::",
 		"turn:start:turn1", "user::u1", "update::r1", "update::c1", "update::m1", "turn:endend_turn:turn1",
 		"turn:start:turn2", "user::u2", "update::r2", "update::c2", "update::m2", "turn:endcancelled:turn2",
 		"turn:start:turn3", "user::u3", "update::r3", "update::c3", "update::m3", "turn:error:turn3",
@@ -555,6 +562,30 @@ func TestHistory(t *testing.T) {
 	tl := f.requests(t, 1, mThreadTurnsList)
 	if len(tl) != 2 || tl[0]["itemsView"] != "full" || tl[0]["sortDirection"] != "asc" || tl[1]["cursor"] != cursor || tl[0]["threadId"] != testThread {
 		t.Errorf("turns/list %v", tl)
+	}
+	if l := f.requests(t, 1, mThreadList); len(l) != 1 || fmt.Sprint(l[0]["includedThreadIds"]) != "["+testThread+"]" || l[0]["cwd"] != nil {
+		t.Errorf("thread/list %v", l)
+	}
+	// A thread without a name, or whose name cannot be read, has no info.
+	for _, list := range []func(sc *script){
+		func(sc *script) {
+			sc.reply(sc.request(mThreadList), map[string]any{"data": []any{map[string]any{"id": testThread, "preview": "hello 1"}}})
+		},
+		func(sc *script) { sc.fail(sc.request(mThreadList), "no") },
+	} {
+		var sc script
+		sc.reply(sc.request(mInitialize), map[string]any{"userAgent": "x/1"})
+		list(&sc)
+		sc.reply(sc.request(mThreadTurnsList), map[string]any{"data": []any{turnOf(1, turnCompleted)}, "nextCursor": nil})
+		f := newFake(t, "", "", sc.file(t))
+		var got []string
+		p := chatadapter.HistoryParams{Kind: "codex", Argv: f.argv, Env: f.env, Cwd: "/work", SessionID: testThread}
+		if err := (&Adapter{}).History(context.Background(), p, func(ev chatproto.Event) { got = append(got, ev.T) }); err != nil {
+			t.Fatal(err)
+		}
+		if len(got) == 0 || got[0] != chatproto.EventTurn || slices.Contains(got, chatproto.EventInfo) {
+			t.Errorf("without a name: %v", got)
+		}
 	}
 
 	// After an item: newest first until it.
@@ -571,6 +602,9 @@ func TestHistory(t *testing.T) {
 		}
 		if tl := f.requests(t, 1, mThreadTurnsList); tl[0]["sortDirection"] != "desc" {
 			t.Errorf("turns/list %v", tl)
+		}
+		if l := f.requests(t, 1, mThreadList); len(l) != 0 {
+			t.Errorf("a catch-up read the name: %v", l)
 		}
 		return got
 	}

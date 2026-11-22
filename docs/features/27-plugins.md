@@ -39,7 +39,9 @@ a failure `error`, the code `plugin.WriteError` or `plugin.WriteJSON` gave,
 `failed` when the handler answered nothing); a refused request is recorded
 with its refusal;
 `TestMutatingRoutesAreGuarded` walks the plugins' routes with the core's.
-While a plugin is off, its routes answer `404 plugin_disabled`. A plugin that
+While a plugin is off, its routes answer `404 plugin_disabled`. A GET
+route may upgrade to a WebSocket (the chat plugin's page connection),
+behind the same Host and Origin checks. A plugin that
 works while the core runs (a scheduler) implements `Starter`. A plugin
 that serves streams agents open towards the core with ops of its own
 (`agentproto`, as the vault's `vault`) implements `Streamer`: the core hands
@@ -49,7 +51,9 @@ machines (the vault's allowed machines) implements `MachineForgetter`: the
 core calls it when the user removes a machine, whether the plugin is on or
 off.
 
-`plugin.Host` is the core as plugins see it: the machines, `Broadcast`
+`plugin.Host` is the core as plugins see it: the machines (with
+`PublishAgent`, an agent message on `/ws` that a plugin's pane stands
+behind: the chat plugin's), `Broadcast`
 (a `/ws` message `plugin {plugin, m, data}` to every page), the audit log,
 read-only mode, the settings and the logger. `plugin.Request` and
 `plugin.Open` run an action of the plugin's machine side; an agent's failure
@@ -93,8 +97,10 @@ handler a plugin's package registered with `plugin.Register`; the reply's
 `Plugin` field carries its result (`plugin.Reply`), or the reply is followed
 by JSON lines until either side closes the stream (`plugin.Stream`, as
 `detect` does). Failures carry a code (`plugin.Errorf`). Handlers get the
-agent's directories, its path expansion and the environment of processes it
-starts (`plugin.Env`), and their params read in full (from the header, or
+agent's directories, its path expansion, the environment of processes it
+starts and the running of helpers as hidden terminals of the instance's
+terminal core (`plugin.Env.RunHidden`, `KillHidden`,
+[21](21-terminal-core.md)), and their params read in full (from the header, or
 the body after it). An unknown plugin fails with `unknown_plugin`. A handler
 that panics fails its action with `failed` (or, when it had answered, its
 stream is closed), is logged, and the agent and the other actions go on;
@@ -141,6 +147,19 @@ A plugin (`PluginDef`, `web/src/plugins/api.ts`) contributes:
   (`tabIndex` -1); a press leaves the keyboard where it is, and they hide
   with the pane's own buttons on panes without the focus and in narrow
   headers. Each plugin's buttons are drawn in its error boundary;
+- **new-tab items** (`newTabItems(m)`): kinds of tab of the tab bar's
+  new-tab menu, after Terminal, each plugin's after a separator (VS
+  Code, the browser pane, the Task Manager, a chat with each agent,
+  [37](37-agent-chats.md));
+- **pane statuses** (`viewStatus`, `ViewStatusDef`): the agent status
+  (`working`, `blocked`, `done`, `idle`) of the plugin's panes, which the
+  app shows and counts as it does terminals' agents (dots, badge,
+  attention list, sounds and notifications,
+  [07](07-agent-native-workflow.md)): `status(m, view)` from the plugin's
+  state, `subscribe` for changes, `paneOf(m, data)` for the pane an agent
+  notification of the plugin (with members of its own, such as `chat`)
+  points to, and `seen(m, view)` when the user looked at a done pane
+  (shown, focused, in a visible page);
 - **commands**: handlers of commands declared in
   `internal/keybindings/commands.go`, checked before the app's own;
 - **status bar items**, **palette items** and a handler of its `/ws`
@@ -327,7 +346,8 @@ does not have says so. Read-only pages do not drag panels into panes.
 | `usage` | `plugins.usage.enabled` | The AI usage panel, its status bar items (the accounts' tightest window, and the session of the agent in the focused pane), its settings page (section `usage`) and its scheduler in the core ([29](29-ai-usage.md)). |
 | `git` | `plugins.git.enabled` | Source Control's panel, the graph and diff panes, the file explorer's decorations of changed files, and its settings page (section `git`) ([31](31-git.md)). |
 | `monitor` | `plugins.monitor.enabled` | Live resource dashboard (⌘+hover on sidebar machines and an upward-floating status bar item), the Task Manager panel/pane with tree view and search, and its settings page (section `monitor`) ([34](34-system-monitor.md)). |
-| `agents` | `plugins.agents.enabled` | While on, the sessions the machines resolve for the detected coding agents, and the route that confirms a session before a restore resumes it ([35](35-agent-native-view.md)). It adds nothing to the page but its switch. |
+| `agents` | `plugins.agents.enabled` | While on, the sessions the machines resolve for the detected coding agents, and the route that confirms a session before a restore resumes it ([35](35-agent-native-view.md)). On the page it adds the header button **Continue in Chat** of a terminal whose agent quit. |
+| `chat` | `plugins.chat.enabled` (and its settings `chat.*`, per machine) | Chats with coding agents a machine's chat host runs headless: the chat pane, the Chats panel, new-tab items per agent, the command `chat.new`, the status bar item `chat.usage`, the panes' agent statuses, its settings page (section `chat`), the core's WebSocket and watch of the hosts ([37](37-agent-chats.md)). |
 | `history` | `plugins.history.enabled` (and `history.capture`, off by default, per machine) | Snapshots of the terminals' output on each machine's disk, taken by a scheduler in the core, shown above the new shell of a terminal whose program was replaced; its settings page (section `history`, ending with what the machine keeps and **Clear Saved Output**) ([36](36-terminal-history.md)). |
 
 ## Alternatives considered
@@ -375,6 +395,10 @@ does not have says so. Read-only pages do not drag panels into panes.
 - `web/src/__tests__/plugins.test.ts`: switches (also one per machine), the
   rail and panels, commands, messages, panes of plugins that are off or
   unknown.
+- `web/src/__tests__/viewStatus.test.tsx`, `notifyViews.test.ts`,
+  `attention.test.tsx`: plugins' panes' statuses in the dots, the badge,
+  the attention list, notifications and seen (with a plugin of the tests,
+  `viewStatusPlugin.ts`).
 - `web/src/__tests__/headerActions.test.ts`: no buttons while no plugin
   that is on has any, each plugin's buttons for the pane, a press that
   leaves the keyboard where it is, a plugin's buttons that fail in their

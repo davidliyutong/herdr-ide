@@ -2,8 +2,9 @@
 //
 // The cards with which the user answers the agent: a permission of each
 // kind (a command with its directory and reason, files with their diff, a
-// tool with its input), answered here (also with number keys), in another
-// window, or cancelled with the turn; one of an ended turn or a read-only
+// tool with its input), answered here (also with number keys), elsewhere
+// (another window, or before a reload: only this page's answers are the
+// user's own), or cancelled with the turn; one of an ended turn or a read-only
 // view that cannot be answered; a plan approved to go on in a mode or
 // planned on; questions with single and multiple choices, the user's own
 // words, a secret, previews, answered or skipped; the banner that shows
@@ -20,6 +21,7 @@ import { t } from '../i18n';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class FakeSource implements ChatSource {
+  id?: string;
   readOnly?: boolean;
   events: SourceEvent[] = [];
   subs = new Set<(ev: SourceEvent) => void>();
@@ -127,13 +129,13 @@ describe('a permission', () => {
     expect(q('.conv-ask-outcome', c)?.textContent).toBe(t('conversation.ask.youChose', { option: t('conversation.ask.allowSession') }));
   });
 
-  it('answered in another window says so; one cancelled with the turn or ended too', async () => {
+  it('answered not by this page says only that it was answered; one cancelled with the turn or ended says so', async () => {
     const s = new FakeSource();
     s.emit(working(), permission('p1', { kind: 'command', toolCall: { toolCallId: 'x', rawInput: { command: 'make' } } }));
     await show(s);
     await emit(s, done('p1', 'allow_once'));
     expect(q('.conv-ask-outcome', card('p1'))?.textContent).toBe(
-      t('conversation.ask.answeredElsewhere', { option: t('conversation.ask.allowOnce') }),
+      t('conversation.ask.answered', { option: t('conversation.ask.allowOnce') }),
     );
     await emit(
       s,
@@ -402,8 +404,27 @@ describe('questions', () => {
   });
 });
 
-describe('cards answered before the view had them (a reload, attaching again)', () => {
-  it('show the answer as the user’s, not another window’s', async () => {
+/** A plan to approve, and a question of one choice, for the cards of a
+ * view drawn again. */
+const planOf = (id: string): ChatEvent =>
+  permission(id, {
+    kind: 'plan',
+    toolCall: { toolCallId: 'x', title: 'Plan', kind: 'switch_mode', rawInput: { plan: 'Do it' } },
+    options: [
+      { optionId: 'plan:default', name: 'Approve', kind: 'allow_once' },
+      { optionId: 'plan:acceptEdits', name: 'Approve, edits', kind: 'allow_once' },
+      { optionId: 'reject_once', name: 'Keep planning', kind: 'reject_once' },
+    ],
+  });
+const colorAsked = (id: string): ChatEvent => ({
+  seq: next(),
+  t: 'question',
+  id,
+  questions: [{ id: 'color', question: 'Which color?', options: [{ label: 'Blue' }] }],
+});
+
+describe('cards this page did not answer (a reload, attaching again, another window)', () => {
+  it('show the answer as given, claiming no one', async () => {
     const s = new FakeSource();
     s.emit(
       working(),
@@ -421,13 +442,86 @@ describe('cards answered before the view had them (a reload, attaching again)', 
     );
     await show(s);
     expect(q('.conv-ask-outcome', card('p1'))?.textContent).toBe(
-      t('conversation.ask.youChose', { option: t('conversation.ask.allowOnce') }),
+      t('conversation.ask.answered', { option: t('conversation.ask.allowOnce') }),
     );
-    expect(q('.conv-ask-outcome', card('p2'))?.textContent).toBe(t('conversation.ask.youDismissed'));
-    expect(q('.conv-ask-outcome', card('q1'))?.textContent).toBe(t('conversation.question.youAnswered'));
+    expect(q('.conv-ask-outcome', card('p2'))?.textContent).toBe(t('conversation.ask.dismissed'));
+    expect(q('.conv-ask-outcome', card('q1'))?.textContent).toBe(t('conversation.question.answered'));
   });
 
-  it('keep this window’s answer when its sending ended without an answer', async () => {
+  it('show the answer as given when the replay has the card wait and its answer comes after', async () => {
+    // After a reload the page attaches again: its replay draws the cards
+    // waiting, then their answers come.
+    const s = new FakeSource();
+    s.id = 'c-reload';
+    s.emit(working(), permission('p1', { kind: 'command' }), planOf('pl1'), colorAsked('q1'));
+    await show(s);
+    expect(card('p1').dataset.state).toBe('waiting');
+    await emit(s, done('p1', 'allow_session'), done('pl1', 'plan:default'), {
+      seq: next(),
+      t: 'question_done',
+      id: 'q1',
+      answers: { color: ['Blue'] },
+      by: 'user',
+    });
+    expect(q('.conv-ask-outcome', card('p1'))?.textContent).toBe(
+      t('conversation.ask.answered', { option: t('conversation.ask.allowSession') }),
+    );
+    expect(q('.conv-ask-outcome', card('pl1'))?.textContent).toBe(
+      t('conversation.ask.answered', { option: t('conversation.plan.approve.default') }),
+    );
+    expect(q('.conv-ask-outcome', card('q1'))?.textContent).toBe(t('conversation.question.answered'));
+    expect(host.textContent).not.toContain('window');
+  });
+
+  it('show this page’s answers as the user’s in a new view of the chat (attached again), and no other chat’s', async () => {
+    const a = new FakeSource();
+    a.id = 'c-mine';
+    a.emit(working(), permission('p1', { kind: 'command' }), planOf('pl1'), colorAsked('q1'), permission('p2', { kind: 'command' }));
+    await show(a);
+    await click(buttons(card('p1'))[1]);
+    await click(buttons(card('pl1'))[1]);
+    await click(q('input', card('q1')));
+    await click(q('button[type="submit"]', card('q1')));
+    expect(a.answer).toHaveBeenCalledWith('q1', { answers: { color: ['Blue'] } });
+    // A new view of the chat, its cards waiting again in the replay; the
+    // answers come after. p2 was answered elsewhere.
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    const b = new FakeSource();
+    b.id = 'c-mine';
+    b.emit(working(), permission('p1', { kind: 'command' }), planOf('pl1'), colorAsked('q1'), permission('p2', { kind: 'command' }));
+    await show(b);
+    expect(card('p1').dataset.state).toBe('waiting');
+    await emit(
+      b,
+      done('p1', 'allow_session'),
+      done('pl1', 'plan:acceptEdits'),
+      { seq: next(), t: 'question_done', id: 'q1', answers: { color: ['Blue'] }, by: 'user' },
+      done('p2', 'allow_once'),
+    );
+    expect(q('.conv-ask-outcome', card('p1'))?.textContent).toBe(
+      t('conversation.ask.youChose', { option: t('conversation.ask.allowSession') }),
+    );
+    expect(q('.conv-ask-outcome', card('pl1'))?.textContent).toBe(
+      t('conversation.ask.youChose', { option: t('conversation.plan.approve.acceptEdits') }),
+    );
+    expect(q('.conv-ask-outcome', card('q1'))?.textContent).toBe(t('conversation.question.youAnswered'));
+    expect(q('.conv-ask-outcome', card('p2'))?.textContent).toBe(
+      t('conversation.ask.answered', { option: t('conversation.ask.allowOnce') }),
+    );
+    // Another chat with cards of the same ids: not this page's answers.
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    const c = new FakeSource();
+    c.id = 'c-other';
+    c.emit(working(), permission('p1', { kind: 'command' }), done('p1', 'allow_session'));
+    await show(c);
+    expect(q('.conv-ask-outcome', card('p1'))?.textContent).toBe(
+      t('conversation.ask.answered', { option: t('conversation.ask.allowSession') }),
+    );
+  });
+
+  it('keep this page’s answer when its sending ended without an answer', async () => {
     const s = new FakeSource();
     s.emit(working(), permission('p1', { kind: 'command' }));
     await show(s);

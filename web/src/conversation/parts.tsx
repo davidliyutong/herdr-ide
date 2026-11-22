@@ -7,7 +7,7 @@ import { createContext } from 'react';
 import { FileText, ImageIcon } from 'lucide-react';
 import { hasMessage, t, type MessageKey } from '../i18n';
 import { asText, ownMeta, type ContentBlock } from './model';
-import type { PermissionReply, QuestionReply } from './source';
+import type { ChatSource, PermissionReply, QuestionReply } from './source';
 
 /** What the items of a conversation may call; the same object for every
  * item, so that an item that did not change is not drawn again. */
@@ -23,6 +23,48 @@ export interface ItemContext {
   untrust?: () => Promise<void>;
 }
 
+/** The answers this page gave to the cards of a chat, by the card's item
+ * id: a permission's option id ('' when dismissed), ANSWERED or SKIPPED
+ * for questions. Only an answer in it is shown as the user's own ("Your
+ * choice"); any other one as answered, with no claim about where: the
+ * page cannot tell another window's answer from its own before a reload,
+ * or from one given while it was not attached. */
+export type AnsweredCards = Map<string, string>;
+export const ANSWERED = 'answered';
+export const SKIPPED = 'skipped';
+
+/** The cards' answers by chat (the source's id) or by source: they outlive
+ * the view (the pane moved, the chat attached again) for as long as the
+ * page lives. */
+const answeredBySource = new WeakMap<ChatSource, AnsweredCards>();
+const answeredByName = new Map<string, AnsweredCards>();
+/** The most chats, and answers of a chat, kept by name. */
+const MAX_ANSWERED_CHATS = 200;
+const MAX_ANSWERS = 500;
+
+/** The answers this page gave to the cards of a source's chat. */
+export function answeredOf(s: ChatSource): AnsweredCards {
+  if (!s.id) {
+    let a = answeredBySource.get(s);
+    if (!a) answeredBySource.set(s, (a = new Map()));
+    return a;
+  }
+  let a = answeredByName.get(s.id);
+  if (a) answeredByName.delete(s.id);
+  else a = new Map();
+  answeredByName.set(s.id, a);
+  if (answeredByName.size > MAX_ANSWERED_CHATS) answeredByName.delete(answeredByName.keys().next().value!);
+  return a;
+}
+
+/** Keeps the answer this page gave to a card (undefined: none after all). */
+export function keepAnswer(a: AnsweredCards, item: string, answer: string | undefined) {
+  a.delete(item);
+  if (answer === undefined) return;
+  a.set(item, answer);
+  if (a.size > MAX_ANSWERS) a.delete(a.keys().next().value!);
+}
+
 /** What the cards of permissions and questions may do: a context of its
  * own, so that a change of it (the chat stops waiting, read-only) draws
  * the cards again and no other item. */
@@ -34,6 +76,8 @@ export interface Answering {
   /** The items of the cards that wait (model.ts waitingItems). */
   waiting: ReadonlySet<string>;
   readOnly: boolean;
+  /** The answers this page gave to the chat's cards (answeredOf). */
+  answered: AnsweredCards;
   respond(permission: string, reply: PermissionReply): Promise<void>;
   answer(question: string, reply: QuestionReply): Promise<void>;
 }
@@ -43,6 +87,7 @@ export const AnsweringContext = createContext<Answering>({
   open: false,
   waiting: new Set(),
   readOnly: true,
+  answered: new Map(),
   respond: nothing,
   answer: nothing,
 });

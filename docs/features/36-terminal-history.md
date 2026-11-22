@@ -55,11 +55,10 @@ terminal core (`run/hc.sock`, never the user's own herdr-core) when the
 core asks (`capture {lines, maxTerminals, maxTotalBytes, days}`), within
 25 s:
 
-1. It takes the snapshots' directory's lock (waiting up to 2 s; another
-   writer, such as a second core's agent of the instance, makes the
-   capture answer `busy` and do nothing), removes generations that are not
-   whole and temporary files older than an hour, and the generations older
-   than `days`.
+1. It takes the snapshots' lease (waiting up to 2 s; another writer,
+   such as a second core's agent of the instance, makes the capture answer
+   `busy` and do nothing), removes generations that are not whole, and the
+   generations older than `days`.
 2. It lists the terminal core's terminals (`terminal.list` with `all`) and
    removes the snapshots of terminals that finished with their program (an
    exit, a kill: any reason but the core's own end, `stopped_by_restart`,
@@ -126,21 +125,33 @@ generation lists `at: 0`.
 
 ### Storage and limits
 
-`~/.herdr-ide[-<instance>]/history/` (0700; it must be a directory of the
-user, not a link, or nothing is written; one others may access is made
-0700) holds per address `<address>.vt` (the bytes) and `<address>.json`
-(pid, time, lines, bytes, grid, the screen's hash, the days it was written
-under, `restored`), and `.prev.vt` and `.prev.json` for the previous
-generation. Each file is 0600, written as a temporary file created
-exclusively (`.<name>.<hex>.tmp`), flushed to disk and renamed; a
-generation exists for readers while its `.json` does and its `.vt` has the
-size it gives, so a writer removes the `.json` first and puts it back
-last. Writers (capture, clear, adopt, housekeeping) hold `.lock`
-(`flock`), which two agents of an instance share: a capture that does not
-get it within 2 s answers `busy` and writes nothing, a clear or an adopt
-waits for it up to 40 s, and the housekeeping of a list or a read runs
-only when it is free. Readers take no lock. Links and special files found
-there are removed, never followed.
+The snapshots live in the machine's database, `machine-<host>.db` in the
+agent's data directory `~/.herdr-ide[-<instance>]/` (0600 in the 0700
+directory, neither a link; named after the host, since the directory may
+be on a home several hosts share; [38](38-sqlite-state.md)), table
+`history_snapshots`: a row per generation of a terminal (the current one
+and the previous one) with what describes it (pid, time, lines, bytes,
+grid, the screen's hash, the days it was written under, `restored`) and
+its bytes. Every change is a transaction of its own, on disk before it
+returns (`store.Durable`), so readers take no lock and see each
+generation whole. Writers (capture, clear, adopt, housekeeping) hold the
+snapshots' lease (`history_lease`: the writer, its process and host, and
+until when), which two agents of an instance share: taken in a
+transaction, renewed by each of the writer's changes, which fail once
+another writer took it; it ends when the writer closes, when its process
+is gone (on the same host: no process of its pid, or this process
+while the writer's process id is another's, an agent of a container
+started again with the same pid), or a minute after its last renewal. A
+capture that does not get it within 2 s answers `busy` and writes
+nothing, a clear or an adopt waits for it up to 40 s, and the
+housekeeping of a list or a read runs only when it is free. Memory
+follows the database: a change that fails leaves what describes the
+snapshots as it was (a clear whose removal fails says so and removes
+nothing). The
+snapshots were kept before in `<data dir>/history/` as files; their whole
+generations are imported once when the database is opened, and the
+directory is removed then (also one an agent of an older version left
+again later).
 
 | Limit | Setting (per machine) | Default | Hard bounds |
 | --- | --- | --- | --- |
@@ -199,7 +210,7 @@ machines for nothing.
   hold. Refused read-only, audited as `history.adopt` with `from`, `to` and
   `adopted`; both addresses are checked on the core first, and `from`
   equal to `to` is refused. Like a clear it waits up to 40 s for the
-  directory's lock.
+  lease.
 
 Listing and reading remove the generations older than the days they were
 written under first. Every address is checked on the core and again on
@@ -293,7 +304,7 @@ outlive the setting:
 - on a machine removed from the core, disabled, or never connected again:
   until an agent starts there again and removes those past their days;
 - with another core of the same instance whose setting is on for the
-  machine: it keeps writing the same directory (and a core whose setting
+  machine: it keeps writing the same database (and a core whose setting
   is off clears what the other wrote when it first finds the machine
   connected);
 - while a clear keeps failing: until one succeeds (asked again after 30 s,
@@ -368,8 +379,9 @@ outlive the setting:
 
 Terminal output can hold secrets, so nothing is written unless the user
 turns `history.capture` on for a machine; the setting's description says
-so. The snapshots stay on that machine, in the agent's private data
-directory (0700, files 0600), within the hard limits the agent enforces;
+so. The snapshots stay on that machine, in the agent's database (0600 in
+its private data directory, 0700), within the hard limits the agent
+enforces;
 the core reads them only for a page that passed its guards, as bytes that
 are never a document of the UI's origin. Capturing never types into,
 resizes or redraws a terminal, and reads only the instance's own terminal
@@ -385,7 +397,7 @@ them leaves none of their modes, colors or links to the live terminal
 snapshot follows a line of text in its current one (herdr-core's "the
 program above ended; this is a new shell"): a program that prints that
 line keeps its predecessor's snapshot from being shown above it, which
-stays on disk and can still be read. The adopt route changes files and is
+stays on disk and can still be read. The adopt route changes snapshots and is
 refused read-only and audited. See the row on terminal history in
 [SECURITY.md](../../SECURITY.md).
 
@@ -400,9 +412,18 @@ refused read-only and audited. See the row on terminal history in
   dropped and too large paints asked with fewer lines, a new program
   rotating once, the limits clamped (`TestLimitsClamped`), terminals and
   bytes (`TestMaxTerminals`, `TestMaxTotalBytes`), age (`TestAge`),
-  finished terminals, addresses (`TestAddresses`), private files
-  (`TestFilesPrivate`), what is not whole (`TestNotWholeRemoved`),
-  temporary files, list, read and clear, busy and not running, a capture
+  finished terminals, addresses (`TestAddresses`), the database private
+  and never through a link (`TestDatabasePrivate`), the files of before
+  imported, kept when the import fails, a newer generation kept
+  (`TestImportFiles`, `TestImportFailureLeavesFiles`,
+  `TestImportKeepsNewer`), what is not whole (`TestNotWholeRemoved`), two
+  agents capturing and the lease, also of an earlier process of the same
+  pid (`TestTwoAgentsCapture`, `TestLease`, `TestLeaseOfAnEarlierProcess`),
+  a newer version (`TestNewerVersion`), one database per host
+  (`TestPerHostDatabase`), failures that change nothing
+  (`TestClearFailure`, `TestEvictionFailure`,
+  `TestAdoptFailureKeepsSource`), list, read and clear, busy and not
+  running, a capture
   waiting for a prune, errors without paths, `restore_screen`, `restored`
   and the core's line, the order and the time budget, performance, a
   refusal remembered, list and read applying the age; the adoption (the
@@ -413,7 +434,9 @@ refused read-only and audited. See the row on terminal history in
   machine without the directory, no terminal core; `TestAdoptRefused`),
   and the two minutes a vanished terminal's snapshots are kept, counted
   anew when its record comes back or an agent starts again, an adoption
-  within them (`TestVanishedGrace`).
+  within them (`TestVanishedGrace`). `hidden_test.go`
+  (`TestHiddenTerminalsNotCaptured`): the chat host's terminal is never
+  captured, one that only carries its label is.
 - `internal/agent/plugin/history/integration_test.go`
   (`TestIntegrationCapture`, build tag `integration`, part of `make it`):
   against a real herdr-core in a session of its own (`HC_TEST_BIN`), a

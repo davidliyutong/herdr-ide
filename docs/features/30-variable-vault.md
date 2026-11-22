@@ -627,18 +627,22 @@ value. Results: `allowed` (by the variables' machines), `approved`
 (once), `approved_always`, `exempted` (to an exempt app), `revealed`,
 `exported` (these let values out), `listed`, `denied` (by the user), `expired` (no answer in time),
 `cancelled` (the requester went away), `log_failed` or the error's code.
-The log is kept in `vault[-<instance>]-access.jsonl` beside the vault's
-file (0600, a JSON record a line) and read back at the core's start, so
-the panel shows what happened before a restart. A record that lets values
-out is appended and flushed to disk before they leave; when it cannot be
+The log is kept in the core's database (`core[-<instance>].db` beside
+the settings file, table `vault_access`, a row a record;
+[38](38-sqlite-state.md)) and read back at the core's start, so the panel
+shows what happened before a restart. A record that lets values out is
+committed to disk (`store.Durable`) before they leave; when it cannot be
 written the values do not leave (`log_failed`, to the MCP server and as a
-reveal's `500`). A write that fails partway is cut back to the last whole
-record, and a line a crash left half written is ended before the next
-record is appended, so no later record is glued to it and lost when the
-file is read back. The log keeps the last 1000 records that let values out
-and, apart, the last 500 others, so lists and refusals, which a program
-can repeat at will, never push a release out; the file is written again
-with what is kept once it holds twice as many lines. Every record is
+reveal's `500`), also when the database is of a newer version, which this
+core reads and does not write. A record gets its id in the transaction
+that writes it, after every row's, so it never replaces another; the log
+is read again at each use until a read succeeded. The log keeps the last
+1000 records that let values out and, apart, the last 500 others, so
+lists and refusals, which a program can repeat at will, never push a
+release out. The file it was kept in before,
+`vault[-<instance>]-access.jsonl` beside the vault's, is imported once and
+removed; one an earlier version wrote again after a downgrade has the
+records the table lacks added and is removed. Every record is
 audited too (`vault.access`, a page's as `vault.revealed` and
 `vault.exported`) when the core writes an audit log (`--audit-log`).
 Reading the log (`GET log`) needs an open vault session (`401
@@ -1082,7 +1086,8 @@ the passphrase between changes.
 - Many refusals in a row (a program repeating a call): one record in the
   log with their count, one audit record a minute per machine and result,
   the last of a burst written when the minute is over.
-- The access log cannot be written (a full disk, its file not writable):
+- The access log cannot be written (a full disk, the core's database not
+  writable or of a newer version):
   no value leaves; the MCP server gets `log_failed`, a reveal `500
   log_failed`; list calls and refusals are answered as before.
 - An export file with a wrong passphrase, or changed: `file_passphrase`
@@ -1094,7 +1099,8 @@ the passphrase between changes.
   the vault unchanged; the dialog says which variable.
 - One change of several chosen fails (Who May Read…, Delete): the others
   are done; the panel names the ones that failed and why.
-- The core restarted: the access log is read back from its file; a
+- The core restarted: the access log is read back from the core's
+  database; a
   repeated refusal's count may lack the calls of its last 5 s.
 
 ## Security
@@ -1294,12 +1300,17 @@ entries, the key in memory and exempt apps do not guarantee:
   values (`TestAccessLogSurvivesARestart`); releases never merged and
   never pushed out by refusals (`TestReleasesAreNeverCoalesced`); a
   release whose record cannot be written refused (`TestUnloggedReleaseIsRefused`);
-  a release after a write that failed partway, and after a half line a
-  crash left, read back (`TestAccessLogAfterAFailedWrite`); the log
+  a write that fails refusing its release and leaving nothing, the next
+  release read back after a restart (`TestAccessLogAfterAFailedWrite`),
+  and after a read that failed (`TestAccessLogAfterAFailedRead`); the log
   refused without a session, its reads no use of one, nothing shown
   while locked (`TestAccessLogNeedsASession`);
-  the file written again past its bound and read back the same; a merged
-  count written once the while is over; the process chain taken from the
+  the bounds (`TestAccessLogBounds`); the earlier file imported once, and
+  merged after a downgrade (`TestAccessLogImport`,
+  `TestAccessLogImportAfterDowngrade`); a database of a newer version read
+  and its releases refused (`TestAccessLogNewerVersion`); the database
+  beside the settings (`TestAccessLogDatabase`); a merged count written
+  once the while is over; the process chain taken from the
   header, never the request (`TestWhoAskedComesFromTheAgent`); cancelled
   and expired requests.
 - `internal/plugins/vault/transfer_test.go`: an export needs the session

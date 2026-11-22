@@ -71,6 +71,20 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   Claude Code, Codex, Gemini, OpenCode and more, and which session Claude
   Code and Codex run, found from their processes without changing their
   configuration ([35](docs/features/35-agent-native-view.md)).
+- **Agent chats.** A tab can be a chat with Claude Code, Codex, Kimi Code
+  or Grok running headless on any machine, drawn by the app: text and
+  thoughts as they stream, permissions, questions and plans answered in
+  cards, the model, effort and permission mode chosen per chat (full
+  access only where the machine's settings allow it), images, files named
+  with `@`, slash commands, messages queued while the agent works,
+  compacting, and the cost, context and limits below the composer and in
+  the status bar. Chats count in the agent inbox, dots and notifications
+  as agents in terminals do. A chat host on each machine, run by its
+  terminal core, keeps the chats across disconnects and restarts within
+  the limits you set per machine and stops idle agents; a session started
+  in a terminal opens as a chat (**Continue in Chat**, or the Chats
+  panel's earlier sessions), and a chat goes on in a terminal
+  (**Continue in Terminal**) ([37](docs/features/37-agent-chats.md)).
 - **Terminal history.** With **Keep snapshots of terminal output** on for
   a machine (off by default: terminal output can hold secrets), the
   machine saves what its terminals show to its own disk at intervals,

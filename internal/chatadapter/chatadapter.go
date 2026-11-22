@@ -117,7 +117,11 @@ type Adapter interface {
 	Sessions(ctx context.Context, p SessionsParams) (sessions []chatproto.Session, next string, err error)
 	// History emits the stored events of a session's earlier conversation
 	// (an import), oldest first: the events the chat's log would hold had
-	// the chat run it, without sequence numbers, never live ones.
+	// the chat run it, without sequence numbers, never live ones. For a
+	// whole conversation (After "") it may also emit one EventInfo whose
+	// Chat has the Title the agent or the user gave the session (never
+	// one made of a prompt), when there is one: the host takes it as the
+	// imported chat's title, unless the user named the chat.
 	History(ctx context.Context, p HistoryParams, emit func(chatproto.Event)) error
 }
 

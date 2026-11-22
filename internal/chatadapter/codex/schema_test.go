@@ -271,6 +271,7 @@ func TestSchemaPinned(t *testing.T) {
 	checkParams(mTurnInterrupt, map[string]any{"threadId": "", "turnId": ""})
 	checkParams(mThreadCompactStart, map[string]any{"threadId": ""})
 	checkParams(mThreadList, map[string]any{"cwd": "", "limit": 0, "cursor": ""})
+	checkParams(mThreadList, map[string]any{"includedThreadIds": nil, "limit": 0})
 	checkParams(mThreadTurnsList, map[string]any{"threadId": "", "limit": 0, "sortDirection": "", "itemsView": "", "cursor": ""})
 	checkParams(mModelList, map[string]any{"limit": 0, "includeHidden": false, "cursor": ""})
 	checkParams(mAccountRead, map[string]any{"refreshToken": false})

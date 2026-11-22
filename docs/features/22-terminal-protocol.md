@@ -106,6 +106,37 @@ read-only client's `terminal.read` reaches herdr-core without its `lines`
 the screen of a program on the alternate screen, herdr-core scrolls the
 program with mouse-wheel input, which every viewer sees.
 
+**Terminals that are none of the clients'.** Two kinds of terminals of a
+machine's terminal core are kept from its clients:
+
+- **Hidden terminals**, the product's own helpers (the chat host,
+  [37](37-agent-chats.md)): a terminal named `herdr-ide-chat-host` and
+  labeled `herdr-ide.hidden` with the value `chat-host`, both
+  (`agentproto.Hidden`; the label alone hides nothing, since labels are
+  free-form). The backend keeps their addresses apart from its records:
+  they are in no snapshot, no event (also after a `missed`, and from the
+  event that gives a terminal the label on), no `terminal.list` result,
+  and their agent is detected for nobody ([25](25-agent-detection.md)).
+  A stream of a terminal that becomes hidden is closed.
+- **Other machines' terminals**, those the terminal core added
+  (`machine.add`) or that dialed in to it (addresses `box/t7`): they are
+  left out the same way, and a `terminal.list` result says the terminal
+  core has no other machines. The core's own machines are each reached
+  through their own terminal core.
+
+A call that names such a terminal as its `terminal`, its `caller` or a new
+terminal's `parent` (by address, by name or after the core's own id), and
+an attach of one, are answered as for a terminal that does not exist
+(`not_found`) and audited as `denied.term` with `reason: hidden` or
+`machine`; a target the backend does not know yet (a name, a terminal
+being made) is looked up first (`terminal.get`), and an attach is checked
+again on the record it answered with. A `terminal.run` or
+`terminal.label` that sets the hidden label, and a `terminal.run` that
+takes the chat host's name, are refused (`refused`, audited with `param`
+`labels` or `name`). `labels` that are not a JSON object of strings are
+refused (`usage`) before the call reaches the terminal core, so that what
+the core reads is what was checked.
+
 **Streams.** `attach` opens a herdr-core attach stream and answers
 `attached` with a stream number of the client's connection; the reply is
 queued before the stream's first frame. Output arrives as binary frames:
@@ -349,6 +380,9 @@ ended with the core in the layout (`web/src/restore.ts`,
 - **Call to a machine the client did not subscribe to, or whose backend is
   not ready** → `unavailable`.
 - **Unknown or refused method** → `refused`, audited as `denied.term`.
+- **A hidden terminal or another machine's named** → `not_found`, as for
+  a terminal that does not exist; audited as `denied.term` with the
+  reason.
 
 ## Security
 
@@ -356,6 +390,15 @@ See the row for terminal clients in [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
+`internal/server/term_hidden_test.go`: hidden terminals out of
+snapshots, events and lists, also in the window before their label and
+after a `missed`, for read-only clients too, calls and attaches that name
+them refused and audited, other machines' terminals, `labels` that are not
+an object of strings (`TestTermHiddenTerminals`,
+`TestTermHiddenCreationWindow`, `TestTermHiddenAfterMissed`,
+`TestTermHiddenReadOnly`, `TestTermOtherMachines`,
+`TestTermLabelsParams`); `TestIntegrationTermHidden` (`make it`) against
+a real herdr-core.
 `internal/server/term_test.go`, with a scripted terminal core on the
 machine's socket behind a real agent: the lifecycle from the UI (a stopped
 core kept stopped while subscribed, started and restarted, the machine's

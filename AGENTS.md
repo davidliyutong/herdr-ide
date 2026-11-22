@@ -15,7 +15,10 @@ them with Ghostty's libghostty-vt as WebAssembly through the core's terminal
 protocol (`/api/v1/term`), and an Electron desktop app (`desktop/`) wraps the
 same UI and a core of its own on macOS, Windows and Linux. The agent runs on
 Linux and macOS only, so a core on Windows reaches SSH machines only.
-code-server provides VS Code panels. One binary embeds the UI, its own
+code-server provides VS Code panels. A chat host on each machine (the
+command `chat-host`, a hidden terminal of that terminal core) runs coding
+agents headless for the chat panes, its state in SQLite
+(`internal/store`). One binary embeds the UI, its own
 machine builds (the tag `machine`: the same program without the server, the
 UI and these payloads) and herdr-core for 4 platforms, and a VS Code
 extension.
@@ -136,6 +139,20 @@ playbooks):
   the registry's JSON. The adapters' protocol recordings are in
   `design/testdata/chat/` (sanitized; its README says what each shows and
   which version made it).
+- Chat adapters follow the rules in `internal/chatadapter`'s package
+  comment: never write the agents' configuration (a Codex thread starts
+  and resumes read-only and gets its policy per turn; a writable one adds
+  the directory to `~/.codex/config.toml`), end an agent gracefully before
+  any SIGKILL (Codex killed outright leaves its shell snapshots), answer
+  requests they do not serve with "method not found". The part of Codex's
+  app-server schema the adapter relies on is pinned in
+  `design/codex-app-server/summary.json` (`TestSchemaPinned`; its README
+  says how to move to another version).
+- A terminal the product runs for itself (the chat host) is hidden by its
+  reserved name and label together (`agentproto.Hidden`): anything that
+  walks a terminal core's terminals (the core's terminal protocol, agent
+  detection, terminal history) skips it with that function, never by the
+  label alone, which any program can set.
 - Never call herdr-core's `terminal.read` with `lines` above 0 for a
   read-only client or from a background task: with history lines the core
   scrolls a program on the alternate screen, which every viewer sees.

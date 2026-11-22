@@ -38,6 +38,9 @@ terminals (they belong to the user and run in the terminal core).
 | display keeper (`herdr-ide gui-keep`) | itself (own session, one per instance by `run/gui-keep.lock`) | the instance's terminal core no longer runs (checked every 5 s; a core restarted within 30 s is followed), or the display ends; so Xvfb ends soon after the terminal core and its programs |
 | video encoder | the agent's window manager (own process group) | 5 s without frames, the window no longer watched, resized or gone, video turned off, or the agent exits |
 | `apt-get download xvfb` | the agent's `install` request | the download finishes, fails, or runs 5 min |
+| chat host (`herdr-ide chat-host`, [37](37-agent-chats.md)) | the instance's terminal core: a hidden terminal of it, started by the agent when the core opens a connection to a host and none serves | no agent process and no connection for 60 s; the terminal core's stop (SIGHUP, SIGTERM, SIGKILL); asked to make way for a host of a newer build (only while no chat works or waits); 30 s after it began to stop at the latest; a host that holds its name without serving is killed by the next agent that wants one |
+| agent process of a chat (`claude`, `codex app-server`, `kimi acp`, `grok agent`) | the chat host, in a process group of its own | idle for `chat.idleStopMinutes` (30), the oldest idle one when more than `chat.maxLive` (8) would run, the chat closed, deleted or handed off to a terminal, full access turned off (started again without it), the host ending; input closed, SIGTERM to the group, SIGKILL after a grace, and the group swept of what it left |
+| short agent processes of a chat host (listing sessions, an import) | the chat host, at most 4 at once | when they answered, within 60 s (2 min for an ACP session's load) |
 
 - **Ownership** (`internal/agent/codeserver.go`): `cs.pid` holds the process
   id and the owning agent's pid. An agent stops only the process it owns on
@@ -62,7 +65,10 @@ terminals (they belong to the user and run in the terminal core).
 | `cs-data/logs/` | 7 days |
 | `hc/herdr-core` | one file per instance, verified and replaced whole by the next install; a running terminal core keeps the executable it started from |
 | `hc/.fetch-*` | removed when the install ends; left by a killed agent, removed by the next install after 1 h |
-| `run/hc.sock`, `run/cs.sock`, `run/bridge.sock` | sockets of the processes above, 0600 in the 0700 run directory |
+| `run/hc.sock`, `run/cs.sock`, `run/bridge.sock`, `run/chat.sock` | sockets of the processes above, 0600 in the 0700 run directory |
+| `chat-<host>.db` | the chat host's journal: within `chat.maxChatMB` per chat, `chat.maxTotalMB`, `chat.maxChats` and `chat.retentionDays` after a chat was closed ([37](37-agent-chats.md)); other hosts' after 30 days unused |
+| `chat-host-<host>.log`, `chat-host.old-<host>.log` | the chat host's log, started again at 1 MiB, one old file kept; other hosts' after 30 days unused |
+| `machine-<host>.db` | the agent's database: terminal history snapshots within their limits, the AI usage cost cache's 90 days ([38](38-sqlite-state.md)); other hosts' after 30 days unused |
 | herdr-core's state (`~/.local/state/herdr-core/herdr-ide[-<instance>]/`) | herdr-core's own (terminal records, saved screens, logs); kept until the user removes it |
 | `agent/<build>/` | removed after 14 days unused; running agents touch their directory |
 | `code-server/<version>/` | removed after 14 days unused; touched on start |
@@ -108,7 +114,15 @@ The full list of paths is in [reference](../reference.md#files-and-directories).
   directory moved under it) → replaced when VS Code is next opened
   ([05](05-vscode-panes.md)).
 - **Two cores, same instance** → one code-server; either core's idle stop
-  affects both, and the other restarts it on its next request.
+  affects both, and the other restarts it on its next request. One chat
+  host too, which a core of a newer build replaces once its chats are
+  idle and an older one never does.
+- **A chat host nobody uses** (the machine removed, the core gone) → its
+  agents stop when idle and it exits a minute after the last; one that
+  hangs exits 30 s after it began to stop.
+- **A data directory shared by several hosts** (NFS) → each host keeps
+  its own databases and logs; the others' go once unused for 30 days
+  ([38](38-sqlite-state.md)).
 
 ## Testing
 
@@ -126,6 +140,13 @@ The full list of paths is in [reference](../reference.md#files-and-directories).
   that fails leaves no partial file, a newer build replaces the old one);
   `internal/server/term_test.go` (`TestHCLifecycle`: a stopped terminal
   core stays stopped while clients are subscribed).
+- `internal/chathost` (`TestIdleExit`, `TestIdleStopAndResume`,
+  `TestMaxLive`, `TestShutdown`, `TestHardExit`, `signal_test.go`: agents'
+  groups ended on the terminal core's signals), `internal/agent/plugin/chat`
+  (`TestHandover`, `TestNeverDowngrade`, `TestStuckHostKilled`),
+  `TestIntegrationChatHost` (`make it`: the host as a hidden terminal,
+  gone with its terminal core and started again);
+  `internal/store/host_unix_test.go` (`TestPruneHostFiles`).
 - `internal/agent/guikeep_test.go` (`TestKeeperHoldsDisplay`: the keeper
   holds the display while the terminal core runs, one per instance),
   `internal/agent/gui_test.go` (`TestGUIHousekeeping`: unfinished Xvfb

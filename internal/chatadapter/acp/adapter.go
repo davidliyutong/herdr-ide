@@ -37,6 +37,7 @@ import (
 	"log"
 	"path"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -355,12 +356,14 @@ func (a *Adapter) Sessions(ctx context.Context, p chatadapter.SessionsParams) ([
 }
 
 // History emits a session's earlier conversation from the agent's replay
-// of it (session/load), after a notice that it is an import (none when
-// p.After names where an earlier import ended). Items are numbered by
-// their place in the replay, so that p.After finds where an earlier import
-// of the session ended: what comes after the turn that holds it is
-// emitted; nothing when the replay has no such item. emit is called from
-// the probe's reader, one call at a time, all before History returns.
+// of it (session/load), after a notice that it is an import and an info
+// event of the title the agent lists the session with (sessionTitle; none
+// of either when p.After names where an earlier import ended). Items are
+// numbered by their place in the replay, so that p.After finds where an
+// earlier import of the session ended: what comes after the turn that
+// holds it is emitted; nothing when the replay has no such item. emit is
+// called from the probe's reader, one call at a time, all before History
+// returns.
 func (a *Adapter) History(ctx context.Context, p chatadapter.HistoryParams, emit func(chatproto.Event)) error {
 	h := newHistory(p.After, emit)
 	handler := probeHandler{notify: func(method string, params json.RawMessage) {
@@ -384,6 +387,9 @@ func (a *Adapter) History(ctx context.Context, p chatadapter.HistoryParams, emit
 	}
 	if p.After == "" {
 		emit(chatproto.Event{T: chatproto.EventNotice, Method: agentproto.NoticeMethod(agentproto.NoticeImported), Params: json.RawMessage(`{"lossy":true}`)})
+		if title := a.sessionTitle(ctx, pr, init, p); title != "" {
+			emit(chatproto.Event{T: chatproto.EventInfo, Chat: &chatproto.Chat{Title: title}})
+		}
 	}
 	lctx, cancel := context.WithTimeout(ctx, a.t.load)
 	defer cancel()
@@ -394,6 +400,38 @@ func (a *Adapter) History(ctx context.Context, p chatadapter.HistoryParams, emit
 		logger(p.Logger).Printf("acp %s: the import's last item %q is not in the replay of %s: nothing imported", p.Kind, p.After, p.SessionID)
 	}
 	return nil
+}
+
+// titlePages bounds the pages of session/list sessionTitle reads.
+const titlePages = 10
+
+// sessionTitle is the title the agent lists a session with (session/list
+// of the session's directory, until the page that has it); "" for none,
+// for an agent that cannot list its sessions, or when listing fails.
+func (a *Adapter) sessionTitle(ctx context.Context, pr *probe, init *rpc.InitializeResult, p chatadapter.HistoryParams) string {
+	if !bool(init.AgentCapabilities.SessionCapabilities.List) {
+		return ""
+	}
+	lctx, cancel := context.WithTimeout(ctx, a.t.session)
+	defer cancel()
+	cursor := ""
+	for range titlePages {
+		res, err := pr.conn.ListSessions(lctx, rpc.ListSessionsParams{Cwd: p.Cwd, Cursor: cursor})
+		if err != nil {
+			logger(p.Logger).Printf("acp %s: the title of %s: %v", p.Kind, p.SessionID, err)
+			return ""
+		}
+		for _, si := range res.Sessions {
+			if si.SessionID == p.SessionID {
+				return clip(strings.TrimSpace(si.Title), titleRunes)
+			}
+		}
+		if res.NextCursor == "" || res.NextCursor == cursor {
+			break
+		}
+		cursor = res.NextCursor
+	}
+	return ""
 }
 
 // history turns a session's replay into an import's events: a turn from

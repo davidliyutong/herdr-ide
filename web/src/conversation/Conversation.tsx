@@ -15,7 +15,7 @@ import { spokenText } from './format';
 import { ItemView } from './items';
 import { agentKind } from './kinds';
 import { blocksText, emptyConversation, hasClientMessage, take, waitingItems, type Conversation as State, type SourceEvent } from './model';
-import { AnsweringContext, type Answering, type ItemContext } from './parts';
+import { answeredOf, AnsweringContext, type Answering, type ItemContext } from './parts';
 import type { ChatSource } from './source';
 import './conversation.css';
 
@@ -224,10 +224,11 @@ export function Conversation({ source, kind, readOnly: readOnlyProp, allowFull =
       open,
       waiting: waitingSet,
       readOnly,
+      answered: answeredOf(source),
       respond: (permission, reply) => latest.current.source.respond(permission, reply),
       answer: (question, reply) => latest.current.source.answer(question, reply),
     }),
-    [open, waitingSet, readOnly],
+    [open, waitingSet, readOnly, source],
   );
   const waiting = open && waitingSet.size > 0;
   const delivered = useCallback((clientId: string) => hasClientMessage(conv, clientId), [conv]);

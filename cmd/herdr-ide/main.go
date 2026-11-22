@@ -14,8 +14,10 @@
 //	herdr-ide gui-wl --device NODE [--nvidia]
 //	                                 the compositor of a machine's GPU
 //	                                 display; started by the agent
-//	herdr-ide chat-host              a machine's chat host (Linux and
-//	                                 macOS); not available in this version
+//	herdr-ide chat-host --base DIR --run DIR
+//	                                 a machine's chat host, which runs coding
+//	                                 agents headless; started by the agent as
+//	                                 a hidden terminal (Linux and macOS)
 //	herdr-ide version
 //
 // The copies the core carries for machines of other platforms are this

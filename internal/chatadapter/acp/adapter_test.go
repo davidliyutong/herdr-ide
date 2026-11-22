@@ -470,22 +470,24 @@ func TestResume(t *testing.T) {
 	}
 }
 
-// An import: the replay of session/load as stored events, turn by turn;
-// then again from where the first ended.
+// An import: the title the agent lists the session with (session/list),
+// then the replay of session/load as stored events, turn by turn; then
+// again from where the first ended, without the title.
 func TestHistory(t *testing.T) {
-	for _, tt := range []struct{ agent, id string }{
-		{"kimi", "session_00000000-0000-4000-8000-000000000001"},
-		{"grok", "00000000-0000-4000-8000-000000000007"},
+	for _, tt := range []struct{ agent, id, title string }{
+		{"kimi", "session_00000000-0000-4000-8000-000000000001", "Reply with the word hi"},
+		{"grok", "00000000-0000-4000-8000-000000000007", "Create hello.txt containing hi"},
 	} {
 		t.Run(tt.agent, func(t *testing.T) {
 			h := newHarness(t)
-			steps := without(h.rec(tt.agent, "09-list-load"), "session/list")
-			hp := func() chatadapter.HistoryParams {
+			listed := h.rec(tt.agent, "09-list-load")
+			steps := without(listed, "session/list")
+			hp := func(steps []step) chatadapter.HistoryParams {
 				p := h.params(steps)
 				return chatadapter.HistoryParams{Kind: tt.agent, Argv: p.Argv, Env: p.Env, Cwd: p.Cwd, SessionID: tt.id, Logger: p.Logger}
 			}
 			var all []chatproto.Event
-			if err := h.a.History(context.Background(), hp(), func(ev chatproto.Event) {
+			if err := h.a.History(context.Background(), hp(listed), func(ev chatproto.Event) {
 				all = append(all, ev)
 				h.host.Event(ev)
 			}); err != nil {
@@ -493,7 +495,8 @@ func TestHistory(t *testing.T) {
 			}
 			h.host.golden(t, tt.agent+"-history")
 
-			// Every event is stored; the import starts with its notice.
+			// Every event is stored; the import starts with its notice and
+			// the session's title.
 			users := 0
 			for _, ev := range all {
 				if ev.Live || ev.Seq != 0 {
@@ -506,6 +509,10 @@ func TestHistory(t *testing.T) {
 			if users < 3 || all[0].T != chatproto.EventNotice || !strings.HasSuffix(all[0].Method, "/"+agentproto.NoticeImported) {
 				t.Fatalf("%d user messages; first event %+v", users, all[0])
 			}
+			if all[1].T != chatproto.EventInfo || all[1].Chat == nil || all[1].Chat.Title != tt.title {
+				t.Fatalf("the title's event %+v", all[1])
+			}
+			all = append(all[:1:1], all[2:]...)
 
 			// From the last item of the second turn on: the turns after it.
 			second, third := -1, -1
@@ -522,7 +529,7 @@ func TestHistory(t *testing.T) {
 					second = i
 				}
 			}
-			p := hp()
+			p := hp(steps)
 			p.After = all[second].Item
 			var rest []chatproto.Event
 			if err := h.a.History(context.Background(), p, func(ev chatproto.Event) { rest = append(rest, ev) }); err != nil {

@@ -51,11 +51,13 @@ for the status bar ([29](29-ai-usage.md)); another kind of agent added by a
 row of a registry and, for its conversations, a parser that reads a
 session's transcript on its machine into events shaped as the Agent
 Client Protocol's; a conversation view that knows its events only through
-an interface (`AgentSource`).
+an interface (`ChatSource`), which the chat panes draw
+([37](37-agent-chats.md)).
 
 Non-goals: changing the agents' configuration (hooks); transcripts kept
 compressed; subagents' conversations; sessions of agents other than
-Claude Code and Codex.
+Claude Code and Codex. Running agents headless and their chats are
+[37](37-agent-chats.md).
 
 ## Design
 
@@ -67,23 +69,28 @@ its `ID` (the detector's manifest id, [25](25-agent-detection.md)), `Title`,
 `Start` (the argv that starts it), `NewSession` (appended to `Start` to
 start it with a session id the caller chose), `ContinueLatest` (the command
 that continues the directory's latest conversation), `ResumeByID` (the
-command that resumes a session by its id) and `Transcript` (the parser of
-its transcripts, or none). It is data only and builds for every system the
-core runs on.
+command that resumes a session by its id), `Transcript` (the parser of
+its transcripts, or none) and `Chat` (how the chat host runs it headless:
+its adapter, the command and environment the adapter starts it with, and
+for ACP the `_meta` of a new session; [37](37-agent-chats.md)). It is data
+only and builds for every system the core runs on.
 
-| Kind | Start | New session | Continue latest | Resume by id | Transcript |
-| --- | --- | --- | --- | --- | --- |
-| `claude` | `claude` | `--session-id {id}` | `claude --continue` | `claude --resume {id}` | `claude` |
-| `codex` | `codex` | – | `codex resume --last` | `codex resume {id}` | `codex` |
-| `gemini`, `opencode`, `kimi`, `grok`, `cursor`, `copilot`, `qwen`, `amp` | its id | – | – | – | – |
-| the other 12 the detector knows | – | – | – | – | – |
+| Kind | Start | New session | Continue latest | Resume by id | Transcript | Chat |
+| --- | --- | --- | --- | --- | --- | --- |
+| `claude` | `claude` | `--session-id {id}` | `claude --continue` | `claude --resume {id}` | `claude` | `claude` |
+| `codex` | `codex` | – | `codex resume --last` | `codex resume {id}` | `codex` | `codex` |
+| `kimi`, `grok` | its id | – | – | – | – | `acp` |
+| `gemini`, `opencode`, `cursor`, `copilot`, `qwen`, `amp` | its id | – | – | – | – | – |
+| the other 12 the detector knows | – | – | – | – | – | – |
 
 `scripts/registry` writes the kinds into `design/generated/registry.json`
 (key `agents`; `make tokens`), which the page reads
 (`web/src/conversation/kinds.ts`): the palette's agents to start
 (`startArgv`), the commands a restore types (`resumeCommand`), the AI
 usage provider of a session and whether a kind's conversations can be
-read (`hasNativeView`: it has a transcript parser). `uisettings.Agents`, the list of silent
+read (`hasNativeView`: it has a transcript parser) and the adapter of its
+chats (`chatAdapter`; the command, environment and session metadata stay
+on the machine's side, never in the registry's JSON). `uisettings.Agents`, the list of silent
 agents, is made from it. A placeholder is replaced only by a lower-case
 UUID (`ValidSessionID`, `isSessionId`); any other value makes no command.
 
@@ -94,7 +101,8 @@ plugin's), then `make tokens`. For its sessions and conversations also: a parser
 `internal/agent/transcript` (`formats`), how `internal/agent/sessions`
 finds its sessions and transcripts, `ResumeByID` and `ContinueLatest`
 (the test requires them of a kind with a transcript) and the vectors of
-its lines in `design/testdata/transcript/`.
+its lines in `design/testdata/transcript/`. For chats with it: a `Chat`
+spec whose adapter is one of `agentkinds.Adapters` (`TestChatKinds`).
 
 ### Finding a session (`internal/agent/sessions`)
 
@@ -223,8 +231,12 @@ adopts a snapshot by `before` ([36](36-terminal-history.md)).
 
 ### Transcripts (`internal/agent/transcript`)
 
-The parser reads a session's conversation on its machine; its consumers
-come with the chat host, and no route sends its events to the page.
+The parser reads a session's conversation on its machine. The chat
+host's Claude Code adapter reads with it: a session imported into a chat
+and what a handed-off session did in a terminal (`EachClaude`), and the
+tool results of a live chat (`ClaudeFrame`, the same mapping;
+[37](37-agent-chats.md)). No route sends a transcript's pages to the
+page.
 `Tail(kind, file, ref, limits)` reads one page of a transcript into events
 shaped as the Agent Client Protocol's (ACP v1) `session/update`
 notifications (`internal/agentproto/transcript.go`): `{seq, t, at}` and,
@@ -259,7 +271,7 @@ Claude Code's lines:
 | Line | Events |
 | --- | --- |
 | `user` with a text prompt (not `isMeta`, not a compaction's summary) | `turn` start, `user` |
-| `attachment` `queued_command` of `commandMode` `prompt` whose `origin.kind` is `human` (not `isMeta`, not a subagent's): a message sent while the agent worked | `user` without a `turn` start (it joins the running turn); a command's text makes its notice, as in a `user` line |
+| `attachment` `queued_command` of `commandMode` `prompt` whose `origin.kind` is `human`, or without an `origin` (a client of the SDK protocol's message; not `isMeta`, not a subagent's): a message sent while the agent worked | `user` without a `turn` start (it joins the running turn); a command's text makes its notice, as in a `user` line |
 | any other `attachment` (other agents' messages, task notifications, the environment, skill listings) | nothing, not counted |
 | `user` with `<command-name>`, `<local-command-stdout>`, `<bash-input>` and the like; `system` `local_command` | notice `command` (`name`, `args`, `output`) |
 | `[Request interrupted by user…` | `turn` end, `cancelled` |
@@ -268,6 +280,7 @@ Claude Code's lines:
 | `assistant` `tool_use` | `tool_call`: `Edit`, `MultiEdit`, `Write`, `NotebookEdit` edit; `Bash` and the shell tools execute; `Read` read; `Grep`, `Glob`, `LS` search; `WebFetch`, `WebSearch` fetch; `Task`, `Agent` think; `ExitPlanMode` switch_mode; others (MCP tools) other; `TodoWrite` a `plan` |
 | `message.usage` | `usage_update` (`used`: input and cache tokens; no `size`, the transcript has no context window), once per `message.id` in a page |
 | `system` `turn_duration`, `compact_boundary` | `turn` end; notice `compacted` (`trigger`, `preTokens`) |
+| `assistant` whose response stopped (`end_turn`, `max_tokens`, `refusal`…), its last block not a thought: the turn's end in a session of the SDK protocol, whose transcript has no `turn_duration` lines | `turn` end with the stop reason |
 | an API error (`isApiErrorMessage`, model `<synthetic>`) | notice `error` |
 | `ai-title`, `summary`, `custom-title` | the reply's `title` |
 | a subagent's line (`isSidechain`), any other type (the program's own state) | nothing, not counted |
@@ -305,8 +318,11 @@ file, the look back included, and ends with its context.
 
 Its switch, `plugins.agents.enabled` (on by default), turns finding the
 sessions on the machines on and off (the detector's part, above). On the
-page it is that switch alone (`web/src/plugins/agents`): no commands, no
-new-tab items, no buttons in terminals' headers.
+page (`web/src/plugins/agents`) it adds one button to terminals' headers,
+**Continue in Chat** (`ContinueInChat.tsx`): for a terminal whose agent
+ran a session of a kind with chats and quit, while the leaf remembers the
+agent and its session and no agent runs there, it opens that session as a
+chat with the chat plugin on ([37](37-agent-chats.md)).
 
 Core (`internal/plugins/agents`), a machine's route:
 `GET /api/m/{id}/p/agents/resolve?kind=&session=&cwd=`: `{ok}` when the
@@ -353,7 +369,7 @@ text only when it is a string (`asText`), and malformed events and blocks
 are passed over or counted among the entries not shown.
 
 `Conversation.tsx` draws the last 300 items; **Show Earlier Messages**
-draws 300 more, then asks the source for an earlier page. The list keeps
+draws 300 more, then asks a source that has them for an earlier page. The list keeps
 to its end while the user is there (24 px of slack) and keeps the user's
 place when items come before; **Jump to Latest** shows while scrolled
 away. Prompts show as typed (long ones folded), the agent's messages as
@@ -375,12 +391,23 @@ compared when the call is opened. What is read out to screen readers is
 the agent's last message, at most 2000 characters taken from its first
 4000.
 
-The view and its reducer know only `AgentSource`
-(`web/src/conversation/source.ts`): `capabilities` (`input`, `permissions`,
-`streaming`), `subscribe` (the events the source has, then each new one;
-`reset` when they no longer hold), `loadEarlier`, `send`, `cancel` and
-`respond`. No pane of the app draws the view: the tests drive it with
-sources of their own.
+The view and its reducer know only `ChatSource`
+(`web/src/conversation/source.ts`): `subscribe` (the events the source
+has, then each new one: an `info` with the chat as the host states it
+after each attach, `reattach` before a replay after the connection came
+back, `reset` when they no longer hold), `loadEarlier` (optional), `send`
+(with the page's id of the message), `cancel`, `respond` (a permission),
+`answer` (a question), `setConfig`, `cancelQueued`, `compact`,
+`suggestFiles`, `trust` and `untrust`; each command rejects with a code.
+The chat host's events add permissions, questions and their answers,
+queued messages, the chat's state and what it states, live increments of
+items being written and subagents' items under their call: the reducer
+replaces what came live for an item with its stored event (or a stored
+notice under the item), drops items that only came live when it attaches
+again, keeps them as they are once their turn ended without one, and keys
+tool calls apart from the host's items (`tool:<id>`). The chat panes draw the view with the cards and the
+composer ([37](37-agent-chats.md)); the tests also drive it with sources
+of their own.
 
 ## Alternatives considered
 
@@ -449,7 +476,8 @@ and on agent detection in [SECURITY.md](../../SECURITY.md).
 
 - `internal/agentkinds/agentkinds_test.go`: the kinds against the
   detector's manifests, `uisettings.Agents` and the usage providers; the
-  commands the UI had before; only a UUID substituted; copies.
+  commands the UI had before; only a UUID substituted; copies; the chat
+  specs and their JSON (`TestChatKinds`, `TestKindJSON`).
   `scripts/registry/main_test.go` (`TestAgents`): the kinds in the
   generated registry.
 - `internal/agent/sessions`: Claude Code's command line, records (trusted
@@ -488,9 +516,11 @@ and on agent detection in [SECURITY.md](../../SECURITY.md).
   replaced usage let go, the 64 MiB budget, walking past a long line, a
   cancelled read, oversize events (`bounds_test.go`); `FuzzTail`,
   `FuzzLineMemory`.
-- `design/testdata/transcript/`: `claude-2.1.330-tools.json` and
-  `codex-0.170.0-exec.json` (real transcripts, sanitized),
-  `claude-session-events.json`, `claude-tools-errors.json`,
+- `design/testdata/transcript/`: `claude-2.1.330-tools.json`,
+  `codex-0.170.0-exec.json` and `claude-headless.json` (real transcripts,
+  sanitized; the last of a session driven through the SDK protocol:
+  turns without `turn_duration` lines, queued messages without an
+  origin), `claude-session-events.json`, `claude-tools-errors.json`,
   `claude-unknown.json`, `claude-queued-prompts.json` (messages sent while
   the agent worked, in the shape measured on real transcripts),
   `codex-items.json`, `codex-legacy-apply-patch.json`
@@ -505,7 +535,8 @@ and on agent detection in [SECURITY.md](../../SECURITY.md).
   `resolve`, the shared resolver.
   `internal/agentproto/transcript_test.go`: the events' JSON, cursors,
   pages, `Seq`.
-- `web/src/__tests__`: `agents.test.ts` (the plugin is its switch alone),
+- `web/src/__tests__`: `agents.test.ts` (the plugin is its switch and
+  one header button), `chatImport.test.tsx` (**Continue in Chat**),
   `agentLeaves.test.ts` (the leaf's fields, `render` dropped),
   `conversation.test.ts` and `conversationMemo.test.tsx` (the reducer and
   what is drawn again), `conversationView.test.tsx` (messages, display

@@ -10,8 +10,9 @@ context (code, images) to it.
 ## Goals / non-goals
 
 Goals: a cross-machine view of agents ordered by how much they need the
-user; notifications when an agent blocks or finishes; starting agents and
-feeding them context from the IDE.
+user, those in terminals and those of chats alike; notifications when an
+agent blocks or finishes; starting agents and feeding them context from
+the IDE.
 
 Non-goals: interpreting agent output, answering approval prompts
 automatically, scheduling agents.
@@ -70,6 +71,21 @@ automatically, scheduling agents.
   The three switches are separate, each on by default (sounds,
   notifications and the badge, as before they could be turned off), and
   all four are settings of the core ([13](13-settings-and-appearance.md)).
+- **Chats** ([37](37-agent-chats.md)): a chat pane has the agent status
+  of its chat (`working`, `blocked`: a permission, a question or a plan
+  waits, `done`, `idle`), which the chat host computes and the core
+  watches. The core publishes a chat that becomes blocked or done as an
+  `agent` message with `chat` in place of the terminal, once per status
+  and sequence number; the page finds the pane that shows the chat
+  (`ViewStatusDef.paneOf`, [27](27-plugins.md)). Chat panes count in the
+  inbox (after the terminals of the same status), the workspaces', tabs'
+  and panes' dots, the badge and **Jump to the agent that needs
+  attention**; their notifications and sounds follow the settings above,
+  the done chime left out only while the chat's pane is shown and has the
+  focus in a focused page. A chat is seen when its pane is on screen and
+  focused in a visible page while it is done: the page posts `seen` to
+  the chat host, which ends done for every page. A chat no pane shows is
+  in none of these.
 - **One browser sounds**: each page tells the core when it is used
   (`active` on the WebSocket: on connect with the time since its last input,
   then on pointer, key or focus events at most every 2 s; durations, so
@@ -80,6 +96,9 @@ automatically, scheduling agents.
   user gesture on the page, so a page not clicked since it was loaded can
   stay silent; the desktop app's main window allows autoplay
   ([16](16-desktop-packaging.md)).
+- **Starting chats**: the new-tab menu and the command `chat.new` start a
+  chat with an agent the machine's chat host can run (Claude Code, Codex,
+  Kimi Code, Grok) in a pane of its own ([37](37-agent-chats.md)).
 - **Starting agents**: the palette offers the agent kinds the registry
   starts (`internal/agentkinds`, [35](35-agent-native-view.md): `claude`,
   `codex`, `gemini`, `opencode`, `kimi`, `grok`, `cursor`, `copilot`,
@@ -112,7 +131,7 @@ automatically, scheduling agents.
 
 | Option | Why not |
 | --- | --- |
-| A prompt box sending text to the agent | The terminal itself is the prompt; a second input duplicates it and hides the agent's own UI (approvals, slash commands). |
+| A prompt box sending text to an agent in a terminal | The terminal itself is the prompt; a second input duplicates it and hides the agent's own UI (approvals, slash commands). A chat has a composer because its agent runs headless, with approvals and commands through its protocol ([37](37-agent-chats.md)). |
 | Sound files | Shipped audio needs an asset and its license notice; synthesized chimes need neither. |
 | Every browser plays | With several browsers or tabs open, each would sound at once. |
 | Web Push for closed tabs | Requires a push service and subscription storage; the reverse-proxy model has no user accounts. |
@@ -131,7 +150,9 @@ automatically, scheduling agents.
 agent messages and the seen marking by focus ([25](25-agent-detection.md)).
 `web/src/__tests__/terms.test.ts` covers the attention order,
 `sidebarMachines.test.ts` the inbox and the workspaces' dots,
-`codePanes.test.ts` where *Send to Agent* goes, and
+`codePanes.test.ts` where *Send to Agent* goes, `viewStatus.test.tsx`,
+`notifyViews.test.ts` and `attention.test.tsx` chat panes in the dots,
+the badge, the attention list, notifications and seen, and
 `web/src/__tests__/sound.test.ts` which sound a status change plays
 (suppression, muted agents, the chosen browser), `notify.test.ts` the
 three switches (a notification only while its setting is on, the

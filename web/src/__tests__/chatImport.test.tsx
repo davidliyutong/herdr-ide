@@ -10,7 +10,10 @@
 // (plugins/agents/ContinueInChat.tsx). Both POST new {kind, cwd, resume,
 // import} and open the chat's pane, refuse a session a terminal's agent
 // runs (naming that terminal), and open nothing on a read-only page, which
-// lists none. The core's chat routes are a scripted fetch.
+// lists none; both show the chat that has the session already (one handed
+// off to the terminal), from the machine's chats the page knows, or from
+// the machine's list of its chats when the host refuses a second chat of
+// the session. The core's chat routes are a scripted fetch.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -29,8 +32,10 @@ import { allPlugins, definePlugins, TerminalHeaderActions } from '../plugins/reg
 import type { PluginDef } from '../plugins/api';
 import { agentsPlugin } from '../plugins/agents';
 import { chatTarget, ContinueInChat } from '../plugins/agents/ContinueInChat';
-import { chatSessions, importSession } from '../plugins/chat/imports';
+import { chatSessions, importSession, sessionChat } from '../plugins/chat/imports';
 import { listedDirectory, PastSessions } from '../plugins/chat/Sessions';
+import { applyStates, useChats } from '../plugins/chat/state';
+import type { ChatState } from '../plugins/chat/protocol';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -73,6 +78,8 @@ class FakeChats {
   pages = new Map<string, unknown>();
   /** A chat host serves: a GET finds none otherwise, and a POST starts it. */
   running = true;
+  /** The machine's chats (GET chats). */
+  chats: unknown[] = [];
   newAnswer: () => Response = () => new Response(JSON.stringify({ chat: { id: NEW_CHAT, kind: 'claude' } }), { status: 200 });
 
   install() {
@@ -93,6 +100,7 @@ class FakeChats {
         return ok(page ?? { sessions: [] });
       }
       if (u.pathname === '/api/m/m/p/chat/new' && method === 'POST') return this.newAnswer();
+      if (u.pathname === '/api/m/m/p/chat/chats' && method === 'GET') return ok({ chats: this.chats });
       return new Response('{"error":"unknown"}', { status: 404 });
     });
   }
@@ -116,6 +124,7 @@ beforeEach(() => {
   definePlugins([agentsPlugin, chatPlugin]);
   useStore.setState({ toasts: [] });
   useStore.getState().setReadOnly(false);
+  useChats.setState({ states: {}, full: {}, deleted: {}, agents: {}, live: {} });
 });
 
 afterEach(async () => {
@@ -180,6 +189,19 @@ const groups = () => [...host!.querySelectorAll('.agent-sessions-kind-title')].m
 const chatViews = (model: FakeCore['model']) =>
   model.layout('m')!.workspaces.flatMap((ws) => L.pluginViews(ws, 'chat', 'chat').map((v) => ({ ws: ws.id, tab: v.tab, view: v.view })));
 const toasts = () => useStore.getState().toasts;
+
+/** A chat of the machine that has a session (handed off to a terminal). */
+const chatOf = (id: string, kind: string, session: string, updated = '2026-11-22T10:00:00Z'): ChatState => ({
+  id,
+  kind,
+  title: 'Handed off',
+  cwd: DIR,
+  state: 'closed',
+  status: 'idle',
+  updated,
+  seq: 9,
+  sessionId: session,
+});
 
 /** The sessions of the scripted machine: claude's in two pages (with
  * entries that are none), codex's one, which a chat has. */
@@ -316,6 +338,20 @@ describe('the chat panel’s earlier sessions', () => {
     expect(chatViews(model)).toHaveLength(1);
   });
 
+  it('show the chat that has a session the listing does not mark, without a request', async () => {
+    const { model } = await setup();
+    script();
+    applyStates('m', [chatOf(CHAT, 'claude', S2)], true);
+    await render(createElement(PastSessions, { m: 'm' }));
+    await act(async () => rowOf(S2).click());
+    for (let i = 0; i < 3; i++) await act(settle);
+    expect(chats.posts()).toEqual([]);
+    const layout = model.layout('m')!;
+    expect(L.selectedWorkspace(layout)!.id).toBe('w2');
+    expect(L.focusedPane(layout)).toBe('view:v1');
+    expect(chatViews(model)).toHaveLength(1);
+  });
+
   it('refuse a session a terminal’s agent runs, naming the terminal, which the toast shows', async () => {
     const { model } = await setup({ b: { agent: 'claude', agent_session: S1, agent_session_source: 'pid' } });
     script();
@@ -407,6 +443,49 @@ describe('Continue in Chat in a terminal’s header', () => {
     expect(chats.posts().map((r) => r.body)).toEqual([{ kind: 'claude', cwd: DIR, resume: S1, import: true }]);
     const opened = chatViews(model).find((v) => v.view.chat === NEW_CHAT)!;
     expect(opened).toMatchObject({ ws: 'w1', tab: 2, view: { agent: 'claude' } });
+  });
+
+  it('opens the chat that has the session already (handed off to the terminal), without a request', async () => {
+    const { model } = await setup({ leaf: quit });
+    // A deleted chat, one of another kind and an older one have it too.
+    applyStates(
+      'm',
+      [
+        chatOf('c00000000000000c3', 'claude', S1, '2026-11-01T10:00:00Z'),
+        chatOf(CHAT, 'claude', S1),
+        chatOf('c00000000000000c4', 'codex', S1, '2026-11-23T10:00:00Z'),
+        { ...chatOf('c00000000000000c5', 'claude', S1, '2026-11-23T10:00:00Z'), state: 'deleted' },
+      ],
+      true,
+    );
+    expect(sessionChat('m', 'claude', S1)).toBe(CHAT);
+    expect(sessionChat('m', 'claude', S2)).toBeUndefined();
+    await render(createElement(TerminalHeaderActions, { m: 'm', terminal: 'a', leaf: { terminal: 'a', ...quit } }));
+    await act(async () => host!.querySelector<HTMLButtonElement>('button.agents-continue')!.click());
+    for (let i = 0; i < 4; i++) await act(settle);
+    expect(chats.posts()).toEqual([]);
+    const layout = model.layout('m')!;
+    expect(L.selectedWorkspace(layout)!.id).toBe('w2');
+    expect(L.focusedPane(layout)).toBe('view:v1');
+    expect(chatViews(model)).toHaveLength(1);
+    expect(toasts()).toEqual([]);
+  });
+
+  it('opens the chat the machine says has the session when the page did not know of it', async () => {
+    const { model } = await setup({ leaf: quit });
+    chats.newAnswer = () => new Response(`{"error":"bad_request","message":"chat ${CHAT} has the session"}`, { status: 400 });
+    chats.chats = [chatOf('c00000000000000c4', 'codex', S1), chatOf(CHAT, 'claude', S1)];
+    await render(createElement(TerminalHeaderActions, { m: 'm', terminal: 'a', leaf: { terminal: 'a', ...quit } }));
+    await act(async () => host!.querySelector<HTMLButtonElement>('button.agents-continue')!.click());
+    for (let i = 0; i < 4; i++) await act(settle);
+    expect(chats.posts().map((r) => r.path)).toEqual(['/api/m/m/p/chat/new']);
+    expect(L.focusedPane(model.layout('m')!)).toBe('view:v1');
+    expect(toasts()).toEqual([]);
+    expect(sessionChat('m', 'claude', S1)).toBe(CHAT);
+    // None in the list: the refusal is said.
+    chats.chats = [];
+    await importSession('m', { kind: 'claude', session: S2, cwd: DIR });
+    expect(toasts().at(-1)).toMatchObject({ kind: 'error' });
   });
 
   it('is not there on a read-only page, with the chat plugin off, or while an agent runs', async () => {

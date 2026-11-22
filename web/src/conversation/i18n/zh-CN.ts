@@ -118,7 +118,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'conversation.ask.kind.reject_once': '拒绝',
   'conversation.ask.kind.reject_always': '总是拒绝',
   'conversation.ask.youChose': '你的选择：{option}',
-  'conversation.ask.answeredElsewhere': '已在另一个窗口作答：{option}',
+  'conversation.ask.answered': '已作答：{option}',
   'conversation.ask.youDismissed': '你已关闭它。',
   'conversation.ask.dismissed': '已关闭。',
   'conversation.ask.cancelled': '随回合一起取消了。',

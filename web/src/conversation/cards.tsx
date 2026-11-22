@@ -5,17 +5,19 @@
 // in a mode, or planning on), and questions (one or more, a choice of one
 // or several options with their previews, the user's own words where
 // allowed, hidden as typed where secret; or skipped). The first answer is
-// the one that counts: another window may answer first, and the card then
-// says so when this view saw it wait and did not answer it; a card that
-// was answered before the view had it (after a reload, or attaching
-// again) shows the answer as the user's. Number keys choose a
+// the one that counts, and another window may give it: a card shows an
+// answer as the user's own only when this page gave it (parts.tsx
+// answeredOf, which outlives the view while the page lives); any other
+// answer it shows as given, without saying where (after a reload, or
+// attaching again, a card may come waiting and its answer after it, which
+// the page cannot tell from another window's). Number keys choose a
 // permission's options while the card has the keyboard.
 
 import { useContext, useId, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { ClipboardList, MessageCircleQuestion, ShieldQuestion } from 'lucide-react';
 import { Markdown } from '../markdown/Markdown';
 import { hasMessage, t } from '../i18n';
-import { commandOf, inputText, jsonText } from './format';
+import { commandOf, displayMath, inputText, jsonText } from './format';
 import {
   asText,
   OPTION_ALLOW_ONCE,
@@ -27,7 +29,7 @@ import {
   type Question,
   type QuestionItem,
 } from './model';
-import { AnsweringContext, errorText, type ItemContext } from './parts';
+import { ANSWERED, AnsweringContext, errorText, keepAnswer, SKIPPED, type ItemContext } from './parts';
 import { changedPaths, ChangeView, isDiff, PathButton, readDiff, Section } from './ToolCall';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -52,10 +54,10 @@ const allows = (o: PermissionOption) => o.kind === 'allow_once' || o.kind === 'a
 const unsureOf = (e: unknown): boolean => typeof e === 'object' && e !== null && (e as { unsure?: unknown }).unsure === true;
 
 /** How a card that waits no longer does, in words; mine: the answer is
- * this window's, or was there before the view saw the card wait. */
+ * the one this page gave. */
 function doneText(by: string | undefined, chosen: string | undefined, mine: boolean): string {
   if (chosen !== undefined)
-    return mine ? t('conversation.ask.youChose', { option: chosen }) : t('conversation.ask.answeredElsewhere', { option: chosen });
+    return mine ? t('conversation.ask.youChose', { option: chosen }) : t('conversation.ask.answered', { option: chosen });
   if (by === 'cancel') return t('conversation.ask.cancelled');
   if (by === 'ended') return t('conversation.ask.ended');
   return mine ? t('conversation.ask.youDismissed') : t('conversation.ask.dismissed');
@@ -206,19 +208,28 @@ function permissionHeading(item: PermissionItem, agent: string): string {
   }
 }
 
+/** The answer this page gave to a card (Answering.answered), and how to
+ * keep another: the card is drawn again when it changes. */
+function useMine(item: string): [string | undefined, (answer: string | undefined) => void] {
+  const answering = useContext(AnsweringContext);
+  const [, redraw] = useState(0);
+  const set = (answer: string | undefined) => {
+    keepAnswer(answering.answered, item, answer);
+    redraw((n) => n + 1);
+  };
+  return [answering.answered.get(item), set];
+}
+
 /** The answers of a permission or a plan: its options while it waits and
  * may be answered, else how it was answered. */
 function useAnswer(item: PermissionItem, agent: string) {
   const answering = useContext(AnsweringContext);
-  /** The option this window chose ('' for none: dismissed), and whether it
+  /** The option this page chose ('' for none: dismissed), and whether it
    * is being sent. */
-  const [mine, setMine] = useState<string | undefined>(undefined);
+  const [mine, setMine] = useMine(item.id);
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string | undefined>(undefined);
   const done = !!item.outcome;
-  /** The view had the card before it was answered: an answer that is not
-   * this window's is another window's then. */
-  const [sawWaiting] = useState(() => !done);
   const waiting = !done && answering.open && answering.waiting.has(item.id);
   const choose = (option: string | undefined) => {
     if (!waiting || sending) return;
@@ -229,7 +240,7 @@ function useAnswer(item: PermissionItem, agent: string) {
       () => setSending(false),
       (e: unknown) => {
         setSending(false);
-        // Sent, and perhaps taken: still this window's answer if it comes.
+        // Sent, and perhaps taken: still this page's answer if it comes.
         if (!unsureOf(e)) setMine(undefined);
         // Another window answered first: its answer comes as the card's.
         if ((e as { code?: unknown })?.code !== 'not_found') setFailed(errorText(e, agent, 'conversation.commandFailed'));
@@ -245,11 +256,7 @@ function useAnswer(item: PermissionItem, agent: string) {
       : undefined;
   const state: 'waiting' | 'done' | 'stale' = done ? 'done' : waiting ? 'waiting' : 'stale';
   const status = done
-    ? doneText(
-        item.by,
-        chosen,
-        !sawWaiting || (mine !== undefined && (chosen === undefined ? mine === '' : item.outcome?.optionId === mine)),
-      )
+    ? doneText(item.by, chosen, mine !== undefined && (chosen === undefined ? mine === '' : item.outcome?.optionId === mine))
     : !waiting
       ? answering.readOnly
         ? t('conversation.ask.readOnly')
@@ -362,7 +369,7 @@ export function PlanCard({ item, ctx }: { item: PermissionItem; ctx: ItemContext
     >
       {plan.trim() && (
         <div className="conv-ask-plan">
-          <Markdown text={plan} className="conv-md conv-tool-md" />
+          <Markdown text={displayMath(plan)} className="conv-md conv-tool-md" />
         </div>
       )}
       {a.waiting && (
@@ -489,7 +496,7 @@ function QuestionField({ q, draft, disabled, onChange }: { q: Question; draft: D
       )}
       {preview && (
         <div className="conv-q-preview">
-          <Markdown text={preview} className="conv-md conv-tool-md" />
+          <Markdown text={displayMath(preview)} className="conv-md conv-tool-md" />
         </div>
       )}
     </fieldset>
@@ -502,10 +509,9 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
   // By question id: a Map, as an id may be any text.
   const [drafts, setDrafts] = useState<ReadonlyMap<string, Draft>>(() => new Map());
   const [sending, setSending] = useState(false);
-  const [mine, setMine] = useState(false);
+  /** How this page answered: ANSWERED or SKIPPED. */
+  const [mine, setMine] = useMine(item.id);
   const [failed, setFailed] = useState<string | undefined>(undefined);
-  /** The view had the card before it was answered (as a permission's). */
-  const [sawWaiting] = useState(() => !item.done);
   const waiting = !item.done && answering.open && answering.waiting.has(item.id);
   const draftOf = (q: Question) => drafts.get(q.id) ?? emptyDraft();
   const ready = item.questions.every((q) => answersOf(q, draftOf(q)).length > 0);
@@ -515,12 +521,12 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
     for (const q of item.questions) answers[q.id] = answersOf(q, draftOf(q));
     setSending(true);
     setFailed(undefined);
-    setMine(true);
+    setMine(cancelled ? SKIPPED : ANSWERED);
     answering.answer(item.request, cancelled ? { cancelled: true } : { answers }).then(
       () => setSending(false),
       (e: unknown) => {
         setSending(false);
-        if (!unsureOf(e)) setMine(false);
+        if (!unsureOf(e)) setMine(undefined);
         if ((e as { code?: unknown })?.code !== 'not_found') setFailed(errorText(e, ctx.agent, 'conversation.commandFailed'));
       },
     );
@@ -537,7 +543,7 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
   let status: string | undefined;
   if (item.done) {
     const answered = !!item.answers && Object.values(item.answers).some((a) => a.length);
-    if (answered) status = mine || !sawWaiting ? t('conversation.question.youAnswered') : t('conversation.question.answered');
+    if (answered) status = mine === ANSWERED ? t('conversation.question.youAnswered') : t('conversation.question.answered');
     else if (item.by === 'cancel') status = t('conversation.ask.cancelled');
     else if (item.by === 'ended') status = t('conversation.ask.ended');
     else status = t('conversation.question.skipped');
