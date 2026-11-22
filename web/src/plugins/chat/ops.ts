@@ -17,10 +17,9 @@ import { ProviderLogo } from '../usage/logos';
 import { chatApi, failureText, permissionMode } from './api';
 import { canContinueInTerminal, continueInTerminal } from './handoff';
 import { STATE_DELETED } from './protocol';
-import { chatPane } from './status';
 import { applyStates, chatState, loadAgents, offeredKinds, upsertState } from './state';
 import { withSource } from './source';
-import { CHAT_PLUGIN, CHAT_VIEW, chatRef } from './view';
+import { CHAT_PLUGIN, CHAT_VIEW, chatPane, chatRef } from './view';
 
 /** What the chat panes are asked from outside: the pane (machine and view
  * id, `${m}\n${id}`) whose title is to be edited. */
@@ -114,6 +113,23 @@ export async function closeChat(m: string, chat: string) {
   } catch (e) {
     toast(failureText(e, agentName(chatState(m, chat)?.kind), 'chat.closeFailed'));
   }
+}
+
+/** Archives a chat from the sidebar list (its agent's own session stays in
+ * history) and reminds the user in a bottom-left toast. */
+export async function archiveChat(m: string, chat: string): Promise<boolean> {
+  const st = chatState(m, chat);
+  const agent = agentName(st?.kind);
+  const title = st?.title || agent;
+  try {
+    await chatApi.remove(m, chat);
+  } catch (e) {
+    toast(failureText(e, agent, 'chat.archiveFailed'));
+    return false;
+  }
+  if (st) applyStates(m, [{ ...st, state: STATE_DELETED }], false);
+  useStore.getState().toast(t('chat.archived', { title }), undefined, undefined, 'info', 'bottom-left');
+  return true;
 }
 
 /** Deletes a chat once the user confirmed it; resolves to whether it

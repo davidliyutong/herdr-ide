@@ -10,6 +10,12 @@ export interface OpenedFolders {
   skipped: number;
 }
 
+/** Where a notification click routes focus when activated. */
+export type NotificationTarget =
+  | { kind: 'pane'; machine: string; pane: string }
+  | { kind: 'chat'; machine: string; chat: string; agent?: string }
+  | { kind: 'panel'; panel: string };
+
 export interface DesktopShell {
   /** Calls fn with the command ("tab.new", "pane.close") of each menu item
    * chosen, by a click or by its key when the page left the key to the

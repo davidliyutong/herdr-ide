@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: vi.fn() } }));
 
 import { chatPlugin } from '../plugins/chat';
-import { fullAccessAllowed, permissionMode } from '../plugins/chat/api';
+import { fullAccessAllowed, permissionMode, readState, readStates } from '../plugins/chat/api';
 import { chatMenu, cleanDir, useChatUi } from '../plugins/chat/ops';
 import { STATES_PATH, type ChatState } from '../plugins/chat/protocol';
 import { chatSource, dropSources } from '../plugins/chat/source';
@@ -262,6 +262,49 @@ describe('the chat panes’ statuses', () => {
     seen('m', view(A));
     await settle();
     expect(calls).toEqual([]);
+  });
+
+  it('reads seen/unread/stale state fields and exposes unopened chats and openTarget', async () => {
+    expect(
+      readState({
+        id: A,
+        kind: 'claude',
+        title: 'Unread chat',
+        cwd: '/proj',
+        state: 'sleeping',
+        status: 'done',
+        updated: '2026-11-22T10:00:00Z',
+        seq: 12,
+        sessionId: '',
+        seen: 10,
+        unread: true,
+        stale: true,
+      }),
+    ).toMatchObject({ id: A, seen: 10, unread: true, stale: true });
+    expect(readStates({ t: 'states', states: [], full: true, rev: 2, stale: true })).toMatchObject({ full: true, rev: 2, stale: true });
+
+    applyMessage(
+      'm',
+      msg(
+        [
+          st(B, { title: 'Open', status: 'blocked', state: 'waiting' }),
+          st(A, { title: 'Wait here', cwd: '/a', status: 'blocked', state: 'waiting' }),
+          st(C, { kind: 'codex', title: '', cwd: '/b', status: 'done', state: 'idle' }),
+          st('c00000000000000d4', { title: 'Old', cwd: '/c', status: 'idle', state: 'closed' }),
+        ],
+        10,
+        true,
+      ),
+    );
+    const unopened = chatPlugin.viewStatus!.unopened!('m');
+    expect(unopened.map((u) => [u.id, u.title, u.directory, u.status])).toEqual([
+      [`chat:${A}`, 'Wait here', '/a', 'blocked'],
+      [`chat:${C}`, 'Codex', '/b', 'done'],
+    ]);
+    await chatPlugin.viewStatus!.openTarget!({ kind: 'chat', machine: 'm', chat: C });
+    await settle();
+    expect(core.layout('m')!.workspaces[0].tabs).toHaveLength(2);
+    expect(chatPlugin.viewStatus!.unopened!('m').map((u) => u.id)).toEqual([`chat:${A}`]);
   });
 });
 

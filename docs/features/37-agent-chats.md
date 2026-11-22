@@ -558,11 +558,12 @@ cut to 256 bytes.
   Alt+Enter: a new line), attaches up to 20 images by pasting, dropping or
   picking, names files of the chat's directory after `@` (the machine's
   listing, 50 at most), offers the agent's slash commands after `/`, the
-  model, effort and mode selectors from the chat's options (values of
-  full access shown unavailable where the machine does not allow them),
-  the queued messages, a stop button (and Escape), and a line of cost,
-  context and the tightest limit. Drafts are kept per chat (200 chats).
-  Read-only, every control is disabled.
+  custom-styled model, effort and mode popover selectors from the chat's
+  options (with keyboard navigation, upward positioning near the bottom,
+  and values of full access shown unavailable where the machine does not
+  allow them), the queued messages, a stop button (and Escape), and a line
+  of cost, context and the tightest limit. Drafts are kept per chat (200
+  chats). Read-only, every control is disabled.
 - **New chats.** The new-tab menu offers a chat with each kind that has
   one, and with those the machine's host can start once it told
   (`GET agents`, which starts no host, asked again after 5 minutes), as
@@ -571,14 +572,22 @@ cut to 256 bytes.
   machine's home, in the mode of `chat.permissionMode`, in a new tab.
 - **The Chats panel** of the right sidebar: the machine's chats, blocked
   ones first, then done, working and the rest, the latest first; each
-  shows its chat, closes or deletes it. Below them the agents' earlier
-  sessions of the focused pane's directory (below).
+  shows its chat, closes it or archives it (reminding the user in a
+  bottom-left toast that it can be restored from history), with row
+  actions placed in flex flow beside the state label so they do not
+  overlap it. Its toolbar links to the Agent Chats management page in
+  Settings (`SettingsExtra.tsx`), which shows an overview of headless chat
+  hosts and active sessions across machines (with stop/open controls) and
+  the persisted list of trusted folders per machine with per-folder revoke
+  controls. Below the chats are the agents' earlier sessions of the
+  focused pane's directory (below).
 - **Statuses** (`status.ts`, the plugin's `viewStatus`,
   [27](27-plugins.md)): a chat pane is working, blocked, done or idle as
-  its chat; the sidebar's dots, the tabs', the attention list, the badge
-  and notifications count chat panes as they count agent terminals, and a
-  notification of a chat leads to its pane
-  ([07](07-agent-native-workflow.md)). Seeing a pane whose chat is done
+  its chat, and active or attention-needing conversations without an open
+  pane (`unopened`) are included in the sidebar's attention inbox, the
+  command palette, the badge count, and notifications (clicking opens or
+  focuses the chat pane via `openTarget`,
+  [07](07-agent-native-workflow.md)). Seeing a pane whose chat is done
   posts `seen` with its last sequence number, which ends done for every
   page; a failed post is tried again after 2 s, doubling, 8 times at
   most, and the chat's next done state asks again.
@@ -764,8 +773,8 @@ they do in a terminal. See the rows on agent chats in
   `TestIntegrationTermHidden`, passed in an isolated Linux container and
   on macOS.
 - `web/src/__tests__`: `chat.test.ts`, `chatConnection.test.ts`,
-  `chatPane.test.tsx`, `chatPlugin.test.tsx`, `chatHandoff.test.ts`,
-  `chatImport.test.tsx`, `conversationChat.test.ts`,
+  `chatPane.test.tsx`, `chatPlugin.test.tsx`, `chatManage.test.tsx`,
+  `chatHandoff.test.ts`, `chatImport.test.tsx`, `conversationChat.test.ts`,
   `conversationCards.test.tsx`, `conversationComposer.test.tsx`,
   `viewStatus.test.tsx`, `notifyViews.test.ts`, `attention.test.tsx`.
 - Run in a browser against a development instance (Claude Code 2.1.330

@@ -9,28 +9,15 @@
 // times), never at once: after the last try, the next state of the chat
 // done asks again.
 import { useStore } from '../../state/store';
-import { useTerms } from '../../state/terms';
-import * as L from '../../term/layout';
 import type { AgentStatus } from '../../lib/machine';
-import type { ViewStatusDef } from '../api';
+import type { UnopenedAgent, ViewStatusDef } from '../api';
 import { chatApi } from './api';
+import { agentName, openChat } from './ops';
 import { CHAT_STATUSES, isChatId } from './protocol';
-import { follow, useChats } from './state';
-import { CHAT_PLUGIN, CHAT_VIEW, chatRef } from './view';
+import { chatState, follow, useChats } from './state';
+import { chatPane, chatRef } from './view';
 
-/** The pane of machine m's layout that shows a chat: the selected
- * workspace's first, then any other's. */
-export function chatPane(m: string, chat: string): string | undefined {
-  const layout = useTerms.getState().machines[m]?.layout;
-  if (!layout) return undefined;
-  const order = [layout.workspaces[layout.selected], ...layout.workspaces.filter((_, i) => i !== layout.selected)];
-  for (const ws of order) {
-    if (!ws) continue;
-    const found = L.pluginViews(ws, CHAT_PLUGIN, CHAT_VIEW).find((v) => chatRef(v.view).chat === chat);
-    if (found) return found.key;
-  }
-  return undefined;
-}
+export { chatPane };
 
 /** The seq up to which each chat was said to be seen, by machine and chat;
  * the oldest forgotten past MAX_TOLD. */
@@ -102,6 +89,28 @@ export const chatViewStatus: ViewStatusDef = {
     clearTimeout(retries.get(k));
     retries.delete(k);
     tell(m, chat, st.seq, 0);
+  },
+  unopened(m) {
+    const states = useChats.getState().states[m];
+    if (!states) return [];
+    const out: UnopenedAgent[] = [];
+    for (const st of Object.values(states)) {
+      if (st.status !== 'blocked' && st.status !== 'done' && st.status !== 'working') continue;
+      if (chatPane(m, st.id)) continue;
+      out.push({
+        id: `chat:${st.id}`,
+        title: st.title || agentName(st.kind),
+        directory: st.cwd || undefined,
+        status: st.status as AgentStatus,
+        open: () => void openChat(m, st.id, st.kind),
+      });
+    }
+    return out;
+  },
+  openTarget(target) {
+    if (target.kind !== 'chat') return;
+    const kind = target.agent || chatState(target.machine, target.chat)?.kind || '';
+    return openChat(target.machine, target.chat, kind).then(() => {});
   },
 };
 

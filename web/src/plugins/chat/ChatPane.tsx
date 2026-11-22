@@ -73,7 +73,7 @@ function ChatBody({ m, pane, view, chat }: { m: string; pane: string; view: Plug
   const cwd = live?.info?.cwd || st?.cwd || '';
   const state = live?.state ?? st?.state;
   const status = st?.status;
-  const offline = live?.link === 'offline';
+  const offline = live?.link === 'offline' || (!!st?.stale && st.state !== 'closed');
   const label = gone ? t('chat.state.deleted') : stateLabel(state, { handedOff: live?.info?.handedOff, offline });
   const Icon = kind ? kindIcon(kind) : BotMessageSquare;
   const failed = !gone && live?.link === 'failed' ? live.linkError : undefined;

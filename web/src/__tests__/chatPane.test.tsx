@@ -23,7 +23,7 @@ import { useChatUi } from '../plugins/chat/ops';
 import { definePlugins } from '../plugins/registry';
 import { useSettings } from '../settings';
 import { useStore } from '../state/store';
-import { useDialog, type DialogRequest } from '../dialog';
+import { useDialog } from '../dialog';
 import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
@@ -200,13 +200,17 @@ describe('the chat pane', () => {
       { seq: 1, t: 'notice', method: CHAT_NOTICES.untrustedFolder, params: { cwd: '/home/u/proj' } },
     ]);
     await pane(view(A, { agent: 'kimi' }));
-    const yolo = () => q<HTMLSelectElement>('select[data-config="mode"]')!.options[1];
-    await vi.waitFor(() => expect(yolo()?.disabled).toBe(true));
+    const modeBtn = () => q<HTMLButtonElement>('button.conv-select[data-config="mode"]')!;
+    await vi.waitFor(() => expect(modeBtn()).toBeTruthy());
+    await act(async () => modeBtn().click());
+    const yolo = () => document.body.querySelector<HTMLElement>('.conv-select-menu[data-config="mode"] [data-value="yolo"]')!;
+    await vi.waitFor(() => expect(yolo()?.getAttribute('aria-disabled')).toBe('true'));
     expect(yolo().textContent).toBe(t('conversation.config.fullOff', { name: 'YOLO' }));
     await act(async () =>
       useSettings.setState({ values: { 'chat.allowFullAccess': { value: false, source: 'global', machines: { m: true } } } }),
     );
-    expect(yolo().disabled).toBe(false);
+    expect(yolo().getAttribute('aria-disabled')).toBeNull();
+    await act(async () => modeBtn().click());
     const trust = qa('.conv-notice button').find((b) => b.textContent === t('conversation.notice.trust'))!;
     await act(async () => trust.click());
     await tick();
@@ -316,24 +320,34 @@ describe('the Chats panel', () => {
     expect((ws().tabs[2].root as L.PluginLeaf).view).toMatchObject({ plugin: 'chat', kind: 'chat', chat: A, agent: 'codex' });
   });
 
-  it('closes and deletes chats, not on a read-only page', async () => {
+  it('closes and archives chats with a bottom-left toast, not on a read-only page', async () => {
+    useStore.setState({ toasts: [] });
     applyStates('m', [st(A, { title: 'one' }), st(B, { title: 'two', state: 'closed' })], true);
     await act(async () => root.render(createElement(ChatsPanel)));
     expect(qa(`[aria-label="${t('chat.closeNamed', { title: 'two' })}"]`)).toHaveLength(0);
+    // The closed status label lives inside .chat-row-main while actions are a flex sibling (no overlap).
+    const closedRow = qa('.chat-row').find((r) => r.textContent?.includes('two'))!;
+    expect(closedRow.querySelector('.chat-row-main .chat-row-state')?.textContent).toBe(t('chat.state.closed'));
+    expect(closedRow.querySelector('.chat-row-main .chat-row-actions')).toBeNull();
+    expect(closedRow.querySelector(':scope > .chat-row-actions')).not.toBeNull();
     await act(async () => q<HTMLButtonElement>(`[aria-label="${t('chat.closeNamed', { title: 'one' })}"]`)!.click());
     await tick();
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual([`/api/m/m/p/chat/close?chat=${A}`]);
-    await act(async () => q<HTMLButtonElement>(`[aria-label="${t('chat.deleteNamed', { title: 'two' })}"]`)!.click());
-    const req = useDialog.getState().current as Extract<DialogRequest, { kind: 'confirm' }>;
-    expect(req.danger).toBe(true);
-    await act(async () => {
-      useDialog.setState({ current: undefined });
-      req.resolve(true);
-      await settle();
-    });
+    const archiveBtn = q<HTMLButtonElement>(`[aria-label="${t('chat.archiveNamed', { title: 'two' })}"]`)!;
+    expect(archiveBtn.title).toBe(t('chat.archive'));
+    await act(async () => archiveBtn.click());
     await tick();
+    expect(useDialog.getState().current).toBeUndefined();
     expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual([`/api/m/m/p/chat/chat?chat=${B}`]);
     expect(rows()).toEqual(['one']);
+    expect(useStore.getState().toasts.at(-1)).toMatchObject({
+      msg: t('chat.archived', { title: 'two' }),
+      position: 'bottom-left',
+    });
+    // Management button opens Agent Chats settings page
+    await act(async () => q<HTMLButtonElement>(`[aria-label="${t('chat.manage.open')}"]`)!.click());
+    expect(useStore.getState().settings).toEqual({ page: 'chat' });
+    useStore.getState().openSettings(false);
     await act(async () => useStore.getState().setReadOnly(true));
     expect(qa('.chat-row-actions')).toHaveLength(0);
     expect(q(`[aria-label="${t('chat.new')}"]`)).toBeNull();

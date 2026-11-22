@@ -21,7 +21,7 @@ import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
 import { t } from '../i18n';
 import { FakeCore, settle } from './fakeTerms';
-import { dummyPlugin, resetViewStatuses, setViewStatus, thing } from './viewStatusPlugin';
+import { dummyPlugin, resetViewStatuses, setUnopenedAgents, setViewStatus, thing } from './viewStatusPlugin';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -140,6 +140,37 @@ describe('views', () => {
     await act(async () => rows()[0].click());
     await act(settle);
     expect(L.selectedTab(core.layout('m')!)?.focused).toBe('view:v1');
+  });
+
+  it('includes unopened conversations in the inbox, attention list, palette, and openAttention, and opens them on click', async () => {
+    const open = vi.fn();
+    await act(async () => root.render(createElement(Sidebar)));
+    await act(async () =>
+      setUnopenedAgents('m', [{ id: 'chat:u1', title: 'Background chat', directory: '/srv/bg', status: 'blocked', open }]),
+    );
+    const list = attentionList();
+    expect(list.some((i) => i.terminal === 'chat:u1' && i.status === 'blocked')).toBe(true);
+    const rows = [...host.querySelectorAll<HTMLElement>('.inbox-item')];
+    const bg = rows.find((r) => r.textContent?.includes('Background chat'))!;
+    expect(bg).toBeTruthy();
+    expect(bg.querySelector('.muted')?.textContent).toBe('gpu');
+    expect(bg.title).toBe('gpu\n/srv/bg');
+    await act(async () => bg.click());
+    expect(open).toHaveBeenCalledTimes(1);
+
+    // openAttention opens highest-priority unopened chat when pane v1 is idle
+    setViewStatus('v1', 'idle');
+    actions.openAttention();
+    expect(open).toHaveBeenCalledTimes(2);
+
+    // Palette lists unopened chat and invokes open()
+    await act(async () => root.render(createElement(Palette)));
+    await act(async () => useStore.getState().setPalette('workspaces'));
+    await act(settle);
+    const item = [...host.querySelectorAll<HTMLElement>('.palette-item')].find((e) => e.textContent?.includes('Background chat'))!;
+    expect(item).toBeTruthy();
+    await act(async () => item.click());
+    expect(open).toHaveBeenCalledTimes(3);
   });
 
   it("names plugins' panes in the palette's agents", async () => {

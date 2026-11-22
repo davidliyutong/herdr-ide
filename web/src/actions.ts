@@ -6,7 +6,7 @@
 // they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
-import { describeView, isPluginOn, viewStatus } from './plugins/registry';
+import { describeView, isPluginOn, viewStatus, viewUnopened } from './plugins/registry';
 import { isLive, type TerminalRecord } from './term/protocol';
 import { procName, SHELLS } from './term/place';
 import { terms, useTerms } from './state/terms';
@@ -26,19 +26,23 @@ import type { MessageKey } from './i18n/en';
 
 export interface AttentionItem {
   m: string;
-  /** The pane's key: a terminal's address, or view:<id> for a plugin's pane. */
+  /** The pane's key: a terminal's address, view:<id> for a plugin's pane,
+   * or an unopened conversation id (chat:<id>). */
   terminal: string;
   /** The terminal's record; none for a plugin's pane. */
   record?: TerminalRecord;
   /** The plugin's pane, for one. */
   view?: L.PluginView;
+  /** A conversation/agent without an open pane yet. */
+  unopened?: { title: string; directory?: string; open: () => void };
   status: AgentStatus;
 }
 
-/** Terminals with an agent (or a status their program reports) and the
- * plugins' panes with a status (a chat's; plugins/api.ts ViewStatusDef)
- * on every machine followed, by how much they need the user; terminals
- * before panes of the same status. */
+/** Terminals with an agent (or a status their program reports), the
+ * plugins' panes with a status, and active/attention-needing plugin
+ * conversations without an open pane on every machine followed, by how
+ * much they need the user; terminals before panes, panes before unopened
+ * chats within the same status. */
 export function attentionList(): AttentionItem[] {
   const s = useStore.getState();
   const tm = useTerms.getState().machines;
@@ -56,17 +60,29 @@ export function attentionList(): AttentionItem[] {
       if (status) out.push({ m, terminal: key, view, status });
     }
   }
+  for (const m of s.order) {
+    for (const u of viewUnopened(m)) {
+      out.push({ m, terminal: u.id, unopened: u, status: u.status });
+    }
+  }
   return out.sort((a, b) => statusRank[b.status] - statusRank[a.status]);
+}
+
+/** Opens or focuses an item from the attention list. */
+export function focusAttention(item: AttentionItem) {
+  if (item.unopened) item.unopened.open();
+  else actions.focusPane(item.m, item.terminal);
 }
 
 /** What an attention item is called first: its agent, else its pane's
  * title (a terminal's; a plugin's pane's, a chat's). */
 export function attentionName(i: AttentionItem): string {
-  return (i.record && agentOf(i.record)) ?? attentionTitle(i);
+  return (i.record && agentOf(i.record)) ?? i.unopened?.title ?? attentionTitle(i);
 }
 
 /** An attention item's pane's title. */
 export function attentionTitle(i: AttentionItem): string {
+  if (i.unopened) return i.unopened.title;
   return i.view ? describeView(i.m, i.view).title : terminalTitle(i.record, i.terminal);
 }
 
@@ -1041,10 +1057,10 @@ export const actions = {
   },
 
   /** Jump to the agent that most needs attention (blocked first, then
-   * done): a terminal's, or a plugin's pane's (a chat's). */
+   * done): a terminal's, a plugin's pane's, or an unopened chat. */
   openAttention() {
     const best = attentionList()[0];
-    if (best) actions.focusPane(best.m, best.terminal);
+    if (best) focusAttention(best);
   },
 };
 

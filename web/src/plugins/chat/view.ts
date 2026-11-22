@@ -5,6 +5,8 @@
 // is taken only in the host's form (protocol.ts isChatId), the agent only
 // when it is a kind the chat host runs, the title as text.
 import { chatAdapter } from '../../conversation/kinds';
+import { useTerms } from '../../state/terms';
+import * as L from '../../term/layout';
 import type { PluginView } from '../../term/layout';
 import { isChatId } from './protocol';
 
@@ -24,4 +26,18 @@ export interface ChatRef {
 export function chatRef(view: PluginView): ChatRef {
   const agent = typeof view.agent === 'string' && chatAdapter(view.agent) ? view.agent : undefined;
   return { chat: isChatId(view.chat) ? view.chat : undefined, agent };
+}
+
+/** The pane of machine m's layout that shows a chat: the selected
+ * workspace's first, then any other's. */
+export function chatPane(m: string, chat: string): string | undefined {
+  const layout = useTerms.getState().machines[m]?.layout;
+  if (!layout) return undefined;
+  const order = [layout.workspaces[layout.selected], ...layout.workspaces.filter((_, i) => i !== layout.selected)];
+  for (const ws of order) {
+    if (!ws) continue;
+    const found = L.pluginViews(ws, CHAT_PLUGIN, CHAT_VIEW).find((v) => chatRef(v.view).chat === chat);
+    if (found) return found.key;
+  }
+  return undefined;
 }

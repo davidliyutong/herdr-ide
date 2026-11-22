@@ -8,6 +8,7 @@ import type { MenuEntry } from '../contextMenu';
 import type { MessageKey } from '../i18n';
 import type { AgentStatus } from '../lib/machine';
 import type { SettingDef } from '../settings';
+import type { NotificationTarget } from '../shell';
 import type { PluginView, TerminalLeaf } from '../term/layout';
 
 /** An icon: lucide's, or one drawn the same way (components/icons.tsx). */
@@ -158,6 +159,15 @@ export interface TerminalHeaderProps {
  * tabIndex -1. A press leaves the keyboard where it is. */
 export type HeaderActionsComponent = ComponentType<TerminalHeaderProps>;
 
+/** An active or attention-needing conversation/agent without an open pane. */
+export interface UnopenedAgent {
+  id: string;
+  title: string;
+  directory?: string;
+  status: AgentStatus;
+  open(): void;
+}
+
 /** Status of a plugin's panes as terminal agents have it, for dots, badges, the attention list and
  * notifications (registry.ts viewStatus; notify.ts, seen.ts). */
 export interface ViewStatusDef {
@@ -171,6 +181,10 @@ export interface ViewStatusDef {
   paneOf?(m: string, data: Record<string, unknown>): string | undefined;
   /** The user saw the pane (it is visible and focused while the page is visible) and its status was done. */
   seen?(m: string, view: PluginView): void;
+  /** Conversations/agents on machine m that do not currently have an open pane. */
+  unopened?(m: string): UnopenedAgent[];
+  /** Opens/focuses a chat target when a notification without an open pane is clicked. */
+  openTarget?(target: Extract<NotificationTarget, { kind: 'chat' }>): void | Promise<void>;
 }
 
 export interface PluginDef {

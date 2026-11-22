@@ -11,7 +11,19 @@
 import { hasMessage, t, type MessageKey } from '../../i18n';
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
 import { builtinDefaults } from '../../settings';
-import { MODES, STATES_PATH, isChatId, type AgentStatus, type ChatState, type Options, type Session } from './protocol';
+import {
+  MODES,
+  STATES_PATH,
+  isChatId,
+  type AgentStatus,
+  type ChatHostOverview,
+  type ChatHostSession,
+  type ChatState,
+  type HostSettings,
+  type Options,
+  type Session,
+  type TrustedFolder,
+} from './protocol';
 
 /** A failure with the core's or the chat host's code (chatproto's codes,
  * read_only, offline, …), or network when the core did not answer. */
@@ -65,7 +77,7 @@ export function readAgent(v: unknown): AgentStatus | undefined {
  * one), read; undefined without a chat id in the host's form. */
 export function readState(v: unknown): ChatState | undefined {
   if (!isObject(v) || !isChatId(v.id)) return undefined;
-  return {
+  const out: ChatState = {
     id: v.id,
     kind: str(v.kind, 64),
     title: str(v.title),
@@ -76,6 +88,75 @@ export function readState(v: unknown): ChatState | undefined {
     seq: seq(v.seq),
     sessionId: str(v.sessionId, 200),
   };
+  if (typeof v.seen === 'number' && Number.isSafeInteger(v.seen) && v.seen >= 0) out.seen = v.seen;
+  if (v.unread === true) out.unread = true;
+  if (v.stale === true) out.stale = true;
+  return out;
+}
+
+const optInt = (v: unknown): number | undefined => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : undefined);
+
+/** A trusted folder entry, read; undefined for invalid entries. */
+export function readTrustedFolder(v: unknown): TrustedFolder | undefined {
+  if (!isObject(v)) return undefined;
+  const cwd = plain(v.cwd, MAX_PATH);
+  if (!cwd?.startsWith('/')) return undefined;
+  return { cwd, at: str(v.at, 64) };
+}
+
+/** A session on a headless chat host, read; undefined without a valid chat id. */
+export function readHostSession(v: unknown): ChatHostSession | undefined {
+  if (!isObject(v) || !isChatId(v.chat)) return undefined;
+  const out: ChatHostSession = {
+    chat: v.chat,
+    kind: str(v.kind, 64),
+    title: str(v.title),
+    cwd: str(v.cwd, MAX_PATH),
+    sessionId: str(v.sessionId, MAX_SESSION_ID),
+    state: str(v.state, 32),
+    status: str(v.status, 32),
+    updated: str(v.updated, 64),
+    bytes: seq(v.bytes),
+  };
+  const pid = optInt(v.pid);
+  if (pid !== undefined) out.pid = pid;
+  if (v.starting === true) out.starting = true;
+  if (typeof v.idleSince === 'string' && v.idleSince) out.idleSince = v.idleSince.slice(0, 64);
+  if (typeof v.agentVersion === 'string' && v.agentVersion) out.agentVersion = v.agentVersion.slice(0, 100);
+  return out;
+}
+
+/** A machine's headless chat host overview, read; undefined without a machine id. */
+export function readHostOverview(v: unknown): ChatHostOverview | undefined {
+  if (!isObject(v) || typeof v.machine !== 'string' || !v.machine) return undefined;
+  const status =
+    v.status === 'running' || v.status === 'stopped' || v.status === 'offline' || v.status === 'error'
+      ? v.status
+      : v.running === true
+        ? 'running'
+        : 'stopped';
+  const out: ChatHostOverview = {
+    machine: v.machine.slice(0, 128),
+    label: str(v.label, 200) || v.machine.slice(0, 128),
+    machineStatus: str(v.machineStatus, 32),
+    running: v.running === true,
+    status,
+    totalChats: seq(v.totalChats),
+    sessions: list(v.sessions, MAX_CHATS, readHostSession),
+  };
+  for (const k of ['pid', 'proto', 'conns', 'watchers', 'liveAgents', 'totalBytes', 'ending'] as const) {
+    const n = optInt(v[k]);
+    if (n !== undefined) out[k] = n;
+  }
+  if (typeof v.version === 'string' && v.version) out.version = v.version.slice(0, 100);
+  if (typeof v.terminalId === 'string' && v.terminalId) out.terminalId = v.terminalId.slice(0, 200);
+  if (typeof v.startedAt === 'string' && v.startedAt) out.startedAt = v.startedAt.slice(0, 64);
+  if (typeof v.socket === 'string' && v.socket) out.socket = v.socket.slice(0, MAX_PATH);
+  if (typeof v.base === 'string' && v.base) out.base = v.base.slice(0, MAX_PATH);
+  if (typeof v.error === 'string' && v.error) out.error = v.error.slice(0, 64);
+  if (typeof v.message === 'string' && v.message) out.message = v.message.slice(0, 500);
+  if (isObject(v.settings)) out.settings = v.settings as HostSettings;
+  return out;
 }
 
 /** A string of at most max characters without control characters;
@@ -107,11 +188,14 @@ export interface States {
   states: ChatState[];
   full: boolean;
   rev: number;
+  stale?: boolean;
 }
 export function readStates(v: unknown): States | undefined {
   if (!isObject(v) || v.t !== 'states' || !Array.isArray(v.states)) return undefined;
   // Deleted chats come too: room for them beyond the host's bound.
-  return { states: list(v.states, MAX_CHATS + 1000, readState), full: v.full === true, rev: seq(v.rev) };
+  const out: States = { states: list(v.states, MAX_CHATS + 1000, readState), full: v.full === true, rev: seq(v.rev) };
+  if (v.stale === true) out.stale = true;
+  return out;
 }
 
 /** The most machines read from a snapshot. */
@@ -189,6 +273,18 @@ export const chatApi = {
   /** Takes back the trust that covers a directory: its own and that of
    * the directories above it. */
   untrust: (m: string, cwd: string) => send<unknown>(`${base(m)}/untrust?${query({ cwd })}`, { method: 'POST' }).then(() => {}),
+  /** Lists trusted folders from a running host without starting one. */
+  trusted: async (m: string): Promise<TrustedFolder[]> =>
+    list((await send<{ trusted?: unknown }>(`${base(m)}/trusted`, { cache: 'no-store' })).trusted, MAX_CHATS, readTrustedFolder),
+  /** Lists persisted trusted folders, starting the host if not running. */
+  startTrusted: async (m: string): Promise<TrustedFolder[]> =>
+    list((await send<{ trusted?: unknown }>(`${base(m)}/trusted`, { method: 'POST' })).trusted, MAX_CHATS, readTrustedFolder),
+  /** Overview of headless chat hosts and sessions across all machines. */
+  hosts: async (): Promise<ChatHostOverview[]> =>
+    list((await send<{ hosts?: unknown }>('/api/p/chat/hosts', { cache: 'no-store' })).hosts, MAX_MACHINES, readHostOverview),
+  /** Stops a machine's headless chat host cleanly (refused with busy while
+   * any chat is working, waiting or starting). */
+  stopHost: (m: string) => send<unknown>(`${base(m)}/host/stop`, { method: 'POST' }).then(() => {}),
 };
 
 type Values = Record<string, { value?: unknown; machines?: Record<string, unknown> } | undefined>;

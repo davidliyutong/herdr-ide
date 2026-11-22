@@ -206,25 +206,51 @@ export function App() {
       <AuthDialog />
       <ContextMenu />
       <div className="toasts">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`toast ${toast.kind ?? ''}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
-            {toast.kind === 'error' && <CircleAlert />}
-            {toast.kind === 'warning' && <TriangleAlert />}
-            <span>{toast.msg}</span>
-            {toast.action && (
-              <button
-                className="sm"
-                onClick={() => {
-                  toast.action!.run();
-                  useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== toast.id) }));
-                }}
-              >
-                {toast.action.label}
-              </button>
-            )}
-          </div>
-        ))}
+        {toasts
+          .filter((toast) => toast.position !== 'bottom-left')
+          .map((toast) => (
+            <div key={toast.id} className={`toast ${toast.kind ?? ''}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
+              {toast.kind === 'error' && <CircleAlert />}
+              {toast.kind === 'warning' && <TriangleAlert />}
+              <span>{toast.msg}</span>
+              {toast.action && (
+                <button
+                  className="sm"
+                  onClick={() => {
+                    toast.action!.run();
+                    useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== toast.id) }));
+                  }}
+                >
+                  {toast.action.label}
+                </button>
+              )}
+            </div>
+          ))}
       </div>
+      {toasts.some((toast) => toast.position === 'bottom-left') && (
+        <div className="toasts toasts-left">
+          {toasts
+            .filter((toast) => toast.position === 'bottom-left')
+            .map((toast) => (
+              <div key={toast.id} className={`toast ${toast.kind ?? ''}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
+                {toast.kind === 'error' && <CircleAlert />}
+                {toast.kind === 'warning' && <TriangleAlert />}
+                <span>{toast.msg}</span>
+                {toast.action && (
+                  <button
+                    className="sm"
+                    onClick={() => {
+                      toast.action!.run();
+                      useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== toast.id) }));
+                    }}
+                  >
+                    {toast.action.label}
+                  </button>
+                )}
+              </div>
+            ))}
+        </div>
+      )}
     </div>
   );
 }

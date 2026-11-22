@@ -8,6 +8,7 @@ import {
   attentionList,
   attentionName,
   attentionTitle,
+  focusAttention,
   paneDirectory,
   terminalPlace,
   workspaceStatus,
@@ -349,7 +350,10 @@ function Inbox() {
         // must not cut off), its terminal's title, its machine; the
         // directory is in the tooltip. A plugin's pane (a chat) goes by its
         // title, said once (attentionName).
-        const where = [terminalPlace(m, terminal), !item.view && attentionTitle(item), machines[m]?.label].filter(Boolean).join(' · ');
+        const where = item.unopened
+          ? [machines[m]?.label].filter(Boolean).join(' · ')
+          : [terminalPlace(m, terminal), !item.view && attentionTitle(item), machines[m]?.label].filter(Boolean).join(' · ');
+        const dir = item.unopened ? item.unopened.directory : paneDirectory(m, item.view ? { view: item.view } : { terminal });
         return (
           <div
             key={`${m} ${terminal}`}
@@ -361,12 +365,10 @@ function Inbox() {
             onKeyDown={(e) => {
               if (e.key !== 'Enter' && e.key !== ' ') return;
               e.preventDefault();
-              actions.focusPane(m, terminal);
+              focusAttention(item);
             }}
-            title={[where, shortPath(paneDirectory(m, item.view ? { view: item.view } : { terminal }), machines[m]?.info?.home)]
-              .filter(Boolean)
-              .join('\n')}
-            onClick={() => actions.focusPane(m, terminal)}
+            title={[where, shortPath(dir, machines[m]?.info?.home)].filter(Boolean).join('\n')}
+            onClick={() => focusAttention(item)}
           >
             <StatusDot status={status} />
             <div className="inbox-text">

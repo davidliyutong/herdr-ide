@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { actions, attentionList, attentionName, attentionTitle, current, terminalPlace, workspaceTitle } from '../actions';
+import { actions, attentionList, attentionName, attentionTitle, current, focusAttention, terminalPlace, workspaceTitle } from '../actions';
 import { commandEnabled, commandLabel, keyHint, runCommand } from '../keymap';
 import { useKeys } from '../keybindings';
 import { locales, t, type MessageKey } from '../i18n';
@@ -86,10 +86,10 @@ export function Palette() {
     // An agent by its name and where it is (its workspace and tab).
     const agents: Item[] = attentionList().map((i) => ({
       id: `agent:${i.m}:${i.terminal}`,
-      label: `${attentionName(i)} · ${terminalPlace(i.m, i.terminal) || attentionTitle(i)}`,
+      label: i.unopened ? attentionName(i) : `${attentionName(i)} · ${terminalPlace(i.m, i.terminal) || attentionTitle(i)}`,
       hint: s.machines[i.m]?.label,
       icon: <StatusDot status={i.status} />,
-      run: () => actions.focusPane(i.m, i.terminal),
+      run: () => focusAttention(i),
     }));
     // Commands that open the palette, the tabs by number and commands that
     // cannot run now are left out.
