@@ -47,7 +47,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   are shown; machines need nothing installed and no internet. Programs keep running
   when the browser closes or the core stops. After a machine restarted,
   its workspaces and tabs come back as shells in their directories, and
-  Claude Code and Codex continue the directory's latest conversation
+  Claude Code and Codex come back in the session each ran when the
+  machine confirms it for that directory (`claude --resume <id>`,
+  `codex resume <id>`), else continue the directory's latest conversation
   (`claude --continue`, `codex resume --last`); other programs are not
   started again ([33](docs/features/33-workspace-restore.md)). A machine's menu has
   **Troubleshooting** ▸ **Restart Terminal Service…** (its programs keep
@@ -66,7 +68,28 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   sending code from VS Code to an agent of its workspace, pasting images into agent
   prompts. Each machine's agent tells which coding agent runs in a terminal
   and whether it works, waits or finished a turn, with herdr's rules for
-  Claude Code, Codex, Gemini, OpenCode and more.
+  Claude Code, Codex, Gemini, OpenCode and more, and which session Claude
+  Code and Codex run, found from their processes without changing their
+  configuration.
+- **Agents' conversations.** A Claude Code or Codex pane can show the
+  agent's conversation instead of its terminal: messages as Markdown with
+  tables, formulas and code, thoughts, tool calls that open on their
+  output and diffs, the plan as a checklist. It is read from the session's
+  transcript on the machine; the agent keeps running as the CLI under it,
+  and the terminal shows by itself while the agent waits for an answer.
+  The button in the pane's header (or **Toggle Agent Conversation View**)
+  switches between the two for every browser; the message box types into
+  the CLI. The new-tab menu's **Agent: Claude Code** and **Agent: Codex**
+  start an agent shown this way. Text appears a block at a time, as the
+  agents write their transcripts
+  ([35](docs/features/35-agent-native-view.md)).
+- **Terminal history.** With **Keep snapshots of terminal output** on for
+  a machine (off by default: terminal output can hold secrets), the
+  machine saves what its terminals show to its own disk at intervals,
+  within limits of lines, terminals, space and days; after its terminal
+  core started again (a reboot), each terminal shows the output its
+  program left above the new shell, in the same scrollback
+  ([36](docs/features/36-terminal-history.md)).
 - **VS Code on demand.** code-server is installed per machine from the core
   host (no internet needed on machines), downloaded by the machines
   themselves, or taken from an existing install, with Git Graph and a bridge
@@ -221,7 +244,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   API prices (by day, model, project and machine; or the tokens by kind,
   which also count the models without a price), Antigravity's and OpenCode's sessions
   among them, and a page per service. Its settings list the providers,
-  each opening its own.
+  each opening its own. A second status bar item shows what the session
+  of the Claude Code or Codex in the focused pane has cost so far and how
+  much of its context it uses.
   Credentials are read where they are and never leave the machine; only Kimi Code's
   15-minute sign-in is renewed there, as Kimi Code renews it.
 - **Settings.** Language (English, Chinese), light/dark theme followed by

@@ -1,0 +1,48 @@
+{
+  "note": "Hand-written: lines a parser cannot read count in unknown and make no event (not JSON, a JSON array, an object without a type, a message of the wrong shape, content blocks of types never seen); a kind of line never seen is the program's own state and is skipped without counting; what can be read of a line is still shown.",
+  "kind": "claude",
+  "lines": [
+    "not json at all",
+    "[1,2,3]",
+    "{\"sessionId\":\"5b0c3f1e-2a4d-4e6f-8a9b-0c1d2e3f4a5b\"}",
+    "{\"type\":\"user\",\"message\":42}",
+    "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":{\"weird\":true}}}",
+    "{\"parentUuid\":null,\"isSidechain\":false,\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"future_input\",\"x\":1}]},\"uuid\":\"00000000-0000-4000-8000-000000000033\",\"timestamp\":\"2026-11-21T10:00:33.000Z\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"5b0c3f1e-2a4d-4e6f-8a9b-0c1d2e3f4a5b\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"parentUuid\":null,\"isSidechain\":false,\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-5-5\",\"id\":\"msg_03Future\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"future_block\",\"data\":\"secret\"}],\"stop_reason\":\"tool_use\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":1,\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0}}},\"requestId\":\"req_03Future\",\"uuid\":\"00000000-0000-4000-8000-000000000034\",\"timestamp\":\"2026-11-21T10:00:34.000Z\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"5b0c3f1e-2a4d-4e6f-8a9b-0c1d2e3f4a5b\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"parentUuid\":null,\"isSidechain\":false,\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-5-5\",\"id\":\"msg_03Mixed\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"future_block\",\"data\":\"secret\"},{\"type\":\"text\",\"text\":\"Still shown.\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":1,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":1,\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0}}},\"uuid\":\"00000000-0000-4000-8000-000000000035\",\"timestamp\":\"2026-11-21T10:00:35.000Z\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"5b0c3f1e-2a4d-4e6f-8a9b-0c1d2e3f4a5b\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"type\":\"brand-new-state\",\"sessionId\":\"5b0c3f1e-2a4d-4e6f-8a9b-0c1d2e3f4a5b\",\"data\":\"skipped without counting\"}"
+  ],
+  "unknown": 8,
+  "events": [
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 1
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "_meta": {
+          "herdr-ide": {
+            "model": "claude-opus-5-5"
+          }
+        },
+        "content": {
+          "text": "Still shown.",
+          "type": "text"
+        },
+        "messageId": "msg_03Mixed",
+        "sessionUpdate": "agent_message_chunk"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 1
+      }
+    }
+  ]
+}

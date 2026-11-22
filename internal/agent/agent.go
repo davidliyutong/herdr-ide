@@ -189,7 +189,7 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 	case agentproto.OpHCAPI:
 		err = a.pipeUnix(st, a.hcSocket())
 	case agentproto.OpDetect:
-		err = a.handleDetect(ctx, st)
+		err = a.handleDetect(ctx, st, h)
 	case agentproto.OpPrivacy:
 		err = a.handlePrivacy(ctx, st)
 	case agentproto.OpPlugin:

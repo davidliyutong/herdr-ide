@@ -8,7 +8,9 @@
 //     of each platform, which the web UI and the desktop app's shell use
 //     until they have read the core's;
 //   - "i18n": the translation keys the web UI needs for the settings and
-//     commands it shows; its tests fail when it lacks one.
+//     commands it shows; its tests fail when it lacks one;
+//   - "agents": the kinds of coding agents (internal/agentkinds), which
+//     the web UI starts, resumes and shows the conversations of.
 //
 // It also writes the tables of every setting and of every command with its
 // default keys into docs/reference.md, between the markers there.
@@ -31,6 +33,7 @@ import (
 	"strconv"
 	"strings"
 
+	"herdr-ide/internal/agentkinds"
 	"herdr-ide/internal/keybindings"
 	"herdr-ide/internal/registry"
 	"herdr-ide/internal/settings"
@@ -84,6 +87,7 @@ func generate() []byte {
 		"commands":    kb.CommandList(),
 		"keybindings": kb.AllDefaults(),
 		"i18n":        keys(),
+		"agents":      agentkinds.All(),
 	}
 	b, _ := json.MarshalIndent(doc, "", "  ")
 	return append(b, '\n')

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,6 +18,25 @@ func TestKeys(t *testing.T) {
 	}
 	if !slices.IsSorted(got) {
 		t.Error("keys are not sorted")
+	}
+}
+
+// The kinds of coding agents are in the file, with camelCase members, for
+// the web UI (web/src/conversation/kinds.ts).
+func TestAgents(t *testing.T) {
+	var doc struct {
+		Agents []map[string]any `json:"agents"`
+	}
+	if err := json.Unmarshal(generate(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Agents) < 10 || doc.Agents[0]["id"] != "claude" || doc.Agents[0]["title"] != "Claude Code" {
+		t.Fatalf("agents %v", doc.Agents)
+	}
+	for _, k := range []string{"usageProvider", "start", "newSession", "continueLatest", "resumeById", "transcript"} {
+		if _, ok := doc.Agents[0][k]; !ok {
+			t.Errorf("claude has no %s", k)
+		}
 	}
 }
 

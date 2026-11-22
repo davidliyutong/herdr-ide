@@ -39,6 +39,7 @@ import {
   selectWorkspace,
   setPreviewPath,
   setViewFields,
+  setTerminalFields,
   soleLeaf,
   workspaceTitle,
   setRatio,
@@ -193,6 +194,8 @@ function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
       return setPreviewPath(layout, s('pane'), s('path'));
     case 'setViewFields':
       return setViewFields(layout, s('pane'), op.fields as Record<string, unknown>);
+    case 'setTerminalFields':
+      return setTerminalFields(layout, s('terminal'), op.fields as Record<string, unknown>);
     case 'prune':
       return pruneLayout(layout, new Set(op.live as string[]));
     case 'setRatio':

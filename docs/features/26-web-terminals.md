@@ -133,7 +133,16 @@ returns. Focus changes are reported to programs that asked (mode 1004).
   program's end shows how it ended; its pane goes when the
   core reports it ([22](22-terminal-protocol.md)), unless the terminal
   ended with its core and is started again
-  ([33](33-workspace-restore.md)).
+  ([33](33-workspace-restore.md)). A pane whose program ended stays
+  closed only while its terminal does: when the terminal's record is live
+  again with another pid than the program whose stream ended (the
+  terminal core started a new shell at a kept terminal's address after a
+  stop or a restart; `TerminalView` hands the record's pid to
+  `TermPane.setProgram`), the pane drops the notice of the end and
+  attaches again, which brings back the saved output and the agent
+  ([36](36-terminal-history.md), [33](33-workspace-restore.md)); a
+  terminal that finished, or still runs the program that ended, stays
+  closed.
 - A stream that ends with `disconnected` is attached again, with a new
   emulator that the first paint fills and whose view goes back where it
   was scrolled (below): when the page's connection to the
@@ -198,6 +207,60 @@ returns. Focus changes are reported to programs that asked (mode 1004).
   shown again, it attaches again with a new emulator, is painted anew and
   scrolled where it was (below). The kept terminals are the page's own,
   by machine and address, and are forgotten with the page.
+- A plugin may draw over a shown terminal's pane, in a layer below the
+  pane's header that takes none of the terminal's room (a surface,
+  [27](27-plugins.md); the agents plugin's conversation,
+  [35](35-agent-native-view.md)). What surfaces cover of a terminal is the
+  strongest of what each says as the pane is rendered and what each sets
+  while mounted (`state/covers.ts`): all of it, a part (the terminal is
+  drawn under it as usual) or nothing. A terminal covered all is like a
+  kept one in that it draws nothing, shows no formula, rings no bell and
+  gives up its renderer, and like a shown one in that it is laid out at
+  its pane's size: it measures its grid, attaches with it (the first time
+  too), follows the pane's size and takes its output, acknowledged at
+  once (`TermPane.setShown(shown, covered)`, `TerminalView`'s `covered`).
+  It has neither the pane's focus nor a stop of the Tab key; one covered
+  while it has the keyboard hands it to the surface that takes the pane's
+  focus. Text pasted or typed into the pane still reaches the terminal. A
+  pane going from kept to covered makes no renderer on the way; kept
+  panes draw no surface.
+- A terminal may have a prelude (`state/preludes.ts`): output of the
+  terminal from before its program was replaced, which the terminal
+  history plugin gives ([36](36-terminal-history.md)). Each new emulator
+  of the pane gets it before the first byte of its stream, written at the
+  grid its snapshot was painted at (from the history list and the read's
+  headers, at most 1000 by 500; else at the pane's grid): its bytes; then
+  a complete reset (`PRELUDE_RESET` in `vt/pane.ts`), since the bytes are
+  a program's output and as untrusted: CAN, an OSC 8 hyperlink closed, the
+  main screen (`ESC[?1049l` and the older forms; a program's alternate
+  screen is not kept), a soft reset and plain styles on both screens, the
+  kitty keyboard flags popped and cleared on both screens,
+  modifyOtherKeys off, normal cursor and keypad keys, mouse, focus,
+  bracketed-paste, color-scheme and in-band size reports off, no
+  synchronized output held, reverse video and LNM off, and the palette,
+  foreground, background and cursor colors and the cursor style of the
+  settings, so that no mode, color or link the bytes set reaches the live
+  terminal, also when the core sends no first paint; then its note, dim,
+  on the line below the last row with something on it (a character or a
+  background), also when the output's cursor was above it; and as many
+  newlines as that grid has rows, which move every row up to that one into
+  the scrollback, the cursor left at the top of the blank screen. The
+  emulator then goes back to the pane's grid (an observer's follows the
+  core's resize), so every saved line stays in the scrollback. The first
+  paint clears only the screen ([21](21-terminal-core.md)), so the prelude
+  stays above the terminal's own history in the same scrollback, found by
+  find and selected and copied as the rest. While it is written nothing
+  the emulator answers (device attributes, cursor and mode reports, color
+  and size queries) is sent to the program, and titles, clipboard writes,
+  bells and synchronized-output holds are dropped. A prelude that
+  appears, changes or goes while the pane is attached makes it attach
+  again once its changes paused for 50 ms (the core keeps the program's
+  stream meanwhile; the program sees nothing); one attaching checks again
+  once attached. While the pane attaches again for a prelude, what is
+  typed or pasted waits (up to 64 KiB, `SEND_QUEUE_MAX`) and is sent on the
+  new stream; it is dropped if that attach fails or the pane goes.
+  Preludes live in the page's memory, at most 2 MiB each, by machine and
+  address.
 - Leaving a terminal does not resize it. A pane that is unmounted
   detaches, and a page that closes leaves, but the core keeps
   the stream of a terminal's last viewer attached to the terminal core,
@@ -389,6 +452,21 @@ returns. Focus changes are reported to programs that asked (mode 1004).
   → the cursor is off on that row until the program redraws it.
 - **A program writes the clipboard without the user's input** → it is
   offered, not copied.
+- **A prelude of another grid size** (the terminal was captured at another
+  width or height) → written at its own grid, every saved line kept. One
+  whose grid is not known or beyond 1000 by 500 is written at the pane's
+  grid, where on a taller pane the lines right above the saved screen are
+  lost.
+- **Input while the pane attaches again for a prelude** (a few tens of
+  milliseconds) → it waits for the new stream, but is encoded by the new
+  emulator before the first paint brought the program's modes: a paste
+  then is not bracketed, and keys are encoded as a new terminal's.
+- **The terminal core stops and starts again while a page is open** → the
+  panes of kept terminals show that their program ended, then attach again
+  once the core started a new shell at their addresses, without a reload.
+- **A plugin's surface fails while drawing** → its error shows in its
+  place with **Try Again**, and the rest of the page goes on; a surface
+  whose `covers` throws covers nothing.
 
 ## Security
 
@@ -397,8 +475,11 @@ The CSP of the UI allows compiling WebAssembly (`'wasm-unsafe-eval'`), not
 page's scripts. Programs' clipboard writes follow the setting above and
 reads are refused; only `http`, `https` and `mailto` hyperlinks open. The
 rows noted for the place a terminal was scrolled to are text of its screen
-held in the page's memory only, neither stored nor sent. The stream the
-core keeps for a terminal's size belongs to no client. See
+held in the page's memory only, neither stored nor sent; so is a
+prelude, written into the emulator as untrusted output, with its answers,
+titles, clipboard writes, bells and synchronized-output holds dropped and
+a complete reset after it. The stream the core keeps for a terminal's size
+belongs to no client. See
 [SECURITY.md](../../SECURITY.md).
 
 ## Testing
@@ -425,6 +506,26 @@ are blank),
 WebGL context counted, [13](13-settings-and-appearance.md)),
 `terms.test.ts` (the layout document's reading and writing, other clients'
 versions, ended programs, terminals asked for early, attention order),
+`termPane.test.ts` (a covered terminal attaching with its pane's grid,
+following its size and drawing nothing, drawn again without a new attach,
+a kept one never attached staying so; a prelude written before the
+stream's first byte and kept above the first paint, of an alternate
+screen, with and without its note, its answers dropped, one that comes
+while attached or attaching making one new attach, one painted at
+another grid (24 rows into 50, 50 into 24, other widths) keeping every
+saved line, an observer's saved lines kept through the core's resize
+before its first paint, hostile
+output leaving none of its state to the live terminal with and without a
+first paint, every mode flipped on both screens brought back to a new
+emulator's, input kept while it attaches again, at most 64 KiB, dropped
+when that attach fails or the pane goes; a pane whose program ended
+attaching again once when the terminal has another program, staying
+closed while it is finished or runs the program that ended),
+`terminalViewProgram.test.tsx` (the record's program handed to the pane
+while live, the notice of the end taken away when it has another),
+`surfaces.test.ts` and `surfaceFocus.test.ts` (surfaces drawn over the
+terminal, the strongest cover, owners, the pane's focus and keyboard
+going to the surface),
 `termOptions.test.ts` (the terminal settings as the emulator's options,
 the font stack before and after the bundled font loads, the colors'
 contrast), `clipToast.test.ts`, `paneHeader.test.ts`, `menus.test.ts`,

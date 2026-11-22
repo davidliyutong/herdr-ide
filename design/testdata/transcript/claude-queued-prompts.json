@@ -1,0 +1,170 @@
+{
+  "note": "Hand-written in the shapes of Claude Code 2.1.30x to 2.1.330's lines (measured on real transcripts, structure only): messages the user sent while the agent worked. One taken up by the running turn is a queued_command attachment (commandMode prompt, origin human) after the queue's remove, with no user line for it: a user event without a turn's start; one with a pasted image a list of blocks. Another agent's message, a task's notification, a message the program marks isMeta, a subagent's and other attachments give nothing. A message still queued when the turn ended is the next turn's ordinary user line.",
+  "kind": "claude",
+  "lines": [
+    "{\"parentUuid\":null,\"isSidechain\":false,\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"Run the tests and fix what fails.\"},\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"timestamp\":\"2026-11-21T11:00:01.000Z\",\"permissionMode\":\"default\",\"origin\":{\"kind\":\"human\"},\"promptSource\":\"typed\",\"turnOrigin\":\"human\",\"turnPosition\":{\"promptIndex\":1,\"turnIndex\":1},\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000101\",\"isSidechain\":false,\"message\":{\"model\":\"claude-opus-5-5\",\"id\":\"msg_q01\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_q01\",\"name\":\"Bash\",\"input\":{\"command\":\"go test ./...\",\"description\":\"Run the tests\"},\"caller\":{\"type\":\"direct\"}}],\"stop_reason\":\"tool_use\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":1200,\"cache_read_input_tokens\":30000,\"output_tokens\":80,\"service_tier\":\"standard\"}},\"type\":\"assistant\",\"uuid\":\"00000000-0000-4000-8000-000000000102\",\"timestamp\":\"2026-11-21T11:00:02.000Z\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-11-21T11:00:03.000Z\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"content\":\"Also run them with the race detector.\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000102\",\"isSidechain\":false,\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_q01\",\"type\":\"tool_result\",\"content\":\"ok  \\texample.com/p\\t0.01s\",\"is_error\":false}]},\"uuid\":\"00000000-0000-4000-8000-000000000104\",\"timestamp\":\"2026-11-21T11:00:04.000Z\",\"toolUseResult\":{\"stdout\":\"ok  \\texample.com/p\\t0.01s\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false},\"sourceToolAssistantUUID\":\"00000000-0000-4000-8000-000000000102\",\"session_id\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"type\":\"queue-operation\",\"operation\":\"remove\",\"timestamp\":\"2026-11-21T11:00:05.000Z\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"content\":\"Also run them with the race detector.\",\"reason\":\"absorbed_mid_turn\",\"commandUuid\":\"00000000-0000-4000-8000-000000000105\",\"deliveryId\":\"d0000000-0000-4000-8000-000000000001\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000104\",\"isSidechain\":false,\"attachment\":{\"type\":\"queued_command\",\"prompt\":\"Also run them with the race detector.\",\"source_uuid\":\"00000000-0000-4000-8000-000000000105\",\"delivery_id\":\"d0000000-0000-4000-8000-000000000001\",\"commandMode\":\"prompt\",\"origin\":{\"kind\":\"human\"},\"timestamp\":\"2026-11-21T11:00:05.000Z\",\"humanTurn\":true},\"type\":\"attachment\",\"uuid\":\"00000000-0000-4000-8000-000000000155\",\"timestamp\":\"2026-11-21T11:00:05.000Z\",\"rendered\":[{\"content\":\"<system-reminder>\\nThe user sent a new message while you were working:\\nAlso run them with the race detector.\\n</system-reminder>\"}],\"renderedRole\":\"system\",\"session_id\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000105\",\"isSidechain\":false,\"message\":{\"model\":\"claude-opus-5-5\",\"id\":\"msg_q02\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Running them again with -race.\"}],\"stop_reason\":\"tool_use\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":1200,\"cache_read_input_tokens\":30000,\"output_tokens\":80,\"service_tier\":\"standard\"}},\"type\":\"assistant\",\"uuid\":\"00000000-0000-4000-8000-000000000106\",\"timestamp\":\"2026-11-21T11:00:06.000Z\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-11-21T11:00:07.000Z\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"content\":\"And check this screenshot.\"}",
+    "{\"type\":\"queue-operation\",\"operation\":\"remove\",\"timestamp\":\"2026-11-21T11:00:08.000Z\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"content\":\"And check this screenshot.\",\"reason\":\"absorbed_mid_turn\",\"commandUuid\":\"00000000-0000-4000-8000-000000000108\",\"deliveryId\":\"d0000000-0000-4000-8000-000000000002\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000107\",\"isSidechain\":false,\"attachment\":{\"type\":\"queued_command\",\"prompt\":[{\"type\":\"text\",\"text\":\"And check this screenshot.\"},{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==\"}}],\"source_uuid\":\"00000000-0000-4000-8000-000000000108\",\"delivery_id\":\"d0000000-0000-4000-8000-000000000002\",\"commandMode\":\"prompt\",\"origin\":{\"kind\":\"human\"},\"timestamp\":\"2026-11-21T11:00:08.000Z\",\"humanTurn\":true,\"imagePasteIds\":[1]},\"type\":\"attachment\",\"uuid\":\"00000000-0000-4000-8000-000000000158\",\"timestamp\":\"2026-11-21T11:00:08.000Z\",\"rendered\":[{\"content\":\"<system-reminder>\\nThe user sent a new message while you were working:\\nAnd check this screenshot.\\n</system-reminder>\"}],\"renderedRole\":\"system\",\"session_id\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000108\",\"isSidechain\":false,\"attachment\":{\"type\":\"queued_command\",\"prompt\":\"Report from the reviewer: two findings.\",\"source_uuid\":\"00000000-0000-4000-8000-000000000109\",\"delivery_id\":\"d0000000-0000-4000-8000-000000000003\",\"commandMode\":\"prompt\",\"origin\":{\"kind\":\"peer\",\"from\":\"reviewer\",\"name\":\"reviewer\",\"senderTaskId\":\"t1\",\"body\":\"Report from the reviewer: two findings.\",\"handback\":false,\"handbackReportText\":\"\"},\"timestamp\":\"2026-11-21T11:00:09.000Z\",\"isMeta\":false,\"reminderId\":\"r1\"},\"type\":\"attachment\",\"uuid\":\"00000000-0000-4000-8000-000000000159\",\"timestamp\":\"2026-11-21T11:00:09.000Z\",\"rendered\":[{\"content\":\"<system-reminder>\\nThe user sent a new message while you were working:\\nReport from the reviewer: two findings.\\n</system-reminder>\"}],\"renderedRole\":\"system\",\"session_id\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000109\",\"isSidechain\":false,\"attachment\":{\"type\":\"queued_command\",\"prompt\":\"<task-notification><task-id>b1</task-id><status>completed</status></task-notification>\",\"source_uuid\":\"00000000-0000-4000-8000-000000000110\",\"delivery_id\":\"d0000000-0000-4000-8000-000000000004\",\"commandMode\":\"task-notification\",\"origin\":{\"kind\":\"task-notification\",\"producer\":\"background\"},\"timestamp\":\"2026-11-21T11:00:10.000Z\",\"runId\":\"run-0000000000001\"},\"type\":\"attachment\",\"uuid\":\"00000000-0000-4000-8000-000000000160\",\"timestamp\":\"2026-11-21T11:00:10.000Z\",\"rendered\":[{\"content\":\"<system-reminder>\\nThe user sent a new message while you were working:\\n<task-notification><task-id>b1</task-id><status>completed</status></task-notification>\\n</system-reminder>\"}],\"renderedRole\":\"system\",\"session_id\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000110\",\"isSidechain\":false,\"attachment\":{\"type\":\"queued_command\",\"prompt\":\"Shown to the model only.\",\"source_uuid\":\"00000000-0000-4000-8000-000000000111\",\"delivery_id\":\"d0000000-0000-4000-8000-000000000005\",\"commandMode\":\"prompt\",\"origin\":{\"kind\":\"human\"},\"timestamp\":\"2026-11-21T11:00:11.000Z\",\"humanTurn\":true},\"type\":\"attachment\",\"uuid\":\"00000000-0000-4000-8000-000000000161\",\"timestamp\":\"2026-11-21T11:00:11.000Z\",\"rendered\":[{\"content\":\"<system-reminder>\\nThe user sent a new message while you were working:\\nShown to the model only.\\n</system-reminder>\"}],\"renderedRole\":\"system\",\"session_id\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\",\"isMeta\":true}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000111\",\"isSidechain\":true,\"attachment\":{\"type\":\"queued_command\",\"prompt\":\"A subagent's queued message.\",\"source_uuid\":\"00000000-0000-4000-8000-000000000112\",\"delivery_id\":\"d0000000-0000-4000-8000-000000000006\",\"commandMode\":\"prompt\",\"origin\":{\"kind\":\"human\"},\"timestamp\":\"2026-11-21T11:00:12.000Z\",\"humanTurn\":true},\"type\":\"attachment\",\"uuid\":\"00000000-0000-4000-8000-000000000162\",\"timestamp\":\"2026-11-21T11:00:12.000Z\",\"rendered\":[{\"content\":\"<system-reminder>\\nThe user sent a new message while you were working:\\nA subagent's queued message.\\n</system-reminder>\"}],\"renderedRole\":\"system\",\"session_id\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\",\"agentId\":\"a0000000000000001\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000112\",\"isSidechain\":false,\"attachment\":{\"type\":\"edited_text_file\",\"filename\":\"/home/dev/project/p.go\",\"snippet\":\"package p\"},\"type\":\"attachment\",\"uuid\":\"00000000-0000-4000-8000-000000000113\",\"timestamp\":\"2026-11-21T11:00:13.000Z\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000113\",\"isSidechain\":false,\"message\":{\"model\":\"claude-opus-5-5\",\"id\":\"msg_q03\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Both runs pass; the screenshot shows the same output.\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":1200,\"cache_read_input_tokens\":30000,\"output_tokens\":80,\"service_tier\":\"standard\"}},\"type\":\"assistant\",\"uuid\":\"00000000-0000-4000-8000-000000000114\",\"timestamp\":\"2026-11-21T11:00:14.000Z\",\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000114\",\"isSidechain\":false,\"type\":\"system\",\"subtype\":\"turn_duration\",\"durationMs\":14000,\"messageCount\":12,\"timestamp\":\"2026-11-21T11:00:15.000Z\",\"uuid\":\"00000000-0000-4000-8000-000000000115\",\"isMeta\":false,\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}",
+    "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-11-21T11:00:16.000Z\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"content\":\"Thanks, commit it.\"}",
+    "{\"type\":\"queue-operation\",\"operation\":\"dequeue\",\"timestamp\":\"2026-11-21T11:00:16.000Z\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\"}",
+    "{\"parentUuid\":\"00000000-0000-4000-8000-000000000115\",\"isSidechain\":false,\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"Thanks, commit it.\"},\"uuid\":\"00000000-0000-4000-8000-000000000117\",\"timestamp\":\"2026-11-21T11:00:17.000Z\",\"permissionMode\":\"default\",\"origin\":{\"kind\":\"human\"},\"promptSource\":\"queued\",\"turnOrigin\":\"human\",\"turnPosition\":{\"promptIndex\":2,\"turnIndex\":2},\"userType\":\"external\",\"entrypoint\":\"cli\",\"cwd\":\"/home/dev/project\",\"sessionId\":\"7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"version\":\"2.1.330\",\"gitBranch\":\"main\"}"
+  ],
+  "unknown": 0,
+  "events": [
+    {
+      "state": "start",
+      "t": "turn"
+    },
+    {
+      "content": [
+        {
+          "text": "Run the tests and fix what fails.",
+          "type": "text"
+        }
+      ],
+      "t": "user"
+    },
+    {
+      "t": "update",
+      "update": {
+        "kind": "execute",
+        "rawInput": {
+          "command": "go test ./...",
+          "description": "Run the tests"
+        },
+        "sessionUpdate": "tool_call",
+        "status": "pending",
+        "title": "Run the tests",
+        "toolCallId": "toolu_q01"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 31202
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "content": [
+          {
+            "content": {
+              "text": "ok  \texample.com/p\t0.01s",
+              "type": "text"
+            },
+            "type": "content"
+          }
+        ],
+        "sessionUpdate": "tool_call_update",
+        "status": "completed",
+        "toolCallId": "toolu_q01"
+      }
+    },
+    {
+      "content": [
+        {
+          "text": "Also run them with the race detector.",
+          "type": "text"
+        }
+      ],
+      "t": "user"
+    },
+    {
+      "t": "update",
+      "update": {
+        "_meta": {
+          "herdr-ide": {
+            "model": "claude-opus-5-5"
+          }
+        },
+        "content": {
+          "text": "Running them again with -race.",
+          "type": "text"
+        },
+        "messageId": "msg_q02",
+        "sessionUpdate": "agent_message_chunk"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 31202
+      }
+    },
+    {
+      "content": [
+        {
+          "text": "And check this screenshot.",
+          "type": "text"
+        },
+        {
+          "_meta": {
+            "herdr-ide": {
+              "image": true
+            }
+          },
+          "text": "",
+          "type": "text"
+        }
+      ],
+      "t": "user"
+    },
+    {
+      "t": "update",
+      "update": {
+        "_meta": {
+          "herdr-ide": {
+            "model": "claude-opus-5-5"
+          }
+        },
+        "content": {
+          "text": "Both runs pass; the screenshot shows the same output.",
+          "type": "text"
+        },
+        "messageId": "msg_q03",
+        "sessionUpdate": "agent_message_chunk"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 31202
+      }
+    },
+    {
+      "state": "end",
+      "t": "turn"
+    },
+    {
+      "state": "start",
+      "t": "turn"
+    },
+    {
+      "content": [
+        {
+          "text": "Thanks, commit it.",
+          "type": "text"
+        }
+      ],
+      "t": "user"
+    }
+  ]
+}

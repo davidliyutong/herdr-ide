@@ -7,7 +7,8 @@ import type { ComponentType, ReactNode } from 'react';
 import type { MenuEntry } from '../contextMenu';
 import type { MessageKey } from '../i18n';
 import type { SettingDef } from '../settings';
-import type { PluginView } from '../term/layout';
+import type { PluginView, TerminalLeaf } from '../term/layout';
+import type { Cover } from '../state/covers';
 
 /** An icon: lucide's, or one drawn the same way (components/icons.tsx). */
 export type IconComponent = ComponentType<{ className?: string }>;
@@ -143,6 +144,51 @@ export function isStatusWidget(item: StatusItemDef): item is StatusWidgetDef {
   return typeof item === 'object' && item !== null && 'component' in item;
 }
 
+/** What a plugin draws over a terminal's pane, and a terminal pane's header
+ * gets from it. */
+export interface TerminalSurfaceProps {
+  m: string;
+  /** The terminal's address (its pane's key). */
+  terminal: string;
+  leaf: TerminalLeaf;
+  /** The tab's focused pane. */
+  focused: boolean;
+  /** Makes the pane the tab's focused one (a press in the surface). */
+  onActivate(): void;
+}
+
+/** What a plugin draws over a terminal's pane, shown and with the plugin on
+ * (Workspace.tsx; registry.ts TerminalSurfaces): in a layer over the
+ * terminal below the pane's header, which takes none of the terminal's
+ * room, so the terminal keeps its size. A surface that covers all or part
+ * of the terminal says so: at render time from the leaf (covers), and
+ * while mounted for what changes otherwise (state/covers.ts useSetCover,
+ * with its id as the owner). Covered all, the terminal is not drawn and
+ * gives up the keyboard, and stays attached at the pane's size: what is
+ * typed or pasted into it (state/panes.ts paneHandle, withPane) reaches
+ * its program. A surface that takes the pane's focus registers it with
+ * state/panes.ts useSurfaceFocus; the pane is then focused through it
+ * (withView), also when it is focused as it mounts. Panes kept hidden draw
+ * no surface. */
+export interface TerminalSurfaceDef {
+  /** Unique among the surfaces of all plugins: <plugin> or
+   * <plugin>.<name> (registry.ts definePlugins refuses a second). */
+  id: string;
+  component: ComponentType<TerminalSurfaceProps>;
+  /** What the surface covers of the terminal as it is drawn for this
+   * leaf, said while the pane is rendered so that the terminal is not
+   * drawn for a frame before the surface mounts (a tab shown again). Pure:
+   * it reads the leaf and state, and changes nothing. Called for plugins
+   * that are on. */
+  covers?(m: string, terminal: string, leaf: TerminalLeaf): Cover | undefined;
+}
+
+/** Buttons a plugin adds to a terminal pane's header, before the pane's
+ * own (PaneHeader.tsx; registry.ts TerminalHeaderActions). The header is
+ * one stop of the Tab key, its buttons reached with the arrows: they take
+ * tabIndex -1. A press leaves the keyboard where it is. */
+export type HeaderActionsComponent = ComponentType<Omit<TerminalSurfaceProps, 'focused' | 'onActivate'>>;
+
 export interface PluginDef {
   /** As the core's plugin (internal/plugin): lower-case letters and digits. */
   id: string;
@@ -176,6 +222,10 @@ export interface PluginDef {
   newTabItems?(m: string): NewTabItem[];
   /** A message of its core side for machine m ("" for the core's). */
   onMessage?(m: string, data: unknown): void;
+  /** What it draws over terminals' panes (TerminalSurfaceDef). */
+  terminalSurfaces?: TerminalSurfaceDef[];
+  /** Buttons in terminals' panes' headers (HeaderActionsComponent). */
+  headerActions?: HeaderActionsComponent[];
   /** A React hook, as PaneViewDef.useGone, for a file of machine m: the
    * app's own panes that show a file (previews) mark their titles with
    * what the first plugin that is on with one says (the file explorer's);

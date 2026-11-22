@@ -90,7 +90,31 @@ program's status). For a terminal whose foreground is an agent it
 attaches as an observer, whose output only says that the screen changed
 (the bytes are acknowledged and dropped), and reads the screen with
 `terminal.read` when needed. Each change goes to the core as one line
-`{terminal, agent, status}`; an agent that leaves sends `{terminal}`.
+`{terminal, agent, status}`, in the order the changes were made (they are
+queued and sent by one writer at a time); an agent that leaves sends
+`{terminal}`.
+
+**Sessions.** When the core opens the stream while the agents plugin is
+on (`plugins.agents.enabled`), it sets `Header.Sessions`, and the agent
+also finds the session each Claude Code or Codex in a terminal runs
+(`internal/agent/agentdetect_session.go` with `internal/agent/sessions`;
+how, in [35](35-agent-native-view.md)). The core looks at the plugin's
+switch every second; a change closes the stream and opens a new one at
+once, so the agents are cleared and detected again. Without the header no
+session file is read and the lines carry none. A goroutine with the
+agent's lifetime resolves the session once the startup grace is over;
+while nothing is found it tries again after 1, 2, 4 and 8 s, then at every
+status change, every 30 s and whenever the files it reads changed (checked
+every 2 s for Claude Code, 5 s for Codex, with a few stats); once one is
+found it checks those files at the same pace and resolves again when they,
+the foreground pid or its command line changed (Claude Code's `/clear`
+rewrites its record). One resolution runs at a time per stream, within
+10 s. A new session is a line of its own,
+`{terminal, agent, status, session, session_source}` with the current
+status; every line carries the last session found, and the line that
+clears an agent clears it. A guess (`guess`, the directory's newest
+transcript) is never taken while another terminal runs the same kind of
+agent in that directory.
 
 **In the core** (`internal/server/term_events.go`). The backend keeps the agents
 per terminal, merges them into the terminal records as `agent` and
@@ -114,6 +138,17 @@ keeps the other labels), and the first word of a new detection that is
 the `done` of that turn is idle. A later turn's `done` is news, and a
 `done` read from the screen is never taken for seen.
 
+The core takes a session only as a lower-case UUID with a known source
+(`argv`, `pid`, `fd`, `start`, `hook`, `guess`; `checkSession`), keeps it
+in the record as `agent_session` and `agent_session_source` while they are
+known, and puts both in every `agent` event, null when not known
+([22](22-terminal-protocol.md)), so a session that ended (another agent,
+the agent gone, the plugin switched off) leaves the pages' records too. A
+line that changes only the session is
+no news: subscribers of `/api/v1/term` get the `agent` event, but there is
+no `/ws` message, sound, notification or change of `seen`, and the status
+stays the core's (a `done` seen since stays idle).
+
 **Client.** The web UI reads a terminal's state from `agent_status`, else
 from the program's own status (OSC 7501), and its agent from `agent`
 (`web/src/lib/machine.ts`: `agentStatus`, `agentOf`; a program's own
@@ -122,9 +157,12 @@ status dots, orders the attention inbox blocked, done, working, idle
 (`attentionList` in `web/src/actions.ts`), and notifies and plays sounds
 from the `/ws` agent message (`notify.ts`, `sound.ts`,
 [07](07-agent-native-workflow.md)). The agent detected in a terminal is
-also what the layout's leaf remembers of it (`claude` and `codex`), so
-that the agent continues its conversation after the terminal core started
-again ([33](33-workspace-restore.md)).
+also what the layout's leaf remembers of it (`claude` and `codex`), with
+its session unless that was a guess, so that the agent continues its
+conversation after the terminal core started again
+([33](33-workspace-restore.md)); the session is also what a pane shows as
+the agent's conversation ([35](35-agent-native-view.md)) and what the
+status bar's session usage reads ([29](29-ai-usage.md)).
 
 ## Alternatives considered
 
@@ -156,13 +194,30 @@ again ([33](33-workspace-restore.md)).
   300 ms.
 - **Screen reads fail** (the terminal ended meanwhile) → the next event
   ends the agent.
+- **No session found** → the lines carry none. Claude Code started with
+  `CLAUDE_CODE_CHILD_SESSION` keeps no record or transcript and has none;
+  Codex has none before its first prompt; a guess is refused while another
+  terminal runs the same kind in the directory. On macOS a process's
+  environment and open files are not read, so a Claude Code with its own
+  `CLAUDE_CONFIG_DIR` and Codex's open rollout are not seen there
+  ([35](35-agent-native-view.md)).
+- **The agents plugin is switched** → the stream is opened again at once
+  with or without sessions; every agent of the machine is cleared and
+  detected again. For 10 s after the stream opened again, each terminal's
+  first event is compared with what the clients were told before: a block
+  or a turn's end they were told of reaches the record and the terminal
+  protocol's subscribers but no second `/ws` message (no sound, no
+  notification), and a `done` they saw stays idle; a turn that ended
+  meanwhile, another agent and later events are news as before.
 
 ## Security
 
 The agent reads the screens of the user's own terminals in its own terminal
 core, as the user, and sends only an agent name and a state word to the
-core; no screen text leaves the machine through this path. See the row for
-agent detection in [SECURITY.md](../../SECURITY.md).
+core, with the session's id and its source word while the agents plugin is
+on; no screen text or path leaves the machine through this path. See the
+rows for agent detection and for coding agents' sessions in
+[SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
@@ -183,5 +238,17 @@ a done read from the screen is never seen. `TestIntegrationDetect`
 (`make it`, `HC_TEST_BIN`) runs a script named `claude` in a real
 herdr-core that shows a turn, a permission dialog and its prompt, and
 follows working, blocked and done through the agent to `/api/v1/term` and
-`/ws`. The web UI's side: `web/src/__tests__/terms.test.ts` (agents
-listed by how much they need the user) and `sound.test.ts`.
+`/ws`, without a session; it passed against the pinned herdr-core 0.1.21
+for linux/arm64 in an isolated Linux container (Debian, an unprivileged
+user, no network). `internal/agent/agentdetect_session_test.go`:
+the schedule of resolutions, a process that changes, peers, the kinds that
+have sessions, a stream without `sessions` reading no session file, many
+terminals at once (no deadlock, no event overtaking a later one); `internal/server/term_session_test.go`: sessions in
+records and events without `/ws` news, the core's check, the header
+following the plugin's switch, a session found through a real agent, a
+session that ends leaving the events and the record
+(`TestTermAgentSessionEnds`), the agents detected again after a switch
+without notifying twice (`TestTermRedetected`,
+`TestTermSwitchNotifiesOnce`). The
+web UI's side: `web/src/__tests__/terms.test.ts` (agents listed by how
+much they need the user) and `sound.test.ts`.

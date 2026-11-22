@@ -3,7 +3,7 @@
 // terminal that lost its agent asks for it back, once.
 import { describe, expect, it } from 'vitest';
 import * as L from '../term/layout';
-import { endedWithCore, rememberAgents, replaceTerminal, RESUME_COMMANDS, takeResume } from '../restore';
+import { endedWithCore, rememberAgents, replaceTerminal, takeResume } from '../restore';
 import { FakeCore, settle } from './fakeTerms';
 import { useStore } from '../state/store';
 
@@ -14,6 +14,8 @@ const layoutOf = (...leaves: L.TerminalLeaf[]): L.Layout => ({
 });
 const leaves = (l: L.Layout) => l.workspaces.flatMap((w) => w.tabs.flatMap((t) => L.leavesOf(t.root)));
 const never = () => false;
+/** A terminal's pane, attached, that records what is typed into it. */
+const into = (typed: string[]) => ({ attached: true, type: (text: string) => void typed.push(text) });
 
 describe('restore', () => {
   it('tells a terminal that ended with its core from one whose program ended', () => {
@@ -48,7 +50,7 @@ describe('restore', () => {
     const after = rememberAgents(l, () => FakeCore.term('t1', { pid: 70 }), never);
     expect(leaves(after)).toEqual([{ terminal: 't1', resume: 'codex' }]);
     const taken = takeResume(after, 't1')!;
-    expect(taken.command).toBe(RESUME_COMMANDS.codex);
+    expect(taken.command).toBe('codex resume --last');
     expect(leaves(taken.layout)).toEqual([{ terminal: 't1' }]);
     expect(takeResume(taken.layout, 't1')).toBeUndefined();
     // A name the document made up is no command.
@@ -62,7 +64,7 @@ describe('restore', () => {
   it('puts a new terminal in the place of an ended one, with the focus', () => {
     const l = layoutOf({ terminal: 't1', agent: 'claude', pid: 7 }, { terminal: 't2' });
     const next = replaceTerminal(l, 't1', 't5');
-    expect(leaves(next)).toEqual([{ terminal: 't5', resume: 'claude' }, { terminal: 't2' }]);
+    expect(leaves(next)).toEqual([{ terminal: 't5', before: 't1', resume: 'claude' }, { terminal: 't2' }]);
     expect(next.workspaces[0].tabs[0].focused).toBe('t5');
     expect(replaceTerminal(next, 't1', 't6')).toBe(next);
   });
@@ -78,10 +80,30 @@ describe('restore', () => {
     fm.layout = layoutOf({ terminal: 't1' });
     fm.version++;
     const typed: string[] = [];
-    model.resumeAgent('m', 't1', (text) => typed.push(text));
+    model.resumeAgent('m', 't1', into(typed));
     await settle();
     expect(typed).toEqual([]);
     expect(leaves(model.layout('m')!)).toEqual([{ terminal: 't1' }]);
+  });
+
+  it('takes nothing for a pane that is not attached, or a terminal that is not live', async () => {
+    useStore.setState({ readOnly: false });
+    const core = new FakeCore();
+    const fm = core.machine('m', [FakeCore.term('t1', { pid: 70 })], layoutOf({ terminal: 't1', resume: 'codex' }));
+    const model = core.install();
+    model.subscribe('m');
+    await settle();
+    const typed: string[] = [];
+    model.resumeAgent('m', 't1', { attached: false, type: (text) => void typed.push(text) });
+    await settle();
+    expect(typed).toEqual([]);
+    expect(leaves(fm.layout as L.Layout)).toEqual([{ terminal: 't1', resume: 'codex' }]);
+    core.event('m', 'finished', 't1', { state: 'finished', reason: 'server_stop' });
+    await settle();
+    model.resumeAgent('m', 't1', into(typed));
+    await settle();
+    expect(typed).toEqual([]);
+    expect(leaves(fm.layout as L.Layout)).toEqual([{ terminal: 't1', resume: 'codex' }]);
   });
 
   // A machine whose terminal t1 ended with its core, its record and pane kept.
@@ -114,8 +136,8 @@ describe('restore', () => {
     // t3 lost and ended; t1 stayed and was started again as t4, whose
     // layout was written before t1 was removed.
     expect(core.calls.some((c) => c.method === 'terminal.kill' && c.params.terminal === 't3')).toBe(true);
-    expect(leaves(model.layout('m')!)).toEqual([{ terminal: 't4', resume: 'claude' }]);
-    expect(leaves(core.layout('m')!)).toEqual([{ terminal: 't4', resume: 'claude' }]);
+    expect(leaves(model.layout('m')!)).toEqual([{ terminal: 't4', before: 't1', resume: 'claude' }]);
+    expect(leaves(core.layout('m')!)).toEqual([{ terminal: 't4', before: 't1', resume: 'claude' }]);
     expect(removed('t1')).toBe(true);
   });
 
@@ -139,8 +161,8 @@ describe('restore', () => {
     handle(held!);
     await settle();
     expect(core.calls.some((c) => c.method === 'terminal.kill')).toBe(false);
-    expect(leaves(model.layout('m')!)).toEqual([{ terminal: 't3' }]);
-    expect(leaves(core.layout('m')!)).toEqual([{ terminal: 't3' }]);
+    expect(leaves(model.layout('m')!)).toEqual([{ terminal: 't3', before: 't1' }]);
+    expect(leaves(core.layout('m')!)).toEqual([{ terminal: 't3', before: 't1' }]);
     expect(removed('t1')).toBe(true);
   });
 
@@ -164,10 +186,11 @@ describe('restore', () => {
     expect(now).toHaveLength(1);
     expect(now[0].terminal).not.toBe('t1');
     expect(now[0].resume).toBe('claude');
+    expect(now[0].before).toBe('t1');
     expect(model.terminal('m', now[0].terminal)?.cwd).toBe('/srv/app');
     const typed: string[] = [];
-    model.resumeAgent('m', now[0].terminal, (text) => typed.push(text));
-    model.resumeAgent('m', now[0].terminal, (text) => typed.push(text));
+    model.resumeAgent('m', now[0].terminal, into(typed));
+    model.resumeAgent('m', now[0].terminal, into(typed));
     // Typed once the core took the layout without the request, not before.
     expect(typed).toEqual([]);
     await settle();

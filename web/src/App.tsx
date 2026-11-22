@@ -3,7 +3,7 @@ import { Check, CircleAlert, SlidersHorizontal, TriangleAlert } from 'lucide-rea
 import { useStore } from './state/store';
 import { terms, useTerms } from './state/terms';
 import { rememberFollowed } from './state/followed';
-import { paneHandle } from './state/panes';
+import { paneHandle, withView } from './state/panes';
 import { conn } from './lib/conn';
 import { Sidebar } from './components/Sidebar';
 import { Workspace } from './components/Workspace';
@@ -60,7 +60,8 @@ function pasteToAgent(m: string, text: string, window?: string, folders?: string
     const h = paneHandle(m, terminal);
     if (!h) return false;
     h.paste(text);
-    h.focus();
+    // The pane takes the keyboard: what covers the terminal when something does.
+    withView(m, terminal, (v) => v.focus());
     return true;
   };
   if (!paste()) setTimeout(paste, 300);

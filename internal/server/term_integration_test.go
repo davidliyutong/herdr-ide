@@ -128,8 +128,10 @@ while :; do sleep 1; done
 
 // TestIntegrationDetect runs a program the agent takes for Claude Code in
 // a real herdr-core and follows its status through the agent's detection
-// to /api/v1/term and /ws: working, blocked, done.
+// to /api/v1/term and /ws: working, blocked, done. Not being Claude Code,
+// it has no session.
 func TestIntegrationDetect(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	s, _ := hcServer(t)
 	dir, err := os.MkdirTemp("/tmp", "hcd")
 	if err != nil {
@@ -192,7 +194,7 @@ func TestIntegrationDetect(t *testing.T) {
 				continue
 			}
 			d := m["data"].(map[string]any)
-			if d["agent"] != "claude" {
+			if d["agent"] != "claude" || d["agent_session"] != nil {
 				t.Fatalf("agent %v", m)
 			}
 			if d["agent_status"] == want {

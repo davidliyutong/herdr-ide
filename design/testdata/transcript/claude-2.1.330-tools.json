@@ -1,0 +1,377 @@
+{
+  "note": "A real transcript of Claude Code 2.1.330 (sanitized: paths, and lines of the program's own state reduced to stubs): a turn with thinking, text, Write, Bash, Edit and Read and their results, its title and its end.",
+  "kind": "claude",
+  "lines": [
+    "{\"type\": \"mode\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"permission-mode\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"session-owner\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"atis-latch\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"file-history-snapshot\", \"sessionId\": null, \"stub\": true}",
+    "{\"parentUuid\": null, \"isSidechain\": false, \"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Do these steps in order, using your tools and a todo list: 1) create hello.txt containing the word hi  2) run: cat hello.txt  3) edit hello.txt to say hello instead  4) read it back. Then answer with one short sentence.\"}, \"uuid\": \"78850659-556e-420f-a477-038716d01f20\", \"timestamp\": \"2026-11-21T19:42:41.240Z\", \"permissionMode\": \"default\", \"origin\": {\"kind\": \"human\"}, \"promptSource\": \"typed\", \"turnOrigin\": \"human\", \"turnPosition\": {\"promptIndex\": 1, \"turnIndex\": 1}, \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"data-flow-records\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request-shape\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request-blob\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request-blob\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"last-prompt\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"mode\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"permission-mode\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"session-owner\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"atis-latch\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"ai-title\", \"aiTitle\": \"hello.txt 文件操作\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\"}",
+    "{\"type\": \"tools-used\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"data-flow-records\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"parentUuid\": \"8490b89a-94d8-4ea0-aa99-918b0f3470de\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeKiCQxZc8aSc6G2EeE\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"thinking\", \"thinking\": \"\", \"signature\": \"sig\"}], \"container\": null, \"stop_reason\": \"tool_use\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 22324, \"cache_read_input_tokens\": 31717, \"output_tokens\": 571, \"output_tokens_details\": {\"thinking_tokens\": 402}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 22324, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 571, \"cache_read_input_tokens\": 31717, \"cache_creation_input_tokens\": 22324, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 22324}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"thinkingDurationMs\": 1936, \"thinkingDisplay\": \"updates\", \"apiBlockIndex\": 0, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"54b56f9f-ae4e-467b-8ae6-caea562b4bf4\", \"timestamp\": \"2026-11-21T19:42:44.031Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"54b56f9f-ae4e-467b-8ae6-caea562b4bf4\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeKiCQxZc8aSc6G2EeE\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Starting with step 1: creating hello.txt with the word \\\"hi\\\".\"}], \"container\": null, \"stop_reason\": \"tool_use\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 22324, \"cache_read_input_tokens\": 31717, \"output_tokens\": 571, \"output_tokens_details\": {\"thinking_tokens\": 402}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 22324, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 571, \"cache_read_input_tokens\": 31717, \"cache_creation_input_tokens\": 22324, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 22324}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"apiBlockIndex\": 1, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"71ab0732-cff7-4e05-922a-37df208c6fca\", \"timestamp\": \"2026-11-21T19:42:44.184Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"71ab0732-cff7-4e05-922a-37df208c6fca\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeKiCQxZc8aSc6G2EeE\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"id\": \"toolu_01NVZUMZCpiPEDSc7Wceb6Xq\", \"name\": \"Write\", \"input\": {\"file_path\": \"/home/dev/project/hello.txt\", \"content\": \"hi\"}, \"caller\": {\"type\": \"direct\"}}], \"container\": null, \"stop_reason\": \"tool_use\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 22324, \"cache_read_input_tokens\": 31717, \"output_tokens\": 571, \"output_tokens_details\": {\"thinking_tokens\": 402}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 22324, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 571, \"cache_read_input_tokens\": 31717, \"cache_creation_input_tokens\": 22324, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 22324}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"toolInputStreamMs\": 522, \"wireToolInputs\": {\"toolu_01NVZUMZCpiPEDSc7Wceb6Xq\": {\"file_path\": \"/home/dev/project/hello.txt\", \"content\": \"hi\"}}, \"apiBlockIndex\": 2, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"be571dec-aa5a-4681-b7f8-42d38289f95c\", \"timestamp\": \"2026-11-21T19:42:44.712Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"type\": \"file-history-delta\", \"sessionId\": null, \"stub\": true}",
+    "{\"parentUuid\": \"be571dec-aa5a-4681-b7f8-42d38289f95c\", \"isSidechain\": false, \"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [{\"tool_use_id\": \"toolu_01NVZUMZCpiPEDSc7Wceb6Xq\", \"type\": \"tool_result\", \"content\": \"File created successfully at: /home/dev/project/hello.txt (file state is current in your context — no need to Read it back)\"}]}, \"uuid\": \"2ddca25b-f64e-44e3-ad65-fa10064f6c79\", \"timestamp\": \"2026-11-21T19:42:55.741Z\", \"toolUseResult\": {\"type\": \"create\", \"filePath\": \"/home/dev/project/hello.txt\", \"content\": \"hi\", \"structuredPatch\": [], \"originalFile\": null, \"userModified\": false}, \"sourceToolAssistantUUID\": \"be571dec-aa5a-4681-b7f8-42d38289f95c\", \"permissionDecision\": {\"decision\": \"accept\", \"source\": \"user_temporary\", \"grantScope\": \"once\", \"reasonCode\": \"unknown\"}, \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"last-prompt\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"ai-title\", \"aiTitle\": \"hello.txt 文件操作\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\"}",
+    "{\"type\": \"mode\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"permission-mode\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"session-owner\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"atis-latch\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request-blob\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"data-flow-records\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"tools-used\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"parentUuid\": \"2135930e-64e8-4f6f-9772-92f4c3b447b6\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeLmcahN8tFqHsJWzvr\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Step 2: running `cat hello.txt`.\"}], \"container\": null, \"stop_reason\": \"tool_use\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 701, \"cache_read_input_tokens\": 54041, \"output_tokens\": 172, \"output_tokens_details\": {\"thinking_tokens\": 0}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 701, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 172, \"cache_read_input_tokens\": 54041, \"cache_creation_input_tokens\": 701, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 701}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"apiBlockIndex\": 0, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"f1aca667-4abd-48ef-b6f9-0f8a08cc57ea\", \"timestamp\": \"2026-11-21T19:42:56.439Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"f1aca667-4abd-48ef-b6f9-0f8a08cc57ea\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeLmcahN8tFqHsJWzvr\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"id\": \"toolu_01AfbYYhfvpXGGCf1mGcjc4C\", \"name\": \"Bash\", \"input\": {\"command\": \"cat /home/dev/project/hello.txt\", \"description\": \"Print contents of hello.txt\"}, \"caller\": {\"type\": \"direct\"}}], \"container\": null, \"stop_reason\": \"tool_use\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 701, \"cache_read_input_tokens\": 54041, \"output_tokens\": 172, \"output_tokens_details\": {\"thinking_tokens\": 0}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 701, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 172, \"cache_read_input_tokens\": 54041, \"cache_creation_input_tokens\": 701, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 701}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"toolInputStreamMs\": 661, \"wireToolInputs\": {\"toolu_01AfbYYhfvpXGGCf1mGcjc4C\": {\"command\": \"cat /home/dev/project/hello.txt\", \"description\": \"Print contents of hello.txt\"}}, \"apiBlockIndex\": 1, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"7885aa4a-7cf7-4be5-9e5a-3ca04534cd53\", \"timestamp\": \"2026-11-21T19:42:57.103Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"7885aa4a-7cf7-4be5-9e5a-3ca04534cd53\", \"isSidechain\": false, \"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [{\"tool_use_id\": \"toolu_01AfbYYhfvpXGGCf1mGcjc4C\", \"type\": \"tool_result\", \"content\": \"hi\", \"is_error\": false}]}, \"uuid\": \"94e2958f-a359-42c8-aac0-66289fc4d76b\", \"timestamp\": \"2026-11-21T19:42:57.490Z\", \"toolUseResult\": {\"stdout\": \"hi\", \"stderr\": \"\", \"interrupted\": false, \"isImage\": false, \"noOutputExpected\": false}, \"sandboxed\": false, \"sourceToolAssistantUUID\": \"7885aa4a-7cf7-4be5-9e5a-3ca04534cd53\", \"permissionDecision\": {\"decision\": \"accept\", \"source\": \"config\", \"reasonType\": \"subcommandResults\"}, \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"type\": \"api-request-blob\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"data-flow-records\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"tools-used\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"parentUuid\": \"9bf442ea-5ef7-42a2-a0cf-758af125c6cc\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeLuHwA5jVxN35N8AjP\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Step 3: changing \\\"hi\\\" to \\\"hello\\\".\"}], \"container\": null, \"stop_reason\": \"tool_use\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 203, \"cache_read_input_tokens\": 54742, \"output_tokens\": 190, \"output_tokens_details\": {\"thinking_tokens\": 0}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 203, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 190, \"cache_read_input_tokens\": 54742, \"cache_creation_input_tokens\": 203, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 203}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"apiBlockIndex\": 0, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"b1f9396d-0dda-4888-ae05-963cb8eef907\", \"timestamp\": \"2026-11-21T19:42:58.343Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"b1f9396d-0dda-4888-ae05-963cb8eef907\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeLuHwA5jVxN35N8AjP\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"id\": \"toolu_01A6K5cJ4UNsGFs5Zgz4tov4\", \"name\": \"Edit\", \"input\": {\"replace_all\": false, \"file_path\": \"/home/dev/project/hello.txt\", \"old_string\": \"hi\", \"new_string\": \"hello\"}, \"caller\": {\"type\": \"direct\"}}], \"container\": null, \"stop_reason\": \"tool_use\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 203, \"cache_read_input_tokens\": 54742, \"output_tokens\": 190, \"output_tokens_details\": {\"thinking_tokens\": 0}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 203, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 190, \"cache_read_input_tokens\": 54742, \"cache_creation_input_tokens\": 203, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 203}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"toolInputStreamMs\": 519, \"wireToolInputs\": {\"toolu_01A6K5cJ4UNsGFs5Zgz4tov4\": {\"file_path\": \"/home/dev/project/hello.txt\", \"old_string\": \"hi\", \"new_string\": \"hello\"}}, \"apiBlockIndex\": 1, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"303e7dea-5f79-45e9-894a-9c6fcc452acf\", \"timestamp\": \"2026-11-21T19:42:58.868Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"303e7dea-5f79-45e9-894a-9c6fcc452acf\", \"isSidechain\": false, \"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [{\"tool_use_id\": \"toolu_01A6K5cJ4UNsGFs5Zgz4tov4\", \"type\": \"tool_result\", \"content\": \"The file /home/dev/project/hello.txt has been updated successfully. (file state is current in your context — no need to Read it back)\"}]}, \"uuid\": \"17385cae-4241-4359-97f9-e9e144b3d400\", \"timestamp\": \"2026-11-21T19:43:01.824Z\", \"toolUseResult\": {\"filePath\": \"/home/dev/project/hello.txt\", \"oldString\": \"hi\", \"newString\": \"hello\", \"originalFile\": \"hi\", \"structuredPatch\": [{\"oldStart\": 1, \"oldLines\": 1, \"newStart\": 1, \"newLines\": 1, \"lines\": [\"-hi\", \"\\\\ No newline at end of file\", \"+hello\", \"\\\\ No newline at end of file\"]}], \"userModified\": false, \"replaceAll\": false}, \"sourceToolAssistantUUID\": \"303e7dea-5f79-45e9-894a-9c6fcc452acf\", \"permissionDecision\": {\"decision\": \"accept\", \"source\": \"user_temporary\", \"grantScope\": \"once\", \"reasonCode\": \"unknown\"}, \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"type\": \"api-request-blob\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request-blob\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"data-flow-records\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"tools-used\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"parentUuid\": \"7d6ca2f5-f22e-471c-ba67-65ed0be50f26\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeMDdzh7ZAxZoXdBruX\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Step 4: reading the file back.\"}], \"container\": null, \"stop_reason\": \"tool_use\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 323, \"cache_read_input_tokens\": 54945, \"output_tokens\": 136, \"output_tokens_details\": {\"thinking_tokens\": 0}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 323, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 136, \"cache_read_input_tokens\": 54945, \"cache_creation_input_tokens\": 323, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 323}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"apiBlockIndex\": 0, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"c1648d1a-9af9-47ca-9ab0-647621963398\", \"timestamp\": \"2026-11-21T19:43:02.611Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"c1648d1a-9af9-47ca-9ab0-647621963398\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeMDdzh7ZAxZoXdBruX\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"id\": \"toolu_012FeSzHcH8W3wDjQnAQkRDq\", \"name\": \"Read\", \"input\": {\"file_path\": \"/home/dev/project/hello.txt\"}, \"caller\": {\"type\": \"direct\"}}], \"container\": null, \"stop_reason\": \"tool_use\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 323, \"cache_read_input_tokens\": 54945, \"output_tokens\": 136, \"output_tokens_details\": {\"thinking_tokens\": 0}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 323, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 136, \"cache_read_input_tokens\": 54945, \"cache_creation_input_tokens\": 323, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 323}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"toolInputStreamMs\": 446, \"wireToolInputs\": {\"toolu_012FeSzHcH8W3wDjQnAQkRDq\": {\"file_path\": \"/home/dev/project/hello.txt\"}}, \"apiBlockIndex\": 1, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"46ae6332-d47d-4902-8ef1-9e2de62f3591\", \"timestamp\": \"2026-11-21T19:43:03.065Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"46ae6332-d47d-4902-8ef1-9e2de62f3591\", \"isSidechain\": false, \"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [{\"tool_use_id\": \"toolu_012FeSzHcH8W3wDjQnAQkRDq\", \"type\": \"tool_result\", \"content\": \"1\\thello\"}]}, \"uuid\": \"8fadfa8b-452f-458b-b988-ee99ef658453\", \"timestamp\": \"2026-11-21T19:43:03.090Z\", \"toolUseResult\": {\"type\": \"text\", \"file\": {\"filePath\": \"/home/dev/project/hello.txt\", \"content\": \"hello\", \"numLines\": 1, \"startLine\": 1, \"totalLines\": 1}}, \"sourceToolAssistantUUID\": \"46ae6332-d47d-4902-8ef1-9e2de62f3591\", \"permissionDecision\": {\"decision\": \"accept\", \"source\": \"config\", \"reasonType\": \"mode\"}, \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"type\": \"api-request-blob\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"api-request\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"data-flow-records\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"attachment\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"parentUuid\": \"a8e705b9-6850-4483-9e80-4ddc1c9bddf8\", \"isSidechain\": false, \"message\": {\"model\": \"claude-haiku-5-5\", \"id\": \"msg_011ChGeMK2TNB6tiAsZKg8An\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"hello.txt 已按顺序完成四步：先写入 \\\"hi\\\"，cat 输出为 \\\"hi\\\"，再改为 \\\"hello\\\"，读回内容确认是 \\\"hello\\\"。文件路径为 /home/dev/project/hello.txt。\"}], \"container\": null, \"stop_reason\": \"end_turn\", \"stop_sequence\": null, \"stop_details\": null, \"usage\": {\"input_tokens\": 2, \"cache_creation_input_tokens\": 169, \"cache_read_input_tokens\": 55268, \"output_tokens\": 145, \"output_tokens_details\": {\"thinking_tokens\": 0}, \"server_tool_use\": {\"web_search_requests\": 0, \"web_fetch_requests\": 0}, \"service_tier\": \"standard\", \"cache_creation\": {\"ephemeral_1h_input_tokens\": 169, \"ephemeral_5m_input_tokens\": 0}, \"inference_geo\": \"global\", \"iterations\": [{\"input_tokens\": 2, \"output_tokens\": 145, \"cache_read_input_tokens\": 55268, \"cache_creation_input_tokens\": 169, \"cache_creation\": {\"ephemeral_5m_input_tokens\": 0, \"ephemeral_1h_input_tokens\": 169}, \"type\": \"message\"}], \"speed\": \"standard\", \"fallback_credit\": null}, \"input_transformations\": [], \"diagnostics\": null, \"context_management\": null}, \"apiBlockIndex\": 0, \"requestedModel\": \"claude-haiku-5-5\", \"promptCacheRequested\": \"1h\", \"type\": \"assistant\", \"uuid\": \"8385ceec-218a-40a2-a277-7762726259f6\", \"timestamp\": \"2026-11-21T19:43:04.533Z\", \"advisorModel\": \"claude-opus-5-5\", \"effort\": \"medium\", \"perTurnEffort\": \"medium\", \"madeBy\": \"model\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"8385ceec-218a-40a2-a277-7762726259f6\", \"isSidechain\": false, \"type\": \"system\", \"subtype\": \"stop_hook_summary\", \"hookCount\": 2, \"preventedContinuation\": false, \"stopReason\": \"\", \"hasOutput\": false, \"level\": \"suggestion\", \"timestamp\": \"2026-11-21T19:43:04.681Z\", \"uuid\": \"b8aef804-f2c9-42ab-bebd-def6499b15c8\", \"toolUseID\": \"88af9d6f-6e20-4af6-95c7-42d8f69ac009\", \"session_id\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"parentUuid\": \"b8aef804-f2c9-42ab-bebd-def6499b15c8\", \"isSidechain\": false, \"type\": \"system\", \"subtype\": \"turn_duration\", \"durationMs\": 9725, \"messageCount\": 34, \"timestamp\": \"2026-11-21T19:43:04.683Z\", \"uuid\": \"880e058a-50d9-4da3-b820-1cbb528f3d17\", \"isMeta\": false, \"userType\": \"external\", \"entrypoint\": \"cli\", \"cwd\": \"/home/dev/project\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"version\": \"2.1.330\", \"gitBranch\": \"HEAD\", \"dataFlowOn\": true}",
+    "{\"type\": \"cost-state\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"last-prompt\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"ai-title\", \"aiTitle\": \"hello.txt 文件操作\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\"}",
+    "{\"type\": \"mode\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"permission-mode\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"session-owner\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"atis-latch\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}",
+    "{\"type\": \"cost-state\", \"sessionId\": \"e6cdc860-1055-488f-9ed2-8b8019061bb9\", \"stub\": true}"
+  ],
+  "unknown": 0,
+  "title": "hello.txt 文件操作",
+  "events": [
+    {
+      "state": "start",
+      "t": "turn"
+    },
+    {
+      "content": [
+        {
+          "text": "Do these steps in order, using your tools and a todo list: 1) create hello.txt containing the word hi  2) run: cat hello.txt  3) edit hello.txt to say hello instead  4) read it back. Then answer with one short sentence.",
+          "type": "text"
+        }
+      ],
+      "t": "user"
+    },
+    {
+      "t": "update",
+      "update": {
+        "content": {
+          "text": "",
+          "type": "text"
+        },
+        "messageId": "msg_011ChGeKiCQxZc8aSc6G2EeE",
+        "sessionUpdate": "agent_thought_chunk"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "_meta": {
+          "herdr-ide": {
+            "model": "claude-haiku-5-5"
+          }
+        },
+        "content": {
+          "text": "Starting with step 1: creating hello.txt with the word \"hi\".",
+          "type": "text"
+        },
+        "messageId": "msg_011ChGeKiCQxZc8aSc6G2EeE",
+        "sessionUpdate": "agent_message_chunk"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "kind": "edit",
+        "locations": [
+          {
+            "path": "/home/dev/project/hello.txt"
+          }
+        ],
+        "rawInput": {
+          "content": "hi",
+          "file_path": "/home/dev/project/hello.txt"
+        },
+        "sessionUpdate": "tool_call",
+        "status": "pending",
+        "title": "/home/dev/project/hello.txt",
+        "toolCallId": "toolu_01NVZUMZCpiPEDSc7Wceb6Xq"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 54043
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "content": [
+          {
+            "newText": "hi",
+            "oldText": null,
+            "path": "/home/dev/project/hello.txt",
+            "type": "diff"
+          }
+        ],
+        "sessionUpdate": "tool_call_update",
+        "status": "completed",
+        "toolCallId": "toolu_01NVZUMZCpiPEDSc7Wceb6Xq"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "_meta": {
+          "herdr-ide": {
+            "model": "claude-haiku-5-5"
+          }
+        },
+        "content": {
+          "text": "Step 2: running `cat hello.txt`.",
+          "type": "text"
+        },
+        "messageId": "msg_011ChGeLmcahN8tFqHsJWzvr",
+        "sessionUpdate": "agent_message_chunk"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "kind": "execute",
+        "rawInput": {
+          "command": "cat /home/dev/project/hello.txt",
+          "description": "Print contents of hello.txt"
+        },
+        "sessionUpdate": "tool_call",
+        "status": "pending",
+        "title": "Print contents of hello.txt",
+        "toolCallId": "toolu_01AfbYYhfvpXGGCf1mGcjc4C"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 54744
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "content": [
+          {
+            "content": {
+              "text": "hi",
+              "type": "text"
+            },
+            "type": "content"
+          }
+        ],
+        "sessionUpdate": "tool_call_update",
+        "status": "completed",
+        "toolCallId": "toolu_01AfbYYhfvpXGGCf1mGcjc4C"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "_meta": {
+          "herdr-ide": {
+            "model": "claude-haiku-5-5"
+          }
+        },
+        "content": {
+          "text": "Step 3: changing \"hi\" to \"hello\".",
+          "type": "text"
+        },
+        "messageId": "msg_011ChGeLuHwA5jVxN35N8AjP",
+        "sessionUpdate": "agent_message_chunk"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "kind": "edit",
+        "locations": [
+          {
+            "path": "/home/dev/project/hello.txt"
+          }
+        ],
+        "rawInput": {
+          "file_path": "/home/dev/project/hello.txt",
+          "new_string": "hello",
+          "old_string": "hi",
+          "replace_all": false
+        },
+        "sessionUpdate": "tool_call",
+        "status": "pending",
+        "title": "/home/dev/project/hello.txt",
+        "toolCallId": "toolu_01A6K5cJ4UNsGFs5Zgz4tov4"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 54947
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "content": [
+          {
+            "newText": "hello",
+            "oldText": "hi",
+            "path": "/home/dev/project/hello.txt",
+            "type": "diff"
+          }
+        ],
+        "sessionUpdate": "tool_call_update",
+        "status": "completed",
+        "toolCallId": "toolu_01A6K5cJ4UNsGFs5Zgz4tov4"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "_meta": {
+          "herdr-ide": {
+            "model": "claude-haiku-5-5"
+          }
+        },
+        "content": {
+          "text": "Step 4: reading the file back.",
+          "type": "text"
+        },
+        "messageId": "msg_011ChGeMDdzh7ZAxZoXdBruX",
+        "sessionUpdate": "agent_message_chunk"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "kind": "read",
+        "locations": [
+          {
+            "path": "/home/dev/project/hello.txt"
+          }
+        ],
+        "rawInput": {
+          "file_path": "/home/dev/project/hello.txt"
+        },
+        "sessionUpdate": "tool_call",
+        "status": "pending",
+        "title": "/home/dev/project/hello.txt",
+        "toolCallId": "toolu_012FeSzHcH8W3wDjQnAQkRDq"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 55270
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "_meta": {
+          "herdr-ide": {
+            "lines": 1
+          }
+        },
+        "locations": [
+          {
+            "line": 1,
+            "path": "/home/dev/project/hello.txt"
+          }
+        ],
+        "sessionUpdate": "tool_call_update",
+        "status": "completed",
+        "toolCallId": "toolu_012FeSzHcH8W3wDjQnAQkRDq"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "_meta": {
+          "herdr-ide": {
+            "model": "claude-haiku-5-5"
+          }
+        },
+        "content": {
+          "text": "hello.txt 已按顺序完成四步：先写入 \"hi\"，cat 输出为 \"hi\"，再改为 \"hello\"，读回内容确认是 \"hello\"。文件路径为 /home/dev/project/hello.txt。",
+          "type": "text"
+        },
+        "messageId": "msg_011ChGeMK2TNB6tiAsZKg8An",
+        "sessionUpdate": "agent_message_chunk"
+      }
+    },
+    {
+      "t": "update",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 55439
+      }
+    },
+    {
+      "state": "end",
+      "t": "turn"
+    }
+  ]
+}

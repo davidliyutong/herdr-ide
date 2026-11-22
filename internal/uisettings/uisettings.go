@@ -6,8 +6,10 @@
 package uisettings
 
 import (
+	"slices"
 	"strings"
 
+	"herdr-ide/internal/agentkinds"
 	"herdr-ide/internal/settings"
 )
 
@@ -62,11 +64,18 @@ const (
 	MaxUndoClose = 120
 )
 
-// Agents are the coding agents the terminals recognize (the manifests'
-// ids, internal/agent/detect), offered by the list of silent agents.
-var Agents = []string{
-	"agy", "amp", "claude", "cline", "codex", "copilot", "cursor", "devin", "droid", "gemini", "grok",
-	"hermes", "kilo", "kimi", "kiro", "letta", "maki", "muse", "opencode", "pi", "qodercli", "qwen",
+// Agents are the ids of the coding agents the terminals recognize (the
+// kinds of internal/agentkinds, which are the manifests' of
+// internal/agent/detect), sorted, offered by the list of silent agents.
+var Agents = agentIDs()
+
+func agentIDs() []string {
+	var ids []string
+	for _, k := range agentkinds.All() {
+		ids = append(ids, k.ID)
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 // Schemes are the terminal color schemes the UIs offer; "default" is the

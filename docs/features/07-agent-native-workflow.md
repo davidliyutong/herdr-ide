@@ -80,12 +80,15 @@ automatically, scheduling agents.
   user gesture on the page, so a page not clicked since it was loaded can
   stay silent; the desktop app's main window allows autoplay
   ([16](16-desktop-packaging.md)).
-- **Starting agents**: the palette offers common agent kinds (`claude`,
+- **Starting agents**: the palette offers the agent kinds the registry
+  starts (`internal/agentkinds`, [35](35-agent-native-view.md): `claude`,
   `codex`, `gemini`, `opencode`, `kimi`, `grok`, `cursor`, `copilot`,
   `qwen`, `amp`); the focused pane is split to the right and the agent runs
-  in the new terminal (`terminal.run` with the agent's name as the program)
-  in the focused terminal's directory, or in a new tab when no pane has the
-  focus.
+  in the new terminal (`terminal.run` with the kind's command line as the
+  program) in the focused terminal's directory, or in a new tab when no
+  pane has the focus. The new-tab menu's **Agent: Claude Code** and
+  **Agent: Codex** start one in a new tab shown as its conversation
+  ([35](35-agent-native-view.md)).
 - **Context to agents**: VS Code's *Send to Agent* pastes `@file:lines` and
   the selection into a terminal without submitting (`web/src/lib/bridge.ts`).
   From a VS Code pane it goes to an agent of the pane's tab, else of the
@@ -111,7 +114,7 @@ automatically, scheduling agents.
 
 | Option | Why not |
 | --- | --- |
-| A prompt box sending text to the agent | The terminal itself is the prompt; a second input duplicates it and hides the agent's own UI (approvals, slash commands). |
+| A prompt box sending text to the agent | The terminal itself is the prompt; a second input duplicates it and hides the agent's own UI (approvals, slash commands). The native view's message box ([35](35-agent-native-view.md)) types into that terminal, and the terminal shows whenever the agent waits for an answer. |
 | Sound files | Shipped audio needs an asset and its license notice; synthesized chimes need neither. |
 | Every browser plays | With several browsers or tabs open, each would sound at once. |
 | Web Push for closed tabs | Requires a push service and subscription storage; the reverse-proxy model has no user accounts. |

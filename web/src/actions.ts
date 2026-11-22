@@ -1006,12 +1006,20 @@ export const actions = {
     if (best) actions.focusPane(best.m, best.terminal);
   },
 
-  /** Starts a coding agent in a pane split off the focused one. */
-  async startAgent(kind: string) {
-    const c = current();
-    if (!c) return;
-    if (c.focused) await actions.split(c.m, c.focused, 'right', [kind]);
-    else await actions.newTab(c.m, undefined, [kind]);
+  /** Starts a coding agent (argv) in a new tab of a workspace of machine m
+   * (the selected one) and gives it the keyboard; its pane's leaf gets
+   * fields (term/layout.ts setTerminalFields: how the pane shows the agent,
+   * the session it starts) in the same write that places it. */
+  async startAgent(m: string, argv: string[], o: { workspace?: string; fields?: Record<string, unknown> } = {}) {
+    const ws = o.workspace;
+    try {
+      const address = await terms.run(m, { workspace: ws, argv }, (l, a) =>
+        L.setTerminalFields(L.openTerminal(l, a, ws && l.workspaces.some((w) => w.id === ws) ? ws : undefined), a, o.fields ?? {}),
+      );
+      if (address) focusDom(m, address);
+    } catch (e) {
+      report(e);
+    }
   },
 };
 

@@ -29,15 +29,17 @@ What herdr-core 0.1.21 gives to build on:
 
 Goals: after the terminal core starts again, every workspace and tab is
 there as it was arranged, each terminal a shell in its directory; an
-agent that can continue the latest conversation of a directory is back in
-its pane without the user typing; nothing a client wrote into the layout
+agent that can continue a conversation is back in its pane, in the
+session it ran when the machine confirms it, else in the directory's
+latest, without the user typing; nothing a client wrote into the layout
 document is run as a command; several pages open on one machine restore
 it once.
 
 Non-goals: starting any other program again (a build, an editor, a
-server, a shell's history or environment); restoring the output that was
-on the screen; choosing which conversation an agent continues; restoring
-from a read-only page.
+server, a shell's history or environment); restoring a session the
+machine does not confirm for the terminal's directory; restoring from a
+read-only page. The output that was on the screen is the terminal
+history plugin's ([36](36-terminal-history.md)).
 
 ## Design
 
@@ -53,7 +55,12 @@ that stayed open while the machine was away lost the machine's streams,
 not its connection to the core: its panes attach again when the
 machine's terminals are back, and an attach refused while herdr-core is
 still starting the shell is tried again
-([26](26-web-terminals.md)).
+([26](26-web-terminals.md)). A stop of the terminal core ends the
+programs, and their panes show that the program ended; once the core
+started a new shell at a kept terminal's address (its record live with
+another pid), the pane attaches again by itself, so the agent is resumed,
+and the saved output shown ([36](36-terminal-history.md)), without
+reloading the page.
 
 **Terminals that ended with their core.** A terminal the core reports
 finished with the reason `stopped_by_restart`, `holder_lost`,
@@ -68,8 +75,9 @@ did, not its program (`endedWithCore`). For such a terminal:
   `keep: true` in the directory the old terminal started in (the record's
   `cwd`);
 - when the replacement runs, the leaf takes its address
-  (`replaceTerminal`: the pane keeps its place, its splits and, if it had
-  it, the focus), the layout is written through `doc.set` with the
+  (`replaceTerminal`: the pane keeps its place, its splits, its `render`
+  and `session` and, if it had it, the focus, and says
+  `before: <old address>`), the layout is written through `doc.set` with the
   version last read, and once that write succeeded (or a read shows a
   layout naming the replacement) the old record is removed
   (`terminal.rm`); a write that lost keeps it, so that the layout that
@@ -80,27 +88,42 @@ did, not its program (`endedWithCore`). For such a terminal:
   time.
 
 **Agents.** A program is never started again by the layout. For an agent
-that can continue its last conversation of a directory, the page types
-the agent's own command for that into the new shell:
+that can continue a conversation, the page types the agent's own command
+into the new shell, from the agent kind registry
+([35](35-agent-native-view.md); `web/src/conversation/kinds.ts`,
+`resumeCommand`): the kinds that can be brought back are those with a
+command that continues the directory's latest conversation.
 
-| Agent | Command typed |
-| --- | --- |
-| `claude` | `claude --continue` |
-| `codex` | `codex resume --last` |
+| Agent | Session confirmed | Otherwise |
+| --- | --- | --- |
+| `claude` | `claude --resume <id>` | `claude --continue` |
+| `codex` | `codex resume <id>` | `codex resume --last` |
 
 - While a live terminal runs one of these agents
   ([25](25-agent-detection.md)), its leaf remembers `agent` (the agent's
   id) and `pid` (the pid of the terminal's program then), written with
   every change of the terminals (`rememberAgents`, `TermModel.remember`).
-- A terminal seen without its agent keeps the leaf's `agent` for 30 s
-  (`AGENT_FORGET_MS`) and loses it then: an agent the user quit is not
-  resumed, while a machine going down, whose programs end before the
-  connection does, takes less than that and leaves the leaf as it was.
+  When the machine found the agent's session from its own process (its
+  command line, its record of the process, the transcript it holds open,
+  the only session made in its directory since it started, or a hook;
+  never `guess`, the directory's newest transcript, which may be another
+  terminal's; `rememberedSession`), the leaf also remembers `session`. It
+  follows the record when the agent starts another session (`/clear`). A
+  record that names no session, or only a guess, leaves the leaf's as it
+  is, so a new agent tab keeps the session it started the agent with
+  until a record names another; the session is dropped when another kind
+  of agent runs in the terminal, and forgotten with `agent`.
+- A terminal seen without its agent keeps the leaf's `agent` (and
+  `session`) for 30 s (`AGENT_FORGET_MS`) and loses them then: an agent
+  the user quit is not resumed, while a machine going down, whose
+  programs end before the connection does, takes less than that and
+  leaves the leaf as it was.
 - A live terminal whose program has another pid than the leaf remembers
   has lost the agent with its program (the core gave it a new shell): the
-  leaf drops `agent` and `pid` and says `resume: <agent>`. A replacement
-  for a terminal that ended with its core gets `resume` from the old
-  leaf's `agent` the same way.
+  leaf drops `agent` and `pid`, keeps `session` and says
+  `resume: <agent>`. A replacement for a terminal that ended with its
+  core gets `resume` from the old leaf's `agent` the same way, and keeps
+  its `session`.
 - A writing page that has a pane of the terminal, shown or kept hidden
   ([26](26-web-terminals.md)), takes `resume` out of the leaf and, once
   the core took that layout, types the command with a return into the
@@ -112,11 +135,32 @@ the agent's own command for that into the new shell:
   attached (`onAttached`). A page left open while the machine was away
   thus types into the terminals it shows or keeps as soon as they are
   back, and a page loaded afterwards into each terminal when it first
-  shows it. The command comes from the table in `restore.ts`
-  (`RESUME_COMMANDS`); a `resume` that names no agent of the table is
-  removed and nothing is typed.
-- The conversation continued is the agent's latest of the directory. Two
-  agents of one kind that ran in one directory both continue that one.
+  shows it. A `resume` that names no kind that can be brought back is
+  removed and nothing is typed. The request is taken from the layout only
+  while the terminal's pane is attached at that moment (not while it
+  attaches again for a prelude, [26](26-web-terminals.md), not after it
+  was unmounted) and the terminal runs what it ran when the request was
+  made: the same program, with the same program, or its shell, in the
+  foreground (`sameProgram`). Otherwise the request stays for the pane's
+  next attach. Once taken, the command is typed only if that still holds
+  when the layout is written; otherwise nothing is typed. Text typed
+  while the pane attaches again for a prelude waits for the new stream.
+- Before taking a `resume` whose leaf names a session (`resumeSession`),
+  the page asks the machine `GET /api/m/{id}/p/agents/resolve` with the
+  agent, the session and the terminal's directory (`confirmSession`). With
+  `ok` it types the kind's command that resumes the session by its id;
+  with any other answer, the agents plugin off, a failed request, or no
+  answer within 3 s (`RESOLVE_TIMEOUT_MS`), it types the command that
+  continues the directory's latest, as for a leaf without a session. The
+  question comes before the request is taken out of the layout: the
+  answer only chooses between the kind's two commands, the versioned
+  write still decides whether anything is typed, and the layout never says
+  the agent is back while the page waits. The command is made from the
+  layout as it is when the answer came, by the id only while the leaf
+  still names the agent and the session that were confirmed. While a
+  question is on its way for a terminal, other calls for it only give the
+  newest pane to type into. Two agents of one kind that ran in one
+  directory thus each come back in their own conversation.
 
 **Read-only pages** restore nothing: they start no replacement, write no
 leaf and type nothing; a terminal that ended with its core is back there
@@ -127,9 +171,12 @@ once a writing page restored it.
 | Option | Why not |
 | --- | --- |
 | Restoring in the core (Go) when a backend connects | The layout document is the clients' ([22](22-terminal-protocol.md)): the core passes it on without reading it, and other clients of the protocol arrange terminals their own way. |
-| Storing the command to run in the leaf | Every writing client of the machine writes the document; a command taken from it would be typed into a shell by another page. The leaf names an agent, and the page's table has the command. |
+| Storing the command to run in the leaf | Every writing client of the machine writes the document; a command taken from it would be typed into a shell by another page. The leaf names an agent kind and a session id, and the registry has the commands. |
 | Starting the agent as the terminal's program (`argv`) | The pane would close when the agent exits; typed into the shell, the agent runs as when the user started it there, and the shell stays when it ends. |
-| Remembering the conversation's id | The agents' session files are theirs, in formats that change; `--continue` and `resume --last` are their own commands for the directory's latest. |
+| Continuing only the directory's latest conversation | Two agents of one kind that ran in one directory both continued the same conversation. The session the machine found from the agent's process names the right one; the directory's latest stays the fallback when the machine does not confirm it. |
+| Resuming the leaf's session without asking the machine | Every writing client writes the document: a session the agent never kept, or one that ran in another directory, would bring back a conversation this pane never had. The machine confirms that the transcript exists and ran in the terminal's directory, and only a lower-case UUID is put into the kind's own command. |
+| Remembering a session the machine guessed | A guess is the directory's newest transcript, which may be another terminal's. |
+| Asking the machine after the request is taken out of the layout | For as long as the machine takes to answer, the layout would say nothing is to be brought back while nothing was typed yet, and a page closed meanwhile would lose the resume. |
 | Starting every program that ran again | A command line says nothing about what the program had done; running a build, a migration or a server again unasked is not safe. |
 | Forgetting an agent as soon as it is no longer detected | A machine going down ends its programs before its connection: the leaf would forget the agent seconds before the reboot it is remembered for. |
 | Knowing a new shell by the `restarted` event alone | A page that was not open when the core came back never sees the event; the pid in the leaf says the same to whichever page reads the layout next. |
@@ -160,14 +207,37 @@ once a writing page restored it.
   nothing is typed again.
 - **The agent was quit less than 30 s before the core ended** → the leaf
   still remembers it, and it is resumed.
+- **The machine does not confirm the session** (no transcript of it, a
+  compressed one, another directory, the agents plugin off, no answer
+  within 3 s) → the directory's latest conversation is continued. A
+  replacement for a terminal that ended with its core starts in the
+  directory the old terminal started in: when the agent ran elsewhere
+  (the user changed directory first), the machine answers `other_cwd`
+  and the latest of the start directory is continued.
+- **The command fails** (a session the agent can no longer resume) → the
+  agent says so in the pane; the leaf keeps `session`, nothing is typed
+  again.
+- **No session was found while the agent ran** (Codex before its first
+  prompt, a guess, the agents plugin off) → the leaf has none, and the
+  directory's latest is continued.
+- **The user started a program in the new shell before the pane first
+  attached** → the terminal ran that program when the request was made,
+  so the command is still typed, into that program.
+- **The user starts a program while the machine's answer is on its way**
+  → the request stays in the layout, and is taken at the pane's next
+  attach while the shell waits again.
 - **The page is read-only** → nothing is restored (above).
 
 ## Security
 
 The layout document is written by every writing client of the machine.
-From it the page takes only an agent's id, which selects a command of a
-fixed table in the page; no text of the document is typed into a shell or
-passed as a program. A replacement starts the machine's shell (no `argv`)
+From it the page takes only an agent's id, which selects a kind of the
+registry and its fixed commands, and a session id, which reaches a
+command only as a lower-case UUID (checked when the document is read and
+again when the command is made) and only after the machine confirmed it
+for the terminal's directory; the machine only compares the directory with
+the one the transcript records and opens no path the request names. No
+other text of the document is typed into a shell or passed as a program. A replacement starts the machine's shell (no `argv`)
 in the directory the terminal core recorded for the old terminal, not in
 one the document names. Read-only pages restore nothing, and the calls
 involved (`terminal.run`, `terminal.rm`, `terminal.kill`, `doc.set`) are
@@ -183,8 +253,27 @@ terminal runs another program, and taken once; a new terminal put in an
 ended one's place, with the focus; and, with a scripted core, terminals
 that ended with the core started again in their directory when the layout
 is read, the pane of one whose program exited closed, and the resume
-command typed once. `terms.test.ts`, `menus.test.ts`, `codePanes.test.ts`
-and `paneHeader.test.ts` pin `keep: true` in the page's `terminal.run`.
+command typed once. `restoreSession.test.ts`: the session a leaf
+remembers (the machine's from the agent's process, following the record,
+never a guess or a value that is no session id, a new agent tab's kept,
+another agent's dropped, kept for the resume), `before` and the leaf's
+fields in a replacement, the confirmation (the question asked, any other
+answer, no request for what the route would refuse, the time limit and a
+later answer ignored), and with a scripted core two agents of one kind in
+one directory brought back in their own sessions, Codex resumed by its
+id, the latest continued without a confirmation or for a hostile session,
+one question while an answer is on its way, nothing typed when the write
+lost or another page took the request meanwhile, the id only while the
+leaf still names the session confirmed, the request left for the next
+attach when the pane is not attached or gone once the answer came, when
+the terminal got another program or the user started one meanwhile, and
+nothing typed when the terminal runs something else by the time the
+layout is written, nothing on a read-only page. `termPane.test.ts` and
+`terminalViewProgram.test.tsx`: a pane whose program ended attaching
+again when its terminal has another program, and input kept while a
+pane attaches again for a prelude ([26](26-web-terminals.md)).
+`terms.test.ts`, `menus.test.ts`, `codePanes.test.ts` and
+`paneHeader.test.ts` pin `keep: true` in the page's `terminal.run`.
 
 Checked by hand with real reboots: a Debian 12 arm64 virtual machine
 (QEMU in Docker, systemd, no lingering for the user) as an ssh machine of
@@ -196,3 +285,10 @@ again at their addresses in the directories they were last in
 typed once each (stand-in programs of those names took them), with the
 page loaded again after the reboot and with the page left open across
 it.
+
+Run in a browser against the `dev` instance on macOS with Claude Code
+2.1.330: after the terminal core was stopped and started, the agent's
+pane resumed its session by its id (`claude --resume <id>`). The page was
+reloaded for it then, as panes did not yet attach again by themselves
+after their program ended; that they do is covered by the tests above,
+not by a browser run.

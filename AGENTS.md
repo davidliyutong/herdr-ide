@@ -27,7 +27,7 @@ extension.
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
 | All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, generated tokens, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
-| Regenerate the design tokens' CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings or commands | `make tokens` |
+| Regenerate the design tokens' CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings, commands or agent kinds (`internal/agentkinds`) | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
 | Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
@@ -120,6 +120,18 @@ playbooks):
   libraries with it. Its tests run on Linux only (`TestGPUPick`).
 - yamux streams cannot be half-closed: use `agentproto.ChunkWriter` for
   uploads that expect a reply.
+- A coding agent kind is a row of `internal/agentkinds` with a detector
+  manifest of the same id (`TestKindsMatchManifestsAndSettings`), then
+  `make tokens`. A native view of its conversations also needs a parser in
+  `internal/agent/transcript`, its sessions in `internal/agent/sessions`
+  and vectors in `design/testdata/transcript/`, which the Go and the web
+  tests both run; `go test ./internal/agent/transcript -run TestVectors
+  -update` rewrites a vector's expected events after a deliberate change
+  of the mapping (review the diff). Browsers hold transcript cursors as
+  opaque numbers: no bit operations on them.
+- Never call herdr-core's `terminal.read` with `lines` above 0 for a
+  read-only client or from a background task: with history lines the core
+  scrolls a program on the alternate screen, which every viewer sees.
 - `web/dist` is embedded at build time; run `pnpm -C web build` (or
   `make build`) before `go build` if the UI changed. The build keeps
   `web/dist/.gitkeep`, which `go:embed` needs in a clean checkout.

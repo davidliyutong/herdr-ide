@@ -626,6 +626,44 @@
   border-top: 1px solid var(--line);
 }
 
+/* The status bar's item of the focused pane's agent session (SessionItem.tsx):
+   the service's mark, the cost and the context in use; its card lists the
+   session's numbers in two columns, then the account's tightest window. */
+.usage-session-item .ai-logo {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.usage-session-cost,
+.usage-session-ctx,
+.usage-session-facts dd {
+  font-variant-numeric: tabular-nums;
+}
+.usage-session-ctx {
+  padding-left: 4px;
+  border-left: 1px solid var(--line);
+}
+.usage-session-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0;
+}
+.usage-session-facts dt {
+  color: var(--fg-dim);
+}
+.usage-session-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.usage-session-account {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
 /* The settings page (SettingsPage.tsx): a row per provider, drawn as the
    settings' rows, that opens its settings, a page with a Back button and the provider's
    name. */

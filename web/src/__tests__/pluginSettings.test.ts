@@ -104,13 +104,15 @@ describe("plugins' settings pages", () => {
 
   it('lists the sections of plugins under the Plugins page, in the plugins’ order', () => {
     const labels = nav().map((b) => b.textContent);
-    // The vault's page has its extra alone here (its section has no settings in this stand-in).
+    // The vault's page and the terminal history's have their extra alone
+    // here (their sections have no settings in this stand-in).
     expect(labels).toEqual([
       'Terminal',
       'Plugins',
       t('files.title'),
       t('usage.title'),
       t('plugins.vault.title'),
+      t('history.title'),
       t('plugins.transfers.title'),
       'Keyboard Shortcuts',
     ]);

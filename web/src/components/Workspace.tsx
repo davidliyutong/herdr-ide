@@ -9,7 +9,8 @@ import { PaneHeader } from './PaneHeader';
 import { CodeSlot } from './CodeLayer';
 import { PreviewPane } from './PreviewPane';
 import { FileTitle, LeafIcon, PluginPane, ViewTitle } from './PluginPane';
-import { describeView, newTabGroups, useActivePlugins } from '../plugins/registry';
+import { describeView, newTabGroups, surfacesCover, TerminalSurfaces, useActivePlugins } from '../plugins/registry';
+import { coverIn, strongestCover, useCovers } from '../state/covers';
 import { StatusDot } from './StatusDot';
 import { aggregate, agentStatus, codeText, shortPath, terminalTitle } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
@@ -448,6 +449,13 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
     const leaf = L.leafOf(tab.root, pane);
     return leaf && L.isTerminalLeaf(leaf) ? [{ m, pane, rect }] : [];
   });
+  // A terminal a plugin's surface covers all of is not drawn and has not
+  // the focus, its size unchanged (state/covers.ts): what the surfaces of
+  // the plugins that are on say as the pane is rendered, so that a pane
+  // shown again is covered from its first frame, and what they set while
+  // mounted.
+  const covers = useCovers((s) => s.covers);
+  const active = useActivePlugins();
   const kept = keepPanes(shownTerminals, keptLimit, (k) => {
     const layout = terms.layout(k.m);
     return !!layout && L.locate(layout, k.pane) !== null;
@@ -502,6 +510,9 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
           const leaf = L.leafOf(tab.root, key);
           if (!leaf) return null;
           const focused = key === tab.focused;
+          const covered =
+            L.isTerminalLeaf(leaf) && strongestCover([coverIn(covers, m, key), surfacesCover(active, m, key, leaf)]) === 'all';
+          const onActivate = () => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key));
           return (
             <div
               // Machines name their terminals alike ("t1" on each): the
@@ -517,12 +528,7 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
             >
               <PaneHeader m={m} pane={key} leaf={leaf} ws={ws} focused={focused} zoomed={!!zoom} />
               {L.isTerminalLeaf(leaf) ? (
-                <TerminalView
-                  m={m}
-                  terminal={key}
-                  focused={focused}
-                  onActivate={() => key !== tab.focused && terms.mutate(m, (l) => L.focusPane(l, key))}
-                />
+                <TerminalView m={m} terminal={key} focused={focused && !covered} covered={covered} onActivate={onActivate} />
               ) : L.isCodeLeaf(leaf) ? (
                 <CodeSlot m={m} pane={key} view={leaf.code} />
               ) : L.isPluginLeaf(leaf) ? (
@@ -530,6 +536,9 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
               ) : (
                 <PreviewPane m={m} pane={key} path={leaf.preview.path} />
               )}
+              {/* What plugins draw over the terminal: the third child, after
+                  the terminal, which stays the second one. */}
+              {L.isTerminalLeaf(leaf) && <TerminalSurfaces m={m} terminal={key} leaf={leaf} focused={focused} onActivate={onActivate} />}
             </div>
           );
         }),
@@ -542,7 +551,8 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
             style={{ left: pct(k.rect.x), top: pct(k.rect.y), width: pct(k.rect.w), height: pct(k.rect.h) }}
             aria-hidden
           >
-            {/* The header's place, so that the terminal stays the second child. */}
+            {/* The header's place, so that the terminal stays the second
+                child; a kept pane draws no surface over it. */}
             {null}
             <TerminalView m={k.m} terminal={k.pane} focused={false} shown={false} onActivate={() => {}} />
           </div>

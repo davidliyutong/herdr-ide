@@ -6,6 +6,9 @@ import { zhCN as monitorZhCN } from '../plugins/monitor/i18n/zh-CN';
 import { zhCN as usageZhCN } from '../plugins/usage/i18n/zh-CN';
 import { zhCN as vaultZhCN } from '../plugins/vault/i18n/zh-CN';
 import { zhCN as browserZhCN } from '../plugins/browser/i18n/zh-CN';
+import { zhCN as agentsZhCN } from '../plugins/agents/i18n/zh-CN';
+import { zhCN as historyZhCN } from '../plugins/history/i18n/zh-CN';
+import { zhCN as conversationZhCN } from '../conversation/i18n/zh-CN';
 
 export const zhCN: Messages = {
   'desktop.failed': '桌面应用启动失败或与服务器的连接已中断。',
@@ -897,6 +900,12 @@ export const zhCN: Messages = {
   'settings.plugins.monitor.enabled.desc':
     '按住 ⌘ 悬停主机或通过状态栏查看实时 CPU、内存、每块 GPU、网络与磁盘占用，并提供支持树状视图与搜索的任务管理器。',
   'command.view.panel.monitor': '显示任务管理器',
+  // agents plugin
+  'settings.plugins.agents.enabled': '编程智能体',
+  'settings.plugins.agents.enabled.desc': '在终端窗格中显示编程智能体（Claude Code、Codex）的对话，内容读取自各机器上的会话记录。',
+  // terminal history plugin
+  'settings.plugins.history.enabled': '终端历史',
+  'settings.plugins.history.enabled.desc': '机器在开启“保存终端输出的快照”后保存在磁盘上的终端输出，在终端核心重新启动后显示。',
   // unsaved changes
   'unsaved.title': '未保存的更改',
   'unsaved.one': '要保存对 {name} 的更改吗？',
@@ -915,4 +924,7 @@ export const zhCN: Messages = {
   ...usageZhCN,
   ...vaultZhCN,
   ...browserZhCN,
+  ...agentsZhCN,
+  ...historyZhCN,
+  ...conversationZhCN,
 };

@@ -21,6 +21,30 @@ by the integration tests):
   paint (the screen as escape sequences, starting with CAN and a reset) and
   then the program's output; the viewer sends input bytes, its size, focus
   and display facts. The core encodes no keys.
+- The first paint, measured against a running core: CAN, a soft reset
+  (DECSTR), mode resets, `ESC[?1049l`, `ESC[H ESC[2J`, the attach's
+  `history` lines of scrollback with their styles (each ending `\r\n`),
+  as many newlines as the screen has rows, `ESC[H ESC[2J` and the screen;
+  a program on the alternate screen adds `ESC[?1049h ESC[!p` and that
+  screen. Then come the title (OSC 2, twice on the alternate screen), the
+  program's win32-input-mode (`ESC[?9001h` or `ESC[?9001l`), which the
+  core keeps out of the program's output, and from then on only the
+  program's status reports (OSC 7501) and its output. The paint has no
+  `ESC[3J` and no full reset, so it clears the screen and not the
+  scrollback, and no mark of its end. Every paint starts with CAN at the
+  start of a data frame. An observing attach with `history` is not seen by
+  the program or the other viewers (no resize, focus or redraw). A first
+  paint over 4 MiB is dropped without a word: the attach succeeds and only
+  the program's output comes. A resize before the first paint was sent
+  whole brings the new grid and a paint without history, and so does a
+  reader more than 4 MiB behind, whose backlog that paint replaces. How much history the core keeps
+  depends on the user's `history_mb` (5 MB by default) and the width:
+  about 2600 to 6800 plain lines. An attach to a terminal whose shell the
+  core is starting again answers `unavailable`.
+- `terminal.read` returns the screen as plain text (its last rows, without
+  trailing blanks). With `lines` (history lines above the screen; 0 is as
+  none) on a program on the alternate screen, the core scrolls the program
+  with mouse-wheel input to stitch its history, which every viewer sees.
 - A terminal's size is that of its viewer active last among those not
   observing (`apply_size` in `viewers.rs`); an `observe` viewer never
   holds it. A terminal without such a viewer gets the *headless* size:
@@ -51,7 +75,16 @@ by the integration tests):
   address, in the directory it was last in (events `lost` and
   `restarted`); an exit with a code and an explicit kill stay final. The
   web UI starts its terminals this way
-  ([33](33-workspace-restore.md)).
+  ([33](33-workspace-restore.md)). Such a terminal's live record has its
+  `reason` cleared once it restarted.
+- With `restore_screen = true` in the user's `config.toml` (false by
+  default; herdr-ide only reads it, [36](36-terminal-history.md)), the new
+  shell of a kept terminal shows the old program's screen and history
+  above a dim line, `-- the program above ended; this is a new shell --`,
+  after `server stop` or the loss of its holder; after a power loss (the
+  core and the holders killed, the reason `stopped_by_restart`) nothing is
+  shown. A configuration file the core cannot read leaves kept terminals
+  waiting for their new shell.
 - Documents (`doc.get`, `doc.set`) are kept with their versions in the
   core's state directory (`docs.json`), across restarts of the core and
   of the machine.
@@ -84,7 +117,17 @@ by the integration tests):
   and `ZELLIJ_*`. A core started from a herdr pane or inside tmux runs the
   local machine's agent in its own process, so without this its terminals
   would take themselves for nested sessions, and an agent's hooks would
-  report to the herdr pane the core was started from.
+  report to the herdr pane the core was started from. It also leaves out
+  the variables by which Claude Code and Codex mark the programs of one of
+  their sessions, named one by one (`agentSessionVars`: `CLAUDECODE`,
+  `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`,
+  `CODEX_THREAD_ID`, `CODEX_SESSION_ID` and the others of the list): a
+  Claude Code started in a terminal of a core launched from inside a Claude
+  Code session would take itself for a child session, which saves no
+  transcript and no record of its process
+  ([35](35-agent-native-view.md)). The variables that configure the
+  agents (`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `ANTHROPIC_*`,
+  `CODEX_HOME`, `OPENAI_*`) stay.
 - The new terminals of an ssh machine get `SSH_CONNECTION` and `SSH_CLIENT`
   from the core (`internal/server/sshenv.go`), with the values of the ssh
   session its agent runs in, which the agent tells in its hello apart from
@@ -258,9 +301,12 @@ and ports passed on, none for the local machine, none in the state clients
 see; `internal/agent/agent_test.go` the hello telling the session.
 `internal/agent/procutil_test.go` (`TestCleanEnv`): the variables of
 terminals and multiplexers removed (every `HC_*`), `TMUX_TMPDIR`,
-`TERM_PROGRAM` and the product's own kept. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`
+`TERM_PROGRAM` and the product's own kept; `TestCleanEnvAgentSessionMarkers`:
+the agents' session markers removed, their configuration kept. `TestIntegrationTerminal` (`internal/hc`) and `TestIntegrationHC`
 (`internal/agent`) run with `make it` against a real herdr-core
 (`HC_TEST_BIN`, else `hc` on `PATH`) in the sessions `herdr-ide-it` with
 temporary state: first paint, input and output, sizes of two viewers,
 documents and their conflicts, how a killed program's stream ends; install
 through the agent, start, the socket's mode, a program's environment, stop.
+Both passed against the pinned herdr-core 0.1.21 for linux/arm64 in an
+isolated Linux container (Debian, an unprivileged user, no network).

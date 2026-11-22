@@ -1,6 +1,7 @@
 // The AI usage plugin's data (internal/plugins/usage) and what the panel and
 // the status bar compute from it: the tightest window, durations, the text
-// of the core's alerts, and the cost report's totals and rankings.
+// of the core's alerts, the cost report's totals and rankings, and what a
+// coding agent's session used.
 import { t } from '../../i18n';
 
 export type WindowKind = 'session' | 'weekly' | 'monthly' | 'model';
@@ -340,4 +341,87 @@ export function tokens(n: number): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
   return String(n);
+}
+
+/** A token count for the status bar: whole thousands ("84k"), millions
+ * with a decimal below ten ("1.2M"). */
+export function tokensShort(n: number): string {
+  const k = Math.round(n / 1e3);
+  if (k >= 1000) return n >= 1e7 ? `${Math.round(n / 1e6)}M` : `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${k}k`;
+  return String(Math.max(0, Math.round(n)));
+}
+
+// ---- a coding agent's session ----
+
+/** What a session of a coding agent used, at API prices
+ * (agentproto.SessionUsage; GET /api/m/{id}/p/usage/session). */
+export interface SessionUsage {
+  /** The model of the session's latest request. */
+  model?: string;
+  input: number;
+  cached: number;
+  cacheWrite: number;
+  /** Includes the reasoning tokens. */
+  output: number;
+  reasoning: number;
+  requests: number;
+  cost: number;
+  /** Every request's model had a price. */
+  priced: boolean;
+  /** The tokens of the latest request's context. */
+  contextUsed: number;
+  /** The model's context window; 0 when it is not known. */
+  contextSize: number;
+}
+
+const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+
+/** A session's usage from the core's answer: numbers that are not finite
+ * and non-negative count 0, a model that is not text is left out;
+ * undefined for an answer that is not an object. */
+export function sessionUsageOf(v: unknown): SessionUsage | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const o = v as Record<string, unknown>;
+  return {
+    model: typeof o.model === 'string' && o.model ? o.model : undefined,
+    input: count(o.input),
+    cached: count(o.cached),
+    cacheWrite: count(o.cacheWrite),
+    output: count(o.output),
+    reasoning: count(o.reasoning),
+    requests: count(o.requests),
+    cost: count(o.cost),
+    priced: o.priced === true,
+    contextUsed: count(o.contextUsed),
+    contextSize: count(o.contextSize),
+  };
+}
+
+/** A session's cost as the spend shows money; a dash when a model of it
+ * has no price. */
+export function sessionCost(u: SessionUsage): string {
+  return u.priced ? money(u.cost) : '—';
+}
+
+/** The share of the context window in use, a whole percentage; undefined
+ * when the window is not known. */
+export function contextPct(u: SessionUsage): number | undefined {
+  return u.contextSize > 0 ? Math.round((u.contextUsed / u.contextSize) * 100) : undefined;
+}
+
+/** The context in use for the status bar: its share of the window, else
+ * the tokens; "" when the session has no context yet. */
+export function contextShort(u: SessionUsage): string {
+  const pct = contextPct(u);
+  if (pct !== undefined) return `${pct}%`;
+  return u.contextUsed > 0 ? tokensShort(u.contextUsed) : '';
+}
+
+/** The account of provider whose subscription an agent on machine m uses:
+ * of those read on m, the one closest to running out of a window. */
+export function sessionAccount(s: UsageSnapshot | undefined, provider: string, m: string): UsageAccount | undefined {
+  return sortAccounts((s?.accounts ?? []).filter((a) => a.provider === provider && (a.machines ?? []).includes(m))).find((a) =>
+    tightestWindow(a),
+  );
 }

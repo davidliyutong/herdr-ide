@@ -6,9 +6,12 @@ import (
 	"strconv"
 	"time"
 
+	"herdr-ide/internal/agentkinds"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/hc"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/plugin"
+	agentsplugin "herdr-ide/internal/plugins/agents"
 )
 
 func indexTerminals(list []map[string]any) map[string]map[string]any {
@@ -111,41 +114,105 @@ func (b *termBackend) event(n hc.RawNotification) {
 	// A record replaced by the event lacks the agent the core knows of:
 	// clients get it again right behind.
 	if ev, ok := b.agents[n.Terminal]; ok && n.Terminal != "" && (n.Type == "created" || n.Type == "restarted" || n.Type == "labels") {
-		raw, _ := json.Marshal(map[string]any{"agent": ev.Agent, "agent_status": ev.Status})
-		again := map[string]any{"t": "event", "m": b.id, "type": "agent", "terminal": n.Terminal, "data": json.RawMessage(raw)}
+		again := b.agentMsg(ev)
 		for c := range b.subs {
 			c.sendJSON(again)
 		}
 	}
 }
 
+// detectSwitchPoll is how often an open detect stream checks whether the
+// agents plugin was switched on or off: the stream is then opened again at
+// once with the new Header.Sessions.
+const detectSwitchPoll = time.Second
+
+// sessionsOn reports whether the machines resolve the sessions of the
+// agents in their terminals (Header.Sessions): while the agents plugin is
+// on (a core without that plugin, as in tests, has it on).
+func (s *Server) sessionsOn() bool {
+	return s.pluginOn(agentsplugin.ID, plugin.Desktop)
+}
+
+// detectHeader is the header of a detect stream opened now.
+func (b *termBackend) detectHeader() agentproto.Header {
+	return agentproto.Header{Op: agentproto.OpDetect, Sessions: b.s.sessionsOn()}
+}
+
+// redetectGrace is how long after a detect stream opened again because the
+// agents plugin was switched its events are compared with what the clients
+// were told before (detect): the machine reports every agent at once when a
+// stream opens.
+const redetectGrace = 10 * time.Second
+
 // detect follows the coding agents in the machine's terminals through the
 // agent (op detect) until ctx ends, trying again after 5 s when the stream
-// fails.
+// fails, and at once when the agents plugin was switched (sessionsOn). A
+// switch makes the machine detect every agent again: what the clients were
+// told of each terminal before is kept (applyDetected), so that the agents
+// found again do not notify again of a turn's end, or a block, that they
+// were told of, nor bring back a done that was seen.
 func (b *termBackend) detect(ctx context.Context, mc *machines.Machine) {
+	var told map[string]agentproto.DetectEvent
 	for ctx.Err() == nil {
-		conn, _, err := mc.Open(ctx, agentproto.Header{Op: agentproto.OpDetect})
+		h := b.detectHeader()
+		switched := false
+		conn, _, err := mc.Open(ctx, h)
 		if err == nil {
-			stop := context.AfterFunc(ctx, func() { conn.Close() })
+			until := time.Now().Add(redetectGrace)
+			done, exited := make(chan struct{}), make(chan struct{})
+			go func() {
+				defer close(exited)
+				t := time.NewTicker(detectSwitchPoll)
+				defer t.Stop()
+				for {
+					select {
+					case <-done:
+						return
+					case <-ctx.Done():
+						conn.Close()
+						return
+					case <-t.C:
+						if b.s.sessionsOn() != h.Sessions {
+							switched = true
+							conn.Close()
+							return
+						}
+					}
+				}
+			}()
 			for {
 				var ev agentproto.DetectEvent
 				if agentproto.ReadLine(conn, &ev) != nil {
 					break
 				}
-				b.applyAgent(ev)
+				if told != nil && time.Now().After(until) {
+					told = nil
+				}
+				b.applyDetected(ev, told)
 			}
-			stop()
+			close(done)
+			<-exited
 			conn.Close()
 		}
 		// What the stream said no longer holds: a new one says it again.
 		b.mu.Lock()
 		var cleared []agentproto.DetectEvent
-		for addr := range b.agents {
+		told = nil
+		if switched {
+			told = make(map[string]agentproto.DetectEvent, len(b.agents))
+		}
+		for addr, ev := range b.agents {
 			cleared = append(cleared, agentproto.DetectEvent{Terminal: addr})
+			if told != nil {
+				told[addr] = ev
+			}
 		}
 		b.mu.Unlock()
 		for _, ev := range cleared {
 			b.applyAgent(ev)
+		}
+		if switched {
+			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -154,20 +221,80 @@ func (b *termBackend) detect(ctx context.Context, mc *machines.Machine) {
 	}
 }
 
-// applyAgent records a terminal's agent and status and tells the clients:
-// subscribers of the terminal protocol get an "agent" event, /ws clients the
-// agent message that notifications and sounds follow. A turn that ended
-// (done) while a client has the terminal focused counts as seen: idle.
+// validSessionSource reports whether s is a source a machine may report a
+// session with (agentproto's SessionFrom*).
+func validSessionSource(s string) bool {
+	switch s {
+	case agentproto.SessionFromArgv, agentproto.SessionFromPID, agentproto.SessionFromFD,
+		agentproto.SessionFromStart, agentproto.SessionFromHook, agentproto.SessionFromGuess:
+		return true
+	}
+	return false
+}
+
+// checkSession drops what a machine said of a terminal's session unless it
+// is a session id with a known source, for an agent.
+func checkSession(ev *agentproto.DetectEvent) {
+	if ev.Agent == "" || !agentkinds.ValidSessionID(ev.Session) || !validSessionSource(ev.SessionSource) {
+		ev.Session, ev.SessionSource = "", ""
+	}
+}
+
+// applyAgent records a terminal's agent, status and session and tells the
+// clients: subscribers of the terminal protocol get an "agent" event, /ws
+// clients the agent message that notifications and sounds follow. A turn
+// that ended (done) while a client has the terminal focused counts as
+// seen: idle. The machine changes an agent's session in an event of its
+// own, which carries the status it already reported: such an event changes
+// only the record's session and reaches only the terminal protocol's
+// subscribers, as no news.
 func (b *termBackend) applyAgent(ev agentproto.DetectEvent) {
+	b.applyDetected(ev, nil)
+}
+
+// notifies reports whether an agent message of the status makes the pages
+// notify (a sound, the system's notification): a block or a turn's end.
+func notifies(status string) bool { return status == "blocked" || status == "done" }
+
+// applyDetected is applyAgent for an event of a detect stream; told holds
+// what the clients were told of the terminals before the stream opened
+// again because the agents plugin was switched (nil otherwise), and is
+// taken for each terminal by its first event. An agent found again by such
+// an event keeps a done the clients saw (idle) and one they were told of,
+// and a block or a turn's end they were told of reaches /ws no second time.
+func (b *termBackend) applyDetected(ev agentproto.DetectEvent, told map[string]agentproto.DetectEvent) {
+	before, again := told[ev.Terminal]
+	if again {
+		delete(told, ev.Terminal)
+		again = ev.Agent != "" && before.Agent == ev.Agent
+	}
+	checkSession(&ev)
 	b.mu.Lock()
 	prev, had := b.agents[ev.Terminal]
+	quiet := false
 	if ev.Agent == "" {
 		if !had {
 			b.mu.Unlock()
 			return
 		}
 		delete(b.agents, ev.Terminal)
+	} else if had && prev.Agent == ev.Agent && (prev.Session != ev.Session || prev.SessionSource != ev.SessionSource) {
+		// The status stays the core's (a done may have been seen since).
+		prev.Session, prev.SessionSource = ev.Session, ev.SessionSource
+		b.agents[ev.Terminal] = prev
+		b.mergeAgent(ev.Terminal)
+		msg := b.agentMsg(prev)
+		for c := range b.subs {
+			c.sendJSON(msg)
+		}
+		b.mu.Unlock()
+		return
 	} else {
+		// The end of the turn the clients knew of before the switch, seen
+		// or not.
+		if again && !had && ev.Status == "done" && (before.Status == "idle" || before.Status == "done") {
+			ev.Status = before.Status
+		}
 		// Seen: the terminal has a client's focus, or (the first word of a
 		// new detection, after the core or the agent started again) the
 		// program still reports the turn a client saw before.
@@ -178,10 +305,21 @@ func (b *termBackend) applyAgent(ev agentproto.DetectEvent) {
 			b.mu.Unlock()
 			return
 		}
+		quiet = again && !had && ev.Status == before.Status && notifies(ev.Status)
 		b.agents[ev.Terminal] = ev
 		b.keepSeenLocked(ev.Terminal)
 	}
 	b.mergeAgent(ev.Terminal)
+	if quiet {
+		// The record and the terminal protocol's subscribers get the agent
+		// back; /ws was told of this state already.
+		msg := b.agentMsg(ev)
+		for c := range b.subs {
+			c.sendJSON(msg)
+		}
+		b.mu.Unlock()
+		return
+	}
 	b.mu.Unlock()
 	b.notifyAgent(ev)
 }
@@ -254,17 +392,33 @@ func (b *termBackend) seen(addr string) {
 	b.notifyAgent(ev)
 }
 
-// notifyAgent sends a terminal's agent change to the subscribers (event
-// "agent", data {agent, agent_status}, both null when no agent runs there)
+// agentMsg is the terminal protocol's event of a terminal's agent: data
+// {agent, agent_status, agent_session, agent_session_source}, the first two
+// null when no agent runs there, the last two null when its session is not
+// known. Every member is there: a client that merges the event into its
+// record loses a session that ended (another agent's, or none, or the
+// agents plugin switched off).
+func (b *termBackend) agentMsg(ev agentproto.DetectEvent) map[string]any {
+	data := map[string]any{"agent": nil, "agent_status": nil, "agent_session": nil, "agent_session_source": nil}
+	if ev.Agent != "" {
+		data["agent"], data["agent_status"] = ev.Agent, ev.Status
+		if ev.Session != "" {
+			data["agent_session"], data["agent_session_source"] = ev.Session, ev.SessionSource
+		}
+	}
+	raw, _ := json.Marshal(data)
+	return map[string]any{"t": "event", "m": b.id, "type": "agent", "terminal": ev.Terminal, "data": json.RawMessage(raw)}
+}
+
+// notifyAgent sends a terminal's agent change to the subscribers (agentMsg)
 // and to /ws as an agent message.
 func (b *termBackend) notifyAgent(ev agentproto.DetectEvent) {
 	var agent, status any
 	if ev.Agent != "" {
 		agent, status = ev.Agent, ev.Status
 	}
-	raw, _ := json.Marshal(map[string]any{"agent": agent, "agent_status": status})
 	b.mu.Lock()
-	msg := map[string]any{"t": "event", "m": b.id, "type": "agent", "terminal": ev.Terminal, "data": json.RawMessage(raw)}
+	msg := b.agentMsg(ev)
 	for c := range b.subs {
 		c.sendJSON(msg)
 	}
@@ -277,18 +431,26 @@ func (b *termBackend) notifyAgent(ev agentproto.DetectEvent) {
 	}
 }
 
-// mergeAgent writes a terminal's agent and status into its record; b.mu is
+// mergeAgent writes a terminal's agent, status and session (agent_session,
+// agent_session_source; absent when not known) into its record; b.mu is
 // held.
 func (b *termBackend) mergeAgent(addr string) {
 	t := b.terms[addr]
 	if t == nil {
 		return
 	}
-	if ev, ok := b.agents[addr]; ok {
+	ev, ok := b.agents[addr]
+	if ok {
 		t["agent"], t["agent_status"] = ev.Agent, ev.Status
 	} else {
 		delete(t, "agent")
 		delete(t, "agent_status")
+	}
+	if ok && ev.Session != "" {
+		t["agent_session"], t["agent_session_source"] = ev.Session, ev.SessionSource
+	} else {
+		delete(t, "agent_session")
+		delete(t, "agent_session_source")
 	}
 }
 

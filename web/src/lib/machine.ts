@@ -3,6 +3,7 @@
 
 import { hasMessage, t, type MessageKey } from '../i18n';
 import { displayName, statusOf, type TerminalRecord } from '../term/protocol';
+import { isSessionId } from '../conversation/kinds';
 
 /** What a coding agent in a terminal is doing (docs/features/25-agent-detection.md). */
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
@@ -81,6 +82,16 @@ const statuses = new Set<string>(Object.keys(statusRank));
 /** The agent detected in a terminal, if any. */
 export function agentOf(r: TerminalRecord | undefined): string | undefined {
   return typeof r?.agent === 'string' && r.agent ? r.agent : undefined;
+}
+
+/** The session of the agent detected in a terminal, and how the machine
+ * found it (agentproto's session sources: argv, pid, fd, start, hook,
+ * guess); undefined when none is known or the id is not a session id. */
+export function agentSession(r: TerminalRecord | undefined): { id: string; source: string } | undefined {
+  const id = r?.agent_session;
+  if (!isSessionId(id)) return undefined;
+  const source = r?.agent_session_source;
+  return { id, source: typeof source === 'string' ? source : '' };
 }
 
 /** What a terminal's agent is doing: the detected state, else what the

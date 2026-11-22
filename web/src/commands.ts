@@ -12,8 +12,10 @@ import { openPaneMenu } from './menus';
 import { canGo } from './paneHistory';
 import type { CommandDef } from './plugins/api';
 import { activePanels } from './plugins/registry';
+import { coverOf } from './state/covers';
 import { paneHandle } from './state/panes';
 import { useStore } from './state/store';
+import { terms } from './state/terms';
 import * as L from './term/layout';
 import { findStep, openFind, useFind } from './vt/find';
 import { currentZoom, zoom, zoomAvailable, ZOOM_LEVELS } from './zoom';
@@ -59,6 +61,16 @@ const withTab = (fn: (m: string, ws: string, index: number) => void) => () => {
   const c = actions.currentTab();
   if (c) fn(c.m, c.ws, c.index);
 };
+
+/** Whether the focused terminal is shown as its agent's conversation
+ * (its leaf's render), which covers it. */
+function shownNative(): boolean {
+  const c = focused();
+  if (!c?.terminal) return false;
+  const layout = terms.layout(c.m);
+  const leaf = layout ? L.findLeaf(layout, c.terminal) : null;
+  return !!leaf && L.isTerminalLeaf(leaf) && leaf.render === 'native' && !!coverOf(c.m, c.terminal);
+}
 
 /** The next or previous match of the open search, or the search opened in
  * the focused terminal. */
@@ -217,13 +229,23 @@ export const commands: Record<string, CommandDef> = {
   'pane.undoClose': { enabled: () => changes() && hasClosed(), run: () => actions.undoClose() },
 
   'find.open': {
-    enabled: hasTerminal,
+    // A terminal its agent's conversation covers is shown as the terminal
+    // first, which a read-only page cannot do.
+    enabled: () => hasTerminal() && !(store().readOnly && shownNative()),
     run() {
       const c = focused();
       if (!c?.terminal) return;
-      const h = paneHandle(c.m, c.terminal);
-      if (h) h.openFind();
-      else openFind(c.m, c.terminal);
+      const { m, terminal } = c;
+      const open = () => {
+        const h = paneHandle(m, terminal);
+        if (h) h.openFind();
+        else openFind(m, terminal);
+      };
+      if (!shownNative() || !changes()) return open();
+      terms.mutate(m, (l) => L.setTerminalFields(l, terminal, { render: null }));
+      // Once the terminal is drawn again and has taken the pane's focus, the
+      // search takes it.
+      setTimeout(open, 0);
     },
   },
   'find.next': { enabled: hasTerminal, run: find(true) },

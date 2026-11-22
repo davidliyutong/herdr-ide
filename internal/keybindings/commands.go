@@ -146,6 +146,8 @@ var Commands = func() []Command {
 		// focused machine, and the focused browser pane's page again.
 		cmd("browser.open", "tab"),
 		cmd("browser.reload", "tab"),
+		// The agents plugin: a new tab running a coding agent.
+		cmd("agents.newTab", "tab"),
 
 		cmd("pane.splitRight", "pane", on(macApp, "cmd+d")),
 		cmd("pane.splitDown", "pane", on(macApp, "cmd+shift+d")),
@@ -171,6 +173,12 @@ var Commands = func() []Command {
 		// seconds. Cmd+Z in a terminal: the page takes it there; text fields
 		// and VS Code keep it for Undo (desktop/src/menu.ts).
 		cmd("pane.undoClose", "pane", on(macApp, "cmd+z")),
+		// The agents plugin: the focused terminal's coding agent shown as
+		// its conversation or as its own interface, back and forth. No
+		// default: the keys left free are those of terminal emulators
+		// (Cmd+Shift+V pastes the selection in Terminal.app, Ctrl+Shift+V
+		// pastes elsewhere) or of the programs in the terminals.
+		cmd("agents.toggleView", "pane"),
 
 		cmd("view.toggleSidebar", "view", on(macApp, "cmd+b")),
 		// The right sidebar: the plugins' panels (web/src/plugins), with

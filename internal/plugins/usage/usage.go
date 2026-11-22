@@ -3,19 +3,25 @@
 // subscriptions signed in there (internal/agent/plugin/usage), merges the
 // accounts seen on several machines, keeps their history for their pace,
 // fires the alerts, polls the providers' status pages, and serves the
-// result to the UIs (GET /api/p/usage, /ws plugin messages). The web UI's side is
+// result to the UIs (GET /api/p/usage, /ws plugin messages); it also asks
+// a machine what one coding agent's session there used (GET
+// /api/m/{id}/p/usage/session). The web UI's side is
 // web/src/plugins/usage; docs/features/29-ai-usage.md has the design.
 package usage
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"herdr-ide/internal/agentkinds"
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/usage"
@@ -172,7 +178,92 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "GET", Path: "cost", Handler: p.getCost},
 		{Method: "POST", Path: "refresh", Mutating: true, Audit: "refresh", Handler: p.postRefresh},
 		{Method: "PUT", Path: "deepseek-key", Machine: true, Mutating: true, Audit: "deepseek_key", Handler: p.putDeepseekKey},
+		{Method: "GET", Path: "session", Machine: true, Handler: p.getSession},
 	}
+}
+
+const (
+	// sessionTimeout bounds a machine's reading of a session's transcripts.
+	sessionTimeout = 30 * time.Second
+	// MaxSessionReads bounds the session requests a machine serves at
+	// once: each holds a stream of its agent and may search its session
+	// directories for an id it does not know. More are answered 429 busy.
+	MaxSessionReads = 8
+)
+
+// sessionReader is a machine of a plugin, whose session requests under
+// way sessionReads counts.
+type sessionReader struct {
+	p       *Plugin
+	machine string
+}
+
+var sessionReads = struct {
+	sync.Mutex
+	n map[sessionReader]int
+}{n: map[sessionReader]int{}}
+
+// takeSessionRead counts a session request of machine m; false, and
+// nothing counted, when m serves MaxSessionReads already. release ends it.
+func (p *Plugin) takeSessionRead(m string) (release func(), ok bool) {
+	k := sessionReader{p, m}
+	sessionReads.Lock()
+	defer sessionReads.Unlock()
+	if sessionReads.n[k] >= MaxSessionReads {
+		return nil, false
+	}
+	sessionReads.n[k]++
+	return func() {
+		sessionReads.Lock()
+		defer sessionReads.Unlock()
+		if sessionReads.n[k]--; sessionReads.n[k] <= 0 {
+			delete(sessionReads.n, k)
+		}
+	}, true
+}
+
+// getSession answers with what a coding agent's session on the route's
+// machine used (agentproto.SessionUsage, from its agent's session action):
+// ?kind= (an agentkinds id whose sessions the plugin prices,
+// usage.SessionProvider) and &session= (the session's id), at the user's
+// prices. Both are checked before the machine is asked; a session of a
+// provider turned off is not read (404 provider_off), and at most
+// MaxSessionReads are under way per machine (429 busy). It only reads, so a
+// read-only core answers it too.
+func (p *Plugin) getSession(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	kind, session := q.Get("kind"), q.Get("session")
+	prov, ok := usage.SessionProvider(kind)
+	if !ok || !agentkinds.ValidSessionID(session) {
+		plugin.WriteError(w, &plugin.Error{Code: "bad_request", Message: "kind: an agent whose sessions are priced; session: its session id"})
+		return
+	}
+	if o := p.settingsOptions(); len(o.Providers) > 0 && !slices.Contains(o.Providers, prov) {
+		plugin.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "provider_off"})
+		return
+	}
+	if c.Machine == nil {
+		plugin.WriteError(w, plugin.ErrOffline)
+		return
+	}
+	release, ok := p.takeSessionRead(c.Machine.ID())
+	if !ok {
+		plugin.WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "busy", "message": "too many reads of the machine's sessions at once"})
+		return
+	}
+	defer release()
+	own, _ := p.prices()
+	ctx, cancel := context.WithTimeout(r.Context(), sessionTimeout)
+	defer cancel()
+	// Decoded into the numbers' struct: nothing else an agent answered
+	// reaches the page.
+	var out agentproto.SessionUsage
+	req := usage.SessionRequest{Kind: kind, Session: session, SessionOptions: usage.SessionOptions{Prices: own}}
+	if err := p.call(ctx, c.Machine.ID(), "session", req, &out); err != nil {
+		plugin.WriteError(w, err)
+		return
+	}
+	plugin.WriteJSON(w, http.StatusOK, out)
 }
 
 // ID names the plugin.

@@ -25,6 +25,8 @@ same in its sessions' database.
 - The logs' cost by day, model, project and machine, with weekly and monthly
   equivalents; OpenCode's sessions too, a service with spend and no
   windows (it has no quota of its own to ask).
+- What the session of the coding agent in the focused pane has used, at
+  API prices, with its context.
 - Credentials stay where they are and are never sent to the core; they
   are read only, except Kimi Code's sign-in, which is renewed in place as
   Kimi Code renews it (its token lasts 15 minutes).
@@ -60,6 +62,8 @@ same in its sessions' database.
   without re-aggregating or sending the rows again. The scan stops between
   files when the request ends, keeping what it read.
 - `setDeepseekKey {key}`: writes or removes the key file.
+- `session {kind, session, prices}`: what one session of a coding agent
+  used (below).
 
 | Provider | Credentials | Asks | Account id |
 | --- | --- | --- | --- |
@@ -189,6 +193,35 @@ OpenCode's database (below). `internal/usage/pricing.json` has the prices by pro
 model prefix, with tiers by prompt length and cache-write prices (5 minutes:
 the input price unless given; 1 hour: twice it). A week is 168 hours and a
 month 750 for the equivalents (cost × 168 or 750 / the range's hours).
+
+### One session's usage
+
+The action `session` answers what one session of a coding agent used, for
+the status bar's session item below (`internal/usage/session.go`,
+`SessionCost`). It takes an agent kind whose sessions are priced (a kind of
+`internal/agentkinds` whose provider is Claude or Codex and whose
+transcripts are that provider's logs: `claude`, `codex`;
+`SessionProvider`) and a lower-case UUID; the agent finds the session's
+transcript and, for Claude Code, its subagents' as the agents plugin does
+([35](35-agent-native-view.md): `internal/agent/sessions`, opened through
+no link as the files it found), and reads them with the parsers the cost
+of the logs uses, decoding only the members of the lines that carry usage,
+into structures without a text member. A response several of the
+transcripts recorded counts once, records older than the cost's retention
+are left out, and each is priced as the spend prices it, with the user's
+prices (`TestSessionCostEqualsCost`). The answer
+(`agentproto.SessionUsage`): `input`, `cached`, `cacheWrite`, `output`
+(`reasoning` part of it), `requests`, `cost`, `priced` (every request's
+model has a price), the latest request's `model` (at most 128 bytes) and
+`contextUsed` (Claude Code: its input and cache tokens; Codex: the last
+request's input tokens), with `contextSize` (Codex's model context window;
+for Claude Code an entry's `contextWindow` in `pricing.json`, which none
+has, so 0). A transcript the cost cache or an earlier read holds unchanged
+is not read again, one that grew is read on (the last reads of 16
+transcripts, 48 MiB, are kept); at most 2 such reads run at once; a
+transcript over 256 MiB, or a session of more than 200 000 records (48
+MiB), is `too_large`. Nothing is written. Codes: `not_found` (no
+transcript yet), `compressed`, `too_large`, `bad_params`.
 
 ### Antigravity's sessions
 
@@ -426,6 +459,17 @@ prices), also with `ETag` / `304 Not Modified`; the reports of the last 4
 ranges are kept. A machine scans one range at a time: requests for the
 range being scanned share that scan, others wait for it.
 
+`GET /api/m/{id}/p/usage/session?kind=&session=` asks the machine's
+`session` action (30 s) with the user's prices: the kind and the session
+id are checked first (`400 bad_request`), a session of a provider turned
+off is not read (`404 provider_off`), and the machine's answer is decoded
+into the numbers' structure, so nothing else reaches the page; the
+machine's codes pass on (`404 not_found`, `compressed`, `too_large`,
+`409 offline`). At most 8 run at once per machine (`429 busy`), since each
+holds a stream of its agent and may search the session directories for
+an id it does not know. It only reads: a read-only core answers it, and
+it is not audited.
+
 On a core on Windows no agent runs on the local machine, so its CLIs are
 not read; SSH machines are.
 
@@ -511,6 +555,34 @@ downloads trays):
 - The card is a `role="tooltip"` that the button names with
   `aria-describedby` while it shows; nothing in it takes the keyboard, and
   the button has no `title`, so no second tooltip shows.
+
+The status bar's second item, `usage.session` (`SessionItem.tsx`,
+`session.ts`), is the session of the coding agent in the focused pane of
+the machine shown: the service's mark, what the session cost at API
+prices, and the context in use as a share of the window, or in tokens
+while the window is not known (Claude Code). The card on hover lists the
+model, the cost (with a note when a model has no price), the context, the
+requests, the tokens by kind (the reasoning when there is some) and the
+tightest window of the service's account read on that machine; a click
+shows the service's tab of the panel. It shows nothing while the focused
+pane is not a terminal whose agent has a session and a usage provider,
+while that provider is turned off, before the machine's first answer, and
+for a session the machine only guessed (the directory's newest
+transcript, which may be another program's,
+[35](35-agent-native-view.md)). Reads: when the focused pane or its
+session changes, every 30 s while the agent is in a turn (working, or
+blocked on a question between its work, which an agent may alternate
+faster than the reads come; a tick reads when the agent worked since the
+last one, so one blocked for long is not read again and again) and once
+when it turns done or idle; at most one read of a session in 10 s (one
+owed when the agent stops waits for that gap); none from a hidden page,
+which owes one until it is shown. A read is given up after 15 s; the read
+when the agent stopped is tried once more 10 s after it failed. A session
+without a transcript yet (`not_found`) is read again at its agent's next
+status change; an agent whose sessions are not priced (`bad_request`) is
+not asked again; other failures keep the last numbers. The page keeps the numbers of 64 sessions, so a pane
+focused again shows its own at once. `usage.statusBar` does not govern it;
+the status bar's menu shows and hides it as its other items.
 
 ### Alerts
 
@@ -601,12 +673,20 @@ window over a threshold is said at the next poll.
   numbers and machines until another poll sees them.
 - macOS keychain over ssh: `security` cannot ask, the provider counts as
   missing.
+- A session's context window unknown (Claude Code: `pricing.json` has
+  none) → the session item shows the tokens in use without a share.
+- Several accounts of a provider signed in on one machine → the session
+  item's card shows the tightest window of those, which need not be the
+  agent's own account.
+- A session not found yet (Codex before its first prompt) → no session
+  item; a guessed session is never shown as the agent's.
 
 ## Security
 
 [SECURITY.md](../../SECURITY.md) lists the credential files read, the hosts
 asked, the language server's loopback client, the DeepSeek key file, the
-status pages and how OpenCode's and Antigravity's databases are read. Resources and retention:
+status pages, how OpenCode's and Antigravity's databases are read and how
+one session's transcripts are found and read. Resources and retention:
 [deployment](../deployment.md#remote-resources).
 
 ## Testing
@@ -690,6 +770,25 @@ status pages and how OpenCode's and Antigravity's databases are read. Resources 
   keyless `dedupe` zero allocations,
   a cancelled scan keeping its progress.
 - `internal/agent/plugin/usage/usage_test.go`: the actions and their codes.
+- One session's usage: `internal/usage/session_test.go` (the same numbers
+  as the spend for the same records, a transcript in Claude Code
+  2.1.330's shapes, no content
+  read (`TestSessionCostReadsNoContent`), one response counted once,
+  subagents, the context, reading on, the cost cache, retention, errors,
+  the memo's bound, nothing opened by name, the model's name cut, the
+  records held, two reads at once, a read ending with its context);
+  `internal/agent/plugin/usage/session_test.go` (the action, its codes,
+  the files opened as located); `internal/plugins/usage/session_test.go`
+  (the route, the machine asked, parameters checked
+  (`TestSessionParams`), a provider turned off, errors, at most 8 at once
+  per machine (`TestSessionBusy`));
+  `web/src/__tests__/usageSession.test.tsx` (the item's numbers and card,
+  the reads' schedule, hidden pages, `not_found`, a provider off, an
+  unpriced agent, the last numbers kept while the machine cannot answer, a
+  read the machine does not answer given up, the read when the agent
+  stopped tried once more, the reads every 30 s while the agent alternates
+  between working and blocked, the 64 sessions kept, the status bar's
+  menu).
 - `internal/plugins/usage/alerts_test.go`: each alert at most once per
   period: use jittering around a threshold, a reset that moves forward
   (and the next period's alert), a pace notice with a reset a second off,

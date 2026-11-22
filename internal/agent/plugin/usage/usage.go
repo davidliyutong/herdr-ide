@@ -14,17 +14,27 @@
 //     and OpenCode's sessions from their databases, read-only), until the
 //     core stops waiting;
 //   - setDeepseekKey {key}: writes (or with "" removes) the DeepSeek key
-//     file; the key is never read back.
+//     file; the key is never read back;
+//   - session {kind, session, prices}: what one session of a coding agent
+//     used (agentproto.SessionUsage), from its transcripts, which the agent
+//     finds by the kind and the session id (internal/agent/sessions) and
+//     opens as the files it found, through no symbolic link.
 package usage
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
+	"os"
+	"sync"
 	"time"
 
 	"herdr-ide/internal/agent/plugin"
+	"herdr-ide/internal/agent/sessions"
+	"herdr-ide/internal/agentkinds"
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/usage"
 )
 
@@ -34,6 +44,9 @@ const limitsTimeout = 45 * time.Second
 
 // costTimeout bounds a cost scan (the core waits 2 minutes).
 const costTimeout = 150 * time.Second
+
+// sessionTimeout bounds a session action (the core waits 30 seconds).
+const sessionTimeout = 40 * time.Second
 
 func init() { plugin.Register("usage", handle) }
 
@@ -75,8 +88,83 @@ func handle(ctx context.Context, st net.Conn, action string, params json.RawMess
 			err = plugin.Errorf("bad_key", "not an API key")
 		}
 		return plugin.Reply(st, map[string]bool{"set": p.Key != ""}, err)
+	case "session":
+		var q usage.SessionRequest
+		if err := plugin.Decode(params, &q); err != nil {
+			return plugin.Reply(st, nil, err)
+		}
+		if err := usage.ValidPrices(q.Prices); err != nil {
+			return plugin.Reply(st, nil, plugin.Errorf("bad_params", "usage: %v", err))
+		}
+		// Only a known kind and a session id reach the search for a file.
+		prov, ok := usage.SessionProvider(q.Kind)
+		if !ok || !agentkinds.ValidSessionID(q.Session) {
+			return plugin.Reply(st, nil, plugin.Errorf("bad_params", "usage: not a session of an agent whose sessions are priced"))
+		}
+		f, err := resolver(e.Home).Locate(q.Kind, q.Session)
+		if err != nil {
+			return plugin.Reply(st, nil, sessionError(err))
+		}
+		ctx, cancel := untilClosed(ctx, st, sessionTimeout)
+		defer cancel()
+		u, err := usage.SessionCost(ctx, env(e), prov, sessionFiles(f), q.SessionOptions)
+		if err != nil {
+			return plugin.Reply(st, nil, sessionError(err))
+		}
+		return plugin.Reply(st, u, nil)
 	}
 	return plugin.Reply(st, nil, plugin.Errorf("bad_params", "usage: unknown action %q", action))
+}
+
+var (
+	resolverMu sync.Mutex
+	resolved   *sessions.Resolver
+)
+
+// resolver is the agent's finder of sessions' transcripts in home, kept
+// across actions for what it remembers of where they are.
+func resolver(home string) *sessions.Resolver {
+	resolverMu.Lock()
+	defer resolverMu.Unlock()
+	if resolved == nil || resolved.Home != home {
+		resolved = &sessions.Resolver{Home: home}
+	}
+	return resolved
+}
+
+// sessionFiles are a located session's transcripts as usage.SessionCost
+// reads them: each opened as the file Locate found, through no symbolic
+// link (sessions.File.Open, OpenSubagent); a subagent's that is not that
+// file any more is gone (os.ErrNotExist) and left out.
+func sessionFiles(f sessions.File) []usage.SessionFile {
+	out := []usage.SessionFile{{Name: f.Path, Open: f.Open}}
+	for i, p := range f.Subagents {
+		out = append(out, usage.SessionFile{Name: p, Open: func() (*os.File, error) {
+			fh, err := f.OpenSubagent(i)
+			if errors.Is(err, sessions.ErrNotFound) {
+				return nil, fmt.Errorf("usage: subagent transcript %d: %w", i, os.ErrNotExist)
+			}
+			return fh, err
+		}})
+	}
+	return out
+}
+
+// sessionError is the code of a session that could not be read: not_found
+// (no transcript of it), compressed, too_large, bad_params, else failed.
+// Its message names no path.
+func sessionError(err error) error {
+	switch {
+	case errors.Is(err, sessions.ErrNotFound) || errors.Is(err, os.ErrNotExist):
+		return plugin.Errorf(agentproto.TranscriptNotFound, "usage: no transcript of the session")
+	case errors.Is(err, sessions.ErrCompressed):
+		return plugin.Errorf(agentproto.TranscriptCompressed, "usage: the session's transcript is compressed")
+	case errors.Is(err, usage.ErrSessionTooLarge):
+		return plugin.Errorf(agentproto.TranscriptTooLarge, "usage: a transcript of the session is too large")
+	case errors.Is(err, sessions.ErrBadID) || errors.Is(err, sessions.ErrUnknownKind) || errors.Is(err, usage.ErrSessionProvider):
+		return plugin.Errorf("bad_params", "usage: not a session of an agent whose sessions are priced")
+	}
+	return plugin.Errorf("failed", "usage: the session's transcripts could not be read")
 }
 
 // untilClosed is ctx ended after d or when the core closes st (it stopped

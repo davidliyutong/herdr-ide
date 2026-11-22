@@ -16,8 +16,60 @@ export type Axis = 'horizontal' | 'vertical';
 /** Fields of a newer client, written back as they were. */
 type Extra = { [key: string]: unknown };
 
-/** A terminal of the machine's terminal core, by its address. */
-export type TerminalLeaf = Extra & { terminal: string };
+/** A terminal of the machine's terminal core, by its address. A coding
+ * agent's terminal may say how its pane shows it and which session it
+ * runs; read from a document, a field of another type or shape is left
+ * out (terminalFields). */
+export type TerminalLeaf = Extra & {
+  terminal: string;
+  /** Shown as the agent's conversation (native) rather than the
+   * terminal; absent: the terminal. */
+  render?: 'native';
+  /** The session of the agent in it (a lower-case UUID, isSessionId). */
+  session?: string;
+  /** The address of the terminal this one took the place of (isAddress). */
+  before?: string;
+};
+
+/** The fields of a terminal leaf whose values are checked, and the only
+ * ones setTerminalFields changes. */
+export const TERMINAL_FIELDS = ['render', 'session', 'before'] as const;
+
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// A terminal core's addresses are short words of letters and digits ("t1",
+// "t3q"): the form takes them, and refuses what could be read as a path
+// ("." or "..") or an option ("-rf").
+const ADDRESS = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+/** Whether s has the form of a terminal's address: letters, digits, "_"
+ * and "-", at most 64, starting with a letter or digit. */
+export function isAddress(s: unknown): s is string {
+  return typeof s === 'string' && ADDRESS.test(s);
+}
+
+/** Whether s is an agent's session id: a lower-case UUID
+ * (agentkinds.ValidSessionID). */
+export function isSessionId(s: unknown): s is string {
+  return typeof s === 'string' && SESSION_ID.test(s);
+}
+
+/** Whether a checked field of a terminal leaf has a value it may have. */
+function validTerminalField(field: (typeof TERMINAL_FIELDS)[number], v: unknown): boolean {
+  if (field === 'render') return v === 'native';
+  if (field === 'session') return isSessionId(v);
+  return isAddress(v);
+}
+
+/** A terminal leaf without the checked fields whose values are not what
+ * they may be; the same leaf when they all are. */
+function terminalFields(leaf: TerminalLeaf): TerminalLeaf {
+  const bad = TERMINAL_FIELDS.filter((f) => Object.hasOwn(leaf, f) && !validTerminalField(f, leaf[f]));
+  if (!bad.length) return leaf;
+  const next: TerminalLeaf = { ...leaf };
+  for (const f of bad) delete next[f];
+  return next;
+}
+
 /** VS Code of the machine for a folder ("" for the one code-server opens). */
 export type CodeView = Extra & { id: string; folder: string };
 export type CodeLeaf = Extra & { code: CodeView };
@@ -215,7 +267,7 @@ export function newId(): string {
 // Reading a document.
 
 function parseNode(raw: Extra): Node {
-  if (typeof raw.terminal === 'string' && raw.terminal) return { ...raw };
+  if (typeof raw.terminal === 'string' && raw.terminal) return terminalFields({ ...raw, terminal: raw.terminal });
   if (id(raw.code)) {
     const code = raw.code as Extra;
     return { ...raw, code: { ...code, id: code.id as string, folder: text(code.folder) } };
@@ -750,6 +802,33 @@ export function setViewFields(layout: Layout, key: string, fields: Extra): Layou
   const at = locate(layout, key)!;
   const ws = layout.workspaces[at.workspace];
   return withWorkspace(layout, at.workspace, { ...ws, tabs: ws.tabs.map((t, i) => (i === at.tab ? { ...t, root: swap(t.root) } : t)) });
+}
+
+/** Changes how a terminal's pane shows it: the fields render, session and
+ * before of its leaf (TERMINAL_FIELDS). A patch's other keys are ignored:
+ * the address stays, and agent, pid and resume are restore.ts's. A field
+ * whose value is undefined or null is removed, and so is one whose value
+ * is not one a document may hold (terminalFields). Each leaf of the
+ * address (a malformed document may have two) is changed from its own
+ * fields. The same layout when nothing changes or the terminal is not in
+ * it. */
+export function setTerminalFields(layout: Layout, terminal: string, patch: Extra): Layout {
+  const fields = TERMINAL_FIELDS.filter((f) => Object.hasOwn(patch, f));
+  if (!fields.length) return layout;
+  return mapTerminals(layout, (leaf) => {
+    if (leaf.terminal !== terminal) return leaf;
+    let next: TerminalLeaf = leaf;
+    for (const f of fields) {
+      const v = patch[f];
+      const set = v !== undefined && v !== null && validTerminalField(f, v);
+      if (set ? Object.hasOwn(next, f) && next[f] === v : !Object.hasOwn(next, f)) continue;
+      // A copy with the field defined on it (never a write through a prototype).
+      next = { ...next };
+      if (set) Object.defineProperty(next, f, { value: v, enumerable: true, writable: true, configurable: true });
+      else delete next[f];
+    }
+    return next;
+  });
 }
 
 /** A workspace's panes of a plugin's kind, in the order of its tabs and their trees. */

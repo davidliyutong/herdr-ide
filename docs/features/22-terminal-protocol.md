@@ -50,11 +50,19 @@ subscriber starts the machine's backend:
 4. The core asks the agent which coding agents run in the terminals
    ([25](25-agent-detection.md)) and adds them to the records as `agent`
    (`claude`, `codex`, …) and `agent_status` (`working`, `blocked`,
-   `idle`, `done`, `unknown`), sending subscribers
-   `event {type: "agent", terminal, data: {agent, agent_status}}` (both
-   null when the agent left) at every change and again after an event
-   that replaced the record. A `focus {s, focused: true}` on a stream of a
-   terminal whose turn ended (`done`) marks it seen: `idle`.
+   `idle`, `done`, `unknown`), and, while the agents plugin is on, the
+   session the agent runs as `agent_session` (a lower-case UUID) with
+   `agent_session_source` (how the machine found it: `argv`, `pid`, `fd`,
+   `start`, `hook`, `guess`; [35](35-agent-native-view.md)), absent from
+   the record while none is known. Subscribers get
+   `event {type: "agent", terminal, data: {agent, agent_status, agent_session, agent_session_source}}`
+   at every change and again after an event that replaced the record; a
+   change of the session alone is such an event too. Every member is
+   there: `agent` and `agent_status` are null when the agent left, the
+   session's two null when it is not known, so a client that merges the
+   event into its record loses a session that ended (another agent in the
+   terminal, the agent gone, the agents plugin switched off). A `focus {s, focused: true}` on a
+   stream of a terminal whose turn ended (`done`) marks it seen: `idle`.
 
 A backend that fails reports `backend {state: error, code}`
 (`machine_offline`, `not_bundled`, `not_running`, `install_failed`,
@@ -91,7 +99,12 @@ for `on`); `terminal.run` (with its `argv`, `cwd` and the names, not the
 values, of the variables the client gave in `env` as `client_env`, and of
 those the core added as `env`), `terminal.kill`, `terminal.rm`,
 `terminal.interrupt` and `terminal.keep` are audited with their terminal.
-An `env` that is not an object of strings is refused (`usage`).
+An `env` that is not an object of strings is refused (`usage`). A
+read-only client's `terminal.read` reaches herdr-core without its `lines`
+(the member removed in any letter case and of any type,
+`readScreenOnly`), so it reads the screen only: to put history lines above
+the screen of a program on the alternate screen, herdr-core scrolls the
+program with mouse-wheel input, which every viewer sees.
 
 **Streams.** `attach` opens a herdr-core attach stream and answers
 `attached` with a stream number of the client's connection; the reply is
@@ -220,8 +233,20 @@ so every client of the machine shows the same arrangement. Version 2:
     `codex`) with `pid` (the pid of the terminal's program then), or
     `resume` (the id of the agent the terminal lost with its program,
     until a client typed that agent's resume command into it). The ids
-    select a command of the client's own table; a client that does not
-    restore keeps the fields as it keeps unknown ones;
+    select a kind of the agent kind registry (`internal/agentkinds`,
+    [35](35-agent-native-view.md)), whose commands the client types; a
+    client that does not restore keeps the fields as it keeps unknown
+    ones. Three more fields have values the web UI checks
+    (`terminalFields`, `setTerminalFields` in `web/src/term/layout.ts`):
+    `render` (`"native"`: the pane shows the agent's conversation instead
+    of the terminal, [35](35-agent-native-view.md)), `session` (the
+    agent's session, a lower-case UUID) and `before` (the address of the
+    terminal this one took the place of: 1–64 letters, digits, `_` and
+    `-`, starting with a letter or digit). Read from a document, a value of
+    another type or shape is left out of the leaf and its other fields
+    are kept; a change sets only these three of every leaf of the address
+    (a malformed document may have two), removes one whose value is null
+    or not one it may hold, and never writes through a prototype;
   - VS Code `{"code": {"id", "folder"}}` for a folder of the machine
     (`""`: the one code-server opens), named `code:<id>`
     ([05](05-vscode-panes.md));
@@ -349,7 +374,13 @@ observe without display facts, input, size, focus and facts dropped, a
 finished turn not seen, nothing installed), a machine without a
 terminal core, and `TestTermKeepsTheLastViewer` (of two viewers and an
 observer the ones that leave first closed, the last viewer's stream kept,
-an observer not taking its place, the next viewer ending it). `web/src/__tests__/term.test.ts` covers the TypeScript client against a
+an observer not taking its place, the next viewer ending it).
+`term_readlines_test.go`: a read-only client's `terminal.read` reaching
+the terminal core without `lines` in any spelling or type
+(`TestTermReadOnlyReadsTheScreenOnly`), a writing client's with them;
+`term_session_test.go`: the session in records and agent events, present
+in a record only while known and null in an event when not
+(`TestTermAgentSessionEnds`; [35](35-agent-native-view.md)). `web/src/__tests__/term.test.ts` covers the TypeScript client against a
 scripted socket (frames, names, the store's events, every layout vector,
 subscribing, calls, a stream's reply before its frames, input, credit,
 reconnecting), `terms.test.ts` the browser UI's model (the layout read
@@ -357,9 +388,13 @@ after the terminals, one write at a time with another client's newer
 version taken, ended programs' panes closed, terminals asked for before
 the machine was ready, `keep: true` in `terminal.run`), `restore.test.ts`
 terminals that ended with the core replaced in the layout and the leaf's
-`agent`, `pid` and `resume` ([33](33-workspace-restore.md)). `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
+`agent`, `pid` and `resume` ([33](33-workspace-restore.md)),
+`agentLeaves.test.ts` and `design/testdata/layout/agent-leaves.json` the
+leaf's `render`, `session` and `before`. `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
 whole path against a real herdr-core: install and start through the agent,
 a shell started, typed into and read by one client, found and watched by a
 second, and killed; `TestIntegrationDetect` an agent's states
 ([25](25-agent-detection.md)); `TestIntegrationTermShells` typing into a
-shell as enabling program windows does, without changing its size.
+shell as enabling program windows does, without changing its size. The
+three passed against the pinned herdr-core 0.1.21 for linux/arm64 in an
+isolated Linux container (Debian, an unprivileged user, no network).

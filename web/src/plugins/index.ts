@@ -11,6 +11,20 @@ import { usagePlugin } from './usage';
 import { vaultPlugin } from './vault';
 import { gitPlugin } from './git';
 import { monitorPlugin } from './monitor';
+import { agentsPlugin } from './agents';
+import { historyPlugin } from './history';
 
 setPanelCommand((panel) => ({ run: () => togglePanel(panel.id) }));
-definePlugins([transfersPlugin, guiPlugin, vscodePlugin, browserPlugin, filesPlugin, gitPlugin, monitorPlugin, usagePlugin, vaultPlugin]);
+definePlugins([
+  transfersPlugin,
+  guiPlugin,
+  vscodePlugin,
+  browserPlugin,
+  filesPlugin,
+  gitPlugin,
+  monitorPlugin,
+  usagePlugin,
+  vaultPlugin,
+  agentsPlugin,
+  historyPlugin,
+]);

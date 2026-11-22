@@ -83,7 +83,34 @@ type DetectEvent struct {
 	Terminal string `json:"terminal"`
 	Agent    string `json:"agent"`
 	Status   string `json:"status"`
+	// Session is the id of the session the agent uses (a lower-case UUID,
+	// agentkinds.ValidSessionID), "" when it is not known; only a stream
+	// opened with Header.Sessions resolves it. SessionSource tells how it
+	// was found (SessionFrom*).
+	Session       string `json:"session,omitempty"`
+	SessionSource string `json:"session_source,omitempty"`
 }
+
+// How a DetectEvent's session was found (DetectEvent.SessionSource).
+const (
+	// SessionFromArgv: the agent's command line names it (--session-id,
+	// --resume).
+	SessionFromArgv = "argv"
+	// SessionFromPID: the agent's own record of its process names it.
+	SessionFromPID = "pid"
+	// SessionFromFD: the agent's process holds the session's transcript
+	// open.
+	SessionFromFD = "fd"
+	// SessionFromStart: the only session an agent of the kind made in the
+	// agent's directory since its process started (Codex), while no other
+	// terminal runs that kind there.
+	SessionFromStart = "start"
+	// SessionFromHook: the agent's hook reported it.
+	SessionFromHook = "hook"
+	// SessionFromGuess: the newest session of the agent's directory since
+	// the process started; a guess, which the UIs do not keep in the layout.
+	SessionFromGuess = "guess"
+)
 
 // Header is the first line of every stream.
 type Header struct {
@@ -131,6 +158,11 @@ type Header struct {
 	// Process (OpVault) is the process connected to vault.sock (peer
 	// credentials) and its parents, as the agent saw them.
 	Process []VaultProcess `json:"process,omitempty"`
+
+	// Sessions (OpDetect): the agent also resolves the session each
+	// terminal's agent uses (DetectEvent.Session); without it the stream
+	// reads no session file.
+	Sessions bool `json:"sessions,omitempty"`
 }
 
 // Reply is the first line written back by the acceptor.

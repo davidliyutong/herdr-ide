@@ -71,6 +71,12 @@ per remote machine; a machine without its own value uses the global one. A
 flag given on the command line wins, for every machine, and locks the
 setting in the UI.
 
+### Terminal history
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--history-capture` | `false` | Keep snapshots of the terminals' output on each machine's disk, in the agent's data directory there, to show what a terminal held after its terminal core started again. The output can hold secrets such as keys and passwords printed in a terminal. `true` or `false`. The setting `history.capture`, also per machine. |
+
 ### Development
 
 | Flag | Default | Description |
@@ -151,6 +157,8 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `plugins.monitor.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.vault.enabled` | `true`, `false` | `true` | – | – |
+| `plugins.agents.enabled` | `true`, `false` | `true` | – | – |
+| `plugins.history.enabled` | `true`, `false` | `true` | – | – |
 | `files.showHidden` | `true`, `false` | `false` | – | – |
 | `files.exclude` | list of strings | `[".git",".svn",".hg","CVS",".DS_Store","Thumbs.db"]` | – | – |
 | `files.sortOrder` | `default`, `mixed`, `filesFirst`, `type`, `modified` | `"default"` | – | – |
@@ -197,6 +205,12 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `gui.gpu` | `vglrun`, `all` | `"vglrun"` | `--gui-gpu` | per remote machine |
 | `gui.gpuPick` | `true`, `false` | `false` | `--gui-gpu-pick` | per remote machine |
 | `gui.video` | `true`, `false` | `true` | `--gui-video` | per remote machine |
+| `history.capture` | `true`, `false` | `false` | `--history-capture` | per machine |
+| `history.interval` | integer, 10–600 | `30` | – | per machine |
+| `history.lines` | integer, 100–10000 | `2000` | – | per machine |
+| `history.maxTerminals` | integer, 1–128 | `32` | – | per machine |
+| `history.maxTotalMB` | integer, 1–512 | `64` | – | per machine |
+| `history.days` | integer, 1–30 | `7` | – | per machine |
 | `performance.keptTerminals` | integer, 0–64 | `12` | – | – |
 
 <!-- end of scripts/registry: settings -->
@@ -298,6 +312,7 @@ by `scripts/registry`.
 | `tab.unpin` | `terminal` | – | – | – | – |
 | `browser.open` | `terminal` | – | – | – | – |
 | `browser.reload` | `terminal` | – | – | – | – |
+| `agents.newTab` | `terminal` | – | – | – | – |
 | `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
 | `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
 | `pane.close` | `terminal` | `cmd+w` | – | – | – |
@@ -313,6 +328,7 @@ by `scripts/registry`.
 | `pane.back` | `terminal` | `cmd+bracketleft` | – | – | – |
 | `pane.forward` | `terminal` | `cmd+bracketright` | – | – | – |
 | `pane.undoClose` | `terminal` | `cmd+z` | – | – | – |
+| `agents.toggleView` | `terminal` | – | – | – | – |
 | `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
 | `view.togglePanel` | `terminal` | `cmd+alt+b` | – | – | – |
 | `view.panel.files` | `terminal` | `cmd+shift+e` | – | – | – |
@@ -455,6 +471,13 @@ missing here.
 | `GET /api/p/usage/cost` | – | The cost of the machines' AI CLI logs (including Antigravity's and OpenCode's sessions) at API prices by day, provider, model, project and machine, with each machine's logs it could not read (`failed`: `<provider>:<code>`) (`?days=` 1–90, `&tz=` the user's offset east of UTC in minutes); supports `ETag` / `If-None-Match` (`304 Not Modified`). |
 | `POST /api/p/usage/refresh` | writes | Asks every connected machine for its limits now, or 30 s after the last poll when that was sooner (202 `{queued, at}`: when the poll runs). |
 | `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key file (`{"key"}`; `""` removes it); never read back, audited without the key. |
+| `GET /api/m/{id}/p/usage/session` | – | What one coding agent's session on the machine used at API prices (`?kind=` an agent kind whose sessions are priced, `claude` or `codex`, `&session=` its id, a lower-case UUID): `{model, input, cached, cacheWrite, output, reasoning, requests, cost, priced, contextUsed, contextSize}` ([29](features/29-ai-usage.md)). `400 bad_request`, `404 provider_off` (the provider turned off; the machine is not asked), `404 not_found` (no transcript yet), `compressed`, `too_large`, `409 offline`, `429 busy` (8 already under way for the machine). |
+| `GET /api/m/{id}/p/agents/tail` | – | Pages of coding agents' transcripts as conversation events ([35](features/35-agent-native-view.md)): `?s=<kind>~<session>~<from>[~b]` for each of 1 to 8 transcripts (an agent kind with a transcript parser, a lower-case UUID, a cursor as a decimal number, `~b` for the page before it) and `&wait=` 0 to 15000 ms the machine waits for one of them to have something new: `{tails: [{kind, session, file, first, next, events, more, unknown, title, code}]}`, `code` `not_found`, `compressed` or `bad_request` for a transcript not read. At most 6 requests wait on a machine and 2 of one client (its address without the port; `X-Forwarded-For` is not believed): one over either limit is read without its wait and, with nothing new, answered after at most 1 s. `400 bad_request`, `429 busy` (16 already under way for the machine), `409 offline`, `502 bad_reply`. |
+| `GET /api/m/{id}/p/agents/resolve` | – | Whether an agent kept a session's transcript and it ran in a directory (`?kind=&session=&cwd=`, `cwd` an absolute path of at most 4096 bytes): `{ok: true}`, or `{ok: false, code}` with `not_found`, `other_cwd`, `compressed` or `bad_request` ([33](features/33-workspace-restore.md)). `400 bad_request`, `429 busy` (8 already under way for the machine), `409 offline`. |
+| `GET /api/m/{id}/p/history` | – | The machine's snapshots of terminal output ([36](features/36-terminal-history.md)): `{terminals: [{terminal, pid, at, lines, bytes, cols, rows, restored?, previous?}], restoreScreen}` (`at` in ms since the epoch, 0 for a terminal with only a previous generation; `restored`: the current generation shows a screen the terminal core restored itself; `restoreScreen`: the user's herdr-core configuration has `restore_screen = true`). |
+| `GET /api/m/{id}/p/history/read` | – | One generation's bytes (`?terminal=` an address, `&generation=current\|previous`) as an `application/octet-stream` attachment, at most 2 MiB, with `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and `no-store`, described by `X-History-Pid`, `X-History-At`, `X-History-Cols`, `X-History-Rows`, `X-History-Lines`. `400 bad_request` or `busy`, `404 not_found`, `409 offline`, `502 bad_reply`, `504 timeout`. |
+| `DELETE /api/m/{id}/p/history` | writes | Removes the snapshots of one terminal (`?terminal=`) or of every terminal: `{removed}`; audited as `history.clear` with the terminal and the count. |
+| `POST /api/m/{id}/p/history/adopt` | writes | Gives terminal `?to=` (one of the machine's terminal core's records, which took the place of `&from=`) the newest generation of `from`'s snapshots as its previous one, unless it has a previous one captured later, and removes `from`'s snapshots either way: `{adopted}` ([36](features/36-terminal-history.md)); audited as `history.adopt` with `from`, `to` and `adopted`. `400 bad_request` (an address that is not one, or `from` equal to `to`), `busy` or `not_running` (the terminal core), `404 not_found` (`to` not in the records), `409 offline`, `502 bad_reply`, `504 timeout`. |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
 ## Environment variables
@@ -467,9 +490,9 @@ missing here.
 | `HERDR_IDE_DESKTOP_NO_OPEN` | Electron, development instances only | Set (to anything): the Full Disk Access buttons write `no-open: …` with what they would open (System Settings' URL, the terminal core's executable in Finder, the app's relaunch) to stderr instead of opening it, for smoke tests. |
 | `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
 | `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (on macOS not with `open`, which activates a running copy of the same bundle identifier) runs beside another one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV`. |
-| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux | The user configuration directory (settings, keybindings, machines; default `~/.config`) and the cache directory (code-server downloads; default `~/.cache`). |
+| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux | The user configuration directory (settings, keybindings, machines; default `~/.config`) and the cache directory (code-server downloads; default `~/.cache`). On a machine, `XDG_CONFIG_HOME` of the environment the agent starts the terminal core with also says where herdr-core's `config.toml` is, which the terminal history plugin reads for `restore_screen`. |
 | `XDG_STATE_HOME` | core | Where the SSH machines herdr saved are read from for the one-time import (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default `~/.local/state/herdr/client/endpoints.json`). |
-| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent (AI usage plugin) | Where the AI CLIs keep their credentials and logs when not in `~/.claude`, `~/.codex`, `~/.grok`, `~/.kimi-code`. |
+| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent (AI usage plugin; `CLAUDE_CONFIG_DIR` and `CODEX_HOME` also the agents' sessions and transcripts) | Where the AI CLIs keep their credentials, logs and sessions when not in `~/.claude`, `~/.codex`, `~/.grok`, `~/.kimi-code`. On Linux a Claude Code or Codex process's own `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is read from its environment to find its session ([35](features/35-agent-native-view.md)). |
 | `KIMI_DISABLE_OAUTH_LOCK` | agent (AI usage plugin) | `1`: Kimi Code renews its sign-in without its lock, so the plugin does not renew it (`usage.kimiRefresh`). |
 | `XDG_DATA_HOME`, `OPENCODE_DB` | agent (AI usage plugin) | Where OpenCode keeps its database when not `~/.local/share/opencode/opencode.db` (and `opencode-<channel>.db` beside it): its data directory's parent, or the database itself (relative to the data directory). |
 | `DEEPSEEK_API_KEY` | agent (AI usage plugin) | The DeepSeek key whose balance is shown; before Claude Code's DeepSeek settings and the key file. |
@@ -521,6 +544,7 @@ On every machine (the agent's `$HOME`):
 | `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` (0700 directory) | Link to the executable that serves the vault's MCP server (the agent's, or on the local machine the core's) | Pointed at the running executable whenever an agent starts; kept so MCP configurations stay valid. |
 | `~/.herdr-ide[-<instance>]/usage/cost-cache.json` (0600) | The AI usage plugin's records of the AI CLIs' logs, per log file | Records and logs older than 90 days leave it at each scan. |
 | `~/.herdr-ide[-<instance>]/usage/deepseek.key` (0600) | A DeepSeek API key set in the AI usage panel | Until removed in the panel or by hand. |
+| `~/.herdr-ide[-<instance>]/history/` (0700) | Snapshots of the terminals' output while `history.capture` is on for the machine (off by default): per terminal address `<address>.vt` (the bytes) and `<address>.json` (what describes them), `<address>.prev.vt` and `.prev.json` for the generation before, each 0600; `.lock`; temporary files `.<name>.<hex>.tmp` while one is written ([36](features/36-terminal-history.md)) | Within the limits (`history.lines`, 2 MiB a generation, `history.maxTerminals`, `history.maxTotalMB`); removed at a capture when older than `history.days` or when its terminal ended with its program or is gone, when an agent starts or the snapshots are listed or read once older than the days it was written under, when the setting or the plugin is turned off, and by **Clear Saved Output**; temporary files after 1 h. |
 
 On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` on Linux
 and macOS (must be owned by you, mode 0700; a core on Windows keeps none),

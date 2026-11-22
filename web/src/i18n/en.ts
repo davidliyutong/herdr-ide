@@ -8,6 +8,9 @@ import { en as monitorEn } from '../plugins/monitor/i18n/en';
 import { en as usageEn } from '../plugins/usage/i18n/en';
 import { en as vaultEn } from '../plugins/vault/i18n/en';
 import { en as browserEn } from '../plugins/browser/i18n/en';
+import { en as agentsEn } from '../plugins/agents/i18n/en';
+import { en as historyEn } from '../plugins/history/i18n/en';
+import { en as conversationEn } from '../conversation/i18n/en';
 
 export const en = {
   'desktop.failed': 'The desktop app could not start or lost its server.',
@@ -924,6 +927,14 @@ export const en = {
   'settings.plugins.monitor.enabled.desc':
     'Live CPU, memory, per-GPU, network and disk usage on Cmd+hover or in the status bar, plus a searchable Task Manager with tree view.',
   'command.view.panel.monitor': 'Show Task Manager',
+  // agents plugin
+  'settings.plugins.agents.enabled': 'Coding agents',
+  'settings.plugins.agents.enabled.desc':
+    'Coding agents’ conversations (Claude Code, Codex) in their terminals’ panes, read from their sessions on the machines.',
+  // terminal history plugin
+  'settings.plugins.history.enabled': 'Terminal history',
+  'settings.plugins.history.enabled.desc':
+    'Terminal output that machines keep on their disks while Keep snapshots of terminal output is on for them, shown after their terminal core started again.',
   // unsaved changes
   'unsaved.title': 'Unsaved Changes',
   'unsaved.one': 'Do you want to save the changes you made to {name}?',
@@ -942,6 +953,9 @@ export const en = {
   ...usageEn,
   ...vaultEn,
   ...browserEn,
+  ...agentsEn,
+  ...historyEn,
+  ...conversationEn,
 } as const;
 
 export type MessageKey = keyof typeof en;

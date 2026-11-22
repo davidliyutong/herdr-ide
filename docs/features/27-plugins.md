@@ -135,6 +135,30 @@ A plugin (`PluginDef`, `web/src/plugins/api.ts`) contributes:
   `FileTitle`): the first plugin that is on with one answers (the file
   explorer), and with none on nothing is marked, so the app imports no
   plugin's module for it;
+- **terminal surfaces** (`terminalSurfaces`: `{id, component, covers?}`):
+  what it draws over a shown terminal's pane, in one layer for all
+  plugins below the pane's header that takes none of the terminal's room
+  (`registry.ts` `TerminalSurfaces`, each in its error boundary; kept
+  panes draw none). A surface's id is its own among every plugin's
+  (`definePlugins` refuses an empty or repeated one) and owns its covers.
+  `covers(m, terminal, leaf)`, a pure function called as the pane is
+  rendered, says what the surface covers of the terminal for that leaf
+  (`all`, `part` or nothing), so a pane shown again is covered from its
+  first frame; a mounted surface sets what changes otherwise with
+  `useSetCover` (`state/covers.ts`, with its id). The strongest of them
+  applies; a terminal covered all is not drawn and gives up the keyboard,
+  and stays attached at its pane's size ([26](26-web-terminals.md)). A
+  surface that takes the pane's focus registers a handle with
+  `useSurfaceFocus` (`state/panes.ts`, in a layout effect, so it is
+  registered before the terminal mounted in the same commit): focusing
+  the pane (`withView`) focuses it, while typing and pasting into the pane
+  (`paneHandle`, `withPane`) still reach the terminal;
+- **header actions** (`headerActions`): buttons in a terminal pane's
+  header before the pane's own (`TerminalHeaderActions` in
+  `PaneHeader.tsx`), reached with the arrows like the header's own
+  (`tabIndex` -1); a press leaves the keyboard where it is, and they hide
+  with the pane's own buttons on panes without the focus and in narrow
+  headers unless the plugin keeps one shown;
 - **commands**: handlers of commands declared in
   `internal/keybindings/commands.go`, checked before the app's own;
 - **status bar items**, **palette items** and a handler of its `/ws`
@@ -318,9 +342,11 @@ does not have says so. Read-only pages do not drag panels into panes.
 | `vscode` | `plugins.vscode.enabled` (the desktop app), `plugins.vscode.browser` (browsers, after accepting the risk); both off by default | VS Code (code-server) in panes: the commands `code.open`, `code.diff`, `code.gitGraph`, the panes' buttons and menu items, the windows' layer ([05](05-vscode-panes.md)). Its routes are the core's own (`/api/m/{id}/code/*`, `/m/{id}/code/`, `/api/m/{id}/bridge`), which answer `plugin_disabled` to a client whose switch is off (`withPlugin`), stopping code-server excepted. Turning a switch off also closes that client's proxied connections, VS Code windows open in other browsers included, and, once both are off, ends a code-server preparation under way. Its settings page is code-server's section (`codeServer`, marked `Plugin: "vscode"`). |
 | `files` | `plugins.files.enabled` | The file explorer's panel and its editor pane, with Monaco loaded on first use, and its settings page (section `files`) ([28](28-file-explorer.md)). |
 | `vault` | `plugins.vault.enabled` | The variable vault: its panel, approval prompts and file dialogs, its settings page (section `vault`, ending with Import and Export), the op `vault` and the `mcp` command ([30](30-variable-vault.md)). |
-| `usage` | `plugins.usage.enabled` | The AI usage panel, its status bar item, its settings page (section `usage`) and its scheduler in the core ([29](29-ai-usage.md)). |
+| `usage` | `plugins.usage.enabled` | The AI usage panel, its status bar items (the accounts' tightest window, and the session of the agent in the focused pane), its settings page (section `usage`) and its scheduler in the core ([29](29-ai-usage.md)). |
 | `git` | `plugins.git.enabled` | Source Control's panel, the graph and diff panes, the file explorer's decorations of changed files, and its settings page (section `git`) ([31](31-git.md)). |
 | `monitor` | `plugins.monitor.enabled` | Live resource dashboard (⌘+hover on sidebar machines and an upward-floating status bar item), the Task Manager panel/pane with tree view and search, and its settings page (section `monitor`) ([34](34-system-monitor.md)). |
+| `agents` | `plugins.agents.enabled` | Coding agents' conversations over their terminals' panes (a terminal surface), the switch in the header (a header action), the commands `agents.toggleView` and `agents.newTab`, the new-tab menu's agents, the routes that read transcripts and confirm sessions, and, while on, the sessions the machines resolve for the detected agents ([35](35-agent-native-view.md)). |
+| `history` | `plugins.history.enabled` (and `history.capture`, off by default, per machine) | Snapshots of the terminals' output on each machine's disk, taken by a scheduler in the core, shown above the new shell of a terminal whose program was replaced; its settings page (section `history`, ending with what the machine keeps and **Clear Saved Output**) ([36](36-terminal-history.md)). |
 
 ## Alternatives considered
 
@@ -367,6 +393,12 @@ does not have says so. Read-only pages do not drag panels into panes.
 - `web/src/__tests__/plugins.test.ts`: switches (also one per machine), the
   rail and panels, commands, messages, panes of plugins that are off or
   unknown.
+- `web/src/__tests__/surfaces.test.ts`: no layer while no plugin that is
+  on has a surface, each plugin's surface and header buttons, a surface
+  that fails, the strongest cover, covers said at render time and while
+  mounted, owners; the pane's focus with a surface, also when both mount
+  in one commit; `surfaceFocus.test.ts`: the keyboard of a terminal that
+  becomes covered.
 - `web/src/__tests__/panelPanes.test.ts`: a panel drawn in a pane and named
   after it, drops on a pane's edges and middle, a tab, the new-tab button,
   its pane moved instead of a second one, Open in Pane, Move to Sidebar,

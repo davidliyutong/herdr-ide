@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -325,6 +326,9 @@ func (c *termClient) call(m *termIn) {
 		c.fail(m.RID, "refused", "")
 		return
 	}
+	if c.readOnly && m.Method == "terminal.read" {
+		readScreenOnly(params)
+	}
 	conn := c.subscribed(m.M)
 	if conn == nil {
 		c.fail(m.RID, "unavailable", "")
@@ -384,6 +388,20 @@ func (c *termClient) call(m *termIn) {
 		return
 	}
 	c.sendJSON(map[string]any{"t": "res", "rid": m.RID, "result": result})
+}
+
+// readScreenOnly removes from the params of a read-only client's
+// terminal.read the history lines it asks for ("lines", in any letter case
+// and of any JSON type), so that the terminal core reads the screen only:
+// to stitch history above the screen of a program on the alternate screen
+// the core scrolls the program (it sends it mouse-wheel input, and other
+// viewers see it redrawn), and a read-only client only watches.
+func readScreenOnly(params map[string]json.RawMessage) {
+	for k := range params {
+		if strings.EqualFold(k, "lines") {
+			delete(params, k)
+		}
+	}
 }
 
 func (c *termClient) attach(m *termIn) {

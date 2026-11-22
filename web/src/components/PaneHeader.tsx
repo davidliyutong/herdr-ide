@@ -15,7 +15,7 @@ import { isMenuKey } from '../rowKeys';
 import { PaneActions } from './PaneActions';
 import { t } from '../i18n';
 import { FileTitle, LeafIcon, ViewTitle } from './PluginPane';
-import { describeView } from '../plugins/registry';
+import { describeView, TerminalHeaderActions } from '../plugins/registry';
 
 interface Props {
   m: string;
@@ -72,8 +72,9 @@ function onHeaderKey(e: React.KeyboardEvent<HTMLElement>, m: string, pane: strin
 }
 
 /** The header of one pane: for a terminal the agent's state, the title, the
- * agent and the folder; for VS Code its mark, the folder's name and path;
- * for a preview the file's name and directory. Then the pane's own buttons
+ * agent and the folder, and the plugins' buttons for it; for VS Code its
+ * mark, the folder's name and path; for a preview the file's name and
+ * directory. Then the pane's own buttons
  * (PaneActions). Pressing it focuses the pane (VS Code takes the
  * keyboard), dragging it moves the pane, its menu has the pane's commands.
  * It is a toolbar, one stop of the Tab key (onHeaderKey); the keyboard on
@@ -112,7 +113,10 @@ export function PaneHeader({ m, pane, leaf, ws, focused, zoomed }: Props) {
       onContextMenu={(e) => !(e.target as HTMLElement).closest('input') && openMenu(e, paneMenu(m, pane))}
     >
       {L.isTerminalLeaf(leaf) ? (
-        <TerminalHeading m={m} terminal={pane} home={home} />
+        <>
+          <TerminalHeading m={m} terminal={pane} home={home} />
+          <TerminalHeaderActions m={m} terminal={pane} leaf={leaf} />
+        </>
       ) : L.isCodeLeaf(leaf) ? (
         <>
           <CodeIcon className="pane-kind" />

@@ -1,7 +1,8 @@
 // The AI usage plugin's state in the page: the core's snapshot (GET
 // /api/p/usage, then its /ws messages), the cost report, the panel's view
-// options (kept per browser) and the alerts the snapshots carry, each shown
-// once per browser.
+// options (kept per browser), the alerts the snapshots carry, each shown
+// once per browser, and the numbers of the coding agents' sessions the
+// status bar showed (session.ts).
 import { create } from 'zustand';
 import { showPanel } from '../../panelPanes';
 import { loadPref, savePref, useStore } from '../../state/store';
@@ -9,12 +10,28 @@ import { getPrefs } from '../../prefs';
 import { settingValue } from '../../settings';
 import { storage } from '../../brand';
 import { failureCode, jsonBody } from '../../lib/pluginApi';
-import { alertText, type CostReport, type UsageAlert, type UsageSnapshot } from './model';
+import { alertText, type CostReport, type SessionUsage, type UsageAlert, type UsageSnapshot } from './model';
 
 /** The panel shows the overview or one service (its id). */
 export type UsageTab = string;
 
 export type Metric = 'spend' | 'tokens';
+
+/** Why the core has no numbers of a session: no transcript yet
+ * (not_found), its provider turned off (provider_off), an agent whose
+ * sessions are not priced (bad_request). */
+export type SessionCode = 'not_found' | 'provider_off' | 'bad_request';
+
+/** What the page knows of a coding agent's session. */
+export interface SessionEntry {
+  /** The last numbers the core gave; none while code is set. */
+  usage?: SessionUsage;
+  code?: SessionCode;
+  /** The agent's status when code came. */
+  status?: string;
+  /** When the entry was written (ms). */
+  at: number;
+}
 
 interface UsageState {
   snapshot?: UsageSnapshot;
@@ -27,6 +44,8 @@ interface UsageState {
   metric: Metric;
   tab: UsageTab;
   costDays: 7 | 30 | 90;
+  /** Sessions by sessionKey (machine, agent kind, session id). */
+  sessions: Record<string, SessionEntry>;
 }
 
 const VIEW = 'usage.view';
@@ -46,6 +65,7 @@ export const useUsage = create<UsageState>(() => ({
   metric: view.metric === 'tokens' ? 'tokens' : 'spend',
   tab: typeof view.tab === 'string' ? view.tab : 'overview',
   costDays: view.costDays === 7 || view.costDays === 90 ? view.costDays : 30,
+  sessions: {},
 }));
 
 /** Changes the panel's view options and keeps them. */

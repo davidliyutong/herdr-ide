@@ -165,7 +165,7 @@ describe('keybindings', () => {
   it('handles only declared commands, and every one no plugin brings', () => {
     const declared = registry.commands.map((c) => c.id);
     for (const id of Object.keys(commands)) expect(declared, id).toContain(id);
-    const plugins = /^(browser|code|git|view\.panel)\./;
+    const plugins = /^(agents|browser|code|git|view\.panel)\./;
     for (const id of declared) if (!plugins.test(id)) expect(commands[id], id).toBeDefined();
   });
 

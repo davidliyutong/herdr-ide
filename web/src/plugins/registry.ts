@@ -1,19 +1,28 @@
 // The plugins the app has and which of them are on (api.ts).
-import { createElement } from 'react';
+import { createElement, type MouseEvent } from 'react';
 import { create } from 'zustand';
+import { PluginBoundary } from '../components/PluginBoundary';
 import { riskDialog } from '../dialog';
 import { t } from '../i18n';
 import { builtinDefaults, setSetting, useSettings, type Client, type Section } from '../settings';
-import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef } from './api';
+import { strongestCover, type Cover } from '../state/covers';
+import type { TerminalLeaf } from '../term/layout';
+import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef, TerminalSurfaceProps } from './api';
 
 let plugins: PluginDef[] = [];
 
-/** Sets the app's plugins (index.ts; tests). */
+/** Sets the app's plugins (index.ts; tests). Their ids, and the ids of
+ * their terminal surfaces (the owners of covers), are each one's own. */
 export function definePlugins(list: PluginDef[]) {
   const seen = new Set<string>();
+  const surfaces = new Set<string>();
   for (const p of list) {
     if (!/^[a-z][a-z0-9]*$/.test(p.id) || seen.has(p.id)) throw new Error(`bad plugin id ${p.id}`);
     seen.add(p.id);
+    for (const s of p.terminalSurfaces ?? []) {
+      if (!s.id || surfaces.has(s.id)) throw new Error(`bad terminal surface id ${s.id} of plugin ${p.id}`);
+      surfaces.add(s.id);
+    }
   }
   plugins = list;
   usePluginList.setState({ list });
@@ -113,6 +122,63 @@ export function useActivePlugins(): PluginDef[] {
 /** Whether the plugin of this id is on, for components. */
 export function usePluginOn(id: string): boolean {
   return useActivePlugins().some((p) => p.id === id);
+}
+
+/** What the plugins that are on draw over a terminal's pane shown
+ * (Workspace.tsx): each surface in its error boundary, all in one layer
+ * over the terminal below the header; nothing when no plugin that is on
+ * has a surface. */
+export function TerminalSurfaces(props: TerminalSurfaceProps) {
+  const list = useActivePlugins().flatMap((p) => (p.terminalSurfaces ?? []).map((surface) => ({ p, surface })));
+  if (!list.length) return null;
+  return createElement(
+    'div',
+    { className: 'pane-surfaces' },
+    list.map(({ p, surface }) =>
+      createElement(PluginBoundary, {
+        key: surface.id,
+        plugin: t(p.title),
+        resetKey: `${props.m}\n${props.terminal}`,
+        children: createElement(surface.component, props),
+      }),
+    ),
+  );
+}
+
+/** What the surfaces of the plugins that are on (active: useActivePlugins)
+ * say they cover of a terminal as they are drawn for its leaf
+ * (TerminalSurfaceDef.covers): all when one covers all, else part when one
+ * covers a part. A surface whose covers fails covers nothing. */
+export function surfacesCover(active: readonly PluginDef[], m: string, terminal: string, leaf: TerminalLeaf): Cover | undefined {
+  const list: (Cover | undefined)[] = [];
+  for (const p of active)
+    for (const s of p.terminalSurfaces ?? []) {
+      if (!s.covers) continue;
+      try {
+        list.push(s.covers(m, terminal, leaf));
+      } catch (err) {
+        console.error(`terminal surface ${s.id}:`, err);
+      }
+    }
+  return strongestCover(list);
+}
+
+/** The buttons the plugins that are on add to a terminal pane's header
+ * (PaneHeader.tsx), each plugin's in its error boundary; nothing when no
+ * plugin that is on has any. A press leaves the keyboard where it is. */
+export function TerminalHeaderActions(props: Omit<TerminalSurfaceProps, 'focused' | 'onActivate'>) {
+  const list = useActivePlugins().flatMap((p) => (p.headerActions ?? []).map((component, i) => ({ p, component, i })));
+  if (!list.length) return null;
+  return createElement(
+    'span',
+    {
+      className: 'pane-plugin-actions',
+      onMouseDown: (e: MouseEvent) => (e.target as HTMLElement).closest('button') && e.preventDefault(),
+    },
+    list.map(({ p, component, i }) =>
+      createElement(PluginBoundary, { key: `${p.id}:${i}`, plugin: t(p.title), compact: true, children: createElement(component, props) }),
+    ),
+  );
 }
 
 /** The panels of the plugins that are on. */

@@ -89,7 +89,19 @@ describe('plugins', () => {
   });
 
   it('are on unless their setting is false; the built-in ones are listed', () => {
-    expect(saved.map((p) => p.id)).toEqual(['transfers', 'gui', 'vscode', 'browser', 'files', 'git', 'monitor', 'usage', 'vault']);
+    expect(saved.map((p) => p.id)).toEqual([
+      'transfers',
+      'gui',
+      'vscode',
+      'browser',
+      'files',
+      'git',
+      'monitor',
+      'usage',
+      'vault',
+      'agents',
+      'history',
+    ]);
     expect(pluginOn(git)).toBe(true);
     setValue('plugins.git.enabled', false);
     expect(pluginOn(git)).toBe(false);

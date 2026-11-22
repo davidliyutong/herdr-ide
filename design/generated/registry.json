@@ -1,4 +1,155 @@
 {
+  "agents": [
+    {
+      "id": "claude",
+      "title": "Claude Code",
+      "usageProvider": "claude",
+      "start": [
+        "claude"
+      ],
+      "newSession": [
+        "--session-id",
+        "{id}"
+      ],
+      "continueLatest": [
+        "claude",
+        "--continue"
+      ],
+      "resumeById": [
+        "claude",
+        "--resume",
+        "{id}"
+      ],
+      "transcript": "claude"
+    },
+    {
+      "id": "codex",
+      "title": "Codex",
+      "usageProvider": "codex",
+      "start": [
+        "codex"
+      ],
+      "continueLatest": [
+        "codex",
+        "resume",
+        "--last"
+      ],
+      "resumeById": [
+        "codex",
+        "resume",
+        "{id}"
+      ],
+      "transcript": "codex"
+    },
+    {
+      "id": "gemini",
+      "title": "Gemini CLI",
+      "start": [
+        "gemini"
+      ]
+    },
+    {
+      "id": "opencode",
+      "title": "OpenCode",
+      "usageProvider": "opencode",
+      "start": [
+        "opencode"
+      ]
+    },
+    {
+      "id": "kimi",
+      "title": "Kimi Code",
+      "usageProvider": "kimi",
+      "start": [
+        "kimi"
+      ]
+    },
+    {
+      "id": "grok",
+      "title": "Grok",
+      "usageProvider": "grok",
+      "start": [
+        "grok"
+      ]
+    },
+    {
+      "id": "cursor",
+      "title": "Cursor",
+      "start": [
+        "cursor"
+      ]
+    },
+    {
+      "id": "copilot",
+      "title": "GitHub Copilot",
+      "start": [
+        "copilot"
+      ]
+    },
+    {
+      "id": "qwen",
+      "title": "Qwen Code",
+      "start": [
+        "qwen"
+      ]
+    },
+    {
+      "id": "amp",
+      "title": "Amp",
+      "start": [
+        "amp"
+      ]
+    },
+    {
+      "id": "agy",
+      "title": "Antigravity",
+      "usageProvider": "antigravity"
+    },
+    {
+      "id": "cline",
+      "title": "Cline"
+    },
+    {
+      "id": "devin",
+      "title": "Devin"
+    },
+    {
+      "id": "droid",
+      "title": "Droid"
+    },
+    {
+      "id": "hermes",
+      "title": "Hermes"
+    },
+    {
+      "id": "kilo",
+      "title": "Kilo Code"
+    },
+    {
+      "id": "kiro",
+      "title": "Kiro"
+    },
+    {
+      "id": "letta",
+      "title": "Letta Code"
+    },
+    {
+      "id": "maki",
+      "title": "Maki"
+    },
+    {
+      "id": "muse",
+      "title": "Muse"
+    },
+    {
+      "id": "pi",
+      "title": "Pi"
+    },
+    {
+      "id": "qodercli",
+      "title": "Qoder CLI"
+    }
+  ],
   "commands": [
     {
       "id": "app.commandPalette",
@@ -166,6 +317,11 @@
       "when": "terminal"
     },
     {
+      "id": "agents.newTab",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
       "id": "pane.splitRight",
       "section": "pane",
       "when": "terminal"
@@ -237,6 +393,11 @@
     },
     {
       "id": "pane.undoClose",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
+      "id": "agents.toggleView",
       "section": "pane",
       "when": "terminal"
     },
@@ -327,6 +488,8 @@
     }
   ],
   "i18n": [
+    "command.agents.newTab",
+    "command.agents.toggleView",
     "command.app.addMachine",
     "command.app.agentAttention",
     "command.app.commandPalette",
@@ -474,6 +637,12 @@
     "settings.gui.gpu.vglrun",
     "settings.gui.gpuPick",
     "settings.gui.video",
+    "settings.history.capture",
+    "settings.history.days",
+    "settings.history.interval",
+    "settings.history.lines",
+    "settings.history.maxTerminals",
+    "settings.history.maxTotalMB",
     "settings.layout.undoClose",
     "settings.monitor.confirmKill",
     "settings.monitor.refreshSeconds",
@@ -483,9 +652,11 @@
     "settings.notifications.sound",
     "settings.notifications.system",
     "settings.performance.keptTerminals",
+    "settings.plugins.agents.enabled",
     "settings.plugins.browser.enabled",
     "settings.plugins.files.enabled",
     "settings.plugins.git.enabled",
+    "settings.plugins.history.enabled",
     "settings.plugins.monitor.enabled",
     "settings.plugins.usage.enabled",
     "settings.plugins.vault.enabled",
@@ -498,6 +669,7 @@
     "settings.section.files",
     "settings.section.git",
     "settings.section.gui",
+    "settings.section.history",
     "settings.section.layout",
     "settings.section.monitor",
     "settings.section.notifications",
@@ -1030,6 +1202,12 @@
     "gui.gpu": "vglrun",
     "gui.gpuPick": false,
     "gui.video": true,
+    "history.capture": false,
+    "history.days": 7,
+    "history.interval": 30,
+    "history.lines": 2000,
+    "history.maxTerminals": 32,
+    "history.maxTotalMB": 64,
     "layout.undoClose": 5,
     "monitor.confirmKill": true,
     "monitor.refreshSeconds": 2,
@@ -1041,9 +1219,11 @@
     "notifications.sound": true,
     "notifications.system": true,
     "performance.keptTerminals": 12,
+    "plugins.agents.enabled": true,
     "plugins.browser.enabled": true,
     "plugins.files.enabled": true,
     "plugins.git.enabled": true,
+    "plugins.history.enabled": true,
     "plugins.monitor.enabled": true,
     "plugins.usage.enabled": true,
     "plugins.vault.enabled": true,
