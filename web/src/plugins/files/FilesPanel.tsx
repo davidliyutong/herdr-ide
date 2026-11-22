@@ -19,6 +19,7 @@ import { InlineEdit } from '../../components/InlineEdit';
 import { APP_SLUG } from '../../brand';
 import { t } from '../../i18n';
 import { isMac } from '../../keys';
+import { isDeleteKey, isRenameKey } from '../../rowKeys';
 import { useSize } from '../../lib/sizes';
 import { revealTop, useScrollView, visibleRange } from '../../lib/windowed';
 import { TreeRow } from '../../components/tree/TreeRow';
@@ -241,8 +242,17 @@ export function FilesPanel() {
       else if (nav.kind === 'selectAll') selectAllRows(rows);
       return;
     }
+    const plain = !ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey;
+    const openKey =
+      (!isMac && plain && ev.key === 'Enter') ||
+      (isMac && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey && (ev.key.toLowerCase() === 'o' || ev.key === 'ArrowDown'));
     switch (true) {
-      case ev.key === 'Enter': {
+      case isRenameKey(ev): {
+        handled();
+        if (!readOnly && row) setEdit({ kind: 'rename', path: row.path });
+        return;
+      }
+      case openKey: {
         handled();
         // On a selection of several, its files open; else the cursor's row.
         const files = st.selection.filter((p) => kinds.get(p) === false);
@@ -263,10 +273,7 @@ export function FilesPanel() {
     if (readOnly) return;
     // Only rows shown: a selection the tree does not show is not acted on.
     const sel = (st.selection.length ? st.selection : cur ? [cur] : []).filter((p) => kinds.has(p));
-    if (ev.key === 'F2' && row) {
-      handled();
-      setEdit({ kind: 'rename', path: row.path });
-    } else if ((ev.key === 'Delete' || (isMac && ev.key === 'Backspace' && ev.metaKey)) && sel.length) {
+    if (isDeleteKey(ev) && sel.length) {
       handled();
       if (ev.shiftKey) void remove(m, sel);
       else void trash(m, sel);

@@ -163,7 +163,7 @@ func TestKeybindingsAPI(t *testing.T) {
 	if code != 200 || json.Unmarshal([]byte(body), &got) != nil {
 		t.Fatalf("GET = %d %s", code, body)
 	}
-	if len(got.Commands) < 40 || len(got.Defaults["mac"]) == 0 || len(got.Effective["pc-browser"]) == 0 || got.User == nil {
+	if len(got.Commands) < 40 || len(got.Defaults["mac"]) == 0 || len(got.Effective["linux-browser"]) == 0 || len(got.Effective["windows-browser"]) == 0 || got.User == nil {
 		t.Fatalf("GET = %s", body)
 	}
 	code, body = f.do("PUT", "/api/keybindings", `[{"key":"ctrl+k t","command":"tab.new"},{"key":"ctrl+b c","command":"-tab.new"}]`)

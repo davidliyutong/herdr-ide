@@ -145,6 +145,22 @@ export function handleKey(ev: KeyboardEvent, ctx: KeyContext = keyContext()): bo
   }
 }
 
+/** Runs `pane.leave` when `ev` matches a single-stroke binding for it in the
+ * terminal context (used in capture phase inside Monaco editors and pane inputs
+ * so Ctrl+B escapes focus to the app chrome before the editor consumes it). */
+export function handlePaneLeaveKey(ev: KeyboardEvent): boolean {
+  if (ev.type !== 'keydown' || modifierKeys.has(ev.key)) return false;
+  if (keyContext() === 'dialog') return false;
+  const stroke = strokeOf(ev);
+  if (!stroke) return false;
+  const match = bindings().find((b) => applies(b.when, 'terminal') && b.key === stroke && b.command === 'pane.leave');
+  if (!match) return false;
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (!ev.repeat) runCommand('pane.leave');
+  return true;
+}
+
 /** VS Code's key for closing, pressed in a window without editors
  * (bridge.close; the extension binds it there, as VS Code closes such a
  * window): closes the VS Code pane showing that window, when this page has
@@ -184,7 +200,8 @@ export function keyHint(command: string): string {
     .getState()
     .effective.filter((b) => b.command === command)
     .map((b) => b.key);
-  const direct = platform() === 'mac' || platform() === 'pc' ? keys.find((k) => !k.includes(' ')) : undefined;
+  const direct =
+    platform() === 'mac' || platform() === 'windows' || platform() === 'linux' ? keys.find((k) => !k.includes(' ')) : undefined;
   const key = direct ?? keys[0];
   return key ? keyLabel(key) : '';
 }

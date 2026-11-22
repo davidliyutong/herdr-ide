@@ -3,6 +3,7 @@ package keybindings
 import (
 	"encoding/json"
 	"os"
+	"runtime"
 	"strings"
 
 	"herdr-ide/internal/userfile"
@@ -54,7 +55,10 @@ func (s *Store) MigrateDesktopShortcuts(settingsFile string, mac bool) (bool, er
 	if json.Unmarshal(b, &old) != nil {
 		return false, nil
 	}
-	platform := PlatformPC
+	platform := PlatformLinux
+	if runtime.GOOS == "windows" {
+		platform = PlatformWindows
+	}
 	if mac {
 		platform = PlatformMac
 	}

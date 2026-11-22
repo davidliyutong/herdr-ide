@@ -546,7 +546,15 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   );
 
   return (
-    <div className="files-editor" data-autofocus tabIndex={-1} onKeyDown={saveKeys.root}>
+    <div
+      className="files-editor"
+      data-autofocus
+      tabIndex={-1}
+      onFocus={(e) => {
+        if (e.target === e.currentTarget) ed.current?.editor.focus();
+      }}
+      onKeyDown={saveKeys.root}
+    >
       <EditorBar m={m} pane={pane} view={view}>
         {dirty && (
           <span className="files-dirty" title={t('files.unsaved')} aria-label={t('files.unsaved')}>

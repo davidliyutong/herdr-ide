@@ -742,5 +742,25 @@ describe('a terminal’s pane', () => {
       expect(link.attaches).toHaveLength(2);
       expect(attached).toHaveBeenCalledTimes(2);
     });
+
+    it('lets appKey intercept Ctrl+B before Ghostty encodes it, and sends Ctrl+B when unbound', async () => {
+      let intercept = true;
+      const appKey = vi.fn(() => intercept);
+      const { p } = pane(800, 400, { appKey });
+      p.setProgram(100);
+      await loadEmulator();
+      const ta = document.querySelector('textarea')!;
+      const ev1 = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true });
+      ta.dispatchEvent(ev1);
+      expect(appKey).toHaveBeenCalledTimes(1);
+      expect(ev1.defaultPrevented).toBe(true);
+      expect(link.written).toEqual([]);
+
+      intercept = false;
+      const ev2 = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true });
+      ta.dispatchEvent(ev2);
+      expect(ev2.defaultPrevented).toBe(true);
+      expect(link.written).toEqual(['\x02']);
+    });
   });
 });

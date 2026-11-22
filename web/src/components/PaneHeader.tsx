@@ -11,7 +11,7 @@ import { CodeIcon } from './icons';
 import { startPaneDrag } from '../paneDrag';
 import { openMenu } from '../contextMenu';
 import { openPaneMenu, paneMenu } from '../menus';
-import { isMenuKey } from '../rowKeys';
+import { isMenuKey, isRenameKey } from '../rowKeys';
 import { PaneActions } from './PaneActions';
 import { t } from '../i18n';
 import { FileTitle, LeafIcon, ViewTitle } from './PluginPane';
@@ -59,7 +59,7 @@ function onHeaderKey(e: React.KeyboardEvent<HTMLElement>, m: string, pane: strin
   else if (plain && e.key === 'ArrowLeft') go(at < 0 ? items.length - 1 : at - 1);
   else if (plain && e.key === 'Home') go(0);
   else if (plain && e.key === 'End') go(items.length - 1);
-  else if (plain && (e.key === 'F2' || (e.key === 'Enter' && onTitle)) && renamable) {
+  else if ((isRenameKey(e) || (plain && e.key === 'Enter' && onTitle)) && renamable) {
     done();
     actions.startRename('pane', m, pane);
   } else if (isMenuKey(e)) {

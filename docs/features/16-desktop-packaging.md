@@ -51,8 +51,8 @@ system's rules run in the tests on any of them:
   sets with `app.setAppUserModelId`. Windows shows an app's notifications
   only under the id of its Start menu shortcut, which the setup gives the
   same id.
-- `keyPlatform`: the keybindings of the `mac` platform on macOS and `pc`
-  elsewhere; the page picks the same (`web/src/keybindings.ts`).
+- `keyPlatform`: the keybindings of `mac` on macOS, `windows` on Windows
+  and `linux` on Linux; the page picks the same (`web/src/keybindings.ts`).
 - `coreBinary`: `bin/<slug>` (`bin/<slug>.exe` on Windows) in the packaged
   app's resources, or the `dist/<slug>-<goos>-<goarch>[.exe]` that
   `scripts/build.sh` wrote, unpackaged.

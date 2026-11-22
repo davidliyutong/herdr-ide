@@ -19,7 +19,17 @@ import { initDesktop } from './desktop';
 import { warnOnUnload } from './unsaved';
 import { followDesktopClose } from './quitGuard';
 import { takeOpenedFolders } from './drop';
-import { closeWindowPane, leaveWindowPane, commandLabel, handleKey, keyHint, onChordChange, pendingChord, runCommand } from './keymap';
+import {
+  closeWindowPane,
+  leaveWindowPane,
+  commandLabel,
+  handleKey,
+  handlePaneLeaveKey,
+  keyHint,
+  onChordChange,
+  pendingChord,
+  runCommand,
+} from './keymap';
 import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
@@ -160,12 +170,22 @@ export function App() {
       .then((c) => useStore.setState({ readOnly: !!c.read_only, sshLogin: c.ssh_login !== false }))
       .catch(() => {});
     const off = onChordChange(setChord);
-    // Bindings also work when the focus is outside a terminal.
+    // Ctrl+B escapes focus from editors and pane inputs before they consume it;
+    // terminals route their own keys through TermPane -> appKey -> handleKey.
+    const onCaptureKey = (ev: KeyboardEvent) => {
+      const el = ev.target as HTMLElement | null;
+      if (!el || el.closest('.term-host') || el.closest('.pane-header') || el.closest('.inline-edit')) return;
+      if (el.closest('.pane') || (el.closest('.panel') && el.closest('input, textarea, [contenteditable]'))) {
+        handlePaneLeaveKey(ev);
+      }
+    };
+    // Bindings also work when the focus is outside a terminal or Monaco editor.
     const onKey = (ev: KeyboardEvent) => {
       const el = ev.target as HTMLElement | null;
-      if (el?.closest('.term-host') || el?.closest('input, textarea, iframe, [contenteditable]')) return;
+      if (el?.closest('.term-host') || el?.closest('.monaco-editor') || el?.closest('input, textarea, iframe, [contenteditable]')) return;
       handleKey(ev);
     };
+    window.addEventListener('keydown', onCaptureKey, true);
     window.addEventListener('keydown', onKey);
     return () => {
       off();
@@ -175,6 +195,7 @@ export function App() {
       offClose();
       offFolders();
       offWorkers();
+      window.removeEventListener('keydown', onCaptureKey, true);
       window.removeEventListener('keydown', onKey);
     };
   }, []);

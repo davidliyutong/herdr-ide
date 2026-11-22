@@ -241,6 +241,7 @@ export const zhCN: Messages = {
   'command.tab.unpin': '取消固定标签页',
   'command.pane.rename': '重命名窗格',
   'command.pane.actions': '窗格操作…',
+  'command.pane.leave': '聚焦应用界面',
   'command.view.toggleSidebar': '显示/隐藏侧栏',
   'command.view.zoomIn': '放大',
   'command.view.zoomOut': '缩小',

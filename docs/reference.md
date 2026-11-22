@@ -258,16 +258,13 @@ of reaching the terminal; typing it twice (`ctrl+k ctrl+k`) lets the second
 press through to the terminal as any key no binding takes.
 
 The default keys differ by platform: `mac` is the desktop app on macOS,
-`mac-browser` browsers on macOS, `pc` the desktop app on other systems and
-`pc-browser` browsers there. No default is a chord, and none is `ctrl` or `alt` with a letter alone: `ctrl+b` and every
-other key that is not in the table reach the program in the terminal on
-their first press. The desktop app has direct shortcuts, which browsers
-keep for themselves (`cmd+t`, `cmd+w`…); browsers get find, the keyboard
-shortcuts and, on macOS, the command palette (`cmd+k`; in browsers on
-other systems the status bar's **Command Palette…** opens it). On Windows
-and Linux the desktop app's tab keys are `ctrl+tab`, `ctrl+shift+tab` and
-`alt+1`…`alt+9`, as in GNOME Terminal and Konsole; `tab.select9` is the
-last tab. A command
+`mac-browser` browsers on macOS, `windows` the desktop app on Windows,
+`windows-browser` browsers on Windows, `linux` the desktop app on Linux
+and `linux-browser` browsers on Linux. `ctrl+b` (`pane.leave`) escapes
+focus from the active editor, terminal or pane to the app chrome (and
+returns focus when already there); no other default is a chord, `ctrl` or
+`alt` with a letter alone, or a function key, so every other key that is
+not in the table reaches the program in the terminal on its first press. The desktop app has direct shortcuts, which browsers keep for themselves (`cmd+t`, `cmd+w`…); browsers get find, the keyboard shortcuts, `ctrl+b` focus escape and, on macOS, the command palette (`cmd+k`; in browsers on other systems the status bar's **Command Palette…** opens it). On Windows and Linux the desktop app's tab keys are `ctrl+tab`, `ctrl+shift+tab` and `alt+1`…`alt+9` (with `ctrl+pageup`/`ctrl+pagedown` on Linux), and splits and workspace switches follow each platform's conventions (`alt+shift++`/`alt+shift+-` and `ctrl+shift+pgdn`/`pgup` on Windows; `ctrl+shift+d`/`ctrl+shift+o` and `ctrl+alt+up`/`down` on Linux); `tab.select9` is the last tab. A command
 without a key (–) runs from the menus, the command palette, its button and
 the context menus, and any key or chord can be bound to it. The desktop
 app's menu shows the keys; there the page runs the keys it sees, and on
@@ -287,74 +284,75 @@ by `scripts/registry`.
 
 <!-- scripts/registry: commands -->
 
-| Command | When | `mac` | `mac-browser` | `pc` | `pc-browser` |
-| --- | --- | --- | --- | --- | --- |
-| `app.commandPalette` | `terminal` | `cmd+shift+p` | `cmd+k` | `ctrl+shift+p` | – |
-| `app.keyboardShortcuts` | `terminal` | `cmd+slash` | `cmd+slash` | `ctrl+shift+slash` | `ctrl+shift+slash` |
-| `app.settings` | `terminal` | `cmd+comma` | – | `ctrl+comma` | – |
-| `app.agentAttention` | `terminal` | `cmd+shift+a` | – | `ctrl+shift+a` | – |
-| `app.addMachine` | `terminal` | – | – | – | – |
-| `app.fullDiskAccess` | `terminal` | – | – | – | – |
-| `workspace.switch` | `terminal` | `cmd+p` | – | – | – |
-| `workspace.next` | `terminal` | `cmd+ctrl+down` | – | – | – |
-| `workspace.previous` | `terminal` | `cmd+ctrl+up` | – | – | – |
-| `workspace.new` | `terminal` | `cmd+n` | – | `ctrl+shift+n` | – |
-| `workspace.edit` | `terminal` | – | – | – | – |
-| `workspace.close` | `terminal` | – | – | – | – |
-| `workspace.closeOthers` | `terminal` | – | – | – | – |
-| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – |
-| `tab.rename` | `terminal` | – | – | – | – |
-| `tab.next` | `terminal` | `cmd+shift+bracketright`, `ctrl+tab` | – | `ctrl+tab` | – |
-| `tab.previous` | `terminal` | `cmd+shift+bracketleft`, `ctrl+shift+tab` | – | `ctrl+shift+tab` | – |
-| `tab.select1` | `terminal` | `cmd+1` | – | `alt+1` | – |
-| `tab.select2` | `terminal` | `cmd+2` | – | `alt+2` | – |
-| `tab.select3` | `terminal` | `cmd+3` | – | `alt+3` | – |
-| `tab.select4` | `terminal` | `cmd+4` | – | `alt+4` | – |
-| `tab.select5` | `terminal` | `cmd+5` | – | `alt+5` | – |
-| `tab.select6` | `terminal` | `cmd+6` | – | `alt+6` | – |
-| `tab.select7` | `terminal` | `cmd+7` | – | `alt+7` | – |
-| `tab.select8` | `terminal` | `cmd+8` | – | `alt+8` | – |
-| `tab.select9` | `terminal` | `cmd+9` | – | `alt+9` | – |
-| `tab.close` | `terminal` | `cmd+shift+w` | – | `ctrl+shift+w` | – |
-| `tab.closeOthers` | `terminal` | – | – | – | – |
-| `tab.closeRight` | `terminal` | – | – | – | – |
-| `tab.pin` | `terminal` | – | – | – | – |
-| `tab.unpin` | `terminal` | – | – | – | – |
-| `browser.open` | `terminal` | – | – | – | – |
-| `browser.reload` | `terminal` | – | – | – | – |
-| `chat.new` | `terminal` | – | – | – | – |
-| `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
-| `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
-| `pane.close` | `terminal` | `cmd+w` | – | – | – |
-| `pane.zoom` | `terminal` | `cmd+shift+enter` | – | `ctrl+shift+enter` | – |
-| `pane.rename` | `terminal` | – | – | – | – |
-| `pane.actions` | `terminal` | – | – | – | – |
-| `pane.focusLeft` | `terminal` | `cmd+alt+left` | – | – | – |
-| `pane.focusDown` | `terminal` | `cmd+alt+down` | – | – | – |
-| `pane.focusUp` | `terminal` | `cmd+alt+up` | – | – | – |
-| `pane.focusRight` | `terminal` | `cmd+alt+right` | – | – | – |
-| `pane.focusNext` | `terminal` | – | – | – | – |
-| `pane.focusPrevious` | `terminal` | – | – | – | – |
-| `pane.back` | `terminal` | `cmd+bracketleft` | – | – | – |
-| `pane.forward` | `terminal` | `cmd+bracketright` | – | – | – |
-| `pane.undoClose` | `terminal` | `cmd+z` | – | – | – |
-| `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
-| `view.togglePanel` | `terminal` | `cmd+alt+b` | – | – | – |
-| `view.panel.files` | `terminal` | `cmd+shift+e` | – | – | – |
-| `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
-| `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – |
-| `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – |
-| `view.panel.vault` | `terminal` | – | – | – | – |
-| `view.panel.usage` | `terminal` | – | – | – | – |
-| `view.panel.git` | `terminal` | `ctrl+shift+g` | – | `ctrl+shift+g` | – |
-| `view.panel.monitor` | `terminal` | – | – | – | – |
-| `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` |
-| `find.next` | `terminal` | `cmd+g` | – | – | – |
-| `find.previous` | `terminal` | `cmd+shift+g` | – | – | – |
-| `code.open` | `terminal` | `cmd+j` | – | `ctrl+shift+j` | – |
-| `code.diff` | `terminal` | – | – | – | – |
-| `code.gitGraph` | `terminal` | – | – | – | – |
-| `git.graph` | `terminal` | – | – | – | – |
+| Command | When | `mac` | `mac-browser` | `windows` | `windows-browser` | `linux` | `linux-browser` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `app.commandPalette` | `terminal` | `cmd+shift+p` | `cmd+k` | `ctrl+shift+p` | – | `ctrl+shift+p` | – |
+| `app.keyboardShortcuts` | `terminal` | `cmd+slash` | `cmd+slash` | `ctrl+shift+slash` | `ctrl+shift+slash` | `ctrl+shift+slash` | `ctrl+shift+slash` |
+| `app.settings` | `terminal` | `cmd+comma` | – | `ctrl+comma` | – | `ctrl+comma` | – |
+| `app.agentAttention` | `terminal` | `cmd+shift+a` | – | `ctrl+shift+a` | – | `ctrl+shift+a` | – |
+| `app.addMachine` | `terminal` | – | – | – | – | – | – |
+| `app.fullDiskAccess` | `terminal` | – | – | – | – | – | – |
+| `workspace.switch` | `terminal` | `cmd+p` | – | `ctrl+shift+k` | – | `ctrl+shift+k` | – |
+| `workspace.next` | `terminal` | `cmd+ctrl+down` | – | `ctrl+shift+pagedown` | – | `ctrl+alt+down` | – |
+| `workspace.previous` | `terminal` | `cmd+ctrl+up` | – | `ctrl+shift+pageup` | – | `ctrl+alt+up` | – |
+| `workspace.new` | `terminal` | `cmd+n` | – | `ctrl+shift+n` | – | `ctrl+shift+n` | – |
+| `workspace.edit` | `terminal` | – | – | – | – | – | – |
+| `workspace.close` | `terminal` | – | – | – | – | – | – |
+| `workspace.closeOthers` | `terminal` | – | – | – | – | – | – |
+| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – | `ctrl+shift+t` | – |
+| `tab.rename` | `terminal` | – | – | – | – | – | – |
+| `tab.next` | `terminal` | `cmd+shift+bracketright`, `ctrl+tab` | – | `ctrl+tab` | – | `ctrl+tab`, `ctrl+pagedown` | – |
+| `tab.previous` | `terminal` | `cmd+shift+bracketleft`, `ctrl+shift+tab` | – | `ctrl+shift+tab` | – | `ctrl+shift+tab`, `ctrl+pageup` | – |
+| `tab.select1` | `terminal` | `cmd+1` | – | `alt+1` | – | `alt+1` | – |
+| `tab.select2` | `terminal` | `cmd+2` | – | `alt+2` | – | `alt+2` | – |
+| `tab.select3` | `terminal` | `cmd+3` | – | `alt+3` | – | `alt+3` | – |
+| `tab.select4` | `terminal` | `cmd+4` | – | `alt+4` | – | `alt+4` | – |
+| `tab.select5` | `terminal` | `cmd+5` | – | `alt+5` | – | `alt+5` | – |
+| `tab.select6` | `terminal` | `cmd+6` | – | `alt+6` | – | `alt+6` | – |
+| `tab.select7` | `terminal` | `cmd+7` | – | `alt+7` | – | `alt+7` | – |
+| `tab.select8` | `terminal` | `cmd+8` | – | `alt+8` | – | `alt+8` | – |
+| `tab.select9` | `terminal` | `cmd+9` | – | `alt+9` | – | `alt+9` | – |
+| `tab.close` | `terminal` | `cmd+shift+w` | – | `ctrl+shift+w` | – | `ctrl+shift+w` | – |
+| `tab.closeOthers` | `terminal` | – | – | – | – | – | – |
+| `tab.closeRight` | `terminal` | – | – | – | – | – | – |
+| `tab.pin` | `terminal` | – | – | – | – | – | – |
+| `tab.unpin` | `terminal` | – | – | – | – | – | – |
+| `browser.open` | `terminal` | – | – | – | – | – | – |
+| `browser.reload` | `terminal` | – | – | – | – | – | – |
+| `chat.new` | `terminal` | – | – | – | – | – | – |
+| `pane.splitRight` | `terminal` | `cmd+d` | – | `alt+shift+equal` | – | `ctrl+shift+d` | – |
+| `pane.splitDown` | `terminal` | `cmd+shift+d` | – | `alt+shift+minus` | – | `ctrl+shift+o` | – |
+| `pane.close` | `terminal` | `cmd+w` | – | – | – | – | – |
+| `pane.zoom` | `terminal` | `cmd+shift+enter` | – | `ctrl+shift+enter` | – | `ctrl+shift+enter` | – |
+| `pane.leave` | `terminal` | `ctrl+b` | `ctrl+b` | `ctrl+b` | `ctrl+b` | `ctrl+b` | `ctrl+b` |
+| `pane.rename` | `terminal` | – | – | – | – | – | – |
+| `pane.actions` | `terminal` | – | – | – | – | – | – |
+| `pane.focusLeft` | `terminal` | `cmd+alt+left` | – | `alt+shift+left` | – | `alt+shift+left` | – |
+| `pane.focusDown` | `terminal` | `cmd+alt+down` | – | `alt+shift+down` | – | `alt+shift+down` | – |
+| `pane.focusUp` | `terminal` | `cmd+alt+up` | – | `alt+shift+up` | – | `alt+shift+up` | – |
+| `pane.focusRight` | `terminal` | `cmd+alt+right` | – | `alt+shift+right` | – | `alt+shift+right` | – |
+| `pane.focusNext` | `terminal` | – | – | – | – | – | – |
+| `pane.focusPrevious` | `terminal` | – | – | – | – | – | – |
+| `pane.back` | `terminal` | `cmd+bracketleft` | – | `alt+left` | – | `alt+left` | – |
+| `pane.forward` | `terminal` | `cmd+bracketright` | – | `alt+right` | – | `alt+right` | – |
+| `pane.undoClose` | `terminal` | `cmd+z` | – | `ctrl+shift+z` | – | `ctrl+shift+z` | – |
+| `view.toggleSidebar` | `terminal` | `cmd+b` | – | `ctrl+shift+b` | – | `ctrl+shift+b` | – |
+| `view.togglePanel` | `terminal` | `cmd+alt+b` | – | `alt+shift+b` | – | `alt+shift+b` | – |
+| `view.panel.files` | `terminal` | `cmd+shift+e` | – | `ctrl+shift+e` | – | `ctrl+shift+e` | – |
+| `view.zoomIn` | `always` | `cmd+shift+equal`, `cmd+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – | `ctrl+shift+equal`, `ctrl+equal` | – |
+| `view.zoomOut` | `always` | `cmd+minus` | – | `ctrl+minus` | – | `ctrl+minus` | – |
+| `view.zoomReset` | `always` | `cmd+0` | – | `ctrl+0` | – | `ctrl+0` | – |
+| `view.panel.vault` | `terminal` | – | – | – | – | – | – |
+| `view.panel.usage` | `terminal` | – | – | – | – | – | – |
+| `view.panel.git` | `terminal` | `ctrl+shift+g` | – | `ctrl+shift+g` | – | `ctrl+shift+g` | – |
+| `view.panel.monitor` | `terminal` | – | – | – | – | – | – |
+| `find.open` | `terminal` | `cmd+f` | `cmd+f` | `ctrl+shift+f` | `ctrl+shift+f` | `ctrl+shift+f` | `ctrl+shift+f` |
+| `find.next` | `terminal` | `cmd+g` | – | – | – | – | – |
+| `find.previous` | `terminal` | `cmd+shift+g` | – | – | – | – | – |
+| `code.open` | `terminal` | `cmd+j` | – | `ctrl+shift+j` | – | `ctrl+shift+j` | – |
+| `code.diff` | `terminal` | – | – | – | – | – | – |
+| `code.gitGraph` | `terminal` | – | – | – | – | – | – |
+| `git.graph` | `terminal` | – | – | – | – | – | – |
 
 <!-- end of scripts/registry: commands -->
 

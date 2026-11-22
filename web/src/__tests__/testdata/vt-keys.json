@@ -340,7 +340,7 @@
       }
     },
     {
-      "name": "Ctrl+B (tmux's prefix; no default binding takes it)",
+      "name": "Ctrl+B (when unbound in keybindings, reaches terminal)",
       "event": {
         "key": "b",
         "code": "KeyB",

@@ -1,13 +1,15 @@
 {
-  "description": "Strokes against each platform's default bindings (the keybindings of design/generated/registry.json, which internal/keybindings writes): each gives none (the key reaches the program in the terminal on its first press) or run:<command>. No default is a chord, so ctrl+b and every key that is not a default give none. Run by web/src/__tests__/keys.test.ts.",
+  "description": "Strokes against each platform's default bindings (the keybindings of design/generated/registry.json, which internal/keybindings writes): ctrl+b runs pane.leave (escaping focus to app chrome), direct shortcuts run their commands, and unbound keys give none (reaching the program in the terminal on their first press). Run by web/src/__tests__/keys.test.ts.",
   "cases": [
     {
-      "description": "ctrl+b (tmux's prefix) and the keys of shells and editors reach the terminal on their first press",
+      "description": "ctrl+b escapes focus to app chrome while other keys of shells and editors reach the terminal on their first press",
       "platforms": [
         "mac",
         "mac-browser",
-        "pc",
-        "pc-browser"
+        "windows",
+        "windows-browser",
+        "linux",
+        "linux-browser"
       ],
       "context": "terminal",
       "strokes": [
@@ -39,10 +41,10 @@
         "ctrl+left"
       ],
       "results": [
+        "run:pane.leave",
         "none",
-        "none",
-        "none",
-        "none",
+        "run:pane.leave",
+        "run:pane.leave",
         "none",
         "none",
         "none",
@@ -87,7 +89,7 @@
         "run:app.keyboardShortcuts",
         "run:pane.close",
         "none",
-        "none"
+        "run:pane.leave"
       ]
     },
     {
@@ -110,13 +112,13 @@
         "run:find.open",
         "none",
         "none",
-        "none"
+        "run:pane.leave"
       ]
     },
     {
-      "description": "the desktop app elsewhere: ctrl+shift keys, as terminal emulators use",
+      "description": "the desktop app on Windows: ctrl+shift keys, Windows Terminal splits and Alt+Left/Right back/forward",
       "platforms": [
-        "pc"
+        "windows"
       ],
       "context": "terminal",
       "strokes": [
@@ -124,6 +126,9 @@
         "ctrl+shift+slash",
         "ctrl+shift+t",
         "ctrl+shift+w",
+        "alt+shift+equal",
+        "alt+shift+minus",
+        "alt+left",
         "ctrl+t",
         "ctrl+w",
         "ctrl+b"
@@ -133,15 +138,52 @@
         "run:app.keyboardShortcuts",
         "run:tab.new",
         "run:tab.close",
+        "run:pane.splitRight",
+        "run:pane.splitDown",
+        "run:pane.back",
         "none",
         "none",
-        "none"
+        "run:pane.leave"
       ]
     },
     {
-      "description": "browsers elsewhere: find and the list of shortcuts only",
+      "description": "the desktop app on Linux: ctrl+shift keys, Linux terminal splits, Ctrl+Alt workspace switch and Alt+Left/Right",
       "platforms": [
-        "pc-browser"
+        "linux"
+      ],
+      "context": "terminal",
+      "strokes": [
+        "ctrl+shift+p",
+        "ctrl+shift+slash",
+        "ctrl+shift+t",
+        "ctrl+shift+w",
+        "ctrl+shift+d",
+        "ctrl+shift+o",
+        "ctrl+alt+down",
+        "alt+left",
+        "ctrl+t",
+        "ctrl+w",
+        "ctrl+b"
+      ],
+      "results": [
+        "run:app.commandPalette",
+        "run:app.keyboardShortcuts",
+        "run:tab.new",
+        "run:tab.close",
+        "run:pane.splitRight",
+        "run:pane.splitDown",
+        "run:workspace.next",
+        "run:pane.back",
+        "none",
+        "none",
+        "run:pane.leave"
+      ]
+    },
+    {
+      "description": "browsers on Windows and Linux: find, keyboard shortcuts and ctrl+b focus escape",
+      "platforms": [
+        "windows-browser",
+        "linux-browser"
       ],
       "context": "terminal",
       "strokes": [
@@ -156,7 +198,7 @@
         "run:find.open",
         "none",
         "none",
-        "none"
+        "run:pane.leave"
       ]
     },
     {
@@ -175,7 +217,7 @@
         "run:tab.new",
         "run:pane.close",
         "run:tab.select1",
-        "none"
+        "run:pane.leave"
       ]
     },
     {
@@ -219,7 +261,8 @@
     {
       "description": "on Windows and Linux Ctrl with +, = , - or 0 zooms, as in terminal emulators; Ctrl+Shift+- (Ctrl+_, undo in shells) reaches the terminal",
       "platforms": [
-        "pc"
+        "windows",
+        "linux"
       ],
       "context": "dialog",
       "strokes": [
@@ -241,7 +284,8 @@
       "description": "browsers keep their zoom keys: no default takes them",
       "platforms": [
         "mac-browser",
-        "pc-browser"
+        "windows-browser",
+        "linux-browser"
       ],
       "context": "terminal",
       "strokes": [
