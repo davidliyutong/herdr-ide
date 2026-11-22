@@ -101,9 +101,8 @@ describe('the session a leaf remembers', () => {
     expect(leaves(guessed)).toEqual([{ terminal: 't1', agent: 'claude', pid: 7 }]);
   });
 
-  it('of a new agent’s tab is kept until a record names another', () => {
-    // The tab started the agent with its session before any record has it.
-    const l = layoutOf({ terminal: 't1', render: 'native', session: S1 });
+  it('named by the leaf before any record has one is kept until a record names another', () => {
+    const l = layoutOf({ terminal: 't1', session: S1 });
     expect(
       rememberAgents(
         l,
@@ -112,17 +111,17 @@ describe('the session a leaf remembers', () => {
       ),
     ).toBe(l);
     const seen = rememberAgents(l, () => claude(), never);
-    expect(leaves(seen)).toEqual([{ terminal: 't1', render: 'native', session: S1, agent: 'claude', pid: 7 }]);
+    expect(leaves(seen)).toEqual([{ terminal: 't1', session: S1, agent: 'claude', pid: 7 }]);
     expect(rememberAgents(seen, () => claude({ agent_session: S2, agent_session_source: 'guess' }), never)).toBe(seen);
     const named = rememberAgents(seen, () => claude({ agent_session: S2, agent_session_source: 'argv' }), never);
     expect(leaf(named, 't1')?.session).toBe(S2);
   });
 
   it('is forgotten with the agent', () => {
-    const l = layoutOf({ terminal: 't1', render: 'native', agent: 'claude', pid: 7, session: S1 });
+    const l = layoutOf({ terminal: 't1', font: 12, agent: 'claude', pid: 7, session: S1 });
     const without = () => FakeCore.term('t1', { pid: 7 });
     expect(rememberAgents(l, without, never)).toBe(l);
-    expect(leaves(rememberAgents(l, without, (a) => a === 't1'))).toEqual([{ terminal: 't1', render: 'native' }]);
+    expect(leaves(rememberAgents(l, without, (a) => a === 't1'))).toEqual([{ terminal: 't1', font: 12 }]);
   });
 
   it('is another agent’s no longer when another agent runs in the terminal', () => {
@@ -150,11 +149,9 @@ describe('the session a leaf remembers', () => {
 });
 
 describe('a terminal started in place of one that ended with its core', () => {
-  it('says which one it replaced, and keeps how it is shown and its session', () => {
-    const l = layoutOf({ terminal: 't1', render: 'native', session: S1, before: 't0', agent: 'claude', pid: 7 });
-    expect(leaves(replaceTerminal(l, 't1', 't5'))).toEqual([
-      { terminal: 't5', render: 'native', session: S1, before: 't1', resume: 'claude' },
-    ]);
+  it('says which one it replaced, and keeps the leaf’s other fields and its session', () => {
+    const l = layoutOf({ terminal: 't1', font: 12, session: S1, before: 't0', agent: 'claude', pid: 7 });
+    expect(leaves(replaceTerminal(l, 't1', 't5'))).toEqual([{ terminal: 't5', font: 12, session: S1, before: 't1', resume: 'claude' }]);
     // An address of a form no leaf may name as `before`: the stale one goes.
     const odd = layoutOf({ terminal: 't1.x', before: 't0' });
     expect(leaves(replaceTerminal(odd, 't1.x', 't5'))).toEqual([{ terminal: 't5' }]);

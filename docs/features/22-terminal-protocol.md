@@ -236,17 +236,18 @@ so every client of the machine shows the same arrangement. Version 2:
     select a kind of the agent kind registry (`internal/agentkinds`,
     [35](35-agent-native-view.md)), whose commands the client types; a
     client that does not restore keeps the fields as it keeps unknown
-    ones. Three more fields have values the web UI checks
+    ones. Two more fields have values the web UI checks
     (`terminalFields`, `setTerminalFields` in `web/src/term/layout.ts`):
-    `render` (`"native"`: the pane shows the agent's conversation instead
-    of the terminal, [35](35-agent-native-view.md)), `session` (the
-    agent's session, a lower-case UUID) and `before` (the address of the
+    `session` (the agent's session, a lower-case UUID,
+    [35](35-agent-native-view.md)) and `before` (the address of the
     terminal this one took the place of: 1–64 letters, digits, `_` and
     `-`, starting with a letter or digit). Read from a document, a value of
     another type or shape is left out of the leaf and its other fields
-    are kept; a change sets only these three of every leaf of the address
-    (a malformed document may have two), removes one whose value is null
-    or not one it may hold, and never writes through a prototype;
+    are kept, and `render`, which earlier versions wrote (the pane showed
+    the agent's conversation over the terminal), is left out whatever its
+    value; a change sets only these two of every leaf of the address (a
+    malformed document may have two), removes one whose value is null or
+    not one it may hold, and never writes through a prototype;
   - VS Code `{"code": {"id", "folder"}}` for a folder of the machine
     (`""`: the one code-server opens), named `code:<id>`
     ([05](05-vscode-panes.md));
@@ -390,7 +391,7 @@ the machine was ready, `keep: true` in `terminal.run`), `restore.test.ts`
 terminals that ended with the core replaced in the layout and the leaf's
 `agent`, `pid` and `resume` ([33](33-workspace-restore.md)),
 `agentLeaves.test.ts` and `design/testdata/layout/agent-leaves.json` the
-leaf's `render`, `session` and `before`. `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
+leaf's `session` and `before`, and `render` dropped. `TestIntegrationTerm` (`make it`, `HC_TEST_BIN`) runs the
 whole path against a real herdr-core: install and start through the agent,
 a shell started, typed into and read by one client, found and watched by a
 second, and killed; `TestIntegrationDetect` an agent's states

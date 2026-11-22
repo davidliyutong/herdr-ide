@@ -902,7 +902,8 @@ export const zhCN: Messages = {
   'command.view.panel.monitor': '显示任务管理器',
   // agents plugin
   'settings.plugins.agents.enabled': '编程智能体',
-  'settings.plugins.agents.enabled.desc': '在终端窗格中显示编程智能体（Claude Code、Codex）的对话，内容读取自各机器上的会话记录。',
+  'settings.plugins.agents.enabled.desc':
+    '在各机器上找出终端中每个编程智能体（Claude Code、Codex）的会话：状态栏显示它的用量，终端核心重新启动后，智能体会回到它自己的对话中。',
   // terminal history plugin
   'settings.plugins.history.enabled': '终端历史',
   'settings.plugins.history.enabled.desc': '机器在开启“保存终端输出的快照”后保存在磁盘上的终端输出，在终端核心重新启动后显示。',

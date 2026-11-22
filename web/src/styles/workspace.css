@@ -197,25 +197,6 @@
 .pane.focused > .pane-header {
   border-top-color: var(--accent);
 }
-/* What plugins draw over a terminal (plugins/registry.ts TerminalSurfaces):
- * a layer over the terminal below the header that takes none of its room,
- * so the terminal keeps its size; only the surfaces in it take the pointer. */
-.pane > .pane-surfaces {
-  position: absolute;
-  top: var(--h-toolbar);
-  left: 0;
-  right: 1px;
-  bottom: 1px;
-  z-index: 3;
-  pointer-events: none;
-}
-.tab-panes.alone .pane > .pane-surfaces {
-  right: 0;
-  bottom: 0;
-}
-.pane-surfaces > * {
-  pointer-events: auto;
-}
 /* The plugins' buttons in a terminal's header (TerminalHeaderActions),
  * right before the pane's own and drawn as they are (.pane-actions). */
 .pane-header .pane-plugin-actions {

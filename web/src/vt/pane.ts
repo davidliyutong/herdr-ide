@@ -267,10 +267,6 @@ export class TermPane {
   private paintTimer?: number;
   /** Kept while its tab is not shown: output is taken, nothing is drawn or measured. */
   private hidden = false;
-  /** Under what a plugin draws over all of it (state/covers.ts): laid out
-   * at its size, so its cells and grid are measured and it attaches and
-   * follows the pane's size as one shown, but nothing is drawn. */
-  private covered = false;
   private composing = false;
   private readonly preedit: HTMLDivElement;
   private readonly ro: ResizeObserver;
@@ -372,14 +368,6 @@ export class TermPane {
       this.watchDpr();
     }
     this.metrics = measureCell(this.measureCtx, a, dpr);
-    // Covered: the grid that fits the pane is measured (and the terminal
-    // attached with it, the first time) as when shown, without a renderer.
-    if (this.covered) {
-      this.o.onCell?.(this.metrics.cw / dpr, this.metrics.ch / dpr);
-      if (this.term) this.configure(this.term);
-      this.measureSize();
-      return;
-    }
     if (!this.renderer) {
       this.renderer = createRenderer(this.canvas, this.preferCanvas ? 'canvas' : 'webgl');
       this.o.onRenderer?.(this.renderer.kind);
@@ -447,7 +435,7 @@ export class TermPane {
   /** The grid that fits the pane; a new one resizes the terminal and the program's. */
   private measureSize() {
     const m = this.metrics;
-    if (this.disposed || this.hidden || !m || (!this.renderer && !this.covered)) return;
+    if (this.disposed || this.hidden || !m || !this.renderer) return;
     // A zoom changes the pixel ratio and the pane's size at once; the size
     // may be seen first. The cells are measured again for the new ratio
     // (setAppearance measures the size after them), so text stays sharp.
@@ -455,12 +443,9 @@ export class TermPane {
     const w = Math.round(this.host.clientWidth * this.dpr);
     const h = Math.round(this.host.clientHeight * this.dpr);
     if (w <= 0 || h <= 0) return;
-    // Covered, there is no canvas to size: it is sized when shown.
-    if (this.renderer) {
-      this.renderer.resize(w, h);
-      this.canvas.style.width = `${w / this.dpr}px`;
-      this.canvas.style.height = `${h / this.dpr}px`;
-    }
+    this.renderer.resize(w, h);
+    this.canvas.style.width = `${w / this.dpr}px`;
+    this.canvas.style.height = `${h / this.dpr}px`;
     const cols = Math.max(2, Math.floor(w / m.cw));
     const rows = Math.max(1, Math.floor(h / m.ch));
     const changed = cols !== this.grid.cols || rows !== this.grid.rows;
@@ -487,9 +472,8 @@ export class TermPane {
     const term = new Terminal(this.vt, this.grid.cols, this.grid.rows, {
       reply: (data) =>
         !this.replaying && this.stream !== undefined && !this.o.readOnly() && this.o.connection.write(this.stream, data, true),
-      // Not for a bell of the history painted, nor of a terminal not shown
-      // (kept or covered).
-      bell: () => !this.painting && !this.hidden && !this.covered && this.o.onBell(),
+      // Not for a bell of the history painted, nor of a terminal not shown.
+      bell: () => !this.painting && !this.hidden && this.o.onBell(),
       title: (s) => !this.replaying && this.o.onTitle?.(s),
       clipboard: (text) => !this.replaying && !this.o.readOnly() && programCopied(this.o.m, text),
       dark: () => this.appearance.theme === 'dark',
@@ -763,19 +747,11 @@ export class TermPane {
    * as it was left, but it draws nothing, keeps the size it had and gives
    * up what it draws with (a WebGL context, of which a page has few, and
    * its glyphs' texture), made again when it is shown. A kept pane that
-   * was never attached does not attach while kept.
-   *
-   * Covered (shown, under what a plugin draws over all of it) it draws
-   * nothing and gives up the same, but its pane is laid out at its size:
-   * it measures its grid, attaches with it and follows the pane's size as
-   * when it is shown, so its program gets input and the size it has when
-   * shown again. Both are set at once, so that a pane going from kept to
-   * covered makes no renderer on the way. */
-  setShown(shown: boolean, covered = false) {
-    if (this.disposed || (this.hidden === !shown && this.covered === covered)) return;
+   * was never attached does not attach while kept. */
+  setShown(shown: boolean) {
+    if (this.hidden === !shown || this.disposed) return;
     this.hidden = !shown;
-    this.covered = covered;
-    if (shown && !covered) return this.setAppearance(this.appearance);
+    if (shown) return this.setAppearance(this.appearance);
     this.hideMath();
     if (this.renderer) {
       this.renderer.dispose();
@@ -785,7 +761,6 @@ export class TermPane {
       // No pixels are held for it meanwhile; shown again, it is sized anew.
       this.canvas.width = this.canvas.height = 0;
     }
-    if (shown) this.setAppearance(this.appearance);
   }
 
   /** What the pane holds, for the settings' Performance page. */
@@ -807,9 +782,8 @@ export class TermPane {
     const term = this.term;
     if (!term) return;
     // Nothing is drawn, the output is taken: its credit goes back, so a
-    // hidden or covered terminal (which has no renderer) keeps up with its
-    // program.
-    if (this.painting || this.hidden || this.covered) return this.ack();
+    // hidden terminal (which has no renderer) keeps up with its program.
+    if (this.painting || this.hidden) return this.ack();
     const r = this.renderer;
     if (!r) return;
     if (this.held && performance.now() - this.heldSince < HOLD_MS) {

@@ -87,21 +87,22 @@ func TestSeq(t *testing.T) {
 	}
 }
 
-// The requests and replies of reading transcripts, and a session's usage.
+// A read's cursor and page, a resolve's request and reply, and a
+// session's usage.
 func TestTranscriptMessagesJSON(t *testing.T) {
-	req := TailRequest{Refs: []TranscriptRef{
+	refs := []TranscriptRef{
 		{Kind: "claude", Session: "0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f", From: 512},
 		{Kind: "codex", Session: "1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f", Back: true},
-	}, WaitMS: 15000}
-	if got, want := marshal(t, req), `{"refs":[{"kind":"claude","session":"0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f","from":512},{"kind":"codex","session":"1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f","from":0,"back":true}],"wait_ms":15000}`; got != want {
-		t.Errorf("request\ngot  %s\nwant %s", got, want)
 	}
-	rep := TailReply{Tails: []TranscriptTail{
+	if got, want := marshal(t, refs), `[{"kind":"claude","session":"0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f","from":512},{"kind":"codex","session":"1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f","from":0,"back":true}]`; got != want {
+		t.Errorf("refs\ngot  %s\nwant %s", got, want)
+	}
+	tails := []TranscriptTail{
 		{Kind: "claude", Session: "s", File: "f1", First: 256, Next: 1024, Events: []TranscriptEvent{{Seq: 256, T: TranscriptTurn, State: TurnStart}}, More: true, Unknown: 2, Title: "Tables"},
 		{Kind: "codex", Session: "t", Code: TranscriptNotFound},
-	}}
-	if got, want := marshal(t, rep), `{"tails":[{"kind":"claude","session":"s","file":"f1","first":256,"next":1024,"events":[{"seq":256,"t":"turn","state":"start"}],"more":true,"unknown":2,"title":"Tables"},{"kind":"codex","session":"t","first":0,"next":0,"code":"not_found"}]}`; got != want {
-		t.Errorf("reply\ngot  %s\nwant %s", got, want)
+	}
+	if got, want := marshal(t, tails), `[{"kind":"claude","session":"s","file":"f1","first":256,"next":1024,"events":[{"seq":256,"t":"turn","state":"start"}],"more":true,"unknown":2,"title":"Tables"},{"kind":"codex","session":"t","first":0,"next":0,"code":"not_found"}]`; got != want {
+		t.Errorf("pages\ngot  %s\nwant %s", got, want)
 	}
 	if got, want := marshal(t, ResolveRequest{Kind: "claude", Session: "s", Cwd: "/w"}), `{"kind":"claude","session":"s","cwd":"/w"}`; got != want {
 		t.Errorf("resolve %s", got)
@@ -113,7 +114,7 @@ func TestTranscriptMessagesJSON(t *testing.T) {
 	if got, want := marshal(t, u), `{"model":"m","input":1,"cached":2,"cacheWrite":3,"output":4,"reasoning":1,"requests":5,"cost":0.25,"priced":true,"contextUsed":900,"contextSize":200000}`; got != want {
 		t.Errorf("usage\ngot  %s\nwant %s", got, want)
 	}
-	if MaxTailRefs != 8 || MaxTailWait != 15*time.Second || MaxTailBytes != 1<<20 || MaxTextBytes != 256<<10 || MaxToolOutput != 32<<10 {
+	if MaxTailBytes != 1<<20 || MaxTextBytes != 256<<10 || MaxToolOutput != 32<<10 {
 		t.Error("limits changed")
 	}
 }

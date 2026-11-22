@@ -1,5 +1,5 @@
 {
-  "description": "A coding agent's terminal leaf may say how its pane shows it (render: \"native\"), the agent's session (a lower-case UUID) and the terminal it took the place of (before: an address); read from a document, a value of another type or shape is left out, the leaf's other fields kept. setTerminalFields changes only these three fields of a terminal (never its address, nor fields of others such as agent, pid or resume): null removes a field, a value the document could not hold removes it too, other keys of the change are ignored, and panes of other kinds and unknown terminals stay as they are. The fields go with their leaf through splits, swaps and moves.",
+  "description": "A coding agent's terminal leaf may name the agent's session (a lower-case UUID) and the terminal it took the place of (before: an address); read from a document, a value of another type or shape is left out, the leaf's other fields kept, and render, which earlier versions wrote (\"native\": the pane showed the agent's conversation over its terminal), is dropped whatever its value. setTerminalFields changes only session and before of a terminal (never its address, nor render, nor fields of others such as agent, pid or resume): null removes a field, a value the document could not hold removes it too, other keys of the change are ignored, and panes of other kinds and unknown terminals stay as they are. The fields go with their leaf through splits, swaps and moves.",
   "input": {
     "version": 2,
     "workspaces": [
@@ -73,7 +73,8 @@
       "op": "setTerminalFields",
       "terminal": "t1",
       "fields": {
-        "render": null
+        "render": "native",
+        "before": null
       }
     },
     {
@@ -90,14 +91,14 @@
       "op": "setTerminalFields",
       "terminal": "code:c1",
       "fields": {
-        "render": "native"
+        "session": "1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f"
       }
     },
     {
       "op": "setTerminalFields",
       "terminal": "t9",
       "fields": {
-        "render": "native"
+        "session": "1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f"
       }
     },
     {
@@ -144,14 +145,12 @@
                     {
                       "terminal": "t1",
                       "session": "0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f",
-                      "before": "t0",
                       "agent": "claude",
                       "pid": 42
                     },
                     {
                       "terminal": "t2",
                       "font": 12,
-                      "render": "native",
                       "session": "1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f",
                       "before": "t1x-old_2"
                     }

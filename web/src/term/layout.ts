@@ -17,14 +17,11 @@ export type Axis = 'horizontal' | 'vertical';
 type Extra = { [key: string]: unknown };
 
 /** A terminal of the machine's terminal core, by its address. A coding
- * agent's terminal may say how its pane shows it and which session it
- * runs; read from a document, a field of another type or shape is left
- * out (terminalFields). */
+ * agent's terminal may say which session it runs; read from a document, a
+ * field of another type or shape is left out, and so is one earlier
+ * versions wrote that this one drops (terminalFields). */
 export type TerminalLeaf = Extra & {
   terminal: string;
-  /** Shown as the agent's conversation (native) rather than the
-   * terminal; absent: the terminal. */
-  render?: 'native';
   /** The session of the agent in it (a lower-case UUID, isSessionId). */
   session?: string;
   /** The address of the terminal this one took the place of (isAddress). */
@@ -33,7 +30,12 @@ export type TerminalLeaf = Extra & {
 
 /** The fields of a terminal leaf whose values are checked, and the only
  * ones setTerminalFields changes. */
-export const TERMINAL_FIELDS = ['render', 'session', 'before'] as const;
+export const TERMINAL_FIELDS = ['session', 'before'] as const;
+
+/** Fields of a terminal leaf that earlier versions wrote and that are
+ * dropped when a document is read: render ("native": the pane showed the
+ * agent's conversation over its terminal). */
+export const DROPPED_TERMINAL_FIELDS = ['render'] as const;
 
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // A terminal core's addresses are short words of letters and digits ("t1",
@@ -55,15 +57,18 @@ export function isSessionId(s: unknown): s is string {
 
 /** Whether a checked field of a terminal leaf has a value it may have. */
 function validTerminalField(field: (typeof TERMINAL_FIELDS)[number], v: unknown): boolean {
-  if (field === 'render') return v === 'native';
   if (field === 'session') return isSessionId(v);
   return isAddress(v);
 }
 
 /** A terminal leaf without the checked fields whose values are not what
- * they may be; the same leaf when they all are. */
+ * they may be, and without the dropped ones; the same leaf when it has
+ * none of either. */
 function terminalFields(leaf: TerminalLeaf): TerminalLeaf {
-  const bad = TERMINAL_FIELDS.filter((f) => Object.hasOwn(leaf, f) && !validTerminalField(f, leaf[f]));
+  const bad = [
+    ...TERMINAL_FIELDS.filter((f) => Object.hasOwn(leaf, f) && !validTerminalField(f, leaf[f])),
+    ...DROPPED_TERMINAL_FIELDS.filter((f) => Object.hasOwn(leaf, f)),
+  ];
   if (!bad.length) return leaf;
   const next: TerminalLeaf = { ...leaf };
   for (const f of bad) delete next[f];
@@ -804,9 +809,10 @@ export function setViewFields(layout: Layout, key: string, fields: Extra): Layou
   return withWorkspace(layout, at.workspace, { ...ws, tabs: ws.tabs.map((t, i) => (i === at.tab ? { ...t, root: swap(t.root) } : t)) });
 }
 
-/** Changes how a terminal's pane shows it: the fields render, session and
- * before of its leaf (TERMINAL_FIELDS). A patch's other keys are ignored:
- * the address stays, and agent, pid and resume are restore.ts's. A field
+/** Changes what a terminal's leaf says of its agent: the fields session and
+ * before (TERMINAL_FIELDS). A patch's other keys are ignored: the address
+ * stays, agent, pid and resume are restore.ts's, and a dropped field
+ * (DROPPED_TERMINAL_FIELDS) is never written. A field
  * whose value is undefined or null is removed, and so is one whose value
  * is not one a document may hold (terminalFields). Each leaf of the
  * address (a malformed document may have two) is changed from its own

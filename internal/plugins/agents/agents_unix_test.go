@@ -9,11 +9,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	agentplugin "herdr-ide/internal/agent/plugin"
 	_ "herdr-ide/internal/agent/plugin/agents"
@@ -54,8 +51,8 @@ func machineSide(env *agentplugin.Env) func(ctx context.Context, mc *machines.Ma
 	}
 }
 
-// The routes with the machine side's own handler: the actions' names and
-// shapes agree, and a wait ends with the page's request.
+// The route with the machine side's own handler: the action's name and
+// shapes agree.
 func TestWithTheMachineSide(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -83,22 +80,7 @@ func TestWithTheMachineSide(t *testing.T) {
 	p.call = machineSide(&agentplugin.Env{Home: home})
 	mc := mg.Get("box")
 
-	w := do(context.Background(), p.getTail, mc, "tail", ref("claude", sid1, "0", "b")+"&"+ref("codex", sid2, "0"))
-	var out agentproto.TailReply
-	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil {
-		t.Fatalf("%d %s", w.Code, w.Body)
-	}
-	if tl := out.Tails[0]; tl.Code != "" || len(tl.Events) == 0 || tl.Next != agentproto.Seq(int64(len(data)), 0) {
-		t.Fatalf("claude: %+v", tl)
-	}
-	if tl := out.Tails[1]; tl.Code != agentproto.TranscriptNotFound {
-		t.Fatalf("codex: %+v", tl)
-	}
-	if strings.Contains(w.Body.String(), home) {
-		t.Fatal("a path of the machine reached the page")
-	}
-
-	w = do(context.Background(), p.getResolve, mc, "resolve", "kind=claude&session="+sid1+"&cwd=/home/dev/project/")
+	w := do(context.Background(), p.getResolve, mc, "resolve", "kind=claude&session="+sid1+"&cwd=/home/dev/project/")
 	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"ok":true}` {
 		t.Fatalf("resolve: %d %s", w.Code, w.Body)
 	}
@@ -106,29 +88,8 @@ func TestWithTheMachineSide(t *testing.T) {
 	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"ok":false,"code":"other_cwd"}` {
 		t.Fatalf("resolve elsewhere: %d %s", w.Code, w.Body)
 	}
-
-	// A long poll at the transcript's end, given up by the page.
-	before := runtime.NumGoroutine()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan int, 1)
-	start := time.Now()
-	go func() {
-		done <- do(ctx, p.getTail, mc, "tail", ref("claude", sid1, strconv.FormatUint(out.Tails[0].Next, 10))+"&wait=15000").Code
-	}()
-	time.Sleep(300 * time.Millisecond)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("the poll outlived the page's request")
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Fatal("the poll ran to its end")
-	}
-	for i := 0; runtime.NumGoroutine() > before; i++ {
-		if i > 300 {
-			t.Fatalf("%d goroutines, %d before", runtime.NumGoroutine(), before)
-		}
-		time.Sleep(10 * time.Millisecond)
+	w = do(context.Background(), p.getResolve, mc, "resolve", "kind=codex&session="+sid2+"&cwd=/home/dev/project")
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"ok":false,"code":"not_found"}` {
+		t.Fatalf("resolve of no transcript: %d %s", w.Code, w.Body)
 	}
 }

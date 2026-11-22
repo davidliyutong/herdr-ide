@@ -10,7 +10,7 @@ import { useEffect, useRef } from 'react';
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { t } from '../i18n';
 import { closeFind, findStep, setFindQuery, useFind } from '../vt/find';
-import { withView } from '../state/panes';
+import { paneHandle } from '../state/panes';
 import { isCommandKey } from '../keymap';
 
 /** What the bar says about the matches. */
@@ -30,10 +30,9 @@ export function FindBar({ m, terminal }: { m: string; terminal: string }) {
     input.current?.select();
   }, [st.focusSeq]);
 
-  // The pane gets its keys back: what covers the terminal when something does.
   const close = () => {
     closeFind();
-    withView(m, terminal, (h) => h.focus(), 0);
+    paneHandle(m, terminal)?.focus();
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

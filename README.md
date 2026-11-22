@@ -70,19 +70,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   and whether it works, waits or finished a turn, with herdr's rules for
   Claude Code, Codex, Gemini, OpenCode and more, and which session Claude
   Code and Codex run, found from their processes without changing their
-  configuration.
-- **Agents' conversations.** A Claude Code or Codex pane can show the
-  agent's conversation instead of its terminal: messages as Markdown with
-  tables, formulas and code, thoughts, tool calls that open on their
-  output and diffs, the plan as a checklist. It is read from the session's
-  transcript on the machine; the agent keeps running as the CLI under it,
-  and the terminal shows by itself while the agent waits for an answer.
-  The button in the pane's header (or **Toggle Agent Conversation View**)
-  switches between the two for every browser; the message box types into
-  the CLI. The new-tab menu's **Agent: Claude Code** and **Agent: Codex**
-  start an agent shown this way. Text appears a block at a time, as the
-  agents write their transcripts
-  ([35](docs/features/35-agent-native-view.md)).
+  configuration ([35](docs/features/35-agent-native-view.md)).
 - **Terminal history.** With **Keep snapshots of terminal output** on for
   a machine (off by default: terminal output can hold secrets), the
   machine saves what its terminals show to its own disk at intervals,

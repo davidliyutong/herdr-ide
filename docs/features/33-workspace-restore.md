@@ -75,8 +75,8 @@ did, not its program (`endedWithCore`). For such a terminal:
   `keep: true` in the directory the old terminal started in (the record's
   `cwd`);
 - when the replacement runs, the leaf takes its address
-  (`replaceTerminal`: the pane keeps its place, its splits, its `render`
-  and `session` and, if it had it, the focus, and says
+  (`replaceTerminal`: the pane keeps its place, its splits, its
+  `session` and, if it had it, the focus, and says
   `before: <old address>`), the layout is written through `doc.set` with the
   version last read, and once that write succeeded (or a read shows a
   layout naming the replacement) the old record is removed
@@ -110,8 +110,7 @@ command that continues the directory's latest conversation.
   terminal's; `rememberedSession`), the leaf also remembers `session`. It
   follows the record when the agent starts another session (`/clear`). A
   record that names no session, or only a guess, leaves the leaf's as it
-  is, so a new agent tab keeps the session it started the agent with
-  until a record names another; the session is dropped when another kind
+  is until a record names another; the session is dropped when another kind
   of agent runs in the terminal, and forgotten with `agent`.
 - A terminal seen without its agent keeps the leaf's `agent` (and
   `session`) for 30 s (`AGENT_FORGET_MS`) and loses them then: an agent
@@ -255,11 +254,11 @@ that ended with the core started again in their directory when the layout
 is read, the pane of one whose program exited closed, and the resume
 command typed once. `restoreSession.test.ts`: the session a leaf
 remembers (the machine's from the agent's process, following the record,
-never a guess or a value that is no session id, a new agent tab's kept,
-another agent's dropped, kept for the resume), `before` and the leaf's
-fields in a replacement, the confirmation (the question asked, any other
-answer, no request for what the route would refuse, the time limit and a
-later answer ignored), and with a scripted core two agents of one kind in
+never a guess or a value that is no session id, one the leaf named before
+any record kept, another agent's dropped, kept for the resume), `before`
+and the leaf's fields in a replacement, the confirmation (the question
+asked, any other answer, no request for what the route would refuse, the
+time limit and a later answer ignored), and with a scripted core two agents of one kind in
 one directory brought back in their own sessions, Codex resumed by its
 id, the latest continued without a confirmation or for a hostile session,
 one question while an answer is on its way, nothing typed when the write

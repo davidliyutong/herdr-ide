@@ -317,11 +317,6 @@
       "when": "terminal"
     },
     {
-      "id": "agents.newTab",
-      "section": "tab",
-      "when": "terminal"
-    },
-    {
       "id": "pane.splitRight",
       "section": "pane",
       "when": "terminal"
@@ -393,11 +388,6 @@
     },
     {
       "id": "pane.undoClose",
-      "section": "pane",
-      "when": "terminal"
-    },
-    {
-      "id": "agents.toggleView",
       "section": "pane",
       "when": "terminal"
     },
@@ -488,8 +478,6 @@
     }
   ],
   "i18n": [
-    "command.agents.newTab",
-    "command.agents.toggleView",
     "command.app.addMachine",
     "command.app.agentAttention",
     "command.app.commandPalette",

@@ -405,7 +405,7 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
     return () => clearInterval(timer);
   }, [m, root, autoFetch, readOnly, hasRemotes]);
 
-  const toggleView = () => {
+  const toggleChangesView = () => {
     const next = tree ? 'list' : 'tree';
     if (readOnly) return setViewHere(next);
     setViewHere(undefined);
@@ -439,7 +439,7 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
       { label: t('git.branch.create'), run: () => void createBranch(m, root) },
       { label: t('git.stash.push'), run: () => void stashPush(m, root) },
       'sep',
-      { label: t(tree ? 'git.viewList' : 'git.viewTree'), run: toggleView },
+      { label: t(tree ? 'git.viewList' : 'git.viewTree'), run: toggleChangesView },
       { label: t('git.openGraph'), run: () => void openGraph(m, root) },
     ];
     openMenu(e, items);
@@ -711,7 +711,7 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
           className="icon"
           title={t(tree ? 'git.viewList' : 'git.viewTree')}
           aria-label={t(tree ? 'git.viewList' : 'git.viewTree')}
-          onClick={toggleView}
+          onClick={toggleChangesView}
         >
           {tree ? <List /> : <ListTree />}
         </button>

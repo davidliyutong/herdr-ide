@@ -312,7 +312,6 @@ by `scripts/registry`.
 | `tab.unpin` | `terminal` | – | – | – | – |
 | `browser.open` | `terminal` | – | – | – | – |
 | `browser.reload` | `terminal` | – | – | – | – |
-| `agents.newTab` | `terminal` | – | – | – | – |
 | `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
 | `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
 | `pane.close` | `terminal` | `cmd+w` | – | – | – |
@@ -328,7 +327,6 @@ by `scripts/registry`.
 | `pane.back` | `terminal` | `cmd+bracketleft` | – | – | – |
 | `pane.forward` | `terminal` | `cmd+bracketright` | – | – | – |
 | `pane.undoClose` | `terminal` | `cmd+z` | – | – | – |
-| `agents.toggleView` | `terminal` | – | – | – | – |
 | `view.toggleSidebar` | `terminal` | `cmd+b` | – | – | – |
 | `view.togglePanel` | `terminal` | `cmd+alt+b` | – | – | – |
 | `view.panel.files` | `terminal` | `cmd+shift+e` | – | – | – |
@@ -471,7 +469,6 @@ missing here.
 | `POST /api/p/usage/refresh` | writes | Asks every connected machine for its limits now, or 30 s after the last poll when that was sooner (202 `{queued, at}`: when the poll runs). |
 | `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key file (`{"key"}`; `""` removes it); never read back, audited without the key. |
 | `GET /api/m/{id}/p/usage/session` | – | What one coding agent's session on the machine used at API prices (`?kind=` an agent kind whose sessions are priced, `claude` or `codex`, `&session=` its id, a lower-case UUID): `{model, input, cached, cacheWrite, output, reasoning, requests, cost, priced, contextUsed, contextSize}` ([29](features/29-ai-usage.md)). `400 bad_request`, `404 provider_off` (the provider turned off; the machine is not asked), `404 not_found` (no transcript yet), `compressed`, `too_large`, `409 offline`, `429 busy` (8 already under way for the machine). |
-| `GET /api/m/{id}/p/agents/tail` | – | Pages of coding agents' transcripts as conversation events ([35](features/35-agent-native-view.md)): `?s=<kind>~<session>~<from>[~b]` for each of 1 to 8 transcripts (an agent kind with a transcript parser, a lower-case UUID, a cursor as a decimal number, `~b` for the page before it) and `&wait=` 0 to 15000 ms the machine waits for one of them to have something new: `{tails: [{kind, session, file, first, next, events, more, unknown, title, code}]}`, `code` `not_found`, `compressed` or `bad_request` for a transcript not read. At most 6 requests wait on a machine and 2 of one client (its address without the port; `X-Forwarded-For` is not believed): one over either limit is read without its wait and, with nothing new, answered after at most 1 s. `400 bad_request`, `429 busy` (16 already under way for the machine), `409 offline`, `502 bad_reply`. |
 | `GET /api/m/{id}/p/agents/resolve` | – | Whether an agent kept a session's transcript and it ran in a directory (`?kind=&session=&cwd=`, `cwd` an absolute path of at most 4096 bytes): `{ok: true}`, or `{ok: false, code}` with `not_found`, `other_cwd`, `compressed` or `bad_request` ([33](features/33-workspace-restore.md)). `400 bad_request`, `429 busy` (8 already under way for the machine), `409 offline`. |
 | `GET /api/m/{id}/p/history` | – | The machine's snapshots of terminal output ([36](features/36-terminal-history.md)): `{terminals: [{terminal, pid, at, lines, bytes, cols, rows, restored?, previous?}], restoreScreen}` (`at` in ms since the epoch, 0 for a terminal with only a previous generation; `restored`: the current generation shows a screen the terminal core restored itself; `restoreScreen`: the user's herdr-core configuration has `restore_screen = true`). |
 | `GET /api/m/{id}/p/history/read` | – | One generation's bytes (`?terminal=` an address, `&generation=current\|previous`) as an `application/octet-stream` attachment, at most 2 MiB, with `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and `no-store`, described by `X-History-Pid`, `X-History-At`, `X-History-Cols`, `X-History-Rows`, `X-History-Lines`. `400 bad_request` or `busy`, `404 not_found`, `409 offline`, `502 bad_reply`, `504 timeout`. |

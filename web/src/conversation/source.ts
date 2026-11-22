@@ -1,7 +1,6 @@
-// Where a conversation's events come from, as the native view sees it: a
-// session's transcript read on its machine, or later an Agent Client
-// Protocol client. The view (its reducer, model.ts, and its components)
-// knows only this interface.
+// Where a conversation's events come from, as the conversation view sees
+// it. The view (its reducer, model.ts, and its components) knows only this
+// interface.
 import type { ContentBlock, SourceEvent } from './model';
 
 export interface SourceCapabilities {

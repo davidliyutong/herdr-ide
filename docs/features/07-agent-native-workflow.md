@@ -86,9 +86,7 @@ automatically, scheduling agents.
   `qwen`, `amp`); the focused pane is split to the right and the agent runs
   in the new terminal (`terminal.run` with the kind's command line as the
   program) in the focused terminal's directory, or in a new tab when no
-  pane has the focus. The new-tab menu's **Agent: Claude Code** and
-  **Agent: Codex** start one in a new tab shown as its conversation
-  ([35](35-agent-native-view.md)).
+  pane has the focus.
 - **Context to agents**: VS Code's *Send to Agent* pastes `@file:lines` and
   the selection into a terminal without submitting (`web/src/lib/bridge.ts`).
   From a VS Code pane it goes to an agent of the pane's tab, else of the
@@ -114,7 +112,7 @@ automatically, scheduling agents.
 
 | Option | Why not |
 | --- | --- |
-| A prompt box sending text to the agent | The terminal itself is the prompt; a second input duplicates it and hides the agent's own UI (approvals, slash commands). The native view's message box ([35](35-agent-native-view.md)) types into that terminal, and the terminal shows whenever the agent waits for an answer. |
+| A prompt box sending text to the agent | The terminal itself is the prompt; a second input duplicates it and hides the agent's own UI (approvals, slash commands). |
 | Sound files | Shipped audio needs an asset and its license notice; synthesized chimes need neither. |
 | Every browser plays | With several browsers or tabs open, each would sound at once. |
 | Web Push for closed tabs | Requires a push service and subscription storage; the reverse-proxy model has no user accounts. |

@@ -207,23 +207,6 @@ returns. Focus changes are reported to programs that asked (mode 1004).
   shown again, it attaches again with a new emulator, is painted anew and
   scrolled where it was (below). The kept terminals are the page's own,
   by machine and address, and are forgotten with the page.
-- A plugin may draw over a shown terminal's pane, in a layer below the
-  pane's header that takes none of the terminal's room (a surface,
-  [27](27-plugins.md); the agents plugin's conversation,
-  [35](35-agent-native-view.md)). What surfaces cover of a terminal is the
-  strongest of what each says as the pane is rendered and what each sets
-  while mounted (`state/covers.ts`): all of it, a part (the terminal is
-  drawn under it as usual) or nothing. A terminal covered all is like a
-  kept one in that it draws nothing, shows no formula, rings no bell and
-  gives up its renderer, and like a shown one in that it is laid out at
-  its pane's size: it measures its grid, attaches with it (the first time
-  too), follows the pane's size and takes its output, acknowledged at
-  once (`TermPane.setShown(shown, covered)`, `TerminalView`'s `covered`).
-  It has neither the pane's focus nor a stop of the Tab key; one covered
-  while it has the keyboard hands it to the surface that takes the pane's
-  focus. Text pasted or typed into the pane still reaches the terminal. A
-  pane going from kept to covered makes no renderer on the way; kept
-  panes draw no surface.
 - A terminal may have a prelude (`state/preludes.ts`): output of the
   terminal from before its program was replaced, which the terminal
   history plugin gives ([36](36-terminal-history.md)). Each new emulator
@@ -464,9 +447,6 @@ returns. Focus changes are reported to programs that asked (mode 1004).
 - **The terminal core stops and starts again while a page is open** → the
   panes of kept terminals show that their program ended, then attach again
   once the core started a new shell at their addresses, without a reload.
-- **A plugin's surface fails while drawing** → its error shows in its
-  place with **Try Again**, and the rest of the page goes on; a surface
-  whose `covers` throws covers nothing.
 
 ## Security
 
@@ -506,9 +486,9 @@ are blank),
 WebGL context counted, [13](13-settings-and-appearance.md)),
 `terms.test.ts` (the layout document's reading and writing, other clients'
 versions, ended programs, terminals asked for early, attention order),
-`termPane.test.ts` (a covered terminal attaching with its pane's grid,
-following its size and drawing nothing, drawn again without a new attach,
-a kept one never attached staying so; a prelude written before the
+`termPane.test.ts` (a kept terminal never attached staying so until it
+is shown, and giving up its renderer while kept without a new attach; a
+prelude written before the
 stream's first byte and kept above the first paint, of an alternate
 screen, with and without its note, its answers dropped, one that comes
 while attached or attaching making one new attach, one painted at
@@ -523,9 +503,8 @@ attaching again once when the terminal has another program, staying
 closed while it is finished or runs the program that ended),
 `terminalViewProgram.test.tsx` (the record's program handed to the pane
 while live, the notice of the end taken away when it has another),
-`surfaces.test.ts` and `surfaceFocus.test.ts` (surfaces drawn over the
-terminal, the strongest cover, owners, the pane's focus and keyboard
-going to the surface),
+`machineSwitch.test.ts` (a pane its header and its terminal, the
+terminal's element the same shown and kept),
 `termOptions.test.ts` (the terminal settings as the emulator's options,
 the font stack before and after the bundled font loads, the colors'
 contrast), `clipToast.test.ts`, `paneHeader.test.ts`, `menus.test.ts`,

@@ -8,7 +8,7 @@ import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
 import { isLive } from '../term/protocol';
-import { registerPane, surfaceHandle } from '../state/panes';
+import { registerPane } from '../state/panes';
 import { usePrefs, getPrefs } from '../prefs';
 import { appearanceOf, useThemeKind } from '../appearance';
 import { handleKey } from '../keymap';
@@ -33,10 +33,6 @@ interface Props {
   /** False for a terminal kept mounted while its tab is not shown
    * (keptPanes.ts): it takes its output and draws nothing. */
   shown?: boolean;
-  /** A plugin's surface covers all of the terminal (state/covers.ts): it
-   * attaches and keeps the pane's size, draws nothing and gives up the
-   * keyboard to what covers it. */
-  covered?: boolean;
 }
 
 /** What dropping files on the terminal does. */
@@ -54,7 +50,7 @@ function closedText(reason: string): string {
   return hasMessage(key) ? t(key) : t('term.closed.other', { reason });
 }
 
-export function TerminalView({ m, terminal, focused, onActivate, shown = true, covered = false }: Props) {
+export function TerminalView({ m, terminal, focused, onActivate, shown = true }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -160,18 +156,7 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true, c
     };
   }, [m, terminal]);
 
-  useEffect(() => paneRef.current?.setShown(shown, shown && covered), [shown, covered, m, terminal]);
-
-  // Covered all while it has the keyboard: the hidden terminal gives it
-  // up, to what covers it when that takes the pane's focus (state/panes.ts
-  // useSurfaceFocus), so nothing is typed into a terminal not seen. After
-  // the commit's effects, by which a surface mounted with it registered.
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!covered || !input || document.activeElement !== input) return;
-    input.blur();
-    surfaceHandle(m, terminal)?.focus();
-  }, [covered, m, terminal]);
+  useEffect(() => paneRef.current?.setShown(shown), [shown, m, terminal]);
 
   // A terminal that lost its agent with its core gets it back (restore.ts):
   // asked for while the pane is attached here, and in onAttached otherwise.
@@ -218,8 +203,7 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true, c
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}
-        // Covered, the Tab key does not reach it either.
-        tabIndex={covered ? -1 : 0}
+        tabIndex={0}
       />
       {thumb && (
         <div

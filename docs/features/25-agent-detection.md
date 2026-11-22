@@ -160,9 +160,8 @@ from the `/ws` agent message (`notify.ts`, `sound.ts`,
 also what the layout's leaf remembers of it (`claude` and `codex`), with
 its session unless that was a guess, so that the agent continues its
 conversation after the terminal core started again
-([33](33-workspace-restore.md)); the session is also what a pane shows as
-the agent's conversation ([35](35-agent-native-view.md)) and what the
-status bar's session usage reads ([29](29-ai-usage.md)).
+([33](33-workspace-restore.md)); the session is also what the status
+bar's session usage reads ([29](29-ai-usage.md)).
 
 ## Alternatives considered
 

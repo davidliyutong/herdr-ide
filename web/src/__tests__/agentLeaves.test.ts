@@ -1,8 +1,10 @@
-// A coding agent's terminal leaf: render, session and before checked when a
+// A coding agent's terminal leaf: session and before checked when a
 // document is read (the vector design/testdata/layout/agent-leaves.json
 // runs with the others in term.test.ts), changed by setTerminalFields, and
 // kept by every other operation, also by the rules that restore terminals
-// after their core started again, as an older client keeps them.
+// after their core started again, as an older client keeps them; render,
+// which earlier versions wrote, dropped when a document is read and never
+// written.
 import { describe, expect, it } from 'vitest';
 import * as L from '../term/layout';
 import { rememberAgents, replaceTerminal, takeResume } from '../restore';
@@ -11,7 +13,7 @@ import vector from '../../../design/testdata/layout/agent-leaves.json';
 
 const S1 = '0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f';
 const S2 = '1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f';
-const agent = { render: 'native' as const, session: S1, before: 't0' };
+const agent = { session: S1, before: 't0' };
 
 const layoutOf = (...tabs: L.Node[]): L.Layout =>
   L.parseLayout({
@@ -25,14 +27,12 @@ const leaf = (l: L.Layout, key: string) => L.findLeaf(l, key) as L.TerminalLeaf;
 describe('agent leaves', () => {
   it('read only the values a document may hold', () => {
     const l = L.parseLayout(vector.input);
+    // render: "native" dropped, the rest kept.
     expect(leaf(l, 't1')).toEqual({ terminal: 't1', ...agent, agent: 'claude', pid: 42 });
     // Of another type or shape: left out, the other fields kept.
     expect(leaf(l, 't2')).toEqual({ terminal: 't2', font: 12 });
     expect(leaf(l, 't3')).toEqual({ terminal: 't3' });
     for (const [field, value] of [
-      ['render', 'Native'],
-      ['render', 'cli'],
-      ['render', 1],
       ['session', `${S1} `],
       ['session', S1.toUpperCase()],
       ['session', `${S1};id`],
@@ -63,22 +63,33 @@ describe('agent leaves', () => {
     expect(L.isSessionId(undefined)).toBe(false);
   });
 
-  it('change by setTerminalFields, and only there', () => {
-    const l = layoutOf({ terminal: 't1', agent: 'claude', pid: 7 }, { code: { id: 'c1', folder: '' } });
-    const native = L.setTerminalFields(l, 't1', { render: 'native', session: S1 });
-    expect(leaf(native, 't1')).toEqual({ terminal: 't1', agent: 'claude', pid: 7, render: 'native', session: S1 });
-    expect(l.workspaces[0].tabs[0].root).toEqual({ terminal: 't1', agent: 'claude', pid: 7 });
-    // Nothing changes: the same layout.
-    expect(L.setTerminalFields(native, 't1', { render: 'native' })).toBe(native);
-    expect(L.setTerminalFields(native, 't9', { render: 'native' })).toBe(native);
-    expect(L.setTerminalFields(native, 'code:c1', { render: 'native' })).toBe(native);
-    // Back to the terminal; a value the document could not hold removes
-    // the field; the address stays.
-    const cli = L.setTerminalFields(native, 't1', { render: undefined, session: 'x; rm -rf ~', terminal: 't2' });
-    expect(leaf(cli, 't1')).toEqual({ terminal: 't1', agent: 'claude', pid: 7 });
+  it('drop render, which earlier versions wrote, whatever its value', () => {
+    for (const render of ['native', 'cli', 1, null, { x: 1 }]) {
+      const l = layoutOf({ terminal: 't1', render, session: S1, font: 12 });
+      expect(leaf(l, 't1'), String(render)).toEqual({ terminal: 't1', session: S1, font: 12 });
+      // Written back without it.
+      expect(JSON.parse(JSON.stringify(l)).workspaces[0].tabs[0].root).toEqual({ terminal: 't1', session: S1, font: 12 });
+    }
   });
 
-  it('change only render, session and before', () => {
+  it('change by setTerminalFields, and only there', () => {
+    const l = layoutOf({ terminal: 't1', agent: 'claude', pid: 7 }, { code: { id: 'c1', folder: '' } });
+    const withSession = L.setTerminalFields(l, 't1', { session: S1, before: 't0' });
+    expect(leaf(withSession, 't1')).toEqual({ terminal: 't1', agent: 'claude', pid: 7, session: S1, before: 't0' });
+    expect(l.workspaces[0].tabs[0].root).toEqual({ terminal: 't1', agent: 'claude', pid: 7 });
+    // Nothing changes: the same layout.
+    expect(L.setTerminalFields(withSession, 't1', { session: S1 })).toBe(withSession);
+    expect(L.setTerminalFields(withSession, 't9', { session: S2 })).toBe(withSession);
+    expect(L.setTerminalFields(withSession, 'code:c1', { session: S2 })).toBe(withSession);
+    // render is never written.
+    expect(L.setTerminalFields(withSession, 't1', { render: 'native' })).toBe(withSession);
+    // A value the document could not hold removes the field, undefined
+    // too; the address stays.
+    const none = L.setTerminalFields(withSession, 't1', { before: undefined, session: 'x; rm -rf ~', terminal: 't2' });
+    expect(leaf(none, 't1')).toEqual({ terminal: 't1', agent: 'claude', pid: 7 });
+  });
+
+  it('change only session and before', () => {
     const l = layoutOf({ terminal: 't1', agent: 'claude', pid: 7, resume: 'claude' });
     // The fields restore.ts keeps, and any other, are not changed here.
     expect(L.setTerminalFields(l, 't1', { agent: 'codex', pid: 1, resume: undefined, note: 'x', terminal: 't2' })).toBe(l);
@@ -92,16 +103,20 @@ describe('agent leaves', () => {
     const l = layoutOf({ terminal: 't1' });
     // As a patch read from JSON has them: own keys named __proto__ and the like.
     const patch = JSON.parse(
-      '{"__proto__": {"render": "native", "polluted": true}, "constructor": {"prototype": {"polluted": true}}, "prototype": {"render": "native"}}',
+      '{"__proto__": {"session": "' +
+        S1 +
+        '", "polluted": true}, "constructor": {"prototype": {"polluted": true}}, "prototype": {"session": "' +
+        S1 +
+        '"}}',
     );
     expect(L.setTerminalFields(l, 't1', patch)).toBe(l);
-    const native = L.setTerminalFields(l, 't1', { ...patch, render: 'native' });
-    const t1 = leaf(native, 't1');
-    expect(t1).toEqual({ terminal: 't1', render: 'native' });
+    const withSession = L.setTerminalFields(l, 't1', { ...patch, session: S1 });
+    const t1 = leaf(withSession, 't1');
+    expect(t1).toEqual({ terminal: 't1', session: S1 });
     expect(Object.getPrototypeOf(t1)).toBe(Object.prototype);
-    expect(Object.keys(t1)).toEqual(['terminal', 'render']);
+    expect(Object.keys(t1)).toEqual(['terminal', 'session']);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-    expect((Object.prototype as Record<string, unknown>).render).toBeUndefined();
+    expect((Object.prototype as Record<string, unknown>).session).toBeUndefined();
   });
 
   it('change each leaf of an address from its own fields in a malformed document', () => {
@@ -110,20 +125,20 @@ describe('agent leaves', () => {
       split: 'horizontal',
       ratio: 0.5,
       children: [
-        { terminal: 't1', render: 'native', agent: 'claude' },
+        { terminal: 't1', session: S2, agent: 'claude' },
         { terminal: 't1', before: 't0', font: 12 },
       ],
     });
     expect(leaves(l)).toHaveLength(2);
-    const next = L.setTerminalFields(l, 't1', { session: S1 });
+    const next = L.setTerminalFields(l, 't1', { before: 't3' });
     expect(leaves(next)).toEqual([
-      { terminal: 't1', render: 'native', agent: 'claude', session: S1 },
-      { terminal: 't1', before: 't0', font: 12, session: S1 },
+      { terminal: 't1', session: S2, agent: 'claude', before: 't3' },
+      { terminal: 't1', before: 't3', font: 12 },
     ]);
     // A field removed where it is, nothing added where it was not.
-    expect(leaves(L.setTerminalFields(next, 't1', { render: null }))).toEqual([
-      { terminal: 't1', agent: 'claude', session: S1 },
-      { terminal: 't1', before: 't0', font: 12, session: S1 },
+    expect(leaves(L.setTerminalFields(next, 't1', { session: null }))).toEqual([
+      { terminal: 't1', agent: 'claude', before: 't3' },
+      { terminal: 't1', before: 't3', font: 12 },
     ]);
   });
 

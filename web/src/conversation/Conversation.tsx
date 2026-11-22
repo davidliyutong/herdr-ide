@@ -1,7 +1,7 @@
-// A coding agent's conversation as a native view (the pane over its
-// terminal): the session's events from a source (source.ts) reduced to
-// items (model.ts) and drawn as a list that keeps to its end while the user
-// is there, and a composer that hands the user's message to the source.
+// A coding agent's conversation as a native view: the session's events
+// from a source (source.ts) reduced to items (model.ts) and drawn as a list
+// that keeps to its end while the user is there, and a composer that hands
+// the user's message to the source.
 // The list draws the last SHOWN_ITEMS items; earlier ones, and then the
 // source's earlier pages, come on request. A short view (peek: the agent
 // waits for an answer in its terminal, shown below) has no composer, unless

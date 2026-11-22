@@ -202,9 +202,9 @@ the status bar's session item below (`internal/usage/session.go`,
 `internal/agentkinds` whose provider is Claude or Codex and whose
 transcripts are that provider's logs: `claude`, `codex`;
 `SessionProvider`) and a lower-case UUID; the agent finds the session's
-transcript and, for Claude Code, its subagents' as the agents plugin does
-([35](35-agent-native-view.md): `internal/agent/sessions`, opened through
-no link as the files it found), and reads them with the parsers the cost
+transcript and, for Claude Code, its subagents' (`internal/agent/sessions`,
+[35](35-agent-native-view.md): opened through no link as the files it
+found), and reads them with the parsers the cost
 of the logs uses, decoding only the members of the lines that carry usage,
 into structures without a text member. A response several of the
 transcripts recorded counts once, records older than the cost's retention

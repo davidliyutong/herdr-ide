@@ -930,7 +930,7 @@ export const en = {
   // agents plugin
   'settings.plugins.agents.enabled': 'Coding agents',
   'settings.plugins.agents.enabled.desc':
-    'Coding agents’ conversations (Claude Code, Codex) in their terminals’ panes, read from their sessions on the machines.',
+    'The session of each coding agent in a terminal (Claude Code, Codex), found on its machine: its usage in the status bar, and the agent back in its own conversation after the terminal core starts again.',
   // terminal history plugin
   'settings.plugins.history.enabled': 'Terminal history',
   'settings.plugins.history.enabled.desc':

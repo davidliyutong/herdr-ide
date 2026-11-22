@@ -8,12 +8,12 @@ import (
 )
 
 // A coding agent's session transcript (Claude Code's and Codex's JSON
-// lines) as the agents plugin reads it on a machine and the web UI shows
-// it in a pane's native view. The machine parses the file into
-// TranscriptEvents shaped as the Agent Client Protocol's (ACP v1)
-// session/update notifications: their members are named as ACP's, and the
-// members every event has as an event log's (seq, t, at). The browser
-// names a transcript by its agent's kind and session id, never by a path.
+// lines) as a machine reads it (internal/agent/transcript): the machine
+// parses the file into TranscriptEvents shaped as the Agent Client
+// Protocol's (ACP v1) session/update notifications: their members are
+// named as ACP's, and the members every event has as an event log's (seq,
+// t, at). A transcript is named by its agent's kind and session id, never
+// by a path.
 //
 // A read is one page of the file, forward from a cursor or back before
 // one, and the machine keeps nothing between reads: every event is made
@@ -65,11 +65,7 @@ func NoticeMethod(name string) string { return "_" + brand.Slug + "/" + name }
 
 // Limits of reading transcripts.
 const (
-	// MaxTailRefs is the most transcripts one TailRequest reads.
-	MaxTailRefs = 8
-	// MaxTailWait is the longest a TailRequest waits for new lines.
-	MaxTailWait = 15 * time.Second
-	// MaxTailBytes is the most bytes of a transcript one reply reads.
+	// MaxTailBytes is the most bytes of a transcript one read gives.
 	MaxTailBytes = 1 << 20
 	// MaxTextBytes is the most text of one event: longer text is cut.
 	MaxTextBytes = 256 << 10
@@ -137,7 +133,7 @@ type TranscriptRef struct {
 	From uint64 `json:"from"`
 	// Back reads the page before From instead: the latest events before it
 	// that MaxTailBytes holds. With From 0 that is the page ending at the
-	// transcript's end, a view's first read, and its Next is where forward
+	// transcript's end, a reader's first read, and its Next is where forward
 	// reads go on. With another From (the First of the page after it) its
 	// Next is From. A back read that reached the transcript's start says
 	// More false, and readers ask for no earlier page.
@@ -186,19 +182,6 @@ type TranscriptTail struct {
 	Title string `json:"title,omitempty"`
 	// Code says why nothing was read (Transcript*), "" when it was.
 	Code string `json:"code,omitempty"`
-}
-
-// TailRequest reads up to MaxTailRefs transcripts at once, waiting up to
-// WaitMS (at most MaxTailWait) for one of them to have new lines when none
-// has any.
-type TailRequest struct {
-	Refs   []TranscriptRef `json:"refs"`
-	WaitMS int             `json:"wait_ms,omitempty"`
-}
-
-// TailReply has a TranscriptTail for each ref of a TailRequest, in order.
-type TailReply struct {
-	Tails []TranscriptTail `json:"tails"`
 }
 
 // ResolveRequest asks whether a session is one to resume in a directory:

@@ -301,7 +301,7 @@ describe('the history plugin in the page', () => {
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
     expect(preludeOf('a', 't1')?.note).toBe(noteOf(3000));
     // The layout and the records change, a list is read again: the same snapshot is not read again.
-    machine([rec('t1', 200, { title: 'vim' })], layoutOf({ terminal: 't1', render: 'native' }));
+    machine([rec('t1', 200, { title: 'vim' })], layoutOf({ terminal: 't1', label: 'vim' }));
     machine([rec('t1', 200), rec('t2', 400)], layoutOf({ terminal: 't1' }, { terminal: 't2' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
     expect(core.lists()).toBe(2);

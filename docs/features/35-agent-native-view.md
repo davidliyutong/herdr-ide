@@ -1,15 +1,12 @@
-# 35 · Coding agents' conversations in their panes
+# 35 · Coding agents' sessions and transcripts
 
 ## Context
 
 Claude Code and Codex run as programs in the machines' terminals
-([21](21-terminal-core.md)). Their interfaces draw on the alternate screen:
-a table or a formula an agent writes is characters in cells, a long
-conversation scrolls inside the program, and a diff is colored text. The
-page knew which agent runs in a terminal and what it does
-([25](25-agent-detection.md)), but not which conversation it is in, so
-after a restart it could only continue the directory's latest one
-([33](33-workspace-restore.md)).
+([21](21-terminal-core.md)). The page knew which agent runs in a terminal
+and what it does ([25](25-agent-detection.md)), but not which conversation
+it is in, so after a restart it could only continue the directory's latest
+one ([33](33-workspace-restore.md)).
 
 Both agents write every session to a transcript of JSON lines on the
 machine, under an id that is a UUID. What they do, measured on macOS with
@@ -42,29 +39,23 @@ Claude Code 2.1.330 and Codex CLI 0.170.0:
   completed (`event_msg` of type `item_completed`), and again in the
   model's wire form (`response_item`); older versions have no items.
 - Both report their state through OSC 7501 (`idle`, `working`, `blocked`,
-  `done`, with a `msg` such as `approve Write: /path`), and a dialog of
-  theirs can be open while the state is not `blocked`. Text pasted into
-  either interface and an Enter start a turn, several lines included.
+  `done`, with a `msg` such as `approve Write: /path`).
 
 ## Goals / non-goals
 
 Goals: the session each agent terminal runs, found on the machine without
-changing the agents' configuration; a pane that shows the agent's
-conversation natively (Markdown with tables, formulas and code, thoughts,
-tool calls with their output and diffs, the plan, notices), and the CLI
-again in one step, for every client of the machine; the agent still the
-CLI in its terminal, attached under the view, which shows whenever the
-agent waits for the user; a message box that types into the CLI; a tab
-that starts an agent shown this way; another kind of agent added by a row
-of a registry and, for its conversations, a parser; a view that knows its
-events only through an interface (`AgentSource`).
+changing the agents' configuration; a terminal brought back in its
+agent's own session after its terminal core started again, once the
+machine confirmed it ([33](33-workspace-restore.md)); the session's usage
+for the status bar ([29](29-ai-usage.md)); another kind of agent added by a
+row of a registry and, for its conversations, a parser that reads a
+session's transcript on its machine into events shaped as the Agent
+Client Protocol's; a conversation view that knows its events only through
+an interface (`AgentSource`).
 
-Non-goals: replacing the CLI (permission dialogs, slash command menus,
-model pickers stay its own: the terminal shows for them); text as the
-agent generates it (the transcripts are written a block at a time);
-changing the agents' configuration (hooks); images in the view (a
-placeholder stands for each); subagents' conversations; transcripts kept
-compressed; a native view of agents other than Claude Code and Codex.
+Non-goals: changing the agents' configuration (hooks); transcripts kept
+compressed; subagents' conversations; sessions of agents other than
+Claude Code and Codex.
 
 ## Design
 
@@ -89,22 +80,21 @@ core runs on.
 
 `scripts/registry` writes the kinds into `design/generated/registry.json`
 (key `agents`; `make tokens`), which the page reads
-(`web/src/conversation/kinds.ts`): the palette's agents to start, the
-commands a restore types (`resumeCommand`), the new agent tab
-(`startArgv`), the AI usage provider of a session and whether a kind has a
-native view (`hasNativeView`). `uisettings.Agents`, the list of silent
+(`web/src/conversation/kinds.ts`): the palette's agents to start
+(`startArgv`), the commands a restore types (`resumeCommand`), the AI
+usage provider of a session and whether a kind's conversations can be
+read (`hasNativeView`: it has a transcript parser). `uisettings.Agents`, the list of silent
 agents, is made from it. A placeholder is replaced only by a lower-case
 UUID (`ValidSessionID`, `isSessionId`); any other value makes no command.
 
 Adding a kind: a row in `kinds`, the detector's manifest of the same id
 (`TestKindsMatchManifestsAndSettings` holds the kinds, the manifests and
 `uisettings.Agents` to the same ids, and the providers to the AI usage
-plugin's), then `make tokens`. For a native view also: a parser in
+plugin's), then `make tokens`. For its sessions and conversations also: a parser in
 `internal/agent/transcript` (`formats`), how `internal/agent/sessions`
 finds its sessions and transcripts, `ResumeByID` and `ContinueLatest`
-(the test requires them of a kind with a transcript), the vectors of its
-lines in `design/testdata/transcript/`, and the new-tab item's message
-`agents.newTab.<id>` in `web/src/plugins/agents/i18n/`.
+(the test requires them of a kind with a transcript) and the vectors of
+its lines in `design/testdata/transcript/`.
 
 ### Finding a session (`internal/agent/sessions`)
 
@@ -221,17 +211,20 @@ the core's.
 ### The terminal leaf
 
 A terminal's leaf in the layout document ([22](22-terminal-protocol.md))
-may hold `render: "native"` (shown as the agent's conversation; absent:
-the terminal), `session` (a lower-case UUID: the session the agent runs)
-and `before` (the address of the terminal this one took the place of). A
+may hold `session` (a lower-case UUID: the session the agent runs) and
+`before` (the address of the terminal this one took the place of). A
 value of another type or shape is dropped when the document is read, and
-`setTerminalFields` changes only these three, of every leaf of the address.
-The switch writes `render`; a new agent tab writes `render` and, for Claude
-Code, `session`; the restore remembers `session` and writes `before`
-([33](33-workspace-restore.md)).
+so is `render`, which earlier versions wrote (`"native"`: the pane showed
+the agent's conversation over its terminal), whatever its value.
+`setTerminalFields` changes only `session` and `before`, of every leaf of
+the address, and never writes `render`. The restore remembers `session`
+and writes `before` ([33](33-workspace-restore.md)); the terminal history
+adopts a snapshot by `before` ([36](36-terminal-history.md)).
 
 ### Transcripts (`internal/agent/transcript`)
 
+The parser reads a session's conversation on its machine; its consumers
+come with the chat host, and no route sends its events to the page.
 `Tail(kind, file, ref, limits)` reads one page of a transcript into events
 shaped as the Agent Client Protocol's (ACP v1) `session/update`
 notifications (`internal/agentproto/transcript.go`): `{seq, t, at}` and,
@@ -245,16 +238,17 @@ alone, so the machine keeps nothing between reads.
 
 - **Cursors.** An event's `seq` is its line's offset times 256 plus its
   index in the line (`agentproto.Seq`; exact in JavaScript for files below
-  32 TiB, which the page compares and sends back and never takes apart).
-  A view's first read is a read back from the end (`from` 0, `back`): the
-  page ending with the last complete line, whose `next` is where forward
-  reads go on; a back read before `first` gives earlier pages until `more`
-  is false. A line still being written is not read until it ends.
+  32 TiB, which a browser holding one compares and sends back and never
+  takes apart). A reader's first read is a read back from the end (`from`
+  0, `back`): the page ending with the last complete line, whose `next` is
+  where forward reads go on; a back read before `first` gives earlier
+  pages until `more` is false. A line still being written is not read
+  until it ends.
 - **Starting over.** A forward cursor that is no line's start any more
   (the file was replaced or truncated) is answered as a first read, and
   `file`, a digest of the file's device, inode and first line (never its
   path), tells a reader that it changed.
-- **The reply** has `kind`, `session`, `file`, `first`, `next`, `events`,
+- **A page** has `kind`, `session`, `file`, `first`, `next`, `events`,
   `more`, `unknown` (lines read that made no event, whose content is not
   sent), `title` (the session's title the lines read give: the user's
   `custom-title` before Claude Code's `ai-title` or `summary`) and `code`
@@ -309,163 +303,31 @@ file, the look back included, and ends with its context.
 
 ### The agents plugin
 
-Core (`internal/plugins/agents`), both routes a machine's:
+Its switch, `plugins.agents.enabled` (on by default), turns finding the
+sessions on the machines on and off (the detector's part, above). On the
+page it is that switch alone (`web/src/plugins/agents`): no commands, no
+new-tab items, no buttons in terminals' headers.
 
-- `GET /api/m/{id}/p/agents/tail?s=<kind>~<session>~<from>[~b]&…&wait=<ms>`:
-  a page of each of 1 to 8 transcripts (`~b` reads the page before the
-  cursor), waiting up to `wait` (0 to 15000) for one of them to have
-  something new. At most 6 requests wait on a machine at once, and at
-  most 2 of one client (the address it connects from, without the port;
-  `X-Forwarded-For` is the client's own word and is not believed, so
-  behind a proxy every client is the proxy): a request over either limit
-  is read at once (`wait` 0) and, when it has nothing new, held by the
-  core for at most 1 s (and not longer than its own wait) before it is
-  answered, using nothing of the machine meanwhile. More than 16 requests
-  of a machine at once, waiting or not, answer `429 busy`. The machine is
-  asked within the wait and 30 s; a reply whose pages are not the ones
-  asked for is `502 bad_reply`.
-- `GET /api/m/{id}/p/agents/resolve?kind=&session=&cwd=`: `{ok}` when the
-  agent kept the session's transcript and it records the directory `cwd`,
-  else `{ok: false, code}` (`not_found`, `other_cwd`, `compressed`,
-  `bad_request`); within 15 s, at most 8 at once per machine (`429 busy`),
-  since each may search the machine's session directories for an id it
-  does not know.
+Core (`internal/plugins/agents`), a machine's route:
+`GET /api/m/{id}/p/agents/resolve?kind=&session=&cwd=`: `{ok}` when the
+agent kept the session's transcript and it records the directory `cwd`,
+else `{ok: false, code}` (`not_found`, `other_cwd`, `compressed`,
+`bad_request`); within 15 s, at most 8 at once per machine (`429 busy`),
+since each may search the machine's session directories for an id it
+does not know. It checks everything a request names (a kind with a
+transcript parser, a lower-case UUID, an absolute directory of at most
+4096 bytes of UTF-8 without NUL; `400 bad_request`) before asking the
+machine, which checks it again; the machine's answer is decoded into the
+reply's type, so nothing else reaches the page. It only reads: a
+read-only core answers it, and it is not audited, as the file explorer's
+reads are not. With the plugin off it answers `404 plugin_disabled`.
 
-Both check everything a request names (a kind with a transcript parser, a
-lower-case UUID, a decimal cursor, an absolute directory of at most 4096
-bytes of UTF-8 without NUL; `400 bad_request`) before asking the machine,
-which checks it again; the machine's answer is decoded into the reply's
-types, so nothing else reaches the page. They only read: a read-only core
-answers them, and they are not audited, as the file explorer's reads are
-not. With the plugin off they answer `404 plugin_disabled`.
-
-Machine (`internal/agent/plugin/agents`): `tail` opens each transcript
-with `OpenLocated` and reads it with `Tail`, the refs sharing a reply of 4
-MiB (each at most 1 MiB, `4 MiB / n`). At most 2 transcript reads run at
-once in the agent; the others wait their turn until their request ends.
-When nothing of any ref is new and the request waits, the plugin stats
-each watched transcript every 250 ms (and reads its last line when it
-grew), looks for those not found once a second, holds no file open in
-between, reads every ref again on a change, and ends with the core's
-request (the page closed or moved on). A read again that brought no event
-(lines were appended that make none) is where the wait goes on from, so
-such lines are read once, not at every look. `resolve` reads only what the
+Machine (`internal/agent/plugin/agents`): `resolve` reads only what the
 transcript says of itself (Claude Code's first conversation line, Codex's
 `session_meta`) and compares its directory with the one asked about,
 which it never opens. Replies carry codes, never an error's text, which
-would name a path.
-
-Page (`web/src/plugins/agents`):
-
-- **Reading** (`transcript.ts`). A feed per session a surface shows, read
-  by one poller per machine: one request in flight for every session the
-  page shows on that machine (at most 8 a request, the next ones in turn
-  when more are shown), the next as soon as one is answered. A session's
-  first read asks for no wait and is a back read; later reads go forward
-  from `next` and wait 15 s on the machine. A read is given up when the
-  sessions shown change, and counts as failed 10 s after its wait; after
-  a failure the next waits 1 s, doubling to 30 s, and what was shown
-  stays (marked stale); a machine whose terminals come again, or the page
-  shown again, ends that wait and reads at once. A session without a
-  first page 5 s after it is shown, after a first read that failed, or
-  after three first reads in a row that found the machine busy, has
-  none to show (the strip below), and its reads go on. No read starts
-  while the page is hidden or no surface shows a session. A forward read
-  answered from another transcript file (the machine's `file` changed) is
-  not taken: the feed starts over and reads that file's last page; a
-  back read of another file starts the feed over with it. A feed keeps at
-  most 20 000 events, and 8 feeds no surface shows are kept for a pane
-  shown again.
-- **What the pane shows** (`view.ts`, `Surface.tsx`). The session shown is
-  the record's `agent_session`, else the leaf's `session`. With the leaf's
-  `render: "native"` and an agent with a native view, the surface over the
-  terminal is: a strip over the terminal's top while there is nothing to
-  show (no session found yet, no transcript yet, a compressed one, no
-  first page that could be read: "The conversation cannot be read right
-  now; trying again", also on a read-only page; or the agent waiting for
-  an answer before its first page came), with **Terminal View** (not on a
-  read-only page), the terminal staying visible and usable; the whole
-  pane with a spinner until the first page is read; the conversation
-  over the whole pane; or, while the agent's status is `blocked`, the
-  conversation over the upper part of the pane (38 %, at least 7rem) with
-  a line naming what the agent waits for (the record's status `msg`) and
-  **Show Terminal**, the terminal shown below at its size. `covers` says
-  the same at render time from the leaf, the record and the feed's state,
-  so a pane shown again is covered from its first frame; while the agent
-  waits it says nothing, and the surface covers the upper part as it
-  draws it.
-- **Where the question is** (`waitingView`). While the agent waits, the
-  surface reads the terminal's screen (its rows as text) and the rows its
-  upper part would cover. When all the terminal shows is under that part
-  and nothing below it (Codex draws its first dialogs at the top of a
-  cleared screen), or the screen cannot be read, the terminal is shown
-  whole, the conversation kept in its place unseen, with a strip saying
-  what the agent waits for, over the terminal's blank bottom (over its top
-  when the screen cannot be read) and **Show Conversation**, which brings
-  the upper part back until the agent stops waiting (its **Show Terminal**
-  then goes back to the terminal shown whole). A CLI draws its dialog a
-  moment after its status, so the screen is read again every 250 ms until
-  the answer held for 3 s, and anew when what the agent waits for
-  changes; a user writing a message keeps the upper part. Neither way
-  changes the terminal's size.
-- **The keyboard** (`Surface.tsx`) follows what the surface draws, in the
-  pane that has the focus and only while nothing else on the page has it
-  (a field, a dialog, another pane, the terminal itself): the composer
-  (the list on a read-only page) when the conversation is drawn over the
-  terminal, the spinner's box before it; the terminal when the strip is
-  shown over it (a new agent tab before its first prompt, so the user can
-  type it) or when the agent begins to wait for an answer. When the agent
-  begins to wait while the user is writing a message (text in the
-  composer, or a key pressed in it within 1.5 s, `WRITING_MS`), the short
-  view keeps the composer and the keyboard in it, and only the line says
-  what the agent waits for; Enter sends nothing while the agent waits, so
-  the user's next Enter does not answer the agent's question. The
-  terminal takes the keyboard when the user clicks it, or with **Show
-  Terminal**, which shows the terminal alone. Each of the strip, the
-  spinner and the conversation is an element of its own, so the keyboard
-  never stays on one drawn for another.
-- **The switch.** A button in the header of a terminal that runs an agent
-  with a native view (`ViewToggle.tsx`; it stays in narrow headers and in
-  panes without the focus) and the command `agents.toggleView` (the
-  focused terminal; no default key, every candidate being taken by a
-  terminal or a program in it) write the leaf's `render`, so every client
-  of the machine follows. A read-only page shows the button disabled and
-  follows the layout.
-- **A new agent tab.** The new-tab menu has **Agent: Claude Code** and
-  **Agent: Codex**; `agents.newTab` (no default key) starts the first kind
-  in the workspace shown. The agent is the terminal's program
-  (`terminal.run` with its `Start`), in a new tab whose leaf has
-  `render: "native"` from the write that places it; Claude Code is started
-  with `--session-id` and a new UUID, which the leaf remembers, so its
-  session is known before any file exists. Codex's is found after its
-  first prompt.
-- **The message box** (`TranscriptSource.send`). The text is pasted into
-  the terminal (bracketed when the program asked for it), and Enter is
-  typed 250 ms later: Codex takes an Enter right after a burst of text as
-  a new line. Before the paste, and again before the Enter, the page
-  checks that it is not read-only, that the terminal is on the page and
-  still runs the session's agent (its record is live and names the
-  feed's kind), and that the agent does not wait for an answer. A check
-  that fails before the paste refuses the message (`read_only`,
-  `detached`, `blocked`); one that fails before the Enter leaves the
-  pasted text in the agent's input without pressing Enter (`pasted`): an
-  Enter then would answer a permission dialog with its default, or run
-  the text in a shell. The box says why, and for `pasted` asks the user to
-  check the terminal; the text stays in the box. A message counts as sent
-  once, within 10 s, the transcript has it after the send as the user's
-  prompt: the same text, or a prompt containing it, runs of white space
-  compared as one space; a prompt longer than the transcript keeps of an
-  event's text (256 KiB) by its first 4096 characters. A message that
-  starts with `/` or `!` (a command of the agent's interface or of its
-  shell) counts as sent also by the first command notice after it, which
-  confirms the oldest such message waiting, without comparing its name.
-  Otherwise the box says it has not shown in the conversation and offers
-  **Show Terminal**, since a dialog of the agent's may have taken the
-  text. **Stop** (while the agent works) types Escape, the key both agents
-  stop a turn with.
-- **Find** (`find.open`) on a terminal its conversation covers shows the
-  terminal first (the leaf's `render` removed), then opens find in it; a
-  read-only page cannot, and the command is disabled there.
+would name a path. Any other action, the `tail` of earlier versions
+included, is `bad_params`.
 
 ### The conversation view (`web/src/conversation`)
 
@@ -484,11 +346,11 @@ it knew; a turn that ends for `cancelled`, `max_tokens`,
 over; a page of earlier events goes before the items, the overlap passed
 over and its last message continued by the later page's chunks. Events
 and updates of kinds the view does not show are counted, and the list
-says how many with **Show Terminal**. Only the item an event changes is
-drawn again. Events come from a machine and are not trusted to have the
-shapes declared: the reducer checks the type of every member it keeps, a
-member is read as text only when it is a string (`asText`), and malformed
-events and blocks are passed over or counted among the entries not shown.
+says how many. Only the item an event changes is drawn again. Events come
+from a machine and are not trusted to have the shapes declared: the
+reducer checks the type of every member it keeps, a member is read as
+text only when it is a string (`asText`), and malformed events and blocks
+are passed over or counted among the entries not shown.
 
 `Conversation.tsx` draws the last 300 items; **Show Earlier Messages**
 draws 300 more, then asks the source for an earlier page. The list keeps
@@ -511,70 +373,35 @@ call's row counts the lines a text diff adds and removes only when that
 takes at most 100 000 pairs of lines compared; the diff itself is
 compared when the call is opened. What is read out to screen readers is
 the agent's last message, at most 2000 characters taken from its first
-4000. The box below takes Enter to send, Shift+Enter or Alt+Enter for a
-new line, nothing while an input method composes; it is greyed while a
-message is on its way, sends nothing while the agent is blocked, and is
-not there on a read-only page, in the upper part shown while the agent
-waits (unless the user was writing, above), or for a source that takes
-no input. Text typed in it and not sent is a draft of the session's view
-in that terminal (one source per feed and terminal, `sourceOf`), kept in
-the page's memory: it stays when the terminal is shown instead, when
-another tab is shown and when the agent disappears for a moment, and is
-gone once sent; another session (after `/clear`) starts with an empty
-box.
-
-### The source (`AgentSource`)
+4000.
 
 The view and its reducer know only `AgentSource`
-(`web/src/conversation/source.ts`): `capabilities` (`input`: `terminal`,
-`direct` or `none`; `permissions`; `streaming`), `subscribe` (the events
-the source has, then each new one; `reset` when they no longer hold),
-`loadEarlier`, `send`, `cancel` and `respond`. Its one implementation is
-`TranscriptSource` (`web/src/plugins/agents/transcript.ts`): input
-`terminal` (`none` on a read-only page), no permissions, no streaming.
-
-### Surfaces over web terminals
-
-The page draws a plugin's surface in a layer over a terminal's pane, below
-its header, which takes none of the terminal's room
-([27](27-plugins.md): `terminalSurfaces`, `headerActions`). A surface that
-covers all of the terminal makes it covered
-([26](26-web-terminals.md)): attached, measured and resized with its pane,
-its output taken and acknowledged, nothing drawn, no bell, no keyboard and
-no Tab stop. Text pasted or typed into the pane (Send to Agent, the message
-box) still reaches the terminal (`paneHandle`, `withPane`), while focusing
-the pane focuses the surface that registered with `useSurfaceFocus`
-(`withView`). A terminal covered while it has the keyboard hands it to the
-surface. Panes kept hidden draw no surface.
+(`web/src/conversation/source.ts`): `capabilities` (`input`, `permissions`,
+`streaming`), `subscribe` (the events the source has, then each new one;
+`reset` when they no longer hold), `loadEarlier`, `send`, `cancel` and
+`respond`. No pane of the app draws the view: the tests drive it with
+sources of their own.
 
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
-| Embedding a third-party terminal renderer for agents (Tern) | A closed beta, a terminal application of its own that cannot be embedded in a page, and neither agent speaks its protocol; the page has Markdown, highlighting and KaTeX already. |
-| A new kind of layout leaf for an agent instead of fields on the terminal leaf | Everything that knows terminal leaves (status dots, where a notification leads, Send to Agent, closing, kept panes, replacement after a core restart) would need a second path, and older clients would show an unknown node without a pane. With fields the pane stays a terminal everywhere and older clients show the CLI. |
-| Rendering the view instead of the terminal (unmounting it) | The terminal is the pane's second child, which keeps its stream and emulator alive; a layer beside it leaves the terminal attached at its size, so the CLI is there at once. |
-| Shrinking the terminal when the agent waits | A resize makes Claude Code lay itself out again and lose its scroll position ([22](22-terminal-protocol.md)); the surface shrinks and the terminal keeps its size. |
-| A stream or a long poll per pane | Browsers open 6 HTTP/1.1 connections per origin: a page with several agent panes would hold them all and starve its other requests. One request per machine carries every session shown. |
+| A new kind of layout leaf for an agent's terminal instead of fields on the terminal leaf | Everything that knows terminal leaves (status dots, where a notification leads, Send to Agent, closing, kept panes, replacement after a core restart) would need a second path, and older clients would show an unknown node without a pane. With fields the pane stays a terminal everywhere. |
 | Hooks in the agents' configuration | Writes into the user's configuration of each agent, shared with every other way they run it; the process, the agent's record of it and its transcript tell the session without that. |
-| Headless modes (`claude -p --output-format stream-json`, Codex's app server) | The agent would no longer be the CLI the user knows, with its dialogs, commands and keys, and the terminal would show nothing; the transcript is what the CLI writes anyway. |
-| Parsing transcripts in the page | The page would fetch whole files, mostly the program's own state (lines of 100 KB and more), over the connection; the machine sends a page of events. |
+| Parsing transcripts away from their machine (in the core or the page) | Whole files, mostly the program's own state (lines of 100 KB and more), would cross the connection; the machine parses them where they are and makes pages of events within bounds. |
 | A path in the browser's request | A path is anything; a kind and a UUID name only a session's transcript inside the kind's own root. |
-| `terminal.interrupt` (Ctrl+C) to stop a turn | Both agents stop a turn with Escape, and Ctrl+C at an idle prompt may quit them. |
-| Enter with the paste | Codex tells a paste from typing by its pace and takes an Enter right after it as a new line. |
-| Taking a session the message box sent as sent | A dialog of the agent's can be open while its status is not `blocked`, and takes the text; only the prompt in the transcript says it reached the agent. |
-| Pressing Enter after the pause without looking again | The agent may have begun to wait for an answer meanwhile, and an Enter gives its dialog the default answer; or it left the terminal, and the shell runs the text as a command. |
-| One number of waiting reads per machine, shared by every page | One client, a read-only one included, could hold every place with its long polls, and the conversations of the other pages would never load. A client has 2 of the 6, and a request over a limit is still read at once. || Remembering a guessed session in the layout, or resuming by id without the machine's confirmation | A guess may be another terminal's, and the layout is written by every client of the machine ([33](33-workspace-restore.md)). |
+| Remembering a guessed session in the layout, or resuming by id without the machine's confirmation | A guess may be another terminal's, and the layout is written by every client of the machine ([33](33-workspace-restore.md)). |
 
 ## Failure modes
 
 - **No session yet** (Codex before its first prompt; Claude Code before
-  its record is read) → the strip over the terminal says so; the
-  terminal stays usable. Codex's session is found once its rollout
-  appears: at the status change of its first turn, or at the next check of
-  the stamp.
-- **No transcript yet** (before the first prompt) → `not_found`: the
-  strip; a waiting read looks for it once a second.
+  its record is read) → the record has no `agent_session`; a restore then
+  continues the directory's latest conversation. Codex's session is found
+  once its rollout appears: at the status change of its first turn, or at
+  the next check of the stamp.
+- **No transcript yet** (before the first prompt) → `resolve` answers
+  `not_found`, and a restore continues the directory's latest
+  conversation.
 - **A child session** (Claude Code that inherited
   `CLAUDE_CODE_CHILD_SESSION`) → no record, no transcript, no session. The
   agent drops the agents' session markers from what its terminals inherit
@@ -584,67 +411,38 @@ surface. Panes kept hidden draw no surface.
   Claude Code whose own `CLAUDE_CONFIG_DIR` differs from the agent's is
   not found there, and the `fd` source does not exist. A transcript under
   a configuration directory that only the agent's process names (Linux)
-  is found by `Resolve` but not by `Locate`: the view says `not_found`.
+  is found by `Resolve` but not by `Locate`: `resolve` says `not_found`.
 - **A guess** → taken only while no other terminal runs that kind in the
-  directory; shown in the view, never remembered in the layout nor shown
-  as the session's usage ([29](29-ai-usage.md)). Another program of the
-  user's working in the same directory can still be guessed.
+  directory; never remembered in the layout nor shown as the session's
+  usage ([29](29-ai-usage.md)). Another program of the user's working in
+  the same directory can still be guessed.
 - **A transcript format changes** → lines the parser does not know make no
-  event: counted (`unknown` on the machine, the reducer's own count on the
-  page, which the list says), and the CLI is one click away. New kinds of
-  lines of the programs' own state are skipped without a count.
-- **A compressed transcript** → `compressed`: the strip.
+  event and are counted (`unknown`); new kinds of lines of the programs'
+  own state are skipped without a count.
+- **A compressed transcript** → `compressed`.
 - **A transcript hard-linked by a backup tool** (`cp -al`, rsnapshot) →
-  the file has two names and is not taken: `not_found`, the strip.
-- **A message not confirmed** in 10 s → the box says it has not shown in
-  the conversation and offers the terminal; the text stays in the box. A
-  message sent while the agent works shows, and counts as sent, once the
-  running turn takes it up (Claude Code records it then); a turn that
-  takes it up later than 10 s after the send leaves it unconfirmed.
-- **Commands without a notice** → the parser makes no command notice of
-  Codex's lines: a `/` command sent to Codex shows as not confirmed after
-  10 s although it ran, with the same explanation. A
-  command notice confirms the oldest command waiting, whatever its name.
-- **The agent begins to wait, or leaves, during the 250 ms before Enter**
-  → no Enter is typed; the pasted text may be in the agent's input, and
-  the box says to check the terminal.
-- **A dialog open while the status is not blocked** → the view stays over
-  the terminal; the message box's text may go to the dialog (and is then
-  not confirmed); the switch shows the CLI.
-- **Text appears a block at a time**, when the agent wrote it to its
-  transcript, not as it is generated; the status is live.
-- **The transcript's file changes** (`/clear`, a replaced file) → a new
-  session or a new `file`: the feed starts over from the new file's last
-  page.
-- **The machine does not answer** → reads back off up to 30 s, the view
-  says it may not be current, and keeps what it shows; without a first
-  page, the strip says the conversation cannot be read now, the terminal
-  shows, and the reads go on.
-- **More pages than a machine's waiting reads** (6 per machine, 2 per
-  client) → a page over a limit reads about once a second instead of
-  waiting on the machine; more than 16 reads of a machine at once →
-  `429 busy`, read again after the back-off.
-- **The plugin is turned off** → its routes answer `plugin_disabled`, the
+  the file has two names and is not taken: `not_found`.
+- **The plugin is turned off** → its route answers `plugin_disabled`, the
   detect stream is opened again without sessions (records lose
   `agent_session`, and the `agent` events say so to open pages, so they
-  lose it too), and panes show their terminals; the leaves keep `render`.
-  The agents are detected again without notifying again of a block or a
-  turn's end the pages were told of ([25](25-agent-detection.md)).
+  lose it too); the leaves keep `session`. The agents are detected again
+  without notifying again of a block or a turn's end the pages were told
+  of ([25](25-agent-detection.md)).
+- **A layout written by an earlier version** → its leaves' `render` is
+  dropped as the document is read, and the panes show their terminals.
 
 ## Security
 
 What leaves a machine, and when: while the plugin is on, the session id
 (a lower-case UUID) and its source word for each agent terminal through the
-detect stream, and, for a pane that shows a conversation, the
-conversation's events, tool input and output included, cut to their bounds;
-images never. A browser names a transcript only by a kind and a UUID,
-checked on the core and again on the machine; the file is found inside the
-kind's root, resolved and still inside it, opened through no link as a
-regular file of the user's with one name and the identity it was found
-with, and parsed as hostile within the bounds above. The routes are reads,
-allowed on a read-only core and not audited. The message box and the stop
-button type into the terminal only what the user could type, and never on
-a read-only page. See the rows on coding agents' sessions and transcripts
+detect stream; for a `resolve`, whether the session ran in the directory
+asked about, as a code. No transcript's conversation is sent. A browser
+names a session only by a kind and a UUID, checked on the core and again
+on the machine; the transcript is found inside the kind's root, resolved
+and still inside it, opened through no link as a regular file of the
+user's with one name and the identity it was found with, and parsed as
+hostile within the bounds above. The route is a read, allowed on a
+read-only core and not audited. See the rows on coding agents' sessions
 and on agent detection in [SECURITY.md](../../SECURITY.md).
 
 ## Testing
@@ -699,72 +497,24 @@ and on agent detection in [SECURITY.md](../../SECURITY.md).
   (hand-written in the programs' shapes); the Go tests and
   `web/src/__tests__/transcriptVectors.test.ts` run every one.
   `design/testdata/layout/agent-leaves.json`: the leaf's fields.
-- `internal/plugins/agents`: routes, validation, the reply checked, the
-  request ending with its HTTP request, the waiting limits per machine and
-  per client with a request over them read at once and held at most 1 s,
-  `busy` beyond 16 (`TestTailWaiting`), the client's address
-  (`TestClientOf`), `resolve` and its limit (`TestResolveBusy`), and the
-  whole path with the machine side (`agents_unix_test.go`).
-  `internal/agent/plugin/agents/agents_test.go`: bad params, first and
-  forward reads, codes, waits for an append and for a file to appear, the
-  wait's limit and its end with the stream, the reply's bound, `resolve`,
-  the shared resolver, reads taking turns (`TestReadsTakeTurns`), lines
-  without events read once in a wait (`TestWaitReadsAnAppendOnce`).
-  `internal/agentproto/transcript_test.go`: the events' JSON, `Seq`.
-- `web/src/__tests__`: `agents.test.ts` (covers, the rows a box over the
-  terminal covers and when a waiting agent's terminal is shown whole, the
-  switch, the new agent tab, find), `agentsSurface.test.tsx` (the
-  header's button, strip, loading, native, the upper part while blocked,
-  a new session, a draft kept across the terminal shown instead and the
-  pane drawn again, the keyboard handed over as what is drawn changes and
-  left with a user writing a message; while the agent waits, the upper
-  part when the question shows below it, the terminal whole with the strip
-  over its blank bottom or, unread, over its top, the screen followed as
-  the dialog is drawn and read again as what the agent waits for changes,
-  the upper part kept for a user writing), `agentsFocus.test.tsx` (with
-  the real `TerminalView`: the terminal's keyboard for a new agent tab
-  without a transcript, the composer's when the conversation is first
-  drawn, the terminal's when the agent begins to wait but not from a user
-  writing, and when it is shown whole),
-  `agentsGrid.test.tsx` (the terminal's grid unchanged while the view
-  shrinks and covers it again), `agentsTranscript.test.ts` (one read per
-  machine, first back then forward, earlier pages, a changed file, codes,
-  giving up, hidden pages, back-off, reading at once when the page is
-  shown or the machine is back, the terminal shown when the first page
-  does not come, time-outs, cursors above 32 bits, the message box's
-  paste, Enter, confirmation by the prompt, by a command's notice and by
-  the start of a prompt too long to keep, no Enter when the agent began
-  to wait, left or its pane went during the pause, refusals, Escape),
+- `internal/plugins/agents`: the route, validation, the reply checked,
+  the request ending with its HTTP request
+  (`TestResolveEndsWithItsRequest`), its limit (`TestResolveBusy`), and
+  the whole path with the machine side (`agents_unix_test.go`).
+  `internal/agent/plugin/agents/agents_test.go`: unknown actions,
+  `resolve`, the shared resolver.
+  `internal/agentproto/transcript_test.go`: the events' JSON, cursors,
+  pages, `Seq`.
+- `web/src/__tests__`: `agents.test.ts` (the plugin is its switch alone),
+  `agentLeaves.test.ts` (the leaf's fields, `render` dropped),
   `conversation.test.ts` and `conversationMemo.test.tsx` (the reducer and
   what is drawn again), `conversationView.test.tsx` (messages, display
   math from one-line `$$` paragraphs with code left as written, what is
   read out, tool calls, a patch's lines outside hunks, a long text diff
   compared only when opened, composer, drafts per source, list, events of
-  shapes no parser makes), `agentKinds.test.tsx` (the palette's agents),
-  `agentLeaves.test.ts`, `surfaces.test.ts`, `surfaceFocus.test.ts`,
-  `termPane.test.ts` (covered terminals).
+  shapes no parser makes), `agentKinds.test.tsx` (the palette's agents).
 - Run on real programs (macOS, Claude Code 2.1.330, Codex CLI 0.170.0,
   herdr-core 0.1.21): the record and its rewrite on `/clear`,
   `--session-id`, the transcripts made at the first prompt, no files of a
   child session; Codex's rollout made at the first prompt and not held
-  open; a pasted message and Enter starting a turn in both interfaces,
-  several lines included; a dialog open while the status was `done`. The
-  two real vectors are transcripts of these runs.
-- Run in a browser against the `dev` instance on macOS, with Claude Code
-  2.1.330 and Codex 0.170.0, before the confirmation of commands, the
-  check before Enter, the keyboard's rules, the drafts kept across
-  remounts, the strip for a conversation that cannot be read and display
-  math took the form described above (the tests above cover those): a
-  Claude Code started by hand in a shell was detected with its session,
-  and the header's button showed its conversation (a table with formulas
-  in its cells, a formula, a highlighted code block, tool rows: an edit
-  with +1 −0, a read) with the session's cost and context in the status
-  bar; the composer's message reached Claude Code and Codex through the
-  terminal (the paste, Enter 250 ms later) and showed as the user's
-  message; a permission dialog showed the terminal under the short view
-  with what the agent waited for, and the conversation came back after
-  the answer; `/clear` made the view follow the new session (a `/clear`
-  notice); Codex had no session before its first prompt (the strip) and
-  one after it, with a table and an inline formula drawn and its context
-  as a percentage; the terminals of the `dev` core carried no session
-  markers of the Claude Code session the core was started from.
+  open. The two real vectors are transcripts of these runs.

@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
 //
 // A terminal's pane (vt/pane.ts) with the real emulator, over a link that
-// records what reaches the core: a pane covered whole by what a plugin
-// draws over it attaches as one shown does, with the grid the pane's size
-// gives, and draws nothing (no renderer, so no WebGL context); a pane kept
-// while its tab is not shown neither attaches nor draws. A terminal's
+// records what reaches the core: a pane kept while its tab is not shown
+// neither attaches nor draws (no renderer, so no WebGL context). A terminal's
 // prelude (state/preludes.ts) is replayed into each new emulator before
 // the stream's first paint, which leaves it in the scrollback; first
 // paints here are built as herdr-core 0.1.21 sends them (their pieces
@@ -250,74 +248,6 @@ describe('a terminal’s pane', () => {
     return { p, attached, size };
   }
 
-  it('covered as it mounts, attaches once the emulator is loaded, with the pane’s grid, and draws nothing', async () => {
-    const { p, attached } = pane();
-    // TerminalView's effect, right after the pane is made: before the emulator loaded.
-    p.setShown(true, true);
-    await settle();
-    expect(link.attaches).toEqual([]);
-    await loadEmulator();
-    expect(link.attaches).toHaveLength(1);
-    // 800 by 400 CSS pixels of cells of 8 by 16.
-    expect(link.attaches[0]).toMatchObject({ machine: 'a', terminal: 't1', cols: 100, rows: 25, observe: false });
-    expect(attached).toHaveBeenCalledTimes(1);
-    expect(p.attached).toBe(true);
-    expect(renderers).toEqual([]);
-    expect(p.usage).toEqual({ hidden: false, attached: true, renderer: undefined });
-    // What is pasted into it reaches its program (Send to Agent).
-    p.paste('make a table');
-    expect(link.written.join('')).toContain('make a table');
-  });
-
-  it('attaches covered with the grid it has shown', async () => {
-    const shown = pane(640, 480).p;
-    await loadEmulator();
-    const covered = pane(640, 480).p;
-    covered.setShown(true, true);
-    await loadEmulator();
-    expect(link.attaches.map((a) => [a.cols, a.rows])).toEqual([
-      [80, 30],
-      [80, 30],
-    ]);
-    expect(shown.usage.renderer).toBe('webgl');
-    expect(covered.usage.renderer).toBeUndefined();
-    expect(renderers).toHaveLength(1);
-  });
-
-  it('covered, follows the pane’s size and takes the output it does not draw', async () => {
-    const { p, size } = pane();
-    p.setShown(true, true);
-    await loadEmulator();
-    size.w = 400;
-    observers.forEach((f) => f());
-    expect(link.resized).toEqual([[50, 25]]);
-    // The first paint is over and output comes: its credit goes back undrawn.
-    await new Promise((r) => setTimeout(r, 700));
-    link.acked = 0;
-    link.handler!.output(new TextEncoder().encode('hello'));
-    await settle();
-    expect(link.acked).toBe(5);
-    expect(renderers).toEqual([]);
-  });
-
-  it('uncovered, draws without attaching again', async () => {
-    const { p } = pane();
-    p.setShown(true, true);
-    await loadEmulator();
-    p.setShown(true, false);
-    expect(renderers).toHaveLength(1);
-    expect(renderers[0].size).toEqual([800, 400]);
-    expect(link.attaches).toHaveLength(1);
-    // The grid is the one it attached with: nothing is resized.
-    expect(link.resized).toEqual([]);
-    expect(p.usage).toEqual({ hidden: false, attached: true, renderer: 'webgl' });
-    // Covered again, it gives the renderer up.
-    p.setShown(true, true);
-    expect(renderers[0].disposed).toBe(true);
-    expect(p.usage.renderer).toBeUndefined();
-    expect(link.attaches).toHaveLength(1);
-  });
-
   it('kept before it attached, neither attaches nor draws until it is shown', async () => {
     const { p } = pane();
     p.setShown(false);
@@ -325,21 +255,20 @@ describe('a terminal’s pane', () => {
     expect(link.attaches).toEqual([]);
     expect(renderers).toEqual([]);
     expect(p.usage).toEqual({ hidden: true, attached: false, renderer: undefined });
-    // Its tab shown again with a surface over it: attached, still not drawn.
-    p.setShown(true, true);
+    // Its tab shown again: attached and drawn.
+    p.setShown(true);
     expect(link.attaches).toHaveLength(1);
-    expect(renderers).toEqual([]);
+    expect(renderers).toHaveLength(1);
+    expect(p.usage.renderer).toBe('webgl');
   });
 
-  it('goes from shown to kept to covered without a renderer on the way', async () => {
+  it('gives its renderer up while kept and makes another when shown again, attached once', async () => {
     const { p } = pane();
     await loadEmulator();
     expect(renderers).toHaveLength(1);
     p.setShown(false);
     expect(renderers[0].disposed).toBe(true);
-    p.setShown(true, true);
-    expect(renderers).toHaveLength(1);
-    p.setShown(false);
+    expect(p.usage.renderer).toBeUndefined();
     p.setShown(true);
     expect(renderers).toHaveLength(2);
     expect(link.attaches).toHaveLength(1);
