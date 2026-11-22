@@ -309,6 +309,83 @@ let generation = 0;
 /** At most this many expanded directories are remembered; beyond it the
  * oldest outside the root are forgotten when the root moves. */
 export const MAX_EXPANDED = 500;
+/** At most this many (machine, root) UI states are remembered across tab/root switches. */
+export const MAX_TREE_MEMORY = 32;
+
+export interface TreeMemory {
+  expanded: Record<string, true>;
+  selection: string[];
+  cursor?: string;
+  anchor?: string;
+  filter: string;
+  scrollTop: number;
+}
+
+const treeMemory = new Map<string, TreeMemory>();
+const memKey = (m: string, root: string) => `${m}\u0000${root}`;
+let lastAutoRevealed: string | undefined;
+
+export const getLastAutoRevealed = () => lastAutoRevealed;
+export const setLastAutoRevealed = (key: string | undefined) => {
+  lastAutoRevealed = key;
+};
+
+/** Reveal requests (auto-reveal or explicit Reveal in Explorer) for FilesPanel to scroll into view. */
+export const useReveal = create<{ path?: string; seq: number }>(() => ({ seq: 0 }));
+
+export function requestReveal(path: string) {
+  useReveal.setState((r) => ({ path, seq: r.seq + 1 }));
+}
+
+function putMemory(m: string, root: string, mem: TreeMemory) {
+  const k = memKey(m, root);
+  treeMemory.delete(k);
+  treeMemory.set(k, mem);
+  while (treeMemory.size > MAX_TREE_MEMORY) treeMemory.delete(treeMemory.keys().next().value!);
+}
+
+function saveTreeMemory(s: TreeState) {
+  if (!s.m || !s.root) return;
+  const prevScroll = treeMemory.get(memKey(s.m, s.root))?.scrollTop ?? 0;
+  putMemory(s.m, s.root, {
+    expanded: Object.fromEntries(Object.entries(s.expanded).filter(([p]) => within(p, s.root!))),
+    selection: [...s.selection],
+    cursor: s.cursor,
+    anchor: s.anchor,
+    filter: s.filter,
+    scrollTop: prevScroll,
+  });
+}
+
+export function getScrollMemory(m: string, root: string): number {
+  return treeMemory.get(memKey(m, root))?.scrollTop ?? 0;
+}
+
+export function setScrollMemory(m: string, root: string, scrollTop: number) {
+  const s = useTree.getState();
+  const same = s.m === m && s.root === root;
+  const prev = treeMemory.get(memKey(m, root));
+  putMemory(m, root, {
+    expanded: same ? Object.fromEntries(Object.entries(s.expanded).filter(([p]) => within(p, root))) : (prev?.expanded ?? {}),
+    selection: same ? [...s.selection] : (prev?.selection ?? []),
+    cursor: same ? s.cursor : prev?.cursor,
+    anchor: same ? s.anchor : prev?.anchor,
+    filter: same ? s.filter : (prev?.filter ?? ''),
+    scrollTop,
+  });
+}
+
+export function resetTreeMemory() {
+  treeMemory.clear();
+  lastAutoRevealed = undefined;
+  useReveal.setState({ path: undefined, seq: 0 });
+}
+
+useTree.subscribe((st, prev) => {
+  if (st.m === undefined && st.root === undefined && (prev.m !== undefined || prev.root !== undefined)) {
+    resetTreeMemory();
+  }
+});
 
 /** The directories the tree shows: the root and the expanded directories
  * below it whose parents are shown too (not those in a collapsed folder,
@@ -346,9 +423,9 @@ function pruned(s: TreeState, root: string): Pick<TreeState, 'dirs' | 'mtimes' |
 
 /** Shows machine m's tree rooted at root, taken for its workspace ws (the
  * one recorded before on the same machine when not given); another machine
- * starts afresh. Another root clears the selection (its rows may be gone,
- * and a key must not act on rows not shown) and keeps only what is below
- * it. */
+ * starts afresh unless visited before. UI state (expanded directories,
+ * selection, cursor, anchor, filter, scroll) is persisted per (m, root)
+ * across switches. */
 export function showRoot(m: string, root: string, ws?: string) {
   const s = useTree.getState();
   const place = ws ?? (s.m === m ? s.ws : undefined);
@@ -356,12 +433,72 @@ export function showRoot(m: string, root: string, ws?: string) {
     if (s.ws !== place) set({ ws: place });
     return;
   }
+  saveTreeMemory(s);
+  const mem = treeMemory.get(memKey(m, root));
+  if (mem) {
+    // Refresh LRU order.
+    treeMemory.delete(memKey(m, root));
+    treeMemory.set(memKey(m, root), mem);
+  }
   if (s.m !== m) {
     generation++;
-    set({ m, ws: place, root, dirs: {}, mtimes: {}, expanded: {}, selection: [], cursor: undefined, anchor: undefined, edit: undefined });
-  } else set((st) => ({ ws: place, root, ...pruned(st, root), selection: [], cursor: undefined, anchor: undefined, edit: undefined }));
+    set({
+      m,
+      ws: place,
+      root,
+      dirs: {},
+      mtimes: {},
+      expanded: mem ? { ...mem.expanded } : {},
+      selection: mem ? [...mem.selection] : [],
+      cursor: mem?.cursor,
+      anchor: mem?.anchor,
+      filter: mem?.filter ?? '',
+      edit: undefined,
+    });
+  } else {
+    set((st) => {
+      const p = pruned(st, root);
+      const merged = mem ? { ...p.expanded, ...mem.expanded } : p.expanded;
+      const expanded = Object.keys(merged).length > MAX_EXPANDED ? pruned({ ...st, expanded: merged }, root).expanded : merged;
+      return {
+        ws: place,
+        root,
+        ...p,
+        expanded,
+        selection: mem ? [...mem.selection] : [],
+        cursor: mem?.cursor,
+        anchor: mem?.anchor,
+        filter: mem ? mem.filter : '',
+        edit: undefined,
+      };
+    });
+  }
   const st = useTree.getState();
   for (const p of shownDirs(st)) if (!st.dirs[p]?.entries && !st.dirs[p]?.loading) void loadDir(p);
+}
+
+/** Expands all ancestor folders of path within the current root, loads any
+ * unlisted directories along the way, selects path and requests scrolling it
+ * into view. Returns false if path is not strictly inside the current root. */
+export function revealVisiblePath(path: string): boolean {
+  const s = useTree.getState();
+  if (!s.root || !within(path, s.root) || path === s.root) return false;
+  const toExpand: string[] = [];
+  for (let d = parentOf(path); within(d, s.root) && d !== s.root; d = parentOf(d)) {
+    if (!s.expanded[d]) toExpand.push(d);
+  }
+  if (toExpand.length) {
+    set((st) => {
+      const expanded = { ...st.expanded };
+      for (const d of toExpand) expanded[d] = true;
+      return { expanded };
+    });
+  }
+  const st = useTree.getState();
+  for (const d of shownDirs(st)) if (!st.dirs[d]?.entries && !st.dirs[d]?.loading) void loadDir(d);
+  select(path);
+  requestReveal(path);
+  return true;
 }
 
 /** Lists a directory (again). A failure keeps the entries listed before,

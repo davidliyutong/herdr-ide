@@ -11,15 +11,17 @@
 // Binary files, text that is not UTF-8 and files over MAX_SIZE offer a
 // download; a UTF-8 byte order mark is kept. Read-only mode edits nothing.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { saveHandlers } from '../saveKey';
 import { Download, FileDiff, FolderTree, Pin, RotateCcw, Save } from 'lucide-react';
 import { fileUrl } from '../../lib/files';
 import { useStore } from '../../state/store';
+import { terms, useTerms } from '../../state/terms';
+import * as L from '../../term/layout';
 import { t } from '../../i18n';
 import { keepEdit, keptEdit, takeEdit, useUnsaved, type KeptEdit } from '../../unsaved';
 import type { PaneViewProps } from '../api';
-import { createEditor, setLanguage, type CodeEditor, type Monaco, type TextModel } from '../monaco';
+import { createEditor, setLanguage, type CodeEditor, type EditorViewState, type Monaco, type TextModel } from '../monaco';
 import { ConflictError, errorText, FilesError, filesApi, type Entry } from './api';
 import { keepEditor, loadRevealable, reveal } from './ops';
 import { lineChanges, quickDiff, type LineChange } from './quickDiff';
@@ -170,10 +172,10 @@ function EditorBar({ m, pane, view, children }: Pick<PaneViewProps, 'm' | 'pane'
 }
 
 /** An image, video, audio file or PDF. */
-function MediaFile({ m, pane, view }: PaneViewProps) {
+function MediaFile({ m, pane, view, focused }: PaneViewProps) {
   const path = String(view.path ?? '');
   return (
-    <div className="files-editor" data-autofocus tabIndex={-1}>
+    <div className="files-editor" data-autofocus tabIndex={-1} onMouseDown={() => !focused && terms.mutate(m, (l) => L.focusPane(l, pane))}>
       <EditorBar m={m} pane={pane} view={view}>
         <span className="spacer" />
         <a className="icon" href={fileUrl(m, path, true)} title={t('preview.download')} aria-label={t('preview.download')}>
@@ -269,6 +271,81 @@ interface KeptText extends KeptEdit {
   savedAt: number;
   /** The text as loaded or saved (its line endings, eol.ts). */
   raw: string;
+}
+
+/** An editor's view state (cursor, selection, scroll position, folded regions)
+ * kept while its pane stays in the layout across tab/workspace switches. */
+interface KeptViewState {
+  path: string;
+  state: EditorViewState;
+}
+
+export const MAX_VIEW_STATES = 64;
+const viewStates = new Map<string, KeptViewState>();
+const viewKey = (m: string, pane: string) => `${m}\n${pane}`;
+let unfollowTerms: (() => void) | undefined;
+let unfollowStore: (() => void) | undefined;
+
+function paneGone(m: string, pane: string, machines = useTerms.getState().machines): boolean {
+  const known = useStore.getState().machines;
+  if (!known[m] && Object.keys(known).length > 0) return true;
+  const layout = machines[m]?.layout;
+  return !!layout && !layout.workspaces.some((ws) => ws.tabs.some((tb) => L.tabPanes(tb).includes(pane)));
+}
+
+function syncViewWatch() {
+  if (viewStates.size > 0) {
+    unfollowTerms ??= useTerms.subscribe((s) => dropGoneViewStates(s.machines));
+    unfollowStore ??= useStore.subscribe(() => dropGoneViewStates());
+  } else {
+    unfollowTerms?.();
+    unfollowTerms = undefined;
+    unfollowStore?.();
+    unfollowStore = undefined;
+  }
+}
+
+export function keepViewState(m: string, pane: string, path: string, state: EditorViewState) {
+  if (paneGone(m, pane)) {
+    dropViewState(m, pane);
+    return;
+  }
+  const k = viewKey(m, pane);
+  viewStates.delete(k);
+  viewStates.set(k, { path, state });
+  while (viewStates.size > MAX_VIEW_STATES) viewStates.delete(viewStates.keys().next().value!);
+  syncViewWatch();
+}
+
+export function keptViewState(m: string, pane: string, path: string): EditorViewState | undefined {
+  const entry = viewStates.get(viewKey(m, pane));
+  return entry && entry.path === path ? entry.state : undefined;
+}
+
+export function takeViewState(m: string, pane: string, path: string): EditorViewState | undefined {
+  const k = viewKey(m, pane);
+  const entry = viewStates.get(k);
+  if (!entry) return undefined;
+  viewStates.delete(k);
+  syncViewWatch();
+  return entry.path === path ? entry.state : undefined;
+}
+
+export function dropViewState(m: string, pane: string) {
+  if (viewStates.delete(viewKey(m, pane))) syncViewWatch();
+}
+
+export function dropGoneViewStates(machines = useTerms.getState().machines) {
+  for (const k of [...viewStates.keys()]) {
+    const [m, pane] = k.split('\n');
+    if (paneGone(m, pane, machines)) viewStates.delete(k);
+  }
+  syncViewWatch();
+}
+
+export function resetViewStates() {
+  viewStates.clear();
+  syncViewWatch();
 }
 
 function TextEditor({ m, pane, view, focused }: PaneViewProps) {
@@ -400,12 +477,15 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   // The editor, once; the file, for each path. Text with unsaved changes
   // outlives the component while the pane is in its layout (unsaved.ts):
   // the pane takes it back, with the version it was edited from, when it
-  // shows again.
+  // shows again. View state (cursor, selection, scroll) outlives it too
+  // (viewStates) even when the file has no unsaved changes.
+  const pendingViewState = useRef<EditorViewState | undefined>(undefined);
   useEffect(() => {
     let disposed = false;
     let created: { editor: CodeEditor; monaco: Monaco } | undefined;
     let sub: { dispose(): void } | undefined;
     let keys: { dispose(): void } | undefined;
+    pendingViewState.current = undefined;
     (async () => {
       const first = await loadText(m, path).catch((e): Loaded => ({ kind: 'error', message: errorText(e) }));
       if (disposed) return;
@@ -417,6 +497,8 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       created = await createEditor(el, { readOnly: useStore.getState().readOnly });
       if (disposed) return created.editor.dispose();
       const { monaco, editor } = created;
+      const savedView = takeViewState(m, pane, path);
+      if (savedView) pendingViewState.current = savedView;
       // A model of the pane's own: another pane of the file has its own text.
       const uri = monaco.Uri.from({ scheme: 'file', path, query: `m=${m}&pane=${pane}` });
       const kept = takeEdit<KeptText>(m, pane, (k) => k.path === path);
@@ -445,6 +527,12 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       ed.current = undefined;
       sub?.dispose();
       keys?.dispose();
+      const viewState = pendingViewState.current ?? c?.editor.saveViewState?.() ?? null;
+      pendingViewState.current = undefined;
+      if (c) {
+        if (viewState && !paneGone(m, pane)) keepViewState(m, pane, path, viewState);
+        else if (paneGone(m, pane)) dropViewState(m, pane);
+      }
       const model = c?.editor.getModel();
       c?.editor.dispose();
       if (!model) return;
@@ -474,7 +562,16 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       });
     };
     // focused only matters for the first load.
-  }, [m, path, showText]);
+  }, [m, pane, path, showText]);
+
+  // Restore saved view state once the editor host is visible and laid out.
+  useLayoutEffect(() => {
+    if ((status.kind !== 'ready' && status.kind !== 'conflict') || !pendingViewState.current || !ed.current) return;
+    const state = pendingViewState.current;
+    pendingViewState.current = undefined;
+    if (host.current && host.current.clientHeight > 0) ed.current.editor.layout?.();
+    ed.current.editor.restoreViewState?.(state);
+  }, [status, m, pane, path]);
 
   useEffect(() => {
     ed.current?.editor.updateOptions({ readOnly: locked });
@@ -546,7 +643,13 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   );
 
   return (
-    <div className="files-editor" data-autofocus tabIndex={-1} onKeyDown={saveKeys.root}>
+    <div
+      className="files-editor"
+      data-autofocus
+      tabIndex={-1}
+      onMouseDown={() => !focused && terms.mutate(m, (l) => L.focusPane(l, pane))}
+      onKeyDown={saveKeys.root}
+    >
       <EditorBar m={m} pane={pane} view={view}>
         {dirty && (
           <span className="files-dirty" title={t('files.unsaved')} aria-label={t('files.unsaved')}>

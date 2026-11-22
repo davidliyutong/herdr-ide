@@ -18,12 +18,15 @@ import type { MachineState } from '../lib/machine';
 import { isItem, type MenuItem } from '../contextMenu';
 import { useDialog, type DialogRequest } from '../dialog';
 import { t } from '../i18n';
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { innerFolders, readEntries, uploadInto, type Picked } from '../plugins/files/upload';
-import { menuFor, panelMenu } from '../plugins/files/ops';
-import { dragOutUrl } from '../plugins/files/FilesPanel';
+import { menuFor, panelMenu, pasteFiles } from '../plugins/files/ops';
+import { dragOutUrl, FilesPanel } from '../plugins/files/FilesPanel';
 import { useTree } from '../plugins/files/tree';
 import { cancelUpload, uploadPlaced, useTransfers } from '../transfers';
 import { UploadCancelled } from '../lib/files';
+import { FakeCore, settle } from './fakeTerms';
 
 const file = (name: string, size = 3) => new File([new Uint8Array(size)], name);
 const pick = (rel: string, size = 3): Picked => ({ rel, file: file(rel.split('/').pop()!, size) });
@@ -295,6 +298,245 @@ describe('menus', () => {
     const item = menuFor('m', [], () => false).find((e): e is MenuItem => isItem(e) && e.label === t('files.showUploads'))!;
     item.run!();
     expect(useTransfers.getState().panel).toBe(true);
+  });
+});
+
+describe('pasting locally copied files', () => {
+  const dirEntry = (name: string, children: FileSystemEntry[]): FileSystemEntry =>
+    ({
+      name,
+      isFile: false,
+      isDirectory: true,
+      createReader: () => {
+        let done = false;
+        return {
+          readEntries: (ok: (b: FileSystemEntry[]) => void) => {
+            const batch = done ? [] : children;
+            done = true;
+            setTimeout(() => ok(batch));
+          },
+        };
+      },
+    }) as unknown as FileSystemEntry;
+  const fileEntry = (name: string): FileSystemEntry =>
+    ({
+      name,
+      isFile: true,
+      isDirectory: false,
+      file: (ok: (f: File) => void) => ok(file(name)),
+    }) as unknown as FileSystemEntry;
+
+  it('uploads pasted clipboard files and folders onto a remote machine', async () => {
+    const folder = dirEntry('assets', [fileEntry('logo.png')]);
+    const items = [
+      { kind: 'file', type: '', webkitGetAsEntry: () => folder, getAsFile: () => null },
+      { kind: 'file', type: 'text/plain', webkitGetAsEntry: () => null, getAsFile: () => file('note.txt', 5) },
+    ] as unknown as DataTransferItemList;
+    await pasteFiles('m', '/r/sub', { items, files: [] as unknown as FileList });
+    expect(posts.filter(([a]) => a === 'mkdir')).toEqual([['mkdir', { path: '/r/sub/assets', unique: true }]]);
+    expect(uploads()).toEqual([
+      ['/r/sub/assets/logo.png', false],
+      ['/r/sub/note.txt', false],
+    ]);
+    expect(useTree.getState().expanded['/r/sub']).toBe(true);
+    expect(
+      useStore.getState().toasts.some((toast) => toast.msg.includes(t('surface.uploadingInto', { n: 2, machine: 'box', dir: '/r/sub' }))),
+    ).toBe(true);
+  });
+
+  it('falls back to clipboardData.files and handles unnamed clipboard images', async () => {
+    const img = new File([new Uint8Array([1, 2, 3])], '', { type: 'image/png' });
+    await pasteFiles('m', '/r', {
+      items: [] as unknown as DataTransferItemList,
+      files: [img, file('doc.pdf', 4)] as unknown as FileList,
+    });
+    expect(uploads()).toEqual([
+      ['/r/paste.png', false],
+      ['/r/doc.pdf', false],
+    ]);
+  });
+
+  it('reports unreadable pasted items with an error toast', async () => {
+    const badEntry = {
+      name: 'secret',
+      isFile: true,
+      isDirectory: false,
+      file: (_ok: (f: File) => void, err: (e: Error) => void) => err(new Error('denied')),
+    } as unknown as FileSystemEntry;
+    const items = [{ kind: 'file', type: '', webkitGetAsEntry: () => badEntry, getAsFile: () => null }] as unknown as DataTransferItemList;
+    await pasteFiles('m', '/r', { items, files: [] as unknown as FileList });
+    expect(uploads()).toEqual([]);
+    expect(useStore.getState().toasts.at(-1)).toMatchObject({
+      msg: t('files.paste.unreadable', { n: 1 }),
+      kind: 'error',
+    });
+  });
+
+  it('uploads when Electron desktopShell.pathForFile is present for a remote machine, and copies on local', async () => {
+    const prevShell = (globalThis as { desktopShell?: unknown }).desktopShell;
+    (globalThis as { desktopShell?: { pathForFile: (f: File) => string } }).desktopShell = {
+      pathForFile: (f: File) => `/Users/me/Desktop/${f.name}`,
+    };
+    vi.resetModules();
+    try {
+      const { pasteFiles: pasteWithShell } = await import('../plugins/files/ops');
+      const { useStore: storeWithShell } = await import('../state/store');
+      storeWithShell.getState().setReadOnly(false);
+      storeWithShell
+        .getState()
+        .setMachines([
+          { id: 'm', label: 'box', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState,
+          { id: 'local', label: 'mac', kind: 'local', status: 'ready', info: { home: '/Users/me' } } as unknown as MachineState,
+        ]);
+
+      // Remote machine: still uploads rather than copying local paths on the remote host.
+      const f1 = file('remote.txt', 6);
+      await pasteWithShell('m', '/r', {
+        items: [{ kind: 'file', type: 'text/plain', webkitGetAsEntry: () => null, getAsFile: () => f1 }] as unknown as DataTransferItemList,
+        files: [f1] as unknown as FileList,
+      });
+      expect(uploads()).toEqual([['/r/remote.txt', false]]);
+      expect(posts.some(([a]) => a === 'copy')).toBe(false);
+
+      // Local machine: copies local file paths directly.
+      const copied: Array<{ paths: string[]; dir: string }> = [];
+      vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+        const url = new URL(input, 'http://x');
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        if (url.pathname === '/api/m/local/p/files/copy') copied.push(body);
+        return new Response(JSON.stringify({ paths: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      });
+      const f2 = file('local.txt', 6);
+      await pasteWithShell('local', '/Users/me/dest', {
+        items: [{ kind: 'file', type: 'text/plain', webkitGetAsEntry: () => null, getAsFile: () => f2 }] as unknown as DataTransferItemList,
+        files: [f2] as unknown as FileList,
+      });
+      expect(copied).toEqual([{ paths: ['/Users/me/Desktop/local.txt'], dir: '/Users/me/dest' }]);
+    } finally {
+      if (prevShell === undefined) delete (globalThis as { desktopShell?: unknown }).desktopShell;
+      else (globalThis as { desktopShell?: unknown }).desktopShell = prevShell;
+      vi.resetModules();
+    }
+  });
+
+  it('handles paste events on a focused folder/node in FilesPanel and ignores inputs and read-only mode', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const core = new FakeCore();
+    core.machine('m', [FakeCore.term('p1', { cwd: '/home/u/src' })], {
+      version: 2,
+      workspaces: [{ id: 'w1w1w1w1', name: 'one', cwd: '', tabs: [{ root: { terminal: 'p1' }, focused: 'p1' }], selected: 0 }],
+      selected: 0,
+    });
+    core.install();
+    useStore.getState().selectMachine('m');
+    core.model.subscribe('m');
+    await settle();
+
+    vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+      const url = new URL(input, 'http://x');
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      const json = (v: unknown, status = 200) =>
+        new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } });
+      if (url.pathname === '/api/m/m/list') {
+        const p = url.searchParams.get('path')!;
+        if (p === '/home/u/src')
+          return json({
+            dir: { path: p },
+            entries: [
+              { name: 'sub', is_dir: true, size: 0, mode: 0o755, mtime: 1 },
+              { name: 'a.txt', is_dir: false, size: 1, mode: 0o644, mtime: 1 },
+            ],
+          });
+        return json({ dir: { path: p }, entries: [] });
+      }
+      if (url.pathname === '/api/m/m/p/files/stat') {
+        return json({ entries: body.paths.map((p: string) => ({ path: p, exists: false, is_dir: false, size: 0, mtime: 1 })) });
+      }
+      return json({ paths: [] });
+    });
+
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root: Root = createRoot(host);
+    try {
+      await act(async () => root.render(createElement(FilesPanel)));
+      await act(async () => settle());
+
+      // Focus the 'sub' folder row and paste a file.
+      await act(async () => host.querySelector<HTMLElement>('.files-row[data-path="/home/u/src/sub"]')!.click());
+      await act(async () => settle());
+      const tree = host.querySelector<HTMLElement>('.files-tree')!;
+      const dispatchPaste = async (target: HTMLElement, files: File[]) => {
+        const ev = new Event('paste', { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, 'clipboardData', { value: { files, items: [] } });
+        await act(async () => target.dispatchEvent(ev));
+        await act(async () => settle());
+        return ev;
+      };
+
+      const ev1 = await dispatchPaste(tree, [file('pasted.txt', 4)]);
+      expect(ev1.defaultPrevented).toBe(true);
+      expect(uploads()).toEqual([['/home/u/src/sub/pasted.txt', false]]);
+
+      // Focusing a file row pastes into its parent directory (/home/u/src).
+      FakeXhr.reset();
+      await act(async () => host.querySelector<HTMLElement>('.files-row[data-path="/home/u/src/a.txt"]')!.click());
+      await act(async () => settle());
+      await dispatchPaste(tree, [file('sibling.txt', 4)]);
+      expect(uploads()).toEqual([['/home/u/src/sibling.txt', false]]);
+
+      // Pasting inside an inline edit input does not trigger file upload.
+      FakeXhr.reset();
+      await act(async () => tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })));
+      const input = host.querySelector<HTMLInputElement>('.files-row input')!;
+      const evInput = await dispatchPaste(input, [file('ignored.txt', 4)]);
+      expect(evInput.defaultPrevented).toBe(false);
+      expect(uploads()).toEqual([]);
+
+      // Read-only mode ignores file paste.
+      await act(async () => useStore.getState().setReadOnly(true));
+      const evRo = await dispatchPaste(tree, [file('ro.txt', 4)]);
+      expect(evRo.defaultPrevented).toBe(false);
+      expect(uploads()).toEqual([]);
+
+      // Earlier in-app copy does not block pasting newly copied OS files via Cmd/Ctrl+V.
+      await act(async () => useStore.getState().setReadOnly(false));
+      FakeXhr.reset();
+      useTree.setState({ clipboard: { m: 'm', paths: ['/home/u/src/a.txt'], cut: false } });
+      const keyV = new KeyboardEvent('keydown', { key: 'v', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true });
+      await act(async () => tree.dispatchEvent(keyV));
+      expect(keyV.defaultPrevented).toBe(false);
+      await dispatchPaste(tree, [file('os-newer.txt', 4)]);
+      expect(uploads()).toEqual([['/home/u/src/os-newer.txt', false]]);
+
+      // In-app copy event writes marker so an older OS file copy does not shadow it.
+      FakeXhr.reset();
+      const written: Record<string, string> = {};
+      const copyEv = new Event('copy', { bubbles: true, cancelable: true });
+      Object.defineProperty(copyEv, 'clipboardData', {
+        value: {
+          setData: (type: string, val: string) => {
+            written[type] = val;
+          },
+        },
+      });
+      await act(async () => tree.dispatchEvent(copyEv));
+      expect(copyEv.defaultPrevented).toBe(true);
+      const markerTypes = Object.keys(written);
+      expect(markerTypes.length).toBe(1);
+
+      const pasteWithMarker = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(pasteWithMarker, 'clipboardData', {
+        value: { types: [...markerTypes, 'Files'], files: [file('stale-os.txt', 4)], items: [] },
+      });
+      await act(async () => tree.dispatchEvent(pasteWithMarker));
+      await act(async () => settle());
+      expect(pasteWithMarker.defaultPrevented).toBe(true);
+      expect(uploads()).toEqual([]);
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
   });
 });
 

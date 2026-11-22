@@ -74,6 +74,12 @@
 .files-rows {
   position: relative;
 }
+.files-row.active:not(.selected) {
+  background: var(--bg-2);
+}
+.files-row.active .tree-label {
+  font-weight: 500;
+}
 .files-edit {
   flex: 1;
   min-width: 0;
