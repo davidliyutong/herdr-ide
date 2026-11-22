@@ -587,20 +587,20 @@ func parseStatus(out []byte, cut bool) (st *Status, whole bool) {
 			// 1 XY sub mH mI mW hH hI path
 			f := strings.SplitN(rec, " ", 9)
 			if len(f) == 9 {
-				st.Files = append(st.Files, File{Path: f[8], X: f[1][:1], Y: f[1][1:], Kind: "changed", Submodule: f[2][0] == 'S'})
+				st.Files = append(st.Files, File{Path: f[8], X: f[1][:1], Y: f[1][1:], Kind: "changed", Submodule: len(f[2]) > 0 && f[2][0] == 'S'})
 			}
 		case '2':
 			// 2 XY sub mH mI mW hH hI Xscore path, then the original path
 			f := strings.SplitN(rec, " ", 10)
 			if len(f) == 10 && i+1 < len(recs) {
 				i++
-				st.Files = append(st.Files, File{Path: f[9], Orig: recs[i], X: f[1][:1], Y: f[1][1:], Kind: "renamed", Submodule: f[2][0] == 'S'})
+				st.Files = append(st.Files, File{Path: f[9], Orig: recs[i], X: f[1][:1], Y: f[1][1:], Kind: "renamed", Submodule: len(f[2]) > 0 && f[2][0] == 'S'})
 			}
 		case 'u':
 			// u XY sub m1 m2 m3 mW h1 h2 h3 path
 			f := strings.SplitN(rec, " ", 11)
 			if len(f) == 11 {
-				st.Files = append(st.Files, File{Path: f[10], X: f[1][:1], Y: f[1][1:], Kind: "unmerged", Submodule: f[2][0] == 'S'})
+				st.Files = append(st.Files, File{Path: f[10], X: f[1][:1], Y: f[1][1:], Kind: "unmerged", Submodule: len(f[2]) > 0 && f[2][0] == 'S'})
 			}
 		case '?':
 			st.Files = append(st.Files, File{Path: rec[2:], X: "?", Y: "?", Kind: "untracked"})

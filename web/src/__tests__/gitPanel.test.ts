@@ -700,6 +700,15 @@ describe('GitPanel', () => {
     await act(async () => parentRow.click());
     await flush();
     expect(host.querySelector('.git-title')!.textContent).toBe('repo');
+    // Keyboard Space on submodule row does not open a diff; Enter opens the submodule repository.
+    const list = host.querySelector<HTMLElement>('.git-groups')!;
+    await act(async () => rowOf(t('git.group.changes'), 'sub').click());
+    await key(list, ' ');
+    await flush();
+    expect(host.querySelector('.git-title')!.textContent).toBe('repo');
+    await key(list, 'Enter');
+    await flush();
+    expect(host.querySelector('.git-title')!.textContent).toBe('sub');
   });
 
   it('says how long ago a commit was', () => {

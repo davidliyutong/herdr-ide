@@ -622,11 +622,18 @@ function RepoView({
     if (!row) return;
     if (ev.key === 'Enter') {
       handled();
-      // Folders open and close; the files selected open their diffs.
-      const files = targetsOf(row).filter((r) => r.kind === 'file');
+      // Folders open and close; a single submodule/nested repo opens that
+      // repository; otherwise regular files selected open their diffs.
+      const targets = targetsOf(row);
+      if (targets.length === 1 && row.kind === 'file' && isDirFile(row.g.file)) {
+        const subRoot = entryPathOf(row.g.file.path);
+        if (onOpenRepo && allRoots?.includes(subRoot)) onOpenRepo(subRoot);
+        return;
+      }
+      const files = targets.filter((r) => r.kind === 'file' && !isDirFile(r.g.file));
       if (!files.length) return row.kind === 'dir' ? toggleDir(row.id) : undefined;
       void openDiffs(rowFiles(files), row.group);
-    } else if (ev.key === ' ' && row.kind === 'file') {
+    } else if (ev.key === ' ' && row.kind === 'file' && !isDirFile(row.g.file)) {
       handled();
       void openDiffs([row.g], row.group, true);
     } else if (ev.key === 'Escape' && sel.selection.length > 1) {
