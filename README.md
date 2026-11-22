@@ -36,7 +36,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   workspaces and machines to reorder them; drag the sidebar's edge or a split's
   handle to resize them (a double click restores the default or equal
   sizes); every tab has a × and a middle
-  click closes it, and a pinned tab stays first with a pin instead;
+  click closes it, and a pinned tab stays first with a pin instead and
+  `cmd+w` does not close it;
   right-click a pane header, tab, workspace or machine
   for its commands, or a pane's text to copy, paste or open a path. Everything is
   in reach of the mouse; the few default keys take nothing from the
@@ -75,14 +76,19 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   or Grok running headless on any machine, drawn by the app: text and
   thoughts as they stream, permissions, questions and plans answered in
   cards, the model, effort and permission mode chosen per chat (full
-  access only where the machine's settings allow it), images, files named
+  access only where the machine's settings allow it, including in a new
+  Claude Code chat before its first message), images, files named
   with `@`, slash commands, messages queued while the agent works,
   compacting, and the cost, context and limits below the composer and in
   the status bar. Chats count in the agent inbox, dots and notifications
   as agents in terminals do. A chat host on each machine, run by its
   terminal core, keeps the chats across disconnects and restarts within
-  the limits you set per machine and stops idle agents; a session started
-  in a terminal opens as a chat (**Continue in Chat**, or the Chats
+  the limits you set per machine and stops idle agents; archived chats
+  stay apart in the Chats panel, restorable, until those limits remove
+  them first. A chat host of another build than the app (after an update
+  or a reinstalled local build) is pointed out, with a button to restart
+  it once no chat runs. A session started in a terminal opens as
+  a chat (**Continue in Chat**, or the Chats
   panel's earlier sessions), and a chat goes on in a terminal
   (**Continue in Terminal**) ([37](docs/features/37-agent-chats.md)).
 - **Terminal history.** With **Keep snapshots of terminal output** on for

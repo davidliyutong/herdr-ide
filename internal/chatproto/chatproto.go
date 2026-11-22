@@ -101,6 +101,14 @@ const (
 	// OpDelete forgets Request.Chat and its log, ending its agent process
 	// first. The agent's own session files stay.
 	OpDelete = "delete"
+	// OpArchive puts Request.Chat away: its agent process ends as with
+	// OpClose, what the user had not seen of it counts as seen, and the
+	// chat is kept with its log, in StateClosed with Chat.Archived, until
+	// the host's limits remove it (archived chats before the other closed
+	// ones). OpUnarchive takes it back, and so does a start of its agent
+	// (a prompt).
+	OpArchive   = "archive"
+	OpUnarchive = "unarchive"
 	// OpSessions lists the sessions the agent of Request.Kind kept for the
 	// directory Request.Cwd, a page at a time from Request.Cursor
 	// (Response.Sessions, Response.NextCursor).
@@ -233,7 +241,8 @@ type Request struct {
 	Import bool `json:"import,omitempty"`
 	// Options are what OpNew's chat starts with.
 	Options *Options `json:"options,omitempty"`
-	// Chat is the chat of OpAttach, OpClose, OpDelete and OpSeen.
+	// Chat is the chat of OpAttach, OpClose, OpDelete, OpArchive,
+	// OpUnarchive and OpSeen.
 	Chat string `json:"chat,omitempty"`
 	// From is the last sequence number an attaching client has: the stored
 	// events after it are sent.
@@ -443,6 +452,10 @@ type Chat struct {
 	// Closed is when the chat was closed (StateClosed); the host's
 	// retention counts from it.
 	Closed time.Time `json:"closed,omitzero"`
+	// Archived is when the chat was archived (OpArchive); zero while it is
+	// not. The host's retention of an archived chat counts from the later
+	// of it and Closed.
+	Archived time.Time `json:"archived,omitzero"`
 	// HandedOff: the session went on in a terminal (OpHandoff); what it
 	// did there is brought into the log when the chat takes a prompt
 	// again.
@@ -465,6 +478,7 @@ func (c *Chat) StateOf() ChatState {
 	return ChatState{
 		ID: c.ID, Kind: c.Kind, Title: c.Title, Cwd: c.Cwd, State: c.State, Status: c.Status,
 		Updated: c.Updated, Seq: c.Seq, Seen: c.Seen, Unread: c.Status == StatusDone, SessionID: c.SessionID,
+		Archived: !c.Archived.IsZero(),
 	}
 }
 
@@ -483,6 +497,8 @@ type ChatState struct {
 	Unread    bool      `json:"unread,omitempty"`
 	Stale     bool      `json:"stale,omitempty"`
 	SessionID string    `json:"sessionId"`
+	// Archived: the chat was archived (OpArchive).
+	Archived bool `json:"archived,omitempty"`
 }
 
 // Capabilities are what a chat's agent can do, for the UIs to offer.

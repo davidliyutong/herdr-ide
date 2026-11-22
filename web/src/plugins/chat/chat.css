@@ -191,6 +191,41 @@
   align-self: flex-start;
   margin: 4px 12px;
 }
+.chat-host-outdated {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--fg-dim);
+}
+.chat-host-outdated > span {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.chat-archived {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  border-top: 1px solid var(--line);
+}
+.chat-archived-toggle {
+  align-self: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  margin: 2px 4px;
+  color: var(--fg-dim);
+}
+.chat-archived-toggle svg {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.chat-archived .chat-row-title {
+  color: var(--fg-dim);
+}
 
 /* ---- the status bar's item ---- */
 .chat-usage-item {

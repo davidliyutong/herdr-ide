@@ -98,9 +98,18 @@ Plugins; `internal/plugins/files/settings.go`):
   directory shows it as it was, listed again. The tree's UI state per
   machine and root (expanded directories, selection, cursor, filter and
   scroll position; at most 32) is remembered across tab, panel, workspace
-  and machine switches and restored when returning. Only the listings of the
-  root and the expanded directories below it are kept: another root, or
-  Collapse Folders, drops the rest. Moving to an unvisited root starts
+  and machine switches and restored when returning. The scroll position is
+  recorded by the tree's scroll events, for the root they show, and never
+  read once the tree shows another root: the browser has clamped it to the
+  new rows' height by then (to 0 while the new root is being listed),
+  which would overwrite where the user left the old root. A scroll event
+  that finds the tree where the panel put it (a restore) or found it (that
+  clamp) records nothing. Returning restores the position once the rows
+  are tall enough to scroll to it, or once every shown directory is listed
+  (a directory that got shorter stops at its end and keeps the position
+  remembered). Only the listings of the root and the expanded directories
+  below it are kept: another root, or Collapse Folders, drops the rest.
+  Moving to an unvisited root starts
   without a selection so a key never acts on rows the tree no longer shows. A
   listing that fails keeps the entries listed before and is tried again by
   the next poll, whatever started it (its recorded time is forgotten). A

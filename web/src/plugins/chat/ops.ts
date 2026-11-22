@@ -1,7 +1,8 @@
 // What the user does with chats: a new one (in the focused pane's
 // directory, else the machine's home, in the permission mode of the
 // setting chat.permissionMode), showing one (its pane, else a new tab),
-// renaming, closing and deleting one, and the menus that offer these.
+// renaming, closing, archiving, restoring and deleting one, and the menus
+// that offer these.
 import { createElement, type ComponentType } from 'react';
 import { CirclePower, Pencil, SquareTerminal, Trash2 } from 'lucide-react';
 import { create } from 'zustand';
@@ -14,10 +15,10 @@ import { useSettings } from '../../settings';
 import { useStore } from '../../state/store';
 import * as L from '../../term/layout';
 import { ProviderLogo } from '../usage/logos';
-import { chatApi, failureText, permissionMode } from './api';
+import { ChatFailure, chatApi, failureText, permissionMode } from './api';
 import { canContinueInTerminal, continueInTerminal } from './handoff';
 import { STATE_DELETED } from './protocol';
-import { applyStates, chatState, loadAgents, offeredKinds, upsertState } from './state';
+import { applyStates, chatState, loadAgents, offeredKinds, upsertState, useChats } from './state';
 import { withSource } from './source';
 import { CHAT_PLUGIN, CHAT_VIEW, chatPane, chatRef } from './view';
 
@@ -75,6 +76,9 @@ const toast = (msg: string) => useStore.getState().toast(msg, undefined, undefin
  * workspace of the pane from (the focused pane's by default). Resolves to
  * the pane's key. */
 export async function openChat(m: string, chat: string, kind: string, from?: string): Promise<string | undefined> {
+  // Shown again, an archived chat is taken back (from the Chats panel's
+  // archived chats or the earlier sessions).
+  if (chatState(m, chat)?.archived && !useStore.getState().readOnly) void restoreChat(m, chat, { quiet: true });
   const pane = chatPane(m, chat);
   if (pane) {
     actions.focusPane(m, pane);
@@ -115,20 +119,87 @@ export async function closeChat(m: string, chat: string) {
   }
 }
 
-/** Archives a chat from the sidebar list (its agent's own session stays in
- * history) and reminds the user in a bottom-left toast. */
+/** Archives a chat from the sidebar list: its agent ends and the chat,
+ * with its log, is kept apart (the Chats panel's archived chats) until the
+ * machine's chat limits remove it. A bottom-left toast says so and can
+ * take it back. */
 export async function archiveChat(m: string, chat: string): Promise<boolean> {
   const st = chatState(m, chat);
   const agent = agentName(st?.kind);
   const title = st?.title || agent;
   try {
-    await chatApi.remove(m, chat);
+    await chatApi.archive(m, chat);
   } catch (e) {
     toast(failureText(e, agent, 'chat.archiveFailed'));
     return false;
   }
-  if (st) applyStates(m, [{ ...st, state: STATE_DELETED }], false);
-  useStore.getState().toast(t('chat.archived', { title }), undefined, undefined, 'info', 'bottom-left');
+  const cur = chatState(m, chat);
+  if (cur && !cur.archived) applyStates(m, [{ ...cur, archived: true, status: 'idle', unread: undefined }], false);
+  useStore
+    .getState()
+    .toast(
+      t('chat.archived', { title }),
+      { label: t('chat.restore'), run: () => void restoreChat(m, chat) },
+      undefined,
+      'info',
+      'bottom-left',
+    );
+  return true;
+}
+
+/** A machine's name for people. */
+export const machineLabel = (m: string): string => useStore.getState().machines[m]?.label || m;
+
+/** How long restartHost waits for the old host to end before it starts
+ * this build's, and how often it looks. */
+const HOST_END_MS = 5000;
+const HOST_END_EVERY_MS = 250;
+
+/** Restarts machine m's chat host so that one of the core's build takes
+ * its place: the host ends (it refuses while a chat starts, works or
+ * waits), ending its idle agents, whose chats resume their sessions at
+ * their next message; once it is gone, a host of this build starts. A
+ * failure is said in a toast. */
+export async function restartHost(m: string): Promise<boolean> {
+  const machine = machineLabel(m);
+  try {
+    await chatApi.stopHost(m);
+  } catch (e) {
+    const busy = e instanceof ChatFailure && e.code === 'busy';
+    toast(busy ? t('chat.host.busy', { machine }) : failureText(e, machine, 'chat.host.restartFailed'));
+    return false;
+  }
+  // The old host ends within its grace; GET agents starts none.
+  for (let waited = 0; waited < HOST_END_MS; waited += HOST_END_EVERY_MS) {
+    try {
+      await chatApi.agents(m);
+    } catch (e) {
+      if (e instanceof ChatFailure && e.code === 'not_running') break;
+    }
+    await new Promise((r) => setTimeout(r, HOST_END_EVERY_MS));
+  }
+  try {
+    await chatApi.startAgents(m);
+  } catch {
+    // The next use starts it.
+  }
+  // The core's watch tells the new host's build.
+  useChats.setState((s) => ({ hosts: { ...s.hosts, [m]: { version: '', outdated: false } } }));
+  useStore.getState().toast(t('chat.host.restarted', { machine }), undefined, undefined, 'info');
+  return true;
+}
+
+/** Takes an archived chat back into the Chats panel's list; a failure is
+ * said in a toast unless quiet. */
+export async function restoreChat(m: string, chat: string, o: { quiet?: boolean } = {}): Promise<boolean> {
+  try {
+    await chatApi.unarchive(m, chat);
+  } catch (e) {
+    if (!o.quiet) toast(failureText(e, agentName(chatState(m, chat)?.kind), 'chat.restoreFailed'));
+    return false;
+  }
+  const cur = chatState(m, chat);
+  if (cur?.archived) applyStates(m, [{ ...cur, archived: undefined }], false);
   return true;
 }
 

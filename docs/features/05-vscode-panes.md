@@ -186,9 +186,9 @@ nothing VS Code's content left keeps running there
   extension binds `cmd+w` (`ctrl+w` elsewhere) to `closePane`: the core
   passes it to the pages as `bridge.close {m, window, folders}`, and the
   page whose iframe of that window has the keyboard closes its pane, as
-  `pane.close` would (`closeWindowPane`; nothing while a dialog is open
-  or in read-only mode). So `cmd+w` held closes the editors, then the
-  pane.
+  `pane.close` would (`closeWindowPane`; nothing while a dialog is open,
+  in read-only mode or for the only pane of a pinned tab). So `cmd+w`
+  held closes the editors, then the pane.
 - The keyboard goes back from VS Code to the page with the bridge
   extension's **Give the Keyboard Back** (`ctrl+b` on macOS,
   `ctrl+alt+shift+b` elsewhere, where `ctrl+b` is VS Code's sidebar; not

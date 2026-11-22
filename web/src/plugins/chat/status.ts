@@ -95,7 +95,7 @@ export const chatViewStatus: ViewStatusDef = {
     if (!states) return [];
     const out: UnopenedAgent[] = [];
     for (const st of Object.values(states)) {
-      if (st.status !== 'blocked' && st.status !== 'done' && st.status !== 'working') continue;
+      if (st.archived || (st.status !== 'blocked' && st.status !== 'done' && st.status !== 'working')) continue;
       if (chatPane(m, st.id)) continue;
       out.push({
         id: `chat:${st.id}`,

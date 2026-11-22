@@ -45,6 +45,9 @@ type scriptLine struct {
 // script is a fake's script and its canned answers.
 type script struct {
 	Lines []scriptLine `json:"lines"`
+	// NoConversation makes --resume fail as a real newly initialized session
+	// does before its first turn has been saved.
+	NoConversation bool `json:"noConversation,omitempty"`
 	// Canned are the answers to control requests of the adapter's own, by
 	// subtype; Silent are the subtypes never answered.
 	Canned map[string]json.RawMessage `json:"canned"`
@@ -105,6 +108,14 @@ func fakeMain() {
 		}
 	}
 	record(fakeRecord{Argv: os.Args[1:], Env: env, Pid: os.Getpid()})
+	if sc.NoConversation {
+		for _, a := range os.Args[1:] {
+			if id, ok := strings.CutPrefix(a, "--resume="); ok {
+				fmt.Fprintln(os.Stderr, "No conversation found with session ID:", id)
+				os.Exit(1)
+			}
+		}
+	}
 	var sock net.Conn
 	if p := os.Getenv("FAKE_CLAUDE_SOCK"); p != "" {
 		sock, _ = net.Dial("unix", p)

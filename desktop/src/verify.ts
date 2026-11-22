@@ -253,7 +253,7 @@ export function verifier(key: string, deps: VerifyDeps): Verifier {
   };
   /** The kind of unlock key this install can keep, if any. */
   const unlockKind = async (): Promise<'enclave' | 'hello' | null> => {
-    if (!key || !deps.unlockStore?.available()) return null;
+    if (!key || !deps.unlockStore || !(await deps.unlockStore.available())) return null;
     if (deps.platform === 'darwin' && deps.enclave) {
       const a = await deps.enclave.available();
       return a.enclave && a.biometry ? 'enclave' : null;
@@ -307,7 +307,7 @@ export function verifier(key: string, deps: VerifyDeps): Verifier {
     unlock: (nonce) =>
       once(nonce, async (n) => {
         const store = deps.unlockStore;
-        if (!store?.available()) return null;
+        if (!store || !(await store.available())) return null;
         const kind = deps.platform === 'darwin' ? 'enclave' : deps.platform === 'win32' ? 'hello' : null;
         if (!kind) return null;
         const p = parsePurpose(await deps.purpose(n));

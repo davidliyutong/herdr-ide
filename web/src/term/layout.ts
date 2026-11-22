@@ -96,7 +96,8 @@ export type Tab = Extra & {
   /** Set only when the user named the tab. */
   name?: string;
   /** Pinned: it stays left of the others, Close Others and Close to the
-   * Right leave it, and it shows a pin where the others have ×. */
+   * Right leave it, pane.close leaves its last pane, and it shows a pin
+   * where the others have ×. */
   pinned?: true;
   root: Node;
   /** The pane with the keyboard focus (paneKey). */
@@ -646,6 +647,14 @@ export function splitFocused(layout: Layout, axis: Axis, address: string): Layou
   const tab = selectedTab(layout);
   if (!tab || !address || !tabPanes(tab).includes(tab.focused)) return layout;
   return splitPane(layout, tab.focused, axis, { terminal: address });
+}
+
+/** Whether a pane is the only one of a pinned tab: closing it would close
+ * the tab, which pane.close does not do. */
+export function onlyPaneOfPinnedTab(layout: Layout, key: string): boolean {
+  const at = locate(layout, key);
+  const tab = at && layout.workspaces[at.workspace].tabs[at.tab];
+  return !!tab?.pinned && tabPanes(tab).length === 1;
 }
 
 /**

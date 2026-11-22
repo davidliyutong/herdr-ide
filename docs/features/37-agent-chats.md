@@ -164,13 +164,19 @@ at a time per agent.
 A host of an older build than the agent's (by `git describe` versions) is
 asked to make way, which it does when no chat works or waits; once its
 process is gone a host of this build takes its place, and the chats
-resume their sessions there. A host of a newer build, or of a build whose
+resume their sessions there. Builds of local changes (`scripts/build.sh`
+follows `-dirty` with the build's Unix time, so that two of them are told
+apart) are of the same age as the commit they are built at: a host of
+another such build is used as it is, as is a host of a newer build, or of a build whose
 age is not known (a development build), is used as it is while it speaks
 this protocol: two cores of different builds that reach one machine do
 not take turns replacing each other. A host that speaks another protocol
 and does not make way fails the open with `upgrading` (503) until its
 chats are idle. An open with `start: false` (the core's watch) never
 starts a host nor asks one to make way: `not_running` when none serves.
+A host of another build than the core's that stays is the user's to
+restart, which the page reminds of (below): its agents end with it, and
+the chats resume their sessions in the new one.
 Other failures: `no_terminal_core` (503: the host runs as a terminal of a
 terminal core that does not run), `start_failed`.
 
@@ -215,8 +221,12 @@ ended after the last sequence number the user saw), `idle`.
   with `excludeTurns`, ACP `session/resume`, else `session/load` with its
   replay dropped). A session that never had a turn may not have been
   kept by the agent: such a chat starts a new one instead. Close ends the
-  agent and keeps the chat until the bounds remove it; delete forgets it
-  and its log (the agent's own session files stay).
+  agent and keeps the chat until the bounds remove it; archive does the
+  same, counts what the chat ended with as seen and marks it `archived`
+  (`Chat.archived`, the time; `ChatState.archived`), which the bounds
+  remove before the other closed chats; unarchive, or a prompt (a start
+  of its agent), takes it back. Delete forgets a chat and its log at once
+  (the agent's own session files stay).
 - **Prompts.** A prompt's content is ACP content blocks (text, images of at
   most 5 MiB each, `resource_link` for a file named with `@`), at most
   8 MiB in all. A prompt to an idle chat starts a turn and is stored as
@@ -271,7 +281,10 @@ ended after the last sequence number the user saw), `idle`.
   its process the machine's settings; turning the setting off restarts
   the agents running with it in `default`. A mode the agent changes to
   by itself (a plan's approval, an agent's own switch) is the chat's mode
-  from then on.
+  from then on. The UI labels `plan` as **Plan mode**, a provider's `auto`
+  as **Auto mode**, and `full` or `bypassPermissions` as **Full access**
+  (计划模式、自动模式、完全访问 in Chinese), without changing the values sent
+  to the agent. The new-chat settings use the same labels.
 - **Trusted folders.** An agent loads a project's own settings (its hooks,
   MCP servers, instructions) only in a folder it trusts itself (Claude
   Code: its trust dialog accepted for the folder or one above, as
@@ -321,7 +334,7 @@ connection then. Requests name agents by their kind, never by a command.
 | `chats` | Every chat, closed ones too, the latest first. |
 | `new {kind, cwd, resume?, import?, options?}` | The chat, `starting`; what follows comes as events. |
 | `attach {chat, from, noCatchUp?}` | The chat and `first`, the lowest sequence number kept; then the stored events after `from`, then every new one. |
-| `close`, `delete {chat}` | – |
+| `close`, `archive`, `unarchive`, `delete {chat}` | – |
 | `sessions {kind, cwd, cursor}` | A page of the sessions the agent kept for the directory, with the chat that has each. |
 | `watch` | Every chat's state, then a line per change (a chat no more in `deleted`). |
 | `seen {chat, seq}` | – (a turn that ended at or before `seq` is no longer `done`) |
@@ -376,7 +389,9 @@ machine's settings:
 | A stored event | – | 1 MiB | – |
 
 A chat over its bytes loses its oldest events down to seven eighths of
-them. Past the others, closed chats go oldest first (closed longest ago);
+them. Past the others, closed chats go, the archived ones first, each the
+one kept the longest first (since it was closed, or archived when that is
+later; the retention counts from the same time);
 when none is left and the bytes are still too many, the largest chat loses
 its oldest events; a new chat past `chat.maxChats` with no closed chat to
 remove is refused (`too_many`). The bounds are checked at the start,
@@ -416,7 +431,11 @@ neither resumed nor imported.
   --setting-sources=…`, `--session-id=` or `--resume=`, `--model=`,
   `--permission-mode=` and, for full access only,
   `--allow-dangerously-skip-permissions` (switching to full access starts
-  the program again with the session resumed: the notice `restarted`). Its
+  the program again: the notice `restarted`). An existing conversation is
+  resumed; a new chat before its first turn starts again with the same
+  `--session-id`, since initialize alone saves no conversation for
+  `--resume` to load. The old process ends before either replacement starts;
+  the selected model and effort are applied again. Its
   environment adds `CLAUDE_CODE_ENTRYPOINT=herdr-ide` (the SDK's own entry
   points hide their sessions from the terminal's `/resume` list),
   `CLAUDE_CODE_SDK_READS_SESSION_STATE=1` and the SDK's version, and drops
@@ -523,13 +542,19 @@ connected, the plugin is on and its host is in use (a chat with an agent,
 a page's subscription, or a route used within the last 2 minutes), the
 core watches the host without starting one: every chat's state, then
 each change. It sends them to the pages as the plugin's `/ws` message
-`{t: states, states, full, rev}` (numbered per machine; `GET
+`{t: states, states, full, rev, hostVersion, outdated}` (numbered per
+machine; `hostVersion` the version of the host the watch read, `outdated`
+when it is not the core's, both empty once no host serves; `GET
 /api/p/chat/states` gives the last of every machine) and publishes an
 agent event (`machines.Manager.PublishAgent`, with `chat` instead of a
 terminal) when a chat becomes blocked or done, once per status and
 sequence number; of the first states read only the blocked ones. When a machine disconnects, its cached live states transition to `sleeping`/`idle`
 (preserving `done` for unread turns) with `stale: true` on `ChatState` and
-`StatesData`, cleared on reconnect. A watch
+`StatesData`, cleared on reconnect. The core ends the machine's watch
+before it marks them, under the same lock, and a watch takes the states
+it read (its first ones and each change) only while it has not been
+ended: a state read before the machine left never makes its chats live
+again (`TestWatchChangeAfterOfflineDropped`). A watch
 that fails is tried again after 5 s, doubling to 5 minutes, up to 6 times
 before it waits for the next use. Settings changes configure the watched
 hosts at once.
@@ -582,15 +607,29 @@ cut to 256 bytes.
   machine's home, in the mode of `chat.permissionMode`, in a new tab.
 - **The Chats panel** of the right sidebar: the machine's chats, blocked
   ones first, then done, working and the rest, the latest first; each
-  shows its chat, closes it or archives it (reminding the user in a
-  bottom-left toast that it can be restored from history), with row
-  actions placed in flex flow beside the state label so they do not
-  overlap it. Its toolbar links to the Agent Chats management page in
+  shows its chat, closes it or archives it (a bottom-left toast says so,
+  with Restore), with row actions placed in flex flow beside the state
+  label so they do not overlap it. Archived chats are not in that list,
+  nor in the agent inbox: a folded **Archived (n)** below it lists them,
+  the latest first, each restored with its button or by showing it, or
+  deleted (after a confirmation), until the machine's chat bounds remove
+  them. Its toolbar links to the Agent Chats management page in
   Settings (`SettingsExtra.tsx`), which shows an overview of headless chat
   hosts and active sessions across machines (with stop/open controls) and
   the persisted list of trusted folders per machine with per-folder revoke
   controls. Below the chats are the agents' earlier sessions of the
   focused pane's directory (below).
+- **A chat host of another build** (`hostReminder.ts`): while the
+  states say that the machine's host is not the core's build (an update,
+  or a reinstalled build of local changes, while the old host outlived the
+  app), the Chats panel says so with **Restart Chat Host**, which is
+  disabled while a chat starts, works or waits. Once none of the machine's
+  chats does, a toast says it once per page and host build, with the same
+  action; a read-only page offers neither. Restarting asks the host to
+  end (`POST host/stop`, refused with `busy` while a chat runs), which ends
+  its idle agents, waits up to 5 s for it to be gone, and starts a host
+  of this build (`POST agents`); the chats resume their sessions at their
+  next message.
 - **Statuses** (`status.ts`, the plugin's `viewStatus`,
   [27](27-plugins.md)): a chat pane is working, blocked, done or idle as
   its chat, and active or attention-needing conversations without an open
@@ -619,8 +658,10 @@ cut to 256 bytes.
   sessions the agent kept for the directory (the panel's, else the
   focused pane's), newest first, a page at a time (**Show More**), at most
   1000 a kind; listing them may run the agent, so a read-only page lists
-  none. A session that is already a chat's shows that chat: from the
-  list, and from **Continue in Chat** below, the page looks for the chat
+  none. A session that is already a chat's shows that chat (one archived
+  says so and is restored when shown; one the listing named that the
+  page's chats no longer have, deleted or removed by the bounds since, is
+  opened anew): from the list, and from **Continue in Chat** below, the page looks for the chat
   of that kind and session among the chats it knows, and when the host
   still refuses a second chat on the session, among the machine's chats
   (`GET chats`), and opens it. Opening one makes a chat that resumes the session and
@@ -697,7 +738,10 @@ id, its context and cost going on.
 - **A session Claude Code or Codex runs in a terminal** → `in_terminal`;
   an ACP agent's is not detected.
 - **A resumed session the agent no longer has** → the start fails
-  (`not_found`); a catch-up that finds nothing goes on as the log has it.
+  (`not_found`); the page explains that the program or saved session could
+  not be found. A missing startup session is distinct from a permission
+  request already answered in another window. A catch-up that finds
+  nothing goes on as the log has it.
 - **The page falls behind** → the subscription is lost and attached again
   from its last sequence number; live increments of unfinished items are
   dropped and come again whole.
@@ -744,20 +788,24 @@ they do in a terminal. See the rows on agent chats in
   (`TestPromptRecorded`, `TestPromptSentAgain`), permissions (first answer
   wins), questions and their ids, idle stop and resume, `maxLive`,
   handoff and catch-up (`TestHandoffAndCatchUp`, `TestCatchUpImportsOnce`),
-  import, close and delete, watch, shutdown, recovery after a host ended,
+  import, close, archive (`TestArchive`) and delete, watch, shutdown,
+  recovery after a host ended,
   idle exit, a fresh session not resumed, trust and its refusals and
   re-checks, full access (off at start, revoked, taken by the agent),
   stderr never stored, a journal failure, a hard exit, the log file, a
   session in a terminal (`fx3_test.go`, `fixes_test.go`, `chat_test.go`,
   `host_test.go`); the journal's replay, slow subscribers, every bound
-  and the cuts (`journal_test.go`); signals ending agents' groups and
+  (archived chats removed first, `TestBoundsRemoveArchivedFirst`) and the
+  cuts (`journal_test.go`); signals ending agents' groups and
   their children (`signal_test.go`).
 - Adapters, against fake agent processes (the test binary playing the
   CLI) that replay the recordings of `design/testdata/chat/`
   (`claude/`, `codex/`, `acp/`; its README says what each shows and which
   version made it): `internal/chatadapter/claude` (`TestReplay`, history
   and sessions, the group swept after exit and close, trust, full access
-  by restart, `in_terminal`, titles, the plan's mode, timeouts),
+  by restart (including a new chat before its first turn and a resumed
+  chat, keeping its session id, model and effort), `in_terminal`, titles,
+  the plan's mode, timeouts),
   `internal/chatadapter/codex` (a replay per recording, the policies per
   mode against the pinned schema `TestSchemaPinned`, server requests,
   close order, leftovers ended, `in_terminal`, sessions, history),
@@ -766,11 +814,14 @@ they do in a terminal. See the rows on agent chats in
   `internal/acp`.
 - `internal/agent/plugin/chat`: the host started, a watch, opens together,
   the name taken, handover (an older host replaced, never a newer one,
-  the old process waited for), a stuck host killed. `internal/agent`
+  the old process waited for, another build of local changes at the same
+  commit kept: `TestDirtyBuildKept`), a stuck host killed. `internal/agent`
   `hidden_test.go`: the hidden run and kill.
 - `internal/plugins/chat`: routes, GETs that start no host, read-only
   redaction, errors, the handoff, the settings; the watch (states, done
-  across a gap, a quiet host let go, configures); the WebSocket (relay,
+  across a gap, a quiet host let go, configures, the host's build and
+  `outdated` (`TestWatchHostOutdated`), a state read before the machine
+  left dropped); the WebSocket (relay,
   read-only, limits, flow control, audit bounds, the connection cap).
 - `internal/server/term_hidden_test.go`: hidden terminals out of
   snapshots, events and lists, in the window before their label, after a
@@ -783,7 +834,8 @@ they do in a terminal. See the rows on agent chats in
   `TestIntegrationTermHidden`, passed in an isolated Linux container and
   on macOS.
 - `web/src/__tests__`: `chat.test.ts`, `chatConnection.test.ts`,
-  `chatPane.test.tsx`, `chatPlugin.test.tsx`, `chatManage.test.tsx`,
+  `chatPane.test.tsx` (archive and restore, a host of another build said,
+  reminded of once and restarted), `chatPlugin.test.tsx`, `chatManage.test.tsx`,
   `chatHandoff.test.ts`, `chatImport.test.tsx`, `conversationChat.test.ts`,
   `conversationCards.test.tsx`, `conversationComposer.test.tsx`,
   `viewStatus.test.tsx`, `notifyViews.test.ts`, `attention.test.tsx`.

@@ -132,7 +132,10 @@ export async function importSession(m: string, target: ImportTarget, from?: stri
   const { kind, session, cwd } = target;
   const s = useStore.getState();
   if (!chatAdapter(kind) || !session) return undefined;
-  const known = target.chat ?? sessionChat(m, kind, session);
+  // The chat a listing named may be gone since (deleted, or removed by the
+  // machine's chat limits): the session is opened anew then.
+  const listed = target.chat && !chatGone(useChats.getState(), m, target.chat) ? target.chat : undefined;
+  const known = listed ?? sessionChat(m, kind, session);
   if (known) {
     await openChat(m, known, kind, from);
     return known;

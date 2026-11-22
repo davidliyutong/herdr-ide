@@ -544,6 +544,8 @@ func (c *chat) recover() {
 // beginStart marks the chat as starting an agent, and returns the start.
 // The caller holds c.mu.
 func (c *chat) beginStart() *start {
+	// A chat the user uses again is archived no more.
+	c.r.Archived = time.Time{}
 	c.gen++
 	ctx, cancel := context.WithCancel(c.h.ctx)
 	st := &start{gen: c.gen, ctx: ctx, cancel: cancel, done: make(chan struct{})}

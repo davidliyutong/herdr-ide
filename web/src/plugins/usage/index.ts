@@ -9,6 +9,7 @@ import { UsagePanel } from './UsagePanel';
 import { UsageStatusItem } from './StatusItem';
 import { UsageSessionItem } from './SessionItem';
 import { UsageSettings } from './SettingsPage';
+import { PricesEditor } from './PricesEditor';
 import './usage.css';
 import { applySnapshot } from './state';
 import type { UsageSnapshot } from './model';
@@ -18,7 +19,7 @@ export const usagePlugin: PluginDef = {
   title: 'usage.title',
   description: 'usage.description',
   icon: Gauge,
-  settings: { section: 'usage', layout: UsageSettings },
+  settings: { section: 'usage', layout: UsageSettings, controls: { 'usage.prices': PricesEditor } },
   panels: [{ id: 'usage', title: 'usage.title', icon: Gauge, component: UsagePanel, command: 'view.panel.usage' }],
   statusItems: [
     { id: 'usage.session', title: 'usage.session.title', component: UsageSessionItem },

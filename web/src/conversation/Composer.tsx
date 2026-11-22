@@ -50,7 +50,6 @@ import {
   configOf,
   MAX_IMAGE,
   MAX_PROMPT,
-  MODES,
   NO_CAPABILITIES,
   type ChatError,
   type ChatInfo,
@@ -154,7 +153,18 @@ function attachErrorText(e: unknown, agent: string): string {
 
 /** A mode's name in the view's words when it is one of the host's. */
 function modeName(v: ConfigValue): string {
-  return (MODES as readonly string[]).includes(v.value) ? t(`conversation.mode.${v.value as (typeof MODES)[number]}`) : v.name;
+  switch (v.value) {
+    case 'default':
+    case 'acceptEdits':
+    case 'plan':
+    case 'auto':
+    case 'full':
+      return t(`conversation.mode.${v.value}`);
+    case 'bypassPermissions':
+      return t('conversation.mode.full');
+    default:
+      return v.name;
+  }
 }
 
 /** Why the values that give an agent full access (ConfigValue.full) are
@@ -895,9 +905,13 @@ export function Composer({
           <div className="conv-banner error" role="alert">
             <TriangleAlert aria-hidden />
             <span title={stateError?.stderr || stateError?.message}>
-              {stateError?.code && stateError.code !== 'failed'
-                ? errorText(stateError, agent, 'conversation.failed')
-                : t('conversation.failed', { agent })}{' '}
+              {/* A chat fails as not_found when its agent's program or its
+                  resumed session is missing, not as an answer elsewhere. */}
+              {stateError?.code === 'not_found'
+                ? t('conversation.error.start_not_found', { agent })
+                : stateError?.code && stateError.code !== 'failed'
+                  ? errorText(stateError, agent, 'conversation.failed')
+                  : t('conversation.failed', { agent })}{' '}
               {!readOnly && t('conversation.failedResume')}
             </span>
           </div>

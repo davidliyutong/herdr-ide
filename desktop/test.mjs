@@ -12,6 +12,7 @@ const tests = [
   'enclave',
   'folders',
   'follow',
+  'keychain',
   'menu',
   'notifications',
   'platform',

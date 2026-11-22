@@ -1,20 +1,23 @@
 // The right sidebar's Chats panel: the chats of the machine shown, those
 // that need the user first (blocked, then done), then those working, then
 // the others, the latest first; a click shows the chat (its pane, else a
-// new tab), and each can be closed or deleted. A new chat starts from its
-// header. Below the chats, the agents' earlier sessions of the focused
-// pane's directory, which open as chats (Sessions.tsx).
+// new tab), and each can be closed or archived. Archived chats are listed
+// apart, folded, below them: each can be restored (also by showing it) or
+// deleted. A new chat starts from its header. Below the chats, the agents'
+// earlier sessions of the focused pane's directory, which open as chats
+// (Sessions.tsx).
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
-import { Archive, CirclePower, Plus, Settings } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, ChevronRight, CirclePower, Plus, Settings, Trash2 } from 'lucide-react';
 import { openMenu } from '../../contextMenu';
 import { relativeTime } from '../../conversation/format';
 import { locale, t } from '../../i18n';
 import { shortPath, statusRank, type AgentStatus } from '../../lib/machine';
 import { useStore } from '../../state/store';
-import { agentName, archiveChat, closeChat, kindIcon, kindsMenu, openChat } from './ops';
+import { agentName, archiveChat, closeChat, deleteChat, kindIcon, kindsMenu, openChat, restartHost, restoreChat } from './ops';
 import { CHAT_STATUSES, type ChatState } from './protocol';
 import { PastSessions } from './Sessions';
-import { follow, loadAgents, useChats } from './state';
+import { follow, hostBusy, loadAgents, useChats } from './state';
+import { watchHosts } from './hostReminder';
 import { stateLabel } from './ChatPane';
 import './chat.css';
 
@@ -42,13 +45,28 @@ export function ChatsPanel() {
   const states = useChats((s) => (m ? (s.states[m] ?? EMPTY) : EMPTY));
   const known = useChats((s) => (m ? !!s.full[m] : false));
   useChats((s) => (m ? s.agents[m] : undefined));
+  const host = useChats((s) => (m ? s.hosts?.[m] : undefined));
+  const busy = useChats((s) => (m ? hostBusy(s, m) : false));
   const [shown, setShown] = useState(SHOWN_CHATS);
-  useEffect(() => follow(), []);
+  const [showArchived, setShowArchived] = useState(false);
+  const [shownArchived, setShownArchived] = useState(SHOWN_CHATS);
+  useEffect(() => {
+    watchHosts();
+    return follow();
+  }, []);
   useEffect(() => {
     setShown(SHOWN_CHATS);
+    setShownArchived(SHOWN_CHATS);
     if (m && ready) void loadAgents(m);
   }, [m, ready]);
-  const list = useMemo(() => panelOrder(Object.values(states)), [states]);
+  const list = useMemo(() => panelOrder(Object.values(states).filter((st) => !st.archived)), [states]);
+  const archived = useMemo(
+    () =>
+      Object.values(states)
+        .filter((st) => st.archived)
+        .sort((a, b) => b.updated.localeCompare(a.updated)),
+    [states],
+  );
   if (!m) return <div className="chat-panel-empty muted small">{t('chat.panel.noMachine')}</div>;
 
   const newMenu = (e: MouseEvent) => {
@@ -78,7 +96,23 @@ export function ChatsPanel() {
         </button>
       </div>
       {!ready && <div className="chat-panel-empty muted small">{t('chat.panel.offline')}</div>}
-      {ready && known && !list.length && <div className="chat-panel-empty muted small">{t('chat.panel.none')}</div>}
+      {ready && host?.outdated && (
+        <div className="chat-host-outdated small" role="status">
+          <span>{t('chat.host.outdatedBanner', { version: host.version })}</span>
+          {!readOnly && (
+            <button
+              type="button"
+              className="sm"
+              disabled={busy}
+              title={busy ? t('chat.host.busyHint') : undefined}
+              onClick={() => void restartHost(m)}
+            >
+              {t('chat.host.restart')}
+            </button>
+          )}
+        </div>
+      )}
+      {ready && known && !list.length && !archived.length && <div className="chat-panel-empty muted small">{t('chat.panel.none')}</div>}
       {list.length > 0 && (
         <div className="chat-rows" role="list" aria-label={t('chat.panel.chats')}>
           {list.slice(0, shown).map((st) => (
@@ -88,6 +122,31 @@ export function ChatsPanel() {
             <button type="button" className="ghost sm chat-more" onClick={() => setShown((n) => n + SHOWN_CHATS)}>
               {t('chat.panel.more', { n: list.length - shown })}
             </button>
+          )}
+        </div>
+      )}
+      {archived.length > 0 && (
+        <div className="chat-archived">
+          <button
+            type="button"
+            className="ghost sm chat-archived-toggle"
+            aria-expanded={showArchived}
+            onClick={() => setShowArchived((v) => !v)}
+          >
+            {showArchived ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
+            <span>{t('chat.panel.archived', { n: archived.length })}</span>
+          </button>
+          {showArchived && (
+            <div className="chat-rows" role="list" aria-label={t('chat.panel.archivedList')}>
+              {archived.slice(0, shownArchived).map((st) => (
+                <ChatRow key={st.id} m={m} st={st} home={home} now={now} readOnly={readOnly} />
+              ))}
+              {archived.length > shownArchived && (
+                <button type="button" className="ghost sm chat-more" onClick={() => setShownArchived((n) => n + SHOWN_CHATS)}>
+                  {t('chat.panel.more', { n: archived.length - shownArchived })}
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -122,7 +181,29 @@ function ChatRow({ m, st, home, now, readOnly }: { m: string; st: ChatState; hom
         </span>
         {label && st.state !== 'idle' && st.state !== 'working' && <span className="chat-row-state small muted">{label}</span>}
       </button>
-      {!readOnly && (
+      {!readOnly && st.archived && (
+        <span className="chat-row-actions">
+          <button
+            type="button"
+            className="icon sm"
+            aria-label={t('chat.restoreNamed', { title })}
+            title={t('chat.restore')}
+            onClick={() => void restoreChat(m, st.id)}
+          >
+            <ArchiveRestore />
+          </button>
+          <button
+            type="button"
+            className="icon sm"
+            aria-label={t('chat.deleteNamed', { title })}
+            title={t('chat.delete')}
+            onClick={() => void deleteChat(m, st.id)}
+          >
+            <Trash2 />
+          </button>
+        </span>
+      )}
+      {!readOnly && !st.archived && (
         <span className="chat-row-actions">
           {st.state !== 'closed' && (
             <button

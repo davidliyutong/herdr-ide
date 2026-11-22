@@ -35,8 +35,9 @@
 //
 // The journal keeps every stored event of every chat, within the settings'
 // bounds: a chat's events beyond MaxChatBytes go oldest first; beyond
-// MaxTotalBytes, MaxChats and RetentionDays the oldest closed chats go
-// first. The agents' own session files are never touched.
+// MaxTotalBytes, MaxChats and RetentionDays closed chats go, the archived
+// ones first (OpArchive), each the one kept the longest first. The agents'
+// own session files are never touched.
 package chathost
 
 import (
@@ -758,6 +759,10 @@ func (h *host) serve(conn net.Conn) {
 		h.reply(conn, h.closeChat(req.Chat))
 	case chatproto.OpDelete:
 		h.reply(conn, h.deleteChat(req.Chat))
+	case chatproto.OpArchive:
+		h.reply(conn, h.archiveChat(req.Chat, true))
+	case chatproto.OpUnarchive:
+		h.reply(conn, h.archiveChat(req.Chat, false))
 	case chatproto.OpSessions:
 		h.reply(conn, h.sessions(req))
 	case chatproto.OpWatch:
@@ -1173,6 +1178,44 @@ func (h *host) closeChat(id string) chatproto.Response {
 	return chatproto.Response{OK: true}
 }
 
+// archiveChat archives a chat (on) or takes it back. Archiving ends its
+// agent and keeps it closed, what it ended with seen; the bounds remove
+// archived chats before the other closed ones (removable).
+func (h *host) archiveChat(id string, on bool) chatproto.Response {
+	c := h.lookup(id)
+	if c == nil {
+		return refuse(chatproto.CodeUnknownChat, "no such chat")
+	}
+	c.mu.Lock()
+	if c.deleted {
+		c.mu.Unlock()
+		return refuse(chatproto.CodeUnknownChat, "no such chat")
+	}
+	if !on {
+		if !c.r.Archived.IsZero() {
+			c.r.Archived = time.Time{}
+			c.save()
+			c.notify()
+		}
+		c.mu.Unlock()
+		return chatproto.Response{OK: true}
+	}
+	if c.r.State != chatproto.StateClosed || c.r.Closed.IsZero() {
+		c.r.Closed = now()
+	}
+	sess := c.stopAgent(chatproto.StateClosed, nil, perr(chatproto.CodeEnded, "the chat was archived"))
+	if c.r.Archived.IsZero() {
+		c.r.Archived = now()
+	}
+	// Put away: nothing of it waits for the user.
+	c.r.Seen = c.r.Seq
+	c.save()
+	c.notify()
+	c.mu.Unlock()
+	h.endSession(sess, true)
+	return chatproto.Response{OK: true}
+}
+
 // deleteChat forgets a chat and its log, its agent ended first.
 func (h *host) deleteChat(id string) chatproto.Response {
 	c := h.lookup(id)
@@ -1480,8 +1523,8 @@ func (h *host) shutdown() chatproto.Response {
 	return chatproto.Response{OK: true}
 }
 
-// roomForChat makes room for one more chat within MaxChats: the oldest
-// closed chat goes; CodeTooMany when none can.
+// roomForChat makes room for one more chat within MaxChats: the first
+// removable chat goes; CodeTooMany when none can.
 func (h *host) roomForChat() *chatproto.Error {
 	max := h.settings.Load().MaxChats
 	for {
@@ -1491,66 +1534,72 @@ func (h *host) roomForChat() *chatproto.Error {
 		if n < max {
 			return nil
 		}
-		victims := h.closedOldestFirst()
+		victims := h.removable()
 		if len(victims) == 0 {
 			return perr(chatproto.CodeTooMany, fmt.Sprintf("the host keeps %d chats, none closed", n))
 		}
-		h.logf("chat %s: removed, the oldest closed one of %d chats", victims[0].r.ID, n)
-		if err := h.forget(victims[0]); err != nil {
-			h.logf("chat %s: remove: %v", victims[0].r.ID, err)
+		h.logf("chat %s: removed, the first to go of %d chats", victims[0].c.r.ID, n)
+		if err := h.forget(victims[0].c); err != nil {
+			h.logf("chat %s: remove: %v", victims[0].c.r.ID, err)
 			return perr(chatproto.CodeFailed, "the journal did not remove a chat")
 		}
 	}
 }
 
-// closedOldestFirst are the closed chats, the one closed first first.
-func (h *host) closedOldestFirst() []*chat {
+// removableChat is a chat the bounds may remove, and since when it is
+// kept: when it was closed, or archived when that is later.
+type removableChat struct {
+	c        *chat
+	archived bool
+	since    time.Time
+}
+
+// removable are the closed chats in the order the bounds remove them:
+// the archived ones first, then the others, each the one kept the longest
+// first.
+func (h *host) removable() []removableChat {
 	h.mu.Lock()
 	chats := h.list()
 	h.mu.Unlock()
-	type closed struct {
-		c  *chat
-		at time.Time
-	}
-	var out []closed
+	var out []removableChat
 	for _, c := range chats {
 		c.mu.Lock()
 		if c.r.State == chatproto.StateClosed && c.sess == nil && !c.starting && !c.deleted {
-			out = append(out, closed{c, c.r.Closed})
+			since := c.r.Closed
+			if c.r.Archived.After(since) {
+				since = c.r.Archived
+			}
+			out = append(out, removableChat{c, !c.r.Archived.IsZero(), since})
 		}
 		c.mu.Unlock()
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if !out[i].at.Equal(out[j].at) {
-			return out[i].at.Before(out[j].at)
+		if out[i].archived != out[j].archived {
+			return out[i].archived
+		}
+		if !out[i].since.Equal(out[j].since) {
+			return out[i].since.Before(out[j].since)
 		}
 		return out[i].c.r.ID < out[j].c.r.ID
 	})
-	cs := make([]*chat, len(out))
-	for i, o := range out {
-		cs[i] = o.c
-	}
-	return cs
+	return out
 }
 
 // enforceBounds keeps the journal within the settings: closed chats past
-// their retention go, then the oldest closed chats while there are more
-// chats than MaxChats or more bytes than MaxTotalBytes; when no closed chat
+// their retention go, then the removable chats in their order while there
+// are more chats than MaxChats or more bytes than MaxTotalBytes; when none
 // is left and the bytes are still too many, the largest chats lose their
 // oldest events.
 func (h *host) enforceBounds() {
 	s := h.settings.Load()
 	cutoff := time.Now().Add(-time.Duration(s.RetentionDays) * h.o.day)
-	for _, c := range h.closedOldestFirst() {
-		c.mu.Lock()
-		old := c.r.Closed.Before(cutoff)
-		c.mu.Unlock()
-		if !old {
-			break
+	for _, v := range h.removable() {
+		if !v.since.Before(cutoff) {
+			continue
 		}
-		h.logf("chat %s: removed, closed more than %d days ago", c.r.ID, s.RetentionDays)
-		if err := h.forget(c); err != nil {
-			h.logf("chat %s: remove: %v", c.r.ID, err)
+		h.logf("chat %s: removed, kept closed more than %d days", v.c.r.ID, s.RetentionDays)
+		if err := h.forget(v.c); err != nil {
+			h.logf("chat %s: remove: %v", v.c.r.ID, err)
 			return
 		}
 	}
@@ -1573,10 +1622,10 @@ func (h *host) enforceBounds() {
 		if n <= s.MaxChats && total <= s.MaxTotalBytes {
 			return
 		}
-		if victims := h.closedOldestFirst(); len(victims) > 0 {
-			h.logf("chat %s: removed, the oldest closed one (%d chats, %d bytes)", victims[0].r.ID, n, total)
-			if err := h.forget(victims[0]); err != nil {
-				h.logf("chat %s: remove: %v", victims[0].r.ID, err)
+		if victims := h.removable(); len(victims) > 0 {
+			h.logf("chat %s: removed, the first to go (%d chats, %d bytes)", victims[0].c.r.ID, n, total)
+			if err := h.forget(victims[0].c); err != nil {
+				h.logf("chat %s: remove: %v", victims[0].c.r.ID, err)
 				return
 			}
 			continue

@@ -299,6 +299,63 @@ func TestStartOptions(t *testing.T) {
 	}
 }
 
+// A new chat has no saved conversation before its first turn. Switching
+// into full access keeps its session id without trying to resume it; an
+// imported/resumed chat still resumes even before a turn in this process.
+func TestRestartFullBeforeFirstTurn(t *testing.T) {
+	for _, resumed := range []bool{false, true} {
+		name := "new"
+		if resumed {
+			name = "resumed"
+		}
+		t.Run(name, func(t *testing.T) {
+			sc := script{Lines: initLines(t), Canned: canned(t), NoConversation: !resumed}
+			delete(sc.Canned, "initialize")
+			r, s := startWith(t, initLines(t), func(r *fakeRun, p *chatadapter.StartParams) {
+				fullScript(t, r, sc)(p)
+				if resumed {
+					p.Resume = testSession
+				}
+			})
+			r.until(s, -1)
+			for _, c := range [][2]string{{optionModel, "sonnet"}, {optionEffort, "low"}} {
+				if err := s.SetConfig(context.Background(), c[0], c[1]); err != nil {
+					t.Fatalf("%s: %v", c[0], err)
+				}
+			}
+			pid := s.PID()
+			if err := s.SetConfig(context.Background(), optionMode, chatproto.ModeFull); err != nil {
+				t.Fatalf("full access before first turn: %v", err)
+			}
+			if s.ID() != testSession || s.PID() <= 0 || s.PID() == pid {
+				t.Fatalf("after restart: id=%s pid=%d (was %d)", s.ID(), s.PID(), pid)
+			}
+			var argvs []string
+			for _, rec := range r.records() {
+				if rec.Argv != nil {
+					argvs = append(argvs, strings.Join(rec.Argv, " "))
+				}
+			}
+			want, absent := "--session-id=", "--resume="
+			if resumed {
+				want, absent = absent, want
+			}
+			if len(argvs) != 2 || !strings.Contains(argvs[1], want+testSession) || strings.Contains(argvs[1], absent) {
+				t.Fatalf("restart argv %q", argvs)
+			}
+			r.sink.mu.Lock()
+			defer r.sink.mu.Unlock()
+			values := map[string]string{}
+			for _, c := range r.sink.chat.Config {
+				values[c.ID] = c.CurrentValue
+			}
+			if values[optionMode] != chatproto.ModeFull || values[optionModel] != "sonnet" || values[optionEffort] != "low" {
+				t.Fatalf("configuration after restart: %v", values)
+			}
+		})
+	}
+}
+
 // Going into full access starts the program again with the session
 // resumed and permissions skippable; out of it and back needs no restart.
 // A restart is refused while a turn runs.

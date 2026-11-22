@@ -4,6 +4,27 @@
   "monthHours": 750,
   "providers": {
     "grok": {
+      "grok-4.5": {
+        "source": "https://docs.x.ai/docs/models",
+        "tiers": [
+          { "inputMax": 200000, "input": 2.0, "cached": 0.3, "output": 6.0 },
+          { "inputMax": null, "input": 4.0, "cached": 0.6, "output": 12.0 }
+        ]
+      },
+      "grok-4.3": {
+        "source": "https://docs.x.ai/docs/models",
+        "tiers": [
+          { "inputMax": 200000, "input": 1.25, "cached": 0.2, "output": 2.5 },
+          { "inputMax": null, "input": 2.5, "cached": 0.4, "output": 5.0 }
+        ]
+      },
+      "grok-4.20": {
+        "source": "https://docs.x.ai/docs/models",
+        "tiers": [
+          { "inputMax": 200000, "input": 1.25, "cached": 0.2, "output": 2.5 },
+          { "inputMax": null, "input": 2.5, "cached": 0.4, "output": 5.0 }
+        ]
+      },
       "grok-4.7": {
         "source": "https://docs.x.ai/docs/models/grok-4.7",
         "tiers": [
@@ -20,6 +41,10 @@
       }
     },
     "claude": {
+      "claude-mythos-preview": {
+        "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "tiers": [{ "inputMax": null, "input": 10.0, "output": 50.0, "cached": 1.0, "cacheWrite": 12.5, "cacheWrite1h": 20.0 }]
+      },
       "claude-fable-5-2": {
         "source": "https://platform.claude.com/docs/en/about-claude/pricing",
         "tiers": [{ "inputMax": null, "input": 8.0, "output": 40.0, "cached": 0.2, "cacheWrite": 10.0, "cacheWrite1h": 16.0 }]
@@ -97,6 +122,81 @@
       }
     },
     "codex": {
+      "gpt-6.2-astra": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          { "inputMax": 272000, "input": 8.0, "cached": 0.4, "output": 40.0, "cacheWrite": 10.0 },
+          { "inputMax": null, "input": 16.0, "cached": 0.8, "output": 60.0, "cacheWrite": 20.0 }
+        ]
+      },
+      "gpt-6.2-sol": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          { "inputMax": 272000, "input": 2.0, "cached": 0.1, "output": 10.0, "cacheWrite": 2.5 },
+          { "inputMax": null, "input": 4.0, "cached": 0.2, "output": 15.0, "cacheWrite": 5.0 }
+        ]
+      },
+      "gpt-5.6": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          { "inputMax": 272000, "input": 4.0, "cached": 0.4, "output": 20.0, "cacheWrite": 5.0 },
+          { "inputMax": null, "input": 8.0, "cached": 0.8, "output": 30.0, "cacheWrite": 10.0 }
+        ]
+      },
+      "gpt-5.4": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          { "inputMax": 272000, "input": 2.5, "cached": 0.25, "output": 15.0 },
+          { "inputMax": null, "input": 5.0, "cached": 0.5, "output": 22.5 }
+        ]
+      },
+      "gpt-5.4-pro": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          { "inputMax": 272000, "input": 30.0, "cached": 30.0, "output": 180.0 },
+          { "inputMax": null, "input": 60.0, "cached": 60.0, "output": 270.0 }
+        ]
+      },
+      "gpt-5.4-mini": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.75, "cached": 0.075, "output": 4.5 }]
+      },
+      "gpt-5.4-nano": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.2, "cached": 0.02, "output": 1.25 }]
+      },
+      "gpt-5.2": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 1.75, "cached": 0.175, "output": 14.0 }]
+      },
+      "gpt-5.2-pro": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 21.0, "cached": 21.0, "output": 168.0 }]
+      },
+      "gpt-5.1": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 1.25, "cached": 0.125, "output": 10.0 }]
+      },
+      "gpt-5.1-codex-mini": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.25, "cached": 0.025, "output": 2.0 }]
+      },
+      "gpt-5": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 1.25, "cached": 0.125, "output": 10.0 }]
+      },
+      "gpt-5-pro": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 15.0, "cached": 15.0, "output": 120.0 }]
+      },
+      "gpt-5-mini": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.25, "cached": 0.025, "output": 2.0 }]
+      },
+      "gpt-5-nano": {
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [{ "inputMax": null, "input": 0.05, "cached": 0.005, "output": 0.4 }]
+      },
       "gpt-6-astra": {
         "source": "https://developers.openai.com/api/docs/pricing",
         "tiers": [
@@ -121,8 +221,8 @@
       "gpt-6-rosalind": {
         "source": "https://developers.openai.com/api/docs/pricing",
         "tiers": [
-          { "inputMax": 272000, "input": 15.0, "cached": 1.5, "output": 75.0, "cacheWrite": 18.75 },
-          { "inputMax": null, "input": 30.0, "cached": 3.0, "output": 112.5, "cacheWrite": 37.5 }
+          { "inputMax": 272000, "input": 10.0, "cached": 1.0, "output": 50.0, "cacheWrite": 12.5 },
+          { "inputMax": null, "input": 20.0, "cached": 2.0, "output": 75.0, "cacheWrite": 25.0 }
         ]
       },
       "gpt-6.1-sol": {

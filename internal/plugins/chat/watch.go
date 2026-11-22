@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"herdr-ide/internal/agentkinds"
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/chatproto"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/plugin"
@@ -42,6 +43,9 @@ type watched struct {
 	// published is per chat the status and sequence number of its last
 	// agent notification ("blocked@12").
 	published map[string]string
+	// hostVersion is the version of the host the watch read last; "" once
+	// none serves.
+	hostVersion string
 
 	// due: a watch is to be tried, from retryAt on; failures counts those
 	// that failed in a row. noChat: the machine has no chat host to give
@@ -62,6 +66,13 @@ type watched struct {
 	// settings as they are; "" for none. A host started again takes them
 	// anew: it starts without full access until a configure allows it.
 	configuredHost string
+}
+
+// data is a states message of w with states, stamped with its host's
+// build. p.mu is held.
+func (w *watched) data(states []chatproto.ChatState, full bool) StatesData {
+	return StatesData{T: DataStates, States: states, Full: full, Stale: w.stale, Rev: w.rev,
+		HostVersion: w.hostVersion, Outdated: w.hostVersion != "" && w.hostVersion != agentproto.Version}
 }
 
 // live tells whether a chat in state st has an agent process.
@@ -278,13 +289,7 @@ func markStaleLocked(w *watched) (StatesData, bool) {
 		w.states[id] = st
 	}
 	w.rev++
-	return StatesData{
-		T:      DataStates,
-		States: sortStates(mapValues(w.states)),
-		Full:   true,
-		Stale:  true,
-		Rev:    w.rev,
-	}, true
+	return w.data(sortStates(mapValues(w.states)), true), true
 }
 
 // quiet tells whether the core has nothing to watch on w's host: no chat
@@ -313,7 +318,9 @@ func (p *Plugin) watchOnce(ctx context.Context, w *watched) error {
 	if err != nil {
 		return err
 	}
-	p.watchUp(w, res.States)
+	if !p.watchUp(ctx, w, c.info, res.States) {
+		return ctx.Err()
+	}
 	p.configure(ctx, w.id)
 	for {
 		line, err := chatproto.ReadLine(c.r)
@@ -324,7 +331,9 @@ func (p *Plugin) watchOnce(ctx context.Context, w *watched) error {
 		if json.Unmarshal(line, &st) != nil || !chatproto.ValidChatID(st.ID) {
 			continue
 		}
-		p.watchChange(w, st)
+		if !p.watchChange(ctx, w, st) {
+			return ctx.Err()
+		}
 	}
 }
 
@@ -337,6 +346,8 @@ func (p *Plugin) watchEnded(ctx context.Context, w *watched, err error) {
 	w.running, w.up, w.dropping = false, false, false
 	var stale []chatproto.ChatState
 	var rev uint64
+	var gone StatesData
+	wasHost := w.hostVersion
 	switch {
 	case dropping:
 		// The core ended it as the host had nothing to watch; a use since
@@ -351,7 +362,7 @@ func (p *Plugin) watchEnded(ctx context.Context, w *watched, err error) {
 		// No host serves, so no agent runs: chats the core still knows
 		// with one are sleeping now, the status of a turn that ran gone.
 		wasStale := w.stale
-		w.stale = false
+		w.stale, w.hostVersion = false, ""
 		for id, st := range w.states {
 			changed := wasStale && st.Stale
 			st.Stale = false
@@ -367,7 +378,7 @@ func (p *Plugin) watchEnded(ctx context.Context, w *watched, err error) {
 				stale = append(stale, st)
 			}
 		}
-		if len(stale) > 0 {
+		if len(stale) > 0 || wasHost != "" {
 			w.rev++
 			rev = w.rev
 		}
@@ -385,9 +396,12 @@ func (p *Plugin) watchEnded(ctx context.Context, w *watched, err error) {
 			h.Logger().Printf("chat: watch of %s: %v", w.id, err)
 		}
 	}
+	if rev != 0 {
+		gone = w.data(sortStates(append([]chatproto.ChatState{}, stale...)), false)
+	}
 	p.mu.Unlock()
-	if len(stale) > 0 && h != nil {
-		h.Broadcast(ID, w.id, StatesData{T: DataStates, States: sortStates(stale), Rev: rev})
+	if rev != 0 && h != nil {
+		h.Broadcast(ID, w.id, gone)
 	}
 }
 
@@ -434,9 +448,22 @@ func (p *Plugin) publishes(w *watched, st, old chatproto.ChatState, had, initial
 	return true
 }
 
-// watchUp takes the states a watch read first: every chat's.
-func (p *Plugin) watchUp(w *watched, states []chatproto.ChatState) {
+// current tells whether the watch of ctx may still change w's states:
+// step ends a watch (its ctx) under p.mu before it marks the states of a
+// machine that left as stale, so a state the watch read before then but
+// takes after would make an offline machine's chats live again, and
+// markStaleLocked, the machine being stale already, would not mark them
+// again. p.mu is held.
+func current(ctx context.Context) bool { return ctx.Err() == nil }
+
+// watchUp takes the states a watch of host read first: every chat's.
+// False: the watch was ended meanwhile, and they are not taken.
+func (p *Plugin) watchUp(ctx context.Context, w *watched, host chatproto.HostInfo, states []chatproto.ChatState) bool {
 	p.mu.Lock()
+	if !current(ctx) {
+		p.mu.Unlock()
+		return false
+	}
 	initial := !w.known
 	prev := w.states
 	w.states = make(map[string]chatproto.ChatState, len(states))
@@ -458,15 +485,22 @@ func (p *Plugin) watchUp(w *watched, states []chatproto.ChatState) {
 		}
 	}
 	w.known, w.stale, w.up, w.since, w.failures = true, false, true, p.now(), 0
+	w.hostVersion = host.Version
 	w.rev++
-	data := StatesData{T: DataStates, States: sortStates(mapValues(w.states)), Full: true, Rev: w.rev}
+	data := w.data(sortStates(mapValues(w.states)), true)
 	p.mu.Unlock()
 	p.tell(w.id, data, notes)
+	return true
 }
 
-// watchChange takes a chat's new state.
-func (p *Plugin) watchChange(w *watched, st chatproto.ChatState) {
+// watchChange takes a chat's new state. False: the watch was ended
+// meanwhile (the machine left: its states are stale), and it is not taken.
+func (p *Plugin) watchChange(ctx context.Context, w *watched, st chatproto.ChatState) bool {
 	p.mu.Lock()
+	if !current(ctx) {
+		p.mu.Unlock()
+		return false
+	}
 	old, had := w.states[st.ID]
 	var notes []note
 	if st.State == chatproto.StateDeleted {
@@ -479,9 +513,10 @@ func (p *Plugin) watchChange(w *watched, st chatproto.ChatState) {
 		}
 	}
 	w.rev++
-	data := StatesData{T: DataStates, States: []chatproto.ChatState{st}, Rev: w.rev}
+	data := w.data([]chatproto.ChatState{st}, false)
 	p.mu.Unlock()
 	p.tell(w.id, data, notes)
+	return true
 }
 
 // tell sends machine m's states to the pages, then the notifications. A
@@ -537,7 +572,7 @@ func (p *Plugin) Snapshot() StatesSnapshot {
 	out := StatesSnapshot{Machines: map[string]StatesData{}}
 	for m, w := range p.machines {
 		if w.known {
-			out.Machines[m] = StatesData{T: DataStates, States: sortStates(mapValues(w.states)), Full: true, Stale: w.stale, Rev: w.rev}
+			out.Machines[m] = w.data(sortStates(mapValues(w.states)), true)
 		}
 	}
 	return out

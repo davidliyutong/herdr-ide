@@ -362,7 +362,15 @@ up in three ways:
   prices, a line each: `<model> <input> <cached> <output> [<cache write>]`
   in USD per million tokens, the model a prefix as in the table, one price
   for any prompt length (`usage.ParsePrices`; at most 50, numbers from 0 to
-  10000). The core sends them with each scan (`CostOptions.Prices`) and
+  10000). The page edits them as a form (`PricesEditor.tsx`, the plugin's
+  own control of the setting): a row per model under the headings Model,
+  Input, Output, Cache read and Cache write, each empty field showing an
+  example or what it means empty (cache read and cache write empty cost
+  the input price), the unit and the prefix rule below; a row is saved
+  when it is complete and valid (Enter, or the focus leaving it), one that
+  is not says why under it and is not saved, and a row's × removes it at
+  once. The models the spend found without a price are offered beside
+  **Add a price** as rows to fill in. The core sends them with each scan (`CostOptions.Prices`) and
   keys its cache of the spend by them, so a change shows at the next read;
   an agent refuses prices the setting could not hold (`usage.ValidPrices`).
   One of the same name as an entry of the table replaces it, and the
@@ -841,6 +849,11 @@ one session's transcripts are found and read. Resources and retention:
 - `internal/plugins/usage` (`TestCostWithOwnPrices`): the setting refuses
   a bad line, its prices reach the scans, and a change is not served from
   the cache.
+- `web/src/__tests__/usageSettings.test.ts`: the form of prices (the
+  columns' headings, the stored line in its columns, a row edited in
+  place, a model without a price offered and focused, an incomplete row
+  said and not saved, cache read empty as the input price, a row removed),
+  the lines read and written and the rows refused.
 - `scripts/pricecheck/main_test.go`: differing prices (a dated version of
   LiteLLM's matched, not a longer model that starts with the name), a
   long-context tier that differs, entries LiteLLM lacks, new models of the

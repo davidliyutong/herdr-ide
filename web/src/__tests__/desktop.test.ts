@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
+import registry from '../../../design/generated/registry.json';
 import { keyName } from '../keys';
 import { disabledCommands, runMenuCommand } from '../desktop';
-import { closeWindowPane, leaveWindowPane } from '../keymap';
+import { closeWindowPane, handleKey, leaveWindowPane } from '../keymap';
+import { useKeys, type Binding } from '../keybindings';
 import '../commands';
 import { noteFocus, resetHistory } from '../paneHistory';
 import { useDialog } from '../dialog';
@@ -135,6 +137,85 @@ describe('runMenuCommand', () => {
     }
   });
 
+  it('leaves a pinned tab open: cmd+w closes its panes but not its last one', async () => {
+    const keysBefore = useKeys.getState().effective;
+    useKeys.setState({ effective: registry.keybindings.mac as Binding[] });
+    const now = vi.spyOn(Date, 'now');
+    const cmdW = () => {
+      const ev = new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', metaKey: true, cancelable: true });
+      expect(handleKey(ev, 'terminal')).toBe(true);
+      expect(ev.defaultPrevented).toBe(true);
+    };
+    const tabs = () => core.layout('m')!.workspaces[0].tabs;
+    try {
+      core.model.mutate('m', (l) => L.pinTab(l, 'wwwwwwww', 0, true));
+      await settle();
+      // With another pane beside it, the focused pane closes and the tab stays.
+      now.mockReturnValue(1_000_000);
+      cmdW();
+      await settle();
+      expect(tabs()).toHaveLength(1);
+      expect(tabs()[0]).toMatchObject({ pinned: true, root: { terminal: 't2' } });
+      // Its last pane stays, from the key (held or pressed again) and the menu.
+      expect(disabledCommands()).toContain('pane.close');
+      for (const t of [1_000_400, 1_000_430, 1_002_000]) {
+        now.mockReturnValue(t);
+        cmdW();
+        runMenuCommand('pane.close');
+      }
+      await settle();
+      expect(tabs()).toHaveLength(1);
+      expect(tabs()[0]).toMatchObject({ pinned: true, root: { terminal: 't2' } });
+      await vi.waitFor(() => expect(killed()).toEqual(['t1']));
+      // Close Tab still closes it.
+      runMenuCommand('tab.close');
+      await settle();
+      expect(tabs()).toEqual([]);
+      await vi.waitFor(() => expect(killed().sort()).toEqual(['t1', 't2']));
+    } finally {
+      now.mockRestore();
+      useKeys.setState({ effective: keysBefore });
+    }
+  });
+
+  it('stops a held cmd+w at a pinned tab it reaches', async () => {
+    await setup([shell('t1'), shell('t2'), shell('t3'), shell('t4')]);
+    // A pinned tab of two panes, then a tab of two panes, shown.
+    core.model.mutate('m', (l) => {
+      const both = L.splitPane(L.openTerminal(l, 't3', 'wwwwwwww'), 't3', 'horizontal', { terminal: 't4' });
+      return L.focusPane(L.pinTab(both, 'wwwwwwww', 0, true), 't3');
+    });
+    await settle();
+    expect(core.layout('m')!.workspaces[0].selected).toBe(1);
+    const now = vi.spyOn(Date, 'now');
+    try {
+      // The key held: its press and first repeat close the second tab's
+      // panes, the tab goes and the pinned one is shown, whose panes the
+      // repeats leave.
+      now.mockReturnValue(1_000_000);
+      runMenuCommand('pane.close');
+      await settle();
+      for (let t = 1_000_400; t < 1_000_700; t += 30) {
+        now.mockReturnValue(t);
+        runMenuCommand('pane.close');
+        await settle();
+      }
+      const tabs = core.layout('m')!.workspaces[0].tabs;
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0].pinned).toBe(true);
+      expect(L.tabPanes(tabs[0] as L.Tab).sort()).toEqual(['t1', 't2']);
+      // Pressed again, it closes the focused pane of the pinned tab.
+      now.mockReturnValue(1_005_000);
+      runMenuCommand('pane.close');
+      await settle();
+      expect(L.tabPanes(core.layout('m')!.workspaces[0].tabs[0] as L.Tab)).toHaveLength(1);
+      await vi.waitFor(() => expect(killed()).toHaveLength(3));
+      expect(killed().slice(0, 2).sort()).toEqual(['t3', 't4']);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('does nothing while a dialog is open', async () => {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
@@ -210,6 +291,39 @@ describe('runMenuCommand', () => {
       await settle();
       expect(L.findLeaf(core.layout('m') as L.Layout, 'code:c1')).toBeNull();
       expect(killed()).toEqual([]);
+    } finally {
+      hasFocus.mockRestore();
+      iframe.remove();
+    }
+  });
+
+  it("leaves a pinned tab's only VS Code pane to VS Code's cmd+w in a window without editors", async () => {
+    // The VS Code pane alone in a tab, pinned and shown.
+    core.model.mutate('m', (l) => {
+      const alone = L.moveToNewTab(L.splitPane(l, 't2', 'vertical', { code: { id: 'c1', folder: '/srv/app' } }), 'code:c1', 'wwwwwwww');
+      return L.pinTab(alone, 'wwwwwwww', 1, true);
+    });
+    await settle();
+    expect(core.layout('m')!.workspaces[0]).toMatchObject({ selected: 0, tabs: [{ pinned: true, focused: 'code:c1' }, {}] });
+    useFrames.setState({ frames: { 'm|c1': { m: 'm', id: 'c1', folder: '/srv/app', load: 0 } } });
+    const iframe = document.createElement('iframe');
+    iframe.className = 'code-frame';
+    iframe.dataset.frame = 'm|c1';
+    document.body.append(iframe);
+    frameLoaded('m|c1', iframe);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    try {
+      iframe.focus();
+      closeWindowPane('m', 'w1', ['/srv/app']);
+      await settle();
+      expect(L.findLeaf(core.layout('m') as L.Layout, 'code:c1')).not.toBeNull();
+      // Unpinned, the tab goes with it.
+      core.model.mutate('m', (l) => L.pinTab(l, 'wwwwwwww', 0, false));
+      await settle();
+      closeWindowPane('m', 'w1', ['/srv/app']);
+      await settle();
+      expect(L.findLeaf(core.layout('m') as L.Layout, 'code:c1')).toBeNull();
+      expect(core.layout('m')!.workspaces[0].tabs).toHaveLength(1);
     } finally {
       hasFocus.mockRestore();
       iframe.remove();

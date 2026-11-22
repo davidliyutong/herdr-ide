@@ -153,6 +153,9 @@ export interface ChatState {
   seen?: number;
   unread?: boolean;
   stale?: boolean;
+  /** The chat was archived: kept, closed, until the machine's chat limits
+   * remove it; the Chats panel lists it apart. */
+  archived?: boolean;
 }
 
 /** A trusted folder persisted on a machine's chat host. */
@@ -412,6 +415,10 @@ export interface StatesData {
   full: boolean;
   rev: number;
   stale?: boolean;
+  /** The machine's chat host's version, and whether it is another build
+   * than the core's (restarting the host brings the core's). */
+  hostVersion?: string;
+  outdated?: boolean;
 }
 
 /** GET STATES_PATH: each machine's states as the core last read them (full,

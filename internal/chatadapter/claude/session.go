@@ -53,6 +53,9 @@ type session struct {
 	// that the program is not signed in.
 	inTurn     bool
 	authFailed bool
+	// hasConversation: this session was resumed or a turn has started.
+	// Initialize alone creates no saved conversation for --resume to load.
+	hasConversation bool
 	// sent are the user's messages the program has not completed, by the
 	// uuid they were sent with; byMessage maps the host's message ids to
 	// them.
@@ -130,6 +133,7 @@ func newSession(p chatadapter.StartParams, sink chatadapter.Sink, id string) *se
 		tasks: map[string]string{}, seen: map[string]bool{},
 		stream:   streamState{open: -1},
 		modelArg: p.Options.Model, effort: effort, mode: mode,
+		hasConversation: p.Resume != "",
 	}
 }
 
@@ -581,6 +585,7 @@ func (s *session) Prompt(ctx context.Context, p chatadapter.PromptParams) error 
 // startTurn starts a turn; mu held.
 func (s *session) startTurn(o *out) {
 	s.inTurn, s.authFailed = true, false
+	s.hasConversation = true
 	o.event(chatproto.Event{T: chatproto.EventTurn, State: chatproto.TurnStart})
 }
 
@@ -805,11 +810,12 @@ func (s *session) applyMode(ctx context.Context, pr *proc, mode string) error {
 // before the session takes it (tests).
 var afterRestartLaunch func(s *session)
 
-// restartFull starts the program again, resuming the session, allowed to
+// restartFull starts the program again, keeping the session id, allowed to
 // skip permissions: Claude Code takes bypassPermissions only from a
 // program started with --allow-dangerously-skip-permissions. Refused while
-// a turn runs or the program waits for the user. Close calls it off: no
-// program it started outlives the session.
+// a turn runs or the program waits for the user. An existing conversation
+// is resumed; a new session before its first turn has none to resume.
+// Close calls it off: no program it started outlives the session.
 func (s *session) restartFull(ctx context.Context) error {
 	busy := &chatproto.Error{Code: chatproto.CodeBusy, Message: "claude: a turn runs"}
 	s.emu.Lock()
@@ -828,6 +834,7 @@ func (s *session) restartFull(ctx context.Context) error {
 	defer cancel()
 	s.restarting, s.cancelRestart = true, cancel
 	old := s.proc
+	resume := s.hasConversation
 	s.mu.Unlock()
 	s.flush(&out{evs: []chatproto.Event{{T: chatproto.EventNotice, Method: agentproto.NoticeMethod(agentproto.NoticeRestarted), Params: mustJSON(map[string]string{"mode": chatproto.ModeFull})}}})
 	s.emu.Unlock()
@@ -843,7 +850,7 @@ func (s *session) restartFull(ctx context.Context) error {
 	var ini *initResponse
 	err := ctx.Err()
 	if err == nil {
-		pr, ini, err = s.launch(ctx, true, true)
+		pr, ini, err = s.launch(ctx, resume, true)
 	}
 	if err == nil && afterRestartLaunch != nil {
 		afterRestartLaunch(s)

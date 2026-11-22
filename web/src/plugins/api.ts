@@ -7,7 +7,7 @@ import type { ComponentType, ReactNode } from 'react';
 import type { MenuEntry } from '../contextMenu';
 import type { MessageKey } from '../i18n';
 import type { AgentStatus } from '../lib/machine';
-import type { SettingDef } from '../settings';
+import type { SettingDef, SettingValue } from '../settings';
 import type { NotificationTarget } from '../shell';
 import type { PluginView, TerminalLeaf } from '../term/layout';
 
@@ -103,6 +103,15 @@ export interface PluginSettingsLayoutProps extends PluginSettingsProps {
   visit: number;
 }
 
+/** A control of a plugin's own for one of its settings: the dialog's row
+ * keeps its title, description, menu and errors around it. */
+export interface SettingControlProps {
+  d: SettingDef;
+  value: SettingValue;
+  disabled: boolean;
+  onChange(v: SettingValue): void;
+}
+
 /** A plugin's page in Settings. */
 export interface PluginSettingsDef {
   /** The section of its settings (internal/settings), whose page the
@@ -115,6 +124,9 @@ export interface PluginSettingsDef {
   layout?: ComponentType<PluginSettingsLayoutProps>;
   /** Drawn at the end of the page. */
   extra?: ComponentType<PluginSettingsProps>;
+  /** Controls of its own for some of its settings, by key, in place of
+   * the dialog's control of their type (in the user's scope). */
+  controls?: Record<string, ComponentType<SettingControlProps>>;
 }
 
 /** A kind of tab a plugin offers in the tab bar's new-tab menu, after

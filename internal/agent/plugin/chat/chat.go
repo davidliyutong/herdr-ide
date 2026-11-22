@@ -293,9 +293,17 @@ func gone(ctx context.Context, pid int, wait time.Duration) bool {
 
 // version is a build's version as the build names it (git describe: the
 // tag, "v" and three numbers, then the commits after it, "-<n>-g<hash>",
-// and "-dirty"); ok false for any other (a development build, "dev").
+// and "-dirty", which scripts/build.sh follows with the build's time so
+// that two builds of local changes are told apart); ok false for any other
+// (a development build, "dev"). What follows "-dirty" does not order
+// builds: builds of local changes at one commit are of the same age, and
+// the page reminds the user to restart a host of another build
+// (internal/plugins/chat).
 func version(v string) (n [4]int, ok bool) {
-	v, _ = strings.CutSuffix(strings.TrimPrefix(v, "v"), "-dirty")
+	v = strings.TrimPrefix(v, "v")
+	if base, _, dirty := strings.Cut(v, "-dirty"); dirty {
+		v = base
+	}
 	base, after, more := strings.Cut(v, "-")
 	parts := strings.Split(base, ".")
 	if len(parts) != 3 {

@@ -769,3 +769,66 @@
   font-weight: 600;
   color: var(--fg);
 }
+
+/* ---- Settings › AI usage › Your prices (PricesEditor.tsx) ---- */
+.prices-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.prices-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.prices-head,
+.prices-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 2fr) repeat(4, minmax(56px, 1fr)) var(--ctl-sm);
+  gap: 4px;
+  align-items: center;
+}
+.prices-col-title {
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prices-row .settings-input {
+  width: 100%;
+  min-width: 0;
+}
+.prices-row.invalid .settings-input[aria-invalid] {
+  border-color: var(--error);
+}
+.prices-problem {
+  margin-top: 2px;
+}
+.prices-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.prices-actions > button svg,
+.prices-suggest svg {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.prices-unpriced {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.prices-suggest {
+  cursor: pointer;
+  color: var(--fg);
+}
+.prices-hint {
+  line-height: 1.4;
+}

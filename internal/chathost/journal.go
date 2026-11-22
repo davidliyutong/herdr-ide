@@ -97,6 +97,9 @@ var migrations = []string{
 	DELETE FROM trusted;
 	ALTER TABLE trusted ADD COLUMN dev INTEGER NOT NULL DEFAULT 0;
 	ALTER TABLE trusted ADD COLUMN ino INTEGER NOT NULL DEFAULT 0;`,
+	// archived: when the chat was archived (chatproto.OpArchive), 0 while
+	// it is not.
+	`ALTER TABLE chats ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // deleteBatch is how many events one transaction deletes: a large log goes
@@ -209,11 +212,11 @@ func (j *journal) saveLocked(r row) error {
 	_, err := j.db.Exec(`UPDATE chats SET kind = ?, title = ?, cwd = ?, session_id = ?, state = ?, error = ?,
 		created = ?, updated = ?, seq = ?, seen = ?, closed = ?, handed_off = ?, agent_version = ?,
 		config = ?, commands = ?, usage = ?, capabilities = ?, turn_end = ?, options = ?, history_after = ?, bytes = ?,
-		fresh = ?, renamed = ?, untrusted_told = ? WHERE id = ?`,
+		fresh = ?, renamed = ?, untrusted_told = ?, archived = ? WHERE id = ?`,
 		r.Kind, r.Title, r.Cwd, r.SessionID, r.State, errText,
 		ms(r.Created), ms(r.Updated), int64(r.Seq), int64(r.Seen), ms(r.Closed), boolInt(r.HandedOff), r.AgentVersion,
 		jsonText(r.Config), jsonText(r.Commands), jsonText(r.Usage), jsonText(r.Capabilities),
-		int64(r.TurnEnd), jsonText(r.Options), r.HistoryAfter, r.Bytes, boolInt(r.Fresh), boolInt(r.Renamed), boolInt(r.UntrustedTold), r.ID)
+		int64(r.TurnEnd), jsonText(r.Options), r.HistoryAfter, r.Bytes, boolInt(r.Fresh), boolInt(r.Renamed), boolInt(r.UntrustedTold), ms(r.Archived), r.ID)
 	return err
 }
 
@@ -221,7 +224,7 @@ func (j *journal) saveLocked(r row) error {
 func (j *journal) loadChats() ([]row, error) {
 	rows, err := j.db.Query(`SELECT id, kind, title, cwd, session_id, state, error, created, updated, seq, seen,
 		closed, handed_off, agent_version, config, commands, usage, capabilities, turn_end, options, history_after, bytes,
-		fresh, renamed, untrusted_told FROM chats`)
+		fresh, renamed, untrusted_told, archived FROM chats`)
 	if err != nil {
 		return nil, err
 	}
@@ -230,14 +233,14 @@ func (j *journal) loadChats() ([]row, error) {
 	for rows.Next() {
 		var r row
 		var errText, config, commands, usage, caps, options string
-		var created, updated, seq, seen, closed, turnEnd int64
+		var created, updated, seq, seen, closed, turnEnd, archived int64
 		var handedOff, fresh, renamed, untrustedTold int
 		if err := rows.Scan(&r.ID, &r.Kind, &r.Title, &r.Cwd, &r.SessionID, &r.State, &errText, &created, &updated,
 			&seq, &seen, &closed, &handedOff, &r.AgentVersion, &config, &commands, &usage, &caps, &turnEnd,
-			&options, &r.HistoryAfter, &r.Bytes, &fresh, &renamed, &untrustedTold); err != nil {
+			&options, &r.HistoryAfter, &r.Bytes, &fresh, &renamed, &untrustedTold, &archived); err != nil {
 			return nil, err
 		}
-		r.Created, r.Updated, r.Closed = fromMS(created), fromMS(updated), fromMS(closed)
+		r.Created, r.Updated, r.Closed, r.Archived = fromMS(created), fromMS(updated), fromMS(closed), fromMS(archived)
 		r.Seq, r.Seen, r.TurnEnd, r.HandedOff, r.Fresh = uint64(seq), uint64(seen), uint64(turnEnd), handedOff != 0, fresh != 0
 		r.Renamed, r.UntrustedTold = renamed != 0, untrustedTold != 0
 		if errText != "" {

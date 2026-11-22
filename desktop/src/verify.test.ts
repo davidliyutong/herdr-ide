@@ -385,7 +385,7 @@ function unlockSetup(over: UnlockOver = {}) {
   const keys = () =>
     'keys' in over ? over.keys && { ...over.keys, secret: Buffer.from(over.keys.secret) } : { install, secret: Buffer.from(shellSecret) };
   const unlockStore: UnlockStore = {
-    available: () => over.safe ?? true,
+    available: async () => over.safe ?? true,
     load: async () => {
       log.push('load');
       return keys() ?? null;

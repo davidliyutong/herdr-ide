@@ -59,7 +59,8 @@ import {
 } from './policy';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
 import { macTrafficLightPosition, windowFrameOptions } from './titlebar';
-import { unlockStore } from './unlockStore';
+import { codeIdentity, instanceFiles, KEYCHAIN_RECORD, keychainMigration, runTool, safeStorageItem, securityKeychain } from './keychain';
+import { UNLOCK_FILE, unlockStore, type Prepared } from './unlockStore';
 import { verifier, type Verifier } from './verify';
 import { helloFor, helloKeysFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
 
@@ -123,6 +124,27 @@ const notifications = createNotifications({
   create: (opts) => new Notification(opts),
   showMain,
 });
+
+/** macOS: the step that gives safeStorage's keychain item to this build
+ * when another build made it, before the vault's unlock store first uses
+ * safeStorage (keychain.ts). A development run (Electron's own executable,
+ * which rebuilding the app does not change) only records that it made the
+ * item, so that a packaged build moves it; an explicit --user-data-dir
+ * (isolated runs) leaves the item and the instances' files alone. */
+function keychainStep(): (() => Promise<Prepared>) | undefined {
+  if (platform !== 'darwin' || app.commandLine.hasSwitch('user-data-dir')) return undefined;
+  const appData = app.getPath('appData');
+  return keychainMigration({
+    move: app.isPackaged,
+    safe: safeStorage,
+    // The bundle of Contents/MacOS/<executable>, which a restored item trusts.
+    keychain: securityKeychain(safeStorageItem(app.getName()), join(process.execPath, '..', '..', '..'), runTool),
+    identity: () => codeIdentity(runTool, process.pid),
+    own: join(app.getPath('userData'), UNLOCK_FILE),
+    files: () => instanceFiles(appData),
+    record: join(appData, KEYCHAIN_RECORD),
+  });
+}
 
 function t(key: MessageKey, vars?: Record<string, string>): string {
   return translate(detectLocale(language === 'auto' ? null : language, app.getPreferredSystemLanguages()), key, vars);
@@ -637,7 +659,7 @@ if (!app.requestSingleInstanceLock()) {
           enclave: enclaveFor(helperRunner(helperPath(app.isPackaged ? process.resourcesPath : undefined, app.getAppPath()))),
         }),
         ...(platform === 'win32' && { helloKeys: helloKeysFor(runPowerShell) }),
-        unlockStore: unlockStore(app.getPath('userData'), safeStorage),
+        unlockStore: unlockStore(app.getPath('userData'), safeStorage, { prepare: keychainStep() }),
       });
       const ses = session.defaultSession;
       await ses.cookies.set(desktopCookie(origin, token));

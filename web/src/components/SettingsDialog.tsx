@@ -45,7 +45,7 @@ import { PluginHeader, PluginsPage } from './settings/PluginsPage';
 import { Performance } from './settings/Performance';
 import { Picker, type PickerItem } from './Picker';
 import { useReturnFocus } from './useDismiss';
-import { acceptRisk, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
+import { acceptRisk, allPlugins, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
 import type { PluginDef, PluginSettingsDef } from '../plugins/api';
 
 export function settingLabel(key: string): string {
@@ -649,6 +649,9 @@ function Control({
   disabled: boolean;
   onChange(v: SettingValue): void;
 }) {
+  // A plugin's own control for the setting (PluginSettingsDef.controls).
+  const Own = allPlugins().find((p) => p.settings?.controls?.[d.key])?.settings?.controls?.[d.key];
+  if (Own) return <Own d={d} value={value} disabled={disabled} onChange={onChange} />;
   switch (d.type) {
     case 'bool':
       return (

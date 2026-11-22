@@ -34,7 +34,7 @@ test('the first enroll makes an install id and a secret, kept 0600 with the secr
   t.after(() => rm(d, { recursive: true, force: true }));
   const { safe } = fakeSafe();
   const store = unlockStore(d, safe);
-  assert.equal(store.available(), true);
+  assert.equal(await store.available(), true);
   assert.equal(await store.load(), null);
   const made = await store.loadOrCreate();
   assert.ok(made);
@@ -57,7 +57,7 @@ test('without safeStorage nothing is offered, read or written', async (t) => {
   t.after(() => rm(d, { recursive: true, force: true }));
   const { safe, calls } = fakeSafe({ available: false });
   const store = unlockStore(d, safe);
-  assert.equal(store.available(), false);
+  assert.equal(await store.available(), false);
   assert.equal(await store.loadOrCreate(), null);
   assert.equal(await store.load(), null);
   assert.deepEqual(calls, { encrypt: 0, decrypt: 0 });
@@ -68,7 +68,7 @@ test('without safeStorage nothing is offered, read or written', async (t) => {
       throw new Error('not ready');
     },
   });
-  assert.equal(throwing.available(), false);
+  assert.equal(await throwing.available(), false);
 });
 
 test('a secret that no longer decrypts is none; enrolling again keeps the install id with a new secret', async (t) => {
@@ -143,4 +143,59 @@ test('the file is read only as a small regular file, never through a link', asyn
   assert.equal(await unlockStore(d, safe).load(), null);
   // The file cannot be written over a directory: no keys.
   assert.equal(await unlockStore(d, safe).loadOrCreate(), null);
+});
+
+test('the step before safeStorage runs once, before its first use; one that fails leaves safeStorage as it was', async (t) => {
+  const d = await dir();
+  t.after(() => rm(d, { recursive: true, force: true }));
+  const { safe, calls } = fakeSafe();
+  const order: string[] = [];
+  let runs = 0;
+  const watched: SafeStorage = {
+    isEncryptionAvailable: () => (order.push('safeStorage'), safe.isEncryptionAvailable()),
+    encryptString: (s) => safe.encryptString(s),
+    decryptString: (b) => safe.decryptString(b),
+  };
+  const store = unlockStore(d, watched, {
+    prepare: async () => {
+      runs++;
+      order.push('step');
+      return { use: true };
+    },
+  });
+  const [a, b] = await Promise.all([store.available(), store.loadOrCreate()]);
+  assert.equal(a, true);
+  assert.ok(b);
+  assert.equal(runs, 1);
+  assert.equal(order[0], 'step');
+  assert.deepEqual(await store.load(), b);
+  assert.equal(runs, 1);
+  const failing = unlockStore(d, safe, {
+    prepare: async () => {
+      throw new Error('broken');
+    },
+  });
+  assert.deepEqual(await failing.load(), b);
+  assert.ok(calls.decrypt > 0);
+});
+
+test('a step that leaves safeStorage alone: its keys for this launch, copies each time, nothing written; none without keys', async (t) => {
+  const d = await dir();
+  t.after(() => rm(d, { recursive: true, force: true }));
+  const { safe, calls } = fakeSafe();
+  const keys = { install: 'install-0123456789ab', secret: Buffer.alloc(32, 7) };
+  const store = unlockStore(d, safe, { prepare: async () => ({ use: false, keys }) });
+  assert.equal(await store.available(), true);
+  const got = (await store.load())!;
+  assert.deepEqual(got, keys);
+  got.secret.fill(0);
+  assert.deepEqual(await store.loadOrCreate(), keys);
+  assert.deepEqual(calls, { encrypt: 0, decrypt: 0 });
+  await assert.rejects(stat(join(d, UNLOCK_FILE)));
+  const none = unlockStore(d, safe, { prepare: async () => ({ use: false }) });
+  assert.equal(await none.available(), false);
+  assert.equal(await none.load(), null);
+  assert.equal(await none.loadOrCreate(), null);
+  assert.deepEqual(calls, { encrypt: 0, decrypt: 0 });
+  await assert.rejects(stat(join(d, UNLOCK_FILE)));
 });

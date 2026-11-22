@@ -14,6 +14,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}
+# Local edits at the same commit need distinct versions too: the chat host
+# outlives an app reinstall and only makes way for a newer build. Release
+# versions stay reproducible; dirty builds are ordered by their build time.
+if [[ "$VERSION" == *-dirty ]]; then
+  VERSION="$VERSION.$(date -u +%s)"
+fi
 MODULE=$(go list -m)
 SLUG=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
 LDFLAGS="-s -w -X ${MODULE}/internal/agentproto.Version=${VERSION}"

@@ -40,6 +40,7 @@ export const en = {
   'conversation.error.bad_request': 'The chat did not take that request.',
   'conversation.error.busy': '{agent} is busy: try again once its turn ends.',
   'conversation.error.not_found': 'It is no longer there: another window may have answered first.',
+  'conversation.error.start_not_found': '{agent} could not start: its program or saved session could not be found.',
   'conversation.error.start_failed': '{agent} could not be started.',
   'conversation.error.protocol': 'This version of {agent} is not one the app can drive.',
   'conversation.error.auth_required': '{agent} needs you to sign in first: run it once in a terminal.',
@@ -101,7 +102,8 @@ export const en = {
   'conversation.config.fullReadOnly': '{name} (not from a read-only window)',
   'conversation.mode.default': 'Ask before edits',
   'conversation.mode.acceptEdits': 'Edit without asking',
-  'conversation.mode.plan': 'Plan first',
+  'conversation.mode.plan': 'Plan mode',
+  'conversation.mode.auto': 'Auto mode',
   'conversation.mode.full': 'Full access',
   // The usage line.
   'conversation.usage.label': 'Usage',

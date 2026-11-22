@@ -195,6 +195,8 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: http.MethodPost, Path: "new", Machine: true, Mutating: true, Audit: "new", Handler: p.postNew},
 		{Method: http.MethodPost, Path: "close", Machine: true, Mutating: true, Audit: "close", Handler: p.postClose},
 		{Method: http.MethodDelete, Path: "chat", Machine: true, Mutating: true, Audit: "delete", Handler: p.deleteChat},
+		{Method: http.MethodPost, Path: "archive", Machine: true, Mutating: true, Audit: "archive", Handler: p.postArchive},
+		{Method: http.MethodPost, Path: "unarchive", Machine: true, Mutating: true, Audit: "unarchive", Handler: p.postUnarchive},
 		{Method: http.MethodPost, Path: "seen", Machine: true, Mutating: true, Audit: "seen", Handler: p.postSeen},
 		{Method: http.MethodPost, Path: "handoff", Machine: true, Mutating: true, Audit: "handoff", Handler: p.postHandoff},
 		{Method: http.MethodPost, Path: "trust", Machine: true, Mutating: true, Audit: "trust", Handler: p.postTrust},
@@ -463,6 +465,14 @@ func (p *Plugin) postClose(c *plugin.Call, w http.ResponseWriter, r *http.Reques
 
 func (p *Plugin) deleteChat(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	p.simple(c, w, r, chatproto.OpDelete)
+}
+
+func (p *Plugin) postArchive(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.simple(c, w, r, chatproto.OpArchive)
+}
+
+func (p *Plugin) postUnarchive(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.simple(c, w, r, chatproto.OpUnarchive)
 }
 
 func (p *Plugin) postSeen(c *plugin.Call, w http.ResponseWriter, r *http.Request) {

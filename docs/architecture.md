@@ -151,7 +151,9 @@ path with one JSON line on stdin and one on stdout: `available`, `create`,
 `agree`), on Windows a Windows Hello key through PowerShell's
 `KeyCredentialManager` (`desktop/src/windowsHello.ts`), each with a secret
 of the install kept with Electron's safeStorage in `vault-unlock.json` of
-the user data (`desktop/src/unlockStore.ts`). What makes an entry's
+the user data (`desktop/src/unlockStore.ts`; on macOS a build whose
+signature differs from the one that made safeStorage's keychain item
+first moves the item to itself, `desktop/src/keychain.ts`). What makes an entry's
 key-encryption key (the Secure Enclave's ECDH secret or the Hello
 signature, with that secret) goes to the core through the page in a
 relay (`desktop/src/relay.ts`): AES-256-GCM under HKDF-SHA256 of the
@@ -216,7 +218,7 @@ own protocol (`/api/v1/term`, below). A client plays no notification sounds
 | – | `plugin {plugin, m, data}`: a plugin's message for machine `m` (`""` for the core's), handed to the plugin's web side while it is on ([27](features/27-plugins.md)); the vault's: `{type: request, request: {id, m, tool, names, client, terminal, cwd, process, created, expires}}` (an approval to ask), `{type: resolved, id, answer}` (answered or expired: every page closes it), `{type: changed}` (load the variables and the log again; for access records at most once a second, the last included) ([30](features/30-variable-vault.md)) |
 | – | `settings {values, problems}` and `keybindings {user, effective, conflicts, problems}` after every change, through the API or the files ([13](features/13-settings-and-appearance.md)) |
 | `active {idle}` (ms since the user last used the page) | `agent {…, sound}`: `sound` is true only for the most recently used page, which plays the notification sound; a terminal core's terminal sends `data {terminal, agent, display_agent, agent_status, title}` ([25](features/25-agent-detection.md)), a chat that became blocked or done `data {terminal: "", chat, agent, display_agent, agent_status, title}` ([37](features/37-agent-chats.md)) |
-| – | `plugin {plugin: "chat", m, data: {t: "states", states, full, rev}}`: the chats' states of machine `m` as its chat host's watch tells them, numbered per machine; `GET /api/p/chat/states` answers the last of every machine ([37](features/37-agent-chats.md)) |
+| – | `plugin {plugin: "chat", m, data: {t: "states", states, full, rev, hostVersion?, outdated?}}`: the chats' states of machine `m` as its chat host's watch tells them, numbered per machine; `GET /api/p/chat/states` answers the last of every machine ([37](features/37-agent-chats.md)) |
 
 HTTP endpoints besides files (`GET /api/m/{id}/file`, `GET /api/m/{id}/list`,
 and `GET /api/m/{id}/download?path=…[&dl=<id>]`: one file as an attachment,
@@ -330,7 +332,10 @@ conversations ([37](features/37-agent-chats.md)). Its path from a page:
    reply the stream carries the host's socket both ways. The machine side
    starts the host as a hidden terminal of the instance's terminal core
    when none serves (not with `start: false`), and asks a host of an
-   older build to make way. At most 128 such streams per machine.
+   older build to make way. A host of another build that stays (one of
+   local changes at the same commit, a newer one) is marked `outdated` in
+   the states, and the page reminds the user to restart it. At most 128
+   such streams per machine.
 3. **Core ↔ chat host**: `chatproto` on `run/chat.sock`, JSON lines of at
    most 16 MiB: the host's hello `{host: {proto, version, pid}}`, one
    request and its response, then for `attach` the chat's stored events

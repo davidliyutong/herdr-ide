@@ -41,6 +41,16 @@ const zoomable = () => zoomAvailable(store().readOnly);
  * repeat comes after the system's delay, about 400 ms by default). */
 let lastPaneClose = 0;
 const HELD_CLOSE_MS = 600;
+/** The panes of the tab pane.close last closed a pane of. */
+let lastCloseTab: readonly string[] = [];
+
+/** Whether the focused pane is the only one of a pinned tab: pane.close
+ * leaves it, so cmd+w does not close a pinned tab. */
+function pinnedLastPane(): boolean {
+  const c = focused();
+  const layout = current()?.layout;
+  return !!c?.pane && !!layout && L.onlyPaneOfPinnedTab(layout, c.pane);
+}
 
 /** Whether the selected workspace has no tab left: closing a pane closes it. */
 function emptyWorkspace(): boolean {
@@ -215,14 +225,23 @@ export const commands: Record<string, CommandDef> = {
     run: withPane((m, pane) => void actions.split(m, pane, 'down')),
   },
   'pane.close': {
-    // With no pane left, it closes the empty workspace.
-    enabled: () => changes() && (hasPane() || emptyWorkspace()),
+    // With no pane left, it closes the empty workspace. A pinned tab keeps
+    // its last pane: Close Tab closes it.
+    enabled: () => changes() && ((hasPane() && !pinnedLastPane()) || emptyWorkspace()),
     run() {
       const c = focused();
       const now = Date.now();
       const held = now - lastPaneClose < HELD_CLOSE_MS;
       lastPaneClose = now;
-      if (c?.pane) void actions.closePane(c.m, c.pane);
+      if (c?.pane) {
+        const tab = current()?.tab;
+        const panes = tab ? L.tabPanes(tab) : [];
+        // In a pinned tab only a pane with others beside it closes, and a
+        // held key that closed another tab's panes stops at a pinned one.
+        if (pinnedLastPane() || (tab?.pinned && held && !panes.some((p) => lastCloseTab.includes(p)))) return;
+        lastCloseTab = panes;
+        void actions.closePane(c.m, c.pane);
+      }
       // A press of its own closes the empty workspace, not a held key that
       // closed its last pane.
       else if (!held && emptyWorkspace()) {

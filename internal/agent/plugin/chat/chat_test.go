@@ -585,6 +585,34 @@ func TestSameBuildIsKept(t *testing.T) {
 	}
 }
 
+// Builds of local changes at the commit of the agent's build are of the
+// same age, whatever their build time: their host is kept, never asked to
+// make way (the page reminds the user to restart it).
+func TestDirtyBuildKept(t *testing.T) {
+	const current = "v0.5.0-3-gabc1234-dirty.1700000002"
+	for _, other := range []string{
+		"v0.5.0-3-gabc1234",
+		"v0.5.0-3-gabc1234-dirty",
+		"v0.5.0-3-gabc1234-dirty.1700000001",
+		"v0.5.0-3-gabc1234-dirty.1700000003",
+	} {
+		t.Run(other, func(t *testing.T) {
+			previous := agentproto.Version
+			agentproto.Version = current
+			t.Cleanup(func() { agentproto.Version = previous })
+			m := newMachine(t)
+			old := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: other, PID: noPID}, false)
+			s := m.open(context.Background())
+			if h := s.hello(); h.Version != other {
+				t.Fatalf("hello %+v, want the host of %s", h, other)
+			}
+			if old.asked() != 0 || m.runs() != 0 {
+				t.Errorf("shutdown requests %d, starts %d", old.asked(), m.runs())
+			}
+		})
+	}
+}
+
 // A host of an older build and another protocol is upgrading while a busy
 // chat keeps it; without one it makes way like any other older build's.
 func TestOtherProtocol(t *testing.T) {
@@ -705,6 +733,10 @@ func TestOlder(t *testing.T) {
 		{"v0.5.0", "v0.5.0-3-gabc1234", true},
 		{"v0.5.0-2-gfff", "v0.5.0-3-gabc", true},
 		{"v0.5.0-3-gabc-dirty", "v0.5.0-4-gabc", true},
+		{"v0.5.0-3-gabc-dirty.1700000002", "v0.5.0-4-gabc", true},
+		{"v0.5.0-3-gabc-dirty", "v0.5.0-3-gabc-dirty.1700000001", false},
+		{"v0.5.0-3-gabc-dirty.1700000001", "v0.5.0-3-gabc-dirty.1700000002", false},
+		{"v0.5.0-3-gabc-dirty.1700000002", "v0.5.0-3-gabc-dirty.1700000001", false},
 		{"0.9.9", "v0.10.0", true},
 		{"v0.5.0", "v0.5.0", false},
 		{"v0.5.0-3-gaaa", "v0.5.0-3-gbbb", false},

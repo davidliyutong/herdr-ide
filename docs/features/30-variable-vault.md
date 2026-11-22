@@ -395,7 +395,8 @@ that does not verify has left its authenticator: audited as
 counter that did not grow).
 
 **The desktop app's unlock key** (`desktop/src/verify.ts`, `enclave.ts`,
-`windowsHello.ts`, `unlockStore.ts`, `relay.ts`, `desktop/helper/`).
+`windowsHello.ts`, `unlockStore.ts`, `keychain.ts`, `relay.ts`,
+`desktop/helper/`).
 
 - Each install of the app keeps `vault-unlock.json` in the app's user
   data (0600, written beside it and renamed over it, read only as a
@@ -408,6 +409,60 @@ counter that did not grow).
   unlock (`canUnlock`). A secret that no longer decrypts is made again at
   the next enrollment, the install id kept; entries made with the old one
   then no longer open.
+- macOS, the keychain item of a new build (`keychain.ts`). The item
+  `<APP_NAME> Safe Storage` (account `<APP_NAME> Key`) is made by the
+  build that first used safeStorage, and its access list trusts that
+  build alone: its designated requirement and, in the partition list, its
+  Team ID, or for a build without one (signed ad hoc, as `make
+  desktop-app` builds without a Developer ID, or with a certificate of the
+  user's own) its cdhash, which every build changes. Every app instance
+  and the development run share the item (it is named after the app).
+  Once per launch, before the store first uses safeStorage, the shell
+  compares the running process's code identity (`codesign -d -vvv
+  +<pid>`: `teamid:<Team ID>:<identifier>`, else `cdhash:<cdhash>`) with
+  the one recorded for the item's maker in `<APP_SLUG>-desktop-keychain.json`
+  of the app data directory (0600, beside every instance's user data). The
+  same build, or no item yet (the first use makes it, and the build is
+  recorded): safeStorage as it is. Another build (or an item older than
+  the record, unless this build has a Team ID, which the item then
+  already trusts) moves the item to this one, one instance at a time (a
+  lock file beside the record; one younger than 10 minutes leaves the
+  launch without unlock):
+
+  1. When no instance's `vault-unlock.json` holds a secret, the old item
+     is deleted unread, without a prompt.
+  2. Else the shell reads the old item's password once with
+     `/usr/bin/security find-generic-password -w`: the one prompt, which
+     macOS shows naming `security`. Refused, or no answer within 2
+     minutes: nothing changes and this launch offers no unlock (no
+     second prompt of safeStorage); the next launch asks again.
+  3. With that password it opens the secrets of every instance's file
+     (`<APP_SLUG>-desktop`, `<APP_SLUG>-desktop-<instance>`; at most 64)
+     as Chromium sealed them (`v10`: AES-128-CBC, an IV of 16 spaces,
+     PBKDF2-HMAC-SHA1 of the password with salt `saltysalt` and 1003
+     iterations); one sealed under another key stays as it is.
+  4. It deletes the old item, has safeStorage make a new one (this
+     build's, with a new random key), checks that safeStorage seals with
+     the new key (a ciphertext the old password opens means it read the
+     old key before) and that each secret comes back, and writes this
+     instance's file, then the others', then the record.
+
+  Two items of one name cannot exist together, so the old password stays
+  in memory until this instance's file is written: when the new item
+  cannot be made or checked, or that file cannot be written, the shell
+  deletes any new item and adds the old one back with its password
+  (`security -i`, the password on its standard input, trusted by the app
+  alone), and the launch keeps the keys it read without using safeStorage.
+  An old item that cannot be deleted stays, likewise. When safeStorage
+  already held the old key (something used it before the step), the build
+  is recorded as well, so that its later launches read the old item as
+  before instead of asking twice. Another instance's
+  file that cannot be written gets a new secret at its next enrollment. A
+  secret in another format than `v10` leaves the item as it is, the build
+  recorded so that it is not asked again. A development run (unpackaged,
+  Electron's own executable, which rebuilding the app does not change)
+  only records the item it makes and never moves one; a run with
+  `--user-data-dir`, Windows and Linux skip the step.
 - macOS: the Secure Enclave helper, `<APP_NAME> Enclave.app` in the app's
   `Contents/Helpers` (`desktop/helper/Enclave.swift`, one universal
   executable for arm64 and x86_64 from macOS 12, signed with the app; the
@@ -1031,6 +1086,19 @@ the passphrase between changes.
   (safeStorage's key gone): the shell has no entry of its own and the page
   says to set biometrics up again; enrolling again makes a new secret,
   under the same install id when the file still names it.
+- A new build of the app on macOS without a Team ID (signed ad hoc or
+  with the user's own certificate): its first use of the unlock asks once
+  to let `security` read `<APP_NAME> Safe Storage` (when no instance
+  enrolled, it asks nothing) and moves the item to this build; its later
+  launches ask nothing. Refused: no biometric unlock in that launch (the
+  passphrase unlocks), asked again at the next. A move that fails puts
+  the old item back and asks again at the next launch. An instance that
+  runs while another moves the item (it holds the old key) unlocks with
+  biometrics again after its restart. A development run of the app reads
+  an item a packaged build moved as before: macOS asks it once to allow
+  it (Always Allow holds for its executable). Killed between deleting the
+  old item and writing the files, the shell loses the old password: the
+  instances' secrets no longer decrypt (the item above).
 - A re-enrollment that replaced the Hello key or the shell's secret but
   that the core refused (a wrong passphrase, an expired nonce): the old
   entry no longer opens; the next unlock with it removes it (`409
@@ -1129,11 +1197,17 @@ entries, the key in memory and exempt apps do not guarantee:
   program of its own) with an entry's blob, which the file holds, and a
   reason text of its choosing. On macOS the other half of a desktop KEK,
   the shell's secret, is in the keychain under the app's access list
-  (another program gets the keychain's prompt). On Windows DPAPI gives
-  the shell's secret to any program of the user, and a Hello key can be
-  opened by name and asked to sign, with a dialog that names no purpose:
-  there only the Hello prompt stands, and a PowerShell transcript, if the
-  user turned transcription on, could record the signature.
+  (another program gets the keychain's prompt). Moving the item to a new
+  build reads it with `/usr/bin/security`, so that prompt names
+  `security`: the password then passes through the shell's main process
+  (which holds the key it makes anyway), and Always Allow there would let
+  any program read the old item through `security` until the shell
+  deletes it a moment later (an item that cannot be deleted keeps that).
+  On Windows DPAPI gives the shell's secret to any program of the user,
+  and a Hello key can be opened by name and asked to sign, with a dialog
+  that names no purpose: there only the Hello prompt stands, and a
+  PowerShell transcript, if the user turned transcription on, could
+  record the signature.
 - A PRF output is a secret for as long as the passphrase lasts, and it
   passes through the page's script and the request's body: content on the
   UI's origin that sees it once (VS Code's windows, while on), with the
@@ -1243,7 +1317,28 @@ entries, the key in memory and exempt apps do not guarantee:
   id and secret made once, 0600 with the secret encrypted; nothing without
   safeStorage; a secret that no longer decrypts made again with the
   install id kept; a file of another shape not read; only a small regular
-  file, never through a link. `windowsHello.test.ts` (also the key
+  file, never through a link; the step before safeStorage run once before
+  its first use, a failing one leaving safeStorage as it was, and keys it
+  held served as copies without safeStorage or a write.
+  `desktop/src/keychain.test.ts`, with a stand-in for the keychain and for
+  Chromium's safeStorage (the item read once per launch, macOS asking for
+  another build's, one made when there is none): the same build moves
+  nothing and asks nothing; a new build reads the old item once, seals
+  every instance's secret under a new item of its own, deletes the old one
+  and records itself, its later launches asking nothing; an item older
+  than the record moves once, unless the build has a Team ID; no secret
+  anywhere deletes the item unread; a file that cannot be written, a new
+  item that cannot be made and safeStorage that read the old key first
+  put the old item back with its password, the file unchanged and the
+  keys kept for the launch, and the next launch moves it (in the last
+  case the build is recorded instead); a refused read
+  changes nothing and asks again; an item that cannot be deleted stays; a
+  secret under another key stays; one migration at a time, a stale lock
+  taken; a development run only records; OSCrypt's `v10` against a vector
+  made with Python and openssl; the identity from codesign's display;
+  security's and codesign's arguments, exit codes and the password only
+  on standard input; the instances' directories, never links;
+  bounded runs. `windowsHello.test.ts` (also the key
   operations' results and the key's name and challenge in the
   environment, never in the script), `preload.test.ts` (also the unlock
   key's answers of their forms only), `core.test.ts`.

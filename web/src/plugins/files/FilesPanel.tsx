@@ -239,11 +239,31 @@ export function FilesPanel() {
   const kinds = useMemo(() => new Map(rows.map((r) => [r.path, r.dir])), [rows]);
   const isDir = (p: string) => kinds.get(p) ?? p === s.root;
 
-  // Scroll position memory across unmounts and tab/root switches.
+  // Scroll position memory across unmounts and tab/root switches. The
+  // tree's scroll events record where the user has it, for the root they
+  // show; nothing reads the position after the tree shows another root,
+  // where the browser has clamped it to the new rows' height already. A
+  // root's remembered position is restored once its rows reach it (or are
+  // all listed).
   const pendingScroll = useRef<number | undefined>(undefined);
+  /** Where the tree was scrolled as last seen: put there by a restore,
+   * found there under a root just shown, or recorded from a scroll event.
+   * A scroll event that finds it still there is the browser's (its clamp
+   * to a shorter root's rows, a restore), not the user's, and records
+   * nothing. */
+  const lastScroll = useRef(0);
   const pendingReveal = useRef<string | undefined>(undefined);
   const prevCursor = useRef<string | undefined>(s.cursor);
   const prevRevealSeq = useRef(revealTick);
+
+  /** Whether the rows reach top: the tree can be scrolled to it. */
+  const reaches = (el: HTMLElement, top: number) => top === 0 || rows.length * ROW_HEIGHT - el.clientHeight >= top;
+  /** Scrolls the tree to the remembered position, pending no more. */
+  const restoreScroll = (el: HTMLElement, top: number) => {
+    el.scrollTop = top;
+    lastScroll.current = el.scrollTop;
+    pendingScroll.current = undefined;
+  };
 
   useLayoutEffect(() => {
     if (!m || s.m !== m || !s.root) return;
@@ -251,15 +271,14 @@ export function FilesPanel() {
     pendingScroll.current = saved;
     prevCursor.current = useTree.getState().cursor;
     const el = treeRef.current;
-    if (el && (saved === 0 || rows.length * ROW_HEIGHT >= saved)) {
-      el.scrollTop = saved;
+    if (!el) return;
+    // Where the browser left it under this root's rows.
+    lastScroll.current = el.scrollTop;
+    if (reaches(el, saved)) {
+      restoreScroll(el, saved);
       view.ref(el);
-      pendingScroll.current = undefined;
     }
-    return () => {
-      if (treeRef.current) setScrollMemory(m, s.root!, treeRef.current.scrollTop);
-    };
-    // Only run on (m, root) identity changes or unmount.
+    // Only run on (m, root) identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [m, s.m, s.root]);
 
@@ -268,26 +287,20 @@ export function FilesPanel() {
     const el = treeRef.current;
     if (saved === undefined || !el) return;
     const st = useTree.getState();
-    const ready =
-      saved === 0 ||
-      rows.length * ROW_HEIGHT >= saved ||
-      shownDirs(st).every((d) => !st.dirs[d]?.loading && (d === st.root || !!st.dirs[d]));
-    if (!ready) return;
-    el.scrollTop = saved;
+    const listed = shownDirs(st).every((d) => !st.dirs[d]?.loading && (d === st.root || !!st.dirs[d]));
+    if (!reaches(el, saved) && !listed) return;
+    restoreScroll(el, saved);
     view.ref(el);
-    pendingScroll.current = undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, ROW_HEIGHT, view.ref]);
 
   const setTreeEl = useCallback(
     (el: HTMLDivElement | null) => {
+      // A tree element comes with the panel or with another (m, root),
+      // whose layout effect above restores its scroll position.
       treeRef.current = el;
-      if (el && pendingScroll.current !== undefined && (pendingScroll.current === 0 || rows.length * ROW_HEIGHT >= pendingScroll.current)) {
-        el.scrollTop = pendingScroll.current;
-        pendingScroll.current = undefined;
-      }
       view.ref(el);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [view.ref],
   );
 
@@ -695,8 +708,12 @@ export function FilesPanel() {
         onCut={(ev) => onCopyCut(ev, true)}
         onPaste={onPaste}
         onScroll={(e) => {
-          pendingScroll.current = undefined;
-          setScrollMemory(m, root, e.currentTarget.scrollTop);
+          const top = e.currentTarget.scrollTop;
+          if (top !== lastScroll.current) {
+            lastScroll.current = top;
+            pendingScroll.current = undefined;
+            setScrollMemory(m, root, top);
+          }
           view.onScroll(e);
         }}
         onContextMenu={(ev) => {

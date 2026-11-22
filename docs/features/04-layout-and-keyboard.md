@@ -105,9 +105,16 @@ Non-goals: arbitrary docking of panes; floating panes.
   others, and a tab dragged among the others' places stops at their edge
   (`L.pinTab`; the layout's tab carries `pinned: true`, so every browser
   shows it). Close Other Tabs and Close Tabs to the Right leave pinned
-  tabs and a middle click does not close one; Close Tab, Close Pane on its
-  last pane and Close Workspace still do, with Undo. A pinned tab showing
-  a preview editor keeps it, as a pinned tab is not one for the next
+  tabs and a middle click does not close one. Nor does `pane.close`
+  (`cmd+w` in the desktop app on macOS): in a pinned tab it closes the
+  focused pane only while others are beside it and leaves the last one
+  (the menu bar's item is disabled there and the palette leaves it out),
+  a held key that closed another tab's panes stops at a pinned tab it
+  reaches, and VS Code's `cmd+w` in a window without editors leaves a
+  pinned tab's only pane too (`L.onlyPaneOfPinnedTab`). Close Tab, the
+  pane header's Close Pane (its × and its menu) on the last pane and Close
+  Workspace still close a pinned tab, with Undo. A pinned tab showing a
+  preview editor keeps it, as a pinned tab is not one for the next
   preview to replace.
 - Zoom shows the focused pane alone in its tab; it is this browser's own
   view, not written to the document.
@@ -565,8 +572,8 @@ described in [13](13-settings-and-appearance.md))
   last one, `cmd+shift+}` / `cmd+shift+{` and `ctrl+tab` /
   `ctrl+shift+tab` next / previous tab, `cmd+shift+w` close the tab,
   `cmd+d` / `cmd+shift+d` split right / down, `cmd+w` close the focused
-  pane (its terminal, not the tab; in a workspace with no tab left, the
-  workspace), `cmd+shift+enter` maximize or restore
+  pane (its terminal, not the tab; not a pinned tab's last pane; in a
+  workspace with no tab left, the workspace), `cmd+shift+enter` maximize or restore
   the pane, `cmd+alt+arrows` focus the pane in that direction, `cmd+[` /
   `cmd+]` go back / forward through the panes focused, `cmd+z` undo the
   last close within the undo time (`layout.undoClose`, 5 s by default), `cmd+n` new workspace (asking for its
@@ -711,6 +718,7 @@ described in [13](13-settings-and-appearance.md))
 | The desktop shell taking direct shortcuts before the page (`before-input-event`), as it did | Two key matchers (the shell's and the page's) with their own rules for VS Code, dialogs and recording keys; with the page matching every key and the menu getting the rest, a key runs once and VS Code keeps its own keys. |
 | Desktop shortcuts per browser profile (localStorage) | The shell needs them before and outside the page; the core's keybindings keep one set for all windows. |
 | `cmd+w` closing the tab on macOS, as the desktop app did | Terminal emulators with splits (Ghostty, iTerm) close the focused split with it, so `cmd+w` closes the focused terminal. **Close Tab** in the Shell menu and the tab's × close a tab. |
+| `cmd+w` closing a pinned tab's last pane, and the tab with it, as earlier versions did | A tab is pinned to keep it, and `cmd+w` is pressed in quick succession and held: it closed pinned tabs by the way. VS Code's pinned editors do not close from the keyboard either (`workbench.editor.preventPinnedEditorClose`); **Close Tab** still closes a pinned tab. |
 | Keyboard Lock API | Fullscreen-only and Chromium-only. |
 | `cmd+]` / `cmd+[` for the next / previous pane | Safari, Finder and Xcode go forward and back with them; next and previous pane keep their commands without a key, and `cmd+alt+arrows` move between panes. |
 | Asking before closing a pane or tab with a program running | A dialog stops the closing; with `layout.undoClose` (5 s by default) to undo, `cmd+w` closes at once, twice in a row too, and a close by mistake is taken back with its program untouched. |
@@ -792,7 +800,9 @@ described in [13](13-settings-and-appearance.md))
   `web/src/__tests__/vt.test.ts`: the bytes `ctrl+b` sends when unbound.
 - `web/src/__tests__/desktop.test.ts`: key names on other layouts, the
   menu's commands: closing tabs and panes at once, their terminals ending
-  once the close can no longer be undone, none under dialogs, the main UI's acting on the
+  once the close can no longer be undone, `cmd+w` leaving a pinned tab's
+  last pane (pressed, held, from the menu and VS Code's in a window
+  without editors) and a held one stopping at a pinned tab, none under dialogs, the main UI's acting on the
   VS Code pane that has the keyboard, VS Code's keys left to it and
   `bridge.close` closing only the pane whose iframe has the keyboard, **Open in VS Code** (a tab for the focused terminal's folder,
   selected again the next time); the commands whose items are disabled

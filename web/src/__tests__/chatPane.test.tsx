@@ -19,7 +19,8 @@ import { ChatUsageItem } from '../plugins/chat/UsageItem';
 import type { ChatState } from '../plugins/chat/protocol';
 import { dropSources } from '../plugins/chat/source';
 import { applyStates, liveKey, resetChats, useChats } from '../plugins/chat/state';
-import { useChatUi } from '../plugins/chat/ops';
+import { machineLabel, useChatUi } from '../plugins/chat/ops';
+import { resetHostReminders, watchHosts } from '../plugins/chat/hostReminder';
 import { definePlugins } from '../plugins/registry';
 import { useSettings } from '../settings';
 import { useStore } from '../state/store';
@@ -320,7 +321,7 @@ describe('the Chats panel', () => {
     expect((ws().tabs[2].root as L.PluginLeaf).view).toMatchObject({ plugin: 'chat', kind: 'chat', chat: A, agent: 'codex' });
   });
 
-  it('closes and archives chats with a bottom-left toast, not on a read-only page', async () => {
+  it('closes, archives and restores chats with a bottom-left toast, not on a read-only page', async () => {
     useStore.setState({ toasts: [] });
     applyStates('m', [st(A, { title: 'one' }), st(B, { title: 'two', state: 'closed' })], true);
     await act(async () => root.render(createElement(ChatsPanel)));
@@ -338,12 +339,27 @@ describe('the Chats panel', () => {
     await act(async () => archiveBtn.click());
     await tick();
     expect(useDialog.getState().current).toBeUndefined();
-    expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual([`/api/m/m/p/chat/chat?chat=${B}`]);
+    // Archived, not deleted: the chat is kept, listed apart and folded.
+    expect(calls.filter((c) => c.method === 'DELETE')).toEqual([]);
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toContain(`/api/m/m/p/chat/archive?chat=${B}`);
     expect(rows()).toEqual(['one']);
     expect(useStore.getState().toasts.at(-1)).toMatchObject({
       msg: t('chat.archived', { title: 'two' }),
+      action: { label: t('chat.restore') },
       position: 'bottom-left',
     });
+    const toggle = q<HTMLButtonElement>('.chat-archived-toggle')!;
+    expect(toggle.textContent).toBe(t('chat.panel.archived', { n: 1 }));
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => toggle.click());
+    expect(rows()).toEqual(['one', 'two']);
+    expect(q(`[aria-label="${t('chat.archiveNamed', { title: 'two' })}"]`)).toBeNull();
+    expect(q(`[aria-label="${t('chat.deleteNamed', { title: 'two' })}"]`)).not.toBeNull();
+    await act(async () => q<HTMLButtonElement>(`[aria-label="${t('chat.restoreNamed', { title: 'two' })}"]`)!.click());
+    await tick();
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toContain(`/api/m/m/p/chat/unarchive?chat=${B}`);
+    expect(q('.chat-archived')).toBeNull();
+    expect(rows()).toEqual(['one', 'two']);
     // Management button opens Agent Chats settings page
     await act(async () => q<HTMLButtonElement>(`[aria-label="${t('chat.manage.open')}"]`)!.click());
     expect(useStore.getState().settings).toEqual({ page: 'chat' });
@@ -351,6 +367,52 @@ describe('the Chats panel', () => {
     await act(async () => useStore.getState().setReadOnly(true));
     expect(qa('.chat-row-actions')).toHaveLength(0);
     expect(q(`[aria-label="${t('chat.new')}"]`)).toBeNull();
+  });
+
+  it('says a chat host of another build, reminds of it once when no chat runs, and restarts it', async () => {
+    useStore.setState({ toasts: [] });
+    resetHostReminders();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET';
+        calls.push({ url: String(url), method });
+        // The old host is gone once asked to end.
+        if (String(url) === '/api/m/m/p/chat/agents' && method === 'GET')
+          return new Response('{"error":"not_running","message":"no chat host"}', { status: 409 });
+        return new Response('{}', { status: 200 });
+      }),
+    );
+    const version = 'v0.5.0-3-gabc-dirty.1700000001';
+    applyStates('m', [st(A, { title: 'one', status: 'working', state: 'working' })], true);
+    useChats.setState({ hosts: { m: { version, outdated: true } } });
+    watchHosts();
+    await act(async () => root.render(createElement(ChatsPanel)));
+    expect(q('.chat-host-outdated span')!.textContent).toBe(t('chat.host.outdatedBanner', { version }));
+    const restart = q<HTMLButtonElement>('.chat-host-outdated button')!;
+    expect(restart.textContent).toBe(t('chat.host.restart'));
+    expect(restart.disabled).toBe(true);
+    const said = () => useStore.getState().toasts.filter((x) => x.msg === t('chat.host.outdated', { machine: machineLabel('m'), version }));
+    // A chat works: not said yet.
+    expect(said()).toHaveLength(0);
+    await act(async () => applyStates('m', [st(A, { title: 'one', status: 'done', state: 'idle' })], false));
+    expect(said()).toHaveLength(1);
+    expect(said()[0].action?.label).toBe(t('chat.host.restart'));
+    await act(async () => applyStates('m', [st(A, { title: 'one', state: 'idle' })], false));
+    expect(said()).toHaveLength(1);
+
+    expect(restart.disabled).toBe(false);
+    const before = calls.length;
+    await act(async () => restart.click());
+    await vi.waitFor(() => expect(q('.chat-host-outdated')).toBeNull());
+    // Asked to end, looked for until gone, then this build's started.
+    expect(calls.slice(before).map((c) => `${c.method} ${c.url}`)).toEqual([
+      'POST /api/m/m/p/chat/host/stop',
+      'GET /api/m/m/p/chat/agents',
+      'POST /api/m/m/p/chat/agents',
+    ]);
+    expect(useStore.getState().toasts.at(-1)?.msg).toBe(t('chat.host.restarted', { machine: machineLabel('m') }));
+    resetHostReminders();
   });
 
   it('says when the machine is not connected or has no chats', async () => {

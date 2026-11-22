@@ -5,12 +5,15 @@
 // the machine's home. For each chat kind the machine's chat host can start
 // now, its sessions of that directory, newest first, a page at a time
 // (Show More); a row opens with a click, Enter or its button, and a
-// session that is already a chat's shows that chat. They are read again
+// session that is already a chat's shows that chat (an archived one is
+// restored; one deleted or removed since the listing, as the page's
+// chats tell, is no chat's any more and opens anew). They are read again
 // when the directory changes and with Refresh. Listing them may run the
 // agent (Codex, ACP agents), a change the core takes only from a page that
 // may make changes: a read-only page lists none.
-import { History, MessageSquareShare, MessagesSquare, RefreshCw } from 'lucide-react';
+import { Archive, History, MessageSquareShare, MessagesSquare, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { paneDirectory } from '../../actions';
 import { Section, TreeRow } from '../../components/tree';
 import { relativeTime } from '../../conversation/format';
@@ -22,6 +25,7 @@ import { terms, useTerms } from '../../state/terms';
 import * as L from '../../term/layout';
 import { reasonText } from './api';
 import { chatAgents, chatSessions, importSession, MAX_SESSIONS, type PastSession } from './imports';
+import { chatGone, useChats } from './state';
 import './chat.css';
 
 export interface PastSessionsProps {
@@ -83,6 +87,18 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
   const [opening, setOpening] = useState<string | undefined>(undefined);
   // What the lists are of: an answer for another is dropped.
   const generation = useRef(0);
+  // The chats the sessions are listed with, as the page's chats are now:
+  // gone (deleted, or removed by the machine's limits), archived or there.
+  const listedIds = Object.values(lists).flatMap((l) => l.sessions.flatMap((s) => (s.chat ? [s.chat] : [])));
+  const chats = useChats(
+    useShallow((st) =>
+      Object.fromEntries(
+        listedIds.map((id) => [id, chatGone(st, m, id) ? 'gone' : st.states[m]?.[id]?.archived ? 'archived' : 'chat'] as const),
+      ),
+    ),
+  );
+  const chatOf = (s: PastSession): string | undefined => (s.chat && chats[s.chat] !== 'gone' ? s.chat : undefined);
+  const archivedChat = (chat: string | undefined) => !!chat && chats[chat] === 'archived';
 
   useEffect(() => {
     let gone = false;
@@ -135,12 +151,13 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
 
   const open = useCallback(
     async (kind: string, s: PastSession) => {
-      if (opening || (readOnly && !s.chat)) return;
+      const listed = s.chat && !chatGone(useChats.getState(), m, s.chat) ? s.chat : undefined;
+      if (opening || (readOnly && !listed)) return;
       setOpening(s.sessionId);
       try {
-        const chat = await importSession(m, { kind, session: s.sessionId, cwd: s.cwd, chat: s.chat });
+        const chat = await importSession(m, { kind, session: s.sessionId, cwd: s.cwd, chat: listed });
         // The session is that chat's from now on.
-        if (chat && !s.chat)
+        if (chat && chat !== s.chat)
           setLists((all) => {
             const l = all[kind];
             return l
@@ -189,17 +206,28 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
             {list.sessions.map((s) => {
               const label = s.title || t('chat.sessions.untitled', { id: s.sessionId.slice(0, 8) });
               const when = s.updated ? relativeTime(s.updated / 1000, now, locale) : undefined;
-              const action = s.chat ? t('chat.sessions.showChat') : t('chat.sessions.open');
-              const disabled = !!opening || (readOnly && !s.chat);
+              const chat = chatOf(s);
+              const archived = archivedChat(chat);
+              const action = archived ? t('chat.restore') : chat ? t('chat.sessions.showChat') : t('chat.sessions.open');
+              const disabled = !!opening || (readOnly && !chat);
+              const note = archived ? t('chat.sessions.archived') : chat ? t('chat.sessions.inChat') : undefined;
               return (
                 <TreeRow
                   key={s.sessionId}
                   depth={0}
                   className="agent-session"
                   data-session={s.sessionId}
-                  icon={s.chat ? <MessagesSquare className="agent-session-icon" /> : <History className="agent-session-icon" />}
+                  icon={
+                    archived ? (
+                      <Archive className="agent-session-icon" />
+                    ) : chat ? (
+                      <MessagesSquare className="agent-session-icon" />
+                    ) : (
+                      <History className="agent-session-icon" />
+                    )
+                  }
                   label={label}
-                  description={s.chat ? [when, t('chat.sessions.inChat')].filter(Boolean).join(' · ') : when}
+                  description={[when, note].filter(Boolean).join(' · ') || undefined}
                   title={[label, s.sessionId, s.updated ? new Date(s.updated).toLocaleString() : ''].filter(Boolean).join('\n')}
                   dimmed={opening === s.sessionId}
                   tabIndex={0}
@@ -218,7 +246,7 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
                       disabled={disabled}
                       onClick={() => void open(kind, s)}
                     >
-                      {s.chat ? <MessagesSquare /> : <MessageSquareShare />}
+                      {archived ? <Archive /> : chat ? <MessagesSquare /> : <MessageSquareShare />}
                     </button>
                   }
                 />

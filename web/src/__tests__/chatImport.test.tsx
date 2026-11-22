@@ -101,6 +101,7 @@ class FakeChats {
       }
       if (u.pathname === '/api/m/m/p/chat/new' && method === 'POST') return this.newAnswer();
       if (u.pathname === '/api/m/m/p/chat/chats' && method === 'GET') return ok({ chats: this.chats });
+      if ((u.pathname === '/api/m/m/p/chat/archive' || u.pathname === '/api/m/m/p/chat/unarchive') && method === 'POST') return ok({});
       return new Response('{"error":"unknown"}', { status: 404 });
     });
   }
@@ -350,6 +351,35 @@ describe('the chat panel’s earlier sessions', () => {
     expect(L.selectedWorkspace(layout)!.id).toBe('w2');
     expect(L.focusedPane(layout)).toBe('view:v1');
     expect(chatViews(model)).toHaveLength(1);
+  });
+
+  it('open anew a session whose listed chat is gone since (deleted, or removed by the limits)', async () => {
+    await setup();
+    script();
+    // The machine's chats, in full: CHAT is not among them.
+    applyStates('m', [], true);
+    await render(createElement(PastSessions, { m: 'm' }));
+    expect(rowOf(C1).querySelector('.tree-description')!.textContent).not.toContain('in a chat');
+    await act(async () => rowOf(C1).click());
+    for (let i = 0; i < 4; i++) await act(settle);
+    expect(chats.posts()).toEqual([
+      { method: 'POST', path: '/api/m/m/p/chat/new', query: {}, body: { kind: 'codex', cwd: DIR, resume: C1, import: true } },
+    ]);
+  });
+
+  it('show a session’s archived chat as archived, and restore it when it is opened', async () => {
+    const { model } = await setup();
+    script();
+    applyStates('m', [{ ...chatOf(CHAT, 'codex', C1), archived: true }], true);
+    await render(createElement(PastSessions, { m: 'm' }));
+    expect(rowOf(C1).querySelector('.tree-description')!.textContent).toContain('in an archived chat');
+    expect(rowOf(C1).querySelector('.tree-actions button')!.getAttribute('aria-label')).toBe('Restore Chat');
+    await act(async () => rowOf(C1).click());
+    for (let i = 0; i < 4; i++) await act(settle);
+    expect(chats.posts()).toEqual([{ method: 'POST', path: '/api/m/m/p/chat/unarchive', query: { chat: CHAT }, body: undefined }]);
+    expect(L.focusedPane(model.layout('m')!)).toBe('view:v1');
+    expect(useChats.getState().states.m[CHAT].archived).toBeUndefined();
+    expect(rowOf(C1).querySelector('.tree-description')!.textContent).toContain('in a chat');
   });
 
   it('refuse a session a terminal’s agent runs, naming the terminal, which the toast shows', async () => {

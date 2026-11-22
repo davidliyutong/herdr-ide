@@ -91,6 +91,7 @@ export function readState(v: unknown): ChatState | undefined {
   if (typeof v.seen === 'number' && Number.isSafeInteger(v.seen) && v.seen >= 0) out.seen = v.seen;
   if (v.unread === true) out.unread = true;
   if (v.stale === true) out.stale = true;
+  if (v.archived === true || (typeof v.archived === 'string' && v.archived !== '')) out.archived = true;
   return out;
 }
 
@@ -189,11 +190,21 @@ export interface States {
   full: boolean;
   rev: number;
   stale?: boolean;
+  /** The chat host's version as the core read it last ("" for none), and
+   * whether it is another build than the core's. */
+  hostVersion: string;
+  outdated: boolean;
 }
 export function readStates(v: unknown): States | undefined {
   if (!isObject(v) || v.t !== 'states' || !Array.isArray(v.states)) return undefined;
   // Deleted chats come too: room for them beyond the host's bound.
-  const out: States = { states: list(v.states, MAX_CHATS + 1000, readState), full: v.full === true, rev: seq(v.rev) };
+  const out: States = {
+    states: list(v.states, MAX_CHATS + 1000, readState),
+    full: v.full === true,
+    rev: seq(v.rev),
+    hostVersion: str(v.hostVersion, 128),
+    outdated: v.outdated === true,
+  };
   if (v.stale === true) out.stale = true;
   return out;
 }
@@ -262,6 +273,11 @@ export const chatApi = {
   close: (m: string, chat: string) => send<unknown>(`${base(m)}/close?${query({ chat })}`, { method: 'POST' }).then(() => {}),
   /** Forgets a chat and its log. */
   remove: (m: string, chat: string) => send<unknown>(`${base(m)}/chat?${query({ chat })}`, { method: 'DELETE' }).then(() => {}),
+  /** Archives a chat: its agent ends, and the chat is kept with its log
+   * until the machine's chat limits remove it. */
+  archive: (m: string, chat: string) => send<unknown>(`${base(m)}/archive?${query({ chat })}`, { method: 'POST' }).then(() => {}),
+  /** Takes an archived chat back. */
+  unarchive: (m: string, chat: string) => send<unknown>(`${base(m)}/unarchive?${query({ chat })}`, { method: 'POST' }).then(() => {}),
   /** The user saw the chat up to seq. */
   seen: (m: string, chat: string, at: number) =>
     send<unknown>(`${base(m)}/seen?${query({ chat, seq: String(at) })}`, { method: 'POST' }).then(() => {}),

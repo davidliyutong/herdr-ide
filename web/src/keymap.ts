@@ -17,6 +17,7 @@ import { fullDiskAccessAvailable } from './fullDiskAccess';
 import type { CommandDef } from './plugins/api';
 import { commandOfOffPlugin, pluginCommand } from './plugins/registry';
 import { useFrames, windowFocused } from './codeFrames';
+import { terms } from './state/terms';
 
 /** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
 export type KeyContext = 'terminal' | 'vscode' | 'dialog';
@@ -164,13 +165,16 @@ export function handlePaneLeaveKey(ev: KeyboardEvent): boolean {
 /** VS Code's key for closing, pressed in a window without editors
  * (bridge.close; the extension binds it there, as VS Code closes such a
  * window): closes the VS Code pane showing that window, when this page has
- * the keyboard there. Every other key in a VS Code pane is VS Code's
- * first. */
+ * the keyboard there, as pane.close would (not the last pane of a pinned
+ * tab). Every other key in a VS Code pane is VS Code's first. */
 export function closeWindowPane(m: string, window: string, folders?: string[]) {
   const k = windowFocused(m, window, folders);
   const fr = k ? useFrames.getState().frames[k] : undefined;
   if (!fr || keyContext() === 'dialog' || !commandEnabled('pane.close')) return;
-  void actions.closePane(fr.m, L.codeKey(fr.id));
+  const pane = L.codeKey(fr.id);
+  const layout = terms.layout(fr.m);
+  if (layout && L.onlyPaneOfPinnedTab(layout, pane)) return;
+  void actions.closePane(fr.m, pane);
 }
 
 /** The extension's key for leaving VS Code, pressed in a window

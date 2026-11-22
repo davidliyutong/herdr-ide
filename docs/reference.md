@@ -490,6 +490,8 @@ missing here.
 | `POST /api/m/{id}/p/chat/new` | writes | A new chat, `{kind, cwd, resume?, import?, options?: {model?, effort?, mode?}}` (`resume` a session id, `import` brings its earlier conversation in; `mode` one of `default`, `acceptEdits`, `plan`, `full`): `{chat}`, starting. The machine's chat host takes the machine's settings first. Audited as `chat.new` with the kind, the directory, the session, the import, the mode and the chat. |
 | `POST /api/m/{id}/p/chat/close` | writes | Ends a chat's agent and keeps the chat (`?chat=`), audited as `chat.close`. |
 | `DELETE /api/m/{id}/p/chat/chat` | writes | Forgets a chat and its log (`?chat=`); the agent's own session stays. Audited as `chat.delete`. |
+| `POST /api/m/{id}/p/chat/archive` | writes | Archives a chat (`?chat=`): ends its agent, counts what it ended with as seen, and keeps it with its log, closed and `archived`, until the machine's chat limits remove it (archived chats before the other closed ones). Audited as `chat.archive`. |
+| `POST /api/m/{id}/p/chat/unarchive` | writes | Takes an archived chat back (`?chat=`); a prompt to it does too. Audited as `chat.unarchive`. |
 | `POST /api/m/{id}/p/chat/seen` | writes | The user saw a chat up to a sequence number (`?chat=&seq=`), which ends its done status for every page; audited as `chat.seen`. |
 | `POST /api/m/{id}/p/chat/handoff` | writes | Ends a chat's agent so that its session goes on in a terminal (`?chat=`); `409 busy` while a turn runs. Within a minute; audited as `chat.handoff`. |
 | `POST /api/m/{id}/p/chat/trust` | writes | Trusts a directory and those below it on the machine (`?cwd=` a clean absolute path): agents started there from then on load the project's own settings. `403 unsafe_folder` for the root, the home directory or one above it, a directory not the user's or that its group or others may write, or one below a directory others may write without the sticky bit. Audited as `chat.trust` with the directory. |
@@ -498,7 +500,7 @@ missing here.
 | `POST /api/m/{id}/p/chat/trusted` | writes | The same, starting the machine's chat host when none serves; audited as `chat.trusted`. |
 | `POST /api/m/{id}/p/chat/host/stop` | writes | Cleanly shuts down the machine's running chat host; `409 busy` while a chat works, waits or starts, `409 not_running` when none serves. Audited as `chat.host_stop`. |
 | `GET /api/p/chat/hosts` | – | Overview of every configured machine's headless chat host and its active sessions (`{hosts: [...]}`), without starting any host. |
-| `GET /api/p/chat/states` | – | The chats' states of every machine as the core last read them: `{machines: {<id>: {t: "states", states, full: true, stale?, rev}}}`; the plugin's `states` messages on `/ws` that follow carry higher revs. |
+| `GET /api/p/chat/states` | – | The chats' states of every machine as the core last read them: `{machines: {<id>: {t: "states", states, full: true, stale?, rev, hostVersion?, outdated?}}}` (`outdated`: the machine's chat host is another build than the core's); the plugin's `states` messages on `/ws` that follow carry higher revs. |
 | `GET /api/p/chat/ws` | – | The chat plugin's WebSocket, one per page ([architecture](architecture.md#chats-internalchatproto-internalpluginschat)): subscriptions to chats (at most 32, 16 of one machine) with their events, and commands answered by acks (a permission's or a question's answer, a configuration change and a handoff audited as `chat.permission`, `chat.answer`, `chat.set_config`, `chat.handoff`); a read-only core refuses every command (`read_only`) and its subscriptions run nothing on the machine; a page that falls behind is closed (1013). |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
@@ -653,6 +655,10 @@ data directory: `~/Library/Application Support/` on macOS, `%AppData%` on
 Windows, `$XDG_CONFIG_HOME` (default `~/.config`) on Linux.
 It holds browser preferences and Chromium data until manually removed;
 uninstalling leaves it.
+On macOS `herdr-ide-desktop-keychain.json` beside the profiles records
+which build made the keychain item of Electron's safeStorage, so that a
+rebuilt app moves the item to itself once
+([30](features/30-variable-vault.md)); it stays until removed by hand.
 The core uses `settings-desktop.json` and `~/.herdr-ide-desktop/` state
 (on Windows only on the SSH machines); development uses the existing `dev`
 instance or the one `HERDR_IDE_DESKTOP_DEV` names. No desktop log files are

@@ -164,7 +164,7 @@ A plugin (`PluginDef`, `web/src/plugins/api.ts`) contributes:
   `internal/keybindings/commands.go`, checked before the app's own;
 - **status bar items**, **palette items** and a handler of its `/ws`
   messages;
-- **a settings page** (`settings: {section, layout?, extra?}`): the
+- **a settings page** (`settings: {section, layout?, extra?, controls?}`): the
   section of its settings, which the Plugins page opens, a component that
   lays out the page's settings in place of their rows one after the other
   (`layout`, given the settings the scope shows and `rows`, which draws
@@ -175,7 +175,11 @@ A plugin (`PluginDef`, `web/src/plugins/api.ts`) contributes:
   a search lists the rows it finds as on any page), and a component drawn
   at the end of that page (`extra`, given `readOnly`: actions that are no
   setting, such as an import and an export). A plugin that names a
-  section without settings gets a page for its `extra` alone.
+  section without settings gets a page for its `extra` alone. `controls`
+  gives some of its settings a control of its own, by key, in place of
+  the dialog's control of their type (in the user's scope): the row keeps
+  its title, description, menu, badge and errors around it (the AI usage
+  plugin's form of prices, [29](29-ai-usage.md)).
 
 A plugin's messages are files of its directory
 (`web/src/plugins/<id>/i18n/en.ts` and one per locale,
@@ -416,8 +420,9 @@ does not have says so. Read-only pages do not drag panels into panes.
   plugin's row, the page's switch and its note while the plugin is off,
   a page of an `extra` alone, the search finding a plugin's settings;
   `usageSettings.test.ts`: a page a plugin lays out itself (`layout`,
-  the AI usage plugin's), its rows' controls, the way back from a page of
-  its own (its button, and the page chosen in the list again), search and
+  the AI usage plugin's), its rows' controls (one of the plugin's own,
+  `controls`: the form of prices), the way back from a page of its own
+  (its button, and the page chosen in the list again), search and
   read-only mode.
 - `web/src/__tests__/picker.test.ts`, `tree.test.ts`, `fileIcons.test.ts`:
   the building blocks.

@@ -271,3 +271,25 @@ func TestCutMiddle(t *testing.T) {
 		t.Error("a small value changed")
 	}
 }
+
+// The bounds remove archived chats before the other closed ones, also one
+// closed later than those.
+func TestBoundsRemoveArchivedFirst(t *testing.T) {
+	h := startHost(t, func(h *testHost) {
+		h.o.settings.MaxChats = 3
+	})
+	closed, archived, open := h.newChat(), h.newChat(), h.newChat()
+	h.ok(chatproto.Request{Op: chatproto.OpClose, Chat: closed.chat.ID})
+	time.Sleep(5 * time.Millisecond)
+	h.ok(chatproto.Request{Op: chatproto.OpArchive, Chat: archived.chat.ID})
+	h.create(chatproto.Request{})
+	h.fake.session(t)
+	ids := map[string]bool{}
+	for _, c := range h.chats() {
+		ids[c.ID] = true
+	}
+	if len(ids) != 3 || ids[archived.chat.ID] || !ids[closed.chat.ID] || !ids[open.chat.ID] {
+		t.Errorf("not the archived chat removed: %v", ids)
+	}
+	archived.ends()
+}

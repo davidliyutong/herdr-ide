@@ -109,6 +109,8 @@ func TestRoutes(t *testing.T) {
 		"POST /api/m/{id}/p/chat/new audited as chat.new",
 		"POST /api/m/{id}/p/chat/close audited as chat.close",
 		"DELETE /api/m/{id}/p/chat/chat audited as chat.delete",
+		"POST /api/m/{id}/p/chat/archive audited as chat.archive",
+		"POST /api/m/{id}/p/chat/unarchive audited as chat.unarchive",
 		"POST /api/m/{id}/p/chat/seen audited as chat.seen",
 		"POST /api/m/{id}/p/chat/handoff audited as chat.handoff",
 		"POST /api/m/{id}/p/chat/trust audited as chat.trust",
@@ -226,6 +228,8 @@ func TestRequests(t *testing.T) {
 	for _, tc := range []struct{ method, path, op string }{
 		{"POST", "close?chat=" + id, chatproto.OpClose},
 		{"DELETE", "chat?chat=" + id, chatproto.OpDelete},
+		{"POST", "archive?chat=" + id, chatproto.OpArchive},
+		{"POST", "unarchive?chat=" + id, chatproto.OpUnarchive},
 		{"POST", "seen?chat=" + id + "&seq=12", chatproto.OpSeen},
 	} {
 		code, out, fields := s.call(tc.method, "gpu", tc.path, "")

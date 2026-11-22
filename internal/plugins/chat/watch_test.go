@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/chatproto"
 	"herdr-ide/internal/plugin"
 )
@@ -434,5 +435,88 @@ func TestWatchOfflineMarksStale(t *testing.T) {
 		if st.Stale {
 			t.Errorf("stale remained set on reconnect: %+v", st)
 		}
+	}
+}
+
+// A state the watch read before the machine left, taken after step ended
+// the watch and marked the machine's chats stale, is dropped: the offline
+// chat stays sleeping and stale, and the pages hear nothing of it. The
+// states a watch read first are dropped the same way.
+func TestWatchChangeAfterOfflineDropped(t *testing.T) {
+	s := newSetup(t)
+	working := chatState(chatproto.StatusWorking, chatproto.StateWorking, 2)
+	s.p.mu.Lock()
+	w := s.p.machine("gpu")
+	s.p.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if !s.p.watchUp(ctx, w, chatproto.HostInfo{}, []chatproto.ChatState{working}) {
+		t.Fatal("the first states were not taken")
+	}
+
+	// step: the machine left.
+	s.p.mu.Lock()
+	cancel()
+	if _, ok := markStaleLocked(w); !ok {
+		t.Fatal("not marked stale")
+	}
+	s.p.mu.Unlock()
+	_, n := s.h.lastBroadcast()
+
+	// The watch's goroutine takes the line it had read.
+	again := working
+	again.Seq = 3
+	if s.p.watchChange(ctx, w, again) {
+		t.Error("a change of an ended watch was taken")
+	}
+	snap := s.p.Snapshot().Machines["gpu"]
+	if !snap.Stale || len(snap.States) != 1 {
+		t.Fatalf("snapshot %+v", snap)
+	}
+	if st := snap.States[0]; !st.Stale || st.State != chatproto.StateSleeping || st.Status != chatproto.StatusIdle || st.Seq != 2 {
+		t.Errorf("offline chat came back as %+v", st)
+	}
+	if _, m := s.h.lastBroadcast(); m != n {
+		t.Errorf("%d states messages after the machine left", m-n)
+	}
+
+	// A watch ended before it took its first states takes none.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	if s.p.watchUp(ctx2, w, chatproto.HostInfo{}, []chatproto.ChatState{working}) {
+		t.Error("the first states of an ended watch were taken")
+	}
+	if snap := s.p.Snapshot().Machines["gpu"]; !snap.Stale || snap.States[0].State != chatproto.StateSleeping {
+		t.Errorf("snapshot after an ended watch's first states: %+v", snap)
+	}
+}
+
+// The states say which build the machine's chat host is and whether it is
+// another than the core's, until no host serves.
+func TestWatchHostOutdated(t *testing.T) {
+	for _, build := range []string{"test", "v0.5.0-3-gabc-dirty.1700000002"} {
+		t.Run(build, func(t *testing.T) {
+			previous := agentproto.Version
+			agentproto.Version = build
+			t.Cleanup(func() { agentproto.Version = previous })
+			s := newSetup(t)
+			s.f.states = []chatproto.ChatState{chatState(chatproto.StatusWorking, chatproto.StateWorking, 3)}
+			s.start(t)
+			s.h.wait(t, "the states", func() bool { return len(s.h.broadcasts) == 1 })
+			first, _ := s.h.lastBroadcast()
+			outdated := build != "test"
+			if first.data.HostVersion != "test" || first.data.Outdated != outdated {
+				t.Fatalf("states of the host %q: %+v", build, first.data)
+			}
+			if snap := s.p.Snapshot().Machines["gpu"]; snap.HostVersion != "test" || snap.Outdated != outdated {
+				t.Errorf("snapshot %+v", snap)
+			}
+			s.f.end(false)
+			s.h.wait(t, "the host gone", func() bool { return len(s.h.broadcasts) == 2 })
+			last, _ := s.h.lastBroadcast()
+			if last.data.HostVersion != "" || last.data.Outdated || last.data.States == nil {
+				t.Errorf("no host serves: %+v", last.data)
+			}
+		})
 	}
 }

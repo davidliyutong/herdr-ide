@@ -22,6 +22,7 @@ import { chatCwd } from './source';
 import { chatViewStatus } from './status';
 import { applyMessage, chatGone, follow, loadAgents, offeredKinds, useChats } from './state';
 import { ChatUsageItem } from './UsageItem';
+import { watchHosts } from './hostReminder';
 import { CHAT_PLUGIN, CHAT_VIEW, chatRef } from './view';
 
 /** Starts a chat on the focused pane's machine: with its agent when the
@@ -91,6 +92,10 @@ export const chatPlugin: PluginDef = {
       run: (machine: string) => void newChat(machine, k.id),
     }));
   },
-  onMessage: applyMessage,
+  onMessage(m, data) {
+    // A host of another build than the core's is reminded of.
+    watchHosts();
+    applyMessage(m, data);
+  },
   viewStatus: chatViewStatus,
 };

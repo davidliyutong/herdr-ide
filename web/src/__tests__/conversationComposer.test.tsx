@@ -13,10 +13,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { placeConfigMenu } from '../conversation/Composer';
+import { errorText } from '../conversation/parts';
 import { Conversation } from '../conversation/Conversation';
 import { MAX_IMAGE, type ChatEvent, type ContentBlock, type SourceEvent } from '../conversation/model';
 import type { ChatSource, FileSuggestion } from '../conversation/source';
-import { t } from '../i18n';
+import { setLocale, t } from '../i18n';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -58,6 +59,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  setLocale('en');
 });
 
 const q = <E extends Element = HTMLElement>(sel: string) => host.querySelector<E>(sel as never) as E | null;
@@ -292,6 +294,37 @@ describe('the chat’s options', () => {
 
   const menuOf = (cat: string) => document.body.querySelector<HTMLElement>(`.conv-select-menu[data-config="${cat}"]`);
   const menuOptions = (cat: string) => Array.from(menuOf(cat)?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
+
+  it.each([
+    { locale: 'en', names: ['Plan mode', 'Auto mode', 'Full access', 'agent custom'] },
+    { locale: 'zh-CN', names: ['计划模式', '自动模式', '完全访问', 'agent custom'] },
+  ] as const)('localizes provider mode names in $locale while keeping their protocol values', async ({ locale, names }) => {
+    setLocale(locale);
+    const s = new FakeSource();
+    const modeConfig = {
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      type: 'select',
+      currentValue: 'auto',
+      options: ['plan', 'auto', 'bypassPermissions', 'custom'].map((value) => ({
+        value,
+        name: `agent ${value}`,
+        full: value === 'bypassPermissions',
+      })),
+    };
+    s.emit(info({ config: [modeConfig] }));
+    await show(s, false, true);
+    const mode = q<HTMLButtonElement>('button.conv-select')!;
+    expect(mode.textContent).toBe(names[1]);
+    await click(mode);
+    expect(menuOptions('mode').map((o) => o.textContent)).toEqual(names);
+    await click(menuOptions('mode')[2]);
+    expect(s.setConfig).toHaveBeenCalledWith('mode', 'bypassPermissions');
+    await emit(s, info({ config: [{ ...modeConfig, currentValue: 'bypassPermissions' }] }));
+    expect(mode.textContent).toBe(names[2]);
+    expect(t('settings.chat.permissionMode.plan')).toBe(names[0]);
+  });
 
   it('are chosen with custom selectors: the model, the effort where there is a choice, the mode in the view’s words', async () => {
     const s = new FakeSource();
@@ -575,6 +608,24 @@ describe('a message whose outcome is not known', () => {
     await key({ key: 'Enter' });
     expect(q('.conv-banner.error')?.textContent).toContain(t('conversation.error.busy', { agent: 'Claude Code' }));
     expect(field().value).toBe('three');
+  });
+});
+
+describe('a failed agent', () => {
+  it.each([
+    ['en', 'Claude Code could not start: its program or saved session could not be found.'],
+    ['zh-CN', '无法启动 Claude Code：未找到所需的程序或已保存的会话。'],
+  ] as const)('explains a missing session without suggesting another window answered (%s)', async (locale, message) => {
+    setLocale(locale);
+    const s = new FakeSource();
+    const error = { code: 'not_found', message: 'claude: no such session', stderr: 'No conversation found with session ID: missing' };
+    s.emit(info({}), { seq: next(), t: 'state', state: 'failed', error });
+    await show(s);
+    const banner = q('.conv-banner.error')!;
+    expect(banner.textContent).toContain(message);
+    expect(banner.textContent).not.toContain(t('conversation.error.not_found'));
+    expect(banner.querySelector('span')!.title).toBe(error.stderr);
+    expect(errorText(error, 'Claude Code', 'conversation.commandFailed')).toBe(t('conversation.error.not_found'));
   });
 });
 

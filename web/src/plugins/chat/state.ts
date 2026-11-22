@@ -62,9 +62,25 @@ export interface ChatsState {
   agents: Record<string, { list: AgentStatus[]; at: number }>;
   /** What the attached chats state, by liveKey. */
   live: Record<string, LiveChat>;
+  /** Each machine's chat host as its states last said: its version and
+   * whether it is another build than the core's (outdated). */
+  hosts?: Record<string, { version: string; outdated: boolean }>;
 }
 
-const empty = (): ChatsState => ({ states: {}, full: {}, deleted: {}, agents: {}, live: {} });
+const empty = (): ChatsState => ({ states: {}, full: {}, deleted: {}, agents: {}, live: {}, hosts: {} });
+
+/** Whether a chat of machine m starts, works or waits: its host refuses
+ * to end then. */
+export function hostBusy(s: ChatsState, m: string): boolean {
+  return Object.values(s.states[m] ?? {}).some((st) => st.state === 'starting' || st.state === 'working' || st.state === 'waiting');
+}
+
+/** Notes machine m's chat host as a states message tells it. */
+function takeHost(m: string, st: States) {
+  const cur = useChats.getState().hosts?.[m];
+  if (cur?.version === st.hostVersion && cur.outdated === st.outdated) return;
+  useChats.setState((s) => ({ hosts: { ...s.hosts, [m]: { version: st.hostVersion, outdated: st.outdated } } }));
+}
 
 export const useChats = create<ChatsState>(empty);
 
@@ -177,11 +193,13 @@ function take(m: string, st: States) {
     // A gap: what changed meanwhile is not known. This message holds, and
     // the snapshot tells the rest.
     applyStates(m, st.states, false);
+    takeHost(m, st);
     revs.set(m, st.rev);
     wantSnapshot();
     return;
   }
   applyStates(m, st.states, st.full);
+  takeHost(m, st);
   revs.set(m, st.rev);
 }
 
@@ -205,6 +223,7 @@ export function loadSnapshot(): Promise<void> {
         const have = revs.get(m);
         if (have === undefined || st.rev >= have || st.rev === 0) {
           applyStates(m, st.states, true);
+          takeHost(m, st);
           revs.set(m, st.rev);
         }
       }

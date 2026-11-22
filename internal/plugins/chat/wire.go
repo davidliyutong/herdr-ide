@@ -144,6 +144,13 @@ type StatesData struct {
 	// number of the last message it holds. A page applies a message only
 	// when its Rev is above the one it has.
 	Rev uint64 `json:"rev"`
+	// HostVersion is the version of the machine's chat host as the watch
+	// read it last ("" while none serves); Outdated: that is not this
+	// core's build (agentproto.Version), whose host takes its place only
+	// when the user restarts it (POST host/stop), which the page reminds
+	// of.
+	HostVersion string `json:"hostVersion,omitempty"`
+	Outdated    bool   `json:"outdated,omitempty"`
 }
 
 // StatesSnapshot answers GET /api/p/chat/states: the last states the core

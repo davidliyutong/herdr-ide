@@ -734,3 +734,55 @@ func TestCommandsWithoutAgent(t *testing.T) {
 	}
 	s.must(chatproto.Command{Op: chatproto.OpRename, Title: "closed one"})
 }
+
+// archive ends the agent and keeps the chat closed, archived and seen,
+// with its log; unarchive takes it back, and so does a prompt.
+func TestArchive(t *testing.T) {
+	h := startHost(t, nil)
+	s := h.newChat()
+	s.turn("hello")
+	s.session.endTurn("end_turn")
+	s.expect("turn:end", "state:idle")
+	if c := h.chat(s.chat.ID); c.Status != chatproto.StatusDone {
+		t.Fatalf("before archiving %+v", c)
+	}
+	h.ok(chatproto.Request{Op: chatproto.OpArchive, Chat: s.chat.ID})
+	s.session.expect(t, "close")
+	s.expect("state:closed")
+	c := h.chat(s.chat.ID)
+	if c.Archived.IsZero() || c.Closed.IsZero() || c.State != chatproto.StateClosed || c.Status != chatproto.StatusIdle || c.Seen != c.Seq {
+		t.Fatalf("archived %+v", c)
+	}
+	if st := c.StateOf(); !st.Archived || st.Unread {
+		t.Errorf("archived state %+v", st)
+	}
+	// Its log stays.
+	if a := h.attach(s.chat.ID, 0); a.first != 1 {
+		t.Errorf("an archived chat's log starts at %d", a.first)
+	}
+	h.ok(chatproto.Request{Op: chatproto.OpArchive, Chat: s.chat.ID})
+	if c2 := h.chat(s.chat.ID); !c2.Archived.Equal(c.Archived) {
+		t.Error("archiving again changed when it was archived")
+	}
+	j := openTestJournal(t, h)
+	var at int64
+	j.db.QueryRow(`SELECT archived FROM chats WHERE id = ?`, s.chat.ID).Scan(&at)
+	if at != c.Archived.UnixMilli() {
+		t.Errorf("the journal has it archived at %d", at)
+	}
+
+	h.ok(chatproto.Request{Op: chatproto.OpUnarchive, Chat: s.chat.ID})
+	if c := h.chat(s.chat.ID); !c.Archived.IsZero() || c.State != chatproto.StateClosed {
+		t.Errorf("unarchived %+v", c)
+	}
+	// A prompt to an archived chat takes it back.
+	h.ok(chatproto.Request{Op: chatproto.OpArchive, Chat: s.chat.ID})
+	s.prompt("again")
+	s.session = h.fake.session(t)
+	s.session.expect(t, "prompt:again")
+	if c := h.chat(s.chat.ID); !c.Archived.IsZero() {
+		t.Errorf("prompted, still archived %+v", c)
+	}
+	h.refused(chatproto.Request{Op: chatproto.OpArchive, Chat: "nope"}, chatproto.CodeUnknownChat)
+	h.refused(chatproto.Request{Op: chatproto.OpUnarchive, Chat: "nope"}, chatproto.CodeUnknownChat)
+}

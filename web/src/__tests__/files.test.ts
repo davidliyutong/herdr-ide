@@ -23,6 +23,7 @@ import {
   crumbs,
   excluded,
   fromSettings,
+  getScrollMemory,
   poll,
   polledDirs,
   relativePath,
@@ -69,6 +70,17 @@ let tree: Record<string, RemoteStat[]>;
 let mtimes: Record<string, number>;
 /** Directories whose listing fails. */
 let failList: Set<string>;
+/** Directories whose listing waits for the promise (hold). */
+let held = new Map<string, Promise<void>>();
+/** Holds directory p's listings until the function returned is called. */
+const hold = (p: string): (() => void) => {
+  let release!: () => void;
+  held.set(p, new Promise((r) => (release = r)));
+  return () => {
+    held.delete(p);
+    release();
+  };
+};
 /** Answers of the plugin's changes, by action, instead of {paths: []}. */
 let answers: Record<string, (body: unknown) => { status: number; json: unknown }>;
 const calls: Array<{ method: string; url: string; body?: unknown }> = [];
@@ -82,6 +94,8 @@ function stubFetch() {
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } });
     if (url.pathname === '/api/m/m/list') {
       const p = url.searchParams.get('path')!;
+      const gate = held.get(p);
+      if (gate) await gate;
       if (failList.has(p)) return json({ error: 'input/output error' }, 404);
       if (!tree[p]) return json({ error: 'no such directory' }, 404);
       // An empty directory's entries came as null.
@@ -329,6 +343,44 @@ describe('FilesPanel', () => {
       treeEl().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...o }));
     });
   const flush = () => act(async () => settle());
+  /** Opens a tab of its own for a new terminal in cwd. */
+  const openTab = async (id: string, cwd: string) => {
+    const terminals = core.machines.get('m')!.terminals;
+    terminals.push(FakeCore.term(id, { cwd }));
+    await act(async () => {
+      core.push({ t: 'snapshot', m: 'm', terminals });
+      core.model.mutate('m', (l) => {
+        const ws = l.workspaces[0];
+        return { ...l, workspaces: [{ ...ws, tabs: [...ws.tabs, { root: { terminal: id }, focused: id }], selected: ws.tabs.length }] };
+      });
+    });
+    await flush();
+  };
+  /** Makes el scroll as a browser does, clientHeight high: its scroll
+   * position stays within its rows (layout clamps it when they get shorter,
+   * before a read of it returns), and a scroll event follows each move. */
+  const scrollLikeBrowser = (el: HTMLElement, clientHeight: number) => {
+    let top = 0;
+    const move = (v: number) => {
+      const height = parseFloat(el.querySelector<HTMLElement>('.files-rows')!.style.height) || 0;
+      const was = top;
+      top = Math.max(0, Math.min(v, height - clientHeight));
+      if (top !== was) setTimeout(() => el.dispatchEvent(new Event('scroll')));
+    };
+    Object.defineProperty(el, 'clientHeight', { configurable: true, value: clientHeight });
+    Object.defineProperty(el, 'scrollTop', {
+      configurable: true,
+      get: () => {
+        move(top);
+        return top;
+      },
+      set: move,
+    });
+    // Layout happens whether or not anything reads the position.
+    new MutationObserver(() => move(top)).observe(el, { subtree: true, childList: true, attributes: true });
+  };
+  /** The height of a row of the tree. */
+  const rowHeight = () => parseFloat(host.querySelector<HTMLElement>('.files-rows')!.style.height) / treeRows(useTree.getState()).length;
   const menuItem = (label: string) => useMenu.getState().menu?.entries.find((e): e is MenuItem => isItem(e) && e.label === label);
   const confirm = async (ok: boolean) => {
     const req = useDialog.getState().current;
@@ -345,6 +397,7 @@ describe('FilesPanel', () => {
     };
     mtimes = {};
     failList = new Set();
+    held = new Map();
     answers = {};
     calls.length = 0;
     stubFetch();
@@ -920,22 +973,7 @@ describe('FilesPanel', () => {
     expect(treeEl().scrollTop).toBe(180);
 
     // 2) Switch to a terminal tab in a different directory, then switch back to the first tab.
-    const t2 = FakeCore.term('p2', { cwd: '/home/u/other' });
-    core.machines.get('m')!.terminals.push(t2);
-    await act(async () => {
-      core.push({ t: 'snapshot', m: 'm', terminals: core.machines.get('m')!.terminals });
-      core.model.mutate('m', (l) => ({
-        ...l,
-        workspaces: [
-          {
-            ...l.workspaces[0],
-            tabs: [l.workspaces[0].tabs[0], { root: { terminal: 'p2' }, focused: 'p2' }],
-            selected: 1,
-          },
-        ],
-      }));
-    });
-    await flush();
+    await openTab('p2', '/home/u/other');
     expect(useTree.getState().root).toBe('/home/u/other');
     expect(useTree.getState().selection).toEqual([]);
     expect(useTree.getState().filter).toBe('');
@@ -951,6 +989,89 @@ describe('FilesPanel', () => {
       filter: 'f2',
     });
     expect(treeEl().scrollTop).toBe(180);
+  });
+
+  it('remembers where the user scrolled a directory, not where the browser clamped it under the next one', async () => {
+    tree['/home/u/src'] = Array.from({ length: 80 }, (_, i) => f(`f${String(i).padStart(2, '0')}.txt`));
+    tree['/home/u/other'] = Array.from({ length: 20 }, (_, i) => f(`o${String(i).padStart(2, '0')}.txt`));
+    await act(async () => showRoot('m', '/home/u'));
+    await act(async () => showRoot('m', '/home/u/src'));
+    await flush();
+    const el = treeEl();
+    scrollLikeBrowser(el, 200);
+
+    el.scrollTop = 700;
+    await flush();
+    expect(el.scrollTop).toBe(700);
+
+    // Another tab's terminal is in a shorter directory: its rows cannot
+    // reach 700, so the browser clamps the position under them.
+    await openTab('p2', '/home/u/other');
+    expect(useTree.getState().root).toBe('/home/u/other');
+    expect(treeEl()).toBe(el);
+    expect(el.scrollTop).toBe(0);
+    el.scrollTop = 150;
+    await flush();
+
+    // Back, the directory's listing comes after the browser clamped the
+    // other's 150 to 0 under its missing rows (and told so with a scroll
+    // event); once listed, it is where the user left it.
+    let release = hold('/home/u/src');
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await flush();
+    expect(useTree.getState().root).toBe('/home/u/src');
+    expect(el.scrollTop).toBe(0);
+    release();
+    await flush();
+    expect(el.scrollTop).toBe(700);
+    release = hold('/home/u/other');
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 1));
+    await flush();
+    expect(el.scrollTop).toBe(0);
+    release();
+    await flush();
+    expect(el.scrollTop).toBe(150);
+  });
+
+  it('restores the scroll position once the rows reach it, and does not take the clamped restore for the user’s', async () => {
+    tree['/home/u/src'] = [d('lib'), ...Array.from({ length: 30 }, (_, i) => f(`f${String(i).padStart(2, '0')}.txt`))];
+    tree['/home/u/src/lib'] = Array.from({ length: 50 }, (_, i) => f(`l${String(i).padStart(2, '0')}.txt`));
+    tree['/home/u/other'] = [f('o.txt')];
+    await act(async () => showRoot('m', '/home/u'));
+    await act(async () => showRoot('m', '/home/u/src'));
+    await flush();
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    const el = treeEl();
+    scrollLikeBrowser(el, 200);
+    const h = rowHeight();
+    // Below what the directory's own 31 rows can show in a view 200 high.
+    const top = 29 * h;
+    el.scrollTop = top;
+    await flush();
+    expect(el.scrollTop).toBe(top);
+
+    await openTab('p2', '/home/u/other');
+    // Back, with lib's listing late: the directory's rows alone do not
+    // reach the position; the tree waits for lib's.
+    const release = hold('/home/u/src/lib');
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await flush();
+    expect(useTree.getState().dirs['/home/u/src']?.entries).toHaveLength(31);
+    expect(el.scrollTop).toBeLessThan(top);
+    release();
+    await flush();
+    expect(el.scrollTop).toBe(top);
+
+    // lib got shorter meanwhile: the restore stops at the end of the rows,
+    // and the directory still remembers where the user had it.
+    tree['/home/u/src/lib'] = [f('a.go'), f('b.go')];
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 1));
+    await flush();
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await flush();
+    expect(el.scrollTop).toBe(33 * h - 200);
+    expect(getScrollMemory('m', '/home/u/src')).toBe(top);
   });
 
   it('uses platform-native rename keys: Enter on macOS and F2 on Windows/Linux', () => {
