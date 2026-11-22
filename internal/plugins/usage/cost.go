@@ -63,9 +63,14 @@ type costEntry struct {
 }
 
 type machineCostEntry struct {
-	etag string
-	rep  usage.CostReport
-	at   time.Time
+	Machine    string           `json:"machine"`
+	TZOffset   int              `json:"tzOffset"`
+	Since      int64            `json:"since"`
+	CodexHomes []string         `json:"codexHomes,omitempty"`
+	PriceKey   string           `json:"priceKey,omitempty"`
+	ETag       string           `json:"etag"`
+	Rep        usage.CostReport `json:"rep"`
+	At         time.Time        `json:"at"`
 }
 
 // costFlight is a machine's scan in progress: one at a time per machine,
@@ -94,6 +99,7 @@ func costKey(days, tz int, o usage.Options, priceKey string) string {
 }
 
 func (p *Plugin) costWithETag(ctx context.Context, days, tz int) (*CostReport, string) {
+	p.ensureMachineCosts()
 	own, priceKey := p.prices()
 	o := p.options()
 	key := costKey(days, tz, o, priceKey)
@@ -125,7 +131,7 @@ func (p *Plugin) costWithETag(ctx context.Context, days, tz int) (*CostReport, s
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r, err := p.machineCost(ctx, m, key, params)
+			r, err := p.machineCost(ctx, m, key, params, priceKey)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -143,6 +149,9 @@ func (p *Plugin) costWithETag(ctx context.Context, days, tz int) (*CostReport, s
 		}()
 	}
 	wg.Wait()
+	// Include cached historical cost reports for machines that are not ready
+	// (such as disabled or offline machines) without live-polling them.
+	p.appendCachedNonReadyCosts(rep, ready, key, params, priceKey)
 	// Sort merged rows deterministically so identical data across scans
 	// yields the same ETag regardless of goroutine completion order.
 	sort.Slice(rep.Rows, func(i, j int) bool {
@@ -182,6 +191,114 @@ func (p *Plugin) costWithETag(ctx context.Context, days, tz int) (*CostReport, s
 	return rep, etag
 }
 
+// appendCachedNonReadyCosts adds the last cached cost report for any
+// configured (including disabled or offline) machine not in ready, filtered
+// to params without polling the machine.
+func (p *Plugin) appendCachedNonReadyCosts(rep *CostReport, ready []string, key string, params usage.CostOptions, priceKey string) {
+	var known func(string) bool
+	if h := p.getHost(); h != nil && h.Machines() != nil {
+		mg := h.Machines()
+		known = func(m string) bool { return mg.Get(m) != nil }
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	seen := map[string]bool{}
+	var machines []string
+	for _, e := range p.machineCosts {
+		if e.Machine == "" || slices.Contains(ready, e.Machine) || seen[e.Machine] {
+			continue
+		}
+		if known != nil && !known(e.Machine) {
+			continue
+		}
+		seen[e.Machine] = true
+		machines = append(machines, e.Machine)
+	}
+	sort.Strings(machines)
+	for _, m := range machines {
+		r, ok := p.cachedMachineCostLocked(m, key, params, priceKey)
+		if !ok {
+			continue
+		}
+		rep.Machines[m] = MachineCost{Files: r.Files, Retries: r.Retries, Unpriced: r.Unpriced, Failed: r.Failed}
+		for _, row := range r.Rows {
+			rep.Rows = append(rep.Rows, CostRow{CostRow: row, Machine: m})
+		}
+	}
+}
+
+// cachedMachineCostLocked returns machine m's cached report for key, or
+// falls back to its best matching cached report filtered to params; p.mu is held.
+func (p *Plugin) cachedMachineCostLocked(m, key string, params usage.CostOptions, priceKey string) (usage.CostReport, bool) {
+	if e, ok := p.machineCosts[m+"|"+key]; ok {
+		return e.Rep, true
+	}
+	var best *machineCostEntry
+	bestScore := -1
+	for _, e := range p.machineCosts {
+		if e.Machine != m {
+			continue
+		}
+		score := 0
+		if e.TZOffset == params.TZOffset {
+			score += 8
+		}
+		if e.Since <= params.Since {
+			score += 4
+		}
+		if e.PriceKey == priceKey {
+			score += 2
+		}
+		if slices.Equal(e.CodexHomes, params.CodexHomes) {
+			score += 1
+		}
+		if best == nil || score > bestScore ||
+			(score == bestScore && (e.At.After(best.At) || (e.At.Equal(best.At) && e.Since < best.Since))) {
+			cp := e
+			best = &cp
+			bestScore = score
+		}
+	}
+	if best == nil {
+		return usage.CostReport{}, false
+	}
+	return filterMachineCostReport(best.Rep, params), true
+}
+
+func filterMachineCostReport(r usage.CostReport, params usage.CostOptions) usage.CostReport {
+	sinceDay := time.Unix(params.Since, 0).In(time.FixedZone("", params.TZOffset*60)).Format("2006-01-02")
+	wantProvider := func(prov string) bool {
+		return len(params.Providers) == 0 || slices.Contains(params.Providers, prov)
+	}
+	out := usage.CostReport{
+		Since:   params.Since,
+		Files:   r.Files,
+		Retries: r.Retries,
+		Rows:    make([]usage.CostRow, 0, len(r.Rows)),
+	}
+	unpricedSet := map[string]bool{}
+	for _, row := range r.Rows {
+		if row.Day < sinceDay || !wantProvider(row.Provider) {
+			continue
+		}
+		out.Rows = append(out.Rows, row)
+		if !row.Priced {
+			unpricedSet[row.Provider+"/"+row.Model] = true
+		}
+	}
+	for u := range unpricedSet {
+		out.Unpriced = append(out.Unpriced, u)
+	}
+	sort.Strings(out.Unpriced)
+	for _, f := range r.Failed {
+		prov, _, _ := strings.Cut(f, ":")
+		if wantProvider(prov) {
+			out.Failed = append(out.Failed, f)
+		}
+	}
+	return out
+}
+
 // costReportETag hashes the report's content (excluding GeneratedAt) so
 // unchanged reports answer 304 Not Modified.
 func costReportETag(rep *CostReport) string {
@@ -202,7 +319,7 @@ func jsonETag(prefix string, b []byte) string {
 // not by the request that started it, so that the others can share it.
 // When the core already holds a report with an ETag for (m, key), it sends
 // IfNoneMatch so an unchanged machine answers NotModified with no rows.
-func (p *Plugin) machineCost(ctx context.Context, m, key string, params usage.CostOptions) (usage.CostReport, error) {
+func (p *Plugin) machineCost(ctx context.Context, m, key string, params usage.CostOptions, priceKey string) (usage.CostReport, error) {
 	mcKey := m + "|" + key
 	for {
 		p.mu.Lock()
@@ -216,33 +333,50 @@ func (p *Plugin) machineCost(ctx context.Context, m, key string, params usage.Co
 			prev, hasPrev := p.machineCosts[mcKey]
 			p.mu.Unlock()
 			req := params
-			if hasPrev && prev.etag != "" {
-				req.IfNoneMatch = prev.etag
+			if hasPrev && prev.ETag != "" {
+				req.IfNoneMatch = prev.ETag
 			}
 			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), costTimeout)
 			f.err = p.call(cctx, m, "cost", req, &f.rep)
 			cancel()
+			modified := !f.rep.NotModified || !hasPrev
 			if f.err == nil && f.rep.NotModified && hasPrev {
-				f.rep = prev.rep
+				f.rep = prev.Rep
 			}
+			var savedEntry machineCostEntry
+			var evicted []string
+			shouldSave := false
 			p.mu.Lock()
-			if f.err == nil && f.rep.ETag != "" {
+			if f.err == nil {
 				if p.machineCosts == nil {
 					p.machineCosts = map[string]machineCostEntry{}
 				}
-				p.machineCosts[mcKey] = machineCostEntry{etag: f.rep.ETag, rep: f.rep, at: p.now()}
+				savedEntry = machineCostEntry{
+					Machine:    m,
+					TZOffset:   params.TZOffset,
+					Since:      params.Since,
+					CodexHomes: slices.Clone(params.CodexHomes),
+					PriceKey:   priceKey,
+					ETag:       f.rep.ETag,
+					Rep:        f.rep,
+					At:         p.now(),
+				}
+				p.machineCosts[mcKey] = savedEntry
+				shouldSave = modified
 				for len(p.machineCosts) > machineCostKeep {
-					oldest := ""
-					for k, e := range p.machineCosts {
-						if oldest == "" || e.at.Before(p.machineCosts[oldest].at) {
-							oldest = k
-						}
+					oldest := evictMachineCostKeyLocked(p.machineCosts)
+					if oldest == "" {
+						break
 					}
 					delete(p.machineCosts, oldest)
+					evicted = append(evicted, oldest)
 				}
 			}
 			delete(p.costFlights, m)
 			p.mu.Unlock()
+			if shouldSave {
+				p.saveMachineCost(mcKey, savedEntry, evicted)
+			}
 			close(f.done)
 			return f.rep, f.err
 		}
@@ -256,4 +390,28 @@ func (p *Plugin) machineCost(ctx context.Context, m, key string, params usage.Co
 			return f.rep, f.err
 		}
 	}
+}
+
+// evictMachineCostKeyLocked picks the oldest cached entry to evict, preferring
+// machines with more than one cached entry so a disabled machine's sole
+// snapshot is kept.
+func evictMachineCostKeyLocked(costs map[string]machineCostEntry) string {
+	counts := map[string]int{}
+	for _, e := range costs {
+		counts[e.Machine]++
+	}
+	oldestMulti := ""
+	oldestAny := ""
+	for k, e := range costs {
+		if oldestAny == "" || e.At.Before(costs[oldestAny].At) {
+			oldestAny = k
+		}
+		if counts[e.Machine] > 1 && (oldestMulti == "" || e.At.Before(costs[oldestMulti].At)) {
+			oldestMulti = k
+		}
+	}
+	if oldestMulti != "" {
+		return oldestMulti
+	}
+	return oldestAny
 }

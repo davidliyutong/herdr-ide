@@ -1043,3 +1043,130 @@ func TestSnapshotETagAndIdlePollBroadcast(t *testing.T) {
 		t.Fatalf("watched poll broadcasts: %+v", h.sent)
 	}
 }
+
+type managerHost struct {
+	*fakeHost
+	mg *machines.Manager
+}
+
+func (h *managerHost) Machines() *machines.Manager { return h.mg }
+
+// Disabled machines are not live-polled for limits or cost, yet their
+// previously scanned cost statistics stay included (across cache expiry,
+// narrower ranges, provider toggles and restarts) until ForgetMachine.
+func TestCostIncludesDisabledMachineAndSkipsLivePoll(t *testing.T) {
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	st := settings.New(filepath.Join(dir, "settings-dev.json"), Settings)
+	mg := machines.NewManager([]machines.Spec{
+		{ID: "local", Label: "Local", Kind: machines.KindLocal, Enabled: true},
+		{ID: "box", Label: "Box", Kind: machines.KindSSH, Target: "box", Enabled: true},
+	}, nil, log.New(io.Discard, "", 0))
+	host := &managerHost{fakeHost: &fakeHost{st: st}, mg: mg}
+
+	// Simulate both machines ready initially.
+	ready := []string{"local", "box"}
+	var polled []string
+	var mu sync.Mutex
+	newP := func() *Plugin {
+		p := New()
+		p.host = host
+		p.now = func() time.Time { return now }
+		p.ready = func() []string { return ready }
+		p.fetch = func(ctx context.Context, m, action string, params, out any) error {
+			mu.Lock()
+			polled = append(polled, action+":"+m)
+			mu.Unlock()
+			if action == "limits" {
+				return nil
+			}
+			if m == "local" {
+				b, _ := json.Marshal(usage.CostReport{
+					ETag:  "local-1",
+					Files: 1,
+					Rows: []usage.CostRow{
+						{Day: "2026-11-16", Provider: "claude", Model: "claude-opus-4-6", Input: 10, Output: 5, Requests: 1, Cost: 1.0, Priced: true},
+					},
+				})
+				return json.Unmarshal(b, out)
+			}
+			b, _ := json.Marshal(usage.CostReport{
+				ETag:  "box-1",
+				Files: 2,
+				Rows: []usage.CostRow{
+					{Day: "2026-11-16", Provider: "claude", Model: "claude-opus-4-6", Input: 20, Output: 10, Requests: 2, Cost: 2.5, Priced: true},
+					{Day: "2026-11-01", Provider: "codex", Model: "gpt-5", Input: 30, Output: 15, Requests: 1, Cost: 3.0, Priced: true},
+				},
+			})
+			return json.Unmarshal(b, out)
+		}
+		return p
+	}
+
+	p := newP()
+	rep1 := p.cost(context.Background(), 30, 0)
+	if len(rep1.Rows) != 3 {
+		t.Fatalf("initial rows=%d, want 3: %+v", len(rep1.Rows), rep1.Rows)
+	}
+
+	// Disable box: it disappears from ready and is never live-polled again.
+	if err := mg.SetEnabled("box", false); err != nil {
+		t.Fatal(err)
+	}
+	ready = []string{"local"}
+	polled = nil
+	now = now.Add(costFresh + time.Second)
+
+	p.Poll(context.Background())
+	rep2 := p.cost(context.Background(), 30, 0)
+	for _, call := range polled {
+		if strings.HasSuffix(call, ":box") {
+			t.Fatalf("disabled machine was live-polled: %v", polled)
+		}
+	}
+	if len(rep2.Rows) != 3 || rep2.Machines["box"].Error != "" || rep2.Machines["box"].Files != 2 {
+		t.Fatalf("disabled machine missing after cache expiry: rows=%d machine=%+v", len(rep2.Rows), rep2.Machines["box"])
+	}
+
+	// Narrower day range (7 days) and disabled provider still filter the
+	// disabled machine's historical rows accurately without polling it.
+	polled = nil
+	rep7 := p.cost(context.Background(), 7, 0)
+	if len(rep7.Rows) != 2 {
+		t.Fatalf("7-day rows=%d, want 2: %+v", len(rep7.Rows), rep7.Rows)
+	}
+	if err := st.Set(providerSetting(usage.Codex), "", false); err != nil {
+		t.Fatal(err)
+	}
+	repNoCodex := p.cost(context.Background(), 30, 0)
+	if len(repNoCodex.Rows) != 2 {
+		t.Fatalf("without codex rows=%d, want 2: %+v", len(repNoCodex.Rows), repNoCodex.Rows)
+	}
+	for _, call := range polled {
+		if strings.HasSuffix(call, ":box") {
+			t.Fatalf("disabled machine polled on range/provider change: %v", polled)
+		}
+	}
+	_ = st.Set(providerSetting(usage.Codex), "", true)
+
+	// Restart (fresh Plugin reading core.db) while box is still disabled:
+	// box's historical cost statistics persist and are still included.
+	polled = nil
+	q := newP()
+	repRestart := q.cost(context.Background(), 30, 0)
+	if len(repRestart.Rows) != 3 || repRestart.Machines["box"].Files != 2 {
+		t.Fatalf("after restart rows=%d machine=%+v", len(repRestart.Rows), repRestart.Machines["box"])
+	}
+	for _, call := range polled {
+		if strings.HasSuffix(call, ":box") {
+			t.Fatalf("disabled machine polled after restart: %v", polled)
+		}
+	}
+
+	// Removing the machine (ForgetMachine) drops its cached cost rows.
+	q.ForgetMachine(host, "box")
+	repForgotten := q.cost(context.Background(), 30, 0)
+	if len(repForgotten.Rows) != 1 || repForgotten.Rows[0].Machine != "local" {
+		t.Fatalf("after ForgetMachine rows=%+v", repForgotten.Rows)
+	}
+}

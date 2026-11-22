@@ -307,6 +307,54 @@ export function dailyTokens(rows: CostRow[], n: number, today = new Date()): ({ 
   return days.map((day) => ({ day, ...by.get(day)! }));
 }
 
+export interface DailyProviderBreakdown {
+  provider: string;
+  cost: number;
+  tokens: number;
+  requests: number;
+}
+
+export interface DailyDetail {
+  day: string;
+  cost: number;
+  kinds: TokenKinds;
+  byProvider: DailyProviderBreakdown[];
+}
+
+const providerOrder = new Map<string, number>(PROVIDERS.map((p, i) => [p, i]));
+
+/** Per-day cost, token kinds and provider breakdown for the last n days,
+ * oldest first. */
+export function dailyDetails(rows: CostRow[], n: number, today = new Date()): DailyDetail[] {
+  const days = lastDays(n, today);
+  const by = new Map(days.map((d) => [d, { cost: 0, kinds: emptyKinds(), providers: new Map<string, DailyProviderBreakdown>() }]));
+  for (const r of rows) {
+    const d = by.get(r.day);
+    if (!d) continue;
+    d.cost += r.cost;
+    addRow(d.kinds, r);
+    const p = d.providers.get(r.provider) ?? { provider: r.provider, cost: 0, tokens: 0, requests: 0 };
+    p.cost += r.cost;
+    p.tokens += rowTokens(r);
+    p.requests += r.requests;
+    d.providers.set(r.provider, p);
+  }
+  return days.map((day) => {
+    const d = by.get(day)!;
+    const byProvider = [...d.providers.values()]
+      .filter((p) => p.cost > 0 || p.tokens > 0 || p.requests > 0)
+      .sort((a, b) => {
+        const oa = providerOrder.get(a.provider);
+        const ob = providerOrder.get(b.provider);
+        if (oa !== undefined && ob !== undefined) return oa - ob;
+        if (oa !== undefined) return -1;
+        if (ob !== undefined) return 1;
+        return a.provider < b.provider ? -1 : a.provider > b.provider ? 1 : 0;
+      });
+    return { day, cost: d.cost, kinds: d.kinds, byProvider };
+  });
+}
+
 /** The tokens of the last n days by model, project or machine, most first;
  * `unpriced` marks a name with a row the price table does not know (its
  * tokens count all the same, its cost is 0). */

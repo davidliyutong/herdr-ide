@@ -158,8 +158,11 @@ type Plugin struct {
 	working   map[string]bool // machine|terminal of agents working
 	costCache map[string]costEntry
 	// machineCosts keeps each machine's last CostReport and ETag so
-	// unchanged scans transfer only {notModified: true} over SSH.
-	machineCosts map[string]machineCostEntry
+	// unchanged scans transfer only {notModified: true} over SSH, and
+	// disabled or offline machines keep their historical cost statistics.
+	machineCosts         map[string]machineCostEntry
+	machineCostsLoaded   bool
+	machineCostsReadOnly bool
 	// recent are the alerts fired in the last alertKeep.
 	recent []Alert
 	// costFlights are the machines' scans in progress.
@@ -359,6 +362,29 @@ func (p *Plugin) onMachine(st machines.State) {
 			delete(p.working, k)
 		}
 	}
+}
+
+// ForgetMachine drops cached state for a machine the user removed
+// (plugin.MachineForgetter). Disabled machines are not forgotten so their
+// historical usage statistics stay available while live polling stops.
+func (p *Plugin) ForgetMachine(_ plugin.Host, id string) {
+	p.mu.Lock()
+	for k, e := range p.machineCosts {
+		if e.Machine == id {
+			delete(p.machineCosts, k)
+		}
+	}
+	clear(p.costCache)
+	delete(p.machines, id)
+	delete(p.readyNow, id)
+	delete(p.joined, id)
+	for k := range p.working {
+		if strings.HasPrefix(k, id+"|") {
+			delete(p.working, k)
+		}
+	}
+	p.mu.Unlock()
+	p.deleteMachineCostsDB(id)
 }
 
 // onAgent follows which coding agents are working (the adaptive refresh).

@@ -438,7 +438,8 @@ account's `issues`, which its card lists by reason. Accounts no machine reported
 forgotten; those of a provider turned off leave the snapshot at once.
 
 The history (in the core's database, `core[-<instance>].db` beside the
-settings, tables `usage_windows`, `usage_accounts` and `usage_alerts`;
+settings, tables `usage_windows`, `usage_accounts`, `usage_alerts` and
+`usage_machine_costs`;
 [38](38-sqlite-state.md)) keeps a point per window and poll when the use
 changed or 15 minutes
 passed, only for numbers read in that poll (not those kept from an
@@ -463,13 +464,17 @@ data: snapshot}` (idle background polls with no open panel omit the
 start-of-poll `polling: true` broadcast); `GET /api/p/usage` returns the
 same snapshot with an `ETag` and answers `304 Not Modified` when
 `If-None-Match` matches (still recording `?watch=1`).
-`GET /api/p/usage/cost?days=&tz=` asks the machines in parallel (2 min each,
+`GET /api/p/usage/cost?days=&tz=` asks the connected machines in parallel (2 min each,
 passing each machine's last `ifNoneMatch` so unchanged machines answer
 `notModified` without re-sending rows) and is served again for a minute
 (keyed by range, timezone, enabled providers, Codex homes and custom
 prices), also with `ETag` / `304 Not Modified`; the reports of the last 4
-ranges are kept. A machine scans one range at a time: requests for the
-range being scanned share that scan, others wait for it.
+ranges are kept. Machines that are disabled or offline are not polled,
+and their persisted cached cost reports (`usage_machine_costs`) remain
+included in the aggregated report (filtered to the requested range and
+enabled providers) until the machine is removed (`ForgetMachine`). A
+machine scans one range at a time: requests for the range being scanned
+share that scan, others wait for it.
 
 `GET /api/m/{id}/p/usage/session?kind=&session=` asks the machine's
 `session` action (30 s) with the user's prices: the kind and the session
@@ -522,9 +527,11 @@ not read; SSH machines are.
   tokens per week and month at this pace, a thin bar of the shares of
   input, cache reads, cache writes and output (opacity steps of the accent
   color) and a legend with each kind's count, the output saying how much
-  of it was reasoning. The daily bars show tokens (stacked by service in
-  the overview, by kind in a service), their tooltips giving the day, the
-  total and the kinds. The rankings order by tokens, with the cost as the
+  of it was reasoning. The daily bars show cost or tokens (stacked by service in
+  the overview, by kind in a service's tokens view); hovering a column
+  immediately opens a custom tooltip (`role="tooltip"`) with the date,
+  total cost, total tokens, request count, per-service breakdown (when
+  stacked) and token kinds (including reasoning). The rankings order by tokens, with the cost as the
   muted figure and the bar following the tokens. A model the price table
   does not know counts fully here and carries a "no price" tag, so that
   what it used shows before it has a price. Spend shows everything as

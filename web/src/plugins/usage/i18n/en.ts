@@ -89,6 +89,7 @@ export const en = {
   'usage.cost.loading': 'Reading the logs…',
   'usage.cost.failed': 'Could not read the cost ({code}).',
   'usage.cost.daily': 'Cost per day',
+  'usage.daily.empty': 'No usage',
   'usage.cost.by.model': 'Models',
   'usage.cost.by.project': 'Projects',
   'usage.cost.by.machine': 'Machines',

@@ -16,7 +16,8 @@ import { t } from '../../i18n';
 import { type Metric, costStale, fetchCost, fetchSnapshot, refreshNow, setDeepseekKey, setView, useUsage, type UsageTab } from './state';
 import {
   costOf,
-  daily,
+  dailyDetails,
+  dayOf,
   duration,
   equivalents,
   money,
@@ -27,7 +28,6 @@ import {
   rank,
   rankTokens,
   sortAccounts,
-  dailyTokens,
   tightestWindow,
   tokenKinds,
   tokens,
@@ -742,78 +742,146 @@ export function tokensOf(rows: CostRow[], n: number, today = new Date()): number
   return tokenKinds(rows, n, today).total;
 }
 
-/** The day's tokens as a tooltip: the total and the kinds. */
-function tokensTitle(day: string, k: TokenKinds): string {
-  const kinds = KINDS.map((x) => `${t(`usage.tokens.${x}`)} ${tokens(k[x])}`).join(', ');
-  return `${day}: ${tokens(k.total)} (${kinds})`;
+/** Horizontal position of the bar chart tooltip, clamped to the chart box. */
+function tipPosition(idx: number, count: number): React.CSSProperties {
+  const pct = ((idx + 0.5) / count) * 100;
+  if (pct <= 28) return { left: 0 };
+  if (pct >= 72) return { right: 0 };
+  return { left: `${pct}%`, transform: 'translateX(-50%)' };
 }
 
 /** The cost or the tokens per day as bars (plain SVG): the cost in the
  * service's color, or, with `stacked`, in the services' colors; the tokens
- * stacked by service with `stacked`, else by kind. */
+ * stacked by service with `stacked`, else by kind. Hovering shows an
+ * immediate custom tooltip with the day's breakdown. */
 function DailyBars({ rows, days, stacked, metric = 'spend' }: { rows: CostRow[]; days: number; stacked?: boolean; metric?: Metric }) {
   const W = 300;
   const H = 72;
-  const today = new Date();
   const isTokens = metric === 'tokens';
-  const providers = stacked ? shownProviders([], { rows } as CostReport) : [];
-  const all = dailyTokens(rows, days, today);
-  const cost = daily(rows, days, today);
-  type Layer = { key: string; color: string; values: number[] };
-  let layers: Layer[];
-  if (!isTokens) {
-    layers = stacked
-      ? providers.map((p) => ({
-          key: p,
-          color: providerColor(p),
-          values: daily(
-            rows.filter((r) => r.provider === p),
-            days,
-            today,
-          ).map((d) => d.cost),
-        }))
-      : [{ key: 'cost', color: 'var(--brand)', values: cost.map((d) => d.cost) }];
-  } else {
-    layers = stacked
-      ? providers.map((p) => ({
-          key: p,
-          color: providerColor(p),
-          values: dailyTokens(
-            rows.filter((r) => r.provider === p),
-            days,
-            today,
-          ).map((d) => d.total),
-        }))
-      : KINDS.map((k) => ({ key: k, color: kindColor(k), values: all.map((d) => d[k]) }));
-  }
-  const totals = isTokens ? all.map((d) => d.total) : cost.map((d) => d.cost);
-  const max = Math.max(...totals, isTokens ? 1 : 0.01);
-  const bw = W / totals.length;
+  const todayKey = dayOf(new Date());
+  const [hoverIdx, setHoverIdx] = useState<number>();
+
+  const chart = useMemo(() => {
+    const today = new Date();
+    const details = dailyDetails(rows, days, today);
+    const providers = stacked ? shownProviders([], { rows } as CostReport) : [];
+    type Layer = { key: string; color: string; values: number[] };
+    let layers: Layer[];
+    if (stacked) {
+      layers = providers.map((p) => ({
+        key: p,
+        color: providerColor(p),
+        values: details.map((d) => {
+          const bp = d.byProvider.find((x) => x.provider === p);
+          return isTokens ? (bp?.tokens ?? 0) : (bp?.cost ?? 0);
+        }),
+      }));
+    } else if (!isTokens) {
+      layers = [{ key: 'cost', color: 'var(--brand)', values: details.map((d) => d.cost) }];
+    } else {
+      layers = KINDS.map((k) => ({ key: k, color: kindColor(k), values: details.map((d) => d.kinds[k]) }));
+    }
+    const totals = details.map((d) => (isTokens ? d.kinds.total : d.cost));
+    const max = Math.max(...totals, isTokens ? 1 : 0.01);
+    const bw = W / totals.length;
+    return { details, layers, totals, max, bw };
+  }, [rows, days, stacked, isTokens, todayKey]);
+
+  const activeIdx = hoverIdx !== undefined && hoverIdx >= 0 && hoverIdx < chart.details.length ? hoverIdx : undefined;
+  const hovered = activeIdx !== undefined ? chart.details[activeIdx] : undefined;
+  const emptyDay = hovered ? hovered.cost === 0 && hovered.kinds.total === 0 && hovered.kinds.requests === 0 : false;
+
   return (
-    <div className="usage-daily-box">
-      <span className="usage-daily-max muted">{isTokens ? tokens(max) : money(max)}</span>
+    <div className="usage-daily-box" onMouseLeave={() => setHoverIdx(undefined)}>
+      <span className="usage-daily-max muted">{isTokens ? tokens(chart.max) : money(chart.max)}</span>
       <svg
         className="usage-daily"
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
         role="img"
         aria-label={t(isTokens ? 'usage.tokens.daily' : 'usage.cost.daily')}
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          if (rect.width <= 0) return;
+          const idx = Math.min(
+            chart.details.length - 1,
+            Math.max(0, Math.floor(((e.clientX - rect.left) / rect.width) * chart.details.length)),
+          );
+          if (idx !== hoverIdx) setHoverIdx(idx);
+        }}
       >
         <line x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} className="usage-daily-axis" />
-        {totals.map((_, i) => {
+        {activeIdx !== undefined && <rect className="usage-daily-hover" x={activeIdx * chart.bw} y={0} width={chart.bw} height={H} />}
+        {chart.details.map((d, i) => {
           let y = H;
           return (
-            <g key={all[i].day}>
-              <title>{isTokens ? tokensTitle(all[i].day, all[i]) : `${cost[i].day}: ${money(cost[i].cost)}`}</title>
-              {layers.map((l) => {
-                const h = (l.values[i] / max) * (H - 2);
+            <g key={d.day} data-day={d.day} onMouseEnter={() => setHoverIdx(i)}>
+              {chart.layers.map((l) => {
+                const h = (l.values[i] / chart.max) * (H - 2);
                 y -= h;
-                return h > 0 ? <rect key={l.key} x={i * bw + bw * 0.15} y={y} width={bw * 0.7} height={h} fill={l.color} /> : null;
+                return h > 0 ? (
+                  <rect key={l.key} x={i * chart.bw + chart.bw * 0.15} y={y} width={chart.bw * 0.7} height={h} fill={l.color} />
+                ) : null;
               })}
             </g>
           );
         })}
       </svg>
+      {hovered && activeIdx !== undefined && (
+        <div className="usage-daily-tooltip" role="tooltip" style={tipPosition(activeIdx, chart.details.length)}>
+          <div className="usage-daily-tip-head">
+            <span className="usage-daily-tip-date">{hovered.day}</span>
+            <span className="usage-daily-tip-total">{isTokens ? tokens(hovered.kinds.total) : money(hovered.cost)}</span>
+          </div>
+          {emptyDay ? (
+            <div className="usage-daily-tip-sub muted">{t('usage.daily.empty')}</div>
+          ) : (
+            <>
+              <div className="usage-daily-tip-sub muted">
+                {isTokens ? money(hovered.cost) : t('usage.spend.tokens', { tokens: tokens(hovered.kinds.total) })}
+                {hovered.kinds.requests > 0 ? ` · ${t('usage.tokens.requests', { n: hovered.kinds.requests })}` : ''}
+              </div>
+              {stacked && hovered.byProvider.length > 0 && (
+                <div className="usage-daily-tip-list">
+                  {hovered.byProvider.map((p) => (
+                    <div key={p.provider} className="usage-daily-tip-row">
+                      <i style={{ background: providerColor(p.provider) }} />
+                      <span>{providerName(p.provider)}</span>
+                      <span className="spacer" />
+                      <span className="usage-daily-tip-val">
+                        {isTokens ? tokens(p.tokens) : money(p.cost)}
+                        <span className="muted"> · {isTokens ? money(p.cost) : tokens(p.tokens)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {hovered.kinds.total > 0 && (
+                <div className="usage-daily-tip-kinds">
+                  {KINDS.map((k) =>
+                    hovered.kinds[k] > 0 ? (
+                      <div key={k} className="usage-daily-tip-row">
+                        <i style={{ background: kindColor(k) }} />
+                        <span>{t(`usage.tokens.${k}`)}</span>
+                        <span className="spacer" />
+                        <span className="usage-daily-tip-val">
+                          {tokens(hovered.kinds[k])}
+                          {k === 'output' && hovered.kinds.reasoning > 0 && (
+                            <span className="muted">
+                              {' '}
+                              ({t('usage.tokens.reasoning')} {tokens(hovered.kinds.reasoning)})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ) : null,
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

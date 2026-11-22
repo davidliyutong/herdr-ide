@@ -200,6 +200,11 @@ var historyMigrations = []string{
 		key TEXT PRIMARY KEY,
 		record TEXT NOT NULL
 	);`,
+	`CREATE TABLE usage_machine_costs (
+		mc_key TEXT PRIMARY KEY,
+		machine TEXT NOT NULL,
+		entry BLOB NOT NULL
+	);`,
 }
 
 // historyNewerTold: a save said once that the core's database is of a
@@ -244,6 +249,7 @@ func (p *Plugin) loadHistory(path string) {
 		// No database: the history is kept in memory.
 		p.mu.Lock()
 		p.history.loaded = true
+		p.machineCostsLoaded = true
 		p.mu.Unlock()
 		return
 	}
@@ -256,11 +262,29 @@ func (p *Plugin) loadHistory(path string) {
 		p.logf("usage: %v", err)
 		return
 	}
+	costs, err := readMachineCosts(db)
+	if err != nil {
+		p.logf("usage: %v", err)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.history.merge(h)
 	p.history.prune(p.now())
 	p.history.loaded = true
+	if !writable {
+		p.machineCostsReadOnly = true
+	}
+	if len(costs) > 0 {
+		if p.machineCosts == nil {
+			p.machineCosts = map[string]machineCostEntry{}
+		}
+		for k, e := range costs {
+			if cur, ok := p.machineCosts[k]; !ok || e.At.After(cur.At) {
+				p.machineCosts[k] = e
+			}
+		}
+	}
+	p.machineCostsLoaded = true
 	for _, v := range h.Accounts {
 		if v.Key == "" || p.now().Sub(time.Unix(v.SeenAt, 0)) > forgetAfter || p.accounts[v.Key] != nil {
 			continue
@@ -271,6 +295,161 @@ func (p *Plugin) loadHistory(path string) {
 		}
 		v.Windows = nil
 		p.accounts[v.Key] = &account{view: v}
+	}
+}
+
+func readMachineCosts(db *store.DB) (map[string]machineCostEntry, error) {
+	rows, err := db.Query("SELECT mc_key, entry FROM usage_machine_costs")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]machineCostEntry{}
+	for rows.Next() {
+		var k string
+		var b []byte
+		var e machineCostEntry
+		if rows.Scan(&k, &b) != nil || json.Unmarshal(b, &e) != nil || e.Machine == "" {
+			continue
+		}
+		out[k] = e
+	}
+	return out, rows.Err()
+}
+
+// ensureMachineCosts loads persisted per-machine cost reports once when a
+// database exists (for callers that run before Start's loadHistory).
+func (p *Plugin) ensureMachineCosts() {
+	p.mu.Lock()
+	loaded := p.machineCostsLoaded
+	p.mu.Unlock()
+	if loaded {
+		return
+	}
+	if p.historyPath() == "" {
+		p.mu.Lock()
+		p.machineCostsLoaded = true
+		p.mu.Unlock()
+		return
+	}
+	p.saveMu.Lock()
+	defer p.saveMu.Unlock()
+	p.mu.Lock()
+	loaded = p.machineCostsLoaded
+	p.mu.Unlock()
+	if loaded {
+		return
+	}
+	db, writable, err := p.openHistoryDB()
+	if db == nil {
+		if err != nil {
+			p.logf("usage: %v", err)
+			return
+		}
+		p.mu.Lock()
+		p.machineCostsLoaded = true
+		p.mu.Unlock()
+		return
+	}
+	defer db.Close()
+	costs, err := readMachineCosts(db)
+	if err != nil {
+		p.logf("usage: %v", err)
+		return
+	}
+	p.mu.Lock()
+	if !writable {
+		p.machineCostsReadOnly = true
+	}
+	if len(costs) > 0 {
+		if p.machineCosts == nil {
+			p.machineCosts = map[string]machineCostEntry{}
+		}
+		for k, e := range costs {
+			if cur, ok := p.machineCosts[k]; !ok || e.At.After(cur.At) {
+				p.machineCosts[k] = e
+			}
+		}
+	}
+	p.machineCostsLoaded = true
+	p.mu.Unlock()
+}
+
+func (p *Plugin) saveMachineCost(mcKey string, e machineCostEntry, evicted []string) {
+	if p.historyPath() == "" {
+		return
+	}
+	p.mu.Lock()
+	ro := p.machineCostsReadOnly
+	p.mu.Unlock()
+	if ro {
+		return
+	}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return
+	}
+	p.saveMu.Lock()
+	defer p.saveMu.Unlock()
+	db, writable, err := p.openHistoryDB()
+	if db == nil {
+		if err != nil {
+			p.logf("usage: %v", err)
+		}
+		return
+	}
+	defer db.Close()
+	if !writable {
+		p.mu.Lock()
+		p.machineCostsReadOnly = true
+		p.mu.Unlock()
+		return
+	}
+	if err := db.Update(context.Background(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO usage_machine_costs (mc_key, machine, entry) VALUES (?, ?, ?)
+			ON CONFLICT (mc_key) DO UPDATE SET machine = excluded.machine, entry = excluded.entry WHERE entry != excluded.entry`,
+			mcKey, e.Machine, b); err != nil {
+			return err
+		}
+		for _, k := range evicted {
+			if _, err := tx.Exec("DELETE FROM usage_machine_costs WHERE mc_key = ?", k); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		p.logf("usage: %v", err)
+	}
+}
+
+func (p *Plugin) deleteMachineCostsDB(machine string) {
+	if p.historyPath() == "" {
+		return
+	}
+	p.mu.Lock()
+	ro := p.machineCostsReadOnly
+	p.mu.Unlock()
+	if ro {
+		return
+	}
+	p.saveMu.Lock()
+	defer p.saveMu.Unlock()
+	db, writable, err := p.openHistoryDB()
+	if db == nil {
+		if err != nil {
+			p.logf("usage: %v", err)
+		}
+		return
+	}
+	defer db.Close()
+	if !writable {
+		return
+	}
+	if err := db.Update(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("DELETE FROM usage_machine_costs WHERE machine = ?", machine)
+		return err
+	}); err != nil {
+		p.logf("usage: %v", err)
 	}
 }
 

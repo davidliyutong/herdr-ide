@@ -20,6 +20,7 @@ import { applySnapshot, costStale, fetchCost, fetchSnapshot, setView, useUsage }
 import {
   costOf,
   daily,
+  dailyDetails,
   dailyTokens,
   equivalents,
   rank,
@@ -191,6 +192,17 @@ describe('usage tokens', () => {
       ['2026-11-16', 200],
     ]);
     expect(d[2].cached).toBe(50);
+    const det = dailyDetails(
+      [...rows, row('2026-11-16', 'claude-opus-4-6', { provider: 'claude', cost: 2.5, input: 50, cached: 0, cacheWrite: 0, output: 10 })],
+      3,
+      today,
+    );
+    expect(det[2].cost).toBe(3.5);
+    expect(det[2].kinds.total).toBe(260);
+    expect(det[2].byProvider.map((p) => [p.provider, p.cost, p.tokens])).toEqual([
+      ['claude', 2.5, 60],
+      ['codex', 1, 200],
+    ]);
   });
 
   it('ranks by tokens and marks the model without a price', () => {
@@ -517,7 +529,22 @@ describe('usage panel and status item', () => {
     const legend = host.querySelector('.usage-kind-legend')!.textContent!;
     expect(legend).toContain('input 4.0k');
     expect(legend).toContain('output 1.0k (reasoning 300)');
-    expect([...host.querySelectorAll('.usage-daily title')].pop()!.textContent).toContain('5.0k (input 4.0k');
+    // No native SVG <title> tooltips (avoids hover delay); hovering shows the custom tooltip at once.
+    expect(host.querySelectorAll('.usage-daily title')).toHaveLength(0);
+    const bars = host.querySelectorAll('.usage-daily g');
+    await act(async () => {
+      bars[bars.length - 1].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    const tip = host.querySelector('.usage-daily-tooltip')!;
+    expect(tip).not.toBeNull();
+    expect(tip.textContent).toContain('5.0k');
+    expect(tip.textContent).toContain('input');
+    expect(tip.textContent).toContain('4.0k');
+    expect(tip.textContent).toContain('reasoning 300');
+    await act(async () => {
+      host.querySelector('.usage-daily-box')!.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    });
+    expect(host.querySelector('.usage-daily-tooltip')).toBeNull();
     const first = host.querySelector('.usage-rank li')!;
     expect(first.textContent).toContain('mystery-1');
     expect(first.textContent).toContain('no price');
@@ -598,5 +625,112 @@ describe('usage panel and status item', () => {
     expect(useUsage.getState().costLoading).toBe(false);
     expect(useUsage.getState().cost?.rows).toHaveLength(1);
     expect(costStale()).toBe(false);
+  });
+
+  it('shows immediate custom daily tooltip with breakdown on bar hover and pointer move', async () => {
+    await act(async () => root.render(createElement(UsagePanel)));
+    await act(async () => {});
+    const svg = host.querySelector<SVGSVGElement>('.usage-daily')!;
+    const box = host.querySelector<HTMLElement>('.usage-daily-box')!;
+    const bars = host.querySelectorAll('.usage-daily g');
+    const lastDay = bars[bars.length - 1].getAttribute('data-day')!;
+    const firstDay = bars[0].getAttribute('data-day')!;
+
+    // Hovering the today bar immediately displays date, cost, tokens, requests and provider/kind breakdown.
+    await act(async () => {
+      bars[bars.length - 1].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    const tip = host.querySelector('.usage-daily-tooltip')!;
+    expect(tip.getAttribute('role')).toBe('tooltip');
+    expect(tip.textContent).toContain(lastDay);
+    expect(tip.textContent).toContain('$12.50');
+    expect(tip.textContent).toContain('5.0k tokens');
+    expect(tip.textContent).toContain('4 requests');
+    expect(tip.textContent).toContain('Claude');
+
+    // Moving the pointer over an empty day column immediately shows that date without lag.
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 300,
+      bottom: 72,
+      width: 300,
+      height: 72,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    });
+    await act(async () => {
+      svg.dispatchEvent(new MouseEvent('mousemove', { clientX: 2, bubbles: true }));
+    });
+    expect(host.querySelector('.usage-daily-tooltip')!.textContent).toContain(firstDay);
+    expect(host.querySelector('.usage-daily-tooltip')!.textContent).toContain('No usage');
+
+    await act(async () => {
+      box.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    });
+    expect(host.querySelector('.usage-daily-tooltip')).toBeNull();
+  });
+
+  it('includes disabled machines in usage statistics, machine rankings and accounts', async () => {
+    const today = new Date();
+    const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    useStore
+      .getState()
+      .setMachines([
+        { id: 'local', label: 'This Mac', kind: 'local', enabled: true, status: 'ready', updated_at: now } as MachineState,
+        { id: 'gpu', label: 'Disabled GPU', kind: 'ssh', enabled: false, status: 'disabled', updated_at: now } as MachineState,
+      ]);
+    useUsage.setState({
+      snapshot: snapshot([account('claude:b', [40], { machines: ['local', 'gpu'] })]),
+      cost: {
+        generatedAt: now,
+        days: 90,
+        weekHours: 168,
+        monthHours: 750,
+        machines: { local: { files: 1 }, gpu: { files: 2 } },
+        rows: [
+          {
+            day,
+            provider: 'claude',
+            model: 'claude-opus-4-6',
+            machine: 'local',
+            input: 100,
+            cached: 0,
+            cacheWrite: 0,
+            output: 50,
+            requests: 1,
+            cost: 2.0,
+            priced: true,
+          },
+          {
+            day,
+            provider: 'claude',
+            model: 'claude-opus-4-6',
+            machine: 'gpu',
+            input: 200,
+            cached: 0,
+            cacheWrite: 0,
+            output: 100,
+            requests: 2,
+            cost: 5.5,
+            priced: true,
+          },
+        ],
+      },
+    });
+    await act(async () => root.render(createElement(UsagePanel)));
+    expect(host.querySelector('.usage-big')!.textContent).toBe('~$7.50');
+    const byMachine = [...host.querySelectorAll('.usage-spend [role="radio"]')].find((b) => b.textContent === 'Machines')!;
+    await act(async () => (byMachine as HTMLButtonElement).click());
+    const ranks = [...host.querySelectorAll('.usage-rank li')].map((li) => li.textContent);
+    expect(ranks[0]).toContain('Disabled GPU');
+    expect(ranks[0]).toContain('$5.50');
+    expect(ranks[1]).toContain('This Mac');
+    expect(ranks[1]).toContain('$2.00');
+    // Account card still lists the disabled machine label.
+    await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
+    expect(host.querySelector('.usage-machines')!.textContent).toContain('Disabled GPU');
+    useStore.getState().setMachines([]);
   });
 });

@@ -87,6 +87,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'usage.cost.loading': '正在读取日志…',
   'usage.cost.failed': '无法读取费用（{code}）。',
   'usage.cost.daily': '每日费用',
+  'usage.daily.empty': '无用量',
   'usage.cost.by.model': '模型',
   'usage.cost.by.project': '项目',
   'usage.cost.by.machine': '机器',
