@@ -29,7 +29,7 @@ const B = 'c00000000000000b2';
 
 type Call = { method: string; url: string };
 let calls: Call[];
-let answers: Record<string, () => Response>;
+let answers: Record<string, () => Response | Promise<Response>>;
 let core: FakeCore;
 let host: HTMLDivElement;
 let root: Root;
@@ -300,5 +300,66 @@ describe('ChatSettingsExtra (debug/management panel)', () => {
     expect(qa('.chat-host-session button').map((b) => b.getAttribute('aria-label'))).toEqual([t('chat.manage.openChat')]);
     expect(calls.some((c) => c.method === 'POST')).toBe(false);
     expect(q('[data-chat-trusted]')?.textContent).toContain(t('chat.manage.hostNotRunning'));
+  });
+
+  it('clears previous machine rows while loading and ignores out-of-order trusted folder responses', async () => {
+    answers['GET /api/p/chat/hosts'] = () => new Response(JSON.stringify({ hosts: [] }), { status: 200 });
+
+    let resolveM1: ((r: Response) => void) | undefined;
+    let m1Calls = 0;
+    answers['GET /api/m/m1/p/chat/trusted'] = () => {
+      m1Calls += 1;
+      if (m1Calls === 1) {
+        return new Response(JSON.stringify({ trusted: [{ cwd: '/srv/m1-initial', at: '2026-11-22T09:00:00Z' }] }), { status: 200 });
+      }
+      return new Promise<Response>((resolve) => {
+        resolveM1 = resolve;
+      });
+    };
+    let resolveM2: ((r: Response) => void) | undefined;
+    answers['GET /api/m/m2/p/chat/trusted'] = () =>
+      new Promise<Response>((resolve) => {
+        resolveM2 = resolve;
+      });
+
+    await renderPanel();
+    expect(qa('.chat-trusted-row').map((r) => r.dataset.cwd)).toEqual(['/srv/m1-initial']);
+
+    // Switching to m2 immediately clears m1's rows while m2 is still pending.
+    const select = q<HTMLSelectElement>('.chat-trusted-machine')!;
+    await act(async () => {
+      select.value = 'm2';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(qa('.chat-trusted-row')).toEqual([]);
+
+    // Resolve m2, switch back to m1 (kept pending), then switch to m2 again and let m1 resolve late.
+    await act(async () => {
+      resolveM2!(new Response(JSON.stringify({ trusted: [{ cwd: '/opt/m2-active', at: '2026-11-22T10:00:00Z' }] }), { status: 200 }));
+    });
+    await act(settle);
+    expect(qa('.chat-trusted-row').map((r) => r.dataset.cwd)).toEqual(['/opt/m2-active']);
+
+    await act(async () => {
+      select.value = 'm1';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(qa('.chat-trusted-row')).toEqual([]);
+
+    answers['GET /api/m/m2/p/chat/trusted'] = () =>
+      new Response(JSON.stringify({ trusted: [{ cwd: '/opt/m2-fresh', at: '2026-11-22T11:00:00Z' }] }), { status: 200 });
+    await act(async () => {
+      select.value = 'm2';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(settle);
+    expect(qa('.chat-trusted-row').map((r) => r.dataset.cwd)).toEqual(['/opt/m2-fresh']);
+
+    // Stale m1 response resolving out of order must not overwrite m2's list.
+    await act(async () => {
+      resolveM1!(new Response(JSON.stringify({ trusted: [{ cwd: '/srv/m1-stale', at: '2026-11-22T12:00:00Z' }] }), { status: 200 }));
+    });
+    await act(settle);
+    expect(qa('.chat-trusted-row').map((r) => r.dataset.cwd)).toEqual(['/opt/m2-fresh']);
   });
 });

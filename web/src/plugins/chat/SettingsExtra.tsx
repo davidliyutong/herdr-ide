@@ -3,7 +3,7 @@
 //    active sessions, stop host / stop session / open chat controls).
 // 2) Trusted Folders list per machine (persisted across refreshes, with
 //    per-folder revoke controls).
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FolderCheck, RefreshCw, Server, ShieldOff, Square, ExternalLink } from 'lucide-react';
 import { relativeTime } from '../../conversation/format';
 import { locale, t, type MessageKey } from '../../i18n';
@@ -84,23 +84,29 @@ export function ChatSettingsExtra({ readOnly }: PluginSettingsProps) {
     if (!trustedMachine || !machines[trustedMachine]) setTrustedMachine(defaultMachine);
   }, [defaultMachine, trustedMachine, machines]);
 
-  const [trusted, setTrusted] = useState<TrustedFolder[]>();
+  const [trustedData, setTrustedData] = useState<{ machine: string; folders: TrustedFolder[] }>();
   const [trustedLoading, setTrustedLoading] = useState(false);
   const [trustedError, setTrustedError] = useState('');
   const [revoking, setRevoking] = useState<string>();
+  const trustedReqRef = useRef(0);
 
+  const trusted = trustedData && trustedData.machine === trustedMachine ? trustedData.folders : undefined;
   const targetState = trustedMachine ? machines[trustedMachine] : undefined;
   const targetReady = targetState?.status === 'ready';
 
   const loadTrusted = useCallback(async () => {
-    if (!trustedMachine) {
-      setTrusted(undefined);
+    const reqId = ++trustedReqRef.current;
+    const machine = trustedMachine;
+    if (!machine) {
+      setTrustedData(undefined);
       setTrustedError('');
+      setTrustedLoading(false);
       return;
     }
     if (!targetReady) {
-      setTrusted(undefined);
+      setTrustedData(undefined);
       setTrustedError(t('chat.manage.machineOffline'));
+      setTrustedLoading(false);
       return;
     }
     setTrustedLoading(true);
@@ -108,24 +114,27 @@ export function ChatSettingsExtra({ readOnly }: PluginSettingsProps) {
     try {
       let list: TrustedFolder[];
       try {
-        list = await chatApi.trusted(trustedMachine);
+        list = await chatApi.trusted(machine);
       } catch (e) {
         if (e instanceof ChatFailure && e.code === 'not_running' && !readOnly) {
-          list = await chatApi.startTrusted(trustedMachine);
+          if (reqId !== trustedReqRef.current) return;
+          list = await chatApi.startTrusted(machine);
         } else {
           throw e;
         }
       }
-      setTrusted(list);
+      if (reqId !== trustedReqRef.current) return;
+      setTrustedData({ machine, folders: list });
     } catch (e) {
-      setTrusted(undefined);
+      if (reqId !== trustedReqRef.current) return;
+      setTrustedData(undefined);
       if (e instanceof ChatFailure && e.code === 'not_running' && readOnly) {
         setTrustedError(t('chat.manage.hostNotRunning'));
       } else {
         setTrustedError(reasonText(e));
       }
     } finally {
-      setTrustedLoading(false);
+      if (reqId === trustedReqRef.current) setTrustedLoading(false);
     }
   }, [trustedMachine, targetReady, readOnly]);
 
@@ -133,16 +142,17 @@ export function ChatSettingsExtra({ readOnly }: PluginSettingsProps) {
     void loadTrusted();
   }, [loadTrusted]);
 
-  const revoke = async (cwd: string) => {
-    if (!trustedMachine || readOnly || revoking) return;
+  const revoke = async (machine: string, cwd: string) => {
+    if (readOnly || revoking || trustedLoading) return;
+    const reqId = trustedReqRef.current;
     setRevoking(cwd);
     setTrustedError('');
     try {
-      await chatApi.untrust(trustedMachine, cwd);
+      await chatApi.untrust(machine, cwd);
       useStore.getState().toast(t('chat.manage.revoked', { cwd }));
-      await loadTrusted();
+      if (reqId === trustedReqRef.current) await loadTrusted();
     } catch (e) {
-      setTrustedError(reasonText(e));
+      if (reqId === trustedReqRef.current) setTrustedError(reasonText(e));
     } finally {
       setRevoking(undefined);
     }
@@ -314,8 +324,13 @@ export function ChatSettingsExtra({ readOnly }: PluginSettingsProps) {
                       </div>
                     )}
                   </div>
-                  {!readOnly && (
-                    <button type="button" className="sm danger-text" disabled={revoking === f.cwd} onClick={() => void revoke(f.cwd)}>
+                  {!readOnly && trustedMachine && (
+                    <button
+                      type="button"
+                      className="sm danger-text"
+                      disabled={trustedLoading || revoking === f.cwd}
+                      onClick={() => void revoke(trustedMachine, f.cwd)}
+                    >
                       <ShieldOff aria-hidden /> {t('chat.manage.revoke')}
                     </button>
                   )}
