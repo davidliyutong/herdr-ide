@@ -2,6 +2,7 @@ package agentkinds_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -142,14 +143,82 @@ func TestSessionIDsAndCommands(t *testing.T) {
 	}
 }
 
-// The registry cannot be changed through what All and ByID return.
+// The registry cannot be changed through what All, ByID and ChatKinds
+// return.
 func TestKindsAreCopies(t *testing.T) {
 	k, _ := agentkinds.ByID("claude")
 	k.Start[0] = "rm"
+	k.Chat.Argv[0] = "rm"
+	k.Chat.Adapter = "acp"
 	all := agentkinds.All()
 	all[0].ResumeByID[0] = "rm"
-	if again, _ := agentkinds.ByID("claude"); again.Start[0] != "claude" || again.ResumeByID[0] != "claude" {
+	chats := agentkinds.ChatKinds()
+	grok := chats[len(chats)-1]
+	grok.Chat.NewSessionMeta[0] = '['
+	grok.Chat.Argv = append(grok.Chat.Argv[:1], "--yolo")
+	if again, _ := agentkinds.ByID("claude"); again.Start[0] != "claude" || again.ResumeByID[0] != "claude" ||
+		again.Chat.Argv[0] != "claude" || again.Chat.Adapter != agentkinds.AdapterClaude {
 		t.Errorf("the registry changed: %+v", again)
+	}
+	if again, _ := agentkinds.ByID("grok"); string(again.Chat.NewSessionMeta) != `{"yoloMode":false}` ||
+		!slices.Equal(again.Chat.Argv, []string{"grok", "agent", "--no-leader", "stdio"}) {
+		t.Errorf("the registry changed: %+v", again.Chat)
+	}
+}
+
+// The kinds the chat host runs: each has a detector manifest (so its
+// terminals are recognized too), an adapter of the host's, and a command
+// whose program is the one the kind starts in a terminal; ACP's session
+// metadata is a JSON object. OpenCode has none: its ACP mode listens on a
+// TCP port without authentication.
+func TestChatKinds(t *testing.T) {
+	ms, err := detect.Manifests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(agentkinds.ChatKinds()); !slices.Equal(got, []string{"claude", "codex", "kimi", "grok"}) {
+		t.Errorf("chat kinds %v", got)
+	}
+	for _, k := range agentkinds.All() {
+		if k.Chat == nil {
+			if slices.Contains(ids(agentkinds.ChatKinds()), k.ID) {
+				t.Errorf("%s is listed without a chat", k.ID)
+			}
+			continue
+		}
+		if _, ok := ms[k.ID]; !ok {
+			t.Errorf("%s has a chat but no detector manifest", k.ID)
+		}
+		if !agentkinds.ValidAdapter(k.Chat.Adapter) {
+			t.Errorf("%s: adapter %q", k.ID, k.Chat.Adapter)
+		}
+		if len(k.Chat.Argv) == 0 || len(k.Start) == 0 || k.Chat.Argv[0] != k.Start[0] {
+			t.Errorf("%s runs %v for chats and %v in terminals", k.ID, k.Chat.Argv, k.Start)
+		}
+		if m := k.Chat.NewSessionMeta; m != nil {
+			var obj map[string]any
+			if k.Chat.Adapter != agentkinds.AdapterACP || json.Unmarshal(m, &obj) != nil {
+				t.Errorf("%s: session metadata %s", k.ID, m)
+			}
+		}
+	}
+	if opencode, _ := agentkinds.ByID("opencode"); opencode.Chat != nil {
+		t.Error("opencode has a chat")
+	}
+	want := map[string]string{
+		"claude": "claude [claude]",
+		"codex":  "codex [codex app-server --listen stdio://]",
+		"kimi":   "acp [kimi acp]",
+		"grok":   "acp [grok agent --no-leader stdio]",
+	}
+	for id, w := range want {
+		k, _ := agentkinds.ByID(id)
+		if got := k.Chat.Adapter + " " + fmt.Sprint(k.Chat.Argv); got != w {
+			t.Errorf("%s: %s, want %s", id, got, w)
+		}
+	}
+	if agentkinds.ValidAdapter("") || agentkinds.ValidAdapter("opencode") || !slices.Equal(agentkinds.Adapters, []string{"claude", "codex", "acp"}) {
+		t.Error("the adapters changed")
 	}
 }
 
@@ -160,9 +229,15 @@ func TestKindJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"id":"codex","title":"Codex","usageProvider":"codex","start":["codex"],"continueLatest":["codex","resume","--last"],"resumeById":["codex","resume","{id}"],"transcript":"codex"}`
+	want := `{"id":"codex","title":"Codex","usageProvider":"codex","start":["codex"],"continueLatest":["codex","resume","--last"],"resumeById":["codex","resume","{id}"],"transcript":"codex","chat":{"adapter":"codex"}}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
+	}
+	// A chat's command, environment and session metadata stay on the
+	// machine's side.
+	grok, _ := agentkinds.ByID("grok")
+	if b, _ := json.Marshal(grok); string(b) != `{"id":"grok","title":"Grok","usageProvider":"grok","start":["grok"],"chat":{"adapter":"acp"}}` {
+		t.Errorf("grok %s", b)
 	}
 	droid, _ := agentkinds.ByID("droid")
 	if b, _ := json.Marshal(droid); string(b) != `{"id":"droid","title":"Droid"}` {

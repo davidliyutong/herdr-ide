@@ -128,7 +128,14 @@ playbooks):
   tests both run; `go test ./internal/agent/transcript -run TestVectors
   -update` rewrites a vector's expected events after a deliberate change
   of the mapping (review the diff). Browsers hold transcript cursors as
-  opaque numbers: no bit operations on them.
+  opaque numbers: no bit operations on them. A chat with it (the chat
+  host running it headless) also needs a `Chat` spec in its row, whose
+  `Adapter` is one of `agentkinds.Adapters`, the protocols of the
+  adapters behind `internal/chatadapter` (`TestChatKinds`); its argv,
+  environment and session metadata stay on the machine's side, never in
+  the registry's JSON. The adapters' protocol recordings are in
+  `design/testdata/chat/` (sanitized; its README says what each shows and
+  which version made it).
 - Never call herdr-core's `terminal.read` with `lines` above 0 for a
   read-only client or from a background task: with history lines the core
   scrolls a program on the alternate screen, which every viewer sees.

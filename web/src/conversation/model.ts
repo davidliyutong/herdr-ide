@@ -4,7 +4,8 @@
 // member names of the Agent Client Protocol's (ACP v1) session/update, and
 // the state they reduce to. A transcript read on a machine (internal/
 // agentproto TranscriptEvent) gives the types update, user, turn and
-// notice; the others are an ACP client's. Events come from a machine and
+// notice; the others are the chat host's (internal/chatproto Event, relayed
+// by the chat plugin, plugins/chat/protocol.ts). Events come from a machine and
 // are not trusted to have the shapes declared here: the reducer checks the
 // type of every member it keeps, and the view reads text through asText.
 import { APP_SLUG } from '../brand';
@@ -228,9 +229,54 @@ export interface PermissionOutcome {
 // ---- events ----
 
 /** The types of an event: update, user, turn and notice come from
- * transcripts and an ACP client alike; the others from an ACP client
+ * transcripts and the chat host alike; the others from the chat host
  * only. */
-export type ChatEventType = 'update' | 'user' | 'turn' | 'notice' | 'state' | 'permission' | 'permission_done' | 'info' | 'ack';
+export type ChatEventType =
+  | 'update'
+  | 'user'
+  | 'turn'
+  | 'notice'
+  | 'state'
+  | 'permission'
+  | 'permission_done'
+  | 'question'
+  | 'question_done'
+  | 'queued'
+  | 'info'
+  | 'ack';
+
+/** What a permission is asked for (chatproto.Permission*): plan is the
+ * approval of a plan, whose options name the mode to go on in
+ * (plugins/chat/protocol.ts PLAN_OPTION_PREFIX). */
+export const PERMISSION_KINDS = ['tool', 'command', 'file', 'plan', 'mcp', 'other'] as const;
+export type PermissionKind = (typeof PERMISSION_KINDS)[number];
+
+/** An answer to choose for a question; answers name options by label. */
+export interface QuestionOption {
+  label: string;
+  description?: string;
+  /** What choosing it would look like (Markdown). */
+  preview?: string;
+}
+
+/** A question the agent asks the user (chatproto.Question). */
+export interface Question {
+  id: string;
+  /** A short label of the question. */
+  header?: string;
+  question: string;
+  /** More than one option may be chosen. */
+  multiSelect?: boolean;
+  /** An answer of the user's own words may be given. */
+  allowOther?: boolean;
+  /** The answer is not shown as typed. */
+  secret?: boolean;
+  options?: QuestionOption[];
+}
+
+/** Where a message sent while a turn ran is (chatproto.Queued*): waiting,
+ * taken by the agent, or withdrawn before it reached it. */
+export type QueuedState = 'queued' | 'taken' | 'cancelled';
 
 /** Why something failed, by its code. */
 export interface ChatError {
@@ -239,30 +285,61 @@ export interface ChatError {
   stderr?: string;
 }
 
-/** An event of a conversation. */
+/** An event of a conversation.
+ *
+ * The chat host's are stored (with a seq) or live: a live event (live) is
+ * an increment of an item being streamed, without a seq, never stored.
+ * Once an item is complete, or changes otherwise, a stored event carries
+ * its whole content under the same item, which replaces what was taken
+ * live for it; after attaching again, items that only have live
+ * increments are dropped. */
 export interface ChatEvent {
   /** Its place in the conversation; a transcript's is its line's byte
-   * offset shifted left by 8 plus its index in the line. None for an ack. */
+   * offset shifted left by 8 plus its index in the line. None for a live
+   * event and an ack. */
   seq?: number;
   t: ChatEventType;
   /** RFC 3339. */
   at?: string;
-  /** The permission's (permission, permission_done) or the command's (ack). */
+  /** The permission's (permission, permission_done), the question's
+   * (question, question_done) or the command's (ack). */
   id?: string;
+  /** A streaming increment (text, a thought, a tool's input, a command's
+   * output). */
+  live?: boolean;
+  /** The id of the item an update belongs to: a message, a thought, a
+   * tool call. */
+  item?: string;
+  /** The tool call id of the subagent the event belongs to; none for the
+   * main agent's. */
+  parent?: string;
   /** update */
   update?: SessionUpdate;
-  /** user: the prompt's content blocks. */
+  /** user, queued: the prompt's content blocks. */
   content?: ContentBlock[];
-  /** turn: start, end or error; state: the chat's. */
+  /** user, queued: the page's id of the message. */
+  clientId?: string;
+  /** queued: the host's id of the message. */
+  message?: string;
+  /** turn: start, end or error; state: the chat's; queued: the message's
+   * (QueuedState). */
   state?: string;
   stopReason?: StopReason | string;
   error?: ChatError;
-  /** permission: what is asked about and the answers to choose from. */
+  /** permission: its kind, what is asked about and the answers to choose
+   * from. */
+  kind?: PermissionKind;
   toolCall?: Omit<ToolCallUpdate, 'sessionUpdate'>;
   options?: PermissionOption[];
-  /** permission_done: how it was answered, and by whom. */
+  /** permission_done: how it was answered; permission_done and
+   * question_done: by whom (user, cancel, ended). */
   outcome?: PermissionOutcome;
   by?: string;
+  /** question: what is asked. */
+  questions?: Question[];
+  /** question_done: the answers by question id (option labels or the
+   * user's own words); none when it was skipped or cancelled. */
+  answers?: Record<string, string[]>;
   /** info: the chat as it is now. */
   chat?: Record<string, unknown>;
   /** notice */

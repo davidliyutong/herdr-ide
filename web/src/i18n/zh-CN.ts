@@ -7,6 +7,7 @@ import { zhCN as usageZhCN } from '../plugins/usage/i18n/zh-CN';
 import { zhCN as vaultZhCN } from '../plugins/vault/i18n/zh-CN';
 import { zhCN as browserZhCN } from '../plugins/browser/i18n/zh-CN';
 import { zhCN as agentsZhCN } from '../plugins/agents/i18n/zh-CN';
+import { zhCN as chatZhCN } from '../plugins/chat/i18n/zh-CN';
 import { zhCN as historyZhCN } from '../plugins/history/i18n/zh-CN';
 import { zhCN as conversationZhCN } from '../conversation/i18n/zh-CN';
 
@@ -904,6 +905,9 @@ export const zhCN: Messages = {
   'settings.plugins.agents.enabled': '编程智能体',
   'settings.plugins.agents.enabled.desc':
     '在各机器上找出终端中每个编程智能体（Claude Code、Codex）的会话：状态栏显示它的用量，终端核心重新启动后，智能体会回到它自己的对话中。',
+  // chat plugin
+  'settings.plugins.chat.enabled': '智能体对话',
+  'settings.plugins.chat.enabled.desc': '与编程智能体的对话：智能体在机器上不经终端运行，界面由本应用绘制。',
   // terminal history plugin
   'settings.plugins.history.enabled': '终端历史',
   'settings.plugins.history.enabled.desc': '机器在开启“保存终端输出的快照”后保存在磁盘上的终端输出，在终端核心重新启动后显示。',
@@ -926,6 +930,7 @@ export const zhCN: Messages = {
   ...vaultZhCN,
   ...browserZhCN,
   ...agentsZhCN,
+  ...chatZhCN,
   ...historyZhCN,
   ...conversationZhCN,
 };

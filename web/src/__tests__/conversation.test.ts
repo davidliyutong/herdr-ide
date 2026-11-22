@@ -8,6 +8,9 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_KINDS,
   agentKind,
+  CHAT_ADAPTERS,
+  chatAdapter,
+  chatKinds,
   hasNativeView,
   isSessionId,
   PLACEHOLDER,
@@ -124,6 +127,21 @@ describe('agent kinds', () => {
     expect(startArgv('droid')).toBeUndefined();
     expect(startArgv('nobody')).toBeUndefined();
     expect(agentKind('claude')?.newSession).toContain(PLACEHOLDER);
+  });
+
+  it('name the chat host’s adapter of the agents it runs, never their command', () => {
+    expect(chatKinds().map((k) => k.id)).toEqual(['claude', 'codex', 'kimi', 'grok']);
+    expect(chatAdapter('claude')).toBe('claude');
+    expect(chatAdapter('codex')).toBe('codex');
+    expect(chatAdapter('kimi')).toBe('acp');
+    expect(chatAdapter('grok')).toBe('acp');
+    expect(chatAdapter('opencode')).toBeUndefined();
+    expect(chatAdapter('nobody')).toBeUndefined();
+    expect(chatAdapter(undefined)).toBeUndefined();
+    for (const k of AGENT_KINDS) {
+      if (k.chat) expect(CHAT_ADAPTERS as readonly string[], k.id).toContain(k.chat.adapter);
+      expect(Object.keys(k.chat ?? {}), k.id).toEqual(k.chat ? ['adapter'] : []);
+    }
   });
 });
 

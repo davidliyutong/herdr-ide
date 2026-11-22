@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/plugin"
@@ -550,4 +552,51 @@ func TestCodeRoutesFollowTheirClientsSwitch(t *testing.T) {
 	check("the browsers' on", map[string]bool{"browser": true, "wrong token": true, "token cut short": true, "core without one": true})
 	set(true, true)
 	check("both on", map[string]bool{"desktop": true, "desktop, shadowed": true, "browser": true, "wrong token": true, "token cut short": true, "core without one": true})
+}
+
+// wsPlugin's route upgrades to a WebSocket and echoes one message.
+type wsPlugin struct{}
+
+func (wsPlugin) ID() string { return "wsecho" }
+func (wsPlugin) Routes() []plugin.Route {
+	return []plugin.Route{{Method: "GET", Path: "ws", Handler: func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		typ, b, err := conn.Read(r.Context())
+		if err == nil {
+			conn.Write(r.Context(), typ, append([]byte("echo "), b...))
+		}
+	}}}
+}
+
+// A plugin's route can be a WebSocket (the chat plugin's page connection):
+// the core hands its handler the connection's own response writer, which
+// can be hijacked, behind the same guards as its other routes.
+func TestPluginRouteUpgrades(t *testing.T) {
+	mg := machines.NewManager(nil, nil, log.New(io.Discard, "", 0))
+	s := New(mg, Options{Logger: log.New(io.Discard, "", 0), Plugins: append(testPlugins(), wsPlugin{})})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/p/wsecho/ws"
+	conn, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	if err := conn.Write(ctx, websocket.MessageText, []byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if _, b, err := conn.Read(ctx); err != nil || string(b) != "echo hi" {
+		t.Fatalf("read %q, %v", b, err)
+	}
+	// A foreign page's origin is refused before the plugin sees it.
+	_, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {"https://evil.example"}}})
+	if err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("a foreign origin: %v, %v", resp, err)
+	}
 }

@@ -16,6 +16,7 @@ here; both READMEs link to this page instead of repeating it.
 | `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` | The same MCP server on a machine, a link to the binary the core uploaded there (the same program, built without the server and the UI: it has `mcp`, `agent`, `gui-keep` and `version`); started by the stable link's name it takes no arguments and asks the agent of the data directory the link is in. |
 | `herdr-ide gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent, never by hand. |
 | `herdr-ide gui-wl --device NODE [--nvidia]` | The compositor of a machine's GPU display: a Wayland server that shows nothing, for the one Xwayland on the socket it inherits as file descriptor 3, which it tells to draw with the GPU of the render node (`--nvidia`: offering NVIDIA's buffer layouts); started by the agent, never by hand. |
+| `herdr-ide chat-host` | A machine's chat host, for the chat plugin. Linux and macOS; in this version it prints its usage and exits with status 2. |
 
 ## `serve` flags
 
@@ -158,6 +159,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `plugins.usage.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.vault.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.agents.enabled` | `true`, `false` | `true` | – | – |
+| `plugins.chat.enabled` | `true`, `false` | `true` | – | – |
 | `plugins.history.enabled` | `true`, `false` | `true` | – | – |
 | `files.showHidden` | `true`, `false` | `false` | – | – |
 | `files.exclude` | list of strings | `[".git",".svn",".hg","CVS",".DS_Store","Thumbs.db"]` | – | – |
@@ -211,6 +213,13 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `history.maxTerminals` | integer, 1–128 | `32` | – | per machine |
 | `history.maxTotalMB` | integer, 1–512 | `64` | – | per machine |
 | `history.days` | integer, 1–30 | `7` | – | per machine |
+| `chat.permissionMode` | `default`, `acceptEdits`, `plan`, `full` | `"default"` | – | per machine |
+| `chat.idleStopMinutes` | integer, 5–1440 | `30` | – | per machine |
+| `chat.maxLive` | integer, 1–32 | `8` | – | per machine |
+| `chat.maxChats` | integer, 50–2000 | `500` | – | per machine |
+| `chat.retentionDays` | integer, 1–365 | `30` | – | per machine |
+| `chat.maxTotalMB` | integer, 64–2048 | `512` | – | per machine |
+| `chat.maxChatMB` | integer, 8–256 | `64` | – | per machine |
 | `performance.keptTerminals` | integer, 0–64 | `12` | – | – |
 
 <!-- end of scripts/registry: settings -->
@@ -474,6 +483,14 @@ missing here.
 | `GET /api/m/{id}/p/history/read` | – | One generation's bytes (`?terminal=` an address, `&generation=current\|previous`) as an `application/octet-stream` attachment, at most 2 MiB, with `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and `no-store`, described by `X-History-Pid`, `X-History-At`, `X-History-Cols`, `X-History-Rows`, `X-History-Lines`. `400 bad_request` or `busy`, `404 not_found`, `409 offline`, `502 bad_reply`, `504 timeout`. |
 | `DELETE /api/m/{id}/p/history` | writes | Removes the snapshots of one terminal (`?terminal=`) or of every terminal: `{removed}`; audited as `history.clear` with the terminal and the count. |
 | `POST /api/m/{id}/p/history/adopt` | writes | Gives terminal `?to=` (one of the machine's terminal core's records, which took the place of `&from=`) the newest generation of `from`'s snapshots as its previous one, unless it has a previous one captured later, and removes `from`'s snapshots either way: `{adopted}` ([36](features/36-terminal-history.md)); audited as `history.adopt` with `from`, `to` and `adopted`. `400 bad_request` (an address that is not one, or `from` equal to `to`), `busy` or `not_running` (the terminal core), `404 not_found` (`to` not in the records), `409 offline`, `502 bad_reply`, `504 timeout`. |
+| `GET /api/m/{id}/p/chat/agents` | – | The chat plugin's agents a machine can run: declared, `501 not_implemented` in this version. |
+| `GET /api/m/{id}/p/chat/chats` | – | The machine's chats: declared, `501 not_implemented` in this version. |
+| `GET /api/m/{id}/p/chat/sessions` | – | The sessions an agent kept for a directory (`?kind=&cwd=&cursor=`): declared, `501 not_implemented` in this version. |
+| `POST /api/m/{id}/p/chat/new` | writes | A new chat, audited as `chat.new`: declared, `501 not_implemented` in this version. |
+| `POST /api/m/{id}/p/chat/close` | writes | Ends a chat's agent and keeps the chat (`?chat=`), audited as `chat.close`: declared, `501 not_implemented` in this version. |
+| `DELETE /api/m/{id}/p/chat/chat` | writes | Forgets a chat and its log (`?chat=`), audited as `chat.delete`: declared, `501 not_implemented` in this version. |
+| `POST /api/m/{id}/p/chat/seen` | writes | The user saw a chat up to a sequence number (`?chat=&seq=`), audited as `chat.seen`: declared, `501 not_implemented` in this version. |
+| `GET /api/p/chat/ws` | – | The chat plugin's WebSocket, one per page: declared, `501 not_implemented` in this version. |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
 ## Environment variables

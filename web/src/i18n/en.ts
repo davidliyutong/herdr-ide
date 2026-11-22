@@ -9,6 +9,7 @@ import { en as usageEn } from '../plugins/usage/i18n/en';
 import { en as vaultEn } from '../plugins/vault/i18n/en';
 import { en as browserEn } from '../plugins/browser/i18n/en';
 import { en as agentsEn } from '../plugins/agents/i18n/en';
+import { en as chatEn } from '../plugins/chat/i18n/en';
 import { en as historyEn } from '../plugins/history/i18n/en';
 import { en as conversationEn } from '../conversation/i18n/en';
 
@@ -931,6 +932,9 @@ export const en = {
   'settings.plugins.agents.enabled': 'Coding agents',
   'settings.plugins.agents.enabled.desc':
     'The session of each coding agent in a terminal (Claude Code, Codex), found on its machine: its usage in the status bar, and the agent back in its own conversation after the terminal core starts again.',
+  // chat plugin
+  'settings.plugins.chat.enabled': 'Agent chats',
+  'settings.plugins.chat.enabled.desc': 'Conversations with coding agents that a machine runs without a terminal, drawn by the app.',
   // terminal history plugin
   'settings.plugins.history.enabled': 'Terminal history',
   'settings.plugins.history.enabled.desc':
@@ -954,6 +958,7 @@ export const en = {
   ...vaultEn,
   ...browserEn,
   ...agentsEn,
+  ...chatEn,
   ...historyEn,
   ...conversationEn,
 } as const;

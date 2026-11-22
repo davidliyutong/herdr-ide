@@ -1,0 +1,32 @@
+// The chat plugin's Chinese messages.
+import type { en } from './en';
+
+export const zhCN: Record<keyof typeof en, string> = {
+  'chat.title': '智能体对话',
+  'chat.description': '与编程智能体（Claude Code、Codex、Kimi Code、Grok）的对话：智能体在机器上不经终端运行，界面由本应用绘制。',
+  'chat.pane': '对话',
+  'chat.unavailable': '此版本尚不支持与编程智能体对话。',
+  'settings.section.chat': '智能体对话',
+  'settings.chat.permissionMode': '新对话的权限模式',
+  'settings.chat.permissionMode.desc': '新对话中的智能体无需询问即可做的事。每个对话可以自行更改。',
+  'settings.chat.permissionMode.default': '编辑和命令前询问',
+  'settings.chat.permissionMode.acceptEdits': '直接编辑，不再询问',
+  'settings.chat.permissionMode.plan': '先做计划',
+  'settings.chat.permissionMode.full': '完全访问',
+  'settings.chat.idleStopMinutes': '空闲多久后停止智能体',
+  'settings.chat.idleStopMinutes.desc': '无事可做超过这段时间的智能体会被停止；下一条消息时，对话会接着它的会话继续。',
+  'settings.chat.idleStopMinutes.unit': '分钟',
+  'settings.chat.maxLive': '同时运行的智能体',
+  'settings.chat.maxLive.desc': '一台机器为对话最多运行的智能体数；再多一个时，停止空闲最久的那个。',
+  'settings.chat.maxChats': '保留的对话数',
+  'settings.chat.maxChats.desc': '一台机器最多保留的对话数；先删除最早关闭的对话。',
+  'settings.chat.retentionDays': '已关闭的对话保留',
+  'settings.chat.retentionDays.desc': '关闭时间超过这段时间的对话会被删除。智能体自己的会话保留。',
+  'settings.chat.retentionDays.unit': '天',
+  'settings.chat.maxTotalMB': '磁盘空间',
+  'settings.chat.maxTotalMB.desc': '对话在一台机器上最多占用的空间；先删除最早关闭的对话。',
+  'settings.chat.maxTotalMB.unit': 'MB',
+  'settings.chat.maxChatMB': '每个对话的空间',
+  'settings.chat.maxChatMB.desc': '一个对话最多占用的空间；先删除它最早的事件。',
+  'settings.chat.maxChatMB.unit': 'MB',
+};

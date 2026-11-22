@@ -100,6 +100,7 @@ describe('plugins', () => {
       'usage',
       'vault',
       'agents',
+      'chat',
       'history',
     ]);
     expect(pluginOn(git)).toBe(true);

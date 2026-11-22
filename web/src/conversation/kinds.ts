@@ -1,9 +1,10 @@
 // The kinds of coding agents (internal/agentkinds), as the core's registry
 // gives them to the UI (design/generated/registry.json, key "agents"):
 // how each starts, continues a directory's latest conversation or resumes
-// a session, the AI usage provider of its subscription, and whether its
-// conversations have a native view. Only a session id that is a lower-case
-// UUID is ever put into a command line.
+// a session, the AI usage provider of its subscription, whether its
+// conversations have a native view, and the adapter the chat host runs it
+// through headless. Only a session id that is a lower-case UUID is ever put
+// into a command line.
 import registry from '../../../design/generated/registry.json';
 import { isSessionId } from '../term/layout';
 
@@ -31,7 +32,15 @@ export interface AgentKind {
   resumeById?: string[];
   /** The parser of its transcripts; none without a native view. */
   transcript?: string;
+  /** How the chat host runs it headless; none for an agent without chats.
+   * Its command stays on the machine's side. */
+  chat?: { adapter: ChatAdapter };
 }
+
+/** The chat host's adapters (agentkinds.Adapters): Claude Code's SDK
+ * protocol, Codex's app-server, the Agent Client Protocol. */
+export const CHAT_ADAPTERS = ['claude', 'codex', 'acp'] as const;
+export type ChatAdapter = (typeof CHAT_ADAPTERS)[number];
 
 /** Stands for a session id in a command line's tokens. */
 export const PLACEHOLDER = '{id}';
@@ -49,6 +58,18 @@ export function agentKind(id: string | undefined): AgentKind | undefined {
 /** Whether the agent's conversations can be shown as a native view. */
 export function hasNativeView(id: string | undefined): boolean {
   return !!agentKind(id)?.transcript;
+}
+
+/** The adapter the chat host runs the agent through; undefined for an
+ * agent without chats (or one of an adapter this version does not know). */
+export function chatAdapter(id: string | undefined): ChatAdapter | undefined {
+  const a = agentKind(id)?.chat?.adapter;
+  return a && (CHAT_ADAPTERS as readonly string[]).includes(a) ? a : undefined;
+}
+
+/** The kinds the chat host runs, in the order the UI offers them. */
+export function chatKinds(): AgentKind[] {
+  return AGENT_KINDS.filter((k) => chatAdapter(k.id) !== undefined);
 }
 
 /** The AI usage plugin's provider of the agent's subscription. */

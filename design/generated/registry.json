@@ -20,7 +20,10 @@
         "--resume",
         "{id}"
       ],
-      "transcript": "claude"
+      "transcript": "claude",
+      "chat": {
+        "adapter": "claude"
+      }
     },
     {
       "id": "codex",
@@ -39,7 +42,10 @@
         "resume",
         "{id}"
       ],
-      "transcript": "codex"
+      "transcript": "codex",
+      "chat": {
+        "adapter": "codex"
+      }
     },
     {
       "id": "gemini",
@@ -62,7 +68,10 @@
       "usageProvider": "kimi",
       "start": [
         "kimi"
-      ]
+      ],
+      "chat": {
+        "adapter": "acp"
+      }
     },
     {
       "id": "grok",
@@ -70,7 +79,10 @@
       "usageProvider": "grok",
       "start": [
         "grok"
-      ]
+      ],
+      "chat": {
+        "adapter": "acp"
+      }
     },
     {
       "id": "cursor",
@@ -572,6 +584,17 @@
     "settings.browser.openLinks.all",
     "settings.browser.openLinks.external",
     "settings.browser.openLinks.loopback",
+    "settings.chat.idleStopMinutes",
+    "settings.chat.maxChatMB",
+    "settings.chat.maxChats",
+    "settings.chat.maxLive",
+    "settings.chat.maxTotalMB",
+    "settings.chat.permissionMode",
+    "settings.chat.permissionMode.acceptEdits",
+    "settings.chat.permissionMode.default",
+    "settings.chat.permissionMode.full",
+    "settings.chat.permissionMode.plan",
+    "settings.chat.retentionDays",
     "settings.codeServer.install",
     "settings.codeServer.install.download",
     "settings.codeServer.install.existing",
@@ -642,6 +665,7 @@
     "settings.performance.keptTerminals",
     "settings.plugins.agents.enabled",
     "settings.plugins.browser.enabled",
+    "settings.plugins.chat.enabled",
     "settings.plugins.files.enabled",
     "settings.plugins.git.enabled",
     "settings.plugins.history.enabled",
@@ -652,6 +676,7 @@
     "settings.plugins.vscode.enabled",
     "settings.section.appearance",
     "settings.section.browser",
+    "settings.section.chat",
     "settings.section.codeServer",
     "settings.section.colors",
     "settings.section.files",
@@ -1165,6 +1190,13 @@
     "appearance.uiFontSize": 13,
     "browser.forwardIdle": 30,
     "browser.openLinks": "loopback",
+    "chat.idleStopMinutes": 30,
+    "chat.maxChatMB": 64,
+    "chat.maxChats": 500,
+    "chat.maxLive": 8,
+    "chat.maxTotalMB": 512,
+    "chat.permissionMode": "default",
+    "chat.retentionDays": 30,
     "codeServer.install": "push",
     "codeServer.path": "",
     "files.confirmTrash": false,
@@ -1209,6 +1241,7 @@
     "performance.keptTerminals": 12,
     "plugins.agents.enabled": true,
     "plugins.browser.enabled": true,
+    "plugins.chat.enabled": true,
     "plugins.files.enabled": true,
     "plugins.git.enabled": true,
     "plugins.history.enabled": true,

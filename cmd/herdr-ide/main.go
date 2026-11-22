@@ -14,12 +14,14 @@
 //	herdr-ide gui-wl --device NODE [--nvidia]
 //	                                 the compositor of a machine's GPU
 //	                                 display; started by the agent
+//	herdr-ide chat-host              a machine's chat host (Linux and
+//	                                 macOS); not available in this version
 //	herdr-ide version
 //
 // The copies the core carries for machines of other platforms are this
 // program built with the tag "machine": without the server, the web UI and
 // what the core embeds for machines, so they have the commands mcp, agent,
-// gui-keep, gui-wl and version only.
+// gui-keep, gui-wl, chat-host and version only.
 package main
 
 import (

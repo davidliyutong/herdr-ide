@@ -27,8 +27,8 @@ func (stdio) Close() error {
 }
 
 // machineCommand runs a command of a machine's helper: agent, which speaks
-// yamux on stdin and stdout and logs to stderr, gui-keep and gui-wl. It
-// reports whether cmd is one.
+// yamux on stdin and stdout and logs to stderr, gui-keep, gui-wl and
+// chat-host (chathost_unix.go). It reports whether cmd is one.
 func machineCommand(cmd string, args []string) bool {
 	switch cmd {
 	case "agent":
@@ -67,6 +67,8 @@ func machineCommand(cmd string, args []string) bool {
 			logger.Printf("exit: %v", err)
 			os.Exit(1)
 		}
+	case "chat-host":
+		os.Exit(chatHost(args))
 	default:
 		return false
 	}

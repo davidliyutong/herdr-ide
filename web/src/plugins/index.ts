@@ -12,6 +12,7 @@ import { vaultPlugin } from './vault';
 import { gitPlugin } from './git';
 import { monitorPlugin } from './monitor';
 import { agentsPlugin } from './agents';
+import { chatPlugin } from './chat';
 import { historyPlugin } from './history';
 
 setPanelCommand((panel) => ({ run: () => togglePanel(panel.id) }));
@@ -26,5 +27,6 @@ definePlugins([
   usagePlugin,
   vaultPlugin,
   agentsPlugin,
+  chatPlugin,
   historyPlugin,
 ]);
