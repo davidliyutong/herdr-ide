@@ -142,6 +142,12 @@ const (
 	// Request.Cwd: its own (OpTrust) and that of every directory above it.
 	// An agent that runs already keeps what it loaded until its next start.
 	OpUntrust = "untrust"
+	// OpTrusted lists all persisted trusted folders on the machine
+	// (Response.Trusted).
+	OpTrusted = "trusted"
+	// OpHostStatus reports the running chat host's status, metadata, and
+	// active headless agent sessions (Response.HostStatus).
+	OpHostStatus = "host_status"
 )
 
 // The operations of a Command. Each is answered by an EventAck.
@@ -267,6 +273,54 @@ type Response struct {
 	// States answers OpWatch: the state of every chat, as OpChats orders
 	// them.
 	States []ChatState `json:"states,omitzero"`
+	// Trusted answers OpTrusted.
+	Trusted []TrustedFolder `json:"trusted,omitzero"`
+	// HostStatus answers OpHostStatus.
+	HostStatus *HostStatus `json:"hostStatus,omitempty"`
+}
+
+// TrustedFolder is a directory the user trusted on the machine (OpTrusted).
+type TrustedFolder struct {
+	Cwd string    `json:"cwd"`
+	At  time.Time `json:"at"`
+}
+
+// HostSessionInfo describes a chat whose agent process runs or is starting on
+// the chat host (OpHostStatus).
+type HostSessionInfo struct {
+	Chat         string    `json:"chat"`
+	Kind         string    `json:"kind"`
+	Title        string    `json:"title"`
+	Cwd          string    `json:"cwd"`
+	SessionID    string    `json:"sessionId"`
+	State        string    `json:"state"`
+	Status       string    `json:"status"`
+	PID          int       `json:"pid,omitempty"`
+	Starting     bool      `json:"starting,omitempty"`
+	IdleSince    time.Time `json:"idleSince,omitzero"`
+	Updated      time.Time `json:"updated"`
+	Bytes        int64     `json:"bytes"`
+	AgentVersion string    `json:"agentVersion,omitempty"`
+}
+
+// HostStatus describes a running chat host process and its active sessions
+// (OpHostStatus).
+type HostStatus struct {
+	Proto      int               `json:"proto"`
+	Version    string            `json:"version"`
+	PID        int               `json:"pid"`
+	TerminalID string            `json:"terminalId,omitempty"`
+	StartedAt  time.Time         `json:"startedAt"`
+	Socket     string            `json:"socket,omitempty"`
+	Base       string            `json:"base,omitempty"`
+	Conns      int               `json:"conns"`
+	Watchers   int               `json:"watchers"`
+	LiveAgents int               `json:"liveAgents"`
+	TotalChats int               `json:"totalChats"`
+	TotalBytes int64             `json:"totalBytes"`
+	Ending     int               `json:"ending"`
+	Settings   HostSettings      `json:"settings"`
+	Sessions   []HostSessionInfo `json:"sessions"`
 }
 
 // The reasons of an AgentStatus that is not available.
@@ -408,8 +462,10 @@ type Chat struct {
 
 // StateOf is what OpWatch tells of the chat.
 func (c *Chat) StateOf() ChatState {
-	return ChatState{ID: c.ID, Kind: c.Kind, Title: c.Title, Cwd: c.Cwd, State: c.State, Status: c.Status,
-		Updated: c.Updated, Seq: c.Seq, SessionID: c.SessionID}
+	return ChatState{
+		ID: c.ID, Kind: c.Kind, Title: c.Title, Cwd: c.Cwd, State: c.State, Status: c.Status,
+		Updated: c.Updated, Seq: c.Seq, Seen: c.Seen, Unread: c.Status == StatusDone, SessionID: c.SessionID,
+	}
 }
 
 // ChatState is what OpWatch tells of a chat. Its State is a chat's, or
@@ -423,6 +479,9 @@ type ChatState struct {
 	Status    string    `json:"status"`
 	Updated   time.Time `json:"updated"`
 	Seq       uint64    `json:"seq"`
+	Seen      uint64    `json:"seen,omitempty"`
+	Unread    bool      `json:"unread,omitempty"`
+	Stale     bool      `json:"stale,omitempty"`
 	SessionID string    `json:"sessionId"`
 }
 

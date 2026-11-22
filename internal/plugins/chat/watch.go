@@ -32,9 +32,11 @@ type watched struct {
 	since                 time.Time
 
 	// known: the states were read at least once since the core started;
+	// stale: the machine disconnected since they were last read;
 	// states are every chat's, as last read; rev numbers the messages of
 	// them (StatesData.Rev).
 	known  bool
+	stale  bool
 	states map[string]chatproto.ChatState
 	rev    uint64
 	// published is per chat the status and sequence number of its last
@@ -201,6 +203,11 @@ func (p *Plugin) step(ctx context.Context) {
 		}
 	}
 	now := p.now()
+	type staleBroadcast struct {
+		m    string
+		data StatesData
+	}
+	var staleOut []staleBroadcast
 	p.mu.Lock()
 	turnedOn, turnedOff := on && !p.on, !on && p.on
 	p.on = on
@@ -219,6 +226,12 @@ func (p *Plugin) step(ctx context.Context) {
 			if h.Machines() != nil && h.Machines().Get(m) == nil && !w.running {
 				// A machine the user removed.
 				delete(p.machines, m)
+				continue
+			}
+			if on {
+				if data, ok := markStaleLocked(w); ok {
+					staleOut = append(staleOut, staleBroadcast{m: m, data: data})
+				}
 			}
 			continue
 		}
@@ -238,9 +251,40 @@ func (p *Plugin) step(ctx context.Context) {
 		go p.watch(wctx, w)
 	}
 	p.mu.Unlock()
+	for _, b := range staleOut {
+		h.Broadcast(ID, b.m, b.data)
+	}
 	if turnedOff {
 		p.closePages(CodePluginDisabled)
 	}
+}
+
+// markStaleLocked marks an offline machine's cached chat states as stale so
+// disconnected machines never appear actively working or blocked indefinitely.
+// p.mu is held.
+func markStaleLocked(w *watched) (StatesData, bool) {
+	if !w.known || w.stale {
+		return StatesData{}, false
+	}
+	w.stale = true
+	for id, st := range w.states {
+		if live(st) {
+			st.State = chatproto.StateSleeping
+			if st.Status != chatproto.StatusDone {
+				st.Status = chatproto.StatusIdle
+			}
+		}
+		st.Stale = true
+		w.states[id] = st
+	}
+	w.rev++
+	return StatesData{
+		T:      DataStates,
+		States: sortStates(mapValues(w.states)),
+		Full:   true,
+		Stale:  true,
+		Rev:    w.rev,
+	}, true
 }
 
 // quiet tells whether the core has nothing to watch on w's host: no chat
@@ -306,12 +350,19 @@ func (p *Plugin) watchEnded(ctx context.Context, w *watched, err error) {
 	case code == codeNotRunning:
 		// No host serves, so no agent runs: chats the core still knows
 		// with one are sleeping now, the status of a turn that ran gone.
+		wasStale := w.stale
+		w.stale = false
 		for id, st := range w.states {
+			changed := wasStale && st.Stale
+			st.Stale = false
 			if live(st) {
 				st.State = chatproto.StateSleeping
 				if st.Status != chatproto.StatusDone {
 					st.Status = chatproto.StatusIdle
 				}
+				changed = true
+			}
+			if changed {
 				w.states[id] = st
 				stale = append(stale, st)
 			}
@@ -394,6 +445,7 @@ func (p *Plugin) watchUp(w *watched, states []chatproto.ChatState) {
 		if !chatproto.ValidChatID(st.ID) || st.State == chatproto.StateDeleted {
 			continue
 		}
+		st.Stale = false
 		w.states[st.ID] = st
 		old, had := prev[st.ID]
 		if p.publishes(w, st, old, had, initial, !initial) {
@@ -405,7 +457,7 @@ func (p *Plugin) watchUp(w *watched, states []chatproto.ChatState) {
 			delete(w.published, id)
 		}
 	}
-	w.known, w.up, w.since, w.failures = true, true, p.now(), 0
+	w.known, w.stale, w.up, w.since, w.failures = true, false, true, p.now(), 0
 	w.rev++
 	data := StatesData{T: DataStates, States: sortStates(mapValues(w.states)), Full: true, Rev: w.rev}
 	p.mu.Unlock()
@@ -485,7 +537,7 @@ func (p *Plugin) Snapshot() StatesSnapshot {
 	out := StatesSnapshot{Machines: map[string]StatesData{}}
 	for m, w := range p.machines {
 		if w.known {
-			out.Machines[m] = StatesData{T: DataStates, States: sortStates(mapValues(w.states)), Full: true, Rev: w.rev}
+			out.Machines[m] = StatesData{T: DataStates, States: sortStates(mapValues(w.states)), Full: true, Stale: w.stale, Rev: w.rev}
 		}
 	}
 	return out

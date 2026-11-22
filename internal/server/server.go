@@ -440,6 +440,7 @@ func (s *Server) Run(ctx context.Context) {
 		if err != nil {
 			s.logger.Printf("the core's database is of a newer version: features keep nothing new in it (%v)", err)
 		}
+		plugin.PruneCoreDBs(pluginHost{s})
 	} else if err != nil {
 		s.logger.Printf("the core's database cannot be opened: features keep their state in memory only (%v)", err)
 	}

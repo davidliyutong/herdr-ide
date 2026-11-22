@@ -375,7 +375,7 @@ func (c *termClient) checkTargets(ctx context.Context, b *termBackend, conn *hc.
 		param := ""
 		if _, set := labels[agentproto.HiddenLabel]; set {
 			param = "labels"
-		} else if name == agentproto.ChatHostName {
+		} else if agentproto.IsChatHostName(name) {
 			param = "name"
 		}
 		if param != "" {

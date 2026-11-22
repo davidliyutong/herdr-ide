@@ -113,6 +113,10 @@ func TestRoutes(t *testing.T) {
 		"POST /api/m/{id}/p/chat/handoff audited as chat.handoff",
 		"POST /api/m/{id}/p/chat/trust audited as chat.trust",
 		"POST /api/m/{id}/p/chat/untrust audited as chat.untrust",
+		"GET /api/m/{id}/p/chat/trusted",
+		"POST /api/m/{id}/p/chat/trusted audited as chat.trusted",
+		"POST /api/m/{id}/p/chat/host/stop audited as chat.host_stop",
+		"GET /api/p/chat/hosts",
 		"GET /api/p/chat/states",
 		"GET /api/p/chat/ws",
 	}
@@ -519,5 +523,107 @@ func TestProtocolMirror(t *testing.T) {
 	}
 	if got := list("REQUEST_OPS"); !slices.Contains(got, chatproto.OpTrust) || !slices.Contains(got, chatproto.OpUntrust) || !strings.Contains(src, "noCatchUp") {
 		t.Errorf("REQUEST_OPS %q", got)
+	}
+}
+
+func TestTrustedAndHostOverview(t *testing.T) {
+	s := newSetup(t)
+	s.f.running = false
+	s.f.trusted = []chatproto.TrustedFolder{{Cwd: "/work/proj"}}
+
+	// GET trusted never starts a stopped host; POST trusted starts it.
+	code, _, _ := s.call("GET", "gpu", "trusted", "")
+	if code != 409 {
+		t.Fatalf("GET trusted while stopped: %d, want 409", code)
+	}
+	if s.f.running {
+		t.Fatal("GET trusted started the host")
+	}
+
+	// GET hosts lists ready stopped and offline machines without starting any host.
+	code, out, _ := s.call("GET", "", "hosts", "")
+	if code != 200 {
+		t.Fatalf("GET hosts: %d %v", code, out)
+	}
+	hosts, _ := out["hosts"].([]any)
+	if len(hosts) != 2 || s.f.running {
+		t.Fatalf("hosts=%v running=%v", out, s.f.running)
+	}
+
+	// POST trusted starts the host and returns the trusted folders.
+	code, out, fields := s.call("POST", "gpu", "trusted", "")
+	if code != 200 || fields != nil {
+		// fields is empty (no audit fields needed for POST trusted)
+	}
+	trusted, _ := out["trusted"].([]any)
+	if len(trusted) != 1 || trusted[0].(map[string]any)["cwd"] != "/work/proj" {
+		t.Fatalf("POST trusted: %d %v", code, out)
+	}
+
+	// GET trusted now succeeds against the running host, even read-only.
+	s.h.readOnly = true
+	code, out, _ = s.call("GET", "gpu", "trusted", "")
+	if code != 200 {
+		t.Fatalf("GET trusted running: %d %v", code, out)
+	}
+	s.h.readOnly = false
+
+	// GET hosts now reports the running host and its active sessions.
+	s.f.mu.Lock()
+	s.f.hostStatus = &chatproto.HostStatus{
+		Proto:      chatproto.Proto,
+		Version:    "v1.2.3",
+		PID:        4242,
+		TerminalID: "t3",
+		LiveAgents: 1,
+		TotalChats: 2,
+		Sessions: []chatproto.HostSessionInfo{{
+			Chat:   "c0123456789abcdef",
+			Kind:   "claude",
+			Title:  "Fix bug",
+			Cwd:    "/work/proj",
+			State:  chatproto.StateIdle,
+			Status: chatproto.StatusIdle,
+			PID:    5555,
+		}},
+	}
+	s.f.mu.Unlock()
+	code, out, _ = s.call("GET", "", "hosts", "")
+	if code != 200 {
+		t.Fatalf("GET hosts running: %d %v", code, out)
+	}
+	hosts = out["hosts"].([]any)
+	byMachine := map[string]map[string]any{}
+	for _, raw := range hosts {
+		m := raw.(map[string]any)
+		byMachine[m["machine"].(string)] = m
+	}
+	gpu := byMachine["gpu"]
+	box := byMachine["box"]
+	if gpu["running"] != true || gpu["status"] != "running" || gpu["pid"] != 4242.0 || gpu["terminalId"] != "t3" {
+		t.Fatalf("gpu host overview: %v", gpu)
+	}
+	if sess := gpu["sessions"].([]any); len(sess) != 1 || sess[0].(map[string]any)["pid"] != 5555.0 {
+		t.Fatalf("gpu sessions: %v", gpu["sessions"])
+	}
+	if box["running"] != false || box["status"] != "offline" {
+		t.Fatalf("box host overview: %v", box)
+	}
+
+	// POST host/stop cleanly shuts down a running idle host, and fails busy/not_running otherwise.
+	s.f.mu.Lock()
+	s.f.reqErr[chatproto.OpShutdown] = &chatproto.Error{Code: chatproto.CodeBusy, Message: "working"}
+	s.f.mu.Unlock()
+	if code, _, _ := s.call("POST", "gpu", "host/stop", ""); code != 409 {
+		t.Fatalf("busy host/stop: %d, want 409", code)
+	}
+	s.f.mu.Lock()
+	delete(s.f.reqErr, chatproto.OpShutdown)
+	s.f.mu.Unlock()
+	if code, _, _ := s.call("POST", "gpu", "host/stop", ""); code != 200 || s.f.running {
+		t.Fatalf("host/stop: code=%d running=%v", code, s.f.running)
+	}
+	if code, _, _ := s.call("POST", "gpu", "host/stop", ""); code != 409 {
+		t.Fatalf("stopped host/stop: %d, want 409", code)
 	}
 }

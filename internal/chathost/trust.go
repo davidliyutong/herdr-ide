@@ -126,6 +126,36 @@ func (h *host) trusted(dir string) bool {
 	return ok
 }
 
+// listTrusted returns all persisted trusted folders that remain valid and
+// safe, pruning any that have moved or become unsafe.
+func (h *host) listTrusted() chatproto.Response {
+	rows, err := h.j.listTrusted()
+	if err != nil {
+		h.logf("list trusted: %v", err)
+		return refuse(chatproto.CodeFailed, "the journal did not answer")
+	}
+	home := userHome()
+	var gone []string
+	out := make([]chatproto.TrustedFolder, 0, len(rows))
+	for _, t := range rows {
+		id, e := trustable(t.path, home)
+		if e == nil && id == t.id {
+			out = append(out, chatproto.TrustedFolder{Cwd: t.path, At: t.at})
+			continue
+		}
+		why := "it is another directory now"
+		if e != nil {
+			why = e.Message
+		}
+		h.logf("%s is trusted no more: %s", t.path, why)
+		gone = append(gone, t.path)
+	}
+	if err := h.j.untrust(gone...); err != nil {
+		h.logf("untrust %v: %v", gone, err)
+	}
+	return chatproto.Response{OK: true, Trusted: out}
+}
+
 // trust adds a directory to the ones the user trusts (chatproto.OpTrust).
 func (h *host) trust(req chatproto.Request) chatproto.Response {
 	if len(req.Cwd) > 4096 {

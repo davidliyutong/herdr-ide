@@ -300,10 +300,10 @@ func recorded(ctx context.Context, env *plugin.Env, addr string) (bool, error) {
 // store.HostFileRetention go (store.PruneHostFiles), and the snapshots'
 // retention applies (pruneAge).
 func Prune(base string, now time.Time) {
+	pruneAge(base, now)
 	if base != "" && path.IsAbs(base) {
 		dbstore.PruneHostFiles(base, dbstore.MachineDB, dbstore.HostFileRetention, now)
 	}
-	pruneAge(base, now)
 }
 
 // pruneAge applies the snapshots' retention below the agent's data

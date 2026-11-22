@@ -180,7 +180,7 @@ func exists(base string) bool {
 	if base == "" || !path.IsAbs(base) {
 		return false
 	}
-	if dbstore.Exists(dbPath(base)) {
+	if dbstore.Exists(dbPath(base)) || dbstore.Exists(path.Join(base, dbstore.MachineDB)) {
 		return true
 	}
 	st, err := os.Lstat(path.Join(base, dirName))
@@ -194,7 +194,12 @@ func openDB(base string) (*dbstore.DB, error) {
 	if base == "" || !path.IsAbs(base) {
 		return nil, errNoData
 	}
-	db, err := dbstore.OpenShared(dbPath(base))
+	target := dbPath(base)
+	legacy := path.Join(base, dbstore.MachineDB)
+	if _, err := dbstore.MigrateLegacy(legacy, target); err != nil {
+		return nil, err
+	}
+	db, err := dbstore.OpenShared(target)
 	if db == nil {
 		return nil, err
 	}

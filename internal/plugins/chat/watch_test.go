@@ -384,3 +384,55 @@ func TestWatchRetries(t *testing.T) {
 	s.call("GET", "gpu", "chats", "")
 	s.f.wait("the watch", func() bool { return len(s.f.watchers) == 1 })
 }
+
+// When a machine goes offline, live/active/blocked chats in the core's cache
+// are marked stale and sleeping/idle so they do not appear working or blocked
+// indefinitely, and fresh states clear the stale flag on reconnect.
+func TestWatchOfflineMarksStale(t *testing.T) {
+	s := newSetup(t)
+	working := chatState(chatproto.StatusWorking, chatproto.StateWorking, 2)
+	blocked := chatState(chatproto.StatusBlocked, chatproto.StateWaiting, 4)
+	done := chatState(chatproto.StatusDone, chatproto.StateIdle, 6)
+	done.Unread = true
+	s.f.states = []chatproto.ChatState{working, blocked, done}
+	s.start(t)
+	s.h.wait(t, "initial states", func() bool { return len(s.h.broadcasts) == 1 })
+
+	// Machine goes offline.
+	s.setReady()
+	s.h.wait(t, "stale broadcast", func() bool { return len(s.h.broadcasts) == 2 })
+	last, _ := s.h.lastBroadcast()
+	if !last.data.Full || !last.data.Stale || len(last.data.States) != 3 {
+		t.Fatalf("offline broadcast: %+v", last.data)
+	}
+	byID := map[string]chatproto.ChatState{}
+	for _, st := range last.data.States {
+		byID[st.ID] = st
+	}
+	if !byID[working.ID].Stale || byID[working.ID].State != chatproto.StateSleeping || byID[working.ID].Status != chatproto.StatusIdle {
+		t.Errorf("working chat offline: %+v", byID[working.ID])
+	}
+	if !byID[blocked.ID].Stale || byID[blocked.ID].State != chatproto.StateSleeping || byID[blocked.ID].Status != chatproto.StatusIdle {
+		t.Errorf("blocked chat offline: %+v", byID[blocked.ID])
+	}
+	if !byID[done.ID].Stale || byID[done.ID].State != chatproto.StateSleeping || byID[done.ID].Status != chatproto.StatusDone {
+		t.Errorf("done chat offline: %+v", byID[done.ID])
+	}
+	snap := s.p.Snapshot().Machines["gpu"]
+	if !snap.Stale || len(snap.States) != 3 {
+		t.Fatalf("snapshot while offline: %+v", snap)
+	}
+
+	// Machine comes back online: fresh states clear Stale.
+	s.setReady("gpu")
+	s.h.wait(t, "reconnected broadcast", func() bool { return len(s.h.broadcasts) == 3 })
+	rec, _ := s.h.lastBroadcast()
+	if rec.data.Stale || !rec.data.Full {
+		t.Fatalf("reconnect broadcast: %+v", rec.data)
+	}
+	for _, st := range rec.data.States {
+		if st.Stale {
+			t.Errorf("stale remained set on reconnect: %+v", st)
+		}
+	}
+}

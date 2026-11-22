@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -111,10 +112,16 @@ type journal struct {
 	failAppend func() error
 }
 
-// openJournal opens this host's database in base (store.HostFile). A
-// database a newer host wrote is not used: its error is store.ErrNewer.
+// openJournal opens this host's database in base (store.HostFile), migrating
+// any legacy un-hosted DBName into it first. A database a newer host wrote is
+// not used: its error is store.ErrNewer.
 func openJournal(base string) (*journal, error) {
-	db, err := store.Open(store.HostFile(base, DBName), store.Options{Migrations: migrations})
+	target := store.HostFile(base, DBName)
+	legacy := filepath.Join(base, DBName)
+	if _, err := store.MigrateLegacy(legacy, target); err != nil {
+		return nil, err
+	}
+	db, err := store.Open(target, store.Options{Migrations: migrations})
 	if errors.Is(err, store.ErrNewer) {
 		db.Close()
 		return nil, err
@@ -479,7 +486,29 @@ func (j *journal) trust(path string, at time.Time, id fileID) error {
 // it had when it was trusted.
 type trustedDir struct {
 	path string
+	at   time.Time
 	id   fileID
+}
+
+// listTrusted returns all trusted directories, most recently trusted first.
+func (j *journal) listTrusted() ([]trustedDir, error) {
+	rows, err := j.db.Query(`SELECT path, at, dev, ino FROM trusted ORDER BY at DESC, path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []trustedDir
+	for rows.Next() {
+		var t trustedDir
+		var at, dev, ino int64
+		if err := rows.Scan(&t.path, &at, &dev, &ino); err != nil {
+			return nil, err
+		}
+		t.at = fromMS(at)
+		t.id = fileID{dev: uint64(dev), ino: uint64(ino)}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // trustedAbove are the directories of the trusted list among dir, an

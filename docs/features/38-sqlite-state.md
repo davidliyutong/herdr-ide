@@ -94,7 +94,7 @@ only after `Import` returned without an error.
 
 | Database | Owner | Where | Features |
 | --- | --- | --- | --- |
-| `core.db` (`core-<instance>.db`) | the core | beside its settings file on the core host ([reference](../reference.md#files-and-directories)) | the vault's access log (`vault_access`), the AI usage history (`usage_windows`, `usage_accounts`, `usage_alerts`) |
+| `core[-<instance>]-<host>[-<id>].db` | the core | beside its settings file on the core host ([reference](../reference.md#files-and-directories)) | the vault's access log (`vault_access`), the AI usage history (`usage_windows`, `usage_accounts`, `usage_alerts`) |
 | `machine-<host>.db` | the machine's agent | the instance's data directory on the machine (`~/.herdr-ide[-<instance>]/`) | the terminal history's snapshots and the lease of their writers (`history_snapshots`, `history_lease`), the AI usage plugin's cost cache (`usage_cost_files`, `usage_cost_state`) |
 | `chat-<host>.db` | the chat host | the same data directory | the chats, their events, the trusted folders, the host's settings ([37](37-agent-chats.md)); opened with `Open`, not shared |
 
@@ -107,9 +107,10 @@ history's writers take turns through its lease.
 ### Per-host names
 
 SQLite's write-ahead logging needs every connection of a database on one
-host (its `-shm` file is shared memory). A data directory may be on a
-home several hosts share, so the databases a machine's processes own are
-named after the host they run on (`store.HostFile`):
+host (its `-shm` file is shared memory). A data or configuration directory
+may be on a home several hosts share, so the databases a host owns
+(`core`, `machine`, `chat`) are named after the host they run on
+(`store.HostFile`):
 `<name>-<host>[-<id>].db`, where `<host>` is the host's whole name,
 lower case, with what is not a letter, a digit, `-`, `_` or `.` replaced
 by `_`, at most 128 bytes (`localhost` for none), and `<id>` the first 8
@@ -121,11 +122,22 @@ Two hosts of one name (cloned machines, `node01` of two clusters sharing
 a home) thus have two databases. The chat host's log files are named the
 same way.
 
+When a host opens its per-host database (`core[-<instance>].db`,
+`machine.db`, `chat.db`) and no per-host file exists yet while a legacy
+un-hosted database is present, `store.MigrateLegacy` copies the legacy
+database (including WAL data and schema versions) via `VACUUM INTO`,
+verifies it with `PRAGMA quick_check`, links it into the per-host path,
+and removes the legacy file once migration is confirmed complete and no
+process holds a lock on it.
+
 `store.PruneHostFiles(dir, name, retention)` removes the databases of
-other hosts of that name (and the one of no host's name, from before they
-were named per host) that nobody opened for 30 days, with their journal
-files: the agent at its start (`machine`), the chat host at its start
-(`chat`, its log files). A database counts as used by its file's
+other hosts of that name that nobody opened for 30 days, and any remaining
+legacy un-hosted database (once this host's per-host file exists) or old
+un-hosted log file after `LegacyFileRetention` (1 hour), with their journal
+files: the core at its start (`core[-<instance>].db`, skipping other
+instances' `core-<instance>*.db` files in the shared config directory), the
+agent at its start (`machine`), and the chat host at its start (`chat`, its
+log files). A database counts as used by its file's
 modification time, which `Open` sets at most once an hour and keeps
 setting hourly while it is open. A removal takes, without waiting, the
 lock SQLite's writers take and removes the files while it holds it, so

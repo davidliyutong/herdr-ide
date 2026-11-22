@@ -41,11 +41,13 @@ type fakeChatHost struct {
 	opens    []bool
 	requests []chatproto.Request
 	commands []chatproto.Command
-	// chats and states; available kinds; sessions.
-	chats    map[string]chatproto.Chat
-	states   []chatproto.ChatState
-	agents   map[string]bool
-	sessions []chatproto.Session
+	// chats and states; available kinds; sessions; trusted folders; hostStatus.
+	chats      map[string]chatproto.Chat
+	states     []chatproto.ChatState
+	agents     map[string]bool
+	sessions   []chatproto.Session
+	trusted    []chatproto.TrustedFolder
+	hostStatus *chatproto.HostStatus
 	// reqErr refuses requests of an op; ackErr answers commands of an op
 	// with an error; holdAcks keeps every ack until released.
 	reqErr   map[string]*chatproto.Error
@@ -199,6 +201,31 @@ func (f *fakeChatHost) serve(c *fakeConn) {
 		f.chats[ch.ID] = ch
 		f.mu.Unlock()
 		c.write(chatproto.Response{OK: true, Chat: &ch})
+	case chatproto.OpTrusted:
+		f.mu.Lock()
+		tr := slices.Clone(f.trusted)
+		f.mu.Unlock()
+		c.write(chatproto.Response{OK: true, Trusted: tr})
+	case chatproto.OpHostStatus:
+		f.mu.Lock()
+		hs := f.hostStatus
+		if hs == nil {
+			hs = &chatproto.HostStatus{
+				Proto:      proto,
+				Version:    "test",
+				PID:        pid,
+				TotalChats: len(f.chats),
+				Settings:   chatproto.DefaultHostSettings(),
+				Sessions:   []chatproto.HostSessionInfo{},
+			}
+		}
+		f.mu.Unlock()
+		c.write(chatproto.Response{OK: true, HostStatus: hs})
+	case chatproto.OpShutdown:
+		f.mu.Lock()
+		f.running = false
+		f.mu.Unlock()
+		c.write(chatproto.Response{OK: true})
 	case chatproto.OpWatch:
 		// Listed and answered at once: a change comes after the states.
 		f.mu.Lock()

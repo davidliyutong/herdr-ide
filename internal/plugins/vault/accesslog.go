@@ -190,16 +190,19 @@ func accessLogPath(vault string) string {
 	return strings.TrimSuffix(vault, ".json") + "-access.jsonl"
 }
 
-// coreDBOf is the core's database beside the access log's former file:
-// core.db beside vault-access.jsonl, core-<instance>.db beside
-// vault-<instance>-access.jsonl, as plugin.CoreDBFile has it beside the
-// settings file the vault's file is beside.
-func coreDBOf(logPath string) string {
+// coreSettingsOf is the settings file path beside the access log's former file.
+func coreSettingsOf(logPath string) string {
 	if logPath == "" {
 		return ""
 	}
 	name := strings.TrimSuffix(filepath.Base(logPath), "-access.jsonl")
-	return plugin.CoreDBFile(filepath.Join(filepath.Dir(logPath), strings.Replace(name, "vault", "settings", 1)+".json"))
+	return filepath.Join(filepath.Dir(logPath), strings.Replace(name, "vault", "settings", 1)+".json")
+}
+
+// coreDBOf is the core's database beside the access log's former file, as
+// plugin.CoreDBFile has it beside the settings file the vault's file is beside.
+func coreDBOf(logPath string) string {
+	return plugin.CoreDBFile(coreSettingsOf(logPath))
 }
 
 func newAccessLog(path string, logger *log.Logger) *accessLog {
@@ -232,7 +235,7 @@ var errNewer = errors.New("the core's database is of a newer version: records ar
 // open opens the core's database with the access log's tables; writable
 // false when they are of a newer version (errNewer). The caller closes it.
 func (l *accessLog) open() (db *store.DB, writable bool, err error) {
-	db, err = store.OpenShared(coreDBOf(l.path))
+	db, err = plugin.OpenCoreDB(coreSettingsOf(l.path))
 	if db == nil {
 		return nil, false, err
 	}

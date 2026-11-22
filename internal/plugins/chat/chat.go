@@ -38,6 +38,7 @@ import (
 
 	"herdr-ide/internal/agentkinds"
 	"herdr-ide/internal/chatproto"
+	"herdr-ide/internal/machines"
 	"herdr-ide/internal/plugin"
 )
 
@@ -163,6 +164,16 @@ func (p *Plugin) opener() opener {
 //   - POST   /api/m/{id}/p/chat/untrust?cwd=: takes back the trust that
 //     covers a directory, its own and that of the directories above it
 //     ({}), audited as chat.untrust;
+//   - GET    /api/m/{id}/p/chat/trusted: lists persisted trusted folders
+//     ({trusted: []chatproto.TrustedFolder}), from a serving host
+//     (not_running otherwise);
+//   - POST   /api/m/{id}/p/chat/trusted: the same, starting the host when
+//     none serves, audited as chat.trusted;
+//   - POST   /api/m/{id}/p/chat/host/stop: cleanly shuts down the machine's
+//     running chat host ({}), refused with busy while a chat works or
+//     waits, audited as chat.host_stop;
+//   - GET    /api/p/chat/hosts: lists all configured machines and their
+//     running chat hosts and active headless sessions ({hosts});
 //   - GET    /api/p/chat/states: the chats' states of every machine as the
 //     core last read them (StatesSnapshot);
 //   - GET    /api/p/chat/ws: the page's WebSocket (wire.go).
@@ -188,6 +199,10 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: http.MethodPost, Path: "handoff", Machine: true, Mutating: true, Audit: "handoff", Handler: p.postHandoff},
 		{Method: http.MethodPost, Path: "trust", Machine: true, Mutating: true, Audit: "trust", Handler: p.postTrust},
 		{Method: http.MethodPost, Path: "untrust", Machine: true, Mutating: true, Audit: "untrust", Handler: p.postUntrust},
+		{Method: http.MethodGet, Path: "trusted", Machine: true, Handler: p.getTrusted},
+		{Method: http.MethodPost, Path: "trusted", Machine: true, Mutating: true, Audit: "trusted", Handler: p.postTrusted},
+		{Method: http.MethodPost, Path: "host/stop", Machine: true, Mutating: true, Audit: "host_stop", Handler: p.postHostStop},
+		{Method: http.MethodGet, Path: "hosts", Handler: p.getHosts},
 		{Method: http.MethodGet, Path: "states", Handler: p.getStates},
 		{Method: http.MethodGet, Path: "ws", Handler: p.serveWS},
 	}
@@ -570,4 +585,214 @@ type eventHead struct {
 func (p *Plugin) getStates(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	p.bind(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, p.Snapshot())
+}
+
+func (p *Plugin) getTrusted(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.trusted(c, w, r, false)
+}
+
+func (p *Plugin) postTrusted(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.trusted(c, w, r, true)
+}
+
+func (p *Plugin) trusted(c *plugin.Call, w http.ResponseWriter, r *http.Request, start bool) {
+	m, ok := p.begin(c, w)
+	if !ok {
+		return
+	}
+	res, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpTrusted}, start, false)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	out := res.Trusted
+	if out == nil {
+		out = []chatproto.TrustedFolder{}
+	}
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"trusted": out})
+}
+
+func (p *Plugin) postHostStop(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	m, ok := p.begin(c, w)
+	if !ok {
+		return
+	}
+	if _, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpShutdown}, false, false); err != nil {
+		writeError(w, err)
+		return
+	}
+	plugin.WriteJSON(w, http.StatusOK, struct{}{})
+}
+
+// HostOverview summarizes one machine's headless chat host and its active
+// sessions for GET /api/p/chat/hosts.
+type HostOverview struct {
+	Machine       string                      `json:"machine"`
+	Label         string                      `json:"label"`
+	MachineStatus string                      `json:"machineStatus"`
+	Running       bool                        `json:"running"`
+	Status        string                      `json:"status"`
+	PID           int                         `json:"pid,omitempty"`
+	Version       string                      `json:"version,omitempty"`
+	Proto         int                         `json:"proto,omitempty"`
+	TerminalID    string                      `json:"terminalId,omitempty"`
+	StartedAt     time.Time                   `json:"startedAt,omitzero"`
+	Socket        string                      `json:"socket,omitempty"`
+	Base          string                      `json:"base,omitempty"`
+	Conns         int                         `json:"conns,omitempty"`
+	Watchers      int                         `json:"watchers,omitempty"`
+	LiveAgents    int                         `json:"liveAgents,omitempty"`
+	TotalChats    int                         `json:"totalChats"`
+	TotalBytes    int64                       `json:"totalBytes,omitempty"`
+	Ending        int                         `json:"ending,omitempty"`
+	Settings      *chatproto.HostSettings     `json:"settings,omitempty"`
+	Sessions      []chatproto.HostSessionInfo `json:"sessions"`
+	Error         string                      `json:"error,omitempty"`
+	Message       string                      `json:"message,omitempty"`
+}
+
+func (p *Plugin) getHosts(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.bind(c.Host)
+	h := p.getHost()
+	if h == nil || h.Machines() == nil {
+		plugin.WriteJSON(w, http.StatusOK, map[string]any{"hosts": []HostOverview{}})
+		return
+	}
+	states := h.Machines().States()
+	readySet := map[string]bool{}
+	for _, id := range p.readyList() {
+		readySet[id] = true
+	}
+	out := make([]HostOverview, len(states))
+	var wg sync.WaitGroup
+	for i, st := range states {
+		cachedChats := p.cachedChatCount(st.ID)
+		if !readySet[st.ID] {
+			out[i] = HostOverview{
+				Machine:       st.ID,
+				Label:         st.Label,
+				MachineStatus: string(st.Status),
+				Running:       false,
+				Status:        "offline",
+				TotalChats:    cachedChats,
+				Sessions:      []chatproto.HostSessionInfo{},
+			}
+			continue
+		}
+		if st.Status != machines.StatusReady {
+			st.Status = machines.StatusReady
+		}
+		wg.Add(1)
+		go func(idx int, ms machines.State, fallbackChats int) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			out[idx] = p.hostOverview(ctx, ms, fallbackChats)
+		}(i, st, cachedChats)
+	}
+	wg.Wait()
+	plugin.WriteJSON(w, http.StatusOK, map[string]any{"hosts": out})
+}
+
+func (p *Plugin) cachedChatCount(m string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if w := p.machines[m]; w != nil && w.known {
+		return len(w.states)
+	}
+	return 0
+}
+
+func (p *Plugin) hostOverview(ctx context.Context, ms machines.State, fallbackChats int) HostOverview {
+	base := HostOverview{
+		Machine:       ms.ID,
+		Label:         ms.Label,
+		MachineStatus: string(ms.Status),
+		TotalChats:    fallbackChats,
+		Sessions:      []chatproto.HostSessionInfo{},
+	}
+	hc, err := p.dial(ctx, ms.ID, false, false)
+	if err != nil {
+		if codeOf(err) == codeNotRunning {
+			base.Status = "stopped"
+			return base
+		}
+		pe := protoError(err)
+		base.Status = "error"
+		base.Error = pe.Code
+		base.Message = pe.Message
+		return base
+	}
+	info := hc.info
+	res, err := hc.send(ctx, chatproto.Request{Op: chatproto.OpHostStatus})
+	hc.Close()
+	if err == nil && res.HostStatus != nil {
+		hs := res.HostStatus
+		base.Running = true
+		base.Status = "running"
+		base.PID = hs.PID
+		base.Version = hs.Version
+		base.Proto = hs.Proto
+		base.TerminalID = hs.TerminalID
+		base.StartedAt = hs.StartedAt
+		base.Socket = hs.Socket
+		base.Base = hs.Base
+		base.Conns = hs.Conns
+		base.Watchers = hs.Watchers
+		base.LiveAgents = hs.LiveAgents
+		base.TotalChats = hs.TotalChats
+		base.TotalBytes = hs.TotalBytes
+		base.Ending = hs.Ending
+		s := hs.Settings
+		base.Settings = &s
+		if hs.Sessions != nil {
+			base.Sessions = hs.Sessions
+		}
+		return base
+	}
+	if codeOf(err) == chatproto.CodeBadRequest {
+		// Older chat host that does not support OpHostStatus: fall back to
+		// OpChats plus Hello metadata.
+		hc2, err2 := p.dial(ctx, ms.ID, false, false)
+		if err2 == nil {
+			res2, err3 := hc2.send(ctx, chatproto.Request{Op: chatproto.OpChats})
+			hc2.Close()
+			if err3 == nil {
+				base.Running = true
+				base.Status = "running"
+				base.PID = info.PID
+				base.Version = info.Version
+				base.Proto = info.Proto
+				base.TotalChats = len(res2.Chats)
+				for _, ch := range res2.Chats {
+					switch ch.State {
+					case chatproto.StateStarting, chatproto.StateIdle, chatproto.StateWorking, chatproto.StateWaiting:
+						base.LiveAgents++
+						base.Sessions = append(base.Sessions, chatproto.HostSessionInfo{
+							Chat:         ch.ID,
+							Kind:         ch.Kind,
+							Title:        ch.Title,
+							Cwd:          ch.Cwd,
+							SessionID:    ch.SessionID,
+							State:        ch.State,
+							Status:       ch.Status,
+							Starting:     ch.State == chatproto.StateStarting,
+							Updated:      ch.Updated,
+							AgentVersion: ch.AgentVersion,
+						})
+					}
+				}
+				return base
+			}
+		}
+	}
+	if codeOf(err) == codeNotRunning {
+		base.Status = "stopped"
+		return base
+	}
+	pe := protoError(err)
+	base.Status = "error"
+	base.Error = pe.Code
+	base.Message = pe.Message
+	return base
 }

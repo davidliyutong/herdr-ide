@@ -456,7 +456,7 @@ func (b *termBackend) isHidden(addr string) bool {
 func (b *termBackend) resolve(ctx context.Context, conn *hc.Conn, target string) (string, error) {
 	b.mu.Lock()
 	local, ok := b.localLocked(target)
-	hidden := b.hidden[local] || local == agentproto.ChatHostName
+	hidden := b.hidden[local] || agentproto.IsChatHostName(local)
 	_, known := b.terms[local]
 	b.mu.Unlock()
 	switch {
@@ -640,7 +640,7 @@ func (t termShells) get(ctx context.Context, addr string) (*hc.Conn, *hc.Termina
 	notFound := &hc.Error{Kind: "not_found", Message: "no terminal " + strconv.Quote(addr)}
 	t.b.mu.Lock()
 	local, ok := t.b.localLocked(addr)
-	hidden := t.b.hidden[local] || local == agentproto.ChatHostName
+	hidden := t.b.hidden[local] || agentproto.IsChatHostName(local)
 	t.b.mu.Unlock()
 	if !ok || hidden {
 		return nil, nil, notFound

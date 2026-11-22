@@ -4,11 +4,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/settings"
+	"herdr-ide/internal/store"
 )
 
 type settingsHost struct{ st *settings.Store }
@@ -20,13 +22,13 @@ func (h settingsHost) ReadOnly() bool                              { return fals
 func (h settingsHost) Settings() *settings.Store                   { return h.st }
 func (h settingsHost) Logger() *log.Logger                         { return log.New(io.Discard, "", 0) }
 
-// The core's database is beside the settings file, per instance; a core
-// without settings keeps none.
+// The core's database is beside the settings file, per instance and per
+// host (store.HostFile); a core without settings keeps none.
 func TestCoreDB(t *testing.T) {
 	dir := t.TempDir()
 	for in, want := range map[string]string{
-		filepath.Join(dir, "settings.json"):     filepath.Join(dir, "core.db"),
-		filepath.Join(dir, "settings-dev.json"): filepath.Join(dir, "core-dev.db"),
+		filepath.Join(dir, "settings.json"):     store.HostFile(dir, "core.db"),
+		filepath.Join(dir, "settings-dev.json"): store.HostFile(dir, "core-dev.db"),
 		"":                                      "",
 	} {
 		if got := CoreDBFile(in); got != want {
@@ -52,5 +54,40 @@ func TestCoreDB(t *testing.T) {
 	defer b.Close()
 	if a.DB != b.DB {
 		t.Error("two pools of the core's database")
+	}
+}
+
+// A legacy core[-<instance>].db is migrated once into the per-host core
+// database when opened, preserving data and removing the legacy file.
+func TestCoreDBLegacyMigration(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings-dev.json")
+	legacyPath := filepath.Join(dir, "core-dev.db")
+	legacyDB, err := store.OpenShared(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyDB.Migrate("testfeat", []string{`CREATE TABLE testfeat_items (id INTEGER PRIMARY KEY, val TEXT)`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyDB.Exec(`INSERT INTO testfeat_items (id, val) VALUES (1, 'keep')`); err != nil {
+		t.Fatal(err)
+	}
+	legacyDB.Close()
+
+	db, err := OpenCoreDB(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var val string
+	if err := db.QueryRow(`SELECT val FROM testfeat_items WHERE id = 1`).Scan(&val); err != nil || val != "keep" {
+		t.Fatalf("migrated value = %q (%v), want keep", val, err)
+	}
+	if _, err := os.Lstat(legacyPath); !os.IsNotExist(err) {
+		t.Errorf("legacy %s still exists after migration: %v", legacyPath, err)
+	}
+	if _, err := os.Lstat(CoreDBFile(settingsPath)); err != nil {
+		t.Errorf("per-host core db missing: %v", err)
 	}
 }

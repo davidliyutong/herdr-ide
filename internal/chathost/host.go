@@ -154,11 +154,12 @@ func or(d, def time.Duration) time.Duration {
 
 // host is a chat host that serves.
 type host struct {
-	o      Options
-	logger *log.Logger
-	env    *environment
-	j      *journal
-	probes chan struct{} // a place for each session listing
+	o         Options
+	logger    *log.Logger
+	env       *environment
+	j         *journal
+	probes    chan struct{} // a place for each session listing
+	startedAt time.Time
 
 	// ctx ends when the host stops: with it end the starts and calls that
 	// wait.
@@ -234,16 +235,17 @@ func Serve(ctx context.Context, o Options) error {
 	}
 	h := &host{
 		o: o, logger: o.Logger,
-		probes:   make(chan struct{}, maxProbes),
-		quit:     make(chan struct{}),
-		chats:    map[string]*chat{},
-		conns:    map[net.Conn]bool{},
-		watchers: map[*subscriber]struct{}{},
-		states:   map[string]chatproto.ChatState{},
-		ending:   map[chatadapter.Session]struct{}{},
-		poke:     make(chan struct{}, 1),
-		enforce:  make(chan struct{}, 1),
-		ended:    make(chan struct{}, 1),
+		probes:    make(chan struct{}, maxProbes),
+		startedAt: time.Now().UTC(),
+		quit:      make(chan struct{}),
+		chats:     map[string]*chat{},
+		conns:     map[net.Conn]bool{},
+		watchers:  map[*subscriber]struct{}{},
+		states:    map[string]chatproto.ChatState{},
+		ending:    map[chatadapter.Session]struct{}{},
+		poke:      make(chan struct{}, 1),
+		enforce:   make(chan struct{}, 1),
+		ended:     make(chan struct{}, 1),
 	}
 	if h.logger == nil {
 		h.logger = log.New(io.Discard, "", 0)
@@ -770,8 +772,89 @@ func (h *host) serve(conn net.Conn) {
 		h.reply(conn, h.trust(req))
 	case chatproto.OpUntrust:
 		h.reply(conn, h.untrust(req))
+	case chatproto.OpTrusted:
+		h.reply(conn, h.listTrusted())
+	case chatproto.OpHostStatus:
+		h.reply(conn, h.hostStatus())
 	default:
 		h.reply(conn, refuse(chatproto.CodeBadRequest, "unknown op"))
+	}
+}
+
+func (h *host) hostStatus() chatproto.Response {
+	h.mu.Lock()
+	chats := h.list()
+	conns := len(h.conns)
+	h.mu.Unlock()
+
+	h.wmu.Lock()
+	watchers := len(h.watchers)
+	h.wmu.Unlock()
+
+	h.pmu.Lock()
+	ending := len(h.ending)
+	h.pmu.Unlock()
+
+	sessions := make([]chatproto.HostSessionInfo, 0)
+	var totalBytes int64
+	liveAgents := 0
+	for _, c := range chats {
+		c.mu.Lock()
+		totalBytes += c.r.Bytes
+		running := c.sess != nil || c.starting
+		if running && !c.deleted {
+			liveAgents++
+			pid := 0
+			if p, ok := c.sess.(pider); ok {
+				pid = p.PID()
+			}
+			var idleSince time.Time
+			if c.r.State == chatproto.StateIdle {
+				idleSince = c.idleSince.UTC()
+			}
+			sessions = append(sessions, chatproto.HostSessionInfo{
+				Chat:         c.r.ID,
+				Kind:         c.r.Kind,
+				Title:        c.r.Title,
+				Cwd:          c.r.Cwd,
+				SessionID:    c.r.SessionID,
+				State:        c.r.State,
+				Status:       c.r.Status,
+				PID:          pid,
+				Starting:     c.starting,
+				IdleSince:    idleSince,
+				Updated:      c.r.Updated,
+				Bytes:        c.r.Bytes,
+				AgentVersion: c.r.AgentVersion,
+			})
+		}
+		c.mu.Unlock()
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		if !sessions[i].Updated.Equal(sessions[j].Updated) {
+			return sessions[i].Updated.After(sessions[j].Updated)
+		}
+		return sessions[i].Chat < sessions[j].Chat
+	})
+	return chatproto.Response{
+		OK: true,
+		HostStatus: &chatproto.HostStatus{
+			Proto:      chatproto.Proto,
+			Version:    agentproto.Version,
+			PID:        os.Getpid(),
+			TerminalID: os.Getenv("HC_TERMINAL_ID"),
+			StartedAt:  h.startedAt,
+			Socket:     filepath.Join(h.o.Run, chatproto.SocketName),
+			Base:       h.o.Base,
+			Conns:      conns,
+			Watchers:   watchers,
+			LiveAgents: liveAgents,
+			TotalChats: len(chats),
+			TotalBytes: totalBytes,
+			Ending:     ending,
+			Settings:   *h.settings.Load(),
+			Sessions:   sessions,
+		},
 	}
 }
 

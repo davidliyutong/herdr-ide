@@ -20,6 +20,13 @@ func TestHiddenTerminalNames(t *testing.T) {
 	if got := HiddenValue(ChatHostName); got != HiddenChatHost {
 		t.Errorf("HiddenValue(%q) = %q, want %q", ChatHostName, got, HiddenChatHost)
 	}
+	fb := ChatHostFallbackName(1)
+	if !regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`).MatchString(fb) || !IsChatHostName(fb) {
+		t.Errorf("bad fallback name %q", fb)
+	}
+	if got := HiddenValue(fb); got != HiddenChatHost {
+		t.Errorf("HiddenValue(%q) = %q, want %q", fb, got, HiddenChatHost)
+	}
 	if got := HiddenValue("other"); got != "other" {
 		t.Errorf("HiddenValue of a name without the prefix = %q", got)
 	}
@@ -33,6 +40,8 @@ func TestHidden(t *testing.T) {
 		want        bool
 	}{
 		{ChatHostName, HiddenChatHost, true},
+		{ChatHostFallbackName(1), HiddenChatHost, true},
+		{ChatHostFallbackName(1), "", false},
 		{ChatHostName, "", false},
 		{ChatHostName, "other", false},
 		{"", HiddenChatHost, false},

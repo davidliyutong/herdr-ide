@@ -496,7 +496,11 @@ missing here.
 | `POST /api/m/{id}/p/chat/handoff` | writes | Ends a chat's agent so that its session goes on in a terminal (`?chat=`); `409 busy` while a turn runs. Within a minute; audited as `chat.handoff`. |
 | `POST /api/m/{id}/p/chat/trust` | writes | Trusts a directory and those below it on the machine (`?cwd=` a clean absolute path): agents started there from then on load the project's own settings. `403 unsafe_folder` for the root, the home directory or one above it, a directory not the user's or that its group or others may write, or one below a directory others may write without the sticky bit. Audited as `chat.trust` with the directory. |
 | `POST /api/m/{id}/p/chat/untrust` | writes | Takes back the trust that covers a directory on the machine (`?cwd=` a clean absolute path): its own and that of the directories above it; agents started there from then on run without the project's own settings. Audited as `chat.untrust` with the directory. |
-| `GET /api/p/chat/states` | – | The chats' states of every machine as the core last read them: `{machines: {<id>: {t: "states", states, full: true, rev}}}`; the plugin's `states` messages on `/ws` that follow carry higher revs. |
+| `GET /api/m/{id}/p/chat/trusted` | – | Lists persisted trusted folders on the machine (`{trusted: [{cwd, at}]}`), pruning any that moved or became unsafe; `409 not_running` when no host serves. |
+| `POST /api/m/{id}/p/chat/trusted` | writes | The same, starting the machine's chat host when none serves; audited as `chat.trusted`. |
+| `POST /api/m/{id}/p/chat/host/stop` | writes | Cleanly shuts down the machine's running chat host; `409 busy` while a chat works, waits or starts, `409 not_running` when none serves. Audited as `chat.host_stop`. |
+| `GET /api/p/chat/hosts` | – | Overview of every configured machine's headless chat host and its active sessions (`{hosts: [...]}`), without starting any host. |
+| `GET /api/p/chat/states` | – | The chats' states of every machine as the core last read them: `{machines: {<id>: {t: "states", states, full: true, stale?, rev}}}`; the plugin's `states` messages on `/ws` that follow carry higher revs. |
 | `GET /api/p/chat/ws` | – | The chat plugin's WebSocket, one per page ([architecture](architecture.md#chats-internalchatproto-internalpluginschat)): subscriptions to chats (at most 32, 16 of one machine) with their events, and commands answered by acks (a permission's or a question's answer, a configuration change and a handoff audited as `chat.permission`, `chat.answer`, `chat.set_config`, `chat.handoff`); a read-only core refuses every command (`read_only`) and its subscriptions run nothing on the machine; a page that falls behind is closed (1013). |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
@@ -575,8 +579,8 @@ downloads in the user cache directory
 on Linux, `%LocalAppData%\herdr-ide\code-server` on Windows) with `.sha256` sidecars (also recorded for releases that machines
 downloaded themselves), the settings in `settings[-<instance>].json`, the
 variable vault in `vault[-<instance>].json` (values encrypted under a key derived from its passphrase, which is kept nowhere, [30](features/30-variable-vault.md)), the
-core's SQLite database `core[-<instance>].db` (0600, with its `-wal` and
-`-shm`; [38](features/38-sqlite-state.md)) holding the vault's access log
+core's SQLite database `core[-<instance>]-<host>[-<id>].db` (0600, with its `-wal` and
+`-shm`; [38](features/38-sqlite-state.md); legacy un-hosted `core[-<instance>].db` is migrated and removed once confirmed complete) holding the vault's access log
 (names, never values; the last 1000 releases and 500 other records) and
 the AI usage plugin's history (the last accounts, 30 days of their
 windows' use and the periods its alerts fired in, kept a day past them),
