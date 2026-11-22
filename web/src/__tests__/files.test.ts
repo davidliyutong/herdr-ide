@@ -816,10 +816,129 @@ describe('FilesPanel', () => {
     expect(changes()).toEqual([['move', { paths: [main], dir: '/home/u/src/lib' }]]);
     expect(useTree.getState().clipboard).toEqual({ m: 'm', paths: [main], cut: true });
     // Some fail: those stay.
-    useTree.setState({ clipboard: { m: 'm', paths: [main, '/home/u/src/.hidden'], cut: true } });
+    useTree.setState({ clipboard: { m: 'm', paths: ['/home/u/src/.hidden'], cut: true } });
     answers.move = () => ({ status: 200, json: { paths: ['/home/u/src/lib/main.go'], failed: { '/home/u/src/.hidden': 'exists' } } });
     await key('v', { metaKey: true, ctrlKey: true });
     await flush();
     expect(useTree.getState().clipboard).toEqual({ m: 'm', paths: ['/home/u/src/.hidden'], cut: true });
+  });
+
+  it('auto-reveals, highlights and scrolls to the active editor file within the root', async () => {
+    tree['/home/u/src/lib/deep'] = [f('target.ts')];
+    tree['/home/u/src/lib'] = [d('deep'), f('a.go'), f('b.go')];
+    const items = Array.from({ length: 30 }, (_, i) => f(`z${i}.txt`));
+    tree['/home/u/src'] = [d('lib'), ...items, f('main.go')];
+    await act(async () => showRoot('m', '/home/u'));
+    await act(async () => showRoot('m', '/home/u/src'));
+    await flush();
+
+    const el = treeEl();
+    Object.defineProperty(el, 'clientHeight', { value: 110, configurable: true });
+
+    // Switch to a tab showing a nested editor file: parent dirs expand, row is highlighted & scrolled into view.
+    core.model.mutate('m', (l) => ({
+      ...l,
+      workspaces: [
+        {
+          ...l.workspaces[0],
+          tabs: [
+            l.workspaces[0].tabs[0],
+            { root: { view: { id: 'ed1', plugin: 'files', kind: 'editor', path: '/home/u/src/lib/deep/target.ts' } }, focused: 'view:ed1' },
+            { root: { view: { id: 'ed2', plugin: 'files', kind: 'editor', path: '/home/u/src/main.go' } }, focused: 'view:ed2' },
+            { root: { view: { id: 'ed3', plugin: 'files', kind: 'editor', path: '/etc/hosts' } }, focused: 'view:ed3' },
+          ],
+          selected: 1,
+        },
+      ],
+    }));
+    await flush();
+    await flush();
+
+    expect(useTree.getState().expanded['/home/u/src/lib']).toBe(true);
+    expect(useTree.getState().expanded['/home/u/src/lib/deep']).toBe(true);
+    expect(useTree.getState().selection).toEqual(['/home/u/src/lib/deep/target.ts']);
+    expect(row('/home/u/src/lib/deep/target.ts').dataset.active).toBe('true');
+    expect(row('/home/u/src/lib/deep/target.ts').className).toContain('active');
+
+    // Switch to another editor tab further down the list: scrolls into view and moves highlight.
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 2));
+    await flush();
+    expect(useTree.getState().selection).toEqual(['/home/u/src/main.go']);
+    expect(row('/home/u/src/main.go').dataset.active).toBe('true');
+    expect(el.scrollTop).toBeGreaterThan(0);
+
+    // An editor file outside the current root does not hijack the root.
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 3));
+    await flush();
+    expect(useTree.getState().root).toBe('/home/u/src');
+    expect(useTree.getState().follow).toBe(true);
+  });
+
+  it('persists and restores File Explorer UI state across tab and panel switches', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => f(`f${String(i).padStart(2, '0')}.txt`));
+    tree['/home/u/src'] = [d('lib'), ...many, f('main.go')];
+    tree['/home/u/other'] = [f('o.txt')];
+    await act(async () => showRoot('m', '/home/u'));
+    await act(async () => showRoot('m', '/home/u/src'));
+    await flush();
+
+    await act(async () => row('/home/u/src/lib').click());
+    await flush();
+    await act(async () => setFilter('f2'));
+    await key('End');
+    const selectedBefore = useTree.getState().selection;
+    expect(selectedBefore).toEqual(['/home/u/src/f29.txt']);
+
+    // Simulate user scrolling in the tree.
+    const el = treeEl();
+    Object.defineProperty(el, 'scrollHeight', { value: 2000, configurable: true });
+    el.scrollTop = 180;
+    await act(async () => el.dispatchEvent(new Event('scroll', { bubbles: true })));
+
+    // 1) Unmount and remount on the same root (e.g. panel switch or pane-mounted explorer tab switch).
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(FilesPanel)));
+    await flush();
+    expect(useTree.getState()).toMatchObject({
+      expanded: { '/home/u/src/lib': true },
+      selection: selectedBefore,
+      cursor: '/home/u/src/f29.txt',
+      filter: 'f2',
+    });
+    expect(treeEl().scrollTop).toBe(180);
+
+    // 2) Switch to a terminal tab in a different directory, then switch back to the first tab.
+    const t2 = FakeCore.term('p2', { cwd: '/home/u/other' });
+    core.machines.get('m')!.terminals.push(t2);
+    await act(async () => {
+      core.push({ t: 'snapshot', m: 'm', terminals: core.machines.get('m')!.terminals });
+      core.model.mutate('m', (l) => ({
+        ...l,
+        workspaces: [
+          {
+            ...l.workspaces[0],
+            tabs: [l.workspaces[0].tabs[0], { root: { terminal: 'p2' }, focused: 'p2' }],
+            selected: 1,
+          },
+        ],
+      }));
+    });
+    await flush();
+    expect(useTree.getState().root).toBe('/home/u/other');
+    expect(useTree.getState().selection).toEqual([]);
+    expect(useTree.getState().filter).toBe('');
+
+    // Switch back to Tab 0 (/home/u/src): expanded dirs, selection, cursor, filter and scroll are restored.
+    await act(async () => actions.selectTab('m', 'w1w1w1w1', 0));
+    await flush();
+    expect(useTree.getState()).toMatchObject({
+      root: '/home/u/src',
+      expanded: { '/home/u/src/lib': true },
+      selection: selectedBefore,
+      cursor: '/home/u/src/f29.txt',
+      filter: 'f2',
+    });
+    expect(treeEl().scrollTop).toBe(180);
   });
 });

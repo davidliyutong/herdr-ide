@@ -95,10 +95,13 @@ Plugins; `internal/plugins/files/settings.go`):
 - Directories are listed with the core's `GET /api/m/{id}/list` when they
   are expanded. Expanded directories are kept by path (at most 500; beyond
   that the oldest outside the root are forgotten), so going back to a
-  directory shows it as it was, listed again. Only the listings of the
+  directory shows it as it was, listed again. The tree's UI state per
+  machine and root (expanded directories, selection, cursor, filter and
+  scroll position; at most 32) is remembered across tab, panel, workspace
+  and machine switches and restored when returning. Only the listings of the
   root and the expanded directories below it are kept: another root, or
-  Collapse Folders, drops the rest. Another root also clears the selection
-  and the cursor, so a key never acts on rows the tree no longer shows. A
+  Collapse Folders, drops the rest. Moving to an unvisited root starts
+  without a selection so a key never acts on rows the tree no longer shows. A
   listing that fails keeps the entries listed before and is tried again by
   the next poll, whatever started it (its recorded time is forgotten). A
   failure alone says nothing: a machine busy unpacking an archive, or a
@@ -108,6 +111,10 @@ Plugins; `internal/plugins/files/settings.go`):
   goes with the next listing that succeeds. An empty directory's listing
   is an empty list, polled as any other. Folders come first
   (`files.sortOrder`), names sort as people sort them (`a2` before `a10`).
+- When the focused pane is an editor whose file lies within the tree's
+  root, the explorer highlights that row and auto-reveals it (expanding
+  parent directories as needed, selecting it and scrolling it into view)
+  without changing the root for files outside it.
 - The filter keeps entries whose names contain its text (case ignored) in
   the directories listed and kept, opens the folders that lead to them,
   and marks the text in each name.
@@ -190,6 +197,8 @@ Plugins; `internal/plugins/files/settings.go`):
   pages on other computers, have no such entry: the window would open on a
   screen nobody there sees. It runs a program, so read-only mode has none.
 - **Uploads** (`upload.ts`): files and folders dropped from the computer,
+  pasted onto the focused tree from the system clipboard (`files` / `items`
+  and desktop clipboard paths),
   or chosen with Upload Files… and Upload Folder… (the browser's dialog),
   go into the folder with their structure: a dropped folder is read with
   everything in it (`webkitGetAsEntry`, its readers' batches; items that
@@ -386,10 +395,13 @@ button.
 - Closing the pane (or its tab or workspace) with unsaved changes asks
   **Save**, **Don't Save** or **Cancel** first
   ([04](04-layout-and-keyboard.md)).
-- Unsaved text stays while the pane is not drawn (another tab, workspace or
-  machine shown, another pane zoomed, the plugin off): it is still asked
-  about and saved from the question, with the version it was loaded in, and
-  comes back with the pane ([27](27-plugins.md)).
+- Unsaved text and Monaco view state (`ICodeEditorViewState`: cursor,
+  selection, scroll position and folding) stay while the pane is not drawn
+  (another tab, workspace or machine shown, another pane zoomed, the
+  plugin off): unsaved text is still asked about and saved from the
+  question, with the version it was loaded in, and both text and view state
+  come back with the pane ([27](27-plugins.md)); closing the pane, its tab
+  or its workspace drops them.
 - **Show in Explorer** reveals the file in the tree; outside its root the
   tree stops following and shows the file's folder.
 

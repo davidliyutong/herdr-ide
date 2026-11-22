@@ -47,6 +47,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'files.upload.skip': '跳过',
   'files.upload.applyAll': '其余 {n} 个重名项也这样处理',
   'files.upload.unreadable': '有 {n} 个拖入的项目无法读取，已略过。',
+  'files.paste.unreadable': '有 {n} 个粘贴的项目无法读取，已略过。',
   'files.upload.tooMany': '一次最多上传 {max} 个文件和文件夹。',
   'files.rename': '重命名…',
   'files.trash': '移到废纸篓',

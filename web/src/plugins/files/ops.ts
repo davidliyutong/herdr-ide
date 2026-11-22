@@ -26,13 +26,23 @@ import { recheckGone } from './gone';
 import { quickDiff } from './quickDiff';
 import { isPluginOn } from '../registry';
 import { settingValue } from '../../settings';
-import { chooseFiles, droppedEntries, localPaths, pickedFiles, uploadInto } from './upload';
+import {
+  chooseFiles,
+  clipboardLocalPaths,
+  clipboardRoots,
+  droppedEntries,
+  localPaths,
+  pickedFiles,
+  readEntries,
+  uploadInto,
+} from './upload';
 import {
   baseName,
   join,
   parentOf,
   relativePath,
   reloadDirs,
+  revealVisiblePath,
   select,
   setClipboard,
   setEdit,
@@ -169,9 +179,7 @@ export function revealInExplorer(m: string, path: string) {
     setFollow(false);
     showRoot(m, parentOf(path));
   }
-  const root = useTree.getState().root!;
-  for (let d = parentOf(path); within(d, root) && d !== root; d = parentOf(d)) setExpanded(d, true);
-  select(path);
+  revealVisiblePath(path);
 }
 
 /** Show in Explorer of the editor pane. */
@@ -342,6 +350,37 @@ export async function dropFiles(m: string, dir: string, items: DataTransferItemL
   const { picked, unreadable } = await droppedEntries(items);
   if (unreadable) toast(t('files.upload.unreadable', { n: unreadable }), 'info');
   await uploadInto(m, dir, picked);
+}
+
+async function uploadRoots(m: string, dir: string, roots: Array<FileSystemEntry | File>) {
+  try {
+    const { picked, unreadable } = await readEntries(roots);
+    if (unreadable) toast(t('files.paste.unreadable', { n: unreadable }), picked.length ? 'info' : 'error');
+    if (!picked.length) return;
+    if (dir !== useTree.getState().root) setExpanded(dir, true);
+    await uploadInto(m, dir, picked);
+  } catch (e) {
+    toast(errorText(e));
+  }
+}
+
+/** Pastes locally copied files or clipboard items onto dir of machine m:
+ * copies in place on the desktop app's own machine when local paths exist,
+ * and uploads onto remote machines (or for non-file clipboard blobs). Must
+ * be called synchronously during the paste event so clipboardData entries are
+ * captured before the browser clears them. */
+export async function pasteFiles(m: string, dir: string, data: Pick<DataTransfer, 'items' | 'files'>) {
+  if (filesAreOn(m)) {
+    const { paths, fallback } = clipboardLocalPaths(data);
+    if (paths.length) {
+      if (dir !== useTree.getState().root) setExpanded(dir, true);
+      await copyInto(m, paths, dir);
+    }
+    if (fallback.length) await uploadRoots(m, dir, fallback);
+    return;
+  }
+  const roots = clipboardRoots(data);
+  if (roots.length) await uploadRoots(m, dir, roots);
 }
 
 /** Upload Files… and Upload Folder…: the browser's dialog, then the

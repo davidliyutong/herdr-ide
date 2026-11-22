@@ -26,6 +26,7 @@ export type Monaco = typeof MonacoNs;
 export type CodeEditor = MonacoNs.editor.IStandaloneCodeEditor;
 export type DiffEditor = MonacoNs.editor.IStandaloneDiffEditor;
 export type TextModel = MonacoNs.editor.ITextModel;
+export type EditorViewState = MonacoNs.editor.ICodeEditorViewState;
 
 let loading: Promise<Monaco> | undefined;
 

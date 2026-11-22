@@ -89,6 +89,15 @@ const editor = {
   },
   focus() {},
   dispose() {},
+  savedState: undefined as unknown,
+  restoredStates: [] as unknown[],
+  layout() {},
+  saveViewState() {
+    return this.savedState ?? null;
+  },
+  restoreViewState(s: unknown) {
+    this.restoredStates.push(s);
+  },
   onDidChangeModelContent(l: () => void) {
     this.model?.onDidChangeContent(l);
     return { dispose() {} };
@@ -126,9 +135,12 @@ vi.mock('../plugins/monaco', () => ({
 }));
 
 import { useStore } from '../state/store';
+import { useTerms } from '../state/terms';
 import type { MachineState } from '../lib/machine';
+import type { Layout } from '../term/layout';
 import { t } from '../i18n';
-import { CHECK_MS, EditorPane, loadText, versionOf } from '../plugins/files/EditorPane';
+import { CHECK_MS, EditorPane, keptViewState, loadText, resetViewStates, versionOf } from '../plugins/files/EditorPane';
+import { dropEdit } from '../unsaved';
 import { registerQuickDiff } from '../plugins/files/quickDiff';
 import { useGoneFiles } from '../plugins/files/gone';
 import { useSettings } from '../settings';
@@ -217,6 +229,10 @@ describe('EditorPane', () => {
     useStore.setState({ toasts: [] });
     editor.model = undefined;
     editor.save = undefined;
+    editor.savedState = undefined;
+    editor.restoredStates = [];
+    useTerms.setState({ machines: {} });
+    resetViewStates();
     stubFetch();
     const s = useStore.getState();
     s.setReadOnly(false);
@@ -596,6 +612,100 @@ describe('EditorPane', () => {
       file = { text: 'a\nb\n', size: 4, mtime: 2000 };
       await render('/home/u/other.txt');
       expect(editor.readOnly).toBe(false);
+    });
+  });
+
+  describe('view state across tab switches', () => {
+    const layoutWith = (...views: string[]): Layout => {
+      const leaf = (id: string) => ({ view: { id, plugin: 'files', kind: 'editor' } });
+      const root = views.length === 2 ? { split: 'horizontal', ratio: 0.5, children: views.map(leaf) } : leaf(views[0] ?? 'other');
+      return {
+        workspaces: [{ id: 'w', tabs: [{ root, focused: `view:${views[0] ?? 'other'}` }], selected: 0 }],
+        selected: 0,
+      } as unknown as Layout;
+    };
+
+    afterEach(() => {
+      dropEdit('m', 'view:v1');
+      resetViewStates();
+    });
+
+    it('persists and restores ICodeEditorViewState across tab switches for clean and dirty files', async () => {
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v1', 'v2') } } });
+      const viewState = {
+        cursorState: [{ inSelectionMode: true, selectionStart: { lineNumber: 12, column: 3 }, position: { lineNumber: 12, column: 8 } }],
+        viewState: {
+          scrollTop: 340,
+          scrollTopWithoutViewZones: 340,
+          firstPosition: { lineNumber: 10, column: 1 },
+          firstPositionDeltaTop: 0,
+        },
+        contributionsState: {},
+      };
+      await render('/home/u/notes.txt');
+      editor.savedState = viewState;
+
+      // Switch away to another tab (pane unmounts, stays in layout).
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toEqual(viewState);
+
+      // Switch back: view state is restored once ready.
+      root = createRoot(host);
+      await render('/home/u/notes.txt');
+      expect(editor.restoredStates).toEqual([viewState]);
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toBeUndefined();
+
+      // Dirty file also preserves view state alongside kept unsaved text.
+      const dirtyViewState = {
+        ...viewState,
+        viewState: { ...viewState.viewState, scrollTop: 620, scrollTopWithoutViewZones: 620 },
+      };
+      await act(async () => editor.model!.setValue('unsaved edit'));
+      editor.savedState = dirtyViewState;
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toEqual(dirtyViewState);
+
+      root = createRoot(host);
+      await render('/home/u/notes.txt');
+      expect(editor.model?.getValue()).toBe('unsaved edit');
+      expect(editor.restoredStates).toEqual([viewState, dirtyViewState]);
+    });
+
+    it('cleans up view state when the tab or pane closes', async () => {
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v1', 'v2') } } });
+      const viewState = { cursorState: [], viewState: { scrollTop: 150 }, contributionsState: {} };
+      await render('/home/u/notes.txt');
+      editor.savedState = viewState;
+
+      // Unmount while still in layout -> kept.
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toEqual(viewState);
+
+      // Closing the inactive tab/pane removes it from layout -> view state is cleaned up.
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v2') } } });
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toBeUndefined();
+
+      // Closing while mounted does not save view state.
+      root = createRoot(host);
+      await render('/home/u/notes.txt');
+      editor.savedState = viewState;
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v2') } } });
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toBeUndefined();
+    });
+
+    it('does not restore a previous file’s view state when a preview pane opens another file', async () => {
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v1') } } });
+      const viewState = { cursorState: [], viewState: { scrollTop: 220 }, contributionsState: {} };
+      await render('/home/u/notes.txt');
+      editor.savedState = viewState;
+      await act(async () => root.unmount());
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toEqual(viewState);
+
+      root = createRoot(host);
+      await render('/home/u/other.txt');
+      expect(editor.restoredStates).toEqual([]);
+      expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toBeUndefined();
     });
   });
 });

@@ -6,7 +6,7 @@
 // the computer that upload them. A click shows a file in Quick Look, a
 // double click (or Enter) opens it in the editor pane.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronsDownUp, Ellipsis, Eye, EyeOff, FilePlus, FolderPlus, LocateFixed, RefreshCw } from 'lucide-react';
 import { current, paneDirectory } from '../../actions';
 import { recentSpots } from '../../paneHistory';
@@ -29,24 +29,31 @@ import {
   baseName,
   collapseAll,
   crumbs,
+  getLastAutoRevealed,
+  getScrollMemory,
   navRows,
   parentOf,
   poll,
   refresh,
+  revealVisiblePath,
   rowIds,
   select,
   selectAllRows,
+  setClipboard,
   setEdit,
   setExpanded,
   setFilter,
   setFollow,
   setHidden,
+  setLastAutoRevealed,
+  setScrollMemory,
   showRoot,
   shownDirs,
   shownError,
   treeRows,
+  useReveal,
   useTree,
-  setClipboard,
+  within,
   type Row,
   type TreeState,
 } from './tree';
@@ -62,11 +69,13 @@ import {
   openPath,
   panelMenu,
   paste,
+  pasteFiles,
   quickLook,
   remove,
   rename,
   trash,
 } from './ops';
+import { hasClipboardFiles } from './upload';
 import { canDownload } from '../../download';
 import { downloadUrl } from '../../lib/files';
 import { startPolling } from './poller';
@@ -154,6 +163,7 @@ export function FilesPanel() {
   const m = useStore((s) => s.machineId);
   const home = useStore((s) => (s.machineId ? s.machines[s.machineId]?.info?.home : undefined));
   const readOnly = useStore((s) => s.readOnly);
+  const layout = useTerms((s) => (m ? s.machines[m]?.layout : undefined));
   // Both stores: the focused pane is in the layout, the shown machine in the UI's.
   const paneDir = useTerms(followedDir);
   const paneDir2 = useStore(followedDir);
@@ -162,11 +172,25 @@ export function FilesPanel() {
   const ws2 = useStore(shownWorkspace);
   const ws = ws1 ?? ws2;
   const s = useTree();
+  const revealTick = useReveal((r) => r.seq);
+  const revealTarget = useReveal((r) => r.path);
   useDecorationVersion((d) => d.v);
   const treeRef = useRef<HTMLDivElement>(null);
   const [drop, setDrop] = useState<string>();
   const view = useScrollView();
   const typeahead = useMemo(() => new TypeAhead(), []);
+
+  // The active editor file in the currently shown workspace/tab, if any.
+  const activeEditor = useMemo(() => {
+    if (!m || !layout) return undefined;
+    const selectedWs = L.selectedWorkspace(layout);
+    const tab = selectedWs?.tabs[selectedWs.selected];
+    if (!tab?.focused) return undefined;
+    const leaf = L.leafOf(tab.root, tab.focused);
+    if (!leaf || !L.isPluginLeaf(leaf) || leaf.view.plugin !== 'files' || leaf.view.kind !== 'editor') return undefined;
+    const path = typeof leaf.view.path === 'string' ? leaf.view.path : '';
+    return path ? { pane: tab.focused, path } : undefined;
+  }, [m, layout]);
 
   // The directories shown, for decoration providers.
   const shownKey = s.m === m && s.root ? shownDirs(s).sort().join('\n') : '';
@@ -181,6 +205,22 @@ export function FilesPanel() {
     if (m) showRoot(m, rootFor(useTree.getState(), m, ws, followed, home), ws);
   }, [m, ws, followed, s.follow, home]);
 
+  // Auto-reveal and highlight the active editor file when it changes (while
+  // staying within the current root, without changing the user's root).
+  useEffect(() => {
+    if (!activeEditor) {
+      setLastAutoRevealed(undefined);
+      return;
+    }
+    if (!m || s.m !== m || !s.root) return;
+    const key = `${m}\u0000${activeEditor.pane}\u0000${activeEditor.path}`;
+    if (key === getLastAutoRevealed()) return;
+    setLastAutoRevealed(key);
+    if (within(activeEditor.path, s.root) && activeEditor.path !== s.root) {
+      revealVisiblePath(activeEditor.path);
+    }
+  }, [m, s.m, s.root, activeEditor]);
+
   // While the panel is shown and the page visible, the shown directories
   // are checked for changes, one poll at a time.
   useEffect(() => startPolling(POLL_MS, poll), []);
@@ -193,13 +233,77 @@ export function FilesPanel() {
   const kinds = useMemo(() => new Map(rows.map((r) => [r.path, r.dir])), [rows]);
   const isDir = (p: string) => kinds.get(p) ?? p === s.root;
 
-  // Keep the cursor's row in view.
-  useEffect(() => {
+  // Scroll position memory across unmounts and tab/root switches.
+  const pendingScroll = useRef<number | undefined>(undefined);
+  const pendingReveal = useRef<string | undefined>(undefined);
+  const prevCursor = useRef<string | undefined>(s.cursor);
+  const prevRevealSeq = useRef(revealTick);
+
+  useLayoutEffect(() => {
+    if (!m || s.m !== m || !s.root) return;
+    const saved = getScrollMemory(m, s.root);
+    pendingScroll.current = saved;
+    prevCursor.current = useTree.getState().cursor;
     const el = treeRef.current;
-    if (!el || !s.cursor || !el.clientHeight) return;
-    const i = rows.findIndex((r) => r.path === s.cursor);
-    if (i >= 0) el.scrollTop = revealTop(el.scrollTop, el.clientHeight, i * ROW_HEIGHT, (i + 1) * ROW_HEIGHT);
-  }, [s.cursor, rows, ROW_HEIGHT]);
+    if (el && (saved === 0 || rows.length * ROW_HEIGHT >= saved)) {
+      el.scrollTop = saved;
+      view.ref(el);
+      pendingScroll.current = undefined;
+    }
+    return () => {
+      if (treeRef.current) setScrollMemory(m, s.root!, treeRef.current.scrollTop);
+    };
+    // Only run on (m, root) identity changes or unmount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [m, s.m, s.root]);
+
+  useLayoutEffect(() => {
+    const saved = pendingScroll.current;
+    const el = treeRef.current;
+    if (saved === undefined || !el) return;
+    const st = useTree.getState();
+    const ready =
+      saved === 0 ||
+      rows.length * ROW_HEIGHT >= saved ||
+      shownDirs(st).every((d) => !st.dirs[d]?.loading && (d === st.root || !!st.dirs[d]));
+    if (!ready) return;
+    el.scrollTop = saved;
+    view.ref(el);
+    pendingScroll.current = undefined;
+  }, [rows, ROW_HEIGHT, view.ref]);
+
+  const setTreeEl = useCallback(
+    (el: HTMLDivElement | null) => {
+      treeRef.current = el;
+      if (el && pendingScroll.current !== undefined && (pendingScroll.current === 0 || rows.length * ROW_HEIGHT >= pendingScroll.current)) {
+        el.scrollTop = pendingScroll.current;
+        pendingScroll.current = undefined;
+      }
+      view.ref(el);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view.ref],
+  );
+
+  // Keep the cursor's row (or an explicitly/auto-revealed row) in view.
+  useEffect(() => {
+    if (revealTick !== prevRevealSeq.current) {
+      prevRevealSeq.current = revealTick;
+      pendingReveal.current = revealTarget;
+      prevCursor.current = s.cursor;
+    } else if (s.cursor !== prevCursor.current) {
+      prevCursor.current = s.cursor;
+      pendingReveal.current = s.cursor;
+    }
+    const el = treeRef.current;
+    const target = pendingReveal.current;
+    if (!el || !target || !el.clientHeight) return;
+    const i = rows.findIndex((r) => r.path === target);
+    if (i >= 0) {
+      el.scrollTop = revealTop(el.scrollTop, el.clientHeight, i * ROW_HEIGHT, (i + 1) * ROW_HEIGHT);
+      pendingReveal.current = undefined;
+    }
+  }, [s.cursor, revealTick, revealTarget, rows, ROW_HEIGHT]);
 
   // The path's end stays in view: a narrow panel scrolls its start away
   // (as VS Code's breadcrumbs do) rather than squeezing every name.
@@ -273,9 +377,30 @@ export function FilesPanel() {
     } else if (mod && !ev.shiftKey && !ev.altKey && (ev.key === 'c' || ev.key === 'x') && sel.length) {
       handled();
       setClipboard({ m, paths: sel, cut: ev.key === 'x' });
-    } else if (mod && !ev.shiftKey && !ev.altKey && ev.key === 'v' && st.clipboard) {
+    } else if (mod && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === 'v' && st.clipboard?.m === m) {
       handled();
       void paste(m, row ? dirOf(row.path, row.dir) : root);
+    }
+  };
+
+  const onPaste = (ev: React.ClipboardEvent<HTMLDivElement>) => {
+    if (useStore.getState().readOnly) return;
+    if (ev.target instanceof HTMLElement && ev.target.closest('input, textarea, [contenteditable]')) return;
+    const st = useTree.getState();
+    const cur = st.cursor;
+    const row = cur ? rows.find((r) => r.path === cur) : undefined;
+    const dir = row ? dirOf(row.path, row.dir) : root;
+    const dt = ev.clipboardData;
+    if (hasClipboardFiles(dt)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void pasteFiles(m, dir, dt);
+      return;
+    }
+    if (st.clipboard?.m === m) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void paste(m, dir);
     }
   };
 
@@ -379,10 +504,11 @@ export function FilesPanel() {
     }
     const deco = decorationOf(row);
     const renaming = s.edit?.kind === 'rename' && s.edit.path === row.path;
+    const isActive = activeEditor?.path === row.path;
     return (
       <TreeRow
         key={row.path}
-        className="files-row"
+        className={isActive ? 'files-row active' : 'files-row'}
         style={style}
         depth={row.depth}
         expanded={row.dir ? row.expanded : undefined}
@@ -395,6 +521,7 @@ export function FilesPanel() {
         dropTarget={drop === row.path && row.dir}
         dimmed={cut.has(row.path)}
         data-path={row.path}
+        data-active={isActive ? 'true' : undefined}
         title={deco?.tooltip ? `${row.path}\n${deco.tooltip}` : row.path}
         draggable={!renaming && (!readOnly || canDownload(m))}
         onClick={(ev) => onRowClick(ev, row)}
@@ -527,17 +654,19 @@ export function FilesPanel() {
         }}
       />
       <div
-        ref={(el) => {
-          treeRef.current = el;
-          view.ref(el);
-        }}
+        ref={setTreeEl}
         className={`tree files-tree ${drop === root ? 'drop' : ''}`}
         role="tree"
         tabIndex={0}
         aria-label={t('files.title')}
         aria-multiselectable
         onKeyDown={onKey}
-        onScroll={view.onScroll}
+        onPaste={onPaste}
+        onScroll={(e) => {
+          pendingScroll.current = undefined;
+          setScrollMemory(m, root, e.currentTarget.scrollTop);
+          view.onScroll(e);
+        }}
         onContextMenu={(ev) => {
           if (ev.defaultPrevented) return;
           openMenu(ev, menuFor(m, [], isDir, treeRef.current));

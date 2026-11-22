@@ -50,6 +50,7 @@ export const en = {
   'files.upload.skip': 'Skip',
   'files.upload.applyAll': 'Do this for the other {n} names taken',
   'files.upload.unreadable': '{n} dropped items could not be read and are left out.',
+  'files.paste.unreadable': '{n} pasted items could not be read and are left out.',
   'files.upload.tooMany': 'At most {max} files and folders can be uploaded at once.',
   'files.rename': 'Rename…',
   'files.trash': 'Move to Trash',
