@@ -463,8 +463,8 @@ func newCapped(limit int) *capped { return &capped{limit: limit, over: make(chan
 
 func (c *capped) Write(p []byte) (int, error) {
 	if c.buf.Len()+len(p) > c.limit {
+		n, _ := c.buf.Write(p[:max(0, c.limit-c.buf.Len())])
 		if c.drop {
-			c.buf.Write(p[:max(0, c.limit-c.buf.Len())])
 			return len(p), nil
 		}
 		select {
@@ -472,7 +472,7 @@ func (c *capped) Write(p []byte) (int, error) {
 		default:
 			close(c.over)
 		}
-		return 0, io.ErrShortWrite
+		return n, io.ErrShortWrite
 	}
 	return c.buf.Write(p)
 }

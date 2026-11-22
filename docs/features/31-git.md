@@ -619,7 +619,9 @@ terminal; what the plugin adds is a way to reach it from the browser:
   shared range patches applied with `git apply`; the ignored paths of the
   status (an ignored folder as itself, files one by one, none of `.git`,
   `TestStatusIgnored`), output cut among them and their cap
-  (`TestParseStatusCut`, `TestKeepCut`), git without
+  (`TestParseStatusCut`, `TestKeepCut`), including a single read that
+  crosses the output limit keeping its prefix (`TestCappedKeepsPrefix`),
+  git without
   `--ignored=matching` (`TestStatusWithoutIgnoredMode`).
 - `internal/agent/plugins_git_test.go`: the core's routes are the agent's
   actions, reads as reads.
