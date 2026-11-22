@@ -443,6 +443,18 @@ const repoOfDir = create<{ dirs: Record<string, Found> }>(() => ({ dirs: {} }));
  * undefined while unknown, [] outside repositories; a failure that says
  * nothing about the directory (offline, busy, timeout) is shown with []
  * and asked again later. */
+export function rootsOf(info: RepoInfo): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of [info.root, ...(info.parents ?? []), ...(info.nested ?? [])]) {
+    if (r && !seen.has(r)) {
+      seen.add(r);
+      out.push(r);
+    }
+  }
+  return out;
+}
+
 export function useReposOf(m: string | undefined, dir: string | undefined): { roots?: string[]; error?: string } {
   const k = m && dir ? `${m}\u0000${dir}` : '';
   const found = repoOfDir((s) => (k ? s.dirs[k] : undefined));
@@ -454,7 +466,7 @@ export function useReposOf(m: string | undefined, dir: string | undefined): { ro
         .repo(m, dir)
         .then((info) => {
           if (gone) return;
-          repoOfDir.setState((s) => ({ dirs: { ...s.dirs, [k]: { roots: [info.root, ...(info.parents ?? [])] } } }));
+          repoOfDir.setState((s) => ({ dirs: { ...s.dirs, [k]: { roots: rootsOf(info) } } }));
           patch(m, info.root, () => ({ info }));
         })
         .catch((e) => {
@@ -472,7 +484,16 @@ export function useReposOf(m: string | undefined, dir: string | undefined): { ro
   return 'roots' in found ? { roots: found.roots } : { roots: [], error: found.error };
 }
 
+const forgetListeners = new Set<() => void>();
+
+/** Registers a callback run when forgetRepos clears cached repositories. */
+export function onForgetRepos(fn: () => void): () => void {
+  forgetListeners.add(fn);
+  return () => forgetListeners.delete(fn);
+}
+
 /** Forgets the repositories found for directories (to look again). */
 export function forgetRepos() {
   repoOfDir.setState({ dirs: {} });
+  for (const fn of forgetListeners) fn();
 }

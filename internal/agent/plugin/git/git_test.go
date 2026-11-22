@@ -1577,3 +1577,214 @@ func TestWorktreeBlobLinks(t *testing.T) {
 		}
 	}
 }
+
+// Submodules and nested repositories inside a parent repository are
+// discovered in Nested, list their enclosing repositories in Parents, and
+// run every git action against the selected repository without parent
+// interference.
+func TestNestedAndSubmodules(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+
+	// Submodule source repo.
+	subSrc := filepath.Join(env.Home, "sub-src")
+	if err := os.Mkdir(subSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subSrc, _ = filepath.EvalSymlinks(subSrc)
+	sh(t, subSrc, "init", "-q", "-b", "main")
+	sh(t, subSrc, "config", "user.name", "Sub")
+	sh(t, subSrc, "config", "user.email", "sub@example.com")
+	write(t, filepath.Join(subSrc, "src/s.txt"), "sub1\n")
+	sh(t, subSrc, "add", "src/s.txt")
+	sh(t, subSrc, "commit", "-q", "-m", "sub init")
+
+	// Add submodule to parent repo.
+	sh(t, dir, "-c", "protocol.file.allow=always", "submodule", "-q", "add", subSrc, "libs/sub")
+	sh(t, dir, "commit", "-q", "-m", "add submodule")
+	subDir := filepath.Join(dir, "libs", "sub")
+
+	// Independent nested repo and a deeper nested repo inside it.
+	indep := filepath.Join(dir, "packages", "indep")
+	if err := os.MkdirAll(indep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, indep, "init", "-q", "-b", "main")
+	sh(t, indep, "config", "user.name", "Indep")
+	sh(t, indep, "config", "user.email", "indep@example.com")
+	write(t, filepath.Join(indep, "indep.txt"), "i\n")
+	sh(t, indep, "add", "indep.txt")
+	sh(t, indep, "commit", "-q", "-m", "indep init")
+
+	deep := filepath.Join(indep, "deep")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, deep, "init", "-q", "-b", "main")
+	sh(t, deep, "config", "user.name", "Deep")
+	sh(t, deep, "config", "user.email", "deep@example.com")
+	write(t, filepath.Join(deep, "d.txt"), "d\n")
+	sh(t, deep, "add", "d.txt")
+	sh(t, deep, "commit", "-q", "-m", "deep init")
+
+	// Gitignored nested repository inside parent.
+	write(t, filepath.Join(dir, ".gitignore"), "ignored-nest/\n")
+	sh(t, dir, "add", ".gitignore")
+	sh(t, dir, "commit", "-q", "-m", "ignore nest")
+	ignoredNest := filepath.Join(dir, "ignored-nest")
+	if err := os.MkdirAll(ignoredNest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, ignoredNest, "init", "-q", "-b", "main")
+
+	var info Repo
+	ok(t, env, "repo", Params{Path: dir}, &info)
+	wantNested := []string{ignoredNest, subDir, indep, deep}
+	// Lexical order.
+	if info.Root != dir || len(info.Parents) != 0 {
+		t.Fatalf("parent repo %+v", info)
+	}
+	for _, w := range wantNested {
+		found := false
+		for _, got := range info.Nested {
+			if got == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing nested %q in %v", w, info.Nested)
+		}
+	}
+
+	// Querying inside the submodule resolves the submodule as Root and
+	// parent as Parents, with gitDir inside parent's .git/modules.
+	var subInfo Repo
+	ok(t, env, "repo", Params{Path: filepath.Join(subDir, "src")}, &subInfo)
+	if subInfo.Root != subDir || len(subInfo.Parents) != 1 || subInfo.Parents[0] != dir {
+		t.Fatalf("sub repo %+v", subInfo)
+	}
+	if !strings.HasSuffix(subInfo.GitDir, filepath.Join(".git", "modules", "libs", "sub")) {
+		t.Errorf("sub gitDir %q", subInfo.GitDir)
+	}
+
+	// Operations in the submodule stay isolated from parent.
+	var w0, w1 Watch
+	ok(t, env, "watch", Params{Repo: subDir}, &w0)
+	time.Sleep(20 * time.Millisecond)
+	write(t, filepath.Join(subDir, "src", "s.txt"), "sub2\n")
+	write(t, filepath.Join(subDir, "extra.txt"), "e\n")
+
+	var subSt Status
+	ok(t, env, "status", Params{Repo: subDir}, &subSt)
+	if len(subSt.Files) != 2 {
+		t.Fatalf("sub status %+v", subSt)
+	}
+	var parentSt Status
+	ok(t, env, "status", Params{Repo: dir}, &parentSt)
+	foundSubEntry := false
+	for _, f := range parentSt.Files {
+		if f.Path == "src/s.txt" || f.Path == "extra.txt" {
+			t.Errorf("submodule file leaked into parent status: %+v", f)
+		}
+		if f.Path == "libs/sub" && f.Submodule {
+			foundSubEntry = true
+		}
+	}
+	if !foundSubEntry {
+		t.Errorf("parent status missing dirty submodule entry: %+v", parentSt.Files)
+	}
+
+	ok(t, env, "stage", Params{Repo: subDir, Paths: []string{"src/s.txt", "extra.txt"}}, nil)
+	ok(t, env, "watch", Params{Repo: subDir}, &w1)
+	if w1.Token == w0.Token {
+		t.Error("submodule watch token did not change after staging")
+	}
+	ok(t, env, "commit", Params{Repo: subDir, Message: "sub commit"}, nil)
+	var subLog Log
+	ok(t, env, "log", Params{Repo: subDir}, &subLog)
+	if len(subLog.Commits) != 2 || subLog.Commits[0].Subject != "sub commit" {
+		t.Errorf("sub log %+v", subLog)
+	}
+	var parentLog Log
+	ok(t, env, "log", Params{Repo: dir}, &parentLog)
+	for _, c := range parentLog.Commits {
+		if c.Subject == "sub commit" {
+			t.Errorf("sub commit leaked into parent log")
+		}
+	}
+
+	// Branch & stash in submodule.
+	ok(t, env, "branchCreate", Params{Repo: subDir, Name: "sub-branch", Checkout: true}, nil)
+	write(t, filepath.Join(subDir, "extra.txt"), "stashed\n")
+	ok(t, env, "stashPush", Params{Repo: subDir, Message: "sub stash"}, nil)
+	var stashes []Stash
+	ok(t, env, "stashes", Params{Repo: subDir}, &stashes)
+	if len(stashes) != 1 || !strings.Contains(stashes[0].Message, "sub stash") {
+		t.Errorf("sub stashes %+v", stashes)
+	}
+	ok(t, env, "stashPop", Params{Repo: subDir, Index: 0, Hash: stashes[0].Hash}, nil)
+
+	// Independent nested repo.
+	var indepInfo Repo
+	ok(t, env, "repo", Params{Path: indep}, &indepInfo)
+	if indepInfo.Root != indep || len(indepInfo.Parents) != 1 || indepInfo.Parents[0] != dir || len(indepInfo.Nested) != 1 || indepInfo.Nested[0] != deep {
+		t.Errorf("indep info %+v", indepInfo)
+	}
+}
+
+// Nested repository scanning ignores symlinks, symlink loops, deep trees
+// past maxNestedDepth, node_modules, and malicious .gitmodules paths.
+func TestNestedScanBoundsAndSymlinks(t *testing.T) {
+	env := testEnv(t)
+	dir := newRepo(t, env)
+
+	outside := filepath.Join(env.Home, "outside-repo")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, outside, "init", "-q", "-b", "main")
+
+	// Symlink to an outside repo and a symlink loop inside dir.
+	if err := os.Symlink(outside, filepath.Join(dir, "link-out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".", filepath.Join(dir, "loop")); err != nil {
+		t.Fatal(err)
+	}
+	// A symlinked .git inside a subdirectory must not be reported.
+	fakeSym := filepath.Join(dir, "fake-sym")
+	if err := os.Mkdir(fakeSym, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, ".git"), filepath.Join(fakeSym, ".git")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Too-deep nested repo past maxNestedDepth.
+	deep := dir
+	for i := 0; i < maxNestedDepth+2; i++ {
+		deep = filepath.Join(deep, fmt.Sprintf("d%d", i))
+	}
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, deep, "init", "-q", "-b", "main")
+
+	// Valid nested repo alongside node_modules noise.
+	for i := 0; i < 20; i++ {
+		os.MkdirAll(filepath.Join(dir, "node_modules", fmt.Sprintf("pkg%d", i)), 0o755)
+	}
+	app := filepath.Join(dir, "packages", "app")
+	os.MkdirAll(app, 0o755)
+	sh(t, app, "init", "-q", "-b", "main")
+
+	// Malicious .gitmodules trying path traversal and symlink traversal.
+	write(t, filepath.Join(dir, ".gitmodules"), "[submodule \"bad1\"]\n\tpath = ../outside-repo\n[submodule \"bad2\"]\n\tpath = link-out\n")
+
+	var info Repo
+	ok(t, env, "repo", Params{Path: dir}, &info)
+	if !reflect.DeepEqual(info.Nested, []string{app}) {
+		t.Errorf("nested %v, want [%s]", info.Nested, app)
+	}
+}

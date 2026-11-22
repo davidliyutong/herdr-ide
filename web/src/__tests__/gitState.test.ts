@@ -91,7 +91,8 @@ describe('following a repository', () => {
           if (repoError) return json({ error: repoError, message: repoError }, 502);
           const p = url.searchParams.get('path')!;
           if (p.startsWith('/plain')) return json({ error: 'not_a_repo', message: 'no' }, 404);
-          return json({ root: p.startsWith(root) ? root : p, ahead: 0, behind: 0, remotes: [] });
+          const nested = p === root && p.endsWith('/with-nested') ? [`${root}/sub`] : undefined;
+          return json({ root: p.startsWith(root) ? root : p, ahead: 0, behind: 0, remotes: [], nested });
         }
       }
       return json({});
@@ -327,6 +328,24 @@ describe('following a repository', () => {
     repoError = undefined;
     await advance(RETRY_MS);
     expect(leaseCount()).toEqual({ held: 2, watching: 2 });
+    await act(async () => useShownDirs.setState({ m: undefined, dirs: [] }));
+    expect(leaseCount()).toEqual({ held: 0, watching: 0 });
+  });
+
+  it('includes nested repositories in useReposOf and watches them in follow leases', async () => {
+    root = `${root}/with-nested`;
+    const host = document.createElement('div');
+    const r = createRoot(host);
+    const Probe = () => createElement('span', null, JSON.stringify(useReposOf('m', root)));
+    await act(async () => r.render(createElement(Probe)));
+    await advance(0);
+    expect(JSON.parse(host.textContent!)).toEqual({ roots: [root, `${root}/sub`] });
+    await act(async () => r.unmount());
+
+    await act(async () => useShownDirs.setState({ m: 'm', dirs: [root] }));
+    await advance(0);
+    expect(leaseCount()).toEqual({ held: 1, watching: 1 });
+    expect(count('status', `${root}/sub`)).toBeGreaterThanOrEqual(1);
     await act(async () => useShownDirs.setState({ m: undefined, dirs: [] }));
     expect(leaseCount()).toEqual({ held: 0, watching: 0 });
   });

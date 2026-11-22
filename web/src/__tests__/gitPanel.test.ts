@@ -87,6 +87,12 @@ describe('grouping', () => {
     expect(Object.keys(decorate([{ root: ROOT, files }], `${ROOT}/src`)).sort()).toEqual(['a.ts', 'new.ts']);
     expect(decorate([{ root: ROOT, files }], '/home/u')).toEqual({ repo: expect.objectContaining({ color: 'var(--ds-git-conflict)' }) });
     expect(decorate([{ root: ROOT, files }], '/elsewhere')).toEqual({});
+    // A tracked submodule entry is decorated as a folder ('•'), not a file letter.
+    const subDec = decorate(
+      [{ root: ROOT, files: [{ path: 'libs/sub', x: '.', y: 'M', kind: 'changed', submodule: true }] }],
+      `${ROOT}/libs`,
+    );
+    expect(subDec['sub']).toEqual({ color: 'var(--ds-git-modified)', badge: '•', tooltip: t('git.mark.modified') });
   });
 
   // What git ignores is muted, without a letter: the paths the status
@@ -127,6 +133,7 @@ describe('GitPanel', () => {
   const posts: Array<{ action: string; body: Record<string, unknown> }> = [];
   let status: StatusFile[];
   let parents: string[] | undefined;
+  let nested: string[] | undefined;
   /** The repository's remotes and the branch's upstream. */
   let remotes: string[];
   let upstream: string | undefined;
@@ -145,6 +152,7 @@ describe('GitPanel', () => {
     logs.length = 0;
     status = files.slice(0, 4);
     parents = undefined;
+    nested = undefined;
     remotes = ['origin'];
     upstream = 'origin/main';
     logImpl = undefined;
@@ -173,10 +181,22 @@ describe('GitPanel', () => {
               remotes,
               remoteUrls: Object.fromEntries(remotes.map((r) => [r, `https://example.com/${r}.git`])),
               parents,
+              nested,
             }),
           );
-        case 'status':
-          return new Response(JSON.stringify({ branch: 'main', head: 'h1', upstream, ahead: 1, behind: 0, files: status }));
+        case 'status': {
+          const repo = url.searchParams.get('repo');
+          return new Response(
+            JSON.stringify({
+              branch: repo === ROOT ? 'main' : 'sub-branch',
+              head: 'h1',
+              upstream,
+              ahead: 1,
+              behind: 0,
+              files: repo === ROOT ? status : [{ path: 'sub.txt', x: '.', y: 'M', kind: 'changed' }],
+            }),
+          );
+        }
         case 'log': {
           if (logImpl) return logImpl(url.searchParams);
           logs.push(url.searchParams);
@@ -653,6 +673,33 @@ describe('GitPanel', () => {
       vi.useRealTimers();
       useSettings.setState((st) => ({ values: { ...st.values, 'git.autoFetch': { value: 0, source: 'global' } } }));
     }
+  });
+
+  it('shows nested repositories in the picker and switches from submodule rows', async () => {
+    const SUB = `${ROOT}/libs/sub`;
+    nested = [SUB];
+    status = [...files.slice(0, 1), { path: 'libs/sub', x: '.', y: 'M', kind: 'changed', submodule: true }];
+    await act(async () => button(t('git.refresh'))!.click());
+    await flush();
+    expect(host.querySelector('.git-repo-pick')).not.toBeNull();
+    // Submodule row offers Open Repository instead of Open File.
+    const subRow = rowOf(t('git.group.changes'), 'sub');
+    expect(button(t('git.openFile'), subRow)).toBeUndefined();
+    expect(button(t('git.openRepo'), subRow)).toBeDefined();
+    await act(async () => button(t('git.openRepo'), subRow)!.click());
+    await flush();
+    expect(host.querySelector('.git-title')!.textContent).toBe('sub');
+    expect(host.querySelector('.git-branch')!.textContent).toContain('sub-branch');
+    // Staging acts against the selected nested repository.
+    await act(async () => button(t('git.stage'), rowOf(t('git.group.changes'), 'sub.txt'))!.click());
+    await flush();
+    expect(posts[0]).toEqual({ action: 'stage', body: { paths: ['sub.txt'], repo: SUB } });
+    // Picker switches back to parent repository.
+    await act(async () => host.querySelector<HTMLButtonElement>('.git-repo-pick')!.click());
+    const parentRow = [...document.querySelectorAll<HTMLElement>('.picker-row')].find((r) => r.textContent?.startsWith('repo'))!;
+    await act(async () => parentRow.click());
+    await flush();
+    expect(host.querySelector('.git-title')!.textContent).toBe('repo');
   });
 
   it('says how long ago a commit was', () => {

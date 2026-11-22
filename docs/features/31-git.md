@@ -45,9 +45,12 @@ repository. The web side is `web/src/plugins/git`, the core's
 vector the agent builds: no shell, no option from the request.
 
 - The repository is its top level (`repo` finds it from a directory with
-  `rev-parse --show-toplevel`, and the top levels of repositories it is
-  nested in); other actions refuse a directory without `.git`
-  (`not_a_repo`). A directory reached through a link to a directory gets
+  `rev-parse --show-toplevel`, the top levels of enclosing repositories
+  it is nested in as `parents`, and repositories nested inside it — git
+  submodules from `.gitmodules` and nested `.git` directories or files —
+  as `nested` with a bounded breadth-first scan that never follows
+  symlinks and skips `node_modules`); other actions refuse a directory
+  without `.git` (`not_a_repo`). A directory reached through a link to a directory gets
   the top level spelled through that link, as the explorer and editors
   show it (the directory without git's `--show-prefix`, when that is the
   same directory as git's physical top level; else git's). Paths are
@@ -111,7 +114,7 @@ vector the agent builds: no shell, no option from the request.
 
 | Read | What it answers |
 | --- | --- |
-| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes with their fetch URLs (`remote -v`) without a URL's user information (also with a raw `/`, `?`, `#` or `@` in its password), query and fragment (tokens are often put there: `?access_token=`) or an scp-like address's user with a password, enclosing repositories. |
+| `repo` | `?path=` a directory: top level, git directories, branch (or detached) and HEAD, upstream with ahead/behind, an operation in progress (`merge`, `rebase`, `cherryPick`, `revert`), remotes with their fetch URLs (`remote -v`) without a URL's user information (also with a raw `/`, `?`, `#` or `@` in its password), query and fragment (tokens are often put there: `?access_token=`) or an scp-like address's user with a password, enclosing repositories (`parents`), and nested repositories or submodules (`nested`). |
 | `status` | `status --porcelain=v2 -z --branch --untracked-files=all --ignored=matching`: files with the index's and the working tree's letters, renames with their old path, conflicts, untracked files; branch, upstream, ahead/behind; apart from them (`ignored`) the paths git ignores, a directory an ignore pattern matches as itself with a trailing `/` (git neither lists nor walks what is inside, so `node_modules/` costs one entry), else each file, at most 20 000 (`ignoredTruncated`). git prints the ignored paths last: output over the run's limit among them keeps the changes and cuts those (`ignoredTruncated`); git before 2.16, which refuses `--ignored=matching`, is asked without it from then on (nothing is ignored). A file whose working tree side differs from the index (and an untracked or conflicted one) has that file's modification time and size (`lstat`, nothing read), which move when it is edited again while its letters stay. |
 | `log` | `log --date-order` of the branches, tags and HEAD (with `remotes=1` the remote branches; `branch=` names some instead; on a branch without commits yet, the other branches' commits), pages of 300 (at most 1000, `skip=`): hash, parents, author, e-mail, date, subject; with the first page the refs (`for-each-ref`, tags peeled), the stashes, HEAD and its branch. |
 | `show` | `rev=` a commit's message and committer and its files (status, lines added and deleted, binary) against its parent `parent=` (1 by default; the empty tree for a root commit), or with `rev2=` the files between two commits. |
@@ -150,15 +153,18 @@ the answer through.
 **Panel** (`GitPanel.tsx`), as VS Code's Source Control view:
 
 - The repository of the focused pane's directory (a terminal's, a VS Code
-  pane's folder, the workspace's), kept while another pane (an editor, a
-  diff, the graph) has the focus in the same workspace of the same
-  machine; a panel drawn afresh then (the panel opened as a pane, in a
-  tab of its own), or the panel after the machine or workspace shown
-  changed, takes that of the terminal or VS Code pane of the workspace
-  focused last (`recentDirectory`): the panel belongs to the machine and
-  workspace shown, and a machine is never asked about another one's
-  directory. A searchable list (`Picker`) when the directory is in nested
-  repositories, whose choice is kept. A directory in no repository is
+  pane's folder, an editor's or preview's file directory, a Git diff or
+  graph pane's repository, or the workspace's), kept while another pane
+  without a directory (such as a browser or panel pane) has the focus in
+  the same workspace of the same machine; a panel drawn afresh then (the
+  panel opened as a pane, in a tab of its own), or the panel after the
+  machine or workspace shown changed, takes that of the pane with a
+  directory of the workspace focused last (`gitRecentDir`): the panel
+  belongs to the machine and workspace shown, and a machine is never asked
+  about another one's directory. A searchable list (`Picker`) when
+  repositories are nested (enclosing `parents` or inside `nested`), whose
+  choice is kept; submodule and untracked nested repository rows also
+  offer **Open Repository** to switch directly to them. A directory in no repository is
   remembered until **Refresh**; a failure that says nothing about it
   (offline, busy, timeout) is asked again 10 s later. While a directory's
   repository is asked, or after such a failure, the panel keeps showing
@@ -592,7 +598,9 @@ terminal; what the plugin adds is a way to reach it from the browser:
   change's arguments, each read on a repository with a merge, a rename, a
   tag, a stash, staged, modified, untracked and binary files; a conflict
   (state, unmerged status, abort), a detached HEAD, a linked worktree
-  (`.git` file, `watch`), nested repositories, one without commits
+  (`.git` file, `watch`), nested repositories and submodules (`TestNested`,
+  `TestNestedAndSubmodules`, bounded scanning and symlink safety in
+  `TestNestedScanBoundsAndSymlinks`), one without commits
   (unstaging a file changed after it was staged) and an untracked one
   inside another (`dir/` staged, unstaged, not deleted); the log on a
   branch without commits (`TestLogUnbornBranch`); a top level through a

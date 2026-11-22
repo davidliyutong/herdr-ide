@@ -10,7 +10,7 @@ import { useShownDirs } from '../files/decorations';
 import { registerQuickDiff } from '../files/quickDiff';
 import { gitApi, noRepo } from './api';
 import { openDiff } from './ops';
-import { repoKey, RETRY_MS, useGit, watchRepo } from './state';
+import { onForgetRepos, repoKey, RETRY_MS, useGit, watchRepo } from './state';
 
 /** How long a directory known not to be in a repository is not asked again. */
 export const NOT_REPO_MS = 60_000;
@@ -20,7 +20,8 @@ const MAX_ORIGINALS = 32;
 const dirname = (p: string) => (p.lastIndexOf('/') > 0 ? p.slice(0, p.lastIndexOf('/')) : '/');
 const inside = (p: string, root: string) => p === root || p.startsWith(root === '/' ? '/' : root + '/');
 
-const known = new Map<string, { root?: string; at: number; pending?: Promise<string | undefined> }>();
+const known = new Map<string, { root?: string; nested?: string[]; at: number; pending?: Promise<string | undefined> }>();
+onForgetRepos(() => known.clear());
 
 /** The root of the repository a directory of m is in, undefined when it
  * is in none (remembered for NOT_REPO_MS). A failure that says nothing
@@ -33,7 +34,7 @@ export function repoOf(m: string, dir: string): Promise<string | undefined> {
   if (c && (c.root || Date.now() - c.at < NOT_REPO_MS)) return Promise.resolve(c.root);
   const pending = gitApi.repo(m, dir).then(
     (info) => {
-      known.set(key, { root: info.root, at: Date.now() });
+      known.set(key, { root: info.root, nested: info.nested, at: Date.now() });
       return info.root as string | undefined;
     },
     (e: unknown) => {
@@ -69,7 +70,11 @@ function begin(l: Lease) {
   const gen = ++l.gen;
   repoOf(l.m, l.dir).then(
     (root) => {
-      if (l.gen === gen && root) l.stop = watchRepo(l.m, root);
+      if (l.gen !== gen || !root) return;
+      const c = known.get(`${l.m}\u0000${l.dir}`);
+      const roots = [root, ...(c?.nested ?? [])];
+      const stops = [...new Set(roots)].map((r) => watchRepo(l.m, r));
+      l.stop = () => stops.forEach((s) => s());
     },
     () => {
       if (l.gen === gen) l.timer = setTimeout(() => l.gen === gen && begin(l), RETRY_MS);
