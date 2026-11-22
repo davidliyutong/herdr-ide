@@ -8,12 +8,11 @@ import type { PluginDef } from '../api';
 import { useStore } from '../../state/store';
 import { t } from '../../i18n';
 import { registerFileDecorations } from '../files/decorations';
-import { followedDir } from '../files/FilesPanel';
 import { gitApi, errorText } from './api';
 import { gitDecorations } from './decorations';
 import './follow';
 import { DiffPane, diffOf, diffTitle } from './DiffPane';
-import { GitPanel } from './GitPanel';
+import { GitPanel, gitFollowedDir, gitRecentDir } from './GitPanel';
 import { GraphPane } from './GraphPane';
 import { baseName, join, openGraph } from './ops';
 import { GitPrompt } from './prompt';
@@ -25,7 +24,7 @@ async function graphOfFocused() {
   const s = useStore.getState();
   const m = s.machineId;
   if (!m) return;
-  const dir = followedDir() ?? s.machines[m]?.info?.home;
+  const dir = gitFollowedDir() ?? gitRecentDir() ?? s.machines[m]?.info?.home;
   if (!dir) return;
   try {
     const info = await gitApi.repo(m, dir);

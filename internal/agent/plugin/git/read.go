@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -47,6 +48,9 @@ type Repo struct {
 	// Parents are the top levels of the repositories this one is nested
 	// in, innermost first.
 	Parents []string `json:"parents,omitempty"`
+	// Nested are the top levels of repositories inside this one
+	// (submodules and nested git repositories), in lexical order.
+	Nested []string `json:"nested,omitempty"`
 }
 
 // repoInfo answers the repository dir is in.
@@ -81,7 +85,150 @@ func repoInfo(ctx context.Context, env *plugin.Env, dir string) (*Repo, error) {
 		info.Parents = append(info.Parents, outer)
 		root, up = outer, filepath.Dir(outer)
 	}
+	info.Nested = nestedRepos(ctx, info.Root)
 	return info, nil
+}
+
+const (
+	maxNestedDepth = 8
+	maxScanDirs    = 2000
+	maxNestedRepos = 64
+)
+
+// nestedRepos finds repositories inside root (git submodules and nested
+// .git directories/files) with bounded breadth-first scanning and without
+// following symlinks so deep/huge trees or symlink loops cannot hang or
+// escape root.
+func nestedRepos(ctx context.Context, root string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(p string) {
+		if !seen[p] && len(out) < maxNestedRepos {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, p := range gitmodulesPaths(root) {
+		cand := filepath.Join(root, filepath.FromSlash(p))
+		if noSymlinkPath(root, p) && isGitRoot(cand) {
+			add(cand)
+		}
+	}
+	type item struct {
+		dir   string
+		depth int
+	}
+	queue := []item{{root, 0}}
+	scanned := 0
+	for len(queue) > 0 && scanned < maxScanDirs && len(out) < maxNestedRepos {
+		if ctx.Err() != nil {
+			break
+		}
+		cur := queue[0]
+		queue = queue[1:]
+		entries, err := os.ReadDir(cur.dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if ctx.Err() != nil || scanned >= maxScanDirs || len(out) >= maxNestedRepos {
+				break
+			}
+			if e.Type()&fs.ModeSymlink != 0 || !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if name == ".git" || name == "node_modules" {
+				continue
+			}
+			scanned++
+			sub := filepath.Join(cur.dir, name)
+			if isGitRoot(sub) {
+				add(sub)
+			}
+			if cur.depth+1 < maxNestedDepth {
+				queue = append(queue, item{sub, cur.depth + 1})
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// gitmodulesPaths reads relative submodule paths from root/.gitmodules
+// without following a symlink or running git.
+func gitmodulesPaths(root string) []string {
+	gm := filepath.Join(root, ".gitmodules")
+	fi, err := os.Lstat(gm)
+	if err != nil || !fi.Mode().IsRegular() {
+		return nil
+	}
+	b, err := readSmall(gm, 256<<10)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "path") {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "path"))
+		val, ok := strings.CutPrefix(rest, "=")
+		if !ok {
+			continue
+		}
+		val = strings.TrimSpace(val)
+		if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+			if u, err := strconv.Unquote(val); err == nil {
+				val = u
+			} else {
+				val = val[1 : len(val)-1]
+			}
+		}
+		val = strings.TrimSuffix(val, "/")
+		if rel, err := cleanPath(val); err == nil {
+			paths = append(paths, rel)
+		}
+	}
+	return paths
+}
+
+// noSymlinkPath reports whether every component of rel below root is a
+// real directory (no symlink on the way).
+func noSymlinkPath(root, rel string) bool {
+	cur := root
+	for _, part := range strings.Split(rel, "/") {
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		if err != nil || fi.Mode()&fs.ModeSymlink != 0 || !fi.IsDir() {
+			return false
+		}
+	}
+	return true
+}
+
+// isGitRoot reports whether dir has a non-symlink .git directory or
+// gitdir file pointing to a git directory with HEAD.
+func isGitRoot(dir string) bool {
+	dot := filepath.Join(dir, ".git")
+	fi, err := os.Lstat(dot)
+	if err != nil || fi.Mode()&fs.ModeSymlink != 0 {
+		return false
+	}
+	if fi.IsDir() {
+		_, err := os.Lstat(filepath.Join(dot, "HEAD"))
+		return err == nil
+	}
+	if !fi.Mode().IsRegular() {
+		return false
+	}
+	gd, _ := gitDirs(dir)
+	if gd == "" {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(gd, "HEAD"))
+	return err == nil
 }
 
 // toplevel is the top level of the repository dir is in, "" when none, as
@@ -440,20 +587,20 @@ func parseStatus(out []byte, cut bool) (st *Status, whole bool) {
 			// 1 XY sub mH mI mW hH hI path
 			f := strings.SplitN(rec, " ", 9)
 			if len(f) == 9 {
-				st.Files = append(st.Files, File{Path: f[8], X: f[1][:1], Y: f[1][1:], Kind: "changed", Submodule: f[2][0] == 'S'})
+				st.Files = append(st.Files, File{Path: f[8], X: f[1][:1], Y: f[1][1:], Kind: "changed", Submodule: len(f[2]) > 0 && f[2][0] == 'S'})
 			}
 		case '2':
 			// 2 XY sub mH mI mW hH hI Xscore path, then the original path
 			f := strings.SplitN(rec, " ", 10)
 			if len(f) == 10 && i+1 < len(recs) {
 				i++
-				st.Files = append(st.Files, File{Path: f[9], Orig: recs[i], X: f[1][:1], Y: f[1][1:], Kind: "renamed", Submodule: f[2][0] == 'S'})
+				st.Files = append(st.Files, File{Path: f[9], Orig: recs[i], X: f[1][:1], Y: f[1][1:], Kind: "renamed", Submodule: len(f[2]) > 0 && f[2][0] == 'S'})
 			}
 		case 'u':
 			// u XY sub m1 m2 m3 mW h1 h2 h3 path
 			f := strings.SplitN(rec, " ", 11)
 			if len(f) == 11 {
-				st.Files = append(st.Files, File{Path: f[10], X: f[1][:1], Y: f[1][1:], Kind: "unmerged"})
+				st.Files = append(st.Files, File{Path: f[10], X: f[1][:1], Y: f[1][1:], Kind: "unmerged", Submodule: len(f[2]) > 0 && f[2][0] == 'S'})
 			}
 		case '?':
 			st.Files = append(st.Files, File{Path: rec[2:], X: "?", Y: "?", Kind: "untracked"})
@@ -1107,7 +1254,7 @@ func gitDirs(root string) (gitDir, common string) {
 	}
 	gitDir = dot
 	if !fi.IsDir() {
-		b, err := os.ReadFile(dot)
+		b, err := readSmall(dot, 64<<10)
 		if err != nil {
 			return "", ""
 		}
@@ -1123,7 +1270,7 @@ func gitDirs(root string) (gitDir, common string) {
 		gitDir = filepath.Clean(d)
 	}
 	common = gitDir
-	if b, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+	if b, err := readSmall(filepath.Join(gitDir, "commondir"), 64<<10); err == nil {
 		c := strings.TrimSpace(string(b))
 		if !filepath.IsAbs(c) {
 			c = filepath.Join(gitDir, c)

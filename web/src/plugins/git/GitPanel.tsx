@@ -55,7 +55,9 @@ import { FileIcon } from '../../fileIcons';
 import { Picker } from '../../components/Picker';
 import { confirmSync, fetchFrom, pickBranch, pullFrom, pushTo } from './pickers';
 import { followedDir, recentDirectory } from '../files/FilesPanel';
-import { current } from '../../actions';
+import { current, paneDirectory } from '../../actions';
+import { recentSpots } from '../../paneHistory';
+import * as L from '../../term/layout';
 import { gitApi, type StatusFile } from './api';
 import { folderOf, leafName, letterColor, letterMark } from './shared';
 import { baseName, createBranch, discard, join, openGraph, openStatusDiff, short, stashPush } from './ops';
@@ -200,37 +202,97 @@ function useShownRepos(m: string | undefined, place: string, dir: string | undef
   return last ? { roots: last } : found;
 }
 
+/** Directory a pane targets for Git: a Git diff/graph pane's repository,
+ * else the pane's directory (terminal, VS Code, file editor, preview). */
+function gitPaneDir(m: string, leaf: L.Leaf): string | undefined {
+  if (L.isPluginLeaf(leaf) && leaf.view.plugin === 'git' && typeof leaf.view.repo === 'string' && leaf.view.repo) {
+    return leaf.view.repo;
+  }
+  const dir = paneDirectory(m, leaf);
+  if (dir) return dir;
+  if (L.isPluginLeaf(leaf) && leaf.view.plugin === 'files' && leaf.view.kind === 'editor' && typeof leaf.view.path === 'string') {
+    const p = leaf.view.path;
+    const i = p.lastIndexOf('/');
+    return i > 0 ? p.slice(0, i) : p ? '/' : undefined;
+  }
+  return undefined;
+}
+
+/** Focused directory for Git tracking: terminals and VS Code panes (from
+ * FilesPanel's followedDir), plus file editors, previews, and Git
+ * diff/graph panes. */
+export function gitFollowedDir(): string | undefined {
+  const dir = followedDir();
+  if (dir) return dir;
+  const c = current();
+  if (!c?.tab || !c.focused) return undefined;
+  const leaf = L.leafOf(c.tab.root, c.focused);
+  return leaf ? gitPaneDir(c.m, leaf) : undefined;
+}
+
+/** Directory of the pane focused last in this workspace that has one
+ * (terminal, VS Code, editor, preview, or Git pane). */
+export function gitRecentDir(): string | undefined {
+  const c = current();
+  if (c?.ws) {
+    for (const s of recentSpots()) {
+      if (s.m !== c.m) continue;
+      const leaf = c.ws.tabs.map((tab) => L.leafOf(tab.root, s.pane)).find(Boolean);
+      if (leaf) {
+        const dir = gitPaneDir(c.m, leaf);
+        if (dir) return dir;
+      }
+    }
+  }
+  return recentDirectory();
+}
+
 export function GitPanel() {
   const m = useStore((s) => s.machineId);
   const home = useStore((s) => (s.machineId ? s.machines[s.machineId]?.info?.home : undefined));
-  const paneDir = useTerms(followedDir);
-  const paneDir2 = useStore(followedDir);
+  const paneDir = useTerms(gitFollowedDir);
+  const paneDir2 = useStore(gitFollowedDir);
   const dir = paneDir ?? paneDir2;
   // The workspace selected is in the layout (the machine shown, m, in the
   // UI's store).
   const place = useTerms(placeOf);
   // The directory followed last in this workspace of this machine, kept
-  // while another pane (an editor, a diff) has the focus; never another
+  // while another pane (a browser, a panel) has the focus; never another
   // machine's or workspace's.
   const [lastDir, setLastDir] = useState<{ place: string; dir: string }>();
   useEffect(() => {
     if (dir) setLastDir({ place, dir });
   }, [dir, place]);
   const kept = lastDir?.place === place ? lastDir.dir : undefined;
-  const shownDir = dir ?? kept ?? recentDirectory() ?? home;
+  const shownDir = dir ?? kept ?? gitRecentDir() ?? home;
   const { roots, error } = useShownRepos(m ?? undefined, place, shownDir);
-  const pickKey = m && roots?.length ? `${m}\u0000${roots[0]}` : '';
+  const reposMap = useGit((s) => s.repos);
+  const allRoots = useMemo(() => {
+    if (!m || !roots?.length) return roots;
+    const seen = new Set(roots);
+    const out = [...roots];
+    for (const r of roots) {
+      for (const n of reposMap[repoKey(m, r)]?.info?.nested ?? []) {
+        if (!seen.has(n)) {
+          seen.add(n);
+          out.push(n);
+        }
+      }
+    }
+    return out;
+  }, [m, roots, reposMap]);
+  const pickKey = m && allRoots?.length ? `${m}\u0000${allRoots[0]}` : '';
   const [, pickedAgain] = useState(0);
   const picked = pickedRepo.get(pickKey);
   const setPicked = (r: string) => {
     pickedRepo.set(pickKey, r);
     pickedAgain((n) => n + 1);
   };
-  const root = roots && roots.length ? (picked && roots.includes(picked) ? picked : roots[0]) : undefined;
+  const root = allRoots && allRoots.length ? (picked && allRoots.includes(picked) ? picked : allRoots[0]) : undefined;
   const st = useRepo(m ?? undefined, root);
 
   if (!m) return <div className="git-empty muted small">{t('git.noMachine')}</div>;
-  if (roots === undefined) return <div className="git-empty muted small">{t('git.loading')}</div>;
+  if (allRoots === undefined) return <div className="git-empty muted small">{t('git.loading')}</div>;
   if (!root)
     return (
       <div className="git-empty muted small">
@@ -243,19 +305,26 @@ export function GitPanel() {
     );
   return (
     <div className="git-panel">
-      {roots.length > 1 && (
+      {allRoots.length > 1 && (
         <Picker
           className="git-repo-pick"
           aria-label={t('git.repository')}
           label={t('git.repository')}
-          items={roots.map((r) => ({ value: r, label: baseName(r), description: r, icon: <FolderGit2 /> }))}
+          items={allRoots.map((r) => ({ value: r, label: baseName(r), description: r, icon: <FolderGit2 /> }))}
           value={root}
           keepOrder
           onChange={setPicked}
         />
       )}
       {/* Its own state (the amend box, the history, the stashes) per repository. */}
-      <RepoView key={`${m}\u0000${root}`} m={m} root={root} st={st} />
+      <RepoView
+        key={`${m}\u0000${root}`}
+        m={m}
+        root={root}
+        st={st}
+        allRoots={allRoots}
+        onOpenRepo={allRoots.length > 1 ? setPicked : undefined}
+      />
     </div>
   );
 }
@@ -281,7 +350,19 @@ export function groupAction(group: Group, files: GroupedFile[], whole: boolean, 
   return { paths: files.map((g) => g.file.path) };
 }
 
-function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) {
+function RepoView({
+  m,
+  root,
+  st,
+  allRoots,
+  onOpenRepo,
+}: {
+  m: string;
+  root: string;
+  st?: RepoState;
+  allRoots?: readonly string[];
+  onOpenRepo?(repo: string): void;
+}) {
   const readOnly = useStore((s) => s.readOnly);
   const rowH = useSize('row');
   // The list or the tree: the setting, which the toolbar's button sets
@@ -501,8 +582,9 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
       );
     setSel(selectOnly(row.id));
     if (row.kind === 'dir') toggleDir(row.id);
-    // The diff, as VS Code's preview: the keyboard stays here.
-    else void openDiffs([row.g], row.group, true);
+    // The diff, as VS Code's preview: the keyboard stays here (submodules
+    // and untracked nested repos are directories, not diffable text files).
+    else if (!row.g.file.submodule && !row.g.file.path.endsWith('/')) void openDiffs([row.g], row.group, true);
   };
 
   const onKey = (ev: React.KeyboardEvent) => {
@@ -540,11 +622,18 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
     if (!row) return;
     if (ev.key === 'Enter') {
       handled();
-      // Folders open and close; the files selected open their diffs.
-      const files = targetsOf(row).filter((r) => r.kind === 'file');
+      // Folders open and close; a single submodule/nested repo opens that
+      // repository; otherwise regular files selected open their diffs.
+      const targets = targetsOf(row);
+      if (targets.length === 1 && row.kind === 'file' && isDirFile(row.g.file)) {
+        const subRoot = entryPathOf(row.g.file.path);
+        if (onOpenRepo && allRoots?.includes(subRoot)) onOpenRepo(subRoot);
+        return;
+      }
+      const files = targets.filter((r) => r.kind === 'file' && !isDirFile(r.g.file));
       if (!files.length) return row.kind === 'dir' ? toggleDir(row.id) : undefined;
       void openDiffs(rowFiles(files), row.group);
-    } else if (ev.key === ' ' && row.kind === 'file') {
+    } else if (ev.key === ' ' && row.kind === 'file' && !isDirFile(row.g.file)) {
       handled();
       void openDiffs([row.g], row.group, true);
     } else if (ev.key === 'Escape' && sel.selection.length > 1) {
@@ -559,23 +648,32 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
     el?.scrollIntoView?.({ block: 'nearest' });
   };
 
+  const isDirFile = (f: StatusFile) => !!(f.submodule || f.path.endsWith('/'));
+  const entryPathOf = (p: string) => join(root, p.replace(/\/+$/, ''));
+
   const rowMenu = (ev: React.MouseEvent, row: ChangeRow) => {
     if (!selected.has(row.id)) setSel(selectOnly(row.id));
     const targets = targetsOf(row);
     const files = rowFiles(targets);
     const group = row.group;
-    // Open Changes: the files selected (a folder opens or closes).
-    const own = rowFiles(targets.filter((r) => r.kind === 'file'));
+    // Open Changes: the files selected (a folder or submodule opens or closes).
+    const own = rowFiles(targets.filter((r) => r.kind === 'file' && !isDirFile(r.g.file)));
     const git: MenuEntry[] = [];
+    if (targets.length === 1 && row.kind === 'file' && isDirFile(row.g.file) && onOpenRepo) {
+      const subRoot = entryPathOf(row.g.file.path);
+      if (allRoots?.includes(subRoot)) git.push({ label: t('git.openRepo'), run: () => onOpenRepo(subRoot) });
+    }
     if (own.length) git.push({ label: t('git.openDiff'), hint: '↵', run: () => void openDiffs(own, group) });
     if (group === 'staged') git.push({ label: t('git.unstage'), disabled: readOnly, run: () => unstage(files) });
     else git.push({ label: t('git.stage'), disabled: readOnly, run: () => stage(files) });
     if (group === 'changes' || group === 'untracked')
       git.push({ label: t('git.discard'), danger: true, disabled: readOnly, run: () => discardFiles(files) });
-    // The explorer's file entries for the rows: files and the tree's folders.
-    const paths = targets.map((r) => join(root, r.kind === 'dir' ? r.path : r.g.file.path));
-    const dirs = new Set(targets.flatMap((r) => (r.kind === 'dir' ? [join(root, r.path)] : [])));
-    const gone = new Set(targets.flatMap((r) => (r.kind === 'file' && r.g.letter === 'D' ? [join(root, r.g.file.path)] : [])));
+    // The explorer's file entries for the rows: files, submodules, and the tree's folders.
+    const paths = targets.map((r) => entryPathOf(r.kind === 'dir' ? r.path : r.g.file.path));
+    const dirs = new Set(
+      targets.flatMap((r) => (r.kind === 'dir' || isDirFile(r.g.file) ? [entryPathOf(r.kind === 'dir' ? r.path : r.g.file.path)] : [])),
+    );
+    const gone = new Set(targets.flatMap((r) => (r.kind === 'file' && r.g.letter === 'D' ? [entryPathOf(r.g.file.path)] : [])));
     openMenu(ev, [...git, 'sep', ...fileEntries(m, { paths, root, dirs, gone, el: list.current })]);
   };
 
@@ -627,6 +725,9 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
     }
     const f = row.g.file;
     const deleted = row.g.letter === 'D';
+    const isDirEntry = isDirFile(f);
+    const subRoot = isDirEntry ? entryPathOf(f.path) : '';
+    const canOpenRepo = isDirEntry && !!onOpenRepo && !!allRoots?.includes(subRoot);
     const mark = letterMark(row.g.letter);
     const folder = folderOf(f.path);
     return (
@@ -634,15 +735,23 @@ function RepoView({ m, root, st }: { m: string; root: string; st?: RepoState }) 
         key={row.id}
         {...common}
         className={`git-row${deleted ? ' deleted' : ''}`}
-        icon={<FileIcon name={leafName(f.path)} kind={f.path.endsWith('/') ? 'dir' : 'file'} />}
+        icon={<FileIcon name={leafName(f.path)} kind={isDirEntry ? 'dir' : 'file'} />}
         label={leafName(f.path)}
         description={!tree && folder ? folder : undefined}
         decoration={{ badge: row.g.letter, color: letterColor(row.g.letter), tooltip: t(`git.mark.${mark}` as MessageKey) }}
         title={f.orig ? `${f.orig} → ${f.path}` : f.path}
-        onDoubleClick={() => void openDiffs([row.g], group)}
+        onDoubleClick={() => {
+          if (canOpenRepo) onOpenRepo(subRoot);
+          else if (!isDirEntry) void openDiffs([row.g], group);
+        }}
         actions={
           <>
-            {!deleted && (
+            {!deleted && canOpenRepo && (
+              <button className="icon" title={t('git.openRepo')} aria-label={t('git.openRepo')} onClick={() => onOpenRepo(subRoot)}>
+                <FolderGit2 />
+              </button>
+            )}
+            {!deleted && !isDirEntry && (
               <button
                 className="icon"
                 title={t('git.openFile')}

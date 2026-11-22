@@ -77,7 +77,7 @@ function markIndex(files: readonly StatusFile[]): MarkIndex {
       let names = ix.dirs.get(dir);
       if (!names) ix.dirs.set(dir, (names = new Map()));
       const prev = names.get(parts[i]);
-      names.set(parts[i], { mark: more(prev?.mark, mark), file: i === parts.length - 1 && !f.path.endsWith('/') });
+      names.set(parts[i], { mark: more(prev?.mark, mark), file: i === parts.length - 1 && !f.path.endsWith('/') && !f.submodule });
     }
   }
   markIndexes.set(files, ix);

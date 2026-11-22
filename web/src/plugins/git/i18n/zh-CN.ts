@@ -92,6 +92,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'git.discardAll': '放弃所有更改',
   'git.openDiff': '打开更改',
   'git.openFile': '打开文件',
+  'git.openRepo': '打开仓库',
   'git.files': '{n} 个文件',
   'git.discard.title': '放弃更改',
   'git.discard.message': '放弃 {what} 的更改？此操作无法撤销。',

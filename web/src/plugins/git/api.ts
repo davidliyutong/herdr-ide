@@ -20,6 +20,8 @@ export interface RepoInfo {
   remoteUrls?: Record<string, string>;
   /** Repositories this one is nested in, innermost first. */
   parents?: string[];
+  /** Repositories nested inside this one (submodules and nested repos). */
+  nested?: string[];
 }
 
 export interface StatusFile {
