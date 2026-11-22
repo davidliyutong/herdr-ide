@@ -55,7 +55,7 @@ func TestAccessLogSurvivesARestart(t *testing.T) {
 		t.Fatalf("reveal %d", code)
 	}
 	path := coreDBOf(accessLogPath(p.Path))
-	if filepath.Base(path) != "core.db" {
+	if path != plugin.CoreDBFile(filepath.Join(filepath.Dir(p.Path), "settings.json")) {
 		t.Fatalf("database %s", path)
 	}
 	if st, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
@@ -362,7 +362,7 @@ func TestAccessLogDatabase(t *testing.T) {
 	dir := t.TempDir()
 	for _, inst := range []string{"", "-dev"} {
 		vault := filepath.Join(dir, "vault"+inst+".json")
-		if got, want := coreDBOf(accessLogPath(vault)), plugin.CoreDBFile(filepath.Join(dir, "settings"+inst+".json")); got != want || filepath.Base(got) != "core"+inst+".db" {
+		if got, want := coreDBOf(accessLogPath(vault)), plugin.CoreDBFile(filepath.Join(dir, "settings"+inst+".json")); got != want || !strings.HasPrefix(filepath.Base(got), "core"+inst+"-") {
 			t.Errorf("%s: %s, want %s", inst, got, want)
 		}
 	}

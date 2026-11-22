@@ -146,15 +146,20 @@ core's for the local machine, whose agent runs in the core) with
 `herdr-ide.hidden=chat-host`, without a parent and notifications, in the
 user's home, removed from the terminal core's records when it exits, with
 only the user's name, home, shell, `PATH`, locale, `TMPDIR` and `XDG_*`
-variables of the agent's environment on top of the terminal core's. The
-terminal core gives a name to one live terminal at a time, so the name is
-the lock: a run that finds it taken waits for that host. The open waits
+variables of the agent's environment on top of the terminal core's. The terminal core gives a name to one live terminal at a time, so `runHidden`
+checks `terminal.get` when `name_taken` occurs: if a matching helper holds
+the name it waits for that host, and if a user's own terminal occupies
+`herdr-ide-chat-host` (without the hidden label and arguments), it leaves
+the user's terminal untouched and starts the chat host under a disambiguated
+hidden fallback name (`herdr-ide-chat-host-1`..`-16`, all matched by
+`agentproto.IsChatHostName`). The open waits
 up to 15 s for a host to serve, asking the terminal core again after
 0.5 s, doubling to 2 s (a host that ends still holds the name). A name
 held while nothing serves for that long and 30 s more (as long as a host
-takes to end) is a stuck host's: the terminal of that name is killed
-(`plugin.Env.KillHidden`) when it carries the label and runs the same
-arguments, and another is started. One start at a time per agent.
+takes to end) is a stuck host's: the terminal of that name (or fallback
+helper name) is killed (`plugin.Env.KillHidden`) only when it carries both
+the hidden label and matching arguments, and another is started. One start
+at a time per agent.
 
 A host of an older build than the agent's (by `git describe` versions) is
 asked to make way, which it does when no chat works or waits; once its
@@ -323,6 +328,8 @@ connection then. Requests name agents by their kind, never by a command.
 | `configure {settings}` | – (the machine's settings, clamped) |
 | `shutdown` | – (`busy` while a chat works, waits or starts) |
 | `trust`, `untrust {cwd}` | – |
+| `trusted` | `{trusted: [{cwd, at}]}` (all valid persisted trusted folders) |
+| `host_status` | `{hostStatus: {proto, version, pid, terminalId?, startedAt, socket, base, conns, watchers, liveAgents, totalChats, totalBytes, ending, settings, sessions}}` |
 
 An attached connection sends commands, each answered by an `ack` with
 its id: `prompt`, `cancel`, `permission`, `answer`, `set_config`,
@@ -478,7 +485,8 @@ a time.
 **Routes** (below `/api/m/{id}/p/chat/`, [reference](../reference.md#http-and-websocket-endpoints)):
 `GET agents`, `POST agents`, `GET chats`, `POST sessions`, `POST new`,
 `POST close`, `DELETE chat`, `POST seen`, `POST handoff`, `POST trust`,
-`POST untrust`; and `GET /api/p/chat/states`, `GET /api/p/chat/ws`. A GET
+`POST untrust`, `GET trusted`, `POST trusted`, `POST host/stop`; and
+`GET /api/p/chat/hosts`, `GET /api/p/chat/states`, `GET /api/p/chat/ws`. A GET
 never starts the machine's host (`not_running`); a change does, except on
 a read-only core, which starts nothing. `GET agents` and the sessions
 listing may run the agents' programs, so the first is refused read-only
@@ -519,7 +527,9 @@ each change. It sends them to the pages as the plugin's `/ws` message
 /api/p/chat/states` gives the last of every machine) and publishes an
 agent event (`machines.Manager.PublishAgent`, with `chat` instead of a
 terminal) when a chat becomes blocked or done, once per status and
-sequence number; of the first states read only the blocked ones. A watch
+sequence number; of the first states read only the blocked ones. a machine disconnects, its cached live states transition to `sleeping`/`idle`
+(preserving `done` for unread turns) with `stale: true` on `ChatState` and
+`StatesData`, cleared on reconnect. A watch
 that fails is tried again after 5 s, doubling to 5 minutes, up to 6 times
 before it waits for the next use. Settings changes configure the watched
 hosts at once.

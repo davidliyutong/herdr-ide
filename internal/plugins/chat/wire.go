@@ -136,6 +136,9 @@ type StatesData struct {
 	// that is not among them is gone; else they are the chats that
 	// changed, a chat that is no more in chatproto.StateDeleted.
 	Full bool `json:"full"`
+	// Stale is true when the machine is offline/disconnected so cached
+	// states cannot be refreshed.
+	Stale bool `json:"stale,omitempty"`
 	// Rev numbers the machine's states since the core started: each
 	// message has the next number, and a snapshot (StatesSnapshot) the
 	// number of the last message it holds. A page applies a message only

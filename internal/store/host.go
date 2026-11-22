@@ -106,6 +106,11 @@ func validHostKey(key string) bool {
 // before PruneHostFiles removes it.
 const HostFileRetention = 30 * 24 * time.Hour
 
+// LegacyFileRetention is how long a legacy un-hosted file (from before
+// per-host naming) stays unopened once this host has its own per-host file
+// (or for non-database files such as logs) before PruneHostFiles removes it.
+const LegacyFileRetention = time.Hour
+
 // maxDirEntries bounds the entries of a data directory PruneHostFiles
 // looks at.
 const maxDirEntries = 4096
@@ -148,12 +153,21 @@ func PruneHostFiles(dir, name string, retention time.Duration, now time.Time) ([
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext) + "-"
 	mine := hostFileName(name, thisHost())
+	mineExists := Exists(filepath.Join(dir, mine))
+	otherInstances := coreInstances(names, name)
 	var removed []string
 	for _, n := range names {
 		if n == mine {
 			continue
 		}
-		if n != name {
+		fileRetention := retention
+		if n == name {
+			// Legacy un-hosted files are pruned promptly once this host has
+			// its own per-host database (migration complete) or for logs.
+			if ext != ".db" || mineExists {
+				fileRetention = min(retention, LegacyFileRetention)
+			}
+		} else {
 			host, ok := strings.CutPrefix(n, stem)
 			if !ok {
 				continue
@@ -161,12 +175,15 @@ func PruneHostFiles(dir, name string, retention time.Duration, now time.Time) ([
 			if host, ok = strings.CutSuffix(host, ext); !ok || !validHostKey(host) {
 				continue
 			}
+			if hasInstancePrefix(host, otherInstances) {
+				continue
+			}
 		}
 		p := filepath.Join(dir, n)
-		if !stale(p, retention, now) || openHere(p) {
+		if !stale(p, fileRetention, now) || openHere(p) {
 			continue
 		}
-		ok, err := removeUnheld(p, func() bool { return stale(p, retention, now) })
+		ok, err := removeUnheld(p, func() bool { return stale(p, fileRetention, now) })
 		if err != nil {
 			return removed, err
 		}
@@ -175,6 +192,36 @@ func PruneHostFiles(dir, name string, retention time.Duration, now time.Time) ([
 		}
 	}
 	return removed, nil
+}
+
+// coreInstances finds instance suffixes (e.g. "dev", "desktop") present in
+// dir's configuration files so pruning core.db never removes core-<instance>*.db.
+func coreInstances(names []string, target string) []string {
+	if target != "core.db" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range names {
+		for _, prefix := range []string{"settings-", "vault-", "machines-", "keybindings-"} {
+			if rest, ok := strings.CutPrefix(n, prefix); ok {
+				if inst, ok := strings.CutSuffix(rest, ".json"); ok && inst != "" && !seen[inst] {
+					seen[inst] = true
+					out = append(out, inst)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func hasInstancePrefix(host string, instances []string) bool {
+	for _, inst := range instances {
+		if host == inst || strings.HasPrefix(host, inst+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // stale reports whether the database at p and its journal files are this

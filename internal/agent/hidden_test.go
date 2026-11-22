@@ -203,7 +203,13 @@ func TestRunHidden(t *testing.T) {
 		}
 	}
 
-	// The name is the lock: a terminal that has it is the helper running.
+	// The name is the lock: a terminal that has it with the helper's hidden
+	// identity is the helper running.
+	helperRec, _ := json.Marshal(map[string]any{"address": "t3", "name": agentproto.ChatHostName, "state": "live",
+		"argv": argv, "labels": map[string]string{agentproto.HiddenLabel: agentproto.HiddenChatHost}})
+	core.mu.Lock()
+	core.get = `"result":` + string(helperRec)
+	core.mu.Unlock()
 	core.set(`"error":{"code":-32000,"message":"a live terminal is already named \"herdr-ide-chat-host\"","data":{"kind":"name_taken"}}`)
 	if err := a.runHidden(ctx, agentproto.ChatHostName, argv); err != nil {
 		t.Errorf("a name that is taken: %v", err)
@@ -309,5 +315,151 @@ func TestKillHidden(t *testing.T) {
 	set(record(agentproto.HiddenChatHost, argv[1:]...), gone)
 	if ok, err := env.KillHidden(ctx, agentproto.ChatHostName, argv, false); !ok || err != nil {
 		t.Errorf("through the plugins' env: %v %v", ok, err)
+	}
+}
+
+// When a user manually starts a terminal named herdr-ide-chat-host (without
+// the hidden label/argv), runHidden leaves it alone and starts the chat host
+// under a disambiguated hidden fallback name, and killHidden only ever kills
+// the fallback helper (never the user's terminal).
+func TestRunAndKillHiddenFallback(t *testing.T) {
+	a := hiddenAgent(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	argv := []string{"/opt/agent", "chat-host", "--base", a.base, "--run", a.runDir}
+
+	ln, err := net.Listen("unix", a.hcSocket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	var mu sync.Mutex
+	terms := map[string]map[string]any{
+		agentproto.ChatHostName: {
+			"address": "t1",
+			"name":    agentproto.ChatHostName,
+			"state":   "live",
+			"argv":    []string{"zsh"},
+			"labels":  map[string]string{},
+		},
+	}
+	var killed []string
+	var runs []map[string]any
+
+	serve := func(c net.Conn) {
+		defer c.Close()
+		br := bufio.NewReader(c)
+		if _, err := br.ReadString('\n'); err != nil {
+			return
+		}
+		io.WriteString(c, `{"jsonrpc":"2.0","id":0,"result":{"generation":1,"version":"9.9.9","framed":true}}`+"\n")
+		for {
+			var h [9]byte
+			if _, err := io.ReadFull(br, h[:]); err != nil {
+				return
+			}
+			payload := make([]byte, binary.LittleEndian.Uint32(h[5:]))
+			if _, err := io.ReadFull(br, payload); err != nil {
+				return
+			}
+			var req struct {
+				ID     uint64         `json:"id"`
+				Method string         `json:"method"`
+				Params map[string]any `json:"params"`
+			}
+			if json.Unmarshal(payload, &req) != nil {
+				continue
+			}
+			mu.Lock()
+			var answer string
+			switch req.Method {
+			case "terminal.run":
+				runs = append(runs, req.Params)
+				name, _ := req.Params["name"].(string)
+				if _, exists := terms[name]; exists {
+					answer = `"error":{"code":-32000,"message":"name taken","data":{"kind":"name_taken"}}`
+				} else {
+					addr := fmt.Sprintf("t%d", len(terms)+1)
+					terms[name] = map[string]any{
+						"address": addr,
+						"name":    name,
+						"state":   "live",
+						"argv":    req.Params["argv"],
+						"labels":  req.Params["labels"],
+					}
+					b, _ := json.Marshal(map[string]string{"address": addr})
+					answer = `"result":` + string(b)
+				}
+			case "terminal.get":
+				target, _ := req.Params["terminal"].(string)
+				if rec, ok := terms[target]; ok {
+					b, _ := json.Marshal(rec)
+					answer = `"result":` + string(b)
+				} else {
+					answer = `"error":{"code":-32000,"message":"no terminal","data":{"kind":"not_found"}}`
+				}
+			case "terminal.kill":
+				addr, _ := req.Params["terminal"].(string)
+				killed = append(killed, addr)
+				for k, rec := range terms {
+					if rec["address"] == addr {
+						delete(terms, k)
+					}
+				}
+				answer = `"result":{}`
+			}
+			mu.Unlock()
+			id, _ := json.Marshal(req.ID)
+			body := []byte(`{"jsonrpc":"2.0","id":` + string(id) + `,` + answer + `}`)
+			frame := binary.LittleEndian.AppendUint32(nil, 0)
+			frame = append(frame, 0)
+			frame = binary.LittleEndian.AppendUint32(frame, uint32(len(body)))
+			c.Write(append(frame, body...))
+		}
+	}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go serve(c)
+		}
+	}()
+
+	if err := a.runHidden(ctx, agentproto.ChatHostName, argv); err != nil {
+		t.Fatalf("runHidden with user collision: %v", err)
+	}
+	fb := agentproto.ChatHostFallbackName(1)
+	mu.Lock()
+	fbRec := terms[fb]
+	userRec := terms[agentproto.ChatHostName]
+	mu.Unlock()
+	if fbRec == nil || userRec == nil || userRec["address"] != "t1" {
+		t.Fatalf("terms after run: fb=%v user=%v", fbRec, userRec)
+	}
+
+	// Second runHidden finds the running fallback helper and does not start another.
+	if err := a.runHidden(ctx, agentproto.ChatHostName, argv); err != nil {
+		t.Fatalf("second runHidden: %v", err)
+	}
+	mu.Lock()
+	if terms[agentproto.ChatHostFallbackName(2)] != nil {
+		t.Fatal("started a second fallback helper")
+	}
+	mu.Unlock()
+
+	// killHidden detects and kills only the fallback helper, leaving user's t1 untouched.
+	if ok, err := a.killHidden(ctx, agentproto.ChatHostName, argv, false); !ok || err != nil {
+		t.Fatalf("killHidden(false): ok=%v err=%v", ok, err)
+	}
+	if ok, err := a.killHidden(ctx, agentproto.ChatHostName, argv, true); !ok || err != nil {
+		t.Fatalf("killHidden(true): ok=%v err=%v", ok, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(killed) != 1 || killed[0] != "t2" || terms[agentproto.ChatHostName] == nil {
+		t.Fatalf("killed=%v userTerm=%v", killed, terms[agentproto.ChatHostName])
 	}
 }

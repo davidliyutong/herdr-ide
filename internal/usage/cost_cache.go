@@ -75,7 +75,12 @@ func costDB(p string) string {
 // tables; writable false when they are of a newer version. The file the
 // cache was kept in before is imported first. The caller closes it.
 func openCostDB(p string) (db *store.DB, writable bool, err error) {
-	db, err = store.OpenShared(costDB(p))
+	target := costDB(p)
+	legacy := filepath.Join(filepath.Dir(target), store.MachineDB)
+	if _, err := store.MigrateLegacy(legacy, target); err != nil {
+		return nil, false, err
+	}
+	db, err = store.OpenShared(target)
 	if db == nil {
 		return nil, false, err
 	}

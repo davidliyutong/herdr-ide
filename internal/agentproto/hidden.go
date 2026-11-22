@@ -1,6 +1,7 @@
 package agentproto
 
 import (
+	"strconv"
 	"strings"
 
 	"herdr-ide/internal/brand"
@@ -26,21 +27,36 @@ const (
 	ChatHostName = brand.Slug + "-" + HiddenChatHost
 )
 
+// IsChatHostName reports whether name is ChatHostName or one of its fallback
+// names (ChatHostName-<suffix>) used when a user terminal occupies ChatHostName.
+func IsChatHostName(name string) bool {
+	return name == ChatHostName || strings.HasPrefix(name, ChatHostName+"-")
+}
+
+// ChatHostFallbackName returns the i-th fallback terminal name (1-based) for
+// the chat host when ChatHostName is occupied by a non-helper terminal.
+func ChatHostFallbackName(i int) string {
+	return ChatHostName + "-" + strconv.Itoa(i)
+}
+
 // HiddenValue is the value of HiddenLabel for a helper's terminal named
 // name: the name without the product's prefix ("chat-host").
 func HiddenValue(name string) string {
+	if IsChatHostName(name) {
+		return HiddenChatHost
+	}
 	return strings.TrimPrefix(name, brand.Slug+"-")
 }
 
 // Hidden reports whether a terminal named name, whose HiddenLabel has
 // value, is a helper's that no client sees: the chat host's, named
-// ChatHostName and labeled HiddenChatHost. Both are needed: the terminal
-// core gives the name to one live terminal at a time and clients cannot
-// take it, while labels are free-form, so a program of the machine that
-// sets the label on another terminal does not hide that terminal. Every
-// part that leaves the helpers' terminals out (the core's terminal
+// ChatHostName (or a fallback ChatHostName-*) and labeled HiddenChatHost. Both
+// are needed: the terminal core gives the name to one live terminal at a time
+// and clients cannot take it, while labels are free-form, so a program of the
+// machine that sets the label on another terminal does not hide that terminal.
+// Every part that leaves the helpers' terminals out (the core's terminal
 // protocol, the agent's detection of coding agents, terminal history's
 // captures) decides by it.
 func Hidden(name, value string) bool {
-	return name == ChatHostName && value == HiddenChatHost
+	return IsChatHostName(name) && value == HiddenChatHost
 }

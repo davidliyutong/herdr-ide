@@ -421,6 +421,40 @@ func TestTrust(t *testing.T) {
 	}
 }
 
+// OpTrusted lists valid persisted trusted folders and prunes missing/unsafe ones;
+// OpHostStatus returns host metadata and active headless sessions.
+func TestTrustedListAndHostStatus(t *testing.T) {
+	h := startHost(t, nil)
+	res := h.ok(chatproto.Request{Op: chatproto.OpTrusted})
+	if len(res.Trusted) != 0 {
+		t.Fatalf("initial trusted %+v", res.Trusted)
+	}
+	p1 := filepath.Join(h.cwd, "p1")
+	p2 := filepath.Join(h.cwd, "p2")
+	os.Mkdir(p1, 0o700)
+	os.Mkdir(p2, 0o700)
+	h.ok(chatproto.Request{Op: chatproto.OpTrust, Cwd: p1})
+	h.ok(chatproto.Request{Op: chatproto.OpTrust, Cwd: p2})
+
+	res = h.ok(chatproto.Request{Op: chatproto.OpTrusted})
+	if len(res.Trusted) != 2 {
+		t.Fatalf("trusted %+v", res.Trusted)
+	}
+	// Removing p1 prunes it when listed.
+	os.Remove(p1)
+	res = h.ok(chatproto.Request{Op: chatproto.OpTrusted})
+	if len(res.Trusted) != 1 || res.Trusted[0].Cwd != p2 {
+		t.Fatalf("after remove p1: %+v", res.Trusted)
+	}
+
+	s := h.newChat()
+	stRes := h.ok(chatproto.Request{Op: chatproto.OpHostStatus})
+	if stRes.HostStatus == nil || stRes.HostStatus.PID != os.Getpid() || stRes.HostStatus.LiveAgents != 1 ||
+		len(stRes.HostStatus.Sessions) != 1 || stRes.HostStatus.Sessions[0].Chat != s.chat.ID {
+		t.Fatalf("host status: %+v", stRes.HostStatus)
+	}
+}
+
 // Full access: refused while the settings do not allow it, at a new chat
 // and at set_config (by the value the adapter marked Full, an agent's own
 // too); once they no longer do, a chat whose agent runs with it starts its

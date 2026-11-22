@@ -59,7 +59,7 @@ func TestWireNames(t *testing.T) {
 	chat := testChat()
 	state := chat.StateOf()
 	const stateJSON = `{"id":"c0123456789abcdef","kind":"claude","title":"Fix it","cwd":"/w","state":"failed","status":"done",` +
-		`"updated":"2026-01-02T03:04:05.006Z","seq":7,"sessionId":"s1"}`
+		`"updated":"2026-01-02T03:04:05.006Z","seq":7,"seen":5,"unread":true,"sessionId":"s1"}`
 	settings := HostSettings{IdleStopMinutes: 30, MaxLive: 8, MaxChats: 500, RetentionDays: 30, MaxTotalBytes: 1 << 29, MaxChatBytes: 1 << 26, DefaultMode: ModePlan, AllowFull: true}
 	const settingsJSON = `{"idleStopMinutes":30,"maxLive":8,"maxChats":500,"retentionDays":30,"maxTotalBytes":536870912,"maxChatBytes":67108864,"defaultMode":"plan","allowFull":true}`
 	minimal := Chat{ID: "c1", Kind: "codex", State: StateStarting, Status: StatusIdle, Created: at, Updated: at}

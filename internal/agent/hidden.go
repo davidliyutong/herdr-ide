@@ -35,48 +35,131 @@ const (
 	// hiddenDial is how long the terminal core's socket has to take the
 	// connection.
 	hiddenDial = 5 * time.Second
+	// maxChatHostFallbacks bounds fallback terminal names tried when a user
+	// terminal occupies ChatHostName without the helper's hidden identity.
+	maxChatHostFallbacks = 16
 )
 
-// runHidden runs argv as a terminal of the instance's terminal core named
-// name, with the label that hides it from clients: without a parent, not
-// notifying, in the user's home, with the user's variables of the agent's
-// environment (hiddenEnv) on top of the terminal core's, and removed
-// from the terminal core's records as soon as its program exits. The
-// terminal core gives a name to one live terminal at a time, so a name
-// that is taken means the helper runs already (or one that ends still
-// holds it), which is success: the caller finds it serving, or asks again.
-// The error wraps plugin.ErrNoTerminalCore when no terminal core answers on
-// the instance's socket: the agent starts none here.
-func (a *Agent) runHidden(ctx context.Context, name string, argv []string) error {
-	c, err := net.DialTimeout("unix", a.hcSocket(), hiddenDial)
+func dialHC(ctx context.Context, sock string) (*hc.Conn, error) {
+	c, err := net.DialTimeout("unix", sock, hiddenDial)
 	if err != nil {
-		return fmt.Errorf("%w: %v", plugin.ErrNoTerminalCore, err)
+		return nil, fmt.Errorf("%w: %v", plugin.ErrNoTerminalCore, err)
 	}
 	dctx, dcancel := context.WithTimeout(ctx, hiddenDial)
 	conn, _, err := hc.Dial(dctx, c)
 	dcancel()
 	if err != nil {
-		return fmt.Errorf("%w: %v", plugin.ErrNoTerminalCore, err)
+		return nil, fmt.Errorf("%w: %v", plugin.ErrNoTerminalCore, err)
+	}
+	return conn, nil
+}
+
+func getLiveTerminal(ctx context.Context, conn *hc.Conn, target string) (*hc.Terminal, error) {
+	var rec hc.Terminal
+	err := conn.Call(ctx, "terminal.get", map[string]string{"terminal": target}, &rec)
+	var e *hc.Error
+	if errors.As(err, &e) && e.Kind == "not_found" {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("terminal core: get %s: %w", target, err)
+	}
+	if rec.State != "live" {
+		return nil, nil
+	}
+	return &rec, nil
+}
+
+func isHelperRecord(rec *hc.Terminal, name string, argv []string) bool {
+	if rec == nil || rec.State != "live" {
+		return false
+	}
+	if rec.Name != nil && *rec.Name != name {
+		return false
+	}
+	return rec.Labels[agentproto.HiddenLabel] == agentproto.HiddenValue(name) &&
+		len(rec.Argv) == len(argv) && len(argv) > 0 && slices.Equal(rec.Argv[1:], argv[1:])
+}
+
+// runHidden runs argv as a terminal of the instance's terminal core named
+// name, with the label that hides it from clients: without a parent, not
+// notifying, in the user's home, with the user's variables of the agent's
+// environment (hiddenEnv) on top of the terminal core's, and removed
+// from the terminal core's records as soon as its program exits. When name
+// is already taken by our own helper, runHidden succeeds so the caller finds
+// it serving; when ChatHostName is occupied by a user terminal (missing the
+// hidden identity), runHidden leaves that terminal untouched and falls back to
+// a disambiguated hidden name (ChatHostFallbackName).
+// The error wraps plugin.ErrNoTerminalCore when no terminal core answers on
+// the instance's socket: the agent starts none here.
+func (a *Agent) runHidden(ctx context.Context, name string, argv []string) error {
+	conn, err := dialHC(ctx, a.hcSocket())
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(ctx, hiddenTimeout)
 	defer cancel()
-	err = conn.Call(ctx, "terminal.run", map[string]any{
-		"argv": argv, "cwd": a.home, "env": hiddenEnv(cleanEnv()),
-		"name":      name,
-		"labels":    map[string]string{agentproto.HiddenLabel: agentproto.HiddenValue(name)},
+
+	candidates := []string{name}
+	if name == agentproto.ChatHostName {
+		for i := 1; i <= maxChatHostFallbacks; i++ {
+			candidates = append(candidates, agentproto.ChatHostFallbackName(i))
+		}
+	}
+	env := hiddenEnv(cleanEnv())
+	for _, candidate := range candidates {
+		started, takenByHelper, err := tryRunHidden(ctx, conn, a.home, env, candidate, argv)
+		if err != nil {
+			return err
+		}
+		if started {
+			a.logger.Printf("started %s as a hidden terminal of the terminal core", candidate)
+			return nil
+		}
+		if takenByHelper {
+			return nil
+		}
+		// Name is occupied by a non-helper terminal: never kill/hijack it;
+		// continue to the next fallback candidate if available.
+	}
+	if name == agentproto.ChatHostName {
+		return fmt.Errorf("terminal core: run %s: all fallback names are taken", name)
+	}
+	return fmt.Errorf("terminal core: run %s: %w", name, errNotHelper)
+}
+
+func tryRunHidden(ctx context.Context, conn *hc.Conn, home string, env map[string]string, candidate string, argv []string) (started, takenByHelper bool, err error) {
+	params := map[string]any{
+		"argv": argv, "cwd": home, "env": env,
+		"name":      candidate,
+		"labels":    map[string]string{agentproto.HiddenLabel: agentproto.HiddenValue(candidate)},
 		"size":      map[string]int{"cols": hiddenCols, "rows": hiddenRows},
 		"no_parent": true, "no_notify": true, "rm": true,
-	}, nil)
-	var e *hc.Error
-	if errors.As(err, &e) && e.Kind == "name_taken" {
-		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("terminal core: run %s: %w", name, err)
+	for attempt := 0; attempt < 2; attempt++ {
+		err = conn.Call(ctx, "terminal.run", params, nil)
+		if err == nil {
+			return true, false, nil
+		}
+		var e *hc.Error
+		if !errors.As(err, &e) || e.Kind != "name_taken" {
+			return false, false, fmt.Errorf("terminal core: run %s: %w", candidate, err)
+		}
+		rec, gerr := getLiveTerminal(ctx, conn, candidate)
+		if gerr != nil {
+			return false, false, gerr
+		}
+		if rec == nil {
+			// Terminal exited between terminal.run and terminal.get; retry once.
+			continue
+		}
+		if isHelperRecord(rec, candidate, argv) {
+			return false, true, nil
+		}
+		return false, false, nil
 	}
-	a.logger.Printf("started %s as a hidden terminal of the terminal core", name)
-	return nil
+	return false, false, nil
 }
 
 // errNotHelper is killHidden's error for a terminal of the name that is not
@@ -84,9 +167,14 @@ func (a *Agent) runHidden(ctx context.Context, name string, argv []string) error
 var errNotHelper = errors.New("the terminal of the name is not the helper")
 
 // killHidden is plugin.Env.KillHidden: killHidden on the instance's
-// terminal core.
+// terminal core, falling back to disambiguated helper names when ChatHostName
+// is occupied by a user's terminal.
 func (a *Agent) killHidden(ctx context.Context, name string, argv []string, kill bool) (bool, error) {
-	return killHidden(ctx, a.hcSocket(), name, argv, kill)
+	ok, err := killHidden(ctx, a.hcSocket(), name, argv, kill)
+	if errors.Is(err, errNotHelper) && name == agentproto.ChatHostName {
+		return killFallbackHidden(ctx, a.hcSocket(), argv, kill)
+	}
+	return ok, err
 }
 
 // killHidden ends a helper terminal that holds its name and does not do
@@ -99,40 +187,42 @@ func (a *Agent) killHidden(ctx context.Context, name string, argv []string, kill
 // errNotHelper when the one that has it is not such a helper, which is
 // left alone. sock is the terminal core's socket.
 func killHidden(ctx context.Context, sock, name string, argv []string, kill bool) (bool, error) {
-	c, err := net.DialTimeout("unix", sock, hiddenDial)
+	conn, err := dialHC(ctx, sock)
 	if err != nil {
-		return false, fmt.Errorf("%w: %v", plugin.ErrNoTerminalCore, err)
-	}
-	dctx, dcancel := context.WithTimeout(ctx, hiddenDial)
-	conn, _, err := hc.Dial(dctx, c)
-	dcancel()
-	if err != nil {
-		return false, fmt.Errorf("%w: %v", plugin.ErrNoTerminalCore, err)
+		return false, err
 	}
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(ctx, hiddenTimeout)
 	defer cancel()
-	live := func() (*hc.Terminal, error) {
-		var rec hc.Terminal
-		err := conn.Call(ctx, "terminal.get", map[string]string{"terminal": name}, &rec)
-		var e *hc.Error
-		if errors.As(err, &e) && e.Kind == "not_found" {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, fmt.Errorf("terminal core: get %s: %w", name, err)
-		}
-		if rec.State != "live" {
-			return nil, nil
-		}
-		return &rec, nil
+	return killNamedHelper(ctx, conn, name, argv, kill)
+}
+
+func killFallbackHidden(ctx context.Context, sock string, argv []string, kill bool) (bool, error) {
+	conn, err := dialHC(ctx, sock)
+	if err != nil {
+		return false, err
 	}
-	rec, err := live()
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(ctx, hiddenTimeout)
+	defer cancel()
+	for i := 1; i <= maxChatHostFallbacks; i++ {
+		ok, err := killNamedHelper(ctx, conn, agentproto.ChatHostFallbackName(i), argv, kill)
+		if errors.Is(err, errNotHelper) {
+			continue
+		}
+		if err != nil || ok {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
+func killNamedHelper(ctx context.Context, conn *hc.Conn, name string, argv []string, kill bool) (bool, error) {
+	rec, err := getLiveTerminal(ctx, conn, name)
 	if rec == nil || err != nil {
 		return false, err
 	}
-	if rec.Labels[agentproto.HiddenLabel] != agentproto.HiddenValue(name) || len(rec.Argv) != len(argv) || len(argv) == 0 ||
-		!slices.Equal(rec.Argv[1:], argv[1:]) {
+	if !isHelperRecord(rec, name, argv) {
 		return false, errNotHelper
 	}
 	if !kill {
@@ -142,7 +232,7 @@ func killHidden(ctx context.Context, sock, name string, argv []string, kill bool
 		return false, fmt.Errorf("terminal core: kill %s: %w", rec.Address, err)
 	}
 	for {
-		rec, err := live()
+		rec, err := getLiveTerminal(ctx, conn, name)
 		if err != nil {
 			return false, err
 		}
