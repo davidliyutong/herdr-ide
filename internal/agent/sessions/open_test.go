@@ -413,10 +413,10 @@ func TestClaudeOwnConfigDir(t *testing.T) {
 	agentUID--
 	// One the agent searches too is the user's whatever its mode.
 	e.vars["CLAUDE_CONFIG_DIR"] = planted
-	if !e.r.trustedDir(planted, e.r.claudeDirs()) {
+	if !e.r.trustedDir(planted, e.r.ClaudeDirs()) {
 		t.Error("the agent's own CLAUDE_CONFIG_DIR")
 	}
-	if !e.r.trustedDir(filepath.Join(planted, "not-yet"), e.r.claudeDirs()) {
+	if !e.r.trustedDir(filepath.Join(planted, "not-yet"), e.r.ClaudeDirs()) {
 		t.Error("a directory not made yet")
 	}
 }

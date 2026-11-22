@@ -57,9 +57,10 @@ type TextDiff = { type: 'text'; path?: string; oldText: string | null; newText: 
 
 /** A diff of the call, read once: a text diff (v1), a patch, or a v2
  * diff's list of changes without one. */
-type Change = TextDiff | { type: 'patch'; path?: string; patch: Patch } | { type: 'list'; changes: { operation: string; path: string }[] };
+export type Change =
+  TextDiff | { type: 'patch'; path?: string; patch: Patch } | { type: 'list'; changes: { operation: string; path: string }[] };
 
-function readDiff(d: ToolDiff): Change {
+export function readDiff(d: ToolDiff): Change {
   const raw = d as unknown as Record<string, unknown>;
   const path = asText(raw.path);
   const patch = isObject(raw.patch) ? asText(raw.patch.text) : undefined;
@@ -83,10 +84,10 @@ function textDiff(c: TextDiff): LineDiff {
   return d;
 }
 
-const isDiff = (c: ToolCallContent): c is ToolDiff => c.type === 'diff';
+export const isDiff = (c: ToolCallContent): c is ToolDiff => c.type === 'diff';
 
 /** The files diffs change, for a call that names no locations. */
-function changedPaths(changes: readonly Change[]): { path: string }[] {
+export function changedPaths(changes: readonly Change[]): { path: string }[] {
   const out: string[] = [];
   for (const c of changes) {
     const paths = c.type === 'list' ? c.changes.map((x) => x.path) : c.type === 'patch' && !c.path ? c.patch.paths : c.path ? [c.path] : [];
@@ -117,7 +118,7 @@ function counts(changes: readonly Change[], open: boolean): { added: number; rem
   return any ? { added, removed } : undefined;
 }
 
-function StatusIcon({ kind, status }: { kind: ToolKind; status: string }) {
+export function StatusIcon({ kind, status }: { kind: ToolKind; status: string }) {
   if (status === 'in_progress') return <LoaderCircle className="conv-kind-icon conv-spin" aria-hidden />;
   if (status === 'failed') return <CircleX className="conv-kind-icon" aria-hidden />;
   if (status === 'cancelled') return <Ban className="conv-kind-icon" aria-hidden />;
@@ -195,7 +196,7 @@ function PatchRows({ patch }: { patch: Patch }) {
   );
 }
 
-function ChangeView({ change, header, ctx }: { change: Change; header: boolean; ctx: ItemContext }) {
+export function ChangeView({ change, header, ctx }: { change: Change; header: boolean; ctx: ItemContext }) {
   const head = header && change.type !== 'list' && change.path ? <PathButton path={change.path} ctx={ctx} /> : null;
   if (change.type === 'list') {
     return (
@@ -236,7 +237,7 @@ function TextChange({ change }: { change: TextDiff }) {
 const PROSE: ReadonlySet<ToolKind> = new Set(['fetch', 'think', 'switch_mode']);
 
 /** The text, images and links a call gave, as its kind shows them. */
-function Results({ content, kind, ctx }: { content: readonly ToolCallContent[]; kind: ToolKind; ctx: ItemContext }) {
+export function Results({ content, kind, ctx }: { content: readonly ToolCallContent[]; kind: ToolKind; ctx: ItemContext }) {
   const blocks = content.flatMap((c) => (c.type === 'content' ? [c.content] : []));
   const text = blocks.flatMap((b) => (b.type === 'text' ? (asText(b.text) ?? []) : [])).join('\n');
   const terminal = content.some((c) => c.type === 'terminal');
@@ -258,20 +259,16 @@ function Results({ content, kind, ctx }: { content: readonly ToolCallContent[]; 
         {t('conversation.tool.outputShortened')}
       </div>,
     );
-  if (terminal) {
+  if (terminal)
     out.push(
       <div key="term" className="conv-note">
-        {t('conversation.tool.inTerminal')}{' '}
-        <button type="button" className="conv-link" onClick={ctx.showTerminal}>
-          {t('conversation.showTerminal')}
-        </button>
+        {t('conversation.tool.inTerminal')}
       </div>,
     );
-  }
   return <>{out}</>;
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="conv-section">
       <div className="conv-section-title">{title}</div>

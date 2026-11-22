@@ -150,7 +150,7 @@ func (e *testEnv) record(dir string, pid int, id, cwd string, startedAt time.Tim
 // reader's buffer naming another directory, then the first prompt.
 func (e *testEnv) claudeTranscript(dir, cwd, id string, at, mod time.Time) string {
 	e.t.Helper()
-	return e.claudeTranscriptIn(dir, claudeEscape(cwd), cwd, id, at, mod)
+	return e.claudeTranscriptIn(dir, ClaudeEscape(cwd), cwd, id, at, mod)
 }
 
 // claudeTranscriptIn is claudeTranscript in the project directory project.

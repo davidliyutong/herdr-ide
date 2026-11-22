@@ -16,6 +16,10 @@ import (
 // the lines of one response sharing message.id and its usage) and lines of
 // the program's own state. Each line maps on its own; the usage of a
 // response is reported once a page (by message.id).
+//
+// The messages of Claude Code's SDK protocol (the assistant and user frames
+// of its stream-json output) have the shapes of these lines, but for the
+// tool result, which they name tool_use_result; ClaudeFrame maps them too.
 
 type claudeFormat struct{}
 
@@ -40,6 +44,11 @@ type claudeLine struct {
 	IsAPIErrorMessage         bool            `json:"isApiErrorMessage"`
 	Message                   *claudeMessage  `json:"message"`
 	ToolUseResult             json.RawMessage `json:"toolUseResult"`
+	// ToolUseResultSDK is the SDK protocol's name of ToolUseResult.
+	ToolUseResultSDK json.RawMessage `json:"tool_use_result"`
+	// APIBlockIndex is the index in its message of an assistant line's
+	// content block.
+	APIBlockIndex *int `json:"apiBlockIndex"`
 	// Content is a system line's (local_command).
 	Content         json.RawMessage `json:"content"`
 	CompactMetadata *struct {
@@ -52,7 +61,9 @@ type claudeMessage struct {
 	ID      string          `json:"id"`
 	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"`
-	Usage   *struct {
+	// StopReason is why the response ended (the API's); "" while it runs.
+	StopReason string `json:"stop_reason"`
+	Usage      *struct {
 		Input         int64 `json:"input_tokens"`
 		CacheRead     int64 `json:"cache_read_input_tokens"`
 		CacheCreation int64 `json:"cache_creation_input_tokens"`
@@ -197,6 +208,9 @@ func claudeUser(d *claudeLine, o *lineOut) {
 			var res json.RawMessage
 			if results == 1 {
 				res = d.ToolUseResult
+				if !present(res) {
+					res = d.ToolUseResultSDK
+				}
 			}
 			claudeToolResult(&b, res, o)
 		case "text":
@@ -256,7 +270,9 @@ var queuedCommand = []byte(`"queued_command"`)
 // task notifications), and writes no user line for it; a message still
 // queued when the turn ends becomes the next turn's user line instead,
 // with no attachment. So the attachment gives the user's message, and no
-// turn's start: the turn it joins is running.
+// turn's start: the turn it joins is running. A message of a client of the
+// SDK protocol that did not say where it came from has no origin: it is
+// the user's too.
 func claudeAttachment(l *rawLine, o *lineOut) {
 	if !bytes.Contains(l.b, queuedCommand) {
 		return
@@ -271,7 +287,7 @@ func claudeAttachment(l *rawLine, o *lineOut) {
 		} `json:"origin"`
 		Prompt json.RawMessage `json:"prompt"`
 	}
-	if json.Unmarshal(m["attachment"], &a) != nil || a.Type != "queued_command" || a.CommandMode != "prompt" || a.Origin == nil || a.Origin.Kind != "human" || a.IsMeta {
+	if json.Unmarshal(m["attachment"], &a) != nil || a.Type != "queued_command" || a.CommandMode != "prompt" || a.Origin != nil && a.Origin.Kind != "human" || a.IsMeta {
 		return
 	}
 	var sidechain, meta bool
@@ -422,11 +438,18 @@ func claudeAssistant(d *claudeLine, o *lineOut) {
 		o.notice(agentproto.NoticeError, obj{"text": s})
 		return
 	}
+	o.message, o.count = m.ID, len(blocks)
+	if d.APIBlockIndex != nil && *d.APIBlockIndex >= 0 && *d.APIBlockIndex < 1<<20 {
+		o.first = *d.APIBlockIndex + 1
+	}
 	for i := range blocks {
+		o.block = i + 1
 		if claudeBlockEvents(m, &blocks[i], o); o.over {
+			o.block = 0
 			return
 		}
 	}
+	o.block = 0
 	if u := m.Usage; u != nil {
 		if used := u.Input + u.CacheRead + u.CacheCreation; used > 0 {
 			// The model's context window is not in the transcript: the
@@ -434,7 +457,32 @@ func claudeAssistant(d *claudeLine, o *lineOut) {
 			o.add(pev{t: agentproto.TranscriptUpdate, update: obj{"sessionUpdate": "usage_update", "used": used}, usage: m.ID})
 		}
 	}
+	if stop := claudeStop(m.StopReason); stop != "" && len(blocks) > 0 && !thinking(blocks[len(blocks)-1].Type) {
+		// The response the turn ends with: Claude Code writes a line per
+		// block, each with the response's stop reason, the thinking before
+		// the reply. A transcript of the SDK protocol's sessions has no
+		// other end of a turn (no turn_duration line).
+		o.turn(agentproto.TurnEnd, stop)
+	}
 }
+
+// claudeStop is the ACP stop reason of a turn that ends with a response
+// that stopped for reason (the API's); "" for a response the turn goes on
+// after (tool_use, pause_turn) or one still running.
+func claudeStop(reason string) string {
+	switch reason {
+	case "end_turn", "stop_sequence":
+		return "end_turn"
+	case "max_tokens", "model_context_window_exceeded":
+		return "max_tokens"
+	case "refusal":
+		return "refusal"
+	}
+	return ""
+}
+
+// thinking tells whether a content block's type is a thought's.
+func thinking(typ string) bool { return typ == "thinking" || typ == "redacted_thinking" }
 
 // chunk is the update of a message's or a thought's text.
 func (o *lineOut) chunk(kind, text, messageID string) obj {
@@ -551,7 +599,48 @@ func claudeToolUse(b *claudeBlock, o *lineOut) {
 			u["locations"] = []any{loc}
 		}
 	}
+	if content := claudeInputContent(b.Name, in, u, o); content != nil {
+		u["content"] = content
+	}
 	o.update(u)
+}
+
+// claudeInputContent is what a tool call's input shows before it runs: the
+// change of an Edit, MultiEdit or Write as diffs (a Write's old text is
+// not known: null, as a new file's), the plan of an ExitPlanMode; nil for
+// another tool.
+func claudeInputContent(name string, in obj, u obj, o *lineOut) []any {
+	path := str(in["file_path"])
+	switch name {
+	case "Edit":
+		if path != "" {
+			oldText, okOld := in["old_string"].(string)
+			newText, okNew := in["new_string"].(string)
+			if okOld && okNew {
+				return []any{o.diff(u, path, oldText, newText, true)}
+			}
+		}
+	case "MultiEdit":
+		var out []any
+		for _, e := range asArr(in["edits"]) {
+			m := asObj(e)
+			oldText, okOld := m["old_string"].(string)
+			newText, okNew := m["new_string"].(string)
+			if path != "" && okOld && okNew && len(out) < maxItems {
+				out = append(out, o.diff(u, path, oldText, newText, true))
+			}
+		}
+		return out
+	case "Write":
+		if text, ok := in["content"].(string); ok && path != "" {
+			return []any{o.diff(u, path, "", text, false)}
+		}
+	case "ExitPlanMode":
+		if plan, ok := in["plan"].(string); ok && strings.TrimSpace(plan) != "" {
+			return []any{obj{"type": "content", "content": o.textBlock(plan)}}
+		}
+	}
+	return nil
 }
 
 // planEntries are the entries of a plan from a list of items whose text is
@@ -654,7 +743,7 @@ func claudeToolResult(b *claudeBlock, res json.RawMessage, o *lineOut) {
 		}
 	}
 	// The members that tell the tool, without decoding the others.
-	r := pick(bytes.TrimSpace(res), "newTodos", "oldString", "newString", "edits", "file", "stdout", "stderr", "filePath", "content", "originalFile")
+	r := pick(bytes.TrimSpace(res), "newTodos", "oldString", "newString", "edits", "file", "stdout", "stderr", "filePath", "content", "originalFile", "agentId")
 	var content []any
 	field := func(k string) (string, bool) {
 		var s string
@@ -669,6 +758,12 @@ func claudeToolResult(b *claudeBlock, res json.RawMessage, o *lineOut) {
 	case r["newTodos"] != nil:
 		// TodoWrite's: its plan was the update.
 		return
+	case r["agentId"] != nil && r["content"] != nil:
+		// A subagent's (Agent, Task): its report, without the words to
+		// the model Claude Code wraps it in.
+		if report, n := resultText(r["content"]); report != "" || n > 0 {
+			text, images = report, n
+		}
 	case r["oldString"] != nil || r["newString"] != nil:
 		path, _ := field("filePath")
 		oldText, _ := field("oldString")

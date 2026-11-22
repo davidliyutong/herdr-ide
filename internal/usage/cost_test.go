@@ -135,7 +135,7 @@ func TestCostCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := filepath.Join(e.Base, CostCacheFile)
-	st, err := os.Stat(cache)
+	st, err := os.Stat(costDB(cache))
 	if err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
 		t.Fatalf("cache %v %v", st, err)
 	}
@@ -323,13 +323,10 @@ func TestCostCancelKeepsProgress(t *testing.T) {
 	}
 }
 
-// agedCache makes the cache file older than costPersistEvery.
+// agedCache makes the cache's last save older than costPersistEvery.
 func agedCache(t *testing.T, p string) {
 	t.Helper()
-	old := time.Now().Add(-costPersistEvery - time.Minute)
-	if err := os.Chtimes(p, old, old); err != nil {
-		t.Fatal(err)
-	}
+	setCostSaved(t, p, time.Now().Add(-costPersistEvery-time.Minute))
 }
 
 func appendTo(t *testing.T, f, text string) {
@@ -428,7 +425,7 @@ func TestCostCacheWritesSeldom(t *testing.T) {
 	Cost(context.Background(), e, CostOptions{Since: since})
 	cache := filepath.Join(e.Base, CostCacheFile)
 	recent := time.Now().Add(-time.Minute).Truncate(time.Second)
-	os.Chtimes(cache, recent, recent)
+	setCostSaved(t, cache, recent)
 	f := filepath.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")
 	line := `{"timestamp":"2026-11-15T09:10:00Z","requestId":"req-2","cwd":"/home/u/alpha","message":{"role":"assistant","model":"claude-haiku-4-5","id":"msg-2","usage":{"input_tokens":10,"output_tokens":20}}}` + "\n"
 	appendTo(t, f, line)
@@ -436,7 +433,7 @@ func TestCostCacheWritesSeldom(t *testing.T) {
 	if rowsBy(rep)["claude|claude-haiku-4-5|alpha"].Requests != 1 {
 		t.Fatalf("new line not counted: %+v", rep.Rows)
 	}
-	if st, _ := os.Stat(cache); !st.ModTime().Equal(recent) {
+	if at, _ := costSavedAt(cache); !at.Equal(recent) {
 		t.Errorf("cache written for one line")
 	}
 	// Not written: the next scan reads on from the file's offsets, the
@@ -447,7 +444,7 @@ func TestCostCacheWritesSeldom(t *testing.T) {
 	}
 	agedCache(t, cache)
 	Cost(context.Background(), e, CostOptions{Since: since})
-	if st, _ := os.Stat(cache); time.Since(st.ModTime()) > time.Minute {
+	if at, _ := costSavedAt(cache); time.Since(at) > time.Minute {
 		t.Errorf("an old cache not written")
 	}
 	if rs := loadCostCache(cache).Files[path.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")].Records; len(rs) != 2 {
@@ -473,13 +470,9 @@ func TestCostInMemoryCacheAndETag(t *testing.T) {
 		t.Fatalf("first scan: etag=%q notMod=%v rows=%d", first.ETag, first.NotModified, len(first.Rows))
 	}
 
-	// Make the on-disk cache unreadable: the in-memory cache still serves
-	// the unchanged scan and honors IfNoneMatch without touching the file.
+	// The cache saved did not change: the in-memory cache serves the
+	// unchanged scan and honors IfNoneMatch without reading it again.
 	cache := filepath.Join(e.Base, CostCacheFile)
-	if err := os.Chmod(cache, 0); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(cache, 0o600)
 
 	oMatch := o
 	oMatch.IfNoneMatch = first.ETag
@@ -503,11 +496,9 @@ func TestCostInMemoryCacheAndETag(t *testing.T) {
 	}
 
 	// Appending one line bumps the in-memory generation even when the
-	// recent cache file is not persisted yet, so IfNoneMatch misses and
-	// the next scan sees the new generation.
-	os.Chmod(cache, 0o600)
-	recent := time.Now().Add(-time.Minute).Truncate(time.Second)
-	os.Chtimes(cache, recent, recent)
+	// cache saved recently is not saved again yet, so IfNoneMatch misses
+	// and the next scan sees the new generation.
+	setCostSaved(t, cache, time.Now().Add(-time.Minute).Truncate(time.Second))
 	f := filepath.Join(e.Home, ".claude/projects/-home-u-alpha/s1.jsonl")
 	appendTo(t, f, `{"timestamp":"2026-11-15T09:10:00Z","requestId":"req-9","cwd":"/home/u/alpha","message":{"role":"assistant","model":"claude-haiku-4-5","id":"msg-9","usage":{"input_tokens":10,"output_tokens":20}}}`+"\n")
 	updated, err := Cost(context.Background(), e, oMatch)

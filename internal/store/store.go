@@ -17,10 +17,13 @@
 // write-ahead logging allows (synchronous NORMAL: a power loss may lose the
 // last transactions, never the database) and begins its transactions
 // IMMEDIATE (a writer takes the lock when it begins, so two writers never
-// deadlock upgrading). A database's schema is versioned by PRAGMA
-// user_version: Options.Migrations, applied in order in one transaction,
-// each version once. A database of a version above the code's (written by
-// a newer program) is opened read-only, with ErrNewer.
+// deadlock upgrading); one it creates vacuums incrementally (DB.Reclaim).
+// A database's schema is versioned by PRAGMA user_version:
+// Options.Migrations, applied in order in one transaction, each version
+// once. A database of a version above the code's (written by a newer
+// program) is opened read-only, with ErrNewer. A database that several
+// features share (OpenShared) versions each feature's tables apart
+// instead (Migrate).
 package store
 
 import (
@@ -58,6 +61,10 @@ type DB struct {
 	*sql.DB
 	readOnly bool
 	version  int
+	// pool is the shared database's pool this is a handle of (OpenShared),
+	// closed whether the handle was released.
+	pool   *pool
+	closed bool
 }
 
 // ReadOnly reports whether the database was opened read-only (ErrNewer):
@@ -133,6 +140,9 @@ func dsn(path string, timeout time.Duration, readOnly bool) string {
 	q.Set("_synchronous", "NORMAL")
 	q.Set("_foreign_keys", "1")
 	q.Set("_txlock", "immediate")
+	// A database created here gives the pages its rows freed back when
+	// asked (DB.Reclaim); one created before keeps them for later rows.
+	q.Set("_pragma", "auto_vacuum(INCREMENTAL)")
 	if readOnly {
 		q.Set("_query_only", "1")
 	}

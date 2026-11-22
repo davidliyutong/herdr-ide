@@ -26,6 +26,7 @@ import claudeToolsErrors from '../../../design/testdata/transcript/claude-tools-
 import claudeSessionEvents from '../../../design/testdata/transcript/claude-session-events.json';
 import claudeUnknown from '../../../design/testdata/transcript/claude-unknown.json';
 import claudeQueuedPrompts from '../../../design/testdata/transcript/claude-queued-prompts.json';
+import claudeHeadless from '../../../design/testdata/transcript/claude-headless.json';
 import codexExec from '../../../design/testdata/transcript/codex-0.170.0-exec.json';
 import codexItems from '../../../design/testdata/transcript/codex-items.json';
 import codexLegacy from '../../../design/testdata/transcript/codex-legacy-apply-patch.json';
@@ -45,6 +46,7 @@ const vectors: Record<string, Vector> = {
   'claude-session-events.json': claudeSessionEvents,
   'claude-unknown.json': claudeUnknown,
   'claude-queued-prompts.json': claudeQueuedPrompts,
+  'claude-headless.json': claudeHeadless,
   'codex-0.170.0-exec.json': codexExec,
   'codex-items.json': codexItems,
   'codex-legacy-apply-patch.json': codexLegacy,
@@ -181,8 +183,11 @@ function checkEvent(ev: Json, where: string) {
 }
 
 describe('transcript vectors', () => {
-  it('are all here', () => {
-    expect(Object.keys(vectors)).toHaveLength(8);
+  it('are all here: every file of the directory', async () => {
+    const fsModule = 'node:fs';
+    const fs = (await import(/* @vite-ignore */ fsModule)) as { readdirSync(p: URL): string[] };
+    const files = fs.readdirSync(new URL('../../../design/testdata/transcript/', import.meta.url)).filter((f) => f.endsWith('.json'));
+    expect(Object.keys(vectors).sort()).toEqual(files.sort());
   });
   for (const [name, v] of Object.entries(vectors)) {
     describe(name, () => {

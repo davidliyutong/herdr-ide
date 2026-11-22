@@ -1,11 +1,13 @@
-// Pieces the conversation view's items share: what an item may call, and
-// the blocks of a message other than its text. A block's members are read
-// as text only when they are strings (asText): the blocks come from a
-// machine.
+// Pieces the conversation view's items share: what an item may call, what
+// the cards that answer the agent may do, and the blocks of a message other
+// than its text. A block's members are read as text only when they are
+// strings (asText): the blocks come from a machine.
 
+import { createContext } from 'react';
 import { FileText, ImageIcon } from 'lucide-react';
-import { t } from '../i18n';
+import { hasMessage, t, type MessageKey } from '../i18n';
 import { asText, ownMeta, type ContentBlock } from './model';
+import type { PermissionReply, QuestionReply } from './source';
 
 /** What the items of a conversation may call; the same object for every
  * item, so that an item that did not change is not drawn again. */
@@ -14,7 +16,38 @@ export interface ItemContext {
   agent: string;
   /** Opens a file the agent named (a location, a link to a resource). */
   openFile?: (path: string, line?: number) => void;
-  showTerminal: () => void;
+}
+
+/** What the cards of permissions and questions may do: a context of its
+ * own, so that a change of it (the chat stops waiting, read-only) draws
+ * the cards again and no other item. */
+export interface Answering {
+  /** Whether a card that waits may be answered: not read-only, and the
+   * chat's turn still runs (an answer to a card of an ended turn goes
+   * nowhere). */
+  open: boolean;
+  /** The items of the cards that wait (model.ts waitingItems). */
+  waiting: ReadonlySet<string>;
+  readOnly: boolean;
+  respond(permission: string, reply: PermissionReply): Promise<void>;
+  answer(question: string, reply: QuestionReply): Promise<void>;
+}
+
+const nothing = () => Promise.resolve();
+export const AnsweringContext = createContext<Answering>({
+  open: false,
+  waiting: new Set(),
+  readOnly: true,
+  respond: nothing,
+  answer: nothing,
+});
+
+/** Why a command was not taken, in words: by the code of the source's
+ * error (chatproto's codes, the core's), else in general. */
+export function errorText(e: unknown, agent: string, fallback: MessageKey): string {
+  const code = typeof e === 'object' && e !== null ? (e as { code?: unknown }).code : undefined;
+  const key = `conversation.error.${typeof code === 'string' ? code : ''}`;
+  return hasMessage(key) ? t(key, { agent }) : t(fallback, { agent });
 }
 
 // An image block is drawn when it is a raster image in base64 (as a data

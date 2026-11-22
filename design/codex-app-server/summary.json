@@ -1,0 +1,660 @@
+{
+  "version": "codex-cli 0.171.0",
+  "requests": {
+    "account/read": [
+      "refreshToken"
+    ],
+    "initialize": [
+      "capabilities",
+      "clientInfo!"
+    ],
+    "model/list": [
+      "cursor",
+      "includeHidden",
+      "limit",
+      "modelProvider"
+    ],
+    "thread/compact/start": [
+      "threadId!"
+    ],
+    "thread/list": [
+      "ancestorThreadId",
+      "archived",
+      "attachedToThreadId",
+      "currentAccountOnly",
+      "cursor",
+      "cwd",
+      "excludedThreadIds",
+      "includeAttachedThreads",
+      "includedThreadIds",
+      "limit",
+      "modelProviders",
+      "originators",
+      "parentThreadId",
+      "projectId",
+      "searchTerm",
+      "sectionId",
+      "sortDirection",
+      "sortKey",
+      "sourceKinds",
+      "useStateDbOnly"
+    ],
+    "thread/resume": [
+      "approvalPolicy",
+      "approvalsReviewer",
+      "baseInstructions",
+      "config",
+      "cwd",
+      "developerInstructions",
+      "excludeTurns",
+      "history",
+      "initialTurnsPage",
+      "model",
+      "modelProvider",
+      "path",
+      "permissions",
+      "personality",
+      "runtimeWorkspaceRoots",
+      "sandbox",
+      "serviceTier",
+      "threadId!"
+    ],
+    "thread/start": [
+      "allowProviderModelFallback",
+      "approvalPolicy",
+      "approvalsReviewer",
+      "baseInstructions",
+      "config",
+      "cwd",
+      "daybreakEnabled",
+      "developerInstructions",
+      "dynamicTools",
+      "environments",
+      "ephemeral",
+      "experimentalRawEvents",
+      "historyMode",
+      "mockExperimentalField",
+      "model",
+      "modelProvider",
+      "multiAgentMode",
+      "permissions",
+      "personality",
+      "projectId",
+      "runtimeWorkspaceRoots",
+      "sandbox",
+      "selectedCapabilityRoots",
+      "serviceName",
+      "serviceTier",
+      "sessionStartSource",
+      "threadSource"
+    ],
+    "thread/turns/list": [
+      "cursor",
+      "itemsView",
+      "limit",
+      "sortDirection",
+      "threadId!"
+    ],
+    "turn/interrupt": [
+      "threadId!",
+      "turnId!"
+    ],
+    "turn/start": [
+      "additionalContext",
+      "approvalPolicy",
+      "approvalsReviewer",
+      "clientUserMessageId",
+      "collaborationMode",
+      "cwd",
+      "cyberAccessProgram",
+      "disabledPluginIds",
+      "effort",
+      "environments",
+      "input!",
+      "model",
+      "multiAgentMode",
+      "outputSchema",
+      "parentTurnId",
+      "permissions",
+      "personality",
+      "responsesapiClientMetadata",
+      "responsesapiClientMetadataPatch",
+      "rootTurnId",
+      "runtimeWorkspaceRoots",
+      "sandboxPolicy",
+      "serviceTier",
+      "serviceTierForTurn",
+      "summary",
+      "threadId!",
+      "toolOutput",
+      "turnTrigger"
+    ],
+    "turn/steer": [
+      "additionalContext",
+      "clientUserMessageId",
+      "expectedTurnId!",
+      "input!",
+      "responsesapiClientMetadata",
+      "responsesapiClientMetadataPatch",
+      "threadId!"
+    ]
+  },
+  "serverRequests": {
+    "account/chatgptAuthTokens/refresh": [
+      "previousAccountId",
+      "reason!"
+    ],
+    "applyPatchApproval": [
+      "callId!",
+      "conversationId!",
+      "fileChanges!",
+      "grantRoot",
+      "reason"
+    ],
+    "attestation/generate": null,
+    "execCommandApproval": [
+      "approvalId",
+      "callId!",
+      "command!",
+      "conversationId!",
+      "cwd!",
+      "parsedCmd!",
+      "reason"
+    ],
+    "item/commandExecution/requestApproval": [
+      "additionalPermissions",
+      "approvalId",
+      "availableDecisions",
+      "command",
+      "commandActions",
+      "cwd",
+      "environmentId",
+      "itemId!",
+      "kind",
+      "networkApprovalContext",
+      "proposedExecpolicyAmendment",
+      "proposedNetworkPolicyAmendments",
+      "reason",
+      "startedAtMs!",
+      "threadId!",
+      "turnId!"
+    ],
+    "item/fileChange/requestApproval": [
+      "grantRoot",
+      "itemId!",
+      "reason",
+      "startedAtMs!",
+      "threadId!",
+      "turnId!"
+    ],
+    "item/permissions/requestApproval": [
+      "cwd!",
+      "environmentId",
+      "itemId!",
+      "permissions!",
+      "reason",
+      "startedAtMs!",
+      "threadId!",
+      "turnId!"
+    ],
+    "item/tool/call": [
+      "arguments!",
+      "callId!",
+      "namespace",
+      "threadId!",
+      "tool!",
+      "turnId!"
+    ],
+    "item/tool/requestUserInput": [
+      "autoResolutionMs",
+      "isBlocking!",
+      "itemId!",
+      "questions!",
+      "threadId!",
+      "turnId!"
+    ],
+    "mcpServer/elicitation/request": [
+      "environmentId",
+      "serverName!",
+      "threadId!",
+      "turnId"
+    ]
+  },
+  "notifications": {
+    "account/rateLimits/updated": [
+      "rateLimits!"
+    ],
+    "error": [
+      "error!",
+      "threadId!",
+      "turnId!",
+      "willRetry!"
+    ],
+    "item/agentMessage/delta": [
+      "delta!",
+      "itemId!",
+      "threadId!",
+      "turnId!"
+    ],
+    "item/commandExecution/outputDelta": [
+      "delta!",
+      "itemId!",
+      "threadId!",
+      "turnId!"
+    ],
+    "item/completed": [
+      "completedAtMs!",
+      "contentTokenCount",
+      "item!",
+      "threadId!",
+      "turnId!"
+    ],
+    "item/plan/delta": [
+      "delta!",
+      "itemId!",
+      "threadId!",
+      "turnId!"
+    ],
+    "item/reasoning/summaryPartAdded": [
+      "itemId!",
+      "summaryIndex!",
+      "threadId!",
+      "turnId!"
+    ],
+    "item/reasoning/summaryTextDelta": [
+      "delta!",
+      "itemId!",
+      "summaryIndex!",
+      "threadId!",
+      "turnId!"
+    ],
+    "item/started": [
+      "item!",
+      "startedAtMs!",
+      "threadId!",
+      "turnId!"
+    ],
+    "serverRequest/resolved": [
+      "requestId!",
+      "threadId!"
+    ],
+    "thread/name/updated": [
+      "threadId!",
+      "threadName"
+    ],
+    "thread/tokenUsage/updated": [
+      "threadId!",
+      "tokenUsage!",
+      "turnId!"
+    ],
+    "turn/completed": [
+      "threadId!",
+      "turn!"
+    ],
+    "turn/started": [
+      "threadId!",
+      "turn!"
+    ]
+  },
+  "types": {
+    "ApprovalsReviewer": {
+      "": [
+        "auto_review",
+        "guardian_subagent",
+        "user"
+      ]
+    },
+    "AskForApproval": {
+      "": [
+        "never",
+        "on-request",
+        "untrusted"
+      ],
+      "granular": [
+        "mcp_elicitations!",
+        "request_permissions",
+        "rules!",
+        "sandbox_approval!",
+        "skill_approval"
+      ]
+    },
+    "CollaborationMode": {
+      "{}": [
+        "mode!",
+        "settings!"
+      ]
+    },
+    "CommandExecutionApprovalDecision": {
+      "": [
+        "accept",
+        "acceptForSession",
+        "cancel",
+        "decline"
+      ],
+      "acceptWithExecpolicyAmendment": [
+        "execpolicy_amendment!"
+      ],
+      "applyNetworkPolicyAmendment": [
+        "network_policy_amendment!"
+      ]
+    },
+    "CommandExecutionStatus": {
+      "": [
+        "completed",
+        "declined",
+        "failed",
+        "inProgress"
+      ]
+    },
+    "DynamicToolCallOutputContentItem": {
+      "inputAudio": [
+        "audioUrl!",
+        "type!"
+      ],
+      "inputImage": [
+        "imageUrl!",
+        "type!"
+      ],
+      "inputText": [
+        "text!",
+        "type!"
+      ]
+    },
+    "FileChangeApprovalDecision": {
+      "": [
+        "accept",
+        "acceptForSession",
+        "cancel",
+        "decline"
+      ]
+    },
+    "McpServerElicitationAction": {
+      "": [
+        "accept",
+        "cancel",
+        "decline"
+      ]
+    },
+    "ModeKind": {
+      "": [
+        "default",
+        "plan"
+      ]
+    },
+    "PatchApplyStatus": {
+      "": [
+        "completed",
+        "declined",
+        "failed",
+        "inProgress"
+      ]
+    },
+    "PatchChangeKind": {
+      "add": [
+        "type!"
+      ],
+      "delete": [
+        "type!"
+      ],
+      "update": [
+        "move_path",
+        "type!"
+      ]
+    },
+    "PermissionGrantScope": {
+      "": [
+        "session",
+        "turn"
+      ]
+    },
+    "SandboxMode": {
+      "": [
+        "danger-full-access",
+        "read-only",
+        "workspace-write"
+      ]
+    },
+    "SandboxPolicy": {
+      "dangerFullAccess": [
+        "type!"
+      ],
+      "externalSandbox": [
+        "networkAccess",
+        "type!"
+      ],
+      "readOnly": [
+        "networkAccess",
+        "type!"
+      ],
+      "workspaceWrite": [
+        "excludeSlashTmp",
+        "excludeTmpdirEnvVar",
+        "networkAccess",
+        "type!",
+        "writableRoots"
+      ]
+    },
+    "Settings": {
+      "{}": [
+        "developer_instructions",
+        "model!",
+        "reasoning_effort"
+      ]
+    },
+    "SortDirection": {
+      "": [
+        "asc",
+        "desc"
+      ]
+    },
+    "SubAgentActivityKind": {
+      "": [
+        "completed",
+        "interacted",
+        "interrupted",
+        "started"
+      ]
+    },
+    "ThreadItem": {
+      "agentMessage": [
+        "delivery",
+        "id!",
+        "memoryCitation",
+        "moderation",
+        "phase",
+        "questions",
+        "text!",
+        "type!"
+      ],
+      "collabAgentToolCall": [
+        "agentsStates!",
+        "id!",
+        "model",
+        "prompt",
+        "reasoningEffort",
+        "receiverThreadIds!",
+        "senderThreadId!",
+        "status!",
+        "tool!",
+        "type!"
+      ],
+      "commandExecution": [
+        "aggregatedOutput",
+        "command!",
+        "commandActions!",
+        "cwd!",
+        "durationMs",
+        "exitCode",
+        "id!",
+        "pluginId",
+        "processId",
+        "scriptPath",
+        "source",
+        "status!",
+        "type!"
+      ],
+      "contextCompaction": [
+        "id!",
+        "type!"
+      ],
+      "dynamicToolCall": [
+        "arguments!",
+        "contentItems",
+        "durationMs",
+        "id!",
+        "namespace",
+        "status!",
+        "success",
+        "tool!",
+        "type!"
+      ],
+      "enteredReviewMode": [
+        "id!",
+        "review!",
+        "type!"
+      ],
+      "exitedReviewMode": [
+        "id!",
+        "review!",
+        "type!"
+      ],
+      "fileChange": [
+        "changes!",
+        "id!",
+        "status!",
+        "type!"
+      ],
+      "functionCallOutput": [
+        "id!",
+        "name!",
+        "namespace",
+        "output!",
+        "type!"
+      ],
+      "hookPrompt": [
+        "fragments!",
+        "id!",
+        "type!"
+      ],
+      "imageGeneration": [
+        "failure",
+        "generationId",
+        "id!",
+        "inputImages",
+        "revisedPrompt",
+        "savedPath",
+        "status!",
+        "transparentBackground",
+        "type!"
+      ],
+      "imageView": [
+        "id!",
+        "path!",
+        "type!"
+      ],
+      "mcpToolCall": [
+        "appContext",
+        "arguments!",
+        "durationMs",
+        "environmentId",
+        "error",
+        "id!",
+        "mcpAppResourceUri",
+        "mcpAppUi",
+        "pluginId",
+        "readOnlyHint",
+        "result",
+        "server!",
+        "status!",
+        "tool!",
+        "type!"
+      ],
+      "plan": [
+        "id!",
+        "text!",
+        "type!"
+      ],
+      "reasoning": [
+        "content",
+        "id!",
+        "summary",
+        "type!"
+      ],
+      "sleep": [
+        "durationMs!",
+        "id!",
+        "type!"
+      ],
+      "subAgentActivity": [
+        "agentPath!",
+        "agentThreadId!",
+        "id!",
+        "kind!",
+        "model",
+        "reasoningEffort",
+        "type!"
+      ],
+      "userMessage": [
+        "clientId",
+        "content!",
+        "id!",
+        "type!"
+      ],
+      "webSearch": [
+        "action",
+        "id!",
+        "query!",
+        "results",
+        "type!"
+      ]
+    },
+    "TurnItemsView": {
+      "": [
+        "full",
+        "notLoaded",
+        "summary"
+      ]
+    },
+    "TurnStatus": {
+      "": [
+        "completed",
+        "failed",
+        "inProgress",
+        "interrupted"
+      ]
+    },
+    "UserInput": {
+      "audio": [
+        "type!"
+      ],
+      "image": [
+        "detail",
+        "type!"
+      ],
+      "localAudio": [
+        "path!",
+        "type!"
+      ],
+      "localImage": [
+        "detail",
+        "path!",
+        "type!"
+      ],
+      "mention": [
+        "name!",
+        "path!",
+        "type!"
+      ],
+      "skill": [
+        "name!",
+        "path!",
+        "type!"
+      ],
+      "text": [
+        "text!",
+        "text_elements",
+        "type!"
+      ]
+    }
+  }
+}

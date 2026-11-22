@@ -13,7 +13,8 @@
 // Event per line, until either side closes; meanwhile the client may send
 // Command lines, each answered by an Event of type EventAck. After the
 // response to OpWatch the host writes a ChatState line whenever a chat
-// changes, until either side closes.
+// changes, and one in StateDeleted when a chat is no more, until either
+// side closes.
 //
 // Requests name agents by their kinds (internal/agentkinds ids with a Chat
 // spec), never by a command line: what runs is the machine's to decide.
@@ -96,7 +97,9 @@ const (
 	// (Response.Sessions, Response.NextCursor).
 	OpSessions = "sessions"
 	// OpWatch subscribes to the states of every chat: Response.States
-	// holds them all, then each change comes as a ChatState line.
+	// holds them all, then each change comes as a ChatState line; a chat
+	// deleted (OpDelete) or removed by the host's limits comes one last
+	// time, in StateDeleted.
 	OpWatch = "watch"
 	// OpSeen tells that the user saw Request.Chat up to Request.Seq: a
 	// turn that ended at or before it is no longer StatusDone.
@@ -275,6 +278,10 @@ const (
 	StateFailed = "failed"
 	// StateClosed: the user closed the chat (OpClose).
 	StateClosed = "closed"
+	// StateDeleted is no state of a Chat: OpWatch's last ChatState line of
+	// a chat that is no more (OpDelete, or the host's limits removed it),
+	// with StatusIdle.
+	StateDeleted = "deleted"
 )
 
 // The statuses of a chat (Chat.Status): what notifications and the UIs'
@@ -365,7 +372,8 @@ func (c *Chat) StateOf() ChatState {
 		Updated: c.Updated, Seq: c.Seq, SessionID: c.SessionID}
 }
 
-// ChatState is what OpWatch tells of a chat.
+// ChatState is what OpWatch tells of a chat. Its State is a chat's, or
+// StateDeleted once the chat is no more.
 type ChatState struct {
 	ID        string    `json:"id"`
 	Kind      string    `json:"kind"`

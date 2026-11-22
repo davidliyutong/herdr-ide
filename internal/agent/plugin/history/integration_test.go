@@ -163,15 +163,15 @@ func TestIntegrationCapture(t *testing.T) {
 	}
 
 	// Nothing changed: nothing is attached to, nothing written.
-	vt := path.Join(env.Base, dirName, term.Address+".vt")
-	before, err := os.ReadFile(vt)
-	if err != nil {
-		t.Fatal(err)
+	vt := term.Address + ".vt"
+	before, ok := generation(t, env.Base, vt)
+	if !ok {
+		t.Fatal("no snapshot")
 	}
 	if res, err = capture(ctx, env, p); err != nil || res.Skipped != 1 || res.Captured != 0 {
 		t.Fatalf("second capture: %+v %v", res, err)
 	}
-	if after, err := os.ReadFile(vt); err != nil || !bytes.Equal(after, before) {
+	if after, ok := generation(t, env.Base, vt); !ok || !bytes.Equal(after, before) {
 		t.Fatal("the snapshot was written again")
 	}
 }

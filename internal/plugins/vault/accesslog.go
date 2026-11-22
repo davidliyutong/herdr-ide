@@ -2,11 +2,14 @@ package vault
 
 import (
 	"bufio"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,16 +18,20 @@ import (
 	"time"
 
 	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/userfile"
+	"herdr-ide/internal/plugin"
+	"herdr-ide/internal/store"
 )
 
 // The access log records every request of a machine's MCP server and every
 // value a page took (a reveal, an export), with names only, never values.
-// It is kept beside the vault's file, in vault[-<instance>]-access.jsonl
-// (0600, one record a line), and read back at the core's start, so the
-// panel shows what happened before a restart too. A record that lets
-// values out is written (and flushed to disk) before they leave: one that
-// cannot be written refuses the release (log_failed).
+// It is kept in the core's database (core.db beside the settings file,
+// plugin.CoreDBFile), table vault_access, one row a record, and read back
+// at the core's start, so the panel shows what happened before a restart
+// too. A record that lets values out is committed to disk (store.Durable)
+// before they leave: one that cannot be written refuses the release
+// (log_failed). The file the log was kept in before,
+// vault[-<instance>]-access.jsonl beside the vault's, is imported once and
+// then removed.
 
 // Bounds of the access log: the records that let values out and the others
 // are kept apart, so lists and refusals, which a program can repeat at
@@ -36,7 +43,8 @@ const (
 	// MaxOthers is how many of the others are kept (lists, refusals,
 	// denials).
 	MaxOthers = 500
-	// maxLogRead is how much of the file a start reads (its end).
+	// maxLogRead is how much of the file kept before an import reads (its
+	// end).
 	maxLogRead = 16 << 20
 	// logFlushEvery is how often a record that took in repeated calls
 	// (Count) since it was written is written again.
@@ -134,9 +142,11 @@ func sameCall(a, b Access) bool {
 		a.Remote == b.Remote && a.UserAgent == b.UserAgent
 }
 
-// accessLog is the log in memory and its file ("" keeps it in memory only:
-// the core keeps no settings file).
+// accessLog is the log in memory and in the core's database ("" keeps it
+// in memory only: the core keeps no settings file).
 type accessLog struct {
+	// path is the file the log was kept in before (accessLogPath), which
+	// the core's database is beside (coreDBOf).
 	path   string
 	logger *log.Logger
 	// maxReleases, maxOthers and flushEvery replace MaxReleases, MaxOthers
@@ -148,22 +158,33 @@ type accessLog struct {
 	loaded bool
 	recs   []Access
 	nextID uint64
-	f      *os.File
-	// lines is how many lines the file holds: past twice the records kept
-	// it is written again with those only.
-	lines int
 	// stale: the last record took in calls since it was written; flush
 	// writes it again.
 	stale bool
 	flush *time.Timer
+	// newerTold: the log said once that the database is of a newer version.
+	newerTold bool
 }
 
-// accessLogPath is the access log's file beside the vault's.
+// accessLogPath is the file the access log was kept in before, beside the
+// vault's.
 func accessLogPath(vault string) string {
 	if vault == "" {
 		return ""
 	}
 	return strings.TrimSuffix(vault, ".json") + "-access.jsonl"
+}
+
+// coreDBOf is the core's database beside the access log's former file:
+// core.db beside vault-access.jsonl, core-<instance>.db beside
+// vault-<instance>-access.jsonl, as plugin.CoreDBFile has it beside the
+// settings file the vault's file is beside.
+func coreDBOf(logPath string) string {
+	if logPath == "" {
+		return ""
+	}
+	name := strings.TrimSuffix(filepath.Base(logPath), "-access.jsonl")
+	return plugin.CoreDBFile(filepath.Join(filepath.Dir(logPath), strings.Replace(name, "vault", "settings", 1)+".json"))
 }
 
 func newAccessLog(path string, logger *log.Logger) *accessLog {
@@ -176,8 +197,44 @@ func (l *accessLog) logf(format string, args ...any) {
 	}
 }
 
-// load reads the file once; called with l.mu held. Lines that do not
-// parse are skipped; of a record written several times the last counts.
+// The access log's tables in the core's database (store.DB.Migrate): a
+// record by its ID, with its class for the bounds (released).
+const accessFeature = "vault"
+
+var accessMigrations = []string{
+	`CREATE TABLE vault_access (
+		id INTEGER PRIMARY KEY,
+		released INTEGER NOT NULL,
+		record TEXT NOT NULL
+	);
+	CREATE INDEX vault_access_class ON vault_access (released, id);`,
+}
+
+// errNewer: the core's database, or the access log's tables in it, are
+// of a newer version, which this core reads and does not write.
+var errNewer = errors.New("the core's database is of a newer version: records are not kept")
+
+// open opens the core's database with the access log's tables; writable
+// false when they are of a newer version (errNewer). The caller closes it.
+func (l *accessLog) open() (db *store.DB, writable bool, err error) {
+	db, err = store.OpenShared(coreDBOf(l.path))
+	if db == nil {
+		return nil, false, err
+	}
+	v, err := db.Migrate(accessFeature, accessMigrations)
+	switch {
+	case errors.Is(err, store.ErrNewer) && v >= len(accessMigrations):
+		return db, false, nil
+	case err != nil:
+		db.Close()
+		return nil, false, err
+	}
+	return db, true, nil
+}
+
+// load reads the records once; called with l.mu held. The file the log
+// was kept in before is imported first, then removed. Records that do not
+// parse are skipped.
 func (l *accessLog) load() {
 	if l.loaded {
 		return
@@ -186,50 +243,122 @@ func (l *accessLog) load() {
 	if l.path == "" {
 		return
 	}
-	f, err := os.Open(l.path)
+	db, writable, err := l.open()
 	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			l.logf("%v", err)
-		}
+		l.logf("%v", err)
 		return
 	}
-	defer f.Close()
-	partial := false
-	if st, err := f.Stat(); err == nil && st.Size() > maxLogRead {
-		if _, err := f.Seek(st.Size()-maxLogRead, io.SeekStart); err == nil {
-			partial = true // the first line read is the end of one
-		}
+	defer db.Close()
+	if writable {
+		l.importFile(db)
 	}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64<<10), 8<<20)
-	at := map[uint64]int{}
-	for sc.Scan() {
-		l.lines++
-		if partial {
-			partial = false
-			continue
-		}
+	rows, err := db.Query("SELECT record FROM vault_access ORDER BY id")
+	if err != nil {
+		l.logf("%v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var b []byte
 		var a Access
-		if json.Unmarshal(sc.Bytes(), &a) != nil || a.ID == 0 {
+		if rows.Scan(&b) != nil || json.Unmarshal(b, &a) != nil || a.ID == 0 {
 			continue
 		}
-		if i, ok := at[a.ID]; ok {
-			l.recs[i] = a
-			continue
-		}
-		at[a.ID] = len(l.recs)
 		l.recs = append(l.recs, a)
 		l.nextID = max(l.nextID, a.ID+1)
 	}
-	if err := sc.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		l.logf("%v", err)
 	}
 	l.trim()
 }
 
+// importFile imports the file the log was kept in before (its records as
+// a start read them: of a record written several times the last, within
+// the bounds) into db once, then removes the file; a failed import leaves
+// it for the next start.
+func (l *accessLog) importFile(db *store.DB) {
+	if _, err := os.Lstat(l.path); err != nil {
+		return
+	}
+	_, err := db.Import(context.Background(), accessFeature, "access-log", func(tx *sql.Tx) error {
+		recs, err := readLogFile(l.path, l.maxReleases, l.maxOthers)
+		if err != nil {
+			return err
+		}
+		for _, a := range recs {
+			b, err := json.Marshal(a)
+			if err != nil {
+				continue
+			}
+			if _, err := tx.Exec("INSERT OR REPLACE INTO vault_access (id, released, record) VALUES (?, ?, ?)", int64(a.ID), released(a.Result), b); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		l.logf("importing %s: %v", filepath.Base(l.path), err)
+		return
+	}
+	if err := os.Remove(l.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		l.logf("%v", err)
+	}
+}
+
+// readLogFile reads the records of the file the log was kept in before,
+// one a line, as the log read it back: its end (maxLogRead), lines that do
+// not parse skipped, of a record written several times the last, the
+// oldest past the bounds dropped.
+func readLogFile(path string, maxReleases, maxOthers int) ([]Access, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
+	}
+	partial := false
+	if st.Size() > maxLogRead {
+		if _, err := f.Seek(st.Size()-maxLogRead, io.SeekStart); err != nil {
+			return nil, err
+		}
+		partial = true // the first line read is the end of one
+	}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64<<10), 8<<20)
+	var recs []Access
+	at := map[uint64]int{}
+	for sc.Scan() {
+		if partial {
+			partial = false
+			continue
+		}
+		var a Access
+		if json.Unmarshal(sc.Bytes(), &a) != nil || a.ID == 0 || a.ID > math.MaxInt64 {
+			continue
+		}
+		if i, ok := at[a.ID]; ok {
+			recs[i] = a
+			continue
+		}
+		at[a.ID] = len(recs)
+		recs = append(recs, a)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return trimmed(recs, maxReleases, maxOthers), nil
+}
+
 // add records rec: one that repeats the last record's call (coalesce: a
-// list call or a refusal) adds to its Count instead. The record is
-// appended to the file, flushed to disk when durable (it lets values
+// list call or a refusal) adds to its Count instead. The record is written
+// to the core's database, committed to disk when durable (it lets values
 // out); when that fails, the record says the release was refused
 // (log_failed) and the error is returned: the values must not leave.
 // It returns the record as kept.
@@ -256,7 +385,10 @@ func (l *accessLog) add(rec Access, coalesce, durable bool) (Access, error) {
 	l.recs = append(l.recs, rec)
 	err := l.write(rec, durable)
 	if err != nil {
-		l.logf("%v", err)
+		if !errors.Is(err, errNewer) || !l.newerTold {
+			l.logf("%v", err)
+		}
+		l.newerTold = l.newerTold || errors.Is(err, errNewer)
 		if durable {
 			rec.Result = ResultLogFailed
 			l.recs[len(l.recs)-1] = rec
@@ -265,99 +397,50 @@ func (l *accessLog) add(rec Access, coalesce, durable bool) (Access, error) {
 		}
 	}
 	l.trim()
-	if l.lines > 2*(l.maxReleases+l.maxOthers) {
-		l.compact()
-	}
 	return rec, err
 }
 
-// write appends rec to the file, flushed to disk when durable; called with
-// l.mu held.
+// write writes rec into the core's database, its commit on disk when
+// durable, and drops the oldest records of its class past the bounds;
+// called with l.mu held.
 func (l *accessLog) write(rec Access, durable bool) error {
 	if l.path == "" {
 		return nil
-	}
-	if l.f == nil {
-		if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
-			return err
-		}
-		f, err := os.OpenFile(l.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
-		if err != nil {
-			return err
-		}
-		if err := endLine(f); err != nil {
-			f.Close()
-			return err
-		}
-		l.f = f
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
-	size, serr := l.f.Seek(0, io.SeekEnd)
-	if _, err := writeLog(l.f, append(b, '\n')); err != nil {
-		// What part of the line went is cut, so the next record starts a
-		// line of its own and is read back (else the reopening ends the
-		// line: endLine).
-		if serr == nil {
-			l.f.Truncate(size)
-		}
-		l.f.Close()
-		l.f = nil
+	db, writable, err := l.open()
+	if err != nil {
 		return err
 	}
-	l.lines++
+	defer db.Close()
+	if !writable {
+		return errNewer
+	}
+	run := db.Update
 	if durable {
-		return l.f.Sync()
+		run = db.Durable
 	}
-	return nil
+	rel := released(rec.Result)
+	keep := l.maxOthers
+	if rel {
+		keep = l.maxReleases
+	}
+	return run(context.Background(), func(tx *sql.Tx) error { return writeRecord(tx, rec.ID, rel, b, keep) })
 }
 
-// writeLog writes a record's line into the log's file (tests make it
-// fail partway).
-var writeLog = func(f *os.File, b []byte) (int, error) { return f.Write(b) }
-
-// endLine ends the last line of the log's file f (opened to append) when
-// it does not end with a newline: one a crash or a failed write left half
-// written, which would otherwise take in the next record, so that record
-// would be lost when the file is read back (the half line is skipped).
-func endLine(f *os.File) error {
-	st, err := f.Stat()
-	if err != nil || st.Size() == 0 {
+// writeRecord writes a record's row and keeps the newest keep of its
+// class (tests make it fail).
+var writeRecord = func(tx *sql.Tx, id uint64, rel bool, record []byte, keep int) error {
+	if _, err := tx.Exec(`INSERT INTO vault_access (id, released, record) VALUES (?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET released = excluded.released, record = excluded.record`, int64(id), rel, record); err != nil {
 		return err
 	}
-	last := make([]byte, 1)
-	if _, err := f.ReadAt(last, st.Size()-1); err != nil {
-		return err
-	}
-	if last[0] == '\n' {
-		return nil
-	}
-	_, err = f.Write([]byte{'\n'})
+	_, err := tx.Exec(`DELETE FROM vault_access WHERE released = ?1 AND id NOT IN
+		(SELECT id FROM vault_access WHERE released = ?1 ORDER BY id DESC LIMIT ?2)`, rel, keep)
 	return err
-}
-
-// compact writes the file again with the records kept (atomically: the
-// old file or the new one); called with l.mu held.
-func (l *accessLog) compact() {
-	var b []byte
-	for _, a := range l.recs {
-		line, err := json.Marshal(a)
-		if err != nil {
-			continue
-		}
-		b = append(append(b, line...), '\n')
-	}
-	if l.f != nil {
-		l.f.Close() // Windows replaces no file that is open
-		l.f = nil
-	}
-	if _, err := userfile.Write(l.path, b); err != nil {
-		l.logf("%v", err)
-		return
-	}
-	l.lines, l.stale = len(l.recs), false
 }
 
 // scheduleFlush writes the last record again once a while is over, if it
@@ -371,7 +454,7 @@ func (l *accessLog) scheduleFlush() {
 		defer l.mu.Unlock()
 		l.flush = nil
 		if l.stale && len(l.recs) > 0 {
-			if err := l.write(l.recs[len(l.recs)-1], false); err != nil {
+			if err := l.write(l.recs[len(l.recs)-1], false); err != nil && (!errors.Is(err, errNewer) || !l.newerTold) {
 				l.logf("%v", err)
 			}
 			l.stale = false
@@ -381,20 +464,24 @@ func (l *accessLog) scheduleFlush() {
 
 // trim drops the oldest records past the bounds of their class; called
 // with l.mu held.
-func (l *accessLog) trim() {
+func (l *accessLog) trim() { l.recs = trimmed(l.recs, l.maxReleases, l.maxOthers) }
+
+// trimmed is recs without the oldest records past the bounds of their
+// class.
+func trimmed(recs []Access, maxReleases, maxOthers int) []Access {
 	var releases, others int
-	for _, a := range l.recs {
+	for _, a := range recs {
 		if released(a.Result) {
 			releases++
 		} else {
 			others++
 		}
 	}
-	if releases <= l.maxReleases && others <= l.maxOthers {
-		return
+	if releases <= maxReleases && others <= maxOthers {
+		return recs
 	}
-	dropR, dropO := max(0, releases-l.maxReleases), max(0, others-l.maxOthers)
-	l.recs = slices.DeleteFunc(l.recs, func(a Access) bool {
+	dropR, dropO := max(0, releases-maxReleases), max(0, others-maxOthers)
+	return slices.DeleteFunc(recs, func(a Access) bool {
 		if released(a.Result) {
 			if dropR > 0 {
 				dropR--
@@ -421,16 +508,12 @@ func (l *accessLog) list() []Access {
 	return out
 }
 
-// close ends the file's use (tests reopen it).
+// close stops the pending flush (tests reopen the log).
 func (l *accessLog) close() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.flush != nil {
 		l.flush.Stop()
 		l.flush = nil
-	}
-	if l.f != nil {
-		l.f.Close()
-		l.f = nil
 	}
 }

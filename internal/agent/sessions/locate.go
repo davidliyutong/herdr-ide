@@ -277,7 +277,7 @@ func resolvedRoot(p string) (string, bool) {
 // searchClaude looks for <id>.jsonl in every project directory of every
 // Claude Code configuration directory.
 func (r *Resolver) searchClaude(s *search, id string) {
-	for _, d := range r.claudeDirs() {
+	for _, d := range r.ClaudeDirs() {
 		root, ok := resolvedRoot(path.Join(d, "projects"))
 		if !ok {
 			continue

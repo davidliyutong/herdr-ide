@@ -296,7 +296,7 @@ func TestClaudeGuess(t *testing.T) {
 	t.Run("same escaped name, other directory", func(t *testing.T) {
 		e := setup(t)
 		e.claudeTranscript("", "/home/dev-project", sid(1), start, start.Add(time.Minute))
-		if claudeEscape("/home/dev-project") != claudeEscape(cwd) {
+		if ClaudeEscape("/home/dev-project") != ClaudeEscape(cwd) {
 			t.Fatal("the names should collide")
 		}
 		if f, ok := e.r.Resolve(ctx, "claude", p); ok {
@@ -307,12 +307,12 @@ func TestClaudeGuess(t *testing.T) {
 		e := setup(t)
 		long := "/home/dev/" + strings.Repeat("deep/", 50) + "project"
 		lp := Proc{PID: 100, Cwd: long}
-		esc := claudeEscape(long)
+		esc := ClaudeEscape(long)
 		// Another long directory with the same first 200 characters, more
 		// recently written.
-		e.claudeTranscriptIn("", esc[:claudeMaxName]+"-abc123", long+"x", sid(2), start, start.Add(2*time.Minute))
-		e.claudeTranscriptIn("", esc[:claudeMaxName]+"-1x9z", long, sid(1), start, start.Add(time.Minute))
-		e.claudeTranscriptIn("", esc[:claudeMaxName-1], long, sid(3), start, start.Add(3*time.Minute))
+		e.claudeTranscriptIn("", esc[:ClaudeMaxName]+"-abc123", long+"x", sid(2), start, start.Add(2*time.Minute))
+		e.claudeTranscriptIn("", esc[:ClaudeMaxName]+"-1x9z", long, sid(1), start, start.Add(time.Minute))
+		e.claudeTranscriptIn("", esc[:ClaudeMaxName-1], long, sid(3), start, start.Add(3*time.Minute))
 		if got, _ := e.r.Resolve(ctx, "claude", lp); got != guess(sid(1)) {
 			t.Errorf("got %+v", got)
 		}
@@ -350,8 +350,8 @@ func TestClaudeEscape(t *testing.T) {
 		"C:\\Users\\x":             "C--Users-x",
 		"/a/b-c/../d~e@f+g=h,i;j'": "-a-b-c----d-e-f-g-h-i-j-",
 	} {
-		if got := claudeEscape(in); got != want {
-			t.Errorf("claudeEscape(%q) = %q, want %q", in, got, want)
+		if got := ClaudeEscape(in); got != want {
+			t.Errorf("ClaudeEscape(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

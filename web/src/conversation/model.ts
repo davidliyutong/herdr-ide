@@ -5,10 +5,15 @@
 // the state they reduce to. A transcript read on a machine (internal/
 // agentproto TranscriptEvent) gives the types update, user, turn and
 // notice; the others are the chat host's (internal/chatproto Event, relayed
-// by the chat plugin, plugins/chat/protocol.ts). Events come from a machine and
-// are not trusted to have the shapes declared here: the reducer checks the
-// type of every member it keeps, and the view reads text through asText.
+// by the chat plugin, plugins/chat/protocol.ts): permissions and questions
+// the user answers, queued messages, the chat's state and what it states
+// (info: its configuration, commands, usage and capabilities), live
+// increments of items being streamed, and the items of subagents (parent).
+// Events come from a machine and are not trusted to have the shapes declared
+// here: the reducer checks the type of every member it keeps, and the view
+// reads text through asText.
 import { APP_SLUG } from '../brand';
+import type { Capabilities, ConfigOption, ConfigValue, Limit, SlashCommand } from '../plugins/chat/protocol';
 
 // ---- ACP v1 ----
 
@@ -352,7 +357,34 @@ export interface ChatEvent {
 export interface ResetEvent {
   t: 'reset';
 }
-export type SourceEvent = ChatEvent | ResetEvent;
+/** What a source says when it attached again after losing its connection:
+ * the stored events it gives next follow those it gave, but live increments
+ * may have been lost, so what only arrived live is dropped (an item that
+ * has only live increments goes; one with a stored state goes back to it). */
+export interface ReattachEvent {
+  t: 'reattach';
+}
+export type SourceEvent = ChatEvent | ResetEvent | ReattachEvent;
+
+// ---- the chat host's limits and names (internal/chatproto, chatadapter;
+// plugins/chat/protocol.ts states them for the plugin) ----
+
+/** The most content a prompt carries: the JSON of its blocks, in bytes. */
+export const MAX_PROMPT = 8 << 20;
+/** The most bytes of an image of a prompt, decoded. */
+export const MAX_IMAGE = 5 << 20;
+/** The permission options the host shows for an agent without its own. */
+export const OPTION_ALLOW_ONCE = 'allow_once';
+export const OPTION_ALLOW_SESSION = 'allow_session';
+export const OPTION_REJECT_ONCE = 'reject_once';
+/** A plan's approval: plan:<mode> approves it and goes on in that mode. */
+export const PLAN_OPTION_PREFIX = 'plan:';
+/** The categories of configuration options the view offers selectors for. */
+export const CATEGORY_MODE = 'mode';
+export const CATEGORY_MODEL = 'model';
+export const CATEGORY_THOUGHT_LEVEL = 'thought_level';
+/** The permission modes of the chat host (chatproto.Modes). */
+export const MODES = ['default', 'acceptEdits', 'plan', 'full'] as const;
 
 /** The method of a notice: an ACP extension method, `_<slug>/<name>`
  * (agentproto.NoticeMethod). */
@@ -363,10 +395,26 @@ export const NOTICES = {
   compacted: noticeMethod('compacted'),
   cleared: noticeMethod('cleared'),
   command: noticeMethod('command'),
+  /** params: {message, willRetry?}: willRetry when the agent tries again. */
   error: noticeMethod('error'),
   model: noticeMethod('model'),
   /** A line of the transcript too long to read was passed over. */
   skipped: noticeMethod('skipped'),
+} as const;
+
+/** The notices of the chat host and its adapters, by name. */
+export const CHAT_NOTICES = {
+  /** The agent began to compact the context; compacted follows. No item:
+   * the view says so while the turn works. */
+  compacting: noticeMethod('compacting'),
+  /** The session went on in a terminal (handoff). */
+  handedOff: noticeMethod('handed_off'),
+  /** The agent was started again (params: {mode?}): to switch to a
+   * permission mode it takes only at its start. */
+  restarted: noticeMethod('restarted'),
+  /** What follows was imported from the agent's own record of the session
+   * (params: {lossy?}: parts may differ or be missing). */
+  imported: noticeMethod('imported'),
 } as const;
 
 /** The notice the view adds when a turn ends for another reason than the
@@ -383,12 +431,19 @@ export interface MessageItem {
   id: string;
   role: 'user' | 'agent';
   content: ContentBlock[];
+  /** Its text is still arriving (live increments): the view draws it a
+   * part at a time until its stored event gives it whole. */
+  live?: boolean;
   at?: string;
 }
 export interface ThoughtItem {
   kind: 'thought';
   id: string;
   content: ContentBlock[];
+  /** The tokens the agent thought, as it estimates them: for a thought
+   * whose text it keeps to itself (`_meta.<slug>.estimatedTokens`). */
+  estimatedTokens?: number;
+  live?: boolean;
   at?: string;
 }
 export interface ToolItem {
@@ -405,6 +460,9 @@ export interface ToolItem {
   /** The tool call's `_meta`, ACP's member for extensions: under the
    * product's slug, a command's exitCode and whether it was interrupted. */
   meta?: Record<string, unknown>;
+  /** The conversation of the subagent the call runs (events whose parent
+   * is the call's id), reduced as a conversation of its own. */
+  sub?: Conversation;
   at?: string;
 }
 export interface PlanItem {
@@ -420,16 +478,88 @@ export interface NoticeItem {
   params?: unknown;
   at?: string;
 }
+/** A permission the agent asked for: what (call), of which kind, the
+ * answers to choose from, and once answered how and by whom. */
+export interface PermissionItem {
+  kind: 'permission';
+  id: string;
+  /** The host's id of the permission, which an answer names. */
+  request: string;
+  permission: PermissionKind;
+  /** The tool call it is asked for. */
+  call: ToolItem;
+  options: PermissionOption[];
+  /** The subagent's tool call that asked; none for the main agent. */
+  parent?: string;
+  /** Set once answered (permission_done). */
+  outcome?: PermissionOutcome;
+  /** Who answered: user, cancel (the turn was cancelled), ended. */
+  by?: string;
+  at?: string;
+}
+/** Questions the agent asked the user together. */
+export interface QuestionItem {
+  kind: 'question';
+  id: string;
+  request: string;
+  questions: Question[];
+  parent?: string;
+  /** Answered or skipped (question_done). */
+  done?: boolean;
+  /** The answers by question id; none when skipped or cancelled. */
+  answers?: Record<string, string[]>;
+  by?: string;
+  at?: string;
+}
 /** What the view shows, in order; an item is replaced by one of its id. */
-export type Item = MessageItem | ThoughtItem | ToolItem | PlanItem | NoticeItem;
+export type Item = MessageItem | ThoughtItem | ToolItem | PlanItem | NoticeItem | PermissionItem | QuestionItem;
 
-/** The context window and cost (usage_update); size 0 while it is not
- * known. */
+/** The context window, cost and the subscription's limits (usage_update,
+ * the chat's usage); size 0 while it is not known. */
 export interface Usage {
   used: number;
   size: number;
+  /** The agent's own measure of the context in use, 0 to 100. */
+  percentage?: number;
   cost?: Cost;
+  limits?: Limit[];
 }
+
+/** A message sent while a turn ran, waiting for the agent to take it. */
+export interface QueuedMessage {
+  /** The host's id, which cancelling it names. */
+  message: string;
+  clientId?: string;
+  content: ContentBlock[];
+  at?: string;
+}
+
+/** What the chat states (an info event's chat), each member checked. */
+export interface ChatInfo {
+  title?: string;
+  cwd?: string;
+  state?: string;
+  status?: string;
+  error?: ChatError;
+  handedOff?: boolean;
+  agentVersion?: string;
+  config: ConfigOption[];
+  commands: SlashCommand[];
+  usage?: Usage;
+  capabilities: Capabilities;
+}
+
+/** The capabilities of a chat nobody told of: none. */
+export const NO_CAPABILITIES: Capabilities = Object.freeze({
+  images: false,
+  compact: false,
+  queue: false,
+  plan: false,
+  questions: false,
+  effort: false,
+  model: false,
+  cancelQueued: false,
+});
 
 export interface Conversation {
   items: Item[];
@@ -443,6 +573,20 @@ export interface Conversation {
   turn: 'idle' | 'working';
   /** Events and updates of kinds the view does not show. */
   unknown: number;
+  /** What the chat states (info events). */
+  chat?: ChatInfo;
+  /** The chat's state (chatproto.State*: state and info events), and why
+   * it failed. */
+  state?: string;
+  stateError?: ChatError;
+  /** Messages waiting for the agent, in the order sent. */
+  queued?: QueuedMessage[];
+  /** What the agent does in the current turn besides its items. */
+  activity?: 'compacting';
+  /** The live overlay: for each item that took live increments since its
+   * last stored state, that state (null: it has none, it only arrived
+   * live). A stored event for the item, or a reattach, puts it back. */
+  live?: Record<string, Item | null>;
   // What the reducer keeps of the events it took, for those that follow
   // and for a page of earlier ones (prepend).
   /** The lowest and the highest seq taken. */
@@ -469,6 +613,9 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 /** A member of an event read as text: a string, else nothing. */
 export const asText = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+
+/** A member read as text that is not empty. */
+const nonEmpty = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
 
 /** A content block: an object with a type, and a text block's text a
  * string. */
@@ -519,7 +666,178 @@ function planEntries(entries: readonly unknown[]): PlanEntry[] {
   return out;
 }
 
-const isCost = (c: unknown): c is Cost => isObject(c) && typeof c.amount === 'number' && typeof c.currency === 'string';
+const isCost = (c: unknown): c is Cost =>
+  isObject(c) && typeof c.amount === 'number' && Number.isFinite(c.amount) && typeof c.currency === 'string';
+const count = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+
+// ---- what the chat host states, read from what a machine sent ----
+
+/** The most of a list a machine sends the view keeps: configuration
+ * options, their values, commands, limit windows, questions and their
+ * options, permission options, queued messages. */
+const MAX_LIST = { config: 64, values: 256, commands: 500, limits: 16, questions: 16, options: 64, queued: 100 } as const;
+
+function readError(e: unknown): ChatError | undefined {
+  if (!isObject(e)) return undefined;
+  const code = asText(e.code) ?? '';
+  const message = asText(e.message) ?? '';
+  if (!code && !message) return undefined;
+  const stderr = asText(e.stderr);
+  return stderr ? { code, message, stderr } : { code, message };
+}
+
+function readValue(v: unknown): ConfigValue | undefined {
+  if (!isObject(v) || typeof v.value !== 'string') return undefined;
+  const out: ConfigValue = { value: v.value, name: asText(v.name) || v.value };
+  const d = asText(v.description);
+  if (d) out.description = d;
+  return out;
+}
+
+function readConfig(o: unknown): ConfigOption | undefined {
+  if (!isObject(o) || !nonEmpty(o.id) || o.type !== 'select' || !Array.isArray(o.options)) return undefined;
+  const options = o.options.slice(0, MAX_LIST.values).flatMap((v) => readValue(v) ?? []);
+  const out: ConfigOption = {
+    id: o.id as string,
+    name: asText(o.name) || (o.id as string),
+    type: 'select',
+    currentValue: asText(o.currentValue) ?? '',
+    options,
+  };
+  const d = asText(o.description);
+  if (d) out.description = d;
+  const c = asText(o.category);
+  if (c) out.category = c;
+  return out;
+}
+
+function readCommand(c: unknown): SlashCommand | undefined {
+  if (!isObject(c)) return undefined;
+  const name = asText(c.name)?.replace(/^\//, '').trim();
+  if (!name || /\s/.test(name)) return undefined;
+  const out: SlashCommand = { name };
+  const d = asText(c.description);
+  if (d) out.description = d;
+  const h = asText(c.argumentHint);
+  if (h) out.argumentHint = h;
+  return out;
+}
+
+function readLimit(l: unknown): Limit | undefined {
+  if (!isObject(l) || !nonEmpty(l.id)) return undefined;
+  const used = count(l.usedPercent);
+  if (used === undefined) return undefined;
+  const out: Limit = { id: l.id as string, usedPercent: Math.min(100, used) };
+  const label = asText(l.label);
+  if (label) out.label = label;
+  const resets = count(l.resetsAt);
+  if (resets) out.resetsAt = resets;
+  const minutes = count(l.windowMinutes);
+  if (minutes) out.windowMinutes = minutes;
+  return out;
+}
+
+/** A chat's usage, read from what a machine sent; undefined when it has
+ * no count of tokens. */
+export function readUsage(u: unknown): Usage | undefined {
+  if (!isObject(u)) return undefined;
+  const used = count(u.used);
+  if (used === undefined) return undefined;
+  const out: Usage = { used, size: count(u.size) ?? 0 };
+  const pct = count(u.percentage);
+  if (pct !== undefined && pct > 0) out.percentage = Math.min(100, pct);
+  if (isCost(u.cost)) out.cost = { amount: u.cost.amount, currency: u.cost.currency };
+  if (Array.isArray(u.limits)) {
+    const limits = u.limits.slice(0, MAX_LIST.limits).flatMap((l) => readLimit(l) ?? []);
+    if (limits.length) out.limits = limits;
+  }
+  return out;
+}
+
+function readCapabilities(c: unknown): Capabilities {
+  if (!isObject(c)) return NO_CAPABILITIES;
+  const out = { ...NO_CAPABILITIES };
+  for (const k of Object.keys(out) as (keyof Capabilities)[]) out[k] = c[k] === true;
+  return out;
+}
+
+/** What a chat states (chatproto.Chat), each member checked; undefined for
+ * what is no object. */
+export function readChat(chat: unknown): ChatInfo | undefined {
+  if (!isObject(chat)) return undefined;
+  const out: ChatInfo = {
+    config: Array.isArray(chat.config) ? chat.config.slice(0, MAX_LIST.config).flatMap((o) => readConfig(o) ?? []) : [],
+    commands: Array.isArray(chat.commands) ? chat.commands.slice(0, MAX_LIST.commands).flatMap((c) => readCommand(c) ?? []) : [],
+    capabilities: readCapabilities(chat.capabilities),
+  };
+  for (const k of ['title', 'cwd', 'state', 'status', 'agentVersion'] as const) {
+    const v = asText(chat[k]);
+    if (v) out[k] = v;
+  }
+  const error = readError(chat.error);
+  if (error) out.error = error;
+  if (chat.handedOff === true) out.handedOff = true;
+  const usage = readUsage(chat.usage);
+  if (usage) out.usage = usage;
+  return out;
+}
+
+/** The configuration option of a category the chat has, when it offers
+ * a choice (two values or more). */
+export function configOf(chat: ChatInfo | undefined, category: string): ConfigOption | undefined {
+  const o = chat?.config.find((x) => x.category === category);
+  return o && o.options.length > 1 ? o : undefined;
+}
+
+function readQuestion(q: unknown): Question | undefined {
+  if (!isObject(q) || !nonEmpty(q.id) || !nonEmpty(q.question)) return undefined;
+  const out: Question = { id: q.id as string, question: q.question as string };
+  const header = asText(q.header);
+  if (header) out.header = header;
+  if (q.multiSelect === true) out.multiSelect = true;
+  if (q.allowOther === true) out.allowOther = true;
+  if (q.secret === true) out.secret = true;
+  if (Array.isArray(q.options)) {
+    const options = q.options.slice(0, MAX_LIST.options).flatMap((o): QuestionOption[] => {
+      if (!isObject(o) || !nonEmpty(o.label)) return [];
+      const opt: QuestionOption = { label: o.label as string };
+      const d = asText(o.description);
+      if (d) opt.description = d;
+      const p = asText(o.preview);
+      if (p) opt.preview = p;
+      return [opt];
+    });
+    if (options.length) out.options = options;
+  }
+  return out;
+}
+
+const PERMISSION_OPTION_KINDS = ['allow_once', 'allow_always', 'reject_once', 'reject_always'] as const;
+
+function readOption(o: unknown): PermissionOption | undefined {
+  if (!isObject(o) || !nonEmpty(o.optionId)) return undefined;
+  const id = o.optionId as string;
+  const kind = (PERMISSION_OPTION_KINDS as readonly unknown[]).includes(o.kind)
+    ? (o.kind as PermissionOption['kind'])
+    : id.startsWith('reject')
+      ? 'reject_once'
+      : 'allow_once';
+  return { optionId: id, name: asText(o.name) ?? '', kind };
+}
+
+function readAnswers(a: unknown): Record<string, string[]> | undefined {
+  if (!isObject(a)) return undefined;
+  const out: Record<string, string[]> = Object.create(null);
+  let any = false;
+  for (const [k, v] of Object.entries(a)) {
+    if (!Array.isArray(v)) continue;
+    out[k] = v.filter((x): x is string => typeof x === 'string');
+    any = true;
+  }
+  return any ? out : undefined;
+}
+
+// ---- the reducer ----
 
 /** The length of the list an index (byId) serves. Its entries below that
  * length are a state's; a state of a shorter list that adds an item copies
@@ -535,6 +853,14 @@ function indexFor(byId: Record<string, number>, n: number): Record<string, numbe
     if (typeof i === 'number' && i < n) out[id] = i;
   }
   return out;
+}
+
+/** A new index of a list. */
+function indexOfList(items: readonly Item[]): Record<string, number> {
+  const byId: Record<string, number> = Object.create(null);
+  for (let i = 0; i < items.length; i++) byId[items[i].id] = i;
+  served.set(byId, items.length);
+  return byId;
 }
 
 function indexOf(c: Conversation, id: string): number | undefined {
@@ -569,12 +895,19 @@ const concat = (a: readonly ContentBlock[], b: readonly ContentBlock[]) => b.red
  * copied at its first change, so that a batch of events copies it once and
  * each event costs only what it changes. */
 interface Work {
-  base: Conversation;
   c: Conversation;
   /** c.items is the work's own copy. */
   own: boolean;
+  /** c.live is the work's own copy. */
+  ownLive: boolean;
   changed: boolean;
+  /** The works of subagents' conversations this batch changed, by the
+   * tool call that runs each: put into their calls once the batch is
+   * taken (flush). */
+  subs?: Map<string, Work>;
 }
+
+const work = (state: Conversation): Work => ({ c: { ...state }, own: false, ownLive: false, changed: false });
 
 function items(w: Work): Item[] {
   if (!w.own) {
@@ -603,6 +936,27 @@ function unknown(w: Work) {
   w.changed = true;
 }
 
+function liveMap(w: Work): Record<string, Item | null> {
+  if (!w.ownLive) {
+    w.c.live = Object.assign(Object.create(null), w.c.live) as Record<string, Item | null>;
+    w.ownLive = true;
+  }
+  w.changed = true;
+  return w.c.live!;
+}
+
+const hasBase = (c: Conversation, id: string) => !!c.live && Object.hasOwn(c.live, id);
+
+/** Keeps an item's stored state (none: undefined) before its first live
+ * increment. */
+function remember(w: Work, id: string, stored: Item | undefined) {
+  if (!hasBase(w.c, id)) liveMap(w)[id] = stored ?? null;
+}
+
+function forget(w: Work, id: string) {
+  if (hasBase(w.c, id)) delete liveMap(w)[id];
+}
+
 /** The marks of a chunk under the product's slug in `_meta` (truncated: its
  * text was cut short), put on its block, where the view reads them. */
 function marked(block: ContentBlock, meta: unknown): ContentBlock {
@@ -612,6 +966,14 @@ function marked(block: ContentBlock, meta: unknown): ContentBlock {
   const mine = isObject(prev) && isObject(prev[APP_SLUG]) ? prev[APP_SLUG] : {};
   const out = { ...block, _meta: { ...(isObject(prev) ? prev : {}), [APP_SLUG]: { ...mine, truncated: true } } };
   return out as ContentBlock;
+}
+
+/** A thought's tokens as the agent estimates them, from its update's
+ * `_meta` under the product's slug: a whole number above 0, or none. */
+function estimatedTokens(meta: unknown): number | undefined {
+  const own = isObject(meta) ? meta[APP_SLUG] : undefined;
+  const n = isObject(own) ? own.estimatedTokens : undefined;
+  return typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.round(n) : undefined;
 }
 
 /** The members a value has under the product's slug in its `_meta` (ACP's
@@ -624,9 +986,18 @@ export function ownMeta(x: unknown): Record<string, unknown> | undefined {
 
 const withAt = <T extends Item>(item: T, at: unknown): T => (typeof at === 'string' && at ? { ...item, at } : item);
 
-/** A chunk of a message or a thought: added to its message (by messageId),
- * else to the last item when that is the same kind of message, else as a
- * new item. */
+/** An item without its live mark. */
+function settledItem<T extends MessageItem | ThoughtItem>(it: T): T {
+  if (!it.live) return it;
+  const out = { ...it };
+  delete out.live;
+  return out;
+}
+
+/** A chunk of a message or a thought. With an item id (the chat host's),
+ * a live chunk adds to the item and a stored one gives the item whole;
+ * without one, it is added to its message (by messageId), else to the
+ * last item when that is the same kind of message, else as a new item. */
 function chunk(w: Work, ev: ChatEvent, u: MessageChunk) {
   if (!isBlock(u.content)) return unknown(w);
   const c = w.c;
@@ -634,6 +1005,41 @@ function chunk(w: Work, ev: ChatEvent, u: MessageChunk) {
   const role = u.sessionUpdate === 'user_message_chunk' ? 'user' : 'agent';
   const same = (it: Item | undefined): it is MessageItem | ThoughtItem =>
     !!it && it.kind === kind && (it.kind === 'thought' || it.role === role);
+  const meta = (u as { _meta?: unknown })._meta;
+  const block = marked(u.content, meta);
+  const live = ev.live === true;
+  // A thought's estimate: the latest an increment gives, the one its
+  // stored state gives.
+  const estimate = kind === 'thought' ? estimatedTokens(meta) : undefined;
+  const estimated = <T extends MessageItem | ThoughtItem>(it: T, whole: boolean): T => {
+    if (it.kind !== 'thought' || (estimate === undefined && !(whole && it.estimatedTokens !== undefined))) return it;
+    const out = { ...it };
+    if (estimate === undefined) delete (out as ThoughtItem).estimatedTokens;
+    else (out as ThoughtItem).estimatedTokens = estimate;
+    return out;
+  };
+  const make = (id: string): MessageItem | ThoughtItem => {
+    const it: MessageItem | ThoughtItem = kind === 'thought' ? { kind, id, content: [block] } : { kind, id, role, content: [block] };
+    if (live) it.live = true;
+    return estimated(withAt(it, ev.at), true);
+  };
+  const key = nonEmpty(ev.item);
+  if (key !== undefined) {
+    const id = `${kind}:${role}:item:${key}`;
+    const i = indexOf(c, id);
+    const prev = i === undefined ? undefined : c.items[i];
+    if (prev && !same(prev)) return unknown(w);
+    if (live) {
+      remember(w, id, prev);
+      if (i !== undefined && prev) put(w, i, estimated({ ...prev, content: appendBlock(prev.content, block), live: true }, false));
+      else add(w, make(id));
+      return;
+    }
+    forget(w, id);
+    if (i !== undefined && prev) put(w, i, estimated(settledItem({ ...prev, content: [block] }), true));
+    else add(w, make(id));
+    return;
+  }
   const byMessage = typeof u.messageId === 'string' && u.messageId !== '';
   const last = c.items.length - 1;
   let i: number | undefined;
@@ -649,33 +1055,50 @@ function chunk(w: Work, ev: ChatEvent, u: MessageChunk) {
   } else {
     id = fresh(c, `${kind}:${role}:${ev.seq ?? c.items.length}`);
   }
-  const block = marked(u.content, (u as { _meta?: unknown })._meta);
   const prev = i === undefined ? undefined : c.items[i];
+  if (live) remember(w, id, prev);
   if (i !== undefined && same(prev)) {
-    put(w, i, withAt({ ...prev, content: appendBlock(prev.content, block) }, prev.at ?? ev.at));
+    const next = estimated(withAt({ ...prev, content: appendBlock(prev.content, block) }, prev.at ?? ev.at), false);
+    put(w, i, live ? { ...next, live: true } : next);
     return;
   }
   if (!c.items.length && !byMessage) c.open = true;
-  add(w, withAt(kind === 'thought' ? { kind, id, content: [block] } : { kind, id, role, content: [block] }, ev.at));
+  add(w, make(id));
 }
 
-/** A tool call, or an update of one: present members replace the item's (a
- * call for an id an update made first does not take a settled status
- * back); an update of a call not seen yet makes its item. */
-function tool(w: Work, ev: ChatEvent, u: ToolCall | ToolCallUpdate) {
-  if (typeof u.toolCallId !== 'string' || u.toolCallId === '') return unknown(w);
-  const c = w.c;
-  const i = indexOf(c, u.toolCallId);
-  const prev = i === undefined ? undefined : c.items[i];
-  if (prev && prev.kind !== 'tool') return unknown(w);
+/** A tool call's content with live output added: text after text joins
+ * it. */
+function appendOutput(prev: readonly ToolCallContent[], more: readonly ToolCallContent[]): ToolCallContent[] {
+  const out = prev.slice();
+  for (const x of more) {
+    const last = out[out.length - 1];
+    if (
+      x.type === 'content' &&
+      x.content.type === 'text' &&
+      last?.type === 'content' &&
+      last.content.type === 'text' &&
+      !('_meta' in last.content) &&
+      !('_meta' in x.content)
+    )
+      out[out.length - 1] = { type: 'content', content: { ...last.content, text: last.content.text + x.content.text } };
+    else out.push(x);
+  }
+  return out;
+}
+
+/** A tool call after a call or an update of it: present members replace
+ * the call's (a call for an id an update made first does not take a
+ * settled status back); a live update adds its text output to the call's. */
+function applyTool(prev: ToolItem | undefined, id: string, u: ToolCall | ToolCallUpdate, live: boolean): ToolItem {
   const call = u.sessionUpdate === 'tool_call';
-  const next: ToolItem = prev ? { ...prev } : { kind: 'tool', id: u.toolCallId, title: '', content: [], locations: [] };
+  const next: ToolItem = prev ? { ...prev } : { kind: 'tool', id, title: '', content: [], locations: [] };
   if (typeof u.title === 'string' && (u.title || !prev)) next.title = u.title;
   if (isToolKind(u.kind)) next.toolKind = u.kind;
   if (isToolStatus(u.status) && !(call && prev && settled(prev.status))) next.status = u.status;
   if (Array.isArray(u.content)) {
     const content = u.content.filter(isToolContent);
-    if (!call || content.length || !prev) next.content = content;
+    if (live && !call) next.content = appendOutput(prev?.content ?? [], content);
+    else if (!call || content.length || !prev) next.content = content;
   }
   if (Array.isArray(u.locations)) {
     const locations = u.locations.filter(isLocation);
@@ -685,6 +1108,38 @@ function tool(w: Work, ev: ChatEvent, u: ToolCall | ToolCallUpdate) {
   if (u.rawOutput !== undefined) next.rawOutput = u.rawOutput;
   const meta = (u as { _meta?: unknown })._meta;
   if (isObject(meta)) next.meta = { ...prev?.meta, ...meta };
+  return next;
+}
+
+/** A tool call, or an update of one (applyTool); an update of a call not
+ * seen yet makes its item. A live one keeps the call's stored state; a
+ * stored one with an item id gives the call whole, on its stored state. */
+function tool(w: Work, ev: ChatEvent, u: ToolCall | ToolCallUpdate) {
+  if (typeof u.toolCallId !== 'string' || u.toolCallId === '') return unknown(w);
+  const c = w.c;
+  const id = u.toolCallId;
+  const i = indexOf(c, id);
+  const cur = i === undefined ? undefined : c.items[i];
+  if (cur && cur.kind !== 'tool') return unknown(w);
+  let next: ToolItem;
+  if (ev.live === true) {
+    remember(w, id, cur);
+    next = applyTool(cur, id, u, true);
+  } else if (hasBase(c, id)) {
+    const base = (c.live![id] ?? undefined) as ToolItem | undefined;
+    if (nonEmpty(ev.item) !== undefined) {
+      forget(w, id);
+      next = applyTool(base, id, u, false);
+    } else {
+      next = applyTool(cur, id, u, false);
+      liveMap(w)[id] = applyTool(base, id, u, false);
+    }
+  } else next = applyTool(cur, id, u, false);
+  // A subagent's conversation is the call's own, whatever state it goes
+  // back to.
+  if (cur?.sub) next.sub = cur.sub;
+  else delete next.sub;
+  if (cur?.at) next.at = cur.at;
   if (i !== undefined) put(w, i, next);
   else add(w, withAt(next, ev.at));
 }
@@ -703,12 +1158,16 @@ function plan(w: Work, ev: ChatEvent, u: PlanUpdate) {
   c.plan = id;
 }
 
+/** An ACP usage update: the context's tokens and cost; the limits the
+ * chat told of stay. */
 function usage(w: Work, u: UsageUpdate) {
   if (typeof u.used !== 'number' || !Number.isFinite(u.used) || u.used < 0) return unknown(w);
   const c = w.c;
   const size = typeof u.size === 'number' && Number.isFinite(u.size) && u.size > 0 ? u.size : (c.usage?.size ?? 0);
   const cost = isCost(u.cost) ? u.cost : u.cost === null ? undefined : c.usage?.cost;
-  c.usage = cost ? { used: u.used, size, cost } : { used: u.used, size };
+  const next: Usage = cost ? { used: u.used, size, cost } : { used: u.used, size };
+  if (c.usage?.limits) next.limits = c.usage.limits;
+  c.usage = next;
   w.changed = true;
 }
 
@@ -726,7 +1185,8 @@ function update(w: Work, ev: ChatEvent) {
     w.changed = true;
     return;
   }
-  // Known kinds the view has nothing to show for.
+  // Known kinds the view has nothing to show for (the chat's info gives
+  // its commands, modes and options).
   if (isUpdate(u, 'available_commands_update') || isUpdate(u, 'current_mode_update') || isUpdate(u, 'config_option_update')) return;
   unknown(w);
 }
@@ -734,15 +1194,55 @@ function update(w: Work, ev: ChatEvent) {
 const isUserMessage = (it: Item | undefined): it is MessageItem => it?.kind === 'message' && it.role === 'user';
 const sameText = (a: MessageItem, b: readonly ContentBlock[]) => a.content.length === b.length && blocksText(a.content) === blocksText(b);
 
-/** A prompt of the user; the same text again in the same turn, right after
- * it, is the same prompt. */
+/** The id of the user's message a client named (its clientId), or a
+ * queued message the host named. */
+const clientItem = (clientId: string) => `message:user:c:${clientId}`;
+const queuedItem = (message: string) => `message:user:q:${message}`;
+
+/** A user's message the agent took: once, by the page's id of it. */
+function userMessage(w: Work, id: string, content: ContentBlock[], at: unknown) {
+  const i = indexOf(w.c, id);
+  if (i === undefined) return add(w, withAt({ kind: 'message', id, role: 'user', content }, at));
+  const prev = w.c.items[i];
+  if (prev.kind === 'message' && content.length && !sameText(prev, content)) put(w, i, { ...prev, content });
+}
+
+/** A prompt of the user. One a page named (clientId) is taken once; one
+ * without a name that repeats the text right before it in the same turn is
+ * the same prompt. */
 function user(w: Work, ev: ChatEvent) {
   const c = w.c;
   const content = (Array.isArray(ev.content) ? ev.content : []).filter(isBlock);
+  const client = nonEmpty(ev.clientId);
+  if (client !== undefined) return userMessage(w, clientItem(client), content, ev.at);
   const last = c.items.length - 1;
   const prev = c.items[last];
   if (isUserMessage(prev) && last >= (c.turnStart ?? 0) && sameText(prev, content)) return;
   add(w, withAt({ kind: 'message', id: fresh(c, `message:user:${ev.seq ?? c.items.length}`), role: 'user', content }, ev.at));
+}
+
+/** A message sent while a turn ran: waiting in the queue, then taken (a
+ * prompt of the user's from then on) or withdrawn. */
+function queued(w: Work, ev: ChatEvent) {
+  const message = nonEmpty(ev.message);
+  if (message === undefined || (ev.state !== 'queued' && ev.state !== 'taken' && ev.state !== 'cancelled')) return unknown(w);
+  const c = w.c;
+  const list = c.queued ?? [];
+  const at = list.findIndex((q) => q.message === message);
+  const content = Array.isArray(ev.content) ? ev.content.filter(isBlock) : [];
+  const client = nonEmpty(ev.clientId) ?? (at >= 0 ? list[at].clientId : undefined);
+  w.changed = true;
+  if (ev.state === 'queued') {
+    const q: QueuedMessage = { message, content: content.length || at < 0 ? content : list[at].content };
+    if (client) q.clientId = client;
+    if (typeof ev.at === 'string' && ev.at) q.at = ev.at;
+    c.queued = at >= 0 ? list.map((x, k) => (k === at ? q : x)) : [...list, q].slice(-MAX_LIST.queued);
+    return;
+  }
+  c.queued = at >= 0 ? list.filter((_, k) => k !== at) : list;
+  if (ev.state === 'cancelled') return;
+  const blocks = content.length ? content : at >= 0 ? list[at].content : [];
+  userMessage(w, client ? clientItem(client) : queuedItem(message), blocks, ev.at);
 }
 
 function notice(w: Work, ev: ChatEvent, method: string, params: unknown) {
@@ -750,7 +1250,13 @@ function notice(w: Work, ev: ChatEvent, method: string, params: unknown) {
   add(w, withAt(params === undefined ? item : { ...item, params }, ev.at));
 }
 
-const NOTICE_METHODS: readonly string[] = [...Object.values(NOTICES), STOPPED];
+const NOTICE_METHODS: readonly string[] = [
+  ...Object.values(NOTICES),
+  CHAT_NOTICES.handedOff,
+  CHAT_NOTICES.restarted,
+  CHAT_NOTICES.imported,
+  STOPPED,
+];
 
 function turn(w: Work, ev: ChatEvent) {
   const c = w.c;
@@ -766,27 +1272,249 @@ function turn(w: Work, ev: ChatEvent) {
   if (ev.state !== 'end' && ev.state !== 'error') return unknown(w);
   c.turn = 'idle';
   c.turnSeen = true;
+  delete c.activity;
   w.changed = true;
   const message = isObject(ev.error) ? asText(ev.error.message) : undefined;
   if (ev.state === 'error') notice(w, ev, NOTICES.error, message ? { message } : undefined);
   else if ((NOTABLE_STOPS as readonly unknown[]).includes(ev.stopReason)) notice(w, ev, STOPPED, { stopReason: ev.stopReason });
 }
 
+/** A permission the agent asks for, at the place it asked; a subagent's
+ * too (its parent named): the user answers it here. */
+function permission(w: Work, ev: ChatEvent) {
+  const request = nonEmpty(ev.id);
+  if (request === undefined) return unknown(w);
+  const id = `permission:${request}`;
+  const raw: Record<string, unknown> = isObject(ev.toolCall) ? ev.toolCall : {};
+  const callId = nonEmpty(raw.toolCallId) ?? request;
+  const call = applyTool(undefined, callId, { ...(raw as object), toolCallId: callId, sessionUpdate: 'tool_call' } as ToolCall, false);
+  const kind = (PERMISSION_KINDS as readonly unknown[]).includes(ev.kind) ? (ev.kind as PermissionKind) : 'other';
+  const options = Array.isArray(ev.options) ? ev.options.slice(0, MAX_LIST.options).flatMap((o) => readOption(o) ?? []) : [];
+  const item: PermissionItem = { kind: 'permission', id, request, permission: kind, call, options };
+  const parent = nonEmpty(ev.parent);
+  if (parent) item.parent = parent;
+  const i = indexOf(w.c, id);
+  if (i === undefined) return add(w, withAt(item, ev.at));
+  const prev = w.c.items[i];
+  if (prev.kind !== 'permission') return unknown(w);
+  put(w, i, { ...item, at: prev.at, ...(prev.outcome ? { outcome: prev.outcome, by: prev.by } : {}) });
+}
+
+function permissionDone(w: Work, ev: ChatEvent) {
+  const request = nonEmpty(ev.id);
+  if (request === undefined) return unknown(w);
+  const i = indexOf(w.c, `permission:${request}`);
+  // One asked before the events taken: nothing to show it on.
+  if (i === undefined) return;
+  const prev = w.c.items[i];
+  if (prev.kind !== 'permission') return unknown(w);
+  const o: Record<string, unknown> = isObject(ev.outcome) ? ev.outcome : {};
+  const outcome: PermissionOutcome =
+    o.outcome === 'selected' && nonEmpty(o.optionId) ? { outcome: 'selected', optionId: o.optionId as string } : { outcome: 'cancelled' };
+  put(w, i, { ...prev, outcome, by: asText(ev.by) || 'user' });
+}
+
+function question(w: Work, ev: ChatEvent) {
+  const request = nonEmpty(ev.id);
+  const questions = Array.isArray(ev.questions) ? ev.questions.slice(0, MAX_LIST.questions).flatMap((q) => readQuestion(q) ?? []) : [];
+  if (request === undefined || !questions.length) return unknown(w);
+  const id = `question:${request}`;
+  const item: QuestionItem = { kind: 'question', id, request, questions };
+  const parent = nonEmpty(ev.parent);
+  if (parent) item.parent = parent;
+  const i = indexOf(w.c, id);
+  if (i === undefined) return add(w, withAt(item, ev.at));
+  const prev = w.c.items[i];
+  if (prev.kind !== 'question') return unknown(w);
+  put(w, i, { ...prev, questions });
+}
+
+function questionDone(w: Work, ev: ChatEvent) {
+  const request = nonEmpty(ev.id);
+  if (request === undefined) return unknown(w);
+  const i = indexOf(w.c, `question:${request}`);
+  if (i === undefined) return;
+  const prev = w.c.items[i];
+  if (prev.kind !== 'question') return unknown(w);
+  const next: QuestionItem = { ...prev, done: true, by: asText(ev.by) || 'user' };
+  const answers = readAnswers(ev.answers);
+  if (answers) next.answers = answers;
+  else delete next.answers;
+  put(w, i, next);
+}
+
+/** The chat as it is now. */
+function info(w: Work, ev: ChatEvent) {
+  const chat = readChat(ev.chat);
+  if (!chat) return unknown(w);
+  const c = w.c;
+  c.chat = chat;
+  if (chat.title) c.title = chat.title;
+  if (chat.state) {
+    c.state = chat.state;
+    if (chat.error) c.stateError = chat.error;
+    else delete c.stateError;
+  }
+  if (chat.usage) c.usage = chat.usage;
+  w.changed = true;
+}
+
+/** The chat's state; a chat that failed tells why where it did. */
+function state(w: Work, ev: ChatEvent) {
+  const s = nonEmpty(ev.state);
+  if (s === undefined) return unknown(w);
+  const c = w.c;
+  const error = readError(ev.error);
+  const was = c.state;
+  c.state = s;
+  if (error) c.stateError = error;
+  else delete c.stateError;
+  if (s !== 'working') delete c.activity;
+  w.changed = true;
+  if (s === 'failed' && was !== 'failed') notice(w, ev, NOTICES.error, error?.message ? { message: error.message } : undefined);
+}
+
+/** A notice: compacting is what the agent does, the others are items. */
+function noticeEvent(w: Work, ev: ChatEvent) {
+  if (ev.method === CHAT_NOTICES.compacting) {
+    w.c.activity = 'compacting';
+    w.changed = true;
+    return;
+  }
+  if (typeof ev.method === 'string' && NOTICE_METHODS.includes(ev.method)) {
+    if (ev.method === NOTICES.compacted) delete w.c.activity;
+    return notice(w, ev, ev.method, ev.params);
+  }
+  unknown(w);
+}
+
+/** Whether a conversation, or a subagent's in it, has items that took live
+ * increments. */
+function hasLive(c: Conversation): boolean {
+  if (c.live && Object.keys(c.live).length) return true;
+  return c.items.some((it) => it.kind === 'tool' && !!it.sub && hasLive(it.sub));
+}
+
+/** The conversation without what only arrived live: an item with no stored
+ * state goes, one with a stored state goes back to it (its subagent's
+ * conversation without what arrived live there). */
+export function withoutLive(c: Conversation): Conversation {
+  if (!hasLive(c)) return c;
+  const live = c.live ?? {};
+  const list: Item[] = [];
+  let turnStart = c.turnStart;
+  let head = c.head;
+  for (let k = 0; k < c.items.length; k++) {
+    let it = c.items[k];
+    if (Object.hasOwn(live, it.id)) {
+      const base = live[it.id];
+      if (base === null) {
+        if (c.turnStart !== undefined && k < c.turnStart) turnStart = (turnStart ?? 0) - 1;
+        if (c.head !== undefined && k < c.head) head = (head ?? 0) - 1;
+        continue;
+      }
+      it = it.kind === 'tool' && base.kind === 'tool' && it.sub ? { ...base, sub: it.sub } : base;
+    }
+    if (it.kind === 'tool' && it.sub && hasLive(it.sub)) it = { ...it, sub: withoutLive(it.sub) };
+    list.push(it);
+  }
+  const out: Conversation = { ...c, items: list, byId: indexOfList(list) };
+  delete out.live;
+  if (turnStart !== undefined) out.turnStart = turnStart;
+  if (head !== undefined) out.head = head;
+  if (out.plan !== undefined && indexOf(out, out.plan) === undefined) delete out.plan;
+  return out;
+}
+
+/** The work of the subagent's conversation that a tool call runs. */
+function subWork(w: Work, parent: string): Work | undefined {
+  const cached = w.subs?.get(parent);
+  if (cached) return cached;
+  const c = w.c;
+  let i = indexOf(c, parent);
+  if (i === undefined) {
+    // A call of a subagent's own (deeper): its subagent's work takes it.
+    for (const it of c.items) {
+      if (it.kind !== 'tool' || !(it.sub || w.subs?.has(it.id))) continue;
+      const sw = w.subs?.get(it.id);
+      if (sw ? runs(sw.c, parent) : runs(it.sub!, parent)) return subWork(w, it.id);
+    }
+    // A call not seen yet: its item, to put the subagent's under.
+    add(w, { kind: 'tool', id: parent, title: '', toolKind: 'think', status: 'in_progress', content: [], locations: [] });
+    i = c.items.length - 1;
+  }
+  const it = c.items[i];
+  if (it.kind !== 'tool') return undefined;
+  const sw = work(it.sub ?? emptyConversation());
+  (w.subs ??= new Map()).set(parent, sw);
+  return sw;
+}
+
+/** Whether a conversation has the tool call id, or a subagent's in it. */
+function runs(c: Conversation, id: string): boolean {
+  if (indexOf(c, id) !== undefined) return true;
+  return c.items.some((it) => it.kind === 'tool' && !!it.sub && runs(it.sub, id));
+}
+
+/** Puts the subagents' conversations a batch changed into their calls. */
+function flush(w: Work) {
+  if (!w.subs) return;
+  for (const [parent, sw] of w.subs) {
+    flush(sw);
+    if (!sw.changed) continue;
+    const i = indexOf(w.c, parent);
+    const it = i === undefined ? undefined : w.c.items[i];
+    if (i !== undefined && it?.kind === 'tool') put(w, i, { ...it, sub: sw.c });
+  }
+  delete w.subs;
+}
+
+/** An event of a subagent (one with a parent): into the conversation of
+ * the call that runs it; a deeper subagent's goes on down from there. */
+function nested(w: Work, ev: ChatEvent, parent: string) {
+  const sw = subWork(w, parent);
+  if (!sw) return unknown(w);
+  // A deeper subagent's event keeps its parent; the subagent's own drops it.
+  const own = indexOf(w.c, parent) !== undefined;
+  const inner: ChatEvent = { ...ev };
+  if (own) delete inner.parent;
+  step(sw, inner);
+  if (sw.changed) w.changed = true;
+}
+
+/** The types of events whose items a subagent's conversation holds. */
+const NESTED: ReadonlySet<string> = new Set(['update', 'user', 'turn', 'notice']);
+
 function step(w: Work, ev: SourceEvent) {
   if (!isObject(ev)) return unknown(w);
   if (ev.t === 'reset') {
     w.c = emptyConversation();
+    delete w.subs;
     w.own = true;
+    w.ownLive = true;
     w.changed = true;
     return;
   }
+  if (ev.t === 'reattach') {
+    flush(w);
+    const next = withoutLive(w.c);
+    if (next !== w.c) {
+      w.c = next;
+      w.own = true;
+      w.ownLive = true;
+      w.changed = true;
+    }
+    return;
+  }
   const c = w.c;
-  if (typeof ev.seq === 'number') {
+  if (typeof ev.seq === 'number' && ev.live !== true) {
     if (c.last !== undefined && ev.seq <= c.last) return;
     c.last = ev.seq;
     c.first ??= ev.seq;
     w.changed = true;
   }
+  const parent = nonEmpty(ev.parent);
+  if (parent !== undefined && NESTED.has(ev.t)) return nested(w, ev, parent);
   switch (ev.t) {
     case 'update':
       return update(w, ev);
@@ -795,30 +1523,44 @@ function step(w: Work, ev: SourceEvent) {
     case 'turn':
       return turn(w, ev);
     case 'notice':
-      if (typeof ev.method === 'string' && NOTICE_METHODS.includes(ev.method)) return notice(w, ev, ev.method, ev.params);
-      return unknown(w);
-    case 'state':
+      return noticeEvent(w, ev);
     case 'permission':
+      return permission(w, ev);
     case 'permission_done':
+      return permissionDone(w, ev);
+    case 'question':
+      return question(w, ev);
+    case 'question_done':
+      return questionDone(w, ev);
+    case 'queued':
+      return queued(w, ev);
     case 'info':
+      return info(w, ev);
+    case 'state':
+      return state(w, ev);
     case 'ack':
-      // An ACP client's, which the view does not show.
+      // A command's answer: the source's to take.
       return;
     default:
       return unknown(w);
   }
 }
 
-/** The conversation after events, in their order. An event whose seq is
- * not above the highest one taken was taken already (a page fetched again)
- * and is passed over. Shown are the user's prompts, the agent's messages
- * and thoughts (chunks of one message joined), tool calls (by their id),
- * the turn's plan, notices, the context's usage and the session's title;
- * events and updates of other kinds count as unknown. The list is copied
- * once, and an event costs only the item it changes. */
+/** The conversation after events, in their order. A stored event whose seq
+ * is not above the highest one taken was taken already (a page fetched
+ * again) and is passed over; a live one (live) adds to its item until a
+ * stored one for the item gives it whole. Shown are the user's prompts, the
+ * agent's messages and thoughts (chunks of one message joined), tool calls
+ * (by their id; a subagent's items in the conversation of the call that
+ * runs it), the turn's plan, permissions and questions with their answers,
+ * notices; kept are the context's usage, the session's title, the chat's
+ * state and what it states, and the messages queued. Events and updates of
+ * other kinds count as unknown. The list is copied once, and an event costs
+ * only the item it changes. */
 export function reduceAll(state: Conversation, events: readonly SourceEvent[]): Conversation {
-  const w: Work = { base: state, c: { ...state }, own: false, changed: false };
+  const w = work(state);
   for (const ev of events) step(w, ev);
+  flush(w);
   return w.changed ? w.c : state;
 }
 
@@ -835,6 +1577,8 @@ function merge(a: Item, b: Item): Item {
     if (!b.content.length) out.content = a.content;
     if (!b.locations.length) out.locations = a.locations;
     if (a.meta || b.meta) out.meta = { ...a.meta, ...b.meta };
+    if (a.sub && b.sub) out.sub = join(a.sub, b.sub);
+    else if (a.sub) out.sub = a.sub;
     if (a.at) out.at = a.at;
     return out;
   }
@@ -850,7 +1594,7 @@ const continues = (a: Item | undefined, b: Item): a is MessageItem | ThoughtItem
  * events had followed e's: an item of an id e has goes into e's, the
  * chunk s began without a message id continues e's last message, and what
  * s has before its first turn's start (a plan, the prompt again) belongs to
- * e's last turn. */
+ * e's last turn. What the chat states is s's, else e's. */
 function join(e: Conversation, s: Conversation): Conversation {
   const list = e.items.slice();
   const byId: Record<string, number> = Object.create(null);
@@ -898,6 +1642,16 @@ function join(e: Conversation, s: Conversation): Conversation {
   if (usage) out.usage = usage;
   const title = s.title ?? e.title;
   if (title) out.title = title;
+  const chat = s.chat ?? e.chat;
+  if (chat) out.chat = chat;
+  const st = s.state !== undefined ? s : e;
+  if (st.state !== undefined) out.state = st.state;
+  if (st.stateError) out.stateError = st.stateError;
+  const queue = s.queued ?? e.queued;
+  if (queue) out.queued = queue;
+  const activity = s.turnSeen ? s.activity : (s.activity ?? e.activity);
+  if (activity) out.activity = activity;
+  if (s.live) out.live = s.live;
   const first = e.first ?? s.first;
   if (first !== undefined) out.first = first;
   const lastSeq = s.last ?? e.last;
@@ -912,22 +1666,29 @@ function join(e: Conversation, s: Conversation): Conversation {
   return out;
 }
 
+/** Whether an event is a stored one of an earlier page: not live, not a
+ * source's own. */
+const earlier = (ev: SourceEvent, first: number | undefined) =>
+  isObject(ev) &&
+  ev.t !== 'reset' &&
+  ev.t !== 'reattach' &&
+  ev.live !== true &&
+  (first === undefined || typeof ev.seq !== 'number' || ev.seq < first);
+
 /** The conversation with a page of earlier events (loadEarlier) before its
  * items, taken with the same rules as if they had come first; those not
  * below the lowest seq taken are passed over. */
 export function prepend(state: Conversation, events: readonly SourceEvent[]): Conversation {
   const first = state.first;
-  const older = events.filter(
-    (ev) => isObject(ev) && ev.t !== 'reset' && (first === undefined || typeof ev.seq !== 'number' || ev.seq < first),
-  );
+  const older = events.filter((ev) => earlier(ev, first));
   if (!older.length) return state;
   const e = reduceAll(emptyConversation(), older);
   return !e.items.length && !e.unknown && e.first === undefined ? state : join(e, state);
 }
 
 /** The conversation after a batch of a source's events, as the view takes
- * them: events below the lowest seq taken (a page loadEarlier gave) go
- * before the items (prepend), the others after them (reduceAll). */
+ * them: stored events below the lowest seq taken (a page loadEarlier gave)
+ * go before the items (prepend), the others after them (reduceAll). */
 export function take(state: Conversation, events: readonly SourceEvent[]): Conversation {
   let c = state;
   let lowest = c.first;
@@ -942,13 +1703,26 @@ export function take(state: Conversation, events: readonly SourceEvent[]): Conve
       older = [];
       continue;
     }
-    if (typeof ev.seq === 'number' && lowest !== undefined && ev.seq < lowest) older.push(ev);
+    const stored = ev.t !== 'reattach' && ev.live !== true && typeof ev.seq === 'number';
+    if (stored && lowest !== undefined && ev.seq! < lowest) older.push(ev);
     else {
-      if (typeof ev.seq === 'number') lowest ??= ev.seq;
+      if (stored) lowest ??= ev.seq;
       run.push(ev);
     }
   }
   if (run.length) c = reduceAll(c, run);
   if (older.length) c = prepend(c, older);
   return c;
+}
+
+/** The permissions and questions of the current turn that wait for the
+ * user (their items' ids, in order): one of an earlier turn no longer
+ * waits, whether or not its answer was taken. */
+export function waitingItems(c: Conversation): string[] {
+  const out: string[] = [];
+  for (let i = c.turnStart ?? 0; i < c.items.length; i++) {
+    const it = c.items[i];
+    if ((it.kind === 'permission' && !it.outcome) || (it.kind === 'question' && !it.done)) out.push(it.id);
+  }
+  return out;
 }

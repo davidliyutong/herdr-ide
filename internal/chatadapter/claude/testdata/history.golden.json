@@ -1,0 +1,1509 @@
+{
+ "argv": null,
+ "env": null,
+ "events": [
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Reply with the word hi",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "msg_0001/0",
+   "update": {
+    "content": {
+     "text": "",
+     "type": "text"
+    },
+    "messageId": "msg_0001",
+    "sessionUpdate": "agent_thought_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0001/1",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "hi",
+     "type": "text"
+    },
+    "messageId": "msg_0001",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Reply with the word ok",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "msg_0002/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "ok",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `echo hi` with the Bash tool.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0001",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "echo hi",
+     "description": "Print hi to stdout"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Print hi to stdout",
+    "toolCallId": "toolu_0001"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0001",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "hi",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0001"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0004/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "`echo hi` printed `hi`.",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `echo second` with the Bash tool.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0002",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "echo second",
+     "description": "Print second to stdout"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Print second to stdout",
+    "toolCallId": "toolu_0002"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0002",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "second",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0002"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0006/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "`echo second` printed `second`.",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `echo third` with the Bash tool.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0003",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "echo third",
+     "description": "Print third to stdout"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Print third to stdout",
+    "toolCallId": "toolu_0003"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0003",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "third",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0003"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0008/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "`echo third` printed `third`.",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `echo third` with the Bash tool once more.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0004",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "echo third",
+     "description": "Print third to stdout"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Print third to stdout",
+    "toolCallId": "toolu_0004"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0004",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "third",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0004"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0010/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "`echo third` printed `third` again.",
+     "type": "text"
+    },
+    "messageId": "msg_0010",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Use the AskUserQuestion tool to ask me to pick red or blue. Then reply with just the color I picked.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0005",
+   "update": {
+    "kind": "other",
+    "rawInput": {
+     "questions": [
+      {
+       "header": "Color",
+       "multiSelect": false,
+       "options": [
+        {
+         "description": "红色",
+         "label": "red"
+        },
+        {
+         "description": "蓝色",
+         "label": "blue"
+        }
+       ],
+       "question": "请选择一种颜色：红色还是蓝色？"
+      }
+     ]
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "AskUserQuestion",
+    "toolCallId": "toolu_0005"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0005",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "The user answered: \"请选择一种颜色：红色还是蓝色？\"=\"Blue\". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0005"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0012/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "Blue",
+     "type": "text"
+    },
+    "messageId": "msg_0012",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Ask me again with the AskUserQuestion tool: red or blue?",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0006",
+   "update": {
+    "kind": "other",
+    "rawInput": {
+     "questions": [
+      {
+       "header": "Color",
+       "multiSelect": false,
+       "options": [
+        {
+         "description": "红色",
+         "label": "red"
+        },
+        {
+         "description": "蓝色",
+         "label": "blue"
+        }
+       ],
+       "question": "请再次选择一种颜色：红色还是蓝色？"
+      }
+     ]
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "AskUserQuestion",
+    "toolCallId": "toolu_0006"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0006",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "The user skipped this question. Do not ask again; wait for their next message.",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "failed",
+    "toolCallId": "toolu_0006"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0014/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "You skipped the question, so I won't ask again. Your earlier answer was blue. Tell me when you want to continue.",
+     "type": "text"
+    },
+    "messageId": "msg_0014",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Plan creating hello.txt containing 'hi' in the current directory. Keep the plan to one line, then call ExitPlanMode.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "msg_0015/0",
+   "update": {
+    "content": {
+     "text": "",
+     "type": "text"
+    },
+    "messageId": "msg_0015",
+    "sessionUpdate": "agent_thought_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0007",
+   "update": {
+    "content": [
+     {
+      "newText": "Create `hello.txt` in the current directory containing `hi`.\n",
+      "oldText": null,
+      "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
+      "type": "diff"
+     }
+    ],
+    "kind": "edit",
+    "locations": [
+     {
+      "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
+     }
+    ],
+    "rawInput": {
+     "content": "Create `hello.txt` in the current directory containing `hi`.\n",
+     "file_path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
+    "toolCallId": "toolu_0007"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0007",
+   "update": {
+    "content": [
+     {
+      "newText": "Create `hello.txt` in the current directory containing `hi`.\n",
+      "oldText": null,
+      "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
+      "type": "diff"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0007"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0008",
+   "update": {
+    "kind": "other",
+    "rawInput": {
+     "max_results": 1,
+     "query": "select:ExitPlanMode"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "ToolSearch",
+    "toolCallId": "toolu_0008"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0008",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0008"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0009",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "Create `hello.txt` in the current directory containing `hi`.\n",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "kind": "switch_mode",
+    "rawInput": {
+     "plan": "Create `hello.txt` in the current directory containing `hi`.\n",
+     "planFilePath": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "ExitPlanMode",
+    "toolCallId": "toolu_0009"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0009",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\nYour plan has been saved to: /home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md\nYou can refer back to it if needed during implementation.\n\n## Approved Plan:\nCreate `hello.txt` in the current directory containing `hi`.\n",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0009"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0017/0",
+   "update": {
+    "content": {
+     "text": "",
+     "type": "text"
+    },
+    "messageId": "msg_0017",
+    "sessionUpdate": "agent_thought_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0010",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "printf 'hi' \u003e hello.txt \u0026\u0026 cat hello.txt \u0026\u0026 echo \u0026\u0026 pwd \u0026\u0026 ls -l hello.txt",
+     "description": "Create hello.txt with hi and verify contents"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create hello.txt with hi and verify contents",
+    "toolCallId": "toolu_0010"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0010",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "Do not create the file yet. Stop and wait for my next message.",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "failed",
+    "toolCallId": "toolu_0010"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0018/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "Understood. I've stopped and haven't created `hello.txt`. The plan was approved, but you've asked me to wait, so I'll hold until your next message.",
+     "type": "text"
+    },
+    "messageId": "msg_0018",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Now create hello.txt as planned.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0011",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "printf 'hi' \u003e hello.txt \u0026\u0026 cat hello.txt \u0026\u0026 echo \u0026\u0026 pwd \u0026\u0026 ls -l hello.txt",
+     "description": "Create hello.txt with hi and verify contents"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create hello.txt with hi and verify contents",
+    "toolCallId": "toolu_0011"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0011",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "hi\n/work\n-rw-r--r--@ 1 user  wheel  2 11月 22 19:38 hello.txt",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0011"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0020/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "I created `hello.txt` in the current directory (`/work`). It contains `hi` with no trailing newline, and it is 2 bytes. I confirmed the contents by reading the file back.",
+     "type": "text"
+    },
+    "messageId": "msg_0020",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `touch one.txt` with the Bash tool.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0012",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch one.txt",
+     "description": "Create empty one.txt in current directory"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create empty one.txt in current directory",
+    "toolCallId": "toolu_0012"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0012",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0012"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0022/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "I ran `touch one.txt` in the current directory. It completed without output, so `one.txt` should now exist as an empty file. I didn't check that with a separate command.",
+     "type": "text"
+    },
+    "messageId": "msg_0022",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `touch two.txt` with the Bash tool.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0013",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch two.txt",
+     "description": "Create empty two.txt in current directory"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create empty two.txt in current directory",
+    "toolCallId": "toolu_0013"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0013",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "The user declined to run this command.",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "failed",
+    "toolCallId": "toolu_0013"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0024/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "You declined the `touch two.txt` command, so I didn't create the file. I haven't retried it. Tell me if you want me to run it another way.",
+     "type": "text"
+    },
+    "messageId": "msg_0024",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `touch three.txt` with the Bash tool.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0014",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch three.txt",
+     "description": "Create empty three.txt in current directory"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create empty three.txt in current directory",
+    "toolCallId": "toolu_0014"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0014",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0014"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0026/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "I ran `touch three.txt` in the current directory. It completed without output, so `three.txt` should now exist as an empty file. I didn't verify that with a separate command.",
+     "type": "text"
+    },
+    "messageId": "msg_0026",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `touch three.txt` with the Bash tool once more.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0015",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch three.txt",
+     "description": "Update timestamp of three.txt in current directory"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Update timestamp of three.txt in current directory",
+    "toolCallId": "toolu_0015"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0015",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0015"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0028/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "I ran `touch three.txt` again. It completed without output. Since `touch` only updates the file's timestamp when the file already exists, `three.txt` is still an empty file and its modification time is now updated.",
+     "type": "text"
+    },
+    "messageId": "msg_0028",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Count from 1 to 300, one number per line, nothing else.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "msg_0029/0",
+   "update": {
+    "content": {
+     "text": "",
+     "type": "text"
+    },
+    "messageId": "msg_0029",
+    "sessionUpdate": "agent_thought_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0029/1",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "1\n2\n3\n4\n5\n6\n7\n8\n9",
+     "type": "text"
+    },
+    "messageId": "msg_0029",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "cancelled"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Count from 1 to 40, one number per line, nothing else.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "msg_0030/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40",
+     "type": "text"
+    },
+    "messageId": "msg_0030",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "When you are done, reply with the word NEXT.\nThen reply with the word PLAIN.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "msg_0031/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "NEXT\nPLAIN",
+     "type": "text"
+    },
+    "messageId": "msg_0031",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "_meta": {
+      "herdr-ide": {
+       "image": true
+      }
+     },
+     "text": "",
+     "type": "text"
+    },
+    {
+     "text": "What color is this image? One word.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "msg_0032/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "Red",
+     "type": "text"
+    },
+    "messageId": "msg_0032",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Use the Agent tool (the Task tool) to start a general-purpose subagent that runs `echo sub` with the Bash tool and reports the output. Then tell me what it reported, in one line.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0016",
+   "update": {
+    "kind": "think",
+    "rawInput": {
+     "description": "Run echo sub",
+     "prompt": "Use the Bash tool to run `echo sub`, then report the exact output it printed. Reply with only that output.",
+     "run_in_background": false,
+     "subagent_type": "general-purpose"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Run echo sub",
+    "toolCallId": "toolu_0016"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0016",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "sub",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0016"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0034/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "The subagent reported that `echo sub` printed `sub`.",
+     "type": "text"
+    },
+    "messageId": "msg_0034",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "notice",
+   "method": "_herdr-ide/compacted",
+   "params": {
+    "preTokens": 41753,
+    "trigger": "manual"
+   }
+  },
+  {
+   "t": "notice",
+   "method": "_herdr-ide/command",
+   "params": {
+    "name": "/compact"
+   }
+  },
+  {
+   "t": "notice",
+   "method": "_herdr-ide/command",
+   "params": {
+    "output": "Compacted "
+   }
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Use the Agent tool to start a general-purpose subagent that runs `touch sub.txt` with the Bash tool and reports whether it worked. Then tell me what it reported, in one line.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "msg_0035/0",
+   "update": {
+    "content": {
+     "text": "",
+     "type": "text"
+    },
+    "messageId": "msg_0035",
+    "sessionUpdate": "agent_thought_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0017",
+   "update": {
+    "kind": "think",
+    "rawInput": {
+     "description": "Run touch sub.txt",
+     "prompt": "Use the Bash tool to run `touch sub.txt` in the current working directory. Then report whether the command worked (for example, by checking that the file exists with `ls -l sub.txt`). Reply with a one-line report of the result.",
+     "run_in_background": false,
+     "subagent_type": "general-purpose"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Run touch sub.txt",
+    "toolCallId": "toolu_0017"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0017",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "Worked: `touch sub.txt` created `sub.txt` (0 bytes) in the working directory, confirmed by `ls -l`.",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0017"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0036/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "The subagent reported that `touch sub.txt` worked: it created a 0-byte `sub.txt` in the working directory, confirmed with `ls -l`.",
+     "type": "text"
+    },
+    "messageId": "msg_0036",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `sleep 6; echo done` with the Bash tool, then reply with the word finished.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0018",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "sleep 6; echo done",
+     "description": "Sleep 6 seconds then echo done"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Sleep 6 seconds then echo done",
+    "toolCallId": "toolu_0018"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0018",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "done",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0018"
+   }
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Also say the word EXTRA.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "msg_0038/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "finished\n\nEXTRA",
+     "type": "text"
+    },
+    "messageId": "msg_0038",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "user",
+   "content": [
+    {
+     "text": "Run `touch cancel.txt` with the Bash tool.",
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "t": "update",
+   "item": "toolu_0019",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch cancel.txt \u0026\u0026 ls -l cancel.txt",
+     "description": "Create cancel.txt and list it"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create cancel.txt and list it",
+    "toolCallId": "toolu_0019"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0019",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "failed",
+    "toolCallId": "toolu_0019"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "cancelled"
+  }
+ ],
+ "wrote": null,
+ "chat": null,
+ "echoes": 0,
+ "unknown": 0
+}

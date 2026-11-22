@@ -216,12 +216,16 @@ describe('the conversation', () => {
       update(9, { sessionUpdate: 'available_commands_update', availableCommands: [] }),
       update(10, { sessionUpdate: 'current_mode_update', currentModeId: 'plan' }),
       { t: 'ack', id: 'c1' },
+      // A permission without an id is none; with one, it is shown (with
+      // no option to choose, it can be dismissed).
+      { t: 'permission' },
       { t: 'permission', id: 'p1' },
       { t: 'state', state: 'idle' },
     ]);
     expect(c.title).toBe('Tables');
-    expect(c.items.map((i) => i.kind)).toEqual(['message', 'tool', 'notice']);
-    expect(c.unknown).toBe(4);
+    expect(c.items.map((i) => i.kind)).toEqual(['message', 'tool', 'notice', 'permission']);
+    expect(c.unknown).toBe(5);
+    expect(c.state).toBe('idle');
     expect(reduce(c, { seq: 11, t: 'update', update: { sessionUpdate: 'session_info_update', title: null } }).title).toBeUndefined();
     expect(reduce(c, { t: 'reset' })).toEqual(emptyConversation());
   });
@@ -272,7 +276,9 @@ const texts = (c: Conversation) =>
         ? `plan:${i.entries.map((e) => e.content).join(',')}`
         : i.kind === 'tool'
           ? `tool:${i.id}`
-          : `notice:${i.method.split('/')[1]}`,
+          : i.kind === 'notice'
+            ? `notice:${i.method.split('/')[1]}`
+            : `${i.kind}:${i.request}`,
   );
 
 describe('the conversation’s prompts and messages', () => {

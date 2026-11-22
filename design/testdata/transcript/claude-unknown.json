@@ -43,6 +43,11 @@
         "sessionUpdate": "usage_update",
         "used": 1
       }
+    },
+    {
+      "state": "end",
+      "stopReason": "end_turn",
+      "t": "turn"
     }
   ]
 }

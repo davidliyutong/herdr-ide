@@ -133,6 +133,14 @@
     {
       "t": "update",
       "update": {
+        "content": [
+          {
+            "newText": "hi",
+            "oldText": null,
+            "path": "/home/dev/project/hello.txt",
+            "type": "diff"
+          }
+        ],
         "kind": "edit",
         "locations": [
           {
@@ -245,6 +253,14 @@
     {
       "t": "update",
       "update": {
+        "content": [
+          {
+            "newText": "hello",
+            "oldText": "hi",
+            "path": "/home/dev/project/hello.txt",
+            "type": "diff"
+          }
+        ],
         "kind": "edit",
         "locations": [
           {
@@ -368,6 +384,11 @@
         "sessionUpdate": "usage_update",
         "used": 55439
       }
+    },
+    {
+      "state": "end",
+      "stopReason": "end_turn",
+      "t": "turn"
     },
     {
       "state": "end",

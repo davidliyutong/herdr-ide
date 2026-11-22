@@ -130,6 +130,14 @@
     {
       "t": "update",
       "update": {
+        "content": [
+          {
+            "newText": "return 2",
+            "oldText": "return 1",
+            "path": "/home/dev/project/parse.go",
+            "type": "diff"
+          }
+        ],
         "kind": "edit",
         "locations": [
           {
@@ -222,6 +230,14 @@
     {
       "t": "update",
       "update": {
+        "content": [
+          {
+            "newText": "package parse\n\nfunc Parse() int { return 2 }\n",
+            "oldText": null,
+            "path": "/home/dev/project/parse.go",
+            "type": "diff"
+          }
+        ],
         "kind": "edit",
         "locations": [
           {
@@ -361,6 +377,11 @@
         "sessionUpdate": "usage_update",
         "used": 22336
       }
+    },
+    {
+      "state": "end",
+      "stopReason": "end_turn",
+      "t": "turn"
     },
     {
       "state": "end",

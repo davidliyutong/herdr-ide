@@ -3,28 +3,42 @@
 // The conversation view with a source of its own: the agent's Markdown
 // (tables, formulas, a paragraph of one formula as display math), tool
 // calls of each kind and status, diffs (compared when opened), the plan,
-// notices, the composer's keys and states (why a message was not sent, the
-// composer kept in a short view while the user writes), the empty state,
-// the list's earlier items, and events of shapes no parser makes.
+// notices, the composer's keys and states (why a message was not sent,
+// stopping a turn, read-only), the empty state, the list's earlier items,
+// and events of shapes no parser makes.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Conversation, SHOWN_ITEMS, stickToEnd, type ConversationHandle, type ConversationProps } from '../conversation/Conversation';
 import { MAX_DIFF_LINES } from '../conversation/diff';
-import { NOTICES, STOPPED, TOOL_KINDS, TOOL_STATUSES, type ChatEvent, type ContentBlock, type SourceEvent } from '../conversation/model';
-import type { AgentSource, SourceCapabilities } from '../conversation/source';
+import {
+  CHAT_NOTICES,
+  NOTICES,
+  STOPPED,
+  TOOL_KINDS,
+  TOOL_STATUSES,
+  type ChatEvent,
+  type ContentBlock,
+  type SourceEvent,
+} from '../conversation/model';
+import type { ChatSource } from '../conversation/source';
 import { APP_SLUG } from '../brand';
 import { t } from '../i18n';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-class FakeSource implements AgentSource {
-  capabilities: SourceCapabilities = { input: 'terminal', permissions: false, streaming: false };
+class FakeSource implements ChatSource {
+  readOnly?: boolean;
   events: SourceEvent[] = [];
   subs = new Set<(ev: SourceEvent) => void>();
-  send = vi.fn(async (_content: ContentBlock[]) => {});
-  cancel = vi.fn();
+  send = vi.fn(async (_content: ContentBlock[], _clientId: string) => {});
+  cancel = vi.fn(async () => {});
+  respond = vi.fn(async () => {});
+  answer = vi.fn(async () => {});
+  setConfig = vi.fn(async () => {});
+  cancelQueued = vi.fn(async () => {});
+  compact = vi.fn(async () => {});
   loadEarlier?: () => Promise<boolean>;
   subscribe(fn: (ev: SourceEvent) => void) {
     this.subs.add(fn);
@@ -69,9 +83,9 @@ const settle = () =>
     await new Promise((r) => setTimeout(r, 0));
   });
 
-type Props = Omit<ConversationProps, 'source'> & { source: AgentSource };
-async function show(source: AgentSource, extra: Partial<Props> = {}): Promise<Props> {
-  const props: Props = { source, kind: 'claude', status: 'idle', onShowTerminal: vi.fn(), ...extra };
+type Props = Omit<ConversationProps, 'source'> & { source: ChatSource };
+async function show(source: ChatSource, extra: Partial<Props> = {}): Promise<Props> {
+  const props: Props = { source, kind: 'claude', ...extra };
   await act(async () => root.render(createElement(Conversation, props)));
   await settle();
   return props;
@@ -187,6 +201,24 @@ describe('the conversation view’s messages', () => {
     await until(() => shown.querySelector('.conv-thought-text')?.textContent?.includes('Let me see'));
   });
 
+  it('says how many tokens a thought took that the agent keeps to itself, as it estimates them', async () => {
+    const s = new FakeSource();
+    const estimate = (n: unknown) => ({ _meta: { [APP_SLUG]: { estimatedTokens: n } } });
+    s.emit(
+      update({ sessionUpdate: 'agent_thought_chunk', content: text(''), ...estimate(1234) }),
+      say('x'),
+      update({ sessionUpdate: 'agent_thought_chunk', content: text('Let me see'), ...estimate(80) }),
+      say('y'),
+      update({ sessionUpdate: 'agent_thought_chunk', content: text(''), ...estimate('many') }),
+    );
+    await show(s);
+    expect(qa('.conv-thought .conv-tool-label').map((l) => l.textContent)).toEqual([
+      t('conversation.thoughtTokens', { tokens: '1.23k' }),
+      t('conversation.thought'),
+      t('conversation.thought'),
+    ]);
+  });
+
   it('shows the plan as a checklist', async () => {
     const s = new FakeSource();
     s.emit(
@@ -215,6 +247,12 @@ describe('the conversation view’s messages', () => {
       notice(NOTICES.command, { name: 'context', output: '\x1b[1mTokens\x1b[0m: 12k' }),
       notice(NOTICES.skipped),
       notice(STOPPED, { stopReason: 'max_tokens' }),
+      notice(CHAT_NOTICES.imported, { lossy: true }),
+      notice(CHAT_NOTICES.imported),
+      notice(NOTICES.command, { name: '/compact' }),
+      notice(CHAT_NOTICES.restarted, { mode: 'full' }),
+      notice(CHAT_NOTICES.restarted, { mode: 'yolo' }),
+      notice(CHAT_NOTICES.handedOff),
     );
     await show(s);
     expect(qa('.conv-notice-text').map((n) => n.textContent)).toEqual([
@@ -225,6 +263,12 @@ describe('the conversation view’s messages', () => {
       '/context',
       t('conversation.notice.skipped'),
       t('conversation.notice.stopped.max_tokens'),
+      t('conversation.notice.importedLossy'),
+      t('conversation.notice.imported'),
+      '/compact',
+      t('conversation.notice.restartedFor', { mode: t('conversation.mode.full') }),
+      t('conversation.notice.restartedFor', { mode: 'yolo' }),
+      t('conversation.notice.handedOff'),
     ]);
     expect(qa('.conv-notice.error')).toHaveLength(1);
     expect(q('.conv-notice .conv-pre')).toBeNull();
@@ -232,16 +276,15 @@ describe('the conversation view’s messages', () => {
     expect(q('.conv-notice .conv-pre')?.textContent).toBe('Tokens: 12k');
   });
 
-  it('says where the conversation will be while there is none, and that entries are not shown', async () => {
+  it('says how to start while there is no conversation, and that entries are not shown', async () => {
     const s = new FakeSource();
-    const props = await show(s);
+    await show(s);
     expect(q('.conv-empty-title')?.textContent).toBe('Claude Code');
     expect(q('.conv-empty')?.textContent).toContain(t('conversation.empty', { agent: 'Claude Code' }));
     expect(q('.conv-unknown')).toBeNull();
     await emit(s, update({ sessionUpdate: 'some_future_update' }), update({ sessionUpdate: 'another_one' }));
-    expect(q('.conv-unknown')?.textContent).toContain(t('conversation.unknown', { n: 2 }));
-    await click(q('.conv-unknown button'));
-    expect(props.onShowTerminal).toHaveBeenCalledTimes(1);
+    expect(q('.conv-unknown')?.textContent).toBe(t('conversation.unknown', { n: 2 }));
+    expect(q('.conv-unknown button')).toBeNull();
   });
 });
 
@@ -503,19 +546,23 @@ describe('the conversation view’s composer', () => {
     expect(s.send).not.toHaveBeenCalled();
     await type('hello');
     await key({});
-    expect(s.send).toHaveBeenCalledWith([text('hello')]);
+    expect(s.send).toHaveBeenCalledWith([text('hello')], expect.any(String));
     expect(ta.value).toBe('');
+    // Each message has an id of its own.
+    await type('again');
+    await key({});
+    expect(s.send.mock.calls[1][1]).not.toBe(s.send.mock.calls[0][1]);
     // Nothing to send.
     await type('  \n ');
     await key({});
-    expect(s.send).toHaveBeenCalledTimes(1);
+    expect(s.send).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the text greyed while sending, and offers the terminal when it was not sent', async () => {
+  it('keeps the text greyed while sending, and says when it was not sent', async () => {
     const s = new FakeSource();
     let fail!: (e: Error) => void;
     s.send.mockImplementationOnce(() => new Promise<void>((_, reject) => (fail = reject)));
-    const props = await show(s);
+    await show(s);
     await type('do it');
     await key({});
     const ta = q<HTMLTextAreaElement>('textarea')!;
@@ -529,11 +576,17 @@ describe('the conversation view’s composer', () => {
     expect(ta.value).toBe('do it');
     const alert = q('[role="alert"]')!;
     expect(alert.textContent).toContain(t('conversation.sendFailed'));
+    // Dismissed, it goes.
     await click(alert.querySelector('button'));
-    expect(props.onShowTerminal).toHaveBeenCalledTimes(1);
-    // Sent the second time: the text goes, and so does the error.
+    expect(q('[role="alert"]')).toBeNull();
+    s.send.mockImplementationOnce(async () => {
+      throw new Error('again');
+    });
     await click(q('.conv-send'));
-    expect(s.send).toHaveBeenCalledTimes(2);
+    expect(q('[role="alert"]')).not.toBeNull();
+    // Sent the third time: the text goes, and so does the error.
+    await click(q('.conv-send'));
+    expect(s.send).toHaveBeenCalledTimes(3);
     expect(ta.value).toBe('');
     expect(q('[role="alert"]')).toBeNull();
   });
@@ -546,9 +599,10 @@ describe('the conversation view’s composer', () => {
       });
     await show(s);
     for (const [code, message] of [
-      ['pasted', t('conversation.sendError.pasted', { agent: 'Claude Code' })],
-      ['unconfirmed', t('conversation.sendError.unconfirmed', { agent: 'Claude Code' })],
-      ['detached', t('conversation.sendError.detached', { agent: 'Claude Code' })],
+      ['busy', t('conversation.error.busy', { agent: 'Claude Code' })],
+      ['offline', t('conversation.error.offline')],
+      ['read_only', t('conversation.error.read_only')],
+      ['too_large', t('conversation.error.too_large')],
       ['some_other', t('conversation.sendFailed')],
       [undefined, t('conversation.sendFailed')],
     ] as const) {
@@ -559,77 +613,59 @@ describe('the conversation view’s composer', () => {
       // The text stays to be sent again.
       expect(q<HTMLTextAreaElement>('textarea')!.value).toBe('do it');
     }
-    expect(t('conversation.sendError.pasted', { agent: 'Claude Code' })).toContain('Claude Code');
+    expect(t('conversation.error.busy', { agent: 'Claude Code' })).toContain('Claude Code');
   });
 
-  it('waits while the agent is blocked, saying on what, the field still taking text', async () => {
-    const s = new FakeSource();
-    const props = await show(s, { status: 'blocked', blockedText: 'approve Write: /p/a.txt' });
-    const ta = q<HTMLTextAreaElement>('textarea')!;
-    // Not disabled: a disabled field gives up the keyboard, which would go
-    // to the terminal and its question.
-    expect(ta.disabled).toBe(false);
-    expect(q<HTMLButtonElement>('.conv-send')!.disabled).toBe(true);
-    const banner = q('.conv-banner')!;
-    expect(banner.textContent).toContain(t('conversation.blocked', { agent: 'Claude Code' }));
-    expect(banner.textContent).toContain('approve Write: /p/a.txt');
-    await click(banner.querySelector('button'));
-    expect(props.onShowTerminal).toHaveBeenCalled();
-    await key({});
-    expect(s.send).not.toHaveBeenCalled();
-  });
-
-  it('is not there read-only, without input, or while the terminal shows below', async () => {
+  it('is read-only, every control disabled, when the view or the source says so', async () => {
     const s = new FakeSource();
     await show(s, { readOnly: true });
-    expect(q('textarea')).toBeNull();
-    await show(s, { peek: true });
-    expect(q('textarea')).toBeNull();
-    const none = new FakeSource();
-    none.capabilities = { ...none.capabilities, input: 'none' };
-    await show(none);
-    expect(q('textarea')).toBeNull();
+    const ta = q<HTMLTextAreaElement>('textarea')!;
+    expect(ta.disabled).toBe(true);
+    expect(ta.placeholder).toBe(t('conversation.composer.readOnly'));
+    expect(q<HTMLButtonElement>('.conv-send')!.disabled).toBe(true);
+    const ro = new FakeSource();
+    ro.readOnly = true;
+    await show(ro);
+    expect(q<HTMLTextAreaElement>('textarea')!.disabled).toBe(true);
     await show(s);
-    expect(q('textarea')).not.toBeNull();
+    expect(q<HTMLTextAreaElement>('textarea')!.disabled).toBe(false);
   });
 
-  it('keeps the composer in a short view while the user writes, the keyboard with it', async () => {
+  it('says why the agent does not run: failed, handed off to a terminal, closed', async () => {
     const s = new FakeSource();
-    const ref = createRef<ConversationHandle>();
-    await show(s, { ref, status: 'working' });
-    // Nothing written: the short view has no composer.
-    await show(s, { ref, status: 'blocked', peek: true });
-    expect(q('textarea')).toBeNull();
-    expect(ref.current!.writing()).toBe(false);
-    await show(s, { ref, status: 'working' });
-    // Text in it.
-    q<HTMLTextAreaElement>('textarea')!.focus();
-    await type('half');
-    await show(s, { ref, status: 'blocked', peek: true });
-    expect(ref.current!.writing()).toBe(true);
-    expect(q<HTMLTextAreaElement>('textarea')!.value).toBe('half');
-    expect(document.activeElement).toBe(q('textarea'));
-    // What the agent waits for is the parent's to say.
-    expect(q('.conv-banner')).toBeNull();
-    await key({});
-    expect(s.send).not.toHaveBeenCalled();
-    // Not short any more, then short again with nothing written but a key
-    // pressed a moment ago.
-    await show(s, { ref, status: 'working' });
-    expect(ref.current!.writing()).toBe(false);
-    await type('');
-    await act(async () => void q('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true })));
-    await show(s, { ref, status: 'blocked', peek: true });
-    expect(q('textarea')).not.toBeNull();
+    s.emit({ seq: next(), t: 'state', state: 'failed', error: { code: 'auth_required', message: 'login' } });
+    await show(s);
+    expect(q('.conv-banner.error')?.textContent).toContain(t('conversation.error.auth_required', { agent: 'Claude Code' }));
+    expect(q('.conv-notice.error')).not.toBeNull();
+    await emit(s, { seq: next(), t: 'info', chat: { state: 'sleeping', handedOff: true } });
+    expect(q('.conv-banner.error')).toBeNull();
+    expect(q('.conv-banner')?.textContent).toBe(t('conversation.handedOff', { agent: 'Claude Code' }));
+    await emit(s, { seq: next(), t: 'info', chat: { state: 'closed' } });
+    expect(q('.conv-banner')?.textContent).toBe(t('conversation.closed'));
   });
 
-  it('stops the agent’s turn while it works', async () => {
+  it('stops the agent’s turn while it works, with its button or Escape', async () => {
     const s = new FakeSource();
-    await show(s, { status: 'idle' });
+    await show(s);
     expect(q('.conv-stop')).toBeNull();
-    await show(s, { status: 'working' });
+    await key({ key: 'Escape' });
+    expect(s.cancel).not.toHaveBeenCalled();
+    await emit(s, { seq: next(), t: 'state', state: 'working' });
+    expect(q('.conv-working')?.textContent).toBe(t('conversation.working'));
     await click(q('.conv-stop'));
     expect(s.cancel).toHaveBeenCalledTimes(1);
+    const esc = await key({ key: 'Escape' });
+    expect(esc.defaultPrevented).toBe(true);
+    expect(s.cancel).toHaveBeenCalledTimes(2);
+    // A stop that failed says so.
+    s.cancel.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('x'), { code: 'offline' });
+    });
+    await click(q('.conv-stop'));
+    expect(q('[role="alert"]')?.textContent).toContain(t('conversation.error.offline'));
+    await emit(s, { seq: next(), t: 'state', state: 'idle' });
+    expect(q('.conv-stop')).toBeNull();
+    expect(q('.conv-working')).toBeNull();
   });
 
   it('keeps a draft per source until it is sent', async () => {
@@ -648,13 +684,42 @@ describe('the conversation view’s composer', () => {
     expect(q<HTMLTextAreaElement>('textarea')!.value).toBe('');
   });
 
-  it('shows how much of the context the session uses', async () => {
+  it('shows how much of the context the session uses, its cost and the tightest limit', async () => {
     const s = new FakeSource();
     s.emit(update({ sessionUpdate: 'usage_update', used: 50_000, size: 200_000 }));
     await show(s);
     const meter = q('[role="meter"]')!;
     expect(meter.getAttribute('aria-valuenow')).toBe('25');
     expect(meter.getAttribute('title')).toBe(t('conversation.context', { used: '50k', size: '200k' }));
+    expect(q('.conv-usage-cost')).toBeNull();
+    const resets = Math.round(Date.now() / 1000) + 2 * 3600 + 60;
+    await emit(s, {
+      seq: next(),
+      t: 'info',
+      chat: {
+        usage: {
+          used: 1000,
+          size: 0,
+          cost: { amount: 1.5, currency: 'USD' },
+          limits: [
+            { id: 'five_hour', label: '5h', usedPercent: 40, resetsAt: resets },
+            { id: 'seven_day', windowMinutes: 10080, usedPercent: 91, resetsAt: resets },
+          ],
+        },
+      },
+    });
+    // No size: tokens.
+    expect(q('[role="meter"]')).toBeNull();
+    expect(q('.conv-usage-tokens')?.textContent).toBe(t('conversation.usage.tokens', { n: '1k' }));
+    expect(q('.conv-usage-cost')?.textContent).toBe('$1.50');
+    const limit = q('.conv-usage-limit')!;
+    expect(limit.dataset.level).toBe('high');
+    expect(limit.textContent).toContain(t('conversation.usage.limit', { window: '7d', pct: 91 }));
+    expect(limit.textContent).toContain('in 2 hours');
+    expect(limit.title).toContain(t('conversation.usage.limit', { window: '5h', pct: 40 }));
+    // The agent's own measure.
+    await emit(s, { seq: next(), t: 'info', chat: { usage: { used: 1000, size: 0, percentage: 12 } } });
+    expect(q('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('12');
   });
 
   it('focuses the composer, or the list without one', async () => {
@@ -760,7 +825,7 @@ describe('the conversation view’s list', () => {
     expect(q('.conv-earlier')).toBeNull();
   });
 
-  it('offers the latest when the user scrolled away from it, not while the terminal shows below', async () => {
+  it('offers the latest when the user scrolled away from it', async () => {
     const s = new FakeSource();
     s.emit(prompt('a'), say('b'));
     await show(s);
@@ -778,11 +843,6 @@ describe('the conversation view’s list', () => {
     expect(top).toBe(2000);
     await act(async () => void log.dispatchEvent(new Event('scroll')));
     expect(q('.conv-jump')).toBeNull();
-    top = 0;
-    await act(async () => void log.dispatchEvent(new Event('scroll')));
-    await show(s, { peek: true });
-    expect(q('.conv-jump')).toBeNull();
-    expect(top).toBe(2000);
   });
 
   it('starts over when its source starts over', async () => {

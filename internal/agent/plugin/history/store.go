@@ -5,11 +5,11 @@ package history
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"sort"
@@ -20,35 +20,75 @@ import (
 	"time"
 
 	"herdr-ide/internal/agentproto"
+	dbstore "herdr-ide/internal/store"
 )
 
-// The snapshots live in <data dir>/history (0700), per terminal address:
-// <address>.vt with the bytes and <address>.json with what describes them
-// (meta), and <address>.prev.vt and <address>.prev.json for the previous
-// generation. Every file is 0600 and written as a temporary file renamed
-// over the old one. A generation exists for readers while its .json does
-// and its .vt has the size the .json gives: a writer removes the .json
-// first and puts it back last. Writers (capture, clear, the agent's
-// housekeeping) hold the directory's lock, .lock, which two agents of the
-// same instance (two cores that reach the machine) share; readers (list,
-// read) take no lock.
+// The snapshots live in the machine's database (store.MachineDB in the
+// agent's data directory), table history_snapshots: a row per generation
+// of a terminal (prev 0 for the current one, 1 for the previous one) with
+// what describes it and its bytes. Every change is a transaction of its
+// own, so readers (list, read) take no lock and see each generation whole;
+// a written generation is on disk before the write returns (store.Durable).
+//
+// Writers (capture, clear, adopt, the agent's housekeeping) hold the
+// snapshots' lease, history_lease, which two agents of the same instance
+// (two cores that reach the machine) share: its row names the writer, its
+// process and host and until when it holds it, taken in a transaction and
+// renewed by each of the writer's changes, which fail once another writer
+// took it. It ends when the writer closes the store, when its process is
+// gone (same host), or leaseTTL after its last renewal.
+//
+// The snapshots were kept before in <data dir>/history, as files: their
+// whole generations are imported once when the database is opened, then
+// the directory is removed (also one an agent of an older version left
+// again later).
 
 const (
-	dirName  = "history"
-	lockName = ".lock"
-	// tmpSuffix ends the temporary files, which start with a dot as no
-	// address does.
-	tmpSuffix = ".tmp"
-	// tmpMaxAge: a temporary file older than this is left over from an
-	// agent that ended while it wrote.
-	tmpMaxAge = time.Hour
-	// maxMeta bounds a .json file.
+	// feature names the snapshots' tables in the machine's database.
+	feature = "history"
+	// leaseTTL is how long a writer holds the lease after its last change:
+	// longer than a capture's or a clear's time (captureTimeout,
+	// clearTimeout), each of whose changes renews it.
+	leaseTTL = time.Minute
+	// leaseRetry is how often a writer that waits for the lease asks again.
+	leaseRetry = 50 * time.Millisecond
+
+	// dirName is the directory below the data directory the snapshots were
+	// kept in before, as files (imported once).
+	dirName = "history"
+	// maxMeta bounds a former generation's .json file.
 	maxMeta = 64 << 10
-	// maxEntries bounds the directory entries one scan looks at.
+	// maxEntries bounds the former directory's entries the import looks at.
 	maxEntries = 4096
 )
 
-// meta is a generation's .json.
+var migrations = []string{
+	`CREATE TABLE history_snapshots (
+		terminal TEXT NOT NULL,
+		prev INTEGER NOT NULL CHECK (prev IN (0, 1)),
+		pid INTEGER NOT NULL,
+		at INTEGER NOT NULL,
+		lines INTEGER NOT NULL,
+		cols INTEGER NOT NULL,
+		grid_rows INTEGER NOT NULL,
+		bytes INTEGER NOT NULL,
+		hash TEXT NOT NULL,
+		days INTEGER NOT NULL,
+		restored INTEGER NOT NULL,
+		data BLOB NOT NULL,
+		PRIMARY KEY (terminal, prev)
+	);
+	CREATE TABLE history_lease (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		owner TEXT NOT NULL,
+		host TEXT NOT NULL,
+		pid INTEGER NOT NULL,
+		expires INTEGER NOT NULL
+	);`,
+}
+
+// meta describes a generation (its row's columns; the JSON was its file's
+// before the database, which the import reads).
 type meta struct {
 	Terminal string `json:"terminal"`
 	agentproto.HistorySnapshot
@@ -67,7 +107,12 @@ type meta struct {
 	Restored bool `json:"restored,omitempty"`
 }
 
-// stored are a terminal's generations on disk; either may be nil.
+// valid tells whether m describes a generation of addr that can be one.
+func (m *meta) valid() bool {
+	return agentproto.ValidHistoryTerminal(m.Terminal) && m.Bytes >= 0 && m.Bytes <= agentproto.HistoryMaxBytes && m.At > 0
+}
+
+// stored are a terminal's generations; either may be nil.
 type stored struct{ cur, prev *meta }
 
 // gen is the current generation, or the previous one.
@@ -99,279 +144,270 @@ func (s *stored) bytes() int64 {
 	return n
 }
 
-// store is the directory and, for a writer that holds its lock, what it
-// holds.
+// store is a writer's view of the snapshots: the database, the lease it
+// holds and what describes each terminal's generations.
 type store struct {
-	dir   string
+	db    *dbstore.DB
+	owner string
 	terms map[string]*stored
-	lock  *os.File
 }
 
-// fileName is a generation's file: ext is ".vt" or ".json".
-func fileName(addr string, prev bool, ext string) string {
-	if prev {
-		return addr + ".prev" + ext
-	}
-	return addr + ext
-}
+var (
+	// errBusy: another writer holds the lease.
+	errBusy = errors.New("history: another capture is running")
+	// errLeaseLost: the lease expired and another writer took it.
+	errLeaseLost = errors.New("history: the snapshots' lease was taken over")
+	// errNewer: the machine's database, or the snapshots' tables in it,
+	// are of a newer version, which this agent reads and does not write.
+	errNewer = errors.New("history: the snapshots' database is of a newer version")
+	// errNoData: no data directory.
+	errNoData = errors.New("history: no data directory")
+)
 
-// historyDir is the snapshots' directory below the agent's data directory
-// base, created 0700 when missing. It must be a directory of this user,
-// not a link; one others may access is made 0700.
-func historyDir(base string) (string, error) {
+// dbPath is the machine's database below the data directory base.
+func dbPath(base string) string { return path.Join(base, dbstore.MachineDB) }
+
+// exists tells whether base has snapshots to look at: the machine's
+// database or the directory they were kept in before (a read creates
+// nothing).
+func exists(base string) bool {
 	if base == "" || !path.IsAbs(base) {
-		return "", errors.New("history: no data directory")
+		return false
 	}
-	dir := path.Join(base, dirName)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+	if dbstore.Exists(dbPath(base)) {
+		return true
 	}
-	st, err := os.Lstat(dir)
-	if err != nil {
-		return "", err
-	}
-	sys, ok := st.Sys().(*syscall.Stat_t)
-	if !st.IsDir() || !ok || int(sys.Uid) != os.Getuid() {
-		return "", errors.New("history: the snapshots' directory is not a directory of this user")
-	}
-	if st.Mode().Perm() != 0o700 {
-		if err := os.Chmod(dir, 0o700); err != nil {
-			return "", err
-		}
-	}
-	return dir, nil
+	st, err := os.Lstat(path.Join(base, dirName))
+	return err == nil && st.IsDir()
 }
 
-// errBusy: another writer holds the directory's lock.
-var errBusy = errors.New("history: another capture is running")
-
-// lockDir takes the directory's lock: at once or errBusy without wait,
-// else retrying until ctx ends.
-func lockDir(ctx context.Context, dir string, wait bool) (*os.File, error) {
-	f, err := os.OpenFile(path.Join(dir, lockName), os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
-	if err != nil {
+// openDB opens the machine's database below base with the snapshots'
+// tables, after importing the files they were kept in before. With
+// errNewer the database is returned to read. The caller closes it.
+func openDB(base string) (*dbstore.DB, error) {
+	if base == "" || !path.IsAbs(base) {
+		return nil, errNoData
+	}
+	db, err := dbstore.OpenShared(dbPath(base))
+	if db == nil {
 		return nil, err
 	}
-	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return f, nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) {
-			f.Close()
-			return nil, err
-		}
-		if !wait {
-			f.Close()
-			return nil, errBusy
-		}
-		select {
-		case <-ctx.Done():
-			f.Close()
-			return nil, ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
+	v, err := db.Migrate(feature, migrations)
+	switch {
+	case errors.Is(err, dbstore.ErrNewer) && v >= len(migrations):
+		return db, errNewer
+	case err != nil:
+		db.Close()
+		return nil, err
 	}
+	importFiles(db, base)
+	return db, nil
 }
 
-// openStore takes the lock of the snapshots' directory below base and
-// reads what it holds: generations that are not whole (a .json without
-// its .vt or of another size, a .vt without its .json, a file that is not
-// a regular one) and temporary files older than tmpMaxAge are removed.
-// removed counts the terminals that lost a generation so.
+// openStore opens the snapshots below base for a writer: it takes the
+// lease (at once or errBusy without wait, else asking again until ctx
+// ends) and reads what describes every generation. Rows that cannot be a
+// generation go; removed counts the terminals that lost one so.
 func openStore(ctx context.Context, base string, wait bool, now time.Time) (s *store, removed int, err error) {
-	dir, err := historyDir(base)
+	db, err := openDB(base)
 	if err != nil {
+		if db != nil {
+			db.Close()
+		}
 		return nil, 0, err
 	}
-	lock, err := lockDir(ctx, dir, wait)
-	if err != nil {
+	var r [12]byte
+	rand.Read(r[:])
+	s = &store{db: db, owner: hex.EncodeToString(r[:]), terms: map[string]*stored{}}
+	if err := s.lock(ctx, wait); err != nil {
+		db.Close()
 		return nil, 0, err
 	}
-	s = &store{dir: dir, terms: map[string]*stored{}, lock: lock}
-	removed = s.scan(now)
+	if removed, err = s.load(); err != nil {
+		s.close()
+		return nil, 0, err
+	}
 	return s, removed, nil
 }
 
-// close releases the lock.
+// close releases the lease and the database, giving the pages of the
+// generations that went back to the file system when they are many
+// (store.DB.Reclaim).
 func (s *store) close() {
-	if s.lock != nil {
-		s.lock.Close()
-		s.lock = nil
+	if s.db == nil {
+		return
+	}
+	s.db.Exec("DELETE FROM history_lease WHERE id = 1 AND owner = ?", s.owner)
+	s.db.Reclaim()
+	s.db.Close()
+	s.db = nil
+}
+
+// hostname tells this computer's writers from those of another sharing
+// the data directory, whose processes cannot be looked at.
+var hostname = sync.OnceValue(func() string {
+	h, _ := os.Hostname()
+	return h
+})
+
+// lock takes the lease: at once or errBusy without wait, else asking again
+// until ctx ends.
+func (s *store) lock(ctx context.Context, wait bool) error {
+	for {
+		taken, err := s.tryLease()
+		if err != nil || taken {
+			return err
+		}
+		if !wait {
+			return errBusy
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(leaseRetry):
+		}
 	}
 }
 
-// entries lists the directory's names (at most maxEntries).
-func entries(dir string) []fs.DirEntry {
-	d, err := os.Open(dir)
+// tryLease takes the lease unless another writer holds it: one whose
+// time is not over and whose process is there (on this host) or may be
+// (on another).
+func (s *store) tryLease() (bool, error) {
+	taken := false
+	err := s.db.Update(context.Background(), func(tx *sql.Tx) error {
+		var owner, host string
+		var pid int
+		var expires int64
+		now := time.Now()
+		err := tx.QueryRow("SELECT owner, host, pid, expires FROM history_lease WHERE id = 1").Scan(&owner, &host, &pid, &expires)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return err
+		case owner != s.owner && expires > now.UnixMilli() && (host != hostname() || alive(pid)):
+			return nil
+		}
+		_, err = tx.Exec(`INSERT INTO history_lease (id, owner, host, pid, expires) VALUES (1, ?, ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET owner = excluded.owner, host = excluded.host, pid = excluded.pid, expires = excluded.expires`,
+			s.owner, hostname(), os.Getpid(), now.Add(leaseTTL).UnixMilli())
+		taken = err == nil
+		return err
+	})
+	return taken, err
+}
+
+// alive tells whether process pid of this host is there (this process
+// is: another writer of it holds the lease).
+func alive(pid int) bool {
+	if pid == os.Getpid() {
+		return true
+	}
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// change runs fn in a transaction that renews the writer's lease, its
+// commit on disk when durable.
+func (s *store) change(durable bool, fn func(tx *sql.Tx) error) error {
+	run := s.db.Update
+	if durable {
+		run = s.db.Durable
+	}
+	return run(context.Background(), func(tx *sql.Tx) error {
+		res, err := tx.Exec("UPDATE history_lease SET expires = ? WHERE id = 1 AND owner = ?", time.Now().Add(leaseTTL).UnixMilli(), s.owner)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			return errLeaseLost
+		}
+		return fn(tx)
+	})
+}
+
+// columns are a generation's columns but its bytes, as scanMeta reads
+// them, with the size of its bytes last.
+const columns = "terminal, prev, pid, at, lines, cols, grid_rows, bytes, hash, days, restored, length(data)"
+
+// scanMeta reads a row of columns: its generation, whether it is the
+// previous one, and whether its bytes have the size it gives.
+func scanMeta(sc interface{ Scan(...any) error }, extra ...any) (m *meta, prev, whole bool, err error) {
+	m = &meta{}
+	var size int64
+	dst := append([]any{&m.Terminal, &prev, &m.PID, &m.At, &m.Lines, &m.Cols, &m.Rows, &m.Bytes, &m.Hash, &m.Days, &m.Restored, &size}, extra...)
+	if err := sc.Scan(dst...); err != nil {
+		return nil, false, false, err
+	}
+	return m, prev, size == m.Bytes && m.valid(), nil
+}
+
+// load reads what describes every generation into s.terms; rows that are
+// not whole go.
+func (s *store) load() (int, error) {
+	rows, err := s.db.Query("SELECT " + columns + " FROM history_snapshots ORDER BY terminal, prev")
 	if err != nil {
-		return nil
+		return 0, err
 	}
-	defer d.Close()
-	ents, _ := d.ReadDir(maxEntries)
-	return ents
-}
-
-// parseName tells which generation's file name is: its address, whether
-// it is the previous generation's and its extension; ok false for a name
-// of no generation.
-func parseName(name string) (addr string, prev bool, ext string, ok bool) {
-	for _, e := range []string{".json", ".vt"} {
-		if base, found := strings.CutSuffix(name, e); found {
-			addr, prev = strings.CutSuffix(base, ".prev")
-			return addr, prev, e, agentproto.ValidHistoryTerminal(addr)
-		}
+	type key struct {
+		addr string
+		prev bool
 	}
-	return "", false, "", false
-}
-
-// scan reads the directory into s.terms and removes what is not whole.
-func (s *store) scan(now time.Time) int {
-	type pair struct{ json, vt bool }
-	seen := map[string]*[2]pair{}
-	broken := map[string]bool{}
-	for _, e := range entries(s.dir) {
-		name := e.Name()
-		if strings.HasPrefix(name, ".") {
-			if strings.HasSuffix(name, tmpSuffix) {
-				if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > tmpMaxAge {
-					os.Remove(path.Join(s.dir, name))
-				}
-			}
+	var broken []key
+	for rows.Next() {
+		m, prev, whole, err := scanMeta(rows)
+		if err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if !whole {
+			broken = append(broken, key{m.Terminal, prev})
 			continue
 		}
-		addr, prev, ext, ok := parseName(name)
-		if !ok {
-			continue
+		st := s.terms[m.Terminal]
+		if st == nil {
+			st = &stored{}
+			s.terms[m.Terminal] = st
 		}
-		if !e.Type().IsRegular() {
-			// Not written here: a link or a special file is removed, not
-			// followed (a directory stays).
-			if !e.IsDir() {
-				os.Remove(path.Join(s.dir, name))
-				broken[addr] = true
-			}
-			continue
-		}
-		p := seen[addr]
-		if p == nil {
-			p = &[2]pair{}
-			seen[addr] = p
-		}
-		i := 0
 		if prev {
-			i = 1
-		}
-		if ext == ".json" {
-			p[i].json = true
+			st.prev = m
 		} else {
-			p[i].vt = true
+			st.cur = m
 		}
 	}
-	removed := 0
-	addrs := make([]string, 0, len(seen))
-	for a := range seen {
-		addrs = append(addrs, a)
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
 	}
-	sort.Strings(addrs)
-	for _, addr := range addrs {
-		p := seen[addr]
-		st := &stored{}
-		lost := broken[addr]
-		for i, prev := range []bool{false, true} {
-			if !p[i].json && !p[i].vt {
-				continue
+	if len(broken) == 0 {
+		return 0, nil
+	}
+	lost := map[string]bool{}
+	err = s.change(false, func(tx *sql.Tx) error {
+		for _, k := range broken {
+			if _, err := tx.Exec("DELETE FROM history_snapshots WHERE terminal = ? AND prev = ?", k.addr, k.prev); err != nil {
+				return err
 			}
-			g := s.readGen(addr, prev)
-			if g == nil {
-				s.removeFiles(addr, prev)
-				lost = true
-				continue
-			}
-			if prev {
-				st.prev = g
-			} else {
-				st.cur = g
-			}
+			lost[k.addr] = true
 		}
-		if st.cur != nil || st.prev != nil {
-			s.terms[addr] = st
-		}
-		if lost {
-			removed++
-		}
-	}
-	for addr := range broken {
-		if seen[addr] == nil {
-			removed++
-		}
-	}
-	return removed
-}
-
-// readGen reads a generation whose files are whole, nil otherwise.
-func (s *store) readGen(addr string, prev bool) *meta {
-	return readMeta(s.dir, addr, prev)
-}
-
-// readMeta reads the .json of a generation whose files are whole, nil
-// otherwise.
-func readMeta(dir, addr string, prev bool) *meta {
-	b, err := readRegular(path.Join(dir, fileName(addr, prev, ".json")), maxMeta)
-	if err != nil {
 		return nil
-	}
-	var m meta
-	if json.Unmarshal(b, &m) != nil || m.Terminal != addr || m.Bytes < 0 || m.Bytes > agentproto.HistoryMaxBytes || m.At <= 0 {
-		return nil
-	}
-	st, err := os.Lstat(path.Join(dir, fileName(addr, prev, ".vt")))
-	if err != nil || !st.Mode().IsRegular() || st.Size() != m.Bytes {
-		return nil
-	}
-	return &m
+	})
+	return len(lost), err
 }
 
-// readRegular reads a regular file of at most max bytes, without following
-// a link and without waiting on a special file.
-func readRegular(p string, max int64) ([]byte, error) {
-	return readFile(p, max, syscall.O_NOFOLLOW)
-}
-
-// readFile reads a regular file of at most max bytes, opened with flags
-// added, without waiting on a special file (O_NONBLOCK: opening a FIFO
-// returns at once and the file is then refused).
-func readFile(p string, max int64, flags int) ([]byte, error) {
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK|flags, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !st.Mode().IsRegular() {
-		return nil, errors.New("history: not a regular file")
-	}
-	if st.Size() > max {
-		return nil, errors.New("history: file too large")
-	}
-	b, err := io.ReadAll(io.LimitReader(f, max+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(b)) > max {
-		return nil, errors.New("history: file too large")
-	}
-	return b, nil
-}
-
-// removeFiles removes a generation's files: its .json first, so readers
-// no longer take it while its .vt goes.
-func (s *store) removeFiles(addr string, prev bool) {
-	os.Remove(path.Join(s.dir, fileName(addr, prev, ".json")))
-	os.Remove(path.Join(s.dir, fileName(addr, prev, ".vt")))
+// removeRows removes rows of addr: one generation, or both (prev nil).
+func (s *store) removeRows(addr string, prev *bool) error {
+	return s.change(false, func(tx *sql.Tx) error {
+		var err error
+		if prev == nil {
+			_, err = tx.Exec("DELETE FROM history_snapshots WHERE terminal = ?", addr)
+		} else {
+			_, err = tx.Exec("DELETE FROM history_snapshots WHERE terminal = ? AND prev = ?", addr, *prev)
+		}
+		return err
+	})
 }
 
 // removeGen removes one generation.
@@ -380,7 +416,7 @@ func (s *store) removeGen(addr string, prev bool) {
 	if st == nil {
 		return
 	}
-	s.removeFiles(addr, prev)
+	s.removeRows(addr, &prev)
 	if prev {
 		st.prev = nil
 	} else {
@@ -396,8 +432,8 @@ func (s *store) remove(addr string) bool {
 	if s.terms[addr] == nil {
 		return false
 	}
-	s.removeGen(addr, false)
-	s.removeGen(addr, true)
+	s.removeRows(addr, nil)
+	delete(s.terms, addr)
 	return true
 }
 
@@ -637,15 +673,14 @@ func (s *store) rotate(addr string) error {
 	if st == nil || st.cur == nil {
 		return nil
 	}
-	s.removeFiles(addr, true)
-	st.prev = nil
-	if err := os.Rename(path.Join(s.dir, fileName(addr, false, ".vt")), path.Join(s.dir, fileName(addr, true, ".vt"))); err != nil {
-		s.removeGen(addr, false)
+	err := s.change(true, func(tx *sql.Tx) error {
+		if _, err := tx.Exec("DELETE FROM history_snapshots WHERE terminal = ? AND prev = 1", addr); err != nil {
+			return err
+		}
+		_, err := tx.Exec("UPDATE history_snapshots SET prev = 1 WHERE terminal = ? AND prev = 0", addr)
 		return err
-	}
-	if err := os.Rename(path.Join(s.dir, fileName(addr, false, ".json")), path.Join(s.dir, fileName(addr, true, ".json"))); err != nil {
-		s.removeFiles(addr, true)
-		s.removeGen(addr, false)
+	})
+	if err != nil {
 		return err
 	}
 	st.prev, st.cur = st.cur, nil
@@ -655,8 +690,8 @@ func (s *store) rotate(addr string) error {
 // adopt makes the newest generation of from (its current, else its
 // previous) the previous generation of to, unless to has a previous one
 // captured later, and removes from's snapshots either way; false when
-// nothing moved. Readers stop taking each generation (its .json goes)
-// before its files change, and take the moved one once its .json is back.
+// nothing moved. It is one transaction: readers see the generation at
+// from or at to.
 func (s *store) adopt(from, to string) (bool, error) {
 	src := s.terms[from]
 	if src == nil {
@@ -668,135 +703,206 @@ func (s *store) adopt(from, to string) (bool, error) {
 		s.remove(from)
 		return false, nil
 	}
+	err := s.change(true, func(tx *sql.Tx) error {
+		if _, err := tx.Exec("DELETE FROM history_snapshots WHERE terminal = ? AND prev = 1", to); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE history_snapshots SET terminal = ?, prev = 1 WHERE terminal = ? AND prev = ?", to, from, prev); err != nil {
+			return err
+		}
+		_, err := tx.Exec("DELETE FROM history_snapshots WHERE terminal = ?", from)
+		return err
+	})
+	if err != nil {
+		s.remove(from)
+		return false, err
+	}
 	moved := *m
 	moved.Terminal = to
-	b, err := json.Marshal(moved)
-	if err != nil {
-		s.remove(from)
-		return false, err
-	}
-	js, err := writeTemp(s.dir, fileName(to, true, ".json"), b)
-	if err != nil {
-		s.remove(from)
-		return false, err
-	}
-	s.removeGen(to, true)
-	os.Remove(path.Join(s.dir, fileName(from, prev, ".json")))
-	if err := os.Rename(path.Join(s.dir, fileName(from, prev, ".vt")), path.Join(s.dir, fileName(to, true, ".vt"))); err != nil {
-		os.Remove(js)
-		s.remove(from)
-		return false, err
-	}
-	if err := os.Rename(js, path.Join(s.dir, fileName(to, true, ".json"))); err != nil {
-		os.Remove(js)
-		os.Remove(path.Join(s.dir, fileName(to, true, ".vt")))
-		s.remove(from)
-		return false, err
-	}
 	dst := s.terms[to]
 	if dst == nil {
 		dst = &stored{}
 		s.terms[to] = dst
 	}
 	dst.prev = &moved
-	// The moved generation's files are to's now: only from's other one is
-	// left to remove.
-	if prev {
-		src.prev = nil
-	} else {
-		src.cur = nil
-	}
-	if src.cur == nil && src.prev == nil {
-		delete(s.terms, from)
-	}
-	s.remove(from)
-	syncDir(s.dir)
+	delete(s.terms, from)
 	return true, nil
 }
 
 // write writes addr's current generation.
 func (s *store) write(m meta, data []byte) error {
 	m.Bytes = int64(len(data))
-	b, err := json.Marshal(m)
-	if err != nil {
-		return err
-	}
-	vt, err := writeTemp(s.dir, fileName(m.Terminal, false, ".vt"), data)
-	if err != nil {
-		return err
-	}
-	js, err := writeTemp(s.dir, fileName(m.Terminal, false, ".json"), b)
-	if err != nil {
-		os.Remove(vt)
-		return err
-	}
 	st := s.terms[m.Terminal]
 	if st == nil {
 		st = &stored{}
 		s.terms[m.Terminal] = st
 	}
-	// Readers stop taking the old generation before its bytes change.
-	os.Remove(path.Join(s.dir, fileName(m.Terminal, false, ".json")))
-	st.cur = nil
-	if err := os.Rename(vt, path.Join(s.dir, fileName(m.Terminal, false, ".vt"))); err != nil {
-		os.Remove(vt)
-		os.Remove(js)
-		s.removeGen(m.Terminal, false)
+	err := s.change(true, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO history_snapshots (terminal, prev, pid, at, lines, cols, grid_rows, bytes, hash, days, restored, data)
+			VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (terminal, prev) DO UPDATE SET pid = excluded.pid, at = excluded.at, lines = excluded.lines,
+				cols = excluded.cols, grid_rows = excluded.grid_rows, bytes = excluded.bytes, hash = excluded.hash,
+				days = excluded.days, restored = excluded.restored, data = excluded.data`,
+			m.Terminal, m.PID, m.At, m.Lines, m.Cols, m.Rows, m.Bytes, m.Hash, m.Days, m.Restored, data)
 		return err
-	}
-	if err := os.Rename(js, path.Join(s.dir, fileName(m.Terminal, false, ".json"))); err != nil {
-		os.Remove(js)
-		s.removeGen(m.Terminal, false)
+	})
+	if err != nil {
+		// Nothing changed: the generation before stays.
+		if st.cur == nil && st.prev == nil {
+			delete(s.terms, m.Terminal)
+		}
 		return err
 	}
 	st.cur = &m
-	syncDir(s.dir)
 	return nil
-}
-
-// writeTemp writes data to a new temporary file (0600) in dir for the file
-// name and returns its path. Its content is flushed to disk: a snapshot
-// matters most after the machine lost its power.
-func writeTemp(dir, name string, data []byte) (string, error) {
-	var r [6]byte
-	rand.Read(r[:])
-	p := path.Join(dir, "."+name+"."+hex.EncodeToString(r[:])+tmpSuffix)
-	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
-	if err != nil {
-		return "", err
-	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		os.Remove(p)
-		return "", err
-	}
-	return p, nil
-}
-
-// syncDir flushes the directory's entries (the renames).
-func syncDir(dir string) {
-	if d, err := os.Open(dir); err == nil {
-		d.Sync()
-		d.Close()
-	}
 }
 
 // clearAll removes every terminal's snapshots and returns how many
 // terminals had some.
 func (s *store) clearAll() int {
-	n := 0
-	for addr := range s.terms {
-		if s.remove(addr) {
-			n++
-		}
-	}
+	n := len(s.terms)
+	s.change(false, func(tx *sql.Tx) error {
+		_, err := tx.Exec("DELETE FROM history_snapshots")
+		return err
+	})
+	clear(s.terms)
 	return n
 }
 
 func clamp[T int | int64](v, lo, hi T) T { return max(lo, min(v, hi)) }
+
+// importFiles imports the snapshots kept below base before the database,
+// in <base>/history, once: every whole generation (a .json and a .vt of
+// the size it gives, regular files) of a valid address; what is not whole,
+// links and temporary files are left out. Once the import committed (now
+// or before), the directory is removed; a failed import leaves it. A
+// directory that is a link or another user's is neither read nor removed.
+func importFiles(db *dbstore.DB, base string) {
+	dir := path.Join(base, dirName)
+	st, err := os.Lstat(dir)
+	if err != nil || !st.IsDir() {
+		return
+	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); !ok || int(sys.Uid) != os.Getuid() {
+		return
+	}
+	_, err = db.Import(context.Background(), feature, "files", func(tx *sql.Tx) error {
+		ents, err := readDirNames(dir)
+		if err != nil {
+			return err
+		}
+		for _, name := range ents {
+			addr, prev, ext, ok := parseName(name)
+			if !ok || ext != ".json" {
+				continue
+			}
+			m := readMeta(dir, addr, prev)
+			if m == nil {
+				continue
+			}
+			data, err := readRegular(path.Join(dir, fileName(addr, prev, ".vt")), agentproto.HistoryMaxBytes)
+			if err != nil || int64(len(data)) != m.Bytes {
+				continue
+			}
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO history_snapshots (terminal, prev, pid, at, lines, cols, grid_rows, bytes, hash, days, restored, data)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				addr, prev, m.PID, m.At, m.Lines, m.Cols, m.Rows, m.Bytes, m.Hash, m.Days, m.Restored, data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	os.RemoveAll(dir)
+}
+
+// readDirNames lists a directory's names (at most maxEntries), sorted.
+func readDirNames(dir string) ([]string, error) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+	names, err := d.Readdirnames(maxEntries)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// fileName is a former generation's file: ext is ".vt" or ".json".
+func fileName(addr string, prev bool, ext string) string {
+	if prev {
+		return addr + ".prev" + ext
+	}
+	return addr + ext
+}
+
+// parseName tells which former generation's file name is: its address,
+// whether it is the previous generation's and its extension; ok false for
+// a name of no generation.
+func parseName(name string) (addr string, prev bool, ext string, ok bool) {
+	for _, e := range []string{".json", ".vt"} {
+		if base, found := strings.CutSuffix(name, e); found {
+			addr, prev = strings.CutSuffix(base, ".prev")
+			return addr, prev, e, agentproto.ValidHistoryTerminal(addr)
+		}
+	}
+	return "", false, "", false
+}
+
+// readMeta reads the .json of a former generation whose files are whole,
+// nil otherwise.
+func readMeta(dir, addr string, prev bool) *meta {
+	b, err := readRegular(path.Join(dir, fileName(addr, prev, ".json")), maxMeta)
+	if err != nil {
+		return nil
+	}
+	var m meta
+	if json.Unmarshal(b, &m) != nil || m.Terminal != addr || !m.valid() {
+		return nil
+	}
+	st, err := os.Lstat(path.Join(dir, fileName(addr, prev, ".vt")))
+	if err != nil || !st.Mode().IsRegular() || st.Size() != m.Bytes {
+		return nil
+	}
+	return &m
+}
+
+// readRegular reads a regular file of at most max bytes, without following
+// a link and without waiting on a special file.
+func readRegular(p string, max int64) ([]byte, error) {
+	return readFile(p, max, syscall.O_NOFOLLOW)
+}
+
+// readFile reads a regular file of at most max bytes, opened with flags
+// added, without waiting on a special file (O_NONBLOCK: opening a FIFO
+// returns at once and the file is then refused).
+func readFile(p string, max int64, flags int) ([]byte, error) {
+	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK|flags, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, errors.New("history: not a regular file")
+	}
+	if st.Size() > max {
+		return nil, errors.New("history: file too large")
+	}
+	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > max {
+		return nil, errors.New("history: file too large")
+	}
+	return b, nil
+}

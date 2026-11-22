@@ -1,17 +1,22 @@
 // The items of a conversation as the view draws them: the user's prompts as
-// typed, the agent's messages as Markdown (tables, formulas, code), its
-// thoughts and tool calls as quiet rows that open, the turn's plan as a
-// checklist and notices as thin separators. An item is drawn again only
-// when it changed (the reducer replaces only the items an event changes).
+// typed, the agent's messages as Markdown (tables, formulas, code; while
+// one streams, a block at a time), its thoughts and tool calls as quiet
+// rows that open, a subagent's call with the subagent's own items nested in
+// it (closed at first, with their count), the turn's plan as a checklist,
+// notices as thin separators, and the cards that answer the agent (cards.tsx).
+// An item is drawn again only when it changed (the reducer replaces only
+// the items an event changes).
 
-import { memo, useState } from 'react';
-import { Brain, ChevronRight, Circle, CircleCheck, CircleDot, ListTodo, SquareSlash } from 'lucide-react';
+import { memo, useMemo, useState } from 'react';
+import { Bot, Brain, ChevronRight, Circle, CircleCheck, CircleDot, ListTodo, SquareSlash } from 'lucide-react';
 import { Markdown } from '../markdown/Markdown';
 import { hasMessage, t } from '../i18n';
-import { displayMath, plainOutput } from './format';
+import { PermissionCard, PlanCard, QuestionCard } from './cards';
+import { displayMath, formatTokens, inputText, plainOutput } from './format';
 import {
   asText,
   blocksText,
+  CHAT_NOTICES,
   NOTICES,
   STOPPED,
   type Item,
@@ -19,9 +24,11 @@ import {
   type NoticeItem,
   type PlanItem,
   type ThoughtItem,
+  type ToolItem,
 } from './model';
 import { Blocks, isShortened, Shortened, type ItemContext } from './parts';
-import { ToolCallView } from './ToolCall';
+import { streamBlocks } from './streaming';
+import { Results, Section, StatusIcon, ToolCallView } from './ToolCall';
 
 /** A user's prompt longer than this (characters or lines) shows its start
  * until it is opened. */
@@ -57,26 +64,51 @@ function UserMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
   );
 }
 
+/** A block of Markdown still arriving, drawn again only when it changed. */
+const StreamBlock = memo(function StreamBlock({ text, className }: { text: string; className: string }) {
+  return <Markdown text={displayMath(text)} className={className} />;
+});
+
+/** Markdown that is still arriving: its blocks apart, so that an increment
+ * draws only the last; whole once it no longer streams. */
+export function StreamMarkdown({ text, live, className }: { text: string; live?: boolean; className: string }) {
+  const blocks = useMemo(() => (live ? streamBlocks(text) : undefined), [text, live]);
+  if (!blocks) return <Markdown text={displayMath(text)} className={className} />;
+  return (
+    <div className="conv-stream" data-live>
+      {blocks.map((b, i) => (
+        <StreamBlock key={i} text={b} className={className} />
+      ))}
+    </div>
+  );
+}
+
 function AgentMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
   const text = blocksText(item.content);
   return (
-    <div className="conv-item conv-agent">
+    <div className="conv-item conv-agent" aria-busy={item.live || undefined}>
       <span className="conv-sr">{ctx.agent}: </span>
-      {text.trim() && <Markdown text={displayMath(text)} className="conv-md" />}
+      {text.trim() && <StreamMarkdown text={text} live={item.live} className="conv-md" />}
       <Blocks blocks={item.content} ctx={ctx} />
       {item.content.some(isShortened) && <Shortened />}
     </div>
   );
 }
 
+/** A thought: its text opens; one the agent keeps to itself says how many
+ * tokens it took, when the agent estimates them. */
 function Thought({ item }: { item: ThoughtItem }) {
   const text = blocksText(item.content).trim();
   const [open, setOpen] = useState(false);
+  const label =
+    !text && item.estimatedTokens
+      ? t('conversation.thoughtTokens', { tokens: formatTokens(item.estimatedTokens) })
+      : t('conversation.thought');
   const head = (
     <>
       <ChevronRight className="conv-chevron" aria-hidden />
       <Brain className="conv-kind-icon" aria-hidden />
-      <span className="conv-tool-label">{t('conversation.thought')}</span>
+      <span className="conv-tool-label">{label}</span>
     </>
   );
   return (
@@ -92,7 +124,7 @@ function Thought({ item }: { item: ThoughtItem }) {
       </div>
       {open && text && (
         <div className="conv-tool-body">
-          <Markdown text={text} className="conv-md conv-thought-text" />
+          <StreamMarkdown text={text} live={item.live} className="conv-md conv-thought-text" />
         </div>
       )}
     </div>
@@ -153,10 +185,28 @@ function Notice({ item }: { item: NoticeItem }) {
       text = model ? t('conversation.notice.modelTo', { model }) : t('conversation.notice.model');
       break;
     }
-    case NOTICES.error:
-      error = true;
-      text = str(p.message) ?? str(p.text) ?? str(p.error) ?? t('conversation.notice.error');
+    case NOTICES.error: {
+      const message = str(p.message) ?? str(p.text) ?? str(p.error);
+      if (p.willRetry === true)
+        text = message ? t('conversation.notice.retrying', { message }) : t('conversation.notice.retryingNoMessage');
+      else {
+        error = true;
+        text = message ?? t('conversation.notice.error');
+      }
       break;
+    }
+    case CHAT_NOTICES.handedOff:
+      text = t('conversation.notice.handedOff');
+      break;
+    case CHAT_NOTICES.imported:
+      text = t(p.lossy === true ? 'conversation.notice.importedLossy' : 'conversation.notice.imported');
+      break;
+    case CHAT_NOTICES.restarted: {
+      const mode = str(p.mode);
+      const key = `conversation.mode.${mode ?? ''}`;
+      text = mode ? t('conversation.notice.restartedFor', { mode: hasMessage(key) ? t(key) : mode }) : t('conversation.notice.restarted');
+      break;
+    }
     case NOTICES.command: {
       const name = str(p.name);
       command = name ? (name.startsWith('/') ? name : `/${name}`) : undefined;
@@ -191,6 +241,77 @@ function Notice({ item }: { item: NoticeItem }) {
   );
 }
 
+/** The kind of subagent a call runs (its type), when it says. */
+const subagentType = (item: ToolItem) => inputText(item.rawInput, 'subagent_type', 'agent_type', 'agentType', 'agent');
+
+/** Whether a call runs a subagent: it has the subagent's items, or names
+ * a subagent's type. */
+export const isSubagent = (item: ToolItem) => !!item.sub || subagentType(item) !== undefined;
+
+/** A subagent's call: its type and what it was asked to do, its status
+ * and how many items it has; opened, its prompt, its items as the view
+ * draws the agent's own, and its result. */
+function SubagentView({ item, ctx }: { item: ToolItem; ctx: ItemContext }) {
+  const [open, setOpen] = useState(false);
+  const status = item.status ?? 'pending';
+  const type = subagentType(item);
+  const description = inputText(item.rawInput, 'description') ?? (item.title.trim() || undefined);
+  const prompt = inputText(item.rawInput, 'prompt');
+  const items = item.sub?.items ?? [];
+  const results = item.content.filter((c) => c.type !== 'diff');
+  const statusLabel = t(`conversation.toolStatus.${status}`);
+  return (
+    <div className="conv-item conv-quiet conv-tool conv-subagent" data-kind={item.toolKind ?? 'think'} data-status={status}>
+      <div className="conv-row">
+        <button type="button" className="conv-toggle" aria-expanded={open} title={description} onClick={() => setOpen((o) => !o)}>
+          <ChevronRight className="conv-chevron" aria-hidden />
+          {status === 'in_progress' || status === 'failed' || status === 'cancelled' ? (
+            <StatusIcon kind="think" status={status} />
+          ) : (
+            <Bot className="conv-kind-icon" aria-hidden />
+          )}
+          <span className="conv-tool-label">{type ?? t('conversation.subagent.label')}</span>
+          {description && <span className="conv-tool-subject conv-subagent-desc">{description.split('\n')[0]}</span>}
+          <span className="conv-sr">, {statusLabel}</span>
+        </button>
+        <span className="conv-meta">
+          <span className="conv-subagent-count">{t('conversation.subagent.steps', { n: items.length })}</span>
+          {(status === 'failed' || status === 'cancelled') && (
+            <span className={status === 'failed' ? 'conv-bad' : undefined}>{statusLabel}</span>
+          )}
+        </span>
+      </div>
+      {open && (
+        <div className="conv-tool-body conv-subagent-body">
+          {prompt && (
+            <Section title={t('conversation.tool.task')}>
+              <div className="conv-prompt">{prompt}</div>
+            </Section>
+          )}
+          {items.length > 0 && (
+            <div
+              className="conv-subagent-items"
+              role="list"
+              aria-label={t('conversation.subagent.items', { type: type ?? t('conversation.subagent.label') })}
+            >
+              {items.map((it) => (
+                <div role="listitem" key={it.id}>
+                  <ItemView item={it} ctx={ctx} />
+                </div>
+              ))}
+            </div>
+          )}
+          {results.length > 0 && (
+            <Section title={t('conversation.tool.result')}>
+              <Results content={results} kind="think" ctx={ctx} />
+            </Section>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** An item as the view draws it. */
 export const ItemView = memo(function ItemView({ item, ctx }: { item: Item; ctx: ItemContext }) {
   switch (item.kind) {
@@ -199,11 +320,15 @@ export const ItemView = memo(function ItemView({ item, ctx }: { item: Item; ctx:
     case 'thought':
       return <Thought item={item} />;
     case 'tool':
-      return <ToolCallView item={item} ctx={ctx} />;
+      return isSubagent(item) ? <SubagentView item={item} ctx={ctx} /> : <ToolCallView item={item} ctx={ctx} />;
     case 'plan':
       return <Plan item={item} />;
     case 'notice':
       return <Notice item={item} />;
+    case 'permission':
+      return item.permission === 'plan' ? <PlanCard item={item} ctx={ctx} /> : <PermissionCard item={item} ctx={ctx} />;
+    case 'question':
+      return <QuestionCard item={item} ctx={ctx} />;
     default:
       return null;
   }

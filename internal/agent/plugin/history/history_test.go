@@ -6,12 +6,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -19,6 +22,7 @@ import (
 	"herdr-ide/internal/agent/plugin"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/hc"
+	dbstore "herdr-ide/internal/store"
 )
 
 // fast shortens the capture's waits for the test.
@@ -97,20 +101,56 @@ func mustCapture(t *testing.T, env *plugin.Env, p agentproto.HistoryCaptureParam
 	return res
 }
 
+// historyPath names a generation as its file did before the database:
+// <address>.vt for its bytes, <address>.prev.vt for the previous one's,
+// .json for what describes it.
 func historyPath(env *plugin.Env, name string) string { return path.Join(env.Base, dirName, name) }
 
+// slurp reads from the database what the generation's file named p held:
+// its bytes (.vt), or what describes it as JSON (.json).
 func slurp(t *testing.T, p string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
+	b, ok := generation(t, path.Dir(path.Dir(p)), path.Base(p))
+	if !ok {
+		t.Fatalf("no generation %s", path.Base(p))
 	}
 	return b
 }
 
+// generation reads what the file name held of a generation below the data
+// directory base, if there is that generation.
+func generation(t *testing.T, base, name string) ([]byte, bool) {
+	t.Helper()
+	addr, prev, ext, ok := parseName(name)
+	if !ok || !dbstore.Exists(dbPath(base)) {
+		return nil, false
+	}
+	db, err := openDB(base)
+	if db == nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var data []byte
+	m, _, _, err := scanMeta(db.QueryRow("SELECT "+columns+", data FROM history_snapshots WHERE terminal = ? AND prev = ?", addr, prev), &data)
+	if err != nil {
+		return nil, false
+	}
+	if ext == ".json" {
+		b, _ := json.Marshal(m)
+		return b, true
+	}
+	return data, true
+}
+
 func metaOf(t *testing.T, env *plugin.Env, addr string, prev bool) *meta {
 	t.Helper()
-	return readMeta(path.Join(env.Base, dirName), addr, prev)
+	b, ok := generation(t, env.Base, fileName(addr, prev, ".json"))
+	if !ok {
+		return nil
+	}
+	var m meta
+	json.Unmarshal(b, &m)
+	return &m
 }
 
 // call runs an action as the agent does and decodes its result into out.
@@ -399,42 +439,38 @@ func TestUnavailable(t *testing.T) {
 	sameFiles(t, env, "t1", before)
 }
 
-// snapshotFiles are the bytes of a terminal's files.
+// snapshotFiles are a terminal's generations as their files were named
+// before the database: their bytes and what describes them.
 func snapshotFiles(t *testing.T, env *plugin.Env, addr string) map[string][]byte {
 	t.Helper()
 	out := map[string][]byte{}
 	for _, name := range []string{addr + ".vt", addr + ".json", addr + ".prev.vt", addr + ".prev.json"} {
-		if b, err := os.ReadFile(historyPath(env, name)); err == nil {
+		if b, ok := generation(t, env.Base, name); ok {
 			out[name] = b
 		}
 	}
 	if len(out) == 0 {
-		t.Fatalf("%s has no files", addr)
+		t.Fatalf("%s has no snapshots", addr)
 	}
 	return out
 }
 
-// sameFiles fails unless a terminal's files are byte for byte those before.
+// sameFiles fails unless a terminal's generations are byte for byte those
+// before.
 func sameFiles(t *testing.T, env *plugin.Env, addr string, before map[string][]byte) {
 	t.Helper()
 	now := map[string][]byte{}
 	for _, name := range []string{addr + ".vt", addr + ".json", addr + ".prev.vt", addr + ".prev.json"} {
-		if b, err := os.ReadFile(historyPath(env, name)); err == nil {
+		if b, ok := generation(t, env.Base, name); ok {
 			now[name] = b
 		}
 	}
 	if len(now) != len(before) {
-		t.Fatalf("files %d, were %d", len(now), len(before))
+		t.Fatalf("generations %d, were %d", len(now), len(before))
 	}
 	for name, b := range before {
 		if !bytes.Equal(now[name], b) {
 			t.Fatalf("%s changed", name)
-		}
-	}
-	entries, _ := os.ReadDir(path.Join(env.Base, dirName))
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), tmpSuffix) {
-			t.Fatalf("a temporary file stayed: %s", e.Name())
 		}
 	}
 }
@@ -528,7 +564,7 @@ func TestDroppedPaintHalvesLines(t *testing.T) {
 	if m := metaOf(t, env, "t1", false); m == nil || m.Lines != 500 {
 		t.Fatalf("meta %+v", m)
 	}
-	if _, err := os.Lstat(historyPath(env, "t2.vt")); err == nil {
+	if metaOf(t, env, "t2", false) != nil {
 		t.Fatal("t2 stored")
 	}
 }
@@ -555,7 +591,7 @@ func TestTooLargeHalvesLines(t *testing.T) {
 	if m := metaOf(t, env, "t1", false); m == nil || m.Lines != 500 || m.Bytes > agentproto.HistoryMaxBytes {
 		t.Fatalf("meta %+v", m)
 	}
-	if _, err := os.Lstat(historyPath(env, "t2.vt")); err == nil {
+	if metaOf(t, env, "t2", false) != nil {
 		t.Fatal("t2 stored")
 	}
 }
@@ -785,8 +821,8 @@ func TestAge(t *testing.T) {
 	// Prune of a machine without snapshots creates nothing.
 	empty := t.TempDir()
 	Prune(empty, time.Now())
-	if _, err := os.Lstat(path.Join(empty, dirName)); err == nil {
-		t.Fatal("Prune created the directory")
+	if _, err := os.Lstat(path.Join(empty, dbstore.MachineDB)); err == nil {
+		t.Fatal("Prune created the database")
 	}
 }
 
@@ -879,43 +915,149 @@ func TestAddresses(t *testing.T) {
 	}
 }
 
-// The directory is 0700 (also one that existed with wider access), the
-// files 0600.
-func TestFilesPrivate(t *testing.T) {
+// The machine's database is the user's alone: the file 0600 (its journal
+// too, internal/store) in the data directory, which is made 0700; a link
+// where it would be is refused, and the capture fails without a path.
+func TestDatabasePrivate(t *testing.T) {
 	env, f := testEnv(t)
 	fast(t)
-	if err := os.Mkdir(path.Join(env.Base, dirName), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	os.Chmod(env.Base, 0o755)
 	f.set(live("t1", 1))
 	f.setText("t1", "a")
 	f.setPaint("t1", painter(10, 10, "a"))
 	mustCapture(t, env, params)
-	f.set(live("t1", 2))
-	f.setText("t1", "b")
-	mustCapture(t, env, params)
-	st, err := os.Lstat(path.Join(env.Base, dirName))
-	if err != nil || st.Mode().Perm() != 0o700 {
-		t.Fatalf("directory %v %v", st.Mode(), err)
+	if st, err := os.Lstat(env.Base); err != nil || st.Mode().Perm() != 0o700 {
+		t.Fatalf("data directory %v %v", st.Mode(), err)
 	}
-	for _, name := range []string{"t1.vt", "t1.json", "t1.prev.vt", "t1.prev.json", lockName} {
-		if st, err := os.Lstat(historyPath(env, name)); err != nil || st.Mode().Perm() != 0o600 {
-			t.Errorf("%s: %v %v", name, st, err)
-		}
+	if st, err := os.Lstat(dbPath(env.Base)); err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("database: %v %v", st, err)
 	}
-	// A directory that is a link is refused.
-	other := t.TempDir()
-	base := t.TempDir()
-	if err := os.Symlink(other, path.Join(base, dirName)); err != nil {
-		t.Fatal(err)
+	other, _ := testEnv(t)
+	secret := path.Join(t.TempDir(), "elsewhere.db")
+	os.Symlink(secret, dbPath(other.Base))
+	if rep := call(t, other, "capture", params, nil); rep.OK || rep.Code != "io" || strings.Contains(rep.Error, "/") {
+		t.Errorf("a linked database: %+v", rep)
 	}
-	if _, err := historyDir(base); err == nil {
-		t.Fatal("a linked directory was taken")
+	if _, err := os.Lstat(secret); err == nil {
+		t.Error("the link's target was created")
 	}
 }
 
-// Links and other files that a capture did not write are removed, never
-// followed; a generation that is not whole is removed.
+// writeFormer writes a generation as the agent wrote it before the
+// database, in <base>/history.
+func writeFormer(t *testing.T, base, addr string, prev bool, m meta, data []byte) {
+	t.Helper()
+	dir := path.Join(base, dirName)
+	os.MkdirAll(dir, 0o700)
+	m.Terminal, m.Bytes = addr, int64(len(data))
+	b, _ := json.Marshal(m)
+	if err := os.WriteFile(path.Join(dir, fileName(addr, prev, ".vt")), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(path.Join(dir, fileName(addr, prev, ".json")), b, 0o600)
+}
+
+// The snapshots kept in files before the database are imported once, at
+// the first open (a list here), and their directory goes: every whole
+// generation, with what describes it; links (never followed), generations
+// that are not whole, temporary files and the lock are left out. A
+// directory that comes back is removed, not imported again.
+func TestImportFiles(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	at := time.Now().Add(-time.Hour).UnixMilli()
+	snap := func(pid int) meta {
+		return meta{Hash: "h", Days: 7, Restored: pid == 2, HistorySnapshot: agentproto.HistorySnapshot{PID: pid, At: at + int64(pid), Lines: 100, Cols: 80, Rows: 24}}
+	}
+	writeFormer(t, env.Base, "t1", false, snap(2), []byte("current of t1"))
+	writeFormer(t, env.Base, "t1", true, snap(1), []byte("previous of t1"))
+	writeFormer(t, env.Base, "t2", false, snap(3), []byte("t2"))
+	dir := path.Join(env.Base, dirName)
+	// t2's bytes are not what its description says.
+	os.WriteFile(path.Join(dir, "t2.vt"), []byte("short"), 0o600)
+	// t3's bytes are a link to a file of the user's.
+	secret := path.Join(t.TempDir(), "secret")
+	os.WriteFile(secret, []byte("secret"), 0o600)
+	writeFormer(t, env.Base, "t3", false, snap(4), []byte("secret"))
+	os.Remove(path.Join(dir, "t3.vt"))
+	os.Symlink(secret, path.Join(dir, "t3.vt"))
+	// A .vt alone, a temporary file and the lock.
+	os.WriteFile(path.Join(dir, "t4.prev.vt"), []byte("x"), 0o600)
+	os.WriteFile(path.Join(dir, ".t1.vt.aa.tmp"), []byte("x"), 0o600)
+	os.WriteFile(path.Join(dir, ".lock"), nil, 0o600)
+
+	var l agentproto.HistoryListResult
+	if rep := call(t, env, "list", nil, &l); !rep.OK || len(l.Terminals) != 1 {
+		t.Fatalf("list %+v %+v", rep, l)
+	}
+	e := l.Terminals[0]
+	if e.Terminal != "t1" || e.PID != 2 || !e.Restored || e.Bytes != 13 || e.Previous == nil || e.Previous.PID != 1 || e.Previous.At != at+1 {
+		t.Fatalf("imported %+v %+v", e, e.Previous)
+	}
+	if got := string(slurp(t, historyPath(env, "t1.prev.vt"))); got != "previous of t1" {
+		t.Fatalf("bytes %q", got)
+	}
+	if m := metaOf(t, env, "t1", false); m.Hash != "h" || m.Days != 7 {
+		t.Errorf("meta %+v", m)
+	}
+	if _, err := os.Lstat(dir); err == nil {
+		t.Fatal("the directory stayed")
+	}
+	if b, err := os.ReadFile(secret); err != nil || string(b) != "secret" {
+		t.Fatal("the link's target changed")
+	}
+	// A capture goes on from what was imported: t1's program is still 2.
+	f.set(live("t1", 2))
+	f.setText("t1", "a")
+	f.setPaint("t1", painter(10, 10, "a"))
+	if res := mustCapture(t, env, params); res.Captured != 1 || metaOf(t, env, "t1", true).PID != 1 {
+		t.Fatalf("capture after the import %+v", res)
+	}
+	// The directory written again (an agent of an older version): it goes,
+	// nothing is imported again.
+	writeFormer(t, env.Base, "t9", false, snap(9), []byte("t9"))
+	if call(t, env, "list", nil, &l); len(l.Terminals) != 1 {
+		t.Fatalf("imported again %+v", l.Terminals)
+	}
+	if _, err := os.Lstat(dir); err == nil {
+		t.Fatal("the directory written again stayed")
+	}
+}
+
+// An import that fails changes nothing and leaves the files; the next open
+// imports them. A directory that is a link is neither read nor removed.
+func TestImportFailureLeavesFiles(t *testing.T) {
+	env, _ := testEnv(t)
+	writeFormer(t, env.Base, "t1", false, meta{HistorySnapshot: agentproto.HistorySnapshot{PID: 1, At: time.Now().UnixMilli()}}, []byte("t1"))
+	dir := path.Join(env.Base, dirName)
+	os.Chmod(dir, 0o300) // not readable: its names cannot be listed
+	var l agentproto.HistoryListResult
+	call(t, env, "list", nil, &l)
+	os.Chmod(dir, 0o700)
+	if len(l.Terminals) != 0 {
+		t.Fatalf("listed %+v", l.Terminals)
+	}
+	if _, err := os.Lstat(path.Join(dir, "t1.vt")); err != nil {
+		t.Fatal("a failed import removed the files")
+	}
+	if call(t, env, "list", nil, &l); len(l.Terminals) != 1 {
+		t.Fatalf("not imported at the next open: %+v", l.Terminals)
+	}
+
+	other, _ := testEnv(t)
+	elsewhere := t.TempDir()
+	writeFormer(t, elsewhere, "t1", false, meta{HistorySnapshot: agentproto.HistorySnapshot{PID: 1, At: time.Now().UnixMilli()}}, []byte("t1"))
+	os.Symlink(path.Join(elsewhere, dirName), path.Join(other.Base, dirName))
+	if call(t, other, "list", nil, &l); len(l.Terminals) != 0 {
+		t.Fatalf("read through a link: %+v", l.Terminals)
+	}
+	if _, err := os.Lstat(path.Join(elsewhere, dirName, "t1.vt")); err != nil {
+		t.Fatal("removed through a link")
+	}
+}
+
+// A row that is not a whole generation (its bytes are not of the size it
+// gives) is neither listed nor read, and the next writer removes it.
 func TestNotWholeRemoved(t *testing.T) {
 	env, f := testEnv(t)
 	fast(t)
@@ -925,62 +1067,161 @@ func TestNotWholeRemoved(t *testing.T) {
 	f.setPaint("t1", painter(10, 10, "a"))
 	f.setPaint("t2", painter(10, 10, "b"))
 	mustCapture(t, env, params)
-	secret := path.Join(t.TempDir(), "secret")
-	os.WriteFile(secret, []byte("secret"), 0o600)
-	dir := path.Join(env.Base, dirName)
-	os.Remove(path.Join(dir, "t1.vt"))
-	if err := os.Symlink(secret, path.Join(dir, "t1.vt")); err != nil {
+	db, err := openDB(env.Base)
+	if err != nil {
 		t.Fatal(err)
 	}
-	// t2's bytes are not what its description says.
-	os.WriteFile(path.Join(dir, "t2.vt"), []byte("short"), 0o600)
-	// A .vt alone.
-	os.WriteFile(path.Join(dir, "t3.prev.vt"), []byte("x"), 0o600)
-	if rep := call(t, env, "read", agentproto.HistoryReadParams{Terminal: "t1", Generation: "current"}, nil); rep.Code != "not_found" {
-		t.Fatalf("read through a link: %+v", rep)
+	db.Exec("UPDATE history_snapshots SET bytes = bytes + 1 WHERE terminal = 't1'")
+	db.Close()
+	f.set() // nothing to capture: only the scan
+	if res := mustCapture(t, env, params); res.Removed != 1 {
+		t.Fatalf("%+v", res)
+	}
+	if files(t, env)[0] != "t2.json" {
+		t.Fatalf("rows %v", files(t, env))
+	}
+	// Not listed or read before a writer removed it.
+	db, _ = openDB(env.Base)
+	db.Exec("UPDATE history_snapshots SET bytes = bytes + 1 WHERE terminal = 't2'")
+	db.Exec("INSERT INTO history_lease (id, owner, host, pid, expires) VALUES (1, 'other', ?, ?, ?)", hostname(), os.Getpid(), time.Now().Add(time.Hour).UnixMilli())
+	db.Close()
+	if rep := call(t, env, "read", agentproto.HistoryReadParams{Terminal: "t2", Generation: "current"}, nil); rep.Code != "not_found" {
+		t.Fatalf("read %+v", rep)
 	}
 	var l agentproto.HistoryListResult
 	call(t, env, "list", nil, &l)
 	if len(l.Terminals) != 0 {
 		t.Fatalf("listed %+v", l.Terminals)
 	}
-	f.set() // nothing to capture: only the scan
-	mustCapture(t, env, params)
-	for _, name := range []string{"t1.vt", "t1.json", "t2.vt", "t2.json", "t3.prev.vt"} {
-		if _, err := os.Lstat(path.Join(dir, name)); err == nil {
-			t.Errorf("%s stayed", name)
-		}
-	}
-	if b, err := os.ReadFile(secret); err != nil || string(b) != "secret" {
-		t.Fatal("the link's target changed")
-	}
 }
 
-// Temporary files older than an hour go, younger ones stay; clear removes
-// them all.
-func TestTempFiles(t *testing.T) {
+// Two agents of the instance capture at once: one captures, the other
+// finds the lease held (busy) or waits for it; what the snapshots hold
+// stays within the limits.
+func TestTwoAgentsCapture(t *testing.T) {
 	env, f := testEnv(t)
 	fast(t)
-	dir, err := historyDir(env.Base)
+	lockWait = 5 * time.Second
+	var terms []hc.Terminal
+	for i := range 6 {
+		a := fmt.Sprint("t", i)
+		terms = append(terms, live(a, i+1))
+		f.setText(a, a)
+		f.setPaint(a, painter(200, 100, a))
+	}
+	f.set(terms...)
+	p := params
+	p.MaxTerminals = 4
+	results := make([]agentproto.HistoryCaptureResult, 4)
+	errs := make([]error, 4)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Go(func() { results[i], errs[i] = capture(context.Background(), env, p) })
+	}
+	wg.Wait()
+	captured := 0
+	for i, r := range results {
+		if errs[i] != nil {
+			t.Fatalf("capture %d: %v", i, errs[i])
+		}
+		captured += r.Captured
+	}
+	if captured < 4 {
+		t.Errorf("captured %d: %+v", captured, results)
+	}
+	s, _, err := openStore(context.Background(), env.Base, false, clock())
 	if err != nil {
 		t.Fatal(err)
 	}
-	old, young := path.Join(dir, ".t1.vt.aa.tmp"), path.Join(dir, ".t1.json.bb.tmp")
-	os.WriteFile(old, nil, 0o600)
-	os.WriteFile(young, nil, 0o600)
-	past := time.Now().Add(-2 * time.Hour)
-	os.Chtimes(old, past, past)
-	f.set()
+	defer s.close()
+	if len(s.terms) != 4 {
+		t.Errorf("%d terminals with snapshots", len(s.terms))
+	}
+}
+
+// The lease of a writer whose process is gone, or whose time is over, is
+// taken; one of a live writer of another host until its time is over is
+// not; a writer whose lease another took changes nothing.
+func TestLease(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	f.set(live("t1", 1))
+	f.setText("t1", "a")
+	f.setPaint("t1", painter(10, 10, "a"))
 	mustCapture(t, env, params)
-	if _, err := os.Lstat(old); err == nil {
-		t.Error("an old temporary file stayed")
+	gone := exec.Command("true")
+	gone.Run()
+	held := func(host string, pid int, expires time.Time) {
+		t.Helper()
+		db, err := openDB(env.Base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if _, err := db.Exec("INSERT OR REPLACE INTO history_lease (id, owner, host, pid, expires) VALUES (1, 'other', ?, ?, ?)", host, pid, expires.UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := os.Lstat(young); err != nil {
-		t.Error("a young temporary file went")
+	later := time.Now().Add(time.Hour)
+	held(hostname(), gone.Process.Pid, later)
+	if res := mustCapture(t, env, params); res.Busy {
+		t.Error("the lease of a process gone holds")
 	}
-	call(t, env, "clear", agentproto.HistoryClearParams{}, nil)
-	if _, err := os.Lstat(young); err == nil {
-		t.Error("clear left a temporary file")
+	held("elsewhere", os.Getpid(), later)
+	if res := mustCapture(t, env, params); !res.Busy {
+		t.Error("the lease of another host's writer was taken")
+	}
+	held("elsewhere", os.Getpid(), time.Now().Add(-time.Second))
+	if res := mustCapture(t, env, params); res.Busy {
+		t.Error("an expired lease holds")
+	}
+	s, _, err := openStore(context.Background(), env.Base, false, clock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	held(hostname(), os.Getpid(), later) // taken over meanwhile
+	if s.remove("t1"); metaOf(t, env, "t1", false) == nil {
+		t.Error("a writer without the lease removed a snapshot")
+	}
+	if err := s.write(meta{Terminal: "t2", HistorySnapshot: agentproto.HistorySnapshot{PID: 2, At: 1}}, []byte("x")); !errors.Is(err, errLeaseLost) {
+		t.Errorf("write without the lease: %v", err)
+	}
+	s.close()
+}
+
+// Snapshots' tables of a newer version are listed and read; nothing writes
+// them, and the writers say so.
+func TestNewerVersion(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	f.set(live("t1", 1))
+	f.setText("t1", "a")
+	f.setPaint("t1", painter(10, 10, "a"))
+	mustCapture(t, env, params)
+	db, _ := openDB(env.Base)
+	db.Exec("UPDATE store_features SET version = version + 1 WHERE feature = ?", feature)
+	db.Close()
+	var l agentproto.HistoryListResult
+	if call(t, env, "list", nil, &l); len(l.Terminals) != 1 {
+		t.Fatalf("list %+v", l)
+	}
+	if rep := call(t, env, "read", agentproto.HistoryReadParams{Terminal: "t1", Generation: "current"}, nil); !rep.OK {
+		t.Fatalf("read %+v", rep)
+	}
+	f.setText("t1", "b")
+	for _, c := range []struct {
+		action string
+		p      any
+	}{{"capture", params}, {"clear", agentproto.HistoryClearParams{}}, {"adopt", agentproto.HistoryAdoptParams{From: "t1", To: "t1x"}}} {
+		if c.action == "adopt" {
+			f.set(live("t1", 1), live("t1x", 2))
+		}
+		if rep := call(t, env, c.action, c.p, nil); rep.OK || rep.Code != "io" || !strings.Contains(rep.Error, "newer") {
+			t.Errorf("%s: %+v", c.action, rep)
+		}
+	}
+	if b := slurp(t, historyPath(env, "t1.vt")); !bytes.Equal(b, body(10, 10, "a", false)) {
+		t.Error("changed")
 	}
 }
 
@@ -992,8 +1233,8 @@ func TestListReadClear(t *testing.T) {
 	if rep := call(t, env, "list", nil, &l); !rep.OK || l.Terminals == nil || len(l.Terminals) != 0 {
 		t.Fatalf("empty list: %+v %+v", rep, l)
 	}
-	if _, err := os.Lstat(path.Join(env.Base, dirName)); err == nil {
-		t.Fatal("list created the directory")
+	if _, err := os.Lstat(dbPath(env.Base)); err == nil {
+		t.Fatal("list created the database")
 	}
 	if rep := call(t, env, "clear", agentproto.HistoryClearParams{}, nil); !rep.OK {
 		t.Fatalf("clear without snapshots: %+v", rep)
@@ -1043,21 +1284,20 @@ func TestListReadClear(t *testing.T) {
 	}
 }
 
-// A second capture of the same directory (another agent of the instance)
+// A second capture of the same snapshots (another agent of the instance)
 // does nothing while one runs; without a terminal core a capture still
 // applies the age and fails as not_running.
 func TestBusyAndNotRunning(t *testing.T) {
 	env, f := testEnv(t)
 	fast(t)
-	dir, _ := historyDir(env.Base)
-	lock, err := lockDir(context.Background(), dir, false)
+	lock, _, err := openStore(context.Background(), env.Base, false, clock())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res, err := capture(context.Background(), env, params); err != nil || !res.Busy || f.lists != 0 {
 		t.Fatalf("busy: %+v %v", res, err)
 	}
-	lock.Close()
+	lock.close()
 	env.RunDir = t.TempDir()
 	if rep := call(t, env, "capture", params, nil); rep.OK || rep.Code != "not_running" || strings.Contains(rep.Error, env.RunDir) {
 		t.Fatalf("no terminal core: %+v", rep)
@@ -1073,12 +1313,11 @@ func TestCaptureWaitsForPrune(t *testing.T) {
 	f.set(live("t1", 1))
 	f.setText("t1", "a")
 	f.setPaint("t1", painter(10, 10, "a"))
-	dir, _ := historyDir(env.Base)
-	lock, err := lockDir(context.Background(), dir, false)
+	lock, _, err := openStore(context.Background(), env.Base, false, clock())
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.AfterFunc(100*time.Millisecond, func() { lock.Close() })
+	time.AfterFunc(100*time.Millisecond, lock.close)
 	if res := mustCapture(t, env, params); res.Busy || res.Captured != 1 {
 		t.Fatalf("%+v", res)
 	}
@@ -1089,17 +1328,14 @@ func TestCaptureWaitsForPrune(t *testing.T) {
 func TestErrorsWithoutPaths(t *testing.T) {
 	env, _ := testEnv(t)
 	fast(t)
-	// The data directory's history is a file: nothing can be written.
-	if err := os.WriteFile(path.Join(env.Base, dirName), []byte("x"), 0o600); err != nil {
+	// A directory where the machine's database would be: nothing can be
+	// written.
+	if err := os.Mkdir(dbPath(env.Base), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, action := range []string{"capture", "clear"} {
 		var p any = params
 		if action == "clear" {
-			// A clear of a directory that is not one has nothing to clear;
-			// one whose lock cannot be taken fails.
-			os.Remove(path.Join(env.Base, dirName))
-			os.MkdirAll(path.Join(env.Base, dirName, lockName), 0o700)
 			p = agentproto.HistoryClearParams{}
 		}
 		rep := call(t, env, action, p, nil)
@@ -1400,28 +1636,27 @@ func TestListAndReadPruneAge(t *testing.T) {
 	if call(t, env, "list", nil, &l); len(l.Terminals) != 0 {
 		t.Fatalf("listed %+v", l.Terminals)
 	}
-	for _, name := range []string{"t1.vt", "t1.json", "t2.vt", "t2.json"} {
-		if _, err := os.Lstat(historyPath(env, name)); err == nil {
-			t.Errorf("%s stayed", name)
+	for _, a := range []string{"t1", "t2"} {
+		if metaOf(t, env, a, false) != nil {
+			t.Errorf("%s stayed", a)
 		}
 	}
-	// While a writer holds the directory, an expired snapshot is not
-	// listed either.
+	// While a writer holds the lease, an expired snapshot is not listed
+	// either.
 	*now = start
 	f.setText("t1", "a2")
 	mustCapture(t, env, p)
-	dir, _ := historyDir(env.Base)
-	lock, err := lockDir(context.Background(), dir, false)
+	lock, _, err := openStore(context.Background(), env.Base, false, clock())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer lock.close()
 	*now = start.Add(2 * 24 * time.Hour)
 	if call(t, env, "list", nil, &l); len(l.Terminals) != 0 {
 		t.Fatalf("listed while locked %+v", l.Terminals)
 	}
-	if _, err := os.Lstat(historyPath(env, "t1.vt")); err != nil {
-		t.Fatal("removed without the lock")
+	if metaOf(t, env, "t1", false) == nil {
+		t.Fatal("removed without the lease")
 	}
 }
 
@@ -1433,14 +1668,26 @@ func adoptOf(t *testing.T, env *plugin.Env, from, to string) (agentproto.History
 	return res, rep
 }
 
-// files are the names of the history directory's generations.
+// files are the generations of the snapshots, named as their files were
+// before the database.
 func files(t *testing.T, env *plugin.Env) []string {
 	t.Helper()
+	db, err := openDB(env.Base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT terminal, prev FROM history_snapshots")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
 	var out []string
-	for _, e := range entries(path.Join(env.Base, dirName)) {
-		if n := e.Name(); !strings.HasPrefix(n, ".") {
-			out = append(out, n)
-		}
+	for rows.Next() {
+		var addr string
+		var prev bool
+		rows.Scan(&addr, &prev)
+		out = append(out, fileName(addr, prev, ".json"), fileName(addr, prev, ".vt"))
 	}
 	slices.Sort(out)
 	return out
@@ -1448,7 +1695,7 @@ func files(t *testing.T, env *plugin.Env) []string {
 
 // A terminal that took another's place gets the newest generation of the
 // other's snapshots as its previous one, with its bytes, its time and the
-// days it was written under, as a private file; the other's snapshots go,
+// days it was written under; the other's snapshots go,
 // and what the snapshots take does not grow. A previous generation of its
 // own captured later stays (the other's go all the same), one captured
 // before is replaced; a terminal with only a previous generation gives
@@ -1487,11 +1734,6 @@ func TestAdopt(t *testing.T) {
 	}
 	if got := strings.Join(files(t, env), " "); got != "t2.json t2.prev.json t2.prev.vt t2.vt" {
 		t.Fatalf("files %s", got)
-	}
-	for _, n := range []string{"t2.prev.json", "t2.prev.vt"} {
-		if st, err := os.Stat(historyPath(env, n)); err != nil || st.Mode().Perm() != 0o600 {
-			t.Errorf("%s: %v %v", n, st.Mode(), err)
-		}
 	}
 	var l agentproto.HistoryListResult
 	call(t, env, agentproto.HistoryList, nil, &l)
@@ -1572,14 +1814,14 @@ func TestAdoptRefused(t *testing.T) {
 	if res, rep := adoptOf(t, env, "t5", "t2"); !rep.OK || res.Adopted || metaOf(t, env, "t2", true) != nil {
 		t.Errorf("without snapshots: %+v %+v", rep, res)
 	}
-	// A machine without the directory creates none.
+	// A machine without snapshots creates no database.
 	empty, f2 := testEnv(t)
 	f2.set(live("t2", 2))
 	if res, rep := adoptOf(t, empty, "t1", "t2"); !rep.OK || res.Adopted {
-		t.Errorf("no directory: %+v %+v", rep, res)
+		t.Errorf("no database: %+v %+v", rep, res)
 	}
-	if _, err := os.Lstat(path.Join(empty.Base, dirName)); err == nil {
-		t.Error("an adopt created the directory")
+	if _, err := os.Lstat(dbPath(empty.Base)); err == nil {
+		t.Error("an adopt created the database")
 	}
 	// No terminal core to tell the records.
 	f.ln.Close()
@@ -1647,5 +1889,40 @@ func TestVanishedGrace(t *testing.T) {
 	// What was remembered of t2 went with its snapshots.
 	if _, ok := vanished.get("t2"); ok {
 		t.Error("t2 still remembered as gone")
+	}
+}
+
+// Snapshots that went give their space back: the machine's database does
+// not keep its largest size once they are cleared.
+func TestClearGivesSpaceBack(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	var terms []hc.Terminal
+	for i := range 24 {
+		a := fmt.Sprint("t", i)
+		terms = append(terms, live(a, i+1))
+		f.setText(a, a)
+		f.setPaint(a, painter(400, 1000, a)) // ~400 KiB
+	}
+	f.set(terms...)
+	if res := mustCapture(t, env, params); res.Captured != 24 {
+		t.Fatalf("%+v", res)
+	}
+	size := func() int64 {
+		st, err := os.Stat(dbPath(env.Base))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.Size()
+	}
+	full := size()
+	if full < 8<<20 {
+		t.Fatalf("database of %d bytes", full)
+	}
+	if rep := call(t, env, "clear", agentproto.HistoryClearParams{}, nil); !rep.OK {
+		t.Fatalf("clear %+v", rep)
+	}
+	if after := size(); after > full/8 {
+		t.Errorf("database of %d bytes after the clear, %d before", after, full)
 	}
 }

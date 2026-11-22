@@ -1,6 +1,8 @@
 // Text the conversation view derives from items: a command's output as
-// plain text, what a tool call acts on, token counts and paths for people.
-import { ownMeta, type ToolItem } from './model';
+// plain text, what a tool call acts on, token counts, costs, the context
+// in use, limit windows and paths for people.
+import type { Limit } from '../plugins/chat/protocol';
+import { ownMeta, type Cost, type ToolItem, type Usage } from './model';
 
 // Terminal control sequences: OSC (to BEL or ST) and DCS, SOS, PM and APC
 // strings (to ST), CSI sequences, character set designations, then any
@@ -189,4 +191,56 @@ export function displayMath(md: string): string {
     changed = true;
   }
   return changed ? lines.join('\n') : md;
+}
+
+/** An amount of money for people, in the locale ("$0.042", "US$1.20");
+ * an unknown currency as the amount and its code. */
+export function formatCost(cost: Cost, locale: string): string {
+  const digits = cost.amount !== 0 && Math.abs(cost.amount) < 1 ? 3 : 2;
+  try {
+    return new Intl.NumberFormat(locale, { style: 'currency', currency: cost.currency, maximumFractionDigits: digits }).format(cost.amount);
+  } catch {
+    return `${cost.amount.toFixed(digits)} ${cost.currency}`;
+  }
+}
+
+/** How much of the context window is in use, 0 to 100: the agent's own
+ * measure, else used of size; undefined while the size is not known. */
+export function contextPercent(u: Usage): number | undefined {
+  if (u.percentage !== undefined) return Math.min(100, Math.max(0, u.percentage));
+  if (u.size > 0) return Math.min(100, Math.max(0, (u.used / u.size) * 100));
+  return undefined;
+}
+
+/** The limit window closest to its end: the one most used. */
+export function tightest(limits: readonly Limit[] | undefined): Limit | undefined {
+  let out: Limit | undefined;
+  for (const l of limits ?? []) if (!out || l.usedPercent > out.usedPercent) out = l;
+  return out;
+}
+
+const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ['day', 86_400_000],
+  ['hour', 3_600_000],
+  ['minute', 60_000],
+];
+
+/** When a time (seconds since the epoch) comes, relative to now (ms), in
+ * the locale's words: "in 3 hours", "in 12 minutes". */
+export function relativeTime(at: number, now: number, locale: string): string {
+  const ms = at * 1000 - now;
+  const [unit, size] = UNITS.find(([, s]) => Math.abs(ms) >= s) ?? UNITS[UNITS.length - 1];
+  const n = Math.round(ms / size);
+  try {
+    return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(n, unit);
+  } catch {
+    return new Date(at * 1000).toLocaleString();
+  }
+}
+
+/** A limit window's length for people: "5h", "7d", "30m". */
+export function windowLabel(minutes: number): string {
+  if (minutes >= 1440 && minutes % 1440 === 0) return `${minutes / 1440}d`;
+  if (minutes >= 60 && minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
 }

@@ -1,8 +1,8 @@
 package vault
 
 import (
-	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +17,8 @@ import (
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
+	"herdr-ide/internal/plugin"
+	"herdr-ide/internal/store"
 	vaultstore "herdr-ide/internal/vault"
 )
 
@@ -32,9 +34,10 @@ func reopened(t *testing.T, p *Plugin) *Plugin {
 	return p2
 }
 
-// The access log is kept beside the vault's file (0600) and read back by
-// a core that starts again: releases, refusals with their count and the
-// values pages took are all there, with who asked.
+// The access log is kept in the core's database beside the vault's file
+// (0600) and read back by a core that starts again: releases, refusals
+// with their count and the values pages took are all there, with who
+// asked.
 func TestAccessLogSurvivesARestart(t *testing.T) {
 	p, h, s := newTest(t)
 	s.Set("KEY", vaultstore.Update{Value: str("s3cret"), Machines: &[]string{"m1"}})
@@ -51,13 +54,18 @@ func TestAccessLogSurvivesARestart(t *testing.T) {
 	if code, _ := c.do("POST", "/api/p/vault/vars/KEY/reveal", ""); code != 200 {
 		t.Fatalf("reveal %d", code)
 	}
-	path := accessLogPath(p.Path)
+	path := coreDBOf(accessLogPath(p.Path))
+	if filepath.Base(path) != "core.db" {
+		t.Fatalf("database %s", path)
+	}
 	if st, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
 		t.Fatalf("access log %v %v", st, err)
 	}
-	b, _ := os.ReadFile(path)
-	if strings.Contains(string(b), "s3cret") {
-		t.Fatal("a value in the access log")
+	for _, f := range []string{path, path + "-wal"} {
+		b, _ := os.ReadFile(f)
+		if strings.Contains(string(b), "s3cret") {
+			t.Fatal("a value in the access log")
+		}
 	}
 
 	p2 := reopened(t, p)
@@ -150,8 +158,8 @@ func TestUnloggedReleaseIsRefused(t *testing.T) {
 	s.Set("KEY", vaultstore.Update{Value: str("s3cret"), Machines: &[]string{"m1"}})
 	c := newClient(p, h)
 	c.session(t)
-	// The log's file cannot be created: a directory takes its name.
-	if err := os.Mkdir(accessLogPath(p.Path), 0o700); err != nil {
+	// The core's database cannot be opened: a directory takes its name.
+	if err := os.Mkdir(coreDBOf(accessLogPath(p.Path)), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	r := p.Handle(context.Background(), h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}})
@@ -173,9 +181,9 @@ func TestUnloggedReleaseIsRefused(t *testing.T) {
 	}
 }
 
-// The file is written again with the records kept once it holds twice as
-// many lines, and reads back the same.
-func TestAccessLogIsCompacted(t *testing.T) {
+// The database keeps the newest records of each class within the bounds,
+// and reads back the same.
+func TestAccessLogBounds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
 	l := newAccessLog(path, log.New(os.Stderr, "", 0))
 	l.maxReleases, l.maxOthers = 5, 5
@@ -190,14 +198,11 @@ func TestAccessLogIsCompacted(t *testing.T) {
 	}
 	want := l.list()
 	l.close()
-	f, _ := os.Open(path)
-	lines := 0
-	for sc := bufio.NewScanner(f); sc.Scan(); {
-		lines++
+	if len(want) != 10 || want[0].Names[0] != "N39" || want[9].Names[0] != "N30" {
+		t.Fatalf("%d records: %s", len(want), mustJSON(want))
 	}
-	f.Close()
-	if len(want) != 10 || lines > 20 {
-		t.Fatalf("%d records, %d lines", len(want), lines)
+	if rel, oth := accessRows(t, path); rel != 5 || oth != 5 {
+		t.Fatalf("rows: %d releases, %d others", rel, oth)
 	}
 	l2 := newAccessLog(path, nil)
 	l2.maxReleases, l2.maxOthers = 5, 5
@@ -206,9 +211,22 @@ func TestAccessLogIsCompacted(t *testing.T) {
 	}
 }
 
-// A write that fails partway is cut back, so the next release is read
-// back after a restart; a half line a crash left is ended before the next
-// record is appended.
+// accessRows counts the access log's rows in the core's database beside
+// path, by class.
+func accessRows(t *testing.T, path string) (releases, others int) {
+	t.Helper()
+	db, err := store.OpenShared(coreDBOf(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.QueryRow("SELECT count(*) FROM vault_access WHERE released").Scan(&releases)
+	db.QueryRow("SELECT count(*) FROM vault_access WHERE NOT released").Scan(&others)
+	return releases, others
+}
+
+// A write that fails refuses its release and leaves nothing behind; the
+// next release is written and read back after a restart.
 func TestAccessLogAfterAFailedWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
 	release := func(l *accessLog, name string) (Access, error) {
@@ -225,38 +243,131 @@ func TestAccessLogAfterAFailedWrite(t *testing.T) {
 	if _, err := release(l, "A"); err != nil {
 		t.Fatal(err)
 	}
-	orig := writeLog
-	defer func() { writeLog = orig }()
-	writeLog = func(f *os.File, b []byte) (int, error) {
-		n, _ := f.Write(b[:len(b)/2])
-		return n, errors.New("no space left")
+	orig := writeRecord
+	defer func() { writeRecord = orig }()
+	writeRecord = func(tx *sql.Tx, id uint64, rel bool, record []byte, keep int) error {
+		orig(tx, id, rel, record, keep) // written, then rolled back
+		return errors.New("disk I/O error")
 	}
 	if a, err := release(l, "B"); err == nil || a.Result != ResultLogFailed {
 		t.Fatalf("a failed write: %+v %v", a, err)
 	}
-	writeLog = orig
+	writeRecord = orig
 	if _, err := release(l, "C"); err != nil {
 		t.Fatal(err)
+	}
+	if got := names(l); got != "C:allowed,B:log_failed,A:allowed" {
+		t.Errorf("in memory %s", got)
 	}
 	l.close()
 	if got := names(newAccessLog(path, nil)); got != "C:allowed,A:allowed" {
 		t.Errorf("read back %s", got)
 	}
+}
 
-	// A crash in the middle of a line.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+// The file the log was kept in before, as that core wrote it (a record
+// written again with its count, a half line a crash left, lines that do not
+// parse), is imported once and removed; a core that starts again does not
+// import anything again. New records follow the imported ones.
+func TestAccessLogImport(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault-dev-access.jsonl")
+	at := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	line := func(a Access) string { b, _ := json.Marshal(a); return string(b) + "\n" }
+	legacy := line(Access{ID: 1, Time: at, M: "m1", Tool: "get", Names: []string{"KEY"}, Client: "claude", Result: ResultAllowed}) +
+		line(Access{ID: 2, Time: at, M: "m1", Tool: "get", Names: []string{"NOPE"}, Result: "not_found"}) +
+		"not json\n" +
+		line(Access{ID: 2, Time: at.Add(time.Minute), M: "m1", Tool: "get", Names: []string{"NOPE"}, Result: "not_found", Count: 3}) +
+		line(Access{Time: at, Tool: "get", Result: ResultAllowed}) + // no ID
+		line(Access{ID: 5, Time: at, Tool: "reveal", Names: []string{"KEY"}, Remote: "127.0.0.1:1", Result: ResultRevealed}) +
+		`{"id":6,"time":"2026-11-0`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l := newAccessLog(path, nil)
+	got := l.list()
+	if len(got) != 3 || got[0].ID != 5 || got[1].ID != 2 || got[1].Count != 3 || got[2].Client != "claude" {
+		t.Fatalf("imported %s", mustJSON(got))
+	}
+	if _, err := os.Lstat(path); err == nil {
+		t.Fatal("the file stayed")
+	}
+	if a, err := l.add(Access{Time: time.Now(), Tool: "get", Names: []string{"X"}, Result: ResultAllowed}, false, true); err != nil || a.ID != 6 {
+		t.Fatalf("after the import %+v %v", a, err)
+	}
+	l.close()
+	// A file left again is not imported again: the import ran.
+	os.WriteFile(path, []byte(legacy), 0o600)
+	if got := newAccessLog(path, nil).list(); len(got) != 4 || got[0].ID != 6 {
+		t.Errorf("after a second start %s", mustJSON(got))
+	}
+	if _, err := os.Lstat(path); err == nil {
+		t.Error("the file left again stayed")
+	}
+
+	// An import that fails leaves the file for the next start.
+	dir2 := t.TempDir()
+	bad := filepath.Join(dir2, "vault-access.jsonl")
+	os.Mkdir(bad, 0o700) // not a file: it cannot be read
+	if got := newAccessLog(bad, nil).list(); len(got) != 0 {
+		t.Errorf("imported %s", mustJSON(got))
+	}
+	if _, err := os.Lstat(bad); err != nil {
+		t.Error("a failed import removed what it imports")
+	}
+	db, err := store.OpenShared(coreDBOf(bad))
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.WriteString(`{"id":77,"time":"2026-01-0`)
-	f.Close()
-	l = newAccessLog(path, nil)
-	if _, err := release(l, "D"); err != nil {
+	defer db.Close()
+	if done, _ := db.Imported(accessFeature, "access-log"); done {
+		t.Error("a failed import recorded")
+	}
+}
+
+// Tables of a newer version are read, not written: releases are refused
+// (log_failed), refusals are kept in memory.
+func TestAccessLogNewerVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
+	l := newAccessLog(path, nil)
+	if _, err := l.add(Access{Time: time.Now(), Tool: "get", Names: []string{"A"}, Result: ResultAllowed}, false, true); err != nil {
 		t.Fatal(err)
 	}
 	l.close()
-	if got := names(newAccessLog(path, nil)); got != "D:allowed,C:allowed,A:allowed" {
-		t.Errorf("read back after a half line %s", got)
+	db, err := store.OpenShared(coreDBOf(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Exec("UPDATE store_features SET version = version + 1 WHERE feature = ?", accessFeature)
+	db.Close()
+
+	l = newAccessLog(path, nil)
+	if got := l.list(); len(got) != 1 || got[0].Names[0] != "A" {
+		t.Fatalf("read %s", mustJSON(got))
+	}
+	if a, err := l.add(Access{Time: time.Now(), Tool: "get", Names: []string{"B"}, Result: ResultAllowed}, false, true); !errors.Is(err, errNewer) || a.Result != ResultLogFailed {
+		t.Errorf("release %+v %v", a, err)
+	}
+	if a, err := l.add(Access{Time: time.Now(), Tool: "get", Names: []string{"C"}, Result: "not_found"}, true, false); err != nil || a.Result != "not_found" {
+		t.Errorf("refusal %+v %v", a, err)
+	}
+	if rel, oth := accessRows(t, path); rel != 1 || oth != 0 {
+		t.Errorf("written: %d %d", rel, oth)
+	}
+}
+
+// The core's database the access log uses is the one beside the settings
+// file the vault's file is beside.
+func TestAccessLogDatabase(t *testing.T) {
+	dir := t.TempDir()
+	for _, inst := range []string{"", "-dev"} {
+		vault := filepath.Join(dir, "vault"+inst+".json")
+		if got, want := coreDBOf(accessLogPath(vault)), plugin.CoreDBFile(filepath.Join(dir, "settings"+inst+".json")); got != want || filepath.Base(got) != "core"+inst+".db" {
+			t.Errorf("%s: %s, want %s", inst, got, want)
+		}
+	}
+	if coreDBOf("") != "" {
+		t.Error("a database without a file")
 	}
 }
 

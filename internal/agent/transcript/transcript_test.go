@@ -628,9 +628,10 @@ func queuedLine(t testing.TB, prompt any, att obj) string {
 
 // A message the user sent while Claude Code worked, recorded as a
 // queued_command attachment, is the user's message (no turn's start: it
-// joins the running one), with its line's time and the text limit; one
-// that cannot be read counts as unknown, and attachments of other kinds,
-// origins or modes give nothing and count as nothing.
+// joins the running one), with its line's time and the text limit, also
+// one of no origin (an SDK client's); one that cannot be read counts as
+// unknown, and attachments of other kinds, origins or modes give nothing
+// and count as nothing.
 func TestClaudeQueuedPrompt(t *testing.T) {
 	data := lines(
 		queuedLine(t, "while you work", nil),
@@ -674,7 +675,7 @@ func TestClaudeQueuedPrompt(t *testing.T) {
 			t.Errorf("at %v", ev.At)
 		}
 	}
-	want := []string{"14:false", "100:true", "1:false,<image>", "1:false"}
+	want := []string{"14:false", "100:true", "1:false,<image>", "1:false", "9:false"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("user events %q, want %q", got, want)
 	}

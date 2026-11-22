@@ -47,6 +47,22 @@
 //     output) as live events (chatproto.Event.Live) and, once an item is
 //     complete or changes otherwise, one event with the item's whole
 //     content under the same Item: only those are stored.
+//   - It tells each prompt once: the host stores the EventUser of a
+//     prompt it believes starts a turn (PromptParams.Recorded). Whether a
+//     turn runs is the adapter's to know, decided under its own lock: a
+//     prompt not Recorded that starts a turn gets its EventUser (Content,
+//     ClientID) from the adapter before the turn's start; a Recorded one
+//     that finds a turn running is told as EventQueued with its ClientID,
+//     which the UIs merge with the stored EventUser.
+//   - It may call the Sink from any goroutine, with locks of its own
+//     held: the host never calls a Session method while holding a lock
+//     its Sink methods take.
+//
+// A Session may also have a method PID() int: the id of its agent's
+// process, the leader of the agent's process group (0 while none runs).
+// The host asserts it to signal the group itself: SIGKILL when the agent
+// outlives Close's grace, SIGTERM and then SIGKILL when the host is told
+// to stop at once (a signal of the terminal core).
 //
 // Errors an adapter returns are *chatproto.Error when it knows the code
 // (CodeUnsupported for what the agent cannot do, CodeAuthRequired,
@@ -202,8 +218,15 @@ type PromptParams struct {
 	// Message is the host's id of the message, which EventQueued and
 	// CancelQueued name.
 	Message string
-	// ClientID is the page's id of the message, for EventQueued.
+	// ClientID is the page's id of the message, for EventUser and
+	// EventQueued.
 	ClientID string
+	// Recorded: the host stored the prompt's EventUser, believing that no
+	// turn ran. An adapter that finds a turn running queues the message
+	// (EventQueued with ClientID). Without it, the host believed a turn
+	// ran: an adapter that finds none emits the EventUser (Content,
+	// ClientID) itself, before the turn's start.
+	Recorded bool
 }
 
 // PermissionRequest is a permission the agent asks.

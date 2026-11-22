@@ -21,10 +21,10 @@ import (
 	"herdr-ide/internal/agentproto"
 )
 
-// claudeMaxName is the longest project directory name Claude Code makes
+// ClaudeMaxName is the longest project directory name Claude Code makes
 // from a directory as it is; a longer one is cut there and followed by a
 // hash of the directory.
-const claudeMaxName = 200
+const ClaudeMaxName = 200
 
 // resolveClaude tries the command line, then Claude Code's record of the
 // program or of a descendant (which wins when it names another session than
@@ -138,13 +138,13 @@ func (r *Resolver) claudeDirsOf(pid int, cwd string) (dirs []string, child bool)
 	if env, ok := r.environ(pid); ok {
 		child = env["CLAUDE_CODE_CHILD_SESSION"] != ""
 		if d := r.expand(env["CLAUDE_CONFIG_DIR"], cwd); d != "" {
-			if r.trustedDir(d, r.claudeDirs()) {
+			if r.trustedDir(d, r.ClaudeDirs()) {
 				return []string{d}, child
 			}
 			return nil, child
 		}
 	}
-	return r.claudeDirs(), child
+	return r.ClaudeDirs(), child
 }
 
 // trustedDir reports whether a configuration directory a process's
@@ -245,14 +245,14 @@ func (r *Resolver) claudeGuess(ctx context.Context, kind string, p Proc, cands [
 	}
 	since := start.Add(-startSlack)
 	own, _ := r.claudeDirsOf(p.PID, p.Cwd)
-	dirs := uniq(append(own, r.claudeDirs()...)...)
+	dirs := uniq(append(own, r.ClaudeDirs()...)...)
 	type cand struct {
 		id, file string
 		mod      time.Time
 	}
 	var cs []cand
 	for _, d := range dirs {
-		for _, dir := range claudeProjectDirs(path.Join(d, "projects"), p.Cwd) {
+		for _, dir := range ClaudeProjectDirs(path.Join(d, "projects"), p.Cwd) {
 			for _, e := range readDir(dir, maxEntries) {
 				id, ok := strings.CutSuffix(e.Name(), ".jsonl")
 				if !ok || !agentkinds.ValidSessionID(id) || !e.Type().IsRegular() {
@@ -287,10 +287,10 @@ func (r *Resolver) claudeGuess(ctx context.Context, kind string, p Proc, cands [
 	return Found{}, false
 }
 
-// claudeEscape is the name Claude Code gives a directory's projects
+// ClaudeEscape is the name Claude Code gives a directory's projects
 // directory: every character but an ASCII letter or digit becomes "-", one
 // per UTF-16 code unit as JavaScript counts them.
-func claudeEscape(cwd string) string {
+func ClaudeEscape(cwd string) string {
 	var b strings.Builder
 	for _, c := range cwd {
 		switch {
@@ -305,16 +305,17 @@ func claudeEscape(cwd string) string {
 	return b.String()
 }
 
-// claudeProjectDirs are the directories of projects that may hold cwd's
-// transcripts: the escaped name, or for a long one every directory that
-// starts with its first claudeMaxName characters and a "-" (the hash after
+// ClaudeProjectDirs are the directories of the projects directory projects
+// (<a ClaudeDirs directory>/projects) that may hold cwd's transcripts: the
+// escaped name (ClaudeEscape), or for a long one every directory that
+// starts with its first ClaudeMaxName characters and a "-" (the hash after
 // it is not reproduced; the transcripts' own cwd tells them apart).
-func claudeProjectDirs(projects, cwd string) []string {
-	esc := claudeEscape(cwd)
-	if len(esc) <= claudeMaxName {
+func ClaudeProjectDirs(projects, cwd string) []string {
+	esc := ClaudeEscape(cwd)
+	if len(esc) <= ClaudeMaxName {
 		return []string{path.Join(projects, esc)}
 	}
-	prefix := esc[:claudeMaxName] + "-"
+	prefix := esc[:ClaudeMaxName] + "-"
 	var out []string
 	for _, e := range readDir(projects, maxProjects) {
 		if e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
@@ -396,10 +397,10 @@ func (r *Resolver) claudeStamp(b *strings.Builder, p Proc, last Found) {
 		}
 	}
 	if (last.ID == "" || last.Source == agentproto.SessionFromGuess) && p.Cwd != "" {
-		for _, d := range uniq(append(dirs, r.claudeDirs()...)...) {
+		for _, d := range uniq(append(dirs, r.ClaudeDirs()...)...) {
 			projects := path.Join(d, "projects")
 			stampFile(b, projects)
-			for _, dir := range claudeProjectDirs(projects, p.Cwd) {
+			for _, dir := range ClaudeProjectDirs(projects, p.Cwd) {
 				stampFile(b, dir)
 			}
 		}

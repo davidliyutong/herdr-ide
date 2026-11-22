@@ -52,6 +52,9 @@ type pev struct {
 	// usage is the message whose usage an update reports: of the updates
 	// of one message a page keeps the last.
 	usage string
+	// block is 1 + the index among the line's content blocks of the block
+	// the event was made of, 0 for none (ClaudeFrame).
+	block int
 }
 
 // limits are a read's Limits with the defaults in place.
@@ -75,6 +78,12 @@ type lineOut struct {
 	// after it are marked as truncated.
 	nodes int
 	cut   bool
+	// message is the id of the assistant message whose content blocks the
+	// line holds, count how many; first is 1 + the index in the message of
+	// the first of them, 0 when the line does not say; block is 1 + the
+	// index of the block being mapped, 0 for none (ClaudeFrame).
+	message             string
+	count, first, block int
 }
 
 // reset makes o ready for the next line, its events' array used again
@@ -89,7 +98,7 @@ func (o *lineOut) add(p pev) {
 		o.over = true
 		return
 	}
-	p.at = o.at
+	p.at, p.block = o.at, o.block
 	o.events = append(o.events, p)
 }
 

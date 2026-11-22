@@ -1,10 +1,19 @@
 package usage
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 
+	"herdr-ide/internal/plugin"
+	"herdr-ide/internal/store"
 	"herdr-ide/internal/usage"
 	"herdr-ide/internal/userfile"
 )
@@ -126,18 +135,78 @@ func (h *history) first(key, id string, w usage.Window, now time.Time) *[2]float
 	return nil
 }
 
-// loadHistory reads the history file and the accounts it kept.
+// The history is kept in the core's database (plugin.OpenDB), in tables of
+// its own: the points of each account's window (usage_windows, a JSON
+// array of [time, used %]), the accounts of the last poll (usage_accounts)
+// and the alerts fired (usage_alerts). A save writes the rows that
+// changed and removes those gone from memory. The file it was kept in
+// before, usage-history[-<instance>].json beside the settings file, is
+// imported once and then removed.
+const historyFeature = "usage"
+
+var historyMigrations = []string{
+	`CREATE TABLE usage_windows (
+		account TEXT NOT NULL,
+		win TEXT NOT NULL,
+		points TEXT NOT NULL,
+		PRIMARY KEY (account, win)
+	);
+	CREATE TABLE usage_accounts (
+		key TEXT PRIMARY KEY,
+		view TEXT NOT NULL
+	);
+	CREATE TABLE usage_alerts (
+		key TEXT PRIMARY KEY,
+		record TEXT NOT NULL
+	);`,
+}
+
+// historyNewerTold: a save said once that the core's database is of a
+// newer version, whose history this core reads and does not write.
+var historyNewerTold atomic.Bool
+
+// openHistoryDB opens the core's database with the history's tables;
+// writable false when they are of a newer version. nil without a host or
+// a settings file (the history is kept in memory then). The caller closes
+// it.
+func (p *Plugin) openHistoryDB() (db *store.DB, writable bool, err error) {
+	h := p.getHost()
+	if h == nil {
+		return nil, false, nil
+	}
+	db, err = plugin.OpenDB(h)
+	if db == nil {
+		return nil, false, err
+	}
+	v, err := db.Migrate(historyFeature, historyMigrations)
+	switch {
+	case errors.Is(err, store.ErrNewer) && v >= len(historyMigrations):
+		return db, false, nil
+	case err != nil:
+		db.Close()
+		return nil, false, err
+	}
+	return db, true, nil
+}
+
+// loadHistory reads the history and the accounts it kept from the core's
+// database, after importing path, the file it was kept in before.
 func (p *Plugin) loadHistory(path string) {
-	b, _, err := userfile.Read(path)
-	if err != nil || len(b) == 0 {
+	db, writable, err := p.openHistoryDB()
+	if db == nil {
+		if err != nil {
+			p.logf("usage: %v", err)
+		}
 		return
 	}
-	h := newHistory()
-	if json.Unmarshal(b, h) != nil || h.Version != historyVersion {
-		return
+	defer db.Close()
+	if writable {
+		p.importHistoryFile(db, path)
 	}
-	if h.Windows == nil {
-		h.Windows = map[string]map[string][][2]float64{}
+	h, err := readHistory(db)
+	if err != nil {
+		p.logf("usage: %v", err)
+		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -156,10 +225,219 @@ func (p *Plugin) loadHistory(path string) {
 	}
 }
 
-// save writes the history file (0600, atomically).
-func (p *Plugin) save() {
-	path := p.historyPath()
+func (p *Plugin) logf(format string, args ...any) {
+	if h := p.getHost(); h != nil {
+		h.Logger().Printf(format, args...)
+	}
+}
+
+// importHistoryFile imports the history file at path (as a start read it:
+// one of another version, or that does not parse, holds nothing) into db
+// once, then removes it; a failed import leaves it for the next start.
+func (p *Plugin) importHistoryFile(db *store.DB, path string) {
 	if path == "" {
+		return
+	}
+	if _, err := os.Lstat(path); err != nil {
+		return
+	}
+	_, err := db.Import(context.Background(), historyFeature, "history", func(tx *sql.Tx) error {
+		b, _, err := userfile.Read(path)
+		if err != nil {
+			return err
+		}
+		h := newHistory()
+		if len(b) == 0 || json.Unmarshal(b, h) != nil || h.Version != historyVersion {
+			return nil
+		}
+		rows, err := h.rows()
+		if err != nil {
+			return err
+		}
+		return writeHistory(tx, rows)
+	})
+	if err != nil {
+		p.logf("usage: importing %s: %v", filepath.Base(path), err)
+		return
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		p.logf("usage: %v", err)
+	}
+}
+
+// readHistory reads the history's tables; rows that do not parse are
+// skipped.
+func readHistory(db *store.DB) (*history, error) {
+	h := newHistory()
+	rows, err := db.Query("SELECT account, win, points FROM usage_windows")
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var k, id string
+		var b []byte
+		var pts [][2]float64
+		if rows.Scan(&k, &id, &b) != nil || json.Unmarshal(b, &pts) != nil || len(pts) == 0 {
+			continue
+		}
+		if h.Windows[k] == nil {
+			h.Windows[k] = map[string][][2]float64{}
+		}
+		h.Windows[k][id] = pts
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = db.Query("SELECT view FROM usage_accounts ORDER BY key")
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var b []byte
+		var v AccountView
+		if rows.Scan(&b) != nil || json.Unmarshal(b, &v) != nil {
+			continue
+		}
+		h.Accounts = append(h.Accounts, v)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = db.Query("SELECT key, record FROM usage_alerts")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		var b []byte
+		var r alertRecord
+		if rows.Scan(&k, &b) != nil || json.Unmarshal(b, &r) != nil {
+			continue
+		}
+		if h.Alerts == nil {
+			h.Alerts = map[string]alertRecord{}
+		}
+		h.Alerts[k] = r
+	}
+	return h, rows.Err()
+}
+
+// historyRows are a history's rows as written: by (account, window), by
+// account key, by alert key.
+type historyRows struct {
+	windows  map[[2]string][]byte
+	accounts map[string][]byte
+	alerts   map[string][]byte
+}
+
+// rows marshals h's rows.
+func (h *history) rows() (historyRows, error) {
+	r := historyRows{windows: map[[2]string][]byte{}, accounts: map[string][]byte{}, alerts: map[string][]byte{}}
+	for k, ws := range h.Windows {
+		for id, pts := range ws {
+			b, err := json.Marshal(pts)
+			if err != nil {
+				return r, err
+			}
+			r.windows[[2]string{k, id}] = b
+		}
+	}
+	for _, v := range h.Accounts {
+		if v.Key == "" {
+			continue
+		}
+		b, err := json.Marshal(v)
+		if err != nil {
+			return r, err
+		}
+		r.accounts[v.Key] = b
+	}
+	for k, a := range h.Alerts {
+		b, err := json.Marshal(a)
+		if err != nil {
+			return r, err
+		}
+		r.alerts[k] = b
+	}
+	return r, nil
+}
+
+// writeHistory writes the rows that changed and removes those r does not
+// have.
+func writeHistory(tx *sql.Tx, r historyRows) error {
+	for k, b := range r.windows {
+		if _, err := tx.Exec(`INSERT INTO usage_windows (account, win, points) VALUES (?, ?, ?)
+			ON CONFLICT (account, win) DO UPDATE SET points = excluded.points WHERE points != excluded.points`, k[0], k[1], b); err != nil {
+			return err
+		}
+	}
+	for k, b := range r.accounts {
+		if _, err := tx.Exec(`INSERT INTO usage_accounts (key, view) VALUES (?, ?)
+			ON CONFLICT (key) DO UPDATE SET view = excluded.view WHERE view != excluded.view`, k, b); err != nil {
+			return err
+		}
+	}
+	for k, b := range r.alerts {
+		if _, err := tx.Exec(`INSERT INTO usage_alerts (key, record) VALUES (?, ?)
+			ON CONFLICT (key) DO UPDATE SET record = excluded.record WHERE record != excluded.record`, k, b); err != nil {
+			return err
+		}
+	}
+	windows, err := keysOf(tx, "SELECT account, win FROM usage_windows")
+	if err != nil {
+		return err
+	}
+	for _, k := range windows {
+		if r.windows[k] == nil {
+			if _, err := tx.Exec("DELETE FROM usage_windows WHERE account = ? AND win = ?", k[0], k[1]); err != nil {
+				return err
+			}
+		}
+	}
+	for _, t := range []struct {
+		table string
+		keep  map[string][]byte
+	}{{"usage_accounts", r.accounts}, {"usage_alerts", r.alerts}} {
+		keys, err := keysOf(tx, "SELECT key, '' FROM "+t.table)
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			if t.keep[k[0]] == nil {
+				if _, err := tx.Exec("DELETE FROM "+t.table+" WHERE key = ?", k[0]); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// keysOf are the rows of a query of two text columns.
+func keysOf(tx *sql.Tx, query string) ([][2]string, error) {
+	rows, err := tx.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][2]string
+	for rows.Next() {
+		var k [2]string
+		if err := rows.Scan(&k[0], &k[1]); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+// save writes the history into the core's database (in memory only
+// without a settings file).
+func (p *Plugin) save() {
+	if p.historyPath() == "" {
 		return
 	}
 	p.saveMu.Lock()
@@ -175,14 +453,26 @@ func (p *Plugin) save() {
 		v.Account.Windows = nil
 		h.Accounts = append(h.Accounts, v)
 	}
-	b, err := json.Marshal(h)
+	rows, err := h.rows()
 	p.mu.Unlock()
 	if err != nil {
 		return
 	}
-	if _, err := userfile.Write(path, b); err != nil {
-		if h := p.getHost(); h != nil {
-			h.Logger().Printf("usage: %v", err)
+	db, writable, err := p.openHistoryDB()
+	if db == nil {
+		if err != nil {
+			p.logf("usage: %v", err)
 		}
+		return
+	}
+	defer db.Close()
+	if !writable {
+		if !historyNewerTold.Swap(true) {
+			p.logf("usage: the core's database is of a newer version: the history is not kept")
+		}
+		return
+	}
+	if err := db.Update(context.Background(), func(tx *sql.Tx) error { return writeHistory(tx, rows) }); err != nil {
+		p.logf("usage: %v", err)
 	}
 }

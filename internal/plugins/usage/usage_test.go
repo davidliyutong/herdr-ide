@@ -262,9 +262,10 @@ func TestHistory(t *testing.T) {
 	if filepath.Base(path) != "usage-history-dev.json" {
 		t.Fatalf("history path %s", path)
 	}
-	st, err := os.Stat(path)
+	// Kept in the core's database beside the settings file.
+	st, err := os.Stat(plugin.CoreDBFile(p.settings().Path()))
 	if err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
-		t.Fatalf("history file %v %v", st, err)
+		t.Fatalf("history database %v %v", st, err)
 	}
 	s := p.Snapshot()
 	w := s.Accounts[0].Windows[0]

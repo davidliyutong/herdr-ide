@@ -1,0 +1,1339 @@
+{
+ "argv": [
+  "--output-format",
+  "stream-json",
+  "--verbose",
+  "--input-format",
+  "stream-json",
+  "--include-partial-messages",
+  "--permission-prompt-tool",
+  "stdio",
+  "--setting-sources=user,project,local",
+  "--session-id=11111111-1111-4111-8111-111111111111",
+  "--permission-mode=default"
+ ],
+ "env": {
+  "CLAUDE_AGENT_SDK_VERSION": "0.3.323",
+  "CLAUDE_CODE_ENTRYPOINT": "herdr-ide",
+  "CLAUDE_CODE_SDK_READS_SESSION_STATE": "1",
+  "KEEP_ME": "1"
+ },
+ "events": [
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0001",
+   "update": {
+    "kind": "execute",
+    "rawInput": {},
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Bash",
+    "toolCallId": "toolu_0001"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0001",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch one.txt",
+     "description": "Create empty one.txt in current directory"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create empty one.txt in current directory",
+    "toolCallId": "toolu_0001"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0001",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0001"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": "I ran `touch one.",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": "txt` in the current directory",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": ".",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": " It completed without output",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": ", so `one.txt`",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": " should",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": " now",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": " exist as an empty file.",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": " I didn't check that with",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": " a separate command",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "content": {
+     "text": ".",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0002/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "I ran `touch one.txt` in the current directory. It completed without output, so `one.txt` should now exist as an empty file. I didn't check that with a separate command.",
+     "type": "text"
+    },
+    "messageId": "msg_0002",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0002",
+   "update": {
+    "kind": "execute",
+    "rawInput": {},
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Bash",
+    "toolCallId": "toolu_0002"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0002",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch two.txt",
+     "description": "Create empty two.txt in current directory"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create empty two.txt in current directory",
+    "toolCallId": "toolu_0002"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0002",
+   "update": {
+    "content": [
+     {
+      "content": {
+       "text": "The user declined to run this command.",
+       "type": "text"
+      },
+      "type": "content"
+     }
+    ],
+    "sessionUpdate": "tool_call_update",
+    "status": "failed",
+    "toolCallId": "toolu_0002"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": "You",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " declined the",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " `",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": "touch two.txt` command",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": ", so I didn't create",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " the",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " file. I",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " haven't ret",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": "ried it.",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " Tell me if you want me to",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " run it another",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": " way",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "content": {
+     "text": ".",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0004/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "You declined the `touch two.txt` command, so I didn't create the file. I haven't retried it. Tell me if you want me to run it another way.",
+     "type": "text"
+    },
+    "messageId": "msg_0004",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0003",
+   "update": {
+    "kind": "execute",
+    "rawInput": {},
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Bash",
+    "toolCallId": "toolu_0003"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0003",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch three.txt",
+     "description": "Create empty three.txt in current directory"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Create empty three.txt in current directory",
+    "toolCallId": "toolu_0003"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0003",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0003"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": "I ran `touch three.",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": "txt` in the current directory",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": ". It completed without output, so",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": " `three.txt` should now",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": " exist as an empty file.",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": " I didn't ver",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "content": {
+     "text": "ify that with a separate command.",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0006/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "I ran `touch three.txt` in the current directory. It completed without output, so `three.txt` should now exist as an empty file. I didn't verify that with a separate command.",
+     "type": "text"
+    },
+    "messageId": "msg_0006",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  },
+  {
+   "t": "turn",
+   "state": "start"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0004",
+   "update": {
+    "kind": "execute",
+    "rawInput": {},
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Bash",
+    "toolCallId": "toolu_0004"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0004",
+   "update": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch three.txt",
+     "description": "Update timestamp of three.txt in current directory"
+    },
+    "sessionUpdate": "tool_call",
+    "status": "pending",
+    "title": "Update timestamp of three.txt in current directory",
+    "toolCallId": "toolu_0004"
+   }
+  },
+  {
+   "t": "update",
+   "item": "toolu_0004",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "status": "completed",
+    "toolCallId": "toolu_0004"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": "I ran `touch three.",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": "txt` again. It completed",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": " without output. Since `tou",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": "ch` only",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": " updates the file",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": "'s timestamp when",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": " the",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": " file already exists, `",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": "three.txt` is",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": " still an",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": " empty file and",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": " its mod",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": "ification time is now upd",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "content": {
+     "text": "ated.",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "update",
+   "item": "msg_0008/0",
+   "update": {
+    "_meta": {
+     "herdr-ide": {
+      "model": "claude-haiku-5-5"
+     }
+    },
+    "content": {
+     "text": "I ran `touch three.txt` again. It completed without output. Since `touch` only updates the file's timestamp when the file already exists, `three.txt` is still an empty file and its modification time is now updated.",
+     "type": "text"
+    },
+    "messageId": "msg_0008",
+    "sessionUpdate": "agent_message_chunk"
+   }
+  },
+  {
+   "t": "turn",
+   "state": "end",
+   "stopReason": "end_turn"
+  }
+ ],
+ "permissions": [
+  {
+   "Kind": "command",
+   "ToolCall": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch one.txt",
+     "description": "Create empty one.txt in current directory"
+    },
+    "status": "pending",
+    "title": "Create empty one.txt in current directory",
+    "toolCallId": "toolu_0001"
+   },
+   "Options": [
+    {
+     "optionId": "allow_once",
+     "name": "Allow",
+     "kind": "allow_once"
+    },
+    {
+     "optionId": "allow_session",
+     "name": "Allow for this session",
+     "kind": "allow_always"
+    },
+    {
+     "optionId": "reject_once",
+     "name": "Reject",
+     "kind": "reject_once"
+    }
+   ],
+   "Parent": ""
+  },
+  {
+   "Kind": "command",
+   "ToolCall": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch two.txt",
+     "description": "Create empty two.txt in current directory"
+    },
+    "status": "pending",
+    "title": "Create empty two.txt in current directory",
+    "toolCallId": "toolu_0002"
+   },
+   "Options": [
+    {
+     "optionId": "allow_once",
+     "name": "Allow",
+     "kind": "allow_once"
+    },
+    {
+     "optionId": "allow_session",
+     "name": "Allow for this session",
+     "kind": "allow_always"
+    },
+    {
+     "optionId": "reject_once",
+     "name": "Reject",
+     "kind": "reject_once"
+    }
+   ],
+   "Parent": ""
+  },
+  {
+   "Kind": "command",
+   "ToolCall": {
+    "kind": "execute",
+    "rawInput": {
+     "command": "touch three.txt",
+     "description": "Create empty three.txt in current directory"
+    },
+    "status": "pending",
+    "title": "Create empty three.txt in current directory",
+    "toolCallId": "toolu_0003"
+   },
+   "Options": [
+    {
+     "optionId": "allow_once",
+     "name": "Allow",
+     "kind": "allow_once"
+    },
+    {
+     "optionId": "allow_session",
+     "name": "Allow for this session",
+     "kind": "allow_always"
+    },
+    {
+     "optionId": "reject_once",
+     "name": "Reject",
+     "kind": "reject_once"
+    }
+   ],
+   "Parent": ""
+  }
+ ],
+ "wrote": [
+  {
+   "type": "control_request",
+   "request_id": "req_1",
+   "request": {
+    "subtype": "initialize"
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_2",
+   "request": {
+    "detail": "summary",
+    "subtype": "get_context_usage"
+   }
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "text": "Run `touch one.txt` with the Bash tool.",
+      "type": "text"
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "11111111-1111-4111-8111-111111111111",
+   "uuid": "<uuid-1>",
+   "origin": {
+    "kind": "human"
+   }
+  },
+  {
+   "type": "control_response",
+   "response": {
+    "subtype": "success",
+    "request_id": "00000000-0000-4000-8000-000000000024",
+    "response": {
+     "behavior": "allow",
+     "updatedInput": {
+      "command": "touch one.txt",
+      "description": "Create empty one.txt in current directory"
+     }
+    }
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_3",
+   "request": {
+    "detail": "summary",
+    "subtype": "get_context_usage"
+   }
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "text": "Run `touch two.txt` with the Bash tool.",
+      "type": "text"
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "11111111-1111-4111-8111-111111111111",
+   "uuid": "<uuid-2>",
+   "origin": {
+    "kind": "human"
+   }
+  },
+  {
+   "type": "control_response",
+   "response": {
+    "subtype": "success",
+    "request_id": "00000000-0000-4000-8000-000000000069",
+    "response": {
+     "behavior": "deny",
+     "message": "The user declined this tool use."
+    }
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_4",
+   "request": {
+    "detail": "summary",
+    "subtype": "get_context_usage"
+   }
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "text": "Run `touch three.txt` with the Bash tool.",
+      "type": "text"
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "11111111-1111-4111-8111-111111111111",
+   "uuid": "<uuid-3>",
+   "origin": {
+    "kind": "human"
+   }
+  },
+  {
+   "type": "control_response",
+   "response": {
+    "subtype": "success",
+    "request_id": "00000000-0000-4000-8000-000000000116",
+    "response": {
+     "behavior": "allow",
+     "updatedInput": {
+      "command": "touch three.txt",
+      "description": "Create empty three.txt in current directory"
+     },
+     "updatedPermissions": [
+      {
+       "behavior": "allow",
+       "destination": "session",
+       "rules": [
+        {
+         "toolName": "Bash",
+         "ruleContent": "touch three.txt"
+        }
+       ],
+       "type": "addRules"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_5",
+   "request": {
+    "detail": "summary",
+    "subtype": "get_context_usage"
+   }
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "text": "Run `touch three.txt` with the Bash tool once more.",
+      "type": "text"
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "11111111-1111-4111-8111-111111111111",
+   "uuid": "<uuid-4>",
+   "origin": {
+    "kind": "human"
+   }
+  },
+  {
+   "type": "control_request",
+   "request_id": "req_6",
+   "request": {
+    "detail": "summary",
+    "subtype": "get_context_usage"
+   }
+  }
+ ],
+ "chat": {
+  "id": "",
+  "kind": "",
+  "title": "",
+  "cwd": "",
+  "sessionId": "11111111-1111-4111-8111-111111111111",
+  "state": "",
+  "status": "",
+  "created": "0001-01-01T00:00:00Z",
+  "updated": "0001-01-01T00:00:00Z",
+  "seq": 0,
+  "seen": 0,
+  "agentVersion": "2.1.330",
+  "config": [
+   {
+    "id": "mode",
+    "name": "Mode",
+    "category": "mode",
+    "type": "select",
+    "currentValue": "acceptEdits",
+    "options": [
+     {
+      "value": "default",
+      "name": "Ask"
+     },
+     {
+      "value": "acceptEdits",
+      "name": "Accept edits"
+     },
+     {
+      "value": "plan",
+      "name": "Plan"
+     },
+     {
+      "value": "full",
+      "name": "Full access"
+     }
+    ]
+   },
+   {
+    "id": "model",
+    "name": "Model",
+    "category": "model",
+    "type": "select",
+    "currentValue": "haiku",
+    "options": [
+     {
+      "value": "default",
+      "name": "Default (recommended)",
+      "description": "Opus 5.5 · Best for everyday, complex tasks"
+     },
+     {
+      "value": "opus",
+      "name": "Opus 5.5",
+      "description": "For complex work and everyday tasks"
+     },
+     {
+      "value": "fable",
+      "name": "Fable 5.2",
+      "description": "For your toughest challenges"
+     },
+     {
+      "value": "sonnet",
+      "name": "Sonnet 5.5",
+      "description": "Most efficient for simpler tasks"
+     },
+     {
+      "value": "haiku",
+      "name": "Haiku 5.5",
+      "description": "Fastest for quick answers"
+     },
+     {
+      "value": "claude-fable-5-1",
+      "name": "Fable 5.1",
+      "description": "Most capable for your hardest and longest-running tasks"
+     },
+     {
+      "value": "claude-haiku-4-5-20251001",
+      "name": "Haiku 4.5",
+      "description": "Fastest for quick answers"
+     },
+     {
+      "value": "claude-sonnet-5",
+      "name": "Sonnet 5",
+      "description": "Efficient for routine tasks"
+     },
+     {
+      "value": "claude-opus-5",
+      "name": "Opus 5",
+      "description": "Best for everyday, complex tasks"
+     },
+     {
+      "value": "claude-fable-5",
+      "name": "Fable 5",
+      "description": "Most capable for your hardest and longest-running tasks"
+     },
+     {
+      "value": "claude-opus-4-8",
+      "name": "Opus 4.8",
+      "description": "Best for everyday, complex tasks"
+     },
+     {
+      "value": "claude-opus-4-7",
+      "name": "Opus 4.7",
+      "description": "Best for everyday, complex tasks"
+     },
+     {
+      "value": "claude-opus-4-6",
+      "name": "Opus 4.6",
+      "description": "Best for everyday, complex tasks"
+     },
+     {
+      "value": "claude-sonnet-4-6",
+      "name": "Sonnet 4.6",
+      "description": "Efficient for routine tasks"
+     }
+    ]
+   },
+   {
+    "id": "effort",
+    "name": "Effort",
+    "category": "thought_level",
+    "type": "select",
+    "currentValue": "default",
+    "options": [
+     {
+      "value": "default",
+      "name": "default"
+     },
+     {
+      "value": "low",
+      "name": "low"
+     },
+     {
+      "value": "medium",
+      "name": "medium"
+     },
+     {
+      "value": "high",
+      "name": "high"
+     },
+     {
+      "value": "xhigh",
+      "name": "xhigh"
+     },
+     {
+      "value": "max",
+      "name": "max"
+     }
+    ]
+   }
+  ],
+  "commands": [
+   {
+    "name": "user-skill-1",
+    "description": "\u003credacted\u003e"
+   },
+   {
+    "name": "user-skill-2",
+    "description": "\u003credacted\u003e"
+   },
+   {
+    "name": "user-skill-3",
+    "description": "\u003credacted\u003e"
+   }
+  ],
+  "usage": {
+   "used": 34122,
+   "size": 1000000,
+   "percentage": 3,
+   "cost": {
+    "amount": 0.12509907,
+    "currency": "USD"
+   },
+   "limits": [
+    {
+     "id": "five_hour",
+     "usedPercent": 26,
+     "resetsAt": 1795350600,
+     "windowMinutes": 300
+    },
+    {
+     "id": "seven_day",
+     "usedPercent": 7,
+     "resetsAt": 1795798800,
+     "windowMinutes": 10080
+    }
+   ]
+  },
+  "capabilities": {
+   "images": true,
+   "compact": true,
+   "queue": true,
+   "plan": true,
+   "questions": true,
+   "effort": true,
+   "model": true,
+   "cancelQueued": true
+  }
+ },
+ "echoes": 3,
+ "unknown": 0
+}

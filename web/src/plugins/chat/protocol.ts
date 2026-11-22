@@ -20,6 +20,9 @@ export const MAX_IMAGE = 5 << 20;
 /** The states of a chat (chatproto.State*). */
 export const CHAT_STATES = ['starting', 'idle', 'working', 'waiting', 'sleeping', 'failed', 'closed'] as const;
 export type ChatStateName = (typeof CHAT_STATES)[number];
+/** No state of a chat: the last ChatState the host tells of a chat that is
+ * no more, deleted or removed by its limits (chatproto.StateDeleted). */
+export const STATE_DELETED = 'deleted';
 
 /** The statuses of a chat (chatproto.Status*), what notifications and
  * dots show: working, blocked (a permission or a question waits), done (a
@@ -126,13 +129,14 @@ export interface Chat {
   capabilities: Capabilities;
 }
 
-/** What the chats' states tell of each (chatproto.ChatState). */
+/** What the chats' states tell of each (chatproto.ChatState); its state
+ * is STATE_DELETED once the chat is no more. */
 export interface ChatState {
   id: string;
   kind: string;
   title: string;
   cwd: string;
-  state: ChatStateName | string;
+  state: ChatStateName | typeof STATE_DELETED | string;
   status: ChatStatus | string;
   updated: string;
   seq: number;

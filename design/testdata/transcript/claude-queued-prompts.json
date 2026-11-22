@@ -151,6 +151,11 @@
     },
     {
       "state": "end",
+      "stopReason": "end_turn",
+      "t": "turn"
+    },
+    {
+      "state": "end",
       "t": "turn"
     },
     {

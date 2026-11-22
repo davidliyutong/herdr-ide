@@ -1,63 +1,36 @@
-// A coding agent's conversation as a native view: the session's events
-// from a source (source.ts) reduced to items (model.ts) and drawn as a list
-// that keeps to its end while the user is there, and a composer that hands
-// the user's message to the source.
+// A chat with a coding agent as a native view: the chat's events from a
+// source (source.ts) reduced to items (model.ts) and drawn as a list that
+// keeps to its end while the user is there, the cards that answer the
+// agent at the places it asked, and a composer (Composer.tsx) that hands
+// the user's messages and commands to the source.
 // The list draws the last SHOWN_ITEMS items; earlier ones, and then the
-// source's earlier pages, come on request. A short view (peek: the agent
-// waits for an answer in its terminal, shown below) has no composer, unless
-// the user was writing a message as it became short: then the composer
-// stays, the keyboard with it, and the message waits there.
+// source's earlier pages, come on request. Stored events are drawn as they
+// come; live increments (text as the agent writes it) at most once a frame.
 
-import {
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type Ref,
-  type RefObject,
-} from 'react';
-import { ArrowDown, ArrowUp, LoaderCircle, MessagesSquare, Square, TriangleAlert } from 'lucide-react';
-import type { AgentStatus } from '../lib/machine';
-import { hasMessage, t } from '../i18n';
-import { formatTokens, spokenText } from './format';
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
+import { ArrowDown, MessagesSquare } from 'lucide-react';
+import { t } from '../i18n';
+import { Composer } from './Composer';
+import { spokenText } from './format';
 import { ItemView } from './items';
 import { agentKind } from './kinds';
-import { blocksText, emptyConversation, take, type Conversation as State, type SourceEvent, type Usage } from './model';
-import type { ItemContext } from './parts';
-import type { AgentSource } from './source';
+import { blocksText, emptyConversation, take, waitingItems, type Conversation as State, type SourceEvent } from './model';
+import { AnsweringContext, type Answering, type ItemContext } from './parts';
+import type { ChatSource } from './source';
 import './conversation.css';
-
-export type { AgentStatus };
 
 /** What a parent may do with the view. */
 export interface ConversationHandle {
   /** Focuses the composer, or the list when there is none. */
   focus(): void;
-  /** The view is short (peek) and keeps its composer, because the user was
-   * writing a message as it became so: the keyboard stays where it is. */
-  writing(): boolean;
 }
 
 export interface ConversationProps {
-  source: AgentSource;
+  source: ChatSource;
   /** The agent's kind (kinds.ts), whose title the view names it by. */
   kind: string;
-  /** The agent's state as its terminal reports it. */
-  status: AgentStatus;
-  /** What the agent waits for while blocked. */
-  blockedText?: string;
+  /** Read-only (also when the source says so): every control disabled. */
   readOnly?: boolean;
-  /** The view is short, its terminal shown below it: the list kept at its
-   * end, and no composer unless the user was writing a message as the view
-   * became short (writing); what the agent waits for is the parent's to
-   * say. */
-  peek?: boolean;
-  /** The user asks for the agent's own interface. */
-  onShowTerminal(): void;
   /** A path the agent named was activated. */
   onOpenFile?(path: string, line?: number): void;
   ref?: Ref<ConversationHandle>;
@@ -70,228 +43,24 @@ export const SHOWN_ITEMS = 300;
 /** How close to the end (CSS pixels) the list counts as at its end. */
 const END_SLACK = 24;
 
-/** How long after a keystroke in the composer the user counts as writing a
- * message, also with nothing in it. */
-export const WRITING_MS = 1500;
-
 /** The most of the agent's last message read out. */
 const SPOKEN = 2000;
+
+/** How long live increments wait for a frame at most (a page in the
+ * background draws no frames). */
+const FRAME_WAIT_MS = 250;
 
 /** Whether a list scrolled so is at its end, where it stays as items come. */
 export function stickToEnd(scrollTop: number, scrollHeight: number, clientHeight: number): boolean {
   return scrollHeight - scrollTop - clientHeight <= END_SLACK;
 }
 
-/** The user's text not sent yet, by source: it outlives the view (another
- * tab shown, the terminal shown instead) until it is sent. */
-const drafts = new WeakMap<AgentSource, string>();
-
-const sourceKeys = new WeakMap<AgentSource, number>();
+const sourceKeys = new WeakMap<ChatSource, number>();
 let nextKey = 0;
-function sourceKey(s: AgentSource): number {
+function sourceKey(s: ChatSource): number {
   let k = sourceKeys.get(s);
   if (k === undefined) sourceKeys.set(s, (k = ++nextKey));
   return k;
-}
-
-/** A field's height to fit its text (up to its CSS max-height). */
-function grow(el: HTMLTextAreaElement | null) {
-  if (!el) return;
-  el.style.height = 'auto';
-  if (el.scrollHeight > 0) el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
-}
-
-function Meter({ usage }: { usage: Usage }) {
-  const pct = Math.min(100, Math.max(0, Math.round((usage.used / usage.size) * 100)));
-  return (
-    <span
-      className="conv-meter"
-      role="meter"
-      aria-label={t('conversation.contextUsed')}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={pct}
-      title={t('conversation.context', { used: formatTokens(usage.used), size: formatTokens(usage.size) })}
-      data-level={pct >= 90 ? 'high' : pct >= 75 ? 'mid' : undefined}
-    >
-      <span className="conv-meter-bar">
-        <span style={{ width: `${pct}%` }} />
-      </span>
-      <span className="conv-meter-pct">{pct}%</span>
-    </span>
-  );
-}
-
-/** Why a message was not sent, in words: by the code of the source's
- * error (SendError's of the agents plugin), else in general. */
-function sendError(e: unknown, agent: string): string {
-  const code = typeof e === 'object' && e !== null ? (e as { code?: unknown }).code : undefined;
-  const key = `conversation.sendError.${typeof code === 'string' ? code : ''}`;
-  return hasMessage(key) ? t(key, { agent }) : t('conversation.sendFailed');
-}
-
-interface ComposerProps {
-  source: AgentSource;
-  agent: string;
-  status: AgentStatus;
-  blockedText?: string;
-  usage?: Usage;
-  /** The view is short: the parent says what the agent waits for. */
-  peek: boolean;
-  onShowTerminal(): void;
-  /** Hears whether the user is writing a message: text not sent is in the
-   * field, or it was typed in within WRITING_MS. */
-  onWriting(writing: boolean): void;
-  inputRef: RefObject<HTMLTextAreaElement | null>;
-}
-
-function Composer({ source, agent, status, blockedText, usage, peek, onShowTerminal, onWriting, inputRef }: ComposerProps) {
-  const [text, setText] = useState(() => drafts.get(source) ?? '');
-  const [pending, setPending] = useState(false);
-  /** Why the last message was not sent. */
-  const [failed, setFailed] = useState<string | undefined>(undefined);
-  /** A key was pressed in the field within WRITING_MS. */
-  const [typed, setTyped] = useState(false);
-  const typedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const live = useRef(true);
-  const caret = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    live.current = true;
-    return () => {
-      live.current = false;
-      clearTimeout(typedTimer.current);
-    };
-  }, []);
-  const writing = typed || (!pending && text.trim() !== '');
-  const tell = useRef(onWriting);
-  useLayoutEffect(() => {
-    tell.current = onWriting;
-  });
-  useEffect(() => tell.current(writing), [writing]);
-  useEffect(() => () => tell.current(false), []);
-  useLayoutEffect(() => {
-    const el = inputRef.current;
-    grow(el);
-    if (el && caret.current !== undefined) {
-      el.setSelectionRange(caret.current, caret.current);
-      caret.current = undefined;
-    }
-  }, [text, inputRef]);
-
-  const blocked = status === 'blocked';
-  const body = text.replace(/\s+$/, '');
-  const canSend = body.trim() !== '' && !pending && !blocked;
-
-  const change = (v: string) => {
-    setText(v);
-    setFailed(undefined);
-    if (v) drafts.set(source, v);
-    else drafts.delete(source);
-  };
-
-  const send = () => {
-    if (!canSend || !source.send) return;
-    const send = source.send.bind(source);
-    setPending(true);
-    setFailed(undefined);
-    Promise.resolve()
-      .then(() => send([{ type: 'text', text: body }]))
-      .then(
-        () => {
-          if (drafts.get(source) === text) drafts.delete(source);
-          if (!live.current) return;
-          setText('');
-          setPending(false);
-        },
-        (e: unknown) => {
-          if (!live.current) return;
-          setPending(false);
-          setFailed(sendError(e, agent));
-        },
-      );
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    setTyped(true);
-    clearTimeout(typedTimer.current);
-    typedTimer.current = setTimeout(() => setTyped(false), WRITING_MS);
-    if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
-    // Shift+Enter: the field's own new line.
-    if (e.shiftKey) return;
-    e.preventDefault();
-    if (e.altKey) {
-      const el = e.currentTarget;
-      const at = el.selectionStart;
-      caret.current = at + 1;
-      change(el.value.slice(0, at) + '\n' + el.value.slice(el.selectionEnd));
-      return;
-    }
-    send();
-  };
-
-  return (
-    <div className="conv-composer">
-      <div className="conv-box" data-blocked={blocked || undefined}>
-        {blocked && !peek && (
-          <div className="conv-banner" role="status">
-            <span>
-              {t('conversation.blocked', { agent })}
-              {blockedText && <span className="conv-banner-what"> {blockedText}</span>}
-            </span>
-            <button type="button" className="conv-link" onClick={onShowTerminal}>
-              {t('conversation.showTerminal')}
-            </button>
-          </div>
-        )}
-        {failed !== undefined && (
-          <div className="conv-banner error" role="alert">
-            <TriangleAlert aria-hidden />
-            <span>{failed}</span>
-            <button type="button" className="conv-link" onClick={onShowTerminal}>
-              {t('conversation.showTerminal')}
-            </button>
-          </div>
-        )}
-        {/* Not disabled while the agent waits: a field that is gives up
-            the keyboard, which then goes to the terminal and its question
-            (send() and the send button wait instead). */}
-        <textarea
-          ref={inputRef}
-          className={pending ? 'conv-input pending' : 'conv-input'}
-          rows={1}
-          value={text}
-          readOnly={pending}
-          aria-busy={pending || undefined}
-          aria-label={t('conversation.composer.label', { agent })}
-          aria-keyshortcuts="Enter"
-          placeholder={t('conversation.composer.placeholder', { agent })}
-          spellCheck
-          onChange={(e) => change(e.target.value)}
-          onKeyDown={onKeyDown}
-        />
-        <div className="conv-foot">
-          {usage && usage.size > 0 && <Meter usage={usage} />}
-          <span className="spacer" />
-          {status === 'working' && source.cancel && (
-            <button type="button" className="sm conv-stop" title={t('conversation.stopHint', { agent })} onClick={() => source.cancel?.()}>
-              <Square aria-hidden />
-              {t('conversation.stop')}
-            </button>
-          )}
-          <button
-            type="button"
-            className="primary conv-send"
-            aria-label={t('conversation.send')}
-            title={t('conversation.sendHint')}
-            disabled={!canSend}
-            onClick={send}
-          >
-            {pending ? <LoaderCircle className="conv-spin" aria-hidden /> : <ArrowUp aria-hidden />}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 /** What a batch of events did besides adding items: put items before the
@@ -302,10 +71,13 @@ type Taken = { grown: number } | { reset: true };
  * into a state it is given. */
 const EMPTY: State = Object.freeze({ ...emptyConversation(), items: Object.freeze([]) as never, byId: Object.freeze({}) });
 
-/** The conversation of a source, taken a batch of events at a time; onTaken
+const isLive = (ev: SourceEvent) => typeof ev === 'object' && ev !== null && (ev as { live?: unknown }).live === true;
+
+/** The conversation of a source, taken a batch of events at a time: stored
+ * events at once (a microtask), live increments at the next frame; onTaken
  * hears of a batch that put items before the others or started over,
  * before it is drawn. */
-function useConversation(source: AgentSource, onTaken: (what: Taken) => void) {
+function useConversation(source: ChatSource, onTaken: (what: Taken) => void) {
   const state = useRef<State>(EMPTY);
   const [shown, setShown] = useState({ source, conv: EMPTY });
   const taken = useRef(onTaken);
@@ -315,11 +87,18 @@ function useConversation(source: AgentSource, onTaken: (what: Taken) => void) {
   useEffect(() => {
     let queue: SourceEvent[] = [];
     let live = true;
+    let micro = false;
+    let frame: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     state.current = EMPTY;
     setShown({ source, conv: EMPTY });
-    // The events a source gives at once (a page) are reduced together: the
-    // list is copied once for them and drawn once.
+    // The events a source gives at once (a page, a frame's increments) are
+    // reduced together: the list is copied once for them and drawn once.
     const flush = () => {
+      micro = false;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      frame = timer = undefined;
       if (!live || !queue.length) return;
       const batch = queue;
       queue = [];
@@ -328,7 +107,10 @@ function useConversation(source: AgentSource, onTaken: (what: Taken) => void) {
       if (next === cur) return;
       const first = cur.first;
       if (batch.some((ev) => ev.t === 'reset')) taken.current({ reset: true });
-      else if (first !== undefined && batch.some((ev) => ev.t !== 'reset' && typeof ev.seq === 'number' && ev.seq < first))
+      else if (
+        first !== undefined &&
+        batch.some((ev) => ev.t !== 'reset' && ev.t !== 'reattach' && !isLive(ev) && typeof ev.seq === 'number' && ev.seq < first)
+      )
         taken.current({ grown: next.items.length - cur.items.length });
       state.current = next;
       setShown({ source, conv: next });
@@ -336,11 +118,23 @@ function useConversation(source: AgentSource, onTaken: (what: Taken) => void) {
     const off = source.subscribe((ev) => {
       // An event is an object: what else a machine sent is passed over.
       if (typeof ev !== 'object' || ev === null) return;
-      if (!queue.length) queueMicrotask(flush);
       queue.push(ev);
+      if (!isLive(ev)) {
+        if (!micro) {
+          micro = true;
+          queueMicrotask(flush);
+        }
+        return;
+      }
+      if (frame === undefined && timer === undefined) {
+        if (typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(flush);
+        timer = setTimeout(flush, FRAME_WAIT_MS);
+      }
     });
     return () => {
       live = false;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      clearTimeout(timer);
       off();
     };
   }, [source]);
@@ -349,8 +143,9 @@ function useConversation(source: AgentSource, onTaken: (what: Taken) => void) {
   return shown.source === source ? shown.conv : EMPTY;
 }
 
-export function Conversation({ source, kind, status, blockedText, readOnly, peek, onShowTerminal, onOpenFile, ref }: ConversationProps) {
+export function Conversation({ source, kind, readOnly: readOnlyProp, onOpenFile, ref }: ConversationProps) {
   const agent = agentKind(kind)?.title ?? t('conversation.agent');
+  const readOnly = !!readOnlyProp || !!source.readOnly;
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -358,24 +153,11 @@ export function Conversation({ source, kind, status, blockedText, readOnly, peek
   /** The list's distance from its end to keep when items come before those
    * shown. */
   const anchor = useRef<number | undefined>(undefined);
+  /** An item to show and focus once it is drawn. */
+  const reveal = useRef<string | undefined>(undefined);
   const [away, setAway] = useState(false);
   const [limit, setLimit] = useState(SHOWN_ITEMS);
   const [earlier, setEarlier] = useState<'idle' | 'loading' | 'none'>('idle');
-  /** The user is writing a message (the composer's onWriting). */
-  const [writing, setWriting] = useState(false);
-  /** The view became short while the user was writing: it keeps its
-   * composer until it is not short any more. */
-  const [kept, setKept] = useState(false);
-  const [wasPeek, setWasPeek] = useState(!!peek);
-  if (wasPeek !== !!peek) {
-    setWasPeek(!!peek);
-    setKept(!!peek && writing);
-  }
-  const keeps = !!peek && kept;
-  const keepsRef = useRef(keeps);
-  useLayoutEffect(() => {
-    keepsRef.current = keeps;
-  });
 
   /** Keeps the user's place while items come before those shown. */
   const keep = () => {
@@ -409,21 +191,40 @@ export function Conversation({ source, kind, status, blockedText, readOnly, peek
 
   // What the items call: the same functions for the view's life, calling
   // the parent's latest ones.
-  const latest = useRef({ onOpenFile, onShowTerminal, peek });
+  const latest = useRef({ onOpenFile, source });
   useLayoutEffect(() => {
-    latest.current = { onOpenFile, onShowTerminal, peek };
+    latest.current = { onOpenFile, source };
   });
   const canOpen = !!onOpenFile;
   const ctx = useMemo<ItemContext>(
-    () => ({
-      agent,
-      openFile: canOpen ? (path, line) => latest.current.onOpenFile?.(path, line) : undefined,
-      showTerminal: () => latest.current.onShowTerminal(),
-    }),
+    () => ({ agent, openFile: canOpen ? (path, line) => latest.current.onOpenFile?.(path, line) : undefined }),
     [agent, canOpen],
   );
 
-  useImperativeHandle(ref, () => ({ focus: () => (inputRef.current ?? scrollRef.current)?.focus(), writing: () => keepsRef.current }), []);
+  const state = conv.state;
+  const working = state === 'working' || state === 'waiting' || (state === undefined && conv.turn === 'working');
+  /** A card that waits may be answered while the chat's turn runs. */
+  const open = !readOnly && (state === undefined || state === 'working' || state === 'waiting');
+  // The cards that wait: the same set while they are the same.
+  const waitingKey = useMemo(() => waitingItems(conv).join('\n'), [conv]);
+  const waitingSet = useMemo(() => new Set(waitingKey ? waitingKey.split('\n') : []), [waitingKey]);
+  const answering = useMemo<Answering>(
+    () => ({
+      open,
+      waiting: waitingSet,
+      readOnly,
+      respond: (permission, reply) => latest.current.source.respond(permission, reply),
+      answer: (question, reply) => latest.current.source.answer(question, reply),
+    }),
+    [open, waitingSet, readOnly],
+  );
+  const waiting = open && waitingSet.size > 0;
+
+  useImperativeHandle(
+    ref,
+    () => ({ focus: () => (inputRef.current && !inputRef.current.disabled ? inputRef.current : scrollRef.current)?.focus() }),
+    [],
+  );
 
   const toEnd = useCallback(() => {
     const el = scrollRef.current;
@@ -438,19 +239,44 @@ export function Conversation({ source, kind, status, blockedText, readOnly, peek
     setAway(!end);
   };
 
+  const hidden = Math.max(0, conv.items.length - limit);
+  const shown = hidden ? conv.items.slice(hidden) : conv.items;
+
+  /** Shows the card that waits for the user, and gives it the keyboard. */
+  const showWaiting = () => {
+    const id = Array.from(waitingSet).at(-1);
+    if (id === undefined) return;
+    const at = conv.items.findIndex((it) => it.id === id);
+    if (at >= 0 && at < hidden) setLimit(conv.items.length - at);
+    reveal.current = id;
+    focusReveal();
+  };
+  const focusReveal = () => {
+    const id = reveal.current;
+    const list = listRef.current;
+    if (!id || !list) return;
+    const card = Array.from(list.querySelectorAll<HTMLElement>('[data-item]')).find((el) => el.getAttribute('data-item') === id);
+    if (!card) return;
+    reveal.current = undefined;
+    card.scrollIntoView?.({ block: 'center' });
+    const target = card.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled)') ?? card;
+    target.focus();
+  };
+
   // After each change: back to where the user was when items came before
   // those shown (the distance from the end kept), else to the end while the
-  // user is there.
+  // user is there; then a card asked for is shown.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     if (anchor.current !== undefined) {
       el.scrollTop = el.scrollHeight - anchor.current;
       anchor.current = undefined;
-      return;
-    }
-    if (peek || atEnd.current) el.scrollTop = el.scrollHeight;
-  }, [conv, limit, peek, status]);
+    } else if (atEnd.current) el.scrollTop = el.scrollHeight;
+    focusReveal();
+    // focusReveal reads refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conv, limit]);
 
   // What grows after it is drawn (Markdown, formulas and code as their
   // renderers load, a tool call opened, the pane resized) keeps the list at
@@ -460,7 +286,7 @@ export function Conversation({ source, kind, status, blockedText, readOnly, peek
     const list = listRef.current;
     if (!el || !list || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
-      if (latest.current.peek || atEnd.current) el.scrollTop = el.scrollHeight;
+      if (atEnd.current) el.scrollTop = el.scrollHeight;
     });
     ro.observe(list);
     ro.observe(el);
@@ -477,22 +303,27 @@ export function Conversation({ source, kind, status, blockedText, readOnly, peek
     );
   };
 
-  const hidden = Math.max(0, conv.items.length - limit);
-  const shown = hidden ? conv.items.slice(hidden) : conv.items;
-  const working = status === 'working' || (status === 'unknown' && conv.turn === 'working');
-  const composer = !readOnly && (!peek || keeps) && source.capabilities.input !== 'none' && !!source.send;
-
-  // The last message, read out when it is the agent's and changes.
+  // What is read out: that the agent waits for an answer, else its last
+  // message once it is whole.
   let spoken = '';
-  for (let i = conv.items.length - 1; i >= 0; i--) {
-    const it = conv.items[i];
-    if (it.kind !== 'message') continue;
-    if (it.role === 'agent') spoken = spokenText(blocksText(it.content)).slice(0, SPOKEN);
-    break;
-  }
+  if (waiting) spoken = t('conversation.waiting', { agent });
+  else
+    for (let i = conv.items.length - 1; i >= 0; i--) {
+      const it = conv.items[i];
+      if (it.kind !== 'message') continue;
+      if (it.role === 'agent' && !it.live) spoken = spokenText(blocksText(it.content)).slice(0, SPOKEN);
+      break;
+    }
+
+  const activity =
+    conv.activity === 'compacting'
+      ? t('conversation.compacting')
+      : state === 'starting'
+        ? t('conversation.starting', { agent })
+        : t('conversation.working');
 
   return (
-    <div className="conv" data-peek={peek || undefined}>
+    <div className="conv">
       <div className="conv-main">
         <div
           ref={scrollRef}
@@ -525,40 +356,30 @@ export function Conversation({ source, kind, status, blockedText, readOnly, peek
               </div>
             )}
             {conv.items.length > 0 && conv.unknown > 0 && hidden === 0 && (
-              <div className="conv-unknown">
-                {t('conversation.unknown', { n: conv.unknown })}{' '}
-                <button type="button" className="conv-link" onClick={onShowTerminal}>
-                  {t('conversation.showTerminal')}
-                </button>
-              </div>
+              <div className="conv-unknown">{t('conversation.unknown', { n: conv.unknown })}</div>
             )}
-            {shown.map((it) => (
-              <ItemView key={it.id} item={it} ctx={ctx} />
-            ))}
-            {working && conv.items.length > 0 && (
-              <div className="conv-working">
+            <AnsweringContext.Provider value={answering}>
+              {shown.map((it) => (
+                <ItemView key={it.id} item={it} ctx={ctx} />
+              ))}
+            </AnsweringContext.Provider>
+            {(working || state === 'starting') && (
+              <div className="conv-working" role="status">
                 <span className="dot dot-working" aria-hidden />
-                {t('conversation.working')}
+                {activity}
               </div>
             )}
-            {conv.items.length === 0 && (
+            {conv.items.length === 0 && !working && state !== 'starting' && (
               <div className="empty-note conv-empty">
                 <MessagesSquare aria-hidden />
                 <div className="conv-empty-title">{agent}</div>
                 <div>{t('conversation.empty', { agent })}</div>
-                {conv.unknown > 0 && (
-                  <div className="conv-unknown">
-                    {t('conversation.unknown', { n: conv.unknown })}{' '}
-                    <button type="button" className="conv-link" onClick={onShowTerminal}>
-                      {t('conversation.showTerminal')}
-                    </button>
-                  </div>
-                )}
+                {conv.unknown > 0 && <div className="conv-unknown">{t('conversation.unknown', { n: conv.unknown })}</div>}
               </div>
             )}
           </div>
         </div>
-        {away && !peek && (
+        {away && (
           <button type="button" className="conv-jump" onClick={toEnd}>
             <ArrowDown aria-hidden />
             {t('conversation.jumpToLatest')}
@@ -568,20 +389,21 @@ export function Conversation({ source, kind, status, blockedText, readOnly, peek
       <div className="conv-sr" aria-live="polite">
         {spoken}
       </div>
-      {composer && (
-        <Composer
-          key={sourceKey(source)}
-          source={source}
-          agent={agent}
-          status={status}
-          blockedText={blockedText}
-          usage={conv.usage}
-          peek={!!peek}
-          onShowTerminal={onShowTerminal}
-          onWriting={setWriting}
-          inputRef={inputRef}
-        />
-      )}
+      <Composer
+        key={sourceKey(source)}
+        source={source}
+        agent={agent}
+        chat={conv.chat}
+        usage={conv.usage}
+        queued={conv.queued ?? []}
+        working={working}
+        waiting={waiting}
+        state={state}
+        stateError={conv.stateError}
+        readOnly={readOnly}
+        onShowWaiting={showWaiting}
+        inputRef={inputRef}
+      />
     </div>
   );
 }

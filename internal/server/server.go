@@ -433,6 +433,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 // Run performs background maintenance until ctx ends: code-server instances
 // without VS Code connections are stopped after CodeServerIdle.
 func (s *Server) Run(ctx context.Context) {
+	// The core's database stays open while the core runs: the plugins'
+	// uses (plugin.OpenDB) take its pool.
+	if db, err := plugin.OpenDB(pluginHost{s}); db != nil {
+		defer db.Close()
+		if err != nil {
+			s.logger.Printf("the core's database is of a newer version: features keep nothing new in it (%v)", err)
+		}
+	} else if err != nil {
+		s.logger.Printf("the core's database cannot be opened: features keep their state in memory only (%v)", err)
+	}
 	s.startPlugins(ctx)
 	if s.opts.CodeServerIdle <= 0 {
 		<-ctx.Done()

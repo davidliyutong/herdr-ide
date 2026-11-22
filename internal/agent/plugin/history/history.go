@@ -2,17 +2,18 @@
 
 // Package history is the machine side of the terminal history plugin
 // (internal/plugins/history): snapshots of the terminals' output, with
-// their styles, in the agent's data directory, which pages show above the
-// new shell of a terminal whose program was replaced (its terminal core
-// started again). The core asks for captures only while history.capture is
-// on for the machine. Actions:
+// their styles, in the machine's database (machine.db in the agent's data
+// directory, store.go), which pages show above the new shell of a terminal
+// whose program was replaced (its terminal core started again). The core
+// asks for captures only while history.capture is on for the machine.
+// Actions:
 //
 //   - capture {lines, maxTerminals, maxTotalBytes, days}: snapshots every
 //     live terminal of the instance's terminal core whose screen changed
 //     since its last snapshot, within the limits (agentproto.History*),
 //     and removes what the limits, the age and the terminal core's records
-//     no longer allow; it changes files, and the core never asks for it
-//     in read-only mode;
+//     no longer allow; it changes the snapshots, and the core never asks
+//     for it in read-only mode;
 //   - list: the snapshots, whether the current one shows a screen the
 //     terminal core restored itself, and whether the user's herdr-core
 //     configuration restores screens (restore_screen);
@@ -39,9 +40,6 @@ import (
 	"errors"
 	"net"
 	"os"
-	"path"
-	"sort"
-	"strings"
 	"time"
 
 	"herdr-ide/internal/agent/plugin"
@@ -111,19 +109,6 @@ func untilClosed(ctx context.Context, st net.Conn, d time.Duration) (context.Con
 	}
 }
 
-// existingDir is the snapshots' directory when there is one (a read
-// creates nothing), "" otherwise.
-func existingDir(base string) string {
-	if base == "" || !path.IsAbs(base) {
-		return ""
-	}
-	dir := path.Join(base, dirName)
-	if st, err := os.Lstat(dir); err != nil || !st.IsDir() {
-		return ""
-	}
-	return dir
-}
-
 // environ is the environment the agent starts the terminal core with.
 func environ(env *plugin.Env) []string {
 	if env.Environ != nil {
@@ -132,41 +117,51 @@ func environ(env *plugin.Env) []string {
 	return os.Environ()
 }
 
-// storeError is a failure to use the snapshots' directory as the core gets
-// it: a code and a fixed wording, never the directory's path.
+// storeError is a failure to use the snapshots' database as the core gets
+// it: a code and a fixed wording, never the database's path.
 func storeError(err error) error {
-	if errors.Is(err, errBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+	switch {
+	case errors.Is(err, errBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled):
 		return plugin.Errorf("busy", "history: a capture holds the snapshots")
+	case errors.Is(err, errNewer):
+		return plugin.Errorf("io", "history: the snapshots' database is of a newer version, which this agent does not change")
 	}
-	return plugin.Errorf("io", "history: the snapshots' directory cannot be used")
+	return plugin.Errorf("io", "history: the snapshots' database cannot be used")
 }
 
 // list lists the terminals' snapshots, by address, after the expired ones
 // went (Prune).
 func list(env *plugin.Env) agentproto.HistoryListResult {
 	out := agentproto.HistoryListResult{Terminals: []agentproto.HistoryEntry{}, RestoreScreen: restoreScreen(env.Home, environ(env))}
-	dir := existingDir(env.Base)
-	if dir == "" {
+	if !exists(env.Base) {
 		return out
 	}
 	now := clock()
 	Prune(env.Base, now)
+	db, _ := openDB(env.Base) // also one of a newer version: it is read
+	if db == nil {
+		return out
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT " + columns + " FROM history_snapshots ORDER BY terminal, prev")
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
 	byAddr := map[string]*agentproto.HistoryEntry{}
-	for _, e := range entries(dir) {
-		addr, prev, ext, ok := parseName(e.Name())
-		if !ok || ext != ".json" || !e.Type().IsRegular() {
+	var order []string
+	for rows.Next() {
+		m, prev, whole, err := scanMeta(rows)
+		// A writer that holds the lease meanwhile prunes too; until then an
+		// expired generation is not listed.
+		if err != nil || !whole || expired(m, now, 0) {
 			continue
 		}
-		// A writer that holds the directory meanwhile prunes too; until
-		// then an expired generation is not listed.
-		m := readMeta(dir, addr, prev)
-		if m == nil || expired(m, now, 0) {
-			continue
-		}
-		en := byAddr[addr]
+		en := byAddr[m.Terminal]
 		if en == nil {
-			en = &agentproto.HistoryEntry{Terminal: addr}
-			byAddr[addr] = en
+			en = &agentproto.HistoryEntry{Terminal: m.Terminal}
+			byAddr[m.Terminal] = en
+			order = append(order, m.Terminal)
 		}
 		if prev {
 			s := m.HistorySnapshot
@@ -175,48 +170,44 @@ func list(env *plugin.Env) agentproto.HistoryListResult {
 			en.HistorySnapshot, en.Restored = m.HistorySnapshot, m.Restored
 		}
 	}
-	for _, en := range byAddr {
-		out.Terminals = append(out.Terminals, *en)
+	for _, a := range order {
+		out.Terminals = append(out.Terminals, *byAddr[a])
 	}
-	sort.Slice(out.Terminals, func(i, j int) bool { return out.Terminals[i].Terminal < out.Terminals[j].Terminal })
 	return out
 }
 
-// read returns one generation's bytes. A capture may replace the
-// generation meanwhile: what is returned is the bytes and the description
-// of one generation, read again when they changed under it.
+// read returns one generation's bytes, with its description, as one
+// generation committed them.
 func read(env *plugin.Env, p agentproto.HistoryReadParams) (agentproto.HistoryData, error) {
 	if !agentproto.ValidHistoryTerminal(p.Terminal) || !agentproto.ValidHistoryGeneration(p.Generation) {
 		return agentproto.HistoryData{}, plugin.Errorf("bad_params", "history: bad terminal or generation")
 	}
-	dir := existingDir(env.Base)
-	if dir == "" {
-		return agentproto.HistoryData{}, plugin.Errorf("not_found", "history: no snapshot")
+	notFound := plugin.Errorf("not_found", "history: no snapshot")
+	if !exists(env.Base) {
+		return agentproto.HistoryData{}, notFound
 	}
 	now := clock()
 	Prune(env.Base, now)
-	prev := p.Generation == agentproto.HistoryPrevious
-	for range 3 {
-		m := readMeta(dir, p.Terminal, prev)
-		if m == nil || expired(m, now, 0) {
-			return agentproto.HistoryData{}, plugin.Errorf("not_found", "history: no snapshot")
-		}
-		data, err := readRegular(path.Join(dir, fileName(p.Terminal, prev, ".vt")), agentproto.HistoryMaxBytes)
-		if again := readMeta(dir, p.Terminal, prev); err != nil || again == nil || again.At != m.At || int64(len(data)) != m.Bytes {
-			continue
-		}
-		return agentproto.HistoryData{Terminal: p.Terminal, Generation: p.Generation, HistorySnapshot: m.HistorySnapshot, Data: data}, nil
+	db, _ := openDB(env.Base) // also one of a newer version: it is read
+	if db == nil {
+		return agentproto.HistoryData{}, notFound
 	}
-	return agentproto.HistoryData{}, plugin.Errorf("busy", "history: the snapshot is being replaced")
+	defer db.Close()
+	prev := p.Generation == agentproto.HistoryPrevious
+	var data []byte
+	m, _, whole, err := scanMeta(db.QueryRow("SELECT "+columns+", data FROM history_snapshots WHERE terminal = ? AND prev = ?", p.Terminal, prev), &data)
+	if err != nil || !whole || expired(m, now, 0) || int64(len(data)) != m.Bytes {
+		return agentproto.HistoryData{}, notFound
+	}
+	return agentproto.HistoryData{Terminal: p.Terminal, Generation: p.Generation, HistorySnapshot: m.HistorySnapshot, Data: data}, nil
 }
 
-// clearSnapshots removes one terminal's snapshots, or all with their
-// temporary files.
+// clearSnapshots removes one terminal's snapshots, or all.
 func clearSnapshots(ctx context.Context, env *plugin.Env, p agentproto.HistoryClearParams) (agentproto.HistoryClearResult, error) {
 	if p.Terminal != "" && !agentproto.ValidHistoryTerminal(p.Terminal) {
 		return agentproto.HistoryClearResult{}, plugin.Errorf("bad_params", "history: bad terminal")
 	}
-	if existingDir(env.Base) == "" {
+	if !exists(env.Base) {
 		return agentproto.HistoryClearResult{}, nil
 	}
 	s, _, err := openStore(ctx, env.Base, true, clock())
@@ -231,13 +222,7 @@ func clearSnapshots(ctx context.Context, env *plugin.Env, p agentproto.HistoryCl
 		}
 		return agentproto.HistoryClearResult{}, nil
 	}
-	n := s.clearAll()
-	for _, e := range entries(s.dir) {
-		if name := e.Name(); strings.HasPrefix(name, ".") && strings.HasSuffix(name, tmpSuffix) {
-			os.Remove(path.Join(s.dir, name))
-		}
-	}
-	return agentproto.HistoryClearResult{Removed: n}, nil
+	return agentproto.HistoryClearResult{Removed: s.clearAll()}, nil
 }
 
 // adopt gives terminal p.To, which took the place of p.From, the newest
@@ -260,7 +245,7 @@ func adopt(ctx context.Context, env *plugin.Env, p agentproto.HistoryAdoptParams
 	if !known {
 		return res, plugin.Errorf("not_found", "history: no such terminal")
 	}
-	if existingDir(env.Base) == "" {
+	if !exists(env.Base) {
 		return res, nil
 	}
 	s, _, err := openStore(ctx, env.Base, true, clock())
@@ -302,11 +287,11 @@ func recorded(ctx context.Context, env *plugin.Env, addr string) (bool, error) {
 // Prune applies the snapshots' retention below the agent's data directory
 // base, as the agent's housekeeping does when it starts and list and read
 // do: snapshots older than the days they were written under go, with what
-// is not whole and temporary files older than an hour. It does not wait
-// for a writer that holds the directory: a capture running meanwhile
-// (also another agent's of the instance) does the same itself.
+// is not whole; the snapshots kept in files before are imported first. It
+// does not wait for a writer that holds the lease: a capture running
+// meanwhile (also another agent's of the instance) does the same itself.
 func Prune(base string, now time.Time) {
-	if existingDir(base) == "" {
+	if !exists(base) {
 		return
 	}
 	s, _, err := openStore(context.Background(), base, false, now)

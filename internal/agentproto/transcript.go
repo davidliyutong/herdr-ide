@@ -42,21 +42,40 @@ const (
 	TurnError = "error"
 )
 
-// The notices of a transcript, by name (NoticeMethod).
+// The notices of a transcript and of a chat (chatproto.EventNotice), by
+// name (NoticeMethod). Each list of names the UIs know mirrors these.
 const (
 	// NoticeCompacted: the conversation was compacted (summarized).
 	NoticeCompacted = "compacted"
 	// NoticeCleared: the conversation was cleared; a new session follows.
 	NoticeCleared = "cleared"
-	// NoticeCommand: a slash command the user ran, or its local output.
+	// NoticeCommand: a slash command the user ran, or its local output
+	// (params {name, args?, output?}).
 	NoticeCommand = "command"
-	// NoticeError: an error the agent recorded (an API error).
+	// NoticeError: an error the agent recorded (an API error), or one of
+	// the chat host's (params {message, code?, willRetry?}).
 	NoticeError = "error"
 	// NoticeModel: the model changed.
 	NoticeModel = "model"
 	// NoticeSkipped: a line was left out, longer than a read takes
 	// (MaxTailBytes); the transcript reads on after it.
 	NoticeSkipped = "skipped"
+
+	// The chats' own, which no transcript has:
+
+	// NoticeCompacting: the agent began to compact the context;
+	// NoticeCompacted follows.
+	NoticeCompacting = "compacting"
+	// NoticeHandedOff: the chat's session went on in a terminal
+	// (chatproto.OpHandoff).
+	NoticeHandedOff = "handed_off"
+	// NoticeRestarted: the agent's process was started again (params
+	// {mode?}: for a permission mode it takes only at its start).
+	NoticeRestarted = "restarted"
+	// NoticeImported: what follows was imported from the agent's own
+	// record of the session (params {lossy}: parts may differ or be
+	// missing).
+	NoticeImported = "imported"
 )
 
 // NoticeMethod is the method of a notice: an ACP extension method,

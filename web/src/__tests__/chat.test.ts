@@ -84,6 +84,7 @@ describe('the chat plugin', () => {
   it('mirrors the chat host’s values', () => {
     expect(P.PROTO).toBe(2);
     expect(P.CHAT_STATES).toEqual(['starting', 'idle', 'working', 'waiting', 'sleeping', 'failed', 'closed']);
+    expect(P.STATE_DELETED).toBe('deleted');
     expect(P.CHAT_STATUSES).toEqual(['working', 'blocked', 'done', 'idle']);
     expect(P.MODES).toEqual(['default', 'acceptEdits', 'plan', 'full']);
     expect(P.planOption('acceptEdits')).toBe('plan:acceptEdits');

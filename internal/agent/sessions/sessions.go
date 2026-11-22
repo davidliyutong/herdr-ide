@@ -387,9 +387,10 @@ func uniq(s ...string) []string {
 	return out
 }
 
-// claudeDirs are the agent's user's Claude Code configuration directories:
-// $CLAUDE_CONFIG_DIR, ~/.claude and ~/.config/claude.
-func (r *Resolver) claudeDirs() []string {
+// ClaudeDirs are the agent's user's Claude Code configuration directories:
+// $CLAUDE_CONFIG_DIR, ~/.claude and ~/.config/claude, each an absolute
+// path, without duplicates.
+func (r *Resolver) ClaudeDirs() []string {
 	h := r.home()
 	return uniq(r.expand(r.getenv("CLAUDE_CONFIG_DIR"), h), under(h, ".claude"), under(h, ".config/claude"))
 }
