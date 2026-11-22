@@ -56,7 +56,7 @@ func kimiCreds(access, refresh string, expiresAt int64) string {
 
 func newKimiFake(t *testing.T) *kimiFake {
 	oldWait, oldRetry, oldBackoff := kimiLockWait, kimiLockRetry, kimiBackoff
-	kimiLockWait, kimiLockRetry, kimiBackoff = 1500*time.Millisecond, 50*time.Millisecond, func(int) time.Duration { return 0 }
+	kimiLockWait, kimiLockRetry, kimiBackoff = 300*time.Millisecond, 50*time.Millisecond, func(int) time.Duration { return 0 }
 	t.Cleanup(func() { kimiLockWait, kimiLockRetry, kimiBackoff = oldWait, oldRetry, oldBackoff })
 	f := &kimiFake{api: newFakeAPI(t)}
 	f.e = testEnv(t, f.api)
@@ -317,6 +317,8 @@ func TestKimiLockStaleAndAbandoned(t *testing.T) {
 
 func TestKimiCLIRenewsMeanwhile(t *testing.T) {
 	f := newKimiFake(t)
+	// The CLI's lock is waited for longer than the CLI takes here.
+	kimiLockWait = 30 * time.Second
 	release := f.holdLock(t)
 	go func() {
 		time.Sleep(300 * time.Millisecond)

@@ -2,11 +2,13 @@ package detect
 
 import "time"
 
+// StartupGrace: after an agent appears, its screen is still the shell's
+// or its splash, so it is not read (herdr's, as the timing below). Tests
+// that go through a whole agent shorten it before the agent starts.
+var StartupGrace = 3 * time.Second
+
 // Timing of the state machine, herdr's (src/pane/agent_detection.rs).
 const (
-	// StartupGrace: after an agent appears, its screen is still the shell's
-	// or its splash, so it is not read.
-	StartupGrace = 3 * time.Second
 	// A change from working to idle without visible idle chrome is held
 	// until IdleConfirmations more reads (IdleRecheck apart) agree, or for
 	// at most IdleCap: a spinner between two frames reads as idle.

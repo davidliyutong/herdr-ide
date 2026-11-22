@@ -12,7 +12,7 @@ herdr-core, the terminal core the agents install on machines, into
 `dist/hc/` and embeds it.
 
 ```bash
-make deps            # pnpm install for web/, the extension and desktop/ (with Electron's binary)
+make deps            # pnpm install for web/, the extension, desktop/ (with Electron's binary) and e2e/
 make build           # web UI, extension, machine builds, core; release archives
 make test            # Go, web and desktop unit tests
 make check           # formatting, vet, typecheck, import cycles of the web UI, brand/doc consistency
@@ -33,6 +33,21 @@ isolated session `herdr-ide-it` with temporary state:
 without either the tests are skipped).
 `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned,
 verified executable for one platform to `<file>`, as CI does.
+
+`make e2e` runs the end-to-end tests (`e2e/`, Playwright with Chromium;
+not part of `make test`): `scripts/e2e.sh` builds the web UI, this
+platform's core with the pinned herdr-core and the fake coding agent
+(`e2e/fakeacp`, a scripted ACP agent installed as `kimi`) into
+`dist/e2e/`, then each test starts a core of its own with a temporary
+home under `/tmp/hie-*`, an instance `e2e-<random>`, a free loopback port,
+`--local-only` and no network, and stops its terminal core through that
+instance's API at the end. `make e2e E2E_ARGS='tests/chat.spec.ts'` runs
+one file; failures leave a trace in `dist/e2e/results/`
+(`pnpm -C e2e exec playwright show-trace <trace.zip>`). When you add a
+test, use the fixtures of `e2e/harness/fixtures.ts`, find elements by
+role and accessible name, and wait on conditions (`expect`, `waitFor`),
+never on time; read what a terminal shows with the terminal protocol
+client (`harness/term.ts`), since the page draws it on a canvas.
 
 Release archives are in `dist/release/`; the unpacked directories are in
 `dist/packages/`. herdr-core upgrades change the version and the four

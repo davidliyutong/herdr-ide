@@ -10,7 +10,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"herdr-ide/internal/agentproto"
 )
 
 // /list through a real agent: a directory of more names than a reply line
@@ -24,9 +27,11 @@ func TestListLargeAndEmptyDirectories(t *testing.T) {
 	big := filepath.Join(dir, "big")
 	os.MkdirAll(big, 0o755)
 	os.MkdirAll(filepath.Join(dir, "empty"), 0o755)
-	const n = 15000
+	// Long names: fewer files make more than a line.
+	const n = 4500
+	prefix := strings.Repeat("extracted-file-with-a-long-name-", 7)
 	for i := 0; i < n; i++ {
-		if err := os.WriteFile(filepath.Join(big, fmt.Sprintf("extracted-file-with-a-long-name-%06d.txt", i)), nil, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(big, fmt.Sprintf("%s%06d.txt", prefix, i)), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -46,8 +51,11 @@ func TestListLargeAndEmptyDirectories(t *testing.T) {
 		Name string `json:"name"`
 	}
 	json.Unmarshal(body["entries"], &entries)
-	if status != 200 || len(entries) != n || entries[0].Name != "extracted-file-with-a-long-name-000000.txt" {
+	if status != 200 || len(entries) != n || entries[0].Name != prefix+"000000.txt" {
 		t.Fatalf("large directory: %d, %d entries, %s", status, len(entries), body["error"])
+	}
+	if len(body["entries"]) <= agentproto.MaxHeaderLine {
+		t.Fatalf("the listing (%d bytes) fits in a line", len(body["entries"]))
 	}
 	if status, body := list(filepath.Join(dir, "empty")); status != 200 || string(body["entries"]) != "[]" {
 		t.Fatalf("empty directory: %d %s", status, body["entries"])

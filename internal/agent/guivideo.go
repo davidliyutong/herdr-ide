@@ -241,6 +241,10 @@ const (
 
 var videoFrameTimeout = 3 * time.Second
 
+// encoderExitWait is how long close waits for the encoder to exit on its
+// own before it kills it.
+var encoderExitWait = 2 * time.Second
+
 // startEncoder starts bin for a w×h window, making the first of kinds it
 // can. The process dies with the agent.
 func startEncoder(bin string, w, h int, kinds []string) (*videoEncoder, error) {
@@ -343,7 +347,7 @@ func (e *videoEncoder) close() {
 	}()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(encoderExitWait):
 		killGroup(e.cmd.Process.Pid)
 		<-done
 	}

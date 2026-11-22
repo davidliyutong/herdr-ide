@@ -1088,7 +1088,7 @@ export function Composer({
             type="button"
             className="primary conv-send"
             aria-label={queues ? t('conversation.queue') : t('conversation.send')}
-            title={queues ? t('conversation.queueHint') : t('conversation.sendHint')}
+            title={queues ? t('conversation.queueHint', { agent }) : t('conversation.sendHint')}
             disabled={!canSend}
             onClick={send}
           >

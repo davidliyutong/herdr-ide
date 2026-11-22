@@ -26,6 +26,10 @@ const (
 	maxValue = 64 << 10
 )
 
+// waitDelay is how long a command's output may stay open after it
+// returned, held by programs it left in the background.
+var waitDelay = 2 * time.Second
+
 // Runner runs run_with_env's commands.
 type Runner struct {
 	// MaxOutput is how much output is returned (default MaxOutput).
@@ -168,7 +172,7 @@ func (r Runner) Run(ctx context.Context, command string, env map[string]string, 
 	// hold the output's pipe), nor outlive it with the values in their
 	// environment: the group is killed whenever the command returns, and
 	// when the server is gone (watchServer).
-	cmd.WaitDelay = 2 * time.Second
+	cmd.WaitDelay = waitDelay
 	newGroup(cmd)
 	started, over, err := watchServer(cmd)
 	if err != nil {

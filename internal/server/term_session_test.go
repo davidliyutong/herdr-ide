@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"herdr-ide/internal/agent/detect"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/plugin"
@@ -238,6 +239,7 @@ func TestTermDetectHeader(t *testing.T) {
 // /ws message; switching the agents plugin off opens the detect stream
 // again without sessions, and the record loses it.
 func TestTermSessionFromTheMachine(t *testing.T) {
+	shortGrace(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	ps := []plugin.Plugin{agentsplugin.New()}
 	st := settings.New("", plugin.Settings(ps, nil))
@@ -479,4 +481,13 @@ func TestTermSwitchNotifiesOnce(t *testing.T) {
 			t.Fatalf("switch %d: /ws %q", i, got)
 		}
 	}
+}
+
+// shortGrace shortens the agents' startup grace for a test whose agent
+// runs in the test's process; registered before the server, it is
+// restored once the server and its agent are gone.
+func shortGrace(t *testing.T) {
+	old := detect.StartupGrace
+	detect.StartupGrace = 300 * time.Millisecond
+	t.Cleanup(func() { detect.StartupGrace = old })
 }

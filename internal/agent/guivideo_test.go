@@ -20,6 +20,7 @@ import (
 	"github.com/jezek/xgb/xproto"
 
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/testexec"
 )
 
 // TestHelperEncoder is not a test of its own: run through fakeEncoder, it
@@ -80,12 +81,7 @@ func TestHelperEncoder(t *testing.T) {
 
 // fakeEncoder is a script running TestHelperEncoder.
 func fakeEncoder(t *testing.T, env ...string) string {
-	p := filepath.Join(t.TempDir(), "encoder")
-	script := "#!/bin/sh\nexec env GUI_TEST_ENCODER=1 " + strings.Join(env, " ") + " " + os.Args[0] + " -test.run='^TestHelperEncoder$' -- \"$@\"\n"
-	if err := os.WriteFile(p, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return p
+	return testexec.Script(t, "encoder", "exec env GUI_TEST_ENCODER=1 "+strings.Join(env, " ")+" "+os.Args[0]+" -test.run='^TestHelperEncoder$' -- \"$@\"\n")
 }
 
 // The encoder process: the stream it chose, frames in and packets out,
@@ -144,9 +140,9 @@ func gzipped(b []byte) (*bytes.Buffer, string) {
 // An encoder that stops reading frames fails the frame within
 // videoFrameTimeout instead of holding the pump.
 func TestEncoderStall(t *testing.T) {
-	old := videoFrameTimeout
-	videoFrameTimeout = 300 * time.Millisecond
-	defer func() { videoFrameTimeout = old }()
+	old, oldExit := videoFrameTimeout, encoderExitWait
+	videoFrameTimeout, encoderExitWait = 300*time.Millisecond, 100*time.Millisecond
+	defer func() { videoFrameTimeout, encoderExitWait = old, oldExit }()
 	e, err := startEncoder(fakeEncoder(t, "GUI_TEST_ENCODER_STALL=1"), 256, 144, []string{"avc1"})
 	if err != nil {
 		t.Fatal(err)

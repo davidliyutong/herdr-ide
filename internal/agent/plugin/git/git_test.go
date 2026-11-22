@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 
 	"herdr-ide/internal/agent/plugin"
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/testexec"
 )
 
 // Paths from a request are literal: pathspec magic matches nothing, a
@@ -41,8 +43,7 @@ func TestLiteralPaths(t *testing.T) {
 	ok(t, env, "commit", Params{Repo: dir, Message: "star"}, nil)
 
 	marker := filepath.Join(env.Home, "hook.out")
-	write(t, filepath.Join(dir, ".git", "hooks", "pre-commit"), "#!/bin/sh\ngit diff --cached --name-only -- '*.txt' > '"+marker+"'\n")
-	os.Chmod(filepath.Join(dir, ".git", "hooks", "pre-commit"), 0o755)
+	testexec.ScriptAt(t, filepath.Join(dir, ".git", "hooks", "pre-commit"), "git diff --cached --name-only -- '*.txt' > '"+marker+"'\n")
 	ok(t, env, "stage", Params{Repo: dir, Paths: []string{"b.txt"}}, nil)
 	ok(t, env, "commit", Params{Repo: dir, Message: "b"}, nil)
 	if b, err := os.ReadFile(marker); err != nil || strings.TrimSpace(string(b)) != "b.txt" {
@@ -50,19 +51,35 @@ func TestLiteralPaths(t *testing.T) {
 	}
 }
 
+// TestMain runs the tests that may run at once at most four at a time:
+// more would wait for the runs' slots (MaxRuns).
+func TestMain(m *testing.M) {
+	flag.Parse()
+	if f := flag.Lookup("test.parallel"); f != nil {
+		if n, err := strconv.Atoi(f.Value.String()); err == nil && n > 4 {
+			f.Value.Set("4")
+		}
+	}
+	os.Exit(m.Run())
+}
+
 // testEnv is an agent's environment with HOME (so the global git
-// configuration) in a temporary directory; the setup's git reads no system
-// configuration.
+// configuration) in a temporary directory, for a test that runs while
+// others do (it changes nothing of the package's or the process's).
 func testEnv(t *testing.T) *plugin.Env {
+	t.Helper()
+	t.Parallel()
+	return serialEnv(t)
+}
+
+// serialEnv is testEnv for a test that changes the package's variables or
+// the process's environment, which runs alone.
+func serialEnv(t *testing.T) *plugin.Env {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	return &plugin.Env{
 		Home: home,
 		Expand: func(p string) (string, error) {
@@ -71,7 +88,18 @@ func testEnv(t *testing.T) *plugin.Env {
 			}
 			return filepath.Clean(p), nil
 		},
+		// The later of two values is the one a program gets.
+		Environ: func() []string {
+			return append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"))
+		},
 	}
+}
+
+// setupEnv is the environment of the tests' own runs of git: no system or
+// global configuration.
+func setupEnv() []string {
+	return append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_AUTHOR_DATE=2024-01-01T00:00:00Z", "GIT_COMMITTER_DATE=2024-01-01T00:00:00Z")
 }
 
 // sh runs git in dir for a test's setup.
@@ -79,7 +107,7 @@ func sh(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE=2024-01-01T00:00:00Z", "GIT_COMMITTER_DATE=2024-01-01T00:00:00Z")
+	cmd.Env = setupEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -364,7 +392,7 @@ func TestNotARepo(t *testing.T) {
 }
 
 func TestGitMissing(t *testing.T) {
-	env := testEnv(t)
+	env := serialEnv(t)
 	dir := newRepo(t, env)
 	old := lookGit
 	lookGit = func() (string, error) { return "", exec.ErrNotFound }
@@ -374,12 +402,10 @@ func TestGitMissing(t *testing.T) {
 
 // A run over its time is killed with its process group.
 func TestTimeout(t *testing.T) {
-	env := testEnv(t)
+	env := serialEnv(t)
 	dir := t.TempDir()
-	fake := filepath.Join(dir, "git")
 	// The fake git starts a child that would outlive it.
-	write(t, fake, "#!/bin/sh\nsleep 30 &\nsleep 30\n")
-	os.Chmod(fake, 0o755)
+	fake := testexec.ScriptAt(t, filepath.Join(dir, "git"), "sleep 30 &\nsleep 30\n")
 	old := lookGit
 	lookGit = func() (string, error) { return fake, nil }
 	defer func() { lookGit = old }()
@@ -393,7 +419,7 @@ func TestTimeout(t *testing.T) {
 		t.Errorf("took %s", d)
 	}
 	// Output over the limit ends the run too.
-	write(t, fake, "#!/bin/sh\nwhile :; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done\n")
+	testexec.ScriptAt(t, fake, "while :; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done\n")
 	_, err = execGit(context.Background(), env, dir, true, run{args: []string{"log"}, limit: 1000})
 	if !errors.As(err, &pe) || pe.Code != "too_large" {
 		t.Fatalf("err %v", err)
@@ -404,9 +430,7 @@ func TestTimeout(t *testing.T) {
 func fakeGit(t *testing.T, script string) string {
 	t.Helper()
 	dir := t.TempDir()
-	fake := filepath.Join(dir, "git")
-	write(t, fake, "#!/bin/sh\n"+script)
-	os.Chmod(fake, 0o755)
+	fake := testexec.ScriptAt(t, filepath.Join(dir, "git"), script)
 	old := lookGit
 	lookGit = func() (string, error) { return fake, nil }
 	t.Cleanup(func() { lookGit = old })
@@ -430,7 +454,10 @@ func killPids(t *testing.T, file string) {
 // the wait delay, and the program keeps running, also when it left the
 // process group.
 func TestBackgroundChild(t *testing.T) {
-	env := testEnv(t)
+	env := serialEnv(t)
+	old := waitDelay
+	waitDelay = 200 * time.Millisecond
+	defer func() { waitDelay = old }()
 	detach := ""
 	if p, err := exec.LookPath("setsid"); err == nil {
 		detach = p
@@ -452,8 +479,9 @@ func TestBackgroundChild(t *testing.T) {
 				t.Fatalf("res %+v err %v", res, err)
 			}
 			// Well before the child's 30 s and the read's 15 s limit: the
-			// run does not wait for the child (bounds are generous, the
-			// whole suite may run at once on a loaded machine).
+			// run does not wait for the child, only the wait delay (bounds
+			// are generous, the whole suite may run at once on a loaded
+			// machine).
 			if d := time.Since(start); d > 10*time.Second {
 				t.Errorf("took %s", d)
 			}
@@ -485,7 +513,7 @@ func TestBackgroundChild(t *testing.T) {
 
 // At most MaxRuns runs at once; another waits briefly, then fails busy.
 func TestBusy(t *testing.T) {
-	env := testEnv(t)
+	env := serialEnv(t)
 	pids := filepath.Join(t.TempDir(), "pids")
 	killPids(t, pids)
 	dir := fakeGit(t, "echo $$ >> "+pids+"\nexec sleep 30\n")
@@ -529,12 +557,8 @@ func TestReadsRunNoMonitor(t *testing.T) {
 	env := testEnv(t)
 	dir := newRepo(t, env)
 	marker := filepath.Join(env.Home, "marker")
-	hook := filepath.Join(env.Home, "fsmonitor.sh")
-	write(t, hook, "#!/bin/sh\ntouch "+marker+"\nexit 1\n")
-	os.Chmod(hook, 0o755)
-	tc := filepath.Join(env.Home, "textconv.sh")
-	write(t, tc, "#!/bin/sh\ntouch "+marker+".tc\ncat \"$1\"\n")
-	os.Chmod(tc, 0o755)
+	hook := testexec.ScriptAt(t, filepath.Join(env.Home, "fsmonitor"), "touch "+marker+"\nexit 1\n")
+	tc := testexec.ScriptAt(t, filepath.Join(env.Home, "textconv"), "touch "+marker+".tc\ncat \"$1\"\n")
 	sh(t, dir, "config", "core.fsmonitor", hook)
 	sh(t, dir, "config", "diff.evil.textconv", tc)
 	write(t, filepath.Join(dir, ".gitattributes"), "*.txt diff=evil\n")
@@ -956,6 +980,7 @@ func TestWatch(t *testing.T) {
 	// Refs in reftable (git 2.45 and later).
 	rt := filepath.Join(env.Home, "rt")
 	cmd := exec.Command("git", "init", "-q", "-b", "main", "--ref-format=reftable", rt)
+	cmd.Env = setupEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("no reftable: %s", out)
 	}
@@ -1056,7 +1081,7 @@ func TestParseStatusCut(t *testing.T) {
 
 // A run with keep that prints more than its limit is cut, not failed.
 func TestKeepCut(t *testing.T) {
-	env := testEnv(t)
+	env := serialEnv(t)
 	dir := fakeGit(t, "while :; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done\n")
 	res, err := execGit(context.Background(), env, dir, true, run{args: []string{"status"}, limit: 1000, keep: true})
 	if err != nil || !res.cut || len(res.out) == 0 || len(res.out) > 1000 {
@@ -1073,7 +1098,7 @@ func TestStatusWithoutIgnoredMode(t *testing.T) {
 		"unknown mode": "echo \"fatal: Invalid ignored mode 'matching'\" >&2; exit 128",
 	} {
 		t.Run(name, func(t *testing.T) {
-			env := testEnv(t)
+			env := serialEnv(t)
 			dir := fakeGit(t, `for a in "$@"; do
   if [ "$a" = --ignored=matching ]; then `+refusal+`; fi
 done
@@ -1121,7 +1146,7 @@ func TestManyPaths(t *testing.T) {
 // A run that cannot start fails as what kept it: no git, no directory, or
 // an argument list over the system's limit (not "git is missing").
 func TestStartError(t *testing.T) {
-	env := testEnv(t)
+	env := serialEnv(t)
 	dir := newRepo(t, env)
 	code := func(err error) string {
 		var pe *plugin.Error
@@ -1458,7 +1483,7 @@ func gitAtLeast(t *testing.T, major, minor int) bool {
 // A remote that asks for a password fails with auth_required instead of
 // waiting for one.
 func TestAuthRequired(t *testing.T) {
-	env := testEnv(t)
+	env := serialEnv(t)
 	dir := newRepo(t, env)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="git"`)
@@ -1535,6 +1560,7 @@ func TestRangePatchVectors(t *testing.T) {
 		}
 		cmd := exec.Command("git", "cat-file", "blob", ":0:"+v.Path)
 		cmd.Dir = dir
+		cmd.Env = setupEnv()
 		got, err := cmd.Output()
 		if err != nil {
 			t.Fatal(err)

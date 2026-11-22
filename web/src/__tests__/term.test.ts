@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TermConnection, type Socket, type StreamHandler } from '../term/connection';
 import {
   adoptDirectory,
@@ -423,12 +423,16 @@ describe('terminal connection', () => {
     s.text({ t: 'attached', rid: 4, s: 6 });
     await again;
     const pending = conn.call('x', 'terminal.list');
+    // The wait before connecting again passes on a fake clock.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     s.onclose!();
     await expect(pending).rejects.toMatchObject({ kind: 'unavailable' });
     expect(events[3]).toBe('closed:disconnected:undefined');
     expect(ups).toEqual([true, false]);
     expect(conn.connected).toBe(false);
-    await new Promise((r) => setTimeout(r, 600));
+    vi.advanceTimersByTime(499);
+    expect(sockets.length).toBe(1);
+    vi.advanceTimersByTime(1);
     expect(sockets.length).toBe(2);
     sockets[1].onopen!();
     expect(sockets[1].sent).toEqual([
@@ -439,7 +443,8 @@ describe('terminal connection', () => {
     conn.unsubscribe('y');
     expect(sockets[1].sent[2]).toEqual({ t: 'unsub', m: 'y' });
     conn.close();
-    await new Promise((r) => setTimeout(r, 600));
+    vi.advanceTimersByTime(10_000);
+    vi.useRealTimers();
     expect(sockets.length).toBe(2);
   });
 });

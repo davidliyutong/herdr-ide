@@ -131,6 +131,7 @@ while :; do sleep 1; done
 // to /api/v1/term and /ws: working, blocked, done. Not being Claude Code,
 // it has no session.
 func TestIntegrationDetect(t *testing.T) {
+	shortGrace(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	s, _ := hcServer(t)
 	dir, err := os.MkdirTemp("/tmp", "hcd")

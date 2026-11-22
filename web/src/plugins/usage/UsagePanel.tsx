@@ -7,7 +7,7 @@
 // pace marker and how far ahead of an even pace they are), credits and
 // balances, incidents of its status page and the machines it was seen on,
 // and its own spend.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../state/store';
@@ -82,6 +82,21 @@ export function UsagePanel() {
       document.removeEventListener('visibilitychange', look);
     };
   }, []);
+  // The user's prices and the providers shown change what the logs cost:
+  // the report is read again when they change, not at its next refresh.
+  const pricing = useSettings((s) =>
+    JSON.stringify(
+      Object.entries(s.values)
+        .filter(([k]) => k === 'usage.prices' || k.startsWith('usage.providers.'))
+        .map(([k, v]) => [k, v?.value]),
+    ),
+  );
+  const pricingSeen = useRef(pricing);
+  useEffect(() => {
+    if (pricingSeen.current === pricing) return;
+    pricingSeen.current = pricing;
+    void fetchCost();
+  }, [pricing]);
   const accounts = useMemo(() => sortAccounts(snapshot?.accounts ?? []), [snapshot]);
   const providers = useMemo(() => shownProviders(accounts, cost), [accounts, cost]);
   // DeepSeek's page has the form for its key, so it opens without one.

@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/yamux"
 
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/testexec"
 )
 
 // pair connects a core session to a bare yamux server standing in for the
@@ -71,10 +72,7 @@ func TestStopMasterArgs(t *testing.T) {
 	}
 	bin := t.TempDir()
 	out := filepath.Join(t.TempDir(), "args")
-	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + out + "\n"
-	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	testexec.ScriptAt(t, filepath.Join(bin, "ssh"), "for a in \"$@\"; do printf '%s\\n' \"$a\"; done > "+out+"\n")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	SSHOptions{Target: "user@gpu", ControlDir: "/tmp/ctl", Logger: log.New(io.Discard, "", 0)}.stopMaster()
 	got, err := os.ReadFile(out)

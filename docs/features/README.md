@@ -9,8 +9,8 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | # | Feature | Summary |
 | --- | --- | --- |
 | 02 | [Multi-machine transport](02-multi-machine-transport.md) | One ssh session per machine running a static agent; yamux multiplexing; platform detection and upload. |
-| 04 | [Layout and keyboard](04-layout-and-keyboard.md) | Workspaces, tabs and split panes of the machine's layout document; direct shortcuts of the desktop app as the only default keys (no prefix: other keys reach the terminal), chords for users who bind them; command palette. |
-| 05 | [VS Code panes](05-vscode-panes.md) | code-server per machine behind the core's proxy, VS Code as a pane of the split tree; bridge extension; Git Graph and diffs. |
+| 04 | [Layout and keyboard](04-layout-and-keyboard.md) | Workspaces, tabs and split panes of the machine's layout document; direct shortcuts that leave other keys to the terminal; command palette. |
+| 05 | [VS Code panes](05-vscode-panes.md) | code-server per machine behind the core's proxy as a pane of the split tree; bridge extension; Git Graph and diffs. |
 | 06 | [Quick Look and files](06-quick-look-and-files.md) | Path detection in terminals, media preview with range streaming, uploads for agents, downloads with folders as zips. |
 | 07 | [Agent-native workflow](07-agent-native-workflow.md) | Attention inbox, notifications, starting agents, sending code to agents; chats count as agents do. |
 | 08 | [Web access and security](08-web-access-and-security.md) | Browser/PWA delivery, reverse-proxy model and the guardrails around it. |
@@ -18,27 +18,27 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 10 | [Remote resource lifecycle](10-remote-resource-lifecycle.md) | Ownership and reclamation of every process and file created on machines. |
 | 11 | [Naming and renames](11-naming-and-renames.md) | Centralized product names, one-step renames and migration of persisted state. |
 | 12 | [Internationalization](12-internationalization.md) | English and Chinese UI, translated extension, codes instead of server prose. |
-| 13 | [Settings, keybindings and appearance](13-settings-and-appearance.md) | One settings and one keybinding system in the core, VS Code style files, a settings UI generated from the definitions; themes, terminal font, colors and cursor; a Performance page with what the app uses now. |
-| 14 | [GUI windows](14-gui-windows.md) | Windows of programs on remote machines in browser windows: a user-space display tied to the terminal core (Xwayland drawing with the GPU where there is one, else Xvfb), per-window capture as pictures or video, VirtualGL, the GPU a program chose on machines with several. |
-| 16 | [Desktop app](16-desktop-packaging.md) | The web UI in an Electron shell for macOS, Windows and Linux: an owned core (SSH machines only on Windows), each system's menu, quitting and installers (DMG, NSIS setup, AppImage, deb), theme and language from the core's settings and keybindings. |
-| 19 | [Formulas in panes](19-formulas-in-panes.md) | LaTeX under the resting pointer typeset by KaTeX in a popover; the spellings agents print, also without dropped backslashes. |
-| 21 | [herdr-core terminal core](21-terminal-core.md) | A herdr-core of the agent's own on each machine, in a session apart from the user's, and a client of its API: terminals as raw byte streams with credit. |
-| 22 | [Terminal protocol for clients](22-terminal-protocol.md) | `/api/v1/term`: a machine's terminals, their events and raw byte streams for clients that emulate and draw terminals themselves, and the layout document those clients share. |
-| 24 | [Design tokens and design language](24-design-tokens.md) | One file of colors, color themes, Git and chart colors, sizes, the type scale and terminal palettes, generated into the web UI's CSS variables and the settings' defaults; the chrome's shared sizes and components. |
-| 25 | [Agent detection in terminals](25-agent-detection.md) | herdr's method for the terminal core's terminals: the foreground process names the agent, herdr's rules over the screen give its state, done when a turn ends; with the agents plugin on, the session Claude Code or Codex runs; in the agent, next to the terminals. |
-| 26 | [Web terminals](26-web-terminals.md) | Ghostty's terminal library as WebAssembly emulates the browser's terminals; WebGL2 (or Canvas 2D) draws them; keys, mouse and pastes encoded for each program's modes; selections, links, clipboard and find in the page. |
-| 27 | [Plugins](27-plugins.md) | Features built in with one shape on each side: routes below `/api/p/<id>` and `/api/m/{id}/p/<id>`, the agent's `plugin` op, panels of the right sidebar, panes of their own with agent statuses, new-tab items, buttons in terminals' headers, commands and status bar items; a switch per plugin. |
-| 28 | [File explorer](28-file-explorer.md) | A tree of the machine's files in the right sidebar following the focused terminal (VS Code's explorer: keys, menu, drags, uploads, the trash), and an editor pane (Monaco) whose saves never overwrite a change made on the machine. |
-| 29 | [AI usage](29-ai-usage.md) | The AI subscriptions signed in on the machines (Claude, Codex, Grok, Antigravity, Kimi Code, DeepSeek): windows, resets, pace, credits and balances per account across machines, status pages, alerts, the local logs' cost at API prices, and the focused agent's session in the status bar. |
-| 30 | [Variable vault](30-variable-vault.md) | Environment variables encrypted on the core host (key in the system keychain or from a passphrase) that coding agents on every machine read through an MCP server, per machine allowed or approved in the UI. |
-| 31 | [Git](31-git.md) | VS Code's Source Control and the Git Graph extension without VS Code: a panel for the focused pane's repository (stage, commit, branches, stashes, fetch, pull, push), a graph pane with lanes, badges, details and context menus, diffs in Monaco with selected ranges staged as patches; git run with fixed arguments on machines. |
-| 32 | [Browser pane and port forwards](32-browser-and-ports.md) | A tab that shows a web page: a machine's `localhost` service through a forward on the core host's loopback (as `ssh -L`), kept another origin than the UI; links of terminals open there; a menu of the kinds of tab. |
-| 33 | [Workspaces after the terminal core starts again](33-workspace-restore.md) | After a reboot or a stopped terminal core the layout's tabs come back as shells in their directories (kept terminals at their addresses, the others replaced by the page), and Claude Code and Codex come back in their own session once the machine confirms it, else in the directory's latest conversation, by the commands of the agent kind registry. |
-| 34 | [System monitor and task manager](34-system-monitor.md) | Live CPU, memory, per-GPU, network and disk dashboard on ⌘+hover over sidebar machines and from an upward-floating status bar menu, plus a searchable Task Manager panel/pane with parent-child tree view and guarded process signaling. |
-| 35 | [Coding agents' sessions and transcripts](35-agent-native-view.md) | The agent kind registry; the session an agent's process runs, found on the machine, which a restore resumes once the machine confirms it; a session's transcript read on its machine into ACP-shaped events, which imports into chats use; the conversation view's components (Markdown, tool calls, diffs, plan), which chat panes draw. |
-| 36 | [Terminal history](36-terminal-history.md) | Opt-in snapshots of the terminals' output on each machine's disk, within hard limits, shown above the new shell of a terminal whose program was replaced when its terminal core started again. |
-| 37 | [Agent chats](37-agent-chats.md) | Claude Code, Codex, Kimi Code and Grok run headless by a chat host on each machine (a hidden terminal of its terminal core) through their own protocols (the Agent SDK's, Codex's app-server, ACP), their conversations kept in a journal within bounds and drawn in panes: streaming, permissions, questions and plans answered in cards, model, effort and mode, full access only where allowed, trusted folders, images, queued messages, usage and limits; sessions imported from terminals and continued in them. |
-| 38 | [State in SQLite](38-sqlite-state.md) | One private SQLite database per owner (the core's, a machine's, the chat host's), named per host on shared homes, schemas versioned per feature, a newer one read and not written; the terminal history, the vault's access log, the usage history and the cost cache imported once from their earlier files. |
+| 13 | [Settings, keybindings and appearance](13-settings-and-appearance.md) | One settings and one keybinding system in the core, VS Code style files and a generated settings UI; themes, terminal font and colors. |
+| 14 | [GUI windows](14-gui-windows.md) | Windows of programs on remote Linux machines in browser windows: a display per terminal core (Xwayland on the GPU, else Xvfb), captured as pictures or video. |
+| 16 | [Desktop app](16-desktop-packaging.md) | The web UI in an Electron shell for macOS, Windows and Linux with a core of its own, each system's menus and installers. |
+| 19 | [Formulas in panes](19-formulas-in-panes.md) | LaTeX under the resting pointer typeset by KaTeX in a popover. |
+| 21 | [herdr-core terminal core](21-terminal-core.md) | A herdr-core of the agent's own on each machine, in a session apart from the user's; terminals as raw byte streams with credit. |
+| 22 | [Terminal protocol for clients](22-terminal-protocol.md) | `/api/v1/term`: a machine's terminals, events and byte streams for clients that emulate terminals themselves, and the shared layout document. |
+| 24 | [Design tokens and design language](24-design-tokens.md) | One file of colors, themes, sizes and terminal palettes, generated into the web UI's CSS variables and the settings' defaults. |
+| 25 | [Agent detection in terminals](25-agent-detection.md) | herdr's rules in the agent: the foreground process names the agent, the screen gives its state; the session Claude Code or Codex runs. |
+| 26 | [Web terminals](26-web-terminals.md) | Ghostty's terminal library as WebAssembly emulates the terminals, WebGL2 draws them; input encoded for each program's modes. |
+| 27 | [Plugins](27-plugins.md) | Built-in features with one shape: routes, the agent's `plugin` op, sidebar panels, panes with agent statuses, commands and status bar items; a switch per plugin. |
+| 28 | [File explorer](28-file-explorer.md) | A tree of the machine's files following the focused terminal, and an editor whose saves never overwrite a change made on the machine. |
+| 29 | [AI usage](29-ai-usage.md) | The AI subscriptions signed in on the machines: windows, resets, pace and balances per account, alerts, the local logs' cost at API prices, and the focused agent session's cost. |
+| 30 | [Variable vault](30-variable-vault.md) | Environment variables encrypted on the core host that coding agents read through an MCP server, allowed per machine or approved in the UI. |
+| 31 | [Git](31-git.md) | Source Control and Git Graph without VS Code: a panel, a graph pane and diffs in Monaco; git run with fixed arguments on machines. |
+| 32 | [Browser pane and port forwards](32-browser-and-ports.md) | A tab that shows a machine's `localhost` service through a loopback forward on the core host, kept another origin than the UI. |
+| 33 | [Workspaces after the terminal core starts again](33-workspace-restore.md) | The layout's tabs come back as shells in their directories, and Claude Code and Codex resume their own session, else the directory's latest. |
+| 34 | [System monitor and task manager](34-system-monitor.md) | Live CPU, memory, GPU, network and disk per machine, and a task manager with a process tree and guarded signals. |
+| 35 | [Coding agents' sessions and transcripts](35-agent-native-view.md) | The agent kind registry; the session an agent's process runs; transcripts read on the machine into ACP-shaped events; the conversation view's components. |
+| 36 | [Terminal history](36-terminal-history.md) | Opt-in snapshots of terminal output on each machine's disk, within limits, shown above the new shell after the terminal core restarted. |
+| 37 | [Agent chats](37-agent-chats.md) | Claude Code, Codex, Kimi Code and Grok run headless by a chat host on each machine and drawn in panes; a bounded journal; sessions moved between terminals and chats. |
+| 38 | [State in SQLite](38-sqlite-state.md) | One private SQLite database per owner, named per host on shared homes, schemas versioned per feature; earlier state files imported once. |
 
 ## Writing a feature document
 
@@ -52,6 +52,12 @@ Use the same sections so documents stay comparable:
 6. **Security** – only when the feature affects the threat model in
    [SECURITY.md](../../SECURITY.md).
 7. **Testing** – where the behavior is covered.
+
+Keep documents short. State what the feature does for the user, the design
+and its key decisions with their reasons, the invariants that must hold,
+and where the code lives. Leave out what the code and tests already state
+line by line, edge-case enumerations, history and trivia such as exact
+timeouts; link to another document instead of repeating it.
 
 Describe the system as it is. Open questions and planned work are tracked in
 the issue tracker, not in these documents. Update the document in the same

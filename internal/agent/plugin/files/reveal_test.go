@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"herdr-ide/internal/testexec"
 )
 
 // The command each system shows a path with: the program by its absolute
@@ -65,10 +67,7 @@ func fakeReveal(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
 	out := filepath.Join(dir, "args")
-	script := filepath.Join(dir, "reveal.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+out+"\n"+body), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	script := testexec.ScriptAt(t, filepath.Join(dir, "reveal"), "printf '%s\\n' \"$@\" > "+out+"\n"+body)
 	was := revealCommand
 	revealCommand = func(goos, p string, dir bool) []string {
 		if dir {
@@ -172,12 +171,15 @@ func TestRevealLeavesTheFileManager(t *testing.T) {
 }
 
 // A command that does not exit (an xdg-open running the file manager
-// itself) is answered for after revealWait and frees its place then;
+// itself) is answered for after revealWait and frees its place then (or when it exits);
 // beyond maxRevealing waited for at once, reveal is busy.
 func TestRevealWaitsBounded(t *testing.T) {
 	env := testEnv(t)
 	shortWait(t, 100*time.Millisecond)
-	fakeReveal(t, "exec sleep 2\n")
+	// The commands run until the test lets them go.
+	release := filepath.Join(t.TempDir(), "release")
+	t.Cleanup(func() { os.WriteFile(release, nil, 0o600) })
+	fakeReveal(t, "while [ ! -e "+release+" ]; do sleep 0.02; done\n")
 	start := time.Now()
 	if rep := call(t, env, "reveal", Params{Path: "~"}); !rep.OK {
 		t.Fatalf("reveal: %s", rep.Code)
@@ -186,7 +188,7 @@ func TestRevealWaitsBounded(t *testing.T) {
 		t.Fatalf("answered after %v, %d places held", d, len(revealGate))
 	}
 
-	revealWait = 2 * time.Second
+	revealWait = 30 * time.Second
 	var wg sync.WaitGroup
 	for i := 0; i < maxRevealing; i++ {
 		wg.Add(1)
@@ -203,6 +205,8 @@ func TestRevealWaitsBounded(t *testing.T) {
 	if rep := call(t, env, "reveal", Params{Path: "~"}); rep.OK || rep.Code != "busy" {
 		t.Fatalf("over the bound: %v %s", rep.OK, rep.Code)
 	}
+	// The commands exit: their places are free.
+	os.WriteFile(release, nil, 0o600)
 	wg.Wait()
 	if len(revealGate) != 0 {
 		t.Fatalf("%d places held after the waits", len(revealGate))

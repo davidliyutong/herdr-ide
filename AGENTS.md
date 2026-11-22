@@ -34,6 +34,7 @@ extension.
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
 | Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
+| End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium; builds into `dist/e2e` (not part of `make test`) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
 | macOS: build the `.app` and install it into `/Applications` | `make desktop-install` |
@@ -46,8 +47,9 @@ Run `make check test` before finishing a change.
 
 1. **Never touch the user's real instance or terminals.** Experiments,
    tests and dev servers use `--instance dev` (state in `~/.herdr-ide-dev`,
-   terminal core session `herdr-ide-dev`) or the integration tests'
-   session `herdr-ide-it`; the desktop app's instance (`desktop`) and the
+   terminal core session `herdr-ide-dev`), the integration tests'
+   session `herdr-ide-it` or the end-to-end tests' instances `e2e-<random>`
+   (homes in `/tmp/hie-*`); the desktop app's instance (`desktop`) and the
    default one are the user's. Stop a terminal core only through its own
    instance (`POST /api/m/{id}/hc/stop` of the dev core), never the user's,
    and do not attach to the user's terminals.

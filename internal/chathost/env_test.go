@@ -21,17 +21,14 @@ import (
 	"time"
 
 	"herdr-ide/internal/brand"
+	"herdr-ide/internal/testexec"
 )
 
 // fakeShell writes a shell script that stands in for the user's shell and
 // returns its path.
 func fakeShell(t *testing.T, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "fakeshell")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return testexec.Script(t, "fakeshell", body)
 }
 
 // pidIn is the process a script wrote into a file ("echo $$ > file").

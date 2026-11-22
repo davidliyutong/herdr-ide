@@ -1,0 +1,21 @@
+{
+  "name": "e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "End-to-end tests: the real core binary on an isolated instance, driven through a browser",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit -p .",
+    "format": "prettier --write \"**/*.ts\"",
+    "format:check": "prettier --check \"**/*.ts\""
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.6",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2"
+  },
+  "packageManager": "pnpm@12.8.1"
+}

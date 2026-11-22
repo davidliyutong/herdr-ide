@@ -4,7 +4,7 @@ DEV_LISTEN ?= 127.0.0.1:7790
 SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/brand.go)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test check tokens vt-wasm gpupick it dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test check tokens vt-wasm gpupick it e2e dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
@@ -13,6 +13,7 @@ deps:
 	pnpm -C web install --frozen-lockfile
 	pnpm -C $(EXT) install --frozen-lockfile
 	pnpm -C desktop install --frozen-lockfile
+	pnpm -C e2e install --frozen-lockfile
 
 build:
 	scripts/build.sh
@@ -31,6 +32,8 @@ check:
 	pnpm -C $(EXT) format:check
 	pnpm -C desktop typecheck
 	pnpm -C desktop format:check
+	pnpm -C e2e typecheck
+	pnpm -C e2e format:check
 
 # The design tokens of the web UI and the core's terminal color defaults,
 # from design/tokens.json; then what the clients take from the registered
@@ -55,6 +58,12 @@ it:
 	go test -tags integration -count=1 ./internal/agent/plugin/history -run Integration -v
 	go test -tags integration -count=1 ./internal/hc -run Integration -v
 	go test -tags integration -count=1 ./internal/server -run Integration -v
+
+# End-to-end tests: the core of this platform on isolated instances,
+# driven through Chromium (e2e/, scripts/e2e.sh); not part of make test.
+# Arguments for Playwright: make e2e E2E_ARGS='tests/chat.spec.ts'.
+e2e:
+	scripts/e2e.sh $(E2E_ARGS)
 
 dev-core:
 	go run ./cmd/$(SLUG) --instance dev --local-only --listen $(DEV_LISTEN) --agent-dir dist/agents

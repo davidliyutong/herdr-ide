@@ -216,6 +216,10 @@ func TestRunLimits(t *testing.T) {
 	if !failed || !strings.Contains(out, "timed out after 300ms") || time.Since(start) > 10*time.Second {
 		t.Errorf("timeout %q after %v", out, time.Since(start))
 	}
+	out, failed = Runner{DefaultTimeout: 200 * time.Millisecond}.Run(context.Background(), "sleep 30", nil, "", 0)
+	if !failed || !strings.Contains(out, "timed out after 200ms") {
+		t.Errorf("default timeout %q", out)
+	}
 	out, failed = r.Run(context.Background(), "exit 3", nil, t.TempDir(), 0)
 	if !failed || !strings.HasPrefix(out, "exit status: 3") {
 		t.Errorf("exit %q", out)
@@ -247,11 +251,14 @@ func TestRunLimitsFromTheCore(t *testing.T) {
 	if txt, _ := call("yes abcdefghij | head -c 5000", 0); !strings.Contains(txt, "[output truncated: 50 of 5000 bytes]") {
 		t.Errorf("output %q", txt)
 	}
-	if txt, failed := call("sleep 30", 0); !failed || !strings.Contains(txt, "timed out after 1s") {
-		t.Errorf("default timeout %q", txt)
+	// The call's own timeout, under the core's longest.
+	if txt, failed := call("sleep 30", 0.2); !failed || !strings.Contains(txt, "timed out after 200ms") {
+		t.Errorf("the call's timeout %q", txt)
 	}
-	if txt, failed := call("sleep 30", 600); !failed || !strings.Contains(txt, "timed out after 2s") {
-		t.Errorf("longest timeout %q", txt)
+	// The core's timeouts, in seconds, become the runner's; that a
+	// runner's default and longest timeouts end a command is TestRunLimits'.
+	if r := (Runner{}).with(run); r != (Runner{MaxOutput: 50, DefaultTimeout: time.Second, MaxTimeout: 2 * time.Second}) {
+		t.Errorf("with the core's limits %+v", r)
 	}
 	r := Runner{}.with(nil)
 	if r != (Runner{}) {

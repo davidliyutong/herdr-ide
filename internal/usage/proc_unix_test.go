@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"herdr-ide/internal/testexec"
 )
 
 // fakeAgy writes a script that leaves `sleep 300` behind and records its
@@ -18,15 +20,13 @@ import (
 func fakeAgy(t *testing.T, wait bool) (bin, pidFile string) {
 	dir := t.TempDir()
 	bin, pidFile = filepath.Join(dir, "agy"), filepath.Join(dir, "sleep.pid")
-	script := "#!/bin/sh\nsleep 300 >/dev/null 2>&1 &\necho $! > " + pidFile + "\n"
+	script := "sleep 300 >/dev/null 2>&1 &\necho $! > " + pidFile + "\n"
 	if wait {
 		script += "wait\n"
 	} else {
 		script += "echo '{\"models\":[{\"model\":\"m\",\"remainingFraction\":0.5}]}'\n"
 	}
-	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testexec.ScriptAt(t, bin, script)
 	return bin, pidFile
 }
 

@@ -501,6 +501,7 @@ describe('a message sent while a turn runs', () => {
     await show(s);
     const send = q<HTMLButtonElement>('.conv-send')!;
     expect(send.getAttribute('aria-label')).toBe(t('conversation.queue'));
+    expect(send.getAttribute('title')).toBe(t('conversation.queueHint', { agent: 'Claude Code' }));
     expect(field().placeholder).toBe(t('conversation.composer.queuePlaceholder', { agent: 'Claude Code' }));
     await type('and also this');
     await key({ key: 'Enter' });

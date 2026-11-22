@@ -4,695 +4,443 @@
 
 Programs started in panes on remote machines sometimes open windows: a
 matplotlib figure, the MuJoCo viewer, a Qt tool. Over plain ssh they fail
-(`cannot open display`) or fall back to no output. Machines are typically
-shared servers and workstations where the user has no root, so nothing may
-require installing system packages, and nothing may listen on TCP. What is
-needed is the program's window, not a remote desktop. Such programs often
-draw with the GPU: OpenGL (MuJoCo), or Vulkan, which a simulator like Isaac
-Sim cannot do without, and on a server with several GPUs the user picks the
-one that is free.
+(`cannot open display`). Machines are typically shared servers where the
+user has no root, so nothing may require installing system packages, and
+nothing may listen on TCP. What is needed is the program's window, not a
+remote desktop. Such programs often draw with the GPU (OpenGL, or Vulkan,
+which Isaac Sim requires), and on a server with several GPUs the user picks
+the one that is free.
 
 ## Goals / non-goals
 
-Goals: windows of programs on remote Linux machines appear in the browser,
-one browser window per program window, with keyboard and mouse; no
-privileged installation; OpenGL and Vulkan programs render on the machine's
-GPU where it has one, on the GPU the user chose where it has several;
-programs survive network interruptions; nothing to configure for the common
-case.
+Goals:
+
+- windows of programs on remote Linux machines appear in the browser, one
+  browser window per program window, with keyboard and mouse;
+- no privileged installation;
+- OpenGL and Vulkan render on the machine's GPU, on the one the user chose
+  where there are several;
+- programs survive network interruptions;
+- nothing to configure for the common case.
 
 Non-goals: a full remote desktop; the local machine (its windows already
-open on the user's screen); macOS machines (capturing their windows needs a
-permission that can only be granted in a GUI session); audio, clipboard and
-input methods.
+open on the user's screen); macOS machines (capturing windows needs a
+permission granted only in a GUI session); audio, clipboard and input
+methods.
 
 ## Design
 
-**Display** (agent `internal/agent/gui.go`)
+One X display per instance and machine; the agent is its window manager
+and captures each top-level window separately; the core routes the frames
+to browser windows and their input back.
 
-- Each instance has one virtual display per machine, an X server of one of
-  two kinds. The plain one is Xvfb, which draws in memory: found on `PATH`,
-  in `/usr/bin` or `/usr/local/bin`, or else fetched with
-  `apt-get download xvfb` (no privileges; apt checks the package against its
-  signed lists) and unpacked with `dpkg-deb -x` into
-  `~/.herdr-ide/xvfb/<version>/` (shared by instances). The unpacked server
-  uses the libraries, `xkbcomp` and keyboard data that a desktop or Xwayland
-  already put on the machine; it was verified on Ubuntu 24.04 machines that
-  have no Xvfb.
-- The GPU display is Xwayland (found in the same places, never fetched)
-  drawing with a GPU through glamor, which gives its clients DRI3: OpenGL
-  and Vulkan drivers then render on the GPU and hand the X server finished
-  buffers, without VirtualGL. Xwayland shows its screen in a window of a
-  Wayland compositor, and machines have none. Nobody looks at that window
-  (the agent captures the windows of programs from the X side, below), so
-  the compositor is the agent's own and shows nothing
-  (`internal/agent/guiwl.go`): the machine's binary run as `gui-wl`, a
-  Wayland server for one client. It offers what Xwayland needs to start
-  with a GPU (`wl_compositor`, `wl_shm`, `wl_output`, `xdg_wm_base`, and
-  `wl_drm`, which names the GPU's render node and without which Xwayland
-  before 24.1 does not use glamor), configures the one toplevel, releases
-  every buffer as soon as it is committed (closing its descriptor unread)
-  and answers frame callbacks 60 times a second while there are any, so an
-  idle display costs nothing. The two talk over a socket pair, each with its
-  end as descriptor 3 (`WAYLAND_SOCKET`): no Wayland socket exists on disk.
-  The compositor ends when Xwayland does; a client that breaks the protocol
-  is left.
-- Which kind starts is the setting `gui.display`: `auto` (the default)
-  takes the GPU display where the machine has an Xwayland whose
-  `-terminate` takes a delay and a GPU whose render node the user may open,
-  `xvfb` always the plain one. Xwayland that does not come up, or comes up
-  drawing on the CPU (no DRI3: glamor did not work with the GPU), is ended
-  and Xvfb started instead; that agent does not try again, the next
-  connection does. A display of another kind than asked for (after the
-  setting changed, or a machine that got its display from an earlier build)
-  is replaced while nothing but the instance's own processes is connected
-  to it (the X-Resource extension names every client's process); with a
-  program on it, it stays until it ended. Terminals keep their `DISPLAY`:
-  the number and the cookie file are the same.
-- The display number is reserved in `run/gui.json` (from `:20`) and kept
-  across restarts, so panes keep a valid `DISPLAY`. The socket has to be
-  `/tmp/.X11-unix/X<n>`: libxcb before 1.16 (Ubuntu 24.04 ships 1.15) cannot
-  use a socket path in `DISPLAY`, and on Linux it tries the abstract socket
-  of the same name first. Anyone can create those, and X clients cannot
-  authenticate the server, so a number is used only while no lock file,
-  socket or listener of another user is on it (and `/tmp/.X11-unix` is a
-  directory of root or the user that is sticky or not writable by group and
-  others); otherwise another one is reserved.
-  The agent sends the cookie only to a server whose peer credentials
-  (`SO_PEERCRED`) are the Xvfb it recorded, and after starting Xvfb checks
-  that both sockets answer with it (clients try the abstract one first). A
-  file lock (`run/gui.lock`) serializes
-  reservation and start between agents of the instance.
-- Each start writes a new MIT-MAGIC-COOKIE-1 for the display: the server
-  reads `run/xauth.server`, terminals get `run/xauth` (both 0600). Programs
-  that edit their `XAUTHORITY` file cannot leave the server without a cookie,
-  which would let any local user in. The server (of either kind) runs with
-  `-nolisten tcp`, a 2560×1440 screen, in its own session so that it survives
-  the agent and the ssh connection, and with `-terminate 60`: it exits a
-  minute after its last client disconnected. Its clients are the programs, the agent's window
-  manager while the core is connected, and the display keeper while the
-  instance's terminal core runs, so the display belongs to the server whose
-  terminals have `DISPLAY`: it stays while they may start programs and ends
-  soon after the terminal core stopped (once the programs have exited too).
-- The keeper (`internal/agent/guikeep.go`) is the machine's binary run as
-  `gui-keep`, in its own session: it holds a connection to the display and
-  checks every 5 s that the instance's terminal core (`run/hc.sock`) still
-  runs (the user's process listening on the socket, by peer credentials and
-  start time); a terminal core restarted within 30 s is followed (so is its
-  successor after a restart), and once none runs it exits. The core asks
-  the agent for one (action `keep`, audited as `gui.keep`) once the display
-  is ready and each time the machine's terminal core becomes reachable
-  again (a keeper started while it was down has left), except in read-only
-  mode. One runs per instance (`run/gui-keep.lock`); it logs to
-  `~/.herdr-ide[-<instance>]/gui-keep.log`. The agent connects once right after starting
-  Xvfb, so a display nobody attaches to exits too. xorg-server before 21.1
-  lacks the delay: such a server exits as soon as its last client leaves,
-  and one that never got a client stays until an agent attaches.
+### Display
 
-**GPUs** (agent `internal/agent/guigpu.go`, library `scripts/gpupick`)
+Agent: `internal/agent/gui.go`.
 
-- The GPU display draws with one GPU. On a machine with NVIDIA GPUs it is
-  the driver's first one (the one whose device node is `/dev/nvidia0`, read
-  from `/proc/driver/nvidia/gpus/*/information`; it need not be the first
-  on the bus or in `nvidia-smi`), found by its PCI address among the render
-  nodes; elsewhere the first render node the user may open. On NVIDIA GPUs
-  the compositor also offers linux-dmabuf with buffer layouts (modifiers):
-  NVIDIA's driver shares a buffer with the X server only in a layout both
-  name, and copies every frame through the CPU otherwise. Which layouts a
-  GPU has only its driver knows, and the compositor loads no driver; a
-  layout is a number made of five fields
-  (`DRM_FORMAT_MOD_NVIDIA_BLOCK_LINEAR_2D`), so it offers every one the
-  fields can name, and linear, for the formats Xwayland makes buffers of
-  (541 per format), and Xwayland and the programs take those their driver
-  has. Mesa's drivers share buffers without named layouts, so other GPUs
+- **Two kinds of X server.** The setting `gui.display` chooses: `auto` (the
+  default) or `xvfb`.
+  - The *GPU display* is Xwayland drawing with a GPU through glamor, which
+    gives clients DRI3: OpenGL and Vulkan render on the GPU without
+    VirtualGL. `auto` takes it where the machine has an Xwayland whose
+    `-terminate` takes a delay and a GPU render node the user may open.
+  - The *plain display* is Xvfb, drawing in memory. Where the machine has
+    none it is fetched with `apt-get download xvfb` (no privileges; apt
+    verifies the package) and unpacked into `~/.herdr-ide/xvfb/<version>/`.
+    Xwayland is never fetched.
+  - An Xwayland that does not come up, or comes up without DRI3, is ended
+    and Xvfb started instead; the next connection tries again.
+- **A compositor of our own** (`internal/agent/guiwl.go`). Xwayland needs a
+  Wayland compositor and machines have none. Nobody looks at Xwayland's
+  screen (windows are captured from the X side), so the machine's binary
+  run as `gui-wl` is a Wayland server for one client that draws nothing: it
+  offers the globals Xwayland needs with a GPU (including `wl_drm`, which
+  Xwayland before 24.1 requires for glamor), releases each buffer as soon as
+  it is committed and answers frame callbacks at 60 Hz only while there are
+  any. The two talk over a socket pair (`WAYLAND_SOCKET`); no Wayland socket
+  exists on disk.
+- **Display number** reserved in `run/gui.json` (from `:20`) and kept across
+  restarts, so terminals keep a valid `DISPLAY`. The socket must be
+  `/tmp/.X11-unix/X<n>` (libxcb before 1.16 cannot use a path in
+  `DISPLAY`), where anyone can create a socket and X clients cannot
+  authenticate the server. So a number is used only while no lock file,
+  socket or listener of another user is on it and `/tmp/.X11-unix` is safe
+  (owned by root or the user, sticky or not group/other-writable). The agent
+  sends its cookie only to a server whose peer credentials are the process
+  it started, on both the path and the abstract socket. `run/gui.lock`
+  serializes reservation and start between agents.
+- **Cookie.** Each start writes a new MIT-MAGIC-COOKIE-1: the server reads
+  `run/xauth.server`, terminals get `run/xauth` (both 0600), so a program
+  editing its `XAUTHORITY` cannot leave the server open.
+- **Lifetime.** The server runs with `-nolisten tcp`, a 2560×1440 screen, in
+  its own session (it survives the agent and ssh), and with `-terminate 60`:
+  it exits a minute after its last client left. Its clients are the
+  programs, the agent's window manager while the core is connected, and the
+  display keeper. The display thus lives as long as terminals that have its
+  `DISPLAY` may start programs.
+- **Keeper** (`internal/agent/guikeep.go`): the machine's binary run as
+  `gui-keep`, one per instance. It holds a connection to the display while
+  the instance's terminal core (`run/hc.sock`) runs, follows a terminal core
+  restarted within a short grace period, and exits once none runs. The core
+  asks for one (action `keep`) when the display is ready and whenever the
+  terminal core becomes reachable again; never in read-only mode.
+- **Changing kind.** A display of another kind than wanted (after a setting
+  change) is replaced only while nothing but the instance's own processes is
+  connected to it (X-Resource names every client's process). Terminals keep
+  their `DISPLAY`: number and cookie file stay the same.
+
+### GPUs
+
+Agent: `internal/agent/guigpu.go`; library `scripts/gpupick`.
+
+- **The display's GPU.** With NVIDIA GPUs it is the driver's first one
+  (`/dev/nvidia0`, read from `/proc/driver/nvidia/gpus/*/information`; not
+  necessarily first in `nvidia-smi`); elsewhere the first render node the
+  user may open.
+- **Buffer layouts for NVIDIA.** NVIDIA's driver shares a buffer with the X
+  server only in a layout (modifier) both name, and copies every frame
+  through the CPU otherwise. The compositor loads no driver, so it cannot
+  ask which layouts exist; instead it offers, through linux-dmabuf, every
+  layout the NVIDIA modifier's fields can name plus linear, and the driver
+  takes those it has. Mesa's drivers need no named layouts, so other GPUs
   get no linux-dmabuf.
-- NVIDIA's driver shows windows of Vulkan programs on a display without its
-  own X driver only from the first GPU a program sees, whatever GPU the
-  display draws with (Xwayland on another GPU did not change it, and
-  OpenGL was slow there), and no setting of the driver changes which one
-  that is. A program told to render on another GPU fails with "could not
-  find both graphics and present queues"; Isaac Sim, started with
-  `CUDA_VISIBLE_DEVICES` naming a free GPU as IsaacLab does, with
-  `createSwapchain failed`. This holds on Xvfb too, where the driver copies
-  frames to the window itself. The display state in the settings names that
-  GPU on machines with more than one (`vulkan_gpu`, counted as
-  `nvidia-smi` does).
-- With the setting `gui.gpuPick` (off by default) a program chooses: the
-  library gpupick is preloaded into the programs of new panes
-  (`LD_PRELOAD`), and a program started with `CUDA_VISIBLE_DEVICES` sees
-  only the GPUs that names, as a container given those GPUs would. Opening
-  the device node `/dev/nvidiaN` of any other one fails (`EPERM`), which
-  the driver takes as a GPU it may not use, so the chosen one is its first.
-  The pane's environment carries the machine's GPUs (`GPUPICK_TABLE`: UUID
-  and node number of each, in bus order; `GPUPICK_MIXED` when they are of
-  several models; `GPUPICK_DISPLAY`, the node number of the GPU display's
-  GPU). The first program of a tree works the set out and passes it on in
-  `GPUPICK_KEEP`; it rewrites the indices in `CUDA_VISIBLE_DEVICES` to count
-  among the GPUs left (`2` becomes `0`, `3,0` becomes `1,0`), which is how
-  CUDA and `nvidia-smi` number them from then on, and leaves UUIDs. Indices
-  are taken as bus order: with GPUs of several models CUDA counts fastest
-  first unless `CUDA_DEVICE_ORDER=PCI_BUS_ID`, so then only with that set.
-  A value that names no GPU, one twice, all of them, or a UUID two GPUs
-  could have changes nothing. When the display's GPU is out of sight,
-  NVIDIA's GLX cannot reach the display (`BadValue` at `glXCreateContext`),
-  so the library sets `__GLX_VENDOR_LIBRARY_NAME=mesa` unless it is set:
-  Mesa's GLX draws through Vulkan on a visible GPU, and `vglrun` renders on
-  it through EGL as before.
-- The library is 10 kB of C without dependencies beyond the C library, built
-  for linux/amd64 and linux/arm64 against glibc 2.17
-  (`scripts/build-gpupick.sh`, zig's C compiler; the builds and their
-  digests are committed, `make check` verifies them) and carried by the
-  agent, which writes it to `~/.herdr-ide/gpupick/<sha256 prefix>/` (0600,
-  shared by instances) when the core asks (action `pick`, audited as
-  `gui.pick`; never in read-only mode), checks that the dynamic loader
-  takes it (a home directory mounted `noexec` would make every program
-  complain) and removes builds unused for 14 days. Machines with fewer than
-  two NVIDIA GPUs get nothing.
-- From a GPU other than the display's a window's frames go through the CPU
-  (the driver's own copy), which is slower than sharing buffers: see
-  Testing.
+- **Vulkan presents only from the driver's first GPU.** On a display without
+  NVIDIA's own X driver, a Vulkan program shows windows only from the first
+  GPU it sees, whatever GPU the display uses and on Xvfb too. A program told
+  to render elsewhere (e.g. Isaac Sim with `CUDA_VISIBLE_DEVICES`) fails to
+  create its swapchain. The display state in the settings names that GPU
+  (`vulkan_gpu`, counted as `nvidia-smi` does) on machines with several.
+- **gpupick** (setting `gui.gpuPick`, off by default) lets a program choose.
+  The library is preloaded into new panes' programs (`LD_PRELOAD`); a
+  program started with `CUDA_VISIBLE_DEVICES` then sees only those GPUs, as
+  in a container: opening any other `/dev/nvidiaN` fails with `EPERM`, so
+  the chosen GPU is the driver's first.
+  - The pane's environment carries the GPU table (`GPUPICK_TABLE`,
+    `GPUPICK_MIXED`, `GPUPICK_DISPLAY`); the first program of a process tree
+    works out the set and passes it on in `GPUPICK_KEEP`.
+  - Indices in `CUDA_VISIBLE_DEVICES` are rewritten to count among the GPUs
+    left (`2` becomes `0`), as CUDA and `nvidia-smi` then number them;
+    UUIDs stay. Indices mean bus order, so with GPUs of mixed models only
+    when `CUDA_DEVICE_ORDER=PCI_BUS_ID`. An invalid or ambiguous value
+    changes nothing.
+  - With the display's GPU hidden, NVIDIA's GLX cannot reach the display, so
+    the library sets `__GLX_VENDOR_LIBRARY_NAME=mesa` (unless set): Mesa
+    draws through Vulkan on the visible GPU.
+  - Windows from a GPU other than the display's are copied through the CPU
+    by the driver: slower, but they work.
+- The library is ~10 kB of C, built for linux/amd64 and linux/arm64 against
+  glibc 2.17 (`scripts/build-gpupick.sh`; builds and digests committed and
+  checked by `make check`). The agent carries it and writes it to
+  `~/.herdr-ide/gpupick/<sha256 prefix>/` (0600) when the core asks (action
+  `pick`, never in read-only mode), after checking the dynamic loader takes
+  it (a `noexec` home would make every program complain). Machines with
+  fewer than two NVIDIA GPUs get nothing.
 
-**Terminals** (`internal/server/gui.go`, `internal/server/term_backend.go`,
-`internal/gui`)
+### Terminals
 
-- When the GUI setting is on for a machine, the core adds `DISPLAY` and
-  `XAUTHORITY` to the `env` of the terminal core's `terminal.run`
-  ([22](22-terminal-protocol.md)) for that remote machine once its display
-  is ready (verified as the instance's own). The display's variables
-  replace those of the client, so a client cannot point new terminals at
-  another display; a malformed `env` is refused. The audit log records
-  which variables were added.
-- Terminals created otherwise (before the display existed, or with
-  herdr-core's own commands) keep their environment: a shell gets its
-  variables when it starts. "Enable in open panes" (settings dialog, per
-  machine: every terminal of the machine's terminal core) and the palette's
-  commands for the focused pane's terminal and for a whole machine
-  (`POST /api/m/{id}/gui/enable`, `{"terminals": [...]}`, empty or absent
-  for all) catch them up without restarting anything: for each terminal
-  the core asks the terminal core for its record now (`terminal.get`: the program's `pid` and the `foreground`
-  process group's leader; the shell waits at its prompt when it leads the
-  group), and the agent which shells were started with the display
-  (`/proc/<pid>/environ`, action `shells`, which also reports each
-  process's executable name). A known shell
-  (bash, zsh, fish, dash, sh, ksh and similar) waiting at its prompt (checked
-  again right before) gets Ctrl-C, which discards a half-typed command line,
-  and after 200 ms
-  ` export DISPLAY='…' XAUTHORITY='…'` (values single-quoted, leading space
-  to keep it out of history where enabled; as input of a short-lived
-  attach at the terminal's own size, so typing resizes nothing); a
-  terminal running a program (an agent, an editor, a program that replaced
-  its shell with `exec`) is not typed into and is reported, with the
-  command to copy. A shell busy with a builtin (`read`) looks idle and gets
-  the text. Unreachable terminals are skipped and reported; the audit
-  record lists the terminals typed into even when the request fails. The core remembers the shells it typed
-  into until it restarts. A program already running keeps its environment:
-  an agent started before has to be restarted from a shell that has the
-  display.
-- On machines with a working VirtualGL EGL back end (`vglrun` found, its
-  `eglinfo egl0` succeeds) terminals also get `VGL_DISPLAY=egl0`, so
-  `vglrun program` renders on the GPU without a 3D X server, on either kind
-  of display. With `gui.gpu` set to `all` terminals get VirtualGL's
-  `LD_PRELOAD` and `VGL_ISACTIVE=1`, as if the shell ran under `vglrun`,
-  except on the GPU display, where OpenGL renders on the GPU anyway and
-  VirtualGL would add a copy of every frame. With `gui.gpuPick` on, on a
-  machine with several NVIDIA GPUs and the library installed, they get
-  gpupick's variables, its library first in `LD_PRELOAD`.
+`internal/server/gui.go`, `internal/server/term_backend.go`, `internal/gui`.
 
-**Window manager and capture** (agent `internal/agent/guiwm.go`)
+- **New terminals.** When the GUI is on for a machine and its display is
+  ready, the core adds `DISPLAY` and `XAUTHORITY` to the `env` of the
+  terminal core's `terminal.run` ([22](22-terminal-protocol.md)). They
+  replace a client's own values, so a client cannot point terminals at
+  another display; a malformed `env` is refused. The audit log records them.
+- **Existing terminals** keep their environment. "Enable in open panes"
+  (settings, per machine) and palette commands for the focused pane or a
+  whole machine (`POST /api/m/{id}/gui/enable`) catch them up without
+  restarting anything:
+  - only a known shell (bash, zsh, fish, …) waiting at its prompt is typed
+    into (from the terminal core's `terminal.get` and the agent reading
+    `/proc/<pid>/environ`, action `shells`, checked again right before);
+  - it gets Ctrl-C, then ` export DISPLAY='…' XAUTHORITY='…'` (leading space
+    keeps it out of history), through a short attach at the terminal's own
+    size;
+  - a terminal running a program (an agent, an editor) is not typed into and
+    is reported with the command to copy; a program already running keeps
+    its environment.
+- **VirtualGL.** Where `vglrun` and its EGL back end work, terminals get
+  `VGL_DISPLAY=egl0`, so `vglrun program` renders on the GPU on either kind
+  of display. With `gui.gpu` = `all` terminals also get VirtualGL's
+  `LD_PRELOAD`, except on the GPU display, where OpenGL is on the GPU anyway
+  and VirtualGL would add a copy per frame.
+- **gpupick.** With `gui.gpuPick` on and the library installed, terminals
+  get its variables, its library first in `LD_PRELOAD`.
+
+### Window manager and capture
+
+Agent: `internal/agent/guiwm.go`, `guiframes.go`, `guishm.go`.
 
 - The agent connects to the display (jezek/xgb, pure Go) and becomes its
-  window manager. Top-level windows keep the size their program asks for and
-  are placed at the origin; the window receiving input is raised first.
-  Windows get `WM_STATE`, `_NET_FRAME_EXTENTS` and EWMH basics that toolkits
-  wait for. Override-redirect windows (menus, tooltips) are layers of their
-  transient-for window or, without one, of the focused window. Windows left
-  by a previous agent are adopted.
-- Composite's automatic redirection gives every window its own pixmap, so
-  overlapping windows do not hide each other. Damage reports changed
-  rectangles; at most every 16 ms the changed area of each watched window is
-  captured and sent as JPEG (quality 85) or, for areas under 128×128, PNG.
-  After 400 ms without changes, areas sent as JPEG are sent again as PNG, so
-  still pictures end up exact. Captures are split into tiles of at most
-  1024×1024, so a huge window costs bounded memory per frame.
-- Capturing and encoding (`guiframes.go`): the tiles of a tick are read
-  through MIT-SHM into one System V shared memory segment (0600, marked for
-  removal as soon as the agent attached it, which Linux allows Xvfb to
-  attach afterwards; at most 64 MB), all requests sent
-  before the first reply is read; without MIT-SHM, or once it failed, with
-  `GetImage`. The captures are then encoded at the same time and written in
-  order. JPEG is encoded straight from the captured BGRX pixels by
-  `internal/jpegstrip`, Go's `image/jpeg` encoder cut into up to 8 groups of
-  16-pixel rows coded on separate cores and joined with restart markers:
-  one ordinary JPEG, the same pixels as `image/jpeg` gives, under 0.1% more
-  bytes. A 1706×960 window takes 0.4 ms to capture (2.4 ms with
-  `GetImage`) and 3.4–4.3 ms as JPEG (12–14 ms on one core).
-- Flow: a window may have frames on their way until their bytes reach its
-  budget, and at most 32 frames. The budget is what the connection
-  delivers in the shortest round trip seen since the window was watched
-  (capture to drawn in the fastest viewer, from acknowledgements; the rate
-  is the highest of the last 2 s, each measured over the longer of the
-  time its bytes took to be sent and to be acknowledged, so
-  acknowledgements arriving together do not inflate it), plus a queue of
-  the shorter of that round trip and 30 ms or a quarter of it, whichever is
-  longer; at least 64 kB (also before anything was measured), at most 8 MB.
-  Fast links, whose round trips vary much relative to the shortest, get up
-  to twice the round trip's worth; on slow ones the queue adds about a
-  quarter. Small video frames are not held back by a count. The queue makes
-  round trips measured while sending longer than the shortest: when none as
-  short came for 10 s, frames go one at a time until one is drawn, which
-  measures it again. A frame that will not be sent (its window went away,
-  encoding failed) leaves the flow at once.
-- While a window is watched, the agent reports once a second what its
-  frames cost (`stats` event): updates (ticks that sent frames) and frames,
-  pixels and bytes, time spent capturing, converting and encoding, ticks
-  held back by the flow, its budget and shortest round trip, and the time
-  from capture to acknowledgement. The core passes it to the window's
-  browser windows.
-- A new window takes the keyboard focus only when nothing has it or it is a
-  dialog of the focused window; a click focuses its window first, and before
-  each key press the window manager checks where the focus is and moves it
-  back to the window the key was typed for, also when a program took the
-  focus itself.
-- The program of a window comes from `_NET_WM_PID`, else the X-Resource
-  extension; where it runs from `/proc/<pid>/environ` (or its nearest
-  ancestor's that names one): its terminal from `HC_TERMINAL_ID` when
-  `HC_TERMINAL_SOCKET` is the instance's terminal core (`run/hc.sock`;
-  terminals of the user's own herdr-core are not named). The window record
-  carries `terminal`, by which the web UI lists a window in its terminal's
-  pane header and opens a new one by itself while that terminal is on
-  screen (below).
-- Input arrives in window coordinates and is replayed with XTEST: pointer
-  motion, buttons, wheel steps (buttons 4–7) and keys as X keycodes. The
-  browser sends the physical key (`KeyboardEvent.code` → evdev code + 8), so
-  key bindings of programs work; the display's US layout produces the
-  characters. Closing asks the program with `WM_DELETE_WINDOW`, or
-  disconnects it when it does not support that. The pointer image follows
-  XFIXES cursor changes.
+  window manager: windows keep their requested size at the origin, get the
+  EWMH basics toolkits wait for, and are adopted from a previous agent.
+  Override-redirect windows (menus, tooltips) are layers of their
+  transient-for or the focused window.
+- **Capture.** Composite gives every window its own pixmap, so overlapping
+  windows do not hide each other. Damage reports changed areas; at most
+  every 16 ms the changed area of each watched window is captured as tiles
+  of at most 1024×1024 (bounded memory per frame) and sent as JPEG, or PNG
+  for small areas. After 400 ms without changes JPEG areas are sent again as
+  PNG, so still pictures end up exact.
+- **Speed.** Tiles are read through MIT-SHM into one shared segment (0600,
+  at most 64 MB, removed when the agent goes), else with `GetImage`. JPEG is
+  encoded by `internal/jpegstrip`: Go's encoder split into row groups coded
+  on separate cores and joined with restart markers, giving one ordinary
+  JPEG with the same pixels.
+- **Flow control.** A window may have frames in flight up to a byte budget
+  (and at most 32 frames). The budget is the bandwidth-delay product of the
+  fastest viewer, measured from acknowledgements, plus a small queue,
+  bounded between 64 kB and 8 MB. Because queued frames inflate measured
+  round trips, frames go one at a time now and then to measure again. This
+  replaced a fixed number of frames in flight (see Alternatives).
+- **Statistics.** While watched, the agent reports once a second what a
+  window's frames cost (`stats` event: frames, bytes, capture and encode
+  time, budget, round trip); browser windows show them with `#stats`.
+- **Focus.** A new window takes the focus only when nothing has it or it is
+  a dialog of the focused window; before each key press the focus is moved
+  back to the window the key was typed for.
+- **Origin.** A window's program comes from `_NET_WM_PID` or X-Resource; its
+  terminal from `HC_TERMINAL_ID` in the process's (or nearest ancestor's)
+  environment, when `HC_TERMINAL_SOCKET` is the instance's terminal core
+  (terminals of the user's own herdr-core are not named). The window record
+  carries `terminal`, which the web UI uses below.
+- **Input** arrives in window coordinates and is replayed with XTEST. Keys
+  are physical (`KeyboardEvent.code` → X keycode) and the display's layout
+  is US, so programs' key bindings work. Closing sends `WM_DELETE_WINDOW`,
+  or disconnects the client without it. The pointer image follows XFIXES.
 
-**Video** (setting `gui.video`, on by default; agent
-`internal/agent/guiwm_video.go`, `guivideo.go`, encoder `scripts/encoder/`)
+### Video
 
-- A window that keeps changing (a simulator, a rotating plot) costs a whole
-  JPEG per frame. With video on, a watched window is sent as frames of a
-  video stream of the whole window instead, while all its viewers decode
-  one kind of stream the machine can make and at least 8 of the last 12
-  ticks changed a quarter of it or more. Each change is then one video
-  frame, small ones too. Once the window is unchanged for 400 ms it is sent
-  again as PNG (video blurs colored text, 4:2:0), and after 5 s unchanged
-  the stream ends, also when the window's flow holds frames back (a viewer
-  stopped acknowledging). Layers stay pictures. Windows under 64 or over
-  4096 pixels a side are never video (over: `#stats` says why), so a
-  capture of the whole window stays bounded.
-- Browsers name the streams they decode in the WebSocket's `?video=`:
-  `avc1` (H.264) and `vp8`, probed with WebCodecs' `isConfigSupported`, and
-  only in a secure context (localhost, HTTPS, the desktop app). The core
-  passes the kinds every viewer of the window decodes to the agent with
-  `watch` and `refresh`, ordered H.264 before VP8, and `codecs` when viewers
-  leave or the setting changes; with video off for the machine it passes
-  none.
-- The encoder is a small program on ffmpeg's libraries (LGPL build with
-  libvpx, libva and libdrm, static except for glibc 2.28, for linux/amd64
-  and linux/arm64) that the core embeds and pushes to each Linux machine
-  when its display is ready and video is on for it:
-  `~/.herdr-ide/video/<sha256 prefix>/encoder`, verified by its SHA-256,
-  shared by instances. Release builds always embed it
-  (`scripts/build-ffmpeg.sh` in CI, [deployment](../deployment.md)); a
-  build without it sends pictures. The agent runs it once per stream kind
-  on a small frame to learn what works. H.264 comes from NVENC (the NVIDIA
-  driver's libraries, driver 550.54 or newer), else from VA-API: the first
-  render node (`/dev/dri/renderD128` and up) the user may open whose driver
-  encodes H.264 (Intel's iHD or i965, Mesa's radeonsi for AMD), loaded from
-  the distribution's driver directories by the libva built in, VA-API 1.24
-  or older. VP8 comes from libvpx on the CPU. The encoder reads raw frames
-  from a pipe and writes one packet per frame, a key frame when asked, so
-  frames are not held back (a muxer, as in the ffmpeg program, keeps each
-  frame until the next one arrives; VA-API runs with one frame in the GPU at
-  a time). One encoder runs per window sent as video.
-- A stream starts with a `video` event (codec string, coded size) and a key
-  frame; frames carry `Enc` 3, or 4 for key frames, and are paced by
-  acknowledgements like pictures. The agent starts a new stream when the
-  window is resized or the kinds its viewers and the encoder share change
-  (a preferred kind, or one a viewer does not decode), and makes a key
-  frame when a viewer asks (`keyframe`, `refresh`). The encoder makes the
-  first kind it can open, so a stream is VA-API's H.264 or VP8 while all
-  NVENC sessions are in use, and stays so until it ends.
-- The core routes video frames like pictures, except that a viewer that
-  missed one (it was behind, or joined during a stream) gets no frames of
-  the stream until the next key frame, which the core asks for once the
-  viewer has nothing in flight, at most twice a second. A viewer joining
-  gets the stream's `video` event first.
-- The browser decodes with one `VideoDecoder` per window
-  (`optimizeForLatency`), in the order frames arrive (pictures included),
-  draws each frame on the window's canvas and then acknowledges it. A
-  decoding error drops the decoder and asks for a key frame.
-- Anything failing sends the window as pictures: no encoder in the build or
-  on the machine, no stream kind in common, the encoder not starting or
-  exiting (then pictures for 5 s, doubling up to 5 minutes, before trying
-  again). `#stats` shows the encoder in use or why pictures are sent.
+Setting `gui.video`, on by default. Agent `internal/agent/guiwm_video.go`,
+`guivideo.go`; encoder `scripts/encoder/`.
 
-**Routing** (`internal/gui/display.go`, `internal/gui/frames.go`)
+- **When.** A window that keeps changing (a simulator) would cost a whole
+  JPEG per frame. It is sent as a video stream instead while it keeps
+  changing (most recent ticks changed a quarter of it or more) and all its
+  viewers decode a kind of stream the machine can make. Unchanged for
+  400 ms it is sent as PNG (4:2:0 video blurs colored text); after 5 s the
+  stream ends. Layers stay pictures; windows under 64 or over 4096 pixels a
+  side are never video.
+- **Kinds.** Browsers name what they decode in the WebSocket's `?video=`:
+  `avc1` (H.264) and `vp8`, probed with WebCodecs, only in a secure context.
+  The core passes the kinds every viewer decodes, H.264 first.
+- **Encoder.** A small program on ffmpeg's libraries (LGPL build with
+  libvpx, libva and libdrm; static except glibc 2.28; linux/amd64 and
+  arm64) that the core embeds and pushes to each Linux machine:
+  `~/.herdr-ide/video/<sha256 prefix>/encoder`, verified by digest. Release
+  builds embed it (`scripts/build-ffmpeg.sh`, [deployment](../deployment.md));
+  a build without it sends pictures.
+  - H.264 comes from NVENC, else VA-API (the first usable render node whose
+    driver encodes H.264, loaded by the built-in libva, VA-API ≤ 1.24); VP8
+    from libvpx on the CPU. The agent probes once which kinds work.
+  - It reads raw frames from a pipe and writes one packet per frame at once
+    (no muxer holding a frame back). One encoder per window sent as video.
+- **Stream.** A `video` event (codec, size) and a key frame start a stream;
+  frames are paced by acknowledgements like pictures. A resize or a change
+  of the kinds viewers share starts a new stream; a viewer can ask for a key
+  frame.
+- **Routing.** A viewer that missed a frame (behind, or joined mid-stream)
+  gets nothing until the next key frame, which the core requests for it.
+- **Browser.** One `VideoDecoder` per window (`optimizeForLatency`), frames
+  and pictures decoded in arrival order; a decoding error resets the decoder
+  and asks for a key frame.
+- **Fallback.** Any failure (no encoder, no common kind, the encoder not
+  starting or exiting) sends pictures; a failing encoder is retried with a
+  backoff. `#stats` shows the encoder in use or why pictures are sent.
 
-- The core prepares a machine's display when the machine connects (status,
-  install, start, attach; phases `installing`, `starting`, `ready`, `error`,
-  `unavailable`, `unsupported`, `off`, `local`, `disconnected`), keeps one
-  attach stream per machine and re-attaches after errors. When the machine
-  is disabled, reconnects, fails or is removed, the core detaches and
-  reports `disconnected` without windows; a preparation or attach stream
-  that fails because its connection is gone reports that too, not an
-  error. A display is prepared once per
-  connection of the machine; a failed preparation or an attach stream that
-  ends within a minute is retried after 5 s, doubling up to 5 minutes, and
-  a change of the GUI setting or a reconnect starts over. Turning the
-  setting off while a display is prepared leaves it detached. Every `/ws`
-  client gets `gui` messages with each machine's phase and windows.
-- Frames go to every browser window showing that window. The fastest viewer
-  acknowledges frames to the agent (only frames it was sent count), so the
-  window's flow follows it. A viewer whose oldest unshown frame was shown
-  by another viewer and sent more than 250 ms ago, or that has 64 frames or
-  16 MB unshown, skips frames and, once it caught up, gets the whole window
-  again; a frame no viewer got is acknowledged by the core. A viewer may ask
-  for the whole window at most twice a second. Commands to the agent are
-  built by the core from a viewer's message: a refresh carries the streams
-  all viewers decode, an acknowledgement only its number.
-- In read-only mode the core attaches only to a display that already runs
-  (phase `not_running` otherwise): nothing is installed or started. Installs
-  and starts are audited (`gui.install`, `gui.start`).
+### Routing
 
-**Browser windows** (`web/src/gui/`)
+`internal/gui/display.go`, `internal/gui/frames.go`.
 
-- `/m/{machine}/gui/{window}` is the app showing one window: canvases for the
-  window and its layers, scaled to fit the browser window with the aspect
-  kept, input sent back over `/m/{machine}/gui/{window}/ws`. The browser
-  window opens at the program window's size and follows its size changes.
-- A window that appears while its terminal is on screen opens at once
-  (`window.open`). Browsers block pop-ups not caused by a click unless the
-  site is allowed to open them; then a toast offers to open it. Other new
-  windows are marked on the program windows button of their terminal's pane
-  header ([04](04-layout-and-keyboard.md)), until opened; the button lists
-  the terminal's windows (by the window's `terminal`), and the status bar
-  lists every window, including those without a terminal. A button of one
-  window opens it; with more, the list is searchable (`components/Picker.tsx`:
-  the windows' titles and sizes, under their machines' names when they are
-  on several; typing narrows it, the keyboard chooses, Escape gives the
-  keyboard back to the button). A dialog of a window (`WM_TRANSIENT_FOR`) is opened
-  by the browser window of its parent, which may still do so after the click
-  that caused it; if blocked, that window shows a button for it.
-- Pictures are decoded as they arrive, several at once
-  (`createImageBitmap`), and drawn in order.
-- With `#stats` at the end of its address, a browser window shows these
-  figures next to its own: frames and bytes received, decode and draw time,
-  frames the core skipped for it. They tell whether the machine, the
-  connection or the browser limits the frame rate.
-- Closing the browser window closes the program window: the page sends a
-  `keepalive` POST to `/m/{machine}/gui/{window}/close` (audited), and the
-  core closes the window
-  two seconds later unless a viewer is showing it again (a reload) or another
-  browser window still shows it. Losing the connection closes nothing.
+- The core prepares a machine's display once per connection (status,
+  install, start, attach), keeps one attach stream per machine, and retries
+  failures with a backoff (5 s doubling to 5 minutes). A change of the GUI
+  setting or a reconnect starts over. Every `/ws` client gets `gui` messages
+  with each machine's phase (`installing`, `starting`, `ready`, `error`,
+  `unavailable`, `disconnected`, …) and windows.
+- A machine disabled, removed or disconnected is shown as `disconnected`
+  without windows, not as an error.
+- **Viewers.** Frames go to every browser window showing the window. The
+  fastest viewer's acknowledgements pace the agent; a viewer that falls
+  behind skips frames and then gets the whole window again; a frame no
+  viewer got is acknowledged by the core. Commands to the agent are built by
+  the core from a viewer's message, never forwarded as is, and refreshes are
+  rate-limited.
+- **Read-only mode.** The core attaches only to a display already running
+  (`not_running` otherwise); nothing is installed or started. Installs and
+  starts are audited.
 
-**Settings**: `gui.enabled` (`true`, `false`), `gui.display` (`auto`,
-`xvfb`), `gui.gpu` (`vglrun`, `all`), `gui.gpuPick` (`true`, `false`) and
-`gui.video` (`true`, `false`), in the settings dialog's "Program windows"
-section and as the flags `--gui`, `--gui-display`, `--gui-gpu`,
-`--gui-gpu-pick` and `--gui-video` ([13](13-settings-and-appearance.md)).
-A change of `gui.display` prepares the machine's display anew (its browser
-windows reconnect); one of `gui.gpuPick` installs the library and applies
-to panes created afterwards. All can be set
-per remote machine ("Per machine" in the same section, which also shows each
-machine's display state); a machine without its own value follows the
-global one, and a flag fixes the value for every machine. Program windows
-are also a plugin ([27](27-plugins.md)): the switch on Settings › Plugins is
-the global `gui.enabled` (it says that machines with a value of their own
-keep it), and the tray and palette items are there while the global value
-or any machine's own is on. Turning the GUI
-off for a machine detaches from its display and stops adding the variables
-to its new panes; its programs keep their windows while they run. Turning
-video off sends that machine's windows as pictures from the next frame;
-turning it on pushes the encoder if needed.
+### Browser windows
+
+`web/src/gui/`.
+
+- `/m/{machine}/gui/{window}` shows one window: canvases for the window and
+  its layers, scaled with the aspect kept, input over
+  `/m/{machine}/gui/{window}/ws`. The browser window opens at the program
+  window's size and follows it.
+- **Opening.** A window that appears while its terminal is on screen opens
+  at once (`window.open`); if the browser blocks the pop-up, a toast offers
+  it. Other windows are marked on the program windows button of their
+  terminal's pane header ([04](04-layout-and-keyboard.md)); the status bar
+  lists every window. With several, the list is searchable
+  (`components/Picker.tsx`). A dialog (`WM_TRANSIENT_FOR`) is opened by its
+  parent's browser window.
+- Pictures are decoded concurrently (`createImageBitmap`) and drawn in
+  order.
+- **Closing** the browser window closes the program window: a `keepalive`
+  POST to `/m/{machine}/gui/{window}/close` (audited), applied after a
+  2 s grace unless a viewer shows the window again (a reload). Losing the
+  connection closes nothing.
+
+### Settings
+
+`gui.enabled`, `gui.display` (`auto`, `xvfb`), `gui.gpu` (`vglrun`, `all`),
+`gui.gpuPick` and `gui.video`, in the settings dialog's "Program windows"
+section and as flags ([reference](../reference.md#program-windows),
+[13](13-settings-and-appearance.md)).
+
+- Each can be set per remote machine; a machine without its own value
+  follows the global one, and a flag fixes it for every machine.
+- Program windows are also a plugin ([27](27-plugins.md)): its switch is the
+  global `gui.enabled`.
+- Turning the GUI off for a machine detaches and stops adding the variables
+  to new panes; running programs keep their windows. A change of
+  `gui.display` prepares the display anew; `gui.gpuPick` applies to panes
+  created afterwards; `gui.video` takes effect from the next frame.
 
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
-| VNC (TigerVNC `Xvnc`, x11vnc) with noVNC | A whole desktop in one canvas instead of program windows; `Xvnc` was on one of seven machines tried and needs a package installed by root. |
-| Xpra with its HTML5 client | Seamless windows, but all inside one browser page; rootless only through a conda environment with Python, GTK and ffmpeg; its protocol changes between versions while core and agent ship together. |
-| GTK Broadway | Only GTK programs; not Tk (matplotlib's default), Qt or GLFW (MuJoCo). |
-| Only Xvfb (before) | No DRI3: OpenGL is Mesa's on the CPU unless every program is started under VirtualGL, and NVIDIA's Vulkan copies every frame through the CPU (Isaac Sim's viewport: 24–33 frames per second against 80–100 on the GPU display). |
-| An existing compositor under Xwayland (weston, cage, sway, fetched like Xvfb) | Machines have none, and each brings libraries of its own that are missing there (wlroots, libseat, libdisplay-info); the one built in is 400 lines without a dependency and draws nothing, which is all that is asked of it. Xwayland on headless weston served as the reference: the same frame rates. |
-| Asking the driver for its buffer layouts (EGL, as compositors do) | The machine's binary is static and loads no library; a helper that does would be one more program to build and push for a list the driver takes its own from anyway. |
-| No buffer layouts for NVIDIA | Xwayland starts and draws with the GPU, but programs fall back to copying frames: Isaac Sim 32–34 frames per second, `glxgears` 300–550 instead of 6000. |
-| An X server with NVIDIA's own driver (Xorg, no monitor) | Needs root and the right to set display modes; `Xorg.wrap` gives it to console users only. |
-| Xwayland on the GPU the program chose, or a display per GPU | The driver presents Vulkan only from its first GPU whatever the display draws with; measured with Xwayland on another one. A terminal's `DISPLAY` is set before its programs choose a GPU. |
-| A Vulkan layer that makes its own swapchain on any GPU | The copy the driver already makes from its first GPU, written anew for every GPU, against applications that use several devices at once; hiding the other GPUs gets the driver's own path for the chosen one. |
-| Hiding GPUs in a mount or user namespace, or with seccomp | Unprivileged user namespaces are restricted on current distributions; a seccomp filter cannot read a path, and one that asks a supervisor stops every `open` of the program. A preloaded library sees the path and costs a comparison. |
-| A command to put before the program (as `vglrun`) instead of preloading | The launch commands of projects set `CUDA_VISIBLE_DEVICES` themselves; with the library in the pane's environment they work unchanged. Off by default, since it changes what a program sees. |
-| Rendering the viewport on the first GPU and the rest on the chosen one | Possible in Isaac Sim (`--/renderer/multiGpu/activeCudaGpus`), but a setting of each application, and the first GPU is often the busy one. |
-| Isaac Sim without a window, with its own stream | WebRTC with media over UDP, which does not pass the ssh connection. |
+| VNC (`Xvnc`, x11vnc) with noVNC | A whole desktop in one canvas; `Xvnc` was on one of seven machines tried and needs root to install. |
+| Xpra with its HTML5 client | All windows in one page; rootless only via a conda environment; protocol varies between versions. |
+| GTK Broadway | GTK only; not Tk (matplotlib), Qt or GLFW (MuJoCo). |
+| Only Xvfb | No DRI3: OpenGL on the CPU without VirtualGL, NVIDIA Vulkan copies every frame (Isaac Sim 24–33 fps vs 80–100 on the GPU display). |
+| An existing compositor (weston, cage, sway) | Not on machines, and each needs libraries missing there; ours is ~400 lines without dependencies and reached headless weston's frame rates. |
+| Asking the driver for its buffer layouts (EGL) | The machine binary is static and loads no library; offering every layout lets the driver pick anyway. |
+| No buffer layouts for NVIDIA | Programs fall back to copying frames (`glxgears` 300–550 fps instead of 6000). |
+| Xorg with NVIDIA's driver | Needs root and mode setting rights. |
+| Xwayland on the chosen GPU, or a display per GPU | The driver presents Vulkan only from its first GPU regardless; `DISPLAY` is set before a program chooses. |
+| A Vulkan layer with its own swapchain on any GPU | Rewrites the driver's own copy per GPU; hiding GPUs reuses the driver's path. |
+| Hiding GPUs with namespaces or seccomp | Unprivileged user namespaces are restricted; seccomp cannot read paths cheaply. A preload costs a comparison. |
+| A wrapper command (as `vglrun`) instead of preloading | Projects' launch commands set `CUDA_VISIBLE_DEVICES` themselves and work unchanged with the preload. |
+| Viewport on the first GPU, compute on the chosen one | An application-specific setting, and the first GPU is often the busy one. |
+| Isaac Sim's own streaming | WebRTC over UDP does not pass the ssh connection. |
 | Terminal graphics (sixel, Kitty) | The browser's emulator has none ([26](26-web-terminals.md)); not interactive. |
-| Starting the display on the first connection (socket activation) | Xvfb cannot take a listening socket; relaying through the agent would end every program's connection when the agent exits. |
-| A display per pane or per workspace | Many X servers for windows that rarely exist; one display with per-window capture separates windows anyway. |
-| Only pictures (no video) | Measured with a 1706×960 MuJoCo viewer rendering 60 frames per second: pictures reach 48 whole windows per second at 44 Mbit/s directly and 7.5 on a 10 Mbit/s link with 50 ms more round trip (240 ms from capture to drawing), H.264 from NVENC 58 frames at 1.7 Mbit/s directly and 58 on that link (90 ms); per frame NVENC costs the machine a third of the CPU time of JPEG. Pictures stay for windows that rarely change, where they are exact and need no encoder. |
-| The ffmpeg program as the encoder | Its muxers write a frame when the next one arrives (Annex B ends a frame at the next delimiter, fragmented MP4 at the next fragment); with acknowledgement-paced frames the stream stalls. IVF writes at once but carries only VP8, VP9 and AV1. |
-| The machine's own ffmpeg | Missing on some machines (one of seven tried) and of varying versions and builds. |
-| NVENC from the agent through the driver's API (purego, without cgo) | Bindings for NVENC's and CUDA's C structures written by hand, no VP8 fallback, and loading libraries this way makes the agent a dynamically linked program, so it depends on the machine's libc. |
-| WebRTC to the browser | Needs ICE and connections outside the guarded WebSocket; frames already reach the browser over it and WebCodecs decodes them there. |
-| AV1 (av1_nvenc) | Smallest frames, but NVENC encodes AV1 only from Ada GPUs on (not the A40), and Safari decodes it only with hardware support. |
-| HEVC | Browsers decode it only with hardware support. |
-| WebP pictures | No encoder in Go's standard library; a library would be loaded like the video encoder for less gain. |
-| JPEG rows as separate frames (parallel encoding without restart markers) | Every part carries its own headers (1–5% more bytes), is drawn at a different moment (tearing across a moving picture) and acknowledged on its own. |
-| A fixed number of frames in flight (three, before) | Three large pictures queue on a slow link (222 ms from capture to drawing at 10 Mbit/s), while three small video frames per round trip held video back to 31 frames per second with 87 ms round trips. |
-| The machine's libva (or a second encoder linked to it) | The encoder would not start at all where libva is missing; VA-API drivers do not link libva, so the built-in one loads them. A driver built for a newer VA-API than 1.24 is not found and the encoder uses VP8. |
-| Xvfb exiting six hours after its last client (before) | Outlived the terminal server it served by hours as an orphan; the keeper ties the display to the terminal core instead, while the short delay keeps it across a core restart. |
-| `DISPLAY` only when asked | MuJoCo and matplotlib would need setup in every pane. With a display, `plt.show()` blocks until its window is closed, which is visible in the browser; machines where that is unwanted are turned off individually. |
-| Restarting the terminal core with `DISPLAY` set, or a wrapper as the shell | Programs inherit the core's environment, so every terminal would get a display the core may not have; a wrapper means changing the user's shell. |
-| Typing the export into every pane | Would land in agents' prompts and editors; only shells at their prompt are typed into. |
+| Socket-activated display | Xvfb cannot take a listening socket; relaying through the agent would cut programs when it exits. |
+| A display per pane or workspace | Many X servers for rare windows; per-window capture already separates them. |
+| Only pictures | MuJoCo at 60 fps: pictures 48 fps at 44 Mbit/s (7.5 fps on 10 Mbit/s), H.264 58 fps at 1.7 Mbit/s on both, at a third of JPEG's CPU. |
+| The ffmpeg program as encoder | Its muxers hold each frame until the next arrives, stalling acknowledgement-paced streams. |
+| The machine's own ffmpeg | Often missing, of varying versions and builds. |
+| NVENC from the agent (purego) | Hand-written bindings, no VP8 fallback, and the agent would depend on the machine's libc. |
+| WebRTC to the browser | Needs connections outside the guarded WebSocket. |
+| AV1 | NVENC encodes it only from Ada GPUs; Safari decodes it only in hardware. |
+| HEVC | Browsers decode it only in hardware. |
+| WebP pictures | No encoder in Go's standard library. |
+| JPEG row groups as separate frames | Extra headers, tearing between parts, separate acknowledgements. |
+| A fixed number of frames in flight | Large pictures queue on slow links; small video frames are held back. |
+| The machine's libva | The encoder would not start where libva is missing; drivers do not need it linked. |
+| Xvfb exiting hours after its last client | Outlived its terminal core as an orphan; the keeper ties the display to it. |
+| `DISPLAY` only when asked | MuJoCo and matplotlib would need setup in every pane; machines can be turned off individually. |
+| Restarting the terminal core with `DISPLAY`, or a wrapper shell | Every terminal would inherit a display; a wrapper changes the user's shell. |
+| Typing the export into every pane | Would land in agents' prompts and editors. |
 
 ## Failure modes
 
-- **No Xvfb and no apt** → phase `unavailable`; panes get no `DISPLAY`, so
-  programs behave as over plain ssh.
-- **Unpacked Xvfb cannot start** (missing libraries) → phase `error` with
-  Xvfb's output (`~/.herdr-ide[-<instance>]/xvfb.log` on the machine); retried with the
-  backoff, so at most one start every 5 minutes.
-- **Any preparation or attach error** → the status bar shows that the
-  machine's display failed; clicking it shows the error the core reported
-  (the agent's or Xvfb's message), how it is retried, a button to copy it,
-  one to open the settings, where the machine's program windows can be
-  turned off, and one to dismiss it. A dismissed error stays hidden while
-  retries fail the same way and shows again once the display recovered
-  and failed anew. The status bar shows displays only of connected
-  machines.
-- **Machine disabled, removed or disconnected** → its display is shown as
-  disconnected (not connected in the settings), without an error or
-  windows; the display keeps running on the machine until idle, and the
-  next connection prepares it again.
+- **No Xvfb and no apt** → phase `unavailable`; panes get no `DISPLAY` and
+  behave as over plain ssh.
+- **Preparation or attach error** (e.g. unpacked Xvfb missing libraries) →
+  the status bar shows the machine's display failed; clicking shows the
+  error, how it is retried, and a link to the settings. Retries back off to
+  one every 5 minutes. Logs on the machine:
+  `~/.herdr-ide[-<instance>]/xvfb.log`, `xwayland.log`, `gui-keep.log`.
 - **Network interruption** → browser windows show "Reconnecting"; programs
-  and windows stay; after reconnecting the windows are adopted again.
-- **Display number taken** by another user (lock file, socket or listener)
-  after Xvfb idled out → a new number is reserved; panes created earlier
-  point at the old one and reach whatever server holds it (see Security).
-- **Old xorg-server** (before 21.1) → Xvfb exits as soon as its last client
-  leaves instead of a minute later; the next connect starts it again. An
-  Xwayland that old is not used.
-- **No Xwayland, no GPU or no access to its render node** (the user is not
-  in the `render` group) → the plain display; OpenGL on the CPU or through
-  `vglrun`.
-- **Xwayland does not come up or draws on the CPU** → it is ended, Xvfb
-  starts in its place (an error only when there is no Xvfb either: then it
-  is fetched at the next attempt) and the agent logs why; Xwayland's and the
-  compositor's output is in `~/.herdr-ide[-<instance>]/xwayland.log`.
-- **The compositor ends** (killed) → Xwayland loses its connection and
-  exits, programs lose the display; the next preparation starts a new one.
-- **Display in use when its kind should change** → it stays; the agent logs
-  the process that uses it. It is replaced at a later preparation (a
-  reconnect, a change of the setting) once nothing uses it.
-- **A Vulkan program renders on another GPU than the driver's first**
-  (several NVIDIA GPUs, `gui.gpuPick` off) → it fails to create its
-  swapchain; the settings name the GPU that works and the setting.
-- **`gui.gpuPick` on, GPU chosen is not the display's** → Vulkan windows
-  work, copied through the CPU (Isaac Sim 17–26 frames per second);
-  OpenGL through Mesa on that GPU, or `vglrun`.
-- **Two NVIDIA Vulkan drivers registered** (a stale `nvidia_icd.json` in
-  `/etc/vulkan/icd.d` beside the package's) → every GPU is listed twice;
-  programs that mind (Isaac Sim) say so. `VK_DRIVER_FILES` naming one file
-  avoids it; removing the stale file is the administrator's.
-- **gpupick cannot be preloaded** (home directory mounted `noexec`, a C
-  library that is not glibc) → the install fails and is logged; panes get
-  the display without it.
-- **A program of another word size, or one that is setuid** → the loader
-  does not preload the library (and says so for the former); it sees every
-  GPU.
-- **Install interrupted** (agent killed) → its `.fetch-*` directory is removed
-  by the next agent after an hour.
+  and windows stay and are adopted again.
+- **Display number taken** by another user after the display idled out →
+  a new number is reserved; terminals created earlier point at the old one
+  (see Security).
+- **xorg-server before 21.1** → no `-terminate` delay: Xvfb exits as soon as
+  its last client leaves; such an Xwayland is not used.
+- **No Xwayland, GPU or render node access** (not in the `render` group) →
+  the plain display.
+- **Xwayland fails or draws on the CPU** → Xvfb in its place; the agent logs
+  why.
+- **Compositor killed** → Xwayland exits; the next preparation starts anew.
+- **Display in use when its kind should change** → it stays until nothing
+  uses it.
+- **Vulkan on another GPU than the driver's first, gpupick off** → the
+  swapchain fails; the settings name the GPU that works.
+- **Two NVIDIA Vulkan ICDs registered** (a stale `nvidia_icd.json`) → every
+  GPU listed twice; `VK_DRIVER_FILES` or removing the stale file fixes it.
+- **gpupick cannot be preloaded** (`noexec` home, non-glibc) → logged;
+  panes get the display without it. Programs of another word size or setuid
+  ones see every GPU.
 - **Another window manager on the display** (two cores of one instance) →
-  attach fails after 3 s; the phase shows the error.
-- **Slow connection** → frames are skipped, the picture lags but stays
-  consistent; measured 24 frames per second for a 1706×960 MuJoCo viewer
-  from a campus machine.
-- **VirtualGL's EGL device not accessible** → `VGL_DISPLAY` is not set;
-  OpenGL programs render with Mesa on the CPU.
-- **Video encoder cannot start or stops** (killed, a driver failing) → the
-  window is sent as pictures and video is tried again after 5 s, doubling
-  up to 5 minutes; VP8 is used where H.264 is not available and the
-  viewers decode it.
-- **No GPU encoder for H.264**: no NVIDIA driver and no render node the
-  user may open (not in the `render` group), or a VA-API driver that cannot
-  encode H.264 (NVIDIA's VA-API driver decodes only) or is newer than VA-API
-  1.24 → VP8 on the CPU.
-- **All NVENC sessions in use** (GeForce cards allow 8 per system, shared
-  by all users) → new streams use VA-API where the machine has another GPU,
-  else VP8 on the CPU when the viewers decode it, else pictures.
-- **No MIT-SHM** (a display without the extension, or the segment failing)
-  → captures go through the X connection (2.4 ms instead of 0.4 ms for a
-  1706×960 window); logged once.
-- **Keeper not running** (killed, or the terminal core restarted more than
-  30 s later while the core was away; while connected the core asks for a
-  new one when the terminal core is back) → the display ends a minute
-  after its last client; the next connection of the core starts it again
-  on the same number if it is still free, with a new cookie that terminals
-  read from `run/xauth`, otherwise terminals created earlier point at a
-  number another server may hold (see Security).
-- **Browser without WebCodecs or not in a secure context** (plain HTTP on a
-  LAN) → it asks for no video and gets pictures; so does every viewer of a
-  window one of whose viewers does not decode the stream.
-- **Slow connection** → frames are paced by acknowledgements within the
-  window's budget. On a 10 Mbit/s link with 50 ms more round trip, pictures
-  of the MuJoCo viewer fill the link (7.5 whole windows per second, 240 ms
-  from capture to drawing) while its video runs at 58 frames per second
-  with 90 ms, using 1.8 Mbit/s.
+  attach fails; the phase shows the error.
+- **Slow connection** → the flow budget skips frames; pictures lag but stay
+  consistent, video keeps its frame rate at lower bandwidth.
+- **No GPU encoder for H.264** (no NVENC, no usable VA-API driver) or all
+  NVENC sessions in use → VP8 on the CPU if viewers decode it, else
+  pictures.
+- **No MIT-SHM** → captures through the X connection (slower); logged once.
+- **Keeper not running** → the display ends a minute after its last client;
+  the next connection starts it again, on the same number if still free.
+- **Browser without WebCodecs or secure context** → pictures, for every
+  viewer of that window.
 
 ## Security
 
-The display is reachable only with its cookie (0600 in the private run
-directory, new at each start) and not over TCP; programs on it run as the
-user, like everything in the panes, and X11 does not isolate them from each
-other. Other users cannot pose as the display while the agent uses it (peer
-credentials, ownership of everything in `/tmp` for the number), but a pane
-created earlier keeps `DISPLAY` after its display ended. Window contents and
-input travel the same guarded paths as terminals: same-origin pages,
-Host/Origin checks, proxy secret. In read-only mode nothing is installed or
-started, browser windows show windows but send no input, and closing is
-refused. The GPU display adds no way in: its compositor listens nowhere and
-opens no file (it passes the render node's name on; Xwayland opens it as
-the user), talks to Xwayland over a socket pair made close-on-exec, bounds
-what that one client can make it hold, and Xwayland is checked like Xvfb
-(peer credentials of the process the agent started, the cookie). A display
-is replaced only while no program is connected to it. gpupick is off by
-default; it is written by the agent from its own binary into a directory
-only the user can write, restricts what a program sees and grants nothing,
-and the table it reads comes from the driver's own description of the GPUs
-with UUIDs of one fixed form. Xvfb packages are fetched through apt, which verifies them. The video
-encoder is run only as pushed by the core and verified by its SHA-256; it
-reads frames from a pipe and writes packets to one. See
-[SECURITY.md](../../SECURITY.md).
+- The display is reachable only with its cookie (0600, new at each start),
+  never over TCP. Programs on it run as the user and X11 does not isolate
+  them from each other.
+- Other users cannot pose as the display while the agent uses it (peer
+  credentials, ownership checks in `/tmp`), but a terminal created earlier
+  keeps `DISPLAY` after its display ended.
+- Window contents and input travel the same guarded paths as terminals
+  (same origin, Host/Origin checks, proxy secret). In read-only mode nothing
+  is installed or started, input is not sent and closing is refused.
+- Commands to the agent are built by the core, never forwarded from the
+  browser; a client cannot override the display variables.
+- The GPU display's compositor listens nowhere and opens no file, talks to
+  Xwayland over a close-on-exec socket pair, and bounds what its one client
+  can make it hold; Xwayland is checked like Xvfb.
+- gpupick is off by default, written from the agent's own binary into a
+  directory only the user can write, and only restricts what a program sees.
+- Xvfb packages are verified by apt; the video encoder runs only as pushed
+  by the core and verified by its SHA-256.
+
+See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-`internal/agent/gui_test.go` runs a real Xvfb (skipped where there is none;
-`GUI_TEST_INSTALL=1` fetches the package): a helper program's window is
-announced with its terminal, streamed, receives clicks and keys (also after a
-second window appeared) and is closed; plus cookie rotation, display
-reservation against another user's files and listeners (played by another
-uid in a private directory), the socket directory check, capture tiles,
-staging cleanup, library ownership and package pruning.
-`internal/agent/guiorigin_test.go` the terminal of a window (one of the
-instance's terminal core, not of another one);
-`internal/server/term_test.go` the display's variables in `terminal.run`
-(replacing the client's, a malformed `env`) and typing into a terminal's
-shell (its record read now, input at its own size), and
-`TestIntegrationTermShells` the same with a real herdr-core;
-`internal/gui/gui_test.go` covers terminal environments (also per machine),
-the export command's quoting, enabling (`TestEnable`, with stand-ins for
-the terminals and the agent: only known shells waiting at their prompt,
-also when checked again right before, are typed into; a program in front,
-a shell that started one meanwhile, a terminal without a shell, an
-unreachable one and a shell started with the display are reported; a
-second enable types into no shell twice until the display changes),
-frame routing, forged acknowledgements and
-refresh floods, the read-only plan, the close grace period, preparing once
-per connection, the retry backoff, and detaching without an error when the
-machine disconnects or is removed;
-`web/src/__tests__/guiError.test.ts` covers the status bar's error (shown
-on click, dismissed until the display failed anew, hidden for machines
-that are not connected) and the windows' searchable list (grouped by
-machine, narrowed by typing, the chosen window opened, the keyboard back
-on the button);
-`internal/server/server_test.go` covers the Origin check of the close
-request;
-`internal/agent/gui_test.go` also covers recognizing shells started with the
-display (a process still in exec has an empty environment and is skipped),
-frame statistics and the flow (a simulated 10 Mbit/s link: the budget
-settles near the bandwidth-delay product, acknowledgements in bursts do not
-inflate the rate, a round trip measured with a queue is measured again);
-`internal/jpegstrip` that one row group gives `image/jpeg`'s bytes and any
-number of groups its pixels; `internal/agent/guikeep_test.go` that the
-keeper follows a terminal core that restarts, leaves once it is gone,
-holds the display meanwhile and runs once per instance;
-`internal/gui/gui_test.go` that the keeper is asked for again when the
-terminal core comes back and never in read-only mode (nor is the encoder pushed), and that commands to
-the agent are the core's; `internal/gui/gui_test.go` that they reach only the
-window's viewers; `web/src/__tests__/gui.test.ts` keycodes, paths, unseen windows and the
-statistics shown. Video: `internal/agent/guivideo_test.go` runs the
-encoder's protocol against a stand-in process (key frames on request,
-codec strings, an encoder that exits or stops reading), installs with a wrong and the right
-digest and prunes old builds, and decides when a window becomes video,
-changes stream and goes back to pictures; `internal/gui/gui_test.go` routes
-streams (common kinds in order of preference, viewers behind waiting for a
-key frame, joining mid-stream, the stream's end, video off);
-`web/src/__tests__/guiVideo.test.ts` decodes from key frames and starts
-over after errors, and asks for video only with WebCodecs in a secure
-context. The encoder was measured with MuJoCo and matplotlib windows on
-NVIDIA machines (RTX PRO 6000, RTX 5090), checked on an A40 machine without
-ffmpeg and a machine with an AMD integrated GPU (Radeon 780M, VA-API), and
-killed while streaming. `BenchmarkGUICapture` (`go test ./internal/agent -run '^$'
--bench GUICapture` on Linux with Xvfb) times capturing and encoding a
-1706×960 window, a rendered scene and a plot, in tiles as the window
-manager does; on a Core Ultra 9 285K a frame takes 2.4 ms to capture with
-`GetImage` and 0.34–0.43 ms through MIT-SHM, 12–14 ms as JPEG on one core
-and 3.4–4.3 ms in row groups (158–169 kB either way), 16–20 ms as PNG.
-End to end (Chrome on macOS, `#stats`), the MuJoCo viewer was drawn with
-pictures at 48 whole windows per second (36 ms from capture to drawing)
-instead of 29 before these changes, and as H.264 at 58 frames per second;
-on a 10 Mbit/s link with 50 ms more round trip at 7.5 (bandwidth-bound)
-and 58 (90 ms, before 31 with three frames in flight). The desktop app's
-Electron decoded the same stream at 57–60 frames per second.
-matplotlib (TkAgg) and the MuJoCo viewer under `vglrun` were used end to end
-in Chrome on Ubuntu 24.04 machines, one with Xvfb installed and one where it
-was fetched without privileges; turning a machine off and back to the
-default in the dialog detached and re-attached its display.
-`TestIntegrationTermShells` types into a real shell of a real herdr-core
-as enabling does: the shell waits at its prompt, the text runs and the
-terminal keeps its size.
+- `internal/agent/gui_test.go` (real Xvfb, skipped without one;
+  `GUI_TEST_INSTALL=1` fetches it): a window announced with its terminal,
+  streamed, clicked, typed into and closed; cookie rotation, display
+  reservation against another user's files, the socket directory check,
+  capture tiles, shell recognition, the flow on a simulated slow link.
+  `TestGUIWindowsGPU` runs it on Xwayland with the compositor.
+  `BenchmarkGUICapture` times capture and encoding.
+- `internal/agent/guiwl_test.go`: the compositor's wire protocol and the
+  NVIDIA layouts it offers.
+- `internal/agent/guigpu_test.go`: GPUs from the driver's description, the
+  display kind and its fallback, the change of kind, gpupick itself (Linux).
+- `internal/agent/guikeep_test.go`, `guiorigin_test.go`, `guivideo_test.go`
+  (encoder protocol against a stand-in, install digests, switching between
+  video and pictures).
+- `internal/jpegstrip`: one row group equals `image/jpeg`'s bytes, any
+  number its pixels.
+- `internal/gui/gui_test.go`: terminal environments, enabling open panes
+  (`TestEnable`), frame and video routing, forged acknowledgements, refresh
+  floods, read-only, the close grace, retry backoff, the keeper request.
+- `internal/server/term_test.go` and `TestIntegrationTermShells` (real
+  herdr-core): display variables in `terminal.run` and typing into a shell;
+  `internal/server/server_test.go`: the close request's Origin check.
+- `web/src/__tests__/gui.test.ts`, `guiVideo.test.ts`, `guiError.test.ts`,
+  `guiStatus.test.ts`: keycodes, decoding, the status bar's error, the
+  window list, the display state.
 
-GPU display and GPUs: `internal/agent/guiwl_test.go` speaks the client's
-side of the wire protocol to the compositor (the globals, the device and
-the layouts, the toplevel's configure, a buffer released with its
-descriptor closed, the frame callback, ids given back, the end with its
-client; a client that breaks the protocol is left) and checks that the
-layouts offered include those a Blackwell GPU's driver names;
-`internal/agent/guigpu_test.go` the GPUs read from the driver's description
-(bus order, a first GPU that is not first on the bus, malformed entries),
-the display's GPU, which kind is wanted, the fallback to Xvfb with an
-Xwayland that exits, the change of kind only while no program is on the
-display, and gpupick itself on Linux (the set kept, indices rewritten,
-UUIDs, several models, inheritance, the GLX vendor, ordinary files
-untouched, a damaged copy replaced); `TestGUIWindowsGPU` runs the window
-test on Xwayland with the compositor where the machine has both;
-`internal/gui/gui_test.go` the plan for both kinds and the panes'
-environment; `web/src/__tests__/guiStatus.test.ts` the state shown.
-Measured on a machine with four RTX PRO 6000 Blackwell (driver 580.159,
-Ubuntu 24.04, Xwayland 23.2.6), shared with other users, whose first GPU
-for the driver is the second in `nvidia-smi`: Isaac Sim 6.2 (an empty
-stage, a 1280×720 viewport in a 1440×900 window) draws 24–33 frames per
-second on Xvfb, 98–104 on Xwayland under headless weston and 79–84 under
-the agent's compositor with that GPU more loaded; started with another GPU
-it fails on both as described, and with gpupick draws 17–26 on either.
-`glxgears` without `vglrun` runs at 5500–7000 frames per second on the GPU
-display (2400 on Xvfb, on the CPU), with `vglrun` at 2000–4400, and with a
-GPU chosen that is not the display's at 300–470 through Mesa. Capturing a
-1440×900 window through MIT-SHM takes 0.22–0.28 ms on the GPU display
-against 0.16–0.20 ms on Xvfb. End to end in Chrome on macOS: a pane's
-environment as described, `vkcube` at 61 frames per second as H.264, Isaac
-Sim started in a pane with `CUDA_VISIBLE_DEVICES=0` shown and clicked in a
-browser window, the display replaced in both directions by the setting.
-Not run: a GPU with Mesa's drivers under Xwayland, linux/arm64, and
-Xwayland 24.1 or newer (read in its sources: it takes `wl_drm` as before).
+Measured by hand on NVIDIA machines (RTX PRO 6000 Blackwell, RTX 5090, A40)
+and an AMD iGPU (VA-API): a 1706×960 MuJoCo viewer at 48 fps as pictures
+and 58 as H.264 (58 also on a 10 Mbit/s link with 50 ms added); Isaac Sim
+24–33 fps on Xvfb, 79–84 on the GPU display, 17–26 with gpupick on another
+GPU; `glxgears` 5500–7000 fps on the GPU display. Not run: Mesa GPUs under
+Xwayland, linux/arm64, Xwayland 24.1 or newer.

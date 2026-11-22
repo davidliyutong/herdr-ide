@@ -2,393 +2,234 @@
 
 ## Context
 
-Agents and scripts produce plots, renders, GIFs, videos and logs on remote
-machines; their paths scroll by in terminals. Looking at them should take one
-click, without opening VS Code or copying files, and so should taking them
-home: a checkpoint, a results folder, a log. Conversely, users want to hand
-screenshots and files to agents running on remote machines.
+Agents and scripts produce plots, renders, videos and logs on remote
+machines, and their paths scroll by in terminals. Looking at one should take
+one click, without opening VS Code or copying files. Taking results home (a
+checkpoint, a results folder) should be as easy. The other way round, users
+hand screenshots and files to agents running on those machines.
 
 ## Goals / non-goals
 
-Goals: ⌘/Ctrl-click (or right-click) any path or URL in a pane, also one
-wrapped over several rows; preview images, GIFs, video
-(with seeking), audio, PDF, text and directories; step through sibling media;
-paste or drop files into a pane to paste their paths, uploading them to the
-pane's machine when they are not there (dropped files into the pane's
-directory); follow uploads (progress, speed, time left), cancel them and see
-the recent ones; download a path from a pane, or files and folders chosen in
-the pane's directory, into the browser, folders as zip archives.
+Goals:
 
-Non-goals: browsing and changing files, and editing them: the file
-explorer does that ([28](28-file-explorer.md)), and VS Code panes; the
-download chooser picks entries, nothing more.
+- ⌘/Ctrl-click (or right-click) a path or URL in a pane, also one wrapped
+  over several rows.
+- Preview images, GIFs, video (with seeking), audio, PDF, text and
+  directories; step through sibling media.
+- Paste or drop files into a pane to paste their paths, uploading them when
+  they are not on the pane's machine.
+- Follow uploads and downloads in panels: progress, speed, cancel, history.
+- Download a path, or entries of the pane's directory, into the browser;
+  folders as zip archives.
+
+Non-goals: browsing, changing and editing files. The file explorer
+([28](28-file-explorer.md)) and VS Code panes do that; the download chooser
+only picks entries.
 
 ## Design
 
-**Links** (`web/src/terminal/links.ts` finds them, `openLink.ts` opens them)
+### Links
 
-- With ⌘ or Ctrl held, the row under the pointer is scanned for URLs, paths
-  with a slash, `~`-paths and bare file names with known extensions,
-  optionally followed by `:line[:col]`; OSC 8 hyperlinks from the program
-  come first. Cell columns are mapped from string indices so wide characters
-  do not shift ranges ([26](26-web-terminals.md)).
-- Long paths wrap. A row whose text reaches the pane's last column is
-  joined with the next row, after that row's indentation (a program that
-  wraps its own text may indent continued lines), up to 20 rows either
-  way. A path that happens to end exactly at the last
-  column joins the next row too; the underline shows what a click opens.
-  Programs that wrap their own text (Claude Code, Codex) leave no soft-wrap
-  marks, so this signal covers both terminal and program wrapping.
-- A right click offers the same for the path or URL under the pointer, or
-  for the selection when it is one: **Preview**, **Open in VS Code** (not for
-  media) and **Copy full path**, or **Open** and **Copy link** for URLs. A
-  path wrapped in a way detection does not join (a margin before the last
-  column, a diff's `+` in front of the next row) is opened by selecting it.
-- Relative paths resolve against the terminal's directory (its shell's,
-  or that of a program which stayed where it started,
-  [28](28-file-explorer.md)), else where it started; `~` against the
+`web/src/terminal/links.ts` finds links, `openLink.ts` opens them.
+
+- With ⌘ or Ctrl held, the row under the pointer is scanned for OSC 8
+  hyperlinks first, then URLs, paths, `~`-paths and bare file names with
+  known extensions, optionally with `:line[:col]`. Requiring the modifier
+  leaves plain clicks to mouse-aware programs.
+- A row whose text reaches the last column is joined with the next one (up
+  to 20 rows). Programs that wrap their own text (Claude Code, Codex) leave
+  no soft-wrap marks, so this one signal covers both kinds of wrapping. A
+  path wrapped in a way detection does not join is opened by selecting it.
+- A right click offers **Preview**, **Open in VS Code** and **Copy full
+  path** for a path (or the selection), **Open** and **Copy link** for a URL.
+- Relative paths resolve against the terminal's directory, `~` against the
   machine's home.
-- Activation requires ⌘ or Ctrl, so plain clicks still reach mouse-aware
-  applications. What a path opens in is a pane of the terminal's
-  workspace (`actions.openPath`):
-  - media (images, video, audio, PDF) opens in a preview pane: the
-    workspace's preview pane (the one of the terminal's tab first), which
-    then shows that path, else a new one split beside the terminal;
-  - other files open in VS Code at the line ([05](05-vscode-panes.md)): in
-    a VS Code pane of the workspace, the one of the terminal's tab whose
-    folder holds the file first, then one of another tab that holds it,
-    then any of the terminal's tab, then any; else in a new VS Code pane
-    split beside the terminal, for the terminal's directory when it holds
-    the file, else the workspace's when it does, else the file's
-    directory.
+- Media opens in the workspace's preview pane, else a new one split beside
+  the terminal. Other files open at the line in a VS Code pane of the
+  workspace whose folder holds the file, else a new one beside the terminal
+  (`actions.openPath`, [05](05-vscode-panes.md)).
 
-  The text menu's **Open in VS Code** does the same, and its **Preview**
-  opens the path in a preview pane the same way, also when it is not
-  media.
+### Preview
 
-**Preview** (`web/src/components/PreviewPane.tsx`)
+`web/src/components/PreviewPane.tsx`.
 
 - A preview is a pane of the layout document (`{"preview": {"id",
-  "path"}}`, [22](22-terminal-protocol.md)): it is split, dragged by its
-  header, maximized and closed like any pane, can be a tab's only pane,
-  and comes back after a reload or a restart ([04](04-layout-and-keyboard.md)).
-  A split from it starts a terminal in its file's directory. Closing it
-  ends nothing. A file deleted or moved away since strikes its title
-  through in its header and tab, as the file explorer's editors are
-  ([28](28-file-explorer.md); only while the explorer is on), and the
-  preview keeps what it showed: also when it is drawn again (another tab
-  shown, then this one), the last text or directory shown of the path
-  (the page keeps those of the last 8 paths) stands in for the 404. Once
-  the file is there again, the preview loads it again.
+  "path"}}`, [22](22-terminal-protocol.md)). It splits, moves and survives
+  reloads like any pane ([04](04-layout-and-keyboard.md)). Stepping to a
+  sibling or into a directory changes the document's path, so every client
+  follows.
 - `GET /api/m/<machine>/file?path=` streams through the agent (`fs.stat`,
-  `fs.read` with offset/length) and supports single HTTP ranges, ETags and
-  `download=1`.
-- Images, video and audio use native elements; PDFs an iframe; text files
-  read the first 2 MiB and refuse binary content; directories list entries
-  that open on click (`GET /api/m/<machine>/list`, at most 20 000; a
-  listing larger than the agent's reply line holds, as of an archive just
-  unpacked, follows the line, [architecture](../architecture.md)). Text is colored in the language of the file's name or
-  first line ([28](28-file-explorer.md), `web/src/highlight`). A Markdown
-  file shows rendered, with a toolbar button for its source
-  (`web/src/markdown`): GitHub's tables, task lists, strikethrough and
-  footnotes, formulas (KaTeX, with the terminal's limits), and code blocks
-  colored by their fence's language with a copy button. A file is text the
-  page does not trust, so the renderer shows HTML in it as text; a link
-  keeps its target only for `http`, `https` and `mailto` (a web one opens as
-  a link in a terminal of the document's machine does,
-  [32](32-browser-and-ports.md): an address of that machine's `localhost`
-  in a browser pane, any other outside the app; `mailto` outside), a link
-  to a file beside the document shows that file in the
-  pane, and any other link is its text; an image loads only from a `data:`
-  URL of a raster type, a `blob:` URL or a file beside the document, through
-  the file route. A remote image is a link instead: loading it would tell
-  its server who reads the file. The renderer (react-markdown) loads when a
-  Markdown file is first shown. Sibling media in the same directory are navigable with
-  ← →. Stepping to a sibling or entering a directory shows that path in the
-  same preview pane (the layout document's path changes, so every client
-  follows).
-- Its toolbar has **Download** and **Open in VS Code** (also for media:
-  VS Code shows images), which opens the file in a VS Code pane of the
-  workspace as a path from a terminal does, beside the preview.
-- A video codec the browser cannot decode shows a hint with download and
-  VS Code options.
+  `fs.read`) with single HTTP ranges, ETags and `download=1`.
+- Images, video and audio use native elements, PDFs an iframe. Text shows
+  the first 2 MiB, highlighted (`web/src/highlight`), and refuses binary
+  content. Directories list up to 20 000 entries (`GET
+  /api/m/<machine>/list`). An undecodable video codec shows a hint with
+  download and VS Code options.
+- Markdown renders (`web/src/markdown`, loaded on first use) with GitHub's
+  extensions, KaTeX formulas and highlighted code blocks; a button shows the
+  source. See [Security](#security) for what the renderer refuses.
+- A file deleted or moved away is struck through in the header, as in the
+  explorer's editors ([28](28-file-explorer.md)), and the preview keeps the
+  last content it showed. It loads again once the file is back.
 
-**Downloads** (`web/src/download.ts`, `internal/server/files.go`,
-`internal/agent/archive.go`)
+### Downloads
+
+`web/src/download.ts`, `internal/server/files.go`, `internal/agent/archive.go`.
 
 - `GET /api/m/<machine>/download?path=…&path=…` takes up to 1000 absolute
-  paths. One file comes as itself (the preview's file serving, as an
-  attachment); a directory or several paths come as one zip the agent makes
-  while it is downloaded (`fs.archive`), named after the one path or the
-  directory holding them all. Each path is at the archive's root under its
-  name (a repeated name gets `-1`, `-2`…), directories with everything
-  below them, with modes and times.
+  paths. One file comes as itself; a directory or several paths come as one
+  zip the agent writes while it is downloaded (`fs.archive`). Each path sits
+  at the archive's root; repeated names get `-1`, `-2`….
 - The pane menu offers **Download <name>** for the path under the pointer
-  or selected (checked with a `HEAD` request first, so text that names no
-  file becomes a note instead of a failed download) and **Download files…**:
-  a chooser listing the pane's working directory, where entries are
-  checked (or all at once; Shift-clicking a box or name checks or unchecks
-  every entry from the one clicked last, alike), a field filters the
-  entries by name (the matched characters marked; **Select all shown**
-  then takes those shown, checked entries stay checked while hidden, and
-  Escape clears the filter before it closes the chooser), directories are
-  entered by clicking their names and left with the up button, and
-  **Download** takes the checked entries of the directory shown in one
-  download. Neither is offered for the desktop app's
-  own machine, whose files are already on the computer; a browser offers
-  them for every machine.
-- The page starts a download with a same-origin link, so the browser (or the
-  desktop app's save dialog) saves it like any download, where the user
-  wants it. Nothing is held in the page's memory. The link carries an id
-  (`dl=`), by which the downloads panel follows it (below). The core copies
-  the agent's stream to the response; a download that ends early (cancelled
-  in the browser or the panel) stops reading the stream before its next
-  read and closes it, which stops the agent's walk. (Closing a yamux stream
-  only ends its writes, and a read deadline is not checked while received
-  data is waiting, which it always is while the agent keeps sending.)
-- The agent sends the archive in chunks (`fs.archive` with `chunked`,
-  `agentproto.ChunkWriter`) and marks its end once the archive is
-  complete. A stream that ends without that mark, as when the machine's
-  connection drops (yamux then ends every stream as if it were complete),
-  is a truncated archive: the core aborts the response, so the browser
-  reports a failed download instead of saving a broken zip. One file needs
-  no mark: the response has its length, which the browser checks.
-- The agent follows the paths it is given when they are symbolic links (the
-  user named them) but stores links below them as links, so a link to `/`
-  inside a project is not followed; sockets, devices and FIFOs are left out
-  (reading a FIFO would block), and so is anything it cannot read. Nothing
-  is written on the machine. Files are compressed at the fastest deflate
-  level: the archive is made while it downloads.
-- VS Code's explorer downloads through the same endpoint: the page whose
-  VS Code pane shows the asking window starts the download, else the page
-  with the focus ([05](05-vscode-panes.md)).
+  (checked with `HEAD` first) and **Download files…**, a chooser over the
+  pane's working directory with a filter and Shift ranges. Neither is shown
+  for the desktop app's own machine, whose files are already local.
+- The page starts the download with a same-origin link, so the browser (or
+  the desktop app's save dialog) saves it like any download. Nothing is held
+  in the page's memory.
+- The agent sends the archive in chunks (`agentproto.ChunkWriter`) and marks
+  its end. When the machine's connection drops, yamux ends streams as if
+  complete; a stream without the end mark is therefore a truncated archive,
+  and the core aborts the response so the browser reports a failure instead
+  of saving a broken zip.
+- A download that ends early stops the core reading the agent's stream and
+  closes it, which ends the agent's walk.
+- The agent follows the named paths when they are symlinks but stores links
+  below them as links. It skips sockets, devices, FIFOs and unreadable
+  entries, writes nothing on the machine, and uses the fastest deflate level.
+- VS Code's explorer downloads through the same endpoint
+  ([05](05-vscode-panes.md)).
 
-**Pasted and dropped files** (`web/src/drop.ts`, `web/src/lib/files.ts`)
+### Pasted and dropped files
 
-- Files pasted into a pane, or dragged from outside the page onto one, end
-  up as their paths in the pane, shell-quoted and separated by spaces, sent
-  as a paste, the way a terminal delivers dropped files: the terminal
-  brackets it when the program asked for that, so programs that tell pastes from typing
-  (shells, coding agents) handle it as a paste. The paths go to the pane
-  under the drop, which gets the focus.
-- While files are dragged over a pane, it is outlined with what a drop does
-  there. Read-only mode takes no drop. Drops that nothing on the page takes are
-  refused, so a file dropped beside a target is not opened by the browser in
-  place of the app.
+`web/src/drop.ts`, `web/src/lib/files.ts`.
+
+- Pasted or dropped files end up as shell-quoted paths sent to the pane as a
+  paste, the way a terminal delivers dropped files. Programs that tell pastes
+  from typing (shells, coding agents) treat them as a paste.
+- A pane outlines what a drop does there. Read-only mode takes no drop. Drops
+  nothing takes are refused, so the browser does not open the file in place
+  of the app.
 - In the desktop app, files dropped on a pane of the local machine are
-  already there: their own paths are pasted, folders too, and nothing is
-  copied. The shell's bridge says where a dropped file is on disk
-  ([16](16-desktop-packaging.md)); browsers do not tell a page, so there
-  every file is uploaded.
-- Other files are `POST`ed to `/api/m/<machine>/upload?name=` of the pane's
-  machine, one after the other, streamed with chunk framing; the reply holds
-  the path. Folders are not uploaded on panes; they are skipped with a note
-  (the file explorer uploads them, [28](28-file-explorer.md)). A failed
-  or cancelled upload shows in the uploads panel (a failure also as a note),
-  and the paths of the others are still pasted.
-- Dropped files go into the pane's working directory (its foreground
-  program's, from the terminal core, so the directory of the agent running
-  there), given as
-  `&dir=`: the user put them there on purpose, and the agent finds them next
-  to its project. Each keeps its own name (without control characters); a
-  name already taken gets `-1`, `-2`… before the extension, so nothing there
-  is replaced. The overlay and the note name that directory. When it does
-  not take the file (not writable, gone) or there is none, the file
-  goes to the upload directory instead, with a note.
-- Pasted files (mostly clipboard screenshots) go to the machine's upload
-  directory, where the server adds a timestamp and random suffix (several
-  clipboard images are all called `image.png`) and files expire after 7 days
-  ([10](10-remote-resource-lifecycle.md)).
+  already there: their paths are pasted and nothing is copied
+  ([16](16-desktop-packaging.md)). Browsers do not reveal local paths, so
+  there every file is uploaded.
+- Uploads go one at a time to `POST /api/m/<machine>/upload?name=`, streamed
+  with chunk framing; the reply holds the path. Folders are skipped with a
+  note on panes (the file explorer uploads them).
+- Dropped files go into the pane's working directory (`&dir=`, the
+  foreground program's), so the agent finds them next to its project. A
+  taken name gets `-1`, `-2`… and nothing is replaced. If that directory
+  does not take the file, it goes to the upload directory with a note.
+- Pasted files (mostly clipboard screenshots, all called `image.png`) go to
+  the machine's upload directory with a timestamp and random suffix, and
+  expire after 7 days ([10](10-remote-resource-lifecycle.md)).
 
-**Uploads panel** (`web/src/transfers.ts`, `web/src/components/Transfers.tsx`)
+### Transfer panels
 
-- Every upload of a pasted or dropped file is listed in a panel opened from
-  the status bar, where a button appears once the browser has uploaded
-  something; while files go it shows how many and how far they are
-  together. The note of a drop that uploads has a **Show** button for it.
-- The mouse resting on the button for 200 ms opens the panel without a
-  click, and it closes 300 ms after the mouse has left the button and the
-  panel (the pointer may cross the gap between them). A panel opened this
-  way does not take the keyboard. A click on the button while it is open
-  that way, or a press or the keyboard in the panel, keeps it open until
-  the button, a press outside, Escape or × closes it; a click while it is
-  closed opens it kept, as does other code (a starting upload). Only a
-  mouse hovers; touch and pen click, and the
-  keyboard is as before (Enter and Space toggle, Escape closes)
-  (`web/src/components/useHoverOpen.ts`).
-- The files of one paste or drop are queued together. A running upload
-  shows the bytes sent of its size, its speed over the last 3 seconds and
-  the time left; a waiting one shows that it waits. The browser sends the
-  body with `XMLHttpRequest`, whose upload events report the bytes sent;
-  the core streams the body to the agent as it arrives, so these are close
-  to what has reached the machine.
-- **Cancel** (and **Cancel all**) stops a running upload by aborting its
-  request; the core then closes its stream to the agent, which removes the
-  temporary file it was writing, so nothing of the file is left on the
-  machine. A waiting upload is never sent, and the paths of the others in
-  the drop are still pasted. Once the whole body is sent, the agent is
-  saving the file (moving it to its name); the upload then shows as saving
-  and can no longer be cancelled, since the file would arrive anyway.
-- Finished uploads (done, failed or cancelled) move to the history, newest
-  first: the machine, where the file is (or the directory it was going to),
-  its size, time and average speed, or the error. A done upload can be
-  opened in a preview pane (the workspace's, else a new one beside the
-  focused pane) and its path copied. The browser keeps the
-  last 50 in `localStorage` (names, machines and paths, not contents);
-  opening the panel shows the ones other tabs finished. Entries can be
-  removed one by one or all at once; this does not touch the files.
-- The keyboard (as in the downloads panel): the list of transfers is one
-  stop of the Tab key; ↑ ↓ Home End move between them, ← → between a
-  transfer and its buttons, Delete (or Backspace) cancels a running one or
-  removes a finished one from the list, the keyboard going on to the next;
-  Escape closes the panel and gives the keyboard back to its button.
+Uploads: `web/src/transfers.ts`, `web/src/components/Transfers.tsx`.
+Downloads: `web/src/components/Downloads.tsx`, `internal/server/downloads.go`.
+Shared: `web/src/transferList.ts`, `web/src/components/TransferPanel.tsx`,
+`web/src/components/useHoverOpen.ts`.
 
-**Downloads panel** (`web/src/download.ts`, `web/src/components/Downloads.tsx`,
-`internal/server/downloads.go`; what it shares with the uploads panel is in
-`web/src/transferList.ts` and `web/src/components/TransferPanel.tsx`)
-
-- The same design as the uploads panel, with its own button in the status
-  bar (shown once the browser has downloaded something): the downloads
-  running, then the finished ones, newest first. It opens on hover and
-  is kept by a click as the uploads panel is.
-- A browser tells a page nothing about the downloads it saves, so the core
-  reports them. A download whose link has an id (8–64 URL-safe characters;
-  the page makes 128 random bits) is followed. Before starting it, the page
-  tells the core over its WebSocket that it follows the id
-  (`download.watch {ids}`); the core sends
-  `download {id, state, sent, total?, name?, error?}` to that page alone:
-  when the request arrives, when it knows the name the file is saved under
-  and its size, every 250 ms while it writes the response, and once at the
-  end. `sent` counts the bytes the core wrote to the response, which over a
-  machine's link is close to what the browser received. Every download in
-  progress is followed (what the core keeps for it goes with its request);
-  a `HEAD` check is not.
-- Every `download.watch` is answered with what the core knows of each id:
-  its progress, how it ended (kept for 10 minutes, at most 256), or
-  `unknown`. So a request that arrives before the page's message, or a
-  download that ends while the page is reconnecting, loses nothing: after
-  every reconnect the page asks again about the downloads it shows as
-  running. One the core reported and no longer knows (it restarted, or the
-  page was away longer than that) ends as failed with `lost`; one it has
-  not seen yet keeps waiting.
-- A running download shows the bytes received of its size, its speed over
-  the last 3 seconds and the time left. An archive is made while it
-  downloads, so its size is not known: it shows the bytes received and the
-  speed, with a moving bar.
-- **Cancel** (and **Cancel all**) asks the core
-  (`download.cancel {id}` over the WebSocket) to break the response off:
-  the browser's download fails instead of saving a partial file, the
-  agent's stream ends, and the panel shows it as cancelled. A download
-  whose request has not arrived ends as cancelled at once, and the core
-  answers that request `410 Gone` if it comes later; one that just ended
-  shows how it ended. A download cancelled in the browser (or the desktop
-  app's save dialog) ends the request, which the core also reports as
-  cancelled, also while the core is still asking the machine about the
-  path.
-- It ends as done once the core wrote the whole response; as failed with a
-  reason when the path or machine is not there (`not_found`, also for a
-  file removed between its check and its read), the machine is not
-  connected (`unavailable`), the paths were refused (`invalid`), a resumed
-  download asks for more than the file now has (`changed`, answered `416`)
-  or the transfer broke off (`interrupted`; the response is aborted, so
-  the browser reports a failure, not a truncated archive); a note says so
-  too. Only a transfer that broke off is aborted: the others are answered
-  with their error.
-- A download the core has not reported after 30 s of connected time shows
-  as not started yet: browsers hold back downloads beyond a few to the
-  same host (6 over HTTP/1.1) until others finish, or may block several
-  downloads at once. It stays, can be cancelled, and runs as usual once
-  its request arrives.
-- Finished downloads show the machine, the paths, the size, time and
-  average speed, or why they ended, and can be downloaded again or removed
-  from the list. The browser keeps the last 50 in `localStorage` (names,
-  machines and paths, not contents). A page reloaded during a download no
-  longer follows it; the browser's own downloads still show it.
+- Each panel has a status bar button that appears after the first transfer.
+  It opens on hover and stays open after a click.
+- Running transfers show bytes, speed over the last 3 seconds and time left.
+  Finished ones (newest first, the last 50 kept in `localStorage`: names,
+  machines and paths, never contents) show size, time and speed, or the
+  error. A finished upload can be previewed; a download can be repeated.
+- Upload progress comes from `XMLHttpRequest`'s upload events. The core
+  streams the body to the agent as it arrives, so bytes sent are close to
+  bytes written on the machine.
+- Cancelling an upload aborts its request; the agent then removes the
+  temporary file it was writing. Once the body is sent the upload shows as
+  saving and can no longer be cancelled, since the file arrives anyway.
+- Browsers tell a page nothing about downloads, so the core reports them.
+  The page gives the link a random id (`dl=`) and sends `download.watch
+  {ids}` over `/ws`. The core sends `download {id, state, sent, total?,
+  name?, error?}` to that page alone, and answers each watch with what it
+  knows. A page that reconnects asks again; an id the core has forgotten
+  (kept 10 minutes after the end) ends as `lost`.
+- Cancelling a download (`download.cancel {id}`) makes the core break the
+  response off, so the browser fails it instead of saving a partial file.
+  A request that arrives after its cancel gets `410 Gone`.
+- Failures carry a code: `not_found`, `unavailable`, `invalid`, `changed`
+  (`416` for a resumed download past the file's end) or `interrupted`. Only
+  `interrupted` aborts the response; the others are answered with their
+  error.
+- A download the core has not seen after 30 s shows as not started:
+  browsers hold back downloads to one host beyond a few.
 
 ## Alternatives considered
 
 | Option | Why not |
 | --- | --- |
-| Preview only inside VS Code | Heavy for a glance; needs code-server running. |
+| Preview only inside VS Code | Heavy for a glance; needs code-server. |
 | Inline terminal images (sixel, Kitty) | The browser's emulator has no image support ([26](26-web-terminals.md)). |
-| `ssh … cat` / `dd` per range request | One process per range; POSIX tool differences across platforms. |
-| Client-chosen upload paths | Collisions and path injection. The browser names at most an existing directory; the server owns the file name and the agent never replaces a file. |
-| Upload to the upload directory, then move | Two steps and a copy across file systems; writing in the target directory renames within it. |
-| `fetch` with a streamed request body for upload progress | Streaming request bodies (`duplex: 'half'`) need HTTP/2 and are not in every browser; the core serves HTTP/1.1. `fetch` reports no upload progress otherwise. |
-| Progress reported by the core over `/ws` | Another message type for what the browser already knows; the core streams the body as it arrives, so the bytes sent are close to the bytes written. |
-| Cancelling during saving | The agent may already have renamed the file; a cancel that leaves the file would be misleading. |
-| Zip folders with a tool on the machine (`zip`, `tar`) | Not installed everywhere, different flags across platforms, and a process to own and end; the agent's Go zip writer is the same on every machine. |
-| Archive into a temporary file, then serve it | Disk on the machine and a retention rule for it, and nothing arrives until the whole archive is made. |
-| tar.gz instead of zip | Not opened by a double click on Windows; zip streams just as well (data descriptors, zip64 for large files). |
-| Fetch the files in the page and zip them there | Holds everything in the page's memory and needs a request per file. |
-| One download per checked file | The browser asks to allow several downloads, and a folder still needs an archive. |
-| Download progress by fetching the file in the page | Holds the whole file (or archive) in the page's memory before it can be saved. |
-| Save with the File System Access API to follow progress | Chromium only, and asks where to save every time; downloads would behave differently per browser. |
-| Progress from the desktop app's download events | Only in the desktop app; the core's count works in every browser and also tells why a download failed. |
-| Download events to every page, each ignoring the ids it did not make | Other pages, read-only ones included, would learn the names saved and the ids, with which they could cancel the download. |
-| Checking a zip's end record in the core instead of marking the end | Ties the core to the archive format and to the agent writing no trailing comment; the mark says the agent finished, whatever it sent. |
+| `ssh … cat` / `dd` per range request | A process per range; tool differences across platforms. |
+| Client-chosen upload paths | Collisions and path injection; the server owns the name. |
+| Upload to the upload directory, then move | Two steps and a copy across file systems. |
+| `fetch` with a streamed body for upload progress | Needs HTTP/2 and is not in every browser; `fetch` has no upload progress. |
+| Upload progress reported by the core | Duplicates what the browser already knows. |
+| Cancelling during saving | The file may already be renamed into place. |
+| Zipping with `zip`/`tar` on the machine | Not installed everywhere, flags differ, a process to own. |
+| Archive to a temporary file, then serve | Disk and retention on the machine; nothing arrives until done. |
+| tar.gz instead of zip | Windows does not open it on double click; zip streams as well. |
+| Zipping in the page | Holds everything in memory, a request per file. |
+| One download per checked file | Browsers prompt for multiple downloads; folders still need an archive. |
+| Download progress by fetching in the page | Holds the whole file in the page's memory. |
+| File System Access API | Chromium only, asks where to save every time. |
+| Progress from the desktop app's download events | Desktop only; the core's count works everywhere and knows why it failed. |
+| Download events to every page | Other pages (read-only ones too) would learn names and ids, and could cancel. |
+| Checking the zip's end record in the core | Ties the core to the archive format; the mark says the agent finished. |
+
+## Failure modes
+
+- A machine that disconnects mid-download: the archive lacks its end mark,
+  the response is aborted, the browser reports a failure.
+- A core restarted or a page away longer than 10 minutes: running downloads
+  in the panel end as `lost`.
+- A page reloaded during a download no longer follows it; the browser's own
+  download list still does.
+- A pane directory that cannot take an upload: the file goes to the upload
+  directory, with a note.
 
 ## Security
 
-Files are served with `X-Content-Type-Options: nosniff`, a sandboxing CSP
-(except PDFs, whose viewer refuses sandboxed frames) and HTML/JavaScript as
-`text/plain`, so a file cannot run script on the app's origin. Uploads are
-limited to 4 GiB and refused in read-only mode; uploads in the upload
-directory expire after 7 days ([10](10-remote-resource-lifecycle.md)).
-Uploads into a pane's directory must name an absolute directory; the core
-takes only the file's base name, and the agent claims the name exclusively,
-so an upload replaces no file and follows no symlink there. Such files are
-the user's and stay. A cancelled or interrupted upload leaves no partial
-file: the agent writes to a temporary file in the target directory and
-removes it when the stream ends before its last chunk. The upload history
-is per browser and holds names and paths only. Downloads read only what
-the file preview reads, with the same headers (`nosniff`, a sandboxing
-CSP), are allowed in read-only mode like viewing files, and are audited as
-`file.download`; links below the paths named are not followed. Download
-events carry the page's random id, the saved name, sizes, the state and a
-reason code, never contents, and go only to the page that follows the id;
-cancelling needs the id, is allowed in read-only mode (it changes nothing
-on a machine) and is audited as `file.download.cancel`.
+- Served files carry `X-Content-Type-Options: nosniff` and a sandboxing CSP
+  (except PDFs, whose viewer refuses sandboxed frames); HTML and JavaScript
+  are served as `text/plain`. A file cannot run script on the app's origin.
+- The Markdown renderer treats the file as untrusted: HTML shows as text;
+  links keep their target only for `http`, `https`, `mailto` and files beside
+  the document; images load only from raster `data:`, `blob:` or files beside
+  the document. Remote images become links, so opening a file does not tell
+  a server who reads it.
+- Uploads are limited to 4 GiB and refused in read-only mode. An upload into
+  a pane's directory must name an absolute directory; the core keeps only the
+  base name and the agent claims it exclusively, so no file is replaced and
+  no symlink followed. A cancelled or interrupted upload leaves no partial
+  file.
+- Downloads read only what the preview reads, with the same headers, are
+  allowed in read-only mode and are audited (`file.download`). Links below
+  the named paths are not followed.
+- Download events carry ids, names, sizes and states, never contents, and go
+  only to the page that watches the id. Cancelling needs the id, is allowed
+  in read-only mode (it changes nothing on a machine) and is audited
+  (`file.download.cancel`).
 
 ## Testing
 
-`internal/server/server_test.go` (range parsing, `TestParseRange`; content
-types, `TestContentTypeNeverActive`; upload names,
-`TestUploadNameUniqueAndSafe`; uploads into a directory,
-`TestUploadIntoDirectory`), `internal/agent/agent_test.go` (ranged reads
-and chunked writes, `TestFileOps`; writes that keep existing files,
-`TestWriteKeepsExistingFiles`),
-`web/src/__tests__/core.test.ts` (path resolution, media detection, wrapped
-links, selected links), `web/src/__tests__/codePanes.test.ts` (a path
-from a terminal in a VS Code pane of the workspace or beside the terminal,
-media in a preview pane beside it that then shows the next file),
-`web/src/__tests__/vt.test.ts` (hyperlinks and the
-link underline), `web/src/__tests__/filesGone.test.ts` (a preview of a
-file deleted: its titles struck through, what it showed kept, the file
-loaded again once back), `web/src/__tests__/drop.test.ts`
-(dropped files' paths on the local machine, uploads and skipped folders for
-another, refused stray drops), `web/src/__tests__/transfers.test.ts`
-(progress and speed, cancelling running and waiting uploads, the fallback
-to the upload directory, the kept history, the panel and its keys), and
-`TestCancelledUploadLeavesNoFile` in `internal/server/server_test.go` (an
-aborted upload through a real agent leaves no file; a complete one arrives).
-Downloads: `internal/agent/archive_test.go` (archive contents, repeated
-names, links followed only at the top, modes, missing paths, an abandoned
-stream, the end mark of a chunked archive), `internal/server/download_test.go`
-(path checks and archive names, `TestDownloadPaths`; a file as itself and
-directories as zips through a real agent, `HEAD`, read-only mode, the audit
-record, `TestDownload`; `TestDownloadProgress`: events of a file
-and an archive to the page following them only, failure codes, the state
-for a page that asks late and for an unknown id, cancelling from the panel
-and in the browser with the response broken off, an archive whose machine
-goes away failing instead of ending, no events without an id or for
-`HEAD`; `TestDownloadEdges`: more than 100 downloads at once followed, a
-download cancelled before its request refused, `416` for a range past the
-end, a file removed between stat and read not found, the browser leaving
-during the stat reported as cancelled),
-`web/src/__tests__/download.test.ts` (the pane menu's items, the check
-before a path's download, the chooser (Shift ranges, the filter), no downloads for the desktop app's
-own machine; the panel: progress and speed, an archive without a size,
-failures and their notes, cancelling, a download the browser holds back,
-asking again after a reconnect and ending what the core no longer knows,
-downloading again, the status bar button).
+- `internal/server/server_test.go`: ranges (`TestParseRange`), content types
+  (`TestContentTypeNeverActive`), upload names
+  (`TestUploadNameUniqueAndSafe`, `TestUploadIntoDirectory`), aborted uploads
+  (`TestCancelledUploadLeavesNoFile`).
+- `internal/agent/agent_test.go`: ranged reads and chunked writes
+  (`TestFileOps`, `TestWriteKeepsExistingFiles`).
+- `internal/agent/archive_test.go`: archive contents, names, links, the end
+  mark.
+- `internal/server/download_test.go`: `TestDownloadPaths`, `TestDownload`,
+  `TestDownloadProgress`, `TestDownloadEdges`.
+- Web (`web/src/__tests__`): `core.test.ts` (path resolution, wrapped and
+  selected links), `codePanes.test.ts` (where a path opens), `vt.test.ts`
+  (hyperlinks), `filesGone.test.ts`, `drop.test.ts`, `transfers.test.ts`,
+  `download.test.ts`.

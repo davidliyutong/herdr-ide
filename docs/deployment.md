@@ -1,8 +1,8 @@
 # Deployment
 
 herdr-ide runs on one host (your laptop or an always-on machine) and is used
-from browsers. It reaches its machines over ssh; nothing listens on the
-machines.
+from browsers or its desktop app. It reaches its machines over ssh; nothing
+listens on the machines.
 
 - [Local use](#local-use)
 - [Desktop app](#desktop-app)
@@ -21,193 +21,147 @@ cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
 ./herdr-ide    # http://127.0.0.1:7780
 ```
 
-The core listens on `127.0.0.1:7780` and takes the same port on `::1`, so
-`http://localhost:7780` is the same page; biometrics in a browser for
-the variable vault ([30](features/30-variable-vault.md)) need the page
-opened by that name, since a browser keeps no WebAuthn credential for an
-IP address.
+The core listens on `127.0.0.1:7780` and the same port on `::1`. Open it as
+`http://localhost:7780` if you want biometrics for the variable vault:
+browsers keep no WebAuthn credential for an IP address
+([30](features/30-variable-vault.md)).
 
-Each `dist/release/` archive contains the core and its licenses
-(`licenses/`). Release archives are for Linux and macOS on amd64 and arm64.
-A core for Windows x64 ships only inside the [desktop app](#desktop-app)'s
-setup (`TARGETS=windows/amd64 scripts/build.sh` writes
-`dist/herdr-ide-windows-amd64.exe` and no archive); it reaches SSH machines
-only, since the agent runs on Linux and macOS.
+Release archives (`dist/release/`) are for Linux and macOS on amd64 and
+arm64 and include the licenses. A Windows x64 core ships only inside the
+[desktop app](#desktop-app) and reaches SSH machines only.
 
-The core embeds the video encoder it puts on Linux machines to send program
-windows as video ([14](features/14-gui-windows.md)). `scripts/build.sh`
-embeds it when `scripts/build-ffmpeg.sh` (Docker) built it into
-`dist/ffmpeg/`; the release workflow builds it on native amd64 and arm64
-runners and requires it (`REQUIRE_ENCODER=1`). A build without it sends
-program windows as pictures.
+What the core embeds:
 
-The core also embeds herdr-core 0.1.21, the terminal core its agent installs
-on machines ([21](features/21-terminal-core.md)), for Linux and macOS on
-amd64 and arm64: about 12 MB in the core. `scripts/build.sh` runs
-`scripts/fetch-hc`, which downloads the four release archives from
-`releases.herdr.dev` (or reuses those in `dist/hc/`), checks them against
-the SHA-256 digests pinned in `internal/hcdist` and writes the executables,
-gzip-compressed, to `internal/embedded/hc/`; the build fails when an archive
-cannot be fetched or verified. To build without network access, put the four
-archives into `dist/hc/` first. herdr-core's license and notices are in the
-archive's `licenses/herdr-core/`. A core built with `go build` alone has no
-herdr-core unless `go run ./scripts/fetch-hc <os>/<arch> ...` ran before it.
+- The web UI, the machine builds of the agent and the VS Code bridge.
+- herdr-core 0.1.21 for Linux and macOS on amd64 and arm64 (about 12 MB),
+  the terminal core installed on machines
+  ([21](features/21-terminal-core.md)). `scripts/build.sh` runs
+  `scripts/fetch-hc`, which downloads the archives from `releases.herdr.dev`
+  (or reuses `dist/hc/`) and verifies them against the digests pinned in
+  `internal/hcdist`; the build fails otherwise. A plain `go build` has no
+  herdr-core unless `go run ./scripts/fetch-hc <os>/<arch>` ran first.
+- The video encoder for program windows on Linux machines
+  ([14](features/14-gui-windows.md)), when `scripts/build-ffmpeg.sh`
+  (Docker) built it into `dist/ffmpeg/`. Releases require it
+  (`REQUIRE_ENCODER=1`); without it, windows are sent as pictures.
 
-The browser UI shows the terminals of each machine's terminal core
-(herdr-core, installed and started through the agent when you first show a
-machine; [21](features/21-terminal-core.md)); nothing needs to be installed
-on the machines beforehand. SSH machines are added with **Add machine…** in
-the sidebar (an ssh target and a label); the first start of an instance
-imports the SSH machines herdr saved
-(`~/.local/state/herdr/client/endpoints.json`), if any.
+Nothing needs to be installed on machines beforehand. Add SSH machines with
+**Add machine…** in the sidebar, or for one run with `--ssh`. The first start
+of an instance imports the SSH machines herdr saved
+(`~/.local/state/herdr/client/endpoints.json`). The machines file is listed
+in [reference](reference.md#files-and-directories).
 
-Several browser tabs, windows and the desktop app can show the same
-machines at once: they share each machine's arrangement of
-workspaces, tabs and panes ([04](features/04-layout-and-keyboard.md)), and
-a terminal takes the size of the client that used it last.
+herdr-ide uses OpenSSH with your `~/.ssh/config` in BatchMode. A machine
+that needs a password, 2FA or a host-key confirmation shows **Sign-in
+required**; **Sign in…** opens a terminal for it, and later connections
+reuse that ssh ControlMaster. Windows' OpenSSH has no ControlMaster, so a
+core there has no sign-in ([Windows](#windows)).
 
-Machines come from the core's machines file
-([reference](reference.md#files-and-directories)); add others for one run
-with `--ssh`. herdr-ide uses OpenSSH with your `~/.ssh/config`
-(ProxyJump, agent, keys) in BatchMode. A machine that needs a password, 2FA or
-a host-key confirmation shows **Sign-in required**; **Sign in…**
-opens a terminal for it, and later connections reuse that ssh ControlMaster.
-Windows' OpenSSH has no ControlMaster, so a core there offers no sign-in:
-its SSH machines need a key the ssh agent holds (or one without a
-passphrase) and a host key accepted beforehand
-([Windows](#windows)).
+Several browser tabs and the desktop app can show the same machines at
+once. They share each machine's layout
+([04](features/04-layout-and-keyboard.md)); a terminal takes the size of
+the client that used it last.
 
 ## Desktop app
 
-The desktop app is the browser UI in an Electron window with a core of its
-own, for macOS (Apple Silicon and Intel), Windows (x64) and Linux (x64 and
-arm64) ([16](features/16-desktop-packaging.md)). Each GitHub release
-attaches, built by the release workflow from the tag:
+The desktop app is the web UI in an Electron window with a core of its own,
+for macOS (Apple Silicon and Intel), Windows (x64) and Linux (x64 and arm64)
+([16](features/16-desktop-packaging.md)). Each GitHub release attaches:
 
 | System | Files |
 | --- | --- |
-| macOS | `herdr-ide-<version>-mac-arm64.dmg` and `.zip` (Apple Silicon), `herdr-ide-<version>-mac-x64.dmg` and `.zip` (Intel) |
+| macOS | `herdr-ide-<version>-mac-arm64.dmg` and `.zip`, `herdr-ide-<version>-mac-x64.dmg` and `.zip` |
 | Windows | `herdr-ide-<version>-win-x64.exe` (setup) |
 | Linux | `herdr-ide-<version>-linux-amd64.deb`, `-linux-arm64.deb`, `-linux-x86_64.AppImage`, `-linux-arm64.AppImage` |
 
-They are listed in `SHA256SUMS` with the archives. Check the digest
-(`shasum -a 256 -c SHA256SUMS --ignore-missing`; on Windows compare
-`Get-FileHash <file>` with its line) and, for a public repository, the
-provenance (`gh attestation verify <file> --repo <owner>/<repo>`) before the
-first launch. There are no automatic updates: install a newer release over
-the old one.
-
-What the app does on each system:
+All are listed in `SHA256SUMS`. Check the digest
+(`shasum -a 256 -c SHA256SUMS --ignore-missing`; on Windows `Get-FileHash`)
+and, for a public repository, the provenance
+(`gh attestation verify <file> --repo <owner>/<repo>`) before the first
+launch. There are no automatic updates; install a newer release over the
+old one.
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| Local machine (terminals, files, VS Code) | yes | no: shown as needing Linux or macOS (`local_unsupported`) | yes |
-| SSH machines | yes, with **Sign in…** for passwords and host keys | yes, with keys in the ssh agent and host keys accepted beforehand | yes, with **Sign in…** |
+| Local machine | yes | no (`local_unsupported`) | yes |
+| SSH machines | yes, with **Sign in…** | keys in the ssh agent, host keys accepted beforehand | yes, with **Sign in…** |
 | Program windows | of remote Linux machines | of remote Linux machines | of remote Linux machines |
-| Folders opened with the app | dropped on the sidebar or the Dock icon | – | dropped on the sidebar, or **Open With** in the file manager |
-| Notifications and the blocked-agents badge | the Dock icon's badge | the taskbar button's overlay; notifications of the installed app | with a notification daemon; the badge in docks that implement the Unity launcher API |
-| Closing the main window | the app stays in the Dock until quit | quits | quits |
-| Signature | ad hoc, or Developer ID and notarized when the release has the secrets | none | none |
+| Folders opened with the app | dropped on the sidebar or Dock icon | – | dropped on the sidebar, **Open With** |
+| Blocked-agents badge | Dock icon | taskbar overlay | Unity launcher API docks |
+| Closing the main window | app stays in the Dock | quits | quits |
+| Signature | ad hoc, or Developer ID and notarized | none | none |
 
-The core listens at `127.0.0.1:7781` with instance `desktop`, separate from
-the CLI default and `dev`. The app follows the core's settings: its theme
-colors the title bar, its language the menu, and the menu shows the
-keybindings in effect. A fixed origin preserves UI preferences across
-launches. `HERDR_IDE_DESKTOP_PORT` overrides the port; changing it changes
-the browser storage origin. An occupied port fails visibly; the app never
-attaches to an existing listener. Opening the app twice focuses the
-original window (on macOS, opens it again when it was closed). Quitting
-stops its core and agents, not the machines' terminal cores; closing a
-program window leaves the main app running. HTTP(S) external links open in
-the default browser; custom URL schemes are refused. OpenSSH is the
-system's, with the user's SSH configuration.
+The app's core listens on `127.0.0.1:7781` with instance `desktop`,
+separate from the CLI default and `dev`:
+
+- `HERDR_IDE_DESKTOP_PORT` overrides the port, which also changes the
+  browser storage origin. An occupied port fails visibly; the app never
+  attaches to an existing listener.
+- Opening the app twice focuses the existing window.
+- Quitting stops its core and agents, not the machines' terminal cores.
+- External HTTP(S) links open in the default browser; other URL schemes
+  are refused.
+- ssh is the system's OpenSSH with the user's configuration.
 
 ### macOS
 
-Open the DMG, drag the app to Applications, eject the image, then launch
-it (or unpack the zip and move the app there). A release built without the
-Developer ID secrets is signed ad hoc, and Gatekeeper refuses the
-downloaded app's first launch: "“herdr-ide” cannot be opened because Apple
-cannot check it for malicious software" (or that it is damaged). Allow it
-once: on macOS 14 and earlier Control-click the app and choose **Open**; on
-macOS 15 and later try to open it, then choose **Open Anyway** under System
-Settings → Privacy & Security. Removing the quarantine attribute does the
-same: `xattr -dr com.apple.quarantine /Applications/herdr-ide.app`. A
-release built with the secrets is signed with a Developer ID and notarized,
-and opens without this. To update, quit the app and replace it with the
-newer one; to uninstall, quit it and move it to the Trash (the files below
-stay).
+Drag the app from the DMG (or zip) into Applications. A release without the
+Developer ID secrets is signed ad hoc and Gatekeeper refuses its first
+launch. Allow it once: on macOS 14 and earlier Control-click → **Open**; on
+macOS 15 and later **Open Anyway** under System Settings → Privacy &
+Security; or `xattr -dr com.apple.quarantine /Applications/herdr-ide.app`.
+To uninstall, move the app to the Trash (its files stay).
 
-**Full Disk Access.** Without it macOS keeps programs out of other apps'
-data (Mail, Messages, Safari) and Time Machine backups, and asks before
-they open Desktop, Documents, Downloads or external disks. It is granted to
-two programs: the app, for the file browser, uploads, downloads and
-VS Code, and herdr-core, `~/.herdr-ide-desktop/hc/herdr-core`, for the
-programs of terminals (macOS holds herdr-core, not the app, responsible for
-them). **Settings → Terminal → Permissions → Full Disk Access** shows
-whether each has it and opens System Settings at the list (also **Open
-Full Disk Access Settings…** in the command palette): turn on herdr-ide
-and add herdr-core with **+** or by dragging it from the Finder window
-**Show herdr-core in Finder** opens. macOS applies it to processes started
-afterwards: quit and reopen the app (**Quit and Reopen…**; terminals keep
-running), restart the terminal service (**Restart Terminal Service…**;
-programs keep running) and open new terminals; terminals opened before
-stay without it until closed. macOS keeps a grant for the code that
-satisfies the program's designated requirement: for an app signed ad hoc
-that is this very build, so after rebuilding or updating it remove the
-app's entry with **−** and add it again; a Developer ID release keeps its
-grant across updates, and so does herdr-core, signed with Herdr's
-Developer ID.
+**Full Disk Access.** macOS keeps programs out of other apps' data and asks
+before they open Desktop, Documents, Downloads or external disks. Two
+programs need the grant:
 
-Finder launches include `~/.local/bin`, `/opt/homebrew/bin`,
-`/usr/local/bin` and system paths in the core's PATH. The launcher does not
-execute shell startup files, so variables exported there reach the core only
-when the app is started from that shell.
+- the app, for the file browser, uploads, downloads and VS Code;
+- herdr-core (`~/.herdr-ide-desktop/hc/herdr-core`), which macOS holds
+  responsible for the terminals' programs.
 
-To build on a Mac, install Go, Node.js 22.12+ and pnpm:
+**Settings → Terminal → Permissions → Full Disk Access** shows both and
+opens System Settings. A grant applies to processes started afterwards:
+quit and reopen the app, restart the terminal service and open new
+terminals. An ad hoc build's grant is for that exact build; after updating
+it, remove the entry and add it again. Developer ID builds and herdr-core
+keep their grant across updates.
+
+Finder launches put `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`
+and system paths on the core's PATH. Shell startup files are not run.
+
+To build on a Mac (Go, Node.js 22.12+, pnpm):
 
 ```bash
 make desktop-app                        # host-architecture .app in dist/desktop/mac-arm64/ or mac/
 VERSION=0.1.0 make desktop-dist         # .app, DMG and zip in dist/desktop/
-ARCH=x64 make desktop-dist              # Intel core and Electron
-ARCH=arm64 make desktop-dist            # Apple Silicon core and Electron
+ARCH=x64 make desktop-dist              # Intel
+ARCH=arm64 make desktop-dist            # Apple Silicon
 make desktop-install                    # host-architecture .app into /Applications
 ```
 
-Each command builds the UI, bridge extension, four agents and the matching
-core before bundling Electron. Versions are pinned in the desktop lockfile.
-Local builds are signed ad hoc; with `CSC_LINK` and `CSC_KEY_PASSWORD` (or
-`CSC_NAME`) they are signed with that Developer ID, and with `APPLE_ID`,
-`APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` also notarized
+Local builds are signed ad hoc. With `CSC_LINK` and `CSC_KEY_PASSWORD` (or
+`CSC_NAME`) they get a Developer ID signature, and with `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` they are notarized
 ([reference](reference.md#environment-variables)).
 
-`make desktop-install` builds the `.app` like `make desktop-app` and copies it
-over `/Applications/herdr-ide.app` (`INSTALL_DIR=~/Applications` picks another
-folder). If that copy is running, it is quit first, which stops its core and
-agents but not the machines' terminal cores, and opened again after the copy. An app that
-does not quit within 30 s is left as is and nothing is installed. The new
-copy is assembled next to the old one, so a failed copy leaves the old app in
-place.
+`make desktop-install` copies the build over `/Applications/herdr-ide.app`
+(`INSTALL_DIR` picks another folder). A running copy is quit first and
+reopened after; if it does not quit within 30 s nothing is installed. The
+new copy is assembled beside the old one, so a failure leaves the old app.
 
 ### Windows
 
-The app needs Windows' OpenSSH Client (Settings → System → Optional
-features; installed by default on Windows 10 1809 and later and on
-Windows 11). Run the setup; it is not signed, so SmartScreen may show
-"Windows protected your PC": choose **More info**, then **Run anyway**. It
-installs for the current user, without administrator rights, into
-`%LOCALAPPDATA%\Programs\herdr-ide-desktop\` with a Start menu shortcut.
-To update, run a newer setup with the app closed; to uninstall, use
-Settings → Apps → Installed apps (the files below stay).
+The app needs Windows' OpenSSH Client (installed by default on Windows 10
+1809+ and 11). The setup is unsigned: at SmartScreen choose **More info** →
+**Run anyway**. It installs per user, without administrator rights, into
+`%LOCALAPPDATA%\Programs\herdr-ide-desktop\`. Uninstall from Settings →
+Apps (its files stay).
 
-On Windows the app reaches SSH machines only: the agent runs on Linux and
-macOS, so the local machine is listed with a note and never connected
-(WSL is not built in; a WSL distribution running an ssh server can be added
-as an SSH machine). Windows' ssh cannot share a connection (no
-ControlMaster), so the app has no **Sign in…**: every connection
-authenticates by itself in BatchMode, with the configuration in
-`%USERPROFILE%\.ssh\config`. Before adding a machine, accept its host key
-and make the key available, in PowerShell:
+The app reaches SSH machines only (a WSL distribution running an ssh server
+can be added as one). Windows' ssh has no ControlMaster, so there is no
+**Sign in…**: every connection authenticates in BatchMode. Before adding a
+machine, accept its host key and make the key available:
 
 ```powershell
 ssh user@host            # once: accept the host key, then exit
@@ -217,51 +171,30 @@ Get-Service ssh-agent | Set-Service -StartupType Automatic; Start-Service ssh-ag
 ssh-add                  # adds ~/.ssh/id_* to the agent
 ```
 
-A key without a passphrase needs no agent. A machine that still needs a
-password, 2FA or a host key shows **Sign-in required** with these steps;
-**Retry** it afterwards. ssh runs without console windows. Windows shows
-the notifications of the installed app (its Start menu shortcut carries
-the app's id), not of a copy run from `win-unpacked/`.
+Then **Retry** the machine. Notifications come from the installed app only
+(its Start menu shortcut carries the app id), not from `win-unpacked/`.
 
-To build on Windows, install Go, Node.js 22.12+, pnpm and Git for Windows,
-and run `scripts/desktop.sh app` (the unpacked app in
-`dist/desktop/win-unpacked/`) or `scripts/desktop.sh dist` (the setup) in
-Git Bash; the `make desktop-*` targets run the same script where `make` is
-installed.
+To build: install Go, Node.js 22.12+, pnpm and Git for Windows, and run
+`scripts/desktop.sh app` or `scripts/desktop.sh dist` in Git Bash.
 
 ### Linux
-
-Install the Debian package for your architecture:
 
 ```bash
 sudo apt install ./herdr-ide-<version>-linux-amd64.deb   # or -linux-arm64.deb
 ```
 
-It installs into `/opt/herdr-ide/`, adds the `herdr-ide` command, a desktop
-entry (Development) and icons, depends on the libraries Electron needs
-(ALSA's `libasound2` among them) and recommends `openssh-client`. On
-Ubuntu 24.04 and later it also installs an AppArmor profile, without which
-Chromium's sandbox cannot start there. To update, install a newer package
-the same way; to uninstall, `sudo apt remove herdr-ide-desktop` (the files
-below stay).
+The deb installs into `/opt/herdr-ide/`, adds the `herdr-ide` command and a
+desktop entry, and recommends `openssh-client`. On Ubuntu 24.04+ it also
+installs the AppArmor profile Chromium's sandbox needs. Uninstall with
+`sudo apt remove herdr-ide-desktop`.
 
-The AppImage runs without installing: `chmod +x
-herdr-ide-<version>-linux-x86_64.AppImage`, then start it. It needs FUSE 2
-(`sudo apt install libfuse2`, `libfuse2t64` on Ubuntu 24.04). On Ubuntu
-24.04 and later AppArmor's restriction of unprivileged user namespaces keeps
-Chromium's sandbox from starting in an AppImage, and the app exits: use the
-deb there. The app never turns the sandbox off (`--no-sandbox`). To update,
-replace the file.
+The AppImage runs without installing and needs FUSE 2 (`libfuse2`,
+`libfuse2t64` on Ubuntu 24.04). On Ubuntu 24.04+ AppArmor keeps Chromium's
+sandbox from starting in an AppImage; use the deb there. The app never runs
+with `--no-sandbox`.
 
-The desktop entry offers the app for folders: **Open With** in the file
-manager makes a workspace of each on the local machine, as dropping them on
-the sidebar does. Notifications need a notification daemon on the session
-bus (`org.freedesktop.Notifications`), which desktop environments run; the
-count of blocked agents shows on the app's icon in docks that implement the
-Unity launcher API. Launchers include `~/.local/bin`, `/usr/local/bin` and
-system paths in the core's PATH, as on macOS.
-
-To build on Linux, install Go, Node.js 22.12+ and pnpm:
+Notifications need a notification daemon on the session bus. Launchers put
+`~/.local/bin`, `/usr/local/bin` and system paths on the core's PATH.
 
 ```bash
 make desktop-app                        # dist/desktop/linux-unpacked/ (x64) or linux-arm64-unpacked/
@@ -273,21 +206,19 @@ ARCH=arm64 make desktop-dist            # arm64 packages, also on an x64 host
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| The app | `/Applications/herdr-ide.app` | `%LOCALAPPDATA%\Programs\herdr-ide-desktop\` | `/opt/herdr-ide/` (deb), or the AppImage where you put it |
-| Settings, keybindings, machines (`settings-desktop.json`, `keybindings-desktop.json`, `machines-desktop.json`), and the core's database (`core-desktop.db`: the vault's access log, the AI usage history) | `~/Library/Application Support/herdr-ide/` | `%AppData%\herdr-ide\` | `$XDG_CONFIG_HOME/herdr-ide/` (default `~/.config/herdr-ide/`) |
-| Electron profile (browser storage, permissions, the single-instance lock, the vault's `vault-unlock.json`) | `~/Library/Application Support/herdr-ide-desktop/` | `%AppData%\herdr-ide-desktop\` | `~/.config/herdr-ide-desktop/` |
-| The key that encrypts the vault's unlock secret (Electron's safeStorage) | the login keychain's item `herdr-ide Safe Storage` (account `herdr-ide Key`), and which build made it in `~/Library/Application Support/herdr-ide-desktop-keychain.json` | DPAPI, the user's | – |
+| The app | `/Applications/herdr-ide.app` | `%LOCALAPPDATA%\Programs\herdr-ide-desktop\` | `/opt/herdr-ide/` (deb), or the AppImage |
+| Settings, keybindings, machines (`*-desktop.json`), the core's database (`core-desktop-<host>[-<id>].db`: vault access log, AI usage history) | `~/Library/Application Support/herdr-ide/` | `%AppData%\herdr-ide\` | `$XDG_CONFIG_HOME/herdr-ide/` (default `~/.config/herdr-ide/`) |
+| Electron profile (browser storage, single-instance lock, the vault's `vault-unlock.json`) | `~/Library/Application Support/herdr-ide-desktop/` | `%AppData%\herdr-ide-desktop\` | `~/.config/herdr-ide-desktop/` |
+| Key encrypting the vault's unlock secret (safeStorage) | login keychain item `herdr-ide Safe Storage`; the build that made it in `~/Library/Application Support/herdr-ide-desktop-keychain.json` | DPAPI | – |
 | code-server downloads | `~/Library/Caches/herdr-ide/code-server` | `%LocalAppData%\herdr-ide\code-server` | `~/.cache/herdr-ide/code-server` |
-| The local machine's agent state | `~/.herdr-ide-desktop/` | – | `~/.herdr-ide-desktop/` |
+| Local machine's agent state | `~/.herdr-ide-desktop/` | – | `~/.herdr-ide-desktop/` |
 | ssh control sockets | `/tmp/herdr-ide-<uid>/s` | – | `/tmp/herdr-ide-<uid>/s` |
 
-Every SSH machine keeps the instance's state in its own
-`~/.herdr-ide-desktop/` ([remote resources](#remote-resources)). Uninstalling
-removes only the app; remove the rest by hand. Removing the Electron
-profile resets the app's browser preferences, which are separate from a
-browser's, and removes this install's unlock key of the variable vault:
-Touch ID or Windows Hello then approve but no longer unlock the vault
-until they are turned on again in its Settings.
+SSH machines keep the instance's state in their own `~/.herdr-ide-desktop/`
+([remote resources](#remote-resources)). Uninstalling removes only the app.
+Removing the Electron profile also removes this install's vault unlock key:
+Touch ID or Windows Hello must then be turned on again in the vault's
+Settings.
 
 ### Development
 
@@ -295,15 +226,12 @@ until they are turned on again in its Settings.
 make dev-desktop
 ```
 
-This builds the embedded UI (no hot reload) and runs unpackaged Electron
-with port 7791, instance `dev` (terminal core session `herdr-ide-dev`) and
-local-only connections; on Windows such a run connects no machine, since it
-is local-only and the local machine has no agent there. Quit other
-development cores using the `dev` instance first. For packaged smoke tests,
-launch the executable with `HERDR_IDE_DESKTOP_DEV`: `1` for the `dev`
-instance, or a name of its own (lowercase letters, digits and dashes) to run
-beside a development instance in use (`desktop` is refused), with port
-`0`, e.g.:
+This runs unpackaged Electron with the embedded UI (no hot reload), port
+7791, instance `dev` and local-only connections (on Windows it connects no
+machine). Quit other development cores of the `dev` instance first.
+
+For packaged smoke tests, set `HERDR_IDE_DESKTOP_DEV`: `1` for the `dev`
+instance, or a name of its own (not `desktop`) with port `0`:
 
 ```bash
 HERDR_IDE_DESKTOP_DEV=smoke HERDR_IDE_DESKTOP_PORT=0 \
@@ -312,37 +240,30 @@ HERDR_IDE_DESKTOP_DEV=smoke HERDR_IDE_DESKTOP_PORT=0 \
   dist/desktop/linux-unpacked/herdr-ide --user-data-dir=/tmp/herdr-ide-smoke
 ```
 
-On macOS launch the executable rather than `open` the bundle: `open`
-activates a running copy with the same bundle identifier instead. Every
-development instance is local-only and has an Electron profile and
-single-instance lock of its own (`herdr-ide-desktop-dev`,
-`herdr-ide-desktop-smoke`); `--user-data-dir` replaces both. A named instance leaves its own state like any instance
-(`settings-smoke.json` beside the others, `~/.herdr-ide-smoke/` and the
-terminal core session `herdr-ide-smoke` on the local machine); stop that
-terminal core from the machine's menu (**Stop terminal core…**) before
-removing them. Core state and resource retention follow
-[Remote resources](#remote-resources).
+On macOS launch the executable, not `open` (which activates a running
+copy). Development instances are local-only with an Electron profile of
+their own. A named instance leaves state like any instance
+(`settings-smoke.json`, `~/.herdr-ide-smoke/`, terminal core session
+`herdr-ide-smoke`); stop its terminal core (**Stop Terminal Service (Ends All Terminals)…** in
+the machine's menu) before
+removing it.
 
-Editable icon sources live in `desktop/assets/icon.svg` and
-`web/public/icon.svg` (the simpler small-size version). The 1024-pixel PNG,
-the multi-resolution ICNS and the ICO are committed, so ordinary builds need
-no graphics tools. After editing the sources, run `brew install librsvg` if
-needed, then `make desktop-icons` on macOS and rebuild the app.
+Icon sources are `desktop/assets/icon.svg` and `web/public/icon.svg`. The
+PNG, ICNS and ICO are committed; after editing the sources run
+`make desktop-icons` on macOS (needs `librsvg`).
 
 ## Remote access through a reverse proxy
 
-The server has no login. It must stay on loopback behind a reverse proxy that
-authenticates users and terminates TLS. HTTPS is required in practice: VS Code
-webviews (Git Graph, media preview) need service workers, and the clipboard
-and notification APIs need a secure context (plain `http://localhost` is the
-only exception).
+The server has no login. Keep it on loopback behind a reverse proxy that
+authenticates users and terminates TLS. Use HTTPS: VS Code webviews, the
+clipboard and notifications need a secure context (only `http://localhost`
+is exempt).
 
-VS Code is off by default. code-server is served on the UI's own origin, so
-its extensions and webviews can do whatever a user's page can; a user turns
-it on for browsers in **Settings › Plugins**, after accepting that risk, and
-the setting (`plugins.vscode.browser`) applies to every browser of the
-server until it is turned off. The desktop app's switch
-(`plugins.vscode.enabled`) does not turn it on in browsers.
+VS Code is off for browsers by default. code-server is served on the UI's
+own origin, so its extensions can do whatever the user's page can. Turning
+it on for browsers (`plugins.vscode.browser`, **Settings › Plugins**)
+applies to every browser of the server; the desktop app's switch
+(`plugins.vscode.enabled`) does not affect browsers.
 
 Tell herdr-ide the public origin so its Host/Origin checks accept it:
 
@@ -388,149 +309,150 @@ location / {
 
 ### Guardrails
 
-- **Proxy secret** – `--proxy-secret-file FILE` makes herdr-ide require the
-  `X-herdr-ide-Proxy-Secret` header on every request that does not come from a
-  browser on the same host, so only your proxy can talk to it. With a secret,
-  `--listen` may use a non-loopback address (e.g. a proxy in a container);
-  without one, that needs the explicit `--insecure-listen`.
-- **Read-only** – `--read-only` serves a watch-only view (terminals
-  without input, which follow the size other clients set; no layout
-  changes, uploads or VS Code; no terminal core is installed or started).
-  Run a second instance with it for sharing screens or phones.
+- **Proxy secret** – `--proxy-secret-file FILE` requires the
+  `X-herdr-ide-Proxy-Secret` header on every request not from a browser on
+  the same host, so only your proxy can talk to the core. With a secret,
+  `--listen` may use a non-loopback address; without one that needs
+  `--insecure-listen`.
+- **Read-only** – `--read-only` serves a watch-only view: no terminal
+  input, layout changes, uploads or VS Code, and no terminal core is
+  installed or started. Run a second instance with it for screen sharing.
 - **Audit log** – `--audit-log FILE` records connections, mutating terminal
   core calls, uploads, VS Code and bridge use and refused requests as JSON
   lines, with the user from `--user-header`.
-- The terminal core's API is exposed through an allowlist: clients reach
-  terminals and layout documents, never the core's commands for machines,
-  files or its server.
+- The terminal core's API is reachable only through an allowlist: clients
+  reach terminals and layouts, never the core's machine, file or server
+  commands.
 
 See [SECURITY.md](../SECURITY.md) for the threat model.
 
 ## Air-gapped networks
 
-Machines never need internet access: code-server releases and extensions are
-resolved on the core host and pushed through the agent. The AI usage plugin is the
-one exception: it asks the AI providers' hosts from the machines whose CLIs
-are signed in to them ([29](features/29-ai-usage.md)); without internet its
-requests fail and the panel says so. When the core host is
-offline too, prepare a bundle on a connected machine:
+Machines never need internet access: code-server and extensions are
+resolved on the core host and pushed through the agent. The one exception
+is the AI usage plugin, which asks the providers from the machines
+([29](features/29-ai-usage.md)); offline, it reports the failure.
+
+When the core host is offline too, prepare a bundle on a connected machine:
 
 ```bash
 herdr-ide fetch-assets ./bundle                          # all platforms
 herdr-ide fetch-assets --platforms linux-amd64 ./bundle  # only what you need
 ```
 
-Copy `./bundle` (tarballs, VSIXs and `.sha256` files) and the full application release directory
-into the network, then run:
+Copy `./bundle` and the full release directory into the network, then run:
 
 ```bash
 herdr-ide --offline --seed-dir ./bundle
 ```
 
-Lookup order: `--seed-dir` directories, then the cache, then (unless
-`--offline`) a download from `--code-server-url` / `--extension-url`, which
-can point at an internal mirror. Every file is verified: the default versions
-have SHA-256 digests compiled into the binary; other versions need a
-`<file>.sha256` next to the file (written by `fetch-assets`). A mismatching
-seed is rejected, never replaced. A download without any known digest is
-accepted once and its digest recorded (logged as a warning).
+Lookup order: `--seed-dir` directories, the cache, then (unless
+`--offline`) `--code-server-url` / `--extension-url`, which can point at a
+mirror. Verification:
 
-Bundles are for your own installations: Git Graph explicitly restricts
-derivative distribution and does not clearly grant general redistribution
-of the original, so do not publish bundles containing it without permission.
+- Default versions have SHA-256 digests compiled into the binary.
+- Other versions are checked against a `<file>.sha256` beside the file
+  (`fetch-assets` writes it).
+- A mismatching seed is rejected, never replaced.
+- A seed or cached file with neither a pinned digest nor a sidecar is used
+  unverified, with a logged warning.
+- A download with no known digest is accepted once and its digest recorded
+  (trust on first use), with a warning.
 
-The web UI, agents, herdr-core for machines and VS Code bridge are embedded
-in the core; code-server and external extensions are resolved at runtime.
-Building needs Go modules, npm packages and the pinned herdr-core downloads
+Bundles are for your own installations: Git Graph's license restricts
+redistribution, so do not publish bundles containing it.
+
+Building needs Go modules, npm packages and the pinned herdr-core archives
 (verified archives in `dist/hc/` are reused).
 
 ## Remote resources
 
-What herdr-ide starts on a machine and how it is reclaimed:
+What herdr-ide starts or writes, and what ends or removes it. Feature
+documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
+`<data>` is `~/.herdr-ide[-<instance>]` on the machine.
 
-| Resource | Started | Reclaimed |
+### Processes and connections
+
+| Resource | Started | Ends |
 | --- | --- | --- |
-| Desktop core | Electron launches its bundled binary | The app closes the core's stdin when it quits (on Windows and Linux also when the main window closes; on macOS the app and its core keep running in the Dock until quit), and when Electron crashes the pipe closes as well; the core then stops its agents. That owned child alone is killed after 20 s. No signal is sent, on any system. The machines' terminal cores and their programs remain running. |
-| Electron profile | First desktop launch | Kept until manually removed, also by uninstalling ([where](#where-the-app-keeps-its-files)); Chromium manages its caches. Development has a separate profile. Core stderr is bounded to 16 KiB in memory; no desktop log files accumulate. |
-| Port forwards (the core host's loopback) | The user, in a client on the core's host, opens a machine's port in a browser pane (its address field or Ports, a terminal link, or confirming a pane that asks) | Each is a listener of the core on `127.0.0.1` and `::1` with one stream to the machine per connection, at most 32 with 128 connections each; ended when stopped, unused for `browser.forwardIdle` minutes (30; a use is a connection accepted, bytes carried or a pane asking, not a connection that stays open), when a listener fails, its machine removed, the plugin turned off, or the core stops, with its connections. Nothing listens on the machine ([32](features/32-browser-and-ports.md)). |
-| Agent (`herdr-ide agent`) | one per core while connected | Exits when its ssh session ends; a dead link is detected by keepalives within about 45 s. |
-| A machine added from the UI | **Add machine…** (`POST /api/machines`) | Only a record in the core's `machines[-<instance>].json` and an agent while it is connected. **Remove machine…** deletes the record and ends the session (the agent exits and stops what it started); the machine's terminal core and terminals keep running there; the agent builds left in `~/.herdr-ide/agent/` follow their usual retention. |
-| Full Disk Access check (macOS) | `GET /api/m/{id}/privacy` (the desktop app's settings, on macOS, when the row appears and when the window regains focus); one at a time per agent | `/bin/sh` run by the machine's terminal core through herdr-core's `machine.exec`, only while that core runs (none is started), opening and closing one folder; herdr-core ends it and everything it started after 10 s at most, and sweeps the token it keeps for it in its state directory when it ended (or at its next start, after a crash). The agent writes nothing. |
-| Terminals of the layout | A new tab or split or an agent started in a writing page (`terminal.run` with `keep: true`, audited); a page also starts one in place of each terminal of the layout that ended with its terminal core ([33](features/33-workspace-restore.md)) | Each belongs to the user's layout on the machine and ends when its pane, tab or workspace is closed (after the time to undo, next row), when it is killed, when its program exits, and with the terminal core (**Stop terminal core…**, the machine going down). It outlives the pages, the core and the agent. Being kept, it outlives a restart of the machine as a new shell in its last directory at the same address, not as its program; a replacement that lost the place to another page's is ended by its page. In a shell that lost Claude Code or Codex this way the page that next shows it types the agent's resume command once. Finished terminals' records stay 24 h in herdr-core's state unless removed; the page removes those of programs that ended and of terminals it replaced. |
-| A closed pane's terminal | **Close Pane** or **Close Tab** in a page | The pane leaves at once; the terminal keeps running for the setting `layout.undoClose` (5 s by default), labeled `closing` with the time it ends, so that **Undo Close** can bring it back. Every page showing the machine ends a terminal so labeled that has no pane once that time is over (`terminal.kill`), also when the page that closed it is gone; with no page open, the next page to show the machine ends it. |
-| Terminal core (herdr-core) | when a client of `/api/v1/term` first subscribes to the machine's terminals and no core answers (never in `--read-only`; audited as `term.start`), or **Start terminal core** / **Restart terminal core…** in the machine's menu (browser UI, desktop app) (`POST /api/m/{id}/hc/{start\|restart}`, audited as `hc.start`, `hc.restart`) | Started by herdr-core detached from the agent (a systemd user service on Linux, a launchd job on macOS) in the session `herdr-ide[-<instance>]`, with its socket in `~/.herdr-ide[-<instance>]/run/hc.sock`. It belongs to the user and outlives the agent and the core, so its programs keep running; it ends with **Stop terminal core…** in the machine's menu (`POST /api/m/{id}/hc/stop`, asked first, audited as `hc.stop`: every terminal there ends, and the core starts none again until it is started from the menu or a client subscribes to the machine anew), with the agent op `hc` action `stop`, with `HC_SESSION=herdr-ide[-<instance>] HC_SOCKET=<socket> herdr-core server stop`, and with the machine. A restart keeps the programs (the core's successor adopts them). Its state (terminal records, saved screens, logs) is herdr-core's, in `~/.local/state/herdr-core/herdr-ide[-<instance>]/`, and stays until the user removes it. |
-| herdr-core executable | pushed with the first subscription to a machine's terminals when the machine has another build than the core carries (never in `--read-only`; audited as `term.install`); a core already running is then restarted onto it (`term.restart`), and its programs keep running | One file, `~/.herdr-ide[-<instance>]/hc/herdr-core`, verified by SHA-256 and replaced whole by the next install; a running core keeps the executable it started from. A partial upload left by a killed agent is removed by the next install after 1 h. |
-| Connection to the terminal core | one per machine while a client of `/api/v1/term` is subscribed to it | Closed 10 s after the last subscriber left, and with the agent; a client's attached streams end with the client, except the ones kept for terminals' sizes (two rows below), which end with this connection. No process is started by it. |
-| Attached streams of a page | a page shows a terminal: one attach stream per terminal shown, and per terminal kept hidden (the ones shown last while another tab, workspace or machine is shown, as many as the setting `performance.keptTerminals` says: 12 by default, at most 64, 0 for none; [26](features/26-web-terminals.md)) | Owned by the page. The page lets go of a stream when its terminal is no longer among the ones kept or its pane closes, and with the page or its connection; the core then closes it at the terminal core, unless it keeps it for the terminal's size (next row). A stream also ends with its program, and with its machine or terminal core going away (the page attaches again when they are back). A hidden terminal's output crosses the connection, is taken by its emulator and acknowledged without being drawn. No process is started and nothing is written to disk. |
-| Streams kept for terminals' sizes | a client lets go of the last stream that set a live terminal's size (its pane unmounted or closed, the page closed or disconnected): the core keeps it attached to the machine's terminal core, so that the terminal keeps its size instead of getting herdr-core's headless one (200x120 by default) and a full-screen program is not laid out anew while no page shows it ([22](features/22-terminal-protocol.md)) | Owned by the core's connection to the machine's terminal core: at most one per live terminal without a viewer, read by nobody. Closed when the terminal's next viewer that sets the size has attached, when the terminal is removed or its program ends, and with that connection (10 s after the last client subscribed to the machine left, the machine or its terminal core going away, the core stopping); the terminals then have the headless size until a pane attaches. herdr-core sends a kept stream at most what is left of its 256 KiB of credit, which waits in the core's memory, and queues at most 4 MiB behind it before it drops the backlog. No process is started and nothing is written to disk. |
-| Agent detection (op `detect`) | while the core's connection to a machine's terminal core lasts | In the agent: one more connection to the terminal core, an event subscription, and for each terminal running a coding agent an observing attach and screen reads (`terminal.read`, at most every 300 ms after output); everything ends when the core closes the stream (10 s after the last subscriber left, or the connection to the terminal core ended) or with the agent. No process is started and nothing is written to disk. |
-| Finding the agents' sessions (op `detect` with `sessions`, while the agents plugin is on) | for each terminal whose foreground is Claude Code or Codex, once its startup grace is over | One goroutine per such terminal, owned by the detect stream: it ends when the agent leaves, the terminal goes, the stream ends or the plugin is switched off (the core then opens the stream again without sessions). It wakes every 2 s (Claude Code) or 5 s (Codex) for a few stats and directory listings, while nothing is found also after 1, 2, 4 and 8 s and every 30 s; on Linux a Claude Code check also reads `/proc/<pid>/environ`. A resolution that finds no record of the terminal's program reads the process table to look at its descendants: `/proc/*/stat` on Linux; on macOS the process group's processes and their start times from sysctl (`kern.proc.pid`, `kern.proc.pgrp`). One resolution runs at a time per stream, within 10 s. No process is started, nothing is written; the resolver's caches hold at most 1024 entries each and live as long as the stream ([35](features/35-agent-native-view.md)). |
-| Confirming a session (plugin `agents`, action `resolve`) | a page bringing an agent back after its terminal core started again: one `resolve` per terminal (`GET …/p/agents/resolve`; at most 8 at once per machine, within 15 s) | No process and nothing written. A request lives inside the agent for its length: it finds the session's transcript (for Codex a search may read up to 5000 dated directories), opens it, reads what it says of itself (Claude Code's first conversation line, Codex's `session_meta`) and closes it. The agent keeps where it found transcripts in memory (at most 1024 entries; an id without a transcript is searched for at most once a second, every Codex dated directory at most once in 3 s), gone with the agent. |
-| A session's usage (plugin `usage`, action `session`) | the status bar's session item: when the focused pane's session changes, every 30 s while its agent is in a turn (working, or blocked between its work), once when it stops (tried once more 10 s after it failed), at most once in 10 s per session, each given up after 15 s, never from a hidden page; at most 8 at once per machine | No process and nothing written: the session's transcripts are read (at most 256 MiB each, at most 2 reads at once), and the last reads of 16 transcripts (48 MiB) stay in the agent's memory. |
-| Terminal history (plugin `history`, `history.capture`, off by default, per machine) | while the setting is on for a connected machine and the plugin is on (never for a `--read-only` core): a capture every `history.interval` seconds (30; 10–600) after the last one ended, one at a time per machine, at most 25 s on the machine | No process; per capture one connection to the instance's terminal core with, per live terminal, a read of its screen and, when it changed, an observing attach of at most 5 s (tried again at most a few times with fewer lines or a new grid). Rows of the machine's database `~/.herdr-ide[-<instance>]/machine-<host>.db` (0600, [38](features/38-sqlite-state.md)): two generations per terminal at most, each at most `history.lines` (2000; 100–10000) lines and 2 MiB; at most `history.maxTerminals` (32; 1–128) terminals and `history.maxTotalMB` (64; 1–512) in all, the terminals captured longest ago going first. Removed at a capture when older than `history.days` (7; 1–30), when their terminal ended with its program, or once it has been gone from the terminal core's records for 2 minutes (the time kept in the agent's memory, started again when the agent starts again); when a page moves them to the terminal that took their terminal's place (`POST …/p/history/adopt`, which grows nothing); when an agent starts and whenever they are listed or read, once older than the days they were written under; when the machine no longer keeps snapshots (the setting or the plugin turned off, also seen the first time the core finds the machine connected: the core asks for a clear, again after 30 s doubling to 1 h when it fails, and at once when the machine connects again; audited when the user turned them off or it removed some); and with **Clear Saved Output**. They outlive the setting with a `--read-only` core, which asks for nothing (they go by their age, when an agent starts or they are listed or read); on a machine removed from the core, disabled or never connected again (until an agent starts there and removes those past their days); with another core of the same instance whose setting is on (it keeps writing the same database); while a clear keeps failing (until one succeeds or they age out); and in backups of the agent's data directory ([36](features/36-terminal-history.md)). |
-| code-server | on first VS Code use | Stopped after `--code-server-idle` (default 20 min) without VS Code connections (turning VS Code off for the desktop app or for browsers closes the connections of that kind of client; turning both off also ends a preparation under way), when the agent exits (if that agent started it; for the local machine, when the core stops), or by **Stop VS Code on `<machine>`** in a VS Code pane's menu. Each VS Code pane on screen is a VS Code window of its own, loaded only once its pane is on screen; a window off screen (another tab, workspace or machine) stays loaded for 10 min, and at most 3 such windows stay per page (the oldest go first); then it disconnects. A pane closed in the layout, by any client, disconnects its window at once, as a disabled or removed machine does its windows. A process left behind by a killed agent is stopped by the next agent, and code-server exits by itself after 1 h without connections. |
-| VS Code extension hosts | one per VS Code window | Disposed 5 min after the window disconnects. |
-| ssh ControlMaster | per machine, on a core on Linux or macOS (Windows' ssh has none, and each connection ends with its session) | Exits after 10 min unused or after 1 min without answers from the server. When the core finds its connection dead (an agent session lost while ssh kept running, a probe timing out) it tells it to take no new sessions (`ssh -O stop`), and it exits with the last session open through it. |
-| Xvfb or Xwayland (virtual display) | when a remote Linux machine connects with the GUI setting on: Xwayland where the machine has one and a GPU whose render node the user may open (`gui.display`), else Xvfb | Runs in its own session so programs keep their windows across disconnects; exits 1 min after its last client (programs, the agent's window manager, the display keeper) disconnected, so soon after the terminal core stopped and its programs exited; the agent connects once after starting it, so this also holds when nothing attaches. With xorg-server before 21.1 it exits as soon as its last client leaves, and one that never got a client stays until an agent attaches. The agent ends a display to start one of the other kind only while no program is connected to it. |
-| The GPU display's compositor (`herdr-ide gui-wl`) | with each Xwayland | One process in its own session per GPU display, connected to its Xwayland by a socket pair; it listens nowhere, opens no file, wakes only while Xwayland draws, and exits when Xwayland does. Both log to `~/.herdr-ide[-<instance>]/xwayland.log`. |
-| The GPU selection library (gpupick) | when a display is ready on a machine with several NVIDIA GPUs and `gui.gpuPick` is on for it (never in `--read-only`; audited as `gui.pick`) | 10 kB written from the agent's own binary to `~/.herdr-ide/gpupick/<sha256 prefix>/` (0600); no process. New panes get it in `LD_PRELOAD` while the setting is on. |
-| Display keeper (`herdr-ide gui-keep`) | when a display is ready and each time the machine's terminal core becomes reachable again (never in `--read-only`; audited as `gui.keep`) | One per instance (`run/gui-keep.lock`), in its own session; holds a connection to the display while the instance's terminal core runs (checked every 5 s by the socket's peer process and its start time), follows a terminal core restarted within 30 s, and exits once it no longer runs or when the display ends. |
-| `apt-get download xvfb` | when a machine has no Xvfb (never in `--read-only`) | Ends with the download (5 min limit); the package is unpacked into `~/.herdr-ide/xvfb/` and the download removed; a download left by a killed agent is removed by the next agent after 1 h. A failed install or start is retried after 5 s, doubling up to 5 min, while the machine stays connected. |
-| Video encoder (`gui.video`, on by default) | one per program window sent as video (never for windows over 4096 pixels a side) | Started by the agent's window manager while a watched window keeps changing; ends after 5 s without frames (also while its viewers stopped acknowledging), when the window is no longer watched, resized or gone, when its viewers change to another stream, when video is turned off for the machine, or with the agent (own process group, killed with the agent). With NVENC each holds one GPU encode session; consumer NVIDIA cards allow 8 per machine for all users together, and a stream that cannot open one uses VA-API or VP8, else pictures. VA-API holds a context on the render node while it runs. |
-| Pushing the video encoder (`gui.video`) | when a Linux machine's display is ready and video is on for it (never in `--read-only`) | One upload of about 2 MB per build and machine, verified by SHA-256 and kept in `~/.herdr-ide/video/`; builds unused for 14 days are removed when another is installed. |
-| Shared memory for captures | while the agent's window manager runs | One System V segment of at most 64 MB, 0600, marked for removal as soon as the agent attached it (on Linux; elsewhere once Xvfb attached it): it disappears when the agent and its connection to the display are gone, also when the agent is killed. A segment whose capture failed is freed with the next captures, which go through the X connection. |
-| curl or wget (`--code-server-install=download`) | while a machine downloads code-server | Ends with the download (20 min limit), or when the core stops waiting (VS Code turned off, the machine left); the partial file in `~/.herdr-ide/code-server/` is removed, or with the unused versions after 14 days if the agent was killed. |
-| File explorer (plugin `files`) | changes from its panel, saves from its editor pane, Reveal in Finder | Its changes, saves, uploads and polls start no process: each change is one request to the agent; a copy or removal of a large tree stops between entries when the core stops waiting (its request ended, 10 min at most). Files deleted with **Move to Trash** go to the user's trash on the machine (`~/.local/share/Trash` or `$XDG_DATA_HOME/Trash` with their `.trashinfo`, `.Trash/<uid>` in an administrator's sticky `.Trash` or `.Trash-<uid>` at the top of another mount, each used only while it is the user's own and closed to others, `~/.Trash` on macOS) and stay there until the user empties it, as files the system's file manager deletes do. A save from the explorer writes the file in place and nothing else. An upload (up to 4 GiB) is received into `~/.herdr-ide[-<instance>]/staging/` (`0700`, files `0600`) and then written to its file, so while it runs it also takes its size on the file system of the agent's data directory (usually the home directory's; one that fills up fails the upload with `no_space` and frees the space at once); a failed or broken-off one (cancelled, the connection lost) removes what it received, and an agent whose session ended waits up to 5 s for the requests still running to do so before it exits. Only an agent that ended during an upload (a crash, a kill) leaves a file there: the agent that starts more than 7 days later removes it. Folders uploaded are made before their files and stay when their upload is cancelled, with the files that arrived. Polls (one stat of the shown directories every 2 s, the next only once the last one answered, less often after failures) run only while the panel is shown and the page visible; at most 8 stats run at once on the machine and a path is stat'ed once while a stat of it runs, so a mount that does not answer holds at most 8 threads until it does (each poll answers within 10 s, with those paths' state unknown). The editors' titles drawn have their files stat'ed together every 5 s while the page is visible, to mark those deleted. **Reveal in Finder** (the core's own machine only) is the one action that starts a process, on the core's host: `/usr/bin/open -R` on macOS, elsewhere `xdg-open` found in `/usr/bin`, `/bin` or `/usr/local/bin` (never through `PATH`), a child of the core with its standard streams on `/dev/null`. Its request answers when it exits or after 10 s, whichever comes first; at most 4 are waited for at once, each freeing its place when it answers. The command ends by itself once it handed the path to the file manager; one still running after 10 s (an `xdg-open` that runs the file manager itself), and a file manager it started as its child, are the user's window: they end when the user closes it, holding no place meanwhile, and the core reaps the command then. |
-| Git (plugin `git`) | one `git` process per request of the panel, the graph, a diff, the explorer's colors or an editor's quick diff (while one of them shows the repository and the page is visible, the page asks `watch`, which starts none and stats a few files of the git directory, every 2 s, every 1 s for 30 s after something happened in the repository or the page, and reads the status when the token moved, when a terminal's command or an agent's turn ended in the repository, when the page is shown or focused again, else every 10 s, every 2 s while active; a status read keeps the next one away for five times as long as it took, and after one that timed out the page waits up to 5 minutes; nothing is watched on the machine between requests); with `git.autoFetch` set, one `git fetch --all --prune` every so many minutes while a page shows the panel (none while a change runs); a change with thousands of paths runs git once per 96 KiB of them, one after the other | At most 8 runs at once per machine. Each run is a process group of its own, killed after 15 s (reads) or 120 s (changes, fetch, pull, push), or when the core closes the request's stream (the browser went away); a run whose git exited ends at most 2 s later. Reads start no file system monitor and no maintenance, and automatic maintenance a change starts runs inside the run (`gc.autoDetach=false`, `maintenance.autoDetach=false`), so the plugin leaves no git process running. What remains is the user's, as in a terminal: programs hooks start in the background, which keep running after a run that ended (a run killed at its timeout or cancelled kills those still in its process group), and the file system monitor daemon or hook a change starts when the repository's `core.fsmonitor` asks for one. git writes what the user asked for into the repository (index, refs, objects, stashes) as in a terminal; the plugin keeps no files of its own. |
-| Vault and bridge sockets (`run/vault.sock`, `run/bridge.sock`) | by every agent while it runs; the newest agent of the instance takes them over | Unix sockets (0600) served by one agent of the instance at a time: one that starts takes them over (the agent of a session that lingers after a reconnect no longer gets the connections), one whose sockets were taken over checks every 2 s and serves them again once they are free (the newer agent gone), and an agent removes a socket when it exits only while it is its own (same inode), so they are served while any agent of the instance runs and none is left after the last. A connection is relayed to the core over one stream, opened once it sent its first bytes, that ends with it (the vault's: one request, at most 16 at once); nothing is started. |
-| MCP link (`~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp`) | pointed at the running executable whenever an agent starts (on the local machine: the core's executable) | One symbolic link, replaced by the next agent; kept so MCP configurations stay valid; removed with the data directory. |
-| The vault's access log (in the core's database `core[-<instance>].db` beside the settings, on the core host) | a record for every request of a machine's MCP server and every value a page takes (a reveal, an export), written by the core | Rows of one database file (0600, with its `-wal` and `-shm`), names and who asked, never values: the last 1000 records that let values out and the last 500 others (lists, refusals, denials), older ones going first within each kind; it stays until the user removes it. A `vault[-<instance>]-access.jsonl` of an earlier version is imported once and removed. |
-| The vault's MCP servers | by a coding agent's CLI (Claude Code, Codex…) the user configured with the link, never by herdr-ide | Belong to the CLI that starts them and exit when it closes their stdin or sends them SIGTERM, SIGINT or SIGHUP, after killing the commands they run. A command of `run_with_env` runs in its own process group, killed when the command returns (programs it left in the background with it), after its timeout (`vault.runTimeout`, 120 s by default; at most `vault.runMaxTimeout`, 600 s by default), when the client cancels the call, or when the server ends, however it ends: a watcher in the group holds a pipe only the server writes to and kills the group when the pipe closes (also when the server is killed with SIGKILL), and on Linux the command's shell also gets SIGKILL when the server dies. A program that leaves the group (`setsid`, a daemon) escapes it; its output is kept in memory only (at most 128 KiB). A request waiting for approval ends after `vault.approvalTimeout` (60 s by default), or when the client cancels the call; at most 4 wait per machine and 32 in all. |
-| The vault's key in the core's memory (the core host) | an unlock of the vault, with the passphrase or an authenticator's unlock entry | In a memguard Enclave while the vault is unlocked: a few pages of locked memory (one per 32-byte buffer: memguard's session key takes three, each operation of the store one or two while it runs), and a goroutine of memguard that replaces its session key every 500 ms from its first use. Every lock (Lock, `vault.autoLock`) destroys the key; the core purges memguard as it shuts down. Locked memory comes under `ulimit -l` (`RLIMIT_MEMLOCK`); in a container without `CAP_IPC_LOCK` the container's limit applies. When it cannot be locked every unlock answers `503 memory` and the vault stays locked: raise the limit (`ulimit -l`, `LimitMEMLOCK=` of a systemd unit, `--ulimit memlock=` of a container) and restart the core. |
-| The core's core dump limit (the core host) | memguard's initialization, in every process of the full binary: the core, with the local machine's agent inside it | `RLIMIT_CORE` is set to 0, soft and hard, on Linux and macOS (nothing on Windows) for the life of the process, so no core dump of the core holds the key. Every process the core starts inherits it and, not being root, cannot raise it again (`ulimit -c unlimited` fails there): the local machine's code-server, `git` and the other programs its agent runs, and the local terminal core with its terminals' programs where herdr-core runs as the core's child; a terminal core that herdr-core starts as a systemd user service or a launchd job has the service manager's limits instead ([21](features/21-terminal-core.md)). Machines run the machine build, which does not link memguard. Accepted ([30](features/30-variable-vault.md)). |
-| The desktop app's Secure Enclave helper (macOS) | `herdr-ide Enclave.app` in the app's `Contents/Helpers`, run by the shell for each question: whether the Mac can, making a key, or a Touch ID prompt for an unlock | One process per question, which answers one line and exits; killed after 2 minutes or past 64 KiB of output; one at a time. It keeps nothing: the Secure Enclave key exists only as its blob in the vault's file, which only that Mac's Secure Enclave uses. A Mac build packaged without it (no `swiftc`) is refused by `beforePack`; the development run takes it from `desktop/dist/helper/`. |
-| The desktop app's unlock key of an install | enrolling the desktop authenticator (its switch in the vault's Settings) | `vault-unlock.json` (0600, the install id and the shell's secret encrypted with safeStorage) in the Electron profile ([where](#where-the-app-keeps-its-files)), and on macOS the keychain item `herdr-ide Safe Storage` that safeStorage (Electron's) keeps its key in, shared by every instance and by development and release builds of the same name, with `herdr-ide-desktop-keychain.json` (0600) in the app data directory recording which build made it. A packaged build whose signature differs from that build's (an ad-hoc or self-signed rebuild) moves the item to itself at its first use of the unlock: macOS asks once to let `security` read the old item (nothing when no instance enrolled), the old item is deleted and a new one made by this build, every instance's `vault-unlock.json` sealed again under it ([30](features/30-variable-vault.md)); `herdr-ide-desktop-keychain.json.lock` exists only while that runs (one left by a launch that ended counts after 10 minutes). A development run, whose executable is Electron's own, reads an item a packaged build moved after macOS asks it once; on Windows the Windows Hello key `herdr-ide-vault-<install>` in the user's Hello container. All stay until removed by hand, also after the authenticator is removed or the app uninstalled; a new enrollment of the same install replaces the Hello key and keeps the file's id, and a lost file or secret means enrolling again. Linux keeps none. |
-| Download archives (`fs.archive`) | while a folder or several files download | No process and nothing on disk: the agent zips into the download's stream and its walk ends with the stream, also when the download is cancelled. |
-| AI usage limits (plugin `usage`, action `limits`) | the core's scheduler, while the plugin is on: by hand, every 1–60 min, or adaptive (by default 5 min while a panel is open in a page that is shown, 10 while a coding agent works, else 30; each a setting) | No process except below: HTTPS requests to the providers (15 s each, the action at most 45 s, ended sooner when the core stops waiting) through one client per agent, whose idle connections close after 90 s; the loopback requests to Antigravity's language server close their connections with the answer; nothing is written but a renewed Kimi Code sign-in (below). On macOS, `security find-generic-password` for Claude's keychain item (10 s limit); `ps` and `lsof` (5 s each) to find Antigravity's language server. A manual refresh polls at most once per 30 s. |
-| Renewing Kimi Code's sign-in (plugin `usage`, `usage.kimiRefresh`) | a poll that finds the token of `~/.kimi-code/credentials/kimi-code.json` ended or ending within a minute (never for a `--read-only` core) | Kimi Code's own files, as Kimi Code itself changes them: its lock directory `~/.kimi-code/oauth/kimi-code.lock` while the renewal runs (its time set every 2.5 s, removed after; left by a killed agent, it is stale for Kimi Code after 5 s and taken over), the empty file `~/.kimi-code/oauth/kimi-code` it locks (made as Kimi Code makes it, and kept as Kimi Code keeps it), and the credential file, replaced through `kimi-code.json.tmp.<pid>.<hex>` beside it (removed when the write fails). No process; the request takes at most 3 attempts of 15 s; a refused refresh token is not sent again until the file changes. |
-| `agy -p /usage` (plugin `usage`) | when no Antigravity language server answers and `agy` is installed: at most every 10 min (the polls in between get its last answer), not again for 30 min after it failed or timed out | Runs in a process group of its own, killed with everything it started after 20 s, and again once `agy` exited (`AGY_CLI_DISABLE_AUTO_UPDATE=true`, so it updates nothing); its output is read, at most 4 MiB. |
-| AI usage cost cache (plugin `usage`, action `cost`) | when the Cost tab is shown (at most once a minute per range, one scan at a time per machine, stopped when the core stops waiting, at most 2 min; what it read stays in the cache) | Rows of the machine's database `~/.herdr-ide[-<instance>]/machine-<host>.db` (0600): per log file its size, time and usage records (OpenCode's and Antigravity's SQLite databases, read without a lock or a write, each count as one, their size and time with their WAL's); one record per response; records older than 90 days and logs that are gone or older than 90 days leave it at each scan. A scan that changed it saves what changed when the last save is older than 5 min or the scan read at least 8 MiB of logs (else the next scan reads on from the saved offsets), a long scan every 20 s, and one that is cancelled what it read. | The `usage/cost-cache.json` of an earlier version is imported once and removed.
-| DeepSeek key file (plugin `usage`) | **Save** in the panel's DeepSeek section (`PUT /api/m/{id}/p/usage/deepseek-key`, audited) | `~/.herdr-ide[-<instance>]/usage/deepseek.key` (0600) until **Remove** (an empty key) or the user deletes it. |
-| Chat host (`herdr-ide chat-host`, plugin `chat`, [37](features/37-agent-chats.md)) | when the core opens a connection to a machine's host and none serves, never for a `--read-only` core: a writing request of the chat routes (a new chat, a listing of sessions, trust, a handoff…) or a page's subscription to a chat; never a GET, a read-only core or the core's watch. The agent has the instance's terminal core run it as a hidden terminal (none without a terminal core: `no_terminal_core`); one per instance and machine (the terminal's name and the run directory's socket); at most 15 s to serve | Its parent is the terminal core, so it outlives ssh, the agent and the core. Ends when it had no agent process and no connection for 60 s; with the terminal core's stop (SIGHUP, then SIGTERM, then SIGKILL; it ends its agents' groups on the first); when an agent of a newer build asks it to make way, which it does only while no chat works, waits or starts; and kills its agents' groups and exits 30 s after it began to stop at the latest. A host that holds its terminal's name without serving for 45 s is killed by the next agent that needs one. The core's watch of a host (while the machine is connected and the plugin on) lets it go after 2 minutes without a chat with an agent, a page's subscription or a use. Logs to its terminal (nobody reads it) and to `chat-host-<host>.log` (1 MiB, one old file). |
-| Agents of chats (`claude`, `codex app-server`, `kimi acp`, `grok agent --no-leader stdio`) | a chat's first prompt, a prompt to a sleeping or closed chat, a new chat; their commands from the registry, found in the PATH of the user's login shell (`$SHELL -l -i -c env`, run at most every 6 h or when a shell startup file changed, 10 s at most) | One process per live chat, in a process group of its own, a child of the chat host, with the login shell's environment. Ended when idle for `chat.idleStopMinutes` (30; no turn, nothing waiting or queued), the one idle the longest when more than `chat.maxLive` (8) would run, when the chat is closed, archived, deleted or handed off to a terminal, when full access is turned off for a chat that has it (started again without), and with the host; gracefully (input closed, SIGTERM to the group after 2 s, SIGKILL 3–5 s later), then whatever is left in its group is killed; the host kills a group that outlives 10 s. They write their own files as when run in a terminal (Claude Code's `~/.claude/projects/…`, plans and session state; Codex's `~/.codex/sessions/…` and its SQLite state; Kimi Code's and Grok's sessions), which the product never removes, and run the user's own hooks and MCP servers. |
-| Short agent processes of a chat host | listing a directory's sessions (`POST …/p/chat/sessions`, a writing request) and importing a session's conversation: for Codex when no live chat's app-server can answer, for ACP agents always (Claude Code's are read from its files) | At most 4 at once per host; each ends once it answered, within 60 s (2 minutes for an ACP session's load), as the agents above end. |
-| Chat journal (`chat-<host>.db` in the instance's data directory) | the chat host, at its start | One SQLite file (0600, with its `-wal` and `-shm`): per chat at most `chat.maxChatMB` (64; 8–256) of events, its oldest going first; at most `chat.maxTotalMB` (512; 64–2048) and `chat.maxChats` (500; 50–2000) in all, archived chats going first, then the chats closed longest ago; closed and archived chats after `chat.retentionDays` (30; 1–365, counted from when they were closed or archived, the later); checked at the start, after each 1 MiB of events, hourly and when the settings change. A deleted chat goes at once; the agents' own session files stay. |
-| Connections to a chat host | the core: each page's subscription to a chat, each request of the chat routes, the watch and the configures, each a stream of the op `plugin` to the host's socket | At most 128 per machine (the last 8 for the watch and configures; `too_many` beyond), at most 32 subscriptions per page (16 per machine). The host serves at most 256 connections and drops one that falls 8192 events or 16 MiB behind. A subscription ends with its page, its pane's chat gone or the plugin turned off; a request when answered (45 s; 2 minutes for a listing, 1 minute for a handoff). Nothing listens on TCP. |
-| Disk | see [reference](reference.md#files-and-directories) | Uploads and logs after 7 days; terminal history snapshots after `history.days` (above); chats within their bounds and closed ones after `chat.retentionDays` (above); other hosts' databases and chat host logs in a shared data directory after 30 days unused (below); agent builds and code-server versions unused for 14 days; Xvfb packages, video encoders and GPU selection libraries unused for 14 days when another one is installed. Files dropped on a pane are written into its terminal's directory and belong to the user, like files copied there by hand. A cancelled or interrupted upload leaves nothing: the agent removes its temporary file (`.herdr-ide-upload-*` beside the target) when the stream ends early; only an agent killed during an upload leaves one. |
+| Agent (`herdr-ide agent`) | One per core while connected. | With its ssh session; a dead link is detected by keepalives within about 45 s. |
+| A machine added from the UI | **Add machine…** (`POST /api/machines`). | A record in the machines file; **Remove machine…** deletes it and ends the session. The machine's terminal core and terminals keep running. |
+| ssh ControlMaster | Per machine, on Linux and macOS cores. | 10 min unused or 1 min without server answers; a core that finds it dead sends `ssh -O stop`. |
+| Desktop core | Launched by Electron. | When the app closes its stdin (quit, crash; on Windows and Linux also closing the window); killed after 20 s. Machines' terminal cores keep running. |
+| Terminal core (herdr-core) | First subscription to a machine with no core answering (`term.start`), or **Start Terminal Service** / **Restart Terminal Service…** in the machine's menu (`hc.start`, `hc.restart`). Never in `--read-only`. | Detached (systemd user service or launchd job), session `herdr-ide[-<instance>]`, socket `<data>/run/hc.sock`. Outlives agent and core. Ends with **Stop Terminal Service (Ends All Terminals)…** (`hc.stop`), the agent op `hc` action `stop`, `HC_SESSION=… HC_SOCKET=… herdr-core server stop`, or the machine. A restart keeps the programs. |
+| Connection to the terminal core | One per machine while a `/api/v1/term` client is subscribed. | 10 s after the last subscriber, or with the agent. |
+| Terminals of the layout | New tabs, splits and agents (`terminal.run` with `keep: true`, audited); replacements after a terminal core restart ([33](features/33-workspace-restore.md)). | When the pane, tab or workspace closes (after the undo time), is killed, its program exits, or the terminal core stops. They outlive pages, core and agent. Finished records stay 24 h in herdr-core's state. |
+| A closed pane's terminal | **Close Pane** / **Close Tab**. | Labeled `closing`; any page showing the machine kills it after `layout.undoClose` (5 s) unless **Undo Close** brings it back. |
+| Attached streams of a page | One per terminal shown or kept hidden (`performance.keptTerminals`, 12 by default, max 64; [26](features/26-web-terminals.md)). | With the pane, the page, the program, or the machine. No process, no disk. |
+| Streams kept for terminals' sizes | When the last client that set a live terminal's size leaves ([22](features/22-terminal-protocol.md)). | At most one per terminal; closed when a new sizing viewer attaches, the terminal ends, or the connection to the terminal core closes. Buffered at most 256 KiB credit plus 4 MiB queue. |
+| Agent detection (op `detect`) | While the connection to the terminal core lasts. | With that stream or the agent. One extra connection, an observing attach per agent terminal, screen reads at most every 300 ms. No process, no disk. |
+| Finding agents' sessions (`detect` with `sessions`, plugin `agents`) | Per terminal running Claude Code or Codex. | A goroutine per terminal, ending with the agent, the terminal, the stream or the plugin; stats every 2–5 s (backing off to 30 s), reads of the process table. Caches ≤ 1024 entries. No process, no disk ([35](features/35-agent-native-view.md)). |
+| Confirming a session (`agents` action `resolve`) | A page bringing an agent back ([33](features/33-workspace-restore.md)); ≤ 8 at once per machine, 15 s each. | Reads the transcript's header; locations cached in memory (≤ 1024). No process, no disk. |
+| A session's usage (`usage` action `session`) | The status bar's session item, at most every 10 s per session, ≤ 8 at once per machine. | Reads transcripts (≤ 256 MiB each); the last 16 (48 MiB) cached in memory. No process, no disk. |
+| Terminal history captures (plugin `history`, `history.capture`, off by default) | Every `history.interval` s (30) per connected machine; not for a `--read-only` core. | One at a time, ≤ 25 s: screen reads and short observing attaches over one terminal core connection. Data: see Files. |
+| Full Disk Access check (macOS) | `GET /api/m/{id}/privacy`; one at a time per agent. | A `/bin/sh` run by the terminal core (`machine.exec`) that opens one folder; ended by herdr-core within 10 s. None if no terminal core runs. |
+| code-server | First VS Code use. | `--code-server-idle` (20 min) without connections, agent exit (or the core's, for the local machine), **Stop VS Code**, or VS Code switched off for every client kind. Orphans are stopped by the next agent; code-server exits by itself after 1 h without connections. |
+| VS Code windows | One per VS Code pane on screen. | Off-screen windows stay loaded 10 min, at most 3 per page; a closed pane disconnects at once. |
+| VS Code extension hosts | One per VS Code window. | 5 min after the window disconnects. |
+| curl or wget (`--code-server-install=download`) | While a machine downloads code-server. | With the download (20 min limit) or when the core stops waiting; the partial file is removed. |
+| Xvfb or Xwayland | A remote Linux machine connects with GUI on (`gui.display` picks). | In its own session; exits 1 min after its last client (programs, window manager, display keeper). Replaced by the other kind only while no program is connected. |
+| GPU display compositor (`herdr-ide gui-wl`) | With each Xwayland. | Exits with its Xwayland; listens nowhere. Logs to `<data>/xwayland.log`. |
+| Display keeper (`herdr-ide gui-keep`) | When a display is ready and when the terminal core becomes reachable (`gui.keep`; not in `--read-only`). | One per instance (`run/gui-keep.lock`); holds the display while the terminal core runs, exits once it stops or the display ends. |
+| `apt-get download xvfb` | A machine has no Xvfb (not in `--read-only`). | With the download (5 min limit); retried with backoff up to 5 min while connected. |
+| Video encoder | One per program window sent as video (`gui.video`). | 5 s without frames, window unwatched, resized or gone, video turned off, or with the agent (own process group). NVENC sessions are limited per machine; it falls back to VA-API, VP8 or pictures. |
+| Shared memory for captures | While the agent's window manager runs. | One System V segment ≤ 64 MB (0600), marked for removal once attached, so it goes with the agent. |
+| Port forwards (core host loopback) | A browser pane opens a machine's port ([32](features/32-browser-and-ports.md)). | Listeners on `127.0.0.1`/`::1`, at most 32 with 128 connections each; end when stopped, idle for `browser.forwardIdle` (30 min), the machine removed, the plugin off, or the core stops. Nothing listens on the machine. |
+| Vault and bridge sockets (`run/vault.sock`, `run/bridge.sock`) | Served by the newest agent of the instance. | Unix sockets (0600); an agent removes them on exit only if they are still its own. Each connection is one stream to the core (vault: at most 16 at once). |
+| The vault's MCP servers | Started by a coding agent's CLI, never by herdr-ide. | Exit when the CLI closes stdin or signals them. A `run_with_env` command runs in its own process group, killed when it returns, at `vault.runTimeout` (120 s, max `vault.runMaxTimeout`), on cancel, or when the server dies. Output kept in memory, ≤ 128 KiB. Approvals wait `vault.approvalTimeout` (60 s); at most 4 per machine, 32 in all. |
+| File explorer (plugin `files`) | Changes, saves, uploads, polls. | No process on the machine. Long copies/removals stop when the request ends (10 min max). At most 8 stats at once per machine. **Reveal in Finder** (core's own machine) runs `/usr/bin/open -R` or `xdg-open` from a fixed path; at most 4 waited for. |
+| Git (plugin `git`) | One `git` process per request; `git.autoFetch` while a panel shows the repository. | At most 8 per machine, each its own process group, killed after 15 s (reads) or 120 s (changes, fetch, pull, push) or when the request ends. No background maintenance (`gc.autoDetach=false`). Hooks' background programs and fsmonitor daemons are the user's, as in a terminal. |
+| AI usage limits (plugin `usage`) | The core's scheduler while the plugin is on (manual, 1–60 min, or adaptive). | HTTPS requests (15 s each, 45 s per action). On macOS `security` for Claude's keychain item (10 s), `ps`/`lsof` for Antigravity (5 s). Manual refresh at most every 30 s. |
+| `agy -p /usage` (plugin `usage`) | No Antigravity language server answers: at most every 10 min, 30 min after a failure. | Own process group, killed after 20 s; output ≤ 4 MiB. |
+| Download archives (`fs.archive`) | A folder or several files download. | Zipped into the stream; ends with it. No disk. |
+| Chat host (`herdr-ide chat-host`, plugin `chat`, [37](features/37-agent-chats.md)) | A writing chat request or a page's chat subscription with no host serving; a hidden terminal of the instance's terminal core, one per instance and machine. Never for a `--read-only` core. | Outlives ssh, agent and core. Exits after 60 s with no agent process and no connection, with the terminal core, or when a newer build asks it to make way while no chat works; a host holding its name without serving for 45 s is killed by the next agent. Log `<data>/chat-host-<host>[-<id>].log` (1 MiB, one old file). |
+| Agents of chats (`claude`, `codex app-server`, `kimi acp`, `grok agent … stdio`) | A chat's prompt, with the PATH of the user's login shell (`$SHELL -l -i -c env`, at most every 6 h). | Own process group under the chat host. Ended idle after `chat.idleStopMinutes` (30), the idlest beyond `chat.maxLive` (8), on close, archive, delete or handoff, and with the host: input closed, SIGTERM after 2 s, SIGKILL later. Their own session files are theirs and never removed. |
+| Short agent processes of a chat host | Listing a directory's sessions; importing a session (Codex without a live app-server, ACP agents). | ≤ 4 at once per host, each within 60 s (2 min for an ACP load). |
+| Connections to a chat host | Page subscriptions, chat requests and the core's watch, as streams of op `plugin` to the host's socket. | ≤ 128 per machine, ≤ 32 subscriptions per page; the host serves ≤ 256 and drops one 8192 events or 16 MiB behind. The watch lets a host go after 2 min unused. Nothing on TCP. |
+| The vault's key in the core's memory (core host) | An unlock. | A memguard Enclave in locked memory until the vault locks; needs `ulimit -l` (`RLIMIT_MEMLOCK`), else unlocks answer `503 memory`. The full binary sets `RLIMIT_CORE` to 0 for itself and its children on Linux and macOS ([30](features/30-variable-vault.md)). |
+| Secure Enclave helper (desktop app, macOS) | One process per question (availability, a new key, a Touch ID unlock). | Answers one line and exits; killed after 2 min or 64 KiB of output. Keeps nothing. |
 
-The licenses stay in the extracted release directory until the user removes
-it.
+### Files
 
-**Home directories several hosts share** (NFS, a cluster's home). The
-instance's data directory on a machine is then the same directory on
-every host of that home. Its SQLite databases need every connection of a
-database on one host, so each host keeps its own: `machine-<host>.db`
-and `chat-<host>.db`, with the host's whole name and a hash of its
-machine id (`/etc/machine-id`, `/var/lib/dbus/machine-id` or
-`/etc/hostid`; macOS's platform UUID), and its own chat host log
-([38](features/38-sqlite-state.md)). A host's files are marked used
-hourly while open; another host's go once nobody opened them for 30
-days, removed only under SQLite's writers' lock taken without waiting,
-so a database in use, on any host the file system's locks reach, stays.
-A host that is renamed, or a container without a machine id that moves
-between hosts of one name, starts with new files.
+| Resource | Written | Removed |
+| --- | --- | --- |
+| Agent builds (`~/.herdr-ide/agent/`) | On connect, by content hash. | Unused for 14 days. |
+| herdr-core executable (`<data>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
+| herdr-core state (`~/.local/state/herdr-core/herdr-ide[-<instance>]/`) | By herdr-core. | Kept until the user removes it. |
+| code-server versions (`~/.herdr-ide/code-server/`) | Install. | Unused for 14 days. |
+| Xvfb packages (`~/.herdr-ide/xvfb/`), video encoders (`~/.herdr-ide/video/`, ~2 MB), GPU selection libraries (`~/.herdr-ide/gpupick/`, 0600, `gui.pick`) | When needed (not in `--read-only`). | Unused for 14 days, when another is installed. |
+| Uploads (`<data>/staging/`, 0700/0600) | File explorer uploads (≤ 4 GiB). | When written or failed; one left by a killed agent is removed by an agent after 7 days. |
+| Pasted files (`<data>/uploads/`) | Pasted files, and dropped files when the terminal's directory cannot take them. | After 7 days. |
+| Dropped files (`.herdr-ide-upload-*` while writing) | Files dropped on a pane, into its terminal's directory. | The files are the user's; a temporary file is removed when its stream ends early. |
+| Trash | **Move to Trash** in the explorer. | The user's trash (`~/.local/share/Trash`, `~/.Trash` on macOS); emptied by the user. |
+| code-server logs (`<data>/cs-data/logs/`) | code-server. | After 7 days. |
+| Display logs (`<data>/xvfb.log`, `<data>/xwayland.log`) | Each display start. | Overwritten at each start. |
+| MCP link (`<data>/bin/herdr-ide-mcp`) | Each agent start. | Replaced by the next agent; removed with the data directory. |
+| Machine database (`<data>/machine-<host>[-<id>].db`, 0600, [38](features/38-sqlite-state.md)) | Terminal history snapshots; the AI usage cost cache (Cost tab scans, ≤ 1/min per range, ≤ 2 min). | History: two generations per terminal of ≤ `history.lines` (2000) lines and 2 MiB, ≤ `history.maxTerminals` (32) terminals and `history.maxTotalMB` (64) in all, oldest first; removed after `history.days` (7), when the terminal ends or is gone 2 min, with **Clear Saved Output**, and when capture is turned off ([36](features/36-terminal-history.md)). Cost cache: records and logs older than 90 days leave at each scan. Earlier JSON files are imported once and removed. |
+| Chat journal (`<data>/chat-<host>[-<id>].db`, 0600) | The chat host. | Per chat ≤ `chat.maxChatMB` (64), in all ≤ `chat.maxTotalMB` (512) and `chat.maxChats` (500), archived then longest-closed first; closed and archived chats after `chat.retentionDays` (30); a deleted chat at once. |
+| DeepSeek key (`<data>/usage/deepseek.key`, 0600) | **Save** in the usage panel (audited). | **Remove**, or the user deletes it. |
+| Kimi Code credentials (`~/.kimi-code/`) | Renewed when expiring (`usage.kimiRefresh`; not in `--read-only`), with Kimi Code's own lock. | Kimi Code's files. |
+| Vault access log (core database `core[-<instance>]-<host>[-<id>].db`, core host, 0600) | Every MCP request and value a page takes; names, never values. | Keeps the last 1000 releases and 500 other records; an earlier `vault[-<instance>]-access.jsonl` is imported once and removed. |
+| Desktop vault unlock key | Enrolling the desktop authenticator. | `vault-unlock.json` in the Electron profile, the macOS keychain item (moved to a rebuilt app after one prompt) or the Windows Hello key `herdr-ide-vault-<install>`; kept until removed by hand. |
+| Electron profile | First desktop launch. | Until removed by hand ([where](#where-the-app-keeps-its-files)); core stderr is kept in memory only (16 KiB). |
 
-How machines get code-server is a setting (the settings dialog, for every
-machine or in one machine's own settings, or `--code-server-install` for
-all of them): the core uploads the release (default; works for
-machines without internet), each machine downloads it itself (faster when the
-machines have a better connection than the path through the core; needs curl
-or wget and access to the `--code-server-url` host), or a code-server already
-installed on the machine is used (`--code-server-path`, or found on `PATH` and
-the usual locations). The last two fall back to uploading. A change applies
-the next time code-server starts on a machine; to restart it now, stop it
-from a VS Code pane's menu (**Stop VS Code on `<machine>`**), then press
-**Start VS Code** in the pane.
+**Home directories several hosts share** (NFS). Each host keeps its own
+SQLite files and chat host log, named `<name>-<host>[-<id>]` by host name
+and a hash of its machine id. Another host's files are
+removed after 30 days unopened, only under SQLite's writers' lock, so a
+database in use stays ([38](features/38-sqlite-state.md)).
+
+How machines get code-server is a setting (`codeServer.install`, per
+machine, or `--code-server-install`): the core uploads it (default; works
+without internet on the machine), the machine downloads it (needs curl or
+wget and access to `--code-server-url`), or an installed one is used
+(`--code-server-path` or `PATH`). The last two fall back to uploading. A
+change applies the next time code-server starts; **Stop VS Code on
+`<machine>`** in a VS Code pane's menu restarts it now.
 
 ## Running as a service
 
@@ -568,30 +490,24 @@ KillMode=process
 WantedBy=default.target
 ```
 
-Install the full release directory at the path shown above (or adjust the
-path). The service must run as the user who owns the ssh keys. The local
-machine's terminal core is not part of the unit: herdr-core runs it as a
-user service of its own, so its terminals survive restarts. systemd stops
-every process of a unit by default, including the ssh ControlMasters the
-core started; `KillMode=process` stops only the core, whose agents then end
+Install the full release directory at that path. The service must run as
+the user who owns the ssh keys. The local terminal core is not part of the
+unit (herdr-core runs it as its own user service), so terminals survive
+restarts. `KillMode=process` stops only the core, whose agents then end
 their own processes.
 
 ## Several cores and development builds
 
-The chat host survives restarting or reinstalling the app. A new chat
-connection asks a host of an older release or commit to make way only
-when no chat is working or waiting for input. `scripts/build.sh` gives
-builds of local changes versions ending in `-dirty.<unix build time>`:
-they are not ordered, so a rebuild at the same commit keeps the running
-host, and the Chats panel (and a toast once no chat runs) reminds you to
-restart it with **Restart Chat Host**, which ends its agents; the chats
-resume their sessions in the new host. A plain `go run` development
-version is not told apart either and should use its own instance.
+The chat host survives restarting or reinstalling the app; a newer build
+asks an older host to make way only while no chat works or waits. Builds of
+local changes (`-dirty.<time>` versions) are not ordered, so the Chats panel
+reminds you to **Restart Chat Host**; chats resume their sessions in the new
+host.
 
-Two cores that connect to the same machine share one agent build directory
-but nothing else unless they use the same instance. Give each one its own
-`--instance` (state in `~/.herdr-ide-<instance>`, terminal core session
-`herdr-ide-<instance>`). For development:
+Two cores reaching the same machine share only the agent build directory
+unless they use the same instance. Give each its own `--instance` (state in
+`~/.herdr-ide-<instance>`, terminal core session `herdr-ide-<instance>`).
+For development:
 
 ```bash
 make dev-core     # go run ./cmd/herdr-ide --instance dev --local-only --listen 127.0.0.1:7790 --agent-dir dist/agents
@@ -600,36 +516,20 @@ make dev-web      # Vite on top of it
 
 ## Migrating from versions that used herdr
 
-Earlier versions drew their panes from herdr, the terminal multiplexer, and
-kept part of their configuration in it. This version keeps everything in
-its own files and its own terminal core; starting it once moves what can be
-moved. The steps are one way: an earlier version does not read the new
-files.
+Earlier versions drew panes from herdr, the terminal multiplexer. This
+version keeps everything in its own files and terminal core; the first start
+moves what can be moved, one way only.
 
-- **Settings.** A `settings[-<instance>].json` of the earlier format
-  (string values under the flags' names, machines' values under
-  `"machines"`) is converted when the core first reads it and rewritten in
-  the new format ([13](features/13-settings-and-appearance.md)). Settings a
-  browser kept in `localStorage` (language, theme, font sizes…) are moved
-  into the core's settings once, by the first page of a writable core.
-- **Keybindings.** The desktop app's shortcut settings (`desktop-*-key`)
-  become rules of a new `keybindings[-<instance>].json` once, while that
-  file does not exist, and are dropped from the settings; otherwise the
-  file is created by the first change of a key. Keys set in herdr's own
-  configuration no longer apply, and ⌘W in the desktop app now closes the
-  focused pane (`pane.close`), not the tab.
-- **The prefix chords are gone.** The defaults no longer have the
-  `ctrl+b` chords of herdr's keymap (`ctrl+b c` new tab, `ctrl+b v` split,
-  `ctrl+b space` palette…): `ctrl+b` and every key that is not a default
-  now reach the program in the terminal on their first press, and the
-  commands are in the menus, the context menus, the pane headers and the
-  command palette (the status bar's button; `cmd+shift+p` in the
-  desktop app on macOS, `ctrl+shift+p` on Windows and Linux). The defaults
-  left are in the
-  [reference](reference.md#keyboard-shortcuts). Chords can be bound again,
-  one rule per key, under **Settings → Keyboard shortcuts** or in
-  `keybindings[-<instance>].json` in the core host's user configuration
-  directory (`keybindings-desktop.json` for the desktop app), for example:
+- **Settings.** An old-format `settings[-<instance>].json` is converted and
+  rewritten ([13](features/13-settings-and-appearance.md)). Settings a
+  browser kept in `localStorage` move into the core once.
+- **Keybindings.** The desktop app's `desktop-*-key` settings become rules
+  of a new `keybindings[-<instance>].json`. Keys in herdr's configuration no
+  longer apply. ⌘W in the desktop app closes the focused pane, not the tab.
+- **No prefix chords.** The `ctrl+b` chords are gone: `ctrl+b` and every
+  key that is not a default reach the terminal. Commands are in the menus,
+  pane headers and the command palette; defaults are in the
+  [reference](reference.md#keyboard-shortcuts). Chords can be bound again:
 
   ```json
   [
@@ -639,26 +539,13 @@ files.
   ]
   ```
 
-  While a chord starting with `ctrl+b` is bound, `ctrl+b` waits for its
-  next key; pressed twice it reaches the terminal.
-- **Machines.** The first start of an instance without a
-  `machines[-<instance>].json` imports the SSH machines herdr saved
-  (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default
-  `~/.local/state/herdr/client/endpoints.json`): their ids, labels, targets
-  and whether they were enabled. Names of herdr sessions other than the
-  default that machines used are not kept; every machine gets the
-  instance's own terminal core. Later changes to herdr's file are not
-  read. A machine whose target the core refuses (one that starts with `-`
-  or holds whitespace, a control character or a shell character such as
-  `$`, `;` or `|`) is imported too and shown in error (`invalid_target`),
-  never connected, until it is renamed, removed or corrected in the
-  machines file.
-- **Terminals.** Terminals, workspaces and tabs that lived in herdr
-  sessions are not migrated: each machine now has a terminal core of the
-  instance's own (herdr-core, session `herdr-ide[-<instance>]`,
-  [21](features/21-terminal-core.md)), which starts empty. The old
-  terminals keep running in herdr and remain reachable with the herdr CLI
-  until they are ended there; this version neither stops nor attaches to
-  them.
-- **Find** in a terminal finds plain text (ASCII letters in either case);
-  regular expressions and whole-word matching are gone.
+- **Machines.** The first start without `machines[-<instance>].json`
+  imports herdr's SSH machines
+  (`$XDG_STATE_HOME/herdr/client/endpoints.json`) once. A target the core
+  refuses is imported but shown as `invalid_target` and never connected.
+- **Terminals.** herdr sessions are not migrated. Each machine gets the
+  instance's own, initially empty terminal core
+  ([21](features/21-terminal-core.md)); old terminals keep running in herdr
+  and this version neither stops nor attaches to them.
+- **Find** in a terminal matches plain text; regular expressions and
+  whole-word matching are gone.

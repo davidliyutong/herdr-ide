@@ -16,6 +16,9 @@ import (
 // environment, do not outlive the call: the process group is killed when
 // the command returns, also while they hold the output's pipe.
 func TestRunKillsBackgroundPrograms(t *testing.T) {
+	old := waitDelay
+	waitDelay = 200 * time.Millisecond
+	defer func() { waitDelay = old }()
 	for _, command := range []string{"sleep 30 >/dev/null 2>&1 & echo $!", "sleep 30 & echo $!"} {
 		out, failed := Runner{}.Run(context.Background(), command, map[string]string{"V": "secret"}, "", 0)
 		if failed {

@@ -1,8 +1,9 @@
 # Reference
 
-Single source for command-line flags, keyboard shortcuts, environment
-variables and on-disk layout. `scripts/check.sh` fails when a flag is missing
-here; both READMEs link to this page instead of repeating it.
+Single source for commands, flags, settings, keyboard shortcuts, endpoints,
+environment variables and on-disk layout. `scripts/check.sh` fails when a
+flag or a server route is missing here; both READMEs link to this page
+instead of repeating it.
 
 ## Commands
 
@@ -10,82 +11,84 @@ here; both READMEs link to this page instead of repeating it.
 | --- | --- |
 | `herdr-ide [serve] [flags]` | Run the server (default command). |
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
-| `herdr-ide mcp [--instance NAME] [--socket PATH]` | The variable vault's MCP server on stdio, for coding agents' CLIs; asks the instance's agent through `vault.sock` and exits when stdin closes ([30](features/30-variable-vault.md)). |
+| `herdr-ide mcp [--instance NAME] [--socket PATH]` | The variable vault's MCP server on stdio for coding agents' CLIs; asks the instance's agent through `vault.sock`, exits when stdin closes ([30](features/30-variable-vault.md)). |
 | `herdr-ide version` | Print the version. |
-| `herdr-ide agent [--instance NAME]` | Per-machine helper, speaking the core's protocol on stdin and stdout; started by the core over ssh, never by hand. Linux and macOS. |
-| `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` | The same MCP server on a machine, a link to the binary the core uploaded there (the same program, built without the server and the UI: it has `mcp`, `agent`, `gui-keep`, `gui-wl`, `chat-host` and `version`); started by the stable link's name it takes no arguments and asks the agent of the data directory the link is in. |
-| `herdr-ide gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent, never by hand. |
-| `herdr-ide gui-wl --device NODE [--nvidia]` | The compositor of a machine's GPU display: a Wayland server that shows nothing, for the one Xwayland on the socket it inherits as file descriptor 3, which it tells to draw with the GPU of the render node (`--nvidia`: offering NVIDIA's buffer layouts); started by the agent, never by hand. |
-| `herdr-ide chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)): runs coding agents headless for the chat plugin, serving `chat.sock` in the instance's run directory `--run` and keeping its journal and log in its data directory `--base`; started by the agent as a hidden terminal of the instance's terminal core, never by hand. Ends on SIGHUP, SIGTERM or SIGINT, when asked to make way, or a minute after it had nothing to do. Status 2: a wrong command line; 1: another host serves the socket, the directories are not the user's alone, its journal is a newer host's, or it did not end within 30 s of beginning to stop. Linux and macOS. |
+| `herdr-ide agent [--instance NAME]` | Per-machine helper speaking the core's protocol on stdio; started by the core over ssh, never by hand. Linux and macOS. |
+| `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` | The MCP server on a machine: a link to the uploaded machine build (which has `mcp`, `agent`, `gui-keep`, `gui-wl`, `chat-host` and `version`); takes no arguments and asks the agent of its data directory. |
+| `herdr-ide gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
+| `herdr-ide gui-wl --device NODE [--nvidia]` | Compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
+| `herdr-ide chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS. |
 
 ## `serve` flags
+
+A flag given on the command line sets its setting ([settings](#settings))
+for every machine and locks it in the UI; without it the settings dialog
+and file change the value at runtime.
 
 ### Network and security
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--listen` | `127.0.0.1:7780` | Address to listen on. Non-loopback addresses are refused unless `--proxy-secret-file` or `--insecure-listen` is given. On a loopback address the core also takes the same port on the other one (`::1` beside `127.0.0.1`), so that `http://localhost:<port>` leads to it whichever a browser tries; when another program holds it, the core says so at its start and serves on the one address. |
-| `--allowed-origin` | – | Public origin of the reverse proxy, e.g. `https://ide.example.com` (repeatable). The Host header must be loopback or one of these hosts; an Origin header must be one of these or, on loopback, the request's own host and port. |
-| `--proxy-secret-file` | – | File with a secret (≥ 16 characters) that the reverse proxy sends in `X-herdr-ide-Proxy-Secret`. Required for requests not coming from loopback. |
+| `--listen` | `127.0.0.1:7780` | Address to listen on; on loopback also the same port on the other loopback address (`::1`) when free. Non-loopback needs `--proxy-secret-file` or `--insecure-listen`. |
+| `--allowed-origin` | – | Public origin of the reverse proxy, e.g. `https://ide.example.com` (repeatable). Host must be loopback or one of these; Origin must be one of these or, on loopback, the request's own host and port. |
+| `--proxy-secret-file` | – | File with a secret (≥ 16 characters) the proxy sends in `X-herdr-ide-Proxy-Secret`; required for requests not from loopback. |
 | `--insecure-listen` | `false` | Accept a non-loopback `--listen` without a proxy secret. Anyone reaching the port gets shell access to every machine. |
-| `--read-only` | `false` | Watch only: terminals get no input (they observe), writing terminal core calls (layout changes, new and ended terminals), uploads, ssh authentication and VS Code are refused, no terminal core is installed or started, and agents do not renew Kimi Code's sign-in (`usage.kimiRefresh`). |
-| `--audit-log` | – | Append security-relevant events (connections, mutating API calls, uploads, VS Code and bridge use, denials) as JSON lines. |
-| `--user-header` | – | Header holding the authenticated user for the audit log. Without it, `Tailscale-User-Login`, `X-Forwarded-User`, `X-Auth-Request-User`, `Remote-User` and `X-Forwarded-Email` are tried. |
+| `--read-only` | `false` | Watch only: no terminal input, writing terminal core calls, uploads, ssh login or VS Code; no terminal core installed or started; no Kimi Code sign-in renewal. |
+| `--audit-log` | – | Append security-relevant events (connections, mutating calls, uploads, VS Code and bridge use, denials) as JSON lines. |
+| `--user-header` | – | Header holding the authenticated user for the audit log. Default: `Tailscale-User-Login`, `X-Forwarded-User`, `X-Auth-Request-User`, `Remote-User`, `X-Forwarded-Email`. |
 
 ### Machines
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--local-only` | `false` | Do not connect to the stored SSH machines (`--ssh` targets are still used). |
+| `--local-only` | `false` | Do not connect the stored SSH machines (`--ssh` targets still are). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
-| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored; renaming or disabling it in the UI lasts until the core stops (repeatable). At most 255 bytes, not starting with `-`, without whitespace, control characters or any of ``! " $ & ' ( ) * ; < > ? \ ` { \| }`` (ASCII letters, digits, `# % + , - . / : = @ [ ] ^ _ ~` and Unicode letters, marks and numbers); the core refuses to start otherwise. |
-| `--instance` | – | State instance: machines use `~/.herdr-ide-<instance>` instead of `~/.herdr-ide`, with separate sockets, terminal core (session `herdr-ide-<instance>`), code-server process and settings. Lets a development core run next to the daily one. |
+| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored (repeatable). At most 255 bytes, not starting with `-`, without whitespace, control characters or ``! " $ & ' ( ) * ; < > ? \ ` { \| }``; the core refuses to start otherwise. |
+| `--instance` | – | State instance: `~/.herdr-ide-<instance>` on machines, with its own sockets, terminal core session `herdr-ide-<instance>`, code-server and settings. |
 
 ### code-server
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--code-server-version` | `4.144.0` | code-server release installed on machines. Default versions have pinned SHA-256 digests. |
+| `--code-server-version` | `4.144.0` | code-server release for machines; default versions have pinned SHA-256 digests. |
 | `--code-server-idle` | `20m` | Stop a machine's code-server after this long without VS Code connections; `0` keeps it while the agent lives. |
-| `--code-server-url` | GitHub releases | Download URL template for code-server (`{version}`, `{asset}`, `{file}`); point it at a mirror. |
-| `--extension-url` | Open VSX | Download URL template for extensions (`{publisher}`, `{name}`, `{version}`, `{file}`). |
-| `--seed-dir` | – | Directory with pre-downloaded tarballs and VSIXs (from `fetch-assets`), searched before the cache (repeatable). |
-| `--offline` | `false` | Never download; artifacts must come from `--seed-dir` or the cache. |
-| `--code-server-install` | `push` | How machines get code-server: `push` (the core resolves, verifies and uploads the release), `download` (the machine fetches it with curl or wget, verified against the same digest) or `existing` (a code-server already installed on the machine). `download` and `existing` fall back to `push`; `--offline` disables `download`. The setting `codeServer.install`. |
-| `--code-server-path` | – | code-server on machines for `existing` (absolute or `~/` path); empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/snap/bin`. The setting `codeServer.path`. |
+| `--code-server-url` | GitHub releases | Download URL template (`{version}`, `{asset}`, `{file}`); point it at a mirror. |
+| `--extension-url` | Open VSX | Extension URL template (`{publisher}`, `{name}`, `{version}`, `{file}`). |
+| `--seed-dir` | – | Directory of pre-downloaded tarballs and VSIXs (from `fetch-assets`), searched before the cache (repeatable). |
+| `--offline` | `false` | Never download; artifacts come from `--seed-dir` or the cache. |
+| `--code-server-install` | `push` | `push` (the core uploads), `download` (the machine fetches with curl or wget, same digest; off with `--offline`) or `existing`; the last two fall back to `push`. Setting `codeServer.install`. |
+| `--code-server-path` | – | code-server on machines for `existing`; empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/snap/bin`. Setting `codeServer.path`. |
+
+code-server settings apply from the next code-server start on each machine.
 
 ### Program windows
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--gui` | `true` | Show windows of programs on remote Linux machines in browser windows: new panes get a virtual display (`DISPLAY`, `XAUTHORITY`); Xvfb is fetched in user space when missing. Applies to panes created afterwards. `true` or `false` (`on` and `off` are accepted too). The setting `gui.enabled`. |
-| `--gui-display` | `auto` | The virtual display: `auto` (Xwayland drawing with a GPU, with the agent's own compositor, where the machine has an Xwayland and a GPU whose render node the user may open, so OpenGL and Vulkan programs render on the GPU; Xvfb elsewhere and when that does not come up) or `xvfb` (always Xvfb). A display changes kind while no program is connected to it. The setting `gui.display`. |
-| `--gui-gpu` | `vglrun` | OpenGL on machines with VirtualGL: `vglrun` (programs started with `vglrun` render on the GPU) or `all` (every program in new panes runs under VirtualGL, except on a display that draws with the GPU). The setting `gui.gpu`. |
-| `--gui-gpu-pick` | `false` | On machines with several NVIDIA GPUs, preload the library gpupick into the programs of new panes: a program started with `CUDA_VISIBLE_DEVICES` sees only the GPUs it names (its indices are rewritten to count among those), so a Vulkan program shows its window from the chosen GPU instead of only from the driver's first one. `true` or `false`. The setting `gui.gpuPick`. |
-| `--gui-video` | `true` | Send program windows that keep changing as video (H.264 on machines with an NVIDIA, Intel or AMD GPU, else VP8 on the CPU) to browsers that decode it with WebCodecs, encoded on the machine by the encoder the core brings; pictures otherwise, and always with `false` (`on`/`off` accepted). Release builds embed the encoder; a build without it (no `scripts/build-ffmpeg.sh` before `make build`) sends pictures. The setting `gui.video`. |
+| `--gui` | `true` | Give new panes on remote Linux machines a virtual display whose windows open in browser windows ([14](features/14-gui-windows.md)); Xvfb is fetched in user space when missing. Setting `gui.enabled`. |
+| `--gui-display` | `auto` | `auto` (Xwayland drawing with the GPU where the machine allows, else Xvfb) or `xvfb`. Setting `gui.display`. |
+| `--gui-gpu` | `vglrun` | VirtualGL: `vglrun` (programs started with `vglrun`) or `all` (every program in new panes, except on a GPU display). Setting `gui.gpu`. |
+| `--gui-gpu-pick` | `false` | On machines with several NVIDIA GPUs, preload gpupick so `CUDA_VISIBLE_DEVICES` also selects the GPU a Vulkan window shows from. Setting `gui.gpuPick`. |
+| `--gui-video` | `true` | Send changing windows as video (H.264 on NVIDIA, Intel or AMD GPUs, else VP8) to browsers with WebCodecs; pictures otherwise or in builds without the encoder. Setting `gui.video`. |
 
-These flags set settings ([settings](#settings)); the settings dialog and the
-settings file change them at runtime. code-server settings apply from the
-next code-server start on each machine, GUI settings to panes created
-afterwards, video from the next frame. The `gui.*` settings can also be set
-per remote machine; a machine without its own value uses the global one. A
-flag given on the command line wins, for every machine, and locks the
-setting in the UI.
+Boolean flags of settings also accept `on` and `off`. GUI settings apply to panes
+created afterwards, video from the next frame; `gui.*` can be set per
+remote machine.
 
 ### Terminal history
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--history-capture` | `false` | Keep snapshots of the terminals' output on each machine's disk, in the agent's data directory there, to show what a terminal held after its terminal core started again. The output can hold secrets such as keys and passwords printed in a terminal. `true` or `false`. The setting `history.capture`, also per machine. |
+| `--history-capture` | `false` | Keep snapshots of terminals' output on each machine's disk, shown after its terminal core starts again ([36](features/36-terminal-history.md)); the output can hold secrets. Setting `history.capture`, also per machine. |
 
 ### Development
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--agent-dir` | – | Directory with uncompressed `herdr-ide-<os>-<arch>` machine builds (`go build -tags machine`), used instead of the embedded ones. |
+| `--agent-dir` | – | Directory of uncompressed `herdr-ide-<os>-<arch>` machine builds (`go build -tags machine`) used instead of the embedded ones. |
 | `--ext-dir` | – | Directory containing `herdr-ide-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
-| `--parent-stdio` | `false` | Launcher lifecycle: read the launcher's hello, one JSON line on stdin, before serving (`{"desktop_token":"…"}`: the desktop app's token of this launch, 32 to 256 letters, digits, `-` or `_`, which its windows' requests carry in the cookie `herdr-ide-desktop`; `{}` for none; a missing or malformed hello stops the core); write one `{"event":"ready","url":"http://host:port"}` line to stdout after binding; cancel and clean up when stdin closes. Logs remain on stderr; SIGPIPE is ignored, so a launcher that disappeared does not kill the core before its cleanup. Used by Electron; does not change HTTP guards. |
+| `--parent-stdio` | `false` | Launcher lifecycle (Electron): read a hello line on stdin (`{"desktop_token":"…"}`, the token the app's windows carry in the cookie `herdr-ide-desktop`, or `{}`; missing or malformed stops the core), write `{"event":"ready","url":"…"}` to stdout after binding, clean up when stdin closes. Does not change HTTP guards. |
 
 ## `fetch-assets` flags
 
@@ -95,14 +98,11 @@ selects the code-server builds; `--code-server-version`, `--code-server-url`,
 
 ## Settings
 
-Every setting of the core and of the user interface is defined in the core
-(`internal/registry`) and shown by the UI's settings dialog
-([13](features/13-settings-and-appearance.md)). Values live in
-`settings[-<instance>].json` on the core host and can be edited there by
-hand; the core reads the file again within two seconds. A setting with a
-flag is fixed by that flag when it is given (for every machine) and locked
-in the UI; a setting with a scope can have its own value per machine, under
-`"[machine:<id>]"`. The table is generated from the registry by
+Every setting is defined in the core (`internal/registry`) and shown in the
+settings dialog ([13](features/13-settings-and-appearance.md)). Values live
+in `settings[-<instance>].json` on the core host, which can be edited by
+hand (reread within two seconds). A setting with a scope can have a value
+per machine under `"[machine:<id>]"`. The table is generated by
 `scripts/registry` (`make tokens`; `make check` fails when it is stale).
 
 <!-- scripts/registry: settings -->
@@ -235,52 +235,42 @@ in the UI; a setting with a scope can have its own value per machine, under
 ```
 
 VS Code has two switches, both off by default
-([05](features/05-vscode-panes.md)): `plugins.vscode.enabled` turns it on
-in the desktop app's windows (settings files of earlier versions, where it
-turned VS Code on everywhere, keep their value for the desktop app), and
-`plugins.vscode.browser` in browsers. VS Code runs on the UI's own origin,
-where its extensions and webviews can do whatever the page can; the UI sets
-`plugins.vscode.browser` only after the user accepted that risk in a
-dialog, and setting it in the file by hand is the same acceptance.
+([05](features/05-vscode-panes.md)): `plugins.vscode.enabled` for the
+desktop app and `plugins.vscode.browser` for browsers. VS Code runs on the
+UI's origin, so its extensions can do whatever the page can; setting
+`plugins.vscode.browser` (in the UI's dialog or by hand) accepts that risk.
 
 ## Keyboard shortcuts
 
-Keys come from the keybindings (`internal/keybindings`): defaults per
-platform, changed in **Settings → Keyboard Shortcuts** or in
-`keybindings[-<instance>].json` on the core host, an array of
-`{"key", "command", "when"}` rules (`"command": "-<id>"` removes a key;
-`when` is `terminal`, `vscode`, `dialog` or `always`). A key is modifiers
-(`cmd`, `ctrl`, `alt`, `shift`) and a key joined by `+`; a chord is strokes
-separated by spaces (`ctrl+k c`: ctrl+k, then c within 3 s). The first
-stroke needs `cmd`, `ctrl` or `alt` (or is a function key). While a chord
-starting with a stroke is bound, that stroke waits for the next one instead
-of reaching the terminal; typing it twice (`ctrl+k ctrl+k`) lets the second
-press through to the terminal as any key no binding takes.
+Keys come from `internal/keybindings` and can be changed in **Settings →
+Keyboard Shortcuts** or in `keybindings[-<instance>].json` on the core host
+([04](features/04-layout-and-keyboard.md)):
 
-The default keys differ by platform: `mac` is the desktop app on macOS,
-`mac-browser` browsers on macOS, `windows` the desktop app on Windows,
-`windows-browser` browsers on Windows, `linux` the desktop app on Linux
-and `linux-browser` browsers on Linux. `ctrl+b` (`pane.leave`) escapes
-focus from the active editor, terminal or pane to the app chrome (and
-returns focus when already there); no other default is a chord, `ctrl` or
-`alt` with a letter alone, or a function key, so every other key that is
-not in the table reaches the program in the terminal on its first press. The desktop app has direct shortcuts, which browsers keep for themselves (`cmd+t`, `cmd+w`…); browsers get find, the keyboard shortcuts, `ctrl+b` focus escape and, on macOS, the command palette (`cmd+k`; in browsers on other systems the status bar's **Command Palette…** opens it). On Windows and Linux the desktop app's tab keys are `ctrl+tab`, `ctrl+shift+tab` and `alt+1`…`alt+9` (with `ctrl+pageup`/`ctrl+pagedown` on Linux), and splits and workspace switches follow each platform's conventions (`alt+shift++`/`alt+shift+-` and `ctrl+shift+pgdn`/`pgup` on Windows; `ctrl+shift+d`/`ctrl+shift+o` and `ctrl+alt+up`/`down` on Linux); `tab.select9` is the last tab. A command
-without a key (–) runs from the menus, the command palette, its button and
-the context menus, and any key or chord can be bound to it. The desktop
-app's menu shows the keys; there the page runs the keys it sees, and on
-macOS the menu the keys the page leaves (on Windows and Linux the menu
-takes no key, so Ctrl keys reach the terminals). While a VS Code pane has
-the keyboard VS Code's own keys come first (`cmd+j` toggles its own bottom
-panel there), except the key of `pane.close`, which the page takes first
-to close the VS Code pane; in the desktop app on macOS a key VS Code
-leaves runs, through the menu, a command for `terminal`, `vscode` or
-`always`, on that pane. Rules naming `view.toggleCode` and
-`workspace.rename`, commands of earlier versions, apply to `code.open` and
-`workspace.edit`. `app.fullDiskAccess` (**Open
-Full Disk Access Settings…**) exists only in the desktop app on macOS, and
-the palette and the keyboard shortcuts page list it only there. Keys follow
-the keyboard layout's characters. The table is generated from the registry
-by `scripts/registry`.
+- A rule is `{"key", "command", "when"}`; `"command": "-<id>"` removes a
+  key; `when` is `terminal`, `vscode`, `dialog` or `always`.
+- A key is modifiers (`cmd`, `ctrl`, `alt`, `shift`) and a key joined by
+  `+`; a chord is strokes separated by spaces (`ctrl+k c`, the second within
+  3 s). The first stroke needs `cmd`, `ctrl` or `alt`, or is a function
+  key. A stroke that starts a bound chord waits for the next one; pressed
+  twice it reaches the terminal. Keys follow the keyboard layout's
+  characters.
+- Platforms: `mac`, `windows`, `linux` (the desktop app) and
+  `mac-browser`, `windows-browser`, `linux-browser`. Browsers keep `cmd+t`,
+  `cmd+w` and the like for themselves; in browsers on Windows and Linux the
+  status bar's **Command Palette…** opens the palette.
+- `ctrl+b` (`pane.leave`) moves focus between the active pane and the app
+  chrome. No other default is a chord, `ctrl`/`alt` with a letter alone or a
+  function key, so every key not in the table reaches the terminal.
+- A command without a key (–) runs from menus, buttons and the command
+  palette. The desktop app's menu shows the keys; on Windows and Linux it
+  takes none, so Ctrl keys reach terminals.
+- While a VS Code pane has the keyboard, VS Code's keys come first, except
+  `pane.close`.
+- Old command ids `view.toggleCode` and `workspace.rename` apply to
+  `code.open` and `workspace.edit`. `app.fullDiskAccess` exists only in the
+  desktop app on macOS.
+
+The table is generated by `scripts/registry`.
 
 <!-- scripts/registry: commands -->
 
@@ -356,311 +346,307 @@ by `scripts/registry`.
 
 <!-- end of scripts/registry: commands -->
 
-In terminals, keys reach the program in the
-encoding it asked for (legacy, application cursor and keypad, kitty
-keyboard protocol); the bytes of the keys the browser could keep are listed
-in [`vt-keys.json`](../web/src/__tests__/testdata/vt-keys.json): Shift+Enter
-is `CSI 13;2u` once a program enables the kitty keyboard protocol (Claude
-Code and Codex insert a newline), Alt+Enter is `ESC CR`. Dragging selects
-text (double click: a word, triple click: a line; Shift-drag where the
-program takes the mouse); holding a selection drag above or below a
-terminal scrolls its scrollback; `terminal.copyOnSelect` copies at release.
-The wheel scrolls the scrollback (on the alternate screen it is the arrow
-keys; programs that take the mouse get it). ⌘/Ctrl-click opens paths (media
-in a preview pane, code in a VS Code pane, of the terminal's workspace or
-split beside the terminal) and URLs. `cmd+f` (macOS) or
-`ctrl+shift+f` (other systems) finds text in the focused terminal and its
-scrollback (`find.open`; ASCII letters in either case): Enter goes to the
-older match, Shift+Enter to the newer one, Escape closes the bar. Pasting or
-dropping files uploads them to the terminal's machine (dropped files into
-its directory) and pastes their paths; in the desktop app, files dropped on
-a local terminal are pasted where they are. A terminal's right-click menu
-downloads the path under the pointer and, with **Download files…**, files
-and folders chosen in its directory (folders as zips; not for the desktop
-app's own machine). The downloads panel in the status bar shows each
-download's progress, speed and result, cancels it or downloads it again.
+In terminals ([26](features/26-web-terminals.md)):
 
-With the mouse: double-click a terminal pane's title to rename it (empty
-restores the terminal title); double-click a tab or workspace to rename it;
-drag a pane (a terminal, VS Code or a preview) by its header onto another
-pane to swap the two (centre) or to place it beside that pane (edges),
-onto a tab to move it there, or onto `+` to move it into a new tab; drag a
-tab along the tab bar, a workspace along its machine's list, or a machine
-by its header among the machines, to reorder it. Escape cancels a drag.
+- Keys are encoded for the program's mode (legacy, application cursor and
+  keypad, kitty keyboard protocol); the bytes are in
+  [`vt-keys.json`](../web/src/__tests__/testdata/vt-keys.json).
+  Shift+Enter is `CSI 13;2u` under the kitty protocol; Alt+Enter is
+  `ESC CR`.
+- Drag selects (double click a word, triple click a line; Shift-drag where
+  the program takes the mouse); `terminal.copyOnSelect` copies on release.
+  The wheel scrolls the scrollback (arrow keys on the alternate screen).
+- ⌘/Ctrl-click opens paths (media in a preview pane, code in VS Code) and
+  URLs.
+- `find.open` searches the terminal and its scrollback (ASCII
+  case-insensitive): Enter older, Shift+Enter newer, Escape closes.
+- Pasting or dropping files uploads them to the terminal's machine and
+  pastes their paths (dropped files go to the terminal's directory); the
+  right-click menu downloads paths and chosen files (folders as zips). The
+  downloads panel is in the status bar.
 
-Right-click a pane header (or press its ⋯ button, shown when the header is
-narrow), a tab, a workspace or a machine for a menu of its commands
-(rename, split, zoom, VS Code, new tab, move, close; a machine's terminal
-core) with their bindings;
-↑↓ Home End select, Enter runs, Escape closes. In read-only mode the
-browser's menu shows instead.
+With the mouse: double-click a pane title, tab or workspace to rename it;
+drag a pane by its header onto another pane (swap or split), a tab or `+`;
+drag tabs, workspaces and machines to reorder; Escape cancels. Right-click
+a pane header, tab, workspace or machine for its commands.
 
 ## HTTP and WebSocket endpoints
 
 Every endpoint passes the same guards (Host, Origin, proxy secret,
 [SECURITY.md](../SECURITY.md)); those marked *writes* are refused with
-`--read-only`. Protocols and messages are in
-[architecture](architecture.md); `{id}` is a machine's id. `make check`
-fails when a route the server registers (`internal/server/server.go`) is
-missing here.
+`--read-only`. Messages are in [architecture](architecture.md); `{id}` is a
+machine's id. `make check` fails when a route of
+`internal/server/server.go` is missing here.
+
+### Core
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
-| `GET /ws` | – | The event channel (WebSocket): machines, agents, settings, keybindings, program windows, downloads. |
-| `GET /api/v1/term` | – | The terminal protocol (WebSocket): the machines' terminals, their events and byte streams ([22](features/22-terminal-protocol.md)). |
-| `GET /api/config` | – | Name, slug, version, whether the core is read-only (`read_only`), whether it offers the interactive ssh login (`ssh_login`; false on Windows, whose ssh keeps no control sockets) and which kind of client asks (`client`: `desktop` for a request with the desktop app's token of this launch in its cookie, else `browser`). |
-| `GET /api/settings` | – | Definitions, values (per machine too) and problems of the settings, and which kind of client asks (`client`, as in `/api/config`): the switch of VS Code that applies to the page (`plugins.vscode.enabled` in the desktop app, `plugins.vscode.browser` in a browser). |
+| `GET /ws` | – | Event channel (WebSocket): machines, agents, settings, keybindings, program windows, downloads. |
+| `GET /api/v1/term` | – | Terminal protocol (WebSocket) ([22](features/22-terminal-protocol.md)). |
+| `GET /api/config` | – | Name, slug, version, `read_only`, `ssh_login` (false on Windows), `client` (`desktop` with the app's launch token cookie, else `browser`). |
+| `GET /api/settings` | – | Setting definitions, values (per machine too), problems, and `client`. |
 | `PUT /api/settings` | writes | Sets one value (`{"key", "value", "machine"?}`). |
-| `DELETE /api/settings` | writes | Removes one value, which falls back to the global value or the default. |
-| `GET /api/keybindings` | – | Commands, default keys per platform, the user's rules, the bindings in effect and their conflicts. |
+| `DELETE /api/settings` | writes | Removes one value. |
+| `GET /api/keybindings` | – | Commands, default keys per platform, user rules, bindings in effect, conflicts. |
 | `PUT /api/keybindings` | writes | Replaces the user's rules. |
-| `GET /api/perf` | – | What the core's own process uses now, for the settings' Performance page: `{"cpu_ms", "memory", "goroutines", "uptime_ms", "cpus"}`, the processor time used since it started (user and system, in milliseconds; two answers give a share of a processor), the bytes the Go runtime holds from the system, its goroutines, how long it has run and how many processors it may use at once. The agents, terminal cores and ssh connections it starts are not counted ([13](features/13-settings-and-appearance.md)). |
-| `GET /api/machines` | – | Every machine's state, its agent's information and its terminal core's state. A machine that is never connected is in `error` with a `code`: `invalid_target` (a stored ssh target the core refuses) or `local_unsupported` (the local machine of a core on Windows, where no agent runs). |
+| `GET /api/perf` | – | The core process's own use: `{"cpu_ms", "memory", "goroutines", "uptime_ms", "cpus"}` ([13](features/13-settings-and-appearance.md)). |
+| `/` | – | The web UI (`/licenses.md`: its bundle's notices); other paths get the app shell, except unknown `/api/…` paths (404). |
+
+### Machines
+
+| Endpoint | Writes | Purpose |
+| --- | --- | --- |
+| `GET /api/machines` | – | Every machine's state, agent info and terminal core state; never-connected machines carry `code` `invalid_target` or `local_unsupported`. |
 | `POST /api/machines` | writes | Adds and stores an SSH machine (`{"target", "label"}`). |
-| `PUT /api/machines/order` | writes | Puts the machines in an order and stores it (`{"order": [ids]}`, each machine once; `400 invalid` otherwise). |
-| `GET /api/ssh/hosts` | writes | The Host aliases of the core host's `~/.ssh/config` (and the files it includes) that are no machine's target yet, as `[{"alias", "hostname"?, "user"?}]`, for the Add Machine dialog; nothing else of the configuration ([02](features/02-multi-machine-transport.md)). Refused read-only, where no machine can be added. |
+| `PUT /api/machines/order` | writes | Stores the machines' order (`{"order": [ids]}`, each once). |
+| `GET /api/ssh/hosts` | writes | Host aliases of the core host's ssh configuration not yet machines (`[{"alias", "hostname"?, "user"?}]`) ([02](features/02-multi-machine-transport.md)). |
 | `DELETE /api/m/{id}` | writes | Removes a stored machine. |
 | `PUT /api/m/{id}/label` | writes | Renames a machine. |
 | `PUT /api/m/{id}/enabled` | writes | Enables or disables a machine. |
-| `GET /api/m/{id}/hc` | – | The machine's terminal core: installed, running, version. |
-| `POST /api/m/{id}/hc/{action}` | writes | `start`, `stop` or `restart` the machine's terminal core. |
-| `GET /api/m/{id}/privacy` | – | macOS's Full Disk Access on the machine: `files` (the agent's process; on the local machine the core's, which the desktop app started) and `terminals` (the terminal core's, which its terminals' programs have), each `granted`, `denied` or `unknown` (not macOS, no terminal core running, no protected folder to try), and `hc`, the terminal core's executable. Starts no terminal core. |
-| `GET /api/m/{id}/auth` | writes | Interactive ssh login of a machine that needs one (WebSocket, `?cols=&rows=`); `400 invalid_target` for a refused target, `501 ssh_login_unsupported` on a core without ssh control sockets (Windows). |
-| `POST /api/m/{id}/bridge` | writes | (VS Code plugin; `404 plugin_disabled` while it is off for the requesting client) A command for a VS Code window (open a file at a line, diff, Git Graph): the one `window` names, else with `fresh` one that connects after the request, else the best one for `folder`; the reply names the window that took it. |
-| `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as an attachment), with HTTP ranges; `404` only for a path that is not there, `403` for one the machine may not read, `502` when the machine did not answer or its stat failed otherwise. |
-| `GET /api/m/{id}/download` | – | One file as an attachment, or several paths (folders included) as a zip (`?path=`…, `&dl=<id>` to follow it on `/ws`). |
-| `POST /api/m/{id}/upload` | writes | Writes the request body to a file (`?name=`, `&dir=` absolute, else the upload directory). |
-| `GET /api/m/{id}/list` | – | A directory's entries (`?path=`): `{"dir", "entries"}`, at most 20 000 entries, an empty list for an empty directory. |
-| `POST /api/m/{id}/p/files/stat` | – | The file explorer's poll: size, modification time and kind of 1–200 paths (`{"paths"}`; a POST because 200 paths in a query make a URL proxies refuse, but it changes nothing and read-only mode allows it); `error` (`busy`, `timeout`, `denied`, `failed`) on a path whose state is not known ([28](features/28-file-explorer.md)). |
-| `POST /api/m/{id}/p/files/{action}` | writes | The file explorer's changes (`{"path"}`, `{"path", "to"}`, `{"paths", "dir"}` or `{"paths"}`): `mkdir` (`"unique": true`: a taken name becomes `name-1`…), `mkdirs` (folders with the folders leading to them, those there kept), `create`, `rename` and `move` (never replacing), `copy`, `trash`, `remove` (for good); audited as `files.<action>` with the paths (`path`, `to`, `dir`, the first 50 `paths` and their `count`) and the outcome (`status`, `error`), as every plugin's change is once it ended. |
-| `POST /api/m/{id}/p/files/write` | writes | Saves the body (at most 8 MiB) into `?path=` when the file still has `&mtime=&size=` (`&new=1`: is not there, `&force=1`: any); `409 conflict` with its state otherwise; audited as `files.write` with the path, `force` and the outcome. |
-| `GET /api/m/{id}/p/files/reveal` | – | `{"available"}`: whether Reveal in Finder (Reveal in File Manager) is offered to this client for the machine's paths: the core's own machine on macOS or Linux, and a client on the core's host (a request to its loopback address, not through a proxy) ([28](features/28-file-explorer.md)). |
-| `POST /api/m/{id}/p/files/reveal` | writes | `{"path"}`: shows it in the file manager of the core's host (`open -R` on macOS, `xdg-open` with its folder elsewhere), for the core's own machine and a client on its host only (`400 remote_machine`, `403 local_only`, `reveal_unavailable`, `reveal_failed`, `busy`); refused in read-only mode, audited as `files.reveal` with the path and the outcome. |
-| `POST /api/m/{id}/p/files/upload` | writes | Writes the body (at most 4 GiB) into `?path=` under a free name (`name-1.ext`…), or over the file there with `&replace=1`, as a save writes it; a request that ends early leaves nothing; audited as `files.upload` with the path, the size, `replace` and the outcome ([28](features/28-file-explorer.md)). |
-| `GET /api/m/{id}/p/git/{read}` | – | The Git plugin's reads ([31](features/31-git.md)) with their parameters in the query: `repo` (`?path=` a directory), `status`, `log` (`&skip=&limit=&branch=…&remotes=1`), `show` (`&rev=&parent=` or `&rev2=`), `blob` (`&path=&source=worktree\|index\|head\|<rev>&parent=`), `branches`, `tags`, `stashes`, `diffStat`, `watch` (tokens `token`, `refs`, `config`), each with `?repo=` the top level. |
-| `POST /api/m/{id}/p/git/{change}` | writes | The Git plugin's changes with a JSON body (at most 5 MiB; `repo` and the action's fields): `stage`, `unstage`, `applyPatch`, `discard`, `commit`, `checkout`, `branchCreate`, `branchDelete`, `branchRename`, `merge`, `rebase`, `abort`, `continue`, `cherryPick`, `revert`, `reset`, `tagCreate`, `tagDelete`, `stashPush`, `stashApply`, `stashPop`, `stashDrop` (`index` and `hash`, the entry's commit), `fetch`, `pull`, `push`; at most 20 000 `paths`; audited as `git.<action>`; failures `git_missing`, `not_a_repo`, `bad_ref`, `auth_required`, `conflicts`, `diverged`, `stale`, `timeout`, `git_failed`. |
-| `GET /api/m/{id}/code/status` | – | Whether the machine's code-server is installed and runs. While the VS Code plugin is off for the requesting client (`plugins.vscode.enabled` for the desktop app, `plugins.vscode.browser` for browsers), it, `code/start`, the proxy and the bridge answer `404 plugin_disabled`. |
-| `POST /api/m/{id}/code/start` | writes | Installs and starts the machine's code-server. |
-| `POST /api/m/{id}/code/stop` | – | Releases the machine's code-server (allowed read-only: it only stops). |
-| `/m/{id}/code/` | writes | The machine's code-server behind the core's proxy (`/m/{id}/code` redirects here). |
-| `GET /m/{id}/gui/{win}` | – | The page of a program window. |
-| `GET /m/{id}/gui/{win}/ws` | – | A program window's frames and events, its input (WebSocket; `?video=` names the video streams the browser decodes). |
-| `POST /m/{id}/gui/{win}/close` | writes | Asks a program window to close. |
-| `POST /api/m/{id}/gui/enable` | writes | Gives open terminals the machine's display (`{"terminals": [...]}`, empty for all). |
-| `GET /api/gui` | – | The program windows of every machine. |
-| `GET /api/p/browser/forwards` | – | The port forwards of the browser pane ([32](features/32-browser-and-ports.md)): `forwards` (`m`, `port` on the machine, `local` on the core host's loopback, `created`, `connections`) and `available`, whether the client is on the core's own host and can use them. |
-| `POST /api/m/{id}/p/browser/forwards` | writes | Makes or finds the forward of `{"port"}` on the machine and answers it; asking again counts as a use. `403 forward_local_only` for a client not on the core's host, `400 local_machine` for the local machine, `400 too_many` beyond 32, `409 offline`. Audited as `browser.forward` with both ports. |
-| `DELETE /api/m/{id}/p/browser/forwards/{port}` | writes | Stops one, with its connections; `404` when there is none. |
-| `GET /api/m/{id}/p/browser/listening` | – | The TCP ports the user's programs listen on, on the machine's loopback or every address: `ports` (`port`, `process`). |
-| `GET /api/p/vault` | – | The variable vault ([30](features/30-variable-vault.md)): `status` (`mode` `""` or `passphrase`, `locked`, `setup` (no passphrase yet), `passphraseSet`), the `variables` (`name`, `description`, `machines` (`*`: all), `injectOnly`, `created`, `updated`), never values, `session`: whether the request's `X-Vault-Session` is open, `sessionProof`: whether an authenticator's proof or unlock opened it, not the passphrase, `guard` (while the vault is unlocked), with a session `full: true`, the `authenticators` (`id`, `kind` `webauthn` or `desktop`, `label`, `origin`, `rpId`, `created`, `lastUsed`, `unlock`: whether it keeps an unlock entry, else it only approves; no keys), `verifyEachAllow`, `exempt` (`id`, `machine`, `app`, `created`), and without one only the `authenticators` this page can prove with (`kind`, and a WebAuthn credential's `origin`, this page's); either way `desktop` (the desktop app this page runs in can prompt the user) and `webauthn` (the request's origin is one the core vouches for, where a credential can be added and used), `idle`: the seconds a session lasts unused (`vault.sessionIdle`), `autoLock`: `after` (seconds without use before the vault locks, 0 never: the setting's, at most this unlock's cap), `setting` (`vault.autoLock`'s seconds) and, to a session, while unlocked `lockAt` (when it locks if unused), and `unlock`, how this client can unlock a locked vault without the passphrase: `ways` (`enclave` or `hello` for the desktop client where the desktop app has an unlock entry of that kind, `prf` for a page whose origin the core vouches for and a credential of that origin has one; no ids, labels or times) and `due` (when the passphrase's window ends, RFC 3339, `""` for none; a hint in the clear, never what is allowed). `503` when the vault does not open, with why: `unavailable` (no settings file), `version` (a file of another version), `invalid` (a damaged or hand-edited file) or `failed` (not readable); it is opened again at the next request. The routes marked *gated* answer `401 vault_session` without an open session. |
-| `PUT /api/p/vault/vars/{name}` | writes, gated | Creates or changes a variable (`{"to"?, "description"?, "machines"?, "injectOnly"?, "value"?}`; a new one needs `value`, absent keeps it; `to` renames it in the same write, its value sealed again under the new name, `404 not_found` for a variable that does not exist and `409 exists` for a taken name, so a refusal changes nothing); names `^[A-Za-z_][A-Za-z0-9_]*$` (≤ 128), values ≤ 64 KiB, descriptions ≤ 1 KiB; `409 no_passphrase` before the vault has a passphrase. Audited as `vault.saved` with the name (and `from`, the name before a rename), the machines, the flag and whether the value changed. With the vault's rule to verify every Allow, a change that lets more machines read it, or takes inject-only off, needs `"proof"` (of a `change` nonce for the variable) or `"passphrase"` in the body (`401 vault_proof`). |
+| `GET /api/m/{id}/auth` | writes | Interactive ssh login (WebSocket, `?cols=&rows=`); `501 ssh_login_unsupported` on Windows. |
+| `GET /api/m/{id}/hc` | – | Terminal core: installed, running, version. |
+| `POST /api/m/{id}/hc/{action}` | writes | `start`, `stop` or `restart` the terminal core. |
+| `GET /api/m/{id}/privacy` | – | macOS Full Disk Access of the agent (`files`) and the terminal core (`terminals`): `granted`, `denied` or `unknown`; `hc` is the core's executable. Starts no terminal core. |
+
+### Files
+
+| Endpoint | Writes | Purpose |
+| --- | --- | --- |
+| `GET /api/m/{id}/file` | – | A file (`?path=`, `&download=1` as attachment) with HTTP ranges; `404` missing, `403` denied, `502` machine error. |
+| `GET /api/m/{id}/list` | – | A directory's entries (`?path=`), at most 20 000. |
+| `GET /api/m/{id}/download` | – | One file, or several paths as a zip (`?path=`…, `&dl=<id>` to follow on `/ws`). |
+| `POST /api/m/{id}/upload` | writes | Writes the body to a file (`?name=`, `&dir=` absolute, else the upload directory). |
+
+### VS Code and program windows
+
+| Endpoint | Writes | Purpose |
+| --- | --- | --- |
+| `GET /api/m/{id}/code/status` | – | Whether code-server is installed and runs. The VS Code routes answer `404 plugin_disabled` while VS Code is off for the client kind. |
+| `POST /api/m/{id}/code/start` | writes | Installs and starts code-server. |
+| `POST /api/m/{id}/code/stop` | – | Releases code-server (allowed read-only). |
+| `/m/{id}/code/` | writes | code-server behind the core's proxy (`/m/{id}/code` redirects here). |
+| `POST /api/m/{id}/bridge` | writes | A command for a VS Code window (open, diff, Git Graph); the reply names the window that took it ([05](features/05-vscode-panes.md)). |
+| `GET /api/gui` | – | Program windows of every machine. |
+| `POST /api/m/{id}/gui/enable` | writes | Gives open terminals the display (`{"terminals": [...]}`, empty for all). |
+| `GET /m/{id}/gui/{win}` | – | A program window's page. |
+| `GET /m/{id}/gui/{win}/ws` | – | A window's frames, events and input (WebSocket; `?video=` the streams the browser decodes). |
+| `POST /m/{id}/gui/{win}/close` | writes | Asks a window to close. |
+
+### Plugins
+
+Plugin routes answer `404 plugin_disabled` while their plugin is off;
+changes are audited as `<plugin>.<action>` with their outcome
+([27](features/27-plugins.md)). Errors are `{error, message}` codes.
+
+| Endpoint | Writes | Purpose |
+| --- | --- | --- |
+| `POST /api/m/{id}/p/files/stat` | – | State of 1–200 paths (`{"paths"}`) for the explorer's poll; a POST only for size ([28](features/28-file-explorer.md)). |
+| `POST /api/m/{id}/p/files/{action}` | writes | `mkdir` (`"unique"`), `mkdirs`, `create`, `rename`, `move`, `copy`, `trash`, `remove`; never replaces existing names. |
+| `POST /api/m/{id}/p/files/write` | writes | Saves the body (≤ 8 MiB) to `?path=` if it still has `&mtime=&size=` (`&new=1`, `&force=1`); else `409 conflict`. |
+| `POST /api/m/{id}/p/files/upload` | writes | Writes the body (≤ 4 GiB) to `?path=` under a free name, or over it with `&replace=1`. |
+| `GET /api/m/{id}/p/files/reveal` | – | `{"available"}`: whether Reveal in Finder is offered (the core's own machine, a client on the core host). |
+| `POST /api/m/{id}/p/files/reveal` | writes | Shows `{"path"}` in the core host's file manager. |
+| `GET /api/m/{id}/p/git/{read}` | – | Git reads ([31](features/31-git.md)): `repo`, `status`, `log`, `show`, `blob`, `branches`, `tags`, `stashes`, `diffStat`, `watch`. |
+| `POST /api/m/{id}/p/git/{change}` | writes | Git changes (JSON ≤ 5 MiB): `stage`, `unstage`, `applyPatch`, `discard`, `commit`, `checkout`, `branchCreate`, `branchDelete`, `branchRename`, `merge`, `rebase`, `abort`, `continue`, `cherryPick`, `revert`, `reset`, `tagCreate`, `tagDelete`, `stashPush`, `stashApply`, `stashPop`, `stashDrop`, `fetch`, `pull`, `push`. |
+| `GET /api/p/browser/forwards` | – | Port forwards and whether this client can use them ([32](features/32-browser-and-ports.md)). |
+| `POST /api/m/{id}/p/browser/forwards` | writes | Makes or reuses the forward of `{"port"}`; core-host clients only, at most 32. |
+| `DELETE /api/m/{id}/p/browser/forwards/{port}` | writes | Stops a forward and its connections. |
+| `GET /api/m/{id}/p/browser/listening` | – | TCP ports the user's programs listen on. |
+| `GET /api/m/{id}/p/monitor/metrics` | – | Live CPU, memory, GPU, network and disk figures ([34](features/34-system-monitor.md)). |
+| `GET /api/m/{id}/p/monitor/processes` | – | The machine's process table. |
+| `POST /api/m/{id}/p/monitor/signal` | writes | Sends an allowlisted signal (`{"pid", "signal"}`, default `TERM`); `pid` > 1. |
+| `GET /api/p/usage` | – | AI usage snapshot (accounts, windows, pace, status pages, alerts); `?watch=1` marks a panel open; `ETag` ([29](features/29-ai-usage.md)). |
+| `GET /api/p/usage/cost` | – | Log cost at API prices by day, provider, model, project and machine (`?days=` 1–90, `&tz=`); `ETag`. |
+| `POST /api/p/usage/refresh` | writes | Polls every machine now, at most every 30 s (`202 {queued, at}`). |
+| `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key (`{"key"}`, `""` removes); never read back. |
+| `GET /api/m/{id}/p/usage/session` | – | One agent session's use at API prices (`?kind=claude\|codex&session=`). |
+| `GET /api/m/{id}/p/agents/resolve` | – | Whether a session's transcript exists and ran in a directory (`?kind=&session=&cwd=`): `{ok}` or `{ok: false, code}` ([33](features/33-workspace-restore.md)). |
+| `GET /api/m/{id}/p/history` | – | The machine's terminal output snapshots and whether herdr-core restores screens itself ([36](features/36-terminal-history.md)). |
+| `GET /api/m/{id}/p/history/read` | – | One generation's bytes (`?terminal=&generation=current\|previous`), ≤ 2 MiB, as a sandboxed attachment. |
+| `DELETE /api/m/{id}/p/history` | writes | Removes one terminal's (`?terminal=`) or all snapshots. |
+| `POST /api/m/{id}/p/history/adopt` | writes | Gives terminal `?to=` the newest snapshot of `&from=` (which it replaced) as its previous one, and removes `from`'s. |
+
+### Agent chats
+
+The chat plugin ([37](features/37-agent-chats.md)). GETs never start a
+machine's chat host and answer `409 not_running` without one; changes start
+it, except on a read-only core, which refuses them.
+
+| Endpoint | Writes | Purpose |
+| --- | --- | --- |
+| `GET /api/m/{id}/p/chat/agents` | – | Agent kinds the chat host can start, with version or reason (`not_found`, `unsupported`). |
+| `POST /api/m/{id}/p/chat/agents` | writes | The same, starting the host. |
+| `GET /api/m/{id}/p/chat/chats` | – | The machine's chats, latest first. |
+| `POST /api/m/{id}/p/chat/sessions` | writes | A page of an agent's sessions for a directory (`?kind=&cwd=&cursor=`); a change because listing may run the agent. |
+| `POST /api/m/{id}/p/chat/new` | writes | A new chat (`{kind, cwd, resume?, import?, options?: {model?, effort?, mode?}}`). |
+| `POST /api/m/{id}/p/chat/close` | writes | Ends a chat's agent, keeping the chat (`?chat=`). |
+| `DELETE /api/m/{id}/p/chat/chat` | writes | Forgets a chat and its log; the agent's own session stays. |
+| `POST /api/m/{id}/p/chat/archive` | writes | Ends the agent and keeps the chat archived. |
+| `POST /api/m/{id}/p/chat/unarchive` | writes | Takes an archived chat back. |
+| `POST /api/m/{id}/p/chat/seen` | writes | Marks a chat seen up to `&seq=`. |
+| `POST /api/m/{id}/p/chat/handoff` | writes | Ends the agent so its session continues in a terminal; `409 busy` during a turn. |
+| `POST /api/m/{id}/p/chat/trust` | writes | Trusts a directory and those below (`?cwd=`); unsafe folders get `403 unsafe_folder`. |
+| `POST /api/m/{id}/p/chat/untrust` | writes | Takes back the trust covering a directory. |
+| `GET /api/m/{id}/p/chat/trusted` | – | Trusted folders (`{trusted: [{cwd, at}]}`). |
+| `POST /api/m/{id}/p/chat/trusted` | writes | The same, starting the host. |
+| `POST /api/m/{id}/p/chat/host/stop` | writes | Stops the chat host; `409 busy` while a chat works. |
+| `GET /api/p/chat/hosts` | – | Every machine's chat host and its active sessions, starting none. |
+| `GET /api/p/chat/states` | – | Every machine's chat states as last read, with revisions continued on `/ws`. |
+| `GET /api/p/chat/ws` | – | The chat WebSocket, one per page ([architecture](architecture.md#chats-internalchatproto-internalpluginschat)): subscriptions (≤ 32, 16 per machine) and commands; read-only cores refuse commands. |
+
+### Variable vault
+
+Semantics (sessions, proofs, unlock entries, approvals, exemptions) are in
+[30](features/30-variable-vault.md). *Gated* routes answer `401
+vault_session` without an open `X-Vault-Session`; *passphrase* means a
+session opened with the passphrase, not a proof or unlock. Values leave
+only through `reveal` and `export`, each recorded in the access log first.
+
+| Endpoint | Writes | Purpose |
+| --- | --- | --- |
+| `GET /api/p/vault` | – | Status, variables (never values), session, authenticators, guard rule, exemptions, idle and auto-lock times, unlock ways; `503` with `unavailable`, `version`, `invalid` or `failed` when the store does not open. |
+| `PUT /api/p/vault/vars/{name}` | writes, gated | Creates, changes or renames (`to`) a variable. Names `^[A-Za-z_][A-Za-z0-9_]*$` (≤ 128), values ≤ 64 KiB. Widening access needs a proof or the passphrase under the verify-every-Allow rule. |
 | `DELETE /api/p/vault/vars/{name}` | writes, gated | Removes a variable. |
-| `POST /api/p/vault/vars/{name}/reveal` | writes, gated | The value (`{"value"}`): the only way one reaches a browser; refused read-only; recorded in the access log (`revealed`, with the page's address and browser) and audited as `vault.revealed` before the value is sent, `500 log_failed` without it when the record cannot be written. With the vault's rule to verify every Allow the body carries `{"proof"}` (of a `reveal` nonce for the variable) or `{"passphrase"}` (`401 vault_proof`). |
-| `POST /api/p/vault/export` | writes, gated (a passphrase's session) | An export file of the variables named (`{"passphrase", "filePassphrase", "names"}`, or `"all": true`): the vault's passphrase again (checked and slowed down as a session's), a file passphrase of at least 12 characters (`400 weak_export_passphrase`); the response is the file (`application/json`): `{format: "<slug>-vault-export", version: 1, kdf: {alg: "argon2id", salt, time, memory, threads}, cipher: "aes-256-gcm", nonce, ciphertext}`, everything in the clear bound to the ciphertext as its additional data; the content holds each variable's name, value, description, machines, flag and times, and the machines' ids with their labels, kinds and ssh targets. Recorded in the access log (`exported`, the names) and audited as `vault.exported` before it is sent, `500 log_failed` without it; `404 not_found` (with `name`) for a variable that is not there, `409 vault_locked`, `413 too_large` past 16 MiB. |
-| `POST /api/p/vault/import/preview` | writes, gated (a passphrase's session) | What an export file holds (`{"file", "passphrase"}`: the file's text, at most 16 MiB, and its passphrase), never values: `{exported, variables: [{name, description, injectOnly, machines, unknown, exists, invalid}], machines: [{id, label, local, known}]}`; `machines` are those the variable maps to here (by id, an ssh machine only with the same kind and target as in the file; the local machine only when its label matches too), `unknown` those that will ask every time, `invalid` `invalid_name` (importable under another name) or `invalid`. `400 bad_file` (not an export file, damaged, derivation out of bounds), `400 file_version`, `400 file_passphrase` (wrong passphrase or a changed file), `413 too_large`. |
-| `POST /api/p/vault/import` | writes, gated (a passphrase's session) | Imports a file's variables as chosen (`{"file", "passphrase", "choices": [{"i", "action": "import"\|"overwrite"\|"rename"\|"skip", "as"?}]}`, `i` the variable's index in the file) in one write, machines mapped as the preview says: `{"imported": [names]}`; a refusal of any changes nothing (`409 exists` with `name` for a taken name without `overwrite`, `400 invalid_name`, `400 full` past 1000 variables, the file's errors as for the preview). Audited as `vault.imported` with the names, those overwritten and renamed, never values. |
-| `POST /api/p/vault/session` | writes | Opens a vault session with `{"passphrase"}`, unlocking the vault and starting the passphrase's window again; with `{"unlock": {"nonce", "id", "relay"}}` (the desktop client only: the desktop app's unlock entry and its shell's relay) or `{"unlock": {"nonce", "prf": {"credential", "output"}, "assertion": {"credential", "clientDataJSON", "authenticatorData", "signature"}}}` (a WebAuthn credential's PRF output for its entry's salt and its assertion of the nonce), a `session` nonce issued while locked, unlocking a locked vault with an authenticator's unlock entry within `vault.passphraseDays` of the last passphrase; or, of an unlocked vault, with `{"proof"}`, an authenticator's proof of a `session` nonce. Answers `{"session", "idle", "status"}`, with `"proof": true` for a session of a proof or an unlock, which routes marked "a passphrase's session" refuse (`401 vault_passphrase`); the page sends the token as `X-Vault-Session`. Audited as `vault.unlocked` (`ok`, an unlock's `kind`); an unlock entry removed as `vault.unlock_removed` (`id`, `kind`, `reason`). A session ends unused for `vault.sessionIdle` minutes (30), `vault.sessionMax` hours after it began (12), when the vault is locked (also by `vault.autoLock`) or its passphrase changed; `idle` is the first, in seconds. `403 wrong_passphrase`; `401 vault_proof` for a proof or unlock that does not open or verify (also a nonce expired, of another purpose or issued while unlocked, and an unlock of an unlocked vault), `403 passphrase_due` outside the window, `409 unlock_stale` for an entry gone, invalidated or whose authenticator is gone (the entry is removed), `409 vault_locked` for a proof of a locked vault, `503 memory` when the key cannot be kept in locked memory; after 3 wrong passphrases or unlocks whose key does not open or verify in a row `429 wait` (`Retry-After`), doubling up to 5 minutes; `429 busy` while another passphrase or unlock is checked; `409 no_passphrase` before there is one. |
+| `POST /api/p/vault/vars/{name}/reveal` | writes, gated | Returns the value; logged as `revealed` before it is sent. |
+| `POST /api/p/vault/export` | writes, passphrase | An encrypted export file (Argon2id, AES-256-GCM) of the named variables; file passphrase ≥ 12 characters; ≤ 16 MiB. |
+| `POST /api/p/vault/import/preview` | writes, passphrase | What an export file holds and how its machines map here, never values. |
+| `POST /api/p/vault/import` | writes, passphrase | Imports chosen variables (`import`, `overwrite`, `rename`, `skip`) in one write; any refusal changes nothing. |
+| `POST /api/p/vault/session` | writes | Opens a session with `{"passphrase"}`, an authenticator's `{"proof"}` while unlocked, or `{"unlock"}` (an authenticator's unlock entry within `vault.passphraseDays`) while locked. Failures back off up to 5 min (`429 wait`). |
 | `DELETE /api/p/vault/session` | writes | Ends the request's session. |
-| `POST /api/p/vault/passphrase` | writes | Sets the first passphrase (`{"passphrase"}`, at least 8 characters) or changes it (`{"old", "passphrase"}`, slowed down as sessions are); every value is sealed again (a value that does not open fails the change with `400 corrupt` and leaves the vault as it was); opens a session (`{"session", "idle", "status"}`) and ends the others. |
-| `POST /api/p/vault/lock` | writes | Locks the vault, which forgets its key, and ends every session and nonce; with `{"forget": true}` (audited with `forget`) it also ends the passphrase's window, also while the vault is locked, so that the next unlock needs the passphrase; one asked for while a passphrase is checked or an authenticator unlocks comes after it and its session. Answers the `status`. |
-| `POST /api/p/vault/proof` | writes | Issues a nonce for an authenticator's proof: `{"for": "session"}`, `{"for": "answer", "request", "answer": "once"\|"always"}` for a waiting request, `{"for": "reveal"\|"change", "request": <variable>}`, or `{"for": "register"}` (a passphrase's session). Answers `{"nonce", "rpId", "credentials", "desktop", "ttl"}`: the nonce (base64url, also the WebAuthn challenge), the host name and ids of the WebAuthn credentials added from the request's origin (none for an origin the core does not vouch for), and whether the desktop app's authenticator is on and usable by this client; for `register` also `prfSalt` (32 random bytes, base64url, bound to the nonce: the PRF input of the new credential's assertion). While the vault is locked only `{"for": "session"}` is issued, for an unlock: `credentials` are those of this origin's PRF unlock entries, `prf` maps each to its salt (`{<credential>: <salt>}`, base64url), and `desktop` says whether the desktop client has an unlock entry of the desktop app; others answer `409 vault_locked`. A nonce is good once, for 120 s and for its purpose; one issued while locked only for an unlock, ended by the unlock, one issued while unlocked never for one, and all end with a lock. A proof is `{"nonce", "credential", "clientDataJSON", "authenticatorData", "signature"}` (base64url) or the desktop shell's `{"nonce", "mac"}`. |
-| `GET /api/p/vault/proof/{nonce}` | – | What a waiting nonce is for (`for`, `answer`, for a reveal or a change the variable's `name`, and for an answer the `request`: `id`, `machine` (its label), `target` (its ssh address), `tool`, `names`), answered only to the desktop app, whose shell shows it in the system's prompt; `404` otherwise. For a `session` nonce issued while the vault is locked also `unlock`, the desktop app's unlock entries (`[{"id", "kind": "enclave", "install", "enclave": {"blob", "ephPub"}} \| {"id", "kind": "hello", "install", "hello": {"keyName", "challenge"}}]`, base64url), of which the shell uses its own install's; for a `register` nonce `register: {"challenge"}` (32 random bytes bound to the nonce, which a new Windows Hello key signs). |
-| `POST /api/p/vault/authenticators` | writes, gated (a passphrase's session) | Adds an authenticator with the passphrase again and the proof of a `register` nonce, and wraps the vault's key for it in an unlock entry in the same step: `{"kind": "webauthn", "label", "passphrase", "nonce", "clientDataJSON", "authenticatorData", "publicKey", "alg", "assertion", "prf"}` (what `navigator.credentials.create()` answered, the key as SubjectPublicKeyInfo, a proof the new credential made of the same nonce, and its PRF output for the nonce's `prfSalt`, 32 bytes base64url: `400 prf_required` without it) or `{"kind": "desktop", "label", "passphrase", "nonce", "mac", "relay"}` (the shell's MAC and its relay of this install's new Secure Enclave or Windows Hello key, needed for a new desktop authenticator, `400 bad_request` without it; another install adds its entry to the one desktop authenticator). A WebAuthn credential is bound to the request's origin, which the core must vouch for (`400 webauthn_origin`). An authenticator whose entry cannot be made is not added. Answers `{"guard"}`. |
-| `DELETE /api/p/vault/authenticators/{id}` | writes, gated (a passphrase's session) | Removes one, with its unlock entries in the same write (audited as `vault.unlock_removed`); `{"guard"}`. |
-| `POST /api/p/vault/guard` | writes, gated (a passphrase's session) | Sets the rule that every Allow needs a proof or the passphrase (`{"verifyEachAllow", "passphrase"?}`; ending the rule needs the passphrase, `403 wrong_passphrase`); `{"guard"}`. |
-| `POST /api/p/vault/exempt` | writes, gated (a passphrase's session) | Exempts an app on machines, `{"app", "machines", "passphrase"}` (a process name of 1–15 bytes without control characters or spaces at its ends: `400 invalid`, `400 app_too_long`; no shell, interpreter or launcher such as `sh`, `bash`, `env`, `node` or `python3`: `400 app_generic`; machines this core has, not `*`: `400 unknown_machine`; the vault's passphrase again: `403 passphrase_required` without it, `403 wrong_passphrase`, slowed down as every check): its requests there read every variable without asking (inject-only ones only for `run_with_env`) while the vault is unlocked, recorded as `exempted`. At most 64. Audited with `app` and `machines`; `{"guard"}`. |
-| `DELETE /api/p/vault/exempt/{id}` | writes, gated (a passphrase's session) | Ends an exemption; `{"guard"}`, `404` for none. |
-| `GET /api/p/vault/requests` | – | The MCP requests waiting for an answer. |
-| `POST /api/p/vault/requests/{id}` | writes, gated (but `deny`) | Answers one (`{"answer": "once"\|"always"\|"deny", "proof"?, "passphrase"?}`), audited as `vault.answered`. Allowing takes a session, a proof of an `answer` nonce issued for this request and answer, or the passphrase again; with the vault's rule to verify every Allow a session is not enough (`401 vault_proof`); the first answer wins, later ones and those after the request expired get `404`, so `200` means the requester gets this answer. |
-| `GET /api/p/vault/log` | gated (an open session; reading is no use of it) | The access log, kept in the core's database across restarts: the last 1000 records that let values out and the last 500 others, newest first; never values. Each has `id`, `time`, `m` (the machine; `""` for a page), `tool` (`list`, `get`, `env`; a page's `reveal`, `export`), `names`, what the MCP server said of itself (`client`, `terminal`, `cwd`), the process that connected to `vault.sock` and its parents as the machine's agent saw them (`process`: `[{pid, name}]`), a page's `remote` and `userAgent`, and `result`: `allowed`, `approved`, `approved_always`, `exempted` (an exempt app's), `revealed`, `exported` (values let out), `listed`, `denied`, `expired` (no answer in time), `cancelled` (the requester went away), `log_failed` (not released: its record could not be written) or a refusal's code such as `busy`, `not_found`, `vault_locked`, `inject_only` or `bad_request`; `count` for repeated list calls or refusals merged into one. |
-| `GET /api/p/usage` | – | The AI usage plugin's snapshot: accounts (provider, id, email, plan, windows with pace, credits, balances, status and code, machines seen on), each machine's last poll, the providers' status pages, the alerts fired in the last hour; `?watch=1` marks the panel open for the adaptive refresh; supports `ETag` / `If-None-Match` (`304 Not Modified`, still recording `?watch=1`) ([29](features/29-ai-usage.md)). |
-| `GET /api/p/usage/cost` | – | The cost of the machines' AI CLI logs (including Antigravity's and OpenCode's sessions) at API prices by day, provider, model, project and machine, with each machine's logs it could not read (`failed`: `<provider>:<code>`) (`?days=` 1–90, `&tz=` the user's offset east of UTC in minutes); supports `ETag` / `If-None-Match` (`304 Not Modified`). |
-| `POST /api/p/usage/refresh` | writes | Asks every connected machine for its limits now, or 30 s after the last poll when that was sooner (202 `{queued, at}`: when the poll runs). |
-| `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key file (`{"key"}`; `""` removes it); never read back, audited without the key. |
-| `GET /api/m/{id}/p/usage/session` | – | What one coding agent's session on the machine used at API prices (`?kind=` an agent kind whose sessions are priced, `claude` or `codex`, `&session=` its id, a lower-case UUID): `{model, input, cached, cacheWrite, output, reasoning, requests, cost, priced, contextUsed, contextSize}` ([29](features/29-ai-usage.md)). `400 bad_request`, `404 provider_off` (the provider turned off; the machine is not asked), `404 not_found` (no transcript yet), `compressed`, `too_large`, `409 offline`, `429 busy` (8 already under way for the machine). |
-| `GET /api/m/{id}/p/agents/resolve` | – | Whether an agent kept a session's transcript and it ran in a directory (`?kind=&session=&cwd=`, `cwd` an absolute path of at most 4096 bytes): `{ok: true}`, or `{ok: false, code}` with `not_found`, `other_cwd`, `compressed` or `bad_request` ([33](features/33-workspace-restore.md)). `400 bad_request`, `429 busy` (8 already under way for the machine), `409 offline`. |
-| `GET /api/m/{id}/p/history` | – | The machine's snapshots of terminal output ([36](features/36-terminal-history.md)): `{terminals: [{terminal, pid, at, lines, bytes, cols, rows, restored?, previous?}], restoreScreen}` (`at` in ms since the epoch, 0 for a terminal with only a previous generation; `restored`: the current generation shows a screen the terminal core restored itself; `restoreScreen`: the user's herdr-core configuration has `restore_screen = true`). |
-| `GET /api/m/{id}/p/history/read` | – | One generation's bytes (`?terminal=` an address, `&generation=current\|previous`) as an `application/octet-stream` attachment, at most 2 MiB, with `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and `no-store`, described by `X-History-Pid`, `X-History-At`, `X-History-Cols`, `X-History-Rows`, `X-History-Lines`. `400 bad_request` or `busy`, `404 not_found`, `409 offline`, `502 bad_reply`, `504 timeout`. |
-| `DELETE /api/m/{id}/p/history` | writes | Removes the snapshots of one terminal (`?terminal=`) or of every terminal: `{removed}`; audited as `history.clear` with the terminal and the count. |
-| `POST /api/m/{id}/p/history/adopt` | writes | Gives terminal `?to=` (one of the machine's terminal core's records, which took the place of `&from=`) the newest generation of `from`'s snapshots as its previous one, unless it has a previous one captured later, and removes `from`'s snapshots either way: `{adopted}` ([36](features/36-terminal-history.md)); audited as `history.adopt` with `from`, `to` and `adopted`. `400 bad_request` (an address that is not one, or `from` equal to `to`), `busy` or `not_running` (the terminal core), `404 not_found` (`to` not in the records), `409 offline`, `502 bad_reply`, `504 timeout`. |
-| `GET /api/m/{id}/p/chat/agents` | – | The agent kinds with a chat that the machine's chat host can start ([37](features/37-agent-chats.md)): `{agents: [{kind, available, version?, reason?}]}` (`reason`: `not_found`, not in the user's PATH; `unsupported`), from a host that serves (`409 not_running` otherwise). Refused on a read-only core (`403 read_only`): the host asks the agents' programs. Every chat route fails as `{error, message}`: `400 bad_request`, `403 read_only`, `not_allowed` (full access while the machine's `chat.allowFullAccess` is off) or `unsafe_folder`, `404 unknown_chat` or `not_found`, `409 busy`, `too_many` (also more than 128 connections of the core to the machine's host), `in_terminal` (a terminal's agent runs the session), `handed_off`, `sleeping`, `offline` or `not_running`, `413 too_large`, `422 unsupported` or `auth_required`, `502 start_failed`, `protocol`, `ended`, `failed` or `transport`, `503 upgrading` (a chat host of another build serves until its chats are idle) or `no_terminal_core`, `504 timeout`; `404 plugin_disabled` while `plugins.chat.enabled` is off. A GET never starts the machine's chat host; a change does, except on a read-only core. |
-| `POST /api/m/{id}/p/chat/agents` | writes | The same, starting the machine's chat host when none serves; audited as `chat.agents`. |
-| `GET /api/m/{id}/p/chat/chats` | – | The machine's chats, closed ones included, the latest first: `{chats}`; `409 not_running` while no chat host serves. A read-only core leaves out what the agents wrote to their standard error, here and on the WebSocket. |
-| `POST /api/m/{id}/p/chat/sessions` | writes | A page of the sessions an agent kept for a directory (`?kind=&cwd=&cursor=`, `cwd` a clean absolute path of at most 4096 bytes): `{sessions: [{sessionId, cwd, title?, updatedAt?, chat?}], nextCursor}` (`chat`: the chat that has it); a change because listing them may run the agent (Codex, ACP agents); within 2 minutes; audited as `chat.sessions` with the kind and the directory. |
-| `POST /api/m/{id}/p/chat/new` | writes | A new chat, `{kind, cwd, resume?, import?, options?: {model?, effort?, mode?}}` (`resume` a session id, `import` brings its earlier conversation in; `mode` one of `default`, `acceptEdits`, `plan`, `full`): `{chat}`, starting. The machine's chat host takes the machine's settings first. Audited as `chat.new` with the kind, the directory, the session, the import, the mode and the chat. |
-| `POST /api/m/{id}/p/chat/close` | writes | Ends a chat's agent and keeps the chat (`?chat=`), audited as `chat.close`. |
-| `DELETE /api/m/{id}/p/chat/chat` | writes | Forgets a chat and its log (`?chat=`); the agent's own session stays. Audited as `chat.delete`. |
-| `POST /api/m/{id}/p/chat/archive` | writes | Archives a chat (`?chat=`): ends its agent, counts what it ended with as seen, and keeps it with its log, closed and `archived`, until the machine's chat limits remove it (archived chats before the other closed ones). Audited as `chat.archive`. |
-| `POST /api/m/{id}/p/chat/unarchive` | writes | Takes an archived chat back (`?chat=`); a prompt to it does too. Audited as `chat.unarchive`. |
-| `POST /api/m/{id}/p/chat/seen` | writes | The user saw a chat up to a sequence number (`?chat=&seq=`), which ends its done status for every page; audited as `chat.seen`. |
-| `POST /api/m/{id}/p/chat/handoff` | writes | Ends a chat's agent so that its session goes on in a terminal (`?chat=`); `409 busy` while a turn runs. Within a minute; audited as `chat.handoff`. |
-| `POST /api/m/{id}/p/chat/trust` | writes | Trusts a directory and those below it on the machine (`?cwd=` a clean absolute path): agents started there from then on load the project's own settings. `403 unsafe_folder` for the root, the home directory or one above it, a directory not the user's or that its group or others may write, or one below a directory others may write without the sticky bit. Audited as `chat.trust` with the directory. |
-| `POST /api/m/{id}/p/chat/untrust` | writes | Takes back the trust that covers a directory on the machine (`?cwd=` a clean absolute path): its own and that of the directories above it; agents started there from then on run without the project's own settings. Audited as `chat.untrust` with the directory. |
-| `GET /api/m/{id}/p/chat/trusted` | – | Lists persisted trusted folders on the machine (`{trusted: [{cwd, at}]}`), pruning any that moved or became unsafe; `409 not_running` when no host serves. |
-| `POST /api/m/{id}/p/chat/trusted` | writes | The same, starting the machine's chat host when none serves; audited as `chat.trusted`. |
-| `POST /api/m/{id}/p/chat/host/stop` | writes | Cleanly shuts down the machine's running chat host; `409 busy` while a chat works, waits or starts, `409 not_running` when none serves. Audited as `chat.host_stop`. |
-| `GET /api/p/chat/hosts` | – | Overview of every configured machine's headless chat host and its active sessions (`{hosts: [...]}`), without starting any host. |
-| `GET /api/p/chat/states` | – | The chats' states of every machine as the core last read them: `{machines: {<id>: {t: "states", states, full: true, stale?, rev, hostVersion?, outdated?}}}` (`outdated`: the machine's chat host is another build than the core's); the plugin's `states` messages on `/ws` that follow carry higher revs. |
-| `GET /api/p/chat/ws` | – | The chat plugin's WebSocket, one per page ([architecture](architecture.md#chats-internalchatproto-internalpluginschat)): subscriptions to chats (at most 32, 16 of one machine) with their events, and commands answered by acks (a permission's or a question's answer, a configuration change and a handoff audited as `chat.permission`, `chat.answer`, `chat.set_config`, `chat.handoff`); a read-only core refuses every command (`read_only`) and its subscriptions run nothing on the machine; a page that falls behind is closed (1013). |
-| `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
+| `POST /api/p/vault/passphrase` | writes | Sets (≥ 8 characters) or changes the passphrase, resealing every value; ends other sessions. |
+| `POST /api/p/vault/lock` | writes | Locks, forgetting the key and ending every session; `{"forget": true}` also ends the passphrase's window. |
+| `POST /api/p/vault/proof` | writes | Issues a one-time nonce (120 s) for a WebAuthn or desktop proof: `session`, `answer`, `reveal`, `change`, `register`. |
+| `GET /api/p/vault/proof/{nonce}` | – | What a nonce is for; answered only to the desktop app, for its system prompt. |
+| `POST /api/p/vault/authenticators` | writes, passphrase | Adds a WebAuthn credential (bound to the request's origin, with PRF) or the desktop authenticator, with its unlock entry. |
+| `DELETE /api/p/vault/authenticators/{id}` | writes, passphrase | Removes an authenticator and its unlock entries. |
+| `POST /api/p/vault/guard` | writes, passphrase | Sets the rule that every Allow needs a proof or the passphrase; ending it needs the passphrase. |
+| `POST /api/p/vault/exempt` | writes, passphrase | Exempts an app (a process name; shells and interpreters refused) on named machines; needs the passphrase; at most 64. |
+| `DELETE /api/p/vault/exempt/{id}` | writes, passphrase | Ends an exemption. |
+| `GET /api/p/vault/requests` | – | MCP requests waiting for an answer. |
+| `POST /api/p/vault/requests/{id}` | writes, gated (but `deny`) | Answers `once`, `always` or `deny`; allowing needs a session, a proof or the passphrase (only the last two under the verify-every-Allow rule). First answer wins. |
+| `GET /api/p/vault/log` | gated | The access log, newest first: who asked (machine, tool, client, process chain), names and the result; never values. |
 
 ## Environment variables
 
 | Variable | Where | Description |
 | --- | --- | --- |
 | `HERDR_IDE_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
-| `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets the development core's, `DEV_LISTEN`). |
-| `HERDR_IDE_DESKTOP_DEV` | Electron | Isolated development even in a packaged app: `1` runs instance `dev` (terminal core session `herdr-ide-dev`); another value names the instance (lowercase letters, digits and dashes, starting with a letter or digit, at most 32, not `desktop`; the app refuses to start otherwise), so a smoke test can run beside a development instance in use. Every development instance is local-only and has its own Electron profile and single-instance lock (`herdr-ide-desktop-<instance>`, `herdr-ide-desktop-dev` for `dev`). Unpackaged Electron always uses this mode. |
-| `HERDR_IDE_DESKTOP_NO_OPEN` | Electron, development instances only | Set (to anything): the Full Disk Access buttons write `no-open: …` with what they would open (System Settings' URL, the terminal core's executable in Finder, the app's relaunch) to stderr instead of opening it, for smoke tests. |
-| `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` chooses an ephemeral port, which gives a new browser storage origin. |
-| `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and its single-instance lock, so a copy launched by its executable (on macOS not with `open`, which activates a running copy of the same bundle identifier) runs beside another one; for isolated smoke tests with `HERDR_IDE_DESKTOP_DEV`. |
-| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux | The user configuration directory (settings, keybindings, machines; default `~/.config`) and the cache directory (code-server downloads; default `~/.cache`). On a machine, `XDG_CONFIG_HOME` of the environment the agent starts the terminal core with also says where herdr-core's `config.toml` is, which the terminal history plugin reads for `restore_screen`. |
-| `XDG_STATE_HOME` | core | Where the SSH machines herdr saved are read from for the one-time import (`$XDG_STATE_HOME/herdr/client/endpoints.json`, default `~/.local/state/herdr/client/endpoints.json`). |
-| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent (AI usage plugin; `CLAUDE_CONFIG_DIR` and `CODEX_HOME` also the agents' sessions and transcripts) | Where the AI CLIs keep their credentials, logs and sessions when not in `~/.claude`, `~/.codex`, `~/.grok`, `~/.kimi-code`. On Linux a Claude Code or Codex process's own `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is read from its environment to find its session ([35](features/35-agent-native-view.md)). |
-| `KIMI_DISABLE_OAUTH_LOCK` | agent (AI usage plugin) | `1`: Kimi Code renews its sign-in without its lock, so the plugin does not renew it (`usage.kimiRefresh`). |
-| `XDG_DATA_HOME`, `OPENCODE_DB` | agent (AI usage plugin) | Where OpenCode keeps its database when not `~/.local/share/opencode/opencode.db` (and `opencode-<channel>.db` beside it): its data directory's parent, or the database itself (relative to the data directory). |
-| `DEEPSEEK_API_KEY` | agent (AI usage plugin) | The DeepSeek key whose balance is shown; before Claude Code's DeepSeek settings and the key file. |
-| `HTTPS_PROXY`, `NO_PROXY` | agent (AI usage plugin), core (status pages) | The proxy for the AI providers' hosts. |
-| `SHELL` | chat host | The user's login shell, run as `$SHELL -l -i -c env` to learn the environment (and `PATH`) the chats' agents get; `/bin/sh -l` when it is not an absolute path ([37](features/37-agent-chats.md)). |
+| `HERDR_IDE_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets `DEV_LISTEN`'s). |
+| `HERDR_IDE_DESKTOP_DEV` | Electron | Isolated development instance: `1` for `dev`, or a name (lowercase letters, digits, dashes, ≤ 32, not `desktop`). Local-only, own Electron profile and lock. Always on for unpackaged Electron. |
+| `HERDR_IDE_DESKTOP_NO_OPEN` | Electron, development instances | Full Disk Access buttons print `no-open: …` to stderr instead of opening anything. |
+| `HERDR_IDE_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` is ephemeral. Changing it changes the browser storage origin. |
+| `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and single-instance lock, for smoke tests beside another copy. |
+| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux; agent | Configuration (default `~/.config`) and cache (default `~/.cache`) directories; on a machine also where herdr-core's `config.toml` is read for `restore_screen`. |
+| `XDG_STATE_HOME` | core | Where herdr's saved machines are read for the one-time import. |
+| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent | AI CLIs' credential, log and session directories when not the defaults; on Linux read from a running agent's environment to find its session ([35](features/35-agent-native-view.md)). |
+| `KIMI_DISABLE_OAUTH_LOCK` | agent (AI usage) | `1`: Kimi Code renews without its lock, so the plugin does not renew it. |
+| `XDG_DATA_HOME`, `OPENCODE_DB` | agent (AI usage) | OpenCode's database location when not `~/.local/share/opencode/opencode.db`. |
+| `DEEPSEEK_API_KEY` | agent (AI usage) | DeepSeek key for the balance; preferred over Claude Code's settings and the key file. |
+| `HTTPS_PROXY`, `NO_PROXY` | agent (AI usage), core (status pages) | Proxy for the AI providers' hosts. |
+| `SHELL` | chat host | Login shell run as `$SHELL -l -i -c env` for the chats' agents' environment; `/bin/sh -l` if not absolute ([37](features/37-agent-chats.md)). |
 
-Variables of the build scripts and tests:
+Build scripts and tests:
 
 | Variable | Where | Description |
 | --- | --- | --- |
-| `TARGETS` | `scripts/build.sh` | Core platforms to build and package (default the host's), e.g. `"linux/amd64 darwin/arm64"`; `windows/amd64` builds `dist/herdr-ide-windows-amd64.exe` for the desktop setup, without an archive. |
+| `TARGETS` | `scripts/build.sh` | Core platforms (default the host's), e.g. `"linux/amd64 darwin/arm64"`; `windows/amd64` builds only `dist/herdr-ide-windows-amd64.exe`. |
 | `AGENT_PLATFORMS` | `scripts/build.sh` | Agent and herdr-core platforms to embed (default all four). |
 | `SKIP_WEB`, `SKIP_EXT` | `scripts/build.sh` | `1` reuses `web/dist` or the built bridge extension. |
-| `REQUIRE_ENCODER` | `scripts/build.sh` | `1` (release builds) fails when a Linux video encoder (`scripts/build-ffmpeg.sh`) is missing. |
-| `VERSION` | `scripts/build.sh`, `scripts/desktop.sh` | The version the core and agents report (default `git describe`). Desktop builds take a semver for the app metadata and the installers' names (default `desktop/package.json`'s); a leading `v` (release tags such as `v0.2.0`) is kept for the core and dropped for the app metadata. |
-| `FFMPEG_PLATFORMS` | `scripts/build-ffmpeg.sh` | Linux platforms to build the video encoder for (default both). |
-| `GHOSTTY_SRC` | `make vt-wasm` | A Ghostty checkout to build libghostty-vt from instead of the pinned clone. |
-| `ARCH` | `scripts/desktop.sh` (`make desktop-app`, `make desktop-dist`, `make desktop-install`) | `arm64` or `x64`; defaults to the host Node architecture; the Windows app is `x64` only. The Go core architecture is matched automatically (`x64` is `amd64`). |
-| `DESKTOP_OS` | `scripts/desktop.sh` | `mac`, `win` or `linux` (default this system): packages another system's unpacked app (modes `build` and `app`) to check its packaging; installers (`dist`), `install` and `dev` run only on their own system. |
-| `SKIP_BUILD` | `scripts/desktop.sh` | `1` runs electron-builder alone on what an earlier `scripts/desktop.sh build` made (the release workflow's Package step). |
-| `INSTALL_DIR` | `make desktop-install` | macOS: where the Electron app is installed (default `/Applications`). |
-| `CSC_LINK`, `CSC_KEY_PASSWORD` | `scripts/desktop.sh` on macOS (electron-builder) | A Developer ID Application certificate (a `.p12`, base64-encoded or its path) and its password: the app is signed with it instead of ad hoc. |
-| `CSC_NAME` | `scripts/desktop.sh` on macOS (electron-builder) | The name of a Developer ID identity in the keychain, instead of `CSC_LINK`. |
-| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | `scripts/desktop.sh` on macOS (electron-builder) | With a Developer ID certificate: notarize the app with this Apple ID, its app-specific password and the team id. |
-| `ELECTRON_SKIP_BINARY_DOWNLOAD` | `make deps` | `1` installs the desktop packages without Electron's binary, which checks and the shell's tests do not need (CI's check jobs set it); running or packaging the app needs it. |
-| `DEV_LISTEN` | `make dev-core`, `make dev-web` | The development core's address (default `127.0.0.1:7790`). |
-| `HC_TEST_BIN` | `make it` | herdr-core executable for the integration tests; otherwise `hc` is found on `PATH`, and without one they are skipped. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned one. |
-| `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets the program-window tests fetch Xvfb when it is not installed. |
+| `REQUIRE_ENCODER` | `scripts/build.sh` | `1` fails when the Linux video encoder is missing. |
+| `VERSION` | `scripts/build.sh`, `scripts/desktop.sh` | Reported version (default `git describe`); desktop metadata takes a semver and drops a leading `v`. |
+| `FFMPEG_PLATFORMS` | `scripts/build-ffmpeg.sh` | Linux platforms for the video encoder (default both). |
+| `GHOSTTY_SRC` | `make vt-wasm` | Ghostty checkout to build libghostty-vt from. |
+| `ARCH` | `scripts/desktop.sh` | `arm64` or `x64` (default the host's); Windows is `x64` only. |
+| `DESKTOP_OS` | `scripts/desktop.sh` | `mac`, `win` or `linux`: package another system's unpacked app to check it; installers need their own system. |
+| `SKIP_BUILD` | `scripts/desktop.sh` | `1` runs electron-builder alone on an earlier build. |
+| `INSTALL_DIR` | `make desktop-install` | macOS install folder (default `/Applications`). |
+| `CSC_LINK`, `CSC_KEY_PASSWORD` | `scripts/desktop.sh` on macOS | Developer ID certificate (`.p12`) and password; signs instead of ad hoc. |
+| `CSC_NAME` | `scripts/desktop.sh` on macOS | Developer ID identity in the keychain, instead of `CSC_LINK`. |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | `scripts/desktop.sh` on macOS | Notarize with this Apple ID. |
+| `ELECTRON_SKIP_BINARY_DOWNLOAD` | `make deps` | `1` skips Electron's binary (enough for checks and tests). |
+| `DEV_LISTEN` | `make dev-core`, `make dev-web` | Development core address (default `127.0.0.1:7790`). |
+| `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
+| `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the core and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
+| `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets program-window tests fetch Xvfb. |
 
 ## Files and directories
 
-On every machine (the agent's `$HOME`):
+On every machine (the agent's `$HOME`); `<data>` is
+`~/.herdr-ide[-<instance>]`, `<host>` the host's name and a hash of its
+machine id (data directories may be on a shared home). Retention is
+summarized in [deployment](deployment.md#remote-resources).
 
 | Path | Content | Lifetime |
 | --- | --- | --- |
-| `~/.herdr-ide/agent/<build>/` | The binary uploaded for the agent (`herdr-ide`) | Builds unused for 14 days are removed. |
-| `~/.herdr-ide/code-server/<version>/` | code-server releases (shared by instances) | Versions unused for 14 days are removed. |
-| `~/.herdr-ide[-<instance>]/hc/herdr-core` (0700 directory) | The terminal core's executable, pushed by the core and accepted only with its SHA-256 | Replaced when the core brings another build; kept until removed. |
-| `~/.local/state/herdr-core/herdr-ide[-<instance>]/` (`$XDG_STATE_HOME` when set) | The terminal core's own state (herdr-core's: terminal records, saved screens, logs) | Kept by herdr-core until the user removes it. |
-| `~/.herdr-ide[-<instance>]/run/` (0700) | `hc.sock` (the terminal core's API socket, 0600) and its holders' sockets; `cs.sock`, `cs.pid`, `bridge.sock`, `vault.sock` (0600, the vault's MCP servers); `chat.sock` (0600, the chat host's); `gui.json` (reserved display and Xvfb pid), `xauth` (terminals' display cookie) and `xauth.server` (Xvfb's copy), both 0600 and replaced at each Xvfb start, `gui.lock`, `gui-keep.lock` (held by the display keeper) | Sockets while the agent (code-server, bridge), the terminal core or the chat host runs; the display files are kept so terminals keep a valid environment. |
-| `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked from the distribution's package (shared by instances) | Versions unused for 14 days are removed when another is unpacked. |
-| `~/.herdr-ide/video/<sha256 prefix>/encoder` | Video encoder pushed by the core (`gui-video`, shared by instances), run only while its SHA-256 matches | Builds unused for 14 days are removed when another is installed; unfinished installs after 1 h. |
-| `~/.herdr-ide[-<instance>]/xvfb.log` | Output of the last Xvfb started | Replaced at each start. |
-| `~/.herdr-ide[-<instance>]/xwayland.log` | Output of the last Xwayland started for a GPU display, and of its compositor | Replaced at each start. |
-| `~/.herdr-ide/gpupick/<sha256 prefix>/gpupick.so` | The library that shows a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (0600, shared by instances), written by the agent when `gui.gpuPick` is on for a machine with several NVIDIA GPUs | Builds unused for 14 days are removed when another is installed. |
-| `~/.herdr-ide[-<instance>]/gui-keep.log` | Output of the last display keeper | Replaced at each start. |
-| `~/.herdr-ide[-<instance>]/cs-data/`, `cs-ext/` | VS Code settings, extensions | Kept; logs older than 7 days are pruned. |
-| `~/.herdr-ide[-<instance>]/uploads/` | Pasted and dropped files | Files older than 7 days are pruned. |
-| `~/.herdr-ide[-<instance>]/staging/` (0700) | The file explorer's uploads (0600) while they are received, before they are written to their files | Removed by the upload when it ended; what an agent that ended during one left is removed by the agent that starts more than 7 days later. |
-| `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` (0700 directory) | Link to the executable that serves the vault's MCP server (the agent's, or on the local machine the core's) | Pointed at the running executable whenever an agent starts; kept so MCP configurations stay valid. |
-| `~/.herdr-ide[-<instance>]/usage/deepseek.key` (0600) | A DeepSeek API key set in the AI usage panel | Until removed in the panel or by hand. |
-| `~/.herdr-ide[-<instance>]/machine-<host>.db` (0600; `-wal`, `-shm` beside it) | The agent's SQLite database ([38](features/38-sqlite-state.md)), named after the host (its whole name and a hash of its machine id) since the directory may be on a shared home: the snapshots of the terminals' output while `history.capture` is on for the machine (off by default; [36](features/36-terminal-history.md)) and the lease of their writers; the AI usage plugin's records of the AI CLIs' logs, per log file. The snapshots were kept before in `history/` and the records in `usage/cost-cache.json`, which are imported once and removed. | Snapshots within the limits (`history.lines`, 2 MiB a generation, `history.maxTerminals`, `history.maxTotalMB`), removed at a capture when older than `history.days` or when their terminal ended with its program or is gone, when an agent starts or the snapshots are listed or read once older than the days they were written under, when the setting or the plugin is turned off, and by **Clear Saved Output**; usage records and logs older than 90 days leave at each scan. Another host's database nobody opened for 30 days is removed when an agent starts. |
-| `~/.herdr-ide[-<instance>]/chat-<host>.db` (0600; `-wal`, `-shm` beside it) | The chat host's journal ([37](features/37-agent-chats.md)): the chats, their stored events (prompts, the agents' messages, tool calls and diffs; never answers to secret questions nor the agents' standard error), the folders the user trusted, the host's settings. | Within `chat.maxChatMB` per chat (its oldest events go), `chat.maxTotalMB` and `chat.maxChats` (the chats closed longest ago go first) and `chat.retentionDays` after a chat was closed; until the chat is deleted. The agents' own session files are never touched. Another host's journal nobody opened for 30 days is removed when a host starts. |
-| `~/.herdr-ide[-<instance>]/chat-host-<host>.log`, `chat-host.old-<host>.log` (0600) | What the chat host logs (chats started, ended and removed, refusals, its agents' failures; no prompts or answers). | Started again at 1 MiB, the one before kept as the old file; another host's removed once nobody wrote it for 30 days. |
+| `~/.herdr-ide/agent/<build>/` | Uploaded machine build | Unused 14 days. |
+| `~/.herdr-ide/code-server/<version>/` | code-server releases (shared) | Unused 14 days. |
+| `~/.herdr-ide/xvfb/<version>/` | Xvfb unpacked in user space (shared) | Unused 14 days, when another is unpacked. |
+| `~/.herdr-ide/video/<sha256 prefix>/encoder` | Video encoder (shared), run only while its digest matches | Unused 14 days, when another is installed; unfinished after 1 h. |
+| `~/.herdr-ide/gpupick/<sha256 prefix>/gpupick.so` | GPU selection library (0600, shared) | Unused 14 days, when another is installed. |
+| `<data>/hc/herdr-core` (0700 directory) | Terminal core executable, accepted only with its SHA-256 | Replaced by the next build. |
+| `~/.local/state/herdr-core/herdr-ide[-<instance>]/` (`$XDG_STATE_HOME`) | herdr-core's own state (records, saved screens, logs) | Until the user removes it. |
+| `<data>/run/` (0700) | Sockets (0600): `hc.sock` and its holders', `cs.sock`, `bridge.sock`, `vault.sock`, `chat.sock`; `cs.pid`; display files `gui.json`, `xauth`, `xauth.server` (0600), `gui.lock`, `gui-keep.lock` | Sockets while their owner runs; display files kept so terminals keep a valid environment. |
+| `<data>/xvfb.log`, `<data>/xwayland.log`, `<data>/gui-keep.log` | Output of the last display, compositor and keeper | Replaced at each start. |
+| `<data>/cs-data/`, `<data>/cs-ext/` | VS Code settings and extensions | Kept; logs pruned after 7 days. |
+| `<data>/uploads/` | Pasted files, and dropped files without a terminal directory | 7 days. |
+| `<data>/staging/` (0700) | File explorer uploads in progress (0600) | Removed when the upload ends; leftovers after 7 days. |
+| `<data>/bin/herdr-ide-mcp` (0700 directory) | Link to the executable serving the vault's MCP server | Repointed at each agent start. |
+| `<data>/usage/deepseek.key` (0600) | DeepSeek API key | Until removed. |
+| `<data>/machine-<host>.db` (0600, with `-wal`, `-shm`) | The agent's SQLite database ([38](features/38-sqlite-state.md)): terminal output snapshots while `history.capture` is on ([36](features/36-terminal-history.md)) and the AI usage records per log file | Snapshots within the `history.*` limits and days, removed when their terminal is gone or capture is turned off; usage records after 90 days. Another host's file unopened for 30 days is removed. |
+| `<data>/chat-<host>.db` (0600, with `-wal`, `-shm`) | The chat host's journal ([37](features/37-agent-chats.md)): chats, their events, trusted folders, settings; never secret answers or agents' stderr | Within `chat.maxChatMB`, `chat.maxTotalMB`, `chat.maxChats`, `chat.retentionDays`. Agents' own session files are never touched. Another host's unopened for 30 days is removed. |
+| `<data>/chat-host-<host>.log`, `chat-host.old-<host>.log` (0600) | Chat host log (no prompts or answers) | Rotated at 1 MiB; another host's removed after 30 days unwritten. |
 
-On the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s` on Linux
-and macOS (must be owned by you, mode 0700; a core on Windows keeps none),
-downloads in the user cache directory
-(`~/Library/Caches/herdr-ide/code-server` on macOS, `~/.cache/herdr-ide/code-server`
-on Linux, `%LocalAppData%\herdr-ide\code-server` on Windows) with `.sha256` sidecars (also recorded for releases that machines
-downloaded themselves), the settings in `settings[-<instance>].json`, the
-variable vault in `vault[-<instance>].json` (values encrypted under a key derived from its passphrase, which is kept nowhere, [30](features/30-variable-vault.md)), the
-core's SQLite database `core[-<instance>]-<host>[-<id>].db` (0600, with its `-wal` and
-`-shm`; [38](features/38-sqlite-state.md); legacy un-hosted `core[-<instance>].db` is migrated and removed once confirmed complete) holding the vault's access log
-(names, never values; the last 1000 releases and 500 other records) and
-the AI usage plugin's history (the last accounts, 30 days of their
-windows' use and the periods its alerts fired in, kept a day past them),
-into which `vault[-<instance>]-access.jsonl` and
-`usage-history[-<instance>].json` of earlier versions are imported once
-and then removed, the
-keybindings in `keybindings[-<instance>].json` and the machines in
-`machines[-<instance>].json` (`{"version": 1, "machines": [{id, label,
-kind, target, enabled}], "order": [ids]}`: the SSH machines, the local machine's
-enabled flag and name once they were changed, and the order the user put the machines
-in once they were reordered; the SSH machines herdr saved
-(`~/.local/state/herdr/client/endpoints.json`) are imported into it the
-first time a core of the instance starts without one), all in the
-user configuration directory (`~/Library/Application Support/herdr-ide/` on
-macOS, `$XDG_CONFIG_HOME/herdr-ide/` (default `~/.config/herdr-ide/`) on
-Linux, `%AppData%\herdr-ide\` on Windows; files replaced atomically, kept
-until removed; on Linux and macOS the directory is 0700 and the files
-0600, on Windows the profile's access control list keeps them the user's).
-The settings and keybindings files can be
-edited by hand: the core reads them again within two seconds, keeps entries
-it does not know and reports values it cannot use. The machines file is
-read when the core starts and written by it at every change, keeping the
-entries and fields it does not use; a stored machine whose target the core
-refuses is listed with the code `invalid_target` and never connected, and
-so is the local machine of a core on Windows, with `local_unsupported`.
+On the core host, in the user configuration directory
+(`~/Library/Application Support/herdr-ide/` on macOS,
+`$XDG_CONFIG_HOME/herdr-ide/` on Linux, `%AppData%\herdr-ide\` on Windows;
+0700 with 0600 files on Linux and macOS, replaced atomically, kept until
+removed):
+
+| File | Content |
+| --- | --- |
+| `settings[-<instance>].json` | Settings; hand-editable, reread within two seconds, unknown entries kept. |
+| `keybindings[-<instance>].json` | Keybinding rules; hand-editable. |
+| `machines[-<instance>].json` | `{"version": 1, "machines": [{id, label, kind, target, enabled}], "order": [ids]}`: SSH machines, the local machine once changed, and the order. Written by the core; unknown fields kept. herdr's saved machines are imported on the instance's first start. |
+| `vault[-<instance>].json` | Variable vault, values encrypted under a key derived from the passphrase ([30](features/30-variable-vault.md)). |
+| `core[-<instance>]-<host>[-<id>].db` (with `-wal`, `-shm`) | The core's SQLite database ([38](features/38-sqlite-state.md)): the vault's access log (last 1000 releases, 500 other records; never values) and the AI usage history (30 days of windows' use, alert periods). Earlier `core[-<instance>].db`, `vault[-<instance>]-access.jsonl` and `usage-history[-<instance>].json` are imported once and removed. |
+
+Also on the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s`
+(Linux and macOS; owned by you, 0700), and code-server downloads with
+`.sha256` sidecars in the user cache directory
+(`~/Library/Caches/herdr-ide/code-server`, `~/.cache/herdr-ide/code-server`,
+`%LocalAppData%\herdr-ide\code-server`).
 
 A release directory holds the core, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
-`licenses.md` and `licenses/` (`herdr-core/` (the terminal core the core
-embeds for machines), `herdr-detect/` (herdr's agent detection rules, which
-the agents carry), `encoder/`); they stay until the user removes the
-directory and are not copied to SSH machines.
+`licenses.md` and `licenses/` (`herdr-core/`, `herdr-detect/`, `encoder/`).
+These are not copied to SSH machines.
 
-In the browser, in `localStorage` under `herdr-ide.*` (state of that
-browser only; settings and keybindings are the core's, the workspaces,
-tabs and splits, VS Code and preview panes included, the terminal core's):
+In the browser, `localStorage` under `herdr-ide.*` holds only that
+browser's state: the sidebar's state and width (`sidebarOpen`,
+`sidebarWidth`), the selected machine (`machine`), and the last 50 uploads
+and downloads (`uploads`, `downloads`; names and paths, no contents).
+Settings and layouts are the core's; browser settings of earlier versions
+are moved there once.
 
-- whether the sidebar is open (`sidebarOpen`) and its width
-  (`sidebarWidth`)
-- the selected machine (`machine`)
-- the upload and download histories (`uploads`, `downloads`: the last 50
-  finished transfers each, with file names, machines and paths, no
-  contents)
+Desktop artifacts in `dist/desktop/` (`make desktop-app` unpacked,
+`make desktop-dist` installers):
 
-Browser settings of earlier versions kept there (language, theme, font
-sizes, …) are moved to the core's settings once, when a page of a writable
-core loads, and then removed. What earlier versions kept there for the
-VS Code panel (`docks`, `dockWidth`, `dockHeight`) is removed when a page
-loads, and its position (`dockPosition`) with the settings above.
-
-Desktop artifacts (`make desktop-app` writes the unpacked apps,
-`make desktop-dist` the installers of the system it runs on), in
-`dist/desktop/`:
-
-- macOS: `mac-arm64/herdr-ide.app` (arm64), `mac/herdr-ide.app` (x64),
+- macOS: `mac-arm64/herdr-ide.app`, `mac/herdr-ide.app` (x64),
   `herdr-ide-<version>-mac-arm64.dmg`, `-mac-arm64.zip`, `-mac-x64.dmg`,
   `-mac-x64.zip`
 - Windows: `win-unpacked/herdr-ide.exe`, `herdr-ide-<version>-win-x64.exe`
-  (the setup)
-- Linux: `linux-unpacked/herdr-ide` (x64), `linux-arm64-unpacked/herdr-ide`,
+- Linux: `linux-unpacked/herdr-ide`, `linux-arm64-unpacked/herdr-ide`,
   `herdr-ide-<version>-linux-x86_64.AppImage`, `-linux-arm64.AppImage`,
   `-linux-amd64.deb`, `-linux-arm64.deb`
 
-The core is `bin/herdr-ide` (`bin/herdr-ide.exe` on Windows) in the app's
-resources, beside the licenses. Generated shell code lives in
-`desktop/dist/`; `make clean` removes these build outputs. Icon sources and
-the distributable PNG, ICNS and ICO are kept in `desktop/assets/`, with the
-small SVG in `web/public/icon.svg`; `make desktop-icons` regenerates the
-PNG, ICNS and ICO on macOS with librsvg and iconutil.
-Electron's persistent profile is `herdr-ide-desktop` (`-dev` for
-development, or the `--user-data-dir` given) in the system's application
-data directory: `~/Library/Application Support/` on macOS, `%AppData%` on
-Windows, `$XDG_CONFIG_HOME` (default `~/.config`) on Linux.
-It holds browser preferences and Chromium data until manually removed;
-uninstalling leaves it.
-On macOS `herdr-ide-desktop-keychain.json` beside the profiles records
-which build made the keychain item of Electron's safeStorage, so that a
-rebuilt app moves the item to itself once
-([30](features/30-variable-vault.md)); it stays until removed by hand.
-The core uses `settings-desktop.json` and `~/.herdr-ide-desktop/` state
-(on Windows only on the SSH machines); development uses the existing `dev`
-instance or the one `HERDR_IDE_DESKTOP_DEV` names. No desktop log files are
-kept: stderr is streamed and the last 16 KiB is retained in memory for error
+The core is `bin/herdr-ide` (`.exe` on Windows) in the app's resources.
+Shell code builds into `desktop/dist/`; `make clean` removes the outputs.
+Icon sources are in `desktop/assets/` (`make desktop-icons` regenerates
+them on macOS). Electron's profile is `herdr-ide-desktop` (`-dev`, or
+`--user-data-dir`) in the system's application data directory and survives
+uninstalling; on macOS `herdr-ide-desktop-keychain.json` beside it records
+which build owns the safeStorage keychain item
+([30](features/30-variable-vault.md)). The desktop core uses
+`settings-desktop.json` and `~/.herdr-ide-desktop/`. No desktop log files
+are kept: the last 16 KiB of the core's stderr stay in memory for error
 dialogs.
