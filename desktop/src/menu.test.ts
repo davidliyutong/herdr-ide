@@ -98,7 +98,16 @@ test('items show the first single-stroke key of their command and run it', () =>
   assert.equal(byCommand('pane.focusLeft').accelerator, 'Super+Alt+Left');
   assert.equal(byCommand('pane.zoom').accelerator, 'Super+Shift+Enter');
   assert.equal(byCommand('pane.back').accelerator, 'Super+[');
-  assert.equal(byCommand('pane.forward').registerAccelerator, true);
+  assert.equal(byCommand('pane.back').registerAccelerator, false);
+  assert.equal(byCommand('pane.forward').accelerator, 'Super+]');
+  assert.equal(byCommand('pane.forward').registerAccelerator, false);
+  assert.equal(byCommand('pane.splitRight').accelerator, 'Super+D');
+  assert.equal(byCommand('pane.splitRight').registerAccelerator, false);
+  assert.equal(byCommand('find.open').accelerator, 'Super+F');
+  assert.equal(byCommand('find.open').registerAccelerator, false);
+  assert.equal(byCommand('app.keyboardShortcuts').registerAccelerator, false);
+  assert.equal(byCommand('pane.leave').accelerator, 'Control+B');
+  assert.equal(byCommand('pane.leave').registerAccelerator, false);
   // Cmd+Z is Edit's Undo in text fields and VS Code: the item only shows it,
   // and the page takes it in a terminal.
   assert.equal(byCommand('pane.undoClose').accelerator, 'Super+Z');
@@ -123,9 +132,12 @@ test('items show the first single-stroke key of their command and run it', () =>
   assert.deepEqual(ran, ['tab.new']);
 });
 
-test('on Windows and Linux, File and Help menus; the keys are shown and every one is left to the page', () => {
-  for (const p of ['win32', 'linux'] as const) {
-    const { template, byCommand, items } = build(registry.keybindings.pc as Binding[], p);
+test('on Windows and Linux, File and Help menus; platform-native keys are shown and every one is left to the page', () => {
+  for (const [p, regKey, splitRight] of [
+    ['win32', 'windows', 'Alt+Plus'],
+    ['linux', 'linux', 'Control+Shift+D'],
+  ] as const) {
+    const { template, byCommand, items } = build(registry.keybindings[regKey] as Binding[], p);
     assert.deepEqual(
       template.map((m) => m.label),
       ['File', 'Shell', 'Edit', 'View', 'Window', 'Help'],
@@ -141,7 +153,9 @@ test('on Windows and Linux, File and Help menus; the keys are shown and every on
     );
     assert.equal(byCommand('app.commandPalette').accelerator, 'Control+Shift+P');
     assert.equal(byCommand('tab.new').accelerator, 'Control+Shift+T');
-    assert.equal(byCommand('pane.splitRight').accelerator, undefined);
+    assert.equal(byCommand('pane.splitRight').accelerator, splitRight);
+    assert.equal(byCommand('pane.back').accelerator, 'Alt+Left');
+    assert.equal(byCommand('pane.leave').accelerator, 'Control+B');
     // Ctrl+C, Ctrl+M, Ctrl+Q… are programs' keys in terminals: no item takes one.
     for (const it of items) if (it.role || it.accelerator) assert.equal(it.registerAccelerator, false, String(it.label));
   }

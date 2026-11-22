@@ -16,6 +16,7 @@ import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { useMenu, isItem, type MenuItem } from '../contextMenu';
 import { useDialog } from '../dialog';
+import { isRenameKey, renameKeyHint } from '../rowKeys';
 import { t } from '../i18n';
 import { FilesPanel, followedDir } from '../plugins/files/FilesPanel';
 import {
@@ -950,5 +951,15 @@ describe('FilesPanel', () => {
       filter: 'f2',
     });
     expect(treeEl().scrollTop).toBe(180);
+  });
+
+  it('uses platform-native rename keys: Enter on macOS and F2 on Windows/Linux', () => {
+    expect(renameKeyHint(true)).toBe('↩');
+    expect(renameKeyHint(false)).toBe('F2');
+    expect(isRenameKey({ key: 'Enter' }, true)).toBe(true);
+    expect(isRenameKey({ key: 'F2' }, true)).toBe(false);
+    expect(isRenameKey({ key: 'F2' }, false)).toBe(true);
+    expect(isRenameKey({ key: 'Enter' }, false)).toBe(false);
+    expect(isRenameKey({ key: 'Enter', metaKey: true }, true)).toBe(false);
   });
 });

@@ -39,15 +39,16 @@ export interface KeyProblem {
 /** A rule of the user's file, as written there. */
 export type UserRule = { key?: string; command?: string; when?: string } & Record<string, unknown>;
 
-export type Platform = 'mac' | 'pc' | 'mac-browser' | 'pc-browser';
+export type Platform = 'mac' | 'windows' | 'linux' | 'mac-browser' | 'windows-browser' | 'linux-browser';
 
-export { isMac } from './keys';
-import { isMac } from './keys';
+export { isMac, isWindows, osPlatform, type OS } from './keys';
+import { osPlatform, type OS } from './keys';
 
-/** The platform whose bindings apply: the desktop app or a browser, on macOS
- * or another system. Browsers keep Cmd+T and the like for themselves. */
-export function platform(mac = isMac, app = !!desktopShell): Platform {
-  return mac ? (app ? 'mac' : 'mac-browser') : app ? 'pc' : 'pc-browser';
+/** The platform whose bindings apply: the desktop app or a browser, on
+ * macOS, Windows or Linux. Browsers keep Cmd+T and the like for themselves. */
+export function platform(os: OS | boolean = osPlatform, app = !!desktopShell): Platform {
+  const kind: OS = typeof os === 'boolean' ? (os ? 'mac' : 'linux') : os;
+  return app ? kind : `${kind}-browser`;
 }
 
 interface KeyStore {

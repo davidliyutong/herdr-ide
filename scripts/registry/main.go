@@ -190,10 +190,17 @@ func commandsTable() string {
 	kb := keybindings.New("", registry.Commands())
 	defaults := kb.AllDefaults()
 	var b strings.Builder
-	b.WriteString("| Command | When | `mac` | `mac-browser` | `pc` | `pc-browser` |\n| --- | --- | --- | --- | --- | --- |\n")
+	b.WriteString("| Command | When | `mac` | `mac-browser` | `windows` | `windows-browser` | `linux` | `linux-browser` |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, c := range kb.CommandList() {
 		fmt.Fprintf(&b, "| `%s` | `%s` |", c.ID, c.When)
-		for _, p := range []string{keybindings.PlatformMac, keybindings.PlatformMacBrowser, keybindings.PlatformPC, keybindings.PlatformPCBrowser} {
+		for _, p := range []string{
+			keybindings.PlatformMac,
+			keybindings.PlatformMacBrowser,
+			keybindings.PlatformWindows,
+			keybindings.PlatformWindowsBrowser,
+			keybindings.PlatformLinux,
+			keybindings.PlatformLinuxBrowser,
+		} {
 			var keys []string
 			for _, r := range defaults[p] {
 				if r.Command == c.ID {

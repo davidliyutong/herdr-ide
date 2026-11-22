@@ -171,10 +171,10 @@ settings per browser; theming terminal applications.
   `view.zoomReset`, so the window's zoom works in dialogs too). A binding
   runs only in its context, `terminal` ones in VS Code panes too; `always`
   runs in every one.
-- Platforms: `mac` and `pc` (the desktop app on macOS and on other
-  systems) and `mac-browser`, `pc-browser` (a browser on either). A page
-  picks its platform from the system and whether the desktop shell's
-  bridge is present.
+- Platforms: `mac`, `windows`, and `linux` (the desktop app on macOS,
+  Windows and Linux) and `mac-browser`, `windows-browser`, `linux-browser`
+  (a browser on each). A page picks its platform from the system and whether
+  the desktop shell's bridge is present.
 - Key syntax: a stroke is modifiers (`cmd`, `ctrl`, `alt`, `shift`, with
   aliases such as `meta`, `option`) and a key joined by `+`; a chord is
   strokes separated by spaces (`ctrl+k c`), at most 4. The canonical form
@@ -196,11 +196,12 @@ settings per browser; theming terminal applications.
   `ctrl+shift+/`) and on macOS the palette (`cmd+k`); a browser elsewhere
   has no key left for the palette (Firefox opens a private window on
   `ctrl+shift+p`, and `ctrl` with a letter belongs to the programs in the
-  terminals), and the status bar's **Command palette** opens it. The
-  application is used with the mouse: no default is a chord and none is
-  `ctrl` or `alt` with a letter alone, so `ctrl+b` (tmux's prefix) and
-  every other key that is not a default reach the program in the terminal
-  on their first press. Commands without a key (the tab numbers
+  terminals), and the status bar's **Command palette** opens it. `ctrl+b`
+  (`pane.leave`) escapes focus from the active editor, terminal or pane to
+  its pane header (app chrome) on every platform; no other default is a
+  chord or `ctrl` or `alt` with a letter alone, so every other key that is
+  not a default reaches the program in the terminal on its first press.
+  Commands without a key (the tab numbers
   `tab.select1`…`9`, focus moves, renames, zoom, VS Code's diff and Git
   Graph…) run from the menus, the context menus, the pane headers' buttons
   and the command palette, and the user can bind keys or chords to them.
@@ -387,7 +388,7 @@ settings per browser; theming terminal applications.
   none. The status bar offers **Keyboard shortcuts** and **Command
   palette** as buttons, with their keys when they have one.
 - Desktop app (`desktop/src/follow.ts`, `desktop/src/menu.ts`): the page
-  matches its keys as above with the `mac` or `pc` bindings. The shell
+  matches its keys as above with the `mac`, `windows` or `linux` bindings. The shell
   reads both endpoints when its own event channel opens and follows the
   `settings` and `keybindings` messages (its platform's defaults from
   `registry.json` and the system's languages until then). Its menu's items

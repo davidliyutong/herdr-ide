@@ -648,6 +648,9 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       data-autofocus
       tabIndex={-1}
       onMouseDown={() => !focused && terms.mutate(m, (l) => L.focusPane(l, pane))}
+      onFocus={(e) => {
+        if (e.target === e.currentTarget) ed.current?.editor.focus();
+      }}
       onKeyDown={saveKeys.root}
     >
       <EditorBar m={m} pane={pane} view={view}>

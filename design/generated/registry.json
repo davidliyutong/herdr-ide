@@ -354,6 +354,11 @@
       "when": "terminal"
     },
     {
+      "id": "pane.leave",
+      "section": "pane",
+      "when": "terminal"
+    },
+    {
       "id": "pane.rename",
       "section": "pane",
       "when": "terminal"
@@ -521,6 +526,7 @@
     "command.pane.focusRight",
     "command.pane.focusUp",
     "command.pane.forward",
+    "command.pane.leave",
     "command.pane.rename",
     "command.pane.splitDown",
     "command.pane.splitRight",
@@ -796,6 +802,245 @@
     "settings.window.zoom"
   ],
   "keybindings": {
+    "linux": [
+      {
+        "key": "ctrl+shift+p",
+        "command": "app.commandPalette",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+comma",
+        "command": "app.settings",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+a",
+        "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+k",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+alt+down",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+alt+up",
+        "command": "workspace.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+n",
+        "command": "workspace.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+t",
+        "command": "tab.new",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+tab",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+pagedown",
+        "command": "tab.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+tab",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+pageup",
+        "command": "tab.previous",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+1",
+        "command": "tab.select1",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+2",
+        "command": "tab.select2",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+3",
+        "command": "tab.select3",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+4",
+        "command": "tab.select4",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+5",
+        "command": "tab.select5",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+6",
+        "command": "tab.select6",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+7",
+        "command": "tab.select7",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+8",
+        "command": "tab.select8",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+9",
+        "command": "tab.select9",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+w",
+        "command": "tab.close",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+d",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+o",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+enter",
+        "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+left",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+down",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+up",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+right",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+left",
+        "command": "pane.back",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+right",
+        "command": "pane.forward",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+z",
+        "command": "pane.undoClose",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+b",
+        "command": "view.togglePanel",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+e",
+        "command": "view.panel.files",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+equal",
+        "command": "view.zoomIn",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+minus",
+        "command": "view.zoomOut",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+0",
+        "command": "view.zoomReset",
+        "when": "always"
+      },
+      {
+        "key": "ctrl+shift+g",
+        "command": "view.panel.git",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+j",
+        "command": "code.open",
+        "when": "terminal"
+      }
+    ],
+    "linux-browser": [
+      {
+        "key": "ctrl+shift+slash",
+        "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+f",
+        "command": "find.open",
+        "when": "terminal"
+      }
+    ],
     "mac": [
       {
         "key": "cmd+shift+p",
@@ -933,6 +1178,11 @@
         "when": "terminal"
       },
       {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "terminal"
+      },
+      {
         "key": "cmd+alt+left",
         "command": "pane.focusLeft",
         "when": "terminal"
@@ -1040,12 +1290,17 @@
         "when": "terminal"
       },
       {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "terminal"
+      },
+      {
         "key": "cmd+f",
         "command": "find.open",
         "when": "terminal"
       }
     ],
-    "pc": [
+    "windows": [
       {
         "key": "ctrl+shift+p",
         "command": "app.commandPalette",
@@ -1064,6 +1319,21 @@
       {
         "key": "ctrl+shift+a",
         "command": "app.agentAttention",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+k",
+        "command": "workspace.switch",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+pagedown",
+        "command": "workspace.next",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+pageup",
+        "command": "workspace.previous",
         "when": "terminal"
       },
       {
@@ -1137,8 +1407,73 @@
         "when": "terminal"
       },
       {
+        "key": "alt+shift+equal",
+        "command": "pane.splitRight",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+minus",
+        "command": "pane.splitDown",
+        "when": "terminal"
+      },
+      {
         "key": "ctrl+shift+enter",
         "command": "pane.zoom",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+left",
+        "command": "pane.focusLeft",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+down",
+        "command": "pane.focusDown",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+up",
+        "command": "pane.focusUp",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+right",
+        "command": "pane.focusRight",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+left",
+        "command": "pane.back",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+right",
+        "command": "pane.forward",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+z",
+        "command": "pane.undoClose",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+b",
+        "command": "view.toggleSidebar",
+        "when": "terminal"
+      },
+      {
+        "key": "alt+shift+b",
+        "command": "view.togglePanel",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+shift+e",
+        "command": "view.panel.files",
         "when": "terminal"
       },
       {
@@ -1177,10 +1512,15 @@
         "when": "terminal"
       }
     ],
-    "pc-browser": [
+    "windows-browser": [
       {
         "key": "ctrl+shift+slash",
         "command": "app.keyboardShortcuts",
+        "when": "terminal"
+      },
+      {
+        "key": "ctrl+b",
+        "command": "pane.leave",
         "when": "terminal"
       },
       {

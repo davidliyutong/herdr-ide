@@ -64,6 +64,7 @@ class FakeModel {
 
 type FakeDecoration = { range: { start: number; end: number }; options: { linesDecorationsClassName: string } };
 
+const focusSpy = vi.fn();
 const editor = {
   model: undefined as FakeModel | undefined,
   save: undefined as (() => void) | undefined,
@@ -87,7 +88,7 @@ const editor = {
   updateOptions(o: { readOnly?: boolean }) {
     this.readOnly = o.readOnly;
   },
-  focus() {},
+  focus: focusSpy,
   dispose() {},
   savedState: undefined as unknown,
   restoredStates: [] as unknown[],
@@ -718,5 +719,15 @@ describe('EditorPane', () => {
       await render('/home/u/other.txt');
       expect(editor.restoredStates).toEqual([otherState]);
     });
+  });
+
+  it('forwards focus on the editor root into Monaco so escaping back to the pane works', async () => {
+    await render();
+    focusSpy.mockClear();
+    const rootEl = host.querySelector<HTMLElement>('.files-editor')!;
+    await act(async () => {
+      rootEl.focus();
+    });
+    expect(focusSpy).toHaveBeenCalledTimes(1);
   });
 });

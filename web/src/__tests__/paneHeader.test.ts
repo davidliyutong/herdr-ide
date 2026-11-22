@@ -14,6 +14,7 @@ vi.mock('../lib/bridge', () => ({ bridge: { command: (...a: unknown[]) => comman
 import { useStore } from '../state/store';
 import { terminalTitle, type MachineState } from '../lib/machine';
 import { PaneHeader } from '../components/PaneHeader';
+import * as rowKeys from '../rowKeys';
 import * as L from '../term/layout';
 import { useMenu } from '../contextMenu';
 import { FakeCore, settle } from './fakeTerms';
@@ -210,6 +211,34 @@ describe('PaneHeader', () => {
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     header.dispatchEvent(down);
     expect(down.defaultPrevented).toBe(true);
+  });
+
+  it('does not hijack Enter on a header button to rename on macOS', async () => {
+    const orig = rowKeys.isRenameKey;
+    vi.spyOn(rowKeys, 'isRenameKey').mockImplementation((e) => orig(e, true));
+    try {
+      await render();
+      const header = host.querySelector<HTMLElement>('.pane-header')!;
+      await act(async () => header.focus());
+      await settle();
+      const btn = buttons()[0];
+      btn.focus();
+      expect(document.activeElement).toBe(btn);
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      await act(async () => void btn.dispatchEvent(enter));
+      expect(enter.defaultPrevented).toBe(false);
+      expect(useStore.getState().renaming).toBeUndefined();
+      // Enter on the title itself still renames on macOS.
+      const title = host.querySelector<HTMLElement>('.pane-title')!;
+      title.focus();
+      const titleEnter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      await act(async () => void title.dispatchEvent(titleEnter));
+      expect(titleEnter.defaultPrevented).toBe(true);
+      expect(useStore.getState().renaming).toEqual({ kind: 'pane', m: 'm', id: 'p1' });
+    } finally {
+      await act(async () => useStore.getState().setRenaming(undefined));
+      vi.restoreAllMocks();
+    }
   });
 
   it('has no commands in read-only mode', async () => {

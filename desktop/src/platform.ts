@@ -14,10 +14,10 @@ export type Platform = 'darwin' | 'win32' | 'linux';
  * electron-builder.cjs. */
 export const APP_ID = `dev.${APP_SLUG}.desktop`;
 
-/** The keybindings' platform: the desktop app's Cmd keys on macOS, its
- * Ctrl+Shift keys elsewhere (web/src/keybindings.ts picks the same). */
-export function keyPlatform(p: Platform): 'mac' | 'pc' {
-  return p === 'darwin' ? 'mac' : 'pc';
+/** The keybindings' platform: macOS, Windows or Linux (web/src/keybindings.ts
+ * picks the same). */
+export function keyPlatform(p: Platform): 'mac' | 'windows' | 'linux' {
+  return p === 'darwin' ? 'mac' : p === 'win32' ? 'windows' : 'linux';
 }
 
 /** The core's executable: in the app's resources, or the one scripts/build.sh

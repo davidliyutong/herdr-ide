@@ -46,10 +46,8 @@ func TestParseVectors(t *testing.T) {
 	}
 }
 
-// The defaults are the applications' direct shortcuts and a few keys
-// browsers leave to pages; no default is a chord, so no key waits for a
-// second one and Ctrl+B (tmux's prefix) and every other key that is not a
-// default reach the terminal.
+// The defaults are the applications' direct shortcuts, Ctrl+B for escaping
+// focus from a pane to app chrome, and a few keys browsers leave to pages.
 func TestDefaults(t *testing.T) {
 	s := New("", Commands)
 	find := func(platform, command string) []string {
@@ -66,46 +64,77 @@ func TestDefaults(t *testing.T) {
 		keys              []string
 	}{
 		{PlatformMac, "tab.new", []string{"cmd+t"}},
-		{PlatformPC, "tab.new", []string{"ctrl+shift+t"}},
+		{PlatformWindows, "tab.new", []string{"ctrl+shift+t"}},
+		{PlatformLinux, "tab.new", []string{"ctrl+shift+t"}},
 		{PlatformMacBrowser, "tab.new", nil},
-		{PlatformPCBrowser, "find.open", []string{"ctrl+shift+f"}},
+		{PlatformWindowsBrowser, "find.open", []string{"ctrl+shift+f"}},
+		{PlatformLinuxBrowser, "find.open", []string{"ctrl+shift+f"}},
 		{PlatformMacBrowser, "find.open", []string{"cmd+f"}},
 		{PlatformMac, "pane.close", []string{"cmd+w"}},
-		{PlatformPC, "tab.close", []string{"ctrl+shift+w"}},
+		{PlatformWindows, "tab.close", []string{"ctrl+shift+w"}},
+		{PlatformLinux, "tab.close", []string{"ctrl+shift+w"}},
 		{PlatformMac, "app.commandPalette", []string{"cmd+shift+p"}},
-		{PlatformPC, "app.commandPalette", []string{"ctrl+shift+p"}},
+		{PlatformWindows, "app.commandPalette", []string{"ctrl+shift+p"}},
+		{PlatformLinux, "app.commandPalette", []string{"ctrl+shift+p"}},
 		{PlatformMacBrowser, "app.commandPalette", []string{"cmd+k"}},
-		{PlatformPCBrowser, "app.commandPalette", nil},
+		{PlatformWindowsBrowser, "app.commandPalette", nil},
+		{PlatformLinuxBrowser, "app.commandPalette", nil},
 		{PlatformMac, "app.keyboardShortcuts", []string{"cmd+slash"}},
 		{PlatformMacBrowser, "app.keyboardShortcuts", []string{"cmd+slash"}},
-		{PlatformPC, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
-		{PlatformPCBrowser, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
-		{PlatformPCBrowser, "tab.select9", nil},
+		{PlatformWindows, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
+		{PlatformLinux, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
+		{PlatformWindowsBrowser, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
+		{PlatformLinuxBrowser, "app.keyboardShortcuts", []string{"ctrl+shift+slash"}},
+		{PlatformWindowsBrowser, "tab.select9", nil},
+		{PlatformLinuxBrowser, "tab.select9", nil},
 		{PlatformMacBrowser, "tab.select1", nil},
 		{PlatformMac, "tab.select1", []string{"cmd+1"}},
 		{PlatformMac, "tab.select9", []string{"cmd+9"}},
-		{PlatformPC, "tab.select2", []string{"alt+2"}},
+		{PlatformWindows, "tab.select2", []string{"alt+2"}},
+		{PlatformLinux, "tab.select2", []string{"alt+2"}},
 		{PlatformMac, "tab.close", []string{"cmd+shift+w"}},
 		{PlatformMac, "tab.next", []string{"cmd+shift+bracketright", "ctrl+tab"}},
-		{PlatformPC, "tab.previous", []string{"ctrl+shift+tab"}},
+		{PlatformWindows, "tab.previous", []string{"ctrl+shift+tab"}},
+		{PlatformLinux, "tab.previous", []string{"ctrl+shift+tab", "ctrl+pageup"}},
 		{PlatformMac, "pane.zoom", []string{"cmd+shift+enter"}},
+		{PlatformMac, "pane.leave", []string{"ctrl+b"}},
+		{PlatformWindows, "pane.leave", []string{"ctrl+b"}},
+		{PlatformLinux, "pane.leave", []string{"ctrl+b"}},
+		{PlatformMacBrowser, "pane.leave", []string{"ctrl+b"}},
+		{PlatformWindowsBrowser, "pane.leave", []string{"ctrl+b"}},
+		{PlatformLinuxBrowser, "pane.leave", []string{"ctrl+b"}},
+		{PlatformMac, "pane.splitRight", []string{"cmd+d"}},
+		{PlatformWindows, "pane.splitRight", []string{"alt+shift+equal"}},
+		{PlatformLinux, "pane.splitRight", []string{"ctrl+shift+d"}},
+		{PlatformMac, "pane.splitDown", []string{"cmd+shift+d"}},
+		{PlatformWindows, "pane.splitDown", []string{"alt+shift+minus"}},
+		{PlatformLinux, "pane.splitDown", []string{"ctrl+shift+o"}},
 		{PlatformMac, "pane.focusLeft", []string{"cmd+alt+left"}},
+		{PlatformWindows, "pane.focusLeft", []string{"alt+shift+left"}},
+		{PlatformLinux, "pane.focusLeft", []string{"alt+shift+left"}},
 		{PlatformMac, "pane.focusNext", nil},
 		{PlatformMac, "pane.back", []string{"cmd+bracketleft"}},
 		{PlatformMac, "pane.forward", []string{"cmd+bracketright"}},
+		{PlatformWindows, "pane.back", []string{"alt+left"}},
+		{PlatformLinux, "pane.back", []string{"alt+left"}},
+		{PlatformWindows, "pane.forward", []string{"alt+right"}},
+		{PlatformLinux, "pane.forward", []string{"alt+right"}},
 		{PlatformMac, "pane.undoClose", []string{"cmd+z"}},
-		{PlatformPC, "pane.undoClose", nil},
-		{PlatformPC, "pane.focusLeft", nil},
+		{PlatformWindows, "pane.undoClose", []string{"ctrl+shift+z"}},
+		{PlatformLinux, "pane.undoClose", []string{"ctrl+shift+z"}},
+		{PlatformWindows, "workspace.next", []string{"ctrl+shift+pagedown"}},
+		{PlatformLinux, "workspace.next", []string{"ctrl+alt+down"}},
 		{PlatformMacBrowser, "pane.zoom", nil},
 		{PlatformMac, "code.open", []string{"cmd+j"}},
-		{PlatformPC, "code.open", []string{"ctrl+shift+j"}},
-		{PlatformPCBrowser, "code.open", nil},
+		{PlatformWindows, "code.open", []string{"ctrl+shift+j"}},
+		{PlatformLinux, "code.open", []string{"ctrl+shift+j"}},
+		{PlatformLinuxBrowser, "code.open", nil},
 		// Browsers zoom pages with these keys themselves.
 		{PlatformMac, "view.zoomIn", []string{"cmd+shift+equal", "cmd+equal"}},
-		{PlatformPC, "view.zoomOut", []string{"ctrl+minus"}},
-		{PlatformPC, "view.zoomReset", []string{"ctrl+0"}},
+		{PlatformWindows, "view.zoomOut", []string{"ctrl+minus"}},
+		{PlatformLinux, "view.zoomReset", []string{"ctrl+0"}},
 		{PlatformMacBrowser, "view.zoomIn", nil},
-		{PlatformPCBrowser, "view.zoomReset", nil},
+		{PlatformLinuxBrowser, "view.zoomReset", nil},
 	} {
 		if got := find(c.platform, c.command); !slices.Equal(got, c.keys) {
 			t.Errorf("%s %s = %v, want %v", c.platform, c.command, got, c.keys)
@@ -119,9 +148,9 @@ func TestDefaults(t *testing.T) {
 				continue
 			}
 			// Keys programs in terminals read: Ctrl or Alt with a letter
-			// alone, function keys.
+			// alone, function keys (except pane.leave's ctrl+b focus escape).
 			k := seq[0]
-			if (k.Ctrl || k.Alt) && !k.Cmd && !k.Shift && len(k.Key) == 1 && k.Key[0] >= 'a' && k.Key[0] <= 'z' || functionKey.MatchString(k.Key) {
+			if r.Command != "pane.leave" && ((k.Ctrl || k.Alt) && !k.Cmd && !k.Shift && len(k.Key) == 1 && k.Key[0] >= 'a' && k.Key[0] <= 'z' || functionKey.MatchString(k.Key)) {
 				t.Errorf("%s: %s's default %q is a key of terminal programs", p, r.Command, r.Key)
 			}
 		}
@@ -131,17 +160,18 @@ func TestDefaults(t *testing.T) {
 		}
 		// The command palette and the list of shortcuts are on the keyboard
 		// wherever a key is left for them.
-		if len(find(p, "app.keyboardShortcuts")) == 0 || (p != PlatformPCBrowser && len(find(p, "app.commandPalette")) == 0) {
+		if len(find(p, "app.keyboardShortcuts")) == 0 || (p != PlatformWindowsBrowser && p != PlatformLinuxBrowser && len(find(p, "app.commandPalette")) == 0) {
 			t.Errorf("%s: no key for the command palette or the shortcuts", p)
 		}
 	}
 }
 
-// Chords bound in the user's file still work, those of the earlier
-// defaults (ctrl+b, then a key) included.
+// Chords bound in the user's file still work, ctrl+b chords included once
+// pane.leave is unbound (otherwise ctrl+b reports a prefix conflict).
 func TestUserChords(t *testing.T) {
 	s := New(filepath.Join(t.TempDir(), "keybindings.json"), Commands)
 	err := s.SetUser(rules(t,
+		`{"key": "ctrl+b", "command": "-pane.leave"}`,
 		`{"key": "ctrl+b c", "command": "tab.new"}`,
 		`{"key": "ctrl+b shift+slash", "command": "app.keyboardShortcuts"}`,
 		`{"key": "ctrl+b x", "command": "pane.close"}`,
@@ -158,8 +188,15 @@ func TestUserChords(t *testing.T) {
 			t.Errorf("%s: conflicts %v", p, c)
 		}
 	}
-	if got := effective(st, PlatformPCBrowser, "app.keyboardShortcuts"); !slices.Equal(got, []string{"ctrl+shift+slash@terminal", "ctrl+b shift+slash@terminal"}) {
+	if got := effective(st, PlatformLinuxBrowser, "app.keyboardShortcuts"); !slices.Equal(got, []string{"ctrl+shift+slash@terminal", "ctrl+b shift+slash@terminal"}) {
 		t.Errorf("app.keyboardShortcuts = %v", got)
+	}
+	// Keeping ctrl+b bound to pane.leave while adding a ctrl+b chord reports a prefix conflict.
+	if err := s.SetUser(rules(t, `{"key": "ctrl+b c", "command": "tab.new"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if c := s.State().Conflicts[PlatformMac]; len(c) != 1 || !c[0].Prefix || c[0].Key != "ctrl+b" {
+		t.Errorf("expected ctrl+b prefix conflict, got %+v", c)
 	}
 }
 
@@ -208,8 +245,11 @@ func TestUserRules(t *testing.T) {
 		t.Errorf("tab.new = %v", got)
 	}
 	// User rules apply on every platform.
-	if got := effective(st, PlatformPC, "tab.new"); !slices.Equal(got, []string{"ctrl+shift+t@terminal", "cmd+shift+t@terminal"}) {
-		t.Errorf("tab.new on pc = %v", got)
+	if got := effective(st, PlatformWindows, "tab.new"); !slices.Equal(got, []string{"ctrl+shift+t@terminal", "cmd+shift+t@terminal"}) {
+		t.Errorf("tab.new on windows = %v", got)
+	}
+	if got := effective(st, PlatformLinux, "tab.new"); !slices.Equal(got, []string{"ctrl+shift+t@terminal", "cmd+shift+t@terminal"}) {
+		t.Errorf("tab.new on linux = %v", got)
 	}
 	if got := effective(st, PlatformMac, "pane.zoom"); !slices.Equal(got, []string{"ctrl+k z@always"}) {
 		t.Errorf("pane.zoom = %v", got)
@@ -316,18 +356,18 @@ func TestReload(t *testing.T) {
 		s.Reload()
 	}
 	edit(`[{"key": "ctrl+k m", "command": "tab.new"}]`)
-	if got := effective(s.State(), PlatformPC, "tab.new"); !slices.Equal(got, []string{"ctrl+shift+t@terminal", "ctrl+k m@terminal"}) || notified != 1 {
+	if got := effective(s.State(), PlatformLinux, "tab.new"); !slices.Equal(got, []string{"ctrl+shift+t@terminal", "ctrl+k m@terminal"}) || notified != 1 {
 		t.Errorf("after edit: %v (%d)", got, notified)
 	}
 	edit(`[{"key": `)
-	if got := effective(s.State(), PlatformPC, "tab.new"); len(got) != 2 || s.State().Problems[0].Code != "parse" {
+	if got := effective(s.State(), PlatformLinux, "tab.new"); len(got) != 2 || s.State().Problems[0].Code != "parse" {
 		t.Errorf("broken file: %v %v", got, s.State().Problems)
 	}
 	if err := s.SetUser(nil); !errors.Is(err, ErrFile) {
 		t.Errorf("write over a broken file: %v", err)
 	}
 	edit(`[]`)
-	if got := effective(s.State(), PlatformPC, "tab.new"); len(got) != 1 || len(s.State().Problems) != 0 {
+	if got := effective(s.State(), PlatformLinux, "tab.new"); len(got) != 1 || len(s.State().Problems) != 0 {
 		t.Errorf("fixed file: %v", got)
 	}
 }

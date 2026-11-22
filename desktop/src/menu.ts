@@ -136,6 +136,7 @@ export const menus: Menu[] = [
       '-',
       { command: 'pane.back' },
       { command: 'pane.forward' },
+      { command: 'pane.leave' },
       { command: 'pane.focusNext' },
       { command: 'pane.focusPrevious' },
       { command: 'pane.focusLeft' },
@@ -208,8 +209,25 @@ export function parseDisabled(value: unknown): Set<string> | undefined {
   return new Set((value as string[]).filter((v) => known.has(v)));
 }
 
-/** The keys of Edit's items on macOS (Undo, Redo, Cut, Copy, Paste, Select All). */
-const EDIT_KEYS: ReadonlySet<string> = new Set(['cmd+z', 'cmd+shift+z', 'cmd+x', 'cmd+c', 'cmd+v', 'cmd+a']);
+/** Keys of text fields and editors (Monaco, VS Code) on macOS: the menu
+ * item shows the key, while the page takes it in terminals and app chrome
+ * and editors keep it for editing (Cmd+[/] outdent/indent, Cmd+D next
+ * match, Cmd+F/G find, Cmd+/ toggle comment, Cmd+Z/X/C/V/A edit). */
+const EDIT_KEYS: ReadonlySet<string> = new Set([
+  'cmd+z',
+  'cmd+shift+z',
+  'cmd+x',
+  'cmd+c',
+  'cmd+v',
+  'cmd+a',
+  'cmd+bracketleft',
+  'cmd+bracketright',
+  'cmd+d',
+  'cmd+f',
+  'cmd+g',
+  'cmd+shift+g',
+  'cmd+slash',
+]);
 
 /** The menu's template of a platform for the bindings in effect: titles
  * from text (with the application's name for {app}), commands run through

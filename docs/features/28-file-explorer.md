@@ -130,8 +130,8 @@ Plugins; `internal/plugins/files/settings.go`):
 - Keys on the tree: ↑ ↓ PgUp PgDn Home End (with Shift to extend the
   selection), → (expand, then the first child), ← (collapse, then the
   parent), ⌘A (Ctrl+A elsewhere) selects every row shown, letters go to
-  the next row whose name starts with them (type-ahead), Enter
-  (open, kept; on a selection of several, its files), Space (preview, the keyboard stays in the tree), F2 (rename), Delete or ⌘⌫ (trash), Shift
+  the next row whose name starts with them (type-ahead), Enter on Windows/Linux or ⌘O / ⌘↓ on macOS
+  (open, kept; on a selection of several, its files), Space (preview, the keyboard stays in the tree), Enter on macOS or F2 on Windows/Linux (rename), Delete or ⌘⌫ (trash), Shift
   with them (delete for good, after asking), ⌘/Ctrl C, X, V, Escape (the
   clipboard, then the filter). Arrows with ⌘, Ctrl or Alt are left to
   the page's shortcuts. The keys act on the selected rows the tree
@@ -155,7 +155,7 @@ Plugins; `internal/plugins/files/settings.go`):
   never replaced. One pane kind shows every file: text in Monaco, media
   (images, video, audio, PDF) as Quick Look shows them.
 - Changes are typed in the tree: a new file or folder gets a row with a
-  name field in its folder, F2 turns a row's name into one. Names with `/`,
+  name field in its folder, Enter on macOS or F2 elsewhere turns a row's name into one. Names with `/`,
   empty names, `.` and `..` are refused before anything is sent.
 - The context menu: Open (the files of the selection, several at once,
   each in a tab), Open to the Side (a kept editor split beside the focused

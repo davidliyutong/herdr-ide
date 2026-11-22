@@ -14,6 +14,7 @@ import { canDownload, startDownload, useDownloads } from '../../download';
 import { droppedItems, filesAreOn } from '../../drop';
 import { t } from '../../i18n';
 import { isMac, keyLabel } from '../../keys';
+import { renameKeyHint } from '../../rowKeys';
 import * as L from '../../term/layout';
 import { terms } from '../../state/terms';
 import { unsavedPanes, withView } from '../../state/panes';
@@ -64,6 +65,8 @@ export const treeKeys = {
   cut: () => keyLabel(`${mod}+x`),
   copy: () => keyLabel(`${mod}+c`),
   paste: () => keyLabel(`${mod}+v`),
+  open: () => (isMac ? keyLabel('cmd+o') : '↵'),
+  rename: () => renameKeyHint(),
   trash: () => keyLabel(isMac ? 'cmd+backspace' : 'delete'),
   remove: () => keyLabel(isMac ? 'cmd+shift+backspace' : 'shift+delete'),
 };
@@ -436,7 +439,7 @@ function openEntries(m: string, paths: readonly string[], o: FileMenuOptions): M
   const one = paths.length === 1 ? paths[0] : undefined;
   const out: MenuEntry[] = [];
   if (files.length) {
-    out.push({ label: t('files.open'), hint: '↵', run: () => void openFiles(m, files) });
+    out.push({ label: t('files.open'), hint: treeKeys.open(), run: () => void openFiles(m, files) });
     out.push({
       label: t('files.openToSide'),
       run: () => void files.reduce((p, f) => p.then(() => openToSide(m, f)), Promise.resolve<unknown>(undefined)),
@@ -520,7 +523,12 @@ export function menuFor(m: string, paths: string[], isDir: (p: string) => boolea
   if (target && !ro) {
     out.push('sep');
     if (paths.length === 1)
-      out.push({ label: t('files.rename'), hint: 'F2', icon: createElement(Pencil), run: () => setEdit({ kind: 'rename', path: target }) });
+      out.push({
+        label: t('files.rename'),
+        hint: treeKeys.rename(),
+        icon: createElement(Pencil),
+        run: () => setEdit({ kind: 'rename', path: target }),
+      });
     out.push({ label: t('files.trash'), hint: treeKeys.trash(), icon: createElement(Trash2), run: () => void trash(m, paths) });
     out.push({ label: t('files.deletePermanently'), hint: treeKeys.remove(), danger: true, run: () => void remove(m, paths) });
   }

@@ -248,6 +248,7 @@ export const en = {
   'command.tab.unpin': 'Unpin Tab',
   'command.pane.rename': 'Rename Pane',
   'command.pane.actions': 'Pane Actions…',
+  'command.pane.leave': 'Focus App Chrome',
   'command.view.toggleSidebar': 'Toggle Sidebar',
   'command.view.zoomIn': 'Zoom In',
   'command.view.zoomOut': 'Zoom Out',

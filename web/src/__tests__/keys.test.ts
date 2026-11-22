@@ -9,7 +9,16 @@ import sequenceVectors from '../../../design/testdata/keys/sequences.json';
 import defaultVectors from '../../../design/testdata/keys/defaults.json';
 import registry from '../../../design/generated/registry.json';
 import { altOnly, KeyError, keyLabel, normalizeKeys, strokeOf } from '../keys';
-import { commandEnabled, feedStroke, handleKey, keyHint, REPEATING_COMMANDS, withKey, type KeyContext } from '../keymap';
+import {
+  commandEnabled,
+  feedStroke,
+  handleKey,
+  handlePaneLeaveKey,
+  keyHint,
+  REPEATING_COMMANDS,
+  withKey,
+  type KeyContext,
+} from '../keymap';
 import { commands } from '../commands';
 import { actions } from '../actions';
 import { useStore } from '../state/store';
@@ -66,7 +75,7 @@ describe('key sequences', () => {
 
   it('runs strokes against every platform’s defaults: no key waits for another', () => {
     const defaults = registry.keybindings as Record<Platform, Binding[]>;
-    for (const p of ['mac', 'mac-browser', 'pc', 'pc-browser'] as Platform[]) {
+    for (const p of ['mac', 'mac-browser', 'windows', 'windows-browser', 'linux', 'linux-browser'] as Platform[]) {
       expect(defaults[p].length, p).toBeGreaterThan(0);
       for (const b of defaults[p]) expect(b.key, `${p} ${b.command}`).not.toContain(' ');
     }
@@ -106,16 +115,21 @@ describe('key sequences', () => {
 });
 
 describe('keybindings', () => {
-  afterEach(() => useKeys.setState({ effective: registry.keybindings['pc-browser'] as Binding[], user: [] }));
+  afterEach(() => useKeys.setState({ effective: registry.keybindings['linux-browser'] as Binding[], user: [] }));
 
   it('takes its platform’s defaults', () => {
+    expect(platform('mac', true)).toBe('mac');
+    expect(platform('mac', false)).toBe('mac-browser');
+    expect(platform('windows', true)).toBe('windows');
+    expect(platform('windows', false)).toBe('windows-browser');
+    expect(platform('linux', true)).toBe('linux');
+    expect(platform('linux', false)).toBe('linux-browser');
     expect(platform(true, true)).toBe('mac');
-    expect(platform(true, false)).toBe('mac-browser');
-    expect(platform(false, true)).toBe('pc');
-    expect(platform(false, false)).toBe('pc-browser');
-    // jsdom: a browser on another system.
+    expect(platform(false, false)).toBe('linux-browser');
+    // jsdom: a browser on Linux by default.
     expect(keyHint('app.keyboardShortcuts')).toBe('Ctrl+?');
     expect(keyHint('find.open')).toBe('Ctrl+Shift+F');
+    expect(keyHint('pane.leave')).toBe('Ctrl+B');
     // Unbound commands show no key.
     expect(keyHint('tab.new')).toBe('');
     expect(keyHint('code.open')).toBe('');
@@ -124,13 +138,14 @@ describe('keybindings', () => {
     expect(withKey('New tab', 'tab.new')).toBe('New tab');
   });
 
-  it('leaves ctrl+b and every key without a binding to the terminal on every platform', () => {
+  it('runs pane.leave on ctrl+b and leaves every key without a binding to the terminal on every platform', () => {
     const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { cancelable: true, ...init });
-    for (const p of ['mac', 'mac-browser', 'pc', 'pc-browser'] as Platform[]) {
+    for (const p of ['mac', 'mac-browser', 'windows', 'windows-browser', 'linux', 'linux-browser'] as Platform[]) {
       useKeys.setState({ effective: (registry.keybindings as Record<Platform, Binding[]>)[p] });
+      const leaveEv = key({ key: 'b', code: 'KeyB', ctrlKey: true });
+      expect(handleKey(leaveEv, 'terminal'), `${p} ctrl+b`).toBe(true);
+      expect(leaveEv.defaultPrevented, `${p} ctrl+b`).toBe(true);
       for (const init of [
-        { key: 'b', code: 'KeyB', ctrlKey: true },
-        { key: 'b', code: 'KeyB', ctrlKey: true },
         { key: 'c', code: 'KeyC' },
         { key: 'a', code: 'KeyA', ctrlKey: true },
         { key: 'k', code: 'KeyK', ctrlKey: true },
@@ -144,8 +159,69 @@ describe('keybindings', () => {
     }
   });
 
+  it('escapes focus from pane inputs via handlePaneLeaveKey unless a dialog is open', () => {
+    useKeys.setState({ effective: registry.keybindings.mac as Binding[] });
+    const leaveSpy = vi.spyOn(commands['pane.leave'], 'run').mockImplementation(() => {});
+    try {
+      const ev = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true });
+      expect(handlePaneLeaveKey(ev)).toBe(true);
+      expect(ev.defaultPrevented).toBe(true);
+      expect(leaveSpy).toHaveBeenCalledTimes(1);
+
+      // Non-escape keys (like Cmd+[ in Monaco) are left alone.
+      const outdent = new KeyboardEvent('keydown', { key: '[', code: 'BracketLeft', metaKey: true, cancelable: true });
+      expect(handlePaneLeaveKey(outdent)).toBe(false);
+      expect(outdent.defaultPrevented).toBe(false);
+
+      // Dialogs keep Ctrl+B.
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+      document.body.append(backdrop);
+      const inDialog = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true });
+      expect(handlePaneLeaveKey(inDialog)).toBe(false);
+      backdrop.remove();
+    } finally {
+      leaveSpy.mockRestore();
+    }
+  });
+
+  it('switches focus from an active pane or Monaco editor to its pane header on Ctrl+B and returns cleanly', () => {
+    useKeys.setState({ effective: registry.keybindings.mac as Binding[] });
+    const pane = document.createElement('div');
+    pane.className = 'pane';
+    const header = document.createElement('div');
+    header.className = 'pane-header';
+    header.tabIndex = 0;
+    header.dataset.m = 'm';
+    header.dataset.pane = 'view:e1';
+    const monaco = document.createElement('div');
+    monaco.className = 'monaco-editor';
+    const ta = document.createElement('textarea');
+    monaco.append(ta);
+    pane.append(header, monaco);
+    document.body.append(pane);
+    const focusPane = vi.spyOn(actions, 'focusPane').mockImplementation(() => ta.focus());
+    try {
+      ta.focus();
+      expect(document.activeElement).toBe(ta);
+      const ev = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true, bubbles: true });
+      Object.defineProperty(ev, 'target', { value: ta });
+      expect(handlePaneLeaveKey(ev)).toBe(true);
+      expect(document.activeElement).toBe(header);
+
+      // On the pane header, Ctrl+B again returns focus to the pane.
+      const backEv = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true, bubbles: true });
+      expect(handleKey(backEv, 'terminal')).toBe(true);
+      expect(focusPane).toHaveBeenCalledWith('m', 'view:e1');
+      expect(document.activeElement).toBe(ta);
+    } finally {
+      focusPane.mockRestore();
+      pane.remove();
+    }
+  });
+
   it('leaves the zoom keys to browsers, where the zoom commands do not run', () => {
-    for (const p of ['mac-browser', 'pc-browser'] as Platform[]) {
+    for (const p of ['mac-browser', 'windows-browser', 'linux-browser'] as Platform[]) {
       useKeys.setState({ effective: (registry.keybindings as Record<Platform, Binding[]>)[p] });
       for (const init of [
         { key: '=', code: 'Equal', metaKey: true },

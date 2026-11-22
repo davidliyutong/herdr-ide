@@ -6,8 +6,8 @@ import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow } from 
 
 test('the keybindings, the last window and the app id by platform', () => {
   assert.equal(keyPlatform('darwin'), 'mac');
-  assert.equal(keyPlatform('win32'), 'pc');
-  assert.equal(keyPlatform('linux'), 'pc');
+  assert.equal(keyPlatform('win32'), 'windows');
+  assert.equal(keyPlatform('linux'), 'linux');
   assert.equal(quitsWithLastWindow('darwin'), false);
   assert.equal(quitsWithLastWindow('win32'), true);
   assert.equal(quitsWithLastWindow('linux'), true);

@@ -3,9 +3,11 @@
 ## Context
 
 Terminal multiplexer users know a layout model (workspaces → tabs → binary
-split trees of panes). Their prefix keymaps (`ctrl+b` in tmux) belong to
-the multiplexer running in a pane: this application is used with the
-mouse, so its default keys leave that key to the terminal. The
+split trees of panes). `ctrl+b` (`pane.leave`) escapes focus from the
+active editor, terminal or pane to its pane header (app chrome) so app
+shortcuts run without editor or terminal interception, and returns focus
+when pressed again (or with `Escape` on the header); users who keep
+`ctrl+b` for tmux can unbind `pane.leave` in `keybindings.json`. The
 terminal core keeps terminals, not layouts; every client of a machine arranges its
 terminals, VS Code views and previews in the machine's layout document
 ([22](22-terminal-protocol.md)),
@@ -499,7 +501,7 @@ Non-goals: arbitrary docking of panes; floating panes.
 described in [13](13-settings-and-appearance.md))
 
 - Commands (`tab.new`, `pane.splitRight`, `code.open`…) have default
-  keys per platform (`mac`: the desktop app on macOS; `mac-browser`; `pc`: the desktop app elsewhere; `pc-browser`) and
+  keys per platform (`mac`: the desktop app on macOS; `mac-browser`; `windows`: the desktop app on Windows; `windows-browser`; `linux`: the desktop app on Linux; `linux-browser`) and
   a context (`when`: `terminal`, `vscode`, `dialog` or `always`); the
   user's rules in `keybindings[-<instance>].json` on the core host add and
   remove keys, and the settings' **Keyboard shortcuts** page edits them.
@@ -512,12 +514,19 @@ described in [13](13-settings-and-appearance.md))
   (`web/src/plugins/api.ts`), the others in `web/src/commands.ts`, which
   the app defines at its start; `web/src/keymap.ts` only looks both up (a
   plugin's first), so a command nothing handles does nothing.
-- No default is a chord, and no default is `ctrl` or `alt` with a letter
-  alone or a function key: `ctrl+b` and every key that is not a default
-  reach the program in the terminal on their first press. The defaults
-  are the direct shortcuts below and, on every platform, the keyboard
-  shortcuts (`cmd+/` on macOS, `ctrl+shift+/` elsewhere) and the command
-  palette (`cmd+shift+p` and `ctrl+shift+p` in the desktop app, `cmd+k`
+- `ctrl+b` (`pane.leave`) escapes focus from any active editor, terminal or
+  pane to its pane header (app chrome) and returns focus when already
+  there; no other default is a chord, `ctrl` or `alt` with a letter alone,
+  or a function key, so every other key that is not a default reaches the
+  program in the terminal on its first press. Inside Monaco editors and
+  text inputs, `ctrl+b` is caught in the capture phase before the editor
+  consumes it, and editor shortcuts (`cmd+[` outdent, `cmd+]` indent,
+  `cmd+d`, `cmd+f`, `cmd+g`, `cmd+shift+g`, `cmd+/`, `cmd+z`…) are left to
+  the editor (and not registered as native macOS menu accelerators) so
+  they do not collide with app shortcuts. The defaults
+  are the direct shortcuts below and, on every platform, `ctrl+b`, the
+  keyboard shortcuts (`cmd+/` on macOS, `ctrl+shift+/` elsewhere) and the
+  command palette (`cmd+shift+p` and `ctrl+shift+p` in the desktop app, `cmd+k`
   in browsers on macOS; browsers elsewhere leave no key for it, and the
   status bar's **Command Palette…** button opens it everywhere). Commands
   without a key (renames, closing a workspace, VS Code's diff and Git
@@ -577,7 +586,13 @@ described in [13](13-settings-and-appearance.md))
   `ctrl+shift+tab` next / previous tab and `alt+1`…`alt+9` the tabs (as
   GNOME Terminal and Konsole), and `ctrl++` (or `ctrl+=`), `ctrl+-` and
   `ctrl+0` the zoom (as GNOME Terminal and Windows Terminal size their
-  text; `ctrl+shift+-`, undo in shells, stays the terminal's). Browsers
+  text; `ctrl+shift+-`, undo in shells, stays the terminal's),
+  `alt+left`/`alt+right` back/forward, `ctrl+shift+z` undo close,
+  `ctrl+shift+b` sidebar, `ctrl+shift+e` Explorer, `alt+shift+arrows` focus
+  pane; Windows adds `alt+shift++`/`alt+shift+-` splits and
+  `ctrl+shift+pgdn`/`pgup` workspaces, while Linux uses
+  `ctrl+shift+d`/`ctrl+shift+o` splits, `ctrl+alt+down`/`up` workspaces,
+  and `ctrl+pgdn`/`pgup` tabs. Browsers
   get none of these (they keep them; their zoom keys zoom the page),
   except find (`cmd+f` on macOS, `ctrl+shift+f` elsewhere: `ctrl+f`
   belongs to the programs in panes), the keyboard shortcuts and, on macOS,
@@ -618,11 +633,14 @@ described in [13](13-settings-and-appearance.md))
   key to the page first, so the menu acts only on keys the page left: a
   text field has the keyboard (the page's window handler skips them), a
   VS Code pane does, a dialog is open, or another window has it. A key thus runs
-  its command once. Keys without Cmd are shown but not registered (macOS
-  would offer them to a menu before the page), and the page runs them. On
-  Windows and Linux the menu registers no key at all, so Ctrl+C, Ctrl+M,
-  Ctrl+Q and every other key reach the page and its terminals: the page
-  runs the `pc` bindings it matches, and a key typed in a text field, in
+  its command once. Keys that editors and text fields use (`cmd+z`,
+  `cmd+[`, `cmd+]`, `cmd+d`, `cmd+f`, `cmd+g`, `cmd+shift+g`, `cmd+/`) and
+  keys without Cmd are shown but not registered (macOS would offer them to a
+  menu before the page), and the page runs them in terminals and app
+  chrome. On Windows and Linux the menu registers no key at all, so Ctrl+C,
+  Ctrl+M, Ctrl+Q and every other key reach the page and its terminals: the
+  page runs the `windows` or `linux` bindings it matches, and a key typed in
+  a text field, in
   a VS Code pane or in another window runs no menu command.
 - A menu command the page receives (`runMenuCommand`) runs in the same
   contexts as its key: while a VS Code pane has the keyboard (its iframe
@@ -767,10 +785,11 @@ described in [13](13-settings-and-appearance.md))
   the bar, on its machine's bar with `+` only.
 - `web/src/__tests__/keys.test.ts`: key names, chords from the page's keys,
   every platform's defaults (`design/testdata/keys/defaults.json`: `ctrl+b`
-  and other keys without a binding left to the terminal), the second press
-  of a chord's first stroke left to the terminal, key changes as the
-  user's rules, key hints (none for unbound commands);
-  `web/src/__tests__/vt.test.ts`: the bytes `ctrl+b` sends.
+  runs `pane.leave`, other unbound keys reach the terminal), the second
+  press of a chord's first stroke left to the terminal, key changes as the
+  user's rules, key hints (none for unbound commands), `handlePaneLeaveKey`
+  and focus escape/return with Monaco;
+  `web/src/__tests__/vt.test.ts`: the bytes `ctrl+b` sends when unbound.
 - `web/src/__tests__/desktop.test.ts`: key names on other layouts, the
   menu's commands: closing tabs and panes at once, their terminals ending
   once the close can no longer be undone, none under dialogs, the main UI's acting on the

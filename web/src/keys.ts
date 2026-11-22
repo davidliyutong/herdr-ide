@@ -224,8 +224,16 @@ export function shiftedChar(name: string): string | undefined {
   return named[name]?.shifted ?? (/^\d$/.test(name) ? shiftedDigits[Number(name)] : undefined);
 }
 
+export type OS = 'mac' | 'windows' | 'linux';
+
 /** Whether the page runs on macOS (or iOS), whose keys are shown as symbols. */
 export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+/** Whether the page runs on Windows. */
+export const isWindows = typeof navigator !== 'undefined' && !isMac && /Win/.test(navigator.platform || navigator.userAgent);
+
+/** The operating system the page runs on: mac, windows or linux. */
+export const osPlatform: OS = isMac ? 'mac' : isWindows ? 'windows' : 'linux';
 
 /** Keys shown as symbols on macOS, as its menus show them. */
 const macKeys: Record<string, string> = {

@@ -59,7 +59,7 @@ func TestFillReference(t *testing.T) {
 	}
 	text := string(out)
 	for _, want := range []string{"intro\n" + sb + "\n\n| Setting |", "| `terminal.fontSize` |", "| `gui.enabled` |", "`--gui`",
-		"| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – |", se + "\nmiddle\n", "\nend\n"} {
+		"| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – | `ctrl+shift+t` | – |", se + "\nmiddle\n", "\nend\n"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in\n%s", want, text)
 		}

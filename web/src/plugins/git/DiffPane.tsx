@@ -449,7 +449,15 @@ export function DiffPane({ m, pane, view, focused }: PaneViewProps) {
   const canRanges = !readOnly && status.kind === 'ready' && changes > 0 && rules.ranges;
 
   return (
-    <div className="git-diff" data-autofocus tabIndex={-1} onKeyDown={saveKeys.root}>
+    <div
+      className="git-diff"
+      data-autofocus
+      tabIndex={-1}
+      onFocus={(e) => {
+        if (e.target === e.currentTarget) ed.current?.editor.getModifiedEditor().focus();
+      }}
+      onKeyDown={saveKeys.root}
+    >
       <div className="git-diff-bar">
         <span className="git-diff-path ellipsis" title={d.orig ? `${d.orig} → ${d.path}` : d.path}>
           {diffTitle(d)}

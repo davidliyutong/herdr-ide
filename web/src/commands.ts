@@ -179,6 +179,32 @@ export const commands: Record<string, CommandDef> = {
       if (c?.terminal) actions.startRename('pane', c.m, c.terminal);
     },
   },
+  'pane.leave': {
+    enabled: hasPane,
+    run() {
+      const active = document.activeElement as HTMLElement | null;
+      const header = active?.closest<HTMLElement>('.pane-header');
+      if (header) {
+        const m = header.dataset.m;
+        const pane = header.dataset.pane;
+        if (m && pane) {
+          actions.focusPane(m, pane);
+          return;
+        }
+      }
+      const paneEl = active?.closest<HTMLElement>('.pane');
+      const paneHeader = paneEl?.querySelector<HTMLElement>('.pane-header');
+      if (paneHeader && active !== paneHeader) {
+        paneHeader.focus({ preventScroll: true });
+        return;
+      }
+      const c = focused();
+      if (!c?.pane) return;
+      const el = document.querySelector<HTMLElement>(`.pane-header[data-m="${CSS.escape(c.m)}"][data-pane="${CSS.escape(c.pane)}"]`);
+      if (el && active !== el) el.focus({ preventScroll: true });
+      else actions.focusPane(c.m, c.pane);
+    },
+  },
   'pane.actions': { enabled: () => changes() && hasPane(), run: withPane((m, pane) => openPaneMenu(m, pane)) },
   'pane.splitRight': {
     enabled: () => changes() && hasPane(),
