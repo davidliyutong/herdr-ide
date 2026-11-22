@@ -85,6 +85,9 @@ import './files.css';
 export const POLL_MS = 2000;
 /** The drag type of paths dragged inside the tree. */
 const DRAG_TYPE = `application/x-${APP_SLUG}-files`;
+/** Clipboard marker written on in-app copy/cut so an earlier OS file copy
+ * does not shadow a more recent in-app copy/cut on paste. */
+const CLIP_TYPE = `application/x-${APP_SLUG}-clipboard`;
 
 /** The DownloadURL of rows dragged out of the page ("type:name:url", as
  * Chromium takes it): one file as itself, anything else as the zip the
@@ -213,12 +216,14 @@ export function FilesPanel() {
       return;
     }
     if (!m || s.m !== m || !s.root) return;
-    const key = `${m}\u0000${activeEditor.pane}\u0000${activeEditor.path}`;
+    if (!within(activeEditor.path, s.root) || activeEditor.path === s.root) {
+      setLastAutoRevealed(undefined);
+      return;
+    }
+    const key = `${m}\u0000${s.root}\u0000${activeEditor.pane}\u0000${activeEditor.path}`;
     if (key === getLastAutoRevealed()) return;
     setLastAutoRevealed(key);
-    if (within(activeEditor.path, s.root) && activeEditor.path !== s.root) {
-      revealVisiblePath(activeEditor.path);
-    }
+    revealVisiblePath(activeEditor.path);
   }, [m, s.m, s.root, activeEditor]);
 
   // While the panel is shown and the page visible, the shown directories
@@ -375,12 +380,23 @@ export function FilesPanel() {
       if (ev.shiftKey) void remove(m, sel);
       else void trash(m, sel);
     } else if (mod && !ev.shiftKey && !ev.altKey && (ev.key === 'c' || ev.key === 'x') && sel.length) {
-      handled();
+      // Do not preventDefault: let native copy/cut fire onCopy/onCut to update
+      // the system clipboard marker when running in a browser.
       setClipboard({ m, paths: sel, cut: ev.key === 'x' });
-    } else if (mod && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === 'v' && st.clipboard?.m === m) {
-      handled();
-      void paste(m, row ? dirOf(row.path, row.dir) : root);
     }
+  };
+
+  const onCopyCut = (ev: React.ClipboardEvent<HTMLDivElement>, cut: boolean) => {
+    if (useStore.getState().readOnly) return;
+    if (ev.target instanceof HTMLElement && ev.target.closest('input, textarea, [contenteditable]')) return;
+    const st = useTree.getState();
+    const cur = st.cursor;
+    const sel = (st.selection.length ? st.selection : cur ? [cur] : []).filter((p) => kinds.has(p));
+    if (!sel.length) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    setClipboard({ m, paths: sel, cut });
+    ev.clipboardData?.setData(CLIP_TYPE, JSON.stringify({ m, paths: sel, cut }));
   };
 
   const onPaste = (ev: React.ClipboardEvent<HTMLDivElement>) => {
@@ -391,6 +407,13 @@ export function FilesPanel() {
     const row = cur ? rows.find((r) => r.path === cur) : undefined;
     const dir = row ? dirOf(row.path, row.dir) : root;
     const dt = ev.clipboardData;
+    const hasInAppMarker = !!dt?.types && Array.from(dt.types).includes(CLIP_TYPE);
+    if (hasInAppMarker && st.clipboard?.m === m) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void paste(m, dir);
+      return;
+    }
     if (hasClipboardFiles(dt)) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -661,6 +684,8 @@ export function FilesPanel() {
         aria-label={t('files.title')}
         aria-multiselectable
         onKeyDown={onKey}
+        onCopy={(ev) => onCopyCut(ev, false)}
+        onCut={(ev) => onCopyCut(ev, true)}
         onPaste={onPaste}
         onScroll={(e) => {
           pendingScroll.current = undefined;

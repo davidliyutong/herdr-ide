@@ -498,6 +498,41 @@ describe('pasting locally copied files', () => {
       const evRo = await dispatchPaste(tree, [file('ro.txt', 4)]);
       expect(evRo.defaultPrevented).toBe(false);
       expect(uploads()).toEqual([]);
+
+      // Earlier in-app copy does not block pasting newly copied OS files via Cmd/Ctrl+V.
+      await act(async () => useStore.getState().setReadOnly(false));
+      FakeXhr.reset();
+      useTree.setState({ clipboard: { m: 'm', paths: ['/home/u/src/a.txt'], cut: false } });
+      const keyV = new KeyboardEvent('keydown', { key: 'v', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true });
+      await act(async () => tree.dispatchEvent(keyV));
+      expect(keyV.defaultPrevented).toBe(false);
+      await dispatchPaste(tree, [file('os-newer.txt', 4)]);
+      expect(uploads()).toEqual([['/home/u/src/os-newer.txt', false]]);
+
+      // In-app copy event writes marker so an older OS file copy does not shadow it.
+      FakeXhr.reset();
+      const written: Record<string, string> = {};
+      const copyEv = new Event('copy', { bubbles: true, cancelable: true });
+      Object.defineProperty(copyEv, 'clipboardData', {
+        value: {
+          setData: (type: string, val: string) => {
+            written[type] = val;
+          },
+        },
+      });
+      await act(async () => tree.dispatchEvent(copyEv));
+      expect(copyEv.defaultPrevented).toBe(true);
+      const markerTypes = Object.keys(written);
+      expect(markerTypes.length).toBe(1);
+
+      const pasteWithMarker = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(pasteWithMarker, 'clipboardData', {
+        value: { types: [...markerTypes, 'Files'], files: [file('stale-os.txt', 4)], items: [] },
+      });
+      await act(async () => tree.dispatchEvent(pasteWithMarker));
+      await act(async () => settle());
+      expect(pasteWithMarker.defaultPrevented).toBe(true);
+      expect(uploads()).toEqual([]);
     } finally {
       await act(async () => root.unmount());
       host.remove();

@@ -571,7 +571,7 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
     pendingViewState.current = undefined;
     if (host.current && host.current.clientHeight > 0) ed.current.editor.layout?.();
     ed.current.editor.restoreViewState?.(state);
-  }, [status.kind]);
+  }, [status, m, pane, path]);
 
   useEffect(() => {
     ed.current?.editor.updateOptions({ readOnly: locked });

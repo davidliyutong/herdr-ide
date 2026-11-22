@@ -477,7 +477,7 @@ describe('FilesPanel', () => {
     });
     await act(async () => menuItem(t('files.cut'))!.run!());
     await key('ArrowUp');
-    await key('v', { metaKey: true, ctrlKey: true });
+    await act(async () => treeEl().dispatchEvent(new Event('paste', { bubbles: true, cancelable: true })));
     await flush();
     expect(changes()[2]).toEqual(['move', { paths: ['/home/u/src/main.go'], dir: '/home/u/src/lib' }]);
     expect(useTree.getState().clipboard).toBeUndefined();
@@ -772,7 +772,10 @@ describe('FilesPanel', () => {
     await key('End');
     await key('c', { metaKey: true, ctrlKey: true });
     useTree.setState({ cursor: '/elsewhere/gone', selection: [] });
-    await key('v', { metaKey: true, ctrlKey: true });
+    const kev = new KeyboardEvent('keydown', { key: 'v', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => treeEl().dispatchEvent(kev));
+    expect(kev.defaultPrevented).toBe(false);
+    await act(async () => treeEl().dispatchEvent(new Event('paste', { bubbles: true, cancelable: true })));
     await flush();
     expect(changes()).toEqual([['copy', { paths: ['/home/u/src/main.go'], dir: '/home/u/src' }]]);
   });
@@ -811,14 +814,14 @@ describe('FilesPanel', () => {
     // The move fails: the clipboard stays.
     answers.move = () => ({ status: 400, json: { error: 'failed', message: 'cross-device' } });
     await act(async () => row('/home/u/src/lib').click());
-    await key('v', { metaKey: true, ctrlKey: true });
+    await act(async () => treeEl().dispatchEvent(new Event('paste', { bubbles: true, cancelable: true })));
     await flush();
     expect(changes()).toEqual([['move', { paths: [main], dir: '/home/u/src/lib' }]]);
     expect(useTree.getState().clipboard).toEqual({ m: 'm', paths: [main], cut: true });
     // Some fail: those stay.
-    useTree.setState({ clipboard: { m: 'm', paths: ['/home/u/src/.hidden'], cut: true } });
+    useTree.setState({ clipboard: { m: 'm', paths: [main, '/home/u/src/.hidden'], cut: true } });
     answers.move = () => ({ status: 200, json: { paths: ['/home/u/src/lib/main.go'], failed: { '/home/u/src/.hidden': 'exists' } } });
-    await key('v', { metaKey: true, ctrlKey: true });
+    await act(async () => treeEl().dispatchEvent(new Event('paste', { bubbles: true, cancelable: true })));
     await flush();
     expect(useTree.getState().clipboard).toEqual({ m: 'm', paths: ['/home/u/src/.hidden'], cut: true });
   });
@@ -872,6 +875,13 @@ describe('FilesPanel', () => {
     await flush();
     expect(useTree.getState().root).toBe('/home/u/src');
     expect(useTree.getState().follow).toBe(true);
+
+    // If the user later navigates root into an ancestor of that active file, it auto-reveals.
+    tree['/etc'] = [f('hosts')];
+    await act(async () => showRoot('m', '/etc'));
+    await flush();
+    expect(useTree.getState().selection).toEqual(['/etc/hosts']);
+    expect(row('/etc/hosts').dataset.active).toBe('true');
   });
 
   it('persists and restores File Explorer UI state across tab and panel switches', async () => {

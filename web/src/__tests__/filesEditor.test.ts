@@ -139,7 +139,7 @@ import { useTerms } from '../state/terms';
 import type { MachineState } from '../lib/machine';
 import type { Layout } from '../term/layout';
 import { t } from '../i18n';
-import { CHECK_MS, EditorPane, keptViewState, loadText, resetViewStates, versionOf } from '../plugins/files/EditorPane';
+import { CHECK_MS, EditorPane, keepViewState, keptViewState, loadText, resetViewStates, versionOf } from '../plugins/files/EditorPane';
 import { dropEdit } from '../unsaved';
 import { registerQuickDiff } from '../plugins/files/quickDiff';
 import { useGoneFiles } from '../plugins/files/gone';
@@ -706,6 +706,17 @@ describe('EditorPane', () => {
       await render('/home/u/other.txt');
       expect(editor.restoredStates).toEqual([]);
       expect(keptViewState('m', 'view:v1', '/home/u/notes.txt')).toBeUndefined();
+    });
+
+    it('restores view state when a mounted TextEditor changes path while status remains ready', async () => {
+      useTerms.setState({ machines: { m: { terminals: {}, layout: layoutWith('v1') } } });
+      await render('/home/u/notes.txt');
+      const otherState = { cursorState: [], viewState: { scrollTop: 410 }, contributionsState: {} };
+      keepViewState('m', 'view:v1', '/home/u/other.txt', otherState as unknown as Parameters<typeof keepViewState>[3]);
+
+      // Same mounted root switches directly to /home/u/other.txt while status.kind was already 'ready'.
+      await render('/home/u/other.txt');
+      expect(editor.restoredStates).toEqual([otherState]);
     });
   });
 });
