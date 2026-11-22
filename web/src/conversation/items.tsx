@@ -163,13 +163,18 @@ function Plan({ item }: { item: PlanItem }) {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | undefined => asText(v)?.trim() || undefined;
 
-/** Where trusting a folder from a notice is: asked, done, or failed (why). */
-type Trusting = { busy: true } | { done: true } | { failed: string } | undefined;
+/** Where the folder of a notice that it is not trusted is: trusted from
+ * the notice (and not taken back since), a request under way, and why the
+ * last one failed. */
+interface Trusting {
+  trusted: boolean;
+  busy?: boolean;
+  failed?: string;
+}
 
 function Notice({ item, ctx }: { item: NoticeItem; ctx: ItemContext }) {
   const [open, setOpen] = useState(false);
-  const [trusting, setTrusting] = useState<Trusting>(undefined);
-  const trust = ctx.trust;
+  const [trusting, setTrusting] = useState<Trusting>({ trusted: false });
   const p = isObject(item.params) ? item.params : {};
   let text: string;
   let error = false;
@@ -215,7 +220,7 @@ function Notice({ item, ctx }: { item: NoticeItem; ctx: ItemContext }) {
     }
     case CHAT_NOTICES.untrustedFolder:
       untrusted = true;
-      text = trusting && 'done' in trusting ? t('conversation.notice.trusted') : t('conversation.notice.untrustedFolder');
+      text = trusting.trusted ? t('conversation.notice.trusted') : t('conversation.notice.untrustedFolder');
       break;
     case CHAT_NOTICES.fullAccessOff:
       text = t('conversation.notice.fullAccessOff');
@@ -248,31 +253,45 @@ function Notice({ item, ctx }: { item: NoticeItem; ctx: ItemContext }) {
             {t('conversation.notice.output')}
           </button>
         )}
-        {untrusted && trust && !(trusting && 'done' in trusting) && (
-          <button
-            type="button"
-            className="conv-link"
-            title={t('conversation.notice.trustHint', { cwd: str(p.cwd) ?? '' })}
-            disabled={!!trusting && 'busy' in trusting}
-            onClick={() => {
-              setTrusting({ busy: true });
-              trust().then(
-                () => setTrusting({ done: true }),
-                (e: unknown) => setTrusting({ failed: errorText(e, ctx.agent, 'conversation.notice.trustFailed') }),
-              );
-            }}
-          >
-            {t('conversation.notice.trust')}
-          </button>
-        )}
+        {untrusted && <TrustButton cwd={str(p.cwd) ?? ''} ctx={ctx} trusting={trusting} set={setTrusting} />}
       </div>
-      {trusting && 'failed' in trusting && (
+      {untrusted && trusting.failed && (
         <div className="conv-notice-failed" role="alert">
           {trusting.failed}
         </div>
       )}
       {open && output && <pre className="conv-pre conv-term">{plainOutput(output)}</pre>}
     </div>
+  );
+}
+
+/** The action of a notice that the folder is not trusted: trust it, or,
+ * once trusted from the notice, take that back (the source's trust and
+ * untrust); the other one follows when it is done. */
+function TrustButton({ cwd, ctx, trusting, set }: { cwd: string; ctx: ItemContext; trusting: Trusting; set: (t: Trusting) => void }) {
+  const trusted = trusting.trusted;
+  const ask = trusted ? ctx.untrust : ctx.trust;
+  if (!ask) return null;
+  return (
+    <button
+      type="button"
+      className="conv-link"
+      title={t(trusted ? 'conversation.notice.untrustHint' : 'conversation.notice.trustHint', { cwd })}
+      disabled={!!trusting.busy}
+      onClick={() => {
+        set({ trusted, busy: true });
+        ask().then(
+          () => set({ trusted: !trusted }),
+          (e: unknown) =>
+            set({
+              trusted,
+              failed: errorText(e, ctx.agent, trusted ? 'conversation.notice.untrustFailed' : 'conversation.notice.trustFailed'),
+            }),
+        );
+      }}
+    >
+      {t(trusted ? 'conversation.notice.untrust' : 'conversation.notice.trust')}
+    </button>
   );
 }
 

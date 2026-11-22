@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -354,18 +356,24 @@ func TestWSPluginOff(t *testing.T) {
 	s.attached(0)
 }
 
-// A page that does not take its messages as fast as they come is
-// disconnected, its subscriptions with it.
-func TestWSBackPressure(t *testing.T) {
+// A large replay to a page that does not take it as fast as it comes
+// fills only that subscription's share of the page's backlog: the core
+// stops reading it from the host, which drops that connection; the page
+// hears lost once it took what was sent and attaches again from its last
+// sequence number, while its other chats go on and its WebSocket stays.
+func TestWSFlowControl(t *testing.T) {
 	oldN, oldB := backlogMessages, backlogBytes
 	backlogMessages, backlogBytes = 64, 256<<10
 	t.Cleanup(func() { backlogMessages, backlogBytes = oldN, oldB })
 	s := newSetup(t)
-	id := s.newChat(chatproto.StateWorking)
+	s.f.dropAfter = 100 * time.Millisecond
+	big, small := s.newChat(chatproto.StateWorking), s.newChat(chatproto.StateIdle)
 	pg := s.dial(t)
-	pg.send(ClientMessage{Op: OpAttach, Sub: "s1", M: "gpu", Chat: id})
+	pg.send(ClientMessage{Op: OpAttach, Sub: "s1", M: "gpu", Chat: big})
 	pg.expect(TAttached)
-	s.attached(1)
+	pg.send(ClientMessage{Op: OpAttach, Sub: "s2", M: "gpu", Chat: small})
+	pg.expect(TAttached)
+	s.attached(2)
 	// Random text, which the WebSocket's compression does not shrink.
 	raw := make([]byte, 32<<10)
 	rand.Read(raw)
@@ -373,38 +381,260 @@ func TestWSBackPressure(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 4096; i++ {
+		for i := 1; i <= 4096; i++ {
 			s.f.mu.Lock()
-			n := len(s.f.attached)
+			n := s.f.attachedTo(big)
 			s.f.mu.Unlock()
 			if n == 0 {
 				return
 			}
-			s.f.emit(id, chatproto.Event{T: chatproto.EventUpdate, Live: true, Item: "m", Update: json.RawMessage(`{"text":"` + text + `"}`)})
+			s.f.emit(big, chatproto.Event{Seq: uint64(i), T: chatproto.EventUpdate, Item: "m", Update: json.RawMessage(`{"text":"` + text + `"}`)})
 		}
 	}()
-	s.attached(0)
+	s.f.wait("the host to drop the slow connection", func() bool { return s.f.attachedTo(big) == 0 })
 	<-done
+	s.p.mu.Lock()
+	pages := len(s.p.pages)
+	s.p.mu.Unlock()
+	if pages != 1 {
+		t.Fatalf("%d pages", pages)
+	}
+	var last float64
+	for {
+		m := pg.next()
+		if m["t"] == TEvent && m["sub"] == "s1" {
+			seq := m["ev"].(map[string]any)["seq"].(float64)
+			if seq != last+1 {
+				t.Fatalf("event %v after %v", seq, last)
+			}
+			last = seq
+			continue
+		}
+		if m["t"] != TDetached || m["sub"] != "s1" || errCode(m) != CodeLost {
+			t.Fatalf("got %v", m)
+		}
+		break
+	}
+	if last == 0 {
+		t.Error("no event came before the subscription was lost")
+	}
+	// The page's other chat goes on.
+	s.f.emit(small, chatproto.Event{Seq: 1, T: chatproto.EventTurn, State: chatproto.TurnStart})
+	if m := pg.expect(TEvent); m["sub"] != "s2" {
+		t.Errorf("the other chat's event: %v", m)
+	}
+	pg.send(ClientMessage{Op: OpCommand, ID: "p1", M: "gpu", Chat: small, Cmd: &chatproto.Command{Op: chatproto.OpCancel}})
+	if m := pg.expect(TAck); m["id"] != "p1" || m["error"] != nil {
+		t.Errorf("ack %v", m)
+	}
+	// It attaches again after what it has.
+	pg.send(ClientMessage{Op: OpAttach, Sub: "s3", M: "gpu", Chat: big, From: uint64(last)})
+	pg.expect(TAttached)
+	s.f.mu.Lock()
+	req := s.f.requests[len(s.f.requests)-1]
+	s.f.mu.Unlock()
+	if req.Op != chatproto.OpAttach || req.Chat != big || req.From != uint64(last) {
+		t.Errorf("attached again as %+v", req)
+	}
+}
+
+// What only the core sends (answers, ends of subscriptions) is bounded by
+// the page's backlog, the events of its subscriptions by their shares: a
+// page that falls behind on the former is disconnected (try again later).
+func TestWSControlOverflow(t *testing.T) {
+	oldN, oldB := backlogMessages, backlogBytes
+	backlogMessages, backlogBytes = 16, 256<<10
+	t.Cleanup(func() { backlogMessages, backlogBytes = oldN, oldB })
+	s := newSetup(t)
+	pg := s.dial(t)
+	var sp *page
+	for deadline := time.Now().Add(5 * time.Second); sp == nil; time.Sleep(time.Millisecond) {
+		s.p.mu.Lock()
+		for x := range s.p.pages {
+			sp = x
+		}
+		s.p.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("no page")
+		}
+	}
+	sp.mu.Lock()
+	data := &sub{room: make(chan struct{}, 1)}
+	for range 4 * backlogMessages {
+		sp.enqueueLocked([]byte(`{"t":"event","sub":"x","ev":{"t":"update"}}`), data)
+	}
+	afterData := sp.closed
+	for range backlogMessages/2 + 1 {
+		sp.enqueueLocked([]byte(`{"t":"ack","id":"k"}`), nil)
+	}
+	afterControl := sp.closed
+	sp.mu.Unlock()
+	if afterData || !afterControl {
+		t.Fatalf("closed after the events %v, after the answers %v", afterData, afterControl)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	for {
-		if _, _, err := pg.c.Read(ctx); err != nil {
-			if ctx.Err() != nil {
-				t.Fatal("the page was not disconnected")
-			}
-			break
+		_, _, err := pg.c.Read(ctx)
+		if err == nil {
+			continue
+		}
+		if ctx.Err() != nil {
+			t.Fatal("the page was not disconnected")
+		}
+		if code := websocket.CloseStatus(err); code != websocket.StatusTryAgainLater && code != -1 {
+			t.Errorf("closed with %v", err)
+		}
+		break
+	}
+}
+
+// Before an attach, on which a prompt may start the chat's agent, the
+// host process the core reaches takes the machine's settings unless it
+// took them as they are: a host started again (another pid) takes them
+// anew, and so after the settings changed.
+func TestWSConfigures(t *testing.T) {
+	s := newSetup(t)
+	s.h.st.OnChange(s.p.settingsChanged) // as Start does
+	id := s.newChat(chatproto.StateSleeping)
+	pg := s.dial(t)
+	attach := func(sub string) []string {
+		t.Helper()
+		s.f.mu.Lock()
+		n := len(s.f.requests)
+		s.f.mu.Unlock()
+		pg.send(ClientMessage{Op: OpAttach, Sub: sub, M: "gpu", Chat: id})
+		pg.expect(TAttached)
+		return s.f.ops()[n:]
+	}
+	if ops := attach("s1"); !slices.Equal(ops, []string{chatproto.OpConfigure, chatproto.OpAttach}) {
+		t.Errorf("first attach: %v", ops)
+	}
+	if ops := attach("s2"); !slices.Equal(ops, []string{chatproto.OpAttach}) {
+		t.Errorf("attach to the same host: %v", ops)
+	}
+	s.f.mu.Lock()
+	s.f.pid = 7
+	s.f.mu.Unlock()
+	s.f.end(true)
+	pg.expect(TDetached)
+	pg.expect(TDetached)
+	if ops := attach("s3"); !slices.Equal(ops, []string{chatproto.OpConfigure, chatproto.OpAttach}) {
+		t.Errorf("attach to a host started again: %v", ops)
+	}
+	if err := s.h.st.Set(SettingAllowFull, "gpu", true); err != nil {
+		t.Fatal(err)
+	}
+	if ops := attach("s4"); !slices.Equal(ops, []string{chatproto.OpConfigure, chatproto.OpAttach}) {
+		t.Errorf("attach after the settings changed: %v", ops)
+	}
+	s.f.mu.Lock()
+	for _, r := range s.f.requests {
+		if r.Op == chatproto.OpConfigure && r.Settings == nil {
+			t.Error("a configure without settings")
 		}
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+	if last := s.f.requests[len(s.f.requests)-2]; last.Op != chatproto.OpConfigure || !last.Settings.AllowFull {
+		t.Errorf("configured %+v", last)
+	}
+	s.f.mu.Unlock()
+}
+
+// The core keeps at most maxHostConns connections to a machine's chat
+// host, the last reservedConns for the watch and the configures: beyond,
+// a subscription or a request is refused (too_many).
+func TestHostConnLimit(t *testing.T) {
+	oldMax, oldRes := maxHostConns, reservedConns
+	maxHostConns, reservedConns = 5, 2
+	t.Cleanup(func() { maxHostConns, reservedConns = oldMax, oldRes })
+	s := newSetup(t)
+	pg := s.dial(t)
+	for i := range 3 {
+		pg.send(ClientMessage{Op: OpAttach, Sub: fmt.Sprint("s", i), M: "gpu", Chat: s.newChat(chatproto.StateIdle)})
+		pg.expect(TAttached)
+	}
+	pg.send(ClientMessage{Op: OpAttach, Sub: "more", M: "gpu", Chat: s.newChat(chatproto.StateIdle)})
+	if m := pg.expect(TDetached); m["sub"] != "more" || errCode(m) != chatproto.CodeTooMany {
+		t.Errorf("one more: %v", m)
+	}
+	if code, out, _ := s.call("GET", "gpu", "chats", ""); code != 409 || out["error"] != chatproto.CodeTooMany {
+		t.Errorf("a request: %d %v", code, out)
+	}
+	// The watch and its configure have their own.
+	s.start(t)
+	s.f.wait("the watch", func() bool { return len(s.f.watchers) == 1 })
+	s.f.wait("its configure", func() bool { return s.f.count(chatproto.OpConfigure) >= 2 })
+	// A subscription that ends gives its connection back.
+	pg.send(ClientMessage{Op: OpDetach, Sub: "s0"})
+	s.attached(2)
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
 		s.p.mu.Lock()
-		pages, inUse := len(s.p.pages), len(s.p.inUse)
+		n := s.p.conns["gpu"].open
 		s.p.mu.Unlock()
-		if pages == 0 && inUse == 0 {
+		if n == 2 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("pages %d, machines in use %d", pages, inUse)
+			t.Fatalf("%d connections", n)
 		}
+	}
+	pg.send(ClientMessage{Op: OpAttach, Sub: "again", M: "gpu", Chat: s.newChat(chatproto.StateIdle)})
+	if m := pg.expect(TAttached); m["sub"] != "again" {
+		t.Errorf("again: %v", m)
+	}
+}
+
+// A command that names no machine or chat is refused without a record;
+// what a page gives is clipped in the records, and of its refusals of one
+// operation, one is written per refusalGap, the next one counting those
+// in between.
+func TestWSAuditBounds(t *testing.T) {
+	s := newSetup(t)
+	clk := &clock{}
+	s.p.now = clk.now
+	s.h.readOnly = true
+	id := s.newChat(chatproto.StateIdle)
+	pg := s.dial(t)
+	for _, m := range []ClientMessage{
+		{Op: OpCommand, ID: "b1", M: strings.Repeat("m", MaxPageID+1), Chat: id, Cmd: &chatproto.Command{Op: chatproto.OpPrompt}},
+		{Op: OpCommand, ID: "b2", M: "gpu", Chat: "../x", Cmd: &chatproto.Command{Op: chatproto.OpPrompt}},
+		{Op: OpCommand, ID: "b3", Chat: id, Cmd: &chatproto.Command{Op: chatproto.OpPrompt}},
+	} {
+		pg.send(m)
+		if got := pg.expect(TAck); got["id"] != m.ID || errCode(got) != chatproto.CodeBadRequest {
+			t.Errorf("%s: %v", m.ID, got)
+		}
+	}
+	long := strings.Repeat("é", 400)
+	for i := range 5 {
+		pg.send(ClientMessage{Op: OpCommand, ID: fmt.Sprint("c", i), M: "gpu", Chat: id, Cmd: &chatproto.Command{Op: chatproto.OpSetConfig, Config: "mode", Value: long}})
+		if got := pg.expect(TAck); errCode(got) != CodeReadOnly {
+			t.Errorf("ack %v", got)
+		}
+	}
+	pg.send(ClientMessage{Op: OpCommand, ID: "p0", M: "gpu", Chat: id, Cmd: &chatproto.Command{Op: chatproto.OpPrompt}})
+	pg.expect(TAck)
+	clk.add(refusalGap)
+	pg.send(ClientMessage{Op: OpCommand, ID: "c5", M: "gpu", Chat: id, Cmd: &chatproto.Command{Op: chatproto.OpSetConfig, Config: "mode", Value: "x"}})
+	pg.expect(TAck)
+	s.h.mu.Lock()
+	defer s.h.mu.Unlock()
+	var got []string
+	for _, a := range s.h.audits {
+		got = append(got, fmt.Sprint(a.event, " repeated=", a.fields["repeated"]))
+		if v, ok := a.fields["value"].(string); ok && len(v) > maxAudit+len("…") {
+			t.Errorf("value of %d bytes", len(v))
+		}
+		if a.fields["machine"] != "gpu" || a.fields["chat"] != id {
+			t.Errorf("audited %v", a.fields)
+		}
+	}
+	want := []string{"chat.set_config repeated=<nil>", "chat.prompt repeated=<nil>", "chat.set_config repeated=4"}
+	if !slices.Equal(got, want) {
+		t.Errorf("audits\n got %q\nwant %q", got, want)
+	}
+	if v := s.h.audits[0].fields["value"].(string); !strings.HasPrefix(long, strings.TrimSuffix(v, "…")) || !utf8.ValidString(v) {
+		t.Errorf("clipped value %q", v)
 	}
 }
 

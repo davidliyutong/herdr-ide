@@ -3,6 +3,7 @@
 package chathost
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -44,6 +45,10 @@ const (
 	// catchUpEvery is how often attaching brings what a handed off
 	// session did in a terminal into the log (it may run the agent to ask).
 	catchUpEvery = 10 * time.Second
+	// maxClientIDs is how many of a chat's last prompts a prompt with the
+	// page's id of one of them is known by: it was taken already, and is
+	// not sent again (a page that did not get the ack sends it again).
+	maxClientIDs = 256
 )
 
 // chat is a conversation: its journal's row, its agent session while one
@@ -95,6 +100,30 @@ type chat struct {
 
 	catchMu  sync.Mutex // one History of the session at a time
 	caughtUp time.Time  // when an attach last brought a handed off session's turns in
+
+	// clients are the page's ids of the chat's last prompts its log has
+	// (EventUser, EventQueued), clientOrder them the oldest first; sending
+	// are the prompts being taken, by the page's id.
+	clients     map[string]bool
+	clientOrder []string
+	sending     map[string]*sending
+
+	// mode is the value of the chat's mode option its agent stated last,
+	// modeGen the agent's (gen) that stated it; denying: an agent of gen
+	// denying is being taken out of a full access it took by itself.
+	mode    string
+	modeGen uint64
+	denying uint64
+	// untrustedGen is the agent (gen) whose start told that it runs
+	// without the project's own settings.
+	untrustedGen uint64
+}
+
+// sending is a prompt being taken: a prompt with the same page's id waits
+// for its answer instead of being sent again.
+type sending struct {
+	done chan struct{}
+	err  *chatproto.Error
 }
 
 // start is a start of a chat's agent.
@@ -129,7 +158,21 @@ var pendingCount atomic.Uint64
 
 func newChat(h *host, r row) *chat {
 	return &chat{h: h, r: r, subs: map[*subscriber]struct{}{}, pending: map[string]*pending{}, dropped: map[string]bool{},
-		queued: map[string]bool{}}
+		queued: map[string]bool{}, clients: map[string]bool{}, sending: map[string]*sending{}}
+}
+
+// tookClient notes the page's id of a prompt the log has now. The caller
+// holds c.mu.
+func (c *chat) tookClient(id string) {
+	if id == "" || c.clients[id] {
+		return
+	}
+	c.clients[id] = true
+	c.clientOrder = append(c.clientOrder, id)
+	if len(c.clientOrder) > maxClientIDs {
+		delete(c.clients, c.clientOrder[0])
+		c.clientOrder = slices.Delete(c.clientOrder, 0, 1)
+	}
 }
 
 func now() time.Time { return time.Now().UTC().Truncate(time.Millisecond) }
@@ -234,6 +277,9 @@ func (c *chat) emit(ev chatproto.Event) bool {
 	}
 	c.brokenLog = false
 	c.r.Seq, c.r.Updated, c.r.HistoryAfter, c.r.TurnEnd, c.r.Bytes = r.Seq, r.Updated, r.HistoryAfter, r.TurnEnd, r.Bytes
+	if st.T == chatproto.EventUser || st.T == chatproto.EventQueued {
+		c.tookClient(st.ClientID)
+	}
 	out := b
 	if st.T == ev.T && hasStderr(ev) {
 		if l := line(ev); l != nil && len(l) <= chatproto.MaxLine {
@@ -543,6 +589,10 @@ func (c *chat) stopAgent(rest string, e, turnErr *chatproto.Error) chatadapter.S
 	return sess
 }
 
+// untrustedNotice is the method of the notice that an agent started
+// without the project's own settings (agentproto.NoticeUntrustedFolder).
+var untrustedNotice = agentproto.NoticeMethod(agentproto.NoticeUntrustedFolder)
+
 // errEnded is what waits when the chat's agent ends.
 var errEnded = perr(chatproto.CodeEnded, "the chat's agent ended")
 
@@ -590,6 +640,11 @@ func (c *chat) launch(st *start, resume string) {
 	if id != "" && sessionID.MatchString(id) {
 		c.r.SessionID = id
 	}
+	if c.untrustedGen != st.gen {
+		// It started in a trusted folder: the next start without the
+		// project's settings is told again.
+		c.r.UntrustedTold = false
+	}
 	c.r.HandedOff, c.r.Closed, c.r.Error = false, time.Time{}, nil
 	c.rest = chatproto.StateSleeping
 	c.emitInfo()
@@ -633,7 +688,7 @@ func (c *chat) startAgent(st *start, resume string) (chatadapter.Session, *chatp
 	}
 	p := chatadapter.StartParams{
 		Kind: kind, Argv: append([]string{path}, spec.Argv[1:]...), Env: env, Cwd: cwd, Resume: resume,
-		NewSessionMeta: spec.NewSessionMeta, Options: opts, Trusted: h.j.trusted(cwd), Client: clientInfo(), Settings: settings,
+		NewSessionMeta: spec.NewSessionMeta, Options: opts, Trusted: h.trusted(cwd), Client: clientInfo(), Settings: settings,
 		Logger: log.New(h.logger.Writer(), h.logger.Prefix()+"chat "+id+": ", h.logger.Flags()),
 	}
 	if resume == "" {
@@ -685,6 +740,43 @@ func (c *chat) fullAccessOff(st *start, mode string) {
 	c.emit(chatproto.Event{T: chatproto.EventNotice, Method: agentproto.NoticeMethod(agentproto.NoticeFullAccessOff),
 		Params: line(map[string]string{"mode": mode})})
 	c.save()
+}
+
+// revokeFull ends the agent of a chat that runs or starts in a mode of
+// full access the settings no longer allow, and starts it again, its
+// session resumed, in the default mode, which the notice full_access_off
+// tells. It returns the session for the caller to end (host.endSession)
+// without c.mu. The caller holds c.mu.
+func (c *chat) revokeFull() chatadapter.Session {
+	if c.deleted || c.stopped || (c.sess == nil && !c.starting) {
+		return nil
+	}
+	full := c.r.Options.Mode
+	if !fullMode(c.r.Config, full) {
+		full = ""
+		if o := modeOption(c.r.Config); o != nil && fullMode(c.r.Config, o.CurrentValue) {
+			full = o.CurrentValue
+		}
+	}
+	if full == "" {
+		return nil
+	}
+	c.h.logf("chat %s: full access was turned off: its agent starts again in the default mode", c.r.ID)
+	sess := c.stopAgent(chatproto.StateSleeping, nil, perr(chatproto.CodeNotAllowed, "full access was turned off"))
+	c.r.Options.Mode = chatproto.ModeDefault
+	c.emit(chatproto.Event{T: chatproto.EventNotice, Method: agentproto.NoticeMethod(agentproto.NoticeFullAccessOff),
+		Params: line(map[string]string{"mode": full})})
+	c.save()
+	if !c.h.stopping.Load() {
+		st := c.beginStart()
+		session := c.r.SessionID
+		if c.r.Fresh {
+			session = ""
+		}
+		c.h.wg.Go(func() { c.launch(st, session) })
+	}
+	c.notify()
+	return sess
 }
 
 // watchSession waits for the end of a session: one the host did not end
@@ -869,8 +961,12 @@ func (c *chat) call(f func(ctx context.Context) error) *chatproto.Error {
 
 // prompt takes a message of the user: a new turn on an idle chat, after
 // the agent's start on a chat that has none (its session resumed, and what
-// it did in a terminal brought in first), else queued for the agent.
-func (c *chat) prompt(cmd chatproto.Command) *chatproto.Error {
+// it did in a terminal brought in first), else queued for the agent. A
+// prompt with the page's id (ClientID) of one of the chat's last
+// maxClientIDs prompts its log has is that one sent again by a page that
+// did not get its answer: it is answered OK and not sent again; one with
+// the id of a prompt being taken gets that one's answer.
+func (c *chat) prompt(cmd chatproto.Command) (e *chatproto.Error) {
 	images, e := checkContent(cmd.Content)
 	if e != nil {
 		return e
@@ -879,7 +975,29 @@ func (c *chat) prompt(cmd chatproto.Command) *chatproto.Error {
 		return perr(chatproto.CodeBadRequest, "clientId too long")
 	}
 	msg := newID("m")
+	checked := false
 	c.mu.Lock()
+	if id := cmd.ClientID; id != "" && !c.deleted {
+		if c.clients[id] {
+			c.mu.Unlock()
+			c.h.logf("chat %s: a prompt it took already came again", c.r.ID)
+			return nil
+		}
+		if f := c.sending[id]; f != nil {
+			c.mu.Unlock()
+			<-f.done
+			return f.err
+		}
+		f := &sending{done: make(chan struct{})}
+		c.sending[id] = f
+		defer func() {
+			c.mu.Lock()
+			delete(c.sending, id)
+			c.mu.Unlock()
+			f.err = e
+			close(f.done)
+		}()
+	}
 	for {
 		switch {
 		case c.deleted:
@@ -920,14 +1038,28 @@ func (c *chat) prompt(cmd chatproto.Command) *chatproto.Error {
 				c.mu.Unlock()
 				return perr(chatproto.CodeEnded, "the host stops")
 			}
-			st := c.beginStart()
-			c.held = true
 			handedOff, session := c.r.HandedOff, c.r.SessionID
 			if c.r.Fresh {
 				// The agent may not have kept a session that never had a
 				// turn: a new one is made.
 				session = ""
 			}
+			if session != "" && !checked {
+				// Not while another process runs the session (a
+				// terminal's): the chat stays as it is.
+				checked = true
+				kind, cwd := c.r.Kind, c.r.Cwd
+				c.mu.Unlock()
+				e := c.h.inTerminal(kind, cwd, session)
+				c.mu.Lock()
+				if e != nil {
+					c.mu.Unlock()
+					return e
+				}
+				continue
+			}
+			st := c.beginStart()
+			c.held = true
 			c.mu.Unlock()
 			if handedOff && session != "" {
 				c.catchMu.Lock()
@@ -1369,7 +1501,7 @@ func (c *chat) rename(title string) *chatproto.Error {
 	if c.deleted {
 		return perr(chatproto.CodeUnknownChat, "no such chat")
 	}
-	c.r.Title = title
+	c.r.Title, c.r.Renamed = title, true
 	c.emitInfo()
 	return nil
 }
@@ -1426,6 +1558,18 @@ func (c *chat) agentEvent(gen uint64, ev chatproto.Event) {
 		if ev.T == chatproto.EventUpdate {
 			// The agent answered: it keeps the session.
 			c.r.Fresh = false
+		}
+		if ev.T == chatproto.EventNotice && ev.Method == untrustedNotice {
+			// Told once, until an agent of the chat starts in a trusted
+			// folder.
+			c.untrustedGen = gen
+			if c.r.UntrustedTold {
+				return
+			}
+			c.r.UntrustedTold = true
+			c.emit(ev)
+			c.save()
+			return
 		}
 		c.emit(ev)
 	case chatproto.EventQueued:
@@ -1492,11 +1636,18 @@ func (c *chat) dropEvent(kind string) {
 	}
 }
 
-// update takes what the chat's adapter states of the chat: its title,
+// update takes what the chat's adapter states of the chat: its title
+// (the agent's own title of the session, unless the user named the chat),
 // session id, configuration options, slash commands, usage, capabilities
 // and agent version; the other members are the host's. A member whose
 // JSON is longer than stateBytes is left as it was. The clients are told
 // soon, the changes of a moment together.
+//
+// A mode the agent changes to by itself (the mode a plan's approval goes
+// on in, an agent's own switch) after the first one it stated is the
+// chat's mode from then on: its agent starts again in it. A mode of full
+// access the agent takes while the settings do not allow it is taken
+// back (denyFull).
 func (c *chat) update(gen uint64, fn func(*chatproto.Chat)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1505,7 +1656,7 @@ func (c *chat) update(gen uint64, fn func(*chatproto.Chat)) {
 	}
 	cp := *c.snapshot()
 	fn(&cp)
-	if t := strings.TrimSpace(clip(cp.Title, agentTitleRunes)); t != "" {
+	if t := strings.TrimSpace(clip(cp.Title, agentTitleRunes)); t != "" && !c.r.Renamed {
 		c.r.Title = t
 	}
 	if cp.SessionID != c.r.SessionID && sessionID.MatchString(cp.SessionID) {
@@ -1513,6 +1664,21 @@ func (c *chat) update(gen uint64, fn func(*chatproto.Chat)) {
 	}
 	if fits(cp.Config) {
 		c.r.Config = cp.Config
+		if o := modeOption(c.r.Config); o != nil && o.CurrentValue != "" {
+			id, value := o.ID, o.CurrentValue
+			if c.modeGen == gen && value != c.mode && validOption(value) {
+				// Stored with the EventInfo of this change.
+				c.h.logf("chat %s: its agent changed its mode to %q", c.r.ID, clip(value, 64))
+				c.r.Options.Mode = value
+			}
+			prev := c.mode
+			c.mode, c.modeGen = value, gen
+			if fullMode(c.r.Config, value) && !c.h.settings.Load().AllowFull && c.denying != gen {
+				c.denying = gen
+				back := safeMode(o, prev, c.r.Options.Mode)
+				c.h.wg.Go(func() { c.denyFull(gen, id, value, back) })
+			}
+		}
 	}
 	if fits(cp.Commands) {
 		c.r.Commands = cp.Commands
@@ -1536,6 +1702,101 @@ func (c *chat) update(gen uint64, fn func(*chatproto.Chat)) {
 		})
 	}
 	c.notify()
+}
+
+// modeOption is the chat's mode option; nil when it has none.
+func modeOption(config []chatproto.ConfigOption) *chatproto.ConfigOption {
+	for i := range config {
+		if config[i].Category == chatproto.CategoryMode {
+			return &config[i]
+		}
+	}
+	return nil
+}
+
+// safeMode is the value of a mode option to take an agent out of a full
+// access it took by itself: the mode it had before (prev), the chat's
+// mode (want), the default mode, or the first of its values that gives
+// no full access; "" when it has none.
+func safeMode(o *chatproto.ConfigOption, prev, want string) string {
+	ok := func(v string) bool {
+		return v != "" && v != chatproto.ModeFull &&
+			slices.ContainsFunc(o.Options, func(x chatproto.ConfigValue) bool { return x.Value == v && !x.Full })
+	}
+	for _, v := range []string{prev, want, chatproto.ModeDefault, "ask"} {
+		if ok(v) {
+			return v
+		}
+	}
+	for _, x := range o.Options {
+		if ok(x.Value) {
+			return x.Value
+		}
+	}
+	return ""
+}
+
+// denyFull takes an agent (gen) out of a mode of full access it took by
+// itself while the settings do not allow it: its mode option id is set
+// back to back; when that cannot be, the agent is ended and the chat
+// fails (CodeNotAllowed). The chat's mode is back's (or the default) from
+// then on, which the notice full_access_off tells.
+func (c *chat) denyFull(gen uint64, id, value, back string) {
+	c.mu.Lock()
+	if st := c.start; c.sess == nil && st != nil && st.gen == gen {
+		// Stated while it starts: once it runs, unless the start set
+		// another mode.
+		c.mu.Unlock()
+		<-st.done
+		c.mu.Lock()
+	}
+	sess := c.sess
+	o := modeOption(c.r.Config)
+	switch {
+	case c.gen != gen || sess == nil || c.deleted:
+		c.mu.Unlock()
+		return
+	case o == nil || !fullMode(c.r.Config, o.CurrentValue):
+		c.denying = 0
+		c.mu.Unlock()
+		return
+	}
+	value = o.CurrentValue
+	c.mu.Unlock()
+	c.h.logf("chat %s: its agent took the mode %q of full access, which this machine does not allow", c.r.ID, clip(value, 64))
+	var e *chatproto.Error
+	if back == "" {
+		e = perr(chatproto.CodeNotAllowed, "the agent has no mode without full access")
+	} else {
+		e = c.call(func(ctx context.Context) error { return sess.SetConfig(ctx, id, back) })
+	}
+	c.mu.Lock()
+	if c.gen != gen || c.deleted {
+		c.mu.Unlock()
+		return
+	}
+	c.r.Options.Mode = cmp.Or(back, chatproto.ModeDefault)
+	c.emit(chatproto.Event{T: chatproto.EventNotice, Method: agentproto.NoticeMethod(agentproto.NoticeFullAccessOff),
+		Params: line(map[string]string{"mode": value})})
+	if e == nil {
+		if o := modeOption(c.r.Config); o != nil && o.ID == id {
+			config := slices.Clone(c.r.Config)
+			modeOption(config).CurrentValue = back
+			c.r.Config = config
+			c.mode = back
+		}
+		c.denying = 0
+		c.emitInfo()
+		c.mu.Unlock()
+		return
+	}
+	c.h.logf("chat %s: its agent stays in full access (%s): it is ended", c.r.ID, e.Error())
+	fail := perr(chatproto.CodeNotAllowed, "the agent took full access, which this machine does not allow")
+	sess = c.stopAgent(chatproto.StateFailed, fail, fail)
+	c.save()
+	c.notify()
+	c.mu.Unlock()
+	c.h.endSession(sess, false)
 }
 
 // fits tells whether v's JSON is at most stateBytes.

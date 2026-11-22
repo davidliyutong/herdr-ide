@@ -8,42 +8,51 @@ import (
 	"herdr-ide/internal/agentproto"
 )
 
-// A terminal of the product's own helpers (the chat host), which no client
-// shows, is never read, attached to or stored, whatever its label's value;
-// the other terminals are captured as before.
+// The terminal of the product's own helper (the chat host: its reserved
+// name and its hidden label's value, both, as the core's terminal
+// protocol hides it), which no client shows, is never read, attached to or
+// stored; a terminal that only carries the label, or only has the name,
+// is one the clients show and is captured as before.
 func TestHiddenTerminalsNotCaptured(t *testing.T) {
 	env, f := testEnv(t)
 	fast(t)
+	name := agentproto.ChatHostName
 	shown := live("t1", 100)
 	host := live("t2", 200)
+	host.Name = &name
 	host.Labels[agentproto.HiddenLabel] = agentproto.HiddenChatHost
-	other := live("t3", 300)
-	other.Labels[agentproto.HiddenLabel] = ""
-	f.set(shown, host, other)
-	for _, addr := range []string{"t1", "t2", "t3"} {
+	labeled := live("t3", 300)
+	labeled.Labels[agentproto.HiddenLabel] = agentproto.HiddenChatHost
+	named := live("t4", 400)
+	named.Name = &name
+	named.Labels[agentproto.HiddenLabel] = "other"
+	f.set(shown, host, labeled, named)
+	for _, addr := range []string{"t1", "t2", "t3", "t4"} {
 		f.setText(addr, "$ "+addr)
 		f.setPaint(addr, painter(50, 40, "$ "+addr))
 	}
 	res := mustCapture(t, env, params)
-	if res.Captured != 1 || res.Failed != 0 || res.Skipped != 0 {
+	if res.Captured != 3 || res.Failed != 0 || res.Skipped != 0 {
 		t.Fatalf("result %+v", res)
 	}
-	if at := f.attached(); len(at) != 1 || at[0].Terminal != "t1" {
-		t.Fatalf("attaches %+v", at)
+	for _, at := range f.attached() {
+		if at.Terminal == "t2" {
+			t.Errorf("attached to the chat host's terminal: %+v", at)
+		}
 	}
 	f.mu.Lock()
 	for _, r := range f.reads {
-		if r["terminal"] != "t1" {
+		if r["terminal"] == "t2" {
 			t.Errorf("read %v", r)
 		}
 	}
 	f.mu.Unlock()
-	for _, addr := range []string{"t2", "t3"} {
-		if metaOf(t, env, addr, false) != nil {
-			t.Errorf("a snapshot of %s", addr)
-		}
+	if metaOf(t, env, "t2", false) != nil {
+		t.Error("a snapshot of the chat host's terminal")
 	}
-	if metaOf(t, env, "t1", false) == nil {
-		t.Error("no snapshot of t1")
+	for _, addr := range []string{"t1", "t3", "t4"} {
+		if metaOf(t, env, addr, false) == nil {
+			t.Errorf("no snapshot of %s", addr)
+		}
 	}
 }

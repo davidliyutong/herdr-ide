@@ -293,8 +293,16 @@ export interface ComposerProps {
   allowFull: boolean;
   /** Shows the card that waits for the user. */
   onShowWaiting(): void;
+  /** Whether the conversation has the user's message of that clientId (the
+   * agent took it, or it is queued). */
+  delivered?(clientId: string): boolean;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }
+
+/** Whether a command's refusal leaves its outcome unknown: it was sent,
+ * and the connection or the subscription ended before the answer came
+ * (the source's error says unsure). */
+const unsureOf = (e: unknown): boolean => typeof e === 'object' && e !== null && (e as { unsure?: unknown }).unsure === true;
 
 export function Composer({
   source,
@@ -309,6 +317,7 @@ export function Composer({
   readOnly,
   allowFull,
   onShowWaiting,
+  delivered,
   inputRef,
 }: ComposerProps) {
   const caps = chat?.capabilities ?? NO_CAPABILITIES;
@@ -318,6 +327,16 @@ export function Composer({
   const [pending, setPending] = useState(false);
   /** Why the last thing the user did was not done. */
   const [failed, setFailed] = useState<string | undefined>(undefined);
+  /** The message last sent whose outcome is not known: its id, which
+   * sending the same content again keeps (the host takes a message of one
+   * id once), and its content. unsure: the connection ended before the
+   * answer, and it shows in the conversation once the host has it. */
+  const outstanding = useRef<{ clientId: string; key: string } | undefined>(undefined);
+  const [unsure, setUnsure] = useState(false);
+  const deliveredRef = useRef(delivered);
+  useLayoutEffect(() => {
+    deliveredRef.current = delivered;
+  });
   const [caret, setCaret] = useState(text.length);
   /** The list the user closed (its kind and where its word begins). */
   const [dismissed, setDismissed] = useState<string | undefined>(undefined);
@@ -399,6 +418,7 @@ export function Composer({
   const change = (v: string, at?: number) => {
     setText(v);
     setFailed(undefined);
+    setUnsure(false);
     if (at !== undefined) setCaret(at);
     // A list closed stays closed until its word ends.
     if (!menuAt(v, at ?? v.length)) setDismissed(undefined);
@@ -504,21 +524,43 @@ export function Composer({
     }
     const content = promptContent(body, attachments, mentions);
     if (!fits(content)) return fail(t('conversation.attach.promptTooLarge', { max: formatBytes(MAX_PROMPT) }));
+    // The same message sent again (after its outcome was not known, or a
+    // refusal) keeps its id: the host takes it once.
+    const key = JSON.stringify(content);
+    const before = outstanding.current;
+    const clientId = before && before.key === key ? before.clientId : newClientId();
+    outstanding.current = { clientId, key };
+    setUnsure(false);
     setPending(true);
+    const done = () => {
+      if (outstanding.current?.clientId === clientId) outstanding.current = undefined;
+      clear();
+      if (live.current) setPending(false);
+    };
     Promise.resolve()
-      .then(() => source.send(content, newClientId()))
-      .then(
-        () => {
-          clear();
-          if (live.current) setPending(false);
-        },
-        (e: unknown) => {
-          if (!live.current) return;
-          setPending(false);
-          fail(errorText(e, agent, 'conversation.sendFailed'));
-        },
-      );
+      .then(() => source.send(content, clientId))
+      .then(done, (e: unknown) => {
+        if (deliveredRef.current?.(clientId)) return done();
+        if (!live.current) return;
+        setPending(false);
+        // Sent, but whether the host took it is not known: the draft stays
+        // until the conversation shows it, or the user sends it again.
+        if (unsureOf(e) && outstanding.current?.clientId === clientId) setUnsure(true);
+        else fail(errorText(e, agent, 'conversation.sendFailed'));
+      });
   };
+
+  // A message whose outcome was not known is in the conversation: it was
+  // taken, and the draft that was it goes.
+  useEffect(() => {
+    const o = outstanding.current;
+    if (!o || pending || !delivered?.(o.clientId)) return;
+    outstanding.current = undefined;
+    setUnsure(false);
+    if (JSON.stringify(promptContent(body, attachments, mentions)) === o.key) clear();
+    // body, attachments and mentions are read when the message arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [delivered, pending]);
   const stop = () => run(() => source.cancel());
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -634,6 +676,12 @@ export function Composer({
         {state === 'closed' && !handedOff && (
           <div className="conv-banner" role="status">
             <span>{t('conversation.closed')}</span>
+          </div>
+        )}
+        {unsure && failed === undefined && (
+          <div className="conv-banner" role="status" data-unsure="">
+            <Clock aria-hidden />
+            <span>{t('conversation.sendUnsure', { agent })}</span>
           </div>
         )}
         {failed !== undefined && (

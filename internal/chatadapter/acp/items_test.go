@@ -325,9 +325,11 @@ func TestOutbox(t *testing.T) {
 	o.reached(context.Background(), mark+5) // returns once done
 }
 
-// The values of a mode option that give the agent full access are marked
-// (chatproto.ConfigValue.Full), in an option of category mode and in the
-// option made of the agent's session modes alike; no other value is.
+// The values of a mode option that may give the agent full access are
+// marked (chatproto.ConfigValue.Full), in an option of category mode and
+// in the option made of the agent's session modes alike: every value but
+// those known to ask (deny by default: Kimi Code's auto too); no value of
+// another option is.
 func TestFullModeMarked(t *testing.T) {
 	full := func(cfg []chatproto.ConfigOption) []string {
 		var out []string
@@ -350,16 +352,16 @@ func TestFullModeMarked(t *testing.T) {
 	]`), nil)
 	got := full(s.config)
 	s.mu.Unlock()
-	if !slices.Equal(got, []string{"mode=yolo"}) {
+	if !slices.Equal(got, []string{"mode=auto", "mode=yolo"}) {
 		t.Errorf("full values %v", got)
 	}
 	s = newSession("other", log.New(io.Discard, "", 0), newHost(t.TempDir()), testTiming)
 	defer s.out.close()
 	s.mu.Lock()
-	s.setConfig(nil, json.RawMessage(`{"currentModeId":"ask","availableModes":[{"id":"ask","name":"Ask"},{"id":"bypassPermissions","name":"Bypass"}]}`))
+	s.setConfig(nil, json.RawMessage(`{"currentModeId":"ask","availableModes":[{"id":"ask","name":"Ask"},{"id":"bypassPermissions","name":"Bypass"},{"id":"architect","name":"Architect"},{"id":"accept-edits","name":"Accept edits"}]}`))
 	got = full(s.config)
 	s.mu.Unlock()
-	if !slices.Equal(got, []string{"mode=bypassPermissions"}) {
+	if !slices.Equal(got, []string{"mode=bypassPermissions", "mode=architect"}) {
 		t.Errorf("full values of the session modes %v", got)
 	}
 }

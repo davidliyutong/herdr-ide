@@ -593,7 +593,7 @@ func TestWatch(t *testing.T) {
 	c.write(chatproto.Request{Op: chatproto.OpWatch})
 	var res chatproto.Response
 	c.read(&res)
-	if !res.OK || len(res.States) != 1 || res.States[0].ID != a.chat.ID || res.States[0].State != chatproto.StateIdle {
+	if !res.OK || len(res.States) != 1 || res.States[0].ID != a.chat.ID {
 		t.Fatalf("watch %+v", res)
 	}
 	next := func() chatproto.ChatState {
@@ -602,13 +602,15 @@ func TestWatch(t *testing.T) {
 		c.read(&st)
 		return st
 	}
+	if res.States[0].State != chatproto.StateIdle {
+		// The watch came before the watchers were told it was idle: that
+		// comes next.
+		if st := next(); st.State != chatproto.StateIdle {
+			t.Fatalf("watch %+v, then %+v", res, st)
+		}
+	}
 	a.turn("hi")
 	st := next()
-	if st.State == chatproto.StateIdle && st.Title == "" {
-		// A change told while the watch's states were read may come
-		// again after them.
-		st = next()
-	}
 	if st.State != chatproto.StateWorking || st.Status != chatproto.StatusWorking || st.Title != "hi" {
 		t.Errorf("working %+v", st)
 	}

@@ -16,13 +16,14 @@ import (
 // pluginEnv is what the agent gives its plugins (internal/agent/plugin).
 func (a *Agent) pluginEnv() *plugin.Env {
 	return &plugin.Env{
-		Home:      a.home,
-		Base:      a.base,
-		RunDir:    a.runDir,
-		Logger:    a.logger,
-		Expand:    a.expand,
-		Environ:   cleanEnv,
-		RunHidden: a.runHidden,
+		Home:       a.home,
+		Base:       a.base,
+		RunDir:     a.runDir,
+		Logger:     a.logger,
+		Expand:     a.expand,
+		Environ:    cleanEnv,
+		RunHidden:  a.runHidden,
+		KillHidden: a.killHidden,
 	}
 }
 

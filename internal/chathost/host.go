@@ -15,7 +15,14 @@
 // on a signal of the terminal core (SIGHUP, then SIGTERM, then SIGKILL), or
 // when it has had no agent process and no connection for a minute; the
 // chats stay in the journal, and their agents resume their sessions by id
-// at the next prompt.
+// at the next prompt. A host that has not ended chatproto.StopGrace after
+// it began to stop kills its agents' groups and exits (Options.Exit).
+//
+// Full access (chatproto.HostSettings.AllowFull) is off until a configure
+// of the host's own process allows it; once it is off, a chat whose agent
+// runs with it starts its agent again in the default mode, and an agent
+// that takes it by itself is set back. A session another process runs (a
+// terminal's, chatadapter.Running) is neither resumed nor imported.
 //
 // A chat is a conversation with one agent session. Its agent process runs
 // while the chat is used: it is ended once the chat was idle for the
@@ -109,6 +116,10 @@ type Options struct {
 	// SIGKILL at the next signal, or killAfter later at the latest, and
 	// Serve returns.
 	Signals <-chan os.Signal
+	// Exit, when set, ends the process of a host that has not ended
+	// chatproto.StopGrace after it began to stop (something of it hangs):
+	// its children's process groups are killed, and Exit(1) is called.
+	Exit func(code int)
 
 	// The host's times, which tests shorten; each is its default when 0.
 	// idleExit: how long the host stays without an agent process and a
@@ -120,8 +131,9 @@ type Options struct {
 	// IdleStopMinutes (1 min). day: the unit of RetentionDays (24 h).
 	// enforceEvery: how often the journal's bounds are checked (1 h).
 	// infoDelay: how long changes of a chat its adapter states wait to be
-	// told together (250 ms).
-	idleExit, startTimeout, callTimeout, closeGrace, killAfter, minute, day, enforceEvery, infoDelay time.Duration
+	// told together (250 ms). stopDeadline: how long after it began to stop
+	// a host is ended by Exit (chatproto.StopGrace).
+	idleExit, startTimeout, callTimeout, closeGrace, killAfter, minute, day, enforceEvery, infoDelay, stopDeadline time.Duration
 	// settings replaces the settings, not clamped, until a configure;
 	// onHost is told the host (tests).
 	settings *chatproto.HostSettings
@@ -175,8 +187,12 @@ type host struct {
 
 	room sync.Mutex // one start at a time makes room among MaxLive
 
+	// wmu guards the watchers and states: the state each chat's watchers
+	// were told last (its last broadcast), what a watcher that comes is
+	// told first.
 	wmu      sync.Mutex
 	watchers map[*subscriber]struct{}
+	states   map[string]chatproto.ChatState
 
 	// pmu guards ending: the sessions whose agents are being ended.
 	pmu    sync.Mutex
@@ -206,6 +222,7 @@ func Serve(ctx context.Context, o Options) error {
 	o.day = or(o.day, 24*time.Hour)
 	o.enforceEvery = or(o.enforceEvery, time.Hour)
 	o.infoDelay = or(o.infoDelay, 250*time.Millisecond)
+	o.stopDeadline = or(o.stopDeadline, chatproto.StopGrace)
 	if o.kinds == nil {
 		o.kinds = func(id string) (*agentkinds.ChatSpec, bool) {
 			k, ok := agentkinds.ByID(id)
@@ -222,6 +239,7 @@ func Serve(ctx context.Context, o Options) error {
 		chats:    map[string]*chat{},
 		conns:    map[net.Conn]bool{},
 		watchers: map[*subscriber]struct{}{},
+		states:   map[string]chatproto.ChatState{},
 		ending:   map[chatadapter.Session]struct{}{},
 		poke:     make(chan struct{}, 1),
 		enforce:  make(chan struct{}, 1),
@@ -262,7 +280,11 @@ func Serve(ctx context.Context, o Options) error {
 	} else if len(removed) > 0 {
 		h.logf("removed the journals nobody used for %s: %v", store.HostFileRetention, removed)
 	}
+	// Full access is the core's to allow, in this process: a host does not
+	// take it from what an earlier one stored.
 	settings := h.j.settings()
+	settings.AllowFull = false
+	settings = settings.Clamp()
 	if o.settings != nil {
 		settings = *o.settings
 	}
@@ -290,6 +312,14 @@ func Serve(ctx context.Context, o Options) error {
 		h.fast.Store(true)
 	}
 	h.stopping.Store(true)
+	if o.Exit != nil {
+		hard := time.AfterFunc(o.stopDeadline, func() {
+			h.logf("did not stop within %s: its agents are killed, and it exits", o.stopDeadline)
+			agentTargets(nil).signal(syscall.SIGKILL)
+			o.Exit(1)
+		})
+		defer hard.Stop()
+	}
 	h.end("stopping")
 	ln.Close()
 	removeSocket()
@@ -433,7 +463,14 @@ func (h *host) load() error {
 		if first == 0 {
 			c.first = r.Seq + 1
 		}
+		ids, err := h.j.clientIDs(r.ID, maxClientIDs)
+		if err != nil {
+			return err
+		}
 		c.mu.Lock()
+		for _, id := range ids {
+			c.tookClient(id)
+		}
 		switch r.State {
 		case chatproto.StateStarting, chatproto.StateIdle, chatproto.StateWorking, chatproto.StateWaiting:
 			c.recover()
@@ -442,6 +479,9 @@ func (h *host) load() error {
 		}
 		c.r.Status = chatproto.StatusOf(c.r.State, c.r.TurnEnd, c.r.Seen)
 		c.lastState = c.r.StateOf()
+		h.wmu.Lock()
+		h.states[r.ID] = c.lastState
+		h.wmu.Unlock()
 		c.mu.Unlock()
 		h.chats[r.ID] = c
 	}
@@ -728,6 +768,8 @@ func (h *host) serve(conn net.Conn) {
 		h.reply(conn, h.shutdown())
 	case chatproto.OpTrust:
 		h.reply(conn, h.trust(req))
+	case chatproto.OpUntrust:
+		h.reply(conn, h.untrust(req))
 	default:
 		h.reply(conn, refuse(chatproto.CodeBadRequest, "unknown op"))
 	}
@@ -837,6 +879,11 @@ func (h *host) newChat(req chatproto.Request) chatproto.Response {
 	if h.stopping.Load() {
 		return refuse(chatproto.CodeEnded, "the host stops")
 	}
+	if req.Resume != "" {
+		if e := h.inTerminal(req.Kind, req.Cwd, req.Resume); e != nil {
+			return refusal(e)
+		}
+	}
 	h.newMu.Lock()
 	defer h.newMu.Unlock()
 	if req.Resume != "" {
@@ -878,6 +925,30 @@ func (h *host) newChat(req chatproto.Request) chatproto.Response {
 	return chatproto.Response{OK: true, Chat: view}
 }
 
+// inTerminal is CodeInTerminal's error when a process other than the
+// host's runs an agent's session (chatadapter.Running), so that the host
+// neither resumes nor imports it; nil otherwise, or when the adapter
+// cannot tell.
+func (h *host) inTerminal(kind, cwd, session string) *chatproto.Error {
+	spec, a, e := h.spec(kind)
+	if e != nil {
+		return nil
+	}
+	r, ok := a.(chatadapter.Running)
+	if !ok {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, h.o.startTimeout)
+	defer cancel()
+	err := r.InTerminal(ctx, chatadapter.HistoryParams{Kind: kind, Env: agentEnv(h.env.get(ctx), spec.Env, cwd), Cwd: cwd,
+		SessionID: session, Logger: h.logger})
+	var pe *chatproto.Error
+	if errors.As(err, &pe) && pe.Code == chatproto.CodeInTerminal {
+		return capStderr(pe)
+	}
+	return nil
+}
+
 // chatOfSession is the chat of a kind that has a session, "" for none.
 func (h *host) chatOfSession(kind, session string) string {
 	h.mu.Lock()
@@ -892,22 +963,6 @@ func (h *host) chatOfSession(kind, session string) string {
 		}
 	}
 	return ""
-}
-
-// trust adds a directory to the ones the user trusts (chatproto.OpTrust).
-func (h *host) trust(req chatproto.Request) chatproto.Response {
-	if len(req.Cwd) > 4096 {
-		return refuse(chatproto.CodeBadRequest, "cwd too long")
-	}
-	if e := checkCwd(req.Cwd); e != nil {
-		return refusal(e)
-	}
-	if err := h.j.trust(req.Cwd, now()); err != nil {
-		h.logf("trust %s: %v", req.Cwd, err)
-		return refuse(chatproto.CodeFailed, "the journal did not take the directory")
-	}
-	h.logf("trusted %s", req.Cwd)
-	return chatproto.Response{OK: true}
 }
 
 // lookup is a chat by its id; nil for none.
@@ -1215,31 +1270,34 @@ func (h *host) sessions(req chatproto.Request) chatproto.Response {
 }
 
 // watch sends the states of every chat, then each change, until either
-// side closes.
+// side closes. The states are those the other watchers were told last,
+// read under the lock the changes are told under, as the watcher is
+// listed: every change after them comes after them, none before.
 func (h *host) watch(conn net.Conn, r *bufio.Reader) {
 	s := newSubscriber(conn)
-	// The watcher is listed before the states are read: a change meanwhile
-	// comes after them, and is no older than what they say.
-	h.wmu.Lock()
-	h.watchers[s] = struct{}{}
-	h.wmu.Unlock()
 	h.mu.Lock()
 	if _, served := h.conns[conn]; served {
 		h.conns[conn] = true
 	}
 	h.mu.Unlock()
-	_, views := h.sorted()
-	states := make([]chatproto.ChatState, len(views))
-	for i := range views {
-		states[i] = views[i].StateOf()
+	h.wmu.Lock()
+	states := make([]chatproto.ChatState, 0, len(h.states))
+	for _, st := range h.states {
+		states = append(states, st)
 	}
+	sort.Slice(states, func(a, b int) bool {
+		if !states[a].Updated.Equal(states[b].Updated) {
+			return states[a].Updated.After(states[b].Updated)
+		}
+		return states[a].ID < states[b].ID
+	})
 	head, err := chatproto.Line(chatproto.Response{OK: true, States: states})
 	if err != nil || len(head) > chatproto.MaxLine+1 {
 		head, _ = chatproto.Line(refuse(chatproto.CodeTooLarge, "the answer does not fit a line"))
 	}
-	s.mu.Lock()
 	s.head = [][]byte{head}
-	s.mu.Unlock()
+	h.watchers[s] = struct{}{}
+	h.wmu.Unlock()
 	go s.run()
 	// The client sends nothing more: what it reads tells that it left.
 	io.Copy(io.Discard, io.LimitReader(r, 1<<20))
@@ -1250,7 +1308,8 @@ func (h *host) watch(conn net.Conn, r *bufio.Reader) {
 	<-s.done
 }
 
-// broadcast sends a chat's state to every watcher.
+// broadcast sends a chat's state to every watcher, and keeps it for the
+// watchers that come.
 func (h *host) broadcast(st chatproto.ChatState) {
 	b, err := chatproto.Line(st)
 	if err != nil {
@@ -1258,6 +1317,11 @@ func (h *host) broadcast(st chatproto.ChatState) {
 	}
 	h.wmu.Lock()
 	defer h.wmu.Unlock()
+	if st.State == chatproto.StateDeleted {
+		delete(h.states, st.ID)
+	} else {
+		h.states[st.ID] = st
+	}
 	for s := range h.watchers {
 		if !s.push(b) {
 			delete(h.watchers, s)
@@ -1284,7 +1348,9 @@ func (h *host) seen(req chatproto.Request) chatproto.Response {
 	return chatproto.Response{OK: true}
 }
 
-// configure takes the core's settings.
+// configure takes the core's settings. Without full access, a chat whose
+// agent runs in a mode of full access starts it again in the default mode
+// (revokeFull).
 func (h *host) configure(req chatproto.Request) chatproto.Response {
 	if req.Settings == nil {
 		return refuse(chatproto.CodeBadRequest, "configure needs settings")
@@ -1298,9 +1364,14 @@ func (h *host) configure(req chatproto.Request) chatproto.Response {
 	chats := h.list()
 	h.mu.Unlock()
 	for _, c := range chats {
+		var sess chatadapter.Session
 		c.mu.Lock()
 		c.armIdle()
+		if !s.AllowFull {
+			sess = c.revokeFull()
+		}
 		c.mu.Unlock()
+		h.endSession(sess, false)
 	}
 	h.makeRoom(nil)
 	h.enforceSoon()

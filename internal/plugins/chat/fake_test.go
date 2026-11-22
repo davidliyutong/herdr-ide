@@ -27,9 +27,14 @@ type fakeChatHost struct {
 
 	mu sync.Mutex
 	// running: a host serves (an open without start gets not_running
-	// otherwise); proto is the one its hello states.
+	// otherwise); proto and pid are what its hello states.
 	running bool
 	proto   int
+	pid     int
+	// dropAfter: an event that a connection does not take within it ends
+	// that connection, as the host drops a subscriber that falls behind;
+	// 0 waits 10 s.
+	dropAfter time.Duration
 	// openErr fails every open with that code.
 	openErr string
 	// opens are the start flags of the opens; requests every request.
@@ -60,19 +65,23 @@ type fakeConn struct {
 }
 
 func (c *fakeConn) write(v any) error {
+	return c.writeWithin(v, 10*time.Second)
+}
+
+func (c *fakeConn) writeWithin(v any, d time.Duration) error {
 	b, err := chatproto.Line(v)
 	if err != nil {
 		return err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	c.conn.SetWriteDeadline(time.Now().Add(d))
 	_, err = c.conn.Write(b)
 	return err
 }
 
 func newFakeChatHost(t *testing.T) *fakeChatHost {
-	return &fakeChatHost{t: t, running: true, proto: chatproto.Proto, chats: map[string]chatproto.Chat{}, agents: map[string]bool{},
+	return &fakeChatHost{t: t, running: true, proto: chatproto.Proto, pid: 1, chats: map[string]chatproto.Chat{}, agents: map[string]bool{},
 		reqErr: map[string]*chatproto.Error{}, ackErr: map[string]*chatproto.Error{}, watchers: map[*fakeConn]bool{},
 		attached: map[*fakeConn]string{}, conns: map[*fakeConn]bool{}, changed: make(chan struct{}, 1)}
 }
@@ -138,9 +147,9 @@ func (f *fakeChatHost) serve(c *fakeConn) {
 		f.poke()
 	}()
 	f.mu.Lock()
-	proto := f.proto
+	proto, pid := f.proto, f.pid
 	f.mu.Unlock()
-	if c.write(chatproto.Hello{Host: chatproto.HostInfo{Proto: proto, Version: "test", PID: 1}}) != nil {
+	if c.write(chatproto.Hello{Host: chatproto.HostInfo{Proto: proto, Version: "test", PID: pid}}) != nil {
 		return
 	}
 	r := bufio.NewReader(c.conn)
@@ -258,7 +267,8 @@ func (f *fakeChatHost) release() {
 	}
 }
 
-// emit writes an event to every connection attached to chat.
+// emit writes an event to every connection attached to chat; one that
+// does not take it within dropAfter is ended.
 func (f *fakeChatHost) emit(chat string, ev chatproto.Event) {
 	f.mu.Lock()
 	var cs []*fakeConn
@@ -267,10 +277,26 @@ func (f *fakeChatHost) emit(chat string, ev chatproto.Event) {
 			cs = append(cs, c)
 		}
 	}
+	d := f.dropAfter
 	f.mu.Unlock()
 	for _, c := range cs {
-		c.write(ev)
+		if d == 0 {
+			c.write(ev)
+		} else if c.writeWithin(ev, d) != nil {
+			c.conn.Close()
+		}
 	}
+}
+
+// attachedTo counts the connections attached to chat.
+func (f *fakeChatHost) attachedTo(chat string) int {
+	n := 0
+	for _, id := range f.attached {
+		if id == chat {
+			n++
+		}
+	}
+	return n
 }
 
 // change sets a chat's state and tells the watchers.

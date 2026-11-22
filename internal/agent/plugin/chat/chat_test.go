@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -33,8 +34,13 @@ const patience = 15 * time.Second
 // testExe is the program the terminal core is asked to run as the host.
 const testExe = "/opt/agent/bin/agent"
 
+// noPID is the pid of a fake host: no process has it.
+const noPID = 1 << 30
+
 func TestMain(m *testing.M) {
 	executable = func() (string, error) { return testExe, nil }
+	// A build of a release: older ones make way for it.
+	agentproto.Version = "v0.5.0-3-gabc1234"
 	chatadapter.Register(agentkinds.AdapterACP, failing{})
 	os.Exit(m.Run())
 }
@@ -65,6 +71,7 @@ type machine struct {
 	mu      sync.Mutex
 	asked   [][]string         // the argv of each RunHidden
 	names   []string           // and its name
+	at      []time.Time        // and when
 	taken   int                // how often the name is still another terminal's
 	fail    error              // RunHidden's error
 	stop    context.CancelFunc // ends the host that runs
@@ -99,17 +106,27 @@ func (m *machine) runHidden(ctx context.Context, name string, argv []string) err
 	defer m.mu.Unlock()
 	m.asked = append(m.asked, argv)
 	m.names = append(m.names, name)
+	m.at = append(m.at, time.Now())
 	switch {
 	case m.fail != nil:
 		return m.fail
 	case m.taken > 0:
 		m.taken--
 		return nil
-	case m.stop != nil:
+	case m.stop != nil && !isClosed(m.stopped):
 		return nil
 	}
 	m.startLocked()
 	return nil
+}
+
+func isClosed(c chan struct{}) bool {
+	select {
+	case <-c:
+		return true
+	default:
+		return false
+	}
 }
 
 // startLocked serves a chat host of this build on the run directory.
@@ -230,6 +247,10 @@ type fakeHost struct {
 	ln   net.Listener
 	info chatproto.HostInfo
 	busy bool
+	// keep is how long it still says hello after it said it ends; exit is
+	// called once it said so.
+	keep time.Duration
+	exit func()
 
 	mu        sync.Mutex
 	shutdowns int
@@ -272,11 +293,22 @@ func (f *fakeHost) serve(c net.Conn) {
 		io.WriteString(c, `{"error":{"code":"busy","message":"a chat works"}}`+"\n")
 	default:
 		f.count()
-		// The socket goes before the answer: the host that follows finds
-		// the path free.
-		f.ln.Close()
-		os.Remove(f.sock)
-		io.WriteString(c, `{"ok":true}`+"\n")
+		if f.keep > 0 {
+			// It answers while it ends.
+			io.WriteString(c, `{"ok":true}`+"\n")
+			time.Sleep(f.keep)
+			f.ln.Close()
+			os.Remove(f.sock)
+		} else {
+			// The socket goes before the answer: the host that follows
+			// finds the path free.
+			f.ln.Close()
+			os.Remove(f.sock)
+			io.WriteString(c, `{"ok":true}`+"\n")
+		}
+		if f.exit != nil {
+			f.exit()
+		}
 	}
 }
 
@@ -310,6 +342,14 @@ func quick(t *testing.T, timeout, again time.Duration) {
 	oldTimeout, oldPoll, oldAgain, oldMax := startTimeout, pollEvery, askAgain, askMax
 	startTimeout, pollEvery, askAgain, askMax = timeout, 5*time.Millisecond, again, again
 	t.Cleanup(func() { startTimeout, pollEvery, askAgain, askMax = oldTimeout, oldPoll, oldAgain, oldMax })
+}
+
+// grace shortens how long a host takes to end.
+func grace(t *testing.T, d time.Duration) {
+	t.Helper()
+	old, oldEvery := stopGrace, goneEvery
+	stopGrace, goneEvery = d, 5*time.Millisecond
+	t.Cleanup(func() { stopGrace, goneEvery = old, oldEvery })
 }
 
 // Without a host, open has the terminal core run one under the chat host's
@@ -486,11 +526,11 @@ func TestOpenAsksAgainWhileTheNameIsTaken(t *testing.T) {
 	}
 }
 
-// A host of another build makes way for one of this build when no chat
+// A host of an older build makes way for one of this build when no chat
 // works or waits.
 func TestHandover(t *testing.T) {
 	m := newMachine(t)
-	old := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: "older", PID: 4242}, false)
+	old := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: "v0.4.0", PID: noPID}, false)
 	s := m.open(context.Background())
 	if h := s.hello(); h.Version != agentproto.Version || h.PID != os.Getpid() {
 		t.Fatalf("hello %+v, want this build's host", h)
@@ -505,7 +545,7 @@ func TestHandover(t *testing.T) {
 // agent's protocol.
 func TestHandoverRefused(t *testing.T) {
 	m := newMachine(t)
-	old := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: "older", PID: 4242}, true)
+	old := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: "v0.5.0", PID: noPID}, true)
 	s := m.open(context.Background())
 	// The hello comes as the host wrote it.
 	want, _ := chatproto.Line(chatproto.Hello{Host: old.info})
@@ -515,7 +555,7 @@ func TestHandoverRefused(t *testing.T) {
 	if line, err := s.r.ReadString('\n'); err != nil || line != string(want) {
 		t.Fatalf("hello %q %v, want %q", line, err, want)
 	}
-	if got := s.ask(chatproto.OpChats); got != `{"ok":true,"from":"older"}` {
+	if got := s.ask(chatproto.OpChats); got != `{"ok":true,"from":"v0.5.0"}` {
 		t.Errorf("the stream is not the old host's: %s", got)
 	}
 	if old.asked() != 1 || m.runs() != 0 {
@@ -535,9 +575,9 @@ func TestHandoverRefused(t *testing.T) {
 // A host of this build is not asked to end.
 func TestSameBuildIsKept(t *testing.T) {
 	m := newMachine(t)
-	same := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: agentproto.Version, PID: 4242}, false)
+	same := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: agentproto.Version, PID: noPID}, false)
 	s := m.open(context.Background())
-	if h := s.hello(); h.PID != 4242 {
+	if h := s.hello(); h.PID != noPID {
 		t.Fatalf("hello %+v", h)
 	}
 	if same.asked() != 0 || m.runs() != 0 {
@@ -545,12 +585,12 @@ func TestSameBuildIsKept(t *testing.T) {
 	}
 }
 
-// A host of another protocol, newer or older, is upgrading while a busy
-// chat keeps it; without one it makes way like any other build's.
+// A host of an older build and another protocol is upgrading while a busy
+// chat keeps it; without one it makes way like any other older build's.
 func TestOtherProtocol(t *testing.T) {
 	m := newMachine(t)
 	for _, proto := range []int{chatproto.Proto + 1, chatproto.Proto - 1} {
-		other := m.fakeHost(chatproto.HostInfo{Proto: proto, Version: "other", PID: 4242}, true)
+		other := m.fakeHost(chatproto.HostInfo{Proto: proto, Version: "v0.4.9", PID: noPID}, true)
 		s := m.open(context.Background())
 		if s.rep.OK || s.rep.Code != CodeUpgrading {
 			t.Fatalf("a busy host of protocol %d: %+v", proto, s.rep)
@@ -563,7 +603,7 @@ func TestOtherProtocol(t *testing.T) {
 		os.Remove(m.sock())
 	}
 
-	m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto + 1, Version: "newer", PID: 4242}, false)
+	m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto + 1, Version: "v0.5.0-2-gfff0000", PID: noPID}, false)
 	s := m.open(context.Background())
 	if h := s.hello(); h.Proto != chatproto.Proto || h.Version != agentproto.Version {
 		t.Fatalf("hello %+v, want this build's host", h)
@@ -621,12 +661,12 @@ func TestOpenWithoutStart(t *testing.T) {
 	if m.runs() != 0 {
 		t.Fatalf("the terminal core was asked %d times", m.runs())
 	}
-	old := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: "older", PID: 4242}, false)
+	old := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: "v0.4.0", PID: noPID}, false)
 	s = m.openWith(context.Background(), noStart)
-	if h := s.hello(); h.PID != 4242 {
+	if h := s.hello(); h.PID != noPID {
 		t.Fatalf("hello %+v", h)
 	}
-	if got := s.ask(chatproto.OpWatch); got != `{"ok":true,"from":"older"}` {
+	if got := s.ask(chatproto.OpWatch); got != `{"ok":true,"from":"v0.4.0"}` {
 		t.Errorf("the stream is not the old host's: %s", got)
 	}
 	if old.asked() != 0 || m.runs() != 0 {
@@ -634,7 +674,7 @@ func TestOpenWithoutStart(t *testing.T) {
 	}
 	old.ln.Close()
 	os.Remove(m.sock())
-	other := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto + 1, Version: "newer", PID: 4343}, false)
+	other := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto + 1, Version: "v0.6.0", PID: noPID}, false)
 	if s := m.openWith(context.Background(), noStart); s.rep.OK || s.rep.Code != CodeUpgrading {
 		t.Fatalf("a host of another protocol: %+v", s.rep)
 	}
@@ -651,5 +691,153 @@ func TestOpenWithoutStart(t *testing.T) {
 	// Parameters that are none are refused.
 	if s := m.openWith(context.Background(), json.RawMessage(`{"start":"no"}`)); s.rep.OK || s.rep.Code != "bad_params" {
 		t.Fatalf("bad params: %+v", s.rep)
+	}
+}
+
+// Builds are compared by their tag and the commits after it; a build of no
+// such version (a development build) is older and newer than none.
+func TestOlder(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"v0.4.0", "v0.5.0", true},
+		{"v0.5.0", "v0.5.0-3-gabc1234", true},
+		{"v0.5.0-2-gfff", "v0.5.0-3-gabc", true},
+		{"v0.5.0-3-gabc-dirty", "v0.5.0-4-gabc", true},
+		{"0.9.9", "v0.10.0", true},
+		{"v0.5.0", "v0.5.0", false},
+		{"v0.5.0-3-gaaa", "v0.5.0-3-gbbb", false},
+		{"v0.6.0", "v0.5.0", false},
+		{"dev", "v0.5.0", false},
+		{"v0.5.0", "dev", false},
+		{"dev", "dev", false},
+		{"abc1234", "v0.5.0", false},
+		{"v0.5", "v0.5.0", false},
+		{"v0.5.0-x", "v0.5.1", false},
+	} {
+		if got := older(c.a, c.b); got != c.want {
+			t.Errorf("older(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}
+
+// A host of a newer build, or of a build whose age is not known, is never
+// asked to make way: it is used as it is while it speaks this agent's
+// protocol, and is upgrading otherwise.
+func TestNeverDowngrade(t *testing.T) {
+	m := newMachine(t)
+	for _, v := range []string{"v0.6.0", "v0.5.0-4-gaaa", "dev"} {
+		h := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: v, PID: noPID}, false)
+		s := m.open(context.Background())
+		if got := s.hello(); got.Version != v {
+			t.Fatalf("%s: hello %+v", v, got)
+		}
+		if h.asked() != 0 || m.runs() != 0 {
+			t.Errorf("%s: asked to end %d times, the terminal core %d times", v, h.asked(), m.runs())
+		}
+		h.ln.Close()
+		os.Remove(m.sock())
+	}
+	h := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto + 1, Version: "v0.6.0", PID: noPID}, false)
+	if s := m.open(context.Background()); s.rep.OK || s.rep.Code != CodeUpgrading {
+		t.Fatalf("a newer host of another protocol: %+v", s.rep)
+	}
+	if h.asked() != 0 || m.runs() != 0 {
+		t.Errorf("asked to end %d times, the terminal core %d times", h.asked(), m.runs())
+	}
+}
+
+// After an old host said it ends, its process is waited for before the
+// terminal core is asked for this build's host.
+func TestHandoverWaitsForTheOldHost(t *testing.T) {
+	grace(t, patience)
+	m := newMachine(t)
+	proc := exec.Command("/bin/sleep", "30")
+	if err := proc.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan time.Time, 1)
+	go func() {
+		proc.Wait()
+		exited <- time.Now()
+	}()
+	old := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: "v0.4.0", PID: proc.Process.Pid}, false)
+	old.exit = func() { time.AfterFunc(300*time.Millisecond, func() { proc.Process.Kill() }) }
+	s := m.open(context.Background())
+	if h := s.hello(); h.Version != agentproto.Version {
+		t.Fatalf("hello %+v", h)
+	}
+	at := <-exited
+	m.mu.Lock()
+	first := m.at[0]
+	m.mu.Unlock()
+	if first.Before(at) {
+		t.Errorf("the terminal core was asked %s before the old host ended", at.Sub(first))
+	}
+}
+
+// A host that said it ends and still answers a moment is not taken for
+// this build's: the stream gets the host that follows.
+func TestHandoverSkipsTheOldHost(t *testing.T) {
+	quick(t, patience, 20*time.Millisecond)
+	m := newMachine(t)
+	old := m.fakeHost(chatproto.HostInfo{Proto: chatproto.Proto, Version: "v0.4.0", PID: noPID}, false)
+	old.keep = 300 * time.Millisecond
+	s := m.open(context.Background())
+	if h := s.hello(); h.Version != agentproto.Version || h.PID != os.Getpid() {
+		t.Fatalf("hello %+v, want this build's host", h)
+	}
+}
+
+// A terminal that holds the host's name while nothing serves, past the
+// start's time and the time a host takes to end, is killed, and a host
+// started; a name nobody holds is not waited for.
+func TestStuckHostKilled(t *testing.T) {
+	quick(t, 100*time.Millisecond, 20*time.Millisecond)
+	grace(t, 200*time.Millisecond)
+	m := newMachine(t)
+	var calls []bool
+	held := true
+	m.env.KillHidden = func(ctx context.Context, name string, argv []string, kill bool) (bool, error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		calls = append(calls, kill)
+		if name != agentproto.ChatHostName || argv[1] != "chat-host" {
+			t.Errorf("KillHidden(%q, %q)", name, argv)
+		}
+		if kill && held {
+			m.taken = 0
+		}
+		return held, nil
+	}
+	m.mu.Lock()
+	m.taken = 1 << 20
+	m.mu.Unlock()
+	began := time.Now()
+	s := m.open(context.Background())
+	if h := s.hello(); h.Version != agentproto.Version {
+		t.Fatalf("hello %+v", h)
+	}
+	if d := time.Since(began); d < 300*time.Millisecond {
+		t.Errorf("killed after %s", d)
+	}
+	m.mu.Lock()
+	if len(calls) != 2 || calls[0] || !calls[1] {
+		t.Errorf("KillHidden calls %v", calls)
+	}
+	m.mu.Unlock()
+	m.stopHost()
+
+	// Nothing holds the name: the start fails at its time.
+	m.mu.Lock()
+	m.taken, calls, held = 1<<20, nil, false
+	m.mu.Unlock()
+	began = time.Now()
+	if s := m.open(context.Background()); s.rep.OK || s.rep.Code != CodeStartFailed {
+		t.Fatalf("open %+v", s.rep)
+	}
+	if d := time.Since(began); d > 250*time.Millisecond {
+		t.Errorf("failed after %s", d)
 	}
 }

@@ -19,6 +19,8 @@ export interface ItemContext {
   /** Trusts the chat's folder (ChatSource.trust); absent when the source
    * cannot or the view is read-only. */
   trust?: () => Promise<void>;
+  /** Takes that back (ChatSource.untrust); absent as trust is. */
+  untrust?: () => Promise<void>;
 }
 
 /** What the cards of permissions and questions may do: a context of its

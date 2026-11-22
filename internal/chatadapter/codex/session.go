@@ -262,6 +262,11 @@ func (s *session) connect(ctx context.Context, resume string, first bool) error 
 	return nil
 }
 
+// activeWriter are what Codex 0.171.0 answers a thread/resume of a thread
+// another process of Codex has open ("thread <id> already has an active
+// writer", "... a live local writer").
+var activeWriter = []string{"already has an active writer", "already has a live local writer"}
+
 // startError is why a start failed: the app-server's own error, or its end
 // with what it wrote to its standard error.
 func startError(c *conn, err error) error {
@@ -279,7 +284,8 @@ func startError(c *conn, err error) error {
 }
 
 // callError is an error of a request as the host's: Codex's answers about
-// threads that are not there are CodeNotFound.
+// threads that are not there are CodeNotFound, those about a thread
+// another Codex writes (a terminal's) CodeInTerminal.
 func callError(err error) error {
 	var re *rpcError
 	switch {
@@ -290,6 +296,11 @@ func callError(err error) error {
 		for _, p := range []string{"no rollout found", "thread not found", "thread not loaded", "invalid thread id"} {
 			if strings.HasPrefix(re.Message, p) {
 				code = chatproto.CodeNotFound
+			}
+		}
+		for _, p := range activeWriter {
+			if strings.Contains(re.Message, p) {
+				code = chatproto.CodeInTerminal
 			}
 		}
 		return &chatproto.Error{Code: code, Message: re.Message}

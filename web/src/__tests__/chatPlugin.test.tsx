@@ -17,7 +17,7 @@ import { chatMenu, cleanDir, useChatUi } from '../plugins/chat/ops';
 import { STATES_PATH, type ChatState } from '../plugins/chat/protocol';
 import { chatSource, dropSources } from '../plugins/chat/source';
 import { applyMessage, chatGone, loadSnapshot, resetChats, SNAPSHOT_GAP_MS, useChats } from '../plugins/chat/state';
-import { resetSeen } from '../plugins/chat/status';
+import { resetSeen, SEEN_RETRY_MAX_MS, SEEN_RETRY_MS, SEEN_TRIES } from '../plugins/chat/status';
 import { definePlugins } from '../plugins/registry';
 import { useSettings } from '../settings';
 import { useStore } from '../state/store';
@@ -175,6 +175,25 @@ describe('the chats’ states', () => {
     expect(reads()).toBe(2);
   });
 
+  it('forgets, after the page connects again, the machines the new snapshot does not have', async () => {
+    answers[`GET ${STATES_PATH}`] = () =>
+      new Response(JSON.stringify({ machines: { m: msg([st(A)], 3, true), n: msg([st(B)], 4, true) } }), { status: 200 });
+    chatPlugin.viewStatus!.subscribe(() => {});
+    await settle();
+    expect(Object.keys(useChats.getState().states).sort()).toEqual(['m', 'n']);
+    // A core that started again has read only machine m so far.
+    answers[`GET ${STATES_PATH}`] = () => new Response(JSON.stringify({ machines: { m: msg([st(A)], 1, true) } }), { status: 200 });
+    useStore.getState().setConnected(false);
+    useStore.getState().setConnected(true);
+    await settle();
+    await settle();
+    const s = useChats.getState();
+    expect(Object.keys(s.states)).toEqual(['m']);
+    expect(s.full.n).toBeUndefined();
+    expect(chatGone(s, 'n', B)).toBe(false);
+    expect(s.deleted.n?.[B]).toBeUndefined();
+  });
+
   it('reads the snapshot again after a gap', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     try {
@@ -237,19 +256,59 @@ describe('the chat panes’ statuses', () => {
     await settle();
     const posts = calls.filter((c) => c.method === 'POST');
     expect(posts.map((c) => c.url)).toEqual([`/api/m/m/p/chat/seen?chat=${A}&seq=42`]);
-    // A refused one leaves it done.
-    answers['POST /api/m/m/p/chat/seen'] = () => new Response('{"error":"offline"}', { status: 503 });
-    applyMessage('m', msg([st(A, { status: 'done', seq: 50 })], 2));
-    seen('m', view(A));
-    await settle();
-    await settle();
-    expect(status('m', view(A))).toBe('done');
     // Not from a read-only page.
     useStore.getState().setReadOnly(true);
     calls = [];
     seen('m', view(A));
     await settle();
     expect(calls).toEqual([]);
+  });
+});
+
+describe('a seen that fails', () => {
+  const seenPosts = () => calls.filter((c) => c.method === 'POST' && c.url.includes('/seen?')).length;
+  afterEach(() => void vi.useRealTimers());
+
+  it('is tried again later, never at once, and the status is not flipped back', async () => {
+    let refuse = true;
+    answers['POST /api/m/m/p/chat/seen'] = () =>
+      refuse ? new Response('{"error":"offline","message":"m"}', { status: 409 }) : new Response('{}', { status: 200 });
+    applyMessage('m', msg([st(A, { status: 'done', seq: 50 })], 1, true));
+    vi.useFakeTimers();
+    const seen = chatPlugin.viewStatus!.seen!;
+    seen('m', view(A));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seenPosts()).toBe(1);
+    expect(status('m', view(A))).toBe('idle');
+    // Looking again sends nothing: the retry is on its way.
+    seen('m', view(A));
+    await vi.advanceTimersByTimeAsync(SEEN_RETRY_MS - 10);
+    expect(seenPosts()).toBe(1);
+    expect(status('m', view(A))).toBe('idle');
+    await vi.advanceTimersByTimeAsync(20);
+    expect(seenPosts()).toBe(2);
+    refuse = false;
+    await vi.advanceTimersByTimeAsync(2 * SEEN_RETRY_MS + 10);
+    expect(seenPosts()).toBe(3);
+    await vi.advanceTimersByTimeAsync(10 * SEEN_RETRY_MAX_MS);
+    expect(seenPosts()).toBe(3);
+  });
+
+  it('is given up after SEEN_TRIES, and asked again by the next state that says done', async () => {
+    answers['POST /api/m/m/p/chat/seen'] = () => new Response('{"error":"offline","message":"m"}', { status: 409 });
+    applyMessage('m', msg([st(A, { status: 'done', seq: 50 })], 1, true));
+    vi.useFakeTimers();
+    const seen = chatPlugin.viewStatus!.seen!;
+    seen('m', view(A));
+    await vi.advanceTimersByTimeAsync(SEEN_TRIES * SEEN_RETRY_MAX_MS);
+    expect(seenPosts()).toBe(SEEN_TRIES);
+    await vi.advanceTimersByTimeAsync(10 * SEEN_RETRY_MAX_MS);
+    expect(seenPosts()).toBe(SEEN_TRIES);
+    applyMessage('m', msg([st(A, { status: 'done', seq: 50, title: 'again' })], 2));
+    expect(status('m', view(A))).toBe('done');
+    seen('m', view(A));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seenPosts()).toBe(SEEN_TRIES + 1);
   });
 });
 
@@ -367,7 +426,18 @@ describe('a chat’s folder', () => {
     useStore.getState().setReadOnly(true);
     calls = [];
     await expect(chatSource('m', A).trust()).rejects.toMatchObject({ code: 'read_only' });
+    await expect(chatSource('m', A).untrust()).rejects.toMatchObject({ code: 'read_only' });
     expect(calls).toEqual([]);
+  });
+
+  it('is trusted no more through the core’s route', async () => {
+    applyMessage('m', msg([st(A, { cwd: '/home/u/proj' })], 1, true));
+    await chatSource('m', A).untrust();
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual([
+      `/api/m/m/p/chat/untrust?cwd=${encodeURIComponent('/home/u/proj')}`,
+    ]);
+    answers['POST /api/m/m/p/chat/untrust'] = () => new Response('{"error":"offline"}', { status: 409 });
+    await expect(chatSource('m', A).untrust()).rejects.toMatchObject({ code: 'offline' });
   });
 });
 

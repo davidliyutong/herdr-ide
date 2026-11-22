@@ -32,6 +32,8 @@ export const en = {
   'conversation.stopHint': 'Stop {agent}’s turn (Escape)',
   'conversation.dismiss': 'Dismiss',
   'conversation.sendFailed': 'The message could not be sent.',
+  'conversation.sendUnsure':
+    'Not confirmed yet that {agent} got the message: it shows here once it has. Send it again to retry; it is not sent twice.',
   'conversation.commandFailed': 'That could not be done.',
   // Why a command was not taken, by the code of the chat host's or the
   // core's error.
@@ -51,6 +53,7 @@ export const en = {
   'conversation.error.too_many': 'Too many chats are open.',
   'conversation.error.read_only': 'This window is read-only.',
   'conversation.error.offline': 'The machine is not connected.',
+  'conversation.error.unsafe_folder': 'This folder cannot be trusted: it is your home folder or one above it, or others may change it.',
   'conversation.error.not_allowed': 'Full access is turned off for this machine’s chats (the setting “Allow full access”).',
   'conversation.error.lost': 'The connection to the chat broke: it may have been done. Try again if not.',
   'conversation.error.not_attached': 'The chat is not open in this window.',
@@ -125,7 +128,7 @@ export const en = {
   'conversation.ask.kind.allow_always': 'Always allow',
   'conversation.ask.kind.reject_once': 'Reject',
   'conversation.ask.kind.reject_always': 'Always reject',
-  'conversation.ask.youChose': 'You chose: {option}',
+  'conversation.ask.youChose': 'Your choice: {option}',
   'conversation.ask.answeredElsewhere': 'Answered in another window: {option}',
   'conversation.ask.youDismissed': 'You dismissed it.',
   'conversation.ask.dismissed': 'Dismissed.',
@@ -216,6 +219,9 @@ export const en = {
   'conversation.notice.trustHint': 'Let agents started in {cwd} and the folders below it load the project’s own settings',
   'conversation.notice.trusted': 'The folder is trusted: the next start of the agent loads the project’s settings.',
   'conversation.notice.trustFailed': 'The folder could not be trusted.',
+  'conversation.notice.untrust': 'Stop Trusting This Folder',
+  'conversation.notice.untrustHint': 'Agents started in {cwd} and the folders below it no longer load the project’s own settings',
+  'conversation.notice.untrustFailed': 'The folder could not stop being trusted.',
   'conversation.notice.fullAccessOff': 'Full access is turned off on this machine: the agent started in the default mode.',
   'conversation.notice.stopped.cancelled': 'The turn was interrupted.',
   'conversation.notice.stopped.max_tokens': 'The reply reached its length limit.',

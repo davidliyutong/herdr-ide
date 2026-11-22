@@ -15,16 +15,17 @@ import (
 )
 
 // indexTerminals sorts the terminal core's terminals into those clients are
-// told of, by address, and the hidden ones (hiddenTerminal), by address
-// with their names.
-func indexTerminals(list []map[string]any) (terms map[string]map[string]any, hidden map[string]string) {
-	terms, hidden = make(map[string]map[string]any, len(list)), map[string]string{}
+// told of, by address, and the addresses of the hidden ones
+// (hiddenTerminal). The terminals of other machines the terminal core has
+// (otherMachine) are in neither: they are none of the clients'.
+func indexTerminals(list []map[string]any) (terms map[string]map[string]any, hidden map[string]bool) {
+	terms, hidden = make(map[string]map[string]any, len(list)), map[string]bool{}
 	for _, t := range list {
 		addr, _ := t["address"].(string)
 		switch {
-		case addr == "":
+		case addr == "" || otherMachine(addr):
 		case hiddenTerminal(t):
-			hidden[addr], _ = t["name"].(string)
+			hidden[addr] = true
 		default:
 			terms[addr] = t
 		}
@@ -32,26 +33,75 @@ func indexTerminals(list []map[string]any) (terms map[string]map[string]any, hid
 	return terms, hidden
 }
 
-// hiddenTerminal reports whether a terminal's record carries the label of
-// the product's own helpers (agentproto.HiddenLabel), whatever its value:
-// the chat host, which a machine's agent runs as a terminal so that it
-// lives as the user's terminals do. It is no terminal of the clients': it
-// is in no snapshot, no event and no list they get, its agent is detected
-// for nobody, and a call or an attach that names it is answered as for a
-// terminal that does not exist.
+// hiddenTerminal reports whether a terminal's record is the chat host's,
+// which a machine's agent runs as a terminal so that it lives as the
+// user's terminals do: named agentproto.ChatHostName and labeled
+// agentproto.HiddenLabel with the value agentproto.HiddenChatHost. Both
+// are needed: the terminal core gives the name to one live terminal at a
+// time and clients cannot take it, so a program of the machine that sets
+// the label on another terminal (labels are free-form) does not hide that
+// terminal from the clients. The chat host is no terminal of the
+// clients': it is in no snapshot, no event and no list they get, its agent
+// is detected for nobody, and a call or an attach that names it is
+// answered as for a terminal that does not exist.
 func hiddenTerminal(rec map[string]any) bool {
+	name, _ := rec["name"].(string)
 	labels, _ := rec["labels"].(map[string]any)
-	_, hidden := labels[agentproto.HiddenLabel]
-	return hidden
+	value, _ := labels[agentproto.HiddenLabel].(string)
+	return agentproto.Hidden(name, value)
+}
+
+// hiddenRecord is hiddenTerminal for a decoded record.
+func hiddenRecord(t *hc.Terminal) bool {
+	name := ""
+	if t.Name != nil {
+		name = *t.Name
+	}
+	return agentproto.Hidden(name, t.Labels[agentproto.HiddenLabel])
+}
+
+// closeStreamsLocked ends the clients' streams of terminal addr, which
+// became hidden, also those of clients that no longer follow the machine:
+// their pumps tell the clients that they closed. b.mu is held.
+func (b *termBackend) closeStreamsLocked(addr string) {
+	b.unpark(addr)
+	for ts := range b.streams {
+		if ts.terminal == addr {
+			go ts.st.Close()
+		}
+	}
+}
+
+// track has the backend know a client's stream of it until untrack, and
+// reports whether its terminal is hidden by now (the stream is to end).
+func (b *termBackend) track(ts *termStream) (hidden bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.streams == nil {
+		b.streams = map[*termStream]bool{}
+	}
+	b.streams[ts] = true
+	return b.hidden[ts.terminal]
+}
+
+// untrack forgets a stream that ended or that its client let go of.
+func (b *termBackend) untrack(ts *termStream) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.streams, ts)
 }
 
 // concealLocked reports whether an event is about a hidden terminal, which
 // is then none of the clients', and keeps b.hidden: a terminal that is
-// created with the label, or gets it, is hidden, and the clients that knew
-// it are told that it was removed; one that is hidden stays so until it is
-// removed, whatever becomes of its labels. b.mu is held.
+// created hidden, or becomes so (gets the label), is hidden, and the
+// clients that knew it are told that it was removed and lose their streams
+// of it; one that is hidden stays so until it is removed, whatever becomes
+// of its labels. b.mu is held.
 func (b *termBackend) concealLocked(n hc.RawNotification, data map[string]any) bool {
-	if _, hidden := b.hidden[n.Terminal]; hidden {
+	if b.hidden[n.Terminal] {
 		if n.Type == "removed" {
 			delete(b.hidden, n.Terminal)
 		}
@@ -73,18 +123,20 @@ func (b *termBackend) concealLocked(n hc.RawNotification, data map[string]any) b
 		return false
 	}
 	if b.hidden == nil {
-		b.hidden = map[string]string{}
+		b.hidden = map[string]bool{}
 	}
-	b.hidden[n.Terminal], _ = rec["name"].(string)
+	b.hidden[n.Terminal] = true
 	delete(b.agents, n.Terminal)
 	if _, known := b.terms[n.Terminal]; known {
 		delete(b.terms, n.Terminal)
-		b.unpark(n.Terminal)
 		gone := map[string]any{"t": "event", "m": b.id, "type": "removed", "terminal": n.Terminal, "data": json.RawMessage("{}")}
 		for c := range b.subs {
 			c.sendJSON(gone)
 		}
 	}
+	// Streams attached before it was hidden, while it was not yet known as
+	// hidden, or in the instant before.
+	b.closeStreamsLocked(n.Terminal)
 	return true
 }
 
@@ -99,6 +151,12 @@ func (b *termBackend) event(n hc.RawNotification) {
 		for addr := range b.terms {
 			b.mergeAgent(addr)
 		}
+		// What runs in a terminal hidden meanwhile is no longer the
+		// clients' to know, and their streams of it end.
+		for addr := range b.hidden {
+			delete(b.agents, addr)
+			b.closeStreamsLocked(addr)
+		}
 		// The events missed may have ended terminals: the snapshot is the
 		// whole state, so a parked stream of one gone or over ends too.
 		for addr := range b.parked {
@@ -112,6 +170,10 @@ func (b *termBackend) event(n hc.RawNotification) {
 		return
 	case "event":
 	default:
+		return
+	}
+	// Another machine's terminals and documents are none of the clients'.
+	if otherMachine(n.Terminal) || n.Machine != "" {
 		return
 	}
 	var data map[string]any
@@ -337,8 +399,9 @@ func (b *termBackend) applyDetected(ev agentproto.DetectEvent, told map[string]a
 	}
 	checkSession(&ev)
 	b.mu.Lock()
-	if _, hidden := b.hidden[ev.Terminal]; hidden {
-		// What runs in a hidden terminal is not the clients' to know.
+	if b.hidden[ev.Terminal] || otherMachine(ev.Terminal) {
+		// What runs in a hidden terminal, or on another machine of the
+		// terminal core, is not the clients' to know.
 		delete(b.agents, ev.Terminal)
 		b.mu.Unlock()
 		return

@@ -54,9 +54,12 @@ type watched struct {
 	lastUse  time.Time
 
 	// configuring: a configure runs; configAgain: the settings changed
-	// meanwhile; configured: the host took the machine's settings as they
-	// are (it keeps them in its database across its restarts).
-	configuring, configAgain, configured bool
+	// meanwhile.
+	configuring, configAgain bool
+	// configuredHost is the host process (hostID) that took the machine's
+	// settings as they are; "" for none. A host started again takes them
+	// anew: it starts without full access until a configure allows it.
+	configuredHost string
 }
 
 // live tells whether a chat in state st has an agent process.
@@ -257,7 +260,7 @@ func (p *Plugin) watch(ctx context.Context, w *watched) {
 // watchOnce connects to the host without starting one, reads every chat's
 // state and then each change until the stream ends.
 func (p *Plugin) watchOnce(ctx context.Context, w *watched) error {
-	c, err := p.dial(ctx, w.id, false)
+	c, err := p.dial(ctx, w.id, false, true)
 	if err != nil {
 		return err
 	}
@@ -358,18 +361,22 @@ type note struct {
 // same status at the same sequence number twice. Of the first states the
 // core reads of a machine (initial), only the blocked ones are: what ended
 // before the core started was told by the core of then, and what waits for
-// the user is to be answered still. p.mu is held.
-func (p *Plugin) publishes(w *watched, st, old chatproto.ChatState, had, initial bool) bool {
+// the user is to be answered still. After a gap in the watch (gap: the
+// states a watch read first, not the core's first), a chat done at a later
+// sequence number than it was is a turn that ran and ended meanwhile, done
+// again. p.mu is held.
+func (p *Plugin) publishes(w *watched, st, old chatproto.ChatState, had, initial, gap bool) bool {
 	if st.Status != chatproto.StatusBlocked && st.Status != chatproto.StatusDone {
 		return false
 	}
 	key := st.Status + "@" + strconv.FormatUint(st.Seq, 10)
+	doneAgain := gap && st.Status == chatproto.StatusDone && st.Seq > old.Seq
 	switch {
 	case w.published[st.ID] == key:
 		return false
 	case initial && st.Status != chatproto.StatusBlocked:
 		return false
-	case !initial && had && old.Status == st.Status:
+	case !initial && had && old.Status == st.Status && !doneAgain:
 		return false
 	}
 	w.published[st.ID] = key
@@ -389,7 +396,7 @@ func (p *Plugin) watchUp(w *watched, states []chatproto.ChatState) {
 		}
 		w.states[st.ID] = st
 		old, had := prev[st.ID]
-		if p.publishes(w, st, old, had, initial) {
+		if p.publishes(w, st, old, had, initial, !initial) {
 			notes = append(notes, note{w.id, st})
 		}
 	}
@@ -415,7 +422,7 @@ func (p *Plugin) watchChange(w *watched, st chatproto.ChatState) {
 		delete(w.published, st.ID)
 	} else {
 		w.states[st.ID] = st
-		if p.publishes(w, st, old, had, false) {
+		if p.publishes(w, st, old, had, false, false) {
 			notes = append(notes, note{w.id, st})
 		}
 	}
@@ -524,9 +531,11 @@ func (p *Plugin) configure(ctx context.Context, m string) {
 }
 
 // configureOnce sends machine m's host the settings s; with start, to a
-// host it starts when none serves. The host took them when it answered.
+// host it starts when none serves. The host took them when it answered:
+// that host process is the machine's configured one while the settings
+// stay as they are.
 func (p *Plugin) configureOnce(ctx context.Context, m string, s chatproto.HostSettings, start bool) error {
-	c, err := p.dial(ctx, m, start)
+	c, err := p.dial(ctx, m, start, true)
 	if err != nil {
 		return err
 	}
@@ -537,27 +546,52 @@ func (p *Plugin) configureOnce(ctx context.Context, m string, s chatproto.HostSe
 		p.mu.Lock()
 		// Settings that changed meanwhile are configured again.
 		if h != nil && HostSettings(h.Settings(), m) == s {
-			p.machine(m).configured = true
+			p.machine(m).configuredHost = hostID(c.info)
 		}
 		p.mu.Unlock()
 	}
 	return err
 }
 
-// configureFirst configures machine m's host, starting it, unless it took
-// the settings as they are since the core started or the core is
-// read-only: a chat it makes starts under them (the full access allowed,
-// the default mode). A failure is left to the request that follows.
-func (p *Plugin) configureFirst(ctx context.Context, m string) {
+// prepare configures machine m's host before a request that may start an
+// agent (a chat's new agent, a prompt, a listing that runs the agent),
+// with start starting the host, unless a host took the machine's settings
+// as they are since the core started or the core is read-only: the agent
+// starts under them (the full access allowed, the default mode). A
+// failure is left to the request that follows.
+func (p *Plugin) prepare(ctx context.Context, m string, start bool) {
 	h := p.getHost()
 	if h == nil || h.ReadOnly() {
 		return
 	}
 	p.mu.Lock()
-	done := p.machine(m).configured
+	w := p.machines[m]
+	done := w != nil && w.configuredHost != ""
 	p.mu.Unlock()
 	if !done {
-		p.configureOnce(ctx, m, HostSettings(h.Settings(), m), true)
+		cctx, cancel := context.WithTimeout(ctx, shortTimeout)
+		p.configureOnce(cctx, m, HostSettings(h.Settings(), m), start)
+		cancel()
+	}
+}
+
+// ensureConfigured configures the host c is connected to when it is not
+// the one that took the machine's settings (a host started again since,
+// another build's), before c's request; nothing on a read-only core. A
+// failure is left to the request.
+func (p *Plugin) ensureConfigured(ctx context.Context, m string, c *hostConn) {
+	h := p.getHost()
+	if h == nil || h.ReadOnly() {
+		return
+	}
+	p.mu.Lock()
+	w := p.machines[m]
+	done := w != nil && w.configuredHost == hostID(c.info)
+	p.mu.Unlock()
+	if !done {
+		cctx, cancel := context.WithTimeout(ctx, shortTimeout)
+		p.configureOnce(cctx, m, HostSettings(h.Settings(), m), false)
+		cancel()
 	}
 }
 
@@ -588,7 +622,7 @@ func (p *Plugin) settingsChanged(changes []settings.Change) {
 	var ms []string
 	for m, w := range p.machines {
 		if all || some[m] {
-			w.configured = false
+			w.configuredHost = ""
 			if w.up {
 				ms = append(ms, m)
 			}

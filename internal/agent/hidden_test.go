@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -30,6 +31,12 @@ type hiddenCore struct {
 	mu     sync.Mutex
 	answer string
 	runs   []map[string]any
+	// get answers terminal.get (a result or an error member), killed are
+	// the terminals terminal.kill was asked to kill; after a kill get
+	// answers with afterKill.
+	get, afterKill string
+	gets           []map[string]any
+	killed         []string
 }
 
 func (f *hiddenCore) set(answer string) {
@@ -69,12 +76,25 @@ func (f *hiddenCore) serve(c net.Conn) {
 			Method string         `json:"method"`
 			Params map[string]any `json:"params"`
 		}
-		if json.Unmarshal(payload, &req) != nil || req.Method != "terminal.run" {
+		if json.Unmarshal(payload, &req) != nil {
 			continue
 		}
 		f.mu.Lock()
-		f.runs = append(f.runs, req.Params)
-		answer := f.answer
+		var answer string
+		switch req.Method {
+		case "terminal.run":
+			f.runs = append(f.runs, req.Params)
+			answer = f.answer
+		case "terminal.get":
+			f.gets = append(f.gets, req.Params)
+			answer = f.get
+		case "terminal.kill":
+			f.killed = append(f.killed, fmt.Sprint(req.Params["terminal"]))
+			f.get, answer = f.afterKill, `"result":{}`
+		default:
+			f.mu.Unlock()
+			continue
+		}
 		f.mu.Unlock()
 		id, _ := json.Marshal(req.ID)
 		body := []byte(`{"jsonrpc":"2.0","id":` + string(id) + `,` + answer + `}`)
@@ -104,11 +124,16 @@ func hiddenAgent(t *testing.T) *Agent {
 
 // A helper runs as a terminal of the terminal core that carries the label
 // which hides it, under its name, without a parent, not notifying, removed
-// when it exits, in the user's home, with the agent's environment for the
-// programs it starts but for the variables of the terminal it was started
-// in, of an ssh session and of a terminal's identity.
+// when it exits, in the user's home, with only the user's variables of the
+// agent's environment (home, user, shell, PATH, locale, TMPDIR, XDG): none
+// of the terminal it was started in, of an ssh session, of a terminal's
+// identity, nor any other.
 func TestRunHidden(t *testing.T) {
-	t.Setenv("HIDDEN_TEST", "kept")
+	t.Setenv("HIDDEN_TEST", "dropped")
+	t.Setenv("OPENAI_API_KEY", "sk-secret")
+	t.Setenv("LC_ALL", "C.UTF-8")
+	t.Setenv("XDG_CONFIG_HOME", "/x/config")
+	t.Setenv("TMPDIR", "/x/tmp")
 	t.Setenv("HC_TERMINAL_ID", "t7")
 	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
 	t.Setenv("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
@@ -169,11 +194,11 @@ func TestRunHidden(t *testing.T) {
 	if !reflect.DeepEqual(p, want) {
 		t.Errorf("terminal.run with\n %v\nwant\n %v", p, want)
 	}
-	if env["HIDDEN_TEST"] != "kept" || env["HOME"] != a.home || env["TERMINFO"] != "/usr/share/terminfo" {
-		t.Errorf("the helper lacks the agent's environment: HIDDEN_TEST=%v HOME=%v TERMINFO=%v", env["HIDDEN_TEST"], env["HOME"], env["TERMINFO"])
+	if env["HOME"] != a.home || env["PATH"] != os.Getenv("PATH") || env["LC_ALL"] != "C.UTF-8" || env["XDG_CONFIG_HOME"] != "/x/config" || env["TMPDIR"] != "/x/tmp" {
+		t.Errorf("the helper lacks the user's variables: %v", env)
 	}
 	for k := range env {
-		if strings.HasPrefix(k, "HC_") || strings.HasPrefix(k, "SSH_") || k == "TMUX" || k == "TERM" || k == "COLORTERM" || strings.HasPrefix(k, "TERM_PROGRAM") {
+		if !hiddenVar(k) || k == "HIDDEN_TEST" || k == "OPENAI_API_KEY" || k == "TERMINFO" {
 			t.Errorf("the helper got %s", k)
 		}
 	}
@@ -206,5 +231,83 @@ func TestPluginEnvRunsHidden(t *testing.T) {
 	}
 	if err := env.RunHidden(context.Background(), agentproto.ChatHostName, []string{"/bin/true"}); !errors.Is(err, plugin.ErrNoTerminalCore) {
 		t.Fatalf("without a terminal core: %v", err)
+	}
+}
+
+// A chat host's terminal that holds its name and does not serve is killed
+// through the terminal core, once it is known to be one (its hidden label,
+// the chat host's arguments, of any build's program), and the name waited
+// for; another terminal of the name is left alone. Plugins have it
+// (plugin.Env.KillHidden).
+func TestKillHidden(t *testing.T) {
+	a := hiddenAgent(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	argv := []string{"/new/agent", "chat-host", "--base", a.base, "--run", a.runDir}
+	if _, err := killHidden(ctx, a.hcSocket(), agentproto.ChatHostName, argv, true); !errors.Is(err, plugin.ErrNoTerminalCore) {
+		t.Fatalf("without a terminal core: %v", err)
+	}
+	ln, err := net.Listen("unix", a.hcSocket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	core := &hiddenCore{}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go core.serve(c)
+		}
+	}()
+	record := func(label string, args ...string) string {
+		b, _ := json.Marshal(map[string]any{"address": "t9", "name": agentproto.ChatHostName, "state": "live",
+			"argv": append([]string{"/old/agent"}, args...), "labels": map[string]string{agentproto.HiddenLabel: label}})
+		return `"result":` + string(b)
+	}
+	set := func(get, after string) {
+		core.mu.Lock()
+		core.get, core.afterKill, core.killed = get, after, nil
+		core.mu.Unlock()
+	}
+	gone := `"error":{"code":-32000,"message":"no terminal","data":{"kind":"not_found"}}`
+
+	set(gone, "")
+	if ok, err := killHidden(ctx, a.hcSocket(), agentproto.ChatHostName, argv, true); ok || err != nil {
+		t.Errorf("no terminal of the name: %v %v", ok, err)
+	}
+	for _, rec := range []string{record("other", argv[1:]...), record(agentproto.HiddenChatHost, "chat-host", "--base", "/x", "--run", a.runDir)} {
+		set(rec, gone)
+		if ok, err := killHidden(ctx, a.hcSocket(), agentproto.ChatHostName, argv, true); ok || !errors.Is(err, errNotHelper) {
+			t.Errorf("another terminal: %v %v", ok, err)
+		}
+	}
+	set(record(agentproto.HiddenChatHost, argv[1:]...), gone)
+	if ok, err := killHidden(ctx, a.hcSocket(), agentproto.ChatHostName, argv, false); !ok || err != nil {
+		t.Errorf("held: %v %v", ok, err)
+	}
+	core.mu.Lock()
+	if len(core.killed) != 0 || core.gets[len(core.gets)-1]["terminal"] != agentproto.ChatHostName {
+		t.Errorf("asked: killed %v, got %v", core.killed, core.gets)
+	}
+	core.mu.Unlock()
+	if ok, err := killHidden(ctx, a.hcSocket(), agentproto.ChatHostName, argv, true); !ok || err != nil {
+		t.Errorf("kill: %v %v", ok, err)
+	}
+	core.mu.Lock()
+	if len(core.killed) != 1 || core.killed[0] != "t9" {
+		t.Errorf("killed %v", core.killed)
+	}
+	core.mu.Unlock()
+
+	env := a.pluginEnv()
+	if env.KillHidden == nil {
+		t.Fatal("plugins cannot kill a stuck helper")
+	}
+	set(record(agentproto.HiddenChatHost, argv[1:]...), gone)
+	if ok, err := env.KillHidden(ctx, agentproto.ChatHostName, argv, false); !ok || err != nil {
+		t.Errorf("through the plugins' env: %v %v", ok, err)
 	}
 }

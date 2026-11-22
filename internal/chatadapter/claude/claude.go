@@ -122,6 +122,12 @@ func (Adapter) Start(ctx context.Context, p chatadapter.StartParams, sink chatad
 	if p.Logger == nil {
 		p.Logger = log.New(io.Discard, "", 0)
 	}
+	if p.Resume != "" {
+		// Two programs do not write one session.
+		if err := inTerminal(ctx, p.Env, p.Resume); err != nil {
+			return nil, err
+		}
+	}
 	s := newSession(p, sink, id)
 	if err := s.begin(ctx); err != nil {
 		return nil, err

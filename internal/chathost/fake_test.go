@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"herdr-ide/internal/agentkinds"
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/chatadapter"
 	"herdr-ide/internal/chatproto"
 )
@@ -142,13 +143,19 @@ type fakeAdapter struct {
 	closeDelay  time.Duration
 	historyGate chan struct{}
 	promptErr   error
-	caps        chatproto.Capabilities
-	config      []chatproto.ConfigOption
-	list        []chatproto.Session
-	history     []chatproto.Event
-	historyErr  error
-	histories   []chatadapter.HistoryParams
-	sessionsP   []chatadapter.SessionsParams
+	// setConfigErr is SetConfig's answer; untrusted: a session started in
+	// a folder not Trusted tells so.
+	setConfigErr error
+	untrusted    bool
+	// running are the sessions another process runs (InTerminal).
+	running    map[string]bool
+	caps       chatproto.Capabilities
+	config     []chatproto.ConfigOption
+	list       []chatproto.Session
+	history    []chatproto.Event
+	historyErr error
+	histories  []chatadapter.HistoryParams
+	sessionsP  []chatadapter.SessionsParams
 }
 
 func newFakeAdapter() *fakeAdapter {
@@ -207,6 +214,10 @@ func (a *fakeAdapter) Start(ctx context.Context, p chatadapter.StartParams, sink
 			s.end(err)
 		}()
 	}
+	if a.untrusted && !p.Trusted {
+		sink.Event(chatproto.Event{T: chatproto.EventNotice, Method: agentproto.NoticeMethod(agentproto.NoticeUntrustedFolder),
+			Params: json.RawMessage(`{"cwd":"` + p.Cwd + `"}`)})
+	}
 	sink.Update(func(c *chatproto.Chat) {
 		c.Capabilities = a.caps
 		c.Config = a.config
@@ -252,6 +263,16 @@ func (a *fakeAdapter) History(ctx context.Context, p chatadapter.HistoryParams, 
 			continue
 		}
 		emit(ev)
+	}
+	return nil
+}
+
+// InTerminal tells the sessions of running (chatadapter.Running).
+func (a *fakeAdapter) InTerminal(ctx context.Context, p chatadapter.HistoryParams) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.running[p.SessionID] {
+		return &chatproto.Error{Code: chatproto.CodeInTerminal, Message: "runs in a terminal"}
 	}
 	return nil
 }
@@ -385,7 +406,9 @@ func (s *fakeSession) CancelQueued(ctx context.Context, m string) error {
 
 func (s *fakeSession) SetConfig(ctx context.Context, id, value string) error {
 	s.record("set_config:" + id + "=" + value)
-	return nil
+	s.a.mu.Lock()
+	defer s.a.mu.Unlock()
+	return s.a.setConfigErr
 }
 
 func (s *fakeSession) Compact(ctx context.Context) error {

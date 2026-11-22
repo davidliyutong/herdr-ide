@@ -105,10 +105,16 @@ var coreEnded = map[string]bool{"stopped_by_restart": true, "holder_lost": true,
 // snapshots: live, running a program (its pid tells the program's
 // generations apart), of this terminal core with an address that can name
 // files (a machine linked to the core has addresses machine/t7), and none
-// of the product's own helpers (agentproto.HiddenLabel: the chat host),
-// which no client shows. Every terminal a capture snapshots passes here.
+// of the product's own helpers (agentproto.Hidden: the chat host's name
+// and label both), which no client shows; a terminal that only carries
+// the label is one of the user's and is captured. Every terminal a
+// capture snapshots passes here.
 func capturable(t *hc.Terminal) bool {
-	if _, hidden := t.Labels[agentproto.HiddenLabel]; hidden {
+	name := ""
+	if t.Name != nil {
+		name = *t.Name
+	}
+	if agentproto.Hidden(name, t.Labels[agentproto.HiddenLabel]) {
 		return false
 	}
 	return t.State == "live" && t.PID != nil && *t.PID > 0 && agentproto.ValidHistoryTerminal(t.Address)

@@ -7,8 +7,9 @@
 // source has; after the page's connection came back (or the core lost its
 // connection to the host) a reattach event comes before that, as live
 // increments may have been lost. A chat whose log went back below what the
-// source has (another host's) starts over: a reset, and its events from
-// the start. A subscriber that comes later hears what the source has: the
+// source has (another host's), or whose stored events now begin after the
+// next one the source lacks (the host's limits removed those in between),
+// starts over: a reset, and its stored events from the first. A subscriber that comes later hears what the source has: the
 // info and stored events in order, then the live increments of the items
 // still being written.
 //
@@ -134,11 +135,20 @@ export class ChatSourceImpl implements ChatSource {
   /** Trusts the chat's folder, and those below it, on its machine (the
    * core's route trust, audited): its agents load the project's own
    * settings from their next start. */
-  async trust(): Promise<void> {
+  trust(): Promise<void> {
+    return this.folderTrust(chatApi.trust);
+  }
+  /** Takes back the trust that covers the chat's folder on its machine
+   * (the core's route untrust, audited): its agents start without the
+   * project's own settings again. */
+  untrust(): Promise<void> {
+    return this.folderTrust(chatApi.untrust);
+  }
+  private async folderTrust(ask: (m: string, cwd: string) => Promise<void>): Promise<void> {
     if (this.readOnly) throw new CommandError('read_only');
     const cwd = chatCwd(this.m, this.chat);
     if (!cwd?.startsWith('/')) throw new CommandError('bad_request');
-    await chatApi.trust(this.m, cwd);
+    await ask(this.m, cwd);
   }
 
   /** The files and folders of the chat's directory that match what the
@@ -198,8 +208,8 @@ export class ChatSourceImpl implements ChatSource {
     this.cur = cur;
     cur.sub = this.conn.attach(this.m, this.chat, {
       from: () => this.last,
-      attached: (chat, _first, again) => {
-        if (cur === this.cur) this.attached(cur, chat, again || this.again);
+      attached: (chat, first, again) => {
+        if (cur === this.cur) this.attached(cur, chat, first, again || this.again);
       },
       event: (ev) => {
         if (cur === this.cur) this.event(ev);
@@ -218,12 +228,14 @@ export class ChatSourceImpl implements ChatSource {
     });
   }
 
-  private attached(cur: { sub?: Subscription }, chat: Record<string, unknown>, again: boolean) {
+  private attached(cur: { sub?: Subscription }, chat: Record<string, unknown>, first: number | undefined, again: boolean) {
     this.again = false;
     this.retry = RETRY_MIN_MS;
     const seq = typeof chat.seq === 'number' ? chat.seq : undefined;
-    if (again && seq !== undefined && seq < this.last) {
-      // Another log than the one the source has: from its start.
+    const gap = first !== undefined && this.last > 0 && first > this.last + 1;
+    if ((again && seq !== undefined && seq < this.last) || gap) {
+      // Another log than the one the source has, or one without the events
+      // that follow what it has: from its start.
       this.stored = [];
       this.liveEvents = [];
       this.last = 0;

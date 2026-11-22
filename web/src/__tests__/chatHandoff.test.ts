@@ -1,26 +1,34 @@
 // A chat continued in a terminal (plugins/chat/handoff.ts): offered while
 // the chat's state (plugins/chat/state.ts) names an agent that resumes a
 // session by its id and a session, no turn runs and the page may make
-// changes; the machine's word on the chat (GET chats) decides
-// its kind, session and directory; POST handoff first, and no terminal
-// unless the host let the session go; then a new tab of the chat pane's
-// workspace runs the kind's resume command as its program
-// (agentTerminal.ts), its leaf remembering the session, which a restore
-// after the terminal core started again resumes (restore.ts); a terminal
-// that already runs the session is shown instead.
+// changes; the machine's word on the chat (GET chats, the page's states
+// while no chat host serves) decides its kind, session and directory; POST
+// handoff first, and no terminal unless the host let the session go; then
+// a new tab of the chat pane's workspace runs the machine's shell in the
+// chat's directory, its leaf remembering the session and asking for the
+// agent, whose resume command its pane types once attached, as a restore
+// does (agentTerminal.ts, restore.ts); the shell stays when the agent
+// exits, and its pane offers to continue in a chat; a terminal that
+// already runs the session, or is about to (its leaf names the session and
+// no agent was detected in it yet), is shown instead, and a handoff stays
+// under way until the machine detects the agent in its terminal or
+// HANDOFF_SETTLE_MS pass.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: () => {} } }));
 
 import { useStore } from '../state/store';
+import { useTerms } from '../state/terms';
 import { useSettings } from '../settings';
 import { FakeCore, settle } from './fakeTerms';
 import type { MachineState } from '../lib/machine';
 import { setLocale } from '../i18n';
 import * as L from '../term/layout';
-import { resumeArgv, sessionTerminal, startAgentTerminal } from '../agentTerminal';
-import { canContinueInTerminal, continueInTerminal } from '../plugins/chat/handoff';
+import { resumeArgv, resumeInTerminal, sessionTerminal } from '../agentTerminal';
+import { canContinueInTerminal, continueInTerminal, HANDOFF_SETTLE_MS } from '../plugins/chat/handoff';
+import { actions } from '../actions';
+import { chatTarget } from '../plugins/agents/ContinueInChat';
 import { replaceTerminal, resumeSession } from '../restore';
 import { applyStates, useChats } from '../plugins/chat/state';
 import type { ChatState } from '../plugins/chat/protocol';
@@ -49,13 +57,20 @@ class FakeChats {
   requests: string[] = [];
   chats: unknown[] = [{ id: CHAT, kind: 'claude', cwd: DIR, sessionId: S, state: 'idle', status: 'idle' }];
   handoff: () => Response = () => new Response('{}', { status: 200 });
+  /** No chat host serves: GET chats answers not_running. */
+  notRunning = false;
 
   install() {
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
       const u = new URL(url, 'http://page');
       const method = init?.method ?? 'GET';
       this.requests.push(`${method} ${u.pathname}${u.search}`);
-      if (u.pathname === '/api/m/m/p/chat/chats') return new Response(JSON.stringify({ chats: this.chats }), { status: 200 });
+      if (u.pathname === '/api/m/m/p/chat/chats')
+        return this.notRunning
+          ? new Response('{"error":"not_running","message":"no chat host"}', { status: 409 })
+          : new Response(JSON.stringify({ chats: this.chats }), { status: 200 });
+      // The agents plugin confirms the session for the terminal's directory.
+      if (u.pathname === '/api/m/m/p/agents/resolve') return new Response('{"ok":true}', { status: 200 });
       if (u.pathname === '/api/m/m/p/chat/handoff' && method === 'POST') return this.handoff();
       return new Response('{"error":"unknown"}', { status: 404 });
     });
@@ -118,38 +133,55 @@ describe('an agent as a terminal’s program', () => {
     expect(resumeArgv(undefined, S)).toBeUndefined();
   });
 
-  it('starts in a new tab of the workspace, its leaf with the session, which a restore resumes', async () => {
+  it('starts the shell in a new tab of the workspace, its leaf asking for the agent in the session, which its pane types', async () => {
     const { core, model } = await setup();
-    const address = await startAgentTerminal('m', ['claude', '--resume', S], { workspace: 'w1', cwd: DIR, session: S });
+    const address = await resumeInTerminal('m', 'claude', S, { workspace: 'w1', cwd: DIR });
     await settle();
     expect(address).toBe('t1');
-    expect(runs(core)).toEqual([expect.objectContaining({ argv: ['claude', '--resume', S], cwd: DIR, keep: true })]);
+    expect(runs(core)).toEqual([expect.objectContaining({ cwd: DIR, keep: true })]);
+    expect(runs(core)[0].argv).toBeUndefined();
     const ws = model.layout('m')!.workspaces.find((w) => w.id === 'w1')!;
     expect(ws.tabs.map((t) => L.tabPanes(t))).toEqual([['a'], ['t1']]);
     expect(L.selectedWorkspace(model.layout('m')!)!.id).toBe('w1');
     // No agent before the machine sees it: a leaf with an agent but not
     // its program's pid would read as one whose program is gone.
+    expect(leafOf(model, 't1')).toEqual({ terminal: 't1', session: S, resume: 'claude' });
+    // Its pane attaches: the machine confirms the session, and the page
+    // types the kind's command into the shell, once.
+    const pane = { attached: true, type: vi.fn() };
+    model.resumeAgent('m', 't1', pane);
+    for (let i = 0; i < 4; i++) await settle();
+    expect(pane.type.mock.calls).toEqual([[`claude --resume ${S}\r`]]);
     expect(leafOf(model, 't1')).toEqual({ terminal: 't1', session: S });
+    model.resumeAgent('m', 't1', pane);
+    for (let i = 0; i < 2; i++) await settle();
+    expect(pane.type).toHaveBeenCalledTimes(1);
     // The machine detects the agent: the leaf remembers it with its pid
     // and keeps the session.
     core.event('m', 'agent', 't1', { agent: 'claude' });
     await settle();
     await settle();
     expect(leafOf(model, 't1')).toEqual({ terminal: 't1', session: S, agent: 'claude', pid: 100 });
+    // The agent exits; the shell stays, and its pane can continue the
+    // session in a chat.
+    core.event('m', 'agent', 't1', { agent: null });
+    await settle();
+    await settle();
+    const record = useTerms.getState().machines.m?.terminals.t1;
+    expect(chatTarget(leafOf(model, 't1') as L.TerminalLeaf, record)).toEqual({ kind: 'claude', session: S });
     // The terminal core starts again: the new terminal asks for the
     // agent back in that session.
     const restored = replaceTerminal(model.layout('m')!, 't1', 't9');
     expect(resumeSession(restored, 't9')).toEqual({ agent: 'claude', session: S });
   });
 
-  it('takes only a session id into the leaf, and starts nothing on a read-only page', async () => {
-    const { core, model } = await setup();
-    await startAgentTerminal('m', ['codex'], { session: 'nope' });
-    await settle();
-    expect(leafOf(model, 't1')).toEqual({ terminal: 't1' });
+  it('takes only a session id and a kind that resumes by it, and starts nothing on a read-only page', async () => {
+    const { core } = await setup();
+    expect(await resumeInTerminal('m', 'codex', 'nope')).toBeUndefined();
+    expect(await resumeInTerminal('m', 'kimi', S)).toBeUndefined();
     useStore.getState().setReadOnly(true);
-    expect(await startAgentTerminal('m', ['codex'])).toBeUndefined();
-    expect(runs(core)).toHaveLength(1);
+    expect(await resumeInTerminal('m', 'codex', S)).toBeUndefined();
+    expect(runs(core)).toHaveLength(0);
   });
 
   it('finds the live terminal whose agent runs a session', async () => {
@@ -161,6 +193,26 @@ describe('an agent as a terminal’s program', () => {
     expect(sessionTerminal('m', S)).toBe('b');
     expect(sessionTerminal('m', 'other')).toBeUndefined();
     expect(sessionTerminal('m', '')).toBeUndefined();
+  });
+
+  it('finds the live terminal whose leaf names the session until an agent detected in it quits', async () => {
+    const { core } = await setup();
+    const address = await resumeInTerminal('m', 'claude', S, { cwd: DIR });
+    await settle();
+    // Asked to resume, the agent not seen yet.
+    expect(sessionTerminal('m', S)).toBe(address);
+    expect(sessionTerminal('m', 'other')).toBeUndefined();
+    // The machine sees the agent, without its session yet.
+    core.event('m', 'agent', address!, { agent: 'claude' });
+    await settle();
+    await settle();
+    expect(sessionTerminal('m', S)).toBe(address);
+    // It quits: the leaf keeps the session to continue it in a chat, but
+    // nothing runs it there.
+    core.event('m', 'agent', address!, { agent: null });
+    await settle();
+    await settle();
+    expect(sessionTerminal('m', S)).toBeUndefined();
   });
 });
 
@@ -199,20 +251,36 @@ describe('a chat continued in a terminal', () => {
     await continueInTerminal('m', VIEW);
     await settle();
     expect(chats.requests).toEqual(['GET /api/m/m/p/chat/chats', `POST /api/m/m/p/chat/handoff?chat=${CHAT}`]);
-    expect(runs(core)).toEqual([expect.objectContaining({ argv: ['claude', '--resume', S], cwd: DIR })]);
+    expect(runs(core)).toEqual([expect.objectContaining({ cwd: DIR, keep: true })]);
+    expect(runs(core)[0].argv).toBeUndefined();
     const ws = model.layout('m')!.workspaces.find((w) => w.id === 'w2')!;
     expect(ws.tabs.map((t) => L.tabPanes(t))).toEqual([['view:v1'], ['t1']]);
-    expect(leafOf(model, 't1')).toEqual({ terminal: 't1', session: S });
+    expect(leafOf(model, 't1')).toEqual({ terminal: 't1', session: S, resume: 'claude' });
     expect(L.focusedPane(model.layout('m')!)).toBe('t1');
     expect(toasts()).toEqual([]);
   });
 
   it('goes by the machine’s kind and session, never the leaf’s', async () => {
-    const { core } = await setup();
+    const { core, model } = await setup();
     chats.chats = [{ id: CHAT, kind: 'codex', cwd: DIR, sessionId: S, state: 'sleeping' }];
     await continueInTerminal('m', VIEW);
     await settle();
-    expect(runs(core).map((p) => p.argv)).toEqual([['codex', 'resume', S]]);
+    expect(runs(core)).toHaveLength(1);
+    expect(leafOf(model, 't1')).toEqual({ terminal: 't1', session: S, resume: 'codex' });
+  });
+
+  it('goes by the page’s states of the chat while no chat host serves', async () => {
+    const { core, model } = await setup();
+    chats.notRunning = true;
+    chats.handoff = () => new Response('{"error":"sleeping","message":""}', { status: 409 });
+    await continueInTerminal('m', VIEW);
+    await settle();
+    expect(toasts()).toEqual(['The chat is no longer on the machine.']);
+    applyStates('m', [stateOf({ kind: 'codex', state: 'sleeping' })], true);
+    await continueInTerminal('m', VIEW);
+    await settle();
+    expect(runs(core)).toEqual([expect.objectContaining({ cwd: DIR })]);
+    expect(leafOf(model, 't1')).toEqual({ terminal: 't1', session: S, resume: 'codex' });
   });
 
   it('starts no terminal unless the host let the session go', async () => {
@@ -222,13 +290,70 @@ describe('a chat continued in a terminal', () => {
     await settle();
     expect(runs(core)).toEqual([]);
     expect(toasts()).toEqual(['The chat could not continue in a terminal: the agent is working; wait for its turn to end, or stop it']);
-    // A chat without an agent process, or handed off before, has let it go.
+    // A chat without an agent process, or handed off before, has let it
+    // go (each time the terminal before is gone).
     for (const code of ['sleeping', 'handed_off']) {
       chats.handoff = () => new Response(JSON.stringify({ error: code, message: '' }), { status: 409 });
       await continueInTerminal('m', VIEW);
       await settle();
+      const started = runs(core).length;
+      core.event('m', 'removed', `t${started}`);
+      await settle();
+      await settle();
     }
     expect(runs(core)).toHaveLength(2);
+  });
+
+  it('starts no second terminal while the agent of the first is not detected, then shows that one', async () => {
+    const { core, model } = await setup();
+    await Promise.all([continueInTerminal('m', VIEW), continueInTerminal('m', VIEW)]);
+    await settle();
+    expect(runs(core)).toHaveLength(1);
+    expect(chats.requests).toEqual(['GET /api/m/m/p/chat/chats', `POST /api/m/m/p/chat/handoff?chat=${CHAT}`]);
+    // Under way until the machine detects the agent in t1: asking again
+    // does nothing.
+    await continueInTerminal('m', VIEW);
+    await settle();
+    expect(chats.requests).toHaveLength(2);
+    // Detected: the next ask goes to the machine and shows t1.
+    core.event('m', 'agent', 't1', { agent: 'claude' });
+    await settle();
+    await settle();
+    actions.focusPane('m', 'view:v1');
+    await settle();
+    expect(L.focusedPane(model.layout('m')!)).toBe('view:v1');
+    chats.handoff = () => new Response('{"error":"handed_off","message":""}', { status: 409 });
+    await continueInTerminal('m', VIEW);
+    await settle();
+    expect(chats.requests).toHaveLength(4);
+    expect(runs(core)).toHaveLength(1);
+    expect(L.focusedPane(model.layout('m')!)).toBe('t1');
+    expect(toasts()).toEqual([]);
+  });
+
+  it('stays under way at most HANDOFF_SETTLE_MS without an agent detected, and then shows the terminal that is to run it', async () => {
+    const timers = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      const { core, model } = await setup();
+      await continueInTerminal('m', VIEW);
+      await settle();
+      expect(runs(core)).toHaveLength(1);
+      await continueInTerminal('m', VIEW);
+      expect(chats.requests).toHaveLength(2);
+      const settleTimer = timers.mock.calls.find((c) => c[1] === HANDOFF_SETTLE_MS);
+      expect(HANDOFF_SETTLE_MS).toBe(15_000);
+      (settleTimer![0] as () => void)();
+      actions.focusPane('m', 'view:v1');
+      await settle();
+      chats.handoff = () => new Response('{"error":"handed_off","message":""}', { status: 409 });
+      await continueInTerminal('m', VIEW);
+      await settle();
+      expect(chats.requests).toHaveLength(4);
+      expect(runs(core)).toHaveLength(1);
+      expect(L.focusedPane(model.layout('m')!)).toBe('t1');
+    } finally {
+      timers.mockRestore();
+    }
   });
 
   it('says why when the chat is gone, has no session yet, or the list cannot be read', async () => {

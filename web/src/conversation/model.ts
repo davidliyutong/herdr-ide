@@ -892,6 +892,12 @@ function indexOf(c: Conversation, id: string): number | undefined {
   return typeof i === 'number' && i < c.items.length && c.items[i]?.id === id ? i : undefined;
 }
 
+/** Whether the conversation has the user's message a page named clientId
+ * (Command.clientId): the agent took it, or it waits in the queue. */
+export function hasClientMessage(state: Conversation, clientId: string): boolean {
+  return !!clientId && (indexOf(state, clientItem(clientId)) !== undefined || !!state.queued?.some((q) => q.clientId === clientId));
+}
+
 /** The item of an id. */
 export function itemById(state: Conversation, id: string): Item | undefined {
   const i = indexOf(state, id);

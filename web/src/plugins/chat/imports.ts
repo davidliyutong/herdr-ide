@@ -25,10 +25,19 @@ export const MAX_SESSIONS = 1000;
 
 /** The chat kinds the chat host of machine m can start now, in the order
  * it answered: those it says are available and that are a kind this page
- * knows the chat adapter of. */
+ * knows the chat adapter of. While no host serves, a page that may make
+ * changes starts one to ask (a GET starts none); a read-only page asks
+ * none. */
 export async function chatAgents(m: string): Promise<string[]> {
+  let list;
+  try {
+    list = await chatApi.agents(m);
+  } catch (e) {
+    if (!(e instanceof ChatFailure && e.code === 'not_running') || useStore.getState().readOnly) throw e;
+    list = await chatApi.startAgents(m);
+  }
   const out: string[] = [];
-  for (const a of await chatApi.agents(m)) if (a.available && chatAdapter(a.kind) && !out.includes(a.kind)) out.push(a.kind);
+  for (const a of list) if (a.available && chatAdapter(a.kind) && !out.includes(a.kind)) out.push(a.kind);
   return out;
 }
 
@@ -55,7 +64,8 @@ function pastSession(s: Session, cwd: string): PastSession {
 /** A page of the sessions the agent of kind kept for the directory cwd on
  * machine m, from cursor (the page before's next); next is undefined on
  * the last page. A session without an absolute directory is the listed
- * one's. */
+ * one's. A change (listing them may run the agent): not from a read-only
+ * page. */
 export async function chatSessions(
   m: string,
   kind: string,

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -406,20 +407,25 @@ func TestTrust(t *testing.T) {
 
 	j := h.served().j
 	for i := range maxTrusted + 1 {
-		j.trust("/t/"+itoa(i), time.UnixMilli(int64(i+1)))
+		j.trust("/t/"+itoa(i), time.UnixMilli(int64(i+1)), fileID{})
+	}
+	listed := func(p string) bool {
+		rows, err := j.trustedAbove(p)
+		return err == nil && len(rows) > 0 && rows[0].path == p
 	}
 	var n int
 	j.db.QueryRow(`SELECT COUNT(*) FROM trusted`).Scan(&n)
 	// The user's own is the newest; /t/0 and /t/1 the oldest of 1002.
-	if n != maxTrusted || j.trusted("/t/0") || j.trusted("/t/1") || !j.trusted("/t/2") || !j.trusted(h.cwd) {
-		t.Errorf("%d trusted; the oldest stay %v %v", n, j.trusted("/t/0"), j.trusted("/t/1"))
+	if n != maxTrusted || listed("/t/0") || listed("/t/1") || !listed("/t/2") || !listed(h.cwd) {
+		t.Errorf("%d trusted; the oldest stay %v %v", n, listed("/t/0"), listed("/t/1"))
 	}
 }
 
 // Full access: refused while the settings do not allow it, at a new chat
 // and at set_config (by the value the adapter marked Full, an agent's own
-// too); a chat that had it starts its agent in the default mode once they
-// no longer do, which a notice tells.
+// too); once they no longer do, a chat whose agent runs with it starts its
+// agent again, its session resumed, in the default mode, which a notice
+// tells, and stays in it.
 func TestFullAccess(t *testing.T) {
 	h := startHost(t, nil)
 	mode := chatproto.ConfigOption{ID: "mode", Name: "Mode", Category: chatproto.CategoryMode, Type: chatproto.ConfigSelect, CurrentValue: "default",
@@ -437,19 +443,30 @@ func TestFullAccess(t *testing.T) {
 	s.session.expect(t, "set_config:mode=yolo")
 	s.turn("go")
 	s.session.endTurn("end_turn")
-	full := h.create(chatproto.Request{Options: &chatproto.Options{Mode: chatproto.ModeFull}})
-	h.fake.session(t)
+	other := filepath.Join(h.cwd, "other")
+	os.Mkdir(other, 0o700)
+	full := h.create(chatproto.Request{Cwd: other, Options: &chatproto.Options{Mode: chatproto.ModeFull}})
+	fullSession := h.fake.session(t)
 	if p := h.fake.lastStart(t); p.Options.Mode != chatproto.ModeFull {
 		t.Errorf("a full chat started in %q", p.Options.Mode)
 	}
-	_ = full
+	h.waitState(full.ID, chatproto.StateIdle)
 
+	// Turned off: both live chats start their agents again, without it.
 	h.ok(chatproto.Request{Op: chatproto.OpConfigure, Settings: &chatproto.HostSettings{}})
-	h.ok(chatproto.Request{Op: chatproto.OpClose, Chat: s.chat.ID})
-	s.prompt("again")
-	s.session = h.fake.session(t)
-	if p := h.fake.lastStart(t); p.Options.Mode != chatproto.ModeDefault {
-		t.Errorf("started in %q without full access", p.Options.Mode)
+	s.session.expect(t, "close")
+	fullSession.expect(t, "close")
+	restarted := map[string]*fakeSession{}
+	for range 2 {
+		n := h.fake.session(t)
+		if n.p.Options.Mode != chatproto.ModeDefault {
+			t.Errorf("%s started again in %q", n.p.Cwd, n.p.Options.Mode)
+		}
+		// The full chat had no turn: its agent may not keep its session.
+		if n.p.Cwd == other && n.p.Resume != "" || n.p.Cwd == h.cwd && n.p.Resume != s.session.id {
+			t.Errorf("%s started again with the session %q", n.p.Cwd, n.p.Resume)
+		}
+		restarted[n.p.Cwd] = n
 	}
 	ev := s.until(isKind(notice(agentproto.NoticeFullAccessOff)))
 	var params struct{ Mode string }
@@ -457,7 +474,11 @@ func TestFullAccess(t *testing.T) {
 	if params.Mode != "yolo" {
 		t.Errorf("notice %s", ev[len(ev)-1].raw)
 	}
+	s.until(isKind("state:idle"))
+	h.waitState(full.ID, chatproto.StateIdle)
 	// It stays in the default mode.
+	s.session = restarted[h.cwd]
+	s.prompt("again")
 	s.session.expect(t, "prompt:again")
 	s.session.endTurn("end_turn")
 	h.ok(chatproto.Request{Op: chatproto.OpClose, Chat: s.chat.ID})
@@ -465,6 +486,69 @@ func TestFullAccess(t *testing.T) {
 	h.fake.session(t)
 	if p := h.fake.lastStart(t); p.Options.Mode != chatproto.ModeDefault {
 		t.Errorf("started again in %q", p.Options.Mode)
+	}
+}
+
+// A host does not take full access from what an earlier one stored: it is
+// off until a configure of its own process allows it.
+func TestFullAccessOffAtStart(t *testing.T) {
+	h := startHost(t, func(h *testHost) { h.o.settings = nil })
+	allow := chatproto.HostSettings{AllowFull: true, DefaultMode: chatproto.ModeFull}
+	h.ok(chatproto.Request{Op: chatproto.OpConfigure, Settings: &allow})
+	if !h.served().settings.Load().AllowFull {
+		t.Fatal("configure did not allow full access")
+	}
+	h.restart()
+	if s := h.served().settings.Load(); s.AllowFull || s.DefaultMode != chatproto.ModeDefault {
+		t.Errorf("a host started with %+v", s)
+	}
+	h.refused(chatproto.Request{Op: chatproto.OpNew, Kind: fakeKind, Cwd: h.cwd, Options: &chatproto.Options{Mode: chatproto.ModeFull}}, chatproto.CodeNotAllowed)
+	h.ok(chatproto.Request{Op: chatproto.OpConfigure, Settings: &allow})
+	h.create(chatproto.Request{Options: &chatproto.Options{Mode: chatproto.ModeFull}})
+}
+
+// An agent that takes a mode of full access by itself while the settings
+// do not allow it is set back to the mode it had, which a notice tells;
+// one that cannot be is ended, its chat failed.
+func TestAgentTakesFullAccess(t *testing.T) {
+	h := startHost(t, nil)
+	mode := chatproto.ConfigOption{ID: "mode", Name: "Mode", Category: chatproto.CategoryMode, Type: chatproto.ConfigSelect, CurrentValue: "plan",
+		Options: []chatproto.ConfigValue{{Value: "default"}, {Value: "plan"}, {Value: "auto", Full: true}, {Value: "yolo", Full: true}}}
+	h.fake.set(func(a *fakeAdapter) { a.config = append(a.config, mode) })
+	s := h.newChat()
+	switchTo := func(sess *fakeSession, v string) {
+		sess.sink.Update(func(c *chatproto.Chat) {
+			c.Config = slices.Clone(c.Config)
+			for i := range c.Config {
+				if c.Config[i].ID == "mode" {
+					c.Config[i].CurrentValue = v
+				}
+			}
+		})
+	}
+	switchTo(s.session, "yolo")
+	s.session.expect(t, "set_config:mode=plan")
+	ev := s.until(isKind(notice(agentproto.NoticeFullAccessOff)))
+	if !strings.Contains(ev[len(ev)-1].raw, `"mode":"yolo"`) {
+		t.Errorf("notice %s", ev[len(ev)-1].raw)
+	}
+	eventually(t, "the mode set back", func() bool {
+		for _, o := range h.chat(s.chat.ID).Config {
+			if o.ID == "mode" {
+				return o.CurrentValue == "plan"
+			}
+		}
+		return false
+	})
+
+	// The agent does not take the mode back: it is ended.
+	h.fake.set(func(a *fakeAdapter) { a.setConfigErr = errors.New("no") })
+	switchTo(s.session, "auto")
+	s.session.expect(t, "set_config:mode=plan")
+	s.session.expect(t, "close")
+	c := h.waitState(s.chat.ID, chatproto.StateFailed)
+	if c.Error == nil || c.Error.Code != chatproto.CodeNotAllowed {
+		t.Errorf("failed with %+v", c.Error)
 	}
 }
 

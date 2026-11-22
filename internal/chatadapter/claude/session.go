@@ -46,6 +46,8 @@ type session struct {
 	// trusted: the program loads the project's own settings (the folder is
 	// trusted by Claude Code or through the host).
 	trusted bool
+	// title is the session's title stated last (readTitle).
+	title string
 
 	// inTurn: a turn runs; authFailed: an assistant frame of the turn said
 	// that the program is not signed in.
@@ -590,6 +592,7 @@ func (s *session) endTurn(o *out, ev chatproto.Event) {
 	s.inTurn = false
 	s.stream = streamState{open: -1}
 	o.event(ev)
+	s.titleSoon()
 }
 
 // asError is err as a chatproto.Error, of code when it is none.

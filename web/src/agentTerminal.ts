@@ -1,18 +1,22 @@
-// Coding agents as the program of a terminal of their own, in a new tab:
+// A coding agent's session resumed in a terminal of its own, in a new tab:
 // what continues a chat's session in a terminal (plugins/chat/handoff.ts),
 // and the terminals whose agent runs a session.
 //
-// The argv is the agent kind's (conversation/kinds.ts), never text of a
-// document or of a machine; only a session id that is a lower-case UUID
-// goes into it. The terminal's leaf gets the session in the same write
-// that places it (term/layout.ts setTerminalFields), so that a restore
-// after the terminal core started again resumes that session
-// (restore.ts): once the machine detects the agent in the terminal, the
-// page adds the agent and its program's pid to the leaf and keeps the
-// leaf's session (rememberAgents). The leaf never names the agent before
-// that: a leaf with an agent but not the pid of the program it ran in
-// reads as one whose program is gone, and a restore would type the
-// agent's command into the agent itself.
+// The terminal is the machine's shell, in the session's directory, which
+// stays when the agent exits (its pane can then continue the session in a
+// chat again, plugins/agents/ContinueInChat.tsx). Its leaf gets, in the
+// same write that places it (term/layout.ts setTerminalFields), the session
+// and the request for its agent back (`resume`, restore.ts): once its pane
+// is attached, the page types the agent kind's own command that resumes the
+// session (conversation/kinds.ts resumeCommand, by its id when the machine
+// confirms that session for the terminal's directory, else the directory's
+// latest), the way a restore after the terminal core started again does
+// (state/terms.ts resumeAgent; docs/features/33). The command is the
+// kind's, never text of a document or of a machine; only a session id that
+// is a lower-case UUID goes into it. Once the machine detects the agent in
+// the terminal, the page adds the agent and its program's pid to the leaf
+// and keeps the leaf's session (rememberAgents). Until then the leaf's
+// session says which terminal is about to run it (sessionTerminal).
 import { agentKind, isSessionId, PLACEHOLDER } from './conversation/kinds';
 import { agentOf } from './lib/machine';
 import { withView } from './state/panes';
@@ -34,26 +38,32 @@ export interface AgentTerminalOptions {
   /** The workspace of the new tab (the selected one by default, or when
    * it is gone). */
   workspace?: string;
-  /** Where the agent starts; as a new tab's terminal otherwise
+  /** Where the shell starts; as a new tab's terminal otherwise
    * (state/terms.ts run). */
   cwd?: string;
-  /** The session the agent starts with or resumes, which the leaf
-   * remembers: taken only when it is a session id. */
-  session?: string;
 }
 
-/** Starts a coding agent (argv) as the program of a new terminal in a new
- * tab of machine m, shows it and gives it the keyboard; its leaf gets the
- * session in the same write that places it. Nothing on a read-only page.
+/** Starts the machine's shell in a new terminal in a new tab of machine m,
+ * shows it and gives it the keyboard; its leaf asks for the agent of kind
+ * to resume session, which its pane types once attached (restore.ts
+ * takeResume). Nothing on a read-only page, or for a kind that does not
+ * resume a session by its id or a session that is not a session id.
  * Resolves to the terminal's address, undefined when none started (a
  * failure is said in a toast). */
-export async function startAgentTerminal(m: string, argv: readonly string[], o: AgentTerminalOptions = {}): Promise<string | undefined> {
-  if (!argv.length || useStore.getState().readOnly) return undefined;
+export async function resumeInTerminal(
+  m: string,
+  kind: string,
+  session: string,
+  o: AgentTerminalOptions = {},
+): Promise<string | undefined> {
+  if (!resumeArgv(kind, session) || useStore.getState().readOnly) return undefined;
   const ws = o.workspace;
-  const fields = isSessionId(o.session) ? { session: o.session } : {};
   try {
-    const address = await terms.run(m, { workspace: ws, argv: [...argv], cwd: o.cwd }, (l, a) =>
-      L.setTerminalFields(L.openTerminal(l, a, ws && l.workspaces.some((w) => w.id === ws) ? ws : undefined), a, fields),
+    const address = await terms.run(m, { workspace: ws, cwd: o.cwd }, (l, a) =>
+      L.mapTerminals(
+        L.setTerminalFields(L.openTerminal(l, a, ws && l.workspaces.some((w) => w.id === ws) ? ws : undefined), a, { session }),
+        (leaf) => (leaf.terminal === a ? { ...leaf, resume: kind } : leaf),
+      ),
     );
     if (address) {
       useStore.getState().selectMachine(m);
@@ -67,12 +77,30 @@ export async function startAgentTerminal(m: string, argv: readonly string[], o: 
   }
 }
 
-/** The live terminal of machine m whose agent runs session (as the
- * machine found it: the record's agent_session), if any. */
+/** The live terminal of machine m that runs session, or is on its way
+ * to: the one whose agent runs it (as the machine found it: the record's
+ * agent_session), else one whose leaf names the session (its `session`)
+ * and that runs an agent whose session the machine did not tell yet, or
+ * in which no agent was detected since the leaf took the session (a
+ * resume asked for or typed, whose agent the machine did not see yet).
+ * A leaf whose agent quit keeps the session (to continue it in a chat,
+ * plugins/agents/ContinueInChat.tsx), but nothing runs it there: not that
+ * one. Undefined when there is none. */
 export function sessionTerminal(m: string, session: string): string | undefined {
   if (!session) return undefined;
-  for (const r of Object.values(useTerms.getState().machines[m]?.terminals ?? {})) {
+  const machine = useTerms.getState().machines[m];
+  const records = machine?.terminals ?? {};
+  for (const r of Object.values(records)) {
     if (isLive(r) && agentOf(r) && r.agent_session === session) return r.address;
+  }
+  for (const ws of machine?.layout?.workspaces ?? []) {
+    for (const tab of ws.tabs) {
+      for (const leaf of L.leavesOf(tab.root)) {
+        if (!L.isTerminalLeaf(leaf) || leaf.session !== session) continue;
+        const r = records[leaf.terminal];
+        if (r && isLive(r) && (agentOf(r) || leaf.agent === undefined)) return leaf.terminal;
+      }
+    }
   }
   return undefined;
 }

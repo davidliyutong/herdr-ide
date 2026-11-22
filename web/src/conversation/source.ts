@@ -23,7 +23,11 @@ export type QuestionReply = { answers: Record<string, string[]> } | { cancelled:
 /** A chat as the view uses it. Every command resolves once the host took
  * it, and rejects with an error whose code (a string member, chatproto's
  * Error codes and the core's: read_only, offline, …) says why it did not;
- * the view explains the codes it knows (conversation.error.<code>). */
+ * the view explains the codes it knows (conversation.error.<code>). An
+ * error whose member unsure is true says that the command was sent and may
+ * have been carried out all the same (the connection ended before the
+ * answer): a message then shows in the conversation once the host has it,
+ * and sending it again under its clientId does not send it twice. */
 export interface ChatSource {
   /** A name of the chat that outlives the view (the user's draft is kept
    * by it); without one, the draft is kept by the source object. */
@@ -43,7 +47,8 @@ export interface ChatSource {
   loadEarlier?(): Promise<boolean>;
   /** Sends the user's message (text, image and resource_link blocks) under
    * the page's id of it (the user or queued event that follows names it);
-   * while a turn runs, the host queues it. */
+   * while a turn runs, the host queues it. A message of an id the host has
+   * already is taken once. */
   send(content: ContentBlock[], clientId: string): Promise<void>;
   /** Cancels the turn, what waits for an answer and the queued messages. */
   cancel(): Promise<void>;
@@ -66,4 +71,9 @@ export interface ChatSource {
    * (the notice untrusted_folder says it did not). Absent when the source
    * cannot; a read-only view does not offer it. */
   trust?(): Promise<void>;
+  /** Takes back the trust that covers the chat's folder (its own and
+   * that of the folders above it): an agent started there from then on
+   * runs without the project's own settings again. Absent when the
+   * source cannot; a read-only view does not offer it. */
+  untrust?(): Promise<void>;
 }

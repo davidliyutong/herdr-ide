@@ -310,9 +310,11 @@ func readDir(dir string, n int) []os.DirEntry {
 	return ents
 }
 
-// described is what Sessions reads of a transcript.
+// described is what Sessions reads of a transcript: its directory, its
+// title, and the title the user or Claude Code gave the session
+// (agentTitle; "" for none, title then the first prompt).
 type described struct {
-	cwd, title string
+	cwd, title, agentTitle string
 }
 
 // describe reads a transcript's directory and title from its start and its
@@ -392,6 +394,7 @@ func describe(p string) (described, bool) {
 		return described{}, false
 	}
 	d.title = cut(strings.TrimSpace(cmp.Or(custom, title, prompt)), maxTitle)
+	d.agentTitle = cut(strings.TrimSpace(cmp.Or(custom, title)), maxTitle)
 	return d, true
 }
 

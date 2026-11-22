@@ -465,6 +465,27 @@ func TestAuthRequired(t *testing.T) {
 	}
 }
 
+// A thread another Codex has open (a terminal's) is not taken up: the
+// app-server's refusal is in_terminal.
+func TestResumeInTerminal(t *testing.T) {
+	var sc script
+	sc.reply(sc.request(mInitialize), map[string]any{"userAgent": "x/1"})
+	sc.reply(sc.request(mAccountRead), map[string]any{"account": map[string]any{"type": "chatgpt"}, "requiresOpenaiAuth": true})
+	sc.fail(sc.request(mThreadResume), "thread "+testThread+" already has an active writer")
+	f := newFake(t, "", handshake, sc.file(t))
+	p := f.params(t.TempDir(), chatproto.Options{})
+	p.Resume = testThread
+	_, err := (&Adapter{}).Start(context.Background(), p, newSink())
+	if !isCode(err, chatproto.CodeInTerminal) {
+		t.Errorf("Start: %v", err)
+	}
+	for _, m := range []string{"thread x already has a live local writer", "thread x already has an active writer"} {
+		if err := callError(&rpcError{Code: -32600, Message: m}); !isCode(err, chatproto.CodeInTerminal) {
+			t.Errorf("%q: %v", m, err)
+		}
+	}
+}
+
 // Sessions lists a directory's threads through an app-server started for
 // the question, which ends gracefully.
 func TestSessions(t *testing.T) {

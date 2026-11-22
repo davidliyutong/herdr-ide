@@ -194,6 +194,7 @@ func prepare(t testing.TB, lines []fixtureLine, models map[string]string) []scri
 type sink struct {
 	mu        sync.Mutex
 	events    []chatproto.Event
+	modes     []string // the mode option's values, as each change states them
 	perms     []chatadapter.PermissionRequest
 	questions []chatadapter.QuestionRequest
 	chat      chatproto.Chat
@@ -214,6 +215,11 @@ func (s *sink) Event(ev chatproto.Event) {
 func (s *sink) Update(fn func(*chatproto.Chat)) {
 	s.mu.Lock()
 	fn(&s.chat)
+	for _, o := range s.chat.Config {
+		if o.ID == optionMode && (len(s.modes) == 0 || s.modes[len(s.modes)-1] != o.CurrentValue) {
+			s.modes = append(s.modes, o.CurrentValue)
+		}
+	}
 	s.mu.Unlock()
 }
 
@@ -659,7 +665,7 @@ func act(t testing.TB, ctx context.Context, r *fakeRun, s *session, l scriptLine
 
 // replay runs a recording through the adapter and the fake, and checks
 // the golden file of its name.
-func replay(t *testing.T, name string, edit func(p *chatadapter.StartParams)) {
+func replay(t *testing.T, name string, edit func(p *chatadapter.StartParams)) *fakeRun {
 	lines := readFixture(t, name)
 	models := modelsOf(t)
 	sc := script{Lines: prepare(t, lines, models), Canned: canned(t)}
@@ -693,6 +699,7 @@ func replay(t *testing.T, name string, edit func(p *chatadapter.StartParams)) {
 	}
 	g := goldenOf(t, r, s)
 	checkGolden(t, strings.TrimSuffix(name, ".jsonl"), g)
+	return r
 }
 
 func TestReplay(t *testing.T) {

@@ -78,6 +78,14 @@ func TestReplayApprovals(t *testing.T) {
 	if in, _ := tc["rawInput"].(map[string]any); in["reason"] == nil || in["command"] != "echo hi > hi.txt" {
 		t.Errorf("the permission's input: %v", tc["rawInput"])
 	}
+	// The default mode asks (E1: under on-request and read-only the model
+	// refused to write instead of asking).
+	for _, ts := range f.requests(t, 1, mTurnStart) {
+		sp, _ := ts["sandboxPolicy"].(map[string]any)
+		if ts["approvalPolicy"] != "untrusted" || sp["type"] != "workspaceWrite" {
+			t.Errorf("the default mode ran with %v and %v", ts["approvalPolicy"], sp)
+		}
+	}
 	golden(t, "05b-command-approval", k)
 	checkPolicies(t, f)
 }

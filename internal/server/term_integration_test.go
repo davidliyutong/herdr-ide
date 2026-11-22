@@ -276,3 +276,163 @@ func TestIntegrationTermShells(t *testing.T) {
 		t.Fatalf("typing changed the size: %+v, before %+v", rec, before)
 	}
 }
+
+// TestIntegrationTermHidden runs a terminal as the agent runs the chat
+// host (the reserved name and the hidden label, through the terminal
+// core's own API) in a real herdr-core: clients see it in no snapshot or
+// list and reach it by no address, name or core-prefixed form, the
+// shells keep away from it, and an attach in the instant before its
+// creation's event reached the backend is refused too. A terminal of
+// another machine is refused without asking the core, and a terminal that
+// carries the label without the name stays the clients'.
+func TestIntegrationTermHidden(t *testing.T) {
+	s, audit := hcServer(t)
+	c := dialTerm(t, s)
+	c.ready()
+	c.until("snapshot")
+	b := s.term.existing("x")
+	conn := b.connection()
+	b.mu.Lock()
+	core := b.core
+	b.mu.Unlock()
+	if core.ID == "" || core.Name == "" {
+		t.Fatalf("the core's hello names no core: %+v", core)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	host := agentproto.ChatHostName
+	run := func(name string, labels map[string]string) string {
+		t.Helper()
+		params := map[string]any{"argv": []string{"/bin/sh"}, "cwd": "/", "labels": labels,
+			"size": map[string]int{"cols": 80, "rows": 24}, "no_parent": true}
+		if name != "" {
+			params["name"] = name
+		}
+		var res struct {
+			Address string `json:"address"`
+		}
+		if err := conn.Call(ctx, "terminal.run", params, &res); err != nil || res.Address == "" {
+			t.Fatalf("run %s: %v", name, err)
+		}
+		return res.Address
+	}
+	hiddenLabels := map[string]string{agentproto.HiddenLabel: agentproto.HiddenChatHost}
+	// A terminal of the clients', and one that a program labeled as the
+	// chat host's without its name.
+	c.send(map[string]any{"t": "call", "rid": 1, "m": "x", "method": "terminal.run",
+		"params": map[string]any{"argv": []string{"/bin/sh"}, "cwd": "/"}})
+	mine := c.until("res")["result"].(map[string]any)["address"].(string)
+	labeled := run("", hiddenLabels)
+
+	// The hidden terminal: its creation reaches the backend, not the
+	// clients.
+	hidden := run(host, hiddenLabels)
+	for deadline := time.Now().Add(10 * time.Second); !b.isHidden(hidden); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the backend never had the terminal as hidden")
+		}
+	}
+	c2 := dialTerm(t, s)
+	c2.send(map[string]any{"t": "sub", "m": "x"})
+	snap := addresses(c2.until("snapshot")["terminals"])
+	if strings.Contains(" "+snap+" ", " "+hidden+" ") || !strings.Contains(snap, mine) || !strings.Contains(snap, labeled) {
+		t.Fatalf("snapshot %q (hidden %s, mine %s, labeled %s)", snap, hidden, mine, labeled)
+	}
+	res, _ := c.call(2, "terminal.list", map[string]any{"all": true})["result"].(map[string]any)
+	if list := addresses(res["terminals"]); strings.Contains(" "+list+" ", " "+hidden+" ") || !strings.Contains(list, labeled) {
+		t.Fatalf("list %q", list)
+	}
+
+	// No address, name or core-prefixed form reaches it.
+	rid := 10
+	targets := []string{hidden, host, core.ID + "/" + hidden, core.Name + "/" + hidden, core.ID + "/" + host, core.Name + "/" + host}
+	for _, target := range targets {
+		rid++
+		if m := c.call(rid, "terminal.read", map[string]any{"terminal": target}); errKind(m) != "not_found" {
+			t.Fatalf("read %s: %v", target, m)
+		}
+		for _, observe := range []bool{false, true} {
+			rid++
+			c.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": target, "cols": 80, "rows": 24, "observe": observe})
+			if m := c.until("res"); m["rid"] != float64(rid) || errKind(m) != "not_found" {
+				t.Fatalf("attach %s: %v", target, m)
+			}
+		}
+	}
+	sh := termShells{b}
+	for _, target := range []string{hidden, host, core.Name + "/" + hidden} {
+		if _, _, err := sh.Shell(ctx, target); err == nil || !strings.Contains(err.Error(), "not_found") {
+			t.Fatalf("the shell of %s: %v", target, err)
+		}
+		if err := sh.Send(ctx, target, "echo typed\r"); err == nil {
+			t.Fatalf("typed into %s", target)
+		}
+	}
+	if all, _ := sh.All(ctx); strings.Contains(" "+strings.Join(all, " ")+" ", " "+hidden+" ") {
+		t.Fatalf("shells %v", all)
+	}
+
+	// The creation window: the backend has not heard of the terminal yet.
+	b.mu.Lock()
+	delete(b.hidden, hidden)
+	b.mu.Unlock()
+	rid++
+	c.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": hidden, "cols": 80, "rows": 24})
+	if m := c.until("res"); m["rid"] != float64(rid) || errKind(m) != "not_found" {
+		t.Fatalf("attach in the creation window: %v", m)
+	}
+	rid++
+	if m := c.call(rid, "terminal.read", map[string]any{"terminal": hidden}); errKind(m) != "not_found" {
+		t.Fatalf("read in the creation window: %v", m)
+	}
+	if _, _, err := sh.Shell(ctx, hidden); err == nil {
+		t.Fatal("the shell of a hidden terminal in the creation window")
+	}
+	b.mu.Lock()
+	b.hidden[hidden] = true
+	b.mu.Unlock()
+	// And as it happens: a client attaches as soon as the terminal exists.
+	var killed []string
+	for i := 0; i < 5; i++ {
+		conn.Call(ctx, "terminal.kill", map[string]string{"terminal": hidden}, nil)
+		killed = append(killed, hidden)
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			var rec struct {
+				State string `json:"state"`
+			}
+			if err := conn.Call(ctx, "terminal.get", map[string]string{"terminal": hidden}, &rec); err != nil || rec.State != "live" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the hidden terminal did not end")
+			}
+		}
+		hidden = run(host, hiddenLabels)
+		rid++
+		c.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": hidden, "cols": 80, "rows": 24})
+		if m := c.until("res"); m["rid"] != float64(rid) || errKind(m) != "not_found" {
+			t.Fatalf("attach to a hidden terminal as it starts: %v", m)
+		}
+	}
+
+	// Another machine's terminal: refused here, the core is not asked.
+	rid++
+	if m := c.call(rid, "terminal.read", map[string]any{"terminal": "far/" + mine}); errKind(m) != "not_found" {
+		t.Fatalf("read far/%s: %v", mine, m)
+	}
+	// The clients' own terminals stay theirs, by name of the core too.
+	rid++
+	if m := c.call(rid, "terminal.read", map[string]any{"terminal": core.Name + "/" + mine}); m["error"] != nil {
+		t.Fatalf("read %s/%s: %v", core.Name, mine, m)
+	}
+	rid++
+	c.send(map[string]any{"t": "attach", "rid": rid, "m": "x", "terminal": labeled, "cols": 80, "rows": 24, "observe": true})
+	if m := c.until("attached"); m["rid"] != float64(rid) {
+		t.Fatalf("attach %s: %v", labeled, m)
+	}
+	a := audit.String()
+	if !strings.Contains(a, `"reason":"hidden"`) || !strings.Contains(a, `"reason":"machine"`) {
+		t.Errorf("audit %s", a)
+	}
+	t.Logf("hidden terminals %v and %s, the clients' %s and %s", killed, hidden, mine, labeled)
+}

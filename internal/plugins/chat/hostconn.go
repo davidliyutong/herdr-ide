@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
+	"sync"
 	"time"
 
 	"herdr-ide/internal/chatproto"
@@ -68,11 +70,72 @@ type hostConn struct {
 	r    *bufio.Reader
 	info chatproto.HostInfo
 	stop func() bool
+	// release gives its slot of the machine's connections back, once.
+	release func()
 }
 
 func (c *hostConn) Close() error {
 	c.stop()
+	c.release()
 	return c.conn.Close()
+}
+
+// hostID names the process of a chat host by its hello: another process
+// (a host started again, another build's) has another.
+func hostID(info chatproto.HostInfo) string {
+	return info.Version + "/" + strconv.Itoa(info.PID)
+}
+
+// The bounds of the connections the core has open to one machine's chat
+// host, the pages' subscriptions and every request's together: at most
+// maxHostConns, of which the last reservedConns only for the watch and
+// the configures (variables for the tests).
+var (
+	maxHostConns  = 128
+	reservedConns = 8
+)
+
+// errTooManyConns refuses a connection beyond maxHostConns.
+var errTooManyConns = &chatproto.Error{Code: chatproto.CodeTooMany, Message: "too many connections to the machine's chat host"}
+
+// acquire takes a slot of machine m's connections: of the first
+// maxHostConns-reservedConns of them that every connection may take, or
+// (reserved) of all of them; the function gives it back, once.
+func (p *Plugin) acquire(m string, reserved bool) (func(), error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := p.conns[m]
+	if n.all >= maxHostConns || (!reserved && n.open >= maxHostConns-reservedConns) {
+		return nil, errTooManyConns
+	}
+	n.all++
+	if !reserved {
+		n.open++
+	}
+	p.conns[m] = n
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.mu.Lock()
+			n := p.conns[m]
+			n.all--
+			if !reserved {
+				n.open--
+			}
+			if n.all <= 0 {
+				delete(p.conns, m)
+			} else {
+				p.conns[m] = n
+			}
+			p.mu.Unlock()
+		})
+	}, nil
+}
+
+// connCount is how many connections the core has open to a machine's chat
+// host: all, and those that are not the watch's or a configure's (open).
+type connCount struct {
+	all, open int
 }
 
 // errProtocol is the error of a host that does not speak chatproto.Proto,
@@ -82,17 +145,24 @@ func errProtocol(msg string) *chatproto.Error {
 }
 
 // dial connects to machine m's chat host and reads its Hello; the
-// connection is closed when ctx ends.
-func (p *Plugin) dial(ctx context.Context, m string, start bool) (*hostConn, error) {
+// connection is closed when ctx ends. It takes one of the machine's
+// connection slots (acquire; reserved: the watch's and the configures'),
+// refused with too_many when none is left.
+func (p *Plugin) dial(ctx context.Context, m string, start, reserved bool) (*hostConn, error) {
 	open := p.opener()
 	if open == nil {
 		return nil, plugin.ErrOffline
 	}
-	conn, err := open(ctx, m, start)
+	release, err := p.acquire(m, reserved)
 	if err != nil {
 		return nil, err
 	}
-	c := &hostConn{conn: conn, r: bufio.NewReaderSize(conn, 64<<10), stop: context.AfterFunc(ctx, func() { conn.Close() })}
+	conn, err := open(ctx, m, start)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	c := &hostConn{conn: conn, r: bufio.NewReaderSize(conn, 64<<10), stop: context.AfterFunc(ctx, func() { conn.Close() }), release: release}
 	conn.SetReadDeadline(time.Now().Add(helloTimeout))
 	line, err := chatproto.ReadLine(c.r)
 	conn.SetReadDeadline(time.Time{})
@@ -177,16 +247,26 @@ func (p *Plugin) mayStart() bool {
 	return h == nil || !h.ReadOnly()
 }
 
-// request sends one request to machine m's chat host, starting the host
-// when none serves (mayStart), and returns its answer. A request that
-// reached the host counts as a use of it (Plugin.used).
-func (p *Plugin) request(ctx context.Context, m string, req chatproto.Request) (*rawResponse, error) {
-	c, err := p.dial(ctx, m, p.mayStart())
+// request sends one request to machine m's chat host and returns its
+// answer; with start, it starts the host when none serves (and the core
+// may, mayStart), else it answers not_running then. A request that may
+// start an agent (agent) goes to a host that took the machine's settings
+// (prepare, ensureConfigured). A request that reached the host counts as
+// a use of it (Plugin.used).
+func (p *Plugin) request(ctx context.Context, m string, req chatproto.Request, start, agent bool) (*rawResponse, error) {
+	start = start && p.mayStart()
+	if agent {
+		p.prepare(ctx, m, start)
+	}
+	c, err := p.dial(ctx, m, start, false)
 	if err != nil {
 		return nil, err
 	}
 	defer c.Close()
 	p.used(m)
+	if agent {
+		p.ensureConfigured(ctx, m, c)
+	}
 	return c.send(ctx, req)
 }
 
@@ -236,7 +316,7 @@ func statusOf(code string) int {
 		return http.StatusConflict
 	case chatproto.CodeTooLarge:
 		return http.StatusRequestEntityTooLarge
-	case CodeReadOnly, chatproto.CodeNotAllowed:
+	case CodeReadOnly, chatproto.CodeNotAllowed, chatproto.CodeUnsafeFolder:
 		return http.StatusForbidden
 	case chatproto.CodeUnsupported, chatproto.CodeAuthRequired:
 		return http.StatusUnprocessableEntity

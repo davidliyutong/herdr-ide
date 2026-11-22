@@ -123,15 +123,37 @@ describe('the chat connection', () => {
     expect(core.ops('command')).toHaveLength(2);
   });
 
-  it('gives up a command the core does not answer', async () => {
+  it('gives up a command the core does not answer, saying whether it was sent', async () => {
     vi.useFakeTimers();
     const sa = core.conn.attach('m', A, handler());
     core.open();
     core.push({ t: 'attached', sub: sa.id, chat: { id: A } });
     const p = core.conn.command('m', A, { op: 'cancel' });
-    const caught = p.catch((e: CommandError) => e.code);
+    const caught = p.catch((e: CommandError) => [e.code, e.unsure]);
     await vi.advanceTimersByTimeAsync(ACK_TIMEOUT_MS + 1);
-    expect(await caught).toBe('failed');
+    expect(await caught).toEqual(['timeout', true]);
+    // One that never left the page.
+    core.drop();
+    const unsent = core.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => [e.code, e.unsure]);
+    await vi.advanceTimersByTimeAsync(ACK_TIMEOUT_MS + 1);
+    expect(await unsent).toEqual(['offline', false]);
+  });
+
+  it('says which refusals leave a command’s outcome unknown', async () => {
+    const sa = core.conn.attach('m', A, handler());
+    core.open();
+    core.push({ t: 'attached', sub: sa.id, chat: { id: A } });
+    const codes = ['lost', 'offline', 'not_attached', 'busy', 'read_only', 'bad_request'];
+    const results = codes.map(() => core.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => [e.code, e.unsure]));
+    core.ops('command').forEach((c, i) => core.push({ t: 'ack', id: c.id, error: { code: codes[i], message: '' } }));
+    expect(await Promise.all(results)).toEqual([
+      ['lost', true],
+      ['offline', true],
+      ['not_attached', true],
+      ['busy', false],
+      ['read_only', false],
+      ['bad_request', false],
+    ]);
   });
 
   it('keeps to the subscriptions a page may have', async () => {
@@ -158,11 +180,11 @@ describe('the chat connection', () => {
     core.open();
     core.push({ t: 'attached', sub: sa.id, chat: { id: A } });
     core.push({ t: 'event', sub: sa.id, ev: { seq: 5, t: 'user' } });
-    const pending = core.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => e.code);
+    const pending = core.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => [e.code, e.unsure]);
     const ups: boolean[] = [];
     core.conn.onConnection((up) => ups.push(up));
     core.drop();
-    expect(await pending).toBe('offline');
+    expect(await pending).toEqual(['offline', true]);
     expect(a.log.at(-1)).toEqual(['offline']);
     expect(ups).toEqual([false]);
     await vi.advanceTimersByTimeAsync(RETRY_MIN_MS);
@@ -304,6 +326,37 @@ describe('the chat source', () => {
     await vi.advanceTimersByTimeAsync(RETRY_MIN_MS);
     expect(ts(got)).toEqual(['info', 'user9', 'reset', 'info', 'user1', 'turn2']);
     expect(core.ops('attach').at(-1)).toEqual(expect.not.objectContaining({ from: expect.anything() }));
+  });
+
+  it('starts over when the stored events now begin after the next one it lacks', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    core.chat(A, { kind: 'codex', state: 'idle', seq: 3 }, [
+      { seq: 1, t: 'user' },
+      { seq: 2, t: 'turn', state: 'start' },
+      { seq: 3, t: 'turn', state: 'end' },
+    ]);
+    const source = new ChatSourceImpl('m', A);
+    const { got } = collect(source);
+    await vi.advanceTimersByTimeAsync(0);
+    // The host's limits removed the events up to 7 meanwhile.
+    core.chat(
+      A,
+      { kind: 'codex', state: 'idle', seq: 9 },
+      [
+        { seq: 8, t: 'user' },
+        { seq: 9, t: 'turn', state: 'start' },
+      ],
+      8,
+    );
+    core.drop();
+    await vi.advanceTimersByTimeAsync(RETRY_MIN_MS);
+    expect(ts(got)).toEqual(['info', 'user1', 'turn2', 'turn3', 'reset', 'info', 'user8', 'turn9']);
+    expect(core.ops('attach').map((a) => a.from)).toEqual([undefined, 3, undefined]);
+    // What follows what it has needs no start over.
+    core.chats.get(A)!.events.push({ seq: 10, t: 'turn', state: 'end' });
+    core.drop();
+    await vi.advanceTimersByTimeAsync(2 * RETRY_MIN_MS);
+    expect(ts(got).slice(-3)).toEqual(['reattach', 'info', 'turn10']);
   });
 
   it('sends the view’s commands once the chat is attached', async () => {

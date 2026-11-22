@@ -32,19 +32,28 @@ type settings struct {
 // start and resume read-only (a thread started workspace-write writes its
 // directory into ~/.codex/config.toml as trusted); each turn carries the
 // mode's policies, which write nothing.
+//
+// The default mode asks before every change of a file and every command
+// (approval "untrusted": Codex 0.171.0 asked for apply_patch, mkdir and ls
+// alike), and what the user allows runs in the working directory's
+// sandbox. Under "on-request" with a read-only sandbox, the model refuses
+// to write instead of asking; under "on-request" with a writable one, it
+// writes the directory and runs commands there without asking, which is
+// acceptEdits.
 func policy(mode, cwd string) (approval string, sandbox map[string]any, plan bool) {
 	readOnly := map[string]any{"type": "readOnly", "networkAccess": false}
+	// excludeTmpdirEnvVar would break zsh's here-documents.
+	workspace := map[string]any{"type": "workspaceWrite", "writableRoots": []string{cwd}, "networkAccess": false,
+		"excludeTmpdirEnvVar": false, "excludeSlashTmp": false}
 	switch mode {
 	case chatproto.ModeAcceptEdits:
-		// excludeTmpdirEnvVar would break zsh's here-documents.
-		return "on-request", map[string]any{"type": "workspaceWrite", "writableRoots": []string{cwd}, "networkAccess": false,
-			"excludeTmpdirEnvVar": false, "excludeSlashTmp": false}, false
+		return "on-request", workspace, false
 	case chatproto.ModePlan:
 		return "on-request", readOnly, true
 	case chatproto.ModeFull:
 		return "never", map[string]any{"type": "dangerFullAccess"}, false
 	}
-	return "on-request", readOnly, false
+	return "untrusted", workspace, false
 }
 
 // turnParams are turn/start's parameters for input under st.

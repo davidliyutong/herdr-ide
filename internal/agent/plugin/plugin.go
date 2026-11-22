@@ -38,6 +38,16 @@ type Env struct {
 	// the helper runs (or one that ends still holds the name). The error
 	// wraps ErrNoTerminalCore when no terminal core answers.
 	RunHidden func(ctx context.Context, name string, argv []string) error
+	// KillHidden ends a helper's terminal that holds its name and does
+	// not do its work: when the live terminal named name carries the
+	// helper's hidden label and runs argv's program with argv's arguments
+	// (the program's path may be an older build's), the terminal core
+	// kills it and KillHidden returns once the name is free, true; without
+	// kill, it reports whether such a terminal holds the name. False, nil
+	// when no live terminal has the name; an error, and the terminal left
+	// alone, when the one that has it is not such a helper. Nil leaves a
+	// stuck helper as it is.
+	KillHidden func(ctx context.Context, name string, argv []string, kill bool) (bool, error)
 }
 
 // ErrNoTerminalCore is RunHidden's error when the instance's terminal core

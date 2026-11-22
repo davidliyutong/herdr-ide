@@ -5,7 +5,9 @@
 // named with @ from the source's suggestions, linked in the message; the
 // agent's commands with / (and compact, sent as compact); the model,
 // effort and mode selectors from the chat's options; a message sent while
-// a turn runs queued, shown in the queue and withdrawn; read-only.
+// a turn runs queued, shown in the queue and withdrawn; a message whose
+// outcome is not known kept, under its id, until the conversation shows it;
+// read-only.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -439,6 +441,73 @@ describe('a message sent while a turn runs', () => {
     await emit(s, info({ state: 'idle', capabilities: caps({ compact: true }) }));
     await type('/compact');
     expect(q<HTMLButtonElement>('.conv-send')!.disabled).toBe(false);
+  });
+});
+
+describe('a message whose outcome is not known', () => {
+  const unsure = (code: string) => Object.assign(new Error(code), { code, unsure: true });
+
+  it('stays in the field, is sent again under its id, and goes once the conversation shows it', async () => {
+    const s = new FakeSource();
+    s.emit(info({ capabilities: caps({}) }));
+    s.send.mockRejectedValueOnce(unsure('lost'));
+    await show(s);
+    await type('hello');
+    await key({ key: 'Enter' });
+    expect(s.send).toHaveBeenCalledTimes(1);
+    const id = s.send.mock.calls[0][1];
+    expect(field().value).toBe('hello');
+    expect(q('.conv-banner.error')).toBeNull();
+    expect(q('[data-unsure]')?.textContent).toBe(t('conversation.sendUnsure', { agent: 'Claude Code' }));
+    // Sent again, under the same id; refused again, unsure.
+    s.send.mockRejectedValueOnce(unsure('timeout'));
+    await key({ key: 'Enter' });
+    expect(s.send.mock.calls[1][1]).toBe(id);
+    expect(field().value).toBe('hello');
+    // The host had it: the message is in the conversation, the draft goes.
+    await emit(s, { seq: next(), t: 'user', clientId: id, content: [{ type: 'text', text: 'hello' }] });
+    expect(field().value).toBe('');
+    expect(q('[data-unsure]')).toBeNull();
+    // A new message has an id of its own.
+    await type('again');
+    await key({ key: 'Enter' });
+    expect(s.send.mock.calls[2][1]).not.toBe(id);
+  });
+
+  it('that the user changed is a new message; a queued one counts as shown; a definite refusal is said', async () => {
+    const s = new FakeSource();
+    s.emit(info({ capabilities: caps({ queue: true }) }));
+    s.send.mockRejectedValueOnce(unsure('offline'));
+    await show(s);
+    await type('one');
+    await key({ key: 'Enter' });
+    const first = s.send.mock.calls[0][1];
+    await type('one more');
+    expect(q('[data-unsure]')).toBeNull();
+    s.send.mockRejectedValueOnce(unsure('lost'));
+    await key({ key: 'Enter' });
+    const second = s.send.mock.calls[1][1];
+    expect(second).not.toBe(first);
+    // The first arriving changes nothing of the draft that is another.
+    await emit(s, { seq: next(), t: 'user', clientId: first, content: [{ type: 'text', text: 'one' }] });
+    expect(field().value).toBe('one more');
+    expect(q('[data-unsure]')).not.toBeNull();
+    await emit(s, {
+      seq: next(),
+      t: 'queued',
+      message: 'q1',
+      state: 'queued',
+      clientId: second,
+      content: [{ type: 'text', text: 'one more' }],
+    });
+    expect(field().value).toBe('');
+    expect(q('[data-unsure]')).toBeNull();
+    // A refusal that is sure is an error, and the text stays.
+    s.send.mockRejectedValueOnce(Object.assign(new Error('busy'), { code: 'busy' }));
+    await type('three');
+    await key({ key: 'Enter' });
+    expect(q('.conv-banner.error')?.textContent).toContain(t('conversation.error.busy', { agent: 'Claude Code' }));
+    expect(field().value).toBe('three');
   });
 });
 

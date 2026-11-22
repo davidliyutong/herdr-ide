@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"io/fs"
@@ -19,20 +21,36 @@ import (
 // chat host's) is named after the host it runs on: HostFile. The databases
 // other hosts left go with PruneHostFiles.
 
-// HostFile is the database name of this host in dir: name with the host's
-// name before its extension (machine.db → <dir>/machine-<host>.db; a name
-// without an extension gets -<host> at its end). The host's name is its
-// first label, lowercase, with what is not a letter, a digit, - or _
-// replaced by _, at most 63 bytes, "localhost" when the system gives none.
+// HostFile is the database name of this host in dir: name with this host's
+// key before its extension (machine.db → <dir>/machine-<host>.db; a name
+// without an extension gets -<host> at its end). The key is the host's
+// whole name (hostName) and, when the system has one, a hash of its
+// machine id (machineID): two hosts of one name (cloned machines, or
+// node01 of two clusters that share a home) do not share a database.
 func HostFile(dir, name string) string {
 	return filepath.Join(dir, hostFileName(name, thisHost()))
 }
 
-// thisHost is this host's name as database names have it (hostLabel).
+// thisHost is this host's key as database names have it: hostName, and
+// "-" with the first 8 hex digits of the SHA-256 of the machine id when
+// there is one. The id is hashed (systemd asks programs not to show it),
+// with a prefix of the store's own, so that the hash names no id
+// elsewhere. Without an id (a container without /etc/machine-id) the key
+// is the host's name alone.
 var thisHost = sync.OnceValue(func() string {
 	h, _ := os.Hostname()
-	return hostLabel(h)
+	return hostKey(h, machineID())
 })
+
+// hostKey is the key of host name h with machine id id ("" for none).
+func hostKey(h, id string) string {
+	key := hostName(h)
+	if id = strings.TrimSpace(id); id != "" {
+		sum := sha256.Sum256([]byte("store host\x00" + id))
+		key += "-" + hex.EncodeToString(sum[:4])
+	}
+	return key
+}
 
 // hostFileName is name with host before its extension.
 func hostFileName(name, host string) string {
@@ -40,27 +58,48 @@ func hostFileName(name, host string) string {
 	return strings.TrimSuffix(name, ext) + "-" + host + ext
 }
 
-// hostLabel is the first label of host name h, lowercase, with what is not
-// a letter, a digit, - or _ replaced by _, at most 63 bytes; "localhost"
-// for none.
-func hostLabel(h string) string {
-	h, _, _ = strings.Cut(strings.TrimSpace(h), ".")
-	h = strings.ToLower(h)
+// maxHostName is the length of a host's name in database names at most:
+// with the hash and a database's name, a file name stays far below the
+// 255 bytes file systems take.
+const maxHostName = 128
+
+// hostName is host name h as database names have it: the whole name,
+// lowercase, with what is not a letter, a digit, -, _ or . replaced by _,
+// without dots at its ends, at most maxHostName bytes; "localhost" for
+// none.
+func hostName(h string) string {
+	h = strings.ToLower(strings.TrimSpace(h))
 	var b strings.Builder
 	for _, r := range h {
-		if b.Len() >= 63 {
+		if b.Len() >= maxHostName {
 			break
 		}
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
 			b.WriteRune(r)
 		} else {
 			b.WriteByte('_')
 		}
 	}
-	if b.Len() == 0 {
-		return "localhost"
+	if n := strings.Trim(b.String(), "."); n != "" {
+		return n
 	}
-	return b.String()
+	return "localhost"
+}
+
+// validHostKey reports whether key may be a host's key in a database name
+// (thisHost of some host, or of an earlier version: the host's first
+// label): of the letters, digits, -, _ and . hostName leaves, without a
+// dot at its ends, at most as long as a name and a hash.
+func validHostKey(key string) bool {
+	if key == "" || len(key) > maxHostName+9 || key[0] == '.' || key[len(key)-1] == '.' {
+		return false
+	}
+	for _, r := range key {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 // HostFileRetention is how long another host's database stays unopened
@@ -119,7 +158,7 @@ func PruneHostFiles(dir, name string, retention time.Duration, now time.Time) ([
 			if !ok {
 				continue
 			}
-			if host, ok = strings.CutSuffix(host, ext); !ok || host == "" || hostLabel(host) != host {
+			if host, ok = strings.CutSuffix(host, ext); !ok || !validHostKey(host) {
 				continue
 			}
 		}
@@ -179,19 +218,99 @@ func removeFiles(p string) error {
 	return nil
 }
 
-// usedEvery is how often Open marks a database used (its modification
-// time) at most.
+// usedEvery is how often a database is marked used (its modification
+// time) at most: when Open opens it, and while it is open.
 const usedEvery = time.Hour
 
 // markUsed sets the modification time of the database file at p to now
 // when it is older than usedEvery: PruneHostFiles counts its retention
-// from it.
+// from it. Open calls it, and it keeps the database marked while it is
+// open (keepMarked).
 func markUsed(p string) {
+	markOld(p, time.Now())
+	keepMarked(p)
+}
+
+// markOld sets the modification time of the database file at p to now
+// when it is older than usedEvery.
+func markOld(p string, now time.Time) {
 	st, err := os.Lstat(p)
-	if err != nil {
+	if err != nil || !st.Mode().IsRegular() {
 		return
 	}
-	if now := time.Now(); now.Sub(st.ModTime()) >= usedEvery {
+	if now.Sub(st.ModTime()) >= usedEvery {
 		os.Chtimes(p, now, now)
+	}
+}
+
+// maxMarked bounds the databases a process keeps marked: a process opens
+// a few (its own, and in the tests one per test).
+const maxMarked = 256
+
+// markGrace is how long a database keepMarked took stays kept before
+// refreshMarked looks at whether it is open: Open takes it before it opens
+// the database.
+const markGrace = time.Minute
+
+// marked are the databases this process opened, with when, which it marks
+// used every usedEvery while they are open (refreshMarked); the timer runs
+// from the first one on.
+var marked = struct {
+	sync.Mutex
+	paths map[string]time.Time
+	timer sync.Once
+}{paths: map[string]time.Time{}}
+
+// keepMarked has the database at p marked used every usedEvery while it is
+// open: a database a process holds open for longer than the retention
+// without writing would otherwise look unused to another host's
+// PruneHostFiles, which then removes it when the file system's locks do
+// not reach across hosts (a home on NFS without a lock manager).
+func keepMarked(p string) {
+	marked.Lock()
+	if _, ok := marked.paths[p]; ok || len(marked.paths) < maxMarked {
+		marked.paths[p] = time.Now()
+	}
+	marked.Unlock()
+	marked.timer.Do(func() {
+		go func() {
+			t := time.NewTicker(usedEvery)
+			defer t.Stop()
+			for now := range t.C {
+				refreshMarked(now)
+			}
+		}()
+	})
+}
+
+// refreshMarked marks the databases of keepMarked that are open used, and
+// forgets those that are not, once taken markGrace before now (a later
+// Open has them marked again). A
+// database is open while its write-ahead log is there: every database of
+// the store uses write-ahead logging, which SQLite creates with the first
+// connection and removes when the last one closes; only processes of this
+// host open its databases (HostFile), so the log says that this process
+// or another of this host has it open. A log left by a process that
+// crashed keeps its database marked while this process runs.
+func refreshMarked(now time.Time) {
+	marked.Lock()
+	paths := make(map[string]time.Time, len(marked.paths))
+	for p, at := range marked.paths {
+		paths[p] = at
+	}
+	marked.Unlock()
+	for p, at := range paths {
+		if st, err := os.Lstat(p + "-wal"); err == nil && st.Mode().IsRegular() {
+			markOld(p, now)
+			continue
+		}
+		if now.Sub(at) < markGrace {
+			continue
+		}
+		marked.Lock()
+		if marked.paths[p] == at {
+			delete(marked.paths, p)
+		}
+		marked.Unlock()
 	}
 }

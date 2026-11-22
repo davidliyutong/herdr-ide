@@ -145,6 +145,44 @@ func TestWatchStates(t *testing.T) {
 	}
 }
 
+// A chat done again after a gap in the watch (a turn ran and ended while
+// the core did not watch) is told again; one whose state is as it was is
+// not, nor one that only changed its title while done.
+func TestWatchDoneAcrossGap(t *testing.T) {
+	s := newSetup(t)
+	c := chatState(chatproto.StatusWorking, chatproto.StateWorking, 3)
+	s.f.states = []chatproto.ChatState{c}
+	s.start(t)
+	s.h.wait(t, "the states", func() bool { return len(s.h.broadcasts) == 1 })
+	c.State, c.Status, c.Seq = chatproto.StateIdle, chatproto.StatusDone, 5
+	s.f.change(c)
+	s.h.wait(t, "done", func() bool { return len(s.h.notes) == 1 })
+	// Another turn runs and ends while the watch is down.
+	s.f.mu.Lock()
+	c.Seq = 9
+	s.f.states[0] = c
+	s.f.mu.Unlock()
+	s.f.end(true)
+	s.h.wait(t, "done again", func() bool { return len(s.h.notes) == 2 })
+	s.h.mu.Lock()
+	if n := s.h.notes[1]; n["chat"] != c.ID || n["agent_status"] != "done" {
+		t.Errorf("notification %v", n)
+	}
+	s.h.mu.Unlock()
+	// A gap after which it is as it was tells nothing; a live change of
+	// its title neither.
+	_, n := s.h.lastBroadcast()
+	s.f.end(true)
+	s.h.wait(t, "the states again", func() bool { return len(s.h.broadcasts) == n+1 })
+	c.Title = "renamed"
+	s.f.change(c)
+	s.h.wait(t, "the change", func() bool { return len(s.h.broadcasts) == n+2 })
+	time.Sleep(30 * time.Millisecond)
+	if got := s.h.noteCount(); got != 2 {
+		t.Errorf("%d notifications", got)
+	}
+}
+
 // After its host ended the core watches again, and notifies of what
 // became blocked or done meanwhile, not of what it told before.
 func TestWatchAgain(t *testing.T) {
@@ -176,7 +214,7 @@ func TestWatchAgain(t *testing.T) {
 	}
 }
 
-// A watch starts no host: with none serving, the core waits for a route
+// A watch starts no host: with none serving, the core waits for a change
 // or a page to use the machine's. A host the core knew of agents in that
 // is gone left them sleeping.
 func TestWatchStartsNoHost(t *testing.T) {
@@ -198,7 +236,10 @@ func TestWatchStartsNoHost(t *testing.T) {
 	s.f.mu.Lock()
 	s.f.states = []chatproto.ChatState{c}
 	s.f.mu.Unlock()
-	if code, _, _ := s.call("GET", "gpu", "chats", ""); code != 200 {
+	if code, _, _ := s.call("GET", "gpu", "chats", ""); code != 409 {
+		t.Fatal(code)
+	}
+	if code, _, _ := s.call("POST", "gpu", "agents", ""); code != 200 {
 		t.Fatal(code)
 	}
 	s.h.wait(t, "the states", func() bool { return len(s.h.broadcasts) == 1 })

@@ -103,14 +103,16 @@ func TestRoutes(t *testing.T) {
 	}
 	want := []string{
 		"GET /api/m/{id}/p/chat/agents",
+		"POST /api/m/{id}/p/chat/agents audited as chat.agents",
 		"GET /api/m/{id}/p/chat/chats",
-		"GET /api/m/{id}/p/chat/sessions",
+		"POST /api/m/{id}/p/chat/sessions audited as chat.sessions",
 		"POST /api/m/{id}/p/chat/new audited as chat.new",
 		"POST /api/m/{id}/p/chat/close audited as chat.close",
 		"DELETE /api/m/{id}/p/chat/chat audited as chat.delete",
 		"POST /api/m/{id}/p/chat/seen audited as chat.seen",
 		"POST /api/m/{id}/p/chat/handoff audited as chat.handoff",
 		"POST /api/m/{id}/p/chat/trust audited as chat.trust",
+		"POST /api/m/{id}/p/chat/untrust audited as chat.untrust",
 		"GET /api/p/chat/states",
 		"GET /api/p/chat/ws",
 	}
@@ -119,15 +121,19 @@ func TestRoutes(t *testing.T) {
 	}
 }
 
-// Each route is one request of the machine's chat host, which it starts
-// when none serves; what it takes is checked on the core first.
+// Each route is one request of the machine's chat host, which a change
+// starts when none serves; what it takes is checked on the core first.
 func TestRequests(t *testing.T) {
 	s := newSetup(t)
 	s.f.running = false
 	s.f.agents["claude"] = true
 	s.f.sessions = []chatproto.Session{{SessionID: "0c1d", Cwd: "/w", Title: "earlier"}}
 
-	code, out, _ := s.call("GET", "gpu", "agents", "")
+	// A GET finds no host and starts none.
+	if code, out, _ := s.call("GET", "gpu", "agents", ""); code != 409 || out["error"] != codeNotRunning || s.f.running {
+		t.Fatalf("agents without a host: %d %v", code, out)
+	}
+	code, out, fields := s.call("POST", "gpu", "agents", "")
 	if code != 200 {
 		t.Fatalf("agents: %d %v", code, out)
 	}
@@ -138,8 +144,11 @@ func TestRequests(t *testing.T) {
 	if a := agents[0].(map[string]any); a["kind"] != "claude" || a["available"] != true {
 		t.Errorf("claude: %v", a)
 	}
-	if s.f.opens[0] != true || !slices.Equal(s.f.requests[0].Kinds, chatKinds) {
+	if !slices.Equal(s.f.opens, []bool{false, true}) || !slices.Equal(s.f.requests[0].Kinds, chatKinds) {
 		t.Errorf("open %v, kinds %v", s.f.opens, s.f.requests[0].Kinds)
+	}
+	if code, out, _ = s.call("GET", "gpu", "agents", ""); code != 200 || len(out["agents"].([]any)) != len(agentkinds.ChatKinds()) {
+		t.Errorf("agents of a host that serves: %d %v", code, out)
 	}
 
 	if code, out, _ = s.call("GET", "gpu", "chats", ""); code != 200 || out["chats"] == nil {
@@ -148,17 +157,22 @@ func TestRequests(t *testing.T) {
 
 	for _, q := range []string{"kind=bash&cwd=/w", "kind=claude&cwd=w", "kind=claude&cwd=/w/../x", "kind=claude&cwd=/w/",
 		"kind=claude&cwd=/w&cursor=" + strings.Repeat("x", maxCursor+1)} {
-		if code, out, _ = s.call("GET", "gpu", "sessions?"+q, ""); code != 400 || out["error"] != "bad_request" {
+		if code, out, _ = s.call("POST", "gpu", "sessions?"+q, ""); code != 400 || out["error"] != "bad_request" {
 			t.Errorf("sessions?%s: %d %v", q, code, out)
 		}
 	}
-	code, out, _ = s.call("GET", "gpu", "sessions?kind=codex&cwd=/w/x&cursor=c1", "")
-	if code != 200 || out["nextCursor"] != "next" || len(out["sessions"].([]any)) != 1 {
-		t.Errorf("sessions: %d %v", code, out)
+	code, out, fields = s.call("POST", "gpu", "sessions?kind=codex&cwd=/w/x&cursor=c1", "")
+	if code != 200 || out["nextCursor"] != "next" || len(out["sessions"].([]any)) != 1 || fields["kind"] != "codex" || fields["cwd"] != "/w/x" {
+		t.Errorf("sessions: %d %v, audited %v", code, out, fields)
 	}
 	last := s.f.requests[len(s.f.requests)-1]
 	if last.Op != chatproto.OpSessions || last.Kind != "codex" || last.Cwd != "/w/x" || last.Cursor != "c1" {
 		t.Errorf("sessions asked %+v", last)
+	}
+	// Listing sessions may run the agent: the host took the settings
+	// before.
+	if req := s.f.requests[len(s.f.requests)-2]; req.Op != chatproto.OpConfigure {
+		t.Errorf("before sessions %+v", req)
 	}
 
 	for _, body := range []string{`{`, `{"kind":"bash","cwd":"/w"}`, `{"kind":"claude","cwd":"rel"}`,
@@ -169,13 +183,14 @@ func TestRequests(t *testing.T) {
 			t.Errorf("new %.60s: %d %v", body, code, out)
 		}
 	}
+	// A host started again takes the settings anew before a new chat.
+	s.f.pid = 2
 	n := len(s.f.requests)
-	code, out, fields := s.call("POST", "gpu", "new", `{"kind":"claude","cwd":"/w","resume":"5f0c","import":true,"options":{"model":"m","mode":"full"}}`)
+	code, out, fields = s.call("POST", "gpu", "new", `{"kind":"claude","cwd":"/w","resume":"5f0c","import":true,"options":{"model":"m","mode":"full"}}`)
 	chat, _ := out["chat"].(map[string]any)
 	if code != 200 || chat == nil || !chatproto.ValidChatID(chat["id"].(string)) {
 		t.Fatalf("new: %d %v", code, out)
 	}
-	// The host takes the machine's settings before its first chat.
 	if req := s.f.requests[n]; req.Op != chatproto.OpConfigure || *req.Settings != HostSettings(s.h.st, "gpu") {
 		t.Errorf("before new %+v", req)
 	}
@@ -222,8 +237,12 @@ func TestRequests(t *testing.T) {
 	if req := s.f.requests[len(s.f.requests)-1]; code != 200 || req.Op != chatproto.OpTrust || req.Cwd != "/w/p" || fields["cwd"] != "/w/p" {
 		t.Errorf("trust: %d %v, asked %+v, audited %v", code, out, req, fields)
 	}
+	code, out, fields = s.call("POST", "gpu", "untrust?cwd=/w/p", "")
+	if req := s.f.requests[len(s.f.requests)-1]; code != 200 || req.Op != chatproto.OpUntrust || req.Cwd != "/w/p" || fields["cwd"] != "/w/p" {
+		t.Errorf("untrust: %d %v, asked %+v, audited %v", code, out, req, fields)
+	}
 	for _, path := range []string{"close", "close?chat=x", "seen?chat=" + id, "seen?chat=" + id + "&seq=-1", "handoff?chat=C0123",
-		"trust", "trust?cwd=rel", "trust?cwd=/a/../b"} {
+		"trust", "trust?cwd=rel", "trust?cwd=/a/../b", "untrust", "untrust?cwd=rel", "untrust?cwd=/a/../b"} {
 		if code, out, _ := s.call("POST", "gpu", path, ""); code != 400 {
 			t.Errorf("%s: %d %v", path, code, out)
 		}
@@ -231,6 +250,40 @@ func TestRequests(t *testing.T) {
 	if code, out, _ := s.call("DELETE", "gpu", "chat", ""); code != 400 {
 		t.Errorf("delete without a chat: %d %v", code, out)
 	}
+}
+
+// A GET route (which a browser sends without Origin from any page) never
+// starts the machine's chat host, nor does a read-only core: they answer
+// not_running; a read-only core asks no agent's program.
+func TestGetStartsNoHost(t *testing.T) {
+	s := newSetup(t)
+	s.f.running = false
+	for _, path := range []string{"agents", "chats"} {
+		if code, out, _ := s.call("GET", "gpu", path, ""); code != 409 || out["error"] != codeNotRunning {
+			t.Errorf("%s: %d %v", path, code, out)
+		}
+	}
+	if code, _, _ := s.call("GET", "", "states", ""); code != 200 {
+		t.Errorf("states: %d", code)
+	}
+	if code, _, _ := s.call("GET", "gpu", "sessions?kind=codex&cwd=/w", ""); code != 405 && code != 404 {
+		t.Errorf("GET sessions: %d", code)
+	}
+	s.f.mu.Lock()
+	if !slices.Equal(s.f.opens, []bool{false, false}) || s.f.running || len(s.f.requests) != 0 {
+		t.Errorf("opens %v, requests %v", s.f.opens, s.f.requests)
+	}
+	s.f.mu.Unlock()
+
+	s.h.readOnly = true
+	s.f.running = true
+	if code, out, _ := s.call("GET", "gpu", "agents", ""); code != 403 || out["error"] != CodeReadOnly {
+		t.Errorf("read-only agents: %d %v", code, out)
+	}
+	if s.f.mu.Lock(); s.f.count(chatproto.OpAgents) != 0 || len(s.f.opens) != 2 {
+		t.Errorf("a read-only core asked: %v", s.f.ops())
+	}
+	s.f.mu.Unlock()
 }
 
 // A read-only core leaves out the agents' standard error, which may tell
@@ -252,11 +305,8 @@ func TestReadOnlyRedacts(t *testing.T) {
 	// A read-only core starts no host: it shows what runs.
 	s.f.end(false)
 	code, out, _ := s.call("GET", "gpu", "chats", "")
-	if code != 200 || len(out["chats"].([]any)) != 0 || s.f.running {
+	if code != 409 || out["error"] != codeNotRunning || s.f.running {
 		t.Errorf("read-only without a host: %d %v", code, out)
-	}
-	if code, out, _ := s.call("GET", "gpu", "agents", ""); code != 409 || out["error"] != codeNotRunning || s.f.running {
-		t.Errorf("read-only agents without a host: %d %v", code, out)
 	}
 	line := []byte(`{"seq":4,"t":"state","state":"failed","error":{"code":"failed","message":"m","stderr":"TOKEN=secret"}}`)
 	if got := string(redactEvent(line)); strings.Contains(got, "TOKEN") || !strings.Contains(got, `"seq":4`) || strings.HasSuffix(got, "\n") {
@@ -276,7 +326,7 @@ func TestRequestErrors(t *testing.T) {
 	for code, status := range map[string]int{
 		chatproto.CodeUnknownChat: 404, chatproto.CodeBusy: 409, chatproto.CodeTooMany: 409, chatproto.CodeBadRequest: 400,
 		chatproto.CodeStartFailed: 502, chatproto.CodeUnsupported: 422, chatproto.CodeNotAllowed: 403,
-		chatproto.CodeSleeping: 409, codeNotRunning: 409, "upgrading": 503, "no_terminal_core": 503,
+		chatproto.CodeSleeping: 409, codeNotRunning: 409, "upgrading": 503, "no_terminal_core": 503, chatproto.CodeUnsafeFolder: 403,
 	} {
 		s.f.reqErr[chatproto.OpClose] = &chatproto.Error{Code: code, Message: "m"}
 		got, out, fields := s.call("POST", "gpu", "close?chat="+id, "")
@@ -289,6 +339,11 @@ func TestRequestErrors(t *testing.T) {
 		t.Errorf("another protocol: %d %v", got, out)
 	}
 	s.f.proto = chatproto.Proto
+	// A host that refuses its settings still gets the request.
+	s.f.reqErr[chatproto.OpConfigure] = &chatproto.Error{Code: chatproto.CodeBadRequest, Message: "m"}
+	if got, out, _ := s.call("POST", "gpu", "new", `{"kind":"claude","cwd":"/w"}`); got != 200 || s.f.count(chatproto.OpNew) != 1 {
+		t.Errorf("new after a refused configure: %d %v", got, out)
+	}
 	s.f.openErr = "offline"
 	if got, out, _ := s.call("GET", "gpu", "chats", ""); got != 409 || out["error"] != "offline" {
 		t.Errorf("offline: %d %v", got, out)
@@ -435,7 +490,8 @@ func TestProtocolMirror(t *testing.T) {
 		"HOST_CODES": {chatproto.CodeBadRequest, chatproto.CodeUnknownChat, chatproto.CodeTooMany, chatproto.CodeBusy,
 			chatproto.CodeNotFound, chatproto.CodeStartFailed, chatproto.CodeProtocol, chatproto.CodeAuthRequired,
 			chatproto.CodeUnsupported, chatproto.CodeTooLarge, chatproto.CodeEnded, chatproto.CodeFailed,
-			chatproto.CodeInTerminal, chatproto.CodeHandedOff, chatproto.CodeSleeping, chatproto.CodeNotAllowed},
+			chatproto.CodeInTerminal, chatproto.CodeHandedOff, chatproto.CodeSleeping, chatproto.CodeNotAllowed,
+			chatproto.CodeUnsafeFolder},
 		// The machine side's (internal/agent/plugin/chat) and the
 		// transport's.
 		"MACHINE_CODES": {codeNotRunning, "upgrading", "no_terminal_core", "start_failed", "transport"},
@@ -461,7 +517,7 @@ func TestProtocolMirror(t *testing.T) {
 	if chatproto.MaxStderr != 2<<10 {
 		t.Errorf("MaxStderr %d", chatproto.MaxStderr)
 	}
-	if got := list("REQUEST_OPS"); !slices.Contains(got, chatproto.OpTrust) || !strings.Contains(src, "noCatchUp") {
+	if got := list("REQUEST_OPS"); !slices.Contains(got, chatproto.OpTrust) || !slices.Contains(got, chatproto.OpUntrust) || !strings.Contains(src, "noCatchUp") {
 		t.Errorf("REQUEST_OPS %q", got)
 	}
 }

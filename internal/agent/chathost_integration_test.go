@@ -368,6 +368,43 @@ func TestIntegrationChatHost(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(runDir, chatproto.SocketName)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the host's socket is left: %v", err)
 	}
+
+	// The terminal core starts again: no record holds the host's name, and
+	// the next open starts a host of its own, at a new address (the
+	// terminal core never gives an address twice), which the core's
+	// clients keep hidden whatever they knew of the old one.
+	r, err = s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "start"})
+	if err != nil || !r.HC.Running {
+		t.Fatalf("start again: %+v %v", r, err)
+	}
+	stopped = false
+	if recs := hostRecords(t, ctx, r.HC.Socket); len(recs) != 0 {
+		t.Fatalf("records of the host after the core started again: %v", recs)
+	}
+	conn, br, h3 := openChat(t, ctx, s)
+	res = request(t, conn, br, chatproto.Request{Op: chatproto.OpChats})
+	conn.Close()
+	if h3.PID == h1.PID || !res.OK {
+		t.Fatalf("the open after the restart: hello %+v, chats %+v", h3, res)
+	}
+	recs = hostRecords(t, ctx, r.HC.Socket)
+	if len(recs) != 1 || recs[0]["address"] == rec["address"] || recs[0]["pid"] != float64(h3.PID) || recs[0]["state"] != "live" {
+		t.Fatalf("records of the host after the restart: %v (the first was %s)", recs, rec["address"])
+	}
+	labels, _ = recs[0]["labels"].(map[string]any)
+	if labels[agentproto.HiddenLabel] != agentproto.HiddenChatHost {
+		t.Fatalf("the new host's record: %v", recs[0])
+	}
+	t.Logf("after the restart the host runs as %s, pid %d", recs[0]["address"], h3.PID)
+	if r, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "stop"}); err != nil || r.HC.Running {
+		t.Fatalf("stop: %+v %v", r, err)
+	}
+	stopped = true
+	for deadline := time.Now().Add(10 * time.Second); alive(h3.PID); time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the second host %d outlived the stop", h3.PID)
+		}
+	}
 	if b, err := os.ReadFile(filepath.Join(base, "it-chat-host.log")); err == nil {
 		t.Logf("the host's log:\n%s", b)
 	}

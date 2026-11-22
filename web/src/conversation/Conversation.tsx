@@ -14,7 +14,7 @@ import { Composer } from './Composer';
 import { spokenText } from './format';
 import { ItemView } from './items';
 import { agentKind } from './kinds';
-import { blocksText, emptyConversation, take, waitingItems, type Conversation as State, type SourceEvent } from './model';
+import { blocksText, emptyConversation, hasClientMessage, take, waitingItems, type Conversation as State, type SourceEvent } from './model';
 import { AnsweringContext, type Answering, type ItemContext } from './parts';
 import type { ChatSource } from './source';
 import './conversation.css';
@@ -201,13 +201,15 @@ export function Conversation({ source, kind, readOnly: readOnlyProp, allowFull =
   });
   const canOpen = !!onOpenFile;
   const canTrust = !readOnly && !!source.trust;
+  const canUntrust = !readOnly && !!source.untrust;
   const ctx = useMemo<ItemContext>(
     () => ({
       agent,
       openFile: canOpen ? (path, line) => latest.current.onOpenFile?.(path, line) : undefined,
       trust: canTrust ? () => latest.current.source.trust?.() ?? Promise.resolve() : undefined,
+      untrust: canUntrust ? () => latest.current.source.untrust?.() ?? Promise.resolve() : undefined,
     }),
-    [agent, canOpen, canTrust],
+    [agent, canOpen, canTrust, canUntrust],
   );
 
   const state = conv.state;
@@ -228,6 +230,7 @@ export function Conversation({ source, kind, readOnly: readOnlyProp, allowFull =
     [open, waitingSet, readOnly],
   );
   const waiting = open && waitingSet.size > 0;
+  const delivered = useCallback((clientId: string) => hasClientMessage(conv, clientId), [conv]);
 
   useImperativeHandle(
     ref,
@@ -412,6 +415,7 @@ export function Conversation({ source, kind, readOnly: readOnlyProp, allowFull =
         readOnly={readOnly}
         allowFull={allowFull}
         onShowWaiting={showWaiting}
+        delivered={delivered}
         inputRef={inputRef}
       />
     </div>

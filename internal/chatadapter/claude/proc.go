@@ -153,6 +153,7 @@ func startProc(argv, env []string, dir string) (*proc, error) {
 	inR.Close()
 	outW.Close()
 	errW.Close()
+	own.Store(cmd.Process.Pid, struct{}{})
 	p := &proc{cmd: cmd, stdin: inW, out: outR, errR: errR, stderr: &tail{max: maxStderr},
 		exited: make(chan struct{}), done: make(chan struct{}),
 		pending: map[string]*call{}, incoming: map[string]context.CancelFunc{},
@@ -167,6 +168,7 @@ func startProc(argv, env []string, dir string) (*proc, error) {
 	}()
 	go func() {
 		p.waitErr = cmd.Wait()
+		own.Delete(cmd.Process.Pid)
 		close(p.exited)
 		// The program is gone: what it left running in its group (MCP
 		// servers, hooks, commands) goes too.

@@ -396,8 +396,52 @@ describe('questions', () => {
     expect(s.answer).toHaveBeenCalledWith('q1', { cancelled: true });
     await emit(s, { seq: next(), t: 'question_done', id: 'q1', by: 'user' });
     expect(q('.conv-ask-outcome', card('q1'))?.textContent).toBe(t('conversation.question.skipped'));
-    await emit(s, asked('q2'), { seq: next(), t: 'question_done', id: 'q2', answers: { color: ['Red'] }, by: 'user' });
+    await emit(s, asked('q2'));
+    await emit(s, { seq: next(), t: 'question_done', id: 'q2', answers: { color: ['Red'] }, by: 'user' });
     expect(q('.conv-ask-outcome', card('q2'))?.textContent).toBe(t('conversation.question.answered'));
+  });
+});
+
+describe('cards answered before the view had them (a reload, attaching again)', () => {
+  it('show the answer as the user’s, not another window’s', async () => {
+    const s = new FakeSource();
+    s.emit(
+      working(),
+      permission('p1', { kind: 'command' }),
+      done('p1', 'allow_once'),
+      permission('p2', { kind: 'command' }),
+      done('p2', undefined),
+      {
+        seq: next(),
+        t: 'question',
+        id: 'q1',
+        questions: [{ id: 'color', question: 'Which color?', options: [{ label: 'Blue' }] }],
+      },
+      { seq: next(), t: 'question_done', id: 'q1', answers: { color: ['Blue'] }, by: 'user' },
+    );
+    await show(s);
+    expect(q('.conv-ask-outcome', card('p1'))?.textContent).toBe(
+      t('conversation.ask.youChose', { option: t('conversation.ask.allowOnce') }),
+    );
+    expect(q('.conv-ask-outcome', card('p2'))?.textContent).toBe(t('conversation.ask.youDismissed'));
+    expect(q('.conv-ask-outcome', card('q1'))?.textContent).toBe(t('conversation.question.youAnswered'));
+  });
+
+  it('keep this window’s answer when its sending ended without an answer', async () => {
+    const s = new FakeSource();
+    s.emit(working(), permission('p1', { kind: 'command' }));
+    await show(s);
+    s.respond.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('lost'), { code: 'lost', unsure: true });
+    });
+    await click(buttons(card('p1'))[1]);
+    await settle();
+    expect(q('.conv-ask-error', card('p1'))?.textContent).toBe(t('conversation.error.lost'));
+    await emit(s, done('p1', 'allow_session'));
+    expect(q('.conv-ask-outcome', card('p1'))?.textContent).toBe(
+      t('conversation.ask.youChose', { option: t('conversation.ask.allowSession') }),
+    );
+    expect(q('.conv-ask-error', card('p1'))).toBeNull();
   });
 });
 
@@ -533,14 +577,49 @@ describe('a folder the agent started in without its project settings', () => {
     expect(trustButton()!.disabled).toBe(false);
   });
 
+  it('once trusted from the notice, offers to take it back through the source, and then to trust it again', async () => {
+    const s = new FakeSource();
+    const trust = vi.fn(async () => {});
+    let fail = true;
+    const untrust = vi.fn(async () => {
+      if (fail) throw Object.assign(new Error('x'), { code: 'offline' });
+    });
+    Object.assign(s, { trust, untrust });
+    s.emit(untrusted());
+    await show(s);
+    const untrustButton = () =>
+      qa<HTMLButtonElement>('.conv-notice button').find((b) => b.textContent === t('conversation.notice.untrust'));
+    expect(untrustButton()).toBeUndefined();
+    await click(trustButton());
+    await settle();
+    expect(q('.conv-notice-text')!.textContent).toBe(t('conversation.notice.trusted'));
+    expect(trustButton()).toBeUndefined();
+    expect(untrustButton()!.title).toBe(t('conversation.notice.untrustHint', { cwd: '/home/u/p' }));
+    // It fails: said, still trusted, offered again.
+    await click(untrustButton());
+    await settle();
+    expect(untrust).toHaveBeenCalledTimes(1);
+    expect(q('.conv-notice-failed')?.textContent).toBe(t('conversation.error.offline', { agent: 'Claude Code' }));
+    expect(q('.conv-notice-text')!.textContent).toBe(t('conversation.notice.trusted'));
+    fail = false;
+    await click(untrustButton());
+    await settle();
+    expect(untrust).toHaveBeenCalledTimes(2);
+    expect(q('.conv-notice-failed')).toBeNull();
+    expect(q('.conv-notice-text')!.textContent).toBe(t('conversation.notice.untrustedFolder'));
+    expect(untrustButton()).toBeUndefined();
+    expect(trustButton()!.disabled).toBe(false);
+    expect(trust).toHaveBeenCalledTimes(1);
+  });
+
   it('offers nothing read-only, nor from a source that cannot trust', async () => {
     const s = new FakeSource();
     s.emit(untrusted());
     await show(s);
     expect(trustButton()).toBeUndefined();
-    Object.assign(s, { trust: vi.fn(async () => {}) });
+    Object.assign(s, { trust: vi.fn(async () => {}), untrust: vi.fn(async () => {}) });
     await show(s, { readOnly: true });
     expect(notice().textContent).toBe(t('conversation.notice.untrustedFolder'));
-    expect(trustButton()).toBeUndefined();
+    expect(qa('.conv-notice button')).toHaveLength(0);
   });
 });

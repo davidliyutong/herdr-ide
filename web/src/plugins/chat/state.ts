@@ -10,7 +10,10 @@
 // A machine's messages are numbered (rev): one at or below the rev the
 // page has is passed over; one that changes chats while the page has no
 // full list of the machine (before the snapshot came, or after a gap)
-// waits for the snapshot, which is read again then.
+// waits for the snapshot, which is read again then. The snapshot read after
+// the page's event channel came back (a core that may have started again)
+// replaces what the page has: a machine that is not in it, and of which
+// no message came meanwhile, has no states the page knows.
 import { create } from 'zustand';
 import { chatKinds, type AgentKind } from '../../conversation/kinds';
 import type { ChatInfo, Usage } from '../../conversation/model';
@@ -139,6 +142,9 @@ let snapshot: Promise<void> | undefined;
 let snapshotAt = 0;
 /** Another read is owed once the one under way ended. */
 let owed = false;
+/** The next snapshot read replaces every machine's states (follow's
+ * again). */
+let replaceAll = false;
 let owedTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** Reads the snapshot again: after the one under way, at most once in
@@ -193,6 +199,8 @@ export function loadSnapshot(): Promise<void> {
     snapshotAt = Date.now();
     try {
       const machines = await chatApi.states();
+      const replacing = replaceAll;
+      replaceAll = false;
       for (const [m, st] of Object.entries(machines)) {
         const have = revs.get(m);
         if (have === undefined || st.rev >= have || st.rev === 0) {
@@ -200,6 +208,7 @@ export function loadSnapshot(): Promise<void> {
           revs.set(m, st.rev);
         }
       }
+      if (replacing) forgetMachines((m) => !Object.hasOwn(machines, m) && !revs.has(m));
     } catch {
       // The messages that come keep what the page has.
     } finally {
@@ -216,6 +225,22 @@ export function loadSnapshot(): Promise<void> {
     }
   })();
   return snapshot;
+}
+
+/** Forgets the states of the machines gone says (not their chats that are
+ * no more): the page does not know them now. */
+function forgetMachines(gone: (m: string) => boolean) {
+  useChats.setState((s) => {
+    const ms = Object.keys(s.states).filter(gone);
+    if (!ms.length) return s;
+    const states = { ...s.states };
+    const full = { ...s.full };
+    for (const m of ms) {
+      delete states[m];
+      delete full[m];
+    }
+    return { states, full };
+  });
 }
 
 /** Changes what an attached chat states (undefined: forgets it). */
@@ -289,6 +314,7 @@ export function follow() {
   };
   const again = () => {
     revs.clear();
+    replaceAll = true;
     if (on) void loadSnapshot();
   };
   const offs = [
@@ -319,6 +345,7 @@ export function resetChats() {
   snapshot = undefined;
   snapshotAt = 0;
   owed = false;
+  replaceAll = false;
   clearTimeout(owedTimer);
   owedTimer = undefined;
   useChats.setState(empty());

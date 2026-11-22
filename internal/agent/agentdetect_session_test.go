@@ -625,3 +625,40 @@ func TestDetectSessionsConcurrent(t *testing.T) {
 		}
 	}
 }
+
+// The chat host's terminal (its reserved name and hidden label, both) is
+// never watched: whatever runs in its foreground, no detection event about
+// it reaches the core, from the first snapshot, a creation or a later
+// change, and it counts as no peer; a terminal that only carries the label
+// is the user's and is followed as any other.
+func TestDetectSkipsHelperTerminals(t *testing.T) {
+	d, evs := testDetector(t, nil, nil)
+	name := agentproto.ChatHostName
+	helper := func(addr string, pid int) hc.Terminal {
+		rec := agentTerm(addr, "claude", pid, "/w")
+		rec.Name = &name
+		rec.Labels = map[string]string{agentproto.HiddenLabel: agentproto.HiddenChatHost}
+		return rec
+	}
+	labeled := agentTerm("t2", "claude", 2, "/w")
+	labeled.Labels = map[string]string{agentproto.HiddenLabel: agentproto.HiddenChatHost}
+	d.resync([]hc.Terminal{helper("t1", 1), labeled})
+	if ev := next(t, evs); ev.Terminal != "t2" || ev.Agent != "claude" {
+		t.Fatalf("event %+v", ev)
+	}
+	none(t, evs)
+
+	raw, _ := json.Marshal(helper("t3", 3))
+	d.event(hc.Notification{Method: "event", Type: "created", Terminal: "t3", Data: raw})
+	d.event(foregroundEvent("t1", 10, "codex", "/w"))
+	d.event(statusEvent("t1", "working"))
+	d.event(foregroundEvent("t3", 11, "claude", "/w"))
+	d.event(hc.Notification{Method: "event", Type: "finished", Terminal: "t3"})
+	d.event(hc.Notification{Method: "event", Type: "removed", Terminal: "t3"})
+	none(t, evs)
+	if n := d.peers("claude", "/w"); n != 1 {
+		t.Errorf("peers %d, want the labeled terminal only", n)
+	}
+	d.event(hc.Notification{Method: "missed", Terminals: []hc.Terminal{helper("t1", 1), labeled, helper("t4", 4)}})
+	none(t, evs)
+}

@@ -63,10 +63,18 @@
 //     the agent lets a client choose: elsewhere it starts the agent
 //     without it and tells so with the stored notice
 //     agentproto.NoticeUntrustedFolder {cwd}.
-//   - It marks the value of its mode option that gives the agent full
-//     access with chatproto.ConfigValue.Full: the host refuses that value
-//     while the settings do not allow full access, and starts the agent of
-//     a chat that had it in chatproto.ModeDefault.
+//   - It marks every value of its mode option that may give the agent full
+//     access with chatproto.ConfigValue.Full, a value it does not know the
+//     meaning of too (deny by default): the host refuses those values
+//     while the settings do not allow full access, sets an agent that
+//     switches itself to one back (or ends it), and starts the agent of a
+//     chat that had one in chatproto.ModeDefault.
+//   - It states every mode its agent is in (the mode option's
+//     CurrentValue), also one the agent changed to by itself: the host
+//     keeps it as the chat's mode, which the agent starts in again.
+//   - It neither resumes nor imports a session another process of the
+//     agent runs (a terminal's), where it can tell (Running), or maps the
+//     agent's own refusal to chatproto.CodeInTerminal.
 //   - It ends what its agent left running in its process group: once the
 //     agent itself is gone, the group gets SIGTERM, then SIGKILL while a
 //     process of it is still there after a grace period.
@@ -111,6 +119,19 @@ type Adapter interface {
 	// (an import), oldest first: the events the chat's log would hold had
 	// the chat run it, without sequence numbers, never live ones.
 	History(ctx context.Context, p HistoryParams, emit func(chatproto.Event)) error
+}
+
+// Running is what an Adapter may also be: one that can tell that a
+// process other than the host's runs a session (the user's, in a
+// terminal), which the host then neither resumes nor imports: two
+// processes do not write one session. Its Start refuses such a session
+// too. An adapter that cannot tell (ACP) is none; one whose agent refuses
+// by itself maps that refusal to chatproto.CodeInTerminal (Codex).
+type Running interface {
+	// InTerminal returns a *chatproto.Error of CodeInTerminal when another
+	// process runs the session p.SessionID; nil when none does, or when it
+	// cannot be told.
+	InTerminal(ctx context.Context, p HistoryParams) error
 }
 
 // Session is an agent process running one session.

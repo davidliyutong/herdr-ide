@@ -6,8 +6,10 @@
 // or several options with their previews, the user's own words where
 // allowed, hidden as typed where secret; or skipped). The first answer is
 // the one that counts: another window may answer first, and the card then
-// says so. Number keys choose a permission's options while the card has
-// the keyboard.
+// says so when this view saw it wait and did not answer it; a card that
+// was answered before the view had it (after a reload, or attaching
+// again) shows the answer as the user's. Number keys choose a
+// permission's options while the card has the keyboard.
 
 import { useContext, useId, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { ClipboardList, MessageCircleQuestion, ShieldQuestion } from 'lucide-react';
@@ -45,7 +47,12 @@ export function optionLabel(o: PermissionOption): string {
 
 const allows = (o: PermissionOption) => o.kind === 'allow_once' || o.kind === 'allow_always';
 
-/** How a card that waits no longer does, in words. */
+/** Whether a command's refusal leaves its outcome unknown (the source's
+ * error says unsure): the answer may have been taken. */
+const unsureOf = (e: unknown): boolean => typeof e === 'object' && e !== null && (e as { unsure?: unknown }).unsure === true;
+
+/** How a card that waits no longer does, in words; mine: the answer is
+ * this window's, or was there before the view saw the card wait. */
 function doneText(by: string | undefined, chosen: string | undefined, mine: boolean): string {
   if (chosen !== undefined)
     return mine ? t('conversation.ask.youChose', { option: chosen }) : t('conversation.ask.answeredElsewhere', { option: chosen });
@@ -209,6 +216,9 @@ function useAnswer(item: PermissionItem, agent: string) {
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string | undefined>(undefined);
   const done = !!item.outcome;
+  /** The view had the card before it was answered: an answer that is not
+   * this window's is another window's then. */
+  const [sawWaiting] = useState(() => !done);
   const waiting = !done && answering.open && answering.waiting.has(item.id);
   const choose = (option: string | undefined) => {
     if (!waiting || sending) return;
@@ -219,7 +229,8 @@ function useAnswer(item: PermissionItem, agent: string) {
       () => setSending(false),
       (e: unknown) => {
         setSending(false);
-        setMine(undefined);
+        // Sent, and perhaps taken: still this window's answer if it comes.
+        if (!unsureOf(e)) setMine(undefined);
         // Another window answered first: its answer comes as the card's.
         if ((e as { code?: unknown })?.code !== 'not_found') setFailed(errorText(e, agent, 'conversation.commandFailed'));
       },
@@ -234,7 +245,11 @@ function useAnswer(item: PermissionItem, agent: string) {
       : undefined;
   const state: 'waiting' | 'done' | 'stale' = done ? 'done' : waiting ? 'waiting' : 'stale';
   const status = done
-    ? doneText(item.by, chosen, mine !== undefined && (chosen === undefined ? mine === '' : item.outcome?.optionId === mine))
+    ? doneText(
+        item.by,
+        chosen,
+        !sawWaiting || (mine !== undefined && (chosen === undefined ? mine === '' : item.outcome?.optionId === mine)),
+      )
     : !waiting
       ? answering.readOnly
         ? t('conversation.ask.readOnly')
@@ -250,7 +265,7 @@ function useAnswer(item: PermissionItem, agent: string) {
     e.preventDefault();
     choose(o.optionId);
   };
-  return { waiting, sending, failed, state, status, choose, onKeyDown };
+  return { waiting, sending, failed: done ? undefined : failed, state, status, choose, onKeyDown };
 }
 
 function Outcome({ status, failed }: { status?: string; failed?: string }) {
@@ -489,6 +504,8 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
   const [sending, setSending] = useState(false);
   const [mine, setMine] = useState(false);
   const [failed, setFailed] = useState<string | undefined>(undefined);
+  /** The view had the card before it was answered (as a permission's). */
+  const [sawWaiting] = useState(() => !item.done);
   const waiting = !item.done && answering.open && answering.waiting.has(item.id);
   const draftOf = (q: Question) => drafts.get(q.id) ?? emptyDraft();
   const ready = item.questions.every((q) => answersOf(q, draftOf(q)).length > 0);
@@ -503,7 +520,7 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
       () => setSending(false),
       (e: unknown) => {
         setSending(false);
-        setMine(false);
+        if (!unsureOf(e)) setMine(false);
         if ((e as { code?: unknown })?.code !== 'not_found') setFailed(errorText(e, ctx.agent, 'conversation.commandFailed'));
       },
     );
@@ -520,7 +537,7 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
   let status: string | undefined;
   if (item.done) {
     const answered = !!item.answers && Object.values(item.answers).some((a) => a.length);
-    if (answered) status = mine ? t('conversation.question.youAnswered') : t('conversation.question.answered');
+    if (answered) status = mine || !sawWaiting ? t('conversation.question.youAnswered') : t('conversation.question.answered');
     else if (item.by === 'cancel') status = t('conversation.ask.cancelled');
     else if (item.by === 'ended') status = t('conversation.ask.ended');
     else status = t('conversation.question.skipped');
@@ -568,7 +585,7 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
           })}
         </div>
       )}
-      <Outcome status={status} failed={failed} />
+      <Outcome status={status} failed={item.done ? undefined : failed} />
     </Card>
   );
 }

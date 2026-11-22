@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -53,8 +54,12 @@ type termStream struct {
 	// handed back there whether or not the client still follows the
 	// machine.
 	sizing *termBackend
-	// machine and terminal are what it shows; focused is the client's last
-	// focus report for it.
+	// backend is the backend of the machine it was attached through, which
+	// knows it while it lasts (termBackend.track), whether or not the
+	// client still follows the machine.
+	backend *termBackend
+	// machine and terminal are what it shows (the terminal's address);
+	// focused is the client's last focus report for it.
 	machine, terminal string
 	focused           bool
 	// unacked is the output sent to the client that it has not returned as
@@ -284,6 +289,7 @@ func (c *termClient) dispatch(m *termIn) {
 // which herdr-core does not say for a viewer that stays.
 func (c *termClient) release(ts *termStream) {
 	ts.stop()
+	ts.backend.untrack(ts)
 	if ts.sizing == nil {
 		ts.st.Close()
 		return
@@ -306,54 +312,97 @@ func (c *termClient) subscribed(m string) (*termBackend, *hc.Conn) {
 	return b, b.connection()
 }
 
-// noTerminal answers a call or an attach that names a hidden terminal as
-// the terminal core answers for a terminal it does not have, and audits it.
-func (c *termClient) noTerminal(m *termIn, method, param, target string) {
-	c.s.audit.log(c.req, "denied.term", map[string]any{"machine": m.M, "method": method, "param": param, "terminal": target})
+// noTerminal answers a call or an attach that names a terminal that is
+// none of the clients' (a hidden one, errHiddenTerm, or another machine's,
+// errOtherMachine) as the terminal core answers for a terminal it does not
+// have, and audits it with why.
+func (c *termClient) noTerminal(m *termIn, method, param, target string, why error) {
+	reason := "hidden"
+	if errors.Is(why, errOtherMachine) {
+		reason = "machine"
+	}
+	c.s.audit.log(c.req, "denied.term", map[string]any{"machine": m.M, "method": method, "param": param, "terminal": target, "reason": reason})
 	if _, local, ok := strings.Cut(target, "/"); ok {
 		target = local
 	}
 	c.fail(m.RID, "not_found", "no terminal "+strconv.Quote(target))
 }
 
-// hiddenParams are the parameters by which a call of the allowlist names a
+// targetParams are the parameters by which a call of the allowlist names a
 // terminal: the one it acts on, who calls, and a new terminal's parent.
-var hiddenParams = []string{"terminal", "caller", "parent"}
+var targetParams = []string{"terminal", "caller", "parent"}
 
-// refuseHidden answers a call that would reach a hidden terminal or make
-// one, and reports whether it did. A call that names one, as its terminal,
-// as who calls or as a new terminal's parent, is answered as for a
-// terminal that does not exist; a run or a label that sets the hidden
-// label, which would take a terminal from every client, or a run that
-// takes the chat host's name, is refused. Neither reaches the terminal
-// core.
-func (c *termClient) refuseHidden(b *termBackend, m *termIn, params map[string]json.RawMessage) bool {
-	for _, param := range hiddenParams {
-		var target string
-		if json.Unmarshal(params[param], &target) == nil && b.hides(target) {
-			c.noTerminal(m, m.Method, param, target)
+// stringMap reports whether raw is a JSON object of strings, as the
+// terminal core reads labels: null, an array, a value of another type, or
+// an object with a value that is not a string (null included) is not.
+func stringMap(raw json.RawMessage) bool {
+	var m map[string]json.RawMessage
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] != '{' || json.Unmarshal(raw, &m) != nil {
+		return false
+	}
+	for _, v := range m {
+		var s string
+		if len(v) == 0 || v[0] != '"' || json.Unmarshal(v, &s) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// checkTargets answers a call that would reach a terminal that is none of
+// the clients' or make a hidden one, and reports whether it did; otherwise
+// it names each terminal the call names by its address (resolve). Labels
+// that are not an object of strings are refused as the terminal core would
+// (usage): what the core reads is what was checked. A run or a label that
+// sets the hidden label, or a run that takes the chat host's name, is
+// refused, and so is a call that names a hidden terminal or another
+// machine's, as its terminal, as who calls or as a new terminal's parent
+// (answered as for a terminal that does not exist). None of these reaches
+// the terminal core; a target the backend does not know is looked up
+// there (terminal.get) before.
+func (c *termClient) checkTargets(ctx context.Context, b *termBackend, conn *hc.Conn, m *termIn, params map[string]json.RawMessage) bool {
+	raw, hasLabels := params["labels"]
+	if hasLabels && !stringMap(raw) {
+		c.fail(m.RID, "usage", "")
+		return true
+	}
+	if m.Method == "terminal.run" || m.Method == "terminal.label" {
+		var labels map[string]string
+		var name string
+		json.Unmarshal(raw, &labels)
+		json.Unmarshal(params["name"], &name)
+		param := ""
+		if _, set := labels[agentproto.HiddenLabel]; set {
+			param = "labels"
+		} else if name == agentproto.ChatHostName {
+			param = "name"
+		}
+		if param != "" {
+			c.s.audit.log(c.req, "denied.term", map[string]any{"machine": m.M, "method": m.Method, "param": param})
+			c.fail(m.RID, "refused", "")
 			return true
 		}
 	}
-	if m.Method != "terminal.run" && m.Method != "terminal.label" {
-		return false
+	for _, param := range targetParams {
+		var target string
+		raw := bytes.TrimSpace(params[param])
+		if string(raw) == "null" || json.Unmarshal(raw, &target) != nil {
+			continue // absent, or not a terminal the core takes
+		}
+		addr, err := b.resolve(ctx, conn, target)
+		switch {
+		case errors.Is(err, errHiddenTerm) || errors.Is(err, errOtherMachine):
+			c.noTerminal(m, m.Method, param, target, err)
+			return true
+		case err != nil:
+			c.failErr(m.RID, err)
+			return true
+		case addr != target:
+			params[param], _ = json.Marshal(addr)
+		}
 	}
-	var labels map[string]json.RawMessage
-	var name string
-	json.Unmarshal(params["labels"], &labels)
-	json.Unmarshal(params["name"], &name)
-	param := ""
-	if _, set := labels[agentproto.HiddenLabel]; set {
-		param = "labels"
-	} else if name == agentproto.ChatHostName {
-		param = "name"
-	}
-	if param == "" {
-		return false
-	}
-	c.s.audit.log(c.req, "denied.term", map[string]any{"machine": m.M, "method": m.Method, "param": param})
-	c.fail(m.RID, "refused", "")
-	return true
+	return false
 }
 
 func (c *termClient) call(m *termIn) {
@@ -386,7 +435,9 @@ func (c *termClient) call(m *termIn) {
 		c.fail(m.RID, "unavailable", "")
 		return
 	}
-	if c.refuseHidden(b, m, params) {
+	ctx, cancel := context.WithTimeout(c.ctx, 60*time.Second)
+	defer cancel()
+	if c.checkTargets(ctx, b, conn, m, params) {
 		return
 	}
 	ev := map[string]any{"machine": m.M, "terminal": params["terminal"], "argv": params["argv"]}
@@ -435,8 +486,6 @@ func (c *termClient) call(m *termIn) {
 	case "terminal.run", "terminal.kill", "terminal.rm", "terminal.interrupt", "terminal.keep":
 		c.s.audit.log(c.req, m.Method, ev)
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, 60*time.Second)
-	defer cancel()
 	var result json.RawMessage
 	if err := conn.Call(ctx, m.Method, params, &result); err != nil {
 		c.failErr(m.RID, err)
@@ -472,8 +521,16 @@ func (c *termClient) attach(m *termIn) {
 		c.fail(m.RID, "unavailable", "")
 		return
 	}
-	if b.hides(m.Terminal) {
-		c.noTerminal(m, "terminal.attach", "terminal", m.Terminal)
+	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	defer cancel()
+	// The terminal by its address (resolve): a name, or an address the
+	// backend does not know yet, is looked up first.
+	addr, err := b.resolve(ctx, conn, m.Terminal)
+	if errors.Is(err, errHiddenTerm) || errors.Is(err, errOtherMachine) {
+		c.noTerminal(m, "terminal.attach", "terminal", m.Terminal, err)
+		return
+	} else if err != nil {
+		c.failErr(m.RID, err)
 		return
 	}
 	observe := m.Observe || c.readOnly
@@ -483,16 +540,26 @@ func (c *termClient) attach(m *termIn) {
 	if observe {
 		display = nil
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
-	defer cancel()
 	st, a, err := conn.Attach(ctx, hc.AttachParams{
-		Terminal: m.Terminal, Cols: m.Cols, Rows: m.Rows, History: m.History,
+		Terminal: addr, Cols: m.Cols, Rows: m.Rows, History: m.History,
 		Observe: observe, ResizeNotifications: observe, Display: display,
 	})
 	if err != nil {
 		c.failErr(m.RID, err)
 		return
 	}
+	// The terminal attached to, as its record in the reply says: a hidden
+	// one (it became so since it was looked up) is none, and its stream
+	// ends unread.
+	if a.Terminal.Address != "" {
+		addr = a.Terminal.Address
+	}
+	if hiddenRecord(&a.Terminal) || otherMachine(addr) || b.isHidden(addr) {
+		st.Close()
+		c.noTerminal(m, "terminal.attach", "terminal", m.Terminal, errHiddenTerm)
+		return
+	}
+	attached := b
 	c.mu.Lock()
 	b = c.subs[m.M]
 	c.mu.Unlock()
@@ -501,13 +568,13 @@ func (c *termClient) attach(m *termIn) {
 	// meanwhile hands back one that is counted.
 	sizing := !observe && b != nil
 	if sizing {
-		b.joined(conn, m.Terminal)
+		b.joined(conn, addr)
 	}
 	c.mu.Lock()
 	if c.streams == nil { // the client left meanwhile
 		c.mu.Unlock()
 		if sizing {
-			b.left(conn, m.Terminal, st, true)
+			b.left(conn, addr, st, true)
 		} else {
 			st.Close()
 		}
@@ -516,7 +583,9 @@ func (c *termClient) attach(m *termIn) {
 	c.next++
 	id := c.next
 	pumping, stop := context.WithCancel(c.ctx)
-	ts := &termStream{st: st, observe: observe, conn: conn, stop: stop, machine: m.M, terminal: m.Terminal}
+	// The stream is of the terminal's address, whatever the client named:
+	// it ends when that terminal becomes hidden (closeStreamsLocked).
+	ts := &termStream{st: st, observe: observe, conn: conn, stop: stop, backend: attached, machine: m.M, terminal: addr}
 	if sizing {
 		ts.sizing = b
 	}
@@ -526,6 +595,11 @@ func (c *termClient) attach(m *termIn) {
 		"cols": a.Terminal.Cols, "rows": a.Terminal.Rows, "observe": observe, "automatic": a.AutomaticInput})
 	c.mu.Unlock()
 	go c.pump(pumping, id, st)
+	// Hidden in the instant before the backend knew the stream, when
+	// closeStreamsLocked did not find it: it ends now.
+	if hidden := attached.track(ts); hidden {
+		st.Close()
+	}
 }
 
 // pump forwards a stream's output to the client until it ends. The client
@@ -544,6 +618,7 @@ func (c *termClient) pump(ctx context.Context, id uint32, st *hc.Stream) {
 			}
 			// The stream is over: it no longer counts for its terminal's size.
 			ts.stop()
+			ts.backend.untrack(ts)
 			if ts.sizing != nil {
 				ts.sizing.left(ts.conn, ts.terminal, st, false)
 			}

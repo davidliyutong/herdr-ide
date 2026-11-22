@@ -133,10 +133,24 @@ type watched struct {
 }
 
 // watchable reports whether the detector looks for an agent in the
-// terminal of record r: a live terminal's foreground process. Every walk
-// over the terminals asks it.
+// terminal of record r: a live terminal's foreground process, unless the
+// terminal is a helper's of the product's own (helperTerminal), of which
+// no detection event ever reaches the core. Every walk over the terminals
+// asks it.
 func watchable(r *hc.Terminal) bool {
-	return r.State == "live" && r.Foreground != nil
+	return r.State == "live" && r.Foreground != nil && !helperTerminal(r)
+}
+
+// helperTerminal reports whether the terminal of record r is one of the
+// product's own helpers that no client shows (agentproto.Hidden: the chat
+// host's name and hidden label, both), as the core's terminal protocol
+// decides it.
+func helperTerminal(r *hc.Terminal) bool {
+	name := ""
+	if r.Name != nil {
+		name = *r.Name
+	}
+	return agentproto.Hidden(name, r.Labels[agentproto.HiddenLabel])
 }
 
 // eventLocked is the event of terminal addr's agent with status, carrying

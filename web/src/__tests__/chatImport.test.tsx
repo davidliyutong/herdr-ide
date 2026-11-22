@@ -3,12 +3,14 @@
 // An agent's earlier session opened as a chat (an import,
 // plugins/chat/imports.ts): the chat panel's list of a directory's
 // sessions (plugins/chat/Sessions.tsx PastSessions), for each chat kind
-// the machine can start, newest first, a page at a time, a session that
-// is a chat's showing that chat; and the button in the header of a
-// terminal whose agent quit (plugins/agents/ContinueInChat.tsx). Both POST
-// new {kind, cwd, resume, import} and open the chat's pane, refuse a
-// session a terminal's agent runs (naming that terminal), and open nothing
-// on a read-only page. The core's chat routes are a scripted fetch.
+// the machine can start (asked by a GET, which starts no chat host, then
+// by a POST that does), newest first, a page at a time (POST: listing them
+// may run the agent), a session that is a chat's showing that chat; and
+// the button in the header of a terminal whose agent quit
+// (plugins/agents/ContinueInChat.tsx). Both POST new {kind, cwd, resume,
+// import} and open the chat's pane, refuse a session a terminal's agent
+// runs (naming that terminal), and open nothing on a read-only page, which
+// lists none. The core's chat routes are a scripted fetch.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -69,6 +71,8 @@ class FakeChats {
   ];
   /** Pages by "kind cwd cursor". */
   pages = new Map<string, unknown>();
+  /** A chat host serves: a GET finds none otherwise, and a POST starts it. */
+  running = true;
   newAnswer: () => Response = () => new Response(JSON.stringify({ chat: { id: NEW_CHAT, kind: 'claude' } }), { status: 200 });
 
   install() {
@@ -78,8 +82,12 @@ class FakeChats {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
       this.requests.push({ method, path: u.pathname, query: Object.fromEntries(u.searchParams), body });
       const ok = (v: unknown) => new Response(JSON.stringify(v), { status: 200 });
-      if (u.pathname === '/api/m/m/p/chat/agents') return ok({ agents: this.agents });
-      if (u.pathname === '/api/m/m/p/chat/sessions') {
+      if (u.pathname === '/api/m/m/p/chat/agents') {
+        if (method === 'POST') this.running = true;
+        if (!this.running) return new Response('{"error":"not_running","message":"no chat host"}', { status: 409 });
+        return ok({ agents: this.agents });
+      }
+      if (u.pathname === '/api/m/m/p/chat/sessions' && method === 'POST') {
         const q = u.searchParams;
         const page = this.pages.get(`${q.get('kind')} ${q.get('cwd')} ${q.get('cursor') ?? ''}`);
         return ok(page ?? { sessions: [] });
@@ -89,7 +97,8 @@ class FakeChats {
     });
   }
 
-  posts = () => this.requests.filter((r) => r.method === 'POST');
+  /** The changes besides the listings. */
+  posts = () => this.requests.filter((r) => r.method === 'POST' && !r.path.endsWith('/sessions') && !r.path.endsWith('/agents'));
   sessionReads = () => this.requests.filter((r) => r.path.endsWith('/sessions')).map((r) => r.query);
 }
 
@@ -238,15 +247,27 @@ describe('the chat panel’s earlier sessions', () => {
     const before = chats.requests.length;
     await act(async () => host!.querySelector<HTMLButtonElement>('.section-actions button')!.click());
     for (let i = 0; i < 4; i++) await act(settle);
-    expect(chats.requests.slice(before).map((r) => r.path)).toEqual([
-      '/api/m/m/p/chat/agents',
-      '/api/m/m/p/chat/sessions',
-      '/api/m/m/p/chat/sessions',
+    expect(chats.requests.slice(before).map((r) => `${r.method} ${r.path}`)).toEqual([
+      'GET /api/m/m/p/chat/agents',
+      'POST /api/m/m/p/chat/sessions',
+      'POST /api/m/m/p/chat/sessions',
     ]);
     expect(listedDirectory('~', '/home/u')).toBe('/home/u');
     expect(listedDirectory('/srv/x/', '/home/u')).toBe('/srv/x');
     expect(listedDirectory('relative', '/home/u')).toBe('/home/u');
     expect(listedDirectory(undefined, undefined)).toBeUndefined();
+  });
+
+  it('start the machine’s chat host to ask for its agents when none serves', async () => {
+    await setup();
+    script();
+    chats.running = false;
+    await render(createElement(PastSessions, { m: 'm' }));
+    expect(groups()).toEqual(['Claude Code', 'Codex']);
+    expect(chats.requests.slice(0, 2).map((r) => `${r.method} ${r.path}`)).toEqual([
+      'GET /api/m/m/p/chat/agents',
+      'POST /api/m/m/p/chat/agents',
+    ]);
   });
 
   it('say there are none, and draw nothing where no agent can chat', async () => {
@@ -330,21 +351,18 @@ describe('the chat panel’s earlier sessions', () => {
     expect(toasts().at(-1)!.msg).toContain('The session could not be opened as a chat');
   });
 
-  it('open nothing on a read-only page, and still show a chat', async () => {
+  it('list none and open nothing on a read-only page, which still shows a chat', async () => {
     const { model } = await setup();
     script();
     useStore.getState().setReadOnly(true);
     await render(createElement(PastSessions, { m: 'm' }));
-    expect(rowOf(S1).querySelector<HTMLButtonElement>('.tree-actions button')!.disabled).toBe(true);
-    expect(rowOf(C1).querySelector<HTMLButtonElement>('.tree-actions button')!.disabled).toBe(false);
-    await act(async () => rowOf(S1).click());
-    for (let i = 0; i < 3; i++) await act(settle);
-    expect(chats.posts()).toEqual([]);
+    expect(host!.querySelector('.agent-sessions')).toBeNull();
+    expect(chats.requests).toEqual([]);
     expect(await importSession('m', { kind: 'claude', session: S1, cwd: DIR })).toBeUndefined();
-    expect(chats.posts()).toEqual([]);
+    expect(chats.requests).toEqual([]);
     expect(chatViews(model)).toHaveLength(1);
     // A chat is shown all the same.
-    await act(async () => rowOf(C1).click());
+    expect(await importSession('m', { kind: 'codex', session: C1, cwd: DIR, chat: CHAT })).toBe(CHAT);
     for (let i = 0; i < 3; i++) await act(settle);
     expect(L.focusedPane(model.layout('m')!)).toBe('view:v1');
   });

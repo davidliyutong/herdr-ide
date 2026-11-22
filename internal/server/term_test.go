@@ -177,7 +177,18 @@ func (f *fakeTermCore) serve(c net.Conn) {
 			f.mu.Unlock()
 			write(reply(`"result":{"address":"t2"}`))
 		case "terminal.get":
-			write(reply(`"result":{"address":"t1","state":"live","pid":42,"cols":80,"rows":24,"argv":[],"cwd":"/","created_ms":1,"labels":{},"screen":"exact","foreground":{"pid":42,"name":"zsh","argv":["zsh"],"cwd":"/"}}`))
+			// The terminal asked for, by the address it was named by; t404
+			// is none.
+			var p struct {
+				Terminal string `json:"terminal"`
+			}
+			json.Unmarshal(req.Params, &p)
+			if p.Terminal == "t404" {
+				write(reply(`"error":{"code":-32000,"message":"no terminal \"t404\"","data":{"kind":"not_found"}}`))
+				break
+			}
+			addr, _ := json.Marshal(p.Terminal)
+			write(reply(`"result":{"address":` + string(addr) + `,"state":"live","pid":42,"cols":80,"rows":24,"argv":[],"cwd":"/","created_ms":1,"labels":{},"screen":"exact","foreground":{"pid":42,"name":"zsh","argv":["zsh"],"cwd":"/"}}`))
 		case "terminal.list":
 			write(reply(`"result":{"terminals":[],"hidden_finished":0}`))
 		case "terminal.kill":

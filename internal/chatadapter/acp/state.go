@@ -190,18 +190,32 @@ var modeCandidates = map[string][]string{
 	chatproto.ModeFull:        {"yolo", "bypassPermissions", "full", "full-access", "full_access"},
 }
 
-// markFull marks the values of the mode options that give the agent full
-// access (modeCandidates of chatproto.ModeFull), which the host refuses
-// unless its settings allow full access.
+// markFull marks the values of the mode options that may give the agent
+// full access, which the host refuses unless its settings allow full
+// access: every value but those known to ask before what they do not plan
+// (modeCandidates of the default mode, acceptEdits and plan). An agent's
+// own mode of another meaning counts as full access: Kimi Code's "auto",
+// which approves what it deems safe, too.
 func markFull(opts []chatproto.ConfigOption) {
 	for i := range opts {
 		if opts[i].Category != chatproto.CategoryMode {
 			continue
 		}
 		for j := range opts[i].Options {
-			opts[i].Options[j].Full = slices.Contains(modeCandidates[chatproto.ModeFull], opts[i].Options[j].Value)
+			opts[i].Options[j].Full = !safeMode(opts[i].Options[j].Value)
 		}
 	}
+}
+
+// safeMode tells whether an agent's mode is known not to give it full
+// access.
+func safeMode(v string) bool {
+	for _, m := range []string{chatproto.ModeDefault, chatproto.ModeAcceptEdits, chatproto.ModePlan} {
+		if slices.Contains(modeCandidates[m], v) {
+			return true
+		}
+	}
+	return false
 }
 
 // modeValue is the value of the mode option that a chat's mode stands for:

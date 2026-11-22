@@ -35,11 +35,10 @@ type termBackend struct {
 	// stopped: the terminal core was stopped from the UI, so the backend
 	// starts none until it is started again (or the backend starts anew).
 	stopped bool
-	// hidden are the terminals of the product's own helpers, which carry
-	// agentproto.HiddenLabel and are not in terms: by address, with the
-	// name of each ("" for none). Clients are told nothing of them and
-	// cannot address them (hides).
-	hidden map[string]string
+	// hidden are the addresses of the terminals of the product's own
+	// helpers (hiddenTerminal: the chat host), which are not in terms.
+	// Clients are told nothing of them and cannot address them (resolve).
+	hidden map[string]bool
 	// core is how the terminal core calls itself: an address may say its
 	// id or its name before a terminal of its own ("box/t7").
 	core hc.CoreInfo
@@ -55,6 +54,9 @@ type termBackend struct {
 	// that whenever no page shows it. Both are of the connection now.
 	typing map[string]int
 	parked map[string]*hc.Stream
+	// streams are the clients' streams attached through the backend,
+	// which end when their terminal becomes hidden (closeStreamsLocked).
+	streams map[*termStream]bool
 	// pub orders the publications of the state on the machine.
 	pub sync.Mutex
 	// gone: the machine was removed; the backend publishes nothing more
@@ -401,30 +403,90 @@ func (b *termBackend) serve(ctx context.Context) (code string) {
 	}
 }
 
-// hides reports whether target, a terminal as a client names it, is none of
-// the clients': the address or the name of a hidden terminal, also with the
-// terminal core's own id or name before it, as the terminal core reads
-// addresses, or the name kept for the chat host, whether one runs or not.
-func (b *termBackend) hides(target string) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if m, local, ok := strings.Cut(target, "/"); ok && m != "" && (m == b.core.ID || m == b.core.Name) {
-		target = local
+// Why a terminal a client names is none of the clients' (resolve).
+var (
+	// errHiddenTerm: a hidden terminal (hiddenTerminal), or the name kept
+	// for the chat host, whether one runs or not.
+	errHiddenTerm = errors.New("a hidden terminal")
+	// errOtherMachine: a terminal of another machine, one the terminal
+	// core added (machine.add) or that dialed in to it. The core's own
+	// machines are the server's, each with a terminal core of its own;
+	// a client reaches none through another's.
+	errOtherMachine = errors.New("a terminal of another machine")
+)
+
+// otherMachine reports whether addr, a terminal's address as the terminal
+// core reports it, is one of another machine: "box/t7". The core's own
+// terminals have addresses without a machine ("t7").
+func otherMachine(addr string) bool { return strings.Contains(addr, "/") }
+
+// localLocked is target, a terminal as a client names it ("t7", a name, or
+// either after a machine: "box/t7"), as the terminal core names one of its
+// own: without the core's own id or name before it. ok is false for a
+// target after any other machine (errOtherMachine), and for one that is no
+// address at all ("box/", "a/b/c"). b.mu is held.
+func (b *termBackend) localLocked(target string) (local string, ok bool) {
+	m, local, cut := strings.Cut(target, "/")
+	if !cut {
+		return target, true
 	}
-	if _, hidden := b.hidden[target]; hidden || target == agentproto.ChatHostName {
-		return true
+	if m == "" || local == "" || strings.Contains(local, "/") || m != b.core.ID && m != b.core.Name {
+		return "", false
 	}
-	for addr, name := range b.hidden {
-		// A name is said with the machine of its terminal's address.
-		if name != "" && target == addr[:strings.LastIndex(addr, "/")+1]+name {
-			return true
-		}
-	}
-	return false
+	return local, true
 }
 
-// visible is the result of terminal.list without the hidden terminals;
-// false for a result that is no list of terminals.
+// isHidden reports whether the terminal at addr is hidden.
+func (b *termBackend) isHidden(addr string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.hidden[addr]
+}
+
+// resolve is the address of the terminal that target, a terminal as a
+// client names it, names, as the terminal core reads it. A terminal the
+// clients know is named by its address (also after the core's own id or
+// name); any other target (a name, or the address of a terminal whose
+// creation has not reached the backend yet, or that is hidden and whose
+// event has not) is looked up with terminal.get first, and the call that
+// follows names the terminal found by its address: what a name names can
+// change, an address cannot. errHiddenTerm or errOtherMachine for a
+// terminal that is none of the clients', without asking the terminal core
+// when the backend knows; the terminal core's error when the lookup fails.
+func (b *termBackend) resolve(ctx context.Context, conn *hc.Conn, target string) (string, error) {
+	b.mu.Lock()
+	local, ok := b.localLocked(target)
+	hidden := b.hidden[local] || local == agentproto.ChatHostName
+	_, known := b.terms[local]
+	b.mu.Unlock()
+	switch {
+	case !ok:
+		return "", errOtherMachine
+	case hidden:
+		return "", errHiddenTerm
+	case known:
+		return local, nil
+	}
+	var rec map[string]any
+	if err := conn.Call(ctx, "terminal.get", map[string]string{"terminal": local}, &rec); err != nil {
+		return "", err
+	}
+	addr, _ := rec["address"].(string)
+	switch {
+	case addr == "":
+		return "", errors.New("hc: terminal.get: a record without an address")
+	case otherMachine(addr):
+		return "", errOtherMachine
+	case hiddenTerminal(rec) || b.isHidden(addr):
+		return "", errHiddenTerm
+	}
+	return addr, nil
+}
+
+// visible is the result of terminal.list with only the clients' terminals:
+// without the hidden ones and those of other machines, and without the
+// machines the terminal core added (its "machines"); false for a result
+// that is no list of terminals.
 func (b *termBackend) visible(result json.RawMessage) (json.RawMessage, bool) {
 	var res map[string]json.RawMessage
 	var list []json.RawMessage
@@ -440,11 +502,15 @@ func (b *termBackend) visible(result json.RawMessage) (json.RawMessage, bool) {
 			return nil, false
 		}
 		addr, _ := rec["address"].(string)
-		if _, hidden := b.hidden[addr]; !hidden && !hiddenTerminal(rec) {
+		if !b.hidden[addr] && !hiddenTerminal(rec) && !otherMachine(addr) {
 			kept = append(kept, raw)
 		}
 	}
-	if len(kept) == len(list) {
+	var machines []json.RawMessage
+	_, hasMachines := res["machines"]
+	if hasMachines && (json.Unmarshal(res["machines"], &machines) != nil || len(machines) > 0) {
+		res["machines"] = json.RawMessage("[]")
+	} else if len(kept) == len(list) {
 		return result, true
 	}
 	var err error
@@ -567,14 +633,24 @@ func (t termShells) get(ctx context.Context, addr string) (*hc.Conn, *hc.Termina
 	if conn == nil {
 		return nil, nil, errNoTerminals
 	}
-	// A hidden terminal a request names is no terminal: nothing is asked
-	// about it, and nothing typed into it.
-	if t.b.hides(addr) {
-		return nil, nil, &hc.Error{Kind: "not_found", Message: "no terminal " + strconv.Quote(addr)}
+	// A hidden terminal a request names, or another machine's, is no
+	// terminal: nothing is asked about it, and nothing typed into it. The
+	// record read is the terminal's as it is now: one that is hidden by
+	// now (its event has not reached the backend yet) is none either.
+	notFound := &hc.Error{Kind: "not_found", Message: "no terminal " + strconv.Quote(addr)}
+	t.b.mu.Lock()
+	local, ok := t.b.localLocked(addr)
+	hidden := t.b.hidden[local] || local == agentproto.ChatHostName
+	t.b.mu.Unlock()
+	if !ok || hidden {
+		return nil, nil, notFound
 	}
 	var rec hc.Terminal
-	if err := conn.Call(ctx, "terminal.get", map[string]string{"terminal": addr}, &rec); err != nil {
+	if err := conn.Call(ctx, "terminal.get", map[string]string{"terminal": local}, &rec); err != nil {
 		return nil, nil, err
+	}
+	if rec.Address == "" || otherMachine(rec.Address) || hiddenRecord(&rec) || t.b.isHidden(rec.Address) {
+		return nil, nil, notFound
 	}
 	return conn, &rec, nil
 }
@@ -599,11 +675,15 @@ func (t termShells) Send(ctx context.Context, addr, text string) error {
 	if err != nil {
 		return err
 	}
-	st, _, err := conn.Attach(ctx, hc.AttachParams{Terminal: addr, Cols: max(rec.Cols, 1), Rows: max(rec.Rows, 1), Resumed: true})
+	// The terminal the record is, by its address.
+	st, a, err := conn.Attach(ctx, hc.AttachParams{Terminal: rec.Address, Cols: max(rec.Cols, 1), Rows: max(rec.Rows, 1), Resumed: true})
 	if err != nil {
 		return err
 	}
 	defer st.Close()
+	if hiddenRecord(&a.Terminal) {
+		return &hc.Error{Kind: "not_found", Message: "no terminal " + strconv.Quote(addr)}
+	}
 	_, err = st.Write([]byte(text))
 	return err
 }

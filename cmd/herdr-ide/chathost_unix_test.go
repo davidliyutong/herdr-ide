@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -61,6 +62,22 @@ func TestChatHostCommand(t *testing.T) {
 	}
 	if _, err := os.Stat(store.HostFile(base, chathost.DBName)); err != nil {
 		t.Errorf("no journal: %v", err)
+	}
+	// It logs to its file in the data directory too, the user's alone.
+	logFile := store.HostFile(base, chathost.LogName)
+	for {
+		// The socket listens before the host says it serves.
+		b, err := os.ReadFile(logFile)
+		if err == nil && strings.Contains(string(b), " serving "+sock) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the log file %s: %q, %v", logFile, b, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if st, err := os.Stat(logFile); err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("the log file's mode: %v", err)
 	}
 	// The terminal core's stop starts with SIGHUP.
 	syscall.Kill(os.Getpid(), syscall.SIGHUP)

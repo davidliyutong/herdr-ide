@@ -67,6 +67,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'chat.handoff.failed': '无法在终端中继续这个对话：{error}',
   'chat.reason.busy': '智能体正在工作；请等它这一轮结束，或停止它',
   'chat.reason.in_terminal': '这个会话正在一个终端中运行',
+  'chat.reason.unsafe_folder': '这个文件夹不能被信任',
   'chat.reason.unknown_chat': '这个对话已不存在',
   'chat.reason.not_found': '机器上没有这个智能体或会话',
   'chat.reason.too_many': '机器保留的对话数已达设置的上限',

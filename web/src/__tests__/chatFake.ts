@@ -33,8 +33,9 @@ export class FakeChatCore {
   readonly sent: Array<Record<string, unknown>> = [];
   /** auto: sockets open, attaches and commands are answered. */
   auto = false;
-  /** The chats an automatic attach answers with, and their stored events. */
-  readonly chats = new Map<string, { chat: Record<string, unknown>; events: ChatEvent[] }>();
+  /** The chats an automatic attach answers with, their stored events and
+   * the lowest stored seq (1 by default). */
+  readonly chats = new Map<string, { chat: Record<string, unknown>; events: ChatEvent[]; first?: number }>();
   /** An automatic ack's error for a command op. */
   readonly refuse = new Map<string, { code: string; message: string }>();
   conn!: ChatConnection;
@@ -78,8 +79,8 @@ export class FakeChatCore {
   }
 
   /** Puts a chat an automatic attach answers with. */
-  chat(id: string, chat: Record<string, unknown>, events: ChatEvent[] = []) {
-    this.chats.set(id, { chat: { id, ...chat }, events });
+  chat(id: string, chat: Record<string, unknown>, events: ChatEvent[] = [], first?: number) {
+    this.chats.set(id, { chat: { id, ...chat }, events, first });
   }
 
   /** A stored event of a chat, to every subscription of it. */
@@ -99,7 +100,7 @@ export class FakeChatCore {
     if (msg.op === 'attach') {
       const c = this.chats.get(msg.chat as string);
       if (!c) return socket.deliver({ t: 'detached', sub: msg.sub, error: { code: 'unknown_chat', message: 'no such chat' } });
-      socket.deliver({ t: 'attached', sub: msg.sub, chat: c.chat, first: 1 });
+      socket.deliver({ t: 'attached', sub: msg.sub, chat: c.chat, first: c.first ?? 1 });
       const from = typeof msg.from === 'number' ? msg.from : 0;
       for (const ev of c.events) if ((ev.seq ?? 0) > from) socket.deliver({ t: 'event', sub: msg.sub, ev });
     } else if (msg.op === 'command') {

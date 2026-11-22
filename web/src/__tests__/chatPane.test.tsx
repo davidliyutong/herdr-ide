@@ -213,7 +213,16 @@ describe('the chat pane', () => {
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual([
       `/api/m/m/p/chat/trust?cwd=${encodeURIComponent('/home/u/proj')}`,
     ]);
-    expect(q('.conv-notice')!.textContent).toBe(t('conversation.notice.trusted'));
+    expect(q('.conv-notice-text')!.textContent).toBe(t('conversation.notice.trusted'));
+    // And taken back from the same notice.
+    const untrust = qa('.conv-notice button').find((b) => b.textContent === t('conversation.notice.untrust'))!;
+    await act(async () => untrust.click());
+    await tick();
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual([
+      `/api/m/m/p/chat/trust?cwd=${encodeURIComponent('/home/u/proj')}`,
+      `/api/m/m/p/chat/untrust?cwd=${encodeURIComponent('/home/u/proj')}`,
+    ]);
+    expect(q('.conv-notice-text')!.textContent).toBe(t('conversation.notice.untrustedFolder'));
   });
 
   it('is read-only on a read-only page', async () => {

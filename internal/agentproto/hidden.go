@@ -31,3 +31,16 @@ const (
 func HiddenValue(name string) string {
 	return strings.TrimPrefix(name, brand.Slug+"-")
 }
+
+// Hidden reports whether a terminal named name, whose HiddenLabel has
+// value, is a helper's that no client sees: the chat host's, named
+// ChatHostName and labeled HiddenChatHost. Both are needed: the terminal
+// core gives the name to one live terminal at a time and clients cannot
+// take it, while labels are free-form, so a program of the machine that
+// sets the label on another terminal does not hide that terminal. Every
+// part that leaves the helpers' terminals out (the core's terminal
+// protocol, the agent's detection of coding agents, terminal history's
+// captures) decides by it.
+func Hidden(name, value string) bool {
+	return name == ChatHostName && value == HiddenChatHost
+}

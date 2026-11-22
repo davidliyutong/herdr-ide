@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -36,8 +37,14 @@ const maxTrusted = 1000
 // (json), with its type, item and time. Times are milliseconds since the
 // epoch, 0 for none. A chat is fresh while its agent's session never had
 // a turn: the agent may not keep it, and the chat's next start makes a
-// new one instead of resuming it. trusted lists the directories the user
-// trusted (chatproto.OpTrust), with when.
+// new one instead of resuming it; renamed when the user named it
+// (chatproto.OpRename), whose title its agent's no longer replaces;
+// untrusted_told when its log tells that its agent started without the
+// project's own settings (agentproto.NoticeUntrustedFolder), which is told
+// again only after a start in a trusted folder. trusted lists the
+// directories the user trusted (chatproto.OpTrust), with when, and the
+// device and inode the directory had then: one that is another directory
+// now is no longer trusted.
 var migrations = []string{
 	`CREATE TABLE settings (
 		key   TEXT PRIMARY KEY,
@@ -82,6 +89,13 @@ var migrations = []string{
 		path TEXT PRIMARY KEY,
 		at   INTEGER NOT NULL
 	);`,
+	// The directories trusted before their device and inode were kept are
+	// trusted no longer.
+	`ALTER TABLE chats ADD COLUMN renamed INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE chats ADD COLUMN untrusted_told INTEGER NOT NULL DEFAULT 0;
+	DELETE FROM trusted;
+	ALTER TABLE trusted ADD COLUMN dev INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE trusted ADD COLUMN ino INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // deleteBatch is how many events one transaction deletes: a large log goes
@@ -122,6 +136,12 @@ type row struct {
 	Bytes        int64
 	// Fresh: the session was made for the chat and never had a turn.
 	Fresh bool
+	// Renamed: the user named the chat; its agent's title does not replace
+	// the name.
+	Renamed bool
+	// UntrustedTold: the log tells that the agent started without the
+	// project's own settings, since its last start in a trusted folder.
+	UntrustedTold bool
 }
 
 func ms(t time.Time) int64 {
@@ -182,11 +202,11 @@ func (j *journal) saveLocked(r row) error {
 	_, err := j.db.Exec(`UPDATE chats SET kind = ?, title = ?, cwd = ?, session_id = ?, state = ?, error = ?,
 		created = ?, updated = ?, seq = ?, seen = ?, closed = ?, handed_off = ?, agent_version = ?,
 		config = ?, commands = ?, usage = ?, capabilities = ?, turn_end = ?, options = ?, history_after = ?, bytes = ?,
-		fresh = ? WHERE id = ?`,
+		fresh = ?, renamed = ?, untrusted_told = ? WHERE id = ?`,
 		r.Kind, r.Title, r.Cwd, r.SessionID, r.State, errText,
 		ms(r.Created), ms(r.Updated), int64(r.Seq), int64(r.Seen), ms(r.Closed), boolInt(r.HandedOff), r.AgentVersion,
 		jsonText(r.Config), jsonText(r.Commands), jsonText(r.Usage), jsonText(r.Capabilities),
-		int64(r.TurnEnd), jsonText(r.Options), r.HistoryAfter, r.Bytes, boolInt(r.Fresh), r.ID)
+		int64(r.TurnEnd), jsonText(r.Options), r.HistoryAfter, r.Bytes, boolInt(r.Fresh), boolInt(r.Renamed), boolInt(r.UntrustedTold), r.ID)
 	return err
 }
 
@@ -194,7 +214,7 @@ func (j *journal) saveLocked(r row) error {
 func (j *journal) loadChats() ([]row, error) {
 	rows, err := j.db.Query(`SELECT id, kind, title, cwd, session_id, state, error, created, updated, seq, seen,
 		closed, handed_off, agent_version, config, commands, usage, capabilities, turn_end, options, history_after, bytes,
-		fresh FROM chats`)
+		fresh, renamed, untrusted_told FROM chats`)
 	if err != nil {
 		return nil, err
 	}
@@ -204,14 +224,15 @@ func (j *journal) loadChats() ([]row, error) {
 		var r row
 		var errText, config, commands, usage, caps, options string
 		var created, updated, seq, seen, closed, turnEnd int64
-		var handedOff, fresh int
+		var handedOff, fresh, renamed, untrustedTold int
 		if err := rows.Scan(&r.ID, &r.Kind, &r.Title, &r.Cwd, &r.SessionID, &r.State, &errText, &created, &updated,
 			&seq, &seen, &closed, &handedOff, &r.AgentVersion, &config, &commands, &usage, &caps, &turnEnd,
-			&options, &r.HistoryAfter, &r.Bytes, &fresh); err != nil {
+			&options, &r.HistoryAfter, &r.Bytes, &fresh, &renamed, &untrustedTold); err != nil {
 			return nil, err
 		}
 		r.Created, r.Updated, r.Closed = fromMS(created), fromMS(updated), fromMS(closed)
 		r.Seq, r.Seen, r.TurnEnd, r.HandedOff, r.Fresh = uint64(seq), uint64(seen), uint64(turnEnd), handedOff != 0, fresh != 0
+		r.Renamed, r.UntrustedTold = renamed != 0, untrustedTold != 0
 		if errText != "" {
 			r.Error = &chatproto.Error{}
 			json.Unmarshal([]byte(errText), r.Error)
@@ -432,9 +453,9 @@ func (j *journal) putSettings(s chatproto.HostSettings) error {
 	return err
 }
 
-// trust adds a directory to the trusted list; beyond maxTrusted the one
-// trusted the longest ago goes.
-func (j *journal) trust(path string, at time.Time) error {
+// trust adds a directory to the trusted list, with the device and inode it
+// has (id); beyond maxTrusted the one trusted the longest ago goes.
+func (j *journal) trust(path string, at time.Time, id fileID) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	tx, err := j.db.Begin()
@@ -442,8 +463,9 @@ func (j *journal) trust(path string, at time.Time) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO trusted (path, at) VALUES (?, ?) ON CONFLICT (path) DO UPDATE SET at = excluded.at`,
-		path, ms(at)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO trusted (path, at, dev, ino) VALUES (?, ?, ?, ?)
+		ON CONFLICT (path) DO UPDATE SET at = excluded.at, dev = excluded.dev, ino = excluded.ino`,
+		path, ms(at), int64(id.dev), int64(id.ino)); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM trusted WHERE path NOT IN (SELECT path FROM trusted ORDER BY at DESC, path LIMIT ?)`,
@@ -453,9 +475,16 @@ func (j *journal) trust(path string, at time.Time) error {
 	return tx.Commit()
 }
 
-// trusted tells whether the user trusted dir, an absolute clean path, or a
-// directory above it.
-func (j *journal) trusted(dir string) bool {
+// trustedDir is a directory of the trusted list, with the device and inode
+// it had when it was trusted.
+type trustedDir struct {
+	path string
+	id   fileID
+}
+
+// trustedAbove are the directories of the trusted list among dir, an
+// absolute clean path, and the directories above it, dir first.
+func (j *journal) trustedAbove(dir string) ([]trustedDir, error) {
 	var paths []any
 	for p := dir; ; p = parentDir(p) {
 		paths = append(paths, p)
@@ -463,9 +492,67 @@ func (j *journal) trusted(dir string) bool {
 			break
 		}
 	}
-	q := `SELECT COUNT(*) FROM trusted WHERE path IN (?` + strings.Repeat(", ?", len(paths)-1) + `)`
-	var n int
-	return j.db.QueryRow(q, paths...).Scan(&n) == nil && n > 0
+	rows, err := j.db.Query(`SELECT path, dev, ino FROM trusted WHERE path IN (?`+strings.Repeat(", ?", len(paths)-1)+`)
+		ORDER BY length(path) DESC`, paths...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []trustedDir
+	for rows.Next() {
+		var t trustedDir
+		var dev, ino int64
+		if err := rows.Scan(&t.path, &dev, &ino); err != nil {
+			return nil, err
+		}
+		t.id = fileID{dev: uint64(dev), ino: uint64(ino)}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// untrust removes directories from the trusted list.
+func (j *journal) untrust(paths ...string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	args := make([]any, len(paths))
+	for i, p := range paths {
+		args[i] = p
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	_, err := j.db.Exec(`DELETE FROM trusted WHERE path IN (?`+strings.Repeat(", ?", len(paths)-1)+`)`, args...)
+	return err
+}
+
+// clientIDs are the page's ids (chatproto.Event.ClientID) of the last n
+// prompts of a chat its log keeps (EventUser and EventQueued), the oldest
+// first.
+func (j *journal) clientIDs(chat string, n int) ([]string, error) {
+	rows, err := j.db.Query(`SELECT json FROM events WHERE chat = ? AND t IN (?, ?) ORDER BY seq DESC LIMIT ?`,
+		chat, chatproto.EventUser, chatproto.EventQueued, 2*n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	seen := map[string]bool{}
+	for rows.Next() && len(ids) < n {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, err
+		}
+		var ev struct {
+			ClientID string `json:"clientId"`
+		}
+		if json.Unmarshal(b, &ev) == nil && ev.ClientID != "" && !seen[ev.ClientID] {
+			seen[ev.ClientID] = true
+			ids = append(ids, ev.ClientID)
+		}
+	}
+	slices.Reverse(ids)
+	return ids, rows.Err()
 }
 
 // parentDir is the directory above an absolute, clean path; "/" for "/".

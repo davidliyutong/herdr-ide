@@ -6,8 +6,9 @@
 // now, its sessions of that directory, newest first, a page at a time
 // (Show More); a row opens with a click, Enter or its button, and a
 // session that is already a chat's shows that chat. They are read again
-// when the directory changes and with Refresh. A read-only page lists them
-// and shows chats, and opens none.
+// when the directory changes and with Refresh. Listing them may run the
+// agent (Codex, ACP agents), a change the core takes only from a page that
+// may make changes: a read-only page lists none.
 import { History, MessageSquareShare, MessagesSquare, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { paneDirectory } from '../../actions';
@@ -86,6 +87,10 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
   useEffect(() => {
     let gone = false;
     setKinds(undefined);
+    if (readOnly) {
+      setKinds([]);
+      return;
+    }
     chatAgents(m).then(
       (k) => !gone && setKinds(k),
       () => !gone && setKinds([]),
@@ -93,7 +98,7 @@ export function PastSessions({ m, cwd }: PastSessionsProps): JSX.Element | null 
     return () => {
       gone = true;
     };
-  }, [m, version]);
+  }, [m, version, readOnly]);
 
   // Refresh reads the kinds again, whose answer reads the lists.
   useEffect(() => {

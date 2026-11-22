@@ -16,13 +16,25 @@ import (
 	"herdr-ide/internal/plugin"
 )
 
-// backlogMessages and backlogBytes are how far a page may fall behind the
-// messages it is sent before it is disconnected; one message of any size
-// is taken when nothing waits (variables for the tests).
+// backlogMessages and backlogBytes bound what waits to be sent to a page.
+// The events of its subscriptions share half of them (share): a
+// subscription over its share is not read from the chat host until the
+// page took enough of them, and the host, whose own bound for a
+// connection that falls behind is reached then, drops that connection
+// (the page hears lost and attaches again from its last sequence number),
+// while the page's other chats go on. The core's own messages (answers to
+// attaches and commands, ends of subscriptions) take the rest: a page that
+// falls that far behind is disconnected. One message of any size is taken
+// when nothing waits (variables for the tests).
 var (
 	backlogMessages = 8192
 	backlogBytes    = 32 << 20
 )
+
+// refusalGap is how long after a refused command's audit record a page's
+// refusals of the same operation are only counted, into the next record
+// (its member repeated) (a variable for the tests).
+var refusalGap = 10 * time.Second
 
 // Bounds of a page's WebSocket.
 const (
@@ -50,16 +62,36 @@ type page struct {
 
 	mu   sync.Mutex
 	subs map[string]*sub
-	// out are the messages to send, outBytes their size; closing: send
+	// out are the messages to send, in order; ctrlN and ctrlBytes count
+	// the core's own among them (those of no subscription); closing: send
 	// what is there, then close with closeCode; closed: nothing more is
 	// sent.
-	out       [][]byte
-	outBytes  int
+	out       []outMsg
+	ctrlN     int
+	ctrlBytes int
 	closing   bool
 	closed    bool
 	closeCode websocket.StatusCode
 	closeWhy  string
 	wake      chan struct{}
+
+	// auditMu guards refused: per audit event, when a refusal of it was
+	// last written and how many came since.
+	auditMu sync.Mutex
+	refused map[string]*refusal
+}
+
+// outMsg is a message to send a page: an event of a subscription (s), or
+// one of the core's own (s nil).
+type outMsg struct {
+	b []byte
+	s *sub
+}
+
+// refusal is what a page's audit keeps of the refusals of one operation.
+type refusal struct {
+	at time.Time
+	n  int
 }
 
 // serveWS serves a page's WebSocket (GET /api/p/chat/ws). The core's guards
@@ -76,7 +108,8 @@ func (p *Plugin) serveWS(c *plugin.Call, w http.ResponseWriter, r *http.Request)
 	}
 	ws.SetReadLimit(MaxClientMessage)
 	ctx, cancel := context.WithCancel(context.Background())
-	pg := &page{p: p, host: c.Host, req: r, ws: ws, ctx: ctx, cancel: cancel, subs: map[string]*sub{}, wake: make(chan struct{}, 1)}
+	pg := &page{p: p, host: c.Host, req: r, ws: ws, ctx: ctx, cancel: cancel, subs: map[string]*sub{}, wake: make(chan struct{}, 1),
+		refused: map[string]*refusal{}}
 	p.mu.Lock()
 	p.pages[pg] = struct{}{}
 	p.mu.Unlock()
@@ -115,7 +148,7 @@ func (p *Plugin) serveWS(c *plugin.Call, w http.ResponseWriter, r *http.Request)
 func (pg *page) shut() {
 	pg.mu.Lock()
 	pg.closed = true
-	pg.out, pg.outBytes = nil, 0
+	pg.out, pg.ctrlN, pg.ctrlBytes = nil, 0, 0
 	subs := pg.subs
 	pg.subs = map[string]*sub{}
 	for _, s := range subs {
@@ -152,7 +185,7 @@ func (pg *page) finish(code string) {
 	for id, s := range subs {
 		s.gone = true
 		if code != "" {
-			pg.enqueueLocked(mustJSON(ServerMessage{T: TDetached, Sub: id, Error: &chatproto.Error{Code: code, Message: "the chat plugin is off"}}))
+			pg.enqueueLocked(mustJSON(ServerMessage{T: TDetached, Sub: id, Error: &chatproto.Error{Code: code, Message: "the chat plugin is off"}}), nil)
 		}
 	}
 	why := code
@@ -187,27 +220,36 @@ func mustJSON(v any) []byte {
 	return b
 }
 
-// send queues a message for the page.
+// send queues a message of the core's own for the page.
 func (pg *page) send(v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return
 	}
 	pg.mu.Lock()
-	pg.enqueueLocked(b)
+	pg.enqueueLocked(b, nil)
 	pg.mu.Unlock()
 }
 
-// enqueueLocked queues b, or disconnects a page that fell too far behind.
+// enqueueLocked queues b, an event of subscription s or (s nil) a message
+// of the core's own. Of the latter, a page that fell too far behind is
+// disconnected instead; a subscription's are bounded by its share (relay).
 // pg.mu is held.
-func (pg *page) enqueueLocked(b []byte) {
+func (pg *page) enqueueLocked(b []byte, s *sub) {
 	if pg.closed || pg.closing {
 		return
 	}
-	if len(pg.out) >= backlogMessages || (len(pg.out) > 0 && pg.outBytes+len(b) > backlogBytes) {
+	if s != nil {
+		s.queued += len(b)
+		s.queuedN++
+		pg.out = append(pg.out, outMsg{b, s})
+		pg.signal()
+		return
+	}
+	if pg.ctrlN >= backlogMessages/2 || (pg.ctrlN > 0 && pg.ctrlBytes+len(b) > backlogBytes/2) {
 		// The page is behind: what it missed it reads again when it
 		// attaches anew. A write that waits for it is not waited for.
-		pg.out, pg.outBytes, pg.closed = nil, 0, true
+		pg.out, pg.ctrlN, pg.ctrlBytes, pg.closed = nil, 0, 0, true
 		pg.signal()
 		go func() {
 			// The close frame waits behind a write the page does not take
@@ -219,9 +261,18 @@ func (pg *page) enqueueLocked(b []byte) {
 		}()
 		return
 	}
-	pg.out = append(pg.out, b)
-	pg.outBytes += len(b)
+	pg.ctrlN++
+	pg.ctrlBytes += len(b)
+	pg.out = append(pg.out, outMsg{b, nil})
 	pg.signal()
+}
+
+// share is how many messages and bytes of events one subscription may
+// have waiting for the page: half of the backlog, split among the page's
+// subscriptions. pg.mu is held.
+func (pg *page) shareLocked() (int, int) {
+	n := max(1, len(pg.subs))
+	return max(2, backlogMessages/(2*n)), max(64<<10, backlogBytes/(2*n))
 }
 
 // writeLoop sends the page its messages in order, each within
@@ -250,10 +301,21 @@ func (pg *page) writeLoop() {
 			pg.ws.Close(code, why)
 			return
 		}
-		b := pg.out[0]
-		pg.out[0] = nil
+		e := pg.out[0]
+		pg.out[0] = outMsg{}
 		pg.out = pg.out[1:]
-		pg.outBytes -= len(b)
+		b := e.b
+		if e.s != nil {
+			e.s.queued -= len(b)
+			e.s.queuedN--
+			select {
+			case e.s.room <- struct{}{}:
+			default:
+			}
+		} else {
+			pg.ctrlN--
+			pg.ctrlBytes -= len(b)
+		}
 		pg.mu.Unlock()
 		ctx, cancel := context.WithTimeout(pg.ctx, pageWriteTimeout)
 		err := pg.ws.Write(ctx, websocket.MessageText, b)
@@ -276,8 +338,13 @@ type sub struct {
 	// cmds are the command lines to write to the host.
 	cmds chan []byte
 	// gone: the page no longer has the subscription (detached, closed):
-	// nothing more is sent of it. Guarded by pg.mu.
-	gone bool
+	// nothing more is sent of it. queued and queuedN are the bytes and the
+	// messages of its events that wait to be sent to the page. Guarded by
+	// pg.mu.
+	gone            bool
+	queued, queuedN int
+	// room tells the relay that the page took some of its events.
+	room chan struct{}
 
 	mu sync.Mutex
 	// pending are the commands written or to be written, by the core's
@@ -341,7 +408,7 @@ func (pg *page) attach(m *ClientMessage) {
 	}
 	ctx, cancel := context.WithCancel(pg.ctx)
 	s := &sub{pg: pg, id: m.Sub, m: m.M, chat: m.Chat, from: m.From, ctx: ctx, cancel: cancel,
-		cmds: make(chan []byte, subCommands), pending: map[string]pendingCmd{}}
+		cmds: make(chan []byte, subCommands), pending: map[string]pendingCmd{}, room: make(chan struct{}, 1)}
 	pg.subs[m.Sub] = s
 	pg.mu.Unlock()
 	if old != nil {
@@ -388,6 +455,11 @@ func (pg *page) command(m *ClientMessage) {
 		pg.ack(m.ID, &chatproto.Error{Code: chatproto.CodeBadRequest, Message: "no command of the protocol"})
 		return
 	}
+	if m.M == "" || len(m.M) > MaxPageID || !chatproto.ValidChatID(m.Chat) {
+		// Nothing of it is audited: it names no chat.
+		pg.ack(m.ID, &chatproto.Error{Code: chatproto.CodeBadRequest, Message: "a command names a machine and a chat"})
+		return
+	}
 	cmd := *m.Cmd
 	rec := auditOf(m.M, m.Chat, cmd)
 	if pg.host != nil && pg.host.ReadOnly() {
@@ -421,26 +493,27 @@ func (pg *page) command(m *ClientMessage) {
 // auditOf is the audit record of a command that changes what an agent may
 // do or where its session goes: a permission's answer, a question's (not
 // what was answered), a configuration option set (the mode among them),
-// a handoff; nil for the others, a prompt's text never.
+// a handoff; nil for the others, a prompt's text never. The page's values
+// are clipped to maxAudit bytes; m and chat were checked.
 func auditOf(m, chat string, cmd chatproto.Command) *auditRec {
 	fields := map[string]any{"plugin": ID, "machine": m, "chat": chat}
 	switch cmd.Op {
 	case chatproto.OpPermission:
-		fields["request"] = cmd.Request
+		fields["request"] = auditText(cmd.Request)
 		if cmd.Cancelled {
 			fields["cancelled"] = true
 		} else {
-			fields["option"] = cmd.Option
+			fields["option"] = auditText(cmd.Option)
 		}
 	case chatproto.OpAnswer:
-		fields["request"] = cmd.Request
+		fields["request"] = auditText(cmd.Request)
 		if cmd.Cancelled {
 			fields["cancelled"] = true
 		} else {
 			fields["questions"] = len(cmd.Answers)
 		}
 	case chatproto.OpSetConfig:
-		fields["config"], fields["value"] = cmd.Config, cmd.Value
+		fields["config"], fields["value"] = auditText(cmd.Config), auditText(cmd.Value)
 	case chatproto.OpHandoff:
 	default:
 		return nil
@@ -448,22 +521,44 @@ func auditOf(m, chat string, cmd chatproto.Command) *auditRec {
 	return &auditRec{event: ID + "." + cmd.Op, fields: fields}
 }
 
-// audit writes a command's record with how it ended (e nil: done).
+// audit writes a command's record with how it ended (e nil: done). Of a
+// page's refusals of one operation, one is written per refusalGap; those
+// that come meanwhile are counted into the next one's member repeated.
 func (pg *page) audit(rec *auditRec, e *chatproto.Error) {
 	if rec == nil || pg.host == nil {
 		return
 	}
 	code := ""
 	if e != nil {
-		code = e.Code
+		code = auditText(e.Code)
 	}
-	fields := make(map[string]any, len(rec.fields)+2)
+	repeated := 0
+	if code != "" {
+		now := pg.p.now()
+		pg.auditMu.Lock()
+		r := pg.refused[rec.event]
+		if r != nil && now.Sub(r.at) < refusalGap {
+			r.n++
+			pg.auditMu.Unlock()
+			return
+		}
+		if r == nil {
+			r = &refusal{}
+			pg.refused[rec.event] = r
+		}
+		repeated, r.at, r.n = r.n, now, 0
+		pg.auditMu.Unlock()
+	}
+	fields := make(map[string]any, len(rec.fields)+3)
 	for k, v := range rec.fields {
 		fields[k] = v
 	}
 	fields["status"] = statusOf(code)
 	if code != "" {
 		fields["error"] = code
+	}
+	if repeated > 0 {
+		fields["repeated"] = repeated
 	}
 	pg.host.Audit(pg.req, rec.event, fields)
 }
@@ -541,8 +636,11 @@ func (s *sub) relay() *chatproto.Error {
 	pg := s.pg
 	// The connection lives with the subscription; the machine's reply
 	// comes within transport.ReplyTimeout, the host's hello within
-	// helloTimeout, its answer within attachTimeout.
-	c, err := pg.p.dial(s.ctx, s.m, pg.p.mayStart())
+	// helloTimeout, its answer within attachTimeout. A prompt on it may
+	// start the chat's agent: the host takes the machine's settings first.
+	start := pg.p.mayStart()
+	pg.p.prepare(s.ctx, s.m, start)
+	c, err := pg.p.dial(s.ctx, s.m, start, false)
 	if err != nil {
 		if s.ctx.Err() != nil {
 			return nil
@@ -551,6 +649,7 @@ func (s *sub) relay() *chatproto.Error {
 	}
 	defer c.Close()
 	pg.p.used(s.m)
+	pg.p.ensureConfigured(s.ctx, s.m, c)
 	// A reader who may not change the chat starts nothing on the machine:
 	// no catch-up of what its session did in a terminal.
 	readOnly := pg.host != nil && pg.host.ReadOnly()
@@ -572,7 +671,7 @@ func (s *sub) relay() *chatproto.Error {
 	}
 	pg.mu.Lock()
 	if !s.gone {
-		pg.enqueueLocked(mustJSON(attachedMsg{T: TAttached, Sub: s.id, Chat: chat, First: res.First}))
+		pg.enqueueLocked(mustJSON(attachedMsg{T: TAttached, Sub: s.id, Chat: chat, First: res.First}), s)
 	}
 	pg.mu.Unlock()
 	go s.write(c.conn)
@@ -598,10 +697,42 @@ func (s *sub) relay() *chatproto.Error {
 		msg := make([]byte, 0, len(prefix)+len(line)+1)
 		msg = append(append(append(msg, prefix...), line...), '}')
 		pg.mu.Lock()
+		over := false
 		if !s.gone {
-			pg.enqueueLocked(msg)
+			pg.enqueueLocked(msg, s)
+			n, b := pg.shareLocked()
+			over = s.queuedN > n || s.queued > b
 		}
 		pg.mu.Unlock()
+		if over && !s.waitRoom() {
+			return nil
+		}
+	}
+}
+
+// waitRoom waits, reading nothing of the host, until the page took half of
+// the subscription's share of its events; false when the subscription
+// ended meanwhile. The host drops a connection that falls behind for long
+// (the page hears lost).
+func (s *sub) waitRoom() bool {
+	pg := s.pg
+	for {
+		select {
+		case <-s.room:
+		case <-s.ctx.Done():
+			return false
+		}
+		pg.mu.Lock()
+		n, b := pg.shareLocked()
+		ok := s.queuedN <= n/2 && s.queued <= b/2
+		gone := s.gone || pg.closed
+		pg.mu.Unlock()
+		if gone {
+			return false
+		}
+		if ok {
+			return true
+		}
 	}
 }
 

@@ -16,9 +16,13 @@
 // executable, as a terminal no client shows (plugin.Env.RunHidden). It
 // then lives as the user's terminals do, while agents, ssh sessions and
 // cores come and go, and ends by itself when it has had nothing to do for
-// a while, when the terminal core stops, or when a host of another build
-// asks it to make way. Nothing listens on the machine for the core: the
-// core opens a stream per connection.
+// a while, when the terminal core stops, or when the agent of a newer
+// build asks it to make way (never one of an older build: two cores of
+// different builds that reach one machine do not take turns). A host's
+// terminal that holds the host's name while nothing serves the socket for
+// longer than a host takes to end is stuck: the agent has the terminal
+// core kill it (plugin.Env.KillHidden) and starts another. Nothing listens
+// on the machine for the core: the core opens a stream per connection.
 package chat
 
 import (
@@ -31,7 +35,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"herdr-ide/internal/agent/plugin"
@@ -89,6 +97,13 @@ var (
 	// agent's own (the core's for the local machine, whose agent runs in
 	// the core's process).
 	executable = os.Executable
+	// stopGrace is how long a host takes to end at the most
+	// (chatproto.StopGrace): an old host that makes way is waited for this
+	// long, and a name taken this long past startTimeout while nothing
+	// serves is a stuck host's.
+	stopGrace = chatproto.StopGrace
+	// goneEvery is how often an old host's process is looked for.
+	goneEvery = 50 * time.Millisecond
 )
 
 const (
@@ -198,14 +213,16 @@ func truncate(b []byte) []byte {
 var connecting sync.Mutex
 
 // connect returns a connection to the machine's chat host, which it starts
-// when none serves. A host of another build than this agent's is asked to
-// make way, which it does when no chat works or waits: a host of this build
-// then takes its place. One that does not is used as it is while it speaks
-// this agent's protocol; otherwise the open fails with CodeUpgrading.
+// when none serves. A host of an older build than this agent's is asked to
+// make way, which it does when no chat works or waits: once its process is
+// gone, a host of this build takes its place. A host that does not make
+// way, and one of a newer build or of a build whose age is not known (a
+// development build), is used as it is while it speaks this agent's
+// protocol; otherwise the open fails with CodeUpgrading.
 func connect(ctx context.Context, env *plugin.Env) (*host, error) {
 	sock := filepath.Join(env.RunDir, chatproto.SocketName)
 	if h, err := dial(sock); err == nil {
-		if h.info.Version == agentproto.Version {
+		if h.info.Version == agentproto.Version || (!older(h.info.Version, agentproto.Version) && h.info.Proto == chatproto.Proto) {
 			return h, nil
 		}
 		h.conn.Close()
@@ -214,30 +231,100 @@ func connect(ctx context.Context, env *plugin.Env) (*host, error) {
 	defer connecting.Unlock()
 	h, err := dial(sock)
 	if err != nil {
-		return start(ctx, env, sock)
+		return start(ctx, env, sock, 0)
 	}
 	if h.info.Version == agentproto.Version {
 		return h, nil
 	}
-	// Another build's host. Its connection is not kept while it is asked:
+	if !older(h.info.Version, agentproto.Version) {
+		// Never a downgrade, nor a guess.
+		if h.info.Proto != chatproto.Proto {
+			h.conn.Close()
+			return nil, upgrading(h.info)
+		}
+		return h, nil
+	}
+	// An older build's host. Its connection is not kept while it is asked:
 	// a host closes a connection that sends no request in time.
 	h.conn.Close()
 	if shutdown(sock) {
 		logf(env, "chat: the host of version %s (pid %d) ends for one of version %s", h.info.Version, h.info.PID, agentproto.Version)
-		return start(ctx, env, sock)
+		if !gone(ctx, h.info.PID, stopGrace) {
+			logf(env, "chat: the host of pid %d did not end within %s", h.info.PID, stopGrace)
+		}
+		return start(ctx, env, sock, h.info.PID)
 	}
 	if h.info.Proto != chatproto.Proto {
 		return nil, upgrading(h.info)
 	}
 	if h, err = dial(sock); err != nil {
 		// It ended meanwhile.
-		return start(ctx, env, sock)
+		return start(ctx, env, sock, 0)
 	}
 	if h.info.Proto != chatproto.Proto {
 		h.conn.Close()
 		return nil, upgrading(h.info)
 	}
 	return h, nil
+}
+
+// gone waits until process pid is no more, for at most wait; it reports
+// whether it is gone. A pid that is not a process of the user's is none of
+// a host's.
+func gone(ctx context.Context, pid int, wait time.Duration) bool {
+	if pid <= 1 {
+		return true
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(goneEvery):
+		}
+	}
+}
+
+// version is a build's version as the build names it (git describe: the
+// tag, "v" and three numbers, then the commits after it, "-<n>-g<hash>",
+// and "-dirty"); ok false for any other (a development build, "dev").
+func version(v string) (n [4]int, ok bool) {
+	v, _ = strings.CutSuffix(strings.TrimPrefix(v, "v"), "-dirty")
+	base, after, more := strings.Cut(v, "-")
+	parts := strings.Split(base, ".")
+	if len(parts) != 3 {
+		return n, false
+	}
+	for i, p := range parts {
+		x, err := strconv.Atoi(p)
+		if err != nil || x < 0 {
+			return n, false
+		}
+		n[i] = x
+	}
+	if more {
+		commits, hash, ok := strings.Cut(after, "-g")
+		x, err := strconv.Atoi(commits)
+		if !ok || err != nil || x < 0 || hash == "" {
+			return n, false
+		}
+		n[3] = x
+	}
+	return n, true
+}
+
+// older tells whether build version a is older than b: both are known
+// (version) and a comes before b.
+func older(a, b string) bool {
+	x, ok1 := version(a)
+	y, ok2 := version(b)
+	return ok1 && ok2 && slices.Compare(x[:], y[:]) < 0
 }
 
 // serving returns a connection to the chat host that serves, of any build
@@ -282,8 +369,13 @@ func shutdown(sock string) bool {
 }
 
 // start has the terminal core run a chat host of this build and returns a
-// connection to it once it serves. The caller holds connecting.
-func start(ctx context.Context, env *plugin.Env, sock string) (*host, error) {
+// connection to it once it serves: once a host says hello that is not the
+// one of pid old, which made way and may still answer while it ends. A
+// name that stays taken past startTimeout while nothing serves is waited
+// for until a host that ends would have ended (stopGrace); then the
+// terminal that holds it is killed (plugin.Env.KillHidden), and the
+// terminal core asked again. The caller holds connecting.
+func start(ctx context.Context, env *plugin.Env, sock string, old int) (*host, error) {
 	if env.RunHidden == nil {
 		return nil, plugin.Errorf(CodeStartFailed, "the agent runs no hidden terminals")
 	}
@@ -292,8 +384,15 @@ func start(ctx context.Context, env *plugin.Env, sock string) (*host, error) {
 		return nil, plugin.Errorf(CodeStartFailed, "the agent's executable: %v", err)
 	}
 	argv := []string{exe, "chat-host", "--base", env.Base, "--run", env.RunDir}
-	deadline := time.Now().Add(startTimeout)
+	began := time.Now()
+	deadline := began.Add(startTimeout)
 	ask, wait := time.Now(), askAgain
+	const (
+		starting = iota // the terminal core runs the host
+		held            // a terminal holds the name: it may still end
+		killed          // it did not, and was killed
+	)
+	phase := starting
 	for {
 		if !time.Now().Before(ask) {
 			if err := env.RunHidden(ctx, agentproto.ChatHostName, argv); errors.Is(err, plugin.ErrNoTerminalCore) {
@@ -304,7 +403,11 @@ func start(ctx context.Context, env *plugin.Env, sock string) (*host, error) {
 			ask, wait = time.Now().Add(wait), min(2*wait, askMax)
 		}
 		h, err := dial(sock)
-		if err == nil {
+		switch {
+		case err == nil && old > 0 && h.info.PID == old:
+			// The host that made way, still ending.
+			h.conn.Close()
+		case err == nil:
 			// Another agent (of another build) may have started it.
 			if h.info.Proto != chatproto.Proto {
 				h.conn.Close()
@@ -313,8 +416,31 @@ func start(ctx context.Context, env *plugin.Env, sock string) (*host, error) {
 			return h, nil
 		}
 		if !time.Now().Before(deadline) {
-			logf(env, "chat: the host does not serve %s: %v", sock, err)
-			return nil, plugin.Errorf(CodeStartFailed, "the chat host did not serve within %s", startTimeout)
+			next := 0 * time.Second
+			switch phase {
+			case starting:
+				if env.KillHidden != nil {
+					if taken, err := env.KillHidden(ctx, agentproto.ChatHostName, argv, false); err == nil && taken {
+						phase, next = held, began.Add(startTimeout+stopGrace).Sub(time.Now())
+					}
+				}
+			case held:
+				ok, err := env.KillHidden(ctx, agentproto.ChatHostName, argv, true)
+				if ok {
+					logf(env, "chat: the host's terminal held its name and served nothing for %s: killed", time.Since(began).Round(time.Second))
+				} else if err != nil {
+					logf(env, "chat: a stuck host's terminal: %v", err)
+				}
+				if ok || err == nil {
+					// The name is free: once more.
+					phase, next, ask, wait = killed, startTimeout, time.Now(), askAgain
+				}
+			}
+			if next <= 0 {
+				logf(env, "chat: the host does not serve %s: %v", sock, err)
+				return nil, plugin.Errorf(CodeStartFailed, "the chat host did not serve within %s", time.Since(began).Round(time.Second))
+			}
+			deadline = time.Now().Add(next)
 		}
 		select {
 		case <-ctx.Done():

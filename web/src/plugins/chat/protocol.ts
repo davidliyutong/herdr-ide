@@ -190,11 +190,12 @@ export interface HostSettings {
 
 /** The requests the core makes of a chat host for the page's routes,
  * besides those of the chats' states (chatproto.Op*): trust lets the
- * agents load a directory's own project settings (POST trust?cwd=).
+ * agents load a directory's own project settings (POST trust?cwd=),
+ * untrust takes that back (POST untrust?cwd=).
  * The core attaches a read-only page's subscription with noCatchUp: it
  * starts nothing on the machine (no catch-up of what the session did in
  * a terminal). */
-export const REQUEST_OPS = ['agents', 'chats', 'sessions', 'new', 'close', 'delete', 'seen', 'attach', 'trust'] as const;
+export const REQUEST_OPS = ['agents', 'chats', 'sessions', 'new', 'close', 'delete', 'seen', 'attach', 'trust', 'untrust'] as const;
 
 /** What a new chat starts with; each a value of the chat's option of
  * that category. */
@@ -293,7 +294,8 @@ export type ServerMessage =
 /** The chat host's error codes (chatproto.Code*): sleeping, a command
  * that needs the agent of a chat that has none (a prompt starts it);
  * not_allowed, full access while the machine's chat.allowFullAccess is
- * off. */
+ * off; unsafe_folder, a folder that may not be trusted (the home
+ * directory or one above it, one others may write). */
 export const HOST_CODES = [
   'bad_request',
   'unknown_chat',
@@ -311,6 +313,7 @@ export const HOST_CODES = [
   'handed_off',
   'sleeping',
   'not_allowed',
+  'unsafe_folder',
 ] as const;
 
 /** The machine's codes of reaching its chat host (its agent's open

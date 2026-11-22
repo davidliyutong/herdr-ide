@@ -7,9 +7,11 @@
 // again after the last stored event its handler has; the handler hears
 // that it attached again (attached with again), so its source can say so
 // before the events that follow. A command's promise settles with its ack;
-// one sent before the connection dropped, or not answered within
-// ACK_TIMEOUT_MS, is refused (offline, failed): whether the host took it
-// is not known.
+// one sent before the connection dropped (offline), not answered within
+// ACK_TIMEOUT_MS (timeout), or whose subscription the core lost meanwhile
+// (lost, offline, not_attached) is refused with CommandError.unsure: it
+// was sent, and whether the host took it is not known. One that never left
+// the page is refused without it.
 //
 // What the core sends is checked member by member: a message that is no
 // JSON object, of a type this version does not know or for a subscription
@@ -61,17 +63,24 @@ export interface Subscription {
 }
 
 /** The error of a command or a subscription, with its code (chatproto's,
- * the core's, or the page's own: offline, failed, too_many, too_large). */
+ * the core's, or the page's own: offline, timeout, too_many, too_large).
+ * unsure: the command was sent and may have been carried out all the
+ * same. */
 export class CommandError extends Error {
   constructor(
     readonly code: string,
     message = code,
     readonly stderr?: string,
+    readonly unsure = false,
   ) {
     super(message);
     this.name = 'CommandError';
   }
 }
+
+/** The core's codes of a command's answer that say the command was sent
+ * on a subscription that ended before the host's answer came. */
+const UNSURE_ACKS: ReadonlySet<string> = new Set(['lost', 'offline', 'not_attached']);
 
 /** The page's own code of a subscription whose connection was closed for
  * good (close): nothing attaches it again. */
@@ -193,7 +202,14 @@ export class ChatConnection {
     if (text.length > MAX_CLIENT_MESSAGE) return Promise.reject(new CommandError('too_large'));
     this.busy();
     return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => this.settle(id, new CommandError('failed', 'no answer')), ACK_TIMEOUT_MS);
+      const timer = setTimeout(
+        () =>
+          this.settle(
+            id,
+            p.msg === undefined ? new CommandError('timeout', 'no answer', undefined, true) : new CommandError('offline', 'not connected'),
+          ),
+        ACK_TIMEOUT_MS,
+      );
       const p: Pending = { resolve, reject, timer };
       this.pending.set(id, p);
       if (this.up) this.socket?.send(text);
@@ -216,7 +232,7 @@ export class ChatConnection {
     this.dropped();
     for (const sub of [...this.subs.values()]) sub.handler.detached({ code: CLOSED, message: '' });
     this.subs.clear();
-    for (const id of [...this.pending.keys()]) this.settle(id, new CommandError('offline'));
+    for (const [id, p] of [...this.pending]) this.settle(id, new CommandError('offline', 'offline', undefined, p.msg === undefined));
   }
 
   private start(): void {
@@ -259,7 +275,8 @@ export class ChatConnection {
   private dropped(): void {
     const wasUp = this.up;
     this.up = false;
-    for (const [id, p] of [...this.pending]) if (p.msg === undefined) this.settle(id, new CommandError('offline'));
+    for (const [id, p] of [...this.pending])
+      if (p.msg === undefined) this.settle(id, new CommandError('offline', 'offline', undefined, true));
     for (const sub of this.subs.values()) {
       const was = sub.attached || sub.sent;
       sub.attached = sub.sent = false;
@@ -358,7 +375,7 @@ export class ChatConnection {
       case 'ack': {
         if (typeof msg.id !== 'string' || !this.pending.has(msg.id)) return;
         const e = readError(msg.error);
-        this.settle(msg.id, e && new CommandError(e.code, e.message, e.stderr));
+        this.settle(msg.id, e && new CommandError(e.code, e.message, e.stderr, UNSURE_ACKS.has(e.code)));
         return;
       }
     }

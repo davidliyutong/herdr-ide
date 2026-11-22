@@ -766,7 +766,8 @@ describe('what the chat states', () => {
       { kind: 'notice', id: 'notice:2', method: CHAT_NOTICES.fullAccessOff, params: { mode: 'full' } },
     ]);
     expect(c.unknown).toBe(0);
-    for (const k of ['untrustedFolder', 'trust', 'trusted', 'fullAccessOff']) expect(hasMessage(`conversation.notice.${k}`), k).toBe(true);
+    for (const k of ['untrustedFolder', 'trust', 'trusted', 'untrust', 'fullAccessOff'])
+      expect(hasMessage(`conversation.notice.${k}`), k).toBe(true);
   });
 
   it('as the notices’ names of the chat host (agentproto.Notice*)', () => {

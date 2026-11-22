@@ -2,9 +2,12 @@
 // page's one module of them (the agents plugin's part in chats uses it
 // too): a machine's agents, chats and sessions, and the changes (a new
 // chat, an agent's session imported, closing, deleting, seen, handing a
-// chat over to a terminal, trusting a folder). Each answer is read member
-// by member: what a machine sent is not trusted to have the protocol's
-// shapes (protocol.ts), and lists are cut to their bounds.
+// chat over to a terminal, trusting a folder and taking that back). A GET
+// never starts the machine's chat host (not_running while none serves);
+// the changes do, and so do the POSTs that list the agents (startAgents)
+// and the sessions (listing them may run the agent). Each answer is read
+// member by member: what a machine sent is not trusted to have the
+// protocol's shapes (protocol.ts), and lists are cut to their bounds.
 import { hasMessage, t, type MessageKey } from '../../i18n';
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
 import { builtinDefaults } from '../../settings';
@@ -136,18 +139,26 @@ export const chatApi = {
     }
     return out;
   },
-  /** Which chat kinds the machine can start. */
+  /** Which chat kinds the machine can start, from a chat host that serves
+   * (not_running otherwise; read_only on a read-only page). */
   agents: async (m: string): Promise<AgentStatus[]> =>
     list((await send<{ agents?: unknown }>(`${base(m)}/agents`, { cache: 'no-store' })).agents, MAX_AGENTS, readAgent),
-  /** The machine's chats, closed ones included, the latest first. */
+  /** The same, starting the machine's chat host when none serves (a
+   * change: not on a read-only page). */
+  startAgents: async (m: string): Promise<AgentStatus[]> =>
+    list((await send<{ agents?: unknown }>(`${base(m)}/agents`, { method: 'POST' })).agents, MAX_AGENTS, readAgent),
+  /** The machine's chats, closed ones included, the latest first, from a
+   * chat host that serves (not_running otherwise). */
   chats: async (m: string): Promise<ChatState[]> =>
     list((await send<{ chats?: unknown }>(`${base(m)}/chats`, { cache: 'no-store' })).chats, MAX_CHATS, readState),
   /** A page of the sessions an agent kept for a directory, each once;
-   * nextCursor asks for the next ('' after the last). */
+   * nextCursor asks for the next ('' after the last). A change, as listing
+   * them may run the agent: it starts the machine's chat host when none
+   * serves, and a read-only page has none. */
   async sessions(m: string, kind: string, cwd: string, cursor = ''): Promise<{ sessions: Session[]; nextCursor: string }> {
     const q: Record<string, string> = { kind, cwd };
     if (cursor) q.cursor = cursor;
-    const r = await send<{ sessions?: unknown; nextCursor?: unknown }>(`${base(m)}/sessions?${query(q)}`, { cache: 'no-store' });
+    const r = await send<{ sessions?: unknown; nextCursor?: unknown }>(`${base(m)}/sessions?${query(q)}`, { method: 'POST' });
     const seen = new Set<string>();
     const sessions = list(r.sessions, MAX_SESSION_PAGE, readSession).filter((s) => {
       if (seen.has(s.sessionId)) return false;
@@ -175,6 +186,9 @@ export const chatApi = {
   /** Lets the agents started in a directory, and those below it, load
    * its own project settings. */
   trust: (m: string, cwd: string) => send<unknown>(`${base(m)}/trust?${query({ cwd })}`, { method: 'POST' }).then(() => {}),
+  /** Takes back the trust that covers a directory: its own and that of
+   * the directories above it. */
+  untrust: (m: string, cwd: string) => send<unknown>(`${base(m)}/untrust?${query({ cwd })}`, { method: 'POST' }).then(() => {}),
 };
 
 type Values = Record<string, { value?: unknown; machines?: Record<string, unknown> } | undefined>;

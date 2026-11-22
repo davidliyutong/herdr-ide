@@ -12,10 +12,14 @@
 // of the machine's chats, sends them to every page (Broadcast, StatesData),
 // tells the pages' notifications when a chat becomes blocked or done
 // (machines.Manager.PublishAgent) and configures the host with the
-// machine's settings. Every request of a route or a page starts the
-// machine's host when none serves (a read-only core's does not); the watch
-// does not, and lets a host go that has nothing to watch, so a machine
-// whose chats nobody uses runs no host.
+// machine's settings. A change (a POST or DELETE route, which the core
+// takes only from a writable client with a checked origin) and a page's
+// subscription start the machine's host when none serves (a read-only
+// core's do not); a GET route, the watch and a read-only core never do,
+// and the watch lets a host go that has nothing to watch, so a machine
+// whose chats nobody uses runs no host. Before a request that may start an
+// agent, the core gives the host the machine's settings unless that host
+// process took them already (prepare, ensureConfigured).
 package chat
 
 import (
@@ -72,6 +76,9 @@ type Plugin struct {
 	// machine.
 	pages map[*page]struct{}
 	inUse map[string]int
+	// conns counts the connections open to each machine's chat host
+	// (acquire).
+	conns map[string]connCount
 	// on: the plugin was on at the last step.
 	on   bool
 	wake chan struct{}
@@ -88,6 +95,7 @@ func New() *Plugin {
 		machines: map[string]*watched{},
 		pages:    map[*page]struct{}{},
 		inUse:    map[string]int{},
+		conns:    map[string]connCount{},
 		wake:     make(chan struct{}, 1),
 	}
 }
@@ -124,11 +132,18 @@ func (p *Plugin) opener() opener {
 // Routes of the plugin:
 //
 //   - GET    /api/m/{id}/p/chat/agents: which agent kinds with a chat the
-//     machine can start ({agents: []chatproto.AgentStatus});
+//     machine can start ({agents: []chatproto.AgentStatus}), from a chat
+//     host that serves (not_running otherwise); refused on a read-only
+//     core (read_only), as the host asks the agents' programs;
+//   - POST   /api/m/{id}/p/chat/agents: the same, starting the host when
+//     none serves, audited as chat.agents;
 //   - GET    /api/m/{id}/p/chat/chats: its chats, closed ones included
-//     ({chats: []chatproto.Chat});
-//   - GET    /api/m/{id}/p/chat/sessions?kind=&cwd=&cursor=: the sessions
-//     an agent kept for a directory ({sessions, nextCursor});
+//     ({chats: []chatproto.Chat}), from a chat host that serves
+//     (not_running otherwise);
+//   - POST   /api/m/{id}/p/chat/sessions?kind=&cwd=&cursor=: the sessions
+//     an agent kept for a directory ({sessions, nextCursor}); a change as
+//     listing them may run the agent (Codex, ACP agents), audited as
+//     chat.sessions;
 //   - POST   /api/m/{id}/p/chat/new: a new chat from the body {kind, cwd,
 //     resume?, import?, options?{model, effort, mode}} ({chat}), audited
 //     as chat.new;
@@ -145,28 +160,34 @@ func (p *Plugin) opener() opener {
 //   - POST   /api/m/{id}/p/chat/trust?cwd=: trusts a directory and those
 //     below it on the machine: agents started there load the project's
 //     own settings ({}), audited as chat.trust;
+//   - POST   /api/m/{id}/p/chat/untrust?cwd=: takes back the trust that
+//     covers a directory, its own and that of the directories above it
+//     ({}), audited as chat.untrust;
 //   - GET    /api/p/chat/states: the chats' states of every machine as the
 //     core last read them (StatesSnapshot);
 //   - GET    /api/p/chat/ws: the page's WebSocket (wire.go).
 //
 // Errors are {error: code, message}: the chat host's codes
 // (chatproto.Code*), the machine's (offline, transport, not_running,
-// upgrading, no_terminal_core, start_failed) and timeout. Every request
-// starts the machine's chat host when none serves, but a read-only core's,
-// which reads what runs (not_running; no chats); a read-only core also
-// leaves out what only a reader who may change a chat sees
-// (chatproto.Chat.Redacted), here and on the WebSocket.
+// upgrading, no_terminal_core, start_failed), the core's too_many (more
+// connections to the machine's host than maxHostConns) and timeout. A
+// GET never starts the machine's chat host (not_running when none
+// serves); a change does, but a read-only core's, which takes none. A
+// read-only core also leaves out what only a reader who may change a chat
+// sees (chatproto.Chat.Redacted), here and on the WebSocket.
 func (p *Plugin) Routes() []plugin.Route {
 	return []plugin.Route{
 		{Method: http.MethodGet, Path: "agents", Machine: true, Handler: p.getAgents},
+		{Method: http.MethodPost, Path: "agents", Machine: true, Mutating: true, Audit: "agents", Handler: p.postAgents},
 		{Method: http.MethodGet, Path: "chats", Machine: true, Handler: p.getChats},
-		{Method: http.MethodGet, Path: "sessions", Machine: true, Handler: p.getSessions},
+		{Method: http.MethodPost, Path: "sessions", Machine: true, Mutating: true, Audit: "sessions", Handler: p.postSessions},
 		{Method: http.MethodPost, Path: "new", Machine: true, Mutating: true, Audit: "new", Handler: p.postNew},
 		{Method: http.MethodPost, Path: "close", Machine: true, Mutating: true, Audit: "close", Handler: p.postClose},
 		{Method: http.MethodDelete, Path: "chat", Machine: true, Mutating: true, Audit: "delete", Handler: p.deleteChat},
 		{Method: http.MethodPost, Path: "seen", Machine: true, Mutating: true, Audit: "seen", Handler: p.postSeen},
 		{Method: http.MethodPost, Path: "handoff", Machine: true, Mutating: true, Audit: "handoff", Handler: p.postHandoff},
 		{Method: http.MethodPost, Path: "trust", Machine: true, Mutating: true, Audit: "trust", Handler: p.postTrust},
+		{Method: http.MethodPost, Path: "untrust", Machine: true, Mutating: true, Audit: "untrust", Handler: p.postUntrust},
 		{Method: http.MethodGet, Path: "states", Handler: p.getStates},
 		{Method: http.MethodGet, Path: "ws", Handler: p.serveWS},
 	}
@@ -215,19 +236,51 @@ func (p *Plugin) begin(c *plugin.Call, w http.ResponseWriter) (string, bool) {
 	return c.Machine.ID(), true
 }
 
-// do runs one request of machine m's chat host within timeout.
-func (p *Plugin) do(r *http.Request, m string, timeout time.Duration, req chatproto.Request) (*rawResponse, error) {
+// do runs one request of machine m's chat host within timeout (Plugin.request:
+// start, agent).
+func (p *Plugin) do(r *http.Request, m string, timeout time.Duration, req chatproto.Request, start, agent bool) (*rawResponse, error) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	return p.request(ctx, m, req)
+	return p.request(ctx, m, req, start, agent)
 }
 
+// auditText is a value of an audit record: at most maxAudit bytes of s.
+func auditText(s string) string {
+	if len(s) <= maxAudit {
+		return s
+	}
+	cut := maxAudit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
+// maxAudit is the most bytes of a value an audit record takes from a
+// request.
+const maxAudit = 256
+
 func (p *Plugin) getAgents(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	if c.Host != nil && c.Host.ReadOnly() {
+		// The host asks the agents' programs: nothing a reader starts.
+		p.bind(c.Host)
+		writeError(w, &chatproto.Error{Code: CodeReadOnly, Message: "read-only mode"})
+		return
+	}
+	p.agents(c, w, r, false)
+}
+
+func (p *Plugin) postAgents(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.agents(c, w, r, true)
+}
+
+// agents answers which kinds the machine can start; start starts its host.
+func (p *Plugin) agents(c *plugin.Call, w http.ResponseWriter, r *http.Request, start bool) {
 	m, ok := p.begin(c, w)
 	if !ok {
 		return
 	}
-	res, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpAgents, Kinds: chatKinds})
+	res, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpAgents, Kinds: chatKinds}, start, false)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -246,11 +299,7 @@ func (p *Plugin) getChats(c *plugin.Call, w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	res, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpChats})
-	if codeOf(err) == codeNotRunning {
-		// A read-only core's: no host, no chats it can show.
-		res, err = &rawResponse{}, nil
-	}
+	res, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpChats}, false, false)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -267,7 +316,7 @@ func (p *Plugin) getChats(c *plugin.Call, w http.ResponseWriter, r *http.Request
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"chats": chats})
 }
 
-func (p *Plugin) getSessions(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+func (p *Plugin) postSessions(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	m, ok := p.begin(c, w)
 	if !ok {
 		return
@@ -278,15 +327,17 @@ func (p *Plugin) getSessions(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 		badRequest(w, "kind: an agent kind with a chat")
 		return
 	}
+	c.AuditField("kind", kind)
 	if !validCwd(cwd) {
 		badRequest(w, "cwd: a clean absolute path")
 		return
 	}
+	c.AuditField("cwd", auditText(cwd))
 	if len(cursor) > maxCursor {
 		badRequest(w, "cursor: too long")
 		return
 	}
-	res, err := p.do(r, m, sessionsTimeout, chatproto.Request{Op: chatproto.OpSessions, Kind: kind, Cwd: cwd, Cursor: cursor})
+	res, err := p.do(r, m, sessionsTimeout, chatproto.Request{Op: chatproto.OpSessions, Kind: kind, Cwd: cwd, Cursor: cursor}, true, true)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -317,11 +368,12 @@ func (p *Plugin) postNew(c *plugin.Call, w http.ResponseWriter, r *http.Request)
 		badRequest(w, "the body: {kind, cwd, resume?, import?, options?}")
 		return
 	}
-	c.AuditField("kind", b.Kind)
-	switch {
-	case !slices.Contains(chatKinds, b.Kind):
+	if !slices.Contains(chatKinds, b.Kind) {
 		badRequest(w, "kind: an agent kind with a chat")
 		return
+	}
+	c.AuditField("kind", b.Kind)
+	switch {
 	case !validCwd(b.Cwd):
 		badRequest(w, "cwd: a clean absolute path")
 		return
@@ -336,7 +388,7 @@ func (p *Plugin) postNew(c *plugin.Call, w http.ResponseWriter, r *http.Request)
 		badRequest(w, "options: model, effort and a mode")
 		return
 	}
-	c.AuditField("cwd", b.Cwd)
+	c.AuditField("cwd", auditText(b.Cwd))
 	if b.Resume != "" {
 		c.AuditField("resume", b.Resume)
 		c.AuditField("import", b.Import)
@@ -344,11 +396,8 @@ func (p *Plugin) postNew(c *plugin.Call, w http.ResponseWriter, r *http.Request)
 	if b.Options != nil && b.Options.Mode != "" {
 		c.AuditField("mode", b.Options.Mode)
 	}
-	cctx, cancel := context.WithTimeout(r.Context(), shortTimeout)
-	p.configureFirst(cctx, m)
-	cancel()
 	res, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpNew, Kind: b.Kind, Cwd: b.Cwd, Resume: b.Resume,
-		Import: b.Import, Options: b.Options})
+		Import: b.Import, Options: b.Options}, true, true)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -386,7 +435,7 @@ func (p *Plugin) simple(c *plugin.Call, w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-	if _, err := p.do(r, m, shortTimeout, chatproto.Request{Op: op, Chat: id}); err != nil {
+	if _, err := p.do(r, m, shortTimeout, chatproto.Request{Op: op, Chat: id}, true, false); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -416,7 +465,7 @@ func (p *Plugin) postSeen(c *plugin.Call, w http.ResponseWriter, r *http.Request
 		return
 	}
 	c.AuditField("seq", seq)
-	if _, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpSeen, Chat: id, Seq: seq}); err != nil {
+	if _, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpSeen, Chat: id, Seq: seq}, true, false); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -442,6 +491,16 @@ func (p *Plugin) postHandoff(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 }
 
 func (p *Plugin) postTrust(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.folderTrust(c, w, r, chatproto.OpTrust)
+}
+
+func (p *Plugin) postUntrust(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+	p.folderTrust(c, w, r, chatproto.OpUntrust)
+}
+
+// folderTrust asks the machine's chat host to trust the directory ?cwd=,
+// or to take its trust back (op), audited with the directory.
+func (p *Plugin) folderTrust(c *plugin.Call, w http.ResponseWriter, r *http.Request, op string) {
 	m, ok := p.begin(c, w)
 	if !ok {
 		return
@@ -451,8 +510,8 @@ func (p *Plugin) postTrust(c *plugin.Call, w http.ResponseWriter, r *http.Reques
 		badRequest(w, "cwd: a clean absolute path")
 		return
 	}
-	c.AuditField("cwd", cwd)
-	if _, err := p.do(r, m, shortTimeout, chatproto.Request{Op: chatproto.OpTrust, Cwd: cwd}); err != nil {
+	c.AuditField("cwd", auditText(cwd))
+	if _, err := p.do(r, m, shortTimeout, chatproto.Request{Op: op, Cwd: cwd}, true, false); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -463,14 +522,19 @@ func (p *Plugin) postTrust(c *plugin.Call, w http.ResponseWriter, r *http.Reques
 const handoffID = "handoff"
 
 // handoff attaches to a chat without its log, sends it OpHandoff and waits
-// for the answer.
+// for the answer. Its attach may catch the chat up with what its session
+// did meanwhile, which runs the agent: the host takes the machine's
+// settings first.
 func (p *Plugin) handoff(ctx context.Context, m, chat string) error {
-	c, err := p.dial(ctx, m, true)
+	start := p.mayStart()
+	p.prepare(ctx, m, start)
+	c, err := p.dial(ctx, m, start, false)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 	p.used(m)
+	p.ensureConfigured(ctx, m, c)
 	if _, err := c.send(ctx, chatproto.Request{Op: chatproto.OpAttach, Chat: chat, From: math.MaxUint64}); err != nil {
 		return err
 	}

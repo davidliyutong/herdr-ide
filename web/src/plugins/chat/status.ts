@@ -4,7 +4,10 @@
 // is. An agent notification of a chat (the core's, with member chat)
 // points to the pane that shows that chat; seeing a pane whose chat is
 // done tells the host (POST seen with the chat's last seq), which ends
-// done for every page.
+// done for every page. The pane shows the chat idle from then on; a POST
+// that fails is tried again later (SEEN_RETRY_MS, doubling, SEEN_TRIES
+// times), never at once: after the last try, the next state of the chat
+// done asks again.
 import { useStore } from '../../state/store';
 import { useTerms } from '../../state/terms';
 import * as L from '../../term/layout';
@@ -34,6 +37,40 @@ export function chatPane(m: string, chat: string): string | undefined {
 const told = new Map<string, number>();
 const MAX_TOLD = 4000;
 
+/** The wait before a failed seen is sent again, doubled each time up to
+ * SEEN_RETRY_MAX_MS, and how many times it is sent in all. */
+export const SEEN_RETRY_MS = 2_000;
+export const SEEN_RETRY_MAX_MS = 60_000;
+export const SEEN_TRIES = 8;
+
+/** The retries that wait, by machine and chat. */
+const retries = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Tells the host that the user saw the chat up to seq (the tries-th
+ * time); a failure is tried again later while it is still what was told. */
+function tell(m: string, chat: string, seq: number, tries: number) {
+  const k = `${m}\n${chat}`;
+  chatApi.seen(m, chat, seq).catch(() => {
+    if (told.get(k) !== seq) return;
+    if (tries + 1 >= SEEN_TRIES) {
+      // Given up: the next state that says done asks again.
+      told.delete(k);
+      return;
+    }
+    clearTimeout(retries.get(k));
+    retries.set(
+      k,
+      setTimeout(
+        () => {
+          retries.delete(k);
+          if (told.get(k) === seq && !useStore.getState().readOnly) tell(m, chat, seq, tries + 1);
+        },
+        Math.min(SEEN_RETRY_MS * 2 ** tries, SEEN_RETRY_MAX_MS),
+      ),
+    );
+  });
+}
+
 export const chatViewStatus: ViewStatusDef = {
   status(m, view) {
     const chat = chatRef(view).chat;
@@ -62,20 +99,15 @@ export const chatViewStatus: ViewStatusDef = {
       return cur?.status === 'done' ? { states: { ...s.states, [m]: { ...s.states[m], [chat]: { ...cur, status: 'idle' } } } } : s;
     });
     if (told.size > MAX_TOLD) told.delete(told.keys().next().value!);
-    chatApi.seen(m, chat, st.seq).catch(() => {
-      // Not told: done again, as the host still has it.
-      told.delete(k);
-      useChats.setState((s) => {
-        const cur = s.states[m]?.[chat];
-        return cur?.status === 'idle' && cur.seq === st.seq
-          ? { states: { ...s.states, [m]: { ...s.states[m], [chat]: { ...cur, status: 'done' } } } }
-          : s;
-      });
-    });
+    clearTimeout(retries.get(k));
+    retries.delete(k);
+    tell(m, chat, st.seq, 0);
   },
 };
 
 /** Forgets what was said to be seen (tests). */
 export function resetSeen() {
   told.clear();
+  for (const timer of retries.values()) clearTimeout(timer);
+  retries.clear();
 }

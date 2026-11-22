@@ -24,3 +24,23 @@ func TestHiddenTerminalNames(t *testing.T) {
 		t.Errorf("HiddenValue of a name without the prefix = %q", got)
 	}
 }
+
+// A terminal is hidden only with the chat host's name and its label's
+// value both.
+func TestHidden(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		want        bool
+	}{
+		{ChatHostName, HiddenChatHost, true},
+		{ChatHostName, "", false},
+		{ChatHostName, "other", false},
+		{"", HiddenChatHost, false},
+		{"build", HiddenChatHost, false},
+		{"", "", false},
+	} {
+		if got := Hidden(tc.name, tc.value); got != tc.want {
+			t.Errorf("Hidden(%q, %q) = %v", tc.name, tc.value, got)
+		}
+	}
+}

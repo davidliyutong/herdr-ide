@@ -58,6 +58,11 @@ const (
 	ToolOutputEnd = 16 << 10
 	// SocketName is the socket's file name in the instance's run directory.
 	SocketName = "chat.sock"
+	// StopGrace is the longest a host takes to end once it stops
+	// (OpShutdown, a signal, its idle end): it gives its agents their grace
+	// and exits at the latest then, what is left of them killed. A host
+	// that has not served for longer is stuck.
+	StopGrace = 30 * time.Second
 )
 
 // Hello is the first line of a connection, written by the host.
@@ -83,7 +88,8 @@ const (
 	// OpNew makes a chat: it starts the agent of Request.Kind in
 	// Request.Cwd, with a new session or with Request.Resume's, under
 	// Request.Options. The answer comes at once, the chat in StateStarting
-	// (Response.Chat); what follows comes as events.
+	// (Response.Chat); what follows comes as events. A session another
+	// process runs is refused (CodeInTerminal).
 	OpNew = "new"
 	// OpAttach subscribes to the events of Request.Chat after
 	// Request.From (Response.Chat and Response.First, then events).
@@ -100,9 +106,10 @@ const (
 	// (Response.Sessions, Response.NextCursor).
 	OpSessions = "sessions"
 	// OpWatch subscribes to the states of every chat: Response.States
-	// holds them all, then each change comes as a ChatState line; a chat
-	// deleted (OpDelete) or removed by the host's limits comes one last
-	// time, in StateDeleted.
+	// holds them all, as the other watchers were told them last, then each
+	// change comes as a ChatState line, none older than what came before;
+	// a chat deleted (OpDelete) or removed by the host's limits comes one
+	// last time, in StateDeleted.
 	OpWatch = "watch"
 	// OpSeen tells that the user saw Request.Chat up to Request.Seq: a
 	// turn that ended at or before it is no longer StatusDone.
@@ -123,8 +130,18 @@ const (
 	// agent's own or of this list, an adapter that can starts the agent
 	// without them and tells so (the notice untrusted_folder). The host
 	// keeps the list in its database; an agent that runs already takes it
-	// at its next start.
+	// at its next start. The host refuses (CodeUnsafeFolder) "/", the
+	// user's home directory and the directories above it, a directory that
+	// is not the user's or that its group or others may write, and one
+	// below a directory others may write that has no sticky bit; it keeps
+	// the device and inode of the directory, and a trusted path that is
+	// another directory at an agent's start, or no longer one it would
+	// take, is trusted no more.
 	OpTrust = "trust"
+	// OpUntrust takes back the trust that covers the directory
+	// Request.Cwd: its own (OpTrust) and that of every directory above it.
+	// An agent that runs already keeps what it loaded until its next start.
+	OpUntrust = "untrust"
 )
 
 // The operations of a Command. Each is answered by an EventAck.
@@ -132,7 +149,12 @@ const (
 	// OpPrompt sends Command.Content to the agent. While a turn runs the
 	// host queues the message, or steers it into the running turn where
 	// the agent can (EventQueued); a chat in StateSleeping or StateClosed
-	// is resumed first.
+	// is resumed first, unless another process runs its session
+	// (CodeInTerminal). A prompt with the ClientID of one of the chat's
+	// last 256 prompts its log has (EventUser, EventQueued) is that one
+	// sent again by a client that did not get its ack: it is acked OK and
+	// not sent again; one with the ClientID of a prompt still being taken
+	// gets that one's ack.
 	OpPrompt = "prompt"
 	// OpCancel cancels the turn, every permission and question that waits,
 	// and the queued messages.
@@ -194,8 +216,8 @@ type Request struct {
 	// Kind is the agent of OpNew and OpSessions.
 	Kind string `json:"kind,omitempty"`
 	// Cwd is the working directory of OpNew's chat, an absolute path, the
-	// directory whose sessions OpSessions lists, and the one OpTrust
-	// trusts.
+	// directory whose sessions OpSessions lists, the one OpTrust trusts and
+	// the one whose trust OpUntrust takes back.
 	Cwd string `json:"cwd,omitempty"`
 	// Resume is the agent's id of a session OpNew takes up instead of
 	// making one.
@@ -848,8 +870,8 @@ const (
 	CodeEnded = "ended"
 	// CodeFailed: the agent answered with an error, or not at all.
 	CodeFailed = "failed"
-	// CodeInTerminal: the session runs in a terminal; two processes do not
-	// write one session.
+	// CodeInTerminal: another process of the agent (a terminal's) runs the
+	// session; two processes do not write one session.
 	CodeInTerminal = "in_terminal"
 	// CodeHandedOff: the chat's session went on in a terminal (OpHandoff)
 	// and the command needs its agent process.
@@ -860,6 +882,9 @@ const (
 	// CodeNotAllowed: the machine's settings do not allow it: full access
 	// while HostSettings.AllowFull is off.
 	CodeNotAllowed = "not_allowed"
+	// CodeUnsafeFolder: OpTrust of a directory that may not be trusted (see
+	// OpTrust).
+	CodeUnsafeFolder = "unsafe_folder"
 )
 
 // Error is why a request, a command, a turn or a chat failed. Message is
