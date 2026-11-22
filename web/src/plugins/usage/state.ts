@@ -4,9 +4,8 @@
 // once per browser, and the numbers of the coding agents' sessions the
 // status bar showed (session.ts).
 import { create } from 'zustand';
-import { showPanel } from '../../panelPanes';
-import { loadPref, savePref, useStore } from '../../state/store';
-import { getPrefs } from '../../prefs';
+import { loadPref, savePref } from '../../state/store';
+import { dispatchNotification } from '../../notify';
 import { settingValue } from '../../settings';
 import { storage } from '../../brand';
 import { failureCode, jsonBody } from '../../lib/pluginApi';
@@ -129,18 +128,15 @@ function showAlerts(list: UsageAlert[]) {
 }
 
 function notify(text: string, tag: string) {
-  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus();
-  const granted = typeof Notification !== 'undefined' && Notification.permission === 'granted';
-  if (!visible && granted && getPrefs().notifySystem) {
-    const n = new Notification(text, { tag: `usage|${tag}` });
-    n.onclick = () => {
-      window.focus();
-      showPanel('usage');
-      n.close();
-    };
-    return;
-  }
-  useStore.getState().toast(text, undefined, undefined, 'warning');
+  void dispatchNotification({
+    title: text,
+    tag: `usage|${tag}`,
+    target: { kind: 'panel', panel: 'usage' },
+    urgency: 'normal',
+    visibleToast: text,
+    visibleToastKind: 'warning',
+    toastFallback: true,
+  });
 }
 
 let snapshotEtag: string | undefined;

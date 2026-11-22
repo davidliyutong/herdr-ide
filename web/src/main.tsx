@@ -10,6 +10,7 @@ import { useStore } from './state/store';
 import { APP_SLUG } from './brand';
 import { currentAppearance, initAppearance } from './appearance';
 import { applyTitlebar } from './desktop';
+import { desktopShell } from './shell';
 import { loadTermFont } from './terminal/fonts';
 import { initGuiAuto } from './gui/auto';
 import { initUpdateCheck } from './update';
@@ -60,9 +61,9 @@ if (guiPage) {
   void Promise.race([font, new Promise((r) => setTimeout(r, 1500))]).then(async () => {
     await settingsLoaded;
     createRoot(document.getElementById('root')!).render(<App />);
+    // Notification permission needs a user gesture (browsers only; Electron uses native notifications).
+    if (!desktopShell?.notifications) window.addEventListener('pointerdown', () => void requestNotifyPermission(), { once: true });
   });
-  // Notification permission needs a user gesture.
-  window.addEventListener('pointerdown', requestNotifyPermission, { once: true });
   // Input tells the core which page is in use (it plays the sounds), and
   // lets the page start audio.
   const onInput = () => {

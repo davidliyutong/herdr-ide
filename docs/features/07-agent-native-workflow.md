@@ -41,21 +41,32 @@ automatically, scheduling agents.
   loses the focus (`focus` on its stream), and the core reports the agent
   idle ([22](22-terminal-protocol.md)). Opening an agent from the inbox or a
   notification focuses its terminal.
-- **Notifications** (`web/src/notify.ts`): a status change to `blocked` or
-  `done` raises a notification of the system, one per terminal, when the
-  page is hidden or not focused, the setting **System notifications**
-  (`notifications.system`) is on and the browser allows notifications,
-  which the page asks for on its first click while the setting is on (a
-  toast when visible for `blocked`, whatever the setting), saying where
-  the agent is (machine, workspace and tab) and its terminal's title;
-  clicking it focuses the agent. With **Badge count** (`notifications.badge`) on, the
-  title and the app badge (the Badging API, `navigator.setAppBadge`) count
-  blocked agents; turned off, both are cleared at once. The badge is an
-  installed PWA's icon, and in the desktop app the Dock icon on macOS, an
-  overlay on the taskbar button on Windows, and the launcher icon on Linux
-  in docks that implement the Unity launcher API. The desktop app
-  grants the page notifications; Windows shows those of the installed app
-  (its Start menu shortcut carries the app's id), and Linux needs a
+- **Notifications** (`web/src/notify.ts`, `desktop/src/notifications.ts`): a
+  status change to `blocked` or `done` goes through a unified notification
+  dispatcher (`dispatchNotification`): in the desktop app it uses Electron's
+  native `Notification` API over the validated preload bridge (`desktopShell.notifications`,
+  supporting title, body, silent, Linux urgency, tag deduplication, and
+  click-to-focus that restores/reopens the main window and routes focus even
+  after a window close on macOS), and in browsers it uses the Web Notification
+  API (asking for permission once on the first pointer gesture after settings load
+  while `notifications.system` is on, or from the explicit prompt/toggle in
+  Settings, and showing permission status or unavailable/denied guidance there),
+  falling back cleanly when unavailable or denied. Notifications fire when the
+  page is hidden or not focused and **System notifications**
+  (`notifications.system`) is on; when the page is visible and focused, OS
+  notifications are suppressed and `blocked` shows an in-app toast unless the
+  target pane is already focused. Notifications name where the agent is
+  (machine, workspace and tab) and its terminal or chat title; clicking focuses
+  the pane, opens and focuses an unopened chat (`ViewStatusDef.openTarget`), or
+  opens a panel (such as usage alerts). Active pane notifications are closed
+  automatically when the user focuses that pane. With **Badge count**
+  (`notifications.badge`) on, the title and the app badge (the Badging API,
+  `navigator.setAppBadge`) count blocked agents (terminals, plugin panes, and
+  unopened chats via `ViewStatusDef.unopened`); turned off, both are cleared at
+  once. The badge is an installed PWA's icon, and in the desktop app the Dock
+  icon on macOS, an overlay on the taskbar button on Windows, and the launcher
+  icon on Linux in docks that implement the Unity launcher API; Windows shows
+  notifications under the installed app's AppUserModelID and Linux needs a
   notification daemon ([16](16-desktop-packaging.md)).
 - **Sounds** (`web/src/sound.ts`): the page plays a sound on the same
   transitions: `blocked` plays the request chime, `done` the done chime,
@@ -139,8 +150,9 @@ automatically, scheduling agents.
 ## Failure modes
 
 - Agents the rules cannot classify show `unknown` and never notify.
-- Notifications need permission (asked on the first click) and a secure
-  context.
+- Browser notifications need permission (asked on the first click or in
+  Settings) and a secure context; the desktop app uses native OS notifications
+  directly.
 - The chosen browser may be one the user has walked away from (another
   browser was opened earlier and not used since); its sounds play there.
 
@@ -151,8 +163,9 @@ agent messages and the seen marking by focus ([25](25-agent-detection.md)).
 `web/src/__tests__/terms.test.ts` covers the attention order,
 `sidebarMachines.test.ts` the inbox and the workspaces' dots,
 `codePanes.test.ts` where *Send to Agent* goes, `viewStatus.test.tsx`,
-`notifyViews.test.ts` and `attention.test.tsx` chat panes in the dots,
-the badge, the attention list, notifications and seen, and
+`notifyViews.test.ts`, `notifyDispatch.test.tsx`, and `attention.test.tsx` chat
+panes in the dots, the badge (including unopened chats), the attention list,
+unified desktop/web notification dispatch and click-to-focus routing, and
 `web/src/__tests__/sound.test.ts` which sound a status change plays
 (suppression, muted agents, the chosen browser), `notify.test.ts` the
 three switches (a notification only while its setting is on, the

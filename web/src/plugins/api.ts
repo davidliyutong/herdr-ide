@@ -7,6 +7,7 @@ import type { ComponentType, ReactNode } from 'react';
 import type { MenuEntry } from '../contextMenu';
 import type { MessageKey } from '../i18n';
 import type { AgentStatus } from '../lib/machine';
+import type { NotificationTarget } from '../shell';
 import type { SettingDef } from '../settings';
 import type { PluginView, TerminalLeaf } from '../term/layout';
 
@@ -158,6 +159,15 @@ export interface TerminalHeaderProps {
  * tabIndex -1. A press leaves the keyboard where it is. */
 export type HeaderActionsComponent = ComponentType<TerminalHeaderProps>;
 
+/** An agent-like item owned by a plugin (e.g. a chat) that has no open pane. */
+export interface UnopenedAgent {
+  id: string;
+  title: string;
+  directory?: string;
+  status: AgentStatus;
+  open(): void;
+}
+
 /** Status of a plugin's panes as terminal agents have it, for dots, badges, the attention list and
  * notifications (registry.ts viewStatus; notify.ts, seen.ts). */
 export interface ViewStatusDef {
@@ -171,6 +181,10 @@ export interface ViewStatusDef {
   paneOf?(m: string, data: Record<string, unknown>): string | undefined;
   /** The user saw the pane (it is visible and focused while the page is visible) and its status was done. */
   seen?(m: string, view: PluginView): void;
+  /** Items on machine m with an agent status that currently have no open pane. */
+  unopened?(m: string): UnopenedAgent[];
+  /** Opens or focuses the target item (e.g. a chat without an open pane) when clicked from a notification. */
+  openTarget?(target: Extract<NotificationTarget, { kind: 'chat' }>): void | Promise<void>;
 }
 
 export interface PluginDef {

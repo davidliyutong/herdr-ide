@@ -35,6 +35,7 @@ import {
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { FontPicker } from './settings/FontPicker';
 import { desktopShell } from '../shell';
+import { notificationPermission, onPermissionChange, requestNotifyPermission } from '../notify';
 import { ZOOM_KEY } from '../zoom';
 import { colorKeys, ThemeColors, schemeLabel } from './settings/Colors';
 import { ThemePicker } from './settings/ThemePicker';
@@ -566,7 +567,9 @@ function SettingRow({
     if (JSON.stringify(v) === JSON.stringify(machine ? own : value)) return;
     // VS Code's switch for browsers asks to accept its risk first.
     if (v === true && !(await acceptRisk(d.key))) return;
-    done(await setSetting(d.key, v, machine?.id));
+    const err = await setSetting(d.key, v, machine?.id);
+    done(err);
+    if (!err && d.key === 'notifications.system' && v === true) void requestNotifyPermission({ force: true });
   };
   const reset = () => void save(undefined);
   const menu = (): MenuEntry[] => [
@@ -606,6 +609,7 @@ function SettingRow({
           <Control d={d} value={value} disabled={disabled} onChange={save} />
         )}
       </div>
+      {!machine && d.key === 'notifications.system' && <NotificationPermissionStatus enabled={value === true} />}
       {locked && (
         <div className="settings-locked small">
           <Lock /> {t('settings.lockedByFlag', { flag: `--${d.flag ?? d.key}` })}
@@ -1083,6 +1087,24 @@ export function valueLabel(d: Pick<SettingDef, 'key' | 'type'>, v: SettingValue)
   if (d.type === 'bool') return t(v ? 'settings.on' : 'settings.off');
   if (d.type === 'enum') return optionLabel(d.key, String(v));
   return Array.isArray(v) ? v.join(', ') : String(v);
+}
+
+/** Shows browser Notification permission status and an explicit grant action when needed. */
+function NotificationPermissionStatus({ enabled }: { enabled: boolean }) {
+  const [, setTick] = useState(0);
+  useEffect(() => onPermissionChange(() => setTick((n) => n + 1)), []);
+  const perm = notificationPermission();
+  if (perm === 'desktop' || perm === 'granted') return null;
+  if (perm === 'unsupported') return <div className="setting-desc">{t('settings.notifications.permission.unavailable')}</div>;
+  if (perm === 'denied') return <div className="error small">{t('settings.notifications.permission.denied')}</div>;
+  if (!enabled) return null;
+  return (
+    <div className="setting-control">
+      <button type="button" onClick={() => void requestNotifyPermission({ force: true })}>
+        {t('settings.notifications.permission.allow')}
+      </button>
+    </div>
+  );
 }
 
 export { colorKeys };

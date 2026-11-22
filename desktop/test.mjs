@@ -13,6 +13,7 @@ const tests = [
   'folders',
   'follow',
   'menu',
+  'notifications',
   'platform',
   'policy',
   'preload',

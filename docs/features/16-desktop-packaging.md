@@ -466,19 +466,27 @@ and the grant stays across updates. herdr-core is signed with Herdr's
 Developer ID (`dev.herdr.core`, team `2W9652Q7QR`), so its grant stays
 when the app installs another herdr-core at the same path.
 
-**Notifications and the badge.** The page's notifications are the web
-Notification API, granted by the shell's permission policy, and its count
-of blocked agents is the Badging API (`navigator.setAppBadge`,
-[07](07-agent-native-workflow.md)); the settings **System notifications**
-and **Badge count** turn each off, and the page then shows none and clears
-the badge. Electron shows the count as the Dock
-icon's badge on macOS, as an overlay on the taskbar button on Windows, and
-on Linux through the Unity launcher API (D-Bus `LauncherEntry`), which
-docks that implement it show for the desktop entry `<slug>.desktop`.
-Windows shows notifications of the installed app (its Start menu shortcut
-carries the AppUserModelID); Linux needs a notification daemon on the
-session bus (`org.freedesktop.Notifications`), which desktop environments
-run.
+**Notifications and the badge.** The desktop shell exposes native OS
+notifications through Electron's `Notification` API (`desktop/src/notifications.ts`,
+`desktopShell.notifications` in `preload.ts`), validating and bounding title,
+body, tag, silent, urgency and click target (`pane`, `chat` or `panel`) on both
+the preload and main-process sides and accepting requests only from the main
+window's top frame on the core origin. Clicking a native notification restores
+and focuses (or on macOS reopens) the main window and delivers the target to the
+page (`onClick`, queued if the window is still loading) so focus routes to the
+pane, conversation or panel; active notifications are deduplicated by `tag` and
+bounded (`MAX_ACTIVE_NOTIFICATIONS`). When native notifications are unavailable,
+the page falls back to the Web Notification API (allowed by the shell's
+permission policy). The count of blocked agents uses the Badging API
+(`navigator.setAppBadge`, [07](07-agent-native-workflow.md)); the settings
+**System notifications** and **Badge count** turn each off, and the page then
+shows none and clears the badge. Electron shows the count as the Dock icon's
+badge on macOS, as an overlay on the taskbar button on Windows, and on Linux
+through the Unity launcher API (D-Bus `LauncherEntry`), which docks that
+implement it show for the desktop entry `<slug>.desktop`. Windows shows
+notifications of the installed app (its Start menu shortcut carries the
+AppUserModelID); Linux needs a notification daemon on the session bus
+(`org.freedesktop.Notifications`), which desktop environments run.
 
 **Brand and icons.** The web brand constants and English/Chinese message
 dictionaries are imported into the shell; build metadata (`appId`,
@@ -634,10 +642,14 @@ permission policy (`policy`), Full Disk Access (`privacy`: the one URL,
 the executable of each instance shown only when it exists, nothing on
 Windows and Linux, the bundle of a packaged executable, reopening through
 Launch Services after the app exited and through Electron in development,
-and `HERDR_IDE_DESKTOP_NO_OPEN`, which opens nothing) and the preload's
+and `HERDR_IDE_DESKTOP_NO_OPEN`, which opens nothing), native notifications
+(`notifications`: option and target validation and length bounds, tag
+deduplication, active notification bounds, click-to-focus and queued target
+delivery, unsupported OS fallback), and the preload's
 functions against a stand-in for Electron (`preload`: the Full Disk Access
 requests only on macOS, carrying nothing the page passes; the count of
-unsaved panes and the close answer, well-formed only), closing with
+unsaved panes and the close answer, well-formed only; native notification
+options and click targets validated in both directions), closing with
 unsaved changes (`closeGuard`: the page asked, Close, Stay cancelling a
 quit, the native question for a page that does not take the question and
 for a second close while it asks, a shutdown never held, a new page

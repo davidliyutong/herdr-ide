@@ -10,6 +10,7 @@ const common = [
   'answerClose',
   'browser',
   'metrics',
+  'notifications',
   'onCloseRequest',
   'onCommand',
   'onOpenFolders',
@@ -298,4 +299,82 @@ test('browser.onOpen delivers http(s) addresses only, while it listens', () => {
   off();
   receive(channels.browserOpen, 'https://example.com/b');
   assert.deepEqual(got, ['https://example.com/a', 'http://localhost:3000']);
+});
+
+test('notifications validates options and targets in both directions', async () => {
+  const notifications = shell.notifications!;
+  assert.deepEqual(Object.keys(notifications).sort(), ['close', 'onClick', 'show', 'supported']);
+
+  answers.set(channels.notifySupported, true);
+  assert.equal(await notifications.supported(), true);
+  answers.set(channels.notifySupported, 'yes');
+  assert.equal(await notifications.supported(), false);
+  answers.set(channels.notifySupported, new Error('ipc failed'));
+  assert.equal(await notifications.supported(), false);
+
+  invoked.length = 0;
+  answers.set(channels.notifyShow, true);
+  assert.equal(
+    await notifications.show({
+      title: '  Agent blocked  ',
+      body: 'gpu · 1',
+      tag: 'm|t1',
+      silent: true,
+      urgency: 'critical',
+      target: { kind: 'chat', machine: 'm', chat: 'c1', agent: 'claude' },
+    }),
+    true,
+  );
+  assert.deepEqual(invoked, [
+    {
+      channel: channels.notifyShow,
+      args: [
+        {
+          title: 'Agent blocked',
+          body: 'gpu · 1',
+          tag: 'm|t1',
+          silent: true,
+          urgency: 'critical',
+          target: { kind: 'chat', machine: 'm', chat: 'c1', agent: 'claude' },
+        },
+      ],
+    },
+  ]);
+
+  // Invalid payloads are dropped before crossing IPC.
+  invoked.length = 0;
+  for (const bad of [
+    { title: '   ' },
+    { title: 'ok', extra: 1 },
+    { title: 'ok', urgency: 'high' },
+    { title: 'ok', target: { kind: 'pane', machine: 'm', pane: 't1', extra: 1 } },
+  ]) {
+    assert.equal(await notifications.show(bad as unknown as Parameters<typeof notifications.show>[0]), false);
+  }
+  assert.deepEqual(invoked, []);
+
+  sent.length = 0;
+  notifications.close('m|t1');
+  notifications.close('bad\ntag');
+  notifications.close('');
+  assert.deepEqual(sent, [{ channel: channels.notifyClose, value: 'm|t1' }]);
+
+  sent.length = 0;
+  const clicks: unknown[] = [];
+  const off = notifications.onClick((target) => clicks.push(target));
+  assert.deepEqual(sent, [{ channel: channels.notifyClickWanted, value: true }]);
+  receive(channels.notifyClick, { kind: 'pane', machine: 'm', pane: 't1' });
+  receive(channels.notifyClick, { kind: 'chat', machine: 'm', chat: 'c1' });
+  receive(channels.notifyClick, { kind: 'bad', machine: 'm' });
+  receive(channels.notifyClick, { kind: 'pane', machine: 'm', pane: 't1', extra: 1 });
+  off();
+  receive(channels.notifyClick, { kind: 'panel', panel: 'usage' });
+  assert.deepEqual(clicks, [
+    { kind: 'pane', machine: 'm', pane: 't1' },
+    { kind: 'chat', machine: 'm', chat: 'c1' },
+  ]);
+  assert.deepEqual(sent, [
+    { channel: channels.notifyClickWanted, value: true },
+    { channel: channels.notifyClickWanted, value: false },
+  ]);
 });

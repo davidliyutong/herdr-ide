@@ -52,4 +52,14 @@ export const channels = {
   fullScreen: 'desktop:full-screen',
   /** page → shell (macOS): asks the shell to send the current full-screen state. */
   fullScreenQuery: 'desktop:full-screen-query',
+  /** page → shell, answered: whether native OS notifications are supported. */
+  notifySupported: 'desktop:notify-supported',
+  /** page → shell, answered: shows a native OS notification; returns boolean. */
+  notifyShow: 'desktop:notify-show',
+  /** page → shell: closes an active native notification by tag. */
+  notifyClose: 'desktop:notify-close',
+  /** shell → page: target of a clicked native notification (NotificationTarget). */
+  notifyClick: 'desktop:notify-click',
+  /** page → shell: whether the page takes notification click events. */
+  notifyClickWanted: 'desktop:notify-click-wanted',
 } as const;

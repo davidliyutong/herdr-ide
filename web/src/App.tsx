@@ -23,7 +23,7 @@ import { closeWindowPane, leaveWindowPane, commandLabel, handleKey, keyHint, onC
 import { applySettings, loadSettings } from './settings';
 import { applyKeybindings, loadKeybindings, useKeys } from './keybindings';
 import { t } from './i18n';
-import { notifyAgent, updateBadge } from './notify';
+import { initNotifications, notifyAgent, updateBadge } from './notify';
 import { shortPath, terminalTitle } from './lib/machine';
 import * as L from './term/layout';
 import { useGui } from './gui/state';
@@ -151,6 +151,7 @@ export function App() {
     const offTerms = followTerms();
     void loadKeybindings();
     const offDesktop = initDesktop();
+    const offNotify = initNotifications();
     const offUnload = warnOnUnload();
     const offClose = followDesktopClose();
     const offFolders = takeOpenedFolders();
@@ -171,6 +172,7 @@ export function App() {
       off();
       offTerms();
       offDesktop();
+      offNotify();
       offUnload();
       offClose();
       offFolders();
