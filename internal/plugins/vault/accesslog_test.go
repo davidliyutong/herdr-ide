@@ -62,6 +62,7 @@ func TestAccessLogSurvivesARestart(t *testing.T) {
 
 	p2 := reopened(t, p)
 	c2 := newClient(p2, h)
+	c2.session(t)
 	_, out := c2.do("GET", "/api/p/vault/log", "")
 	var log []Access
 	json.Unmarshal([]byte(mustJSON(out["log"])), &log)
@@ -101,7 +102,7 @@ func TestReleasesAreNeverCoalesced(t *testing.T) {
 	get := agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}, Client: "claude"}
 	s.Lock()
 	p.Handle(ctx, h, "m1", get) // vault_locked
-	s.Unlock(pass)
+	s.Unlock(pass, testWindow)
 	for i := 0; i < 5; i++ {
 		if r := p.Handle(ctx, h, "m1", get); !r.OK {
 			t.Fatal(r)
@@ -109,7 +110,7 @@ func TestReleasesAreNeverCoalesced(t *testing.T) {
 		s.Lock()
 		p.Handle(ctx, h, "m1", get)
 		p.Handle(ctx, h, "m1", get)
-		s.Unlock(pass)
+		s.Unlock(pass, testWindow)
 	}
 	allowed := 0
 	for _, a := range p.Log() {
@@ -339,5 +340,48 @@ func TestCancelledAndExpired(t *testing.T) {
 	}
 	if !noisy(ResultCancelled) || noisy(ResultExpired) {
 		t.Error("cancelled requests are repeated at will, expired ones are not")
+	}
+}
+
+// The access log tells what was read, by whom and which apps are exempt:
+// it needs an open session, and reading it does not keep one open.
+func TestAccessLogNeedsASession(t *testing.T) {
+	p := &Plugin{Path: filepath.Join(t.TempDir(), "vault-dev.json")}
+	closeOnCleanup(t, p)
+	h := &fakeHost{}
+	s, _ := p.open(h)
+	s.KDF = testKDF
+	now := time.Unix(1_000_000, 0)
+	p.now = func() time.Time { return now }
+	c := newClient(p, h)
+	if code, out := c.do("GET", "/api/p/vault/log", ""); code != 401 || out["error"] != "vault_session" {
+		t.Fatalf("without a session %d %v", code, out)
+	}
+	if !strings.Contains(h.auditLog(), "denied.vault_session") {
+		t.Error("the refusal is not audited")
+	}
+	code, out := c.do("POST", "/api/p/vault/passphrase", `{"passphrase":"long enough"}`)
+	if code != 200 {
+		t.Fatalf("setup %d %v", code, out)
+	}
+	c.tok = out["session"].(string)
+	if code, out := c.do("GET", "/api/p/vault/log", ""); code != 200 || out["log"] == nil {
+		t.Fatalf("with a session %d %v", code, out)
+	}
+	for i := 0; i < 3; i++ {
+		now = now.Add(SessionIdle / 2)
+		code, _ := c.do("GET", "/api/p/vault/log", "")
+		if i < 1 && code != 200 {
+			t.Errorf("read %d: %d", i, code)
+		}
+	}
+	if code, _ := c.do("GET", "/api/p/vault/log", ""); code != 401 {
+		t.Errorf("session kept by reading the log: %d", code)
+	}
+	// A locked vault ends every session, and the log with it.
+	c.session2(t, "long enough")
+	c.do("POST", "/api/p/vault/lock", "")
+	if code, _ := c.do("GET", "/api/p/vault/log", ""); code != 401 {
+		t.Errorf("locked %d", code)
 	}
 }

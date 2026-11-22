@@ -21,7 +21,6 @@ import { VaultApprovals } from '../plugins/vault/Approvals';
 import { SetupGuide } from '../plugins/vault/SetupGuide';
 import { endSession, loadVault, openSession, useVault, vaultApi, vaultMessage } from '../plugins/vault/api';
 import { mcpCommand, setupSnippets } from '../plugins/vault/setup';
-import { clockText, minutesText, parseMinutes } from '../plugins/vault/lockTimes';
 import { pluginMessage } from '../plugins/registry';
 import '../plugins';
 
@@ -64,8 +63,8 @@ describe('vault', () => {
   let pending: unknown[];
   /** The access log GET log answers. */
   let accessLog: unknown[];
-  /** The auto-lock the list says (the stand-in sets it as the route does). */
-  let autoLock: { after: number; custom: boolean; setting: number; lockAt?: string };
+  /** The auto-lock the list says (the setting's). */
+  let autoLock: { after: number; setting: number; lockAt?: string };
 
   beforeEach(async () => {
     calls = [];
@@ -74,7 +73,7 @@ describe('vault', () => {
     listError = answerError = sessionError = undefined;
     failPut = sessionGone = false;
     pending = [];
-    autoLock = { after: 3600, custom: false, setting: 3600, lockAt: new Date(Date.now() + 59 * 60_000 + 30_000).toISOString() };
+    autoLock = { after: 3600, setting: 3600, lockAt: new Date(Date.now() + 59 * 60_000 + 30_000).toISOString() };
     accessLog = [{ time: '2026-01-01T00:00:00Z', m: 'm1', tool: 'get', names: ['GITHUB_TOKEN'], result: 'approved' }];
     await endSession().catch(() => undefined);
     useVault.setState({ status: undefined, variables: [], log: [], requests: {}, error: undefined, session: false });
@@ -118,22 +117,6 @@ describe('vault', () => {
       // The gate.
       if (!open) return json({ error: 'vault_session' }, 401);
       if (url.endsWith('/reveal')) return json({ value: 'ghp_secret' });
-      if (url === '/api/p/vault/autolock') {
-        const { minutes, passphrase } = JSON.parse(String(init!.body)) as { minutes: number | null; passphrase?: string };
-        const after = minutes === null ? 3600 : minutes * 60;
-        // Longer, or never, takes the passphrase again.
-        if (autoLock.after > 0 && (after === 0 || after > autoLock.after)) {
-          if (!passphrase) return json({ error: 'passphrase_required' }, 403);
-          if (passphrase !== PASS) return json({ error: 'wrong_passphrase' }, 403);
-        }
-        autoLock = {
-          after,
-          custom: minutes !== null,
-          setting: 3600,
-          lockAt: after ? new Date(Date.now() + after * 1000).toISOString() : undefined,
-        };
-        return json(autoLock);
-      }
       if (url.startsWith('/api/p/vault/vars/') && method === 'PUT') return failPut ? json({ error: 'failed' }, 500) : json({});
       if (answer) return json({ ok: true });
       return json({ error: 'not_found' }, 404);
@@ -343,83 +326,24 @@ describe('vault', () => {
     await unlock();
     expect(host.querySelector('.vault-gate .callout.error')?.textContent).toBe(t('vault.error.wait'));
     expect(t('vault.error.busy')).not.toBe(t('vault.error.wait'));
+    // A key that cannot be kept in locked memory says so, not "could not".
+    sessionError = { code: 503, error: 'memory' };
+    await unlock();
+    expect(host.querySelector('.vault-gate .callout.error')?.textContent).toBe(t('vault.error.memory'));
+    expect(t('vault.error.memory')).not.toBe(t('vault.error.failed'));
   });
 
-  it('counts down to the auto-lock and sets another time for this unlock', async () => {
+  it('shows no auto-lock countdown or time of its own in the session bar', async () => {
     await act(async () => root.render(createElement(VaultPanel)));
     await flush();
     await unlock();
-    const btn = () => host.querySelector<HTMLButtonElement>('.vault-autolock')!;
-    expect(btn().textContent).toMatch(/^59:(29|30)$/);
-    expect(btn().title).toBe(t('vault.autoLock.title', { time: t('vault.autoLock.hours', { n: 1 }) }));
-    const key = (k: string) =>
-      act(async () => {
-        (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
-      });
-    const choose = async (q: string) => {
-      await act(async () => btn().click());
-      await flush();
-      const search = document.body.querySelector<HTMLInputElement>('.picker .picker-search')!;
-      await act(async () => type(search, q));
-      await key('Enter');
-      await flush();
-    };
-    const lockCalls = () => calls.filter((c) => c.url === '/api/p/vault/autolock');
-    const confirmWith = async (passphrase: string) => {
-      const form = host.querySelector<HTMLFormElement>('[data-fresh="autolock"]')!;
-      await act(async () => type(form.querySelector<HTMLInputElement>('input[type="password"]')!, passphrase));
-      await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
-      await flush();
-    };
-    // A shorter time typed: the session is enough.
-    await choose('30');
-    expect(lockCalls().at(-1)).toMatchObject({ method: 'POST', token: TOKEN, body: { minutes: 30 } });
-    expect(btn().classList.contains('custom')).toBe(true);
-    // A longer one, an hour and a half, asks for the passphrase first.
-    await choose('1h30m');
-    expect(lockCalls()).toHaveLength(1);
-    await confirmWith('wrong one');
-    expect(host.querySelector('[data-fresh="autolock"] .callout.error')?.textContent).toBe(t('vault.error.wrong_passphrase'));
-    await confirmWith(PASS);
-    expect(lockCalls().at(-1)!.body).toEqual({ minutes: 90, passphrase: PASS });
-    expect(host.querySelector('[data-fresh="autolock"]')).toBeNull();
-    expect(btn().textContent).toMatch(/^1:(29:59|30:00)$/);
-    // Never, from the list, likewise.
-    await choose(t('vault.autoLock.never'));
-    await confirmWith(PASS);
-    expect(lockCalls().at(-1)!.body).toEqual({ minutes: 0, passphrase: PASS });
-    expect(btn().textContent).toBe(t('vault.autoLock.off'));
-    // Back to the setting's time.
-    await choose(t('vault.autoLock.default', { time: t('vault.autoLock.hours', { n: 1 }) }));
-    expect(calls.at(-1)!.body).toEqual({ minutes: null });
-    expect(btn().classList.contains('custom')).toBe(false);
-  });
-
-  it('reads times typed for the auto-lock', () => {
-    expect(['90', '90m', '90 min', '2h', '1.5h', '1h30m', '1h30', '2小时', '45分钟'].map(parseMinutes)).toEqual([
-      90, 90, 90, 120, 90, 90, 90, 120, 45,
-    ]);
-    expect(['', '0', 'h', '25h', '2d', 'abc', '-5'].map(parseMinutes)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
-    expect([clockText(5), clockText(65), clockText(3599.2), clockText(3723), clockText(-3)]).toEqual([
-      '0:05',
-      '1:05',
-      '1:00:00',
-      '1:02:03',
-      '0:00',
-    ]);
-    expect([minutesText(45), minutesText(120), minutesText(90)]).toEqual([
-      t('vault.autoLock.minutes', { n: 45 }),
-      t('vault.autoLock.hours', { n: 2 }),
-      t('vault.autoLock.hoursMinutes', { h: 1, m: 30 }),
-    ]);
+    const bar = host.querySelector<HTMLElement>('.vault-session')!;
+    expect(bar).not.toBeNull();
+    expect(bar.querySelector('.vault-autolock')).toBeNull();
+    // Change Passphrase, Lock and Settings: nothing that sets a time.
+    expect(bar.querySelectorAll('button')).toHaveLength(3);
+    expect(bar.textContent).not.toMatch(/\d+:\d\d/);
+    expect(calls.some((c) => c.url === '/api/p/vault/autolock')).toBe(false);
   });
 
   it('creates the passphrase of a new vault', async () => {
@@ -531,6 +455,14 @@ describe('vault', () => {
     await act(async () => root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultApprovals))));
     await flush();
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')][1].click());
+    // Without a session the log is not asked for: the core shows it to a
+    // session only.
+    expect(calls.some((c) => c.url === '/api/p/vault/log')).toBe(false);
+    expect(host.querySelector('.vault-entry')).toBeNull();
+    expect(host.textContent).toContain(t('vault.log.needsSession'));
+    await act(async () => openSession(PASS));
+    await flush();
+    expect(calls.find((c) => c.url === '/api/p/vault/log')?.token).toBe(TOKEN);
     const entries = [...host.querySelectorAll<HTMLElement>('.vault-entry')];
     expect(entries.map((e) => e.dataset.result)).toEqual(['revealed', 'cancelled', 'allowed']);
     expect(entries[0].textContent).toContain(t('vault.log.page'));

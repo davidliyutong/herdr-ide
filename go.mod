@@ -3,6 +3,7 @@ module herdr-ide
 go 1.27.1
 
 require (
+	github.com/awnumar/memguard v0.23.0
 	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
 	github.com/hashicorp/yamux v0.1.2
@@ -11,3 +12,5 @@ require (
 	golang.org/x/crypto v0.59.0
 	golang.org/x/sys v0.50.0
 )
+
+require github.com/awnumar/memcall v0.4.0 // indirect

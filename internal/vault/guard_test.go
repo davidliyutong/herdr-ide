@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/awnumar/memguard"
 )
 
 // The guard (authenticators, the rule to verify each Allow) is sealed with
@@ -42,7 +44,7 @@ func TestGuard(t *testing.T) {
 	if err := s2.UpdateGuard(func(*Guard) error { return nil }); !errors.Is(err, ErrLocked) {
 		t.Fatalf("changing a locked vault's guard: %v", err)
 	}
-	if err := s2.Unlock(pass); err != nil {
+	if err := s2.Unlock(pass, win); err != nil {
 		t.Fatal(err)
 	}
 	g, err := s2.Guard()
@@ -82,7 +84,7 @@ func TestGuard(t *testing.T) {
 	edited, _ := json.Marshal(mine)
 	os.WriteFile(path, edited, 0o600)
 	s3 := openTest(t, path)
-	if err := s3.Unlock(pass); err != nil {
+	if err := s3.Unlock(pass, win); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s3.Guard(); !errors.Is(err, ErrCorrupt) {
@@ -96,7 +98,7 @@ func TestGuard(t *testing.T) {
 	// A new passphrase ends the authenticators and keeps the rule.
 	os.WriteFile(path, b, 0o600)
 	s4 := openTest(t, path)
-	if err := s4.ChangePassphrase(pass, "another horse"); err != nil {
+	if err := s4.ChangePassphrase(pass, "another horse", win); err != nil {
 		t.Fatal(err)
 	}
 	if g, err := s4.Guard(); err != nil || len(g.Authenticators) != 0 || !g.VerifyEachAllow {
@@ -111,10 +113,10 @@ func TestGuard(t *testing.T) {
 	}
 }
 
-// A suspended vault is locked with the key held: nothing is read or sealed,
-// the guard stays readable for a proof, Resume or the passphrase unlocks
-// it; Lock forgets the key, after which nothing resumes it.
-func TestSuspend(t *testing.T) {
+// A lock forgets the key: its Enclave is destroyed (it no longer opens),
+// nothing is read or sealed and the guard is not readable until an unlock,
+// which works again.
+func TestLockForgetsTheKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
 	s := newVault(t, path)
 	if err := s.Set("KEY", Update{Value: str("v"), Machines: &[]string{"m1"}}); err != nil {
@@ -122,16 +124,21 @@ func TestSuspend(t *testing.T) {
 	}
 	if err := s.UpdateGuard(func(g *Guard) error {
 		g.Authenticators = []Authenticator{{ID: "a1", Kind: KindWebAuthn, Label: "Laptop"}}
+		g.Exempt = []Exemption{{ID: "e", Machine: "m1", App: "claude"}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	s.Suspend()
-	if st := s.Status(); !st.Locked || !s.Held() {
-		t.Fatalf("suspended: %+v, held %v", st, s.Held())
+	old := s.key
+	s.Lock()
+	if s.key != nil || s.usable() || !s.Status().Locked {
+		t.Fatalf("locked: %+v", s.Status())
+	}
+	if err := withKey(old, func([]byte) error { return nil }); !errors.Is(err, ErrMemory) {
+		t.Errorf("the destroyed Enclave opens: %v", err)
 	}
 	if _, err := s.Value("KEY"); !errors.Is(err, ErrLocked) {
-		t.Errorf("a value of a suspended vault: %v", err)
+		t.Errorf("a value of a locked vault: %v", err)
 	}
 	if err := s.Set("KEY", Update{Value: str("w")}); !errors.Is(err, ErrLocked) {
 		t.Errorf("a change: %v", err)
@@ -146,17 +153,29 @@ func TestSuspend(t *testing.T) {
 		t.Errorf("an import: %v", err)
 	}
 	if s.Exempt("m1", "claude") {
-		t.Error("exempt while suspended")
+		t.Error("exempt while locked")
 	}
-	if _, err := s.Guard(); err != nil {
-		t.Errorf("the guard of a suspended vault: %v", err)
+	if _, err := s.Guard(); !errors.Is(err, ErrLocked) {
+		t.Errorf("the guard of a locked vault: %v", err)
 	}
-	// A proof is recorded (it is how a suspended vault is unlocked); the
-	// user's changes of the guard wait for an unlocked vault.
+	if err := s.RecordProof("a1", time.Now(), nil); !errors.Is(err, ErrLocked) {
+		t.Errorf("recording a proof on a locked vault: %v", err)
+	}
+	s.Lock() // nothing to forget
+	if err := s.Unlock("wrong horse", win); !errors.Is(err, ErrPassphrase) || !s.Status().Locked {
+		t.Errorf("a wrong passphrase: %v %+v", err, s.Status())
+	}
+	if err := s.Unlock(pass, win); err != nil || s.Status().Locked {
+		t.Fatalf("the passphrase: %v %+v", err, s.Status())
+	}
+	if v, err := s.Value("KEY"); err != nil || v != "v" {
+		t.Errorf("after the unlock %q %v", v, err)
+	}
+	// A proof is recorded on an unlocked vault.
 	at := time.Now().UTC().Truncate(time.Second)
 	count := uint32(7)
 	if err := s.RecordProof("a1", at, &count); err != nil {
-		t.Errorf("recording a proof on a suspended vault: %v", err)
+		t.Errorf("recording a proof: %v", err)
 	}
 	if err := s.RecordProof("nope", at, nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("recording another authenticator's proof: %v", err)
@@ -164,39 +183,31 @@ func TestSuspend(t *testing.T) {
 	if g, _ := s.Guard(); g.Authenticators[0].SignCount != 7 || !g.Authenticators[0].LastUsed.Equal(at) {
 		t.Errorf("recorded %+v", g.Authenticators[0])
 	}
-	if err := s.UpdateGuard(func(g *Guard) error { g.Authenticators = nil; return nil }); !errors.Is(err, ErrLocked) {
-		t.Errorf("changing the guard of a suspended vault: %v", err)
-	}
-	if g, _ := s.Guard(); len(g.Authenticators) != 1 {
-		t.Errorf("changed while suspended: %+v", g)
-	}
-	if err := s.Resume(); err != nil || s.Status().Locked {
-		t.Fatalf("resume %v, %+v", err, s.Status())
-	}
-	if v, err := s.Value("KEY"); err != nil || v != "v" {
-		t.Errorf("after resume %q %v", v, err)
-	}
-	// The passphrase unlocks a suspended vault, a wrong one does not.
-	s.Suspend()
-	if err := s.Unlock("wrong horse"); !errors.Is(err, ErrPassphrase) || !s.Status().Locked {
-		t.Errorf("a wrong passphrase: %v %+v", err, s.Status())
-	}
-	if err := s.Unlock(pass); err != nil || s.Status().Locked {
-		t.Errorf("the passphrase: %v %+v", err, s.Status())
-	}
-	// A new passphrase unlocks it too.
-	s.Suspend()
-	if err := s.ChangePassphrase(pass, "another horse"); err != nil || s.Status().Locked {
+	// A new passphrase on a locked vault unlocks it.
+	s.Lock()
+	if err := s.ChangePassphrase(pass, "another horse", win); err != nil || s.Status().Locked {
 		t.Errorf("a new passphrase: %v %+v", err, s.Status())
 	}
-	s.Suspend()
-	s.Lock()
-	if s.Held() || !errors.Is(s.Resume(), ErrLocked) || !s.Status().Locked {
-		t.Errorf("resumed without a key: %+v", s.Status())
+}
+
+// Key material that cannot be put in locked memory fails the unlock with
+// ErrMemory and leaves the vault locked: no fallback to a plain slice.
+func TestMemoryFailureFailsTheUnlock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault.json")
+	newVault(t, path).Set("KEY", Update{Value: str("v")})
+	s := openTest(t, path)
+	prev := newEnclave
+	newEnclave = func([]byte) *memguard.Enclave { panic("mlock: cannot allocate memory") }
+	err := s.Unlock(pass, win)
+	newEnclave = prev
+	if !errors.Is(err, ErrMemory) || !s.Status().Locked || s.key != nil {
+		t.Fatalf("unlock without locked memory: %v %+v", err, s.Status())
 	}
-	s.Suspend() // nothing to keep
-	if err := s.Unlock("another horse"); err != nil || s.Status().Locked {
-		t.Errorf("unlock after a lock: %v %+v", err, s.Status())
+	if err := s.Unlock(pass, win); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := s.Value("KEY"); err != nil || v != "v" {
+		t.Errorf("value %q %v", v, err)
 	}
 }
 
@@ -239,7 +250,7 @@ func TestExemptions(t *testing.T) {
 	if s2.Exempt("m1", "claude") {
 		t.Error("exempt while locked")
 	}
-	if err := s2.Unlock(pass); err != nil || !s2.Exempt("m1", "claude") {
+	if err := s2.Unlock(pass, win); err != nil || !s2.Exempt("m1", "claude") {
 		t.Fatalf("after the unlock: %v", err)
 	}
 	// A removed machine: at once while unlocked...
@@ -264,7 +275,7 @@ func TestExemptions(t *testing.T) {
 		t.Errorf("not forgotten in the file: %s", b)
 	}
 	s3 := openTest(t, path)
-	if err := s3.Unlock(pass); err != nil {
+	if err := s3.Unlock(pass, win); err != nil {
 		t.Fatal(err)
 	}
 	if g, _ := s3.Guard(); len(g.Exempt) != 0 || s3.Exempt("m1", "claude") {
@@ -277,7 +288,7 @@ func TestExemptions(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s3.ChangePassphrase(pass, "another horse"); err != nil {
+	if err := s3.ChangePassphrase(pass, "another horse", win); err != nil {
 		t.Fatal(err)
 	}
 	if g, _ := s3.Guard(); len(g.Exempt) != 0 {

@@ -31,6 +31,16 @@ export const channels = {
   /** page → shell, answered: a nonce (a string) to prove; the proof's MAC
    * or null. */
   verifyProve: 'desktop:verify-prove',
+  /** page → shell, answered: whether this install can keep a key that
+   * unlocks the vault (a boolean). */
+  verifyCanUnlock: 'desktop:verify-can-unlock',
+  /** page → shell, answered: a session nonce (a string) of a locked vault;
+   * {id, relay} of this install's unlock entry, 'none' when this install
+   * has none, or null. */
+  verifyUnlock: 'desktop:verify-unlock',
+  /** page → shell, answered: a register nonce (a string); {mac, relay}
+   * with this install's new unlock key, or null. */
+  verifyEnroll: 'desktop:verify-enroll',
   /** page → shell, answered: what the app's processes use now
    * (ProcessUsage[] of web/src/shell.ts), for the settings' Performance page. */
   metrics: 'desktop:metrics',

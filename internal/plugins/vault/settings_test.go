@@ -2,6 +2,9 @@ package vault
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -28,7 +31,7 @@ func withSettings(t *testing.T, h *fakeHost, values map[string]float64) {
 func TestSettingsDefs(t *testing.T) {
 	st := settings.New("", Settings)
 	want := map[string]float64{
-		SettingApprovalTimeout: 60, SettingAutoLock: 60, SettingPassphraseHours: 24, SettingSessionIdle: 30, SettingSessionMax: 12,
+		SettingApprovalTimeout: 60, SettingAutoLock: 60, SettingPassphraseDays: 14, SettingSessionIdle: 30, SettingSessionMax: 12,
 		SettingRunTimeout: 120, SettingRunMaxTimeout: 600, SettingRunOutput: 64,
 	}
 	for k, v := range want {
@@ -36,6 +39,9 @@ func TestSettingsDefs(t *testing.T) {
 		if !ok || d.Section != ID || st.GetFor(k, "") != v || *d.Min > v || *d.Max < v || !d.Integer || d.Scope != settings.ScopeApp {
 			t.Errorf("%s: %+v = %v", k, d, st.GetFor(k, ""))
 		}
+	}
+	if d, _ := st.Lookup(SettingPassphraseDays); *d.Min != 1 || *d.Max != 90 || d.Order != 25 {
+		t.Errorf("passphrase days %+v", d)
 	}
 	if len(Settings.Defs) != len(want) {
 		t.Errorf("%d settings", len(Settings.Defs))
@@ -49,7 +55,7 @@ func TestSettingsDefs(t *testing.T) {
 		v float64
 	}{
 		{SettingApprovalTimeout, 5}, {SettingAutoLock, -1}, {SettingSessionMax, 25}, {SettingRunOutput, 2048}, {SettingSessionIdle, 1.5},
-		{SettingPassphraseHours, 0}, {SettingPassphraseHours, MaxPassphraseHours + 1},
+		{SettingPassphraseDays, 0}, {SettingPassphraseDays, MaxPassphraseDays + 1}, {SettingPassphraseDays, 1.5},
 	} {
 		if err := st.Set(kv.k, "", kv.v); err == nil {
 			t.Errorf("%s = %v taken", kv.k, kv.v)
@@ -58,14 +64,41 @@ func TestSettingsDefs(t *testing.T) {
 	// Without settings (or out of their bounds) the defaults hold.
 	h := &fakeHost{}
 	p := &Plugin{}
-	if p.timeout(h) != DefaultTimeout || p.autoLockAfter(h) != time.Hour || p.passphraseFor(h) != 24*time.Hour {
+	if p.timeout(h) != DefaultTimeout || p.autoLockAfter(h) != time.Hour || p.passphraseDays(h) != 14 {
 		t.Error("defaults without settings")
+	}
+	if w := p.window(h, time.Minute); w != (vaultstore.Window{Days: 14, AutoLock: time.Minute}) {
+		t.Errorf("window %+v", w)
 	}
 	if idle, most := p.sessionLimits(h); idle != SessionIdle || most != SessionMax {
 		t.Errorf("sessions %v %v", idle, most)
 	}
 	if r := runLimits(h); *r != (agentproto.VaultRun{Timeout: 120, MaxTimeout: 600, MaxOutput: 64 << 10}) {
 		t.Errorf("run %+v", r)
+	}
+}
+
+// vault.passphraseDays replaced vault.passphraseHours: a settings file
+// that still has the old key loads without a problem and loses it, and the
+// new one is read.
+func TestPassphraseHoursDropped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"vault.passphraseHours": 24, "vault.passphraseDays": 7}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := settings.New(path, Settings)
+	if err := st.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if ps := st.State().Problems; len(ps) != 0 {
+		t.Errorf("problems %v", ps)
+	}
+	if st.Get(SettingPassphraseDays) != 7.0 {
+		t.Errorf("days %v", st.Get(SettingPassphraseDays))
+	}
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), "passphraseHours") || !strings.Contains(string(b), "passphraseDays") {
+		t.Errorf("the file: %s", b)
 	}
 }
 
@@ -153,16 +186,17 @@ func withClock(t *testing.T, p *Plugin) *testClock {
 }
 
 // With vault.autoLock, the vault locks once unused for that long (every
-// session ends, audited); uses keep it unlocked; without an authenticator
-// the lock forgets the key; 0 never locks it, but the key's hold still
-// ends.
+// session ends, audited) and forgets its key; uses keep it unlocked; 0
+// never locks it.
 func TestAutoLock(t *testing.T) {
 	p, h, s := newTest(t)
 	clk := withClock(t, p)
 	p.lockAfter = 10 * time.Minute
 	s.Set("KEY", vaultstore.Update{Value: str("v"), Machines: &[]string{"m1"}})
 	c := newClient(p, h)
+	c.origin = testOrigin
 	c.session(t)
+	c.register(t, newAuthenticator(t)) // an authenticator changes nothing
 	// Values read by a machine are uses.
 	for i := 0; i < 6; i++ {
 		clk.add(5 * time.Minute)
@@ -180,117 +214,34 @@ func TestAutoLock(t *testing.T) {
 	}
 	clk.add(time.Second)
 	p.autoLock(h)
-	if !s.Status().Locked || s.Held() {
-		t.Fatalf("not locked, or the key kept without an authenticator: held %v", s.Held())
+	if _, err := s.Guard(); !s.Status().Locked || !errors.Is(err, vaultstore.ErrLocked) {
+		t.Fatalf("not locked, or the key kept: %v", err)
 	}
 	if code, _ := c.do("PUT", "/api/p/vault/vars/X", `{"value":"x"}`); code != 401 {
 		t.Errorf("a session outlived the lock: %d", code)
 	}
-	if !strings.Contains(h.auditLog(), `vault.locked {"keyHeld":false,"minutes":10,"reason":"idle"}`) {
+	if !strings.Contains(h.auditLog(), `vault.locked {"minutes":10,"reason":"idle"}`) {
 		t.Errorf("audit %s", h.auditLog())
 	}
 	if h.messageCount("changed") == 0 {
 		t.Error("pages not told")
 	}
+	// A locked vault needs no timer.
+	p.mu.Lock()
+	timer := p.lockTimer
+	p.mu.Unlock()
+	if timer != nil {
+		t.Error("a timer runs for a locked vault")
+	}
 
-	// 0: never; the key is still forgotten at the end of its hold.
+	// 0: never, for as long as it lasts.
 	p.lockAfter = 0
 	withSettings(t, h, map[string]float64{SettingAutoLock: 0})
 	c.session(t)
-	clk.add(24*time.Hour - time.Minute)
+	clk.add(30 * 24 * time.Hour)
 	p.autoLock(h)
 	if s.Status().Locked {
 		t.Error("locked with vault.autoLock 0")
-	}
-	clk.add(time.Minute)
-	p.autoLock(h)
-	if s.Held() || !strings.Contains(h.auditLog(), `"reason":"passphrase"`) {
-		t.Errorf("the key outlived its hold: %s", h.auditLog())
-	}
-}
-
-// With an authenticator the automatic lock keeps the key: the vault is
-// locked until a proof or the passphrase unlocks it, and the timer still
-// ends the hold.
-func TestAutoLockKeepsTheKeyForAProof(t *testing.T) {
-	p, h, s := newTest(t)
-	clk := withClock(t, p)
-	p.lockAfter = 10 * time.Minute
-	c := newClient(p, h)
-	c.origin = testOrigin
-	c.session(t)
-	c.register(t, newAuthenticator(t))
-	clk.add(10 * time.Minute)
-	p.autoLock(h)
-	if !s.Status().Locked || !s.Held() {
-		t.Fatalf("locked %v, held %v", s.Status().Locked, s.Held())
-	}
-	if !strings.Contains(h.auditLog(), `vault.locked {"keyHeld":true,"minutes":10,"reason":"idle"}`) {
-		t.Errorf("audit %s", h.auditLog())
-	}
-	// When the key goes is a session's to see.
-	_, list := c.do("GET", "/api/p/vault", "")
-	if al := list["autoLock"].(map[string]any); al["keyUntil"] != nil || al["lockAt"] != nil {
-		t.Errorf("auto-lock without a session %v", al)
-	}
-	// The passphrase unlocks it as well, and begins the hold again.
-	clk.add(23 * time.Hour)
-	c.session(t)
-	if s.Status().Locked {
-		t.Fatal("the passphrase did not unlock it")
-	}
-	_, list = c.do("GET", "/api/p/vault", "")
-	al := list["autoLock"].(map[string]any)
-	until, _ := time.Parse(time.RFC3339, al["keyUntil"].(string))
-	if d := until.Sub(clk.now()); al["lockAt"] == nil || d <= 24*time.Hour-time.Second || d > 24*time.Hour {
-		t.Errorf("auto-lock %v", al)
-	}
-	clk.add(2 * time.Hour)
-	p.autoLock(h) // locks it again, idle
-	p.autoLock(h)
-	if !s.Held() {
-		t.Error("the hold did not begin again with the passphrase")
-	}
-	clk.add(22 * time.Hour)
-	p.autoLock(h)
-	if s.Held() {
-		t.Error("the key outlived its hold while locked")
-	}
-}
-
-// vault.passphraseHours bounds the key's hold; a change while the core
-// holds the key shortens the hold but does not lengthen it, since settings
-// are changed without the gate.
-func TestPassphraseHoldSettingDoesNotLengthenIt(t *testing.T) {
-	p, h, s := newTest(t)
-	clk := withClock(t, p)
-	h.st = settings.New("", Settings)
-	set := func(hours float64) {
-		t.Helper()
-		if err := h.st.Set(SettingPassphraseHours, "", hours); err != nil {
-			t.Fatal(err)
-		}
-	}
-	c := newClient(p, h)
-	set(2)
-	c.session(t)
-	set(100)
-	if got := p.passphraseFor(h); got != 2*time.Hour {
-		t.Errorf("a longer hold, set while held: %v", got)
-	}
-	set(1)
-	if got := p.passphraseFor(h); got != time.Hour {
-		t.Errorf("a shorter hold: %v", got)
-	}
-	clk.add(time.Hour)
-	if _, list := c.do("GET", "/api/p/vault", ""); s.Held() || list["status"].(map[string]any)["locked"] != true {
-		t.Fatalf("held past the shorter hold: %v", list["status"])
-	}
-	// The next passphrase takes the setting as it is then.
-	set(100)
-	c.session(t)
-	if got := p.passphraseFor(h); got != 100*time.Hour {
-		t.Errorf("at the next passphrase: %v", got)
 	}
 }
 
@@ -340,11 +291,6 @@ func TestAutoLockSettingDoesNotLengthenAnUnlock(t *testing.T) {
 	if got := p.autoLockAfter(h); got != 5*time.Minute {
 		t.Errorf("a shorter time: %v", got)
 	}
-	// A page's own time, through the gate and with the passphrase again, is
-	// not capped.
-	if code, _ := c.do("POST", "/api/p/vault/autolock", `{"minutes":0,"passphrase":"`+pass+`"}`); code != 200 || p.autoLockAfter(h) != 0 {
-		t.Errorf("a page's never: %d %v", code, p.autoLockAfter(h))
-	}
 	// The next unlock takes the setting as it is then.
 	set(0)
 	c.do("POST", "/api/p/vault/lock", "")
@@ -354,85 +300,49 @@ func TestAutoLockSettingDoesNotLengthenAnUnlock(t *testing.T) {
 	}
 }
 
-// A page sets the auto-lock's time for this unlock (presets, a time of its
-// own, never), behind the gate; the list says when the vault locks; the
-// vault locks at that time; the next unlock follows the setting again.
-func TestAutoLockSetByPage(t *testing.T) {
+// The auto-lock follows the setting only: the list says when the vault
+// locks (to a session), the vault locks then, and no page sets another
+// time for an unlock (POST autolock is gone).
+func TestAutoLockFollowsTheSetting(t *testing.T) {
 	p, h, s := newTest(t)
 	clk := withClock(t, p)
+	withSettings(t, h, map[string]float64{SettingAutoLock: 20})
 	c := newClient(p, h)
 	c.do("POST", "/api/p/vault/lock", "")
 	_, out := c.do("GET", "/api/p/vault", "")
-	if al := out["autoLock"].(map[string]any); al["after"] != 3600.0 || al["custom"] != false || al["lockAt"] != nil {
+	if al := out["autoLock"].(map[string]any); al["after"] != 1200.0 || al["setting"] != 1200.0 || al["lockAt"] != nil || len(al) != 2 {
 		t.Fatalf("locked: %v", al)
-	}
-	if code, _ := c.do("POST", "/api/p/vault/autolock", `{"minutes":5}`); code != 401 {
-		t.Fatalf("without a session: %d", code)
 	}
 	c.session(t)
 	_, out = c.do("GET", "/api/p/vault", "")
 	at, _ := time.Parse(time.RFC3339, out["autoLock"].(map[string]any)["lockAt"].(string))
-	if d := at.Sub(clk.now()); d <= 59*time.Minute || d > time.Hour {
+	if d := at.Sub(clk.now()); d <= 19*time.Minute || d > 20*time.Minute {
 		t.Fatalf("locks in %v", d)
 	}
-	for _, bad := range []string{`{"minutes":-1}`, `{"minutes":1441}`, `{"minutes":1.5}`, `{`} {
-		if code, _ := c.do("POST", "/api/p/vault/autolock", bad); code != 400 {
-			t.Errorf("%s: %d", bad, code)
-		}
+	if code, _ := c.do("POST", "/api/p/vault/autolock", `{"minutes":0,"passphrase":"`+pass+`"}`); code != 404 && code != 405 {
+		t.Errorf("POST autolock: %d", code)
 	}
-	// Never, or a longer time, takes the passphrase again; a shorter one
-	// the session.
-	if code, out := c.do("POST", "/api/p/vault/autolock", `{"minutes":0}`); code != 403 || out["error"] != "passphrase_required" || p.autoLockAfter(h) != time.Hour {
-		t.Fatalf("never with the session alone: %d %v", code, out)
-	}
-	if code, out := c.do("POST", "/api/p/vault/autolock", `{"minutes":120}`); code != 403 || out["error"] != "passphrase_required" {
-		t.Fatalf("longer with the session alone: %d %v", code, out)
-	}
-	if code, out := c.do("POST", "/api/p/vault/autolock", `{"minutes":120,"passphrase":"wrong horse"}`); code != 403 || out["error"] != "wrong_passphrase" {
-		t.Fatalf("longer with a wrong passphrase: %d %v", code, out)
-	}
-	p.tried(true, false)
-	if code, _ := c.do("POST", "/api/p/vault/autolock", `{"minutes":30}`); code != 200 || p.autoLockAfter(h) != 30*time.Minute {
-		t.Fatalf("shorter: %d %v", code, p.autoLockAfter(h))
-	}
-	// Back to the setting is longer than the page's 30 minutes.
-	if code, out := c.do("POST", "/api/p/vault/autolock", `{"minutes":null}`); code != 403 || out["error"] != "passphrase_required" {
-		t.Fatalf("back to a longer setting with the session alone: %d %v", code, out)
-	}
-	code, al := c.do("POST", "/api/p/vault/autolock", `{"minutes":0,"passphrase":"`+pass+`"}`)
-	if code != 200 || al["after"] != 0.0 || al["custom"] != true || al["lockAt"] != nil {
-		t.Fatalf("never: %d %v", code, al)
-	}
-	if code, al = c.do("POST", "/api/p/vault/autolock", `{"minutes":null}`); al["after"] != 3600.0 || al["custom"] != false || al["setting"] != 3600.0 {
-		t.Fatalf("back to the setting: %d %v", code, al)
-	}
-	if h.messageCount("changed") == 0 {
-		t.Error("pages not told")
-	}
-	// A time of its own: the vault locks then, and forgets it.
-	if code, al = c.do("POST", "/api/p/vault/autolock", `{"minutes":1}`); al["after"] != 60.0 || al["custom"] != true {
-		t.Fatalf("a minute: %d %v", code, al)
-	}
-	clk.add(time.Minute - time.Second)
+	clk.add(20*time.Minute - time.Second)
 	p.autoLock(h)
 	if s.Status().Locked {
-		t.Fatal("locked before the page's time")
+		t.Fatal("locked before its time")
 	}
 	clk.add(time.Second)
 	p.autoLock(h)
-	if !s.Status().Locked || !strings.Contains(h.auditLog(), `"reason":"idle"`) || p.autoLockAfter(h) != time.Hour {
-		t.Fatalf("after the lock: locked %v, %v, audit %s", s.Status().Locked, p.autoLockAfter(h), h.auditLog())
+	if !s.Status().Locked {
+		t.Fatal("not locked at its time")
 	}
 }
 
-// The key's hold, sessions and the automatic lock count the computer's
-// sleep: asleep past the hold (the monotonic clock stopped, the wall clock
-// went on), the first request after it wakes finds the key forgotten and
-// its session ended; a wall clock set back lengthens nothing, the
-// monotonic clock having gone on.
+// Sessions and the automatic lock count the computer's sleep: asleep past
+// them (the monotonic clock stopped, the wall clock went on), the first
+// request after it wakes finds its session ended and the timer's look
+// locks the vault; a wall clock set back lengthens nothing, the monotonic
+// clock having gone on.
 func TestTimeLimitsCountSleep(t *testing.T) {
 	p, h, s := newTest(t)
 	clk := withClock(t, p)
+	p.lockAfter = 10 * time.Minute
 	var mu sync.Mutex
 	var mono time.Duration
 	p.mono = func() time.Duration {
@@ -447,36 +357,23 @@ func TestTimeLimitsCountSleep(t *testing.T) {
 		clk.add(d)
 	}
 	c := newClient(p, h)
-	c.origin = testOrigin
 	c.session(t)
-	c.register(t, newAuthenticator(t)) // a lock would keep the key
 	awake(time.Minute)
-	clk.add(24 * time.Hour) // asleep
+	clk.add(SessionIdle + time.Minute) // asleep
 	if code, out := c.do("PUT", "/api/p/vault/vars/X", `{"value":"x"}`); code != 401 || out["error"] != "vault_session" {
-		t.Errorf("the first request after the hold: %d %v", code, out)
-	}
-	if s.Held() || !strings.Contains(h.auditLog(), `"reason":"passphrase"`) {
-		t.Fatalf("the key outlived its hold asleep: held %v, audit %s", s.Held(), h.auditLog())
+		t.Errorf("a session outlived its idle time asleep: %d %v", code, out)
 	}
 	// The timer's look, late after a sleep, judges by the wall clock too.
-	c.session(t)
-	clk.add(25 * time.Hour)
 	p.autoLock(h)
-	if s.Held() {
-		t.Error("the timer kept the key past its hold")
+	if !s.Status().Locked {
+		t.Error("the timer kept the vault unlocked past its time asleep")
 	}
-	// A wall clock set back does not lengthen the hold.
+	// A wall clock set back does not lengthen it.
 	c.session(t)
 	clk.add(-48 * time.Hour)
-	awake(24 * time.Hour)
+	awake(10 * time.Minute)
 	p.autoLock(h)
-	if s.Held() {
-		t.Error("a wall clock set back lengthened the hold")
-	}
-	// Nor does sleep lengthen a session's idle time.
-	c.session(t)
-	clk.add(SessionIdle + time.Minute)
-	if code, _ := c.do("PUT", "/api/p/vault/vars/X", `{"value":"x"}`); code != 401 {
-		t.Errorf("a session outlived its idle time asleep: %d", code)
+	if !s.Status().Locked {
+		t.Error("a wall clock set back lengthened the auto-lock")
 	}
 }

@@ -1,9 +1,13 @@
 package server
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -66,6 +70,60 @@ func (s *Server) desktopProof() func(msg, mac []byte) bool {
 		h := hmac.New(sha256.New, []byte(key))
 		h.Write(msg)
 		return hmac.Equal(h.Sum(nil), mac)
+	}
+}
+
+// relayInfo is the HKDF info of the key that opens the desktop shell's
+// relays.
+const relayInfo = "vault-relay v1"
+
+// errRelay is a relay that does not open.
+var errRelay = errors.New("the relay does not open")
+
+// relayKey is the key of the desktop shell's relays: HKDF-SHA256 of the
+// launch's key (the verify key's text as the hello carries it), no salt,
+// info relayInfo, 32 bytes. The shell derives the same key.
+func relayKey(verifyKey string) ([]byte, error) {
+	return hkdf.Key(sha256.New, []byte(verifyKey), nil, relayInfo, 32)
+}
+
+// openRelay opens relay (iv ‖ ciphertext ‖ tag, AES-256-GCM) with key and
+// ad as additional data.
+func openRelay(key, ad, relay []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, errRelay
+	}
+	g, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, errRelay
+	}
+	if len(relay) < g.NonceSize()+g.Overhead() {
+		return nil, errRelay
+	}
+	plain, err := g.Open(nil, relay[:g.NonceSize()], relay[g.NonceSize():], ad)
+	if err != nil {
+		return nil, errRelay
+	}
+	return plain, nil
+}
+
+// desktopRelay opens what the desktop app's shell sealed for the core
+// (plugin.Call): AES-256-GCM under relayKey, bound by its additional data
+// to what it is for. Only the shell's main process has the key, so a page
+// that carries a relay neither reads nor makes one. Nil without a key.
+func (s *Server) desktopRelay() func(ad, relay []byte) ([]byte, error) {
+	verifyKey := s.opts.DesktopVerifyKey
+	if verifyKey == "" {
+		return nil
+	}
+	return func(ad, relay []byte) ([]byte, error) {
+		key, err := relayKey(verifyKey)
+		if err != nil {
+			return nil, errRelay
+		}
+		defer clear(key)
+		return openRelay(key, ad, relay)
 	}
 }
 

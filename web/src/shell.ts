@@ -73,12 +73,39 @@ export interface DesktopBrowser {
   onOpen(fn: (url: string) => void): () => void;
 }
 
+/** What the shell answers for a locked vault's unlock: the core's unlock
+ * entry it used and the relay, sealed for the core with the key of this
+ * launch, which the page only passes on. */
+export interface DesktopUnlock {
+  id: string;
+  relay: string;
+}
+
+/** What the shell answers when an authenticator is added: the proof's MAC
+ * (hex) and the relay that carries this install's unlock key to the core. */
+export interface DesktopEnroll {
+  mac: string;
+  relay: string;
+}
+
 export interface DesktopVerifyUser {
   /** Which prompt the app has, if any. */
   available(): Promise<'touchid' | 'hello' | null>;
+  /** Whether this install can keep a key that unlocks the vault (the
+   * Secure Enclave with Touch ID, a Windows Hello key). */
+  canUnlock(): Promise<boolean>;
   /** Prompts the user for the nonce's purpose; the proof's MAC (hex), or
    * null when the user did not confirm. */
   prove(nonce: string): Promise<string | null>;
+  /** For a `session` nonce of a locked vault: prompts, and answers what the
+   * page sends the core to unlock (POST session {unlock}); 'none', without
+   * a prompt, when this install has no unlock entry (its keys were lost, or
+   * the entries are other installs'); null when the user did not confirm. */
+  unlock(nonce: string): Promise<DesktopUnlock | 'none' | null>;
+  /** For a `register` nonce: prompts, makes this install's unlock key, and
+   * answers the MAC and the relay; null when the user did not confirm or
+   * the key could not be made. */
+  enroll(nonce: string): Promise<DesktopEnroll | null>;
 }
 
 /** What the shell does for Full Disk Access; nothing is passed. */

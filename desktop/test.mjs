@@ -9,6 +9,7 @@ const dir = await mkdtemp(join(tmpdir(), 'desktop-tests-'));
 const tests = [
   'closeGuard',
   'core',
+  'enclave',
   'folders',
   'follow',
   'menu',
@@ -16,7 +17,9 @@ const tests = [
   'policy',
   'preload',
   'privacy',
+  'relay',
   'titlebar',
+  'unlockStore',
   'verify',
   'windowsHello',
 ];

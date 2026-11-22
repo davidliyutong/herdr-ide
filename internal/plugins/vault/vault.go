@@ -11,8 +11,9 @@
 // passphrase); and the UI's approvals, reveals and changes need a vault
 // session, which a page gets only by giving the vault's passphrase or an
 // authenticator's proof (proof.go), so a program that calls the core's API
-// on the core host cannot approve its own request or read a value. The
-// core holds the key for a while after the passphrase (autolock.go).
+// on the core host cannot approve its own request or read a value. A lock
+// forgets the key (autolock.go); the passphrase, or an authenticator that
+// keeps the key wrapped (proof.go), unlocks the vault again.
 // docs/features/30-variable-vault.md has the design.
 package vault
 
@@ -139,34 +140,27 @@ type Plugin struct {
 	// noisyEvery and changedEvery replace noisyAuditEvery and changedEvery
 	// (tests).
 	noisyEvery, changedEvery time.Duration
-	// keyStep runs inside keyMu before a passphrase check opens a session
-	// and after a new passphrase is set, before its session (tests: a lock
-	// asked for there).
+	// keyStep runs inside keyMu before a passphrase check or an unlock by
+	// an authenticator opens a session, and after a new passphrase is set,
+	// before its session (tests: a lock asked for there).
 	keyStep func()
+	// addStep runs inside keyMu between an added authenticator's guard
+	// write and its unlock entry (tests: a lock asked for there).
+	addStep func()
 	// lastUse is the vault's last use (touch), lockTimer the auto-lock's
 	// timer while the vault is unlocked; lockAfter and lockCheck replace
 	// the setting and lockCheckEvery (tests).
 	lastUse              stamp
 	lockTimer            *time.Timer
 	lockAfter, lockCheck time.Duration
-	// lockFor replaces vault.autoLock until the vault locks, once a page
-	// set the countdown (lockForSet; 0: never).
-	lockFor    time.Duration
-	lockForSet bool
-	// lockCap is vault.autoLock's time when the vault was unlocked
-	// (lockCapSet; 0: never): the setting, which programs change without
+	// lockCap is the most the current unlock lasts without use
+	// (lockCapSet; 0: never): vault.autoLock's time when the vault was
+	// unlocked, for an authenticator's unlock at most the time sealed with
+	// the passphrase (capLock). The setting, which programs change without
 	// the gate, shortens the current unlock's time but does not lengthen
 	// it.
 	lockCap    time.Duration
 	lockCapSet bool
-	// keyAt is when the passphrase was last given while the core holds the
-	// key, which it holds for vault.passphraseHours from then, at most for
-	// keyCap (the setting's time then: keyCapSet); keyHold replaces the
-	// setting (tests). See autolock.go.
-	keyAt     stamp
-	keyCap    time.Duration
-	keyCapSet bool
-	keyHold   time.Duration
 }
 
 type session struct {
@@ -265,18 +259,8 @@ func (p *Plugin) accessLog(h plugin.Host) *accessLog {
 	return p.alog
 }
 
-// open returns the store, opened at the first use, having forgotten its
-// key once the key's hold is over (expire): every route and request starts
-// here, so none uses a key the core should no longer hold.
+// open returns the store, opened at the first use.
 func (p *Plugin) open(h plugin.Host) (*vaultstore.Store, error) {
-	s, err := p.openStore(h)
-	if err == nil {
-		p.expire(h, s)
-	}
-	return s, err
-}
-
-func (p *Plugin) openStore(h plugin.Host) (*vaultstore.Store, error) {
 	path := p.vaultPath(h)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -309,7 +293,6 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "DELETE", Path: "session", Mutating: true, Audit: "session_end", Handler: p.handleEndSession},
 		{Method: "POST", Path: "passphrase", Mutating: true, Audit: "passphrase", Handler: p.handlePassphrase},
 		{Method: "POST", Path: "lock", Mutating: true, Audit: "lock", Handler: p.handleLock},
-		{Method: "POST", Path: "autolock", Mutating: true, Audit: "autolock", Handler: p.gatedPassphrase(p.handleAutoLock)},
 		{Method: "POST", Path: "proof", Mutating: true, Audit: "proof", Handler: p.handleProof},
 		{Method: "GET", Path: "proof/{nonce}", Handler: p.handleProofPurpose},
 		{Method: "POST", Path: "authenticators", Mutating: true, Audit: "authenticator_add", Handler: p.gatedPassphrase(p.handleAddAuthenticator)},
@@ -319,7 +302,7 @@ func (p *Plugin) Routes() []plugin.Route {
 		{Method: "DELETE", Path: "exempt/{id}", Mutating: true, Audit: "exempt_delete", Handler: p.gatedPassphrase(p.handleDeleteExempt)},
 		{Method: "GET", Path: "requests", Handler: p.handleRequests},
 		{Method: "POST", Path: "requests/{id}", Mutating: true, Audit: "answer", Handler: p.handleAnswer},
-		{Method: "GET", Path: "log", Handler: p.handleLog},
+		{Method: "GET", Path: "log", Handler: p.gatedRead(p.handleLog)},
 	}
 }
 
@@ -343,12 +326,17 @@ func fail(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case "exists":
 		status = http.StatusConflict
-	case "vault_locked", "no_passphrase", "has_passphrase":
+	case "vault_locked", "no_passphrase", "has_passphrase", "unlock_stale":
 		status = http.StatusConflict
-	case "wrong_passphrase":
+	case "wrong_passphrase", "passphrase_due":
 		status = http.StatusForbidden
+	case "vault_proof":
+		status = http.StatusUnauthorized
 	case "too_large":
 		status = http.StatusRequestEntityTooLarge
+	case "memory":
+		// The core's limit of locked memory is too small for the key.
+		status = http.StatusServiceUnavailable
 	case "failed":
 		status = http.StatusInternalServerError
 	}
@@ -371,18 +359,19 @@ func (p *Plugin) handleList(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 	open, byProof := p.sessionKind(c.Host, r, false)
 	autoLock := p.autoLockState(c.Host, s)
 	if !open {
-		// When the vault was last used and when the key goes are a
-		// session's to see.
+		// When the vault was last used is a session's to see.
 		delete(autoLock, "lockAt")
-		delete(autoLock, "keyUntil")
 	}
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{
 		"status": st, "variables": s.List(), "session": open, "sessionProof": open && byProof, "idle": idle.Seconds(),
 		"autoLock": autoLock,
 		// What guards the vault beside the passphrase (proof.go): all of it
 		// with a session, without one what offering biometrics needs; none
-		// while the core does not hold the key.
+		// while the vault is locked.
 		"guard": p.guardState(c, s, open),
+		// How this page may unlock the vault without the passphrase, and
+		// until when (a hint), for a locked vault's unlock card.
+		"unlock": p.unlockState(c, s),
 	})
 }
 
@@ -396,8 +385,8 @@ func (p *Plugin) clock() time.Time {
 // A stamp is a moment by two clocks: the wall clock (without Go's
 // monotonic reading), which goes on while the computer sleeps, and the
 // monotonic clock, which macOS and Linux stop while it sleeps but which is
-// never set back. The vault's time limits (the key's hold, the automatic
-// lock, sessions, nonces) count by the one that says longer.
+// never set back. The vault's time limits (the automatic lock, sessions,
+// nonces) count by the one that says longer.
 type stamp struct {
 	wall time.Time
 	mono time.Duration
@@ -459,12 +448,9 @@ func (p *Plugin) sessionKind(h plugin.Host, r *http.Request, use bool) (open, by
 }
 
 // gated refuses a request without an open session (401 vault_session):
-// the gate before the UI's changes and reveals. The key's hold is looked at
-// first (open), so a session its end ended does not pass, also on the first
-// request after the computer slept past it.
+// the gate before the UI's changes and reveals.
 func (p *Plugin) gated(h func(*plugin.Call, http.ResponseWriter, *http.Request)) func(*plugin.Call, http.ResponseWriter, *http.Request) {
 	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-		p.open(c.Host)
 		if !p.sessionOf(c.Host, r, true) {
 			refuseSession(c, w, r)
 			return
@@ -473,13 +459,27 @@ func (p *Plugin) gated(h func(*plugin.Call, http.ResponseWriter, *http.Request))
 	}
 }
 
+// gatedRead is gated for what only shows the vault's records (the access
+// log, which tells what was read, by whom, and which apps are exempt): an
+// open session, which reading does not count as a use, so that a page
+// that shows the log does not keep its session open.
+func (p *Plugin) gatedRead(h func(*plugin.Call, http.ResponseWriter, *http.Request)) func(*plugin.Call, http.ResponseWriter, *http.Request) {
+	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
+		if !p.sessionOf(c.Host, r, false) {
+			refuseSession(c, w, r)
+			return
+		}
+		h(c, w, r)
+	}
+}
+
 // gatedPassphrase is gated for what guards the vault itself (its
-// authenticators, the rule to verify each Allow, the automatic lock) and
-// for values in bulk (imports, exports): the session must be one the
-// passphrase opened (401 vault_passphrase for one a proof opened).
+// authenticators, the rule to verify each Allow, the exempt apps) and for
+// values in bulk (imports, exports): the session must be one the
+// passphrase opened (401 vault_passphrase for one an authenticator
+// opened).
 func (p *Plugin) gatedPassphrase(h func(*plugin.Call, http.ResponseWriter, *http.Request)) func(*plugin.Call, http.ResponseWriter, *http.Request) {
 	return func(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-		p.open(c.Host) // the key's hold first, as gated
 		if open, byProof := p.sessionKind(c.Host, r, true); !open || byProof {
 			refusePassphraseSession(c, w, r, open)
 			return
@@ -547,8 +547,8 @@ func (p *Plugin) newSession(h plugin.Host, epoch uint64, byProof bool) string {
 	return tok
 }
 
-// endSessions ends every session (the vault was locked, the passphrase
-// changed) and returns the new epoch.
+// endSessions ends every session and every nonce (the vault was locked,
+// the passphrase changed) and returns the new epoch.
 func (p *Plugin) endSessions() uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -734,9 +734,11 @@ func (p *Plugin) handleReveal(c *plugin.Call, w http.ResponseWriter, r *http.Req
 	plugin.WriteJSON(w, http.StatusOK, map[string]string{"value": v})
 }
 
-// handleSession opens a vault session for the passphrase ({passphrase}),
-// unlocking the vault: the page's proof that the user is there. Wrong
-// passphrases in a row are slowed down (429 wait).
+// handleSession opens a vault session: with the passphrase
+// ({passphrase}), unlocking the vault; with an authenticator's unlock
+// ({unlock}, unlock.go), unlocking a locked vault; with an authenticator's
+// proof ({proof}, proof.go), of an unlocked vault. Wrong passphrases and
+// unlocks that fail in a row are slowed down alike (429 wait).
 func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	s, err := p.open(c.Host)
 	if err != nil {
@@ -744,8 +746,9 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 		return
 	}
 	var body struct {
-		Passphrase string     `json:"passphrase"`
-		Proof      *proofBody `json:"proof"`
+		Passphrase string      `json:"passphrase"`
+		Proof      *proofBody  `json:"proof"`
+		Unlock     *unlockBody `json:"unlock"`
 	}
 	if err := plugin.ReadJSON(r, 64<<10, &body); err != nil {
 		plugin.WriteError(w, err)
@@ -753,6 +756,10 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 	}
 	if st := s.Status(); st.Mode != vaultstore.ModePassphrase {
 		fail(w, vaultstore.ErrNoPassphrase)
+		return
+	}
+	if body.Unlock != nil {
+		p.sessionByUnlock(c, w, r, s, body.Unlock)
 		return
 	}
 	if body.Proof != nil {
@@ -770,17 +777,18 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 		p.keyStep()
 	}
 	wasLocked := s.Status().Locked
-	err = s.Unlock(body.Passphrase)
+	// The window the passphrase opens seals the auto-lock time this unlock
+	// takes: the setting's for a locked vault, else the current unlock's.
+	autoLock := p.autoLockAfter(c.Host)
+	if wasLocked {
+		autoLock = p.autoLockSetting(c.Host)
+	}
+	err = s.Unlock(body.Passphrase, p.window(c.Host, autoLock))
 	p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
-	tok := ""
 	if err == nil && wasLocked {
-		p.capLock(c.Host)
+		p.unlocked(c.Host, 0)
 	}
-	if err == nil {
-		// The passphrase given: the core holds the key for the setting's
-		// time from now.
-		p.keyFrom(c.Host)
-	}
+	tok := ""
 	if err == nil {
 		if tok = p.newSession(c.Host, epoch, false); tok == "" {
 			// The sessions ended while the check ran, which keyMu leaves
@@ -800,27 +808,36 @@ func (p *Plugin) handleSession(c *plugin.Call, w http.ResponseWriter, r *http.Re
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": idle.Seconds(), "status": s.Status()})
 }
 
-// sessionByProof opens a session for an authenticator's proof made for it
-// (proof.go). A vault locked while the core holds its key (suspended) is
-// unlocked by it within the key's hold; one whose key the core forgot is
-// refused, since a proof holds no key.
+// unlocked is what follows an unlock of a locked vault, with keyMu held:
+// the auto-lock's cap of this unlock (capLock; sealed is the time sealed
+// with the passphrase's window, 0 for the passphrase itself), and the end
+// of the nonces issued while the vault was locked, which are good for an
+// unlock only.
+func (p *Plugin) unlocked(h plugin.Host, sealed time.Duration) {
+	p.capLock(h, sealed)
+	p.mu.Lock()
+	for k, pp := range p.proofs {
+		if pp.locked {
+			delete(p.proofs, k)
+		}
+	}
+	p.mu.Unlock()
+}
+
+// sessionByProof opens a session of an unlocked vault for an
+// authenticator's proof made for it (proof.go). A proof holds no key: a
+// locked vault is unlocked by an authenticator's unlock entry
+// (sessionByUnlock) or the passphrase.
 func (p *Plugin) sessionByProof(c *plugin.Call, w http.ResponseWriter, r *http.Request, s *vaultstore.Store, pb *proofBody) {
 	want := purpose{For: ForSession}
-	// As with the passphrase, the check, the unlock and the session it
-	// opens are one step for a lock.
+	// As with the passphrase, the check and the session it opens are one
+	// step for a lock.
 	p.keyMu.Lock()
 	epoch := p.currentEpoch()
 	var kind string
 	err := error(vaultstore.ErrLocked)
-	// The hold may have ended since the last look (open): a key the core
-	// should have forgotten unlocks nothing.
-	if s.Held() && p.keyLeft(c.Host) > 0 {
+	if !s.Status().Locked {
 		kind, err = p.checkProof(c, r, s, pb, want)
-	}
-	resumed := false
-	if err == nil && s.Status().Locked {
-		resumed = true
-		err = s.Resume()
 	}
 	tok := ""
 	if err == nil {
@@ -834,9 +851,6 @@ func (p *Plugin) sessionByProof(c *plugin.Call, w http.ResponseWriter, r *http.R
 		return
 	}
 	c.Host.Audit(r, "vault.proved", map[string]any{"ok": true, "for": want.For, "kind": kind})
-	if resumed {
-		c.Host.Audit(r, "vault.unlocked", map[string]any{"ok": true, "kind": kind})
-	}
 	p.touch(c.Host)
 	changed(c.Host)
 	idle, _ := p.sessionLimits(c.Host)
@@ -877,11 +891,13 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 	// The new key, the end of the old passphrase's sessions and the new
 	// session come together: a lock waits for them, and so ends it too.
 	p.keyMu.Lock()
+	before := s.UnlockEntries()
+	win := p.window(c.Host, p.autoLockSetting(c.Host))
 	if change {
-		err = s.ChangePassphrase(*body.Old, body.Passphrase)
+		err = s.ChangePassphrase(*body.Old, body.Passphrase, win)
 		p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	} else {
-		err = s.SetPassphrase(body.Passphrase)
+		err = s.SetPassphrase(body.Passphrase, win)
 	}
 	tok := ""
 	if err == nil {
@@ -890,8 +906,7 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 		}
 		tok = p.newSession(c.Host, p.endSessions(), false)
 		// A new key, set with the passphrase, unlocks as an unlock does.
-		p.capLock(c.Host)
-		p.keyFrom(c.Host)
+		p.unlocked(c.Host, 0)
 	}
 	p.keyMu.Unlock()
 	c.Host.Audit(r, "vault.passphrase_set", map[string]any{"ok": err == nil, "change": change})
@@ -899,16 +914,18 @@ func (p *Plugin) handlePassphrase(c *plugin.Call, w http.ResponseWriter, r *http
 		fail(w, err)
 		return
 	}
+	// A new key ends every entry that wraps the old one.
+	auditRemovedSince(c, r, s, before, removedStale)
 	p.touch(c.Host)
 	changed(c.Host)
 	idle, _ := p.sessionLimits(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"session": tok, "idle": idle.Seconds(), "status": s.Status()})
 }
 
-// handleLock locks the vault and ends every session: it suspends a vault
-// with an authenticator, whose key the core keeps for a proof to unlock it
-// within the key's hold, and forgets the key of any other, or with
-// {"forget": true}, after which only the passphrase unlocks it.
+// handleLock locks the vault, which forgets its key, and ends every session
+// and nonce. With {"forget": true} it also ends the passphrase's window,
+// also while the vault is locked: no authenticator unlocks the vault until
+// the passphrase is given again.
 func (p *Plugin) handleLock(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	s, err := p.open(c.Host)
 	if err != nil {
@@ -924,18 +941,21 @@ func (p *Plugin) handleLock(c *plugin.Call, w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
+	if body.Forget {
+		c.AuditField("forget", true)
+	}
 	// After a check that runs, never between its key and its session.
 	p.keyMu.Lock()
-	held := s.Held()
-	forgot := p.lockStore(s, body.Forget)
+	p.lockStore(s)
+	if body.Forget {
+		err = s.ForgetPassphrase()
+	}
 	p.keyMu.Unlock()
-	if held {
-		c.AuditField("keyHeld", !forgot)
-	}
-	if held && !forgot {
-		p.armAutoLock(c.Host, p.keyLeft(c.Host)) // the hold's end is still due
-	}
 	changed(c.Host)
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	plugin.WriteJSON(w, http.StatusOK, s.Status())
 }
 

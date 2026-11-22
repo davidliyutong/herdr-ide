@@ -6,6 +6,7 @@ import {
   Menu,
   nativeTheme,
   powerMonitor,
+  safeStorage,
   session,
   shell,
   systemPreferences,
@@ -36,6 +37,7 @@ import {
   ENV_PREFIX,
   verifyKey,
 } from './core';
+import { enclaveFor, helperPath, helperRunner, runBounded } from './enclave';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
@@ -55,8 +57,9 @@ import {
 } from './policy';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
 import { macTrafficLightPosition, windowFrameOptions } from './titlebar';
+import { unlockStore } from './unlockStore';
 import { verifier, type Verifier } from './verify';
-import { helloFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
+import { helloFor, helloKeysFor, HELLO_TIMEOUT_MS, POWERSHELL_ARGS, powershellPath, type RunPowerShell } from './windowsHello';
 
 const platform = process.platform as Platform;
 app.setName(APP_NAME);
@@ -354,35 +357,16 @@ ipcMain.handle(channels.metrics, (event) =>
 let verify: Verifier | undefined;
 ipcMain.handle(channels.verifyAvailable, async (event) => (fromMainPage(event) && verify ? await verify.available() : null));
 ipcMain.handle(channels.verifyProve, async (event, nonce: unknown) => (fromMainPage(event) && verify ? await verify.prove(nonce) : null));
+ipcMain.handle(channels.verifyCanUnlock, async (event) => (fromMainPage(event) && verify ? await verify.canUnlock() : false));
+ipcMain.handle(channels.verifyUnlock, async (event, nonce: unknown) => (fromMainPage(event) && verify ? await verify.unlock(nonce) : null));
+ipcMain.handle(channels.verifyEnroll, async (event, nonce: unknown) => (fromMainPage(event) && verify ? await verify.enroll(nonce) : null));
 
 /** Runs PowerShell with the script on stdin (Windows Hello). */
 const runPowerShell: RunPowerShell = (script, env) =>
-  new Promise((resolve, reject) => {
-    const child = spawn(powershellPath(process.env.SystemRoot), POWERSHELL_ARGS, {
-      env: { ...process.env, ...env },
-      stdio: 'pipe',
-      shell: false,
-      windowsHide: true,
-    });
-    let out = '';
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error('timeout'));
-    }, HELLO_TIMEOUT_MS);
-    child.stdout.on('data', (data: Buffer) => {
-      out = (out + data.toString()).slice(-4096);
-    });
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve(out);
-      else reject(new Error(`exit ${code}`));
-    });
-    child.stdin.on('error', () => {});
-    child.stdin.end(script);
+  runBounded(powershellPath(process.env.SystemRoot), POWERSHELL_ARGS, script, {
+    env: { ...process.env, ...env },
+    timeoutMs: HELLO_TIMEOUT_MS,
+    maxOutput: 64 * 1024,
   });
 
 /** What the core says a nonce of the vault's proofs is for. */
@@ -621,6 +605,14 @@ if (!app.requestSingleInstanceLock()) {
         hello: helloFor(runPowerShell),
         purpose: proofPurpose,
         t,
+        // The vault's unlock key: the Secure Enclave helper inside the app
+        // on macOS, Hello keys on Windows, and this install's secret in the
+        // user data.
+        ...(platform === 'darwin' && {
+          enclave: enclaveFor(helperRunner(helperPath(app.isPackaged ? process.resourcesPath : undefined, app.getAppPath()))),
+        }),
+        ...(platform === 'win32' && { helloKeys: helloKeysFor(runPowerShell) }),
+        unlockStore: unlockStore(app.getPath('userData'), safeStorage),
       });
       const ses = session.defaultSession;
       await ses.cookies.set(desktopCookie(origin, token));

@@ -68,6 +68,13 @@ type Call struct {
 	// a prompt of the system (Touch ID, Windows Hello). Nil in a core the
 	// shell did not start or gave no key.
 	DesktopProof func(msg, mac []byte) bool
+	// DesktopRelay opens what the desktop app's shell sealed for the core
+	// with the key of its launch: relay is iv (12 bytes) ‖ AES-256-GCM
+	// ciphertext ‖ tag (16 bytes), ad its additional data; it returns the
+	// plaintext, or an error when it does not open. The page that carries a
+	// relay cannot read it. Nil in a core the shell did not start or gave
+	// no key.
+	DesktopRelay func(ad, relay []byte) ([]byte, error)
 
 	audit map[string]any
 }

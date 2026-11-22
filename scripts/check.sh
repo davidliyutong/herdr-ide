@@ -89,13 +89,15 @@ scripts/fetch-ghostty-vt.sh --check || fail=1
 scripts/build-gpupick.sh --check || fail=1
 
 echo "==> shared test vectors"
-# The web UI's tests run every vector: they name the file
-# (<dir>/<name>.json), the directory's files (<dir>/*.json) or the directory
-# itself ("…/testdata/<dir>"), so a new vector file cannot go unrun.
+# The web UI's tests, or the desktop shell's for vectors the core shares
+# with the shell alone (the vault's unlock keys), run every vector: they
+# name the file (<dir>/<name>.json), the directory's files (<dir>/*.json)
+# or the directory itself ("…/testdata/<dir>"), so a new vector file
+# cannot go unrun.
 for f in design/testdata/*/*.json; do
   rel=${f#design/testdata/}
   dir=${rel%%/*}
-  grep -rqF -e "$rel" -e "$dir/*.json" -e "testdata/$dir\"" web/src/__tests__ || { echo "$f is run by no test in web/src/__tests__"; fail=1; }
+  grep -rqF -e "$rel" -e "$dir/*.json" -e "testdata/$dir\"" web/src/__tests__ desktop/src || { echo "$f is run by no test in web/src/__tests__ or desktop/src"; fail=1; }
 done
 
 exit $fail

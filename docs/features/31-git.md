@@ -477,10 +477,9 @@ entries git does not list (the explorer's listing of that folder gives
 them, `files/tree.ts`); a change marks its folder whatever is ignored in
 it. What is ignored comes from the innermost repository a directory is in
 (a repository inside an ignored folder rules its own files). The git
-directory (`.git` at a top level, and everything in it) is muted too: the
-explorer hides it as VS Code's does (`files.exclude`), and shown, it is
-the repository's storage, not its files (git never lists it as ignored,
-so VS Code would give it no color). Besides the
+directory (`.git` at a top level, and everything in it) has no color, as
+in VS Code: git never lists it as ignored, and the explorer hides it
+(`files.exclude`). Besides the
 panel's and the panes' repositories, the plugin follows those of the
 directories the explorer shows while it is open (its root and the expanded
 ones; [28](28-file-explorer.md)): the repository of a directory is asked

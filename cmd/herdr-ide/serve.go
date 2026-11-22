@@ -33,6 +33,7 @@ import (
 	"herdr-ide/internal/server"
 	"herdr-ide/internal/settings"
 	"herdr-ide/internal/transport"
+	"herdr-ide/internal/vault"
 	"herdr-ide/web"
 )
 
@@ -395,6 +396,8 @@ func serve(args []string, logger *log.Logger) {
 	case <-time.After(15 * time.Second):
 		logger.Printf("machines did not disconnect within 15s")
 	}
+	// Last: the vault's key and memguard's own leave the process's memory.
+	vault.Purge()
 }
 
 func extraSpecs(targets []string) []machines.Spec {

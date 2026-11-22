@@ -1,0 +1,43 @@
+{
+  "about": "The desktop shell's relay to the core: key = HKDF-SHA256(ikm = UTF-8 bytes of the verify_key hex string, salt = empty, info = \"vault-relay v1\", 32 bytes); relay = base64url(no padding) of iv(12) ‖ AES-256-GCM ciphertext ‖ tag(16), additional data = \"vault-relay\\n\" + purpose + \"\\n\" + nonce + \"\\n\" + entry id (\"\" for register); the plaintext is JSON. Implementations seal with a random iv; the vectors fix it.",
+  "verifyKey": "01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3da",
+  "relayKey": "fFNvpYs-IY5g8BNcafH8XDofRGqyqy-Ajk0vhGSLQVM",
+  "relays": [
+    {
+      "purpose": "session",
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "id": "u1",
+      "ad": "vault-relay\nsession\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nu1",
+      "iv": "CRAXHiUsMzpBSE9W",
+      "plaintext": "{\"z\":\"CRAXHiUsMzpBSE9WXWRrcnmAh46VnKOqsbi_xs3U2-I\",\"shellSecret\":\"KC82PURLUllgZ251fIOKkZifpq20u8LJ0Nfe5ezz-gE\"}",
+      "relay": "CRAXHiUsMzpBSE9WAVP-dTWQMliL3S-ok2eKgJZXxQYQ6f_j5meyqcWqm4DPzBR_1U37KS6lY9Fnvf-kM_LdkkSreUe011UtdKv40H5xJPvFmRNOo_BVgCblU5WRU7dLh3cSiZUPUJ5H5mSKjh9pQZ04POiHgNwXDqKbYZEQR8YUhoQQJkGQ_e8WPg"
+    },
+    {
+      "purpose": "session",
+      "nonce": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "id": "u2",
+      "ad": "vault-relay\nsession\nBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\nu2",
+      "iv": "CRAXHiUsMzpBSE9W",
+      "plaintext": "{\"signature\":\"AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4_wYNFBsiKTA3PkVMU1phaG92fYSLkpmgp661vMPK0djf5u30-wIJEBceJSwzOkFIT1ZdZGtyeYCHjpWco6qxuL_GzdTb4unw9_4FDBMaISgvNj1ES1JZYGdudXyDipGYn6attLvCydDX3uXs8_oBCA8WHSQrMjlAR05VXGNqcXh_ho2Um6KpsLe-xczT2uHo7_b9BAsSGSAnLjU8Q0pRWF9mbXR7gomQl56lrLO6wcjP1t3k6_L5AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK-2vcTL0tng5-71_A\",\"shellSecret\":\"KC82PURLUllgZ251fIOKkZifpq20u8LJ0Nfe5ezz-gE\"}",
+      "relay": "CRAXHiUsMzpBSE9WAVP3PmjcEH6_9wLj_DaGjYlH0QER0-vg5SKArMS6pYXM9hh81ArvEi6qd9Jmg7y-MeWG_VGMLU-i7gY4TvrThR0dKfqOwghPsI9QhxzPXJbUCrBF8Q4fiq8lS58YsWGE9GQvQqsWOemXnMQFeLDLS5s0G_hn9nFsoR7YiZ7nCq_f6OhNqqzjGuS_Hl9RyW5SVvuNkUgX_YPlo7yc90FTNLgeaTuXS8PDKv-e-JMdoEZypy1n8aAJdJlodikhvzPcCQXt_pR8gcI_ojFQdB3eFw_Duthuq1fJ_CCW-Am7rCHrTyrCIJ2a5XoBBmb-Tsc-Ank9aoinYtkG2hiU4T9Cq9h4UjqG-WDUHZINxowJDoa1dlHDnr6178_pLZh_CZxS17PRfpfQIBMdtfsnnYrTzvHilTFsD8FQ3lKUmJpYM0dq7BqMKYhxs0W-1-rm1uLxGqAfWQnuFWEKn8EfEWvxyRkMFbnmtGN_pW83TgG1r-uk8ttIo7kzfU5dNi2qOMqvUoRzmx3ldDKis9dgJcccNKlP3gGQfpa0hQUuaYqqaCTJy32qurLiv5e_2i1q_-J9wAU"
+    },
+    {
+      "purpose": "session",
+      "nonce": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "id": "u1",
+      "ad": "vault-relay\nsession\nCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\nu1",
+      "iv": "CRAXHiUsMzpBSE9W",
+      "plaintext": "{\"invalidated\":true}",
+      "relay": "CRAXHiUsMzpBSE9WAVPtOXnTHWOu5BOkojb9jpRg8z5co7QMIoPHaYe6g26jwfvB"
+    },
+    {
+      "purpose": "register",
+      "nonce": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "id": "",
+      "ad": "vault-relay\nregister\nDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD\n",
+      "iv": "CA8WHSQrMjlAR05V",
+      "plaintext": "{\"kind\":\"enclave\",\"install\":\"install-0123456789ab\",\"sePub\":\"BAUMExohKC82PURLUllgZ251fIOKkZifpq20u8LJ0Nfe5ezz-gEIDxYdJCsyOUBHTlVcY2pxeH-GjZSboqmwt74\",\"blob\":\"CxIZICcuNTxDSlFYX2ZtdHuCiZCXnqWss7rByM_W3eTr8vkABw4VHCMqMTg_Rk1UW2JpcHd-hYyTmqGor7a9xMvS2eDn7vX8AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4_wYNFBsiKTA3PkVMU1phaG92fYSLkpmgp661vMPK0djf5u30-wIJEBceJSwzOkFIT1ZdZGtyeYCHjpWco6qxuL_GzdTb4unw9_4FDBMaISgvNj1ES1JZYGdudXyDipGYn6attLvCydDX3uXs8_oBCA8WHSQrMjlAR05VXGNqcXh_ho2Um6KpsLe-xczT2uHo7_b9BAsSGSAnLjU8Q0pRWF9mbXR7gomQl56lrLO6wcjP1t3k6_L5AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK-2vcTL0tng5-71_AMKERgfJi00O0JJUFdeZWxzeoGIj5adpKuyucDHztXc4-rx-P8GDRQbIikwNz5FTFNaYWhvdn2Ei5KZoKeutbzDytHY3-bt9PsCCRAXHiUsMzpBSE9WXWRrcnmAh46VnKOqsbi_xs3U2-Lp8Pf-BQwTGiEoLzY9REtSWWBnbnV8g4qRmJ-mrbS7wsnQ197l7PP6AQgPFh0kKzI5QEdOVVxjanF4f4aNlJuiqbC3vsXM09rh6O_2_QQLEhkgJy41PENKUVhfZm10e4KJkJeepayzusHIz9bd5Ovy-QAHDhUcIyoxOD9GTVRbYmlwd36FjJM\",\"shellSecret\":\"KC82PURLUllgZ251fIOKkZifpq20u8LJ0Nfe5ezz-gE\"}",
+      "relay": "CA8WHSQrMjlAR05VWiAxxYDLUNs9X_Mnwx7vZiqCVAoQjP1I4KQfnvyBNnGM04QeE1xdC0QsOJ4iKCuvPsBH8kaDuiaXeR35eyx1eOqCt83H4BWZxwHj8TC4LUcMJ_3O694tykehGSOG3rd3WW5pkulGzpKE0s4kNup1_xUn8SUtuFvZ1K1_YHBioSkCaLT9_s_DbxOfyDfwPk6b7MKeZEbhviPSnDbY_T-HPSrsNT8YJybWvB2yc1dLDxw3ZMZzhcZnIdxp9g4McSSrzadaX8rOBGNt8EbR9oEjv13QRzsTTR7wcZ1hIcaVq_0qamPenZTqHqjjsTzZxL2rS8t8AuaiOUZ2rwu5rj0ENp87werAKxX4_7ggsEke1joFuVy-EfO_PQKi9ao9Xay3301be9yl4igQ5p2yYDaZtIpNhDWFz5qVAUlnyRiOcyvEP6LK3zsVtmFu2pfh727R5fgMjiniLTZQdAlgJhV2dY7B3nJs8uRy6yu-n-cZy1njuCK6gam_QpOatAjJIG9SX8NOLoJR8_4a4QLzzVCr9DGTev1LFo4HYURNjZhz5DfG98SNy_yd7QuhjkfhyGF4pCDgRXLRIhNXEvIUBfmpPrObpbxebYr1sLw5M-DVqObW1PYmgVN2PZBiXDb0CpmPm5_7bVR351FjBJboLzRxdL48PNczoNVUICQQjLcRht_58YQtqWgHgc4P49pBYv50-p6qMP9B2YwzAK6qC5WGTsLXRl4ebLvVmv7L5U2vMZ0uzk5ERxb4YZoytak_fO6kzb420Ni9BBl00Is0iIV0D2w52fFwNhY_D6M0pf8zQP9AmgiXmv7-67G1gJFaKplTyEBg4iHrZgtWwA-LTRMa5Web5xwWRro7tDRIJ_miMu43D0JKQy8R0AWVO0ZhhIZ48WifCWR61MAMFexR6GIbexwaFbEbzc7N9NwfuEyktgK_zs1Iev7NMEBHSrzBg9ORaYtCPbr8-kBoP8wyuTbe9QWzlAjXKsZOOqnw1fmwRZ_kb6PE8JiX_sEHfHUQG1XB0YNXnr33gFwNunqWmzhuACw-6JINQ3_V5VohkVgUf62uchz68sLpKxyOoRhrMYanMOqrFApwtEkBGAO7LOpdIX7Ia5btnlDXyUvKfiSUiuqb0lQTvEGjkeTCc38dq0dlawPu73wgqYA-3VQ9HLdzYpjTQ6hTSAXmpnvaX83q9f9nGuJFTlyFgCQAVUYSjBDL2aGVta0acm4INjESozIOx77Vi4dIqbquaL99WrddPSJCfkm46Mxx7VMqlCQixrbQqn-CuftLBF2-KYZbiOUkMOg40i55VYbpzA697AivcXQHTw"
+    }
+  ]
+}

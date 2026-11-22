@@ -218,18 +218,19 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   with the variables set without showing their values to the model. One
   gate stands before every approval, reveal and change: the passphrase,
   so no program, not even one on the core's computer, approves a request
-  or reads a variable that asks every time without you. The passphrase
-  unlocks the vault once after a start; for 24 hours after it (a setting)
-  biometrics stand in for it, to approve and to unlock the vault after it
-  locked: Touch ID or Windows Hello in the desktop app, whose prompt names
-  the machine and the variables, or a WebAuthn credential in a browser;
-  then the passphrase is needed again. Biometrics and Verify every Allow
+  or reads a variable that asks every time without you. Biometrics stand
+  in for the passphrase, to approve and to unlock a locked vault: Touch ID
+  or Windows Hello in the desktop app, whose prompt names the machine and
+  the variables, or a WebAuthn credential with PRF in a browser, each
+  keeping the vault's key wrapped for itself. They unlock it within 14
+  days of the last passphrase (a setting); then the passphrase is needed
+  once. A lock always forgets the key, and while the vault is unlocked
+  the key is kept encrypted in locked memory. Biometrics and Verify every Allow
   (each approval needs them) are set in the vault's page of Settings, as
   are exempt apps: an app on a machine (claude, say) whose requests need no
   approval while the vault is unlocked. Every value that
   leaves the vault is first written to its access log. It locks after an
-  hour without use; the panel counts down and sets another time for the
-  current unlock (presets or one you type). Variables move
+  hour without use (a setting). Variables move
   between vaults in files encrypted under a passphrase of their own
   (export and import, with a preview and a choice per variable)
   ([30](docs/features/30-variable-vault.md)).

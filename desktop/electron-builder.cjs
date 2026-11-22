@@ -23,6 +23,14 @@ const goos = { darwin: 'darwin', linux: 'linux', win32: 'windows' };
 const exe = (platform) => (platform === 'win32' ? '.exe' : '');
 const coreOf = (platform) => `../dist/${slug}-${goos[platform]}-${goArch}${exe(platform)}`;
 const core = (platform) => [{ from: coreOf(platform), to: `bin/${slug}${exe(platform)}` }];
+// macOS: the Secure Enclave helper, a universal app bundle helper/build.mjs
+// made in dist/helper, placed in the app's Contents/Helpers (src/enclave.ts
+// helperPath), where signing the app signs it with the hardened runtime.
+// Only a Mac builds it (swiftc): a macOS --dir app packaged elsewhere, to
+// check the packaging, goes without.
+const helper = `${name} Enclave.app`;
+const helperOf = `dist/helper/${helper}`;
+const withHelper = process.platform === 'darwin';
 // macOS: a Developer ID signature when the signing step has a certificate
 // (CSC_LINK, or CSC_NAME of the keychain's), notarized with APPLE_ID,
 // APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID; ad hoc otherwise.
@@ -72,7 +80,9 @@ module.exports = {
     if (packing !== arch) {
       throw new Error(`Packaging ${packing} with ${goArch} binaries; set DESKTOP_ARCH=${packing} (scripts/desktop.sh does)`);
     }
-    for (const file of [coreOf(context.electronPlatformName), '../dist/hc/licenses/LICENSE', '../web/dist/licenses.md']) {
+    const needed = [coreOf(context.electronPlatformName), '../dist/hc/licenses/LICENSE', '../web/dist/licenses.md'];
+    if (context.electronPlatformName === 'darwin' && withHelper) needed.push(`${helperOf}/Contents/MacOS/${name} Enclave`);
+    for (const file of needed) {
       if (!existsSync(join(__dirname, file))) throw new Error(`Missing ${file}; build it with scripts/desktop.sh`);
     }
   },
@@ -86,6 +96,7 @@ module.exports = {
     notarize: developerId && !!process.env.APPLE_ID,
     hardenedRuntime: true,
     extraResources: core('darwin'),
+    extraFiles: withHelper ? [{ from: helperOf, to: `Helpers/${helper}` }] : [],
     // Folders dropped on the Dock icon become workspaces (src/folders.ts). Rank
     // None: the app accepts dropped folders but never becomes their opener.
     extendInfo: {

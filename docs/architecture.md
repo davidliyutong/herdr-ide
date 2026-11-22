@@ -51,8 +51,8 @@ machines only ([02](features/02-multi-machine-transport.md)).
 | `internal/plugins/git`, `internal/agent/plugin/git` | The Git plugin: its routes below `/api/m/{id}/p/git/` (reads GET, changes POST, audited as `git.<action>`) and its actions on machines, each the `git` executable with an argument vector built in the agent (no shell, paths after `--` and literal, revisions and names checked, no credential prompts, timeouts that kill the process group) ([31](features/31-git.md)). |
 | `internal/plugins/monitor`, `internal/agent/plugin/monitor` | The System Monitor & Task Manager plugin: its routes below `/api/m/{id}/p/monitor/` (`metrics` and `processes` GET, `signal` POST, audited as `monitor.signal` and refused in read-only mode) and its actions on machines reading `/proc`, `/sys`, `nvidia-smi`, `sysctl`, `vm_stat`, `ioreg` and `ps` directly without shells, plus allowlisted POSIX signaling (`syscall.Kill`, refusing PID ≤ 1 and the agent's own PID) ([34](features/34-system-monitor.md)). |
 | `internal/plugins/browser`, `internal/agent/plugin/browser`, `internal/loopback` | The browser plugin's port forwards ([32](features/32-browser-and-ports.md)): a listener of the core on the core host's loopback per forward (both loopback addresses), each connection one stream to the agent's `dial` action, which connects to the port on the machine's own loopback; the machine's listening ports; idle forwards ended. `internal/loopback` takes the other loopback address of a listener's port, which the core's own listener does too. |
-| `internal/vault` | The variable vault's store on the core host: values encrypted one by one (AES-256-GCM, the name, machines and inject-only flag as additional data) in `vault[-<instance>].json`, the master key derived from the passphrase (Argon2id) and kept in memory only (also while suspended: locked with the key held), and the encrypted export files (a versioned envelope, Argon2id and AES-256-GCM under a passphrase of their own) ([30](features/30-variable-vault.md)). Builds for Windows too. |
-| `internal/plugins/vault` | The vault plugin's core side: its routes behind the gate (sessions opened with the passphrase or an authenticator's proof, `X-Vault-Session`), the key's hold after the passphrase, the MCP servers' requests (op `vault`, a `plugin.Streamer`), approvals and exempt apps, export and import, and the access log (`vault[-<instance>]-access.jsonl`, written before a value leaves). |
+| `internal/vault` | The variable vault's store on the core host: values encrypted one by one (AES-256-GCM, the name, machines and inject-only flag as additional data) in `vault[-<instance>].json`, the master key derived from the passphrase (Argon2id) and kept in memory only while the vault is unlocked, in a memguard Enclave (`key.go`: encrypted under memguard's session key in locked, guarded pages, opened into a locked buffer for each operation; a lock destroys it), the authenticators' unlock entries (`unlock.go`: the master key wrapped with AES-256-GCM under a key-encryption key from the desktop app's Secure Enclave or Windows Hello key with the shell's secret, or a WebAuthn credential's PRF output) and the passphrase's window sealed under the key, and the encrypted export files (a versioned envelope, Argon2id and AES-256-GCM under a passphrase of their own) ([30](features/30-variable-vault.md)). Builds for Windows too. |
+| `internal/plugins/vault` | The vault plugin's core side: its routes behind the gate (sessions opened with the passphrase, an authenticator's proof of an unlocked vault or its unlock of a locked one within `vault.passphraseDays` of the passphrase, `X-Vault-Session`), the desktop shell's relays (`plugin.Call.DesktopRelay`, which `internal/server` opens with a key derived from the launch's verify key), the automatic lock, the MCP servers' requests (op `vault`, a `plugin.Streamer`), approvals and exempt apps, export and import, and the access log (`vault[-<instance>]-access.jsonl`, written before a value leaves). |
 | `internal/vaultmcp` | The vault's MCP server (the `mcp` command of the core and the agent): JSON-RPC over stdio, the tools `list_variables`, `get_variable`, `run_with_env`. |
 | `internal/usage` | What AI subscriptions have left on one machine: the CLIs' credentials read only (Kimi Code's sign-in renewed under its own lock), the providers' usage endpoints, Antigravity's local language server, the logs' token cost at the prices of `pricing.json` with an incremental cache (OpenCode's and Antigravity's SQLite databases read by a reader of the file format of its own, without a lock); portable, run by the agent ([29](features/29-ai-usage.md)). |
 | `internal/agent/plugin/usage` | The AI usage plugin's machine side: actions `limits`, `cost`, `setDeepseekKey` and `session` (one coding agent session's usage) of the `plugin` op. |
@@ -84,7 +84,8 @@ the app's windows from browsers (VS Code has a switch for each,
 [08](features/08-web-access-and-security.md)), and the key with which the
 shell's main process signs that the user answered a prompt of the system
 (Touch ID, Windows Hello) for the variable vault
-([30](features/30-variable-vault.md)); the key stays in that process. The core writes one
+([30](features/30-variable-vault.md)) and from which both derive the key
+of the shell's relays; the key stays in that process. The core writes one
 `{ "event": "ready", "url": "…" }` line to stdout after
 binding its listener; stderr carries logs. The shell loads only that owned
 core's URL. Closing the parent stdin pipe cancels the core's context, and
@@ -135,6 +136,22 @@ opens one fixed URL, a path it works out itself and its own bundle. It
 also answers what the app's own processes use (their kinds, helpers'
 names, shares of a processor and memory), for the settings' Performance
 page ([13](features/13-settings-and-appearance.md)).
+For the variable vault it answers which system prompt the app has,
+proves a nonce after that prompt, and keeps the vault's unlock key of this
+install (`desktop/src/verify.ts`): on macOS a Secure Enclave key behind
+Touch ID, used by the helper `<APP_NAME> Enclave.app` in the bundle's
+`Contents/Helpers` (`desktop/helper/Enclave.swift`, run by its absolute
+path with one JSON line on stdin and one on stdout: `available`, `create`,
+`agree`), on Windows a Windows Hello key through PowerShell's
+`KeyCredentialManager` (`desktop/src/windowsHello.ts`), each with a secret
+of the install kept with Electron's safeStorage in `vault-unlock.json` of
+the user data (`desktop/src/unlockStore.ts`). What makes an entry's
+key-encryption key (the Secure Enclave's ECDH secret or the Hello
+signature, with that secret) goes to the core through the page in a
+relay (`desktop/src/relay.ts`): AES-256-GCM under HKDF-SHA256 of the
+verify key, bound to the nonce, its purpose and the entry, which the core
+opens only for a request of the desktop client and the page can neither
+read nor make.
 Same-origin popups become equally restricted native windows;
 HTTP(S) links outside the core open in the default browser. Packaging and
 lifecycle details are in [16](features/16-desktop-packaging.md).

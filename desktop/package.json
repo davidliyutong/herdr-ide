@@ -10,8 +10,8 @@
     "start": "electron .",
     "typecheck": "tsc --noEmit",
     "test": "node test.mjs",
-    "format": "prettier --write src build.mjs test.mjs electron-builder.cjs",
-    "format:check": "prettier --check src build.mjs test.mjs electron-builder.cjs"
+    "format": "prettier --write src build.mjs test.mjs electron-builder.cjs helper/build.mjs",
+    "format:check": "prettier --check src build.mjs test.mjs electron-builder.cjs helper/build.mjs"
   },
   "devDependencies": {
     "@types/node": "26.6.6",

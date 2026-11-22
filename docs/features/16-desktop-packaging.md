@@ -94,8 +94,14 @@ system's rules run in the tests on any of them:
   `THIRD_PARTY_NOTICES.md`, the web bundle's `licenses.md`,
   `licenses/herdr-core/`, `licenses/herdr-detect/`, `licenses/encoder/`);
   the shell and `assets/icon.png` (the Linux window icon) live inside
-  ASAR. The `beforePack` hook refuses a core built for another
-  architecture than the Electron app, and a missing core or notices.
+  ASAR. On macOS the vault's Secure Enclave helper
+  (`desktop/helper/Enclave.swift`, built for arm64 and x86_64 into one
+  binary by `desktop/helper/build.mjs` with `swiftc`) is an app bundle of
+  its own in `Contents/Helpers/<name> Enclave.app`, signed with the app
+  ([30](30-variable-vault.md)); a desktop build on a Mac without `swiftc`
+  goes on without it, with a warning. The `beforePack` hook refuses a core
+  built for another architecture than the Electron app, a missing core or
+  notices, and a macOS app without the helper.
 - Artifacts are `dist/desktop/<name>-<version>-<os>-<arch>.<ext>`:
   - macOS: a DMG with an Applications shortcut and a zip, `mac-arm64` and
     `mac-x64` (x64 with the Intel Electron and a cross-compiled core, also

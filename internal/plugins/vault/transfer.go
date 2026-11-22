@@ -105,7 +105,7 @@ func (p *Plugin) handleExport(c *plugin.Call, w http.ResponseWriter, r *http.Req
 	if p.slowDown(w) {
 		return
 	}
-	err = s.Verify(body.Passphrase)
+	err = p.verifyPassphrase(c.Host, s, body.Passphrase)
 	p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	if err != nil {
 		fail(w, err)

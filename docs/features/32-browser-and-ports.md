@@ -240,8 +240,9 @@ click on a web link of a document shown in a preview pane
 - **external**: every address outside the app.
 - With the plugin off, and where a pane cannot show the address (forwards
   not available, the UI on another host), it opens outside. The value
-  `pane` of earlier versions, their default, became `loopback`
-  (`internal/plugins/browser` migrates the settings file).
+  `pane` of earlier versions, their default, became `all`, which opens
+  links as it did (`internal/plugins/browser` migrates the settings file);
+  a settings file without the setting gets the new default.
 
 A URL is opened only when it is absolute `http(s)://` (or `mailto:`, which
 opens outside), as the browser resolves it, and not the core's own
@@ -407,7 +408,7 @@ own; the UI itself is never a page of a pane
   `terminalLinks.test.ts` and `markdown.test.tsx`: links to the core's
   port under another loopback name refused.
 - `internal/plugins/browser/settings_test.go`: the links' setting, its
-  default and the value `pane` of earlier versions migrated.
+  default and the value `pane` of earlier versions migrated to `all`.
 - `desktop/src/policy.test.ts`: which attaches are allowed and the
   guest's preferences after one, navigation, the core's address refused to
   guests under every loopback name, permissions, the popups' bound, the

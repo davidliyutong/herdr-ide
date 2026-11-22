@@ -32,11 +32,14 @@ func openTest(t *testing.T, path string) *Store {
 
 const pass = "correct horse"
 
+// win is the window of the tests' passphrases.
+var win = Window{Days: 14, AutoLock: 15 * time.Minute}
+
 // newVault is a vault at path with the test passphrase, unlocked.
 func newVault(t *testing.T, path string) *Store {
 	t.Helper()
 	s := openTest(t, path)
-	if err := s.SetPassphrase(pass); err != nil {
+	if err := s.SetPassphrase(pass, win); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -46,7 +49,7 @@ func newVault(t *testing.T, path string) *Store {
 func reopen(t *testing.T, path string) *Store {
 	t.Helper()
 	s := openTest(t, path)
-	if err := s.Unlock(pass); err != nil {
+	if err := s.Unlock(pass, win); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -76,18 +79,18 @@ func TestPassphraseFirst(t *testing.T) {
 	if err := s.Set("TOKEN", Update{Value: str("v1")}); !errors.Is(err, ErrNoPassphrase) {
 		t.Fatalf("first set: %v", err)
 	}
-	if err := s.Unlock(pass); !errors.Is(err, ErrNoPassphrase) {
+	if err := s.Unlock(pass, win); !errors.Is(err, ErrNoPassphrase) {
 		t.Fatalf("unlock without a passphrase: %v", err)
 	}
-	if err := s.SetPassphrase("short"); !errors.Is(err, ErrWeak) {
+	if err := s.SetPassphrase("short", win); !errors.Is(err, ErrWeak) {
 		t.Errorf("weak: %v", err)
 	}
 	now := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return now }
-	if err := s.SetPassphrase(pass); err != nil {
+	if err := s.SetPassphrase(pass, win); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetPassphrase("another one"); !errors.Is(err, ErrHasPassphrase) {
+	if err := s.SetPassphrase("another one", win); !errors.Is(err, ErrHasPassphrase) {
 		t.Errorf("second passphrase: %v", err)
 	}
 	if err := s.Set("TOKEN", Update{Value: str("s3cr3t-value"), Description: str("the key")}); err != nil {
@@ -102,10 +105,10 @@ func TestPassphraseFirst(t *testing.T) {
 			t.Errorf("mode %v", fi.Mode().Perm())
 		}
 	}
-	if err := s.Verify(pass); err != nil {
+	if err := s.Verify(pass, nil); err != nil {
 		t.Errorf("verify: %v", err)
 	}
-	if err := s.Verify("wrong horse"); !errors.Is(err, ErrPassphrase) {
+	if err := s.Verify("wrong horse", nil); !errors.Is(err, ErrPassphrase) {
 		t.Errorf("verify wrong: %v", err)
 	}
 	s2 := openTest(t, path)
@@ -115,13 +118,13 @@ func TestPassphraseFirst(t *testing.T) {
 	if _, err := s2.Value("TOKEN"); !errors.Is(err, ErrLocked) {
 		t.Errorf("locked value: %v", err)
 	}
-	if err := s2.Unlock("wrong horse"); !errors.Is(err, ErrPassphrase) {
+	if err := s2.Unlock("wrong horse", win); !errors.Is(err, ErrPassphrase) {
 		t.Errorf("wrong passphrase: %v", err)
 	}
 	if st := s2.Status(); !st.Locked {
 		t.Error("unlocked by a wrong passphrase")
 	}
-	if err := s2.Unlock(pass); err != nil {
+	if err := s2.Unlock(pass, win); err != nil {
 		t.Fatal(err)
 	}
 	if v, err := s2.Value("TOKEN"); err != nil || v != "s3cr3t-value" {
@@ -244,21 +247,21 @@ func TestChangePassphrase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
 	s := newVault(t, path)
 	s.Set("A", Update{Value: str("alpha"), Machines: &[]string{"m"}})
-	if err := s.ChangePassphrase("wrong horse", "battery staple"); !errors.Is(err, ErrPassphrase) {
+	if err := s.ChangePassphrase("wrong horse", "battery staple", win); !errors.Is(err, ErrPassphrase) {
 		t.Errorf("wrong current: %v", err)
 	}
-	if err := s.ChangePassphrase(pass, "short"); !errors.Is(err, ErrWeak) {
+	if err := s.ChangePassphrase(pass, "short", win); !errors.Is(err, ErrWeak) {
 		t.Errorf("weak: %v", err)
 	}
 	s.Lock()
-	if err := s.ChangePassphrase(pass, "battery staple"); err != nil {
+	if err := s.ChangePassphrase(pass, "battery staple", win); err != nil {
 		t.Fatal(err)
 	}
 	s2 := openTest(t, path)
-	if err := s2.Unlock(pass); !errors.Is(err, ErrPassphrase) {
+	if err := s2.Unlock(pass, win); !errors.Is(err, ErrPassphrase) {
 		t.Errorf("old passphrase: %v", err)
 	}
-	if err := s2.Unlock("battery staple"); err != nil {
+	if err := s2.Unlock("battery staple", win); err != nil {
 		t.Fatal(err)
 	}
 	if v, err := s2.Value("A"); err != nil || v != "alpha" {
@@ -277,7 +280,7 @@ func TestChangePassphrase(t *testing.T) {
 		}
 	})
 	s3 := openTest(t, path)
-	if err := s3.ChangePassphrase("battery staple", "another staple"); !errors.Is(err, ErrCorrupt) || Code(err) != "corrupt" {
+	if err := s3.ChangePassphrase("battery staple", "another staple", win); !errors.Is(err, ErrCorrupt) || Code(err) != "corrupt" {
 		t.Fatalf("change over a value that does not open: %v", err)
 	}
 	if st := s3.Status(); !st.Locked {
@@ -286,7 +289,7 @@ func TestChangePassphrase(t *testing.T) {
 	if _, err := s3.Value("A"); !errors.Is(err, ErrLocked) {
 		t.Errorf("value after a failed change: %v", err)
 	}
-	if err := s3.Unlock("battery staple"); err != nil {
+	if err := s3.Unlock("battery staple", win); err != nil {
 		t.Errorf("the old passphrase after a failed change: %v", err)
 	}
 }
@@ -344,7 +347,7 @@ func TestUnknownFieldsAreKept(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.json")
 	os.WriteFile(path, []byte(`{"version":3,"future":{"x":1},"entries":[]}`), 0o600)
 	s := openTest(t, path)
-	if err := s.SetPassphrase(pass); err != nil {
+	if err := s.SetPassphrase(pass, win); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Set("A", Update{Value: str("v")}); err != nil {
@@ -425,7 +428,7 @@ func TestForgetMachine(t *testing.T) {
 	if i, _ := s3.Get("A"); i.Allows("m2") {
 		t.Errorf("reopened, m2 may read %v", i.Machines)
 	}
-	if err := s3.Unlock(pass); err != nil {
+	if err := s3.Unlock(pass, win); err != nil {
 		t.Fatal(err)
 	}
 	if v, err := s3.Value("A"); err != nil || v != "a" {
@@ -501,7 +504,7 @@ func TestForgottenAppliedAtTheNextChange(t *testing.T) {
 	s.Lock()
 	s.ForgetMachine("m1")
 	os.Chmod(dir, 0o500)
-	err := s.Unlock(pass)
+	err := s.Unlock(pass, win)
 	os.Chmod(dir, 0o700)
 	if err != nil {
 		t.Fatal(err)
@@ -527,7 +530,7 @@ func TestForgottenAppliedAtTheNextChange(t *testing.T) {
 	s.Lock()
 	s.ForgetMachine("m2")
 	os.Chmod(dir, 0o500)
-	err = s.Unlock(pass)
+	err = s.Unlock(pass, win)
 	os.Chmod(dir, 0o700)
 	if err != nil {
 		t.Fatal(err)

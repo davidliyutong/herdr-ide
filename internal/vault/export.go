@@ -218,21 +218,27 @@ func (s *Store) Export(names []string) ([]ExportVariable, error) {
 		return nil, s.noKey()
 	}
 	out := make([]ExportVariable, 0, len(names))
-	for _, n := range names {
-		e := s.find(n)
-		if e == nil {
-			return nil, &NameError{n, ErrNotFound}
+	err := withKey(s.key, func(k []byte) error {
+		for _, n := range names {
+			e := s.find(n)
+			if e == nil {
+				return &NameError{n, ErrNotFound}
+			}
+			b, err := open(k, e.Value, adOf(e))
+			if err != nil {
+				return &NameError{n, err}
+			}
+			i := info(e, s.f.Forgotten)
+			out = append(out, ExportVariable{
+				Name: i.Name, Value: string(b), Description: i.Description, Machines: i.Machines,
+				InjectOnly: i.InjectOnly, Created: i.Created, Updated: i.Updated,
+			})
+			clear(b)
 		}
-		b, err := open(s.key, e.Value, adOf(e))
-		if err != nil {
-			return nil, &NameError{n, err}
-		}
-		i := info(e, s.f.Forgotten)
-		out = append(out, ExportVariable{
-			Name: i.Name, Value: string(b), Description: i.Description, Machines: i.Machines,
-			InjectOnly: i.InjectOnly, Created: i.Created, Updated: i.Updated,
-		})
-		clear(b)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -287,38 +293,40 @@ func (s *Store) Import(list []Import) error {
 	if !s.usable() {
 		return s.noKey()
 	}
-	if err := s.applyForgotten(); err != nil {
-		return err
-	}
-	prev := slices.Clone(s.f.Entries)
-	restore := func(err error) error {
-		s.f.Entries = prev
-		return err
-	}
-	now := s.now().UTC()
-	for _, im := range list {
-		e := s.find(im.Name)
-		if e != nil && !im.Overwrite {
-			return restore(&NameError{im.Name, ErrExists})
+	return withKey(s.key, func(k []byte) error {
+		if err := s.applyForgotten(k); err != nil {
+			return err
 		}
-		if e == nil {
-			if len(s.f.Entries) >= MaxEntries {
-				return restore(ErrFull)
-			}
-			created := im.Created.UTC()
-			if created.IsZero() || created.After(now) {
-				created = now
-			}
-			s.f.Entries = append(s.f.Entries, Entry{Name: im.Name, Created: created})
-			e = &s.f.Entries[len(s.f.Entries)-1]
+		prev := slices.Clone(s.f.Entries)
+		restore := func(err error) error {
+			s.f.Entries = prev
+			return err
 		}
-		e.Description, e.Machines, e.InjectOnly, e.Updated = im.Description, dedupe(im.Machines), im.InjectOnly, now
-		if err := s.reseal(e, []byte(im.Value)); err != nil {
+		now := s.now().UTC()
+		for _, im := range list {
+			e := s.find(im.Name)
+			if e != nil && !im.Overwrite {
+				return restore(&NameError{im.Name, ErrExists})
+			}
+			if e == nil {
+				if len(s.f.Entries) >= MaxEntries {
+					return restore(ErrFull)
+				}
+				created := im.Created.UTC()
+				if created.IsZero() || created.After(now) {
+					created = now
+				}
+				s.f.Entries = append(s.f.Entries, Entry{Name: im.Name, Created: created})
+				e = &s.f.Entries[len(s.f.Entries)-1]
+			}
+			e.Description, e.Machines, e.InjectOnly, e.Updated = im.Description, dedupe(im.Machines), im.InjectOnly, now
+			if err := reseal(k, e, []byte(im.Value)); err != nil {
+				return restore(err)
+			}
+		}
+		if err := s.save(); err != nil {
 			return restore(err)
 		}
-	}
-	if err := s.save(); err != nil {
-		return restore(err)
-	}
-	return nil
+		return nil
+	})
 }

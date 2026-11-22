@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -160,5 +163,81 @@ func TestBridgeMessagesFollowTheClientsSwitch(t *testing.T) {
 	s.broadcast(map[string]any{"t": "machines"})
 	if !got(desktop) || !got(browser) {
 		t.Fatal("other messages")
+	}
+}
+
+// The desktop shell's relays open with the key derived from the launch's
+// verify key, for the additional data they were sealed with only: the
+// vectors the shell's tests check too (design/testdata/vault-unlock).
+func TestDesktopRelay(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "design", "testdata", "vault-unlock", "relay.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		VerifyKey string `json:"verifyKey"`
+		RelayKey  string `json:"relayKey"`
+		Relays    []struct {
+			Purpose, Nonce, ID, AD, Plaintext, Relay string
+		} `json:"relays"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.RawURLEncoding
+	key, err := relayKey(v.VerifyKey)
+	if err != nil || b64.EncodeToString(key) != v.RelayKey {
+		t.Fatalf("relay key %x %v, want %s", key, err, v.RelayKey)
+	}
+	s := newTestServer()
+	if s.desktopRelay() != nil {
+		t.Fatal("a relay opens without the shell's key")
+	}
+	s.opts.DesktopVerifyKey = v.VerifyKey
+	open := s.desktopRelay()
+	if len(v.Relays) == 0 {
+		t.Fatal("no vectors")
+	}
+	for _, c := range v.Relays {
+		relay, err := b64.DecodeString(c.Relay)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ad := "vault-relay\n" + c.Purpose + "\n" + c.Nonce + "\n" + c.ID
+		if ad != c.AD {
+			t.Errorf("additional data %q, want %q", ad, c.AD)
+		}
+		plain, err := open([]byte(ad), relay)
+		if err != nil || string(plain) != c.Plaintext {
+			t.Errorf("%s %s: %q %v", c.Purpose, c.ID, plain, err)
+		}
+		// Not for another purpose, nonce or entry, nor changed.
+		for _, other := range []string{
+			"vault-relay\nregister\n" + c.Nonce + "\n" + c.ID,
+			"vault-relay\nsession\n" + c.Nonce + "x\n" + c.ID,
+			"vault-relay\n" + c.Purpose + "\n" + c.Nonce + "\nu9",
+		} {
+			if other == ad {
+				continue
+			}
+			if _, err := open([]byte(other), relay); err == nil {
+				t.Errorf("%q opened a relay for %q", other, ad)
+			}
+		}
+		bad := append([]byte{}, relay...)
+		bad[len(bad)-1] ^= 1
+		if _, err := open([]byte(ad), bad); err == nil {
+			t.Error("a changed relay opened")
+		}
+		if _, err := open([]byte(ad), relay[:27]); err == nil {
+			t.Error("a short relay opened")
+		}
+	}
+	// Another launch's key opens none.
+	s.opts.DesktopVerifyKey = strings.Repeat("0", 64)
+	c := v.Relays[0]
+	relay, _ := b64.DecodeString(c.Relay)
+	if _, err := s.desktopRelay()([]byte(c.AD), relay); err == nil {
+		t.Error("another launch's key opened a relay")
 	}
 }

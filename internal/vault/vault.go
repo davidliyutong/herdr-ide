@@ -2,10 +2,11 @@
 // values (API keys and the like) encrypted one by one with AES-256-GCM in
 // vault[-<instance>].json beside the settings file, under a master key
 // derived from the user's passphrase with Argon2id and kept only in the
-// core's memory while it holds the key (unlocked, or suspended: locked
-// with the key kept for an authenticator's proof). Names, descriptions and
-// the machines
-// allowed to read a variable are stored in the clear; values never are,
+// core's memory, in a memguard Enclave (key.go), while the vault is
+// unlocked; a lock forgets it. An authenticator that can unlock the vault
+// keeps the key wrapped in an unlock entry of the file (unlock.go). Names,
+// descriptions and the machines allowed to read a variable are stored in
+// the clear; values never are,
 // and each value's encryption covers its name, its machines and its
 // inject-only flag (adOf), so a file edited to let a machine read a
 // variable no longer opens it. The core's plugin (internal/plugins/vault)
@@ -17,6 +18,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +30,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/awnumar/memguard"
 	"golang.org/x/crypto/argon2"
 
 	"herdr-ide/internal/userfile"
@@ -92,6 +95,18 @@ func Code(err error) string {
 		return "weak_export_passphrase"
 	case errors.Is(err, ErrTooLarge):
 		return "too_large"
+	// Locked memory before the others: a failure of memguard may come up
+	// through any operation that holds the key.
+	case errors.Is(err, ErrMemory):
+		return "memory"
+	// An unlock's errors before the others: ErrUnlockFailed wraps the
+	// error of the proof's check.
+	case errors.Is(err, ErrUnlockFailed):
+		return "vault_proof"
+	case errors.Is(err, ErrUnlockStale):
+		return "unlock_stale"
+	case errors.Is(err, ErrPassphraseDue):
+		return "passphrase_due"
 	case errors.Is(err, ErrLocked):
 		return "vault_locked"
 	case errors.Is(err, ErrNotFound):
@@ -209,6 +224,14 @@ type file struct {
 	Forgotten []string `json:"forgotten,omitempty"`
 	// Guard is the sealed Guard (none: no authenticator, no rule).
 	Guard *Sealed `json:"guard,omitempty"`
+	// Unlock are the authenticators' wraps of the key (unlock.go).
+	Unlock []UnlockEntry `json:"unlock,omitempty"`
+	// PassphraseAt is the sealed passphraseAt: when the passphrase was last
+	// checked with the key, and the window it opened.
+	PassphraseAt *Sealed `json:"passphraseAt,omitempty"`
+	// PassphraseHint is PassphraseAt's end in the clear (RFC 3339): what
+	// the UI offers is decided from it, never what is allowed.
+	PassphraseHint string `json:"passphraseHint,omitempty"`
 	// rest keeps the fields this version does not know.
 	rest map[string]json.RawMessage
 }
@@ -220,8 +243,8 @@ type file struct {
 // the key in memory.
 type Guard struct {
 	// Authenticators prove that the user is there in the passphrase's
-	// stead: to open a session (which reopens a vault locked while the key
-	// is held) and to allow a request.
+	// stead: to open a session, to allow a request and, with an unlock
+	// entry of theirs, to unlock the vault.
 	Authenticators []Authenticator `json:"authenticators,omitempty"`
 	// VerifyEachAllow: allowing a request needs a proof made for it (an
 	// authenticator's or the passphrase); a session is not enough.
@@ -377,8 +400,7 @@ func adOf(e *Entry) string {
 // Status is the vault's state.
 type Status struct {
 	Mode string `json:"mode"`
-	// Locked: no value can be read or sealed, whether the key is gone or
-	// held while suspended.
+	// Locked: the key is not in memory; no value can be read or sealed.
 	Locked bool `json:"locked"`
 	// Setup: no passphrase yet; SetPassphrase sets it.
 	Setup bool `json:"setup,omitempty"`
@@ -404,16 +426,13 @@ type Store struct {
 
 	mu  sync.Mutex
 	f   file
-	key []byte // nil while locked
-	// suspended: locked with the key held (Suspend), so that Resume opens
-	// it again without the passphrase; the guard stays readable.
-	suspended bool
-	now       func() time.Time
+	key *memguard.Enclave // nil while locked
+	now func() time.Time
 }
 
-// usable reports whether values can be read and sealed: the key is held
-// and the vault not suspended. Called with s.mu held.
-func (s *Store) usable() bool { return s.key != nil && !s.suspended }
+// usable reports whether values can be read and sealed: the key is there.
+// Called with s.mu held.
+func (s *Store) usable() bool { return s.key != nil }
 
 // Open reads the vault at path (none yet: an empty vault, without a
 // passphrase). A vault with a passphrase stays locked until Unlock.
@@ -431,7 +450,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("%s: %w: %w", path, ErrInvalid, err)
 	}
 	_ = json.Unmarshal(b, &s.f.rest)
-	for _, k := range []string{"version", "mode", "kdf", "check", "passphraseSet", "entries", "forgotten", "guard"} {
+	for _, k := range []string{"version", "mode", "kdf", "check", "passphraseSet", "entries", "forgotten", "guard", "unlock", "passphraseAt", "passphraseHint"} {
 		delete(s.f.rest, k)
 	}
 	switch s.f.Mode {
@@ -455,6 +474,7 @@ func Open(path string) (*Store, error) {
 		}
 		s.f.Version = FileVersion
 	}
+	s.f.Unlock = keptEntries(s.f.Unlock, s.f.Check)
 	return s, nil
 }
 
@@ -521,18 +541,24 @@ func (s *Store) Value(name string) (string, error) {
 	if !s.usable() {
 		return "", ErrLocked
 	}
-	b, err := open(s.key, e.Value, adOf(e))
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	var v string
+	err := withKey(s.key, func(k []byte) error {
+		b, err := open(k, e.Value, adOf(e))
+		if err != nil {
+			return err
+		}
+		v = string(b)
+		clear(b)
+		return nil
+	})
+	return v, err
 }
 
-// reseal seals e's value again for what adOf says now (its machines or
-// flag changed), from plain, the value's text; called with s.mu held and
-// the key there.
-func (s *Store) reseal(e *Entry, plain []byte) error {
-	v, err := seal(s.key, plain, adOf(e))
+// reseal seals e's value again under k, the key, for what adOf says now
+// (its machines or flag changed), from plain, the value's text; called
+// with s.mu held.
+func reseal(k []byte, e *Entry, plain []byte) error {
+	v, err := seal(k, plain, adOf(e))
 	if err != nil {
 		return err
 	}
@@ -610,46 +636,48 @@ func (s *Store) Set(name string, u Update) error {
 	if !s.usable() {
 		return s.noKey()
 	}
-	if err := s.applyForgotten(); err != nil {
-		return err
-	}
-	e = s.find(name) // the entries were written again
-	var plain []byte
-	if u.Value != nil {
-		plain = []byte(*u.Value)
-	} else {
-		b, err := open(s.key, e.Value, adOf(e))
-		if err != nil {
+	return withKey(s.key, func(k []byte) error {
+		if err := s.applyForgotten(k); err != nil {
 			return err
 		}
-		plain = b
-	}
-	defer clear(plain)
-	prev := slices.Clone(s.f.Entries)
-	now := s.now().UTC()
-	if e == nil {
-		s.f.Entries = append(s.f.Entries, Entry{Name: name, Machines: []string{}, Created: now})
-		e = &s.f.Entries[len(s.f.Entries)-1]
-	}
-	if u.Description != nil {
-		e.Description = *u.Description
-	}
-	if u.Machines != nil {
-		e.Machines = dedupe(*u.Machines)
-	}
-	if u.InjectOnly != nil {
-		e.InjectOnly = *u.InjectOnly
-	}
-	e.Name, e.Updated = to, now
-	err := s.reseal(e, plain)
-	if err == nil {
-		err = s.save()
-	}
-	if err != nil {
-		s.f.Entries = prev
-		return err
-	}
-	return nil
+		e := s.find(name) // the entries were written again
+		var plain []byte
+		if u.Value != nil {
+			plain = []byte(*u.Value)
+		} else {
+			b, err := open(k, e.Value, adOf(e))
+			if err != nil {
+				return err
+			}
+			plain = b
+		}
+		defer clear(plain)
+		prev := slices.Clone(s.f.Entries)
+		now := s.now().UTC()
+		if e == nil {
+			s.f.Entries = append(s.f.Entries, Entry{Name: name, Machines: []string{}, Created: now})
+			e = &s.f.Entries[len(s.f.Entries)-1]
+		}
+		if u.Description != nil {
+			e.Description = *u.Description
+		}
+		if u.Machines != nil {
+			e.Machines = dedupe(*u.Machines)
+		}
+		if u.InjectOnly != nil {
+			e.InjectOnly = *u.InjectOnly
+		}
+		e.Name, e.Updated = to, now
+		err := reseal(k, e, plain)
+		if err == nil {
+			err = s.save()
+		}
+		if err != nil {
+			s.f.Entries = prev
+			return err
+		}
+		return nil
+	})
 }
 
 func dedupe(ms []string) []string {
@@ -680,29 +708,31 @@ func (s *Store) Allow(name, m string) error {
 	if !s.usable() {
 		return ErrLocked
 	}
-	if err := s.applyForgotten(); err != nil {
-		return err
-	}
-	e = s.find(name) // the entries were written again
-	if len(e.Machines) >= MaxMachines {
-		return ErrInvalid
-	}
-	plain, err := open(s.key, e.Value, adOf(e))
-	if err != nil {
-		return err
-	}
-	defer clear(plain)
-	prev := *e
-	e.Machines = append(slices.Clone(e.Machines), m)
-	err = s.reseal(e, plain)
-	if err == nil {
-		err = s.save()
-	}
-	if err != nil {
-		*e = prev
-		return err
-	}
-	return nil
+	return withKey(s.key, func(k []byte) error {
+		if err := s.applyForgotten(k); err != nil {
+			return err
+		}
+		e := s.find(name) // the entries were written again
+		if len(e.Machines) >= MaxMachines {
+			return ErrInvalid
+		}
+		plain, err := open(k, e.Value, adOf(e))
+		if err != nil {
+			return err
+		}
+		defer clear(plain)
+		prev := *e
+		e.Machines = append(slices.Clone(e.Machines), m)
+		err = reseal(k, e, plain)
+		if err == nil {
+			err = s.save()
+		}
+		if err != nil {
+			*e = prev
+			return err
+		}
+		return nil
+	})
 }
 
 // ForgetMachine removes machine m from every variable's machines and the
@@ -721,9 +751,14 @@ func (s *Store) ForgetMachine(m string) ([]string, error) {
 		}
 	}
 	// Without the key the guard cannot be read: it may exempt an app there.
-	exempt := s.key == nil && s.f.Guard != nil
-	if g, err := s.guard(); err == nil {
-		exempt = slices.ContainsFunc(g.Exempt, func(e Exemption) bool { return e.Machine == m })
+	exempt := s.f.Guard != nil
+	if s.key != nil {
+		_ = withKey(s.key, func(k []byte) error {
+			if g, err := s.guardWith(k); err == nil {
+				exempt = slices.ContainsFunc(g.Exempt, func(e Exemption) bool { return e.Machine == m })
+			}
+			return nil
+		})
 	}
 	if len(names) == 0 && !exempt {
 		return nil, nil
@@ -739,7 +774,7 @@ func (s *Store) ForgetMachine(m string) ([]string, error) {
 		}
 	}
 	if s.key != nil {
-		_ = s.applyForgotten() // else still enforced by info, applied at the next change
+		_ = withKey(s.key, s.applyForgotten) // else still enforced by info, applied at the next change
 	}
 	return names, nil
 }
@@ -750,18 +785,18 @@ func (s *Store) ForgetMachine(m string) ([]string, error) {
 // was edited) loses them too and stays unreadable, or opens again when they
 // were what the edit added: taking machines out never lets more read. A
 // guard that does not open stays as it is (it exempts nothing: exempt
-// reads it). Called with s.mu held and the key there; on failure nothing
+// reads it). Called with s.mu held and k, the key; on failure nothing
 // changed and the list is still enforced by info and Exempt.
-func (s *Store) applyForgotten() error {
+func (s *Store) applyForgotten(k []byte) error {
 	if len(s.f.Forgotten) == 0 {
 		return nil
 	}
 	forgotten := s.f.Forgotten
 	gone := func(x string) bool { return slices.Contains(forgotten, x) }
 	prevGuard := s.f.Guard
-	if g, err := s.guard(); err == nil && slices.ContainsFunc(g.Exempt, func(e Exemption) bool { return gone(e.Machine) }) {
+	if g, err := s.guardWith(k); err == nil && slices.ContainsFunc(g.Exempt, func(e Exemption) bool { return gone(e.Machine) }) {
 		g.Exempt = slices.DeleteFunc(g.Exempt, func(e Exemption) bool { return gone(e.Machine) })
-		if err := s.setGuard(g); err != nil {
+		if err := s.setGuard(k, g); err != nil {
 			return err
 		}
 	}
@@ -771,12 +806,12 @@ func (s *Store) applyForgotten() error {
 		if !slices.ContainsFunc(e.Machines, gone) {
 			continue
 		}
-		plain, err := open(s.key, e.Value, adOf(e))
+		plain, err := open(k, e.Value, adOf(e))
 		e.Machines = slices.DeleteFunc(slices.Clone(e.Machines), gone)
 		if err != nil {
 			continue
 		}
-		err = s.reseal(e, plain)
+		err = reseal(k, e, plain)
 		clear(plain)
 		if err != nil {
 			s.f.Entries, s.f.Guard = prev, prevGuard
@@ -806,7 +841,7 @@ func (s *Store) Delete(name string) error {
 		return err
 	}
 	if s.key != nil {
-		_ = s.applyForgotten()
+		_ = withKey(s.key, s.applyForgotten)
 	}
 	return nil
 }
@@ -832,82 +867,105 @@ func sealGuard(key []byte, g Guard) (*Sealed, error) {
 }
 
 // Guard returns what guards the vault beside its passphrase; ErrLocked
-// while the key is not held (a suspended vault's guard is read: a proof is
-// checked with it).
+// while the vault is locked.
 func (s *Store) Guard() (Guard, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.guard()
+	if !s.usable() {
+		return Guard{}, s.noKey()
+	}
+	var g Guard
+	err := withKey(s.key, func(k []byte) error {
+		var err error
+		g, err = s.guardWith(k)
+		return err
+	})
+	return g, err
 }
 
-func (s *Store) guard() (Guard, error) {
-	if s.key == nil {
+// guardWith opens the file's guard with k (no key: the vault's noKey).
+// Called with s.mu held.
+func (s *Store) guardWith(k []byte) (Guard, error) {
+	if k == nil {
 		return Guard{}, s.noKey()
 	}
 	if s.f.Guard == nil {
 		return Guard{}, nil
 	}
-	return openGuard(s.key, s.f.Guard)
+	return openGuard(k, s.f.Guard)
 }
 
 // UpdateGuard is the user's change of the guard: fn changes it, and it is
 // written; an error of fn leaves it as it was. The vault must be unlocked
-// (ErrLocked while suspended too: a lock that came after the request's
-// gate ends its say). Exemptions of machines forgotten while the key was
-// not held are taken out first. RecordProof is what a proof writes.
+// (a lock that came after the request's gate ends its say). Exemptions of
+// machines forgotten while the vault was locked are taken out first, and
+// the unlock entries of authenticators fn removed go in the same write.
+// RecordProof is what a proof writes.
 func (s *Store) UpdateGuard(fn func(*Guard) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.usable() {
 		return s.noKey()
 	}
-	if _, err := s.guard(); err != nil {
-		return err
-	}
-	if err := s.applyForgotten(); err != nil {
-		return err
-	}
-	g, err := s.guard()
-	if err != nil {
-		return err
-	}
-	if err := fn(&g); err != nil {
-		return err
-	}
-	if len(g.Authenticators) > MaxAuthenticators {
-		return fmt.Errorf("%w: at most %d authenticators", ErrInvalid, MaxAuthenticators)
-	}
-	if len(g.Exempt) > MaxExemptions {
-		return fmt.Errorf("%w: at most %d exemptions", ErrInvalid, MaxExemptions)
-	}
-	for _, e := range g.Exempt {
-		if !validAppField(e.App) || !validMachineID(e.Machine) || e.Machine == AllMachines {
-			return fmt.Errorf("%w: exemption %q on %q", ErrInvalid, e.App, e.Machine)
+	return withKey(s.key, func(k []byte) error {
+		if _, err := s.guardWith(k); err != nil {
+			return err
 		}
-	}
-	prev := s.f.Guard
-	if err := s.setGuard(g); err != nil {
-		return err
-	}
-	if err := s.save(); err != nil {
-		s.f.Guard = prev
-		return err
-	}
-	return nil
+		if err := s.applyForgotten(k); err != nil {
+			return err
+		}
+		g, err := s.guardWith(k)
+		if err != nil {
+			return err
+		}
+		if err := fn(&g); err != nil {
+			return err
+		}
+		if len(g.Authenticators) > MaxAuthenticators {
+			return fmt.Errorf("%w: at most %d authenticators", ErrInvalid, MaxAuthenticators)
+		}
+		if len(g.Exempt) > MaxExemptions {
+			return fmt.Errorf("%w: at most %d exemptions", ErrInvalid, MaxExemptions)
+		}
+		for _, e := range g.Exempt {
+			if !validAppField(e.App) || !validMachineID(e.Machine) || e.Machine == AllMachines {
+				return fmt.Errorf("%w: exemption %q on %q", ErrInvalid, e.App, e.Machine)
+			}
+		}
+		prev, prevUnlock := s.f.Guard, s.f.Unlock
+		if err := s.setGuard(k, g); err != nil {
+			return err
+		}
+		s.f.Unlock = slices.DeleteFunc(slices.Clone(s.f.Unlock), func(e UnlockEntry) bool { return ownerOf(g, &e) < 0 })
+		if err := s.save(); err != nil {
+			s.f.Guard, s.f.Unlock = prev, prevUnlock
+			return err
+		}
+		return nil
+	})
 }
 
 // RecordProof notes that authenticator id made a proof at at, with the
 // signature counter it signed (count, for WebAuthn), and writes the guard.
-// It changes nothing else, and works while the vault is suspended: a proof
-// is how a suspended vault is unlocked. ErrNotFound for no such
-// authenticator.
+// It changes nothing else. ErrNotFound for no such authenticator.
 func (s *Store) RecordProof(id string, at time.Time, count *uint32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g, err := s.guard()
-	if err != nil {
-		return err
+	if !s.usable() {
+		return s.noKey()
 	}
+	return withKey(s.key, func(k []byte) error {
+		g, err := s.guardWith(k)
+		if err != nil {
+			return err
+		}
+		return s.recordProof(k, g, id, at, count)
+	})
+}
+
+// recordProof writes g with authenticator id's use at at (and its
+// counter); called with s.mu held and k, the key.
+func (s *Store) recordProof(k []byte, g Guard, id string, at time.Time, count *uint32) error {
 	i := slices.IndexFunc(g.Authenticators, func(a Authenticator) bool { return a.ID == id })
 	if i < 0 {
 		return ErrNotFound
@@ -917,7 +975,7 @@ func (s *Store) RecordProof(id string, at time.Time, count *uint32) error {
 		g.Authenticators[i].SignCount = *count
 	}
 	prev := s.f.Guard
-	if err := s.setGuard(g); err != nil {
+	if err := s.setGuard(k, g); err != nil {
 		return err
 	}
 	if err := s.save(); err != nil {
@@ -927,14 +985,14 @@ func (s *Store) RecordProof(id string, at time.Time, count *uint32) error {
 	return nil
 }
 
-// setGuard seals g as the file's guard (none when it holds nothing),
-// without writing the file. Called with s.mu held and the key there.
-func (s *Store) setGuard(g Guard) error {
+// setGuard seals g under k as the file's guard (none when it holds
+// nothing), without writing the file. Called with s.mu held.
+func (s *Store) setGuard(k []byte, g Guard) error {
 	if g.empty() {
 		s.f.Guard = nil
 		return nil
 	}
-	v, err := sealGuard(s.key, g)
+	v, err := sealGuard(k, g)
 	if err != nil {
 		return err
 	}
@@ -954,103 +1012,97 @@ func (s *Store) Exempt(m, app string) bool {
 	if !s.usable() || slices.Contains(s.f.Forgotten, m) {
 		return false
 	}
-	g, err := s.guard()
-	if err != nil {
-		return false
-	}
-	return slices.ContainsFunc(g.Exempt, func(e Exemption) bool { return e.Machine == m && e.App == app })
+	exempt := false
+	_ = withKey(s.key, func(k []byte) error {
+		g, err := s.guardWith(k)
+		if err == nil {
+			exempt = slices.ContainsFunc(g.Exempt, func(e Exemption) bool { return e.Machine == m && e.App == app })
+		}
+		return nil
+	})
+	return exempt
 }
 
-// Lock forgets the key until Unlock.
+// Lock forgets the key until an unlock: its Enclave is destroyed.
 func (s *Store) Lock() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	clear(s.key)
+	destroyKey(s.key)
 	s.key = nil
-	s.suspended = false
 }
 
-// Suspend locks the vault but keeps the key in memory: no value is read or
-// sealed until Resume (or Unlock with the passphrase), and the guard stays
-// readable, so an authenticator's proof can be checked. A vault whose key
-// is not held stays as it is.
-func (s *Store) Suspend() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.key != nil {
-		s.suspended = true
-	}
-}
-
-// Resume unlocks a suspended vault with the key it holds; ErrLocked when it
-// holds none.
-func (s *Store) Resume() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.key == nil {
-		return s.noKey()
-	}
-	s.suspended = false
-	return nil
-}
-
-// Held reports whether the key is in memory, the vault unlocked or
-// suspended.
-func (s *Store) Held() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.key != nil
-}
-
-// Unlock takes the key derived from the passphrase; a vault that holds the
-// key only checks it, and a suspended one is then unlocked. Forgotten
+// Unlock takes the key derived from the passphrase; an unlocked vault only
+// checks it. Either way the passphrase was checked with the key, which
+// starts the window w of unlocks without it (PassphraseAt). Forgotten
 // machines are then taken out of the lists.
-func (s *Store) Unlock(passphrase string) error {
+func (s *Store) Unlock(passphrase string, w Window) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.f.Mode != ModePassphrase {
 		return ErrNoPassphrase
 	}
-	if s.key != nil {
-		if err := s.verify(passphrase); err != nil {
-			return err
-		}
-		s.suspended = false
-		return nil
+	key, err := sealKey(derive(passphrase, *s.f.KDF))
+	if err != nil {
+		return err
 	}
-	key := derive(passphrase, *s.f.KDF)
-	if b, err := open(key, s.f.Check, checkAD); err != nil || string(b) != checkText {
-		clear(key)
+	if err := withKey(key, s.checkKey); err != nil {
+		destroyKey(key)
+		return err
+	}
+	if s.key != nil {
+		destroyKey(key) // the same key
+	} else {
+		s.key = key
+	}
+	_ = withKey(s.key, func(k []byte) error {
+		s.passphraseChecked(k, w)
+		_ = s.applyForgotten(k) // else still enforced by info, applied at the next change
+		return nil
+	})
+	return nil
+}
+
+// checkKey reports whether k opens the file's check: ErrPassphrase when it
+// does not. Called with s.mu held.
+func (s *Store) checkKey(k []byte) error {
+	b, err := open(k, s.f.Check, checkAD)
+	if err != nil || subtle.ConstantTimeCompare(b, []byte(checkText)) != 1 {
 		return ErrPassphrase
 	}
-	s.key = key
-	_ = s.applyForgotten() // else still enforced by info, applied at the next change
 	return nil
 }
 
-// Verify checks a passphrase without changing anything.
-func (s *Store) Verify(passphrase string) error {
+// Verify checks a passphrase. With w, when the vault is unlocked and the
+// passphrase matched, it also starts the window w (PassphraseAt); nothing
+// else changes.
+func (s *Store) Verify(passphrase string, w *Window) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.f.Mode != ModePassphrase {
 		return ErrNoPassphrase
 	}
-	return s.verify(passphrase)
+	if err := s.verify(passphrase); err != nil {
+		return err
+	}
+	if w != nil && s.key != nil {
+		_ = withKey(s.key, func(k []byte) error {
+			s.passphraseChecked(k, *w)
+			return nil
+		})
+	}
+	return nil
 }
 
 func (s *Store) verify(passphrase string) error {
 	key := derive(passphrase, *s.f.KDF)
 	defer clear(key)
-	if b, err := open(key, s.f.Check, checkAD); err != nil || string(b) != checkText {
-		return ErrPassphrase
-	}
-	return nil
+	return s.checkKey(key)
 }
 
 // SetPassphrase gives a new vault its passphrase (at least 8 characters)
-// and unlocks it; a vault with a passphrase changes it with
-// ChangePassphrase.
-func (s *Store) SetPassphrase(passphrase string) error {
+// and unlocks it, starting the window w; a vault with a passphrase changes
+// it with ChangePassphrase.
+func (s *Store) SetPassphrase(passphrase string, w Window) error {
 	if len([]rune(passphrase)) < 8 {
 		return ErrWeak
 	}
@@ -1059,14 +1111,14 @@ func (s *Store) SetPassphrase(passphrase string) error {
 	if s.f.Mode != ModeNone {
 		return ErrHasPassphrase
 	}
-	return s.rekey(nil, passphrase)
+	return s.rekey(nil, passphrase, w)
 }
 
 // ChangePassphrase replaces the passphrase after checking the current one;
 // every value is sealed again under the new key, which then unlocks the
-// vault. A failure (a value that does not open) leaves the vault as it was,
-// locked if it was.
-func (s *Store) ChangePassphrase(old, passphrase string) error {
+// vault and starts the window w. A failure (a value that does not open)
+// leaves the vault as it was, locked if it was.
+func (s *Store) ChangePassphrase(old, passphrase string, w Window) error {
 	if len([]rune(passphrase)) < 8 {
 		return ErrWeak
 	}
@@ -1075,73 +1127,94 @@ func (s *Store) ChangePassphrase(old, passphrase string) error {
 	if s.f.Mode != ModePassphrase {
 		return ErrNoPassphrase
 	}
-	cur := derive(old, *s.f.KDF)
-	defer clear(cur)
-	if b, err := open(cur, s.f.Check, checkAD); err != nil || string(b) != checkText {
-		return ErrPassphrase
+	cur, err := sealKey(derive(old, *s.f.KDF))
+	if err != nil {
+		return err
 	}
-	return s.rekey(cur, passphrase)
+	defer destroyKey(cur)
+	if err := withKey(cur, s.checkKey); err != nil {
+		return err
+	}
+	return s.rekey(cur, passphrase, w)
 }
 
 // rekey derives a new key from passphrase with a new salt and seals every
-// value and the check under it, from cur, the current key (none for a new
-// vault); only once all is written is the new key installed. Called with
-// s.mu held.
-func (s *Store) rekey(cur []byte, passphrase string) error {
+// value, the check and the window w under it, from cur, the current key
+// (none for a new vault); only once all is written is the new key
+// installed. Called with s.mu held.
+func (s *Store) rekey(cur *memguard.Enclave, passphrase string, w Window) error {
 	kdf := s.KDF
 	kdf.Salt = make([]byte, saltLen)
 	if _, err := rand.Read(kdf.Salt); err != nil {
 		return err
 	}
-	key := derive(passphrase, kdf)
-	entries := slices.Clone(s.f.Entries)
-	for i := range entries {
-		e := &entries[i]
-		plain, err := open(cur, e.Value, adOf(e))
-		if err != nil {
-			clear(key)
-			return err
-		}
-		v, err := seal(key, plain, adOf(e))
-		clear(plain)
-		if err != nil {
-			clear(key)
-			return err
-		}
-		e.Value = v
-	}
-	check, err := seal(key, []byte(checkText), checkAD)
+	key, err := sealKey(derive(passphrase, kdf))
 	if err != nil {
-		clear(key)
 		return err
 	}
-	// A new passphrase ends every authenticator and exemption: whoever knew
-	// the old one may have added theirs. The rule stays.
-	var guard *Sealed
-	if s.f.Guard != nil {
-		g, err := openGuard(cur, s.f.Guard)
-		if err != nil {
-			clear(key)
-			return err
+	es := []*memguard.Enclave{key}
+	if cur != nil {
+		es = append(es, cur)
+	}
+	err = withKeys(es, func(ks [][]byte) error {
+		nk := ks[0]
+		var ck []byte
+		if len(ks) > 1 {
+			ck = ks[1]
 		}
-		if g.VerifyEachAllow {
-			if guard, err = sealGuard(key, Guard{VerifyEachAllow: true}); err != nil {
-				clear(key)
+		entries := slices.Clone(s.f.Entries)
+		for i := range entries {
+			e := &entries[i]
+			plain, err := open(ck, e.Value, adOf(e))
+			if err != nil {
 				return err
 			}
+			v, err := seal(nk, plain, adOf(e))
+			clear(plain)
+			if err != nil {
+				return err
+			}
+			e.Value = v
 		}
-	}
-	prev := s.f
-	s.f.Entries, s.f.Version, s.f.Mode, s.f.KDF, s.f.Check, s.f.PassphraseSet = entries, FileVersion, ModePassphrase, &kdf, check, s.now().UTC()
-	s.f.Guard = guard
-	if err := s.save(); err != nil {
-		s.f = prev
-		clear(key)
+		check, err := seal(nk, []byte(checkText), checkAD)
+		if err != nil {
+			return err
+		}
+		// A new passphrase ends every authenticator, its unlock entries and
+		// every exemption: whoever knew the old one may have added theirs.
+		// The rule stays.
+		var guard *Sealed
+		if s.f.Guard != nil {
+			g, err := openGuard(ck, s.f.Guard)
+			if err != nil {
+				return err
+			}
+			if g.VerifyEachAllow {
+				if guard, err = sealGuard(nk, Guard{VerifyEachAllow: true}); err != nil {
+					return err
+				}
+			}
+		}
+		at, hint, err := s.sealWindow(nk, w)
+		if err != nil {
+			return err
+		}
+		prev := s.f
+		s.f.Entries, s.f.Version, s.f.Mode, s.f.KDF, s.f.Check, s.f.PassphraseSet = entries, FileVersion, ModePassphrase, &kdf, check, s.now().UTC()
+		s.f.Guard, s.f.Unlock, s.f.PassphraseAt, s.f.PassphraseHint = guard, nil, at, hint
+		if err := s.save(); err != nil {
+			s.f = prev
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		destroyKey(key)
 		return err
 	}
-	clear(s.key)
-	s.key, s.suspended = key, false
-	_ = s.applyForgotten() // else still enforced by info, applied at the next change
+	destroyKey(s.key)
+	s.key = key
+	_ = withKey(s.key, s.applyForgotten) // else still enforced by info, applied at the next change
 	return nil
 }
 
@@ -1186,6 +1259,15 @@ func (s *Store) save() error {
 	}
 	if s.f.Guard != nil {
 		out["guard"] = s.f.Guard
+	}
+	if len(s.f.Unlock) > 0 {
+		out["unlock"] = s.f.Unlock
+	}
+	if s.f.PassphraseAt != nil {
+		out["passphraseAt"] = s.f.PassphraseAt
+	}
+	if s.f.PassphraseHint != "" {
+		out["passphraseHint"] = s.f.PassphraseHint
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

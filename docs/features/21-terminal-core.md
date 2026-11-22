@@ -128,6 +128,11 @@ by the integration tests):
   ([35](35-agent-native-view.md)). The variables that configure the
   agents (`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `ANTHROPIC_*`,
   `CODEX_HOME`, `OPENAI_*`) stay.
+- The programs of the local machine's terminals inherit the core's core
+  dump limit of 0 (memguard's, [30](30-variable-vault.md#security)) where
+  herdr-core runs the terminal core as a child of the core; one it starts
+  as a systemd user service or a launchd job has the service manager's
+  limits.
 - The new terminals of an ssh machine get `SSH_CONNECTION` and `SSH_CLIENT`
   from the core (`internal/server/sshenv.go`), with the values of the ssh
   session its agent runs in, which the agent tells in its hello apart from

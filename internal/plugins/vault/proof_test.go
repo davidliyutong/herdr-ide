@@ -8,10 +8,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -19,19 +19,19 @@ import (
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/plugin"
+	vaultstore "herdr-ide/internal/vault"
 	"herdr-ide/internal/webauthn"
 )
 
 const testOrigin = "http://localhost:7780"
 
-var enc = base64.RawURLEncoding.EncodeToString
-
 // testAuthenticator is a WebAuthn authenticator of the tests: a P-256 key
-// with a credential id and a counter.
+// with a credential id and a counter, and the secret of its PRF.
 type testAuthenticator struct {
 	key   *ecdsa.PrivateKey
 	id    []byte
 	count uint32
+	prf   []byte
 }
 
 func newAuthenticator(t *testing.T) *testAuthenticator {
@@ -40,9 +40,18 @@ func newAuthenticator(t *testing.T) *testAuthenticator {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := make([]byte, 16)
+	id, secret := make([]byte, 16), make([]byte, 32)
 	rand.Read(id)
-	return &testAuthenticator{key: key, id: id}
+	rand.Read(secret)
+	return &testAuthenticator{key: key, id: id, prf: secret}
+}
+
+// output is the authenticator's PRF output for salt, as WebAuthn's prf
+// extension gives it (an HMAC of the salt with a secret of the credential).
+func (a *testAuthenticator) output(salt []byte) []byte {
+	m := hmac.New(sha256.New, a.prf)
+	m.Write(salt)
+	return m.Sum(nil)
 }
 
 func (a *testAuthenticator) spki(t *testing.T) string {
@@ -103,14 +112,19 @@ func (c *client) nonce(t *testing.T, body string) (string, map[string]any) {
 	return out["nonce"].(string), out
 }
 
-// register adds a as an authenticator of the page's origin.
+// register adds a as an authenticator of the page's origin, with its PRF
+// output for the nonce's salt.
 func (c *client) register(t *testing.T, a *testAuthenticator) {
 	t.Helper()
-	nonce, _ := c.nonce(t, `{"for":"register"}`)
+	nonce, out := c.nonce(t, `{"for":"register"}`)
+	salt := b64(out["prfSalt"].(string))
+	if len(salt) != 32 {
+		t.Fatalf("prf salt %v", out)
+	}
 	body := map[string]any{
 		"kind": "webauthn", "label": "Touch ID", "passphrase": pass, "nonce": nonce,
 		"clientDataJSON": enc(clientData("webauthn.create", nonce, c.origin)), "authenticatorData": enc(a.authData(c.origin, true)),
-		"publicKey": a.spki(t), "alg": webauthn.ES256, "assertion": a.assertion(t, nonce, c.origin),
+		"publicKey": a.spki(t), "alg": webauthn.ES256, "assertion": a.assertion(t, nonce, c.origin), "prf": enc(a.output(salt)),
 	}
 	if code, out := c.do("POST", "/api/p/vault/authenticators", mustJSON(body)); code != 200 {
 		t.Fatalf("register %d %v", code, out)
@@ -120,9 +134,8 @@ func (c *client) register(t *testing.T, a *testAuthenticator) {
 // An authenticator added in a session of the passphrase proves the user in
 // its stead: its proof opens a session, which changes variables but not
 // what guards the vault; a proof is good once, for its purpose, from its
-// page's origin, while its nonce lives and the core holds the key. It
-// unlocks a vault locked while the key is held, until the key's hold is
-// over or a lock forgot the key.
+// page's origin, while its nonce lives and the vault is unlocked. A proof
+// holds no key: a lock forgets the key, and no proof unlocks the vault.
 func TestProofOpensASession(t *testing.T) {
 	p, h, s := newTest(t)
 	now := time.Now()
@@ -140,7 +153,7 @@ func TestProofOpensASession(t *testing.T) {
 	bad := map[string]any{
 		"kind": "webauthn", "passphrase": "wrong horse", "nonce": nonce,
 		"clientDataJSON": enc(clientData("webauthn.create", nonce, c.origin)), "authenticatorData": enc(a.authData(c.origin, true)),
-		"publicKey": a.spki(t), "alg": webauthn.ES256, "assertion": a.assertion(t, nonce, c.origin),
+		"publicKey": a.spki(t), "alg": webauthn.ES256, "assertion": a.assertion(t, nonce, c.origin), "prf": enc(make([]byte, 32)),
 	}
 	if code, out := c.do("POST", "/api/p/vault/authenticators", mustJSON(bad)); code != 403 || out["error"] != "wrong_passphrase" {
 		t.Fatalf("a wrong passphrase: %d %v", code, out)
@@ -207,7 +220,7 @@ func TestProofOpensASession(t *testing.T) {
 	}
 	// ...but not what guards the vault, nor values in bulk.
 	for path, body := range map[string]string{
-		"/api/p/vault/autolock": `{"minutes":0}`, "/api/p/vault/guard": `{"verifyEachAllow":false}`,
+		"/api/p/vault/guard":          `{"verifyEachAllow":false}`,
 		"/api/p/vault/authenticators": `{"kind":"webauthn"}`, "/api/p/vault/proof": `{"for":"register"}`,
 		"/api/p/vault/export": `{"passphrase":"x","filePassphrase":"long enough"}`, "/api/p/vault/import/preview": `{}`,
 		"/api/p/vault/exempt": `{"app":"claude","machines":["m1"]}`,
@@ -282,12 +295,15 @@ func TestProofOpensASession(t *testing.T) {
 	nonce, _ = c.nonce(t, `{"for":"session"}`)
 	refused("another port's assertion posted as the UI's", a.assertion(t, nonce, "http://localhost:3000"))
 
-	// A lock keeps the key of a vault with an authenticator: the vault is
-	// locked (machines get nothing, every session and nonce ends) and the
-	// authenticator's proof unlocks it again.
+	// A lock forgets the key: the vault is locked (machines get nothing,
+	// every session and nonce ends), and a proof, which holds no key, does
+	// not unlock it.
 	nonce, _ = c.nonce(t, `{"for":"session"}`)
-	if code, out := c.do("POST", "/api/p/vault/lock", ""); code != 200 || out["locked"] != true || !s.Held() {
-		t.Fatalf("lock %d %v, held %v", code, out, s.Held())
+	if code, out := c.do("POST", "/api/p/vault/lock", ""); code != 200 || out["locked"] != true {
+		t.Fatalf("lock %d %v", code, out)
+	}
+	if _, err := s.Guard(); !errors.Is(err, vaultstore.ErrLocked) {
+		t.Errorf("the store kept its key: %v", err)
 	}
 	if code, _ := c.do("PUT", "/api/p/vault/vars/KEY", `{"value":"x"}`); code != 401 {
 		t.Errorf("a session outlived the lock: %d", code)
@@ -295,48 +311,23 @@ func TestProofOpensASession(t *testing.T) {
 	if r := p.Handle(context.Background(), h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}}); r.Code != "vault_locked" {
 		t.Errorf("a machine reads a locked vault: %+v", r)
 	}
-	refused("a nonce issued before the lock", a.assertion(t, nonce, c.origin))
-	if _, list := c.do("GET", "/api/p/vault", ""); list["guard"] == nil || list["status"].(map[string]any)["locked"] != true {
-		t.Errorf("a locked vault whose key is held: %v", list)
-	}
-	nonce, _ = c.nonce(t, `{"for":"session"}`)
-	code, out = c.do("POST", "/api/p/vault/session", mustJSON(map[string]any{"proof": a.assertion(t, nonce, c.origin)}))
-	if code != 200 || out["status"].(map[string]any)["locked"] != false || s.Status().Locked {
-		t.Fatalf("unlocked by a proof: %d %v", code, out)
-	}
-	c.tok = out["session"].(string)
-	if !strings.Contains(h.auditLog(), `vault.unlocked {"kind":"webauthn","ok":true}`) {
-		t.Errorf("audit %s", h.auditLog())
-	}
-	if r := p.Handle(context.Background(), h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}}); !r.OK {
-		t.Errorf("a machine after the proof: %+v", r)
-	}
-	// Once the key's hold is over (24 hours after the passphrase) the core
-	// forgets it: the vault locks, and no proof unlocks it.
-	now = now.Add(DefaultPassphraseHours * time.Hour)
-	if code, out := c.do("POST", "/api/p/vault/proof", `{"for":"session"}`); code != 409 || out["error"] != "vault_locked" {
-		t.Errorf("a nonce once the hold is over: %d %v", code, out)
-	}
-	if s.Held() || !s.Status().Locked {
-		t.Fatal("the key outlived its hold")
-	}
-	if !strings.Contains(h.auditLog(), `vault.locked {"hours":24,"keyHeld":false,"reason":"passphrase"}`) {
-		t.Errorf("audit %s", h.auditLog())
-	}
-	if _, list := c.do("GET", "/api/p/vault", ""); list["guard"] != nil || list["session"] != false {
-		t.Errorf("the guard of a vault whose key is forgotten: %v", list)
-	}
-	// Lock can forget the key at once.
-	c.session(t)
-	nonce, _ = c.nonce(t, `{"for":"session"}`)
-	if code, _ := c.do("POST", "/api/p/vault/lock", `{"forget":true}`); code != 200 || s.Held() {
-		t.Fatalf("a lock that forgets: %d", code)
-	}
-	if code, out := c.do("POST", "/api/p/vault/proof", `{"for":"session"}`); code != 409 || out["error"] != "vault_locked" {
-		t.Errorf("a nonce of a vault whose key is forgotten: %d %v", code, out)
-	}
 	if code, out := c.do("POST", "/api/p/vault/session", mustJSON(map[string]any{"proof": a.assertion(t, nonce, c.origin)})); code != 409 || out["error"] != "vault_locked" {
-		t.Errorf("a proof of a vault whose key is forgotten: %d %v", code, out)
+		t.Errorf("a proof of a nonce issued before the lock: %d %v", code, out)
+	}
+	if _, list := c.do("GET", "/api/p/vault", ""); list["guard"] != nil || list["status"].(map[string]any)["locked"] != true {
+		t.Errorf("a locked vault: %v", list)
+	}
+	// A nonce of the locked vault is for an unlock; a proof with it is none.
+	locked, _ := c.nonce(t, `{"for":"session"}`)
+	if code, out := c.do("POST", "/api/p/vault/session", mustJSON(map[string]any{"proof": a.assertion(t, locked, c.origin)})); code != 409 || out["error"] != "vault_locked" || !s.Status().Locked {
+		t.Errorf("a proof of a locked vault: %d %v", code, out)
+	}
+	// The passphrase unlocks it; the nonces issued while it was locked end.
+	locked, _ = c.nonce(t, `{"for":"session"}`)
+	c.session(t)
+	c.tok = ""
+	if code, out := c.do("POST", "/api/p/vault/session", mustJSON(map[string]any{"proof": a.assertion(t, locked, c.origin)})); code != 401 || out["error"] != "vault_proof" {
+		t.Errorf("a nonce of the locked vault after the unlock: %d %v", code, out)
 	}
 
 	// A new passphrase ends the authenticators.
@@ -426,7 +417,7 @@ func TestProofAllowsARequest(t *testing.T) {
 	}
 	<-ch
 	// The rule outlives a new passphrase; the authenticators do not.
-	if err := s.ChangePassphrase(pass, "another horse"); err != nil {
+	if err := s.ChangePassphrase(pass, "another horse", testWindow); err != nil {
 		t.Fatal(err)
 	}
 	if g, err := s.Guard(); err != nil || !g.VerifyEachAllow || len(g.Authenticators) != 0 {
@@ -453,7 +444,8 @@ func TestDesktopProof(t *testing.T) {
 		m.Write(msg)
 		return hmac.Equal(m.Sum(nil), mac)
 	}
-	c.kind, c.desktop = plugin.Desktop, verify
+	sh := newShell(t, string(key), "install-0123456789ab", false)
+	c.kind, c.desktop, c.relay = plugin.Desktop, verify, sh.open
 	c.session(t)
 	if code, _ := c.do("PUT", "/api/p/vault/vars/KEY", `{"value":"s3cret","machines":["m1"]}`); code != 200 {
 		t.Fatal(code)
@@ -470,14 +462,15 @@ func TestDesktopProof(t *testing.T) {
 	if code, _ := try(nonce, sign(nonce, session)); code != 401 {
 		t.Fatalf("before it is on: %d", code)
 	}
-	// Turning it on takes the passphrase and the shell's proof.
+	// Turning it on takes the passphrase, the shell's proof and its relay of
+	// the install's key.
 	register := purpose{For: ForRegister}
 	nonce, _ = c.nonce(t, `{"for":"register"}`)
 	if code, out := c.do("POST", "/api/p/vault/authenticators", mustJSON(map[string]string{"kind": "desktop", "passphrase": pass, "nonce": nonce, "mac": sign(nonce, session)})); code != 401 {
 		t.Fatalf("a MAC of another purpose: %d %v", code, out)
 	}
 	nonce, _ = c.nonce(t, `{"for":"register"}`)
-	if code, out := c.do("POST", "/api/p/vault/authenticators", mustJSON(map[string]string{"kind": "desktop", "label": "Touch ID", "passphrase": pass, "nonce": nonce, "mac": sign(nonce, register)})); code != 200 {
+	if code, out := c.do("POST", "/api/p/vault/authenticators", mustJSON(map[string]string{"kind": "desktop", "label": "Touch ID", "passphrase": pass, "nonce": nonce, "mac": sign(nonce, register), "relay": sh.registration(t, nonce, nil)})); code != 200 {
 		t.Fatalf("turning it on: %d %v", code, out)
 	}
 	c.tok = ""
@@ -526,7 +519,7 @@ func TestDesktopProof(t *testing.T) {
 		t.Fatalf("the requester: %+v", r)
 	}
 	// A core without the shell's key takes none.
-	c.desktop = nil
+	c.desktop, c.relay = nil, nil
 	nonce, out = c.nonce(t, `{"for":"session"}`)
 	if out["desktop"] != false {
 		t.Errorf("offered without a key: %v", out)
@@ -652,9 +645,10 @@ func TestVerifyEveryAllowCoversValuesAndGrants(t *testing.T) {
 }
 
 // Without a session the list says only what offering biometrics needs: the
-// kinds of authenticator this page can prove with, not their ids, labels
-// or use, nor the rule, the exempt apps or when the key goes; the nonce
-// names the credentials, for the origin the core vouches for.
+// kinds of authenticator this page can prove with, and the ways it can
+// unlock a locked vault, not their ids, labels or use, nor the rule, the
+// exempt apps or when the vault locks; the nonce names the credentials,
+// for the origin the core vouches for.
 func TestListWithoutASession(t *testing.T) {
 	p, h, _ := newTest(t)
 	withMachines(h, "mac")
@@ -675,8 +669,11 @@ func TestListWithoutASession(t *testing.T) {
 	if g["full"] != true || len(g["exempt"].([]any)) != 1 || g["verifyEachAllow"] != true || auths[0].(map[string]any)["label"] != "Touch ID" {
 		t.Fatalf("with a session: %v", g)
 	}
-	if full["autoLock"].(map[string]any)["keyUntil"] == nil {
-		t.Errorf("auto-lock with a session: %v", full["autoLock"])
+	if al := full["autoLock"].(map[string]any); al["lockAt"] == nil || al["keyUntil"] != nil || al["custom"] != nil {
+		t.Errorf("auto-lock with a session: %v", al)
+	}
+	if auths[0].(map[string]any)["unlock"] != true {
+		t.Errorf("a credential with PRF does not unlock: %v", auths[0])
 	}
 	bare := func() map[string]any {
 		t.Helper()
@@ -705,11 +702,26 @@ func TestListWithoutASession(t *testing.T) {
 		t.Errorf("an origin not vouched for: %v", g)
 	}
 	c.untrusted = false
-	// Locked with the key held, the same.
+	// Locked, no guard: only the ways to unlock and when the passphrase is
+	// due, a hint.
 	c.tok = tok
 	c.do("POST", "/api/p/vault/lock", "")
 	c.tok = ""
-	if g = bare(); len(g["authenticators"].([]any)) != 1 {
-		t.Errorf("a suspended vault: %v", g)
+	_, out := c.do("GET", "/api/p/vault", "")
+	b, _ := json.Marshal(out)
+	for _, hidden := range []string{"claude", "Touch ID", enc(a.id), auths[0].(map[string]any)["id"].(string), "lastUsed", "lockAt"} {
+		if strings.Contains(string(b), hidden) {
+			t.Errorf("a locked vault's list shows %q: %s", hidden, b)
+		}
+	}
+	u := out["unlock"].(map[string]any)
+	due, err := time.Parse(time.RFC3339, u["due"].(string))
+	if out["guard"] != nil || mustJSON(u["ways"]) != `["prf"]` || err != nil || due.Before(time.Now().AddDate(0, 0, DefaultPassphraseDays-1)) {
+		t.Errorf("a locked vault: %s", b)
+	}
+	// Not for another origin.
+	c.untrusted = true
+	if _, out := c.do("GET", "/api/p/vault", ""); mustJSON(out["unlock"].(map[string]any)["ways"]) != `[]` {
+		t.Errorf("ways of an origin not vouched for: %v", out["unlock"])
 	}
 }

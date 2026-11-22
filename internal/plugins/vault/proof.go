@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -18,14 +19,18 @@ import (
 )
 
 // Proofs: an authenticator's word, in the passphrase's stead, that the user
-// is there. The core must hold the key (the authenticators are sealed with
-// it): a proof opens a session, unlocking a vault that was locked while the
-// key was held (autolock.go), but never brings a key back; after a start,
-// or once the key's hold is over, the passphrase is needed once.
+// is there. The vault must be unlocked (the authenticators are sealed with
+// its key): a proof opens a session of an unlocked vault, or answers one
+// request, but holds no key. A locked vault is unlocked by an
+// authenticator that keeps the key wrapped in its unlock entry (unlock.go),
+// within vault.passphraseDays of the last passphrase.
 //
 // A proof answers a nonce the core issued for one purpose: to open a
 // session, to give one request one answer, or to add an authenticator. It
-// is used once and lives two minutes. Two kinds of authenticator make one:
+// is used once and lives two minutes; a nonce issued while the vault is
+// locked is good only for an unlock, one issued while it is unlocked never
+// for one, and every nonce ends with a lock. Two kinds of authenticator
+// make one:
 //
 //   - a WebAuthn credential (a browser's platform authenticator or a
 //     security key) signs the nonce as its challenge, with the user
@@ -41,10 +46,10 @@ import (
 //     the core what a nonce is for (handleProofPurpose) and shows that in
 //     the prompt, so a page cannot ask for one thing and show another.
 //
-// A session a proof opened is marked: it answers requests and changes and
-// shows variables, but what guards the vault (the authenticators, the rule
-// to verify each Allow, the exempt apps, the automatic lock, imports and
-// exports) takes a session the passphrase opened.
+// A session a proof or an unlock by an authenticator opened is marked: it
+// answers requests and changes and shows variables, but what guards the
+// vault (the authenticators, the rule to verify each Allow, the exempt
+// apps, imports and exports) takes a session the passphrase opened.
 
 // The purposes of a proof.
 const (
@@ -82,6 +87,12 @@ type pendingProof struct {
 	challenge []byte
 	issued    stamp
 	seq       uint64
+	// locked: issued while the vault was locked, for an unlock only.
+	locked bool
+	// prfSalt and register are a registration's: the salt a new WebAuthn
+	// credential's PRF is evaluated with, and the challenge the desktop
+	// app's Windows Hello key signs (32 random bytes each).
+	prfSalt, register []byte
 }
 
 // proofBody is a proof as a page sends it.
@@ -97,8 +108,15 @@ type proofBody struct {
 	Signature         string `json:"signature,omitempty"`
 }
 
-// errProof is a proof that does not hold (401 vault_proof).
-var errProof = errors.New("the proof does not hold")
+// errProof is a proof that does not hold (401 vault_proof); errCounter is
+// a WebAuthn assertion that verifies but whose counter did not grow.
+var (
+	errProof   = errors.New("the proof does not hold")
+	errCounter = fmt.Errorf("%w: the counter did not grow", errProof)
+)
+
+// enc is base64url without padding, as WebAuthn and the relays have it.
+var enc = base64.RawURLEncoding.EncodeToString
 
 func b64(s string) []byte {
 	b, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(s, "="))
@@ -114,11 +132,19 @@ func proofMessage(nonce string, pu purpose) []byte {
 	return []byte("vault-proof\n" + nonce + "\n" + pu.For + "\n" + pu.Request + "\n" + pu.Answer)
 }
 
-// issueProof makes a nonce for pu.
-func (p *Plugin) issueProof(pu purpose) string {
+// issueProof makes a nonce for pu, issued while the vault is locked or
+// not, with keyMu held (so no lock or unlock comes between the vault's
+// state and the nonce).
+func (p *Plugin) issueProof(pu purpose, locked bool) (string, *pendingProof) {
 	challenge := make([]byte, 32)
 	rand.Read(challenge)
 	nonce := base64.RawURLEncoding.EncodeToString(challenge)
+	pp := &pendingProof{purpose: pu, challenge: challenge, locked: locked}
+	if pu.For == ForRegister {
+		pp.prfSalt, pp.register = make([]byte, 32), make([]byte, 32)
+		rand.Read(pp.prfSalt)
+		rand.Read(pp.register)
+	}
 	now := p.at()
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -144,13 +170,15 @@ func (p *Plugin) issueProof(pu purpose) string {
 		delete(p.proofs, oldest)
 	}
 	p.proofSeq++
-	p.proofs[nonce] = &pendingProof{purpose: pu, challenge: challenge, issued: now, seq: p.proofSeq}
-	return nonce
+	pp.issued, pp.seq = now, p.proofSeq
+	p.proofs[nonce] = pp
+	return nonce, pp
 }
 
-// takeProof ends a nonce and returns its challenge when it was issued for
-// want and is not too old: a nonce is good for one try.
-func (p *Plugin) takeProof(nonce string, want purpose) ([]byte, bool) {
+// takeProof ends a nonce and returns it when it was issued for want, while
+// the vault was locked as locked says, and is not too old: a nonce is good
+// for one try.
+func (p *Plugin) takeProof(nonce string, want purpose, locked bool) (*pendingProof, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	pp, ok := p.proofs[nonce]
@@ -158,21 +186,22 @@ func (p *Plugin) takeProof(nonce string, want purpose) ([]byte, bool) {
 		return nil, false
 	}
 	delete(p.proofs, nonce)
-	if pp.issued.since(p.at()) > proofTTL || pp.purpose != want {
+	if pp.issued.since(p.at()) > proofTTL || pp.purpose != want || pp.locked != locked {
 		return nil, false
 	}
-	return pp.challenge, true
+	return pp, true
 }
 
-// peekProof is the purpose of a nonce that still waits.
-func (p *Plugin) peekProof(nonce string) (purpose, bool) {
+// peekProof is a nonce that still waits (its fields are not changed once
+// it is issued).
+func (p *Plugin) peekProof(nonce string) (*pendingProof, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	pp, ok := p.proofs[nonce]
 	if !ok || pp.issued.since(p.at()) > proofTTL {
-		return purpose{}, false
+		return nil, false
 	}
-	return pp.purpose, true
+	return pp, true
 }
 
 // originOf is the origin of the call's page when the core vouches for it,
@@ -192,14 +221,15 @@ func desktopCan(c *plugin.Call) bool {
 }
 
 // checkProof checks pb as a proof for want and returns the kind of
-// authenticator that made it. The core must hold the key (ErrLocked);
+// authenticator that made it. The vault must be unlocked (ErrLocked);
 // anything else that fails is errProof. A proof that holds marks its
 // authenticator used.
 func (p *Plugin) checkProof(c *plugin.Call, r *http.Request, s *vaultstore.Store, pb *proofBody, want purpose) (string, error) {
-	challenge, ok := p.takeProof(pb.Nonce, want)
+	pp, ok := p.takeProof(pb.Nonce, want, false)
 	if !ok {
 		return "", errProof
 	}
+	challenge := pp.challenge
 	g, err := s.Guard()
 	if err != nil {
 		return "", err
@@ -232,15 +262,8 @@ func (p *Plugin) checkProof(c *plugin.Call, r *http.Request, s *vaultstore.Store
 		if a.Kind != vaultstore.KindWebAuthn || a.Origin != origin || a.RPID != rpID || !bytes.Equal(a.Credential, cred) {
 			continue
 		}
-		key, err := webauthn.ParsePublicKey(a.Algorithm, a.PublicKey)
+		count, err := verifyAssertion(a, pb, challenge)
 		if err != nil {
-			return "", errProof
-		}
-		count, err := webauthn.VerifyAssertion(key, b64(pb.ClientDataJSON), b64(pb.AuthenticatorData), b64(pb.Signature),
-			webauthn.Expect{Challenge: challenge, Origin: a.Origin, RPID: a.RPID})
-		// A counter that does not grow is a copy of the authenticator;
-		// those that do not count always say 0.
-		if err != nil || ((count != 0 || a.SignCount != 0) && count <= a.SignCount) {
 			return "", errProof
 		}
 		return vaultstore.KindWebAuthn, p.usedAuthenticator(s, a.ID, now, &count)
@@ -248,8 +271,28 @@ func (p *Plugin) checkProof(c *plugin.Call, r *http.Request, s *vaultstore.Store
 	return "", errProof
 }
 
-// usedAuthenticator records an authenticator's use (and its counter), also
-// while the vault is suspended; one that is gone proves nothing.
+// verifyAssertion checks a WebAuthn assertion of credential a for
+// challenge, with its origin and RP id, and returns the counter it signed.
+// A counter that does not grow is a copy of the authenticator (errCounter);
+// those that do not count always say 0.
+func verifyAssertion(a vaultstore.Authenticator, pb *proofBody, challenge []byte) (uint32, error) {
+	key, err := webauthn.ParsePublicKey(a.Algorithm, a.PublicKey)
+	if err != nil {
+		return 0, errProof
+	}
+	count, err := webauthn.VerifyAssertion(key, b64(pb.ClientDataJSON), b64(pb.AuthenticatorData), b64(pb.Signature),
+		webauthn.Expect{Challenge: challenge, Origin: a.Origin, RPID: a.RPID})
+	if err != nil {
+		return 0, errProof
+	}
+	if (count != 0 || a.SignCount != 0) && count <= a.SignCount {
+		return 0, errCounter
+	}
+	return count, nil
+}
+
+// usedAuthenticator records an authenticator's use (and its counter); one
+// that is gone proves nothing.
 func (p *Plugin) usedAuthenticator(s *vaultstore.Store, id string, at time.Time, count *uint32) error {
 	err := s.RecordProof(id, at, count)
 	if errors.Is(err, vaultstore.ErrNotFound) {
@@ -290,7 +333,7 @@ func (p *Plugin) verified(c *plugin.Call, w http.ResponseWriter, r *http.Request
 		if p.slowDown(w) {
 			return true, false
 		}
-		err := s.Verify(f.Passphrase)
+		err := p.verifyPassphrase(c.Host, s, f.Passphrase)
 		p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 		if err != nil {
 			fail(w, err)
@@ -300,6 +343,14 @@ func (p *Plugin) verified(c *plugin.Call, w http.ResponseWriter, r *http.Request
 		return true, true
 	}
 	return false, false
+}
+
+// verifyPassphrase checks a passphrase brought with a request, which
+// starts the passphrase's window again (an unlocked vault's), sealing the
+// current unlock's auto-lock time with it.
+func (p *Plugin) verifyPassphrase(h plugin.Host, s *vaultstore.Store, passphrase string) error {
+	w := p.window(h, p.autoLockAfter(h))
+	return s.Verify(passphrase, &w)
 }
 
 // strict reports whether every Allow is verified: the guard's rule, and a
@@ -341,17 +392,21 @@ type authenticatorInfo struct {
 	RPID     string    `json:"rpId,omitempty"`
 	Created  time.Time `json:"created"`
 	LastUsed time.Time `json:"lastUsed,omitzero"`
+	// Unlock: it keeps the key wrapped in an unlock entry, so it unlocks a
+	// locked vault too; without one (a credential without PRF, added
+	// before) it only approves.
+	Unlock bool `json:"unlock"`
 }
 
 // guardState is what guards the vault as the page of this call sees it;
-// nil while the core does not hold the key. Without a session (full false)
-// it says only what a page needs to offer biometrics before it unlocks:
-// the kinds of authenticator this page can prove with (the desktop app's
-// prompt for the desktop client, a WebAuthn credential added from this
-// very origin), never their ids, labels, origins or use, nor the rule or
-// the exempt apps, which would tell a program what name to take. The
-// credentials' ids, which WebAuthn needs, come with each nonce (handleProof)
-// and only for the origin the core vouches for.
+// nil while the vault is locked. Without a session (full false) it says
+// only what a page needs to offer biometrics: the kinds of authenticator
+// this page can prove with (the desktop app's prompt for the desktop
+// client, a WebAuthn credential added from this very origin), never their
+// ids, labels, origins or use, nor the rule or the exempt apps, which would
+// tell a program what name to take. The credentials' ids, which WebAuthn
+// needs, come with each nonce (handleProof) and only for the origin the
+// core vouches for.
 func (p *Plugin) guardState(c *plugin.Call, s *vaultstore.Store, full bool) map[string]any {
 	g, err := s.Guard()
 	if err != nil {
@@ -373,9 +428,13 @@ func (p *Plugin) guardState(c *plugin.Call, s *vaultstore.Store, full bool) map[
 		}
 		return map[string]any{"authenticators": ways, "desktop": desktopCan(c), "webauthn": origin != ""}
 	}
+	wraps := map[string]bool{}
+	for _, e := range s.UnlockEntries() {
+		wraps[e.Authenticator] = true
+	}
 	list := []authenticatorInfo{}
 	for _, a := range g.Authenticators {
-		list = append(list, authenticatorInfo{ID: a.ID, Kind: a.Kind, Label: a.Label, Origin: a.Origin, RPID: a.RPID, Created: a.Created, LastUsed: a.LastUsed})
+		list = append(list, authenticatorInfo{ID: a.ID, Kind: a.Kind, Label: a.Label, Origin: a.Origin, RPID: a.RPID, Created: a.Created, LastUsed: a.LastUsed, Unlock: wraps[a.ID]})
 	}
 	exempt := g.Exempt
 	if exempt == nil {
@@ -391,9 +450,13 @@ func (p *Plugin) guardState(c *plugin.Call, s *vaultstore.Store, full bool) map[
 }
 
 // handleProof issues a nonce: {for: session} or {for: answer, request,
-// answer} for a pending request, and {for: register}, which a session the
-// passphrase opened asks for. The answer names the WebAuthn credentials of
-// the page's host and whether the desktop app's authenticator is on.
+// answer} for a pending request, {for: reveal|change, request} for a
+// variable, and {for: register}, which a session the passphrase opened
+// asks for. The answer names the WebAuthn credentials of the page's origin
+// and whether the desktop app can prove here. While the vault is locked
+// only a session's nonce is issued, for an unlock: it names the
+// credentials that unlock it with their PRF salts, and whether the
+// desktop app has an unlock entry.
 func (p *Plugin) handleProof(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	s, err := p.open(c.Host)
 	if err != nil {
@@ -436,37 +499,66 @@ func (p *Plugin) handleProof(c *plugin.Call, w http.ResponseWriter, r *http.Requ
 		plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "for is session, answer, register, reveal or change"})
 		return
 	}
+	origin, rpID := originOf(c)
+	creds := []string{}
+	// The vault's state and the nonce come together: no lock or unlock
+	// comes between them.
+	p.keyMu.Lock()
+	defer p.keyMu.Unlock()
+	if st := s.Status(); pu.For == ForSession && st.Mode == vaultstore.ModePassphrase && st.Locked {
+		salts := map[string]string{}
+		desktop := false
+		for _, e := range s.UnlockEntries() {
+			switch {
+			case e.Kind == vaultstore.UnlockPRF && origin != "" && e.PRF.Origin == origin && e.PRF.RPID == rpID:
+				id := enc(e.PRF.Credential)
+				creds = append(creds, id)
+				salts[id] = enc(e.PRF.Salt)
+			case e.Kind == vaultstore.UnlockEnclave || e.Kind == vaultstore.UnlockHello:
+				desktop = desktopUnlocks(c)
+			}
+		}
+		nonce, _ := p.issueProof(pu, true)
+		plugin.WriteJSON(w, http.StatusOK, map[string]any{
+			"nonce": nonce, "rpId": rpID, "credentials": creds, "desktop": desktop, "ttl": proofTTL.Seconds(), "prf": salts,
+		})
+		return
+	}
 	g, err := s.Guard()
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	origin, rpID := originOf(c)
-	creds := []string{}
 	desktop := false
 	for _, a := range g.Authenticators {
 		switch {
 		case a.Kind == vaultstore.KindWebAuthn && origin != "" && a.Origin == origin:
-			creds = append(creds, base64.RawURLEncoding.EncodeToString(a.Credential))
+			creds = append(creds, enc(a.Credential))
 		case a.Kind == vaultstore.KindDesktop:
 			desktop = desktopCan(c)
 		}
 	}
-	plugin.WriteJSON(w, http.StatusOK, map[string]any{
-		"nonce": p.issueProof(pu), "rpId": rpID, "credentials": creds, "desktop": desktop, "ttl": proofTTL.Seconds(),
-	})
+	nonce, pp := p.issueProof(pu, false)
+	out := map[string]any{"nonce": nonce, "rpId": rpID, "credentials": creds, "desktop": desktop, "ttl": proofTTL.Seconds()}
+	if pu.For == ForRegister {
+		out["prfSalt"] = enc(pp.prfSalt)
+	}
+	plugin.WriteJSON(w, http.StatusOK, out)
 }
 
 // handleProofPurpose tells the desktop app's shell what a nonce is for,
 // with the request it would answer: the shell shows that in the system's
-// prompt, whatever the page said. Only the desktop app gets it.
+// prompt, whatever the page said. Only the desktop app gets it. For a
+// session's nonce issued while the vault is locked it names the desktop
+// app's unlock entries (unlock: the shell uses its own install's), for a
+// registration the challenge its Windows Hello key signs (register).
 func (p *Plugin) handleProofPurpose(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
-	p.open(c.Host) // a hold that is over has ended the nonces
-	pu, ok := p.peekProof(r.PathValue("nonce"))
+	pp, ok := p.peekProof(r.PathValue("nonce"))
 	if !ok || !desktopCan(c) {
 		plugin.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such nonce"})
 		return
 	}
+	pu := pp.purpose
 	out := map[string]any{"for": pu.For, "answer": pu.Answer}
 	if pu.For == ForReveal || pu.For == ForChange {
 		out["name"] = pu.Request
@@ -489,19 +581,36 @@ func (p *Plugin) handleProofPurpose(c *plugin.Call, w http.ResponseWriter, r *ht
 		}
 		out["request"] = map[string]any{"id": req.ID, "machine": label, "target": target, "tool": req.Tool, "names": req.Names}
 	}
+	if pu.For == ForSession && pp.locked {
+		s, err := p.open(c.Host)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		out["unlock"] = desktopEntries(s)
+	}
+	if pu.For == ForRegister {
+		out["register"] = map[string]string{"challenge": enc(pp.register)}
+	}
 	plugin.WriteJSON(w, http.StatusOK, out)
 }
 
 // handleAddAuthenticator adds an authenticator ({kind, label, passphrase,
 // nonce, …}) in a session the passphrase opened, with the passphrase again
-// and the proof of a nonce issued for it:
+// and the proof of a nonce issued for it, and wraps the key for it in an
+// unlock entry:
 //   - webauthn: what navigator.credentials.create() answered for the nonce
 //     (clientDataJSON, authenticatorData, publicKey as
 //     SubjectPublicKeyInfo, alg), and an assertion the new credential made
 //     of the same nonce, which shows that the key stored is the
-//     authenticator's;
+//     authenticator's, with its PRF output for the nonce's prfSalt (prf),
+//     which the key is wrapped under; a credential without PRF is refused
+//     (400 prf_required);
 //   - desktop: the shell's MAC of the nonce, so the system's prompt was
-//     answered once before it stands in for the passphrase.
+//     answered once before it stands in for the passphrase, and its relay
+//     (unlock.go) with this install's Secure Enclave or Windows Hello key.
+//     There is one desktop authenticator: another install adds its unlock
+//     entry to it; a new one needs the relay (400 bad_request).
 func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	s, err := p.open(c.Host)
 	if err != nil {
@@ -514,12 +623,14 @@ func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r
 		Passphrase string `json:"passphrase"`
 		Nonce      string `json:"nonce"`
 		MAC        string `json:"mac"`
+		Relay      string `json:"relay"`
 
 		ClientDataJSON    string     `json:"clientDataJSON"`
 		AuthenticatorData string     `json:"authenticatorData"`
 		PublicKey         string     `json:"publicKey"`
 		Algorithm         int        `json:"alg"`
 		Assertion         *proofBody `json:"assertion"`
+		PRF               string     `json:"prf"`
 	}
 	if err := plugin.ReadJSON(r, 64<<10, &body); err != nil {
 		plugin.WriteError(w, err)
@@ -531,17 +642,29 @@ func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r
 		return
 	}
 	c.AuditField("kind", body.Kind)
+	var prfOutput []byte
+	if body.Kind == vaultstore.KindWebAuthn {
+		if body.PRF == "" {
+			plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "prf_required", "message": "the credential's PRF output is needed: a credential without PRF cannot unlock the vault"})
+			return
+		}
+		if prfOutput = b64(body.PRF); len(prfOutput) != 32 {
+			plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "prf is 32 bytes, base64url"})
+			return
+		}
+		defer clear(prfOutput)
+	}
 	if p.slowDown(w) {
 		return
 	}
-	err = s.Verify(body.Passphrase)
+	err = p.verifyPassphrase(c.Host, s, body.Passphrase)
 	p.tried(err == nil, errors.Is(err, vaultstore.ErrPassphrase))
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	want := purpose{For: ForRegister}
-	challenge, ok := p.takeProof(body.Nonce, want)
+	pp, ok := p.takeProof(body.Nonce, want, false)
 	if !ok {
 		refuseProof(c, w, r, errProof, want)
 		return
@@ -556,13 +679,15 @@ func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r
 			refuseProof(c, w, r, errProof, want)
 			return
 		}
+		p.addDesktop(c, w, r, s, a, body.Nonce, body.Relay, pp)
+		return
 	case vaultstore.KindWebAuthn:
 		origin, rpID := originOf(c)
 		if origin == "" {
 			plugin.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "webauthn_origin", "message": "a WebAuthn credential is added from the UI's own address by name: http://localhost on the core's port, or the reverse proxy's"})
 			return
 		}
-		e := webauthn.Expect{Challenge: challenge, Origin: origin, RPID: rpID}
+		e := webauthn.Expect{Challenge: pp.challenge, Origin: origin, RPID: rpID}
 		spki := b64(body.PublicKey)
 		cred, err := webauthn.VerifyRegistration(b64(body.ClientDataJSON), b64(body.AuthenticatorData), e)
 		if err != nil || body.Assertion == nil || !bytes.Equal(b64(body.Assertion.Credential), cred) {
@@ -581,18 +706,33 @@ func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r
 		}
 		a.Origin, a.RPID, a.Credential, a.Algorithm, a.PublicKey, a.SignCount = origin, rpID, cred, body.Algorithm, spki, count
 	}
+	// The authenticator and its entry are one step for a lock (keyMu): a
+	// lock between them would leave the authenticator without its entry,
+	// and the drop of it undone by the lock too.
+	p.keyMu.Lock()
+	before := s.UnlockEntries()
 	err = s.UpdateGuard(func(g *vaultstore.Guard) error {
-		kept := g.Authenticators[:0]
-		for _, o := range g.Authenticators {
-			// One desktop authenticator, and a credential once.
-			same := o.Kind == a.Kind && (a.Kind == vaultstore.KindDesktop || (o.Origin == a.Origin && bytes.Equal(o.Credential, a.Credential)))
-			if !same {
-				kept = append(kept, o)
-			}
-		}
-		g.Authenticators = append(kept, a)
+		// A credential once: added again, it replaces itself (and its
+		// unlock entry goes with the one it replaces).
+		g.Authenticators = slices.DeleteFunc(g.Authenticators, func(o vaultstore.Authenticator) bool {
+			return o.Kind == a.Kind && o.Origin == a.Origin && bytes.Equal(o.Credential, a.Credential)
+		})
+		g.Authenticators = append(g.Authenticators, a)
 		return nil
 	})
+	if err == nil {
+		if p.addStep != nil {
+			p.addStep()
+		}
+		if _, err = s.AddPRF(a.ID, a.Origin, a.RPID, a.Credential, pp.prfSalt, prfOutput); err != nil {
+			// Without its unlock entry it is not added.
+			p.dropAuthenticator(c.Host, s, a.ID)
+		}
+	}
+	p.keyMu.Unlock()
+	// The entry of the credential it replaced went with it, also when its
+	// own could not be made.
+	auditRemovedSince(c, r, s, before, removedOrphan)
 	if err != nil {
 		fail(w, err)
 		return
@@ -602,6 +742,20 @@ func (p *Plugin) handleAddAuthenticator(c *plugin.Call, w http.ResponseWriter, r
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s, true)})
 }
 
+// dropAuthenticator removes an authenticator just added whose unlock entry
+// could not be made; called with keyMu held, as its add.
+func (p *Plugin) dropAuthenticator(h plugin.Host, s *vaultstore.Store, id string) {
+	err := s.UpdateGuard(func(g *vaultstore.Guard) error {
+		g.Authenticators = slices.DeleteFunc(g.Authenticators, func(o vaultstore.Authenticator) bool { return o.ID == id })
+		return nil
+	})
+	if err != nil {
+		h.Logger().Printf("vault: removing authenticator %s: %v", id, err)
+	}
+}
+
+// handleDeleteAuthenticator removes an authenticator; its unlock entries go
+// in the same write (the store's UpdateGuard), so it unlocks nothing after.
 func (p *Plugin) handleDeleteAuthenticator(c *plugin.Call, w http.ResponseWriter, r *http.Request) {
 	s, err := p.open(c.Host)
 	if err != nil {
@@ -610,6 +764,7 @@ func (p *Plugin) handleDeleteAuthenticator(c *plugin.Call, w http.ResponseWriter
 	}
 	id := r.PathValue("id")
 	found := false
+	before := s.UnlockEntries()
 	err = s.UpdateGuard(func(g *vaultstore.Guard) error {
 		kept := g.Authenticators[:0]
 		for _, o := range g.Authenticators {
@@ -630,6 +785,7 @@ func (p *Plugin) handleDeleteAuthenticator(c *plugin.Call, w http.ResponseWriter
 		plugin.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "no such authenticator"})
 		return
 	}
+	auditRemovedSince(c, r, s, before, removedOrphan)
 	changed(c.Host)
 	plugin.WriteJSON(w, http.StatusOK, map[string]any{"guard": p.guardState(c, s, true)})
 }
@@ -738,8 +894,8 @@ func (p *Plugin) handleAddExempt(c *plugin.Call, w http.ResponseWriter, r *http.
 }
 
 // passphraseAgain checks the vault's passphrase brought with a request that
-// lets more out than its session may decide alone (an exemption, a longer
-// automatic lock), slowed down as every check. None is 403
+// lets more out than its session may decide alone (an exemption), slowed
+// down as every check. None is 403
 // passphrase_required, a wrong one 403 wrong_passphrase; either is answered
 // here, so the caller only returns on false.
 func (p *Plugin) passphraseAgain(c *plugin.Call, w http.ResponseWriter, r *http.Request, s *vaultstore.Store, passphrase string) bool {

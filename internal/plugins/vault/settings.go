@@ -6,6 +6,7 @@ import (
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/settings"
+	vaultstore "herdr-ide/internal/vault"
 )
 
 // Settings of the vault (section "vault"): how long things wait and last.
@@ -20,10 +21,13 @@ const (
 	// SettingAutoLock: minutes without use after which the vault locks
 	// (0: never).
 	SettingAutoLock = "vault.autoLock"
-	// SettingPassphraseHours: hours after the passphrase was last given
-	// that the core holds the key; then it forgets it and only the
-	// passphrase unlocks the vault again.
-	SettingPassphraseHours = "vault.passphraseHours"
+	// SettingPassphraseDays: days after the passphrase was last given
+	// that an authenticator may unlock the vault; then only the passphrase
+	// does, once.
+	SettingPassphraseDays = "vault.passphraseDays"
+	// settingPassphraseHours is the setting it replaced (the hours the
+	// core held the key), which settings files drop.
+	settingPassphraseHours = "vault.passphraseHours"
 	// SettingRunTimeout and SettingRunMaxTimeout: run_with_env's default
 	// and longest timeout, in seconds; SettingRunOutput: the KiB of
 	// output it returns.
@@ -34,14 +38,16 @@ const (
 
 // Defaults of what the settings change.
 const (
-	DefaultAutoLock        = 60
-	DefaultPassphraseHours = 24
-	// MaxPassphraseHours bounds the setting: a program that sets it before
-	// the user's next passphrase gets at most this long.
-	MaxPassphraseHours   = 168
-	DefaultRunTimeout    = 120 * time.Second
-	DefaultRunMaxTimeout = 600 * time.Second
-	DefaultRunOutput     = 64 << 10
+	DefaultAutoLock = 60
+	// DefaultPassphraseDays and the setting's bounds are the store's: a
+	// program that sets it before the user's next passphrase gets at most
+	// MaxPassphraseDays.
+	DefaultPassphraseDays = vaultstore.DefaultPassphraseDays
+	MinPassphraseDays     = vaultstore.MinPassphraseDays
+	MaxPassphraseDays     = vaultstore.MaxPassphraseDays
+	DefaultRunTimeout     = 120 * time.Second
+	DefaultRunMaxTimeout  = 600 * time.Second
+	DefaultRunOutput      = 64 << 10
 )
 
 // Settings is the vault's settings module (internal/registry).
@@ -57,13 +63,14 @@ var Settings = func() settings.Module {
 		Defs: []settings.Def{
 			num(SettingApprovalTimeout, DefaultTimeout.Seconds(), 10, 600, "", 10),
 			num(SettingAutoLock, DefaultAutoLock, 0, 1440, "", 20),
-			num(SettingPassphraseHours, DefaultPassphraseHours, 1, MaxPassphraseHours, "", 25),
+			num(SettingPassphraseDays, DefaultPassphraseDays, MinPassphraseDays, MaxPassphraseDays, "", 25),
 			num(SettingSessionIdle, SessionIdle.Minutes(), 1, 240, "vaultSessions", 30),
 			num(SettingSessionMax, SessionMax.Hours(), 1, 24, "vaultSessions", 31),
 			num(SettingRunTimeout, DefaultRunTimeout.Seconds(), 5, 3600, "vaultRun", 40),
 			num(SettingRunMaxTimeout, DefaultRunMaxTimeout.Seconds(), 5, 3600, "vaultRun", 41),
 			num(SettingRunOutput, DefaultRunOutput/1024, 4, 1024, "vaultRun", 42),
 		},
+		Migrations: []settings.Migration{{From: settingPassphraseHours}},
 	}
 }()
 
@@ -95,58 +102,43 @@ func (p *Plugin) sessionLimits(h plugin.Host) (idle, most time.Duration) {
 }
 
 // autoLockAfter is how long the vault stays unlocked without use; 0 never
-// locks it. The time a page set for this unlock (setLockFor) comes first;
-// else the setting's, at most its time when the vault was unlocked
-// (capLock).
+// locks it: the setting's time, at most the cap of this unlock (capLock).
 func (p *Plugin) autoLockAfter(h plugin.Host) time.Duration {
 	p.mu.Lock()
-	set, d := p.lockForSet, p.lockFor
 	capped, limit := p.lockCapSet, p.lockCap
 	p.mu.Unlock()
-	if set {
-		return d
-	}
-	return p.cappedSetting(h, capped, limit)
-}
-
-// settingAfter is the auto-lock's time the setting gives this unlock: the
-// setting's, at most its time when the passphrase unlocked the vault.
-func (p *Plugin) settingAfter(h plugin.Host) time.Duration {
-	p.mu.Lock()
-	capped, limit := p.lockCapSet, p.lockCap
-	p.mu.Unlock()
-	return p.cappedSetting(h, capped, limit)
-}
-
-func (p *Plugin) cappedSetting(h plugin.Host, capped bool, limit time.Duration) time.Duration {
 	after := p.autoLockSetting(h)
-	if capped && limit > 0 && (after == 0 || after > limit) {
-		return limit
+	if capped {
+		return shorter(after, limit)
 	}
 	return after
 }
 
-// passphraseFor is how long after the passphrase was last given the core
-// holds the key: vault.passphraseHours, at most its value when the
-// passphrase was given (keyFrom), so a setting changed without the gate
-// shortens the current hold but does not lengthen it.
-func (p *Plugin) passphraseFor(h plugin.Host) time.Duration {
-	d := p.passphraseSetting(h)
-	p.mu.Lock()
-	capped, limit := p.keyCapSet, p.keyCap
-	p.mu.Unlock()
-	if capped && limit < d {
-		return limit
+// shorter is the shorter of two auto-lock times, where 0 is never (the
+// longest).
+func shorter(a, b time.Duration) time.Duration {
+	switch {
+	case a <= 0:
+		return max(b, 0)
+	case b <= 0:
+		return a
 	}
-	return d
+	return min(a, b)
 }
 
-// passphraseSetting is the hold vault.passphraseHours sets.
-func (p *Plugin) passphraseSetting(h plugin.Host) time.Duration {
-	if p.keyHold > 0 {
-		return p.keyHold
-	}
-	return time.Duration(setting(h, SettingPassphraseHours, DefaultPassphraseHours, 1, MaxPassphraseHours)) * time.Hour
+// passphraseDays is vault.passphraseDays: how many days after the
+// passphrase an authenticator may unlock the vault. The store takes at
+// most the days it sealed with the passphrase, so a setting changed
+// without the gate shortens the window but does not lengthen it.
+func (p *Plugin) passphraseDays(h plugin.Host) int {
+	return int(setting(h, SettingPassphraseDays, DefaultPassphraseDays, MinPassphraseDays, MaxPassphraseDays))
+}
+
+// window is the passphrase's window a passphrase checked now opens: the
+// days of the setting, and autoLock, the auto-lock time an unlock by an
+// authenticator within it may have at most.
+func (p *Plugin) window(h plugin.Host, autoLock time.Duration) vaultstore.Window {
+	return vaultstore.Window{Days: p.passphraseDays(h), AutoLock: autoLock}
 }
 
 // autoLockSetting is the auto-lock's time vault.autoLock sets.

@@ -5,9 +5,11 @@
 // panes have unsaved changes and its answer when the window closes with
 // some (the shell asks it), the addresses the browser panes' webviews open as popups, and on macOS three requests without arguments
 // for Full Disk Access. verifyUser takes a nonce to the main process, which
-// asks the core what it is for and shows that in the system's prompt.
+// asks the core what it is for and shows that in the system's prompt; for
+// the vault's unlock key it answers a relay sealed for the core, which the
+// page only passes on.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import type { DesktopShell, OpenedFolders, ProcessUsage } from '../../web/src/shell';
+import type { DesktopEnroll, DesktopShell, DesktopUnlock, OpenedFolders, ProcessUsage } from '../../web/src/shell';
 import { channels } from './bridge';
 import { MAC_TITLEBAR_INSET, MAC_TITLEBAR_MIN_HEIGHT, MAC_TITLEBAR_TOP_SPACE } from './titlebar';
 
@@ -57,6 +59,29 @@ function processUsage(v: unknown): ProcessUsage | undefined {
 }
 
 const isHex = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+/** A relay: base64url without padding, at most 8 KiB. */
+const isRelay = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 8192 && /^[A-Za-z0-9_-]+$/.test(v);
+/** An unlock entry's id: 16 bytes in base64url. */
+const isEntryId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{22}$/.test(v);
+
+/** An object with exactly these members. */
+function shaped(v: unknown, keys: string[]): v is Record<string, unknown> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const got = Object.keys(v);
+  return got.length === keys.length && keys.every((k) => Object.hasOwn(v, k));
+}
+
+/** The main process's answer on channel for a string nonce; undefined for
+ * anything else or a failure. */
+async function ask(channel: string, nonce: unknown): Promise<unknown> {
+  // Only a string goes on; the main process checks its form.
+  if (typeof nonce !== 'string') return undefined;
+  try {
+    return await ipcRenderer.invoke(channel, nonce);
+  } catch {
+    return undefined;
+  }
+}
 
 const shell: DesktopShell = {
   onCommand: (fn) => listen(channels.command, isString, fn),
@@ -111,14 +136,24 @@ const shell: DesktopShell = {
       }
     },
     async prove(nonce) {
-      // Only a string goes on; the main process checks its form.
-      if (typeof nonce !== 'string') return null;
+      const v = await ask(channels.verifyProve, nonce);
+      return isHex(v) ? v : null;
+    },
+    async canUnlock() {
       try {
-        const v: unknown = await ipcRenderer.invoke(channels.verifyProve, nonce);
-        return isHex(v) ? v : null;
+        return (await ipcRenderer.invoke(channels.verifyCanUnlock)) === true;
       } catch {
-        return null;
+        return false;
       }
+    },
+    async unlock(nonce): Promise<DesktopUnlock | 'none' | null> {
+      const v = await ask(channels.verifyUnlock, nonce);
+      if (v === 'none') return 'none';
+      return shaped(v, ['id', 'relay']) && isEntryId(v.id) && isRelay(v.relay) ? { id: v.id, relay: v.relay } : null;
+    },
+    async enroll(nonce): Promise<DesktopEnroll | null> {
+      const v = await ask(channels.verifyEnroll, nonce);
+      return shaped(v, ['mac', 'relay']) && isHex(v.mac) && isRelay(v.relay) ? { mac: v.mac, relay: v.relay } : null;
     },
   },
 };

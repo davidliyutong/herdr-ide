@@ -90,7 +90,7 @@ func newTest(t *testing.T) (*Plugin, *fakeHost, *vaultstore.Store) {
 		t.Fatal(err)
 	}
 	s.KDF = testKDF
-	if err := s.SetPassphrase(pass); err != nil {
+	if err := s.SetPassphrase(pass, testWindow); err != nil {
 		t.Fatal(err)
 	}
 	return p, h, s
@@ -100,6 +100,10 @@ const pass = "correct horse"
 
 // testKDF keeps Argon2id fast in tests (the store's tests lower its bound).
 var testKDF = vaultstore.KDF{Time: 1, Memory: 8 << 10, Threads: 1}
+
+// testWindow is the passphrase's window of passphrases the tests give the
+// store directly: the default days and auto-lock.
+var testWindow = vaultstore.Window{Days: DefaultPassphraseDays, AutoLock: DefaultAutoLock * time.Minute}
 
 func str(s string) *string { return &s }
 
@@ -414,11 +418,13 @@ type client struct {
 	tok string
 	// origin is the page's (the Origin header of its requests), which the
 	// core vouches for unless untrusted; kind the kind of client, desktop
-	// the check of the desktop shell's MACs.
+	// the check of the desktop shell's MACs and relay the opener of its
+	// relays.
 	origin    string
 	untrusted bool
 	kind      plugin.Client
 	desktop   func(msg, mac []byte) bool
+	relay     func(ad, relay []byte) ([]byte, error)
 }
 
 func newClient(p *Plugin, h *fakeHost) *client {
@@ -426,7 +432,7 @@ func newClient(p *Plugin, h *fakeHost) *client {
 	for _, rt := range p.Routes() {
 		rt := rt
 		c.mux.HandleFunc(plugin.Pattern(ID, rt), func(w http.ResponseWriter, r *http.Request) {
-			call := &plugin.Call{Host: h, Client: c.kind, DesktopProof: c.desktop}
+			call := &plugin.Call{Host: h, Client: c.kind, DesktopProof: c.desktop, DesktopRelay: c.relay}
 			if !c.untrusted {
 				call.TrustedOrigin = c.origin
 			}
@@ -812,7 +818,7 @@ func TestRefusalsAreCoalesced(t *testing.T) {
 	if h.messageCount("changed") != before {
 		t.Errorf("refusals made the pages reload %d times", h.messageCount("changed")-before)
 	}
-	if err := s.Unlock(pass); err != nil {
+	if err := s.Unlock(pass, testWindow); err != nil {
 		t.Fatal(err)
 	}
 

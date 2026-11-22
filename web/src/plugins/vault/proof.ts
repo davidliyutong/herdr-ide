@@ -2,11 +2,17 @@
 // internal/plugins/vault/proof.go): a proof is the user's word, made by
 // the desktop app's system prompt or by a WebAuthn credential, that stands
 // for the passphrase while the vault is unlocked. The core issues a nonce
-// for one purpose, the page has it signed, and the core checks it.
+// for one purpose, the page has it signed, and the core checks it. A
+// locked vault has forgotten its key: an authenticator unlocks it only
+// with an unlock entry, the key wrapped under what the authenticator alone
+// gives (the desktop app's Secure Enclave or Windows Hello key, which the
+// app answers sealed for the core; a credential's PRF output), and only
+// within vault.passphraseDays of the passphrase.
 import { APP_NAME } from '../../brand';
 import type { DesktopVerifyUser } from '../../shell';
 import {
   addAuthenticator,
+  openSessionWithUnlock,
   vaultApi,
   VaultError,
   type DesktopProof,
@@ -14,6 +20,7 @@ import {
   type ProofChallenge,
   type ProofPurpose,
   type VaultGuard,
+  type VaultUnlock,
   type WebAuthnProof,
 } from './api';
 
@@ -24,6 +31,11 @@ export function b64urlEncode(buf: ArrayBuffer | Uint8Array): string {
   let s = '';
   for (const b of bytes) s += String.fromCharCode(b);
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** A WebAuthn byte string (a PRF output) as bytes. */
+function bytesOf(b: BufferSource): Uint8Array {
+  return b instanceof ArrayBuffer ? new Uint8Array(b) : new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
 }
 
 export function b64urlDecode(s: string): Uint8Array<ArrayBuffer> {
@@ -89,6 +101,25 @@ export function ways(guard?: VaultGuard | null): Ways {
   };
 }
 
+/** How this page can unlock a locked vault without the passphrase. */
+export interface UnlockWays {
+  /** The desktop app's key: 'enclave' (Touch ID) or 'hello'; null: none. */
+  desktop: 'enclave' | 'hello' | null;
+  /** A WebAuthn credential of this origin, by its PRF. */
+  prf: boolean;
+}
+
+/** The ways of the list's unlock this page can use: the desktop app's
+ * where the app can keep an unlock key (canUnlock), a credential's PRF
+ * where the browser has WebAuthn. Nothing once the hint says the
+ * passphrase is due. */
+export function unlockWays(u: VaultUnlock | undefined, canUnlock: boolean, now = Date.now()): UnlockWays {
+  const none = { desktop: null, prf: false };
+  if (!u?.ways?.length || (u.due && Date.parse(u.due) <= now)) return none;
+  const desktop = canUnlock && verifyUser() ? (u.ways.find((w) => w === 'enclave' || w === 'hello') ?? null) : null;
+  return { desktop: desktop as UnlockWays['desktop'], prf: u.ways.includes('prf') && browserCan() };
+}
+
 // ---- making a proof ----
 
 const cancelled = (e: unknown) => e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'AbortError');
@@ -108,7 +139,14 @@ function assertionProof(nonce: string, cred: Credential | null): WebAuthnProof {
   };
 }
 
-async function webauthnGet(ch: ProofChallenge, ids: string[]): Promise<WebAuthnProof | null> {
+/** An assertion of the nonce by one of the credentials, with the PRF
+ * output of the one that answered when salts (by credential id) are
+ * given; null when the user cancelled. */
+async function webauthnAssert(
+  ch: ProofChallenge,
+  ids: string[],
+  prf?: Record<string, string>,
+): Promise<{ proof: WebAuthnProof; output?: string } | null> {
   try {
     const cred = await navigator.credentials.get({
       publicKey: {
@@ -117,13 +155,28 @@ async function webauthnGet(ch: ProofChallenge, ids: string[]): Promise<WebAuthnP
         allowCredentials: ids.map((id) => ({ type: 'public-key' as const, id: b64urlDecode(id) })),
         userVerification: 'required',
         timeout: ch.ttl * 1000,
+        ...(prf && {
+          extensions: {
+            prf: { evalByCredential: Object.fromEntries(Object.entries(prf).map(([id, salt]) => [id, { first: b64urlDecode(salt) }])) },
+          },
+        }),
       },
     });
-    return assertionProof(ch.nonce, cred);
+    const proof = assertionProof(ch.nonce, cred);
+    if (!prf) return { proof };
+    const first = (cred as PublicKeyCredential).getClientExtensionResults?.().prf?.results?.first;
+    const bytes = first ? bytesOf(first) : undefined;
+    const output = bytes ? b64urlEncode(bytes) : undefined;
+    bytes?.fill(0);
+    return { proof, output };
   } catch (e) {
     if (cancelled(e)) return null;
     throw e instanceof VaultError ? e : failed();
   }
+}
+
+async function webauthnGet(ch: ProofChallenge, ids: string[]): Promise<WebAuthnProof | null> {
+  return (await webauthnAssert(ch, ids))?.proof ?? null;
 }
 
 async function desktopMac(nonce: string): Promise<DesktopProof | null> {
@@ -145,15 +198,63 @@ export async function prove(purpose: ProofPurpose): Promise<Proof | null> {
   throw new VaultError('vault_proof');
 }
 
+// ---- unlocking a locked vault ----
+
+/** Unlocks the locked vault with the desktop app's unlock key: the app
+ * prompts, and answers the entry it used and the relay sealed for the
+ * core, which the page passes on. False when the user did not confirm;
+ * unlock_stale when this install has no unlock entry (the app says so
+ * without a prompt), which only the passphrase and a new enrollment mend. */
+export async function unlockWithDesktop(): Promise<boolean> {
+  const ch = await vaultApi.proof({ for: 'session' });
+  let r;
+  try {
+    r = await verifyUser()?.unlock(ch.nonce);
+  } catch {
+    throw failed();
+  }
+  if (r === 'none') throw new VaultError('unlock_stale');
+  if (!r) return false;
+  await openSessionWithUnlock({ nonce: ch.nonce, id: r.id, relay: r.relay });
+  return true;
+}
+
+/** Unlocks the locked vault with a WebAuthn credential of this origin: its
+ * PRF of the entry's salt unwraps the key, and its assertion of the nonce
+ * comes with it. False when the user cancelled. */
+export async function unlockWithPrf(): Promise<boolean> {
+  const ch = await vaultApi.proof({ for: 'session' });
+  const salts = ch.prf ?? {};
+  const ids = Object.keys(salts);
+  if (!ids.length) throw new VaultError('unlock_stale');
+  const got = await webauthnAssert(ch, ids, salts);
+  if (!got) return false;
+  // The browser or the authenticator gave no PRF: nothing to unwrap with.
+  if (!got.output) throw failed();
+  const p = got.proof;
+  const assertion = {
+    credential: p.credential,
+    clientDataJSON: p.clientDataJSON,
+    authenticatorData: p.authenticatorData,
+    signature: p.signature,
+  };
+  await openSessionWithUnlock({ nonce: ch.nonce, prf: { credential: p.credential, output: got.output }, assertion });
+  return true;
+}
+
 // ---- adding an authenticator ----
 
 /** Adds a WebAuthn credential for this host: the browser creates it for the
- * core's nonce, then the new credential signs the same nonce, which shows
- * the core that the key it stores is the authenticator's. False when the
- * user cancelled. */
+ * core's nonce with the PRF extension, then the new credential signs the
+ * same nonce, which shows the core that the key it stores is the
+ * authenticator's, and evaluates its PRF of the core's salt, under which
+ * the core wraps the vault's key. A credential without PRF cannot unlock
+ * the vault and is not added (prf_required). False when the user
+ * cancelled. */
 export async function registerWebAuthn(label: string, passphrase: string): Promise<boolean> {
   const ch = await vaultApi.proof({ for: 'register' });
   const challenge = b64urlDecode(ch.nonce);
+  const noPrf = () => new VaultError('prf_required');
   try {
     const created = (await navigator.credentials.create({
       publicKey: {
@@ -165,13 +266,18 @@ export async function registerWebAuthn(label: string, passphrase: string): Promi
         attestation: 'none',
         excludeCredentials: ch.credentials.map((id) => ({ type: 'public-key' as const, id: b64urlDecode(id) })),
         timeout: ch.ttl * 1000,
+        extensions: { prf: {} },
       },
     })) as PublicKeyCredential | null;
     const r = created?.response as AuthenticatorAttestationResponse | undefined;
     const key = r?.getPublicKey?.();
     if (!created || !r || !key) throw failed();
-    const assertion = await webauthnGet({ ...ch, credentials: [b64urlEncode(created.rawId)] }, [b64urlEncode(created.rawId)]);
-    if (!assertion) return false;
+    // The authenticator said it has no PRF: no second prompt for nothing.
+    if (created.getClientExtensionResults?.().prf?.enabled === false || !ch.prfSalt) throw noPrf();
+    const id = b64urlEncode(created.rawId);
+    const got = await webauthnAssert({ ...ch, credentials: [id] }, [id], { [id]: ch.prfSalt });
+    if (!got) return false;
+    if (!got.output) throw noPrf();
     await addAuthenticator({
       kind: 'webauthn',
       label,
@@ -181,7 +287,8 @@ export async function registerWebAuthn(label: string, passphrase: string): Promi
       authenticatorData: b64urlEncode(r.getAuthenticatorData()),
       publicKey: b64urlEncode(key),
       alg: r.getPublicKeyAlgorithm(),
-      assertion,
+      assertion: got.proof,
+      prf: got.output,
     });
     return true;
   } catch (e) {
@@ -191,12 +298,19 @@ export async function registerWebAuthn(label: string, passphrase: string): Promi
 }
 
 /** Turns the desktop app's prompt on: the user answers it once for the
- * core's nonce. False when the user did not confirm. */
+ * core's nonce, and the app makes this install's unlock key, which it
+ * hands the core sealed (the relay). False when the user did not confirm
+ * or the key could not be made. */
 export async function registerDesktop(label: string, passphrase: string): Promise<boolean> {
   const ch = await vaultApi.proof({ for: 'register' });
-  const p = await desktopMac(ch.nonce);
-  if (!p) return false;
-  await addAuthenticator({ kind: 'desktop', label, passphrase, nonce: ch.nonce, mac: p.mac });
+  let r;
+  try {
+    r = await verifyUser()?.enroll(ch.nonce);
+  } catch {
+    throw failed();
+  }
+  if (!r) return false;
+  await addAuthenticator({ kind: 'desktop', label, passphrase, nonce: ch.nonce, mac: r.mac, relay: r.relay });
   return true;
 }
 

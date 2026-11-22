@@ -30,7 +30,7 @@ func TestLinksSetting(t *testing.T) {
 		t.Fatalf("default %v", st.Get(SettingLinks))
 	}
 	st, path := load(t, `{"browser.openLinks": "pane"}`)
-	if st.Get(SettingLinks) != LinksLoopback || len(st.State().Problems) != 0 {
+	if st.Get(SettingLinks) != LinksAll || len(st.State().Problems) != 0 {
 		t.Fatalf("pane read as %v, problems %v", st.Get(SettingLinks), st.State().Problems)
 	}
 	b, err := os.ReadFile(path)
@@ -38,7 +38,7 @@ func TestLinksSetting(t *testing.T) {
 		t.Fatal(err)
 	}
 	var file map[string]any
-	if err := json.Unmarshal(b, &file); err != nil || file[SettingLinks] != LinksLoopback {
+	if err := json.Unmarshal(b, &file); err != nil || file[SettingLinks] != LinksAll {
 		t.Fatalf("file %s", b)
 	}
 	for _, v := range []string{LinksAll, LinksExternal, LinksLoopback} {

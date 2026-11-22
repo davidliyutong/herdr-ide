@@ -90,24 +90,24 @@ describe('grouping', () => {
   });
 
   // What git ignores is muted, without a letter: the paths the status
-  // lists, everything inside an ignored folder (git lists the folder
-  // alone: the explorer's entries are), and the git directory.
-  it('mutes what git ignores and the git directory', () => {
+  // lists and everything inside an ignored folder (git lists the folder
+  // alone: the explorer's entries are). The git directory has no color.
+  it('mutes what git ignores, not the git directory', () => {
     const dim = { color: IGNORED_COLOR, tooltip: t('git.mark.ignored') };
     const repo = { root: ROOT, files, ignored: ['node_modules/', 'src/debug.log', 'logs/'] };
     const top = decorate([repo], ROOT, () => ['node_modules', 'logs', '.git', 'src', 'README.md']);
-    expect([top['node_modules'], top['logs'], top['.git']]).toEqual([dim, dim, dim]);
+    expect([top['node_modules'], top['logs']]).toEqual([dim, dim]);
+    expect(top['.git']).toBeUndefined();
     expect(top['README.md']).toBeUndefined();
     // A change marks its folder whatever is ignored in it.
     expect(top['src'].color).toBe('var(--ds-git-modified)');
     expect(decorate([repo], `${ROOT}/src`)['debug.log']).toEqual(dim);
     expect(decorate([repo], `${ROOT}/node_modules/pkg/lib`, () => ['index.js', 'util'])).toEqual({ 'index.js': dim, util: dim });
-    expect(decorate([repo], `${ROOT}/.git/refs`, () => ['heads', 'tags'])).toEqual({ heads: dim, tags: dim });
+    expect(decorate([repo], `${ROOT}/.git/refs`, () => ['heads', 'tags'])).toEqual({});
     // A repository inside another rules its own files.
     const dep = { root: `${ROOT}/node_modules/dep`, files: [{ path: 'x.js', x: '.', y: 'M', kind: 'changed' } as StatusFile] };
     expect(decorate([repo, dep], dep.root, () => ['x.js', 'y.js'])).toEqual({
       'x.js': { color: 'var(--ds-git-modified)', badge: 'M', tooltip: t('git.mark.modified') },
-      '.git': dim,
     });
     // The provider takes the entries the explorer listed.
     useGit.setState({

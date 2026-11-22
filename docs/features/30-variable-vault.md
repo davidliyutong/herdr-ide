@@ -24,9 +24,10 @@ deciding.
 - One gate for every caller, the core host's own programs included: a
   value leaves the vault only for a machine the variable lists, an app the
   user exempted on a machine, or with the user's approval, and approving,
-  revealing and changing need the vault's passphrase, or biometrics while
-  the core holds the key (for a day after the passphrase by default),
-  which programs on the core host do not have. What it does
+  revealing and changing need the vault's passphrase, or the user's
+  biometrics (which also unlock a locked vault, for 14 days after the
+  passphrase by default), which programs on the core host do not have.
+  What it does
   not cover: a variable that lists machines is open to any program that
   runs on one of them, and programs on the core host can run commands on
   every machine (through the core's terminals, or ssh with the user's
@@ -40,9 +41,11 @@ deciding.
   machine: any process of the user there can ask as an agent does.
 - Non-goal: protection against a program that drives the user's own
   browser page after the user unlocked it (browser automation), reads the
-  core's memory (a debugger with the rights to; the core holds the key for
-  the key's hold, also while the vault is locked), or guesses a weak
-  passphrase offline from the file.
+  core's memory (a debugger with the rights to: while the vault is
+  unlocked the key is there, encrypted by memguard under a key that is
+  there too), obtains an authenticator's key-encryption key once (which,
+  with a copy of the file, opens the vault until the passphrase changes),
+  or guesses a weak passphrase offline from the file.
 - Not yet covered: content the core serves on the UI's own origin, VS
   Code's windows (code-server, proxied from a machine below
   `/m/{id}/code/`), can reach the page that holds a session (the page
@@ -64,7 +67,9 @@ flushed to disk before it replaces the file, and the directory after, so a
 crash or a power loss leaves the old file or the new one):
 `{version: 3, mode, kdf, check, passphraseSet, entries: [{name,
 description, machines, injectOnly, value: {nonce, ciphertext}, created,
-updated}], forgotten}`. Each value is encrypted with AES-256-GCM under the
+updated}], forgotten, guard, unlock, passphraseAt, passphraseHint}` (the
+last four: the sealed guard and the authenticators' unlock entries with
+the passphrase's window, below). Each value is encrypted with AES-256-GCM under the
 master key; its additional data is a JSON object of the file's version, its
 name, its machines (sorted) and its inject-only flag (one text per content:
 machine ids with control characters are refused), so a ciphertext copied
@@ -81,15 +86,12 @@ away by hand. Fields the version does not know are kept.
 
 The master key is derived from the user's passphrase with Argon2id (time
 3, 64 MiB, 4 threads; a new 16-byte salt and the parameters in the file)
-and kept only in the core's memory while the core holds it (the key's
-hold, below); the vault is locked after every start until the passphrase
-is given. The store can be **suspended**: locked with the key kept, so no
-value is given out or changed (`vault_locked`), no exemption applies and
-the user's changes of the guard are refused, but the guard can be read, an
-authenticator's proof checked and recorded (`RecordProof`: its time and
-counter), and values opened and sealed again only to take a removed
-machine out of their lists (a narrowing; nothing leaves the core);
-`Resume` or the passphrase unlocks it, `Lock` forgets the key. A new vault
+and kept only in the core's memory while the vault is unlocked, in a
+memguard Enclave (the key in memory, below); the vault is locked after
+every start until the passphrase, or an authenticator that wraps the key
+(unlock entries, below), gives it. `Lock` always forgets the key: a locked
+vault gives no value out and changes none (`vault_locked`), applies no
+exemption and has no guard to read, whatever authenticators it has. A new vault
 asks for its passphrase (at least 8 characters) before its first value
 (`no_passphrase`). Parameters read from the file must be within bounds (a
 16-byte salt, time 1–10, memory 8 MiB–1 GiB, 1–16 threads), or the vault
@@ -97,7 +99,9 @@ does not open: an edited file can neither weaken the derivation nor
 exhaust the core's memory. Changing the passphrase needs the current one
 and seals every value again under a key of a new salt; the new key is
 installed only once all is written, so a change that fails (a value that
-does not open: `corrupt`) leaves the vault as it was, locked if it was.
+does not open: `corrupt`) leaves the vault as it was, locked if it was;
+the same write drops every unlock entry (they wrap the old key) and seals
+a new passphrase's window.
 When the passphrase
 was set or last changed (`passphraseSet`) is shown in the panel (on
 hover over its unlock card and its bar): a new
@@ -143,14 +147,14 @@ read-only) audited with the name or request id.
 
 **The gate.** The core's API is open to any program on the core host (it
 needs no `Origin` header), so the API cannot tell the user from a program.
-The passphrase can, and the user's biometrics while the core holds the
-key: setting, changing, renaming and deleting variables, revealing a value
+The passphrase can, and the user's biometrics: setting, changing, renaming and deleting variables, revealing a value
 and allowing a request (`once`, `always`; denying needs nothing) need a
 **vault session** of the page, sent as `X-Vault-Session`, or answer `401
 vault_session` (audited as `denied.vault_session`). A page opens one with
 the passphrase (`POST session`, which also unlocks the vault; setting or
-changing the passphrase opens one too) or an authenticator's proof
-(below): 32 random bytes
+changing the passphrase opens one too), an authenticator's proof of an
+unlocked vault or an authenticator's unlock of a locked one (below): 32
+random bytes
 the core keeps in memory and the page only in its own memory, never in
 storage that programs could read from disk. Only what passes the gate
 counts as a session's use: loading the list says whether the session is
@@ -159,42 +163,55 @@ open without keeping it so. A session ends unused for 30 minutes
 when the vault is locked (every one: by Lock or the auto-lock) or its
 passphrase changed (every other one); a session that a passphrase check
 would open after such an end (the check crossed it) is not opened; at most
-32 are open, the oldest going. A session's times, the automatic lock's,
-the key's hold and the nonces' count by the wall clock and the monotonic
+32 are open, the oldest going. A session's times, the automatic lock's
+and the nonces' count by the wall clock and the monotonic
 clock together, whichever says longer (`stamp`): the computer's sleep,
 which stops the monotonic clock on macOS and Linux, counts, and a wall
 clock set back lengthens nothing. Installing or dropping the key is one step
-with its sessions (one lock of the plugin): an unlock and the session it
-opens, a lock and the end of every session, a new passphrase and its
-session. A lock asked for while a passphrase is checked comes after the
-check and its session, so the vault never ends unlocked after a lock, nor
-locked with a session open. Passphrases are checked one at a time
-(`429 busy` while one is checked); three wrong ones in a row cost nothing,
-each one after doubles a wait before the next try (`429 wait` with
+with its sessions (one lock of the plugin): an unlock (by the passphrase or
+an authenticator) and the session it opens, a lock and the end of every
+session and nonce, a new passphrase and its session, an authenticator and
+its unlock entry. A lock asked for while a passphrase is checked, or an
+authenticator's unlock runs, comes after the check and its session, so the
+vault never ends unlocked after a lock, nor locked with a session open.
+Passphrases are checked one at a time, and authenticators' unlocks with
+them (`429 busy` while one is checked); three wrong ones in a row cost
+nothing, each one after doubles a wait before the next try (`429 wait` with
 `Retry-After`, up to 5 minutes), across pages and programs, so a program
-can also make the user wait. Opening a session and changing the passphrase
+can also make the user wait. An authenticator's unlock whose key does not
+open or verify counts as a wrong passphrase; one that guesses nothing (a
+nonce expired or of another purpose, a vault already unlocked, a desktop
+relay that does not open) is refused without counting, and a right one
+ends the count as the passphrase does. Opening a session and changing the passphrase
 are audited (`vault.unlocked`, `vault.passphrase_set`, with whether it
 worked), never with the passphrase; reveals and deletions as
 `vault.revealed` and `vault.deleted` once done. A machine's MCP server
 reaches the vault only through its agent's socket and the same rules as
 every machine: the core host's agent is the local machine's.
 
-**Authenticators** (`proof.go`, `internal/webauthn`). Biometrics (the
-desktop app's Touch ID or Windows Hello, or a browser's WebAuthn
-credential: a platform authenticator or a security key) stand in for the
-passphrase while the core holds the key: a proof opens a session, which
-unlocks a vault locked within the key's hold, or allows one request. A
-proof never brings a forgotten key back: the authenticators are sealed
-with the key (the store's guard), so they are read only while the core
-holds it, and after a start or once the hold is over the passphrase is
-needed once.
+**Authenticators** (`proof.go`, `unlock.go`, `internal/webauthn`).
+Biometrics (the desktop app's Touch ID or Windows Hello, or a browser's
+WebAuthn credential: a platform authenticator or a security key) stand in
+for the passphrase in two ways. A **proof** shows that the user is there:
+it opens a session of an unlocked vault, or allows one request; it holds
+no key, and the authenticators are sealed with the key (the store's
+guard), so they are read only while the vault is unlocked. An **unlock**
+gives a locked vault its key back: the authenticator keeps the master key
+wrapped in an unlock entry of the file, under a key-encryption key only it
+can give again, and it may do so within `vault.passphraseDays` of the last
+passphrase (the passphrase's window, below).
 
 - A **proof** answers a nonce the core issued (`POST proof`) for one
   purpose: `session`, `answer` with a request's id and `once` or `always`,
   `reveal` or `change` with a variable's name, or `register`. A nonce is
   32 random bytes, good for one try and two
   minutes; at most 32 wait, the oldest giving way; they end with the
-  sessions (a lock, a new passphrase).
+  sessions (a lock, a new passphrase). While the vault is locked only a
+  `session` nonce is issued, and it is good for an unlock only; a nonce
+  issued while the vault is unlocked is never good for an unlock, and those
+  issued while it was locked end once it is unlocked. The vault's state and
+  the nonce are taken under the plugin's key lock, so no lock or unlock
+  comes between them.
 - A **WebAuthn credential** (a browser's platform authenticator such as
   Touch ID or Windows Hello, or a security key) signs the nonce as its
   challenge. The core checks, with the standard library only: the client
@@ -214,10 +231,10 @@ needed once.
   `127.0.0.1` at its start, `internal/loopback`; when another program
   holds it, the core says so and vouches for no loopback origin). A
   browser sends no `Origin` with a page's own GET, so for the list, which
-  tells the page whether to offer biometrics (`webauthn`, and the
-  authenticators it can prove with), the page's
-  word that the request is its own (`Sec-Fetch-Site: same-origin`) and
-  the request's Host stand for it; that decides what is offered, never
+  tells the page whether to offer biometrics (`webauthn`, the
+  authenticators it can prove with, and the ways it can unlock with), the
+  page's word that the request is its own (`Sec-Fetch-Site: same-origin`)
+  and the request's Host stand for it; that decides what is offered, never
   what is taken. A page
   that another program serves on `localhost:3000` can ask the user's
   biometrics to sign a nonce; what it signs names that page's origin and
@@ -228,13 +245,21 @@ needed once.
   biometrics needs: the kinds this page can prove with (`desktop` for the
   desktop client with the desktop authenticator on, `webauthn` with this
   origin for a credential added from it), never ids, labels, origins of
-  other pages or times, nor the rule, the exempt apps, `lockAt` or
-  `keyUntil`; a session sees all of it (`full`). WebAuthn's
+  other pages or times, nor the rule, the exempt apps or `lockAt`; a
+  session sees all of it (`full`), and for each authenticator whether it
+  has an unlock entry (`unlock`). A locked vault has no guard to read:
+  the list says instead how this client can unlock it (`unlock.ways`:
+  `enclave` or `hello` for the desktop client where the desktop app has
+  an entry of that kind, the shell telling its own install's apart; `prf`
+  for a page whose origin, vouched for, has a credential's entry) and when
+  the passphrase's window ends (`unlock.due`, from the hint in the clear,
+  below), with no ids, labels or times. WebAuthn's
   `allowCredentials` takes the credentials' ids, which come with each nonce
   (`POST proof`, which needs no session) for the origin the core vouches
-  for only. A program that writes that origin in its headers learns that
-  a credential exists and its id, which proves nothing without the
-  authenticator.
+  for only; while the vault is locked those of this origin's unlock
+  entries, each with its PRF salt (`prf`). A program that writes that
+  origin in its headers learns that a credential exists, its id and its
+  salt, which open nothing without the authenticator.
 - The **desktop app** prompts with the system (Touch ID on macOS, Windows
   Hello on Windows): its page hands the shell's main process the nonce, the
   shell asks the core what the nonce is for (`GET proof/{nonce}`, answered
@@ -250,18 +275,26 @@ needed once.
   signed, nor sign anything without the prompt.
 - **Adding** one needs a session the passphrase opened, the passphrase
   again (checked and slowed down as any), and the proof of a `register`
-  nonce: for WebAuthn what the browser's `create()` answered (its public
-  key as the browser gives it, `getPublicKey()`, so no attestation is
-  parsed) and an assertion the new credential made of the same nonce,
-  which shows that the key stored is the authenticator's; for the desktop
-  app the shell's proof, so its prompt was answered once. At most 16; one
-  desktop authenticator. A new passphrase removes them all: whoever knew
-  the old one may have added theirs.
-- A **session a proof opened** is marked. It answers requests and changes
-  and shows variables as any session; what guards the vault takes a
-  session the passphrase opened (`401 vault_passphrase` otherwise): adding
-  and removing authenticators, exempting apps and ending exemptions, the
-  rule below, the automatic lock's time, imports and exports.
+  nonce, and wraps the key for it: for WebAuthn what the browser's
+  `create()` answered (its public key as the browser gives it,
+  `getPublicKey()`, so no attestation is parsed) and an assertion the new
+  credential made of the same nonce, which shows that the key stored is
+  the authenticator's, with the PRF extension evaluated on the salt the
+  nonce came with (`prfSalt`, 32 random bytes): its output (`prf`) is what
+  the credential's unlock entry is wrapped under, and a credential without
+  PRF is not added (`400 prf_required`); for the desktop app the shell's
+  proof with its relay of a new key of this install (the desktop app's
+  unlock key, below), so its prompt was answered once. At most 16; one
+  desktop authenticator, to which each install of the app adds its own
+  entry. The authenticator and its entry are one step for a lock (the
+  plugin's key lock): one whose entry cannot be made is not added, and a
+  lock does not fall between them. A new passphrase removes them all:
+  whoever knew the old one may have added theirs.
+- A **session a proof or an unlock opened** is marked. It answers requests
+  and changes and shows variables as any session; what guards the vault
+  takes a session the passphrase opened (`401 vault_passphrase`
+  otherwise): adding and removing authenticators, exempting apps and
+  ending exemptions, the rule below, imports and exports.
 - **Verify every Allow** (the guard's rule, off unless set): a session is
   then not enough to let a value out (`401 vault_proof`). Allowing a
   request (`once`, `always`) needs a proof made for that request and
@@ -280,71 +313,238 @@ needed once.
 - **The automatic lock** is a setting, changed without the gate: while the
   vault is unlocked a change shortens its time but does not lengthen it
   (the time is capped at the setting's when the passphrase unlocked the
-  vault, and stays so across a lock and a proof's unlock within the hold);
-  a page's own time for the unlock (`POST autolock`, a passphrase's
-  session) is not capped, but a time longer than the current one, or
-  never, takes the passphrase again in the request (`403
-  passphrase_required` without it): the session alone is what a program
-  driving the page has too, and never keeps the vault unlocked until the
-  key's hold ends.
+  vault, and an unlock by an authenticator takes the shorter of the
+  setting's and the time sealed in the passphrase's window). No page sets
+  a time of its own for an unlock.
 - Proofs are audited as `vault.proved` (`ok`, `for`, the authenticator's
-  kind), refusals as `denied.vault_proof` and `denied.vault_passphrase`.
+  kind), unlocks as `vault.unlocked` (`ok`, the entry's `kind`), the
+  removal of an unlock entry as `vault.unlock_removed` (`id`, `kind`,
+  `reason`: `invalidated`, `stale` (replaced by its install's new entry,
+  or ended by a new passphrase), `orphan` (its authenticator gone), `wrap`
+  (the desktop relay did not open its wrap)), refusals as
+  `denied.vault_proof` and `denied.vault_passphrase`; never with a key, a
+  relay's content or a PRF output.
 
-**The key's hold** (`autolock.go`). The passphrase gives the core the key,
-which the core then holds in its memory for `vault.passphraseHours` hours
-(24 by default, 1–168) from the last time the passphrase was given: an
-unlock, a session opened with it, a new passphrase; by the wall clock, so
-the computer's sleep counts (a laptop closed for a day finds the key
-forgotten at the first request after it wakes, which looks at the hold
-before anything else, as the timer does when it fires late). Within that
-time:
+**Unlock entries** (`internal/vault/unlock.go`). The file keeps, outside
+the sealed guard (which needs the key to be read), a list `unlock` of
+`{id, authenticator, kind, created, check, enclave | hello | prf, wrapped}`:
+`id` 16 random bytes; `authenticator` the guard's authenticator the entry
+belongs to (the desktop authenticator for `enclave` and `hello`, the
+WebAuthn credential for `prf`); `check` the SHA-256 of the file's `check`
+when the entry was made; `wrapped` the master key sealed with AES-256-GCM
+under the entry's key-encryption key (KEK), whose additional data is the
+canonical JSON of the file's version, `"t": "unlock"`, the id, the
+authenticator, the kind, the check and every parameter of the kind, so an
+entry edited in any member does not open. Each KEK is HKDF-SHA256 (32
+bytes):
 
-- a lock, by Lock or by the automatic lock, of a vault that has an
-  authenticator **suspends** it: every session and nonce ends, machines
-  get `vault_locked`, no value is read or sealed and no exemption applies,
-  but the key stays, so the authenticator's proof of a `session` nonce
-  unlocks the vault again (audited as `vault.unlocked` with the
-  authenticator's `kind`), as the passphrase does;
-- a vault without an authenticator has its key forgotten at a lock, as
-  before: only the passphrase would open it, so keeping the key would
-  expose it for nothing;
-- a Lock with `forget` (the panel's Require Passphrase on a locked vault)
-  forgets the key at once.
+- `enclave` (the desktop app on macOS): input the P-256 ECDH secret `Z` ‖
+  the shell's secret, salt `ephPub` ‖ `sePub`, info `vault-unlock enclave`.
+  `Z` is agreed between the app's Secure Enclave key, which the enclave
+  uses only after Touch ID with the fingerprints enrolled when it was made,
+  and an ephemeral key the core made as it added the entry and of which it
+  kept only the public half (`ephPub`). The entry keeps the install, the
+  key's blob (which only that Mac's Secure Enclave opens) and its public
+  key (`sePub`), both X9.63.
+- `hello` (the desktop app on Windows): input the Windows Hello key's
+  signature of the entry's challenge (32 bytes the core chose; RSA
+  PKCS#1 v1.5 over SHA-256, the same at every signing) ‖ the shell's
+  secret, salt the challenge, info `vault-unlock hello`. The entry keeps
+  the install, the key's name (`<slug>-vault-<install>`) and its public
+  key, which is bound into the additional data to tell the key apart but
+  verifies nothing: only that key's signature opens the wrap.
+- `prf` (a WebAuthn credential): input the credential's PRF output for
+  the entry's salt (32 random bytes the core chose, also the PRF's
+  input), salt that salt, info `vault-unlock prf`. The entry keeps the
+  credential's origin, RP id and id.
 
-Once the hold is over the core forgets the key, whatever the vault's state
-(audited as `vault.locked` with `reason: passphrase`): every session ends,
-biometrics unlock nothing and only the passphrase unlocks the vault. Every
-route and machine request looks at the hold first, a proof's unlock looks
-again with the key's lock held, and the auto-lock's timer runs while the
-key is held, so the key is not used past its hold. Locked or not, the key
-held is in the core's memory only, never written anywhere: the lock within
-the hold is the core's refusal, not the key's absence. The hold's time is
-a setting, changed without the gate: a change shortens the current hold
-but does not lengthen it; a longer time counts from the next passphrase,
-and is at most a week. Without an authenticator the vault behaves as
-before but for this bound: a vault in use, or whose automatic lock is
-never, locks once the hold is over.
+The vectors of `design/testdata/vault-unlock/kek.json` (made with Node's
+crypto) are checked by the store's and the desktop shell's tests. A vault
+has at most 4 entries of the desktop app, one per install (adding from an
+install replaces its entry), and one per credential. Open drops the
+entries that are malformed, made for another check (a passphrase changed
+since, also by an older build, which keeps the members it does not know),
+of an id, install or credential already seen, or over these bounds; a new
+passphrase drops every entry, and removing an authenticator drops its
+entries in the same write. The key is not wrapped again after an unlock:
+it does not change until the passphrase does, so a new wrap would protect
+nothing.
 
-What needs the passphrase, whatever the hold: the first unlock after a
-start or once the hold is over; changing the passphrase (the current one);
+An unlock (`POST session` with `{"unlock"}`) runs under the plugin's key
+lock, slowed down with the passphrase's checks, and checks in this order:
+the nonce (a `session` nonce issued while locked, used once), the entry,
+the KEK opening the wrap, the key opening the check, the guard the key
+opens holding the entry's authenticator (else the entry is removed: an
+older copy of the file was put back), the authenticator's proof (for PRF
+the credential's assertion of the nonce, verified with the key the guard
+keeps and a counter that grows; the desktop app's relay is its own proof),
+and the passphrase's window. Only then is the key installed, the
+authenticator's use recorded (a use that cannot be written fails the
+unlock) and a session opened, marked as a proof's. Any failure leaves the
+vault locked: `401 vault_proof` for what does not open or verify, `403
+passphrase_due` outside the window, `409 unlock_stale` for an entry gone,
+invalidated or without its authenticator (the entry is removed), `503
+memory` for a key that cannot be kept in locked memory. On the desktop
+path a relay that opened (only the shell has its key) but whose wrap does
+not open is a dead entry, which a re-enrollment that made the Hello key or
+the shell's secret again and that the core then refused leaves behind: it
+is removed (`409 unlock_stale`, audited with `reason: wrap`) and not
+counted as a guess. A PRF output that opens the wrap with an assertion
+that does not verify has left its authenticator: audited as
+`denied.vault_proof` with `reason: prf_signature` (`prf_counter` for a
+counter that did not grow).
+
+**The desktop app's unlock key** (`desktop/src/verify.ts`, `enclave.ts`,
+`windowsHello.ts`, `unlockStore.ts`, `relay.ts`, `desktop/helper/`).
+
+- Each install of the app keeps `vault-unlock.json` in the app's user
+  data (0600, written beside it and renamed over it, read only as a
+  regular file of at most 4 KiB and never through a link): an install id
+  (`^[A-Za-z0-9_-]{16,64}$`), which names its entry in the core, and the
+  shell's secret (`shellSecret`, 32 random bytes), encrypted with
+  Electron's safeStorage (the keychain item `<APP_NAME> Safe Storage` on
+  macOS, DPAPI on Windows), so the Secure Enclave key's blob or the Hello
+  key alone does not make the KEK. Without safeStorage the app offers no
+  unlock (`canUnlock`). A secret that no longer decrypts is made again at
+  the next enrollment, the install id kept; entries made with the old one
+  then no longer open.
+- macOS: the Secure Enclave helper, `<APP_NAME> Enclave.app` in the app's
+  `Contents/Helpers` (`desktop/helper/Enclave.swift`, one universal
+  executable for arm64 and x86_64 from macOS 12, signed with the app; the
+  Touch ID sheet names it). The shell runs it by its absolute path with
+  one JSON line in and one out, at most 64 KiB, within 2 minutes, one
+  prompt at a time: `available` (a Secure Enclave, and Touch ID with
+  fingerprints), `create` (a P-256 key-agreement key in the Secure
+  Enclave, usable only with `.privateKeyUsage` and `.biometryCurrentSet`,
+  `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, made without a prompt:
+  its blob and public key) and `agree` (a Touch ID prompt with the
+  shell's text, "open the variable vault", no reuse of an earlier
+  authentication, then the ECDH secret with the peer). It holds no
+  state. It answers `invalidated` only for the
+  errors whose documented meaning is that the key is gone or the blob
+  unreadable (CryptoTokenKit's `objectNotFound` and `corruptedData`, the
+  Security framework's `errSecItemNotFound` and `errSecDecode`), so any
+  other error keeps the entry. A Mac without a Secure Enclave or Touch ID
+  offers no unlock.
+- Windows: the user's Windows Hello key container through PowerShell's
+  `KeyCredentialManager` (`IsSupportedAsync`; `RequestCreateAsync`
+  replacing a key of the same name; `OpenAsync` and `RequestSignAsync`),
+  the key's name and the challenge in environment variables, never in the
+  script. Enrolling shows two Hello prompts (making the key, signing the
+  challenge); Hello's dialogs take no text of the purpose. A key that is
+  gone (`NotFound`) is `invalidated`.
+- Linux: no unlock key; the app's page unlocks with the passphrase.
+- **Enrolling** (the desktop switch): the page asks the shell to enroll a
+  `register` nonce; the shell fetches its purpose, which carries a
+  challenge for a Hello key (`register.challenge`), on macOS prompts
+  Touch ID first and then makes the Secure Enclave key, on Windows makes
+  the Hello key and has it sign the challenge, makes its install id and
+  secret where it has none, and answers the nonce's MAC and a relay of
+  `{kind, install, sePub, blob, shellSecret}` (enclave) or `{kind,
+  install, keyName, publicKey, signature, shellSecret}` (hello). The core
+  adds the desktop authenticator (a new one needs the relay) or this
+  install's entry to it.
+- **Unlocking**: for a `session` nonce issued while locked, `GET
+  proof/{nonce}` lists the desktop app's entries (`unlock: [{id, kind,
+  install, enclave: {blob, ephPub}} | {id, kind, install, hello: {keyName,
+  challenge}}]`); the shell picks its own install's, prompts, and answers
+  the page `{id, relay}`, the relay carrying `{z, shellSecret}` or
+  `{signature, shellSecret}`, or `{invalidated: true}` when the system no
+  longer has the key (fingerprints changed, the Hello key removed), on
+  which the core removes the entry and the desktop authenticator stays to
+  approve with. Without an entry of its own (its file lost, or only other
+  installs' entries; Windows with entries of macOS only) it answers
+  `none` without a prompt, and the page says to set biometrics up again
+  with the passphrase; a cancel or a failure answers nothing.
+- **The relay** carries what makes a KEK through the page, which cannot
+  read or make one: AES-256-GCM under HKDF-SHA256 of the launch's verify
+  key's text (no salt, info `vault-relay v1`), base64url of iv (12 bytes)
+  ‖ ciphertext ‖ tag, with additional data `vault-relay`, the purpose
+  (`session`, `register`), the nonce and the entry's id (empty for
+  `register`), one line each. The core opens it only for a request of the
+  desktop client (`plugin.Call.DesktopRelay`, none in a core the shell did
+  not start) and only for the nonce, purpose and entry of that request.
+  Vectors: `design/testdata/vault-unlock/relay.json`.
+
+A WebAuthn credential unlocks a locked vault from a page of its own
+origin: the list offers `prf`, `POST proof` names the credentials of this
+origin's entries with their salts, the page's `get()` evaluates the PRF
+with them (`evalByCredential`), and `POST session` carries `{"unlock":
+{"nonce", "prf": {"credential", "output"}, "assertion"}}`. A credential
+added before unlock entries, or a desktop authenticator of an older build,
+has no entry: it approves only, and is labeled so until it is added again.
+
+**The passphrase's window.** An authenticator unlocks the vault only
+within `vault.passphraseDays` (14 by default, 1–90) of the last time the
+passphrase was checked with the key: an unlock or a session with it, a new
+passphrase, or the passphrase brought again with a request of an unlocked
+vault (adding an authenticator, exempting an app, an export, a request of
+Verify every Allow). When that was, and the window then, are sealed under
+the key (`passphraseAt`: `{at, days, autoLock}`, additional data
+`#passphraseAt`), so a program that can write the file cannot move,
+lengthen or lift it: it can only put an older one back, which ends sooner,
+or remove it. Its end is also in the clear (`passphraseHint`), from which
+the list's `due` comes, for what the UI offers only. An unlock is allowed
+while less than the lesser of the setting now and the days sealed have
+passed since `at`, by the wall clock (the computer's sleep counts); a
+window missing, that does not open, that begins in the future or that has
+ended is `passphrase_due`. `autoLock` is the automatic lock's time then
+(the setting's for a passphrase that unlocked the vault or set a new
+one, the current unlock's for one checked while unlocked; 0: never), which an unlock by an
+authenticator takes as its most. **Require Passphrase** (`POST lock` with
+`{"forget": true}`, which works on a locked vault and needs no session)
+removes the window, so the next unlock needs the passphrase.
+
+**The key in memory** (`internal/vault/key.go`). While the vault is
+unlocked the master key is in a memguard Enclave (memguard v0.23.0):
+encrypted under a session key that memguard keeps in locked (mlock),
+guarded pages and replaces every 500 ms from a goroutine of its own. Each
+operation of the store (a value opened or sealed, the guard read and
+written, every value of a passphrase change) opens it into a LockedBuffer
+(locked, read-only pages between guard pages) that is destroyed (wiped and
+released) right after. A lock forgets the key: memguard has no way to
+destroy an Enclave, so the store overwrites its ciphertext in place after
+checking memguard's layout (an upgrade of memguard must keep it, or the
+Enclave is left to the garbage collector) and drops it. The core purges
+memguard as the last step of its shutdown (`vault.Purge`); memguard's
+interrupt handler is not used. Memory that cannot be locked (`ulimit -l`
+too small; [deployment](../deployment.md#remote-resources)) fails the
+unlock with `503 memory`: the key never falls back to an ordinary slice.
+What memguard does not cover: Go's AES key schedule on the heap during
+each operation; the passphrase and PRF output of a request (Go strings,
+which cannot be wiped); Argon2's output, an unwrapped key and a relay's
+content for the moment before they move into the Enclave or are wiped;
+the ephemeral private key while an entry is made; the launch's verify key;
+memguard's session key itself, which is in the process's memory too; and
+in the desktop shell the strings of `Z`, the signature, the shell's secret
+and the helper's answer. memguard's initialization sets the core dump
+limit of the whole process to 0 (`RLIMIT_CORE {0, 0}` on Linux and macOS,
+nothing on Windows), which the processes the core starts inherit and a
+process that is not root cannot raise again; machines run the machine
+build, which does not link memguard
+([deployment](../deployment.md#remote-resources)).
+
+What needs the passphrase: the first unlock after a start without an
+authenticator's entry, and every unlock outside the window or after
+Require Passphrase; changing the passphrase (the current one);
 what guards the vault, which takes a session the passphrase opened
 (adding and removing authenticators, with the passphrase again to add
 one; exempting apps, with the passphrase again, and ending exemptions;
-Verify every Allow, with the passphrase again to end it; the automatic
-lock's time for this unlock, with the passphrase again for a longer time
-or never); and values in bulk, imports and exports (an export takes the
-passphrase again too). Whatever would let a value out later, then, takes
-the passphrase in its own request, so a page's session, which a program
-driving the page has too, decides none of it. Biometrics, a proof's session or a proof made for the action,
-are enough to reveal a value, to add, change (a widening included), rename
-and delete variables and to allow a request (once or always); where every
-Allow is verified, each of those that lets a value out takes a proof made
-for it or the passphrase, as before.
+Verify every Allow, with the passphrase again to end it); and values in
+bulk, imports and exports (an export takes the passphrase again too).
+Whatever would let a value out later, then, takes the passphrase in its
+own request, so a page's session, which a program driving the page has
+too, decides none of it. Biometrics, an unlock's session, a proof's
+session or a proof made for the action, are enough to reveal a value, to
+add, change (a widening included), rename and delete variables and to
+allow a request (once or always); where every Allow is verified, each of
+those that lets a value out takes a proof made for it or the passphrase,
+as before.
 
 **Exempt apps.** An exemption names an app and a machine: the app's
 requests there read every variable without asking (an inject-only one
 still only for `run_with_env`) while the vault is unlocked, never while it
-is locked, suspended included; each is recorded in the access log as
+is locked; each is recorded in the access log as
 `exempted` (a release: written and flushed before the values leave, never
 merged) and audited as `vault.access`. The app is the name of the process
 that started the one connected to `vault.sock`, from the process chain the
@@ -365,7 +565,7 @@ passphrase, `403 passphrase_required` without it; `DELETE exempt/{id}`
 ends one in such a session): an exemption is a lasting grant across every
 variable, wider than Always Allow, which names one. At most 64; machines
 this core has, never `*`. A removed machine's exemptions go with
-it, at once while the core holds the key, else as a forgotten machine at
+it, at once while the vault is unlocked, else as a forgotten machine at
 the next unlock (the guard cannot be read before); a new passphrase
 removes them all, as it removes the authenticators.
 
@@ -441,6 +641,11 @@ can repeat at will, never push a release out; the file is written again
 with what is kept once it holds twice as many lines. Every record is
 audited too (`vault.access`, a page's as `vault.revealed` and
 `vault.exported`) when the core writes an audit log (`--audit-log`).
+Reading the log (`GET log`) needs an open vault session (`401
+vault_session` otherwise, audited as `denied.vault_session`): it tells
+what was read, by whom, and which apps are exempt. Reading it is no use
+of the session, so a page that shows the log does not keep its session
+open; a locked vault, which ends every session, shows it to nobody.
 
 List calls and refusals (`busy`, `not_found`, `vault_locked`,
 `inject_only`, `bad_request`, `cancelled`: every result but those that
@@ -533,20 +738,24 @@ read-only mode and for a vault without a passphrase yet, which is said.
   10–600);
 - `vault.autoLock`: minutes after which the vault locks when unused (60;
   0, never; up to 1440). A use is an unlock, a page's action through the
-  gate (a change, a reveal, an approval, an export or import, setting the
-  countdown) or a value released to a machine; lists and refusals are not.
-  The lock is the route's (every session ends, after a passphrase check
-  that runs; the key kept or forgotten as the key's hold says), audited as
-  `vault.locked` with `reason: idle` and `keyHeld`. While the core holds
-  the key a timer looks at least every minute, so a change of the setting
-  counts within one. The panel shows the countdown and may set another
-  time for the current unlock (`POST autolock`, below), which holds until
-  the vault locks: the next unlock follows the setting again;
-- `vault.passphraseHours`: hours after the passphrase was last given (by
-  the wall clock: sleep counts) that the core holds the key (24; 1–168),
-  so that biometrics unlock a locked
-  vault; then the vault locks and only the passphrase unlocks it (the
-  key's hold, above);
+  gate (a change, a reveal, an approval, an export or import) or a value
+  released to a machine; lists and refusals are not. The lock is the
+  route's (every session and nonce ends, after a passphrase check or an
+  authenticator's unlock that runs) and forgets the key, audited as
+  `vault.locked` with `reason: idle` and its `minutes`. While the vault is
+  unlocked a timer looks at least every minute, so a change of the setting
+  counts within one. A change shortens the current unlock's time but does
+  not lengthen it, and an unlock by an authenticator takes at most the
+  time sealed with the passphrase's window; the next unlock with the
+  passphrase follows the setting again. The time is the setting's only: no
+  page sets one of its own for an unlock;
+- `vault.passphraseDays`: days after the passphrase was last checked
+  within which an authenticator unlocks a locked vault (14; 1–90), by the
+  wall clock (sleep counts); then only the passphrase unlocks it, once,
+  and starts the window again (the passphrase's window, above). The days
+  sealed with the window cap it, so a change shortens the current window
+  and lengthens only the next one. It replaced `vault.passphraseHours`
+  (the hours the core held the key), which settings files drop;
 - `vault.sessionIdle` and `vault.sessionMax`: a page's session ends unused
   for those minutes (30; 1–240) or those hours after it began (12; 1–24);
 - `vault.runTimeout`, `vault.runMaxTimeout` and `vault.runOutput`:
@@ -628,28 +837,26 @@ The panel **Variable Vault** of the right sidebar (command
 
 - **The gate** (`Gate.tsx`) at the top: a new vault's card to create the
   passphrase (twice, with a strength bar and that it cannot be recovered);
-  otherwise, without a session, a card to unlock with the passphrase and,
-  where this page can make a proof (the core holds the key, and the
-  desktop app's authenticator is on or a WebAuthn credential was added from
-  this origin), **Continue with** Touch ID, Windows Hello, or biometrics or
-  a security key; on a vault locked within the key's hold also **Require
-  Passphrase** (a Lock that forgets the key). With a session, a bar that
-  says the page is unlocked, with Change Passphrase (which says that
-  biometrics and exempt apps are removed, when there are any), the
-  auto-lock's countdown and Lock. Both have Settings, which opens the
-  vault's page of Settings, and say on hover when the passphrase was set.
-  The countdown (`AutoLock.tsx`) shows the time left before the vault
-  locks unless something uses it (`autoLock.lockAt` of the list, ticking
-  every second; at zero, or when a use elsewhere moved it, the list is
-  loaded again), or **No auto-lock**; on hover it also says when the
-  passphrase is needed again (`autoLock.keyUntil`).
-  A click opens a picker: **As in Settings** (the setting's time), 15 and
-  30 minutes, 1, 2, 4 and 8 hours, **Never**, or a time typed (`90`,
-  `90m`, `2h`, `1.5h`, `1h30m`, `2小时`; 1 minute to a day). The choice
-  holds for this unlock on every page (the core keeps it, and tells the
-  pages), is shown in the accent while it does, and counts as a use, so
-  the countdown starts again from it. A longer time than the current one,
-  or Never, asks for the passphrase below the bar first. A page that the gate refuses (its session ended)
+  otherwise, without a session, a card to unlock with the passphrase and:
+  on a locked vault this page can unlock without it (the list's
+  `unlock.ways`: the desktop app's key where the app can keep one, or a
+  credential's PRF in a browser with WebAuthn; none once `unlock.due` has
+  passed), **Continue with** Touch ID, Windows Hello, or biometrics or a
+  security key, beside it **Require Passphrase** (the next unlock needs
+  the passphrase) and below them until when biometrics unlock the vault
+  (`unlock.due`); on a vault another page unlocked, where this page can
+  make a proof (the desktop app's authenticator is on, or a WebAuthn
+  credential was added from this origin), **Continue with** as well. A
+  refused unlock says why: the passphrase is due (and the passphrase
+  field takes the focus), biometrics are to be set up again
+  (`unlock_stale`, or the desktop app having no entry of its own), or the
+  check failed; a cancelled prompt says nothing. With a session, a bar
+  that says the page is unlocked, with Change Passphrase (which says that
+  biometrics and exempt apps are removed, when there are any) and Lock.
+  Both have Settings, which opens the vault's page of Settings, and say on
+  hover when the passphrase was set. The bar shows no countdown; the page
+  loads the vault again a moment after `autoLock.lockAt`, should the
+  core's message that it locked not reach it. A page that the gate refuses (its session ended)
   shows the unlock card again. The passphrase fields keep password
   managers away (`autocomplete="off"` and the attributes 1Password,
   LastPass and Bitwarden honor): a passphrase saved by a browser is
@@ -678,7 +885,9 @@ The panel **Variable Vault** of the right sidebar (command
   with its time, outcome (values let out: allowed by the list, shown or
   exported by a page; approved; refused; listed), tool, names, machine,
   client, terminal and directory, the process chain the agent saw (the
-  asking process first), and for a page its address. **Connect**: per
+  asking process first), and for a page its address; without a session
+  the tab says the vault is to be unlocked and the page does not ask for
+  it. **Connect**: per
   machine (a searchable choice),
   `claude mcp add --scope user <slug>-vault -- <data dir>/bin/<slug>-mcp`,
   Codex's `[mcp_servers.<slug>-vault]` in `~/.codex/config.toml` and the
@@ -726,14 +935,22 @@ choices), with one choice for every name that exists; Import sends them.
 **Biometrics** in the vault's page of Settings (`Biometrics.tsx`, to a page
 with a session; else a passphrase field and Unlock, the core showing none
 of it without one): in the desktop
-app a switch to approve with Touch ID or Windows Hello; **In browsers**
-(in the desktop app, whose page has no WebAuthn, only while it lists
-some), the WebAuthn credentials with their origin and when they were added and
-last used, each with Remove (and the desktop app's authenticator, to
-remove it from a browser), and Add for a credential of this page's origin
-(a label and the passphrase; on a page opened by a loopback IP address a
-link to the same page under `localhost`; where the core does not vouch for
-the origin, why none is offered); **Verify every Allow**; and **Exempt
+app, where it can keep an unlock key (the Secure Enclave with Touch ID, or
+Windows Hello keys, and safeStorage), a switch to approve and unlock with
+Touch ID or Windows Hello, which turned on enrolls this install; **In
+browsers** (in the desktop app, whose page has no WebAuthn, only while it
+lists some), the WebAuthn credentials with their origin and when they
+were added and last used, each with Remove (and the desktop app's
+authenticator, to remove it from a browser or from an app that cannot
+keep an unlock key), and Add for a credential of this page's origin (a
+label and the passphrase; with PRF only: a browser that says the
+credential has none, an assertion without a PRF output or a core that
+gave no salt refuse it before anything is added, as the core's
+`prf_required` does; on a page opened by a loopback IP address a link to
+the same page under `localhost`; where the core does not vouch for the
+origin, why none is offered). An authenticator without an unlock entry
+(added before them, or a credential without PRF) is labeled **Approvals
+only; add it again to unlock with it**. Then **Verify every Allow**; and **Exempt
 apps**: each app with its machine and when it was exempted, with Remove,
 and a name (the apps seen asking on the machines chosen, from the access
 log's process chains, are offered) with the machines to exempt it on and
@@ -760,12 +977,13 @@ the passphrase between changes.
 | The key in the system keychain (as development builds did) | Any program of the user reads it without a prompt (on macOS through `/usr/bin/security`; the Secret Service and the Credential Manager alike) and with the file has every value: no approval stands before a program on the core host. Such files are not converted: no request can show that the user, not a program, chose the new passphrase, and none was released. |
 | The loopback API or the page's origin as the user's proof | Programs on the core host call the API as pages do, and content on the core's origin passes the origin check; the passphrase is what only the user has, and an authenticator's proof what only the user makes. |
 | Upgrading files sealed with less additional data | Their machine lists were not authenticated: an upgrade would seal a widened list in; none was released, so such files are refused. |
-| Biometrics only on an unlocked vault, every lock forgetting the key (as before) | The passphrase after every automatic lock, an hour without use by default, is what users disable the lock to avoid. Holding the key in the core's memory for a bounded time after the passphrase, as password managers do, keeps it off the disk; the lock within the hold is the core's refusal, which the gate enforces as it enforces sessions. |
-| The key, while held, in a system keychain or wrapped by an authenticator's secret | A keychain item is readable by the user's programs without a prompt (the row above); a secret from the authenticator (WebAuthn's PRF) few platform authenticators give, and the desktop shell's key is given to the core at its start. Neither keeps the key from a program that reads the core's memory, which the hold does not claim either. |
+| Biometrics only on an unlocked vault, every lock forgetting the key and the passphrase after each | The passphrase after every automatic lock, an hour without use by default, is what users disable the lock to avoid. An unlock entry gives biometrics the key back without the core keeping it, so the lock can forget it. |
+| The key held in the core's memory for a day after the passphrase, a lock only suspending the vault (as an earlier build did) | The key stayed in plaintext in memory, also while the vault was locked, for as long as the hold lasted, and a user without biometrics had to type the passphrase again whenever the hold ended. With unlock entries a lock forgets the key, a user without biometrics types the passphrase to unlock only, never because a hold ended, and the key held while unlocked is in memguard's Enclave. |
+| The master key in a system keychain item | A keychain item is readable by the user's programs without a prompt (the row above), and it would hold the key itself. An unlock entry is wrapped under a key-encryption key that only the authenticator gives again; the one thing kept with safeStorage (the keychain on macOS) is the desktop shell's secret, half of a desktop KEK. |
 | Exemptions as a setting | Settings are changed through the API without the gate: a program would exempt itself. In the sealed guard they change only in a passphrase's session. |
 | Exempting by the client a request names | The request is the requester's word; the process chain is what the machine's kernel says, which a program can still shape by naming itself, as the Security section says. |
 | Exempting an app on every machine (`*`) | A name trusted on one machine would be trusted on every machine, those added later included; each exemption names a machine this core has. |
-| WebAuthn in the desktop app | Its page is on `http://127.0.0.1:<port>`, an address no credential can be for, and Electron's Touch ID authenticator needs a keychain access group and a provisioning profile that builds signed ad hoc do not have. The shell's own prompt works in every build. |
+| WebAuthn with PRF in the desktop app, or Electron's own Touch ID prompt for its unlock | Its page is on `http://127.0.0.1:<port>`, an address no credential can be for, and Electron's Touch ID authenticator needs a keychain access group and a provisioning profile that builds signed ad hoc do not have. Electron's `promptTouchID` proves presence and gives no secret, so nothing can be wrapped under it. A Secure Enclave key that the app's helper uses only after Touch ID gives a secret, and needs no keychain item: its blob is kept in the vault's file. The shell's own prompt still makes the proofs, which hold no key. |
 | The desktop shell's prompt answered to the page as yes or no | Any script of the page would report yes; a MAC with a key only the shell's main process holds is what the core can check. |
 | The prompt's text from the page | A page could show the user one request and have another approved; the shell asks the core what the nonce is for. |
 | Reading the attestation of a new credential | It needs a CBOR parser and proves the authenticator's make, which the vault does not ask; the browser hands the public key itself, and an assertion made at once proves the key. |
@@ -773,26 +991,55 @@ the passphrase between changes.
 | A WebAuthn credential checked by its host name and the request's `Origin` | `localhost` is every port of the computer to a browser, and a program writes its request's `Origin`: a page it serves on another port would have the user's biometrics open the vault. The origin the authenticator signed is what cannot be forged, so the credential is bound to it. |
 | Vouching for `localhost` while the core listens on `127.0.0.1` only | Whoever takes `::1` on the same port answers under the same origin in a browser that tries it first. |
 | The rule for requests only | A session could then add the asking machine to a variable's readers, or show the value, which is the same value out by another door. |
-| A proof's session changing what guards the vault | Biometrics would then add another authenticator, exempt an app, or put the automatic lock off, after which the passphrase is never asked again. |
+| A proof's or an unlock's session changing what guards the vault | Biometrics would then widen what biometrics may do: add another authenticator, exempt an app or end Verify every Allow. |
 | Machines and flag in the clear, unauthenticated | A program on the core host could widen a variable's machines in the file and read it without asking; sealing them with the value makes such an edit unreadable. |
 | An import session on the core between the preview and the import | The decrypted values would wait in the core's memory for the user's answer, with an expiry and a bound of their own; sending the file and its passphrase again costs one more derivation and leaves nothing behind. |
 | Mapping machines by label on import | Labels are names the user gives and two machines may share one: a match could let another machine read without asking. Ids are random for machines added in the UI; the local machine's id is the same everywhere, so its label must match too. |
 | Mapping ssh machines by id alone on import | An `--ssh` machine's id is its target and a record imported from herdr's catalog keeps herdr's id, so another core may have a machine of that id that is another host: the file records each machine's kind and target, and an id maps only to a machine with both the same. |
 | Exporting values to the browser (a JSON file the page builds) | Values would pass through the page, its memory and its extensions; the core builds the file, and the page gets ciphertext. |
 | Values in the browser for editing | A value shown in a page is in its memory, its extensions' reach and its screen; the editor only sets new values. |
+| Wrapping the key again after each unlock (a new entry, a new salt or challenge) | The master key does not change until the passphrase does: a key-encryption key or PRF output captured once, with any copy of the file that has the old entry, gives the key whatever wraps came after. Only a new passphrase changes the key, and it drops every entry. |
+| Keeping WebAuthn credentials without PRF for unlocking | A proof holds no key, and without one the core would have to keep the key in memory for them, which is what unlock entries replace. Credentials added before stay, labeled to approve only; new ones need PRF (`prf_required`). |
+| A time of the page's own for the current unlock (the session bar's countdown, `POST autolock`) | It was set with a page's session, which a program driving the page has too, and needed the passphrase again to lengthen it. The automatic lock follows the setting only, which a change while unlocked shortens and never lengthens. |
+| An own implementation of locked memory instead of memguard | It would need mmap, mlock and guard pages on Linux and macOS and VirtualLock on Windows, canaries and an encrypted enclave, which memguard has and maintains; what memguard costs is the core dump limit below and a destroy that depends on its layout, checked at each upgrade. |
+| A vendored copy of memguard without its line that disables core dumps | Rejected by the user, who accepted the limit: without it a core dump of the core could hold the key, and a fork would have to follow every fix upstream. The limit, which the core's children inherit, is accepted and documented ([deployment](../deployment.md#remote-resources)). |
 
 ## Failure modes
 
-- Locked vault (after every start): `get` and `env` fail with
-  `vault_locked` until a page unlocks it. A lost passphrase cannot be
-  recovered: delete the file and start again.
-- A vault locked within the key's hold (Lock, or unused for the automatic
-  lock's time, with an authenticator): machines get `vault_locked`; a
-  page unlocks it with biometrics or the passphrase; Require Passphrase
-  forgets the key.
-- The key's hold over (`vault.passphraseHours` after the passphrase): the
-  vault locks and the core forgets the key, every session ends, biometrics
-  are not offered and only the passphrase unlocks it.
+- Locked vault (after every start or a lock): `get` and `env` fail with
+  `vault_locked` until a page unlocks it, with the passphrase or, within
+  the passphrase's window, an authenticator that has an unlock entry. A
+  lost passphrase cannot be recovered: delete the file and start again.
+- The passphrase's window over (`vault.passphraseDays` after the last
+  passphrase, or Require Passphrase): the list's hint stops offering
+  biometrics, an unlock by one is `403 passphrase_due`, and the passphrase
+  unlocks the vault and starts the window again.
+- The window cannot be written at an unlock with the passphrase (a full
+  disk): the unlock still opens, and the previous window stays.
+- The fingerprints changed on the Mac, or the Windows Hello key was
+  removed: the shell relays that its key is gone, the core removes the
+  entry (`409 unlock_stale`, audited `invalidated`) and the page says to
+  set biometrics up again; the desktop authenticator stays to approve with,
+  and turning its switch off and on again (with the passphrase) makes a
+  new entry. An error of the helper that does not say so keeps the entry
+  and fails that unlock only.
+- The app's `vault-unlock.json` lost, or its secret no longer decrypting
+  (safeStorage's key gone): the shell has no entry of its own and the page
+  says to set biometrics up again; enrolling again makes a new secret,
+  under the same install id when the file still names it.
+- A re-enrollment that replaced the Hello key or the shell's secret but
+  that the core refused (a wrong passphrase, an expired nonce): the old
+  entry no longer opens; the next unlock with it removes it (`409
+  unlock_stale`, audited `wrap`) without counting a guess.
+- An older copy of the file put back with entries whose authenticator the
+  guard no longer has: such an entry is refused and removed (`409
+  unlock_stale`, audited `orphan`).
+- An authenticator without an unlock entry (a credential without PRF, or
+  one added by an older build): it approves but does not unlock, labeled
+  so in Settings until it is added again.
+- memguard cannot lock memory for the key (`ulimit -l` too small, a
+  container's limit): every unlock answers `503 memory` and the vault stays
+  locked; raise the limit and restart the core.
 - A file of another version (a development build's): the vault does not
   open (`503 version`) and the panel says so; move the file away to start
   a new one, then Retry. A damaged file (not JSON, a passphrase without its
@@ -811,13 +1058,12 @@ the passphrase between changes.
   while another runs: `429 busy`.
 - Nobody answers: the request is denied after 60 s
   (`vault.approvalTimeout`); the agent gets `denied` and can ask again.
-- The vault unused for the minutes of `vault.autoLock` (or the time the
-  panel set for this unlock): it locks, every page's session ends, the
-  time set is forgotten and machines get `vault_locked` until a page
-  unlocks it again (with biometrics within the key's hold, where it has an
-  authenticator).
-- A machine removed while the core does not hold the key: its exemptions
-  exempt nothing, and leave the guard at the next unlock.
+- The vault unused for the minutes of `vault.autoLock`: it locks and
+  forgets the key, every page's session and every nonce end, and machines
+  get `vault_locked` until a page unlocks it again (with biometrics within
+  the passphrase's window, where an authenticator has an unlock entry).
+- A machine removed while the vault is locked: its exemptions exempt
+  nothing, and leave the guard at the next unlock.
 - Too many requests waiting: past 4 of the machine (or 32 in all) the
   agent gets `busy`, says so to the model, and can ask again once the user
   answered.
@@ -855,28 +1101,66 @@ the passphrase between changes.
 
 The rows of [SECURITY.md](../../SECURITY.md) on the vault's file and key,
 values in browsers, proving the user without the passphrase, reading
-variables from machines and what the MCP server exposes. What the key's
-hold and exempt apps do not guarantee:
+variables from machines and what the MCP server exposes. What unlock
+entries, the key in memory and exempt apps do not guarantee:
 
-- Within the key's hold a locked vault's key is in the core's memory: the
-  lock is the core's refusal (no value given out or changed, every session
-  ended, a proof or the passphrase needed to unlock), not the key's
-  absence. A program that reads the core's memory gets the key for as
-  long as the hold lasts (a day by default, at most a week, by the wall
-  clock), not only while the vault is unlocked as before; Require
-  Passphrase, or a shorter `vault.passphraseHours`, shortens that.
-- A program of the core host can set `vault.passphraseHours` to a week
-  before the user's next passphrase; the panel shows when the passphrase
-  is needed again (on hover over the countdown).
+- A key-encryption key once obtained (an enclave's `Z` with the shell's
+  secret, a Hello signature with it, a PRF output), with any copy of the
+  vault's file, gives the master key offline until the passphrase
+  changes: the passphrase's window bounds only the unlocks that go
+  through the core. Removing an authenticator and Require Passphrase are
+  no revocation against a program that kept an older copy of the file
+  and writes it back (the core reads the file at its start, and nothing
+  in the file can count against a rollback): revocation is a new
+  passphrase, which changes the key and drops every entry.
+- `vault.passphraseDays` and `vault.autoLock` are settings, changed
+  without the gate: a program of the core host can raise them (to 90
+  days, to never) before the user next types the passphrase on a locked
+  vault, which seals them into the window. That is bounded by 90 days; a
+  change while a window runs shortens it but does not lengthen it.
+- A program of the user cannot answer Touch ID, Windows Hello or a
+  passkey, but it can cause their prompts: it can run the helper (or a
+  program of its own) with an entry's blob, which the file holds, and a
+  reason text of its choosing. On macOS the other half of a desktop KEK,
+  the shell's secret, is in the keychain under the app's access list
+  (another program gets the keychain's prompt). On Windows DPAPI gives
+  the shell's secret to any program of the user, and a Hello key can be
+  opened by name and asked to sign, with a dialog that names no purpose:
+  there only the Hello prompt stands, and a PowerShell transcript, if the
+  user turned transcription on, could record the signature.
+- A PRF output is a secret for as long as the passphrase lasts, and it
+  passes through the page's script and the request's body: content on the
+  UI's origin that sees it once (VS Code's windows, while on), with the
+  vault's file, has the master key.
+- memguard keeps the key encrypted in memory while the vault is unlocked,
+  but not what is listed under the key in memory above (Go strings of
+  passphrases and PRF outputs, AES key schedules, the ephemeral private
+  key while an entry is made, the verify key, and in the desktop shell
+  the strings of `Z`, the signature, the shell's secret and the helper's
+  answer). A debugger of the same user (ptrace, or a process with the
+  rights to read the core's memory) is outside the model.
+- memguard sets the core's core dump limit to 0 for the whole process,
+  which everything the core starts inherits and cannot raise (accepted:
+  [deployment](../deployment.md#remote-resources)), and it needs locked
+  memory: a limit too small fails the unlock (`503 memory`).
+- The app bundle is only as safe as its folder: a program that can
+  rewrite the `.app` (notably one `make desktop-install` put in
+  `/Applications`, signed ad hoc) can replace the helper or the shell's
+  code and get the secrets the next time the user answers Touch ID.
+- Availability is not defended: a program can delete the file or a Hello
+  key, call `POST lock` with `{"forget": true}` without a session, or
+  make the passphrase wait with failed unlocks, as with wrong passphrases.
+- The window counts by the wall clock: an administrator who sets the
+  clock back after the passphrase lengthens it.
 - Where every Allow is verified, a program driving the user's unlocked
   page, with its session, gets no value out: what would let one out now
   or later (an Allow, a reveal, a widening, an export, an authenticator,
-  an exemption, a longer automatic lock) takes a proof made for it or the
-  passphrase in its request. It can still change what lets nothing out:
-  values and descriptions (its own token under a variable's name, words
-  for the agents in a description), variables added, renamed, deleted or
-  imported over, fewer readers, authenticators and exemptions removed, a
-  lock or a shorter automatic lock.
+  an exemption) takes a proof made for it or the passphrase in its
+  request. It can still change what lets nothing out: values and
+  descriptions (its own token under a variable's name, words for the
+  agents in a description), variables added, renamed, deleted or imported
+  over, fewer readers, authenticators and exemptions removed, a lock, or
+  Require Passphrase.
 - An exemption trusts a process name, which any program of the user on
   that machine can take: against such a program it is as wide as the
   machine in every variable's list while the vault is unlocked. It never
@@ -886,11 +1170,11 @@ hold and exempt apps do not guarantee:
   show who asks, so hiding the exemptions from pages without a session
   keeps them from a program that only reads the core's API, not from one
   that looks at the machine.
-- Biometrics unlock a vault locked within the hold. Everything that guards
-  the vault, values in bulk, and the first unlock after a start or the
-  hold still take the passphrase, so biometrics never extend themselves:
-  they cannot add an authenticator or an exemption, lengthen the hold or
-  the automatic lock, or end Verify every Allow.
+- Biometrics unlock a locked vault within the window. Everything that
+  guards the vault, values in bulk, and every unlock outside the window
+  still take the passphrase, so biometrics never extend themselves: they
+  cannot add an authenticator or an exemption, start the window again, or
+  end Verify every Allow.
 
 ## Testing
 
@@ -901,10 +1185,11 @@ hold and exempt apps do not guarantee:
   their bounds; registrations and their credential id; random bytes never
   panicking. `internal/vault/guard_test.go`: the guard sealed, read only
   unlocked, another vault's or an edited one not opening, a new passphrase
-  ending the authenticators and keeping the rule; a suspended vault
-  refusing values, changes, allows, exports, imports and exemptions while
-  its guard is read, unlocked by Resume or the passphrase, not by a wrong
-  one, and not resumed once locked (`TestSuspend`); exemptions sealed,
+  ending the authenticators and keeping the rule; a lock destroying the
+  key's Enclave (it no longer opens), nothing read or sealed and the guard
+  unreadable until an unlock (`TestLockForgetsTheKey`); key material that
+  cannot be locked in memory failing the unlock with the vault locked
+  (`TestMemoryFailureFailsTheUnlock`); exemptions sealed,
   bounded and checked, for one app on one machine, none while locked, a
   removed machine's going at once or at the next unlock, a new passphrase
   ending them (`TestExemptions`).
@@ -913,10 +1198,10 @@ hold and exempt apps do not guarantee:
   proof opening a marked session and what that session may not do (exempt
   apps included), a proof used twice, for another purpose, from another
   origin or host, by another key, with a counter that went back, after its
-  time; a lock keeping the key of a vault with an authenticator (machines
-  refused, sessions and nonces ended) and its proof unlocking it, the key
-  forgotten once its hold is over and by a lock that forgets, after which
-  no proof holds (`TestProofOpensASession`); a
+  time; a lock forgetting the key (machines refused, sessions and nonces
+  ended), no proof unlocking a locked vault, a locked vault's nonce good
+  for no proof and ended by the passphrase's unlock
+  (`TestProofOpensASession`); a
   proof allowing its request and answer only; Verify every Allow against a
   session, with the passphrase, and deny; a credential offered and taken
   only at its own origin, a page of another port refused, also when its
@@ -928,10 +1213,34 @@ hold and exempt apps do not guarantee:
   without a key) and what the shell learns of a nonce; the bound of
   waiting nonces. `internal/server/plugins_test.go`
   (`TestPluginCallClient`): a call's client and the shell's MAC, which the
-  token does not make. `desktop/src/verify.test.ts`: the MAC's test
-  vectors, the prompt's text per purpose with labels cleaned, and every
-  malformed nonce or purpose and cancelled prompt giving nothing;
-  `windowsHello.test.ts`, `preload.test.ts`, `core.test.ts`.
+  token does not make; `internal/server/client_test.go`
+  (`TestDesktopRelay`): the relays of the vectors opening with the key of
+  the launch's verify key for their own additional data only.
+  `desktop/src/verify.test.ts`: the MAC's test vectors, the prompt's text
+  per purpose with labels cleaned, and every malformed nonce or purpose
+  and cancelled prompt giving nothing; `canUnlock` (the Secure Enclave with
+  Touch ID, or Hello keys, each with safeStorage and the key), unlocking on
+  macOS and Windows with this install's entry chosen by the shell, a key
+  the system no longer has relayed as such, a cancel or failure giving
+  nothing, `none` without a prompt for no entry of this install, only a
+  locked vault's session nonce with entries of exactly the core's shape;
+  enrolling on macOS (Touch ID first, then the key) and Windows (two
+  prompts), null for a refusal, a key not made or a purpose without its
+  challenge; one prompt at a time across prove, unlock and enroll.
+  `desktop/src/enclave.test.ts`: the helper's path in `Contents/Helpers`
+  or the development build, only exact answers taken, peers and blobs
+  checked before a run, one prompt at a time, runs bounded by an absolute
+  path, output and time. `desktop/src/relay.test.ts`: the relay key, the
+  vectors opening for their purpose, nonce and entry only and sealing to
+  the same bytes, the enclave vector's `Z` both ways, the vectors' KEKs,
+  base64url read strictly. `desktop/src/unlockStore.test.ts`: the install
+  id and secret made once, 0600 with the secret encrypted; nothing without
+  safeStorage; a secret that no longer decrypts made again with the
+  install id kept; a file of another shape not read; only a small regular
+  file, never through a link. `windowsHello.test.ts` (also the key
+  operations' results and the key's name and challenge in the
+  environment, never in the script), `preload.test.ts` (also the unlock
+  key's answers of their forms only), `core.test.ts`.
   `web/src/__tests__/vaultProof.test.tsx`: the ways a page has, the
   ceremonies' options and what is posted, the card, the gate and the
   settings page.
@@ -986,7 +1295,9 @@ hold and exempt apps do not guarantee:
   never pushed out by refusals (`TestReleasesAreNeverCoalesced`); a
   release whose record cannot be written refused (`TestUnloggedReleaseIsRefused`);
   a release after a write that failed partway, and after a half line a
-  crash left, read back (`TestAccessLogAfterAFailedWrite`);
+  crash left, read back (`TestAccessLogAfterAFailedWrite`); the log
+  refused without a session, its reads no use of one, nothing shown
+  while locked (`TestAccessLogNeedsASession`);
   the file written again past its bound and read back the same; a merged
   count written once the while is over; the process chain taken from the
   header, never the request (`TestWhoAskedComesFromTheAgent`); cancelled
@@ -1011,14 +1322,11 @@ hold and exempt apps do not guarantee:
   the values before them and out-of-bounds values are refused
   (`TestSettingsDefs`); the approval's wait, a session's idle and longest
   life, the auto-lock (uses keep the vault unlocked, then it locks, ends
-  every session and is audited, without an authenticator forgetting the
-  key; 0 never locks it but the key's hold still ends: `TestAutoLock`;
-  with an authenticator the key kept, `keyUntil` in the list, the
-  passphrase beginning the hold again and the hold ending while locked:
-  `TestAutoLockKeepsTheKeyForAProof`; a time a page sets behind the gate,
-  its bounds, `lockAt` in the list, the lock at that time and the setting
-  again after it: `TestAutoLockSetByPage`), the hold's setting shortening
-  but not lengthening a hold (`TestPassphraseHoldSettingDoesNotLengthenIt`)
+  every session, is audited and forgets the key; 0 never locks it:
+  `TestAutoLock`; the list saying when it locks to a session, the lock
+  then, and no route for a page's own time: `TestAutoLockFollowsTheSetting`),
+  the old `vault.passphraseHours` dropped from a settings file that has it
+  (`TestPassphraseHoursDropped`)
   and `run_with_env`'s limits sent with an env's values, not a get's. The
   automatic lock's tests move a clock of their own and make the timer's
   looks themselves, so they do not depend on how fast the machine runs.
@@ -1036,22 +1344,70 @@ hold and exempt apps do not guarantee:
   neither reveal nor exempt
   (`TestExemptingTakesThePassphraseWhereEveryAllowIsVerified`).
 - `internal/plugins/vault/settings_test.go` (`TestTimeLimitsCountSleep`):
-  a sleep past the key's hold (the monotonic clock stopped) has the key
-  forgotten and the session ended at the first request after it, and by
-  the timer's late look; a wall clock set back does not lengthen the hold;
-  a session's idle time counts the sleep. `TestAutoLockSetByPage` also
-  refuses a longer time, never and the setting's longer time without the
-  passphrase in the request and with a wrong one, and takes a shorter one
-  with the session.
+  a sleep past a session's time and the automatic lock's (the monotonic
+  clock stopped) has the session ended at the first request after it and
+  the vault locked by the timer's late look; a wall clock set back
+  lengthens nothing.
 - `internal/plugins/vault/proof_test.go` (`TestListWithoutASession`):
   without a session the list names no authenticator's id, label or use,
-  no exemption, rule, `lockAt` or `keyUntil`, and only the way this origin
-  can prove with (none for an origin not vouched for), also while the vault
-  is suspended; the nonce names the credential.
+  no exemption, rule or `lockAt`, and only the way this origin can prove
+  with (none for an origin not vouched for); the nonce names the
+  credential; a locked vault's list has no guard, only the ways to unlock
+  and the hint of when the passphrase is due, none for an origin not
+  vouched for.
 - `internal/vault/guard_test.go`: `TestCheckApp` (names up to 15 bytes, no
-  shells or interpreters, versions included, their codes); `TestSuspend`
-  also refuses the user's change of a suspended vault's guard while
-  recording a proof's time and counter.
+  shells or interpreters, versions included, their codes).
+- `internal/vault/unlock_test.go`: the KEKs of the vectors, `Z` from
+  either private key (`TestKEKVectors`); each kind unlocking after a lock
+  and after another start, the window sealed with the passphrase coming
+  back, the authenticator's use recorded, the KEK given wiped
+  (`TestUnlockEachKind`); an edit of any member of an entry (each
+  parameter, the authenticator, the kind, the check, the wrapped bytes)
+  dropped at Open or not opening, the vault locked either way
+  (`TestEditedEntriesDoNotOpen`); a new passphrase dropping every entry,
+  one changed by an older build leaving entries of another check that
+  Open drops (`TestNewPassphraseEndsTheEntries`); an entry whose
+  authenticator is gone (an older copy put back) refused and removed, a
+  removed authenticator's entries going in the same write
+  (`TestOrphanEntries`); the authenticator's proof checked after the key
+  opened and before it is installed, its counter recorded, a KEK that does
+  not open never reaching it (`TestUnlockVerifies`); the window: allowed
+  within the lesser of the days, refused with none, in the future or
+  ended, an older window put back ending sooner, `ForgetPassphrase` also
+  while locked, a passphrase checked while locked refreshing nothing
+  (`TestPassphraseWindow`); the new members kept by a build that does not
+  know them, a removed entry not coming back (`TestOlderBuildRoundTrip`);
+  the input and bounds of adding (the authenticator of the right kind,
+  one per install and per credential, at most 4 of the desktop app, the
+  vault unlocked: `TestAddUnlockBounds`); a purge leaving no key that
+  opens (`TestPurge`).
+- `internal/plugins/vault/unlock_test.go`: the desktop app unlocking with
+  its install's Secure Enclave or Hello key, only for the desktop client,
+  with a relay of this very nonce, purpose and entry, once, its session a
+  proof's, no secret in the audit, relays refused without counting a
+  guess (`TestDesktopUnlock`); PRF outputs that do not open slowed down as
+  wrong passphrases, what guesses nothing not counted
+  (`TestFailedUnlocksAreSlowedDown`); a dead entry after a refused
+  re-enrollment removed as `unlock_stale`, audited, not counted, and
+  biometrics set up again with the passphrase (`TestDeadDesktopEntry`);
+  the shell's word that its key is gone ending the entry, the desktop
+  authenticator kept (`TestDesktopUnlockInvalidated`); a credential with
+  PRF unlocking at its own origin with its assertion verified and its
+  counter grown, a leaked output audited, an unknown credential and an
+  unlocked vault refused (`TestPRFUnlock`); `403 passphrase_due` outside
+  the window, after which the passphrase works, and Require Passphrase
+  ending it while locked (`TestPassphraseDue`); the automatic lock after an
+  unlock by an authenticator at most the time sealed with the window,
+  whatever the setting said before or after
+  (`TestAutoLockAfterAnUnlockByAnAuthenticator`); registration wrapping the
+  key (`400 prf_required` without PRF, a new desktop authenticator refused
+  without its relay, a relay of another nonce or key name refused, a
+  second install's entry added to the one desktop authenticator, removing
+  an authenticator or a new passphrase removing its entries, audited:
+  `TestRegistrationWrapsTheKey`); a lock during an unlock coming after it
+  and its session (`TestLockDuringAnUnlock`) and during an add after the
+  authenticator and its entry (`TestLockDuringAnAdd`); `503 memory`
+  (`TestMemoryError`).
 - `internal/vaultmcp/mcp_test.go`: JSON-RPC over pipes (initialize and
   version negotiation, notifications, tools), masking, truncation, masking
   where the capture is cut (`TestMaskAtTheCut`), the core's limits on
@@ -1084,7 +1440,7 @@ hold and exempt apps do not guarantee:
   approval prompt asking for the passphrase, denying without one and
   resolved elsewhere, kept with the reason when an answer fails and closed
   when the core no longer has it; `busy` told from `wait`; the access log
-  with a page's reveal, a count, the directory and the process chain, and
+  not asked for without a session, then with a page's reveal, a count, the directory and the process chain, and
   the chain in the prompt; the local machine's note; the setup snippets.
 - `web/src/__tests__/vault-transfer.test.ts`: exporting the chosen
   variables (a file passphrase under 12 characters and a mismatch
@@ -1100,17 +1456,25 @@ hold and exempt apps do not guarantee:
   and the log's machine filter with the searchable choice, copies a
   variable's name (not its value) and shows the local machine's note in
   its setup, not in its prompts.
-- `web/src/__tests__/vaultProof.test.tsx` also covers the gate (continuing
-  with biometrics, unlocking a vault locked within the hold with them,
-  Require Passphrase, nothing offered where the page cannot prove) and
-  the settings page's biometrics (the authenticators listed and removed,
-  adding a credential, the desktop switch, Verify every Allow and ending
-  it, the passphrase asked in a proof's session, exempting an app on the
-  machines chosen with the apps seen offered and the passphrase (a wrong
-  one said) and ending it, nothing of the guard shown to a page without a
-  session, and the passphrase that unlocks when the core does not hold the
-  key), and the prompt of a page without a session opening one and sending
-  the passphrase with the answer where every Allow is verified.
-  `web/src/__tests__/vault.test.ts` also asks for the passphrase before a
-  longer automatic lock or never (a wrong one said), not before a shorter
-  one.
+- `web/src/__tests__/vaultProof.test.tsx` also covers the gate
+  (continuing with biometrics where the page can prove; unlocking a locked
+  vault with the desktop app's key, the relay posted as the app answered,
+  and with a credential's PRF of the entry's salt and its assertion;
+  nothing sent without a PRF output and nothing said of a cancel; the
+  desktop app's key offered only where the app can keep one and nothing
+  once the passphrase is due; why an unlock was refused (due, stale,
+  failed), and the app's having no key of this install; Require
+  Passphrase beside biometrics only; locking from the session bar; nothing
+  offered where the page cannot prove) and the settings page's biometrics
+  (the authenticators listed and removed, adding a credential and not
+  adding one without PRF, the label of one that only approves, the desktop
+  switch with the app's enrollment, none in a browser or an app that
+  cannot keep an unlock key, Verify every Allow and ending it, the
+  passphrase asked in a proof's session, exempting an app on the machines
+  chosen with the apps seen offered and the passphrase (a wrong one said)
+  and ending it, nothing of the guard shown to a page without a session,
+  and the passphrase that unlocks a locked vault), and the prompt of a
+  page without a session opening one and sending the passphrase with the
+  answer where every Allow is verified.
+  `web/src/__tests__/vault.test.ts` also shows no auto-lock countdown or
+  time of the page's own in the session bar.

@@ -40,7 +40,7 @@ func (fakePlugin) Routes() []plugin.Route {
 		if mac, err := hex.DecodeString(r.Header.Get("X-Mac")); err == nil && c.DesktopProof != nil {
 			proved = c.DesktopProof([]byte("msg"), mac)
 		}
-		plugin.WriteJSON(w, http.StatusOK, map[string]any{"m": m, "client": c.Client, "canProve": c.DesktopProof != nil, "proved": proved})
+		plugin.WriteJSON(w, http.StatusOK, map[string]any{"m": m, "client": c.Client, "canProve": c.DesktopProof != nil, "canRelay": c.DesktopRelay != nil, "proved": proved})
 	}
 	return []plugin.Route{
 		{Method: "GET", Path: "", Handler: ok},
@@ -106,11 +106,11 @@ func TestPluginCallClient(t *testing.T) {
 		return out
 	}
 	// A core no shell started: every client is a browser, nothing proves.
-	if out := get(token, mac(key)); out["client"] != "browser" || out["canProve"] != false || out["proved"] != false {
+	if out := get(token, mac(key)); out["client"] != "browser" || out["canProve"] != false || out["canRelay"] != false || out["proved"] != false {
 		t.Errorf("without a shell: %v", out)
 	}
 	s.opts.DesktopToken, s.opts.DesktopVerifyKey = token, key
-	if out := get(token, mac(key)); out["client"] != "desktop" || out["proved"] != true {
+	if out := get(token, mac(key)); out["client"] != "desktop" || out["proved"] != true || out["canRelay"] != true {
 		t.Errorf("the desktop app: %v", out)
 	}
 	if out := get("", mac(key)); out["client"] != "browser" {
