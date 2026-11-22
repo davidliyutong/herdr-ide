@@ -9,8 +9,9 @@
 // the vault's unlock key it answers a relay sealed for the core, which the
 // page only passes on.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import type { DesktopEnroll, DesktopShell, DesktopUnlock, OpenedFolders, ProcessUsage } from '../../web/src/shell';
+import type { DesktopEnroll, DesktopShell, DesktopUnlock, NotificationTarget, OpenedFolders, ProcessUsage } from '../../web/src/shell';
 import { channels } from './bridge';
+import { parseNotificationOptions, parseNotificationTarget, sanitizeTag } from './notifications';
 import { MAC_TITLEBAR_INSET, MAC_TITLEBAR_MIN_HEIGHT, MAC_TITLEBAR_TOP_SPACE } from './titlebar';
 
 /** Listens on channel for payloads that pass valid; returns a function that
@@ -125,6 +126,43 @@ const shell: DesktopShell = {
     } catch {
       return [];
     }
+  },
+  notifications: {
+    async supported() {
+      try {
+        return (await ipcRenderer.invoke(channels.notifySupported)) === true;
+      } catch {
+        return false;
+      }
+    },
+    async show(opts) {
+      const valid = parseNotificationOptions(opts);
+      if (!valid) return false;
+      try {
+        return (await ipcRenderer.invoke(channels.notifyShow, valid)) === true;
+      } catch {
+        return false;
+      }
+    },
+    close(tag) {
+      const valid = sanitizeTag(tag);
+      if (valid) ipcRenderer.send(channels.notifyClose, valid);
+    },
+    onClick(fn) {
+      const off = listen(
+        channels.notifyClick,
+        (v): v is NotificationTarget => parseNotificationTarget(v) !== undefined,
+        (t) => {
+          const clean = parseNotificationTarget(t);
+          if (clean) fn(clean);
+        },
+      );
+      ipcRenderer.send(channels.notifyClickWanted, true);
+      return () => {
+        off();
+        ipcRenderer.send(channels.notifyClickWanted, false);
+      };
+    },
   },
   verifyUser: {
     async available() {

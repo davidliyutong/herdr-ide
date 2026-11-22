@@ -7,7 +7,8 @@ import { t } from '../i18n';
 import { statusRank, type AgentStatus } from '../lib/machine';
 import { builtinDefaults, setSetting, useSettings, type Client, type Section } from '../settings';
 import type { PluginView } from '../term/layout';
-import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef, TerminalHeaderProps } from './api';
+import type { NotificationTarget } from '../shell';
+import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef, TerminalHeaderProps, UnopenedAgent } from './api';
 
 let plugins: PluginDef[] = [];
 
@@ -275,6 +276,29 @@ export function viewPaneOf(m: string, data: Record<string, unknown>): string | u
 export function viewSeen(m: string, view: PluginView) {
   const o = statusOwner(view.plugin);
   if (o?.def.seen) guarded(o.p, 'seen', () => o.def.seen!(m, view));
+}
+
+/** Items of active plugins on machine m that have an agent status without an open pane. */
+export function viewUnopened(m: string): Array<UnopenedAgent & { plugin: string }> {
+  const out: Array<UnopenedAgent & { plugin: string }> = [];
+  for (const p of activePlugins()) {
+    const def = p.viewStatus;
+    if (!def?.unopened) continue;
+    const list = guarded(p, 'unopened', () => def.unopened!(m));
+    if (Array.isArray(list)) for (const item of list) out.push({ ...item, plugin: p.id });
+  }
+  return out;
+}
+
+/** Opens/focuses an item referenced by a chat notification target through the active plugin that owns it. */
+export function viewOpenTarget(target: Extract<NotificationTarget, { kind: 'chat' }>): boolean {
+  for (const p of activePlugins()) {
+    const def = p.viewStatus;
+    if (!def?.openTarget) continue;
+    guarded(p, 'openTarget', () => void def.openTarget!(target));
+    return true;
+  }
+  return false;
 }
 
 // One subscription to each plugin's statuses serves every listener: taken

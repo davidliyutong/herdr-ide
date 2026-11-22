@@ -5,6 +5,7 @@ import {
   ipcMain,
   Menu,
   nativeTheme,
+  Notification,
   powerMonitor,
   safeStorage,
   session,
@@ -41,6 +42,7 @@ import { enclaveFor, helperPath, helperRunner, runBounded } from './enclave';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
+import { createNotifications } from './notifications';
 import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
 import {
   allowGuestPermission,
@@ -115,6 +117,12 @@ let uiFontSize = tokens.font.root;
 let disabled = new Set<string>();
 // Folders opened with the app, until the page takes them.
 const folders = new FolderQueue();
+// Native OS notifications (Electron Notification API), queued click routing.
+const notifications = createNotifications({
+  isSupported: () => Notification.isSupported(),
+  create: (opts) => new Notification(opts),
+  showMain,
+});
 
 function t(key: MessageKey, vars?: Record<string, string>): string {
   return translate(detectLocale(language === 'auto' ? null : language, app.getPreferredSystemLanguages()), key, vars);
@@ -308,6 +316,17 @@ ipcMain.on(channels.fullScreenQuery, (event) => {
   }
 });
 
+ipcMain.handle(channels.notifySupported, (event) => (fromMainPage(event) ? notifications.supported() : false));
+ipcMain.handle(channels.notifyShow, (event, opts: unknown) => (fromMainPage(event) ? notifications.show(opts) : false));
+ipcMain.on(channels.notifyClose, (event, tag: unknown) => {
+  if (fromMainPage(event)) notifications.close(tag);
+});
+ipcMain.on(channels.notifyClickWanted, (event, wanted: unknown) => {
+  if (!fromMainPage(event)) return;
+  const contents = event.sender;
+  notifications.takenBy(wanted === true ? (target) => contents.send(channels.notifyClick, target) : undefined);
+});
+
 // Full Disk Access (macOS): the page asks; what opens is the shell's own.
 const privacy = privacyActions(
   {
@@ -424,7 +443,10 @@ function createWindow() {
   // Folders opened from now on wait for the next page, which asks for them;
   // this runs before that page can.
   win.webContents.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) folders.takenBy(undefined);
+    if (details.isMainFrame && !details.isSameDocument) {
+      folders.takenBy(undefined);
+      notifications.takenBy(undefined);
+    }
   });
   // What a page said of its unsaved changes goes with it, once another one
   // is there (a navigation that never commits keeps it).
@@ -436,6 +458,7 @@ function createWindow() {
   });
   win.webContents.on('render-process-gone', (_event, details) => {
     folders.takenBy(undefined);
+    notifications.takenBy(undefined);
     g.reset();
     if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
   });
@@ -479,6 +502,7 @@ function createWindow() {
     if (guard === g) guard = undefined;
     nativeTheme.off('updated', onTheme);
     folders.takenBy(undefined);
+    notifications.takenBy(undefined);
     mainWindow = undefined;
     // Program windows do not keep the app open.
     if (quitAfterClose || quitsWithLastWindow(platform)) app.quit();
@@ -498,6 +522,7 @@ app.on('before-quit', (event) => {
   }
   quitting = true;
   stopFollowing();
+  notifications.closeAll();
   if (stopped) return;
   if (systemShutdown) {
     // Delaying a logout, restart or shutdown would cancel it. Stop the core

@@ -636,6 +636,10 @@ export const en = {
   'settings.notifications.system': 'System notifications',
   'settings.notifications.system.desc':
     'A system notification when an agent needs input or finishes while this window is in the background.',
+  'settings.notifications.permission.allow': 'Allow browser notifications',
+  'settings.notifications.permission.denied':
+    'Notifications are blocked in your browser settings. Allow them for this site to receive system notifications.',
+  'settings.notifications.permission.unavailable': 'Browser notifications are unavailable in this context (requires HTTPS or localhost).',
   'settings.notifications.badge': 'Badge count',
   'settings.notifications.badge.desc': 'The number of agents waiting for input, on the app’s icon and in the window title.',
   'settings.notifications.mutedAgents': 'Silent agents',

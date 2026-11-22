@@ -51,6 +51,37 @@ export interface DesktopShell {
    * page: Electron's count of each (the window's page, the GPU process, the
    * shell itself, helpers); the core is not among them. */
   metrics?(): Promise<ProcessUsage[]>;
+  /** Native OS notifications through Electron's Notification API. */
+  notifications?: DesktopNotifications;
+}
+
+/** Target routed when a native desktop notification is clicked. */
+export type NotificationTarget =
+  | { kind: 'pane'; machine: string; pane: string }
+  | { kind: 'chat'; machine: string; chat: string; agent?: string }
+  | { kind: 'panel'; panel: string };
+
+/** Options accepted by the native desktop notification bridge. */
+export interface DesktopNotificationOptions {
+  title: string;
+  body?: string;
+  /** Deduplication tag: a new notification with the same tag replaces the old one. */
+  tag?: string;
+  silent?: boolean;
+  urgency?: 'normal' | 'critical' | 'low';
+  target?: NotificationTarget;
+}
+
+export interface DesktopNotifications {
+  /** Whether the OS supports native notifications. */
+  supported(): Promise<boolean>;
+  /** Shows a native notification; resolves to whether it was shown. */
+  show(opts: DesktopNotificationOptions): Promise<boolean>;
+  /** Closes an active notification by tag, if any. */
+  close(tag: string): void;
+  /** Calls fn when the user clicks a native notification; returns a
+   * function that stops it. */
+  onClick(fn: (target: NotificationTarget) => void): () => void;
 }
 
 /** One process of the desktop app. */
