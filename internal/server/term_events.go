@@ -14,14 +14,78 @@ import (
 	agentsplugin "herdr-ide/internal/plugins/agents"
 )
 
-func indexTerminals(list []map[string]any) map[string]map[string]any {
-	out := make(map[string]map[string]any, len(list))
+// indexTerminals sorts the terminal core's terminals into those clients are
+// told of, by address, and the hidden ones (hiddenTerminal), by address
+// with their names.
+func indexTerminals(list []map[string]any) (terms map[string]map[string]any, hidden map[string]string) {
+	terms, hidden = make(map[string]map[string]any, len(list)), map[string]string{}
 	for _, t := range list {
-		if addr, _ := t["address"].(string); addr != "" {
-			out[addr] = t
+		addr, _ := t["address"].(string)
+		switch {
+		case addr == "":
+		case hiddenTerminal(t):
+			hidden[addr], _ = t["name"].(string)
+		default:
+			terms[addr] = t
 		}
 	}
-	return out
+	return terms, hidden
+}
+
+// hiddenTerminal reports whether a terminal's record carries the label of
+// the product's own helpers (agentproto.HiddenLabel), whatever its value:
+// the chat host, which a machine's agent runs as a terminal so that it
+// lives as the user's terminals do. It is no terminal of the clients': it
+// is in no snapshot, no event and no list they get, its agent is detected
+// for nobody, and a call or an attach that names it is answered as for a
+// terminal that does not exist.
+func hiddenTerminal(rec map[string]any) bool {
+	labels, _ := rec["labels"].(map[string]any)
+	_, hidden := labels[agentproto.HiddenLabel]
+	return hidden
+}
+
+// concealLocked reports whether an event is about a hidden terminal, which
+// is then none of the clients', and keeps b.hidden: a terminal that is
+// created with the label, or gets it, is hidden, and the clients that knew
+// it are told that it was removed; one that is hidden stays so until it is
+// removed, whatever becomes of its labels. b.mu is held.
+func (b *termBackend) concealLocked(n hc.RawNotification, data map[string]any) bool {
+	if _, hidden := b.hidden[n.Terminal]; hidden {
+		if n.Type == "removed" {
+			delete(b.hidden, n.Terminal)
+		}
+		return true
+	}
+	rec := data // created, restarted: the terminal's record
+	switch n.Type {
+	case "created", "restarted":
+	case "labels":
+		// All its labels now; its name is in the record the clients have.
+		rec = map[string]any{"labels": data["labels"], "name": b.terms[n.Terminal]["name"]}
+		if r, ok := data["record"].(map[string]any); ok {
+			rec = r
+		}
+	default:
+		return false
+	}
+	if !hiddenTerminal(rec) {
+		return false
+	}
+	if b.hidden == nil {
+		b.hidden = map[string]string{}
+	}
+	b.hidden[n.Terminal], _ = rec["name"].(string)
+	delete(b.agents, n.Terminal)
+	if _, known := b.terms[n.Terminal]; known {
+		delete(b.terms, n.Terminal)
+		b.unpark(n.Terminal)
+		gone := map[string]any{"t": "event", "m": b.id, "type": "removed", "terminal": n.Terminal, "data": json.RawMessage("{}")}
+		for c := range b.subs {
+			c.sendJSON(gone)
+		}
+	}
+	return true
 }
 
 // event applies a notification to the backend's terminals, as herdr-core's
@@ -31,7 +95,7 @@ func (b *termBackend) event(n hc.RawNotification) {
 	defer b.mu.Unlock()
 	switch n.Method {
 	case "missed":
-		b.terms = indexTerminals(n.Terminals)
+		b.terms, b.hidden = indexTerminals(n.Terminals)
 		for addr := range b.terms {
 			b.mergeAgent(addr)
 		}
@@ -53,6 +117,9 @@ func (b *termBackend) event(n hc.RawNotification) {
 	var data map[string]any
 	json.Unmarshal(n.Data, &data)
 	if n.Terminal != "" {
+		if b.concealLocked(n, data) {
+			return
+		}
 		t := b.terms[n.Terminal]
 		switch n.Type {
 		case "created", "restarted":
@@ -270,6 +337,12 @@ func (b *termBackend) applyDetected(ev agentproto.DetectEvent, told map[string]a
 	}
 	checkSession(&ev)
 	b.mu.Lock()
+	if _, hidden := b.hidden[ev.Terminal]; hidden {
+		// What runs in a hidden terminal is not the clients' to know.
+		delete(b.agents, ev.Terminal)
+		b.mu.Unlock()
+		return
+	}
 	prev, had := b.agents[ev.Terminal]
 	quiet := false
 	if ev.Agent == "" {

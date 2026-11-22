@@ -130,19 +130,25 @@ type fakeAdapter struct {
 	// before it signals it.
 	closeWait time.Duration
 
-	mu         sync.Mutex
-	starts     []chatadapter.StartParams
-	started    chan *fakeSession
-	startErr   error
-	startGate  chan struct{}
-	promptErr  error
-	caps       chatproto.Capabilities
-	config     []chatproto.ConfigOption
-	list       []chatproto.Session
-	history    []chatproto.Event
-	historyErr error
-	histories  []chatadapter.HistoryParams
-	sessionsP  []chatadapter.SessionsParams
+	mu       sync.Mutex
+	starts   []chatadapter.StartParams
+	started  chan *fakeSession
+	startErr error
+	// startGate holds Start up until it is closed, or Start's context
+	// ends unless lateStart: then the session comes all the same.
+	startGate chan struct{}
+	lateStart bool
+	// closeDelay is how long Close takes; historyGate holds History up.
+	closeDelay  time.Duration
+	historyGate chan struct{}
+	promptErr   error
+	caps        chatproto.Capabilities
+	config      []chatproto.ConfigOption
+	list        []chatproto.Session
+	history     []chatproto.Event
+	historyErr  error
+	histories   []chatadapter.HistoryParams
+	sessionsP   []chatadapter.SessionsParams
 }
 
 func newFakeAdapter() *fakeAdapter {
@@ -158,9 +164,11 @@ func newFakeAdapter() *fakeAdapter {
 func (a *fakeAdapter) Start(ctx context.Context, p chatadapter.StartParams, sink chatadapter.Sink) (chatadapter.Session, error) {
 	a.mu.Lock()
 	a.starts = append(a.starts, p)
-	gate, startErr := a.startGate, a.startErr
+	gate, startErr, late := a.startGate, a.startErr, a.lateStart
 	a.mu.Unlock()
-	if gate != nil {
+	if gate != nil && late {
+		<-gate
+	} else if gate != nil {
 		select {
 		case <-gate:
 		case <-ctx.Done():
@@ -225,8 +233,15 @@ func (a *fakeAdapter) History(ctx context.Context, p chatadapter.HistoryParams, 
 	a.mu.Lock()
 	a.histories = append(a.histories, p)
 	evs := append([]chatproto.Event(nil), a.history...)
-	err := a.historyErr
+	err, gate := a.historyErr, a.historyGate
 	a.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -383,6 +398,10 @@ func (s *fakeSession) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.closing = true
 	s.mu.Unlock()
+	s.a.mu.Lock()
+	delay := s.a.closeDelay
+	s.a.mu.Unlock()
+	time.Sleep(delay)
 	if s.cmd == nil {
 		s.end(nil)
 		return nil

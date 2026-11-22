@@ -61,4 +61,9 @@ export interface ChatSource {
   /** The files of the chat's directory that match what the user typed
    * after `@`, the best first; absent when the source cannot tell. */
   suggestFiles?(query: string): Promise<FileSuggestion[]>;
+  /** Trusts the chat's folder, and those below it, on its machine: an
+   * agent started there from then on loads the project's own settings
+   * (the notice untrusted_folder says it did not). Absent when the source
+   * cannot; a read-only view does not offer it. */
+  trust?(): Promise<void>;
 }

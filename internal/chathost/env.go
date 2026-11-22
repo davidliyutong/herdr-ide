@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -24,16 +25,22 @@ import (
 // startup files add to PATH (a version manager's, ~/.local/bin, a package
 // manager's), and the host itself is started without those files being
 // read. So the host asks an interactive login shell for its environment,
-// and gives that to the agents.
+// and gives that to the agents. The shell runs the user's startup files,
+// which may start programs of their own: it is asked again only when one
+// of the startup files changed (startupFiles), or envKeep after it was
+// asked last.
 const (
 	// shellTimeout is how long the shell has to print its environment.
 	shellTimeout = 10 * time.Second
 	// shellOutput is the most the shell may print.
 	shellOutput = 1 << 20
 	// envKeep is how long an environment is used before the shell is asked
-	// again: what the user installs or configures is found without a new
-	// host.
-	envKeep = 5 * time.Minute
+	// again, unless a startup file changes: what the user installs and
+	// configures by other files is found without a new host.
+	envKeep = 6 * time.Hour
+	// failKeep is how long the host's own environment stands in for one the
+	// shell did not tell.
+	failKeep = 5 * time.Minute
 	// shellPipes is how long the shell's output is waited for once the
 	// shell exited: a program its startup files left running may hold the
 	// pipe open.
@@ -41,15 +48,17 @@ const (
 )
 
 // environment is the user's environment, asked for when needed and kept
-// for envKeep.
+// while the startup files stay as they were, for envKeep at most.
 type environment struct {
 	logger *log.Logger
 	// lookup replaces the shell (tests).
 	lookup func(context.Context) []string
 
-	mu  sync.Mutex
-	env []string
-	at  time.Time
+	mu     sync.Mutex
+	env    []string
+	at     time.Time
+	keep   time.Duration // envKeep, or failKeep for the host's own
+	stamps string        // the startup files' as env was asked for
 }
 
 // get is the user's environment: the login shell's, or the host's own when
@@ -57,10 +66,12 @@ type environment struct {
 func (e *environment) get(ctx context.Context) []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.env != nil && time.Since(e.at) < envKeep {
+	stamps := fileStamps(startupFiles(e.env))
+	if e.env != nil && time.Since(e.at) < e.keep && stamps == e.stamps {
 		return e.env
 	}
 	var env []string
+	keep := envKeep
 	if e.lookup != nil {
 		env = e.lookup(ctx)
 	} else {
@@ -71,11 +82,67 @@ func (e *environment) get(ctx context.Context) []string {
 				return os.Environ()
 			}
 			e.logger.Printf("the login shell's environment: %v; using the host's own", err)
-			env = os.Environ()
+			env, keep = os.Environ(), failKeep
 		}
 	}
-	e.env, e.at = env, time.Now()
+	if !slices.Equal(startupFiles(env), startupFiles(e.env)) {
+		// The shell told a ZDOTDIR of its own.
+		stamps = fileStamps(startupFiles(env))
+	}
+	e.env, e.at, e.keep, e.stamps = env, time.Now(), keep, stamps
 	return env
+}
+
+// systemStartup are the startup files of the system's shells (bash, zsh,
+// sh, fish) and the files macOS's path_helper reads.
+var systemStartup = []string{
+	"/etc/profile", "/etc/profile.d", "/etc/environment", "/etc/paths", "/etc/paths.d",
+	"/etc/bashrc", "/etc/bash.bashrc", "/etc/zshenv", "/etc/zprofile", "/etc/zshrc", "/etc/zlogin",
+	"/etc/zsh/zshenv", "/etc/zsh/zprofile", "/etc/zsh/zshrc", "/etc/zsh/zlogin", "/etc/fish/config.fish",
+}
+
+// homeStartup are the startup files of the shells in the user's home (and
+// zsh's in ZDOTDIR).
+var homeStartup = []string{
+	".profile", ".bash_profile", ".bash_login", ".bashrc", ".zshenv", ".zprofile", ".zshrc", ".zlogin",
+	".config/fish/config.fish", ".config/fish/conf.d",
+}
+
+// startupFiles are the files whose change has the login shell asked again:
+// the system's, the home's, and zsh's in ZDOTDIR (the host's, or the one
+// the shell told in env).
+func startupFiles(env []string) []string {
+	files := slices.Clone(systemStartup)
+	dirs := []string{}
+	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
+		dirs = append(dirs, home)
+	}
+	for _, z := range []string{os.Getenv("ZDOTDIR"), func() string { v, _ := getenv(env, "ZDOTDIR"); return v }()} {
+		if filepath.IsAbs(z) && !slices.Contains(dirs, z) {
+			dirs = append(dirs, z)
+		}
+	}
+	for _, d := range dirs {
+		for _, f := range homeStartup {
+			files = append(files, filepath.Join(d, f))
+		}
+	}
+	return files
+}
+
+// fileStamps tells the files as they are: each one's modification time
+// and size, or that it is not there.
+func fileStamps(files []string) string {
+	var b strings.Builder
+	for _, f := range files {
+		b.WriteString(f)
+		if st, err := os.Stat(f); err == nil {
+			fmt.Fprintf(&b, "\x00%d\x00%d\n", st.ModTime().UnixNano(), st.Size())
+		} else {
+			b.WriteString("\x00-\n")
+		}
+	}
+	return b.String()
 }
 
 // loginEnv runs shell as an interactive login shell that prints its

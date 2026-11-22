@@ -15,7 +15,7 @@ import { isMenuKey } from '../rowKeys';
 import { PaneActions } from './PaneActions';
 import { t } from '../i18n';
 import { FileTitle, LeafIcon, ViewTitle } from './PluginPane';
-import { describeView, TerminalHeaderActions } from '../plugins/registry';
+import { describeView, TerminalHeaderActions, useViewStatus } from '../plugins/registry';
 
 interface Props {
   m: string;
@@ -197,11 +197,14 @@ export function PaneTitle({ m, terminal, title, name }: { m: string; terminal: s
   );
 }
 
-/** A plugin's pane: its icon, title and path. */
+/** A plugin's pane: its agent's state when its plugin has one (a chat's;
+ * ViewStatusDef), its icon, title and path. */
 function PluginHeading({ m, view, home }: { m: string; view: L.PluginView; home?: string }) {
   const d = describeView(m, view);
+  const status = useViewStatus(m, view);
   return (
     <>
+      {status && <StatusDot status={status} />}
       <LeafIcon m={m} leaf={{ view }} className="pane-kind" />
       <ViewTitle m={m} view={view} className="pane-title" tooltip={(gone) => [d.title, d.path, gone].filter(Boolean).join(' · ')}>
         {d.title}

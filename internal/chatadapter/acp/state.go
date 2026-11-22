@@ -190,6 +190,20 @@ var modeCandidates = map[string][]string{
 	chatproto.ModeFull:        {"yolo", "bypassPermissions", "full", "full-access", "full_access"},
 }
 
+// markFull marks the values of the mode options that give the agent full
+// access (modeCandidates of chatproto.ModeFull), which the host refuses
+// unless its settings allow full access.
+func markFull(opts []chatproto.ConfigOption) {
+	for i := range opts {
+		if opts[i].Category != chatproto.CategoryMode {
+			continue
+		}
+		for j := range opts[i].Options {
+			opts[i].Options[j].Full = slices.Contains(modeCandidates[chatproto.ModeFull], opts[i].Options[j].Value)
+		}
+	}
+}
+
 // modeValue is the value of the mode option that a chat's mode stands for:
 // the agent's own value when it is one, else the agent's value of the
 // host's mode of that name; "" when the agent has none.

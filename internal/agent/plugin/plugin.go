@@ -31,7 +31,18 @@ type Env struct {
 	// Environ is the environment of processes the agent starts: its own
 	// without the terminal core's and multiplexers' variables.
 	Environ func() []string
+	// RunHidden runs argv as a terminal of the instance's terminal core
+	// that no client shows (agentproto.HiddenLabel), named name: a helper
+	// of the product's own that outlives the agent, as the user's
+	// terminals do. A live terminal that has the name already is success:
+	// the helper runs (or one that ends still holds the name). The error
+	// wraps ErrNoTerminalCore when no terminal core answers.
+	RunHidden func(ctx context.Context, name string, argv []string) error
 }
+
+// ErrNoTerminalCore is RunHidden's error when the instance's terminal core
+// does not run: the agent starts none for a helper.
+var ErrNoTerminalCore = errors.New("the terminal core is not running")
 
 // Handler runs the actions of one plugin. It owns st and closes it. params
 // are read in full, from the header or the body after it; ctx is the

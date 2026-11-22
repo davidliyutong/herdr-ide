@@ -141,30 +141,40 @@ function modeName(v: ConfigValue): string {
   return (MODES as readonly string[]).includes(v.value) ? t(`conversation.mode.${v.value as (typeof MODES)[number]}`) : v.name;
 }
 
+/** Why the values that give an agent full access (ConfigValue.full) are
+ * not offered: the machine's settings do not allow it, or the view is
+ * read-only. */
+export type FullBlocked = 'off' | 'readOnly' | undefined;
+
 function ConfigSelect({
   option,
   label,
   nameOf,
   disabled,
+  fullBlocked,
   onSet,
 }: {
   option: ConfigOption;
   label: string;
   nameOf?: (v: ConfigValue) => string;
   disabled: boolean;
+  fullBlocked: FullBlocked;
   onSet: (id: string, value: string) => Promise<void>;
 }) {
   /** The value asked for until the host took it. */
   const [asked, setAsked] = useState<string | undefined>(undefined);
   const value = asked ?? option.currentValue;
   const values = option.options.some((o) => o.value === value) ? option.options : [{ value, name: value }, ...option.options];
+  const blocked = (v: ConfigValue) => !!fullBlocked && v.full === true;
+  let title = option.description ? `${label}: ${option.description}` : label;
+  if (fullBlocked === 'off' && values.some(blocked)) title += `\n${t('conversation.config.fullOffHint')}`;
   return (
     <select
       className="conv-select"
       data-config={option.category}
       value={value}
       aria-label={label}
-      title={option.description ? `${label}: ${option.description}` : label}
+      title={title}
       disabled={disabled || asked !== undefined}
       onChange={(e) => {
         const v = e.target.value;
@@ -172,11 +182,18 @@ function ConfigSelect({
         onSet(option.id, v).finally(() => setAsked(undefined));
       }}
     >
-      {values.map((v) => (
-        <option key={v.value} value={v.value} title={v.description}>
-          {nameOf ? nameOf(v) : v.name}
-        </option>
-      ))}
+      {values.map((v) => {
+        const name = nameOf ? nameOf(v) : v.name;
+        return blocked(v) ? (
+          <option key={v.value} value={v.value} disabled data-full={fullBlocked}>
+            {t(fullBlocked === 'readOnly' ? 'conversation.config.fullReadOnly' : 'conversation.config.fullOff', { name })}
+          </option>
+        ) : (
+          <option key={v.value} value={v.value} title={v.description}>
+            {name}
+          </option>
+        );
+      })}
     </select>
   );
 }
@@ -271,6 +288,9 @@ export interface ComposerProps {
   state?: string;
   stateError?: ChatError;
   readOnly: boolean;
+  /** The machine allows full access (its setting chat.allowFullAccess):
+   * without it, and read-only, the values that give it are not offered. */
+  allowFull: boolean;
   /** Shows the card that waits for the user. */
   onShowWaiting(): void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -287,6 +307,7 @@ export function Composer({
   state,
   stateError,
   readOnly,
+  allowFull,
   onShowWaiting,
   inputRef,
 }: ComposerProps) {
@@ -545,6 +566,7 @@ export function Composer({
   const effort = configOf(chat, CATEGORY_THOUGHT_LEVEL);
   const mode = configOf(chat, CATEGORY_MODE);
   const setConfig = (id: string, value: string) => run(() => source.setConfig(id, value));
+  const fullBlocked: FullBlocked = readOnly ? 'readOnly' : allowFull ? undefined : 'off';
   const canCancelQueued = caps.cancelQueued && !readOnly;
   const handedOff = !!chat?.handedOff;
 
@@ -725,10 +747,33 @@ export function Composer({
               />
             </>
           )}
-          {model && <ConfigSelect option={model} label={t('conversation.config.model')} disabled={readOnly} onSet={setConfig} />}
-          {effort && <ConfigSelect option={effort} label={t('conversation.config.effort')} disabled={readOnly} onSet={setConfig} />}
+          {model && (
+            <ConfigSelect
+              option={model}
+              label={t('conversation.config.model')}
+              disabled={readOnly}
+              fullBlocked={fullBlocked}
+              onSet={setConfig}
+            />
+          )}
+          {effort && (
+            <ConfigSelect
+              option={effort}
+              label={t('conversation.config.effort')}
+              disabled={readOnly}
+              fullBlocked={fullBlocked}
+              onSet={setConfig}
+            />
+          )}
           {mode && (
-            <ConfigSelect option={mode} label={t('conversation.config.mode')} nameOf={modeName} disabled={readOnly} onSet={setConfig} />
+            <ConfigSelect
+              option={mode}
+              label={t('conversation.config.mode')}
+              nameOf={modeName}
+              disabled={readOnly}
+              fullBlocked={fullBlocked}
+              onSet={setConfig}
+            />
           )}
           <span className="spacer" />
           {working && !readOnly && (

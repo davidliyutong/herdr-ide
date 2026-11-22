@@ -146,6 +146,11 @@ var Commands = func() []Command {
 		// focused machine, and the focused browser pane's page again.
 		cmd("browser.open", "tab"),
 		cmd("browser.reload", "tab"),
+		// The chat plugin: a new tab with a chat with an agent on the
+		// focused machine, in the focused pane's directory (a menu of the
+		// agents when the machine has more than one). No default: the
+		// agents' own keys stay theirs.
+		cmd("chat.new", "tab"),
 
 		cmd("pane.splitRight", "pane", on(macApp, "cmd+d")),
 		cmd("pane.splitDown", "pane", on(macApp, "cmd+shift+d")),

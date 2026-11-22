@@ -31,6 +31,10 @@ export interface ConversationProps {
   kind: string;
   /** Read-only (also when the source says so): every control disabled. */
   readOnly?: boolean;
+  /** The chat's machine allows full access (its setting
+   * chat.allowFullAccess; allowed when absent, the host deciding): without
+   * it the configuration values that give it are shown unavailable. */
+  allowFull?: boolean;
   /** A path the agent named was activated. */
   onOpenFile?(path: string, line?: number): void;
   ref?: Ref<ConversationHandle>;
@@ -143,7 +147,7 @@ function useConversation(source: ChatSource, onTaken: (what: Taken) => void) {
   return shown.source === source ? shown.conv : EMPTY;
 }
 
-export function Conversation({ source, kind, readOnly: readOnlyProp, onOpenFile, ref }: ConversationProps) {
+export function Conversation({ source, kind, readOnly: readOnlyProp, allowFull = true, onOpenFile, ref }: ConversationProps) {
   const agent = agentKind(kind)?.title ?? t('conversation.agent');
   const readOnly = !!readOnlyProp || !!source.readOnly;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -196,9 +200,14 @@ export function Conversation({ source, kind, readOnly: readOnlyProp, onOpenFile,
     latest.current = { onOpenFile, source };
   });
   const canOpen = !!onOpenFile;
+  const canTrust = !readOnly && !!source.trust;
   const ctx = useMemo<ItemContext>(
-    () => ({ agent, openFile: canOpen ? (path, line) => latest.current.onOpenFile?.(path, line) : undefined }),
-    [agent, canOpen],
+    () => ({
+      agent,
+      openFile: canOpen ? (path, line) => latest.current.onOpenFile?.(path, line) : undefined,
+      trust: canTrust ? () => latest.current.source.trust?.() ?? Promise.resolve() : undefined,
+    }),
+    [agent, canOpen, canTrust],
   );
 
   const state = conv.state;
@@ -401,6 +410,7 @@ export function Conversation({ source, kind, readOnly: readOnlyProp, onOpenFile,
         state={state}
         stateError={conv.stateError}
         readOnly={readOnly}
+        allowFull={allowFull}
         onShowWaiting={showWaiting}
         inputRef={inputRef}
       />

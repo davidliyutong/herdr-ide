@@ -6,13 +6,13 @@
 // they came from (docs/features/05-vscode-panes.md).
 
 import * as L from './term/layout';
-import { describeView, isPluginOn } from './plugins/registry';
+import { describeView, isPluginOn, viewStatus } from './plugins/registry';
 import { isLive, type TerminalRecord } from './term/protocol';
 import { procName, SHELLS } from './term/place';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
 import { withView } from './state/panes';
-import { agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } from './lib/machine';
+import { aggregate, agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } from './lib/machine';
 import { mediaExt } from './terminal/links';
 import { bridge, hasFrame, type BridgeCommand } from './lib/bridge';
 import { reloadFrame, setStopped } from './codeFrames';
@@ -26,13 +26,19 @@ import type { MessageKey } from './i18n/en';
 
 export interface AttentionItem {
   m: string;
+  /** The pane's key: a terminal's address, or view:<id> for a plugin's pane. */
   terminal: string;
-  record: TerminalRecord;
+  /** The terminal's record; none for a plugin's pane. */
+  record?: TerminalRecord;
+  /** The plugin's pane, for one. */
+  view?: L.PluginView;
   status: AgentStatus;
 }
 
-/** Terminals with an agent (or a status their program reports) on every
- * machine followed, by how much they need the user. */
+/** Terminals with an agent (or a status their program reports) and the
+ * plugins' panes with a status (a chat's; plugins/api.ts ViewStatusDef)
+ * on every machine followed, by how much they need the user; terminals
+ * before panes of the same status. */
 export function attentionList(): AttentionItem[] {
   const s = useStore.getState();
   const tm = useTerms.getState().machines;
@@ -43,7 +49,41 @@ export function attentionList(): AttentionItem[] {
       if (isLive(r) && status && (agentOf(r) || status !== 'idle')) out.push({ m, terminal: r.address, record: r, status });
     }
   }
+  for (const m of s.order) {
+    const layout = tm[m]?.layout;
+    for (const { key, view } of layout ? L.layoutViews(layout) : []) {
+      const status = viewStatus(m, view);
+      if (status) out.push({ m, terminal: key, view, status });
+    }
+  }
   return out.sort((a, b) => statusRank[b.status] - statusRank[a.status]);
+}
+
+/** What an attention item is called first: its agent, else its pane's
+ * title (a terminal's; a plugin's pane's, a chat's). */
+export function attentionName(i: AttentionItem): string {
+  return (i.record && agentOf(i.record)) ?? attentionTitle(i);
+}
+
+/** An attention item's pane's title. */
+export function attentionTitle(i: AttentionItem): string {
+  return i.view ? describeView(i.m, i.view).title : terminalTitle(i.record, i.terminal);
+}
+
+/** The status of a pane: a terminal's agent's, a plugin's pane's. */
+export function paneStatus(m: string, leaf: L.Leaf): AgentStatus | undefined {
+  if (L.isTerminalLeaf(leaf)) return agentStatus(useTerms.getState().machines[m]?.terminals[leaf.terminal]);
+  return L.isPluginLeaf(leaf) ? viewStatus(m, leaf.view) : undefined;
+}
+
+/** The status a tab shows: the highest of its panes' (aggregate). */
+export function tabStatus(m: string, tab: L.Tab): AgentStatus | undefined {
+  return aggregate(L.leavesOf(tab.root).map((leaf) => paneStatus(m, leaf)));
+}
+
+/** The status a workspace shows: the highest of its tabs'. */
+export function workspaceStatus(m: string, ws: L.Workspace): AgentStatus | undefined {
+  return aggregate(ws.tabs.map((tab) => tabStatus(m, tab)));
 }
 
 /** Each pane's share of its tab, from the split tree. */
@@ -1000,7 +1040,8 @@ export const actions = {
     return { m: c.m, ws: c.ws.id, index: c.tabIndex, name: tabName(c.m, c.tab) };
   },
 
-  /** Jump to the agent that most needs attention (blocked first, then done). */
+  /** Jump to the agent that most needs attention (blocked first, then
+   * done): a terminal's, or a plugin's pane's (a chat's). */
   openAttention() {
     const best = attentionList()[0];
     if (best) actions.focusPane(best.m, best.terminal);

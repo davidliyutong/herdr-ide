@@ -100,6 +100,7 @@ func Open(path string, o Options) (*DB, error) {
 	if err := privateFile(path); err != nil {
 		return nil, err
 	}
+	markUsed(path)
 	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
 		if err := notLink(path + suffix); err != nil {
 			return nil, err

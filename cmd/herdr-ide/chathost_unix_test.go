@@ -13,7 +13,9 @@ import (
 
 	"herdr-ide/internal/agentkinds"
 	"herdr-ide/internal/chatadapter"
+	"herdr-ide/internal/chathost"
 	"herdr-ide/internal/chatproto"
+	"herdr-ide/internal/store"
 )
 
 // The chat-host command serves the run directory's socket until a signal
@@ -57,7 +59,7 @@ func TestChatHostCommand(t *testing.T) {
 	if got := chatHost([]string{"--base", base, "--run", dir}); got != 1 {
 		t.Errorf("a second host: exit status %d, want 1", got)
 	}
-	if _, err := os.Stat(filepath.Join(base, "chat.db")); err != nil {
+	if _, err := os.Stat(store.HostFile(base, chathost.DBName)); err != nil {
 		t.Errorf("no journal: %v", err)
 	}
 	// The terminal core's stop starts with SIGHUP.

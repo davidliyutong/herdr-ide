@@ -24,7 +24,8 @@ import (
 )
 
 // The snapshots live in the machine's database (store.MachineDB in the
-// agent's data directory), table history_snapshots: a row per generation
+// agent's data directory, named after the host: store.HostFile), table
+// history_snapshots: a row per generation
 // of a terminal (prev 0 for the current one, 1 for the previous one) with
 // what describes it and its bytes. Every change is a transaction of its
 // own, so readers (list, read) take no lock and see each generation whole;
@@ -32,11 +33,15 @@ import (
 //
 // Writers (capture, clear, adopt, the agent's housekeeping) hold the
 // snapshots' lease, history_lease, which two agents of the same instance
-// (two cores that reach the machine) share: its row names the writer, its
-// process and host and until when it holds it, taken in a transaction and
-// renewed by each of the writer's changes, which fail once another writer
-// took it. It ends when the writer closes the store, when its process is
-// gone (same host), or leaseTTL after its last renewal.
+// (two cores that reach the machine) share: its row names the writer (its
+// process's random id and its own), its process and host and until when it
+// holds it, taken in a transaction and renewed by each of the writer's
+// changes, which fail once another writer took it. It ends when the writer
+// closes the store, when its process is gone (same host: no process of its
+// pid, or this process while the writer's process id is another's, an
+// agent of a container started again with the same pid), or leaseTTL after
+// its last renewal. Memory follows the database: a change that fails
+// leaves what describes the snapshots as it was.
 //
 // The snapshots were kept before in <data dir>/history, as files: their
 // whole generations are imported once when the database is opened, then
@@ -164,8 +169,9 @@ var (
 	errNoData = errors.New("history: no data directory")
 )
 
-// dbPath is the machine's database below the data directory base.
-func dbPath(base string) string { return path.Join(base, dbstore.MachineDB) }
+// dbPath is the machine's database below the data directory base: this
+// host's (store.HostFile).
+func dbPath(base string) string { return dbstore.HostFile(base, dbstore.MachineDB) }
 
 // exists tells whether base has snapshots to look at: the machine's
 // database or the directory they were kept in before (a read creates
@@ -218,7 +224,7 @@ func openStore(ctx context.Context, base string, wait bool, now time.Time) (s *s
 	}
 	var r [12]byte
 	rand.Read(r[:])
-	s = &store{db: db, owner: hex.EncodeToString(r[:]), terms: map[string]*stored{}}
+	s = &store{db: db, owner: processID() + "." + hex.EncodeToString(r[:]), terms: map[string]*stored{}}
 	if err := s.lock(ctx, wait); err != nil {
 		db.Close()
 		return nil, 0, err
@@ -248,6 +254,15 @@ func (s *store) close() {
 var hostname = sync.OnceValue(func() string {
 	h, _ := os.Hostname()
 	return h
+})
+
+// processID is this process's random id, which its writers' owner names
+// begin with (before a dot): a lease of this pid whose owner does not is
+// a process's before this one with the same pid.
+var processID = sync.OnceValue(func() string {
+	var r [8]byte
+	rand.Read(r[:])
+	return hex.EncodeToString(r[:])
 })
 
 // lock takes the lease: at once or errBusy without wait, else asking again
@@ -284,7 +299,7 @@ func (s *store) tryLease() (bool, error) {
 		case errors.Is(err, sql.ErrNoRows):
 		case err != nil:
 			return err
-		case owner != s.owner && expires > now.UnixMilli() && (host != hostname() || alive(pid)):
+		case owner != s.owner && expires > now.UnixMilli() && (host != hostname() || alive(pid, owner)):
 			return nil
 		}
 		_, err = tx.Exec(`INSERT INTO history_lease (id, owner, host, pid, expires) VALUES (1, ?, ?, ?, ?)
@@ -296,11 +311,13 @@ func (s *store) tryLease() (bool, error) {
 	return taken, err
 }
 
-// alive tells whether process pid of this host is there (this process
-// is: another writer of it holds the lease).
-func alive(pid int) bool {
+// alive tells whether the process of writer owner, pid of this host, is
+// there: this process when owner is one of its writers (another writer of
+// it holds the lease), not when owner is of an earlier process of the same
+// pid.
+func alive(pid int, owner string) bool {
 	if pid == os.Getpid() {
-		return true
+		return strings.HasPrefix(owner, processID()+".")
 	}
 	if pid <= 0 {
 		return false
@@ -410,13 +427,16 @@ func (s *store) removeRows(addr string, prev *bool) error {
 	})
 }
 
-// removeGen removes one generation.
-func (s *store) removeGen(addr string, prev bool) {
+// removeGen removes one generation; memory changes once the removal
+// committed.
+func (s *store) removeGen(addr string, prev bool) error {
 	st := s.terms[addr]
 	if st == nil {
-		return
+		return nil
 	}
-	s.removeRows(addr, &prev)
+	if err := s.removeRows(addr, &prev); err != nil {
+		return err
+	}
 	if prev {
 		st.prev = nil
 	} else {
@@ -425,16 +445,27 @@ func (s *store) removeGen(addr string, prev bool) {
 	if st.cur == nil && st.prev == nil {
 		delete(s.terms, addr)
 	}
+	return nil
 }
 
-// remove removes a terminal's snapshots; false when it had none.
+// remove removes a terminal's snapshots; false when it had none or the
+// removal failed (they stay, also in memory).
 func (s *store) remove(addr string) bool {
+	ok, _ := s.removeTerminal(addr)
+	return ok
+}
+
+// removeTerminal removes a terminal's snapshots: false without error when
+// it had none; memory changes once the removal committed.
+func (s *store) removeTerminal(addr string) (bool, error) {
 	if s.terms[addr] == nil {
-		return false
+		return false, nil
 	}
-	s.removeRows(addr, nil)
+	if err := s.removeRows(addr, nil); err != nil {
+		return false, err
+	}
 	delete(s.terms, addr)
-	return true
+	return true, nil
 }
 
 // expired tells whether generation m was taken before now minus its
@@ -452,14 +483,14 @@ func expired(m *meta, now time.Time, days int) bool {
 }
 
 // pruneAge removes the generations that expired (expired with days). It
-// returns the terminals that lost one.
+// returns the terminals that lost one (a removal that failed loses
+// nothing).
 func (s *store) pruneAge(now time.Time, days int) int {
 	removed := 0
 	for addr, st := range s.terms {
 		lost := false
 		for _, prev := range []bool{false, true} {
-			if m := st.gen(prev); m != nil && expired(m, now, days) {
-				s.removeGen(addr, prev)
+			if m := st.gen(prev); m != nil && expired(m, now, days) && s.removeGen(addr, prev) == nil {
 				lost = true
 			}
 		}
@@ -496,27 +527,35 @@ func (s *store) oldest(keep map[string]bool) string {
 
 // fit evicts the terminals captured longest ago until there are at most
 // maxTerminals of them and maxTotal bytes, not those in keep; it returns
-// how many went.
+// how many went. A removal that fails ends it: what stays is counted.
 func (s *store) fit(maxTerminals int, maxTotal int64, keep map[string]bool) int {
 	evicted := 0
 	for len(s.terms) > maxTerminals || s.total() > maxTotal {
 		victim := s.oldest(keep)
-		if victim == "" {
+		if victim == "" || !s.evict(victim) {
 			break
 		}
-		s.evict(victim)
 		evicted++
 	}
 	return evicted
 }
 
 // evict removes a terminal's snapshots for the limits, remembering the
-// screen its current one was of (evictions).
-func (s *store) evict(addr string) {
-	if st := s.terms[addr]; st != nil && st.cur != nil {
-		evictions.set(addr, screenKey(st.cur.PID, st.cur.Hash))
+// screen its current one was of (evictions); false when the removal
+// failed.
+func (s *store) evict(addr string) bool {
+	st := s.terms[addr]
+	if st == nil {
+		return false
 	}
-	s.remove(addr)
+	cur := st.cur
+	if ok, err := s.removeTerminal(addr); !ok || err != nil {
+		return false
+	}
+	if cur != nil {
+		evictions.set(addr, screenKey(cur.PID, cur.Hash))
+	}
+	return true
 }
 
 // memo is what the agent's process remembers of the live terminals between
@@ -629,7 +668,8 @@ func (s *store) room(addr string, maxTerminals int, maxTotal int64, keep map[str
 // makeRoom evicts for a new current generation of n bytes of addr: the
 // terminals captured longest ago go first, never addr nor those in keep;
 // addr's previous generation goes only when addr alone would exceed
-// maxTotal. ok is false when the generation does not fit.
+// maxTotal. ok is false when the generation does not fit, or a removal
+// failed.
 func (s *store) makeRoom(addr string, n int64, maxTerminals int, maxTotal int64, keep map[string]bool) (evicted int, ok bool) {
 	if n > maxTotal {
 		return 0, false
@@ -654,12 +694,16 @@ func (s *store) makeRoom(addr string, n int64, maxTerminals int, maxTotal int64,
 			return evicted, true
 		}
 		if victim := s.oldest(protect); victim != "" {
-			s.evict(victim)
+			if !s.evict(victim) {
+				return evicted, false
+			}
 			evicted++
 			continue
 		}
 		if total > maxTotal && mine != nil && mine.prev != nil && n+mine.prev.Bytes > maxTotal {
-			s.removeGen(addr, true)
+			if s.removeGen(addr, true) != nil {
+				return evicted, false
+			}
 			continue
 		}
 		return evicted, false
@@ -691,7 +735,7 @@ func (s *store) rotate(addr string) error {
 // previous) the previous generation of to, unless to has a previous one
 // captured later, and removes from's snapshots either way; false when
 // nothing moved. It is one transaction: readers see the generation at
-// from or at to.
+// from or at to. One that fails changes nothing.
 func (s *store) adopt(from, to string) (bool, error) {
 	src := s.terms[from]
 	if src == nil {
@@ -700,8 +744,8 @@ func (s *store) adopt(from, to string) (bool, error) {
 	prev := src.cur == nil
 	m := src.gen(prev)
 	if dst := s.terms[to]; dst != nil && dst.prev != nil && dst.prev.At > m.At {
-		s.remove(from)
-		return false, nil
+		_, err := s.removeTerminal(from)
+		return false, err
 	}
 	err := s.change(true, func(tx *sql.Tx) error {
 		if _, err := tx.Exec("DELETE FROM history_snapshots WHERE terminal = ? AND prev = 1", to); err != nil {
@@ -714,7 +758,6 @@ func (s *store) adopt(from, to string) (bool, error) {
 		return err
 	})
 	if err != nil {
-		s.remove(from)
 		return false, err
 	}
 	moved := *m
@@ -758,23 +801,27 @@ func (s *store) write(m meta, data []byte) error {
 }
 
 // clearAll removes every terminal's snapshots and returns how many
-// terminals had some.
-func (s *store) clearAll() int {
+// terminals had some; one that fails removes nothing.
+func (s *store) clearAll() (int, error) {
 	n := len(s.terms)
-	s.change(false, func(tx *sql.Tx) error {
+	err := s.change(false, func(tx *sql.Tx) error {
 		_, err := tx.Exec("DELETE FROM history_snapshots")
 		return err
 	})
+	if err != nil {
+		return 0, err
+	}
 	clear(s.terms)
-	return n
+	return n, nil
 }
 
 func clamp[T int | int64](v, lo, hi T) T { return max(lo, min(v, hi)) }
 
 // importFiles imports the snapshots kept below base before the database,
 // in <base>/history, once: every whole generation (a .json and a .vt of
-// the size it gives, regular files) of a valid address; what is not whole,
-// links and temporary files are left out. Once the import committed (now
+// the size it gives, regular files) of a valid address, unless the
+// database has that generation captured later; what is not whole, links
+// and temporary files are left out. Once the import committed (now
 // or before), the directory is removed; a failed import leaves it. A
 // directory that is a link or another user's is neither read nor removed.
 func importFiles(db *dbstore.DB, base string) {
@@ -804,8 +851,14 @@ func importFiles(db *dbstore.DB, base string) {
 			if err != nil || int64(len(data)) != m.Bytes {
 				continue
 			}
-			if _, err := tx.Exec(`INSERT OR REPLACE INTO history_snapshots (terminal, prev, pid, at, lines, cols, grid_rows, bytes, hash, days, restored, data)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			// A generation the database has already, captured later (after
+			// an import that failed), stays.
+			if _, err := tx.Exec(`INSERT INTO history_snapshots (terminal, prev, pid, at, lines, cols, grid_rows, bytes, hash, days, restored, data)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT (terminal, prev) DO UPDATE SET pid = excluded.pid, at = excluded.at, lines = excluded.lines,
+					cols = excluded.cols, grid_rows = excluded.grid_rows, bytes = excluded.bytes, hash = excluded.hash,
+					days = excluded.days, restored = excluded.restored, data = excluded.data
+				WHERE excluded.at > history_snapshots.at`,
 				addr, prev, m.PID, m.At, m.Lines, m.Cols, m.Rows, m.Bytes, m.Hash, m.Days, m.Restored, data); err != nil {
 				return err
 			}

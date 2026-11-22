@@ -251,6 +251,9 @@ func startError(ctx context.Context, err error) *chatproto.Error {
 		return &c
 	case errors.As(err, &e) && e.Code == rpc.CodeAuthRequired:
 		return &chatproto.Error{Code: chatproto.CodeAuthRequired, Message: e.Message}
+	case errors.As(err, &e) && e.Code == rpc.CodeResourceNotFound:
+		// The session to take up is not there.
+		return &chatproto.Error{Code: chatproto.CodeNotFound, Message: e.Message}
 	case errors.As(err, &e):
 		return &chatproto.Error{Code: chatproto.CodeStartFailed, Message: e.Message}
 	case errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):

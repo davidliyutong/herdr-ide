@@ -66,6 +66,7 @@ func startProcess(argv []string, dir string, env []string) (*process, error) {
 	go func() {
 		p.waitErr = cmd.Wait()
 		close(p.exited)
+		go p.sweep()
 		// A command the app-server left behind may hold its output and
 		// its standard error open: what came before its end is read for
 		// a while, then the pipes are closed.
@@ -81,17 +82,41 @@ func startProcess(argv []string, dir string, env []string) (*process, error) {
 	return p, nil
 }
 
+// groupPoll is how often a sweep looks whether the process group is gone.
+const groupPoll = 20 * time.Millisecond
+
 // signal sends sig to the process group; false when there is none left.
 func (p *process) signal(sig syscall.Signal) bool {
 	return syscall.Kill(-p.pid, sig) == nil
 }
 
+// groupAlive tells whether a process of the app-server's group is still
+// there.
+func (p *process) groupAlive() bool { return syscall.Kill(-p.pid, 0) == nil }
+
+// sweep ends what the app-server left running in its group once it is
+// gone, whether it was ended or exited by itself: the commands it started
+// get SIGTERM, and what is still there killWait later SIGKILL.
+func (p *process) sweep() {
+	defer close(p.swept)
+	if !p.groupAlive() {
+		return
+	}
+	p.signal(syscall.SIGTERM)
+	deadline := time.Now().Add(killWait)
+	for p.groupAlive() && time.Now().Before(deadline) {
+		time.Sleep(groupPoll)
+	}
+	if p.groupAlive() {
+		p.signal(syscall.SIGKILL)
+	}
+}
+
 // end ends the app-server gracefully: its input closed, then SIGTERM to its
 // group after closeWait, then SIGKILL after killWait more (a Codex killed
-// outright leaves its shell snapshots in ~/.codex/shell_snapshots). Once
-// the app-server itself is gone, what is left of its group gets SIGTERM:
-// the commands it started and left running. It returns once the process
-// was waited for.
+// outright leaves its shell snapshots in ~/.codex/shell_snapshots). It
+// returns once the process was waited for and what it left running in its
+// group was ended (sweep).
 func (p *process) end() {
 	p.endOnce.Do(func() {
 		p.stdin.Close()
@@ -102,9 +127,9 @@ func (p *process) end() {
 				<-p.exited
 			}
 		}
-		p.signal(syscall.SIGTERM)
 	})
 	<-p.exited
+	<-p.swept
 }
 
 func (p *process) waitExit(d time.Duration) bool {

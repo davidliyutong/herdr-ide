@@ -26,7 +26,7 @@ import {
   type ThoughtItem,
   type ToolItem,
 } from './model';
-import { Blocks, isShortened, Shortened, type ItemContext } from './parts';
+import { Blocks, errorText, isShortened, Shortened, type ItemContext } from './parts';
 import { streamBlocks } from './streaming';
 import { Results, Section, StatusIcon, ToolCallView } from './ToolCall';
 
@@ -163,11 +163,17 @@ function Plan({ item }: { item: PlanItem }) {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | undefined => asText(v)?.trim() || undefined;
 
-function Notice({ item }: { item: NoticeItem }) {
+/** Where trusting a folder from a notice is: asked, done, or failed (why). */
+type Trusting = { busy: true } | { done: true } | { failed: string } | undefined;
+
+function Notice({ item, ctx }: { item: NoticeItem; ctx: ItemContext }) {
   const [open, setOpen] = useState(false);
+  const [trusting, setTrusting] = useState<Trusting>(undefined);
+  const trust = ctx.trust;
   const p = isObject(item.params) ? item.params : {};
   let text: string;
   let error = false;
+  let untrusted = false;
   let command: string | undefined;
   let output: string | undefined;
   switch (item.method) {
@@ -207,6 +213,13 @@ function Notice({ item }: { item: NoticeItem }) {
       text = mode ? t('conversation.notice.restartedFor', { mode: hasMessage(key) ? t(key) : mode }) : t('conversation.notice.restarted');
       break;
     }
+    case CHAT_NOTICES.untrustedFolder:
+      untrusted = true;
+      text = trusting && 'done' in trusting ? t('conversation.notice.trusted') : t('conversation.notice.untrustedFolder');
+      break;
+    case CHAT_NOTICES.fullAccessOff:
+      text = t('conversation.notice.fullAccessOff');
+      break;
     case NOTICES.command: {
       const name = str(p.name);
       command = name ? (name.startsWith('/') ? name : `/${name}`) : undefined;
@@ -235,7 +248,29 @@ function Notice({ item }: { item: NoticeItem }) {
             {t('conversation.notice.output')}
           </button>
         )}
+        {untrusted && trust && !(trusting && 'done' in trusting) && (
+          <button
+            type="button"
+            className="conv-link"
+            title={t('conversation.notice.trustHint', { cwd: str(p.cwd) ?? '' })}
+            disabled={!!trusting && 'busy' in trusting}
+            onClick={() => {
+              setTrusting({ busy: true });
+              trust().then(
+                () => setTrusting({ done: true }),
+                (e: unknown) => setTrusting({ failed: errorText(e, ctx.agent, 'conversation.notice.trustFailed') }),
+              );
+            }}
+          >
+            {t('conversation.notice.trust')}
+          </button>
+        )}
       </div>
+      {trusting && 'failed' in trusting && (
+        <div className="conv-notice-failed" role="alert">
+          {trusting.failed}
+        </div>
+      )}
       {open && output && <pre className="conv-pre conv-term">{plainOutput(output)}</pre>}
     </div>
   );
@@ -324,7 +359,7 @@ export const ItemView = memo(function ItemView({ item, ctx }: { item: Item; ctx:
     case 'plan':
       return <Plan item={item} />;
     case 'notice':
-      return <Notice item={item} />;
+      return <Notice item={item} ctx={ctx} />;
     case 'permission':
       return item.permission === 'plan' ? <PlanCard item={item} ctx={ctx} /> : <PermissionCard item={item} ctx={ctx} />;
     case 'question':

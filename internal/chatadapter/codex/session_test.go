@@ -688,3 +688,177 @@ func TestPromptRecorded(t *testing.T) {
 		t.Errorf("turn/start %v", ts)
 	}
 }
+
+// A question without options takes the user's own words even when Codex
+// does not say so (isOther false): it could not be answered otherwise.
+// The answers go back by the questions' ids.
+func TestFreeFormQuestion(t *testing.T) {
+	var sc script
+	sc.begin()
+	turn := sc.request(mTurnStart)
+	// Our ids: initialize 1, model/list 2, account/read 3, thread/start
+	// 4, turn/start 5.
+	sc.ask(6, mRequestUserInput, map[string]any{"threadId": testThread, "turnId": "t1", "itemId": "q-1", "questions": []any{
+		map[string]any{"id": "name", "header": "Name", "question": "What is it called?", "isOther": false, "isSecret": false, "options": nil},
+		map[string]any{"id": "color", "header": "Color", "question": "Which color?", "isOther": false, "isSecret": false,
+			"options": []any{map[string]any{"label": "red", "description": ""}}},
+	}})
+	sc.reply(turn, map[string]any{"turn": map[string]any{"id": "t1", "status": "inProgress", "items": []any{}}})
+	sc.turnStarted("t1")
+	sc.turnCompleted("t1", turnCompleted)
+	f := newFake(t, "", handshake, sc.file(t))
+	s, k := start(t, f, chatproto.Options{}, "")
+	k.questAns = []chatadapter.QuestionAnswer{{Answers: map[string][]string{"name": {"Widget"}, "color": {"red"}}}}
+	prompt(t, s, "m1", "ask me")
+	k.wait(t, "the turn's end", turnEnds(1))
+	k.mu.Lock()
+	qs := k.questions
+	k.mu.Unlock()
+	if len(qs) != 1 || len(qs[0].Questions) != 2 || !qs[0].Questions[0].AllowOther || qs[0].Questions[1].AllowOther {
+		t.Fatalf("questions %+v", qs)
+	}
+	got, _ := json.Marshal(replies(t, f, 1)["6"])
+	if !strings.Contains(string(got), `"name":{"answers":["Widget"]}`) {
+		t.Errorf("the answer %s", got)
+	}
+}
+
+// A message this session told (queued and taken) whose turn does not
+// start ends in an error the log keeps: after a plan that waited for its
+// approval, and after a steer the turn's end beat.
+func TestToldTurnFails(t *testing.T) {
+	turnStates := func(k *testSink) []string {
+		var got []string
+		for _, ev := range k.snapshot() {
+			switch ev.T {
+			case chatproto.EventTurn:
+				got = append(got, ev.State)
+			case chatproto.EventQueued:
+				got = append(got, ev.State+":"+ev.Message)
+			}
+		}
+		return got
+	}
+	t.Run("plan", func(t *testing.T) {
+		var sc script
+		sc.begin()
+		id := sc.request(mTurnStart)
+		sc.reply(id, map[string]any{"turn": map[string]any{"id": "t1", "status": "inProgress", "items": []any{}}})
+		sc.turnStarted("t1")
+		sc.item(false, map[string]any{"type": "plan", "id": "plan-t1", "text": "# Plan"})
+		sc.turnCompleted("t1", turnCompleted)
+		sc.fail(sc.request(mTurnStart), "the model is overloaded")
+		f := newFake(t, "", handshake, sc.file(t))
+		s, k := start(t, f, chatproto.Options{Mode: chatproto.ModePlan}, "")
+		prompt(t, s, "m1", "plan")
+		k.wait(t, "the plan's approval", func(k *testSink) bool { return len(k.perms) == 1 })
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// The host saw the approval wait: the message is not recorded.
+		err := s.Prompt(ctx, chatadapter.PromptParams{Content: text("change it"), Message: "m2", ClientID: "c-m2"})
+		if !isCode(err, chatproto.CodeFailed) {
+			t.Fatalf("Prompt: %v", err)
+		}
+		want := []string{"start", "end", "queued:m2", "taken:m2", "error"}
+		if got := turnStates(k); !slices.Equal(got, want) {
+			t.Errorf("events %v, want %v", got, want)
+		}
+	})
+	t.Run("steer", func(t *testing.T) {
+		var sc script
+		sc.begin()
+		id := sc.request(mTurnStart)
+		sc.reply(id, map[string]any{"turn": map[string]any{"id": "t1", "status": "inProgress", "items": []any{}}})
+		sc.turnStarted("t1")
+		sc.fail(sc.request(mTurnSteer), "no active turn to steer")
+		sc.fail(sc.request(mTurnStart), "the model is overloaded")
+		f := newFake(t, "", handshake, sc.file(t))
+		s, k := start(t, f, chatproto.Options{}, "")
+		prompt(t, s, "m1", "go")
+		k.wait(t, "the turn's start", func(k *testSink) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.turn == "t1"
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := s.Prompt(ctx, chatadapter.PromptParams{Content: text("more"), Message: "m2", ClientID: "c-m2"})
+		if !isCode(err, chatproto.CodeFailed) {
+			t.Fatalf("Prompt: %v", err)
+		}
+		want := []string{"start", "queued:m2", "taken:m2", "error"}
+		if got := turnStates(k); !slices.Equal(got, want) {
+			t.Errorf("events %v, want %v", got, want)
+		}
+	})
+}
+
+// The mode option marks full access, which the host gates.
+func TestFullModeMarked(t *testing.T) {
+	cfg := models{}.configOptions(settings{mode: chatproto.ModeDefault})
+	mode := cfg[len(cfg)-1]
+	if mode.Category != chatproto.CategoryMode {
+		t.Fatalf("config %+v", cfg)
+	}
+	for _, v := range mode.Options {
+		if v.Full != (v.Value == chatproto.ModeFull) {
+			t.Errorf("%s: full %v", v.Value, v.Full)
+		}
+	}
+}
+
+// Every message the session told queued is told taken or cancelled in the
+// end: one steered into a turn when the app-server ends in it (taken, as a
+// turn's end tells), one whose turn was to start after the session ended
+// (cancelled).
+func TestQueuedToldAtEnd(t *testing.T) {
+	queued := func(k *testSink) []string {
+		var got []string
+		for _, ev := range k.snapshot() {
+			if ev.T == chatproto.EventQueued {
+				got = append(got, ev.State+":"+ev.Message)
+			}
+		}
+		return got
+	}
+	t.Run("steered", func(t *testing.T) {
+		var sc script
+		sc.begin()
+		id := sc.request(mTurnStart)
+		sc.reply(id, map[string]any{"turn": map[string]any{"id": "t1", "status": "inProgress", "items": []any{}}})
+		sc.turnStarted("t1")
+		sc.reply(sc.request(mTurnSteer), map[string]any{"turnId": "t1"})
+		sc.line(map[string]any{"dir": "in", "sleep": 100})
+		sc.line(map[string]any{"dir": "in", "exit": 3})
+		f := newFake(t, "", handshake, sc.file(t))
+		s, k := start(t, f, chatproto.Options{}, "")
+		prompt(t, s, "m1", "go")
+		k.wait(t, "the turn's start", func(k *testSink) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.turn == "t1"
+		})
+		prompt(t, s, "m2", "more")
+		select {
+		case <-s.Done():
+		case <-time.After(10 * time.Second):
+			t.Fatal("the session did not end")
+		}
+		if got, want := queued(k), []string{"queued:m2", "taken:m2"}; !slices.Equal(got, want) {
+			t.Errorf("queued %v, want %v", got, want)
+		}
+	})
+	t.Run("late", func(t *testing.T) {
+		var sc script
+		sc.begin()
+		f := newFake(t, "", handshake, sc.file(t))
+		s, k := start(t, f, chatproto.Options{}, "")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		s.Close(ctx)
+		s.sendQueued([]message{{chatadapter.PromptParams{Content: text("late"), Message: "m3", ClientID: "c-m3"}}})
+		if got, want := queued(k), []string{"cancelled:m3"}; !slices.Equal(got, want) {
+			t.Errorf("queued %v, want %v", got, want)
+		}
+	})
+}

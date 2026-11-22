@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,10 +14,18 @@ import (
 	"herdr-ide/internal/store"
 )
 
-// DBName is the chat host's database in the instance's data directory.
+// DBName is the name of the chat host's database in the instance's data
+// directory, which the file of each host has with the host's name
+// (store.HostFile: chat-<host>.db): the data directory may be on a home
+// several hosts share, and a database in write-ahead logging is one
+// host's.
 const DBName = "chat.db"
 
-// migrations are the schema of chat.db (store.Options.Migrations).
+// maxTrusted is the most directories the trusted list keeps: one more
+// drops the one trusted the longest ago.
+const maxTrusted = 1000
+
+// migrations are the schema of the database (store.Options.Migrations).
 //
 // chats holds every member of a chatproto.Chat but its status (computed),
 // with the JSON of its configuration options, slash commands, usage and
@@ -26,7 +34,10 @@ const DBName = "chat.db"
 // a later History of the session starts after, and the bytes of its
 // events. events holds the stored events, each as the line a client gets
 // (json), with its type, item and time. Times are milliseconds since the
-// epoch, 0 for none.
+// epoch, 0 for none. A chat is fresh while its agent's session never had
+// a turn: the agent may not keep it, and the chat's next start makes a
+// new one instead of resuming it. trusted lists the directories the user
+// trusted (chatproto.OpTrust), with when.
 var migrations = []string{
 	`CREATE TABLE settings (
 		key   TEXT PRIMARY KEY,
@@ -66,6 +77,11 @@ var migrations = []string{
 		json BLOB NOT NULL
 	);
 	CREATE UNIQUE INDEX events_chat_seq ON events (chat, seq);`,
+	`ALTER TABLE chats ADD COLUMN fresh INTEGER NOT NULL DEFAULT 0;
+	CREATE TABLE trusted (
+		path TEXT PRIMARY KEY,
+		at   INTEGER NOT NULL
+	);`,
 }
 
 // deleteBatch is how many events one transaction deletes: a large log goes
@@ -77,12 +93,14 @@ const deleteBatch = 2000
 type journal struct {
 	db *store.DB
 	mu sync.Mutex
+	// failAppend makes appendEvent fail (tests).
+	failAppend func() error
 }
 
-// openJournal opens chat.db in base. A database a newer host wrote is not
-// used: its error is store.ErrNewer.
+// openJournal opens this host's database in base (store.HostFile). A
+// database a newer host wrote is not used: its error is store.ErrNewer.
 func openJournal(base string) (*journal, error) {
-	db, err := store.Open(filepath.Join(base, DBName), store.Options{Migrations: migrations})
+	db, err := store.Open(store.HostFile(base, DBName), store.Options{Migrations: migrations})
 	if errors.Is(err, store.ErrNewer) {
 		db.Close()
 		return nil, err
@@ -102,6 +120,8 @@ type row struct {
 	Options      chatproto.Options
 	HistoryAfter string
 	Bytes        int64
+	// Fresh: the session was made for the chat and never had a turn.
+	Fresh bool
 }
 
 func ms(t time.Time) int64 {
@@ -156,24 +176,25 @@ func (j *journal) saveChat(r row) error {
 func (j *journal) saveLocked(r row) error {
 	errText := ""
 	if r.Error != nil {
-		errText = jsonText(r.Error)
+		// The agent's standard error is never stored.
+		errText = jsonText(r.Error.WithoutStderr())
 	}
 	_, err := j.db.Exec(`UPDATE chats SET kind = ?, title = ?, cwd = ?, session_id = ?, state = ?, error = ?,
 		created = ?, updated = ?, seq = ?, seen = ?, closed = ?, handed_off = ?, agent_version = ?,
-		config = ?, commands = ?, usage = ?, capabilities = ?, turn_end = ?, options = ?, history_after = ?, bytes = ?
-		WHERE id = ?`,
+		config = ?, commands = ?, usage = ?, capabilities = ?, turn_end = ?, options = ?, history_after = ?, bytes = ?,
+		fresh = ? WHERE id = ?`,
 		r.Kind, r.Title, r.Cwd, r.SessionID, r.State, errText,
 		ms(r.Created), ms(r.Updated), int64(r.Seq), int64(r.Seen), ms(r.Closed), boolInt(r.HandedOff), r.AgentVersion,
 		jsonText(r.Config), jsonText(r.Commands), jsonText(r.Usage), jsonText(r.Capabilities),
-		int64(r.TurnEnd), jsonText(r.Options), r.HistoryAfter, r.Bytes, r.ID)
+		int64(r.TurnEnd), jsonText(r.Options), r.HistoryAfter, r.Bytes, boolInt(r.Fresh), r.ID)
 	return err
 }
 
 // loadChats reads every chat.
 func (j *journal) loadChats() ([]row, error) {
 	rows, err := j.db.Query(`SELECT id, kind, title, cwd, session_id, state, error, created, updated, seq, seen,
-		closed, handed_off, agent_version, config, commands, usage, capabilities, turn_end, options, history_after, bytes
-		FROM chats`)
+		closed, handed_off, agent_version, config, commands, usage, capabilities, turn_end, options, history_after, bytes,
+		fresh FROM chats`)
 	if err != nil {
 		return nil, err
 	}
@@ -183,14 +204,14 @@ func (j *journal) loadChats() ([]row, error) {
 		var r row
 		var errText, config, commands, usage, caps, options string
 		var created, updated, seq, seen, closed, turnEnd int64
-		var handedOff int
+		var handedOff, fresh int
 		if err := rows.Scan(&r.ID, &r.Kind, &r.Title, &r.Cwd, &r.SessionID, &r.State, &errText, &created, &updated,
 			&seq, &seen, &closed, &handedOff, &r.AgentVersion, &config, &commands, &usage, &caps, &turnEnd,
-			&options, &r.HistoryAfter, &r.Bytes); err != nil {
+			&options, &r.HistoryAfter, &r.Bytes, &fresh); err != nil {
 			return nil, err
 		}
 		r.Created, r.Updated, r.Closed = fromMS(created), fromMS(updated), fromMS(closed)
-		r.Seq, r.Seen, r.TurnEnd, r.HandedOff = uint64(seq), uint64(seen), uint64(turnEnd), handedOff != 0
+		r.Seq, r.Seen, r.TurnEnd, r.HandedOff, r.Fresh = uint64(seq), uint64(seen), uint64(turnEnd), handedOff != 0, fresh != 0
 		if errText != "" {
 			r.Error = &chatproto.Error{}
 			json.Unmarshal([]byte(errText), r.Error)
@@ -236,6 +257,11 @@ type stored struct {
 func (j *journal) appendEvent(r row, e stored) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.failAppend != nil {
+		if err := j.failAppend(); err != nil {
+			return err
+		}
+	}
 	tx, err := j.db.Begin()
 	if err != nil {
 		return err
@@ -245,8 +271,8 @@ func (j *journal) appendEvent(r row, e stored) error {
 		r.ID, int64(e.seq), e.t, e.item, ms(e.at), e.line); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE chats SET seq = ?, updated = ?, turn_end = ?, history_after = ?, bytes = ? WHERE id = ?`,
-		int64(r.Seq), ms(r.Updated), int64(r.TurnEnd), r.HistoryAfter, r.Bytes, r.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE chats SET seq = ?, updated = ?, turn_end = ?, history_after = ?, bytes = ?, fresh = ? WHERE id = ?`,
+		int64(r.Seq), ms(r.Updated), int64(r.TurnEnd), r.HistoryAfter, r.Bytes, boolInt(r.Fresh), r.ID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -404,4 +430,49 @@ func (j *journal) putSettings(s chatproto.HostSettings) error {
 	_, err := j.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
 		settingsKey, jsonText(s))
 	return err
+}
+
+// trust adds a directory to the trusted list; beyond maxTrusted the one
+// trusted the longest ago goes.
+func (j *journal) trust(path string, at time.Time) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	tx, err := j.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO trusted (path, at) VALUES (?, ?) ON CONFLICT (path) DO UPDATE SET at = excluded.at`,
+		path, ms(at)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM trusted WHERE path NOT IN (SELECT path FROM trusted ORDER BY at DESC, path LIMIT ?)`,
+		maxTrusted); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// trusted tells whether the user trusted dir, an absolute clean path, or a
+// directory above it.
+func (j *journal) trusted(dir string) bool {
+	var paths []any
+	for p := dir; ; p = parentDir(p) {
+		paths = append(paths, p)
+		if p == "/" {
+			break
+		}
+	}
+	q := `SELECT COUNT(*) FROM trusted WHERE path IN (?` + strings.Repeat(", ?", len(paths)-1) + `)`
+	var n int
+	return j.db.QueryRow(q, paths...).Scan(&n) == nil && n > 0
+}
+
+// parentDir is the directory above an absolute, clean path; "/" for "/".
+func parentDir(p string) string {
+	i := strings.LastIndexByte(p, '/')
+	if i <= 0 {
+		return "/"
+	}
+	return p[:i]
 }

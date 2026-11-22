@@ -59,8 +59,8 @@ var (
 
 const (
 	// maxStderr is how much of the end of the program's standard error is
-	// kept, for the error of a session that ended.
-	maxStderr = 8 << 10
+	// kept, for the error of a session that ended: what the host keeps.
+	maxStderr = chatproto.MaxStderr
 	// maxCommands bounds the slash commands a chat states, maxModels the
 	// models, maxQuestions the questions of an AskUserQuestion and
 	// maxOptions the options of one; maxText the bytes of each of their
@@ -162,8 +162,15 @@ func chatMode(mode string) string {
 // arguments.
 func (s *session) argv(resume, full bool) []string {
 	a := slices.Clone(s.p.Argv)
+	// The project's own settings (and with them its hooks, MCP servers and
+	// CLAUDE.md) only in a folder someone trusted: Claude Code asks
+	// nothing of a program it runs headless.
+	sources := "--setting-sources=user"
+	if s.trusted {
+		sources = "--setting-sources=user,project,local"
+	}
 	a = append(a, "--output-format", "stream-json", "--verbose", "--input-format", "stream-json",
-		"--include-partial-messages", "--permission-prompt-tool", "stdio", "--setting-sources=user,project,local")
+		"--include-partial-messages", "--permission-prompt-tool", "stdio", sources)
 	if resume {
 		a = append(a, "--resume="+s.id)
 	} else {

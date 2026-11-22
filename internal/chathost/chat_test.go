@@ -92,7 +92,9 @@ func TestQuestion(t *testing.T) {
 	s.must(chatproto.Command{Op: chatproto.OpAnswer, Request: ev.ID, Answers: answers})
 	s.mustNot(chatproto.Command{Op: chatproto.OpAnswer, Request: ev.ID, Cancelled: true}, chatproto.CodeNotFound)
 	r := <-res
-	if r.err != nil || r.a.Cancelled || r.a.Answers["color"][0] != "blue" || r.a.Answers["q2"][0] != "because" {
+	// The agent gets its answers under its own ids: "" for the question
+	// that had none.
+	if r.err != nil || r.a.Cancelled || r.a.Answers["color"][0] != "blue" || len(r.a.Answers[""]) != 1 || r.a.Answers[""][0] != "because" {
 		t.Errorf("the agent got %+v %v", r.a, r.err)
 	}
 	done := s.expect("question_done:user", "state:working")[0]
@@ -355,6 +357,8 @@ func TestSetConfig(t *testing.T) {
 	s.mustNot(chatproto.Command{Op: chatproto.OpRename, Title: " "}, chatproto.CodeBadRequest)
 	s.mustNot(chatproto.Command{Op: "nope"}, chatproto.CodeBadRequest)
 	// Resumed with the model set last.
+	s.turn("hi")
+	s.session.endTurn("end_turn")
 	h.ok(chatproto.Request{Op: chatproto.OpClose, Chat: s.chat.ID})
 	s.prompt("back")
 	h.fake.session(t)
@@ -377,10 +381,12 @@ func TestIdleStopAndResume(t *testing.T) {
 	if c := h.chat(s.chat.ID); c.State != chatproto.StateSleeping || c.SessionID != session.id {
 		t.Fatalf("chat %+v", c)
 	}
+	// The session never had a turn, which the agent may not have kept: a
+	// new one is made.
 	s.prompt("wake up")
 	s.session = h.fake.session(t)
-	if p := h.fake.lastStart(t); p.Resume != session.id {
-		t.Errorf("resume %q", p.Resume)
+	if p := h.fake.lastStart(t); p.Resume != "" || p.SessionID == "" || p.SessionID == session.id {
+		t.Errorf("a session without a turn resumed: %+v", p)
 	}
 	s.session.expect(t, "prompt:wake up")
 	s.expect("state:starting", "info", "state:idle", "user", "state:working", "info", "turn:start")
@@ -393,6 +399,16 @@ func TestIdleStopAndResume(t *testing.T) {
 	s.expect("turn:end", "state:idle")
 	s.session.expect(t, "close")
 	s.expect("state:sleeping")
+	// One that had a turn is resumed.
+	second := s.session.id
+	if c := h.chat(s.chat.ID); c.SessionID != second {
+		t.Errorf("the chat's session %q, want %q", c.SessionID, second)
+	}
+	s.prompt("again")
+	s.session = h.fake.session(t)
+	if p := h.fake.lastStart(t); p.Resume != second {
+		t.Errorf("resume %q, want %q", p.Resume, second)
+	}
 }
 
 // No more agents run than MaxLive: a start stops the agent idle the
@@ -587,7 +603,13 @@ func TestWatch(t *testing.T) {
 		return st
 	}
 	a.turn("hi")
-	if st := next(); st.State != chatproto.StateWorking || st.Status != chatproto.StatusWorking || st.Title != "hi" {
+	st := next()
+	if st.State == chatproto.StateIdle && st.Title == "" {
+		// A change told while the watch's states were read may come
+		// again after them.
+		st = next()
+	}
+	if st.State != chatproto.StateWorking || st.Status != chatproto.StatusWorking || st.Title != "hi" {
 		t.Errorf("working %+v", st)
 	}
 	a.session.endTurn("end_turn")

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -37,17 +38,42 @@ import (
 //	              process's own does not have (not used up)
 //	FAKE_MODE     ignore-eof: keep running when the input ends;
 //	              ignore-term: keep running after SIGTERM
+//	FAKE_CHILD    a file: the fake starts a process of its group that
+//	              ignores SIGTERM (childEnv) and then writes its pid there
 //
 // A recording's line {"dir": "in", "exit": N} ends the fake with status
 // N; {"dir": "in", "sleep": N} waits N milliseconds; {"dir": "in", "raw": "..."} sends a line as it is; {"dir": "in",
 // "big": N} sends a line of N bytes.
 const fakeEnv = "CODEX_ADAPTER_TEST_FAKE"
 
+// childEnv makes the test binary a command an app-server left running: it
+// ignores SIGTERM, then writes its pid to the file childEnv names, and
+// sleeps.
+const childEnv = "CODEX_ADAPTER_TEST_CHILD"
+
 func TestMain(m *testing.M) {
+	if file := os.Getenv(childEnv); file != "" {
+		signal.Ignore(syscall.SIGTERM)
+		os.WriteFile(file, []byte(strconv.Itoa(os.Getpid())), 0o600)
+		time.Sleep(time.Hour)
+		exitNow(0)
+	}
 	if os.Getenv(fakeEnv) != "" {
 		exitNow(fakeMain())
 	}
 	os.Exit(m.Run())
+}
+
+// startChild starts a process of the fake's group that ignores SIGTERM;
+// it writes its pid to file once it does.
+func startChild(file string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(exe, "-test.run=^$")
+	cmd.Env = append(os.Environ(), childEnv+"="+file)
+	return cmd.Start()
 }
 
 type scriptLine struct {
@@ -179,6 +205,12 @@ func fakeMain() int {
 		return 2
 	}
 	f.segs = segs
+	if file := os.Getenv("FAKE_CHILD"); file != "" {
+		if err := startChild(file); err != nil {
+			f.event("error " + err.Error())
+			return 2
+		}
+	}
 	for _, fb := range filepath.SplitList(os.Getenv("FAKE_FALLBACK")) {
 		_, segs, _ := loadScript(fb)
 		f.fall = append(f.fall, segs...)

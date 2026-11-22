@@ -1,10 +1,12 @@
 // The plugins the app has and which of them are on (api.ts).
-import { createElement, type MouseEvent } from 'react';
+import { createElement, useSyncExternalStore, type MouseEvent } from 'react';
 import { create } from 'zustand';
 import { PluginBoundary } from '../components/PluginBoundary';
 import { riskDialog } from '../dialog';
 import { t } from '../i18n';
+import { statusRank, type AgentStatus } from '../lib/machine';
 import { builtinDefaults, setSetting, useSettings, type Client, type Section } from '../settings';
+import type { PluginView } from '../term/layout';
 import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef, TerminalHeaderProps } from './api';
 
 let plugins: PluginDef[] = [];
@@ -221,6 +223,127 @@ export function newTabGroups(m: string): NewTabItem[][] {
 export function pluginMessage(plugin: string, m: string, data: unknown) {
   const p = activePlugins().find((x) => x.id === plugin);
   p?.onMessage?.(m, data);
+}
+
+/** A plugin's viewStatus while the plugin is on. */
+function statusOwner(id: string) {
+  const p = plugins.find((x) => x.id === id);
+  return p?.viewStatus && pluginOn(p) ? { p, def: p.viewStatus } : undefined;
+}
+
+const warned = new Set<string>();
+
+/** Runs a plugin's viewStatus member: one that throws counts as none (and
+ * is said once in the console), so the views that show statuses, outside
+ * any plugin's error boundary, keep going. */
+function guarded<T>(p: { id: string }, what: string, f: () => T): T | undefined {
+  try {
+    return f();
+  } catch (e) {
+    if (!warned.has(`${p.id}.${what}`)) {
+      warned.add(`${p.id}.${what}`);
+      console.warn(`plugin ${p.id}: viewStatus.${what}`, e);
+    }
+    return undefined;
+  }
+}
+
+/** The agent status of a plugin's pane, as its plugin has it
+ * (ViewStatusDef.status): undefined for a plugin without one or off, and
+ * for what is no status. */
+export function viewStatus(m: string, view: PluginView): AgentStatus | undefined {
+  const o = statusOwner(view.plugin);
+  const s = o && guarded(o.p, 'status', () => o.def.status(m, view));
+  return typeof s === 'string' && Object.hasOwn(statusRank, s) ? s : undefined;
+}
+
+/** The pane of machine m an agent notification without a terminal points
+ * to (its data, /ws agent): the first answer of a plugin that is on
+ * (ViewStatusDef.paneOf), when it is a view:<id> key. */
+export function viewPaneOf(m: string, data: Record<string, unknown>): string | undefined {
+  for (const p of activePlugins()) {
+    const def = p.viewStatus;
+    if (!def?.paneOf) continue;
+    const pane = guarded(p, 'paneOf', () => def.paneOf!(m, data));
+    if (typeof pane === 'string' && pane.startsWith('view:')) return pane;
+  }
+  return undefined;
+}
+
+/** Tells a pane's plugin that the user saw the pane while its status was
+ * done (ViewStatusDef.seen; seen.ts). */
+export function viewSeen(m: string, view: PluginView) {
+  const o = statusOwner(view.plugin);
+  if (o?.def.seen) guarded(o.p, 'seen', () => o.def.seen!(m, view));
+}
+
+// One subscription to each plugin's statuses serves every listener: taken
+// with the first listener, given back with the last, taken again when the
+// plugins change. Turning a plugin that has statuses on or off changes them
+// too.
+const statusListeners = new Set<() => void>();
+let statusSubs: Array<() => void> = [];
+let statusOff: Array<() => void> = [];
+
+function statusChanged() {
+  for (const f of [...statusListeners]) f();
+}
+
+function subscribeStatuses() {
+  for (const off of statusSubs) off();
+  statusSubs = plugins.flatMap((p) => {
+    const def = p.viewStatus;
+    return def ? [guarded(p, 'subscribe', () => def.subscribe(statusChanged)) ?? (() => {})] : [];
+  });
+}
+
+/** The plugins with statuses that are on, as one string. */
+const statusPlugins = () =>
+  activePlugins()
+    .filter((p) => p.viewStatus)
+    .map((p) => p.id)
+    .join();
+
+/** Calls fn whenever the status of a plugin's pane may have changed
+ * (viewStatus); returns an unsubscribe. */
+export function onViewStatus(fn: () => void): () => void {
+  statusListeners.add(fn);
+  if (statusListeners.size === 1) {
+    subscribeStatuses();
+    let on = statusPlugins();
+    statusOff = [
+      usePluginList.subscribe(() => {
+        subscribeStatuses();
+        on = statusPlugins();
+        statusChanged();
+      }),
+      useSettings.subscribe(() => {
+        const now = statusPlugins();
+        if (now === on) return;
+        on = now;
+        statusChanged();
+      }),
+    ];
+  }
+  return () => {
+    if (!statusListeners.delete(fn) || statusListeners.size) return;
+    for (const off of [...statusSubs, ...statusOff]) off();
+    statusSubs = [];
+    statusOff = [];
+  };
+}
+
+/** A React hook: what f makes of the plugins' panes' statuses (for the
+ * views that aggregate them), made again whenever they may have changed;
+ * the component draws again only when that changed (Object.is), so f
+ * returns a string or a number. */
+export function useViewStatusOf<T extends string | number | undefined>(f: () => T): T {
+  return useSyncExternalStore(onViewStatus, f);
+}
+
+/** A React hook: the status of a plugin's pane (viewStatus), kept current. */
+export function useViewStatus(m: string, view: PluginView): AgentStatus | undefined {
+  return useViewStatusOf(() => viewStatus(m, view));
 }
 
 /** What the app shows about a plugin's pane: its drawer's title and path,

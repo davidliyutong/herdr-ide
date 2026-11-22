@@ -103,10 +103,14 @@ var coreEnded = map[string]bool{"stopped_by_restart": true, "holder_lost": true,
 
 // capturable tells whether a terminal of the terminal core's records gets
 // snapshots: live, running a program (its pid tells the program's
-// generations apart), and of this terminal core with an address that can
-// name files (a machine linked to the core has addresses machine/t7).
-// Every terminal a capture snapshots passes here.
+// generations apart), of this terminal core with an address that can name
+// files (a machine linked to the core has addresses machine/t7), and none
+// of the product's own helpers (agentproto.HiddenLabel: the chat host),
+// which no client shows. Every terminal a capture snapshots passes here.
 func capturable(t *hc.Terminal) bool {
+	if _, hidden := t.Labels[agentproto.HiddenLabel]; hidden {
+		return false
+	}
 	return t.State == "live" && t.PID != nil && *t.PID > 0 && agentproto.ValidHistoryTerminal(t.Address)
 }
 
@@ -203,8 +207,9 @@ func run(ctx context.Context, env *plugin.Env, s *store, lim limits, res *agentp
 		t := byAddr[addr]
 		switch {
 		case t != nil && finishedForGood(t):
-			s.remove(addr)
-			res.Removed++
+			if s.remove(addr) {
+				res.Removed++
+			}
 		case t != nil:
 			vanished.forget(addr)
 		default:
@@ -213,8 +218,7 @@ func run(ctx context.Context, env *plugin.Env, s *store, lim limits, res *agentp
 			since, seen := vanished.get(addr)
 			if !seen {
 				vanished.set(addr, now)
-			} else if now-since >= goneGrace.Milliseconds() {
-				s.remove(addr)
+			} else if now-since >= goneGrace.Milliseconds() && s.remove(addr) {
 				res.Removed++
 			}
 		}

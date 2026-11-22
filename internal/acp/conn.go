@@ -59,6 +59,10 @@ const (
 	// CodeAuthRequired is the protocol's error for a request that needs
 	// the user to sign in first.
 	CodeAuthRequired = -32000
+	// CodeResourceNotFound is the protocol's error for what is not there:
+	// a session that session/load or session/resume names (the SDKs'
+	// RequestError.resourceNotFound).
+	CodeResourceNotFound = -32002
 )
 
 var (

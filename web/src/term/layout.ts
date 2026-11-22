@@ -177,10 +177,23 @@ export const panesOf = (node: Node): string[] => leavesOf(node).map((l) => paneK
 /** The addresses of a tree's terminals, in order. */
 export const terminalsOf = (node: Node): string[] => leavesOf(node).flatMap((l) => (isTerminalLeaf(l) ? [l.terminal] : []));
 
+/** A plugin's pane: its key (view:<id>) and its view. */
+export interface ViewPane {
+  key: string;
+  view: PluginView;
+}
+
+/** The plugins' panes of a tree, in order. */
+export const viewsOf = (node: Node): ViewPane[] =>
+  leavesOf(node).flatMap((l) => (isPluginLeaf(l) ? [{ key: viewKey(l.view.id), view: l.view }] : []));
+
 export const tabPanes = (tab: Tab): string[] => panesOf(tab.root);
 export const tabTerminals = (tab: Tab): string[] => terminalsOf(tab.root);
 export const workspaceTerminals = (ws: Workspace): string[] => ws.tabs.flatMap(tabTerminals);
 export const layoutTerminals = (layout: Layout): string[] => layout.workspaces.flatMap(workspaceTerminals);
+export const tabViews = (tab: Tab): ViewPane[] => viewsOf(tab.root);
+export const workspaceViews = (ws: Workspace): ViewPane[] => ws.tabs.flatMap(tabViews);
+export const layoutViews = (layout: Layout): ViewPane[] => layout.workspaces.flatMap(workspaceViews);
 export const selectedWorkspace = (layout: Layout): Workspace | undefined => layout.workspaces[layout.selected];
 export const selectedTab = (layout: Layout): Tab | undefined => {
   const ws = selectedWorkspace(layout);

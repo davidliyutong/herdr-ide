@@ -3,15 +3,15 @@ import { ChevronDown, Columns2, PanelLeft, Pin, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
-import { actions, paneRects, paneTitle, tabLabel, tabName } from '../actions';
+import { actions, paneRects, paneTitle, tabLabel, tabName, tabStatus } from '../actions';
 import { TerminalView } from './TerminalView';
 import { PaneHeader } from './PaneHeader';
 import { CodeSlot } from './CodeLayer';
 import { PreviewPane } from './PreviewPane';
 import { FileTitle, LeafIcon, PluginPane, ViewTitle } from './PluginPane';
-import { describeView, newTabGroups, useActivePlugins } from '../plugins/registry';
+import { describeView, newTabGroups, useActivePlugins, useViewStatusOf } from '../plugins/registry';
 import { StatusDot } from './StatusDot';
-import { aggregate, agentStatus, codeText, shortPath, terminalTitle } from '../lib/machine';
+import { codeText, shortPath, terminalTitle } from '../lib/machine';
 import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { InlineEdit } from './InlineEdit';
@@ -129,8 +129,10 @@ export function Workspace() {
   const layout = mt?.layout;
   const ws = layout ? L.selectedWorkspace(layout) : undefined;
   const sel = useMulti((s) => s.sel);
-  // The new-tab menu follows the plugins that are on.
+  // The new-tab menu follows the plugins that are on, the tabs' dots the
+  // statuses of the plugins' panes (a chat's) as of terminals.
   useActivePlugins();
+  useViewStatusOf(() => ws?.tabs.map((tb) => tabStatus(m!, tb) ?? '').join());
   const tabsRef = useRef<HTMLDivElement>(null);
   // One tab is the bar's tab stop: the one focused last, else the one shown.
   useEffect(() => ensureTabStop(tabsRef.current, '.tab.active'));
@@ -182,7 +184,6 @@ export function Workspace() {
   const tab = ws.tabs[ws.selected];
   const kinds = newTabGroups(m).length > 0;
   const picked = new Set(selectedIds(tabsOf(m, ws.id), sel));
-  const tabStatus = (tb: L.Tab) => aggregate(L.tabTerminals(tb).map((a) => agentStatus(mt.terminals[a])));
   const tabTip = (label: string) => (readOnly ? label : t('workspace.tabHint', { label }));
 
   return (
@@ -204,7 +205,7 @@ export function Workspace() {
           }}
         >
           {ws.tabs.map((tb, i) => {
-            const st = tabStatus(tb);
+            const st = tabStatus(m, tb);
             const id = `${ws.id}:${i}`;
             // A tab the user has not named shows its number, or, holding no
             // terminal, its VS Code's or preview's mark and name; the focused

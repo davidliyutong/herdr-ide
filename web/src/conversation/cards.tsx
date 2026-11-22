@@ -484,16 +484,17 @@ function QuestionField({ q, draft, disabled, onChange }: { q: Question; draft: D
 /** Questions the agent asks the user: answered together, or skipped. */
 export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemContext }) {
   const answering = useContext(AnsweringContext);
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  // By question id: a Map, as an id may be any text.
+  const [drafts, setDrafts] = useState<ReadonlyMap<string, Draft>>(() => new Map());
   const [sending, setSending] = useState(false);
   const [mine, setMine] = useState(false);
   const [failed, setFailed] = useState<string | undefined>(undefined);
   const waiting = !item.done && answering.open && answering.waiting.has(item.id);
-  const draftOf = (q: Question) => drafts[q.id] ?? emptyDraft();
+  const draftOf = (q: Question) => drafts.get(q.id) ?? emptyDraft();
   const ready = item.questions.every((q) => answersOf(q, draftOf(q)).length > 0);
   const reply = (cancelled: boolean) => {
     if (!waiting || sending) return;
-    const answers: Record<string, string[]> = {};
+    const answers: Record<string, string[]> = Object.create(null);
     for (const q of item.questions) answers[q.id] = answersOf(q, draftOf(q));
     setSending(true);
     setFailed(undefined);
@@ -542,7 +543,7 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
               q={q}
               draft={draftOf(q)}
               disabled={sending}
-              onChange={(d) => setDrafts((x) => ({ ...x, [q.id]: d }))}
+              onChange={(d) => setDrafts((x) => new Map(x).set(q.id, d))}
             />
           ))}
           <div className="conv-ask-actions">
@@ -557,7 +558,7 @@ export function QuestionCard({ item, ctx }: { item: QuestionItem; ctx: ItemConte
       ) : (
         <div className="conv-ask-body">
           {item.questions.map((q) => {
-            const a = item.answers?.[q.id];
+            const a = item.answers && Object.hasOwn(item.answers, q.id) ? item.answers[q.id] : undefined;
             return (
               <Section key={q.id} title={q.header || q.question}>
                 {q.header && <div className="conv-q-text">{q.question}</div>}

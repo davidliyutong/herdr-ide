@@ -424,10 +424,14 @@ func (s *session) finish(err error) {
 			evs = append(evs, chatproto.Event{T: chatproto.EventTurn, State: chatproto.TurnError, Error: asProtoError(err), Item: turn})
 		}
 	}
+	for _, m := range s.steers {
+		// Steered into the turn, which had them (as a turn's end tells).
+		evs = append(evs, queuedEvent(m.p, chatproto.QueuedTaken, false))
+	}
 	for _, m := range s.queue {
 		evs = append(evs, queuedEvent(m.p, chatproto.QueuedCancelled, false))
 	}
-	s.queue, s.active, s.turn = nil, false, ""
+	s.steers, s.queue, s.active, s.turn = nil, nil, false, ""
 	pend := s.takePending()
 	s.mu.Unlock()
 	for _, p := range pend {
@@ -619,10 +623,13 @@ func (s *session) Prompt(ctx context.Context, p chatadapter.PromptParams) error 
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		if !p.Recorded {
-			s.emit(queuedEvent(p, chatproto.QueuedWaiting, true), queuedEvent(p, chatproto.QueuedTaken, false))
+		if p.Recorded {
+			// The host stored the message's EventUser, and stores the
+			// turn's error.
+			return s.startTurn(ctx, input, p.Message)
 		}
-		return s.startTurn(ctx, input, p.Message)
+		s.emit(queuedEvent(p, chatproto.QueuedWaiting, true), queuedEvent(p, chatproto.QueuedTaken, false))
+		return s.startTold(ctx, input, p.Message)
 	}
 	switch {
 	case !s.active && p.Recorded:
@@ -633,11 +640,7 @@ func (s *session) Prompt(ctx context.Context, p chatadapter.PromptParams) error 
 		// starts the next, told here.
 		s.mu.Unlock()
 		s.emit(userEvent(p))
-		if err := s.startTurn(ctx, input, p.Message); err != nil {
-			s.emit(chatproto.Event{T: chatproto.EventTurn, At: time.Now(), State: chatproto.TurnError, Error: asProtoError(err)})
-			return err
-		}
-		return nil
+		return s.startTold(ctx, input, p.Message)
 	case s.turn == "" || s.compact:
 		s.queue = append(s.queue, message{p})
 		s.mu.Unlock()
@@ -668,10 +671,10 @@ func (s *session) Prompt(ctx context.Context, p chatadapter.PromptParams) error 
 		return nil
 	case errors.As(err, &re) && strings.HasPrefix(re.Message, "no active turn"):
 		// The turn ended before the message reached it: it starts the
-		// next.
+		// next, which this session told as its message.
 		s.mu.Unlock()
 		s.emit(queuedEvent(p, chatproto.QueuedTaken, false))
-		return s.startTurn(ctx, input, p.Message)
+		return s.startTold(ctx, input, p.Message)
 	case errors.As(err, &re) && s.active:
 		// The turn takes no steering: the message waits for its end.
 		s.queue = append(s.queue, message{p})
@@ -721,15 +724,42 @@ func (s *session) startTurn(ctx context.Context, input []userInput, clientMessag
 	return nil
 }
 
+// startTold starts a turn whose message this session told the host
+// (EventUser, or EventQueued taken): a turn that does not start ends in an
+// error the log keeps, as the host does for the messages it told. s.sem is
+// held.
+func (s *session) startTold(ctx context.Context, input []userInput, clientMessage string) error {
+	err := s.startTurn(ctx, input, clientMessage)
+	if err != nil {
+		s.emit(chatproto.Event{T: chatproto.EventTurn, At: time.Now(), State: chatproto.TurnError, Error: asProtoError(err)})
+	}
+	return err
+}
+
 // sendQueued starts a turn with the messages that waited for the last
 // one's end.
 func (s *session) sendQueued(queue []message) {
+	// Never sent once the session ends: its end told the queue it had
+	// then, not these.
+	unsent := func() {
+		var evs []chatproto.Event
+		for _, m := range queue {
+			evs = append(evs, queuedEvent(m.p, chatproto.QueuedCancelled, false))
+		}
+		s.emit(evs...)
+	}
 	if !s.acquire(s.ctx) {
+		unsent()
 		return
 	}
 	defer s.release()
 	s.mu.Lock()
-	if s.ended || s.closing || s.active {
+	switch {
+	case s.ended || s.closing:
+		s.mu.Unlock()
+		unsent()
+		return
+	case s.active:
 		s.queue = append(queue, s.queue...)
 		s.mu.Unlock()
 		return
@@ -1553,14 +1583,16 @@ func (s *session) askApproval(c *conn, r *serverRequest, p *pending, kind string
 }
 
 // askQuestions asks the user the questions of request_user_input (plan
-// mode's); skipped, they are answered with no answers.
+// mode's); skipped, they are answered with no answers. A question without
+// options takes the user's own words, whatever its isOther says: it could
+// not be answered otherwise.
 func (s *session) askQuestions(c *conn, r *serverRequest, p *pending) {
 	var up userInputParams
 	json.Unmarshal(r.params, &up)
 	var qs []chatproto.Question
 	ids := map[string]bool{}
 	for _, q := range up.Questions {
-		cq := chatproto.Question{ID: q.ID, Header: q.Header, Question: q.Question, AllowOther: q.IsOther, Secret: q.IsSecret}
+		cq := chatproto.Question{ID: q.ID, Header: q.Header, Question: q.Question, AllowOther: q.IsOther || len(q.Options) == 0, Secret: q.IsSecret}
 		for _, o := range q.Options {
 			cq.Options = append(cq.Options, chatproto.QuestionOption{Label: o.Label, Description: o.Description})
 		}

@@ -38,6 +38,10 @@ type history struct {
 	// Alerts maps account key|kind|label|length|alert → the period it
 	// fired in.
 	Alerts map[string]alertRecord `json:"alerts,omitempty"`
+	// loaded: what the core's database keeps was read into it (or the
+	// history is kept in memory only); until then a save would remove
+	// what it did not read, and does not write.
+	loaded bool
 }
 
 func newHistory() *history {
@@ -120,6 +124,40 @@ func (h *history) prune(now time.Time) {
 	}
 }
 
+// merge adds what stored, the history read back from the core's
+// database, has that h, what this core recorded since it started, has
+// not: each window's points before h's first, and the alerts h has not
+// fired.
+func (h *history) merge(stored *history) {
+	for k, ws := range stored.Windows {
+		mine := h.Windows[k]
+		if mine == nil {
+			mine = map[string][][2]float64{}
+			h.Windows[k] = mine
+		}
+		for id, pts := range ws {
+			cur := mine[id]
+			if len(cur) == 0 {
+				mine[id] = pts
+				continue
+			}
+			i := 0
+			for i < len(pts) && pts[i][0] < cur[0][0] {
+				i++
+			}
+			mine[id] = append(append([][2]float64(nil), pts[:i]...), cur...)
+		}
+	}
+	for k, r := range stored.Alerts {
+		if h.Alerts == nil {
+			h.Alerts = map[string]alertRecord{}
+		}
+		if _, ok := h.Alerts[k]; !ok {
+			h.Alerts[k] = r
+		}
+	}
+}
+
 // first is the first point of window w (id) in its current period (the
 // last 7 days when its length is unknown), for its pace; nil when none.
 func (h *history) first(key, id string, w usage.Window, now time.Time) *[2]float64 {
@@ -139,9 +177,12 @@ func (h *history) first(key, id string, w usage.Window, now time.Time) *[2]float
 // its own: the points of each account's window (usage_windows, a JSON
 // array of [time, used %]), the accounts of the last poll (usage_accounts)
 // and the alerts fired (usage_alerts). A save writes the rows that
-// changed and removes those gone from memory. The file it was kept in
-// before, usage-history[-<instance>].json beside the settings file, is
-// imported once and then removed.
+// changed and removes those gone from memory, once the history was read
+// back (a save before reads it first, and writes nothing while it cannot:
+// what memory lacks would be removed). The file it was kept in before,
+// usage-history[-<instance>].json beside the settings file, is imported
+// once and then removed; one of another version, or that does not parse,
+// is not this version's to import: it stays, unimported.
 const historyFeature = "usage"
 
 var historyMigrations = []string{
@@ -190,13 +231,20 @@ func (p *Plugin) openHistoryDB() (db *store.DB, writable bool, err error) {
 }
 
 // loadHistory reads the history and the accounts it kept from the core's
-// database, after importing path, the file it was kept in before.
+// database, after importing path, the file it was kept in before, into
+// what memory has (merge: at the start nothing; a read that failed then
+// is tried again by the next save).
 func (p *Plugin) loadHistory(path string) {
 	db, writable, err := p.openHistoryDB()
 	if db == nil {
 		if err != nil {
 			p.logf("usage: %v", err)
+			return
 		}
+		// No database: the history is kept in memory.
+		p.mu.Lock()
+		p.history.loaded = true
+		p.mu.Unlock()
 		return
 	}
 	defer db.Close()
@@ -210,10 +258,11 @@ func (p *Plugin) loadHistory(path string) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	h.prune(p.now())
-	p.history = h
+	p.history.merge(h)
+	p.history.prune(p.now())
+	p.history.loaded = true
 	for _, v := range h.Accounts {
-		if v.Key == "" || p.now().Sub(time.Unix(v.SeenAt, 0)) > forgetAfter {
+		if v.Key == "" || p.now().Sub(time.Unix(v.SeenAt, 0)) > forgetAfter || p.accounts[v.Key] != nil {
 			continue
 		}
 		v.Account.Windows = nil
@@ -231,9 +280,14 @@ func (p *Plugin) logf(format string, args ...any) {
 	}
 }
 
-// importHistoryFile imports the history file at path (as a start read it:
-// one of another version, or that does not parse, holds nothing) into db
-// once, then removes it; a failed import leaves it for the next start.
+// errOtherHistory: the history file is of another version or does not
+// parse; it stays, and is not recorded as imported.
+var errOtherHistory = errors.New("not a history this version reads: it stays")
+
+// importHistoryFile imports the history file at path into db once, then
+// removes it (an empty one holds nothing); a failed import leaves it for
+// the next start, and so does one of another version or that does not
+// parse (errOtherHistory), for a program that reads it.
 func (p *Plugin) importHistoryFile(db *store.DB, path string) {
 	if path == "" {
 		return
@@ -246,9 +300,12 @@ func (p *Plugin) importHistoryFile(db *store.DB, path string) {
 		if err != nil {
 			return err
 		}
-		h := newHistory()
-		if len(b) == 0 || json.Unmarshal(b, h) != nil || h.Version != historyVersion {
+		if len(b) == 0 {
 			return nil
+		}
+		h := newHistory()
+		if json.Unmarshal(b, h) != nil || h.Version != historyVersion {
+			return errOtherHistory
 		}
 		rows, err := h.rows()
 		if err != nil {
@@ -435,13 +492,27 @@ func keysOf(tx *sql.Tx, query string) ([][2]string, error) {
 }
 
 // save writes the history into the core's database (in memory only
-// without a settings file).
+// without a settings file), once it was read back from there (loadHistory,
+// tried again here while it was not).
 func (p *Plugin) save() {
-	if p.historyPath() == "" {
+	path := p.historyPath()
+	if path == "" {
 		return
 	}
 	p.saveMu.Lock()
 	defer p.saveMu.Unlock()
+	p.mu.Lock()
+	loaded := p.history.loaded
+	p.mu.Unlock()
+	if !loaded {
+		p.loadHistory(path)
+		p.mu.Lock()
+		loaded = p.history.loaded
+		p.mu.Unlock()
+		if !loaded {
+			return
+		}
+	}
 	p.mu.Lock()
 	h := &history{Version: historyVersion, Windows: p.history.Windows, Accounts: make([]AccountView, 0, len(p.accounts)), Alerts: p.history.Alerts}
 	for _, a := range p.accounts {

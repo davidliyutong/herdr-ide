@@ -65,16 +65,20 @@ export function validTarget(t: string): boolean {
   return true;
 }
 
-/** An agent's status change in a terminal of a machine's terminal core. */
+/** An agent's status change in a terminal of a machine's terminal core,
+ * or, with terminal "", in a pane of a plugin (a chat), which members of
+ * the plugin's own name (chat) and the plugin finds (ViewStatusDef.paneOf). */
 export interface AgentStatusEvent {
   terminal: string;
   agent_status: AgentStatus;
   agent?: string | null;
   display_agent?: string | null;
   title?: string | null;
+  [member: string]: unknown;
 }
 
-// Status priority for aggregation and attention ordering.
+// Status priority for aggregation and attention ordering, of terminals'
+// agents and plugins' panes (plugins/api.ts ViewStatusDef) alike.
 export const statusRank: Record<AgentStatus, number> = { blocked: 4, done: 3, working: 2, idle: 1, unknown: 0 };
 
 const statuses = new Set<string>(Object.keys(statusRank));

@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
+	ossignal "os/signal"
 	"reflect"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -22,12 +25,16 @@ import (
 // input ends). It records what it got in FAKE_CLAUDE_LOG and tells the test
 // at FAKE_CLAUDE_SOCK where it is: {"at": <the script's line>, "written":
 // <lines written so far>} at each "in" line, at -1 when the script ended.
+// A run started with --allow-dangerously-skip-permissions plays
+// FAKE_CLAUDE_FULL_SCRIPT instead when it is set.
 
 // scriptLine is a line of a fake's script.
 type scriptLine struct {
 	// Dir is "in", "out", "raw" (Text written as it is), "big" (a line of
 	// N bytes), "exit" (Text on stderr, then exit with Code), "sleep" (N
-	// milliseconds).
+	// milliseconds), "spawn" (a process of the fake's group that holds its
+	// output and standard error and sleeps; Text "stubborn" ignores
+	// SIGTERM; its pid is logged).
 	Dir  string          `json:"dir"`
 	Msg  json.RawMessage `json:"msg,omitempty"`
 	Text string          `json:"text,omitempty"`
@@ -47,14 +54,35 @@ type script struct {
 // fakeRecord is a line of the fake's log.
 type fakeRecord struct {
 	Argv     []string          `json:"argv,omitempty"`
+	Pid      int               `json:"pid,omitempty"`
+	Child    int               `json:"child,omitempty"`
 	Env      map[string]string `json:"env,omitempty"`
 	Got      json.RawMessage   `json:"got,omitempty"`
 	Mismatch string            `json:"mismatch,omitempty"`
 }
 
+// grandchildMain is a process a fake left in its group ("spawn"): it
+// sleeps, holding the fake's output and standard error.
+func grandchildMain() {
+	if os.Getenv("FAKE_CLAUDE_STUBBORN") != "" {
+		ossignal.Ignore(syscall.SIGTERM)
+	}
+	// Ready: the fake goes on.
+	ready := os.NewFile(3, "ready")
+	ready.Write([]byte{1})
+	ready.Close()
+	time.Sleep(time.Hour)
+}
+
 func fakeMain() {
 	var sc script
-	b, err := os.ReadFile(os.Getenv("FAKE_CLAUDE_SCRIPT"))
+	file := os.Getenv("FAKE_CLAUDE_SCRIPT")
+	for _, a := range os.Args[1:] {
+		if f := os.Getenv("FAKE_CLAUDE_FULL_SCRIPT"); a == "--allow-dangerously-skip-permissions" && f != "" {
+			file = f
+		}
+	}
+	b, err := os.ReadFile(file)
 	if err == nil {
 		err = json.Unmarshal(b, &sc)
 	}
@@ -76,7 +104,7 @@ func fakeMain() {
 			env[k] = v
 		}
 	}
-	record(fakeRecord{Argv: os.Args[1:], Env: env})
+	record(fakeRecord{Argv: os.Args[1:], Env: env, Pid: os.Getpid()})
 	var sock net.Conn
 	if p := os.Getenv("FAKE_CLAUDE_SOCK"); p != "" {
 		sock, _ = net.Dial("unix", p)
@@ -153,6 +181,28 @@ func fakeMain() {
 			write(`{"type":"assistant","pad":"` + strings.Repeat("x", l.N) + `"}`)
 		case "sleep":
 			time.Sleep(time.Duration(l.N) * time.Millisecond)
+		case "spawn":
+			exe, _ := os.Executable()
+			cmd := exec.Command(exe)
+			cmd.Env = append(os.Environ(), "FAKE_CLAUDE_ROLE=grandchild")
+			if l.Text == "stubborn" {
+				cmd.Env = append(cmd.Env, "FAKE_CLAUDE_STUBBORN=1")
+			}
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			r, w, err := os.Pipe()
+			if err == nil {
+				cmd.ExtraFiles = []*os.File{w}
+				err = cmd.Start()
+				w.Close()
+			}
+			if err != nil {
+				record(fakeRecord{Mismatch: "spawn: " + err.Error()})
+				os.Exit(5)
+			}
+			// Once it ignores what it is to ignore.
+			r.Read(make([]byte, 1))
+			r.Close()
+			record(fakeRecord{Child: cmd.Process.Pid})
 		case "exit":
 			w.Flush()
 			fmt.Fprint(os.Stderr, l.Text)

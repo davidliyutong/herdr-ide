@@ -1,8 +1,9 @@
 // The chat pane's leaf: {view: {id, plugin: 'chat', kind: 'chat', chat,
-// agent}}, the host's chat id and the agent's kind. A layout comes from a
-// machine's document and is not trusted: the chat id is taken only in the
-// host's form (protocol.ts isChatId), the agent only when it is a kind the
-// chat host runs.
+// agent, title?}}, the host's chat id, the agent's kind and the chat's
+// title as the pane last saw it (shown before the chats' states come). A
+// layout comes from a machine's document and is not trusted: the chat id
+// is taken only in the host's form (protocol.ts isChatId), the agent only
+// when it is a kind the chat host runs, the title as text.
 import { chatAdapter } from '../../conversation/kinds';
 import type { PluginView } from '../../term/layout';
 import { isChatId } from './protocol';

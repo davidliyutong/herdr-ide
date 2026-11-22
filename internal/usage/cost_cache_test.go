@@ -195,3 +195,23 @@ func TestCostCacheNewerVersion(t *testing.T) {
 		t.Errorf("written: %d files", len(c.Files))
 	}
 }
+
+// The cache is in this host's machine database (machine-<host>.db, the
+// terminal history's too), never in one of no host's name that hosts
+// sharing the data directory would share.
+func TestCostCachePerHost(t *testing.T) {
+	base := filepath.Join(t.TempDir(), ".app")
+	p := filepath.Join(base, CostCacheFile)
+	if err := saveCostCache(p, testCostCache(1, 5)); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := costDB(p), store.HostFile(base, store.MachineDB); got != want {
+		t.Fatalf("database %s, want %s", got, want)
+	}
+	if _, err := os.Lstat(costDB(p)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(base, store.MachineDB)); err == nil {
+		t.Fatal("a database of no host's name")
+	}
+}

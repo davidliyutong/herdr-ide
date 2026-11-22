@@ -3,8 +3,8 @@
 // Package chathost is the chat host: the long-lived process of a machine
 // that runs coding agents headless, each through its adapter
 // (internal/chatadapter), keeps what their conversations did in a journal
-// (chat.db, SQLite) and serves them on a unix socket in the protocol of
-// internal/chatproto.
+// (chat-<host>.db, SQLite: DBName) and serves them on a unix socket in the
+// protocol of internal/chatproto.
 //
 // One host serves an instance of a machine: the socket chatproto.SocketName
 // in the instance's run directory, taken under a lock of that directory, a
@@ -59,6 +59,7 @@ import (
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/chatadapter"
 	"herdr-ide/internal/chatproto"
+	"herdr-ide/internal/store"
 )
 
 const (
@@ -95,7 +96,7 @@ var ErrRunning = errors.New("chathost: another chat host serves the socket")
 // Options configure Serve.
 type Options struct {
 	// Base is the instance's data directory on the machine: the journal is
-	// Base/chat.db.
+	// this host's DBName in it (store.HostFile).
 	Base string
 	// Run is the instance's run directory, which exists and is the user's
 	// alone (0700). The host serves chatproto.SocketName in it.
@@ -154,10 +155,15 @@ type host struct {
 	quit     chan struct{} // closed to make Serve return
 	once     sync.Once
 	stopping atomic.Bool
+	fast     atomic.Bool    // the host stops on a signal of the terminal core
 	wg       sync.WaitGroup // the goroutines of connections and chats
 
 	settings atomic.Pointer[chatproto.HostSettings]
 	written  atomic.Int64 // bytes of events written since the last check of the bounds
+
+	// newMu makes a chat's check of the session it resumes and its entry
+	// in chats one step: two chats never take up one session.
+	newMu sync.Mutex
 
 	mu    sync.Mutex
 	chats map[string]*chat
@@ -249,6 +255,13 @@ func Serve(ctx context.Context, o Options) error {
 		return err
 	}
 	defer h.j.close()
+	// The databases of other hosts of a shared home, and the one of before
+	// they were named per host, once nobody used them for long.
+	if removed, err := store.PruneHostFiles(o.Base, DBName, store.HostFileRetention, time.Now()); err != nil {
+		h.logf("removing other hosts' journals: %v", err)
+	} else if len(removed) > 0 {
+		h.logf("removed the journals nobody used for %s: %v", store.HostFileRetention, removed)
+	}
 	settings := h.j.settings()
 	if o.settings != nil {
 		settings = *o.settings
@@ -274,6 +287,7 @@ func Serve(ctx context.Context, o Options) error {
 	case sig := <-o.Signals:
 		h.logf("stopping: %v", sig)
 		fast = true
+		h.fast.Store(true)
 	}
 	h.stopping.Store(true)
 	h.end("stopping")
@@ -656,7 +670,7 @@ func errorOf(err error) *chatproto.Error {
 	var e *chatproto.Error
 	switch {
 	case errors.As(err, &e):
-		return e
+		return capStderr(e)
 	case errors.Is(err, context.DeadlineExceeded):
 		return perr(chatproto.CodeFailed, "the agent did not answer in time")
 	case errors.Is(err, context.Canceled):
@@ -712,6 +726,8 @@ func (h *host) serve(conn net.Conn) {
 		h.reply(conn, h.configure(req))
 	case chatproto.OpShutdown:
 		h.reply(conn, h.shutdown())
+	case chatproto.OpTrust:
+		h.reply(conn, h.trust(req))
 	default:
 		h.reply(conn, refuse(chatproto.CodeBadRequest, "unknown op"))
 	}
@@ -815,9 +831,14 @@ func (h *host) newChat(req chatproto.Request) chatproto.Response {
 	if !validOption(opts.Model) || !validOption(opts.Effort) || (opts.Mode != "" && !slices.Contains(chatproto.Modes, opts.Mode)) {
 		return refuse(chatproto.CodeBadRequest, "options out of their bounds")
 	}
+	if opts.Mode == chatproto.ModeFull && !h.settings.Load().AllowFull {
+		return refuse(chatproto.CodeNotAllowed, "full access is not allowed on this machine")
+	}
 	if h.stopping.Load() {
 		return refuse(chatproto.CodeEnded, "the host stops")
 	}
+	h.newMu.Lock()
+	defer h.newMu.Unlock()
 	if req.Resume != "" {
 		if other := h.chatOfSession(req.Kind, req.Resume); other != "" {
 			return refuse(chatproto.CodeBadRequest, "chat "+other+" has the session")
@@ -827,8 +848,10 @@ func (h *host) newChat(req chatproto.Request) chatproto.Response {
 		return refusal(e)
 	}
 	t := now()
-	r := row{Chat: chatproto.Chat{ID: chatproto.NewChatID(), Kind: req.Kind, Cwd: req.Cwd,
-		State: chatproto.StateStarting, Status: chatproto.StatusIdle, Created: t, Updated: t}, Options: opts}
+	// A session taken up is the chat's from the start; one made for it is
+	// fresh until it had a turn.
+	r := row{Chat: chatproto.Chat{ID: chatproto.NewChatID(), Kind: req.Kind, Cwd: req.Cwd, SessionID: req.Resume,
+		State: chatproto.StateStarting, Status: chatproto.StatusIdle, Created: t, Updated: t}, Options: opts, Fresh: req.Resume == ""}
 	c := newChat(h, r)
 	c.first = 1
 	if err := h.j.insertChat(r); err != nil {
@@ -847,7 +870,7 @@ func (h *host) newChat(req chatproto.Request) chatproto.Response {
 	h.wg.Go(func() {
 		if req.Import {
 			c.catchMu.Lock()
-			c.history(st.ctx, req.Resume, "")
+			c.history(st.ctx, req.Resume, importAll)
 			c.catchMu.Unlock()
 		}
 		c.launch(st, req.Resume)
@@ -869,6 +892,22 @@ func (h *host) chatOfSession(kind, session string) string {
 		}
 	}
 	return ""
+}
+
+// trust adds a directory to the ones the user trusts (chatproto.OpTrust).
+func (h *host) trust(req chatproto.Request) chatproto.Response {
+	if len(req.Cwd) > 4096 {
+		return refuse(chatproto.CodeBadRequest, "cwd too long")
+	}
+	if e := checkCwd(req.Cwd); e != nil {
+		return refusal(e)
+	}
+	if err := h.j.trust(req.Cwd, now()); err != nil {
+		h.logf("trust %s: %v", req.Cwd, err)
+		return refuse(chatproto.CodeFailed, "the journal did not take the directory")
+	}
+	h.logf("trusted %s", req.Cwd)
+	return chatproto.Response{OK: true}
 }
 
 // lookup is a chat by its id; nil for none.
@@ -900,7 +939,9 @@ func (h *host) attach(conn net.Conn, r *bufio.Reader, req chatproto.Request) {
 	}
 	h.mu.Unlock()
 	go s.run()
-	c.catchUpLater()
+	if !req.NoCatchUp {
+		c.catchUpLater()
+	}
 	calls := make(chan struct{}, maxCalls)
 	// The connection is closed at once when it ends for any reason but a
 	// line the client must be told of.
@@ -1006,6 +1047,8 @@ func (h *host) deleteChat(id string) chatproto.Response {
 		return refuse(chatproto.CodeUnknownChat, "no such chat")
 	}
 	sess := c.stopAgent(chatproto.StateClosed, nil, perr(chatproto.CodeEnded, "the chat was deleted"))
+	// From here on no prompt starts its agent again.
+	c.deleted = true
 	c.mu.Unlock()
 	h.endSession(sess, true)
 	if err := h.forget(c); err != nil {
@@ -1015,8 +1058,9 @@ func (h *host) deleteChat(id string) chatproto.Response {
 	return chatproto.Response{OK: true}
 }
 
-// forget removes a chat whose agent is not running: from the host, its
-// attached connections closed, then from the journal.
+// forget removes a chat: from the host, its agent ended (one that started
+// since the chat was found to have none) and its attached connections
+// closed, then from the journal.
 func (h *host) forget(c *chat) error {
 	h.mu.Lock()
 	if h.chats[c.r.ID] == c {
@@ -1025,20 +1069,36 @@ func (h *host) forget(c *chat) error {
 	h.mu.Unlock()
 	c.mu.Lock()
 	c.deleted = true
-	c.gen++
+	sess := c.stopAgent(chatproto.StateClosed, nil, nil)
 	for s := range c.subs {
 		s.finish()
 	}
 	c.subs = map[*subscriber]struct{}{}
-	if c.infoTimer != nil {
-		c.infoTimer.Stop()
+	for _, t := range []*time.Timer{c.infoTimer, c.idleTimer} {
+		if t != nil {
+			t.Stop()
+		}
 	}
 	st := c.r.StateOf()
 	st.State, st.Status = chatproto.StateDeleted, chatproto.StatusIdle
 	c.mu.Unlock()
+	h.endSession(sess, false)
 	h.broadcast(st)
 	h.pokeQuiet()
 	return h.j.deleteChat(c.r.ID)
+}
+
+// endLate ends a session whose start its chat no longer waited for. While
+// the host stops, it returns once the agent is gone (killed at once on a
+// signal of the terminal core): no agent outlives the host.
+func (h *host) endLate(sess chatadapter.Session) {
+	stopping := h.stopping.Load()
+	if stopping && h.fast.Load() {
+		if p, ok := sess.(pider); ok && p.PID() > 1 {
+			syscall.Kill(-p.PID(), syscall.SIGKILL)
+		}
+	}
+	h.endSession(sess, stopping)
 }
 
 // endSession ends an agent session the host let go of: gracefully, within

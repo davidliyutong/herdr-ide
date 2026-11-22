@@ -632,6 +632,15 @@ button.conv-path:hover .conv-path-name {
 .conv-notice .conv-pre {
   margin-top: 6px;
 }
+.conv-notice-line > .conv-link {
+  flex: none;
+}
+.conv-notice-failed {
+  margin-top: 4px;
+  color: var(--error);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
 
 /* ---- around the list ---- */
 .conv-earlier {

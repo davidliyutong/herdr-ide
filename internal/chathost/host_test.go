@@ -15,6 +15,7 @@ import (
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/chatproto"
+	"herdr-ide/internal/store"
 )
 
 // The host says who it is, and refuses what is not a request.
@@ -54,7 +55,7 @@ func TestSocketAndFiles(t *testing.T) {
 	if err != nil || st.Mode()&os.ModeSocket == 0 || st.Mode().Perm() != 0o600 {
 		t.Fatalf("socket %v %v", st.Mode(), err)
 	}
-	for path, mode := range map[string]os.FileMode{h.base: 0o700, filepath.Join(h.base, DBName): 0o600} {
+	for path, mode := range map[string]os.FileMode{h.base: 0o700, store.HostFile(h.base, DBName): 0o600} {
 		if st, err := os.Stat(path); err != nil {
 			t.Error(err)
 		} else if st.Mode().Perm() != mode {

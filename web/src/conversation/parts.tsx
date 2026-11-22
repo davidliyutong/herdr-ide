@@ -16,6 +16,9 @@ export interface ItemContext {
   agent: string;
   /** Opens a file the agent named (a location, a link to a resource). */
   openFile?: (path: string, line?: number) => void;
+  /** Trusts the chat's folder (ChatSource.trust); absent when the source
+   * cannot or the view is read-only. */
+  trust?: () => Promise<void>;
 }
 
 /** What the cards of permissions and questions may do: a context of its

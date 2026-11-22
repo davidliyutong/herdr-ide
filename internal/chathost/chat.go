@@ -29,8 +29,12 @@ const (
 	agentTitleRunes = 200
 	// stateBytes is the most bytes of the JSON of each of what an adapter
 	// states of a chat (its configuration options, slash commands, usage,
-	// capabilities): with it, the list of all chats fits a line.
-	stateBytes = 256 << 10
+	// capabilities): with it, the list of all chats fits a line, and the
+	// journal's rows stay small beside the events its bounds count.
+	stateBytes = 64 << 10
+	// maxQueued is the most queued messages a chat follows (the adapters
+	// queue far fewer).
+	maxQueued = 256
 	// maxPending is the number of permissions and questions that may wait
 	// in a chat; an agent that asks more is answered that they were
 	// cancelled.
@@ -59,6 +63,9 @@ type chat struct {
 	subs    map[*subscriber]struct{}
 	deleted bool
 	stopped bool // the host stopped: nothing more is stored
+	// brokenLog: the journal did not take an event of the chat, which
+	// fails (journalFailed); cleared once it takes one again.
+	brokenLog bool
 
 	sess chatadapter.Session
 	// gen numbers the chat's agents: a session or a start of an earlier
@@ -69,6 +76,14 @@ type chat struct {
 	held     bool // a prompt waits for the start
 	turn     bool // a turn runs
 	pending  map[string]*pending
+	// queued are the messages the adapter queued (EventQueued) and did not
+	// tell taken or cancelled yet, by id; next: a turn ended while some
+	// waited, and the next turn, which takes them, is to start: the chat
+	// works meanwhile (until nextTimer gives up on it).
+	queued    map[string]bool
+	next      bool
+	nextTaken bool // a message the next turn takes was taken
+	nextTimer *time.Timer
 
 	idleSince time.Time // since when the chat is idle
 	idleTimer *time.Timer
@@ -113,7 +128,8 @@ type answer struct {
 var pendingCount atomic.Uint64
 
 func newChat(h *host, r row) *chat {
-	return &chat{h: h, r: r, subs: map[*subscriber]struct{}{}, pending: map[string]*pending{}, dropped: map[string]bool{}}
+	return &chat{h: h, r: r, subs: map[*subscriber]struct{}{}, pending: map[string]*pending{}, dropped: map[string]bool{},
+		queued: map[string]bool{}}
 }
 
 func now() time.Time { return time.Now().UTC().Truncate(time.Millisecond) }
@@ -174,42 +190,109 @@ func (c *chat) notify() {
 }
 
 // emit stores an event, numbered, and hands it to the attached
-// connections; one that fell too far behind is disconnected. The caller
-// holds c.mu.
-func (c *chat) emit(ev chatproto.Event) {
+// connections; one that fell too far behind is disconnected. It reports
+// whether the event was stored as it is (its strings cut, maybe): false
+// when it was left out, replaced by a notice that it was too large (fit),
+// or not stored at all. An event the journal does not take is told to
+// nobody, and fails the chat (journalFailed): its log has no hole. The
+// agent's standard error of an event's Error (and of an EventInfo's
+// chat's) goes to the connections attached now, never into the journal.
+// The caller holds c.mu.
+func (c *chat) emit(ev chatproto.Event) bool {
 	if c.deleted {
-		return
+		return false
 	}
 	t := now()
 	ev.Seq, ev.Live = c.r.Seq+1, false
 	if ev.At.IsZero() {
 		ev.At = t
 	}
+	ev.Error = capStderr(ev.Error)
 	if ev.T == chatproto.EventInfo {
 		ev.Chat = c.snapshot()
 		ev.Chat.Seq, ev.Chat.Updated = ev.Seq, t
+		ev.Chat.Error = capStderr(ev.Chat.Error)
 	}
-	ev, b := fit(ev)
+	st, b := fit(ev.Redacted())
 	if b == nil {
 		c.h.logf("chat %s: an event %s that is no JSON was left out", c.r.ID, ev.T)
-		return
+		return false
 	}
-	c.r.Seq, c.r.Updated = ev.Seq, t
-	if ev.Item != "" && ev.Parent == "" {
-		c.r.HistoryAfter = ev.Item
+	r := c.r
+	r.Seq, r.Updated = ev.Seq, t
+	if st.Item != "" && st.Parent == "" {
+		r.HistoryAfter = st.Item
 	}
-	if ev.T == chatproto.EventTurn && (ev.State == chatproto.TurnEnd || ev.State == chatproto.TurnError) {
-		c.r.TurnEnd = ev.Seq
+	if st.T == chatproto.EventTurn && (st.State == chatproto.TurnEnd || st.State == chatproto.TurnError) {
+		r.TurnEnd = ev.Seq
 	}
-	c.r.Bytes += int64(len(b))
-	if err := c.h.j.appendEvent(c.r, stored{seq: ev.Seq, t: ev.T, item: ev.Item, at: ev.At, line: b}); err != nil {
+	r.Bytes += int64(len(b))
+	if err := c.h.j.appendEvent(r, stored{seq: st.Seq, t: st.T, item: st.Item, at: st.At, line: b}); err != nil {
 		c.h.logf("chat %s: store event %d: %v", c.r.ID, ev.Seq, err)
+		c.journalFailed(err)
+		return false
 	}
-	c.fanOut(append(b, '\n'))
+	c.brokenLog = false
+	c.r.Seq, c.r.Updated, c.r.HistoryAfter, c.r.TurnEnd, c.r.Bytes = r.Seq, r.Updated, r.HistoryAfter, r.TurnEnd, r.Bytes
+	out := b
+	if st.T == ev.T && hasStderr(ev) {
+		if l := line(ev); l != nil && len(l) <= chatproto.MaxLine {
+			out = l
+		}
+	}
+	c.fanOut(append(out, '\n'))
 	if max := c.h.settings.Load().MaxChatBytes; c.r.Bytes > max {
 		c.trim(max - max/8)
 	}
 	c.h.wrote(len(b))
+	return st.T == ev.T
+}
+
+// journalFailed fails the chat whose event the journal did not take: its
+// agent ends, and what comes is not stored in a log with a hole. A prompt
+// starts the chat again, once the journal takes events. The caller holds
+// c.mu.
+func (c *chat) journalFailed(err error) {
+	if c.brokenLog || c.stopped {
+		return
+	}
+	c.brokenLog = true
+	e := perr(chatproto.CodeFailed, "the chat's log could not be written: "+err.Error())
+	// Not under the caller's lock, which may be in the middle of a change
+	// of the chat; not one of h.wg's, as the caller may be a timer's.
+	go func() {
+		c.mu.Lock()
+		if c.deleted || c.stopped {
+			c.mu.Unlock()
+			return
+		}
+		c.h.logf("chat %s: failed: %s", c.r.ID, e.Message)
+		sess := c.stopAgent(chatproto.StateFailed, e, e)
+		c.notify()
+		c.mu.Unlock()
+		c.h.endSession(sess, false)
+		c.h.pokeQuiet()
+	}()
+}
+
+// capStderr is e with at most chatproto.MaxStderr bytes of the agent's
+// standard error, its end; e itself when it has no more.
+func capStderr(e *chatproto.Error) *chatproto.Error {
+	if e == nil || len(e.Stderr) <= chatproto.MaxStderr {
+		return e
+	}
+	c := *e
+	s := e.Stderr[len(e.Stderr)-chatproto.MaxStderr:]
+	for len(s) > 0 && !utf8.RuneStart(s[0]) {
+		s = s[1:]
+	}
+	c.Stderr = s
+	return &c
+}
+
+// hasStderr tells whether ev carries an agent's standard error.
+func hasStderr(ev chatproto.Event) bool {
+	return (ev.Error != nil && ev.Error.Stderr != "") || (ev.Chat != nil && ev.Chat.Error != nil && ev.Chat.Error.Stderr != "")
 }
 
 // live hands a streaming increment to the attached connections. The caller
@@ -281,7 +364,7 @@ func (c *chat) settle() {
 		state = chatproto.StateStarting
 	case c.sess != nil && len(c.pending) > 0:
 		state = chatproto.StateWaiting
-	case c.sess != nil && c.turn:
+	case c.sess != nil && (c.turn || c.next):
 		state = chatproto.StateWorking
 	case c.sess != nil:
 		state = chatproto.StateIdle
@@ -290,6 +373,45 @@ func (c *chat) settle() {
 		state = chatproto.StateSleeping
 	}
 	c.setState(state)
+}
+
+// busy tells whether a turn runs, is to start with what was queued, or
+// waits for the user. The caller holds c.mu.
+func (c *chat) busy() bool { return c.turn || c.next || len(c.pending) > 0 }
+
+// awaitNext has the chat work between the end of a turn and the start of
+// the next one, which takes the messages queued meanwhile: no idle stop,
+// no room made of it, no handoff. An adapter that does not start it
+// within the host's call timeout is not waited for any longer. The caller
+// holds c.mu.
+func (c *chat) awaitNext() {
+	c.endNext()
+	if len(c.queued) == 0 || c.sess == nil {
+		return
+	}
+	c.next = true
+	gen := c.gen
+	c.nextTimer = time.AfterFunc(c.h.o.callTimeout, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.gen != gen || !c.next || c.deleted {
+			return
+		}
+		c.h.logf("chat %s: no turn took the %d queued messages", c.r.ID, len(c.queued))
+		c.endNext()
+		c.settle()
+		c.notify()
+	})
+}
+
+// endNext stops waiting for the next turn. The caller holds c.mu, and
+// settles the chat's state after.
+func (c *chat) endNext() {
+	c.next, c.nextTaken = false, false
+	if c.nextTimer != nil {
+		c.nextTimer.Stop()
+		c.nextTimer = nil
+	}
 }
 
 // armIdle has an idle chat's agent ended once the chat was idle for the
@@ -389,12 +511,15 @@ func (c *chat) beginStart() *start {
 // e for StateFailed). It returns the session for the caller to end
 // (host.endSession) without c.mu. The caller holds c.mu.
 func (c *chat) stopAgent(rest string, e, turnErr *chatproto.Error) chatadapter.Session {
+	e, turnErr = capStderr(e), capStderr(turnErr)
 	c.gen++
 	if c.start != nil {
 		c.start.cancel()
 		c.start = nil
 	}
 	c.starting = false
+	c.endNext()
+	clear(c.queued)
 	c.cancelPending(chatproto.ByEnded, errEnded)
 	if c.turn {
 		c.turn = false
@@ -432,12 +557,15 @@ func (c *chat) launch(st *start, resume string) {
 	if sess != nil {
 		id = sess.ID()
 	}
+	e = capStderr(e)
 	c.mu.Lock()
 	if c.gen != st.gen || c.deleted {
 		c.mu.Unlock()
 		st.err = perr(chatproto.CodeEnded, "the chat's start was cancelled")
 		if sess != nil {
-			c.h.endSession(sess, false)
+			// A host that stops waits for it (launch is one of h.wg's):
+			// the agent does not outlive the host.
+			c.h.endLate(sess)
 		}
 		return
 	}
@@ -476,7 +604,7 @@ func (c *chat) launch(st *start, resume string) {
 func (c *chat) startAgent(st *start, resume string) (chatadapter.Session, *chatproto.Error) {
 	h := c.h
 	c.mu.Lock()
-	kind, cwd, id, opts := c.r.Kind, c.r.Cwd, c.r.ID, c.r.Options
+	kind, cwd, id, opts, config := c.r.Kind, c.r.Cwd, c.r.ID, c.r.Options, c.r.Config
 	c.mu.Unlock()
 	spec, a, e := h.spec(kind)
 	if e != nil {
@@ -499,9 +627,13 @@ func (c *chat) startAgent(st *start, resume string) (chatadapter.Session, *chatp
 	if opts.Mode == "" {
 		opts.Mode = settings.DefaultMode
 	}
+	if !settings.AllowFull && fullMode(config, opts.Mode) {
+		c.fullAccessOff(st, opts.Mode)
+		opts.Mode = chatproto.ModeDefault
+	}
 	p := chatadapter.StartParams{
 		Kind: kind, Argv: append([]string{path}, spec.Argv[1:]...), Env: env, Cwd: cwd, Resume: resume,
-		NewSessionMeta: spec.NewSessionMeta, Options: opts, Client: clientInfo(), Settings: settings,
+		NewSessionMeta: spec.NewSessionMeta, Options: opts, Trusted: h.j.trusted(cwd), Client: clientInfo(), Settings: settings,
 		Logger: log.New(h.logger.Writer(), h.logger.Prefix()+"chat "+id+": ", h.logger.Flags()),
 	}
 	if resume == "" {
@@ -518,6 +650,41 @@ func (c *chat) startAgent(st *start, resume string) (chatadapter.Session, *chatp
 		return nil, perr(chatproto.CodeStartFailed, "the adapter made no session")
 	}
 	return sess, nil
+}
+
+// fullMode tells whether mode gives the agent full access: ModeFull, or a
+// value of the chat's mode option its adapter marked Full.
+func fullMode(config []chatproto.ConfigOption, mode string) bool {
+	if mode == chatproto.ModeFull {
+		return true
+	}
+	for _, o := range config {
+		if o.Category != chatproto.CategoryMode {
+			continue
+		}
+		for _, v := range o.Options {
+			if v.Value == mode && v.Full {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// fullAccessOff takes full access from a chat whose agent starts while
+// the settings no longer allow it: its mode is the default from now on,
+// which a notice tells.
+func (c *chat) fullAccessOff(st *start, mode string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gen != st.gen || c.deleted {
+		return
+	}
+	c.h.logf("chat %s: full access is not allowed: it starts in the default mode", c.r.ID)
+	c.r.Options.Mode = chatproto.ModeDefault
+	c.emit(chatproto.Event{T: chatproto.EventNotice, Method: agentproto.NoticeMethod(agentproto.NoticeFullAccessOff),
+		Params: line(map[string]string{"mode": mode})})
+	c.save()
 }
 
 // watchSession waits for the end of a session: one the host did not end
@@ -537,21 +704,44 @@ func (c *chat) watchSession(sess chatadapter.Session, gen uint64) {
 			e = perr(chatproto.CodeEnded, err.Error())
 		}
 	}
-	c.h.logf("chat %s: its agent ended (%v)", c.r.ID, err)
+	c.h.logf("chat %s: its agent ended (%v)", c.r.ID, e.WithoutStderr())
 	c.stopAgent(rest, e, perr(chatproto.CodeEnded, "the agent ended"))
 	c.mu.Unlock()
 	c.h.pokeQuiet()
 }
 
-// history brings a session's conversation from its adapter into the log,
-// after the item after ("" for all of it). What it brings counts as seen.
-// A failure is stored as an error notice, but for a catch-up (after not
-// "") that finds no such item or session (CodeNotFound): the session goes
-// on without it, as the log has it, and the host logs why.
-func (c *chat) history(ctx context.Context, session, after string) {
+// The ways of history.
+const (
+	// importAll brings the session's whole conversation (a new chat's
+	// import).
+	importAll = iota
+	// catchUpStart brings what the session did in a terminal after the
+	// log's last item, as the chat's agent starts.
+	catchUpStart
+	// catchUpAttach does it for an attach, while no agent runs or starts.
+	catchUpAttach
+)
+
+// history brings a session's conversation from its adapter into the log:
+// all of it, or for a catch-up what came after the log's last item
+// (row.HistoryAfter), read once c.catchMu is held, which the caller holds:
+// a catch-up never brings in what an earlier one brought. A catch-up of a
+// chat no longer handed off, or one of an attach while an agent runs or
+// starts, brings nothing. What it brings counts as seen. A failure is
+// stored as an error notice, but for a catch-up that finds no such item or
+// session (CodeNotFound): the session goes on without it, as the log has
+// it, and the host logs why.
+func (c *chat) history(ctx context.Context, session string, way int) {
 	h := c.h
 	c.mu.Lock()
-	kind, cwd := c.r.Kind, c.r.Cwd
+	kind, cwd, after := c.r.Kind, c.r.Cwd, ""
+	if way != importAll {
+		after = c.r.HistoryAfter
+		if !c.r.HandedOff || c.deleted || c.sess != nil || (way == catchUpAttach && c.starting) {
+			c.mu.Unlock()
+			return
+		}
+	}
 	c.mu.Unlock()
 	spec, a, e := h.spec(kind)
 	if e != nil {
@@ -587,7 +777,7 @@ func (c *chat) history(ctx context.Context, session, after string) {
 	defer c.mu.Unlock()
 	if err != nil && !c.deleted {
 		e := errorOf(err)
-		if after != "" && e.Code == chatproto.CodeNotFound {
+		if way != importAll && e.Code == chatproto.CodeNotFound {
 			h.logf("chat %s: no catch-up of %s after %s: %s", c.r.ID, session, clip(after, 64), e.Error())
 			if n > 0 {
 				c.save()
@@ -612,7 +802,7 @@ func (c *chat) history(ctx context.Context, session, after string) {
 func (c *chat) catchUpLater() {
 	c.mu.Lock()
 	ok := c.r.HandedOff && c.sess == nil && !c.starting && !c.deleted && c.r.SessionID != "" && time.Since(c.caughtUp) >= catchUpEvery
-	session, after := c.r.SessionID, c.r.HistoryAfter
+	session := c.r.SessionID
 	if ok {
 		c.caughtUp = time.Now()
 	}
@@ -622,7 +812,7 @@ func (c *chat) catchUpLater() {
 	}
 	c.h.wg.Go(func() {
 		defer c.catchMu.Unlock()
-		c.history(c.h.ctx, session, after)
+		c.history(c.h.ctx, session, catchUpAttach)
 	})
 }
 
@@ -698,7 +888,7 @@ func (c *chat) prompt(cmd chatproto.Command) *chatproto.Error {
 		case c.sess != nil && images && !c.r.Capabilities.Images:
 			c.mu.Unlock()
 			return perr(chatproto.CodeUnsupported, "the agent takes no images")
-		case c.sess != nil && (c.turn || len(c.pending) > 0):
+		case c.sess != nil && c.busy():
 			// Queued: the adapter tells it (EventQueued), or, when the
 			// turn ended meanwhile, stores its EventUser itself.
 			sess := c.sess
@@ -732,11 +922,16 @@ func (c *chat) prompt(cmd chatproto.Command) *chatproto.Error {
 			}
 			st := c.beginStart()
 			c.held = true
-			handedOff, session, after := c.r.HandedOff, c.r.SessionID, c.r.HistoryAfter
+			handedOff, session := c.r.HandedOff, c.r.SessionID
+			if c.r.Fresh {
+				// The agent may not have kept a session that never had a
+				// turn: a new one is made.
+				session = ""
+			}
 			c.mu.Unlock()
 			if handedOff && session != "" {
 				c.catchMu.Lock()
-				c.history(st.ctx, session, after)
+				c.history(st.ctx, session, catchUpStart)
 				c.catchMu.Unlock()
 			}
 			c.launch(st, session)
@@ -887,7 +1082,11 @@ func (c *chat) cancelTurn() *chatproto.Error {
 		c.mu.Unlock()
 		return e
 	}
-	if !c.turn && len(c.pending) == 0 {
+	// The queued messages go with the turn: no turn takes them.
+	next := c.next
+	clear(c.queued)
+	c.endNext()
+	if !c.turn && !next && len(c.pending) == 0 {
 		c.mu.Unlock()
 		return nil
 	}
@@ -906,6 +1105,8 @@ func (c *chat) ask(ctx context.Context, gen uint64, p *pending, ev chatproto.Eve
 		c.mu.Unlock()
 		return cancelled(p, errEnded)
 	}
+	// An agent that asks is in a turn of the session: it keeps it.
+	c.r.Fresh = false
 	if len(c.pending) >= maxPending {
 		c.mu.Unlock()
 		c.h.logf("chat %s: more than %d permissions and questions wait: one more was cancelled", c.r.ID, maxPending)
@@ -919,7 +1120,14 @@ func (c *chat) ask(ctx context.Context, gen uint64, p *pending, ev chatproto.Eve
 	p.id = newID(prefix)
 	ev.ID = p.id
 	c.pending[p.id] = p
-	c.emit(ev)
+	if !c.emit(ev) {
+		// Nobody can answer what the log does not have as it is: too
+		// large (a notice says it was left out), or not stored.
+		delete(c.pending, p.id)
+		c.mu.Unlock()
+		c.h.logf("chat %s: a %s that could not be stored was cancelled", c.r.ID, ev.T)
+		return cancelled(p, nil)
+	}
 	c.settle()
 	c.mu.Unlock()
 	select {
@@ -1082,9 +1290,15 @@ func (c *chat) setConfig(id, value string) *chatproto.Error {
 		c.mu.Unlock()
 		return perr(chatproto.CodeBadRequest, "no such configuration option")
 	}
-	if !slices.ContainsFunc(c.r.Config[i].Options, func(v chatproto.ConfigValue) bool { return v.Value == value }) {
+	v := slices.IndexFunc(c.r.Config[i].Options, func(v chatproto.ConfigValue) bool { return v.Value == value })
+	if v < 0 {
 		c.mu.Unlock()
 		return perr(chatproto.CodeBadRequest, "not a value of the option")
+	}
+	if (c.r.Config[i].Options[v].Full || (c.r.Config[i].Category == chatproto.CategoryMode && value == chatproto.ModeFull)) &&
+		!c.h.settings.Load().AllowFull {
+		c.mu.Unlock()
+		return perr(chatproto.CodeNotAllowed, "full access is not allowed on this machine")
 	}
 	category, gen := c.r.Config[i].Category, c.gen
 	c.mu.Unlock()
@@ -1108,9 +1322,8 @@ func (c *chat) setConfig(id, value string) *chatproto.Error {
 	case chatproto.CategoryThoughtLevel:
 		c.r.Options.Effort = value
 	case chatproto.CategoryMode:
-		if slices.Contains(chatproto.Modes, value) {
-			c.r.Options.Mode = value
-		}
+		// The agent's own modes too: an adapter takes its own values.
+		c.r.Options.Mode = value
 	}
 	c.emitInfo()
 	return nil
@@ -1169,13 +1382,15 @@ func (c *chat) handoff() *chatproto.Error {
 		c.mu.Unlock()
 		return perr(chatproto.CodeUnknownChat, "no such chat")
 	}
-	if c.starting || c.held || c.turn || len(c.pending) > 0 {
+	if c.starting || c.held || c.busy() {
 		c.mu.Unlock()
 		return perr(chatproto.CodeBusy, "a turn runs")
 	}
-	if c.r.SessionID == "" {
+	if c.r.SessionID == "" || c.r.Fresh {
+		// A session without a turn may not be kept by the agent: no
+		// terminal could take it up.
 		c.mu.Unlock()
-		return perr(chatproto.CodeNotFound, "the chat has no session")
+		return perr(chatproto.CodeNotFound, "the chat has no session with a turn")
 	}
 	sess := c.stopAgent(chatproto.StateSleeping, nil, nil)
 	c.r.HandedOff, c.r.Closed = true, time.Time{}
@@ -1207,19 +1422,37 @@ func (c *chat) agentEvent(gen uint64, ev chatproto.Event) {
 		return
 	}
 	switch ev.T {
-	case chatproto.EventUpdate, chatproto.EventUser, chatproto.EventQueued, chatproto.EventNotice:
+	case chatproto.EventUpdate, chatproto.EventUser, chatproto.EventNotice:
+		if ev.T == chatproto.EventUpdate {
+			// The agent answered: it keeps the session.
+			c.r.Fresh = false
+		}
 		c.emit(ev)
+	case chatproto.EventQueued:
+		c.followQueued(ev)
+		c.emit(ev)
+		if c.next && len(c.queued) == 0 && !c.nextTaken {
+			// Every message that waited was withdrawn: no turn comes.
+			c.endNext()
+			c.settle()
+			c.notify()
+		}
 	case chatproto.EventTurn:
 		switch ev.State {
 		case chatproto.TurnStart:
 			c.turn = true
+			c.endNext()
 			c.emit(ev)
 		case chatproto.TurnEnd, chatproto.TurnError:
 			// What waits was asked before the end: it is cancelled, and
 			// the end is the turn's last event.
 			c.cancelPending(chatproto.ByEnded, nil)
 			c.turn = false
+			if ev.State == chatproto.TurnEnd {
+				c.r.Fresh = false
+			}
 			c.emit(ev)
+			c.awaitNext()
 		default:
 			c.dropEvent(ev.T + ":" + ev.State)
 			return
@@ -1228,6 +1461,25 @@ func (c *chat) agentEvent(gen uint64, ev chatproto.Event) {
 		c.notify()
 	default:
 		c.dropEvent(ev.T)
+	}
+}
+
+// followQueued follows the messages the adapter queued: waiting until it
+// tells them taken or cancelled. The caller holds c.mu.
+func (c *chat) followQueued(ev chatproto.Event) {
+	if ev.Message == "" {
+		return
+	}
+	switch ev.State {
+	case chatproto.QueuedWaiting:
+		if len(c.queued) < maxQueued {
+			c.queued[ev.Message] = true
+		}
+	case chatproto.QueuedTaken, chatproto.QueuedCancelled:
+		if ev.State == chatproto.QueuedTaken && c.next {
+			c.nextTaken = true
+		}
+		delete(c.queued, ev.Message)
 	}
 }
 
@@ -1324,19 +1576,46 @@ func (s *sink) Permission(ctx context.Context, r chatadapter.PermissionRequest) 
 	return a.perm, a.err
 }
 
+// Question asks the user. A question without an id, or with the id of one
+// before it, is asked under an id of the host's: the answers come back to
+// the adapter under the ids it gave (the first answer of those of one id).
 func (s *sink) Question(ctx context.Context, r chatadapter.QuestionRequest) (chatadapter.QuestionAnswer, error) {
 	qs := slices.Clone(r.Questions)
 	if len(qs) == 0 {
 		return chatadapter.QuestionAnswer{Cancelled: true}, nil
 	}
-	seen := map[string]bool{}
-	for i := range qs {
-		if qs[i].ID == "" || seen[qs[i].ID] {
-			qs[i].ID = "q" + strconv.Itoa(i+1)
+	// The adapter's ids that stay: each one's first.
+	used := make(map[string]bool, len(qs))
+	keep := make([]bool, len(qs))
+	for i, q := range qs {
+		if q.ID != "" && !used[q.ID] {
+			used[q.ID], keep[i] = true, true
 		}
-		seen[qs[i].ID] = true
+	}
+	ids := make(map[string]string, len(qs)) // the host's id → the adapter's
+	for i := range qs {
+		id := qs[i].ID
+		if !keep[i] {
+			n := i + 1
+			for used["q"+strconv.Itoa(n)] {
+				n++
+			}
+			qs[i].ID = "q" + strconv.Itoa(n)
+			used[qs[i].ID] = true
+		}
+		ids[qs[i].ID] = id
 	}
 	p := &pending{question: true, questions: qs}
 	a := s.c.ask(ctx, s.gen, p, chatproto.Event{T: chatproto.EventQuestion, Questions: qs, ToolCall: r.ToolCall, Parent: r.Parent})
+	if len(a.q.Answers) > 0 {
+		answers := make(map[string][]string, len(a.q.Answers))
+		for _, q := range qs {
+			vs, ok := a.q.Answers[q.ID]
+			if _, had := answers[ids[q.ID]]; ok && !had {
+				answers[ids[q.ID]] = vs
+			}
+		}
+		a.q.Answers = answers
+	}
 	return a.q, a.err
 }

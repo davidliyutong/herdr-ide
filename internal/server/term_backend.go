@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +35,14 @@ type termBackend struct {
 	// stopped: the terminal core was stopped from the UI, so the backend
 	// starts none until it is started again (or the backend starts anew).
 	stopped bool
+	// hidden are the terminals of the product's own helpers, which carry
+	// agentproto.HiddenLabel and are not in terms: by address, with the
+	// name of each ("" for none). Clients are told nothing of them and
+	// cannot address them (hides).
+	hidden map[string]string
+	// core is how the terminal core calls itself: an address may say its
+	// id or its name before a terminal of its own ("box/t7").
+	core hc.CoreInfo
 	// agents are the coding agents detected in the terminals (op detect),
 	// merged into their records as agent and agent_status.
 	agents map[string]agentproto.DetectEvent
@@ -205,7 +216,7 @@ func (b *termBackend) unpark(terminal string) {
 func (b *termBackend) setState(state, code string) {
 	b.mu.Lock()
 	if state != termReady {
-		b.conn, b.terms = nil, nil
+		b.conn, b.terms, b.hidden = nil, nil, nil
 		// The streams went with the connection.
 		for _, st := range b.parked {
 			go st.Close()
@@ -245,7 +256,7 @@ func (b *termBackend) run(ctx context.Context) {
 		}
 	}
 	b.mu.Lock()
-	b.conn, b.terms, b.state, b.code = nil, nil, termStarting, ""
+	b.conn, b.terms, b.hidden, b.state, b.code = nil, nil, nil, termStarting, ""
 	b.mu.Unlock()
 	b.publish()
 }
@@ -364,8 +375,8 @@ func (b *termBackend) serve(ctx context.Context) (code string) {
 		return termCodeConnect
 	}
 	b.mu.Lock()
-	b.conn, b.version, b.state, b.code = conn, hello.Version, termReady, ""
-	b.terms = indexTerminals(snap)
+	b.conn, b.version, b.core, b.state, b.code = conn, hello.Version, hello.Core, termReady, ""
+	b.terms, b.hidden = indexTerminals(snap)
 	b.agents = map[string]agentproto.DetectEvent{}
 	for c := range b.subs {
 		c.sendJSON(b.stateMsg())
@@ -388,6 +399,60 @@ func (b *termBackend) serve(ctx context.Context) (code string) {
 		}
 		b.event(n)
 	}
+}
+
+// hides reports whether target, a terminal as a client names it, is none of
+// the clients': the address or the name of a hidden terminal, also with the
+// terminal core's own id or name before it, as the terminal core reads
+// addresses, or the name kept for the chat host, whether one runs or not.
+func (b *termBackend) hides(target string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if m, local, ok := strings.Cut(target, "/"); ok && m != "" && (m == b.core.ID || m == b.core.Name) {
+		target = local
+	}
+	if _, hidden := b.hidden[target]; hidden || target == agentproto.ChatHostName {
+		return true
+	}
+	for addr, name := range b.hidden {
+		// A name is said with the machine of its terminal's address.
+		if name != "" && target == addr[:strings.LastIndex(addr, "/")+1]+name {
+			return true
+		}
+	}
+	return false
+}
+
+// visible is the result of terminal.list without the hidden terminals;
+// false for a result that is no list of terminals.
+func (b *termBackend) visible(result json.RawMessage) (json.RawMessage, bool) {
+	var res map[string]json.RawMessage
+	var list []json.RawMessage
+	if json.Unmarshal(result, &res) != nil || json.Unmarshal(res["terminals"], &list) != nil {
+		return nil, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	kept := make([]json.RawMessage, 0, len(list))
+	for _, raw := range list {
+		var rec map[string]any
+		if json.Unmarshal(raw, &rec) != nil {
+			return nil, false
+		}
+		addr, _ := rec["address"].(string)
+		if _, hidden := b.hidden[addr]; !hidden && !hiddenTerminal(rec) {
+			kept = append(kept, raw)
+		}
+	}
+	if len(kept) == len(list) {
+		return result, true
+	}
+	var err error
+	if res["terminals"], err = json.Marshal(kept); err != nil {
+		return nil, false
+	}
+	out, err := json.Marshal(res)
+	return out, err == nil
 }
 
 // connection returns the backend's connection when it is ready.
@@ -476,8 +541,8 @@ func (s *Server) handleHCAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rep.HC)
 }
 
-// termShells are the terminals of a machine's terminal core, for typing the
-// display's variables into their shells (gui.Shells).
+// termShells are the terminals of a machine's terminal core that clients
+// see, for typing the display's variables into their shells (gui.Shells).
 type termShells struct{ b *termBackend }
 
 var errNoTerminals = errors.New("the terminal core is not connected")
@@ -501,6 +566,11 @@ func (t termShells) get(ctx context.Context, addr string) (*hc.Conn, *hc.Termina
 	conn := t.b.connection()
 	if conn == nil {
 		return nil, nil, errNoTerminals
+	}
+	// A hidden terminal a request names is no terminal: nothing is asked
+	// about it, and nothing typed into it.
+	if t.b.hides(addr) {
+		return nil, nil, &hc.Error{Kind: "not_found", Message: "no terminal " + strconv.Quote(addr)}
 	}
 	var rec hc.Terminal
 	if err := conn.Call(ctx, "terminal.get", map[string]string{"terminal": addr}, &rec); err != nil {

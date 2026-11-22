@@ -16,6 +16,10 @@ export const PROTO = 2;
 export const MAX_PROMPT = 8 << 20;
 /** The most bytes of an image of a prompt, decoded. */
 export const MAX_IMAGE = 5 << 20;
+/** The most bytes of an agent's standard error an error carries (its
+ * end, ChatError.stderr): never stored, sent only live, and left out for a
+ * read-only page (chatproto.MaxStderr). */
+export const MAX_STDERR = 2 << 10;
 
 /** The states of a chat (chatproto.State*). */
 export const CHAT_STATES = ['starting', 'idle', 'working', 'waiting', 'sleeping', 'failed', 'closed'] as const;
@@ -45,6 +49,11 @@ export interface ConfigValue {
   value: string;
   name: string;
   description?: string;
+  /** Choosing it gives the agent full access (the mode full or the
+   * agent's own equivalent, as Kimi's yolo): a read-only page may not, and
+   * the chat host refuses it (not_allowed) while the machine's setting
+   * chat.allowFullAccess (HostSettings.allowFull) is off. */
+  full?: boolean;
 }
 
 /** A session configuration option (chatproto.ConfigOption), as ACP's: the
@@ -162,6 +171,31 @@ export interface Session {
   chat?: string;
 }
 
+/** The settings the core gives a machine's chat host (chatproto.
+ * HostSettings), from the machine's chat.* settings; a zero member is the
+ * host's default. allowFull (chat.allowFullAccess) allows full access:
+ * without it the host refuses a chat or a configuration value that asks
+ * for it (not_allowed), and starts a chat that had it in the default mode
+ * (the notice full_access_off). */
+export interface HostSettings {
+  idleStopMinutes?: number;
+  maxLive?: number;
+  maxChats?: number;
+  retentionDays?: number;
+  maxTotalBytes?: number;
+  maxChatBytes?: number;
+  defaultMode?: Mode;
+  allowFull?: boolean;
+}
+
+/** The requests the core makes of a chat host for the page's routes,
+ * besides those of the chats' states (chatproto.Op*): trust lets the
+ * agents load a directory's own project settings (POST trust?cwd=).
+ * The core attaches a read-only page's subscription with noCatchUp: it
+ * starts nothing on the machine (no catch-up of what the session did in
+ * a terminal). */
+export const REQUEST_OPS = ['agents', 'chats', 'sessions', 'new', 'close', 'delete', 'seen', 'attach', 'trust'] as const;
+
 /** What a new chat starts with; each a value of the chat's option of
  * that category. */
 export interface Options {
@@ -228,8 +262,16 @@ export const isChatId = (s: unknown): s is string => typeof s === 'string' && /^
 
 /** The page's WebSocket. */
 export const WS_PATH = '/api/p/chat/ws';
-/** The most subscriptions a page's WebSocket has at once. */
-export const MAX_SUBS = 64;
+/** The most subscriptions a page's WebSocket has at once, and of them to
+ * one machine's chats. */
+export const MAX_SUBS = 32;
+export const MAX_SUBS_PER_MACHINE = 16;
+/** The longest id of a subscription or a command a page gives, in bytes. */
+export const MAX_PAGE_ID = 64;
+/** Every machine's chats' states as the core last read them
+ * (StatesSnapshot), which a page reads before it applies the states
+ * messages that follow. */
+export const STATES_PATH = '/api/p/chat/states';
 /** The longest message a page sends, in bytes. */
 export const MAX_CLIENT_MESSAGE = MAX_PROMPT + (64 << 10);
 
@@ -248,13 +290,73 @@ export type ServerMessage =
   | { t: 'detached'; sub: string; error?: ChatError }
   | { t: 'ack'; id: string; error?: ChatError };
 
-/** The core's error codes of the WebSocket, besides the chat host's. */
-export const CORE_CODES = ['read_only', 'offline', 'unknown_sub', 'too_many'] as const;
+/** The chat host's error codes (chatproto.Code*): sleeping, a command
+ * that needs the agent of a chat that has none (a prompt starts it);
+ * not_allowed, full access while the machine's chat.allowFullAccess is
+ * off. */
+export const HOST_CODES = [
+  'bad_request',
+  'unknown_chat',
+  'too_many',
+  'busy',
+  'not_found',
+  'start_failed',
+  'protocol',
+  'auth_required',
+  'unsupported',
+  'too_large',
+  'ended',
+  'failed',
+  'in_terminal',
+  'handed_off',
+  'sleeping',
+  'not_allowed',
+] as const;
+
+/** The machine's codes of reaching its chat host (its agent's open
+ * action): not_running, no chat host serves and the core may not start
+ * one (a read-only core); upgrading, a chat host of another version
+ * serves until its chats are idle; no_terminal_core, the terminal core
+ * that runs the host does not run; start_failed, the host did not start;
+ * transport, the connection broke. */
+export const MACHINE_CODES = ['not_running', 'upgrading', 'no_terminal_core', 'start_failed', 'transport'] as const;
+
+/** The core's error codes of the WebSocket and the routes, besides the
+ * chat host's: not_attached, a command for a chat the page has no
+ * subscription to; lost, the subscription's connection to the chat host
+ * ended while the machine stays (attach again; a command not answered may
+ * have been carried out); plugin_disabled, the plugin was turned off;
+ * timeout, the machine did not answer in time. */
+export const CORE_CODES = [
+  'read_only',
+  'offline',
+  'unknown_sub',
+  'too_many',
+  'not_attached',
+  'lost',
+  'plugin_disabled',
+  'timeout',
+] as const;
+
+/** Every code of an error the page may receive: the host's, the
+ * machine's, the core's, and network when the page did not reach the
+ * core. */
+export const ERROR_CODES = [...new Set<string>([...HOST_CODES, ...MACHINE_CODES, ...CORE_CODES, 'network'])];
 
 /** The chat plugin's message on the core's event channel for a machine:
- * every chat of it (full), or those that changed. */
+ * every chat of it (full), or those that changed (one that is no more in
+ * STATE_DELETED). rev numbers a machine's messages since the core started;
+ * a page applies one only when its rev is above the one it has. */
 export interface StatesData {
   t: 'states';
   states: ChatState[];
   full: boolean;
+  rev: number;
+}
+
+/** GET STATES_PATH: each machine's states as the core last read them (full,
+ * with the rev of the last message they hold), by machine; a machine whose
+ * chat host the core has not read since it started is not there. */
+export interface StatesSnapshot {
+  machines: Record<string, StatesData>;
 }

@@ -76,6 +76,15 @@ const (
 	// record of the session (params {lossy}: parts may differ or be
 	// missing).
 	NoticeImported = "imported"
+	// NoticeUntrustedFolder: the agent started without the project's own
+	// settings (its hooks, MCP servers and instructions): neither the
+	// agent nor the machine's list (chatproto.OpTrust) trusts the folder
+	// (params {cwd}).
+	NoticeUntrustedFolder = "untrusted_folder"
+	// NoticeFullAccessOff: the chat had full access, which the machine's
+	// settings no longer allow; its agent started in the default mode
+	// (params {mode}: the mode it had).
+	NoticeFullAccessOff = "full_access_off"
 )
 
 // NoticeMethod is the method of a notice: an ACP extension method,

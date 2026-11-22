@@ -87,18 +87,92 @@ func TestHistoryImport(t *testing.T) {
 	}
 }
 
-// A file of another version holds nothing to import; it goes.
+// A file of another version, or that does not parse, is not this
+// version's to import: nothing is imported, the file stays and the import
+// is not recorded (a valid file there later is imported).
 func TestHistoryImportOtherVersion(t *testing.T) {
-	dir := t.TempDir()
-	p := historyPlugin(t, dir, time.Unix(1_800_000_000, 0))
-	path := p.historyPath()
-	os.WriteFile(path, []byte(`{"version":2,"windows":{"claude:acc-1":{"weekly|":[[1800000000,15]]}}}`), 0o600)
-	p.loadHistory(path)
-	if len(p.history.Windows) != 0 || len(p.Snapshot().Accounts) != 0 {
-		t.Errorf("imported %+v", p.history.Windows)
+	for _, content := range []string{`{"version":2,"windows":{"claude:acc-1":{"weekly|":[[1800000000,15]]}}}`, `{"version":1,"windows":`} {
+		dir := t.TempDir()
+		p := historyPlugin(t, dir, time.Unix(1_800_000_000, 0))
+		path := p.historyPath()
+		os.WriteFile(path, []byte(content), 0o600)
+		p.loadHistory(path)
+		if len(p.history.Windows) != 0 || len(p.Snapshot().Accounts) != 0 {
+			t.Errorf("imported %+v", p.history.Windows)
+		}
+		if b, err := os.ReadFile(path); err != nil || string(b) != content {
+			t.Fatalf("the file went or changed: %q %v", b, err)
+		}
+		os.WriteFile(path, []byte(legacyHistory), 0o600)
+		q := historyPlugin(t, dir, time.Unix(1_800_000_000, 0))
+		q.loadHistory(path)
+		if len(q.Snapshot().Accounts) != 1 {
+			t.Errorf("a valid file afterwards was not imported")
+		}
 	}
-	if _, err := os.Lstat(path); err == nil {
-		t.Error("the file stayed")
+}
+
+// A save before the history was read back (the read failed) does not
+// remove what it did not read: it reads it first, and writes nothing while
+// it cannot; once read, what was recorded meanwhile joins it.
+func TestHistorySaveAfterAFailedRead(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(1_800_000_000, 0)
+	p := historyPlugin(t, dir, now)
+	path := p.historyPath()
+	os.WriteFile(path, []byte(legacyHistory), 0o600)
+	p.loadHistory(path)
+	dbFile := plugin.CoreDBFile(filepath.Join(dir, "settings-dev.json"))
+	// The database cannot be opened: a directory takes its name.
+	if err := os.Rename(dbFile, dbFile+".away"); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(dbFile + "-wal")
+	os.Remove(dbFile + "-shm")
+	if err := os.Mkdir(dbFile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	q := historyPlugin(t, dir, now)
+	q.loadHistory(path)
+	q.mu.Lock()
+	q.history.Windows["claude:acc-2"] = map[string][][2]float64{"session|": {{1800000100, 5}}}
+	q.mu.Unlock()
+	q.save() // cannot read: writes nothing
+	os.Remove(dbFile)
+	if err := os.Rename(dbFile+".away", dbFile); err != nil {
+		t.Fatal(err)
+	}
+	if w, a, al := historyRowsIn(t, dir); w != 1 || a != 1 || al != 1 {
+		t.Fatalf("rows while unread %d %d %d", w, a, al)
+	}
+	q.save()
+	if w, a, al := historyRowsIn(t, dir); w != 2 || a != 1 || al != 1 {
+		t.Fatalf("rows %d %d %d", w, a, al)
+	}
+	if pts := q.history.Windows["claude:acc-1"]["weekly|"]; len(pts) != 2 || len(q.Snapshot().Accounts) != 1 {
+		t.Errorf("read back into memory: %v, %d accounts", pts, len(q.Snapshot().Accounts))
+	}
+}
+
+// What memory recorded before the read joins what was kept: a window's
+// earlier points come first, alerts fired meanwhile stay.
+func TestHistoryMerge(t *testing.T) {
+	h := newHistory()
+	h.Windows["a"] = map[string][][2]float64{"w": {{30, 3}, {40, 4}}}
+	h.Alerts = map[string]alertRecord{"k1": {End: 9}}
+	s := newHistory()
+	s.Windows["a"] = map[string][][2]float64{"w": {{10, 1}, {20, 2}, {30, 2}}, "v": {{5, 1}}}
+	s.Windows["b"] = map[string][][2]float64{"w": {{1, 1}}}
+	s.Alerts = map[string]alertRecord{"k1": {End: 1}, "k2": {End: 2}}
+	h.merge(s)
+	if got := h.Windows["a"]["w"]; len(got) != 4 || got[0][0] != 10 || got[2] != [2]float64{30, 3} {
+		t.Errorf("points %v", got)
+	}
+	if len(h.Windows["a"]["v"]) != 1 || len(h.Windows["b"]["w"]) != 1 {
+		t.Errorf("windows %v", h.Windows)
+	}
+	if h.Alerts["k1"].End != 9 || h.Alerts["k2"].End != 2 {
+		t.Errorf("alerts %v", h.Alerts)
 	}
 }
 

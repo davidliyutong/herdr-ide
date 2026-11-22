@@ -33,11 +33,14 @@ type process struct {
 
 	exited  chan struct{} // closed once the process was waited for
 	waitErr error         // its exit, valid once exited is closed
+	// swept is closed once what the app-server left running in its group
+	// was ended, after its exit (whatever made it exit).
+	swept   chan struct{}
 	endOnce sync.Once
 }
 
 func newProcess(pid int, stdin io.WriteCloser, stdout io.ReadCloser) *process {
-	return &process{pid: pid, stdin: stdin, stdout: stdout, tail: &ring{max: stderrKeep}, exited: make(chan struct{})}
+	return &process{pid: pid, stdin: stdin, stdout: stdout, tail: &ring{max: stderrKeep}, exited: make(chan struct{}), swept: make(chan struct{})}
 }
 
 // ring keeps the last max bytes written to it.

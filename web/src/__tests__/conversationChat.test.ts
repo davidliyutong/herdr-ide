@@ -28,6 +28,7 @@ import {
   reduce,
   reduceAll,
   take,
+  toolItemId,
   waitingItems,
   withoutLive,
   type ChatEvent,
@@ -69,9 +70,10 @@ const toolEv = (seq: number | undefined, u: Record<string, unknown>, extra: Part
   update: u as ChatEvent['update'],
   ...extra,
 });
-const tool = (c: Conversation, id: string) => itemById(c, id) as ToolItem;
+const tool = (c: Conversation, id: string) => itemById(c, toolItemId(id)) as ToolItem;
 const msg = (c: Conversation, id: string) => itemById(c, id) as MessageItem;
 const ids = (c: Conversation) => c.items.map((i) => i.id);
+const blocksOf = (b: { type: string; text?: string }[]) => b.map((x) => x.text ?? '').join('');
 
 describe('live increments', () => {
   it('add to their item until its stored event gives it whole', () => {
@@ -130,7 +132,7 @@ describe('live increments', () => {
       toolEv(2, { sessionUpdate: 'tool_call', toolCallId: 't', title: 'Run', kind: 'execute' }),
       storedSay(3, 'm:2', 'second', { update: { ...chunk('second'), messageId: 'm' } as ChatEvent['update'] }),
     ]);
-    expect(c.items.map((i) => (i.kind === 'message' ? i.content[0] : i.id))).toEqual([text('first'), 't', text('second')]);
+    expect(c.items.map((i) => (i.kind === 'message' ? i.content[0] : i.id))).toEqual([text('first'), 'tool:t', text('second')]);
   });
 
   it('add a command’s output to its call; its stored state comes back on a stored event', () => {
@@ -152,12 +154,12 @@ describe('live increments', () => {
       ),
     ]);
     expect(tool(c, 't1').content).toEqual([{ type: 'content', content: text('a\nb\n') }]);
-    expect(c.live?.t1).toMatchObject({ id: 't1', status: 'in_progress', content: [] });
+    expect(c.live?.['tool:t1']).toMatchObject({ id: 'tool:t1', status: 'in_progress', content: [] });
     // A stored change of the call without an item id: the call and its
     // stored state take it.
     c = reduce(c, toolEv(2, { sessionUpdate: 'tool_call_update', toolCallId: 't1', title: 'List files' }));
     expect(tool(c, 't1')).toMatchObject({ title: 'List files', content: [{ type: 'content', content: text('a\nb\n') }] });
-    expect(c.live?.t1).toMatchObject({ title: 'List files', content: [] });
+    expect(c.live?.['tool:t1']).toMatchObject({ title: 'List files', content: [] });
     // Its whole state: on the stored one.
     c = reduce(
       c,
@@ -186,9 +188,9 @@ describe('live increments', () => {
       toolEv(undefined, { sessionUpdate: 'tool_call_update', toolCallId: 't1', content: [{ type: 'content', content: text('out') }] }),
       storedSay(4, 'm0:0', 'a whole one'),
     ]);
-    expect(ids(c)).toEqual(['message:user:1', 't1', 'message:agent:item:m1:0', 'message:agent:item:m0:0']);
+    expect(ids(c)).toEqual(['message:user:1', 'tool:t1', 'message:agent:item:m1:0', 'message:agent:item:m0:0']);
     const r = reduce(c, { t: 'reattach' });
-    expect(ids(r)).toEqual(['message:user:1', 't1', 'message:agent:item:m0:0']);
+    expect(ids(r)).toEqual(['message:user:1', 'tool:t1', 'message:agent:item:m0:0']);
     expect(tool(r, 't1').content).toEqual([]);
     expect(itemById(r, 'message:agent:item:m0:0')).toBe(r.items[2]);
     expect(r.live).toBeUndefined();
@@ -208,6 +210,103 @@ describe('live increments', () => {
     const d = take(c, [liveSay('m:1', 'live'), storedSay(5, 'e:0', 'earlier')]);
     expect(ids(d)).toEqual(['message:agent:item:e:0', 'message:agent:item:m:0', 'message:agent:item:m:1']);
     expect(prepend(c, [liveSay('x:0', 'no')])).toBe(c);
+  });
+
+  it('stay as they are when the turn ends without their stored state (cancelled while streaming), a subagent’s too', () => {
+    const id = 'message:agent:item:m1:0';
+    const streaming: SourceEvent[] = [
+      { seq: 1, t: 'turn', state: 'start' },
+      toolEv(
+        2,
+        { sessionUpdate: 'tool_call', toolCallId: 'task1', title: 'Explore', kind: 'think', status: 'in_progress' },
+        { item: 'task1' },
+      ),
+      { t: 'update', live: true, parent: 'task1', item: 'sm:0', update: chunk('look') as ChatEvent['update'] },
+      liveSay('m1:0', 'half a sen'),
+    ];
+    for (const end of [
+      { seq: 3, t: 'turn', state: 'end', stopReason: 'cancelled' },
+      { seq: 3, t: 'turn', state: 'error', error: { code: 'failed', message: 'gone' } },
+    ] as ChatEvent[]) {
+      const c = run([...streaming, end]);
+      expect(msg(c, id)).toEqual({ kind: 'message', id, role: 'agent', content: [text('half a sen')] });
+      expect(c.live).toBeUndefined();
+      const sub = tool(c, 'task1').sub!;
+      expect(sub.live).toBeUndefined();
+      expect(msg(sub, 'message:agent:item:sm:0')).not.toHaveProperty('live');
+      // No stored state will come: a reattach keeps them.
+      const r = reduce(c, { t: 'reattach' });
+      expect(r).toBe(c);
+      // One at a time, the same.
+      const one = [...streaming, end].reduce(reduce, emptyConversation());
+      expect(one.items).toEqual(c.items);
+    }
+  });
+
+  it('end with a stored notice under their item (the host left the item out): it is the item’s stored state', () => {
+    const skipped = (seq: number, item: string, parent?: string): ChatEvent => ({
+      seq,
+      t: 'notice',
+      item,
+      ...(parent ? { parent } : {}),
+      method: NOTICES.skipped,
+      params: { bytes: 2_000_000, t: 'update' },
+    });
+    // Only live: the notice takes its place, for good.
+    let c = run([{ seq: 1, t: 'turn', state: 'start' }, liveSay('m1:0', 'a very long'), skipped(2, 'm1:0'), storedSay(3, 'm2:0', 'next')]);
+    expect(ids(c)).toEqual(['notice:2', 'message:agent:item:m2:0']);
+    expect(itemById(c, 'notice:2')).toMatchObject({ kind: 'notice', method: NOTICES.skipped, params: { bytes: 2_000_000 } });
+    expect(Object.keys(c.live ?? {})).toEqual([]);
+    expect(ids(reduce(c, { t: 'reattach' }))).toEqual(['notice:2', 'message:agent:item:m2:0']);
+    // A call with a stored state goes back to it; the notice follows.
+    c = run([
+      toolEv(1, { sessionUpdate: 'tool_call', toolCallId: 't1', title: 'Run', kind: 'execute', status: 'in_progress' }, { item: 't1' }),
+      toolEv(
+        undefined,
+        { sessionUpdate: 'tool_call_update', toolCallId: 't1', content: [{ type: 'content', content: text('out') }] },
+        { item: 't1' },
+      ),
+      skipped(2, 't1'),
+    ]);
+    expect(ids(c)).toEqual(['tool:t1', 'notice:2']);
+    expect(tool(c, 't1')).toMatchObject({ title: 'Run', status: 'in_progress', content: [] });
+    expect(Object.keys(c.live ?? {})).toEqual([]);
+    // A subagent's: in its conversation.
+    c = run([
+      toolEv(1, { sessionUpdate: 'tool_call', toolCallId: 'task1', title: 'Explore', kind: 'think' }),
+      { t: 'update', live: true, parent: 'task1', item: 'sm:0', update: chunk('lo') as ChatEvent['update'] },
+      skipped(2, 'sm:0', 'task1'),
+    ]);
+    expect(ids(tool(c, 'task1').sub!)).toEqual(['notice:2']);
+    // Under an item not shown: after the items.
+    expect(ids(run([storedSay(1, 'a:0', 'x'), skipped(2, 'zz')]))).toEqual(['message:agent:item:a:0', 'notice:2']);
+  });
+
+  it('after a reattach or a reset in the same batch start a new overlay', () => {
+    const c = run([liveSay('m1:0', 'a'), { t: 'reattach' }, liveSay('m2:0', 'b'), { t: 'reset' }, liveSay('m3:0', 'c')]);
+    expect(ids(c)).toEqual(['message:agent:item:m3:0']);
+    expect(c.live).toEqual({ 'message:agent:item:m3:0': null });
+  });
+
+  it('of an item an earlier page has: a reattach goes back to what the page gave it', () => {
+    const later = run([
+      toolEv(
+        undefined,
+        { sessionUpdate: 'tool_call_update', toolCallId: 't1', content: [{ type: 'content', content: text('out') }] },
+        { item: 't1' },
+      ),
+      liveSay('m:0', ', wor'),
+    ]);
+    const c = prepend(later, [
+      toolEv(5, { sessionUpdate: 'tool_call', toolCallId: 't1', title: 'Run', kind: 'execute', status: 'in_progress' }, { item: 't1' }),
+      storedSay(6, 'm:0', 'Hello'),
+    ]);
+    expect(tool(c, 't1')).toMatchObject({ title: 'Run', content: [{ type: 'content', content: text('out') }] });
+    expect(msg(c, 'message:agent:item:m:0').content).toEqual([text('Hello, wor')]);
+    const r = reduce(c, { t: 'reattach' });
+    expect(ids(r)).toEqual(['tool:t1', 'message:agent:item:m:0']);
+    expect(tool(r, 't1')).toMatchObject({ title: 'Run', status: 'in_progress', content: [] });
+    expect(msg(r, 'message:agent:item:m:0').content).toEqual([text('Hello')]);
   });
 
   it('come between stored events, which are taken once by their seq', () => {
@@ -243,14 +342,14 @@ describe('a subagent’s items', () => {
 
   it('go into the conversation of the call that runs it, the same one at a time or as a batch', () => {
     const c = run([agent, ...sub, toolEv(4, { sessionUpdate: 'tool_call_update', toolCallId: 'task1', status: 'completed' })]);
-    expect(ids(c)).toEqual(['task1']);
+    expect(ids(c)).toEqual(['tool:task1']);
     const t = tool(c, 'task1');
     expect(t.status).toBe('completed');
-    expect(t.sub && ids(t.sub)).toEqual(['s1', 'message:agent:item:sm:0']);
+    expect(t.sub && ids(t.sub)).toEqual(['tool:s1', 'message:agent:item:sm:0']);
     const one = [agent, ...sub].reduce(reduce, emptyConversation());
     expect(tool(one, 'task1').sub?.items).toEqual(tool(c, 'task1').sub?.items);
     // The main agent's items stay apart.
-    expect(itemById(c, 's1')).toBeUndefined();
+    expect(tool(c, 's1')).toBeUndefined();
   });
 
   it('make their call’s item when it is not there yet, and go deeper for a subagent’s subagent', () => {
@@ -258,8 +357,8 @@ describe('a subagent’s items', () => {
       { seq: 1, t: 'update', parent: 'task9', update: { sessionUpdate: 'tool_call', toolCallId: 'inner', title: 'Task', kind: 'think' } },
       { seq: 2, t: 'update', parent: 'inner', update: chunk('deep') as ChatEvent['update'] },
     ]);
-    expect(ids(c)).toEqual(['task9']);
-    const inner = itemById(tool(c, 'task9').sub!, 'inner') as ToolItem;
+    expect(ids(c)).toEqual(['tool:task9']);
+    const inner = tool(tool(c, 'task9').sub!, 'inner');
     expect(inner.sub?.items.map((i) => (i as MessageItem).content[0])).toEqual([text('deep')]);
     expect(tool(c, 'task9')).toMatchObject({ toolKind: 'think', status: 'in_progress' });
   });
@@ -274,14 +373,14 @@ describe('a subagent’s items', () => {
     expect(tool(c, 'task1').sub?.items).toHaveLength(3);
     const r = reduce(c, { t: 'reattach' });
     expect(tool(r, 'task1').content).toEqual([]);
-    expect(ids(tool(r, 'task1').sub!)).toEqual(['s1', 'message:agent:item:sm:0']);
+    expect(ids(tool(r, 'task1').sub!)).toEqual(['tool:s1', 'message:agent:item:sm:0']);
   });
 
   it('of an earlier page join those of a later one', () => {
     const later = run([sub[1]]);
     const c = prepend(later, [agent, sub[0]]);
-    expect(ids(c)).toEqual(['task1']);
-    expect(ids(tool(c, 'task1').sub!)).toEqual(['s1', 'message:agent:item:sm:0']);
+    expect(ids(c)).toEqual(['tool:task1']);
+    expect(ids(tool(c, 'task1').sub!)).toEqual(['tool:s1', 'message:agent:item:sm:0']);
   });
 
   it('ask for permissions in the main list, naming the subagent', () => {
@@ -289,7 +388,7 @@ describe('a subagent’s items', () => {
       agent,
       { seq: 2, t: 'permission', id: 'p1', parent: 'task1', kind: 'command', toolCall: { toolCallId: 's2', title: 'Run' }, options: [] },
     ]);
-    expect(ids(c)).toEqual(['task1', 'permission:p1']);
+    expect(ids(c)).toEqual(['tool:task1', 'permission:p1']);
     expect((c.items[1] as PermissionItem).parent).toBe('task1');
   });
 });
@@ -315,7 +414,7 @@ describe('permissions', () => {
     expect(p).toMatchObject({
       request: 'p1',
       permission: 'command',
-      call: { id: 'call-p1', title: 'List files', rawInput: { command: 'ls -la', cwd: '/w' } },
+      call: { id: 'tool:call-p1', title: 'List files', rawInput: { command: 'ls -la', cwd: '/w' } },
     });
     expect(p.options.map((o) => o.optionId)).toEqual([OPTION_ALLOW_ONCE, OPTION_ALLOW_SESSION, OPTION_REJECT_ONCE]);
     expect(waitingItems(c)).toEqual(['permission:p1']);
@@ -351,7 +450,7 @@ describe('permissions', () => {
     ]);
     const p = itemById(c, 'permission:p1') as PermissionItem;
     expect(p.permission).toBe('other');
-    expect(p.call).toMatchObject({ id: 'p1', title: '', content: [] });
+    expect(p.call).toMatchObject({ id: 'tool:p1', title: '', content: [] });
     expect(p.options).toEqual([
       { optionId: 'reject_x', name: '', kind: 'reject_once' },
       { optionId: 'yes', name: '', kind: 'allow_once' },
@@ -415,6 +514,30 @@ describe('questions', () => {
     // No question that holds: none shown.
     expect(run([q(1, 'q3', [{ id: 'a' }])]).unknown).toBe(1);
   });
+
+  it('are named by ids no object has as members, each once', () => {
+    let c = run([
+      q(1, 'q1', [
+        { id: '__proto__', question: 'A?' },
+        { id: 'constructor', question: 'B?' },
+        { id: 'toString', question: 'C?' },
+        { id: 'ok', question: 'D?' },
+        { id: 'ok', question: 'D again?' },
+      ]),
+    ]);
+    expect((itemById(c, 'question:q1') as QuestionItem).questions).toEqual([{ id: 'ok', question: 'D?' }]);
+    c = reduce(c, {
+      seq: 2,
+      t: 'question_done',
+      id: 'q1',
+      answers: JSON.parse('{"__proto__":["x"],"constructor":["y"],"ok":["z"]}'),
+      by: 'user',
+    });
+    const answers = (itemById(c, 'question:q1') as QuestionItem).answers!;
+    expect(Object.keys(answers)).toEqual(['ok']);
+    expect(Object.getPrototypeOf(answers)).toBeNull();
+    expect(run([q(1, 'q2', [{ id: '__proto__', question: 'A?' }])]).unknown).toBe(1);
+  });
 });
 
 describe('queued messages', () => {
@@ -458,6 +581,29 @@ describe('queued messages', () => {
     c = reduceAll(c, [queued(11, 'q5', 'queued', { content: [text('y')] }), queued(12, 'q5', 'taken')]);
     expect(ids(c).at(-1)).toBe('message:user:q:q5');
     expect(run([queued(1, '', 'queued'), queued(2, 'q', 'bogus')]).unknown).toBe(2);
+  });
+
+  it('of an earlier page still wait unless a later one took or withdrew them', () => {
+    const later = run([
+      queued(10, 'q3', 'queued', { content: [text('three')] }),
+      queued(11, 'q1', 'taken', { clientId: 'c1', content: [text('one')] }),
+      queued(12, 'q2', 'cancelled'),
+    ]);
+    expect(later.dequeued).toEqual(['q1', 'q2']);
+    const c = prepend(later, [
+      queued(1, 'q0', 'queued', { content: [text('zero')] }),
+      queued(2, 'q1', 'queued', { clientId: 'c1', content: [text('one')] }),
+      queued(3, 'q2', 'queued', { content: [text('two')] }),
+      queued(4, 'q3', 'queued', { content: [text('3')] }),
+    ]);
+    expect(c.queued?.map((x) => [x.message, blocksOf(x.content)])).toEqual([
+      ['q0', 'zero'],
+      ['q3', 'three'],
+    ]);
+    expect(ids(c)).toEqual(['message:user:c:c1']);
+    // A page before that one: what the later pages took stays taken.
+    const d = prepend(c, [queued(0, 'q1', 'queued', { clientId: 'c1', content: [text('one')] })]);
+    expect(d.queued?.map((x) => x.message)).toEqual(['q0', 'q3']);
   });
 });
 
@@ -610,12 +756,27 @@ describe('what the chat states', () => {
       expect(hasMessage(`conversation.notice.${k}`), k).toBe(true);
   });
 
+  it('as notices: a folder the agent started in without its project settings, full access turned off', () => {
+    const c = run([
+      { seq: 1, t: 'notice', method: CHAT_NOTICES.untrustedFolder, params: { cwd: '/w' } },
+      { seq: 2, t: 'notice', method: CHAT_NOTICES.fullAccessOff, params: { mode: 'full' } },
+    ]);
+    expect(c.items).toEqual([
+      { kind: 'notice', id: 'notice:1', method: CHAT_NOTICES.untrustedFolder, params: { cwd: '/w' } },
+      { kind: 'notice', id: 'notice:2', method: CHAT_NOTICES.fullAccessOff, params: { mode: 'full' } },
+    ]);
+    expect(c.unknown).toBe(0);
+    for (const k of ['untrustedFolder', 'trust', 'trusted', 'fullAccessOff']) expect(hasMessage(`conversation.notice.${k}`), k).toBe(true);
+  });
+
   it('as the notices’ names of the chat host (agentproto.Notice*)', () => {
     expect(CHAT_NOTICES).toEqual({
       compacting: `_${APP_SLUG}/compacting`,
       handedOff: `_${APP_SLUG}/handed_off`,
       restarted: `_${APP_SLUG}/restarted`,
       imported: `_${APP_SLUG}/imported`,
+      untrustedFolder: `_${APP_SLUG}/untrusted_folder`,
+      fullAccessOff: `_${APP_SLUG}/full_access_off`,
     });
     expect([NOTICES.compacted, NOTICES.command, NOTICES.error]).toEqual(['compacted', 'command', 'error'].map((n) => `_${APP_SLUG}/${n}`));
   });

@@ -46,6 +46,9 @@ const (
 	// MaxImage is the most bytes an image block of a prompt may carry, its
 	// data decoded.
 	MaxImage = 5 << 20
+	// MaxStderr is the most bytes of an agent's standard error an Error
+	// carries (Error.Stderr): its end.
+	MaxStderr = 2 << 10
 	// MaxEvent is the most bytes of a stored event's JSON. The host cuts
 	// what is longer: a tool call's output to its first and last
 	// ToolOutputEnd bytes, anything else to a notice that it was left out.
@@ -113,6 +116,15 @@ const (
 	// StateWaiting; otherwise the host ends every agent process, which the
 	// next host resumes by session id at the next prompt.
 	OpShutdown = "shutdown"
+	// OpTrust trusts the directory Request.Cwd, and every directory below
+	// it, on this machine: an agent started there from then on loads the
+	// project's own settings (its hooks, MCP servers and instructions) as
+	// it does in a folder it trusts itself. Without that trust, of the
+	// agent's own or of this list, an adapter that can starts the agent
+	// without them and tells so (the notice untrusted_folder). The host
+	// keeps the list in its database; an agent that runs already takes it
+	// at its next start.
+	OpTrust = "trust"
 )
 
 // The operations of a Command. Each is answered by an EventAck.
@@ -181,8 +193,9 @@ type Request struct {
 	Kinds []string `json:"kinds,omitempty"`
 	// Kind is the agent of OpNew and OpSessions.
 	Kind string `json:"kind,omitempty"`
-	// Cwd is the working directory of OpNew's chat, an absolute path, and
-	// the directory whose sessions OpSessions lists.
+	// Cwd is the working directory of OpNew's chat, an absolute path, the
+	// directory whose sessions OpSessions lists, and the one OpTrust
+	// trusts.
 	Cwd string `json:"cwd,omitempty"`
 	// Resume is the agent's id of a session OpNew takes up instead of
 	// making one.
@@ -197,6 +210,11 @@ type Request struct {
 	// From is the last sequence number an attaching client has: the stored
 	// events after it are sent.
 	From uint64 `json:"from,omitempty"`
+	// NoCatchUp: OpAttach starts nothing on the machine. An attach brings
+	// what a handed off chat's session did in a terminal into its log,
+	// which may run the agent's program to ask; a reader who may not
+	// change the chat attaches without it.
+	NoCatchUp bool `json:"noCatchUp,omitempty"`
 	// Seq is what OpSeen tells the user saw.
 	Seq uint64 `json:"seq,omitempty"`
 	// Cursor is the NextCursor of the page before, for OpSessions.
@@ -436,6 +454,10 @@ type ConfigValue struct {
 	Value       string `json:"value"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	// Full marks the value of a mode option that gives the agent full
+	// access (ModeFull, an agent's yolo): the host refuses it while
+	// HostSettings.AllowFull is off.
+	Full bool `json:"full,omitempty"`
 }
 
 // SlashCommand is a command the agent takes as a prompt "/<name> ...".
@@ -513,6 +535,11 @@ type HostSettings struct {
 	// DefaultMode is the permission mode of a chat whose Options name none
 	// (Modes).
 	DefaultMode string `json:"defaultMode,omitempty"`
+	// AllowFull allows full access (ModeFull, a ConfigValue.Full): without
+	// it the host refuses a chat or a configuration that asks for it, and
+	// a chat that had it starts its agent again in ModeDefault (the notice
+	// full_access_off).
+	AllowFull bool `json:"allowFull,omitempty"`
 }
 
 // DefaultHostSettings are the settings of a host nobody configured.
@@ -522,7 +549,7 @@ const mib = 1 << 20
 
 // Clamp returns s with each member within its bounds: a zero member its
 // default, one out of its bounds the nearest bound, and a DefaultMode
-// that is no mode ModeDefault.
+// that is no mode, or ModeFull without AllowFull, ModeDefault.
 func (s HostSettings) Clamp() HostSettings {
 	s.IdleStopMinutes = clamp(s.IdleStopMinutes, IdleStopMinutesDefault, IdleStopMinutesMin, IdleStopMinutesMax)
 	s.MaxLive = clamp(s.MaxLive, MaxLiveDefault, MaxLiveMin, MaxLiveMax)
@@ -530,7 +557,7 @@ func (s HostSettings) Clamp() HostSettings {
 	s.RetentionDays = clamp(s.RetentionDays, RetentionDaysDefault, RetentionDaysMin, RetentionDaysMax)
 	s.MaxTotalBytes = clamp(s.MaxTotalBytes, MaxTotalMBDefault*mib, MaxTotalMBMin*mib, MaxTotalMBMax*mib)
 	s.MaxChatBytes = clamp(s.MaxChatBytes, MaxChatMBDefault*mib, MaxChatMBMin*mib, MaxChatMBMax*mib)
-	if !slices.Contains(Modes, s.DefaultMode) {
+	if !slices.Contains(Modes, s.DefaultMode) || (s.DefaultMode == ModeFull && !s.AllowFull) {
 		s.DefaultMode = ModeDefault
 	}
 	return s
@@ -830,6 +857,9 @@ const (
 	// CodeSleeping: the chat has no agent process (StateSleeping,
 	// StateClosed) and the command needs one; a prompt resumes it.
 	CodeSleeping = "sleeping"
+	// CodeNotAllowed: the machine's settings do not allow it: full access
+	// while HostSettings.AllowFull is off.
+	CodeNotAllowed = "not_allowed"
 )
 
 // Error is why a request, a command, a turn or a chat failed. Message is
@@ -837,12 +867,46 @@ const (
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
-	// Stderr is the end of what the agent wrote to its standard error, for
-	// a chat that failed.
+	// Stderr is the end of what the agent wrote to its standard error, at
+	// most MaxStderr bytes, for a chat or a turn that failed. It may tell
+	// what the agent's environment holds: the host never stores it. It is
+	// on the chat's Error while the host runs, and on the events that carry
+	// an Error (EventState, EventTurn) and the Chat of an EventInfo as they
+	// are sent live; replayed, they have none. A client that shows a chat
+	// to a reader who may not change it leaves it out (Redacted).
 	Stderr string `json:"stderr,omitempty"`
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
+
+// WithoutStderr is e without Stderr: e itself when it has none, nil for
+// nil.
+func (e *Error) WithoutStderr() *Error {
+	if e == nil || e.Stderr == "" {
+		return e
+	}
+	c := *e
+	c.Stderr = ""
+	return &c
+}
+
+// Redacted is the chat without what only a reader who may change it sees:
+// its Error's Stderr.
+func (c Chat) Redacted() Chat {
+	c.Error = c.Error.WithoutStderr()
+	return c
+}
+
+// Redacted is the event without what only a reader who may change the
+// chat sees: the Stderr of its Error and of its Chat's.
+func (ev Event) Redacted() Event {
+	ev.Error = ev.Error.WithoutStderr()
+	if ev.Chat != nil && ev.Chat.Error != nil && ev.Chat.Error.Stderr != "" {
+		c := ev.Chat.Redacted()
+		ev.Chat = &c
+	}
+	return ev
+}
 
 // ErrTooLarge is ReadLine's error for a line longer than MaxLine.
 var ErrTooLarge = errors.New("chatproto: line longer than MaxLine (16 MiB)")

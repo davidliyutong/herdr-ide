@@ -12,8 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -26,16 +28,19 @@ import (
 // answered.
 type proc struct {
 	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	out   io.ReadCloser
+	stdin *os.File // the write end
+	out   *os.File // the read end
+	errR  *os.File // the read end of its standard error
 	// wmu orders the lines written to stdin.
 	wmu sync.Mutex
 	// stderr keeps the end of what the program wrote to its standard error.
 	stderr *tail
 	// exited is closed once the program was waited for; waitErr is why it
-	// ended.
+	// ended. done is closed after that, once its process group is gone too
+	// (sweep) and its standard error was read to its end.
 	exited  chan struct{}
 	waitErr error
+	done    chan struct{}
 	// prefix makes this run's control request ids its own.
 	prefix string
 	// closeGrace and killGrace are the package's at the run's start.
@@ -79,39 +84,136 @@ func (t *tail) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// String is what the tail holds, as text: a character cut at its start is
+// left out, bytes that are no UTF-8 become U+FFFD.
 func (t *tail) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return string(t.buf)
+	b := t.buf
+	for i := 0; i < len(b) && i < 3 && b[i]&0xC0 == 0x80; i++ {
+		b = b[1:]
+	}
+	return strings.ToValidUTF8(string(b), "\uFFFD")
 }
 
+// The waits of a run's end, besides closeGrace and killGrace (variables:
+// tests shorten them).
+var (
+	// groupPoll is how often the end of a run looks whether its process
+	// group is gone.
+	groupPoll = 20 * time.Millisecond
+	// drainWait is how long the rest of the program's output and standard
+	// error is read once its group is gone: a program that left the group
+	// may hold the pipes open.
+	drainWait = time.Second
+)
+
 // startProc starts argv in dir with env as its whole environment, in a
-// process group of its own.
+// process group of its own. Its pipes are files: a command it left
+// running that holds them open does not hold up its end (exec would copy
+// a writer's standard error until every holder closed it).
 func startProc(argv, env []string, dir string) (*proc, error) {
+	var files []*os.File
+	closeAll := func() {
+		for _, f := range files {
+			f.Close()
+		}
+	}
+	pipe := func() (r, w *os.File, err error) {
+		if r, w, err = os.Pipe(); err == nil {
+			files = append(files, r, w)
+		}
+		return
+	}
+	inR, inW, err := pipe()
+	if err != nil {
+		return nil, err
+	}
+	outR, outW, err := pipe()
+	if err != nil {
+		closeAll()
+		return nil, err
+	}
+	errR, errW, err := pipe()
+	if err != nil {
+		closeAll()
+		return nil, err
+	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env, cmd.Dir = env, dir
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = inR, outW, errW
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	p := &proc{cmd: cmd, stderr: &tail{max: maxStderr}, exited: make(chan struct{}), pending: map[string]*call{}, incoming: map[string]context.CancelFunc{},
+	// No pipe of exec's to wait for; should there be one, Wait does not
+	// wait for its other holders longer than this.
+	cmd.WaitDelay = killGrace
+	if err := cmd.Start(); err != nil {
+		closeAll()
+		return nil, err
+	}
+	inR.Close()
+	outW.Close()
+	errW.Close()
+	p := &proc{cmd: cmd, stdin: inW, out: outR, errR: errR, stderr: &tail{max: maxStderr},
+		exited: make(chan struct{}), done: make(chan struct{}),
+		pending: map[string]*call{}, incoming: map[string]context.CancelFunc{},
 		closeGrace: closeGrace, killGrace: killGrace}
-	cmd.Stderr = p.stderr
-	var err error
-	if p.stdin, err = cmd.StdinPipe(); err != nil {
-		return nil, err
-	}
-	if p.out, err = cmd.StdoutPipe(); err != nil {
-		return nil, err
-	}
 	var b [4]byte
 	rand.Read(b[:])
 	p.prefix = "req_" + hex.EncodeToString(b[:]) + "_"
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
+	drained := make(chan struct{})
+	go func() {
+		io.Copy(p.stderr, errR)
+		close(drained)
+	}()
 	go func() {
 		p.waitErr = cmd.Wait()
 		close(p.exited)
+		// The program is gone: what it left running in its group (MCP
+		// servers, hooks, commands) goes too.
+		p.sweep()
+		if !waitFor(drained, drainWait) {
+			errR.Close()
+			<-drained
+		}
+		errR.Close()
+		p.stdin.Close()
+		close(p.done)
+		// The output of a program that left the group and holds the pipe
+		// open ends too, once what came before was read.
+		time.AfterFunc(drainWait, func() { outR.Close() })
 	}()
 	return p, nil
+}
+
+// sweep ends what is left of the run's process group once the program
+// itself exited: SIGTERM, then SIGKILL when a process of it is still there
+// killGrace later.
+func (p *proc) sweep() {
+	pgid := p.cmd.Process.Pid
+	alive := func() bool { return syscall.Kill(-pgid, 0) == nil }
+	if !alive() {
+		return
+	}
+	syscall.Kill(-pgid, syscall.SIGTERM)
+	deadline := time.Now().Add(p.killGrace)
+	for alive() && time.Now().Before(deadline) {
+		time.Sleep(groupPoll)
+	}
+	if alive() {
+		syscall.Kill(-pgid, syscall.SIGKILL)
+	}
+}
+
+// waitFor tells whether ch was closed within d.
+func waitFor(ch <-chan struct{}, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ch:
+		return true
+	case <-t.C:
+		return false
+	}
 }
 
 // reader is the program's standard output, a line at a time.
@@ -317,13 +419,14 @@ func (p *proc) answer(id string, resp any, err error) error {
 	return p.write(controlResponse{Type: "control_response", Response: body})
 }
 
-// signal sends sig to the program's process group.
+// signal sends sig to the program's process group, until the group is
+// gone (its id may be another's then).
 func (p *proc) signal(sig syscall.Signal) {
 	if p.cmd.Process == nil {
 		return
 	}
 	select {
-	case <-p.exited:
+	case <-p.done:
 		return
 	default:
 	}
@@ -332,8 +435,10 @@ func (p *proc) signal(sig syscall.Signal) {
 }
 
 // stop ends the program gracefully, once: its input is closed, then its
-// group gets SIGTERM after closeGrace and SIGKILL killGrace later. It
-// returns at once; exited is closed when the program is gone.
+// group gets SIGTERM after closeGrace and SIGKILL killGrace later (once
+// the program exited, what is left of its group goes as sweep has it). It
+// returns at once; done is closed when the program and its group are
+// gone.
 func (p *proc) stop() {
 	p.mu.Lock()
 	if p.stopping {
@@ -375,10 +480,27 @@ func (p *proc) exitError(code string) *chatproto.Error {
 	switch {
 	case errors.As(p.waitErr, &ee):
 		msg += ": " + ee.ProcessState.String()
-	case p.waitErr != nil:
+	case p.cmd.ProcessState != nil && !p.cmd.ProcessState.Success():
+		msg += ": " + p.cmd.ProcessState.String()
+	case p.waitErr != nil && !errors.Is(p.waitErr, exec.ErrWaitDelay):
 		msg += ": " + p.waitErr.Error()
 	}
 	return &chatproto.Error{Code: code, Message: msg, Stderr: p.stderr.String()}
+}
+
+// noSession is what Claude Code writes to its standard error when it is
+// to resume a session it does not have.
+const noSession = "No conversation found with session ID"
+
+// startError says why a run did not start: the program's end, as
+// CodeNotFound when it had no such session to resume.
+func (p *proc) startError(resume bool) *chatproto.Error {
+	e := p.exitError(chatproto.CodeStartFailed)
+	if resume && strings.Contains(e.Stderr, noSession) {
+		e.Code = chatproto.CodeNotFound
+		e.Message = "claude: no such session; " + e.Message
+	}
+	return e
 }
 
 // mustJSON is v in JSON, the characters of HTML not escaped; v is a value

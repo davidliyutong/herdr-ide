@@ -36,9 +36,11 @@ import {
   take,
   TOOL_KINDS,
   TOOL_STATUSES,
+  toolItemId,
   type ChatEvent,
   type Conversation,
   type MessageItem,
+  type PermissionItem,
   type PlanItem,
   type SessionUpdate,
   type SourceEvent,
@@ -267,7 +269,7 @@ const call = (seq: number, u: Record<string, unknown>) => update(seq, { sessionU
 const callUpdate = (seq: number, u: Record<string, unknown>) => update(seq, { sessionUpdate: 'tool_call_update', ...u });
 const planOf = (seq: number, ...entries: [string, string][]) =>
   update(seq, { sessionUpdate: 'plan', entries: entries.map(([content, status]) => ({ content, status, priority: 'medium' })) });
-const tool = (c: Conversation, id: string) => itemById(c, id) as ToolItem;
+const tool = (c: Conversation, id: string) => itemById(c, toolItemId(id)) as ToolItem;
 const texts = (c: Conversation) =>
   c.items.map((i) =>
     i.kind === 'message' || i.kind === 'thought'
@@ -275,7 +277,7 @@ const texts = (c: Conversation) =>
       : i.kind === 'plan'
         ? `plan:${i.entries.map((e) => e.content).join(',')}`
         : i.kind === 'tool'
-          ? `tool:${i.id}`
+          ? i.id
           : i.kind === 'notice'
             ? `notice:${i.method.split('/')[1]}`
             : `${i.kind}:${i.request}`,
@@ -347,10 +349,20 @@ describe('the conversation’s tool calls', () => {
     expect(tool(late, 'y')).toMatchObject({ title: 'Run', status: 'failed' });
   });
 
-  it('pass over calls without an id or with an id another item has', () => {
-    const c = run([say(1, 'x', 'm'), call(2, { title: 'no id' }), call(3, { toolCallId: 'message:agent:id:m', title: 'clash' })]);
-    expect(c.items).toHaveLength(1);
-    expect(c.unknown).toBe(2);
+  it('pass over calls without an id; a call whose id another item’s looks like is an item of its own', () => {
+    const c = run([
+      say(1, 'x', 'm'),
+      call(2, { title: 'no id' }),
+      call(3, { toolCallId: 'message:agent:id:m', title: 'clash' }),
+      call(4, { toolCallId: 'permission:p1', title: 'clash too' }),
+      { seq: 5, t: 'permission', id: 'p1', kind: 'command', toolCall: { toolCallId: 'c', title: 'Run' }, options: [] },
+      say(6, 'y', 'm'),
+    ]);
+    expect(c.items.map((i) => i.id)).toEqual(['message:agent:id:m', 'tool:message:agent:id:m', 'tool:permission:p1', 'permission:p1']);
+    expect(c.unknown).toBe(1);
+    expect(texts(c)[0]).toBe('agent:xy');
+    expect(tool(c, 'permission:p1').title).toBe('clash too');
+    expect((itemById(c, 'permission:p1') as PermissionItem).call).toMatchObject({ id: 'tool:c', title: 'Run' });
   });
 });
 
@@ -430,15 +442,15 @@ describe('the conversation’s events taken twice', () => {
     // Another branch from a: its own item at the index b gave u.
     const c = reduceAll(a, [call(3, { toolCallId: 'v', title: 'Search' }), call(4, { toolCallId: 'u', title: 'Fetch' })]);
     expect(JSON.stringify(a.items)).toBe(before);
-    expect(itemById(a, 'u')).toBeUndefined();
+    expect(itemById(a, toolItemId('u'))).toBeUndefined();
     expect(tool(a, 't').status).toBeUndefined();
     expect(tool(b, 't').status).toBe('completed');
     expect(tool(b, 'u').title).toBe('Read');
-    expect(itemById(b, 'v')).toBeUndefined();
+    expect(itemById(b, toolItemId('v'))).toBeUndefined();
     expect(tool(c, 'v').title).toBe('Search');
     expect(tool(c, 'u').title).toBe('Fetch');
-    expect(c.items.map((i) => i.id)).toEqual(['message:user:1', 't', 'v', 'u']);
-    expect(b.items.map((i) => i.id)).toEqual(['message:user:1', 't', 'u']);
+    expect(c.items.map((i) => i.id)).toEqual(['message:user:1', 'tool:t', 'tool:v', 'tool:u']);
+    expect(b.items.map((i) => i.id)).toEqual(['message:user:1', 'tool:t', 'tool:u']);
     // Items an event did not change stay the same objects.
     expect(b.items[0]).toBe(a.items[0]);
   });

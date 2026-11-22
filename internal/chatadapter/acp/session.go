@@ -181,6 +181,7 @@ func (s *session) setConfig(options, modes json.RawMessage) {
 		cfg = append(cfg, *mode)
 		s.legacy = mode.ID
 	}
+	markFull(cfg)
 	s.config = cfg
 	s.stateConfig()
 }

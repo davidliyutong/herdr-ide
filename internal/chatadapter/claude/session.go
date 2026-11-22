@@ -35,12 +35,17 @@ type session struct {
 
 	emu sync.Mutex
 	mu  sync.Mutex
-	// proc is the program running now; restarting: it is being replaced.
-	proc       *proc
-	restarting bool
-	closing    bool
-	ended      bool
-	err        error
+	// proc is the program running now; restarting: it is being replaced,
+	// and cancelRestart calls that off.
+	proc          *proc
+	restarting    bool
+	cancelRestart context.CancelFunc
+	closing       bool
+	ended         bool
+	err           error
+	// trusted: the program loads the project's own settings (the folder is
+	// trusted by Claude Code or through the host).
+	trusted bool
 
 	// inTurn: a turn runs; authFailed: an assistant frame of the turn said
 	// that the program is not signed in.
@@ -172,9 +177,12 @@ func (s *session) pass(kind string) {
 }
 
 // begin starts the program, initializes it and applies the chat's
-// options; on an error the program is ended.
+// options; on an error the program is ended. In a folder nobody trusted
+// the program starts without the project's own settings, which a notice
+// tells.
 func (s *session) begin(ctx context.Context) error {
 	full := s.mode == chatproto.ModeFull
+	s.trusted = s.p.Trusted || trustedByClaude(s.p.Env, s.p.Cwd, s.p.Logger)
 	pr, ini, err := s.launch(ctx, s.p.Resume != "", full)
 	if err != nil {
 		return err
@@ -186,6 +194,12 @@ func (s *session) begin(ctx context.Context) error {
 		pr.kill()
 		<-s.done
 		return err
+	}
+	if !s.trusted {
+		s.change(func(o *out) {
+			o.event(chatproto.Event{T: chatproto.EventNotice, Method: agentproto.NoticeMethod(agentproto.NoticeUntrustedFolder),
+				Params: mustJSON(map[string]string{"cwd": s.p.Cwd})})
+		})
 	}
 	return nil
 }
@@ -211,8 +225,8 @@ func (s *session) launch(ctx context.Context, resume, full bool) (*proc, *initRe
 	}
 	if err != nil {
 		pr.kill()
-		<-pr.exited
-		e := pr.exitError(chatproto.CodeStartFailed)
+		<-pr.done
+		e := pr.startError(resume)
 		e.Message = "claude: initialize: " + err.Error() + "; " + e.Message
 		return nil, nil, e
 	}
@@ -353,7 +367,7 @@ func (s *session) configChanged(o *out) {
 			{Value: chatproto.ModeDefault, Name: "Ask"},
 			{Value: chatproto.ModeAcceptEdits, Name: "Accept edits"},
 			{Value: chatproto.ModePlan, Name: "Plan"},
-			{Value: chatproto.ModeFull, Name: "Full access"},
+			{Value: chatproto.ModeFull, Name: "Full access", Full: true},
 		},
 	}}
 	if len(s.models) > 0 {
@@ -450,12 +464,17 @@ func (s *session) Done() <-chan struct{} { return s.done }
 
 // PID is the process id of the program running now, the leader of its
 // process group (the host signals the group on its shutdown); 0 when none
-// runs.
+// runs: once the program exited its id may be another's.
 func (s *session) PID() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.proc == nil || s.proc.cmd.Process == nil || s.ended {
 		return 0
+	}
+	select {
+	case <-s.proc.exited:
+		return 0
+	default:
 	}
 	return s.proc.cmd.Process.Pid
 }
@@ -779,15 +798,20 @@ func (s *session) applyMode(ctx context.Context, pr *proc, mode string) error {
 	return nil
 }
 
+// afterRestartLaunch is called once a restart started its new program,
+// before the session takes it (tests).
+var afterRestartLaunch func(s *session)
+
 // restartFull starts the program again, resuming the session, allowed to
 // skip permissions: Claude Code takes bypassPermissions only from a
 // program started with --allow-dangerously-skip-permissions. Refused while
-// a turn runs or the program waits for the user.
+// a turn runs or the program waits for the user. Close calls it off: no
+// program it started outlives the session.
 func (s *session) restartFull(ctx context.Context) error {
 	busy := &chatproto.Error{Code: chatproto.CodeBusy, Message: "claude: a turn runs"}
 	s.emu.Lock()
 	s.mu.Lock()
-	if s.ended {
+	if s.ended || s.closing {
 		s.mu.Unlock()
 		s.emu.Unlock()
 		return errGone
@@ -797,7 +821,9 @@ func (s *session) restartFull(ctx context.Context) error {
 		s.emu.Unlock()
 		return busy
 	}
-	s.restarting = true
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.restarting, s.cancelRestart = true, cancel
 	old := s.proc
 	s.mu.Unlock()
 	s.flush(&out{evs: []chatproto.Event{{T: chatproto.EventNotice, Method: agentproto.NoticeMethod(agentproto.NoticeRestarted), Params: mustJSON(map[string]string{"mode": chatproto.ModeFull})}}})
@@ -805,28 +831,66 @@ func (s *session) restartFull(ctx context.Context) error {
 
 	old.stop()
 	select {
-	case <-old.exited:
+	case <-old.done:
 	case <-ctx.Done():
 		old.kill()
-		<-old.exited
+		<-old.done
 	}
-	pr, ini, err := s.launch(ctx, true, true)
+	var pr *proc
+	var ini *initResponse
+	err := ctx.Err()
 	if err == nil {
-		s.mu.Lock()
+		pr, ini, err = s.launch(ctx, true, true)
+	}
+	if err == nil && afterRestartLaunch != nil {
+		afterRestartLaunch(s)
+	}
+	s.mu.Lock()
+	s.cancelRestart = nil
+	switch {
+	case err == nil && s.closing:
+		// Closed meanwhile: the new program goes too, and with it the
+		// session.
 		s.proc, s.restarting = pr, false
 		s.mu.Unlock()
-		err = s.setup(ctx, pr, ini, true)
-		if err != nil {
-			pr.kill()
+		pr.stop()
+		s.finishGone(pr)
+		return errGone
+	case err != nil:
+		// No program: the session ends.
+		s.restarting = false
+		s.mu.Unlock()
+		if s.isClosing() {
+			err = errGone
 		}
+		s.finish(old, err)
 		return err
 	}
-	// No program: the session ends.
-	s.mu.Lock()
-	s.restarting = false
+	s.proc, s.restarting = pr, false
 	s.mu.Unlock()
-	s.finish(old, err)
+	s.finishGone(pr)
+	err = s.setup(ctx, pr, ini, true)
+	if err != nil {
+		pr.kill()
+	}
 	return err
+}
+
+// isClosing tells whether Close was called.
+func (s *session) isClosing() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closing
+}
+
+// finishGone ends the session when pr, the program it just took, is gone
+// already: its reading ended before pr was the session's.
+func (s *session) finishGone(pr *proc) {
+	select {
+	case <-pr.done:
+		s.finish(pr, pr.exitError(chatproto.CodeEnded))
+	default:
+	}
 }
 
 // Compact compacts the conversation: the /compact command, a turn of its
@@ -867,7 +931,11 @@ func (s *session) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.closing = true
 	pr := s.proc
+	cancelRestart := s.cancelRestart
 	s.mu.Unlock()
+	if cancelRestart != nil {
+		cancelRestart()
+	}
 	if pr == nil {
 		return nil
 	}
@@ -877,6 +945,12 @@ func (s *session) Close(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		pr.kill()
+		s.mu.Lock()
+		cur := s.proc
+		s.mu.Unlock()
+		if cur != pr {
+			cur.kill()
+		}
 		return ctx.Err()
 	}
 }

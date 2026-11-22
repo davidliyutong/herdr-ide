@@ -2,25 +2,23 @@
 //
 // The chat plugin on the page (plugins/chat): its switch and settings, its
 // pane kind, the leaf's checked chat id and agent, the protocol's mirror
-// of the chat host's values, and its pane, which says that this version
-// has no chats.
+// of the chat host's values, and what it adds to the app (a new-tab item
+// for each agent with chats, its panel, its status bar item, its command,
+// the panes' statuses). Its views are in chatPane.test.tsx, its connection
+// in chatConnection.test.ts, the rest in chatPlugin.test.tsx.
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { act, createElement } from 'react';
-import { createRoot } from 'react-dom/client';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import registry from '../../../design/generated/registry.json';
-import { setLocale, t } from '../i18n';
+import { hasMessage, setLocale, t } from '../i18n';
 import { chatPlugin } from '../plugins/chat';
 import * as P from '../plugins/chat/protocol';
 import { chatRef } from '../plugins/chat/view';
 import { allPlugins, definePlugins, enableSetting, newTabGroups, pluginOn } from '../plugins/registry';
 import { useSettings } from '../settings';
 import type { PluginView } from '../term/layout';
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const saved = [...allPlugins()];
 beforeAll(() => setLocale('en'));
@@ -33,14 +31,16 @@ const ID = 'c0123456789abcdef';
 const view = (extra: Record<string, unknown>): PluginView => ({ id: 'v1', plugin: 'chat', kind: 'chat', ...extra });
 
 describe('the chat plugin', () => {
-  it('is on by default, with its settings page and no new-tab items yet', () => {
+  it('is on by default, with its settings page, a new-tab item for each agent with chats, a panel and a status item', () => {
     expect(enableSetting(chatPlugin, 'browser')).toBe('plugins.chat.enabled');
     expect(pluginOn(chatPlugin)).toBe(true);
     expect(chatPlugin.settings?.section).toBe('chat');
     const defaults = registry.settings as Record<string, unknown>;
     expect(defaults['plugins.chat.enabled']).toBe(true);
     expect(defaults['chat.permissionMode']).toBe('default');
+    expect(defaults['chat.allowFullAccess']).toBe(false);
     expect(Object.keys(defaults).filter((k) => k.startsWith('chat.'))).toEqual([
+      'chat.allowFullAccess',
       'chat.idleStopMinutes',
       'chat.maxChatMB',
       'chat.maxChats',
@@ -51,7 +51,16 @@ describe('the chat plugin', () => {
     ]);
     for (const mode of P.MODES) expect(registry.i18n).toContain(`settings.chat.permissionMode.${mode}`);
     definePlugins([chatPlugin]);
-    expect(newTabGroups('a')).toEqual([]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 500 })),
+    );
+    expect(newTabGroups('a').map((g) => g.map((i) => i.id))).toEqual([['chat.claude', 'chat.codex', 'chat.kimi', 'chat.grok']]);
+    vi.unstubAllGlobals();
+    expect(chatPlugin.panels?.map((p) => p.id)).toEqual(['chat']);
+    expect(chatPlugin.statusItems?.map((i) => (typeof i === 'object' ? i.id : ''))).toEqual(['chat.usage']);
+    expect(Object.keys(chatPlugin.commands ?? {})).toEqual(['chat.new']);
+    expect(chatPlugin.viewStatus).toBeDefined();
   });
 
   it('takes a leaf’s chat id only in the host’s form, and its agent only when the host runs it', () => {
@@ -91,18 +100,17 @@ describe('the chat plugin', () => {
     expect([P.OPTION_ALLOW_ONCE, P.OPTION_ALLOW_SESSION, P.OPTION_REJECT_ONCE]).toEqual(['allow_once', 'allow_session', 'reject_once']);
     expect(P.MAX_CLIENT_MESSAGE).toBeGreaterThan(P.MAX_PROMPT);
     expect(P.WS_PATH).toBe('/api/p/chat/ws');
+    expect(P.STATES_PATH).toBe('/api/p/chat/states');
+    expect([P.MAX_SUBS, P.MAX_SUBS_PER_MACHINE, P.MAX_PAGE_ID]).toEqual([32, 16, 64]);
+    expect(P.MAX_STDERR).toBe(2048);
+    expect(P.REQUEST_OPS).toContain('trust');
   });
 
-  it('draws a pane that says chats are not available yet', async () => {
-    const host = document.createElement('div');
-    document.body.append(host);
-    const root = createRoot(host);
-    const Pane = chatPlugin.paneViews!.chat.component;
-    await act(async () =>
-      root.render(createElement(Pane, { m: 'm', pane: 'view:v1', view: view({ chat: ID, agent: 'claude' }), focused: true })),
-    );
-    expect(host.textContent).toBe(t('chat.unavailable'));
-    await act(async () => root.unmount());
-    host.remove();
+  it('says every code of an error the page may receive in words, but the generic ones', () => {
+    // failed and transport: what failed says it in its message.
+    for (const code of P.ERROR_CODES.filter((c) => c !== 'failed' && c !== 'transport'))
+      expect(hasMessage(`conversation.error.${code}`) || hasMessage(`chat.error.${code}`), code).toBe(true);
+    for (const code of ['not_allowed', 'not_running', 'upgrading', 'no_terminal_core', 'start_failed', 'lost', 'not_attached'])
+      expect(P.ERROR_CODES, code).toContain(code);
   });
 });

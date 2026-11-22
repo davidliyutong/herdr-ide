@@ -821,7 +821,7 @@ func TestAge(t *testing.T) {
 	// Prune of a machine without snapshots creates nothing.
 	empty := t.TempDir()
 	Prune(empty, time.Now())
-	if _, err := os.Lstat(path.Join(empty, dbstore.MachineDB)); err == nil {
+	if _, err := os.Lstat(dbPath(empty)); err == nil {
 		t.Fatal("Prune created the database")
 	}
 }
@@ -862,6 +862,47 @@ func TestFinishedPruned(t *testing.T) {
 	*now = now.Add(goneGrace)
 	if res := mustCapture(t, env, params); res.Removed != 1 || metaOf(t, env, "t9", false) != nil {
 		t.Errorf("after the grace: %+v", res)
+	}
+}
+
+// A terminal whose snapshots could not be removed is not counted as
+// removed, finished for good or gone for the grace alike; they stay, and
+// go at a capture whose removal works.
+func TestRemovalFailureNotCounted(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	now := ticking(t, time.Now())
+	for _, a := range []string{"t1", "t2"} {
+		f.setText(a, a)
+		f.setPaint(a, painter(10, 10, a))
+	}
+	f.set(live("t1", 1), live("t2", 2))
+	if res := mustCapture(t, env, params); res.Captured != 2 {
+		t.Fatalf("%+v", res)
+	}
+	db, err := openDB(env.Base)
+	if db == nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	const trigger = "CREATE TRIGGER refuse BEFORE DELETE ON history_snapshots BEGIN SELECT RAISE(ABORT, 'refused'); END"
+	if _, err := db.Exec(trigger); err != nil {
+		t.Fatal(err)
+	}
+	// t1 finished for good; t2 gone from the records.
+	f.set(finished("t1", "exited"))
+	if res := mustCapture(t, env, params); res.Removed != 0 || metaOf(t, env, "t1", false) == nil {
+		t.Errorf("finished, the removal refused: %+v", res)
+	}
+	*now = now.Add(goneGrace)
+	if res := mustCapture(t, env, params); res.Removed != 0 || metaOf(t, env, "t2", false) == nil {
+		t.Errorf("gone, the removal refused: %+v", res)
+	}
+	if _, err := db.Exec("DROP TRIGGER refuse"); err != nil {
+		t.Fatal(err)
+	}
+	if res := mustCapture(t, env, params); res.Removed != 2 || metaOf(t, env, "t1", false) != nil || metaOf(t, env, "t2", false) != nil {
+		t.Errorf("the removal works again: %+v", res)
 	}
 }
 
@@ -1083,7 +1124,7 @@ func TestNotWholeRemoved(t *testing.T) {
 	// Not listed or read before a writer removed it.
 	db, _ = openDB(env.Base)
 	db.Exec("UPDATE history_snapshots SET bytes = bytes + 1 WHERE terminal = 't2'")
-	db.Exec("INSERT INTO history_lease (id, owner, host, pid, expires) VALUES (1, 'other', ?, ?, ?)", hostname(), os.Getpid(), time.Now().Add(time.Hour).UnixMilli())
+	db.Exec("INSERT INTO history_lease (id, owner, host, pid, expires) VALUES (1, ?, ?, ?, ?)", processID()+".other", hostname(), os.Getpid(), time.Now().Add(time.Hour).UnixMilli())
 	db.Close()
 	if rep := call(t, env, "read", agentproto.HistoryReadParams{Terminal: "t2", Generation: "current"}, nil); rep.Code != "not_found" {
 		t.Fatalf("read %+v", rep)
@@ -1924,5 +1965,217 @@ func TestClearGivesSpaceBack(t *testing.T) {
 	}
 	if after := size(); after > full/8 {
 		t.Errorf("database of %d bytes after the clear, %d before", after, full)
+	}
+}
+
+// failChanges makes the snapshots' database refuse the changes of kind
+// (DELETE, UPDATE) of snapshots, as a full disk would, until the returned
+// function is called.
+func failChanges(t *testing.T, env *plugin.Env, kind string) func() {
+	t.Helper()
+	db, err := openDB(env.Base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	name := "fail_" + strings.ToLower(kind)
+	if _, err := db.Exec("CREATE TRIGGER " + name + " BEFORE " + kind + " ON history_snapshots BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END"); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		db, err := openDB(env.Base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		db.Exec("DROP TRIGGER " + name)
+	}
+}
+
+func rowsOf(t *testing.T, env *plugin.Env) int {
+	t.Helper()
+	db, err := openDB(env.Base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var n int
+	db.QueryRow("SELECT count(*) FROM history_snapshots").Scan(&n)
+	return n
+}
+
+// A clear whose removal fails says so (io) and removes nothing; the
+// snapshots stay listed.
+func TestClearFailure(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	f.set(live("t1", 1), live("t2", 2))
+	f.setText("t1", "a")
+	f.setText("t2", "b")
+	f.setPaint("t1", painter(10, 10, "a"))
+	f.setPaint("t2", painter(10, 10, "b"))
+	mustCapture(t, env, params)
+	ok := failChanges(t, env, "DELETE")
+	var res agentproto.HistoryClearResult
+	if rep := call(t, env, "clear", agentproto.HistoryClearParams{}, &res); rep.OK || rep.Code != "io" || res.Removed != 0 {
+		t.Fatalf("clear all: %+v %+v", rep, res)
+	}
+	if rep := call(t, env, "clear", agentproto.HistoryClearParams{Terminal: "t1"}, &res); rep.OK || rep.Code != "io" {
+		t.Fatalf("clear one: %+v %+v", rep, res)
+	}
+	if n := rowsOf(t, env); n != 2 {
+		t.Fatalf("%d rows", n)
+	}
+	ok()
+	if rep := call(t, env, "clear", agentproto.HistoryClearParams{}, &res); !rep.OK || res.Removed != 2 || rowsOf(t, env) != 0 {
+		t.Fatalf("clear: %+v %+v", rep, res)
+	}
+}
+
+// An eviction whose removal fails frees nothing: the new terminal finds
+// no room (limit) and the snapshots stay within the limits.
+func TestEvictionFailure(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	ticking(t, time.Now())
+	f.set(live("t1", 1), live("t2", 2))
+	f.setText("t1", "a")
+	f.setText("t2", "b")
+	f.setPaint("t1", painter(10, 10, "a"))
+	f.setPaint("t2", painter(10, 10, "b"))
+	p := params
+	p.MaxTerminals = 2
+	mustCapture(t, env, p)
+	failChanges(t, env, "DELETE")
+	f.set(live("t1", 1), live("t2", 2), live("t3", 3))
+	f.setText("t3", "c")
+	f.setPaint("t3", painter(10, 10, "c"))
+	res := mustCapture(t, env, p)
+	if res.Captured != 0 || res.Evicted != 0 || res.Errors["t3"] != "limit" {
+		t.Fatalf("%+v", res)
+	}
+	if n := rowsOf(t, env); n != 2 {
+		t.Fatalf("%d rows, the limit is 2", n)
+	}
+	// Limits lowered: the terminals past them cannot go either.
+	p.MaxTerminals = 1
+	if res := mustCapture(t, env, p); res.Evicted != 0 || rowsOf(t, env) != 2 {
+		t.Fatalf("lowered: %+v, %d rows", res, rowsOf(t, env))
+	}
+}
+
+// An adoption that fails changes nothing: from keeps its snapshots.
+func TestAdoptFailureKeepsSource(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	f.set(live("t1", 1), live("t2", 2))
+	f.setText("t1", "a")
+	f.setPaint("t1", painter(10, 10, "a"))
+	mustCapture(t, env, params)
+	failChanges(t, env, "UPDATE")
+	if _, rep := adoptOf(t, env, "t1", "t2"); rep.OK || rep.Code != "io" {
+		t.Fatalf("adopt %+v", rep)
+	}
+	if metaOf(t, env, "t1", false) == nil {
+		t.Fatal("a failed adoption removed the source")
+	}
+}
+
+// An import that runs again (one before failed) leaves a generation the
+// database has captured later: the file's older one does not replace it.
+func TestImportKeepsNewer(t *testing.T) {
+	env, _ := testEnv(t)
+	db, err := openDB(env.Base) // no files yet: nothing imported, nothing recorded
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if _, err := db.Exec(`INSERT INTO history_snapshots (terminal, prev, pid, at, lines, cols, grid_rows, bytes, hash, days, restored, data)
+		VALUES ('t1', 0, 2, ?, 10, 80, 24, 5, 'h', 7, 0, 'newer')`, now); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	writeFormer(t, env.Base, "t1", false, meta{HistorySnapshot: agentproto.HistorySnapshot{PID: 1, At: now - 60_000}}, []byte("older"))
+	writeFormer(t, env.Base, "t1", true, meta{HistorySnapshot: agentproto.HistorySnapshot{PID: 0, At: now - 120_000}}, []byte("oldest"))
+	var l agentproto.HistoryListResult
+	call(t, env, "list", nil, &l)
+	if len(l.Terminals) != 1 || l.Terminals[0].PID != 2 || l.Terminals[0].Previous == nil || l.Terminals[0].Previous.At != now-120_000 {
+		t.Fatalf("listed %+v", l.Terminals)
+	}
+	var d agentproto.HistoryData
+	if call(t, env, "read", agentproto.HistoryReadParams{Terminal: "t1", Generation: agentproto.HistoryCurrent}, &d); string(d.Data) != "newer" {
+		t.Fatalf("current %q", d.Data)
+	}
+}
+
+// A lease of this process's pid whose writer is not of this process (an
+// agent before it with the same pid: a container started again) does
+// not hold; one of another writer of this process does.
+func TestLeaseOfAnEarlierProcess(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	f.set(live("t1", 1))
+	f.setText("t1", "a")
+	f.setPaint("t1", painter(10, 10, "a"))
+	mustCapture(t, env, params)
+	held := func(owner string) {
+		t.Helper()
+		db, err := openDB(env.Base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if _, err := db.Exec("INSERT OR REPLACE INTO history_lease (id, owner, host, pid, expires) VALUES (1, ?, ?, ?, ?)",
+			owner, hostname(), os.Getpid(), time.Now().Add(time.Hour).UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held("0123456789abcdef.earlier")
+	if res := mustCapture(t, env, params); res.Busy {
+		t.Error("the lease of an earlier process of the same pid holds")
+	}
+	held(processID() + ".another")
+	if res := mustCapture(t, env, params); !res.Busy {
+		t.Error("the lease of another writer of this process was taken")
+	}
+}
+
+// The machine's database is this host's (machine-<host>.db); the agent's
+// housekeeping removes the databases of other hosts sharing the data
+// directory that nobody opened for the retention, not recent ones.
+func TestPerHostDatabase(t *testing.T) {
+	env, f := testEnv(t)
+	fast(t)
+	f.set(live("t1", 1))
+	f.setText("t1", "a")
+	f.setPaint("t1", painter(10, 10, "a"))
+	mustCapture(t, env, params)
+	if p := dbPath(env.Base); p != dbstore.HostFile(env.Base, dbstore.MachineDB) || !strings.HasPrefix(path.Base(p), "machine-") {
+		t.Fatalf("database %s", p)
+	}
+	if _, err := os.Lstat(path.Join(env.Base, dbstore.MachineDB)); err == nil {
+		t.Fatal("a database of no host's name")
+	}
+	old := time.Now().Add(-dbstore.HostFileRetention - time.Hour)
+	for _, n := range []string{"machine-gone.db", "machine-recent.db"} {
+		db, err := dbstore.OpenShared(path.Join(env.Base, n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		db.Close()
+	}
+	os.Chtimes(path.Join(env.Base, "machine-gone.db"), old, old)
+	os.Chtimes(dbPath(env.Base), old, old)
+	Prune(env.Base, time.Now())
+	if _, err := os.Lstat(path.Join(env.Base, "machine-gone.db")); err == nil {
+		t.Error("another host's stale database stayed")
+	}
+	for _, p := range []string{path.Join(env.Base, "machine-recent.db"), dbPath(env.Base)} {
+		if _, err := os.Lstat(p); err != nil {
+			t.Errorf("%s went", path.Base(p))
+		}
+	}
+	if metaOf(t, env, "t1", false) == nil {
+		t.Error("this host's snapshots went")
 	}
 }

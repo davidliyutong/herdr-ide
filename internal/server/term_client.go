@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/hc"
 )
 
@@ -292,16 +294,66 @@ func (c *termClient) release(ts *termStream) {
 	ts.sizing.left(ts.conn, ts.terminal, ts.st, true)
 }
 
-// subscribed returns the ready connection of a machine the client
-// subscribed to.
-func (c *termClient) subscribed(m string) *hc.Conn {
+// subscribed returns the backend of a machine the client subscribed to and
+// its connection when it is ready, nil otherwise.
+func (c *termClient) subscribed(m string) (*termBackend, *hc.Conn) {
 	c.mu.Lock()
 	b := c.subs[m]
 	c.mu.Unlock()
 	if b == nil {
-		return nil
+		return nil, nil
 	}
-	return b.connection()
+	return b, b.connection()
+}
+
+// noTerminal answers a call or an attach that names a hidden terminal as
+// the terminal core answers for a terminal it does not have, and audits it.
+func (c *termClient) noTerminal(m *termIn, method, param, target string) {
+	c.s.audit.log(c.req, "denied.term", map[string]any{"machine": m.M, "method": method, "param": param, "terminal": target})
+	if _, local, ok := strings.Cut(target, "/"); ok {
+		target = local
+	}
+	c.fail(m.RID, "not_found", "no terminal "+strconv.Quote(target))
+}
+
+// hiddenParams are the parameters by which a call of the allowlist names a
+// terminal: the one it acts on, who calls, and a new terminal's parent.
+var hiddenParams = []string{"terminal", "caller", "parent"}
+
+// refuseHidden answers a call that would reach a hidden terminal or make
+// one, and reports whether it did. A call that names one, as its terminal,
+// as who calls or as a new terminal's parent, is answered as for a
+// terminal that does not exist; a run or a label that sets the hidden
+// label, which would take a terminal from every client, or a run that
+// takes the chat host's name, is refused. Neither reaches the terminal
+// core.
+func (c *termClient) refuseHidden(b *termBackend, m *termIn, params map[string]json.RawMessage) bool {
+	for _, param := range hiddenParams {
+		var target string
+		if json.Unmarshal(params[param], &target) == nil && b.hides(target) {
+			c.noTerminal(m, m.Method, param, target)
+			return true
+		}
+	}
+	if m.Method != "terminal.run" && m.Method != "terminal.label" {
+		return false
+	}
+	var labels map[string]json.RawMessage
+	var name string
+	json.Unmarshal(params["labels"], &labels)
+	json.Unmarshal(params["name"], &name)
+	param := ""
+	if _, set := labels[agentproto.HiddenLabel]; set {
+		param = "labels"
+	} else if name == agentproto.ChatHostName {
+		param = "name"
+	}
+	if param == "" {
+		return false
+	}
+	c.s.audit.log(c.req, "denied.term", map[string]any{"machine": m.M, "method": m.Method, "param": param})
+	c.fail(m.RID, "refused", "")
+	return true
 }
 
 func (c *termClient) call(m *termIn) {
@@ -329,9 +381,12 @@ func (c *termClient) call(m *termIn) {
 	if c.readOnly && m.Method == "terminal.read" {
 		readScreenOnly(params)
 	}
-	conn := c.subscribed(m.M)
+	b, conn := c.subscribed(m.M)
 	if conn == nil {
 		c.fail(m.RID, "unavailable", "")
+		return
+	}
+	if c.refuseHidden(b, m, params) {
 		return
 	}
 	ev := map[string]any{"machine": m.M, "terminal": params["terminal"], "argv": params["argv"]}
@@ -387,6 +442,13 @@ func (c *termClient) call(m *termIn) {
 		c.failErr(m.RID, err)
 		return
 	}
+	if m.Method == "terminal.list" {
+		var ok bool
+		if result, ok = b.visible(result); !ok {
+			c.fail(m.RID, "unavailable", "")
+			return
+		}
+	}
 	c.sendJSON(map[string]any{"t": "res", "rid": m.RID, "result": result})
 }
 
@@ -405,9 +467,13 @@ func readScreenOnly(params map[string]json.RawMessage) {
 }
 
 func (c *termClient) attach(m *termIn) {
-	conn := c.subscribed(m.M)
+	b, conn := c.subscribed(m.M)
 	if conn == nil {
 		c.fail(m.RID, "unavailable", "")
+		return
+	}
+	if b.hides(m.Terminal) {
+		c.noTerminal(m, "terminal.attach", "terminal", m.Terminal)
 		return
 	}
 	observe := m.Observe || c.readOnly
@@ -428,7 +494,7 @@ func (c *termClient) attach(m *termIn) {
 		return
 	}
 	c.mu.Lock()
-	b := c.subs[m.M]
+	b = c.subs[m.M]
 	c.mu.Unlock()
 	// The terminal has this viewer now: the one kept for its size ends. It
 	// is counted before the client has the stream, so that a client leaving

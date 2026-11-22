@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Conversation, type ConversationProps } from '../conversation/Conversation';
-import type { ChatEvent, SourceEvent } from '../conversation/model';
+import { CHAT_NOTICES, type ChatEvent, type SourceEvent } from '../conversation/model';
 import type { ChatSource, PermissionReply, QuestionReply } from '../conversation/source';
 import { t } from '../i18n';
 
@@ -401,6 +401,32 @@ describe('questions', () => {
   });
 });
 
+describe('questions named like an object’s members', () => {
+  it('are not shown; the others are answered', async () => {
+    const s = new FakeSource();
+    s.emit(working(), {
+      seq: next(),
+      t: 'question',
+      id: 'q1',
+      questions: [
+        { id: '__proto__', question: 'Proto?' },
+        { id: 'constructor', question: 'Constructor?', options: [{ label: 'A' }] },
+        { id: 'name', question: 'Your name?' },
+      ],
+    });
+    await show(s);
+    const c = card('q1');
+    expect(qa('legend', c).map((l) => l.textContent)).toEqual(['Your name?']);
+    await act(async () => {
+      const el = q<HTMLInputElement>('input', c)!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, 'Ada');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(q('button[type="submit"]', c));
+    expect(s.answer).toHaveBeenCalledWith('q1', { answers: { name: ['Ada'] } });
+  });
+});
+
 describe('a subagent’s call', () => {
   it('names its type and task, counts its items, and shows them nested when opened', async () => {
     const s = new FakeSource();
@@ -465,5 +491,56 @@ describe('a subagent’s call', () => {
     });
     expect(q('.conv-spin', row)).toBeNull();
     expect(row.textContent).toContain('Three test files.');
+  });
+});
+
+describe('a folder the agent started in without its project settings', () => {
+  const untrusted = (): ChatEvent => ({ seq: next(), t: 'notice', method: CHAT_NOTICES.untrustedFolder, params: { cwd: '/home/u/p' } });
+  const notice = () => q('.conv-notice')!;
+  const trustButton = () => qa<HTMLButtonElement>('.conv-notice button').find((b) => b.textContent === t('conversation.notice.trust'));
+
+  it('is said, with an action that trusts it through the source; after it, that the next start loads them', async () => {
+    const s = new FakeSource();
+    let done!: () => void;
+    const trust = vi.fn(() => new Promise<void>((r) => (done = r)));
+    Object.assign(s, { trust });
+    s.emit(untrusted(), { seq: next(), t: 'notice', method: CHAT_NOTICES.fullAccessOff, params: { mode: 'full' } });
+    await show(s);
+    expect(notice().textContent).toContain(t('conversation.notice.untrustedFolder'));
+    expect(qa('.conv-notice')[1].textContent).toBe(t('conversation.notice.fullAccessOff'));
+    const b = trustButton()!;
+    expect(b.title).toBe(t('conversation.notice.trustHint', { cwd: '/home/u/p' }));
+    await click(b);
+    expect(trust).toHaveBeenCalledTimes(1);
+    expect(trustButton()!.disabled).toBe(true);
+    await act(async () => done());
+    await settle();
+    expect(notice().textContent).toBe(t('conversation.notice.trusted'));
+    expect(trustButton()).toBeUndefined();
+  });
+
+  it('says why trusting failed, and offers it again', async () => {
+    const s = new FakeSource();
+    const trust = vi.fn(async () => {
+      throw Object.assign(new Error('x'), { code: 'offline' });
+    });
+    Object.assign(s, { trust });
+    s.emit(untrusted());
+    await show(s);
+    await click(trustButton());
+    await settle();
+    expect(q('.conv-notice-failed')?.textContent).toBe(t('conversation.error.offline', { agent: 'Claude Code' }));
+    expect(trustButton()!.disabled).toBe(false);
+  });
+
+  it('offers nothing read-only, nor from a source that cannot trust', async () => {
+    const s = new FakeSource();
+    s.emit(untrusted());
+    await show(s);
+    expect(trustButton()).toBeUndefined();
+    Object.assign(s, { trust: vi.fn(async () => {}) });
+    await show(s, { readOnly: true });
+    expect(notice().textContent).toBe(t('conversation.notice.untrustedFolder'));
+    expect(trustButton()).toBeUndefined();
   });
 });

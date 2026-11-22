@@ -63,8 +63,8 @@ const settle = (ms = 0) =>
   act(async () => {
     await new Promise((r) => setTimeout(r, ms));
   });
-async function show(source: ChatSource, readOnly?: boolean) {
-  await act(async () => root.render(createElement(Conversation, { source, kind: 'claude', readOnly })));
+async function show(source: ChatSource, readOnly?: boolean, allowFull?: boolean) {
+  await act(async () => root.render(createElement(Conversation, { source, kind: 'claude', readOnly, allowFull })));
   await settle();
 }
 async function emit(source: FakeSource, ...evs: SourceEvent[]) {
@@ -344,6 +344,51 @@ describe('the chat’s options', () => {
     await settle();
     expect(q('[role="alert"]')?.textContent).toContain(t('conversation.error.busy', { agent: 'Claude Code' }));
     expect(mode.value).toBe('default');
+  });
+
+  it('that give full access are unavailable, saying why, while the machine does not allow it and read-only', async () => {
+    const modes = {
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      type: 'select',
+      currentValue: 'default',
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'full', name: 'Full', full: true },
+        { value: 'yolo', name: 'YOLO', full: true },
+      ],
+    };
+    const s = new FakeSource();
+    s.emit(info({ config: [modes] }));
+    const shown = () => {
+      const mode = q<HTMLSelectElement>('select.conv-select[data-config="mode"]')!;
+      return { mode, options: Array.from(mode.options).map((o) => [o.value, o.textContent, o.disabled]) };
+    };
+    await show(s, false, false);
+    let { mode, options } = shown();
+    const fullName = t('conversation.mode.full');
+    expect(options).toEqual([
+      ['default', t('conversation.mode.default'), false],
+      ['full', t('conversation.config.fullOff', { name: fullName }), true],
+      ['yolo', t('conversation.config.fullOff', { name: 'YOLO' }), true],
+    ]);
+    expect(mode.title).toContain(t('conversation.config.fullOffHint'));
+    expect(mode.disabled).toBe(false);
+    // Allowed: offered as any other.
+    await show(s, false, true);
+    ({ mode, options } = shown());
+    expect(options).toEqual([
+      ['default', t('conversation.mode.default'), false],
+      ['full', fullName, false],
+      ['yolo', 'YOLO', false],
+    ]);
+    expect(mode.title).not.toContain(t('conversation.config.fullOffHint'));
+    // Read-only: nothing is chosen, full access said to be not from here.
+    await show(s, true, true);
+    ({ mode, options } = shown());
+    expect(mode.disabled).toBe(true);
+    expect(options[1]).toEqual(['full', t('conversation.config.fullReadOnly', { name: fullName }), true]);
   });
 });
 

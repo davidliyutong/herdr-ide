@@ -13,7 +13,8 @@ import (
 )
 
 // Shared databases. The core's database (core.db, beside its settings
-// file) and a machine's (machine.db, in the agent's data directory) hold
+// file) and a machine's (machine-<host>.db, HostFile, in the agent's data
+// directory) hold
 // the state of several features of one owner. Such a database is opened
 // with OpenShared: its user_version is the store's own layout (layout: the
 // features' schema versions and their one-time imports), and each feature
@@ -29,9 +30,10 @@ import (
 // (the core's server) makes every feature's use of the database take the
 // open pool.
 
-// MachineDB is a machine's shared database in its agent's data directory
-// (~/.<slug>[-<instance>]/machine.db). The core's is core.db beside its
-// settings file (internal/plugin's CoreDBFile).
+// MachineDB is the name of a machine's shared database in its agent's
+// data directory, which is kept per host (HostFile:
+// ~/.<slug>[-<instance>]/machine-<host>.db). The core's is core.db beside
+// its settings file (internal/plugin's CoreDBFile).
 const MachineDB = "machine.db"
 
 // layout is the store's own tables of a shared database, versioned by its

@@ -127,7 +127,8 @@
      },
      {
       "value": "full",
-      "name": "Full access"
+      "name": "Full access",
+      "full": true
      }
     ]
    },

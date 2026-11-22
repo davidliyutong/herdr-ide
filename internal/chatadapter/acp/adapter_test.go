@@ -753,6 +753,11 @@ func TestStartErrors(t *testing.T) {
 		{"version", []step{msgLine("out", init), msgLine("in", `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":2}}`)}, "", chatproto.CodeProtocol, ""},
 		{"exit", []step{msgLine("out", init), {Dir: "exit", Code: 1, Stderr: "no configuration\n"}}, "", chatproto.CodeStartFailed, "no configuration\n"},
 		{"no resume", []step{msgLine("out", init), msgLine("in", initOK)}, "s1", chatproto.CodeUnsupported, ""},
+		// The protocol's "not there" for a session to take up.
+		{"unknown session", []step{msgLine("out", init),
+			msgLine("in", `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}`),
+			msgLine("out", `{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"s1","cwd":"DIR","mcpServers":[]}}`),
+			msgLine("in", `{"jsonrpc":"2.0","id":2,"error":{"code":-32002,"message":"Resource not found","data":{"uri":"s1"}}}`)}, "s1", chatproto.CodeNotFound, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -26,7 +26,14 @@ func TestPromptRecorded(t *testing.T) {
 	s.turn("first")
 	s.prompt("second")
 	s.session.expect(t, "prompt:second")
-	s.expect("queued:queued")
+	q := s.expect("queued:queued")[0]
+	// The turn ends with a message queued: the chat works on until the
+	// next turn takes it.
+	s.session.endTurn("end_turn")
+	s.expect("turn:end")
+	s.session.sink.Event(chatproto.Event{T: chatproto.EventQueued, State: chatproto.QueuedTaken, Message: q.Message, ClientID: q.ClientID})
+	s.session.sink.Event(chatproto.Event{T: chatproto.EventTurn, State: chatproto.TurnStart})
+	s.expect("queued:taken", "turn:start")
 	s.session.endTurn("end_turn")
 	s.expect("turn:end", "state:idle")
 

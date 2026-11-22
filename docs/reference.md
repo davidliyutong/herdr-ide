@@ -214,6 +214,7 @@ in the UI; a setting with a scope can have its own value per machine, under
 | `history.maxTotalMB` | integer, 1–512 | `64` | – | per machine |
 | `history.days` | integer, 1–30 | `7` | – | per machine |
 | `chat.permissionMode` | `default`, `acceptEdits`, `plan`, `full` | `"default"` | – | per machine |
+| `chat.allowFullAccess` | `true`, `false` | `false` | – | per machine |
 | `chat.idleStopMinutes` | integer, 5–1440 | `30` | – | per machine |
 | `chat.maxLive` | integer, 1–32 | `8` | – | per machine |
 | `chat.maxChats` | integer, 50–2000 | `500` | – | per machine |
@@ -321,6 +322,7 @@ by `scripts/registry`.
 | `tab.unpin` | `terminal` | – | – | – | – |
 | `browser.open` | `terminal` | – | – | – | – |
 | `browser.reload` | `terminal` | – | – | – | – |
+| `chat.new` | `terminal` | – | – | – | – |
 | `pane.splitRight` | `terminal` | `cmd+d` | – | – | – |
 | `pane.splitDown` | `terminal` | `cmd+shift+d` | – | – | – |
 | `pane.close` | `terminal` | `cmd+w` | – | – | – |
@@ -483,14 +485,17 @@ missing here.
 | `GET /api/m/{id}/p/history/read` | – | One generation's bytes (`?terminal=` an address, `&generation=current\|previous`) as an `application/octet-stream` attachment, at most 2 MiB, with `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and `no-store`, described by `X-History-Pid`, `X-History-At`, `X-History-Cols`, `X-History-Rows`, `X-History-Lines`. `400 bad_request` or `busy`, `404 not_found`, `409 offline`, `502 bad_reply`, `504 timeout`. |
 | `DELETE /api/m/{id}/p/history` | writes | Removes the snapshots of one terminal (`?terminal=`) or of every terminal: `{removed}`; audited as `history.clear` with the terminal and the count. |
 | `POST /api/m/{id}/p/history/adopt` | writes | Gives terminal `?to=` (one of the machine's terminal core's records, which took the place of `&from=`) the newest generation of `from`'s snapshots as its previous one, unless it has a previous one captured later, and removes `from`'s snapshots either way: `{adopted}` ([36](features/36-terminal-history.md)); audited as `history.adopt` with `from`, `to` and `adopted`. `400 bad_request` (an address that is not one, or `from` equal to `to`), `busy` or `not_running` (the terminal core), `404 not_found` (`to` not in the records), `409 offline`, `502 bad_reply`, `504 timeout`. |
-| `GET /api/m/{id}/p/chat/agents` | – | The chat plugin's agents a machine can run: declared, `501 not_implemented` in this version. |
-| `GET /api/m/{id}/p/chat/chats` | – | The machine's chats: declared, `501 not_implemented` in this version. |
-| `GET /api/m/{id}/p/chat/sessions` | – | The sessions an agent kept for a directory (`?kind=&cwd=&cursor=`): declared, `501 not_implemented` in this version. |
-| `POST /api/m/{id}/p/chat/new` | writes | A new chat, audited as `chat.new`: declared, `501 not_implemented` in this version. |
-| `POST /api/m/{id}/p/chat/close` | writes | Ends a chat's agent and keeps the chat (`?chat=`), audited as `chat.close`: declared, `501 not_implemented` in this version. |
-| `DELETE /api/m/{id}/p/chat/chat` | writes | Forgets a chat and its log (`?chat=`), audited as `chat.delete`: declared, `501 not_implemented` in this version. |
-| `POST /api/m/{id}/p/chat/seen` | writes | The user saw a chat up to a sequence number (`?chat=&seq=`), audited as `chat.seen`: declared, `501 not_implemented` in this version. |
-| `GET /api/p/chat/ws` | – | The chat plugin's WebSocket, one per page: declared, `501 not_implemented` in this version. |
+| `GET /api/m/{id}/p/chat/agents` | – | The agent kinds with a chat the machine's chat host can start: `{agents: [{kind, available, version?, reason?}]}` (`reason`: `not_found`, `unsupported`). Every chat route starts the machine's chat host when none serves (a read-only core's does not: `409 not_running`) and fails as `{error, message}`: `400 bad_request`, `403 read_only` or `not_allowed` (full access while the machine's `chat.allowFullAccess` is off), `404 unknown_chat` or `not_found`, `409 busy`, `too_many`, `in_terminal`, `handed_off`, `sleeping`, `offline` or `not_running`, `413 too_large`, `422 unsupported` or `auth_required`, `502 start_failed`, `protocol`, `ended`, `failed` or `transport`, `503 upgrading` (a chat host of another version serves until its chats are idle) or `no_terminal_core`, `504 timeout`. |
+| `GET /api/m/{id}/p/chat/chats` | – | The machine's chats, closed ones included: `{chats}`; `{chats: []}` on a read-only core while no chat host serves. A read-only core leaves out what the agents wrote to their standard error, here and on the WebSocket. |
+| `GET /api/m/{id}/p/chat/sessions` | – | A page of the sessions an agent kept for a directory (`?kind=&cwd=&cursor=`): `{sessions: [{sessionId, cwd, title?, updatedAt?, chat?}], nextCursor}`. |
+| `POST /api/m/{id}/p/chat/new` | writes | A new chat, `{kind, cwd, resume?, import?, options?: {model?, effort?, mode?}}` (`import` brings a resumed session's conversation in): `{chat}`. The machine's chat host takes the machine's settings first. Audited as `chat.new` with the kind, the directory, the session, the import and the mode. |
+| `POST /api/m/{id}/p/chat/close` | writes | Ends a chat's agent and keeps the chat (`?chat=`), audited as `chat.close`. |
+| `DELETE /api/m/{id}/p/chat/chat` | writes | Forgets a chat and its log (`?chat=`), audited as `chat.delete`. |
+| `POST /api/m/{id}/p/chat/seen` | writes | The user saw a chat up to a sequence number (`?chat=&seq=`), which ends its done status for every page; audited as `chat.seen`. |
+| `POST /api/m/{id}/p/chat/handoff` | writes | Ends a chat's agent so that its session goes on in a terminal (`?chat=`); `409 busy` while a turn runs. Audited as `chat.handoff`. |
+| `POST /api/m/{id}/p/chat/trust` | writes | Trusts a directory and those below it on the machine (`?cwd=` an absolute path): agents started there from then on load the project's own settings. Audited as `chat.trust` with the directory. |
+| `GET /api/p/chat/states` | – | The chats' states of every machine as the core last read them: `{machines: {<id>: {t: "states", states, full: true, rev}}}`; the `states` messages of the event channel that follow carry higher revs. |
+| `GET /api/p/chat/ws` | – | The chat plugin's WebSocket, one per page: subscriptions to chats (at most 32, 16 of one machine) with their events, and commands answered by acks (a permission's or a question's answer, a configuration change and a handoff audited); a read-only core refuses every command (`read_only`) and its subscriptions start nothing on the machine. |
 | `/` | – | The web UI (`/licenses.md`: the notices of its bundle); any other path gets the app shell for the UI's own routes, except `/api/…` paths no route takes, which are 404. |
 
 ## Environment variables

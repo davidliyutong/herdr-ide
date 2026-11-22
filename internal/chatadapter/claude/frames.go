@@ -42,13 +42,14 @@ func (s *session) read(pr *proc) {
 		s.lines.Add(1)
 	}
 	pr.end()
-	// The output ended: the program ends, or is made to.
+	// The output ended: the program ends, or is made to, and what it left
+	// in its group goes too.
 	select {
 	case <-pr.exited:
 	case <-time.After(pr.closeGrace):
 		pr.stop()
-		<-pr.exited
 	}
+	<-pr.done
 	s.finish(pr, pr.exitError(chatproto.CodeEnded))
 }
 

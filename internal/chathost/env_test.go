@@ -153,8 +153,12 @@ func TestLoginEnvFailures(t *testing.T) {
 		{"slow", "echo PATH=/bin\nif [ -e " + slow + " ]; then echo $$ > " + pid + "; sleep 30; fi\n", 300 * time.Millisecond, "did not answer"},
 	} {
 		shell := fakeShell(t, tc.body)
+		// A system may take its time with the first run of a new program
+		// (macOS scans it), which is not what is measured: each shell runs
+		// once first.
+		_, err := loginEnv(context.Background(), shell, patience)
 		if tc.name == "slow" {
-			if _, err := loginEnv(context.Background(), shell, patience); err != nil {
+			if err != nil {
 				t.Fatalf("the shell while it is fast: %v", err)
 			}
 			if err := os.WriteFile(slow, nil, 0o644); err != nil {
@@ -332,4 +336,53 @@ func TestLookPath(t *testing.T) {
 	if _, ok := lookPath("tool", []string{"HOME=/h"}); ok {
 		t.Error("found a program without a PATH")
 	}
+}
+
+// The login shell is asked again when a startup file changes, after
+// envKeep, and soon after it failed; not at every agent's start.
+func TestEnvironmentAsksAgainWhenStartupChanges(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ZDOTDIR", "")
+	rc := filepath.Join(home, ".zshrc")
+	os.WriteFile(rc, []byte("export A=1\n"), 0o600)
+	runs := 0
+	e := &environment{logger: log.New(io.Discard, "", 0), lookup: func(context.Context) []string {
+		runs++
+		return []string{"PATH=/bin"}
+	}}
+	get := func(want int, why string) {
+		t.Helper()
+		e.get(context.Background())
+		if runs != want {
+			t.Fatalf("%s: the shell ran %d times, want %d", why, runs, want)
+		}
+	}
+	get(1, "first")
+	get(1, "unchanged")
+	later := time.Now().Add(time.Minute)
+	os.Chtimes(rc, later, later)
+	get(2, "a startup file changed")
+	get(2, "unchanged again")
+	os.WriteFile(filepath.Join(home, ".profile"), nil, 0o600)
+	get(3, "a startup file appeared")
+	e.mu.Lock()
+	e.at = time.Now().Add(-envKeep + time.Minute)
+	e.mu.Unlock()
+	get(3, "before envKeep")
+	e.mu.Lock()
+	e.at = time.Now().Add(-envKeep - time.Second)
+	e.mu.Unlock()
+	get(4, "after envKeep")
+	// The shell told a ZDOTDIR: its files count too.
+	zdot := t.TempDir()
+	e.lookup = func(context.Context) []string {
+		runs++
+		return []string{"PATH=/bin", "ZDOTDIR=" + zdot}
+	}
+	os.Chtimes(rc, later.Add(time.Minute), later.Add(time.Minute))
+	get(5, "changed")
+	get(5, "with the shell's ZDOTDIR")
+	os.WriteFile(filepath.Join(zdot, ".zshrc"), nil, 0o600)
+	get(6, "a file of the shell's ZDOTDIR appeared")
 }

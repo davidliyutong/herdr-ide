@@ -35,7 +35,8 @@ type costCache struct {
 }
 
 // The cache is kept in the machine's database (store.MachineDB in the
-// agent's data directory, the directory CostCacheFile is below): a row per
+// agent's data directory, the directory CostCacheFile is below, named
+// after the host: store.HostFile): a row per
 // log with its entry as JSON and that JSON's SHA-256 (usage_cost_files),
 // and the cache's version, when it was last saved and a generation every
 // save bumps (usage_cost_state). A save writes the entries that changed
@@ -65,9 +66,9 @@ var costMigrations = []string{
 var errCostNewer = errors.New("usage: the machine's database is of a newer version: the cost cache is kept in memory")
 
 // costDB is the machine's database of the cache at p (CostCacheFile below
-// the agent's data directory).
+// the agent's data directory): this host's.
 func costDB(p string) string {
-	return filepath.Join(filepath.Dir(filepath.Dir(p)), store.MachineDB)
+	return store.HostFile(filepath.Dir(filepath.Dir(p)), store.MachineDB)
 }
 
 // openCostDB opens the database of the cache at p with the cache's

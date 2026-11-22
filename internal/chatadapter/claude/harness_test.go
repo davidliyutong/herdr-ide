@@ -32,6 +32,10 @@ const fixtureDir = "../../../design/testdata/chat/claude"
 const testSession = "11111111-1111-4111-8111-111111111111"
 
 func TestMain(m *testing.M) {
+	if os.Getenv("FAKE_CLAUDE_ROLE") == "grandchild" {
+		grandchildMain()
+		return
+	}
 	if os.Getenv("FAKE_CLAUDE_SCRIPT") != "" {
 		fakeMain()
 		return
@@ -378,6 +382,9 @@ func (r *fakeRun) params() chatadapter.StartParams {
 		Options: chatproto.Options{Mode: chatproto.ModeDefault},
 		Client:  chatadapter.ClientInfo{Name: "test", Version: "0"},
 		Logger:  log.New(io.Discard, "", 0),
+		// The recordings ran in a folder the user trusted (TestTrust has
+		// the others).
+		Trusted: true,
 	}
 }
 

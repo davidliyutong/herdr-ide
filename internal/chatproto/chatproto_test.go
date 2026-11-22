@@ -60,8 +60,8 @@ func TestWireNames(t *testing.T) {
 	state := chat.StateOf()
 	const stateJSON = `{"id":"c0123456789abcdef","kind":"claude","title":"Fix it","cwd":"/w","state":"failed","status":"done",` +
 		`"updated":"2026-01-02T03:04:05.006Z","seq":7,"sessionId":"s1"}`
-	settings := HostSettings{IdleStopMinutes: 30, MaxLive: 8, MaxChats: 500, RetentionDays: 30, MaxTotalBytes: 1 << 29, MaxChatBytes: 1 << 26, DefaultMode: ModePlan}
-	const settingsJSON = `{"idleStopMinutes":30,"maxLive":8,"maxChats":500,"retentionDays":30,"maxTotalBytes":536870912,"maxChatBytes":67108864,"defaultMode":"plan"}`
+	settings := HostSettings{IdleStopMinutes: 30, MaxLive: 8, MaxChats: 500, RetentionDays: 30, MaxTotalBytes: 1 << 29, MaxChatBytes: 1 << 26, DefaultMode: ModePlan, AllowFull: true}
+	const settingsJSON = `{"idleStopMinutes":30,"maxLive":8,"maxChats":500,"retentionDays":30,"maxTotalBytes":536870912,"maxChatBytes":67108864,"defaultMode":"plan","allowFull":true}`
 	minimal := Chat{ID: "c1", Kind: "codex", State: StateStarting, Status: StatusIdle, Created: at, Updated: at}
 	const minimalJSON = `{"id":"c1","kind":"codex","title":"","cwd":"","sessionId":"","state":"starting","status":"idle",` +
 		`"created":"2026-01-02T03:04:05.006Z","updated":"2026-01-02T03:04:05.006Z","seq":0,"seen":0,` +
@@ -122,6 +122,9 @@ func TestWireNames(t *testing.T) {
 		{"compact", Command{Op: OpCompact, ID: "k7"}, `{"op":"compact","id":"k7"}`},
 		{"rename", Command{Op: OpRename, ID: "k8", Title: "New"}, `{"op":"rename","id":"k8","title":"New"}`},
 		{"handoff", Command{Op: OpHandoff, ID: "k9"}, `{"op":"handoff","id":"k9"}`},
+		{"trust", Request{Op: OpTrust, Cwd: "/w"}, `{"op":"trust","cwd":"/w"}`},
+		{"attach without catch-up", Request{Op: OpAttach, Chat: "c1", From: 3, NoCatchUp: true}, `{"op":"attach","chat":"c1","from":3,"noCatchUp":true}`},
+		{"full value", ConfigValue{Value: "yolo", Name: "YOLO", Full: true}, `{"value":"yolo","name":"YOLO","full":true}`},
 
 		{"ack", Event{T: EventAck, ID: "k1"}, `{"t":"ack","id":"k1"}`},
 		{"ack error", Event{T: EventAck, ID: "k1", Error: &Error{Code: CodeInTerminal, Message: "m"}}, `{"t":"ack","id":"k1","error":{"code":"in_terminal","message":"m"}}`},
@@ -207,12 +210,13 @@ func TestRoundTripAndUnknownMembers(t *testing.T) {
 }
 
 func TestConstants(t *testing.T) {
-	if Proto != 2 || MaxLine != 16<<20 || MaxPrompt != 8<<20 || MaxImage != 5<<20 || MaxEvent != 1<<20 || ToolOutputEnd != 16<<10 || SocketName != "chat.sock" {
+	if Proto != 2 || MaxLine != 16<<20 || MaxPrompt != 8<<20 || MaxImage != 5<<20 || MaxEvent != 1<<20 || ToolOutputEnd != 16<<10 || SocketName != "chat.sock" ||
+		MaxStderr != 2<<10 {
 		t.Error("the protocol's numbers changed")
 	}
 	codes := []string{CodeBadRequest, CodeUnknownChat, CodeTooMany, CodeBusy, CodeNotFound, CodeStartFailed,
-		CodeProtocol, CodeAuthRequired, CodeUnsupported, CodeTooLarge, CodeEnded, CodeFailed, CodeInTerminal, CodeHandedOff, CodeSleeping}
-	want := "bad_request unknown_chat too_many busy not_found start_failed protocol auth_required unsupported too_large ended failed in_terminal handed_off sleeping"
+		CodeProtocol, CodeAuthRequired, CodeUnsupported, CodeTooLarge, CodeEnded, CodeFailed, CodeInTerminal, CodeHandedOff, CodeSleeping, CodeNotAllowed}
+	want := "bad_request unknown_chat too_many busy not_found start_failed protocol auth_required unsupported too_large ended failed in_terminal handed_off sleeping not_allowed"
 	if got := strings.Join(codes, " "); got != want {
 		t.Errorf("codes = %s", got)
 	}
@@ -299,9 +303,13 @@ func TestClamp(t *testing.T) {
 	if want := (HostSettings{IdleStopMinutes: 5, MaxLive: 1, MaxChats: 50, RetentionDays: 1, MaxTotalBytes: 64 * mib, MaxChatBytes: 8 * mib, DefaultMode: ModeDefault}); low != want {
 		t.Errorf("too low %+v", low)
 	}
-	high := HostSettings{IdleStopMinutes: 1 << 30, MaxLive: 1000, MaxChats: 1 << 20, RetentionDays: 100000, MaxTotalBytes: 1 << 50, MaxChatBytes: 1 << 40, DefaultMode: ModeFull}.Clamp()
-	if want := (HostSettings{IdleStopMinutes: 1440, MaxLive: 32, MaxChats: 2000, RetentionDays: 365, MaxTotalBytes: 2048 * mib, MaxChatBytes: 256 * mib, DefaultMode: ModeFull}); high != want {
+	high := HostSettings{IdleStopMinutes: 1 << 30, MaxLive: 1000, MaxChats: 1 << 20, RetentionDays: 100000, MaxTotalBytes: 1 << 50, MaxChatBytes: 1 << 40, DefaultMode: ModeFull, AllowFull: true}.Clamp()
+	if want := (HostSettings{IdleStopMinutes: 1440, MaxLive: 32, MaxChats: 2000, RetentionDays: 365, MaxTotalBytes: 2048 * mib, MaxChatBytes: 256 * mib, DefaultMode: ModeFull, AllowFull: true}); high != want {
 		t.Errorf("too high %+v", high)
+	}
+	// Full access as the default only where it is allowed.
+	if got := (HostSettings{DefaultMode: ModeFull}).Clamp(); got.DefaultMode != ModeDefault || got.AllowFull {
+		t.Errorf("full without AllowFull: %+v", got)
 	}
 	in := HostSettings{IdleStopMinutes: 60, MaxLive: 2, MaxChats: 100, RetentionDays: 7, MaxTotalBytes: 100 * mib, MaxChatBytes: 10 * mib, DefaultMode: ModeAcceptEdits}
 	if got := in.Clamp(); got != in {
@@ -398,4 +406,29 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	}
 	c.n += len(p)
 	return len(p), nil
+}
+
+// Redacted leaves the agent's standard error out of an event, of its chat
+// and of a chat, and changes nothing else; what it was given stays.
+func TestRedacted(t *testing.T) {
+	chat := testChat()
+	ev := Event{Seq: 1, T: EventInfo, Chat: &chat, Error: &Error{Code: CodeEnded, Message: "m", Stderr: "secret"}}
+	r := ev.Redacted()
+	if r.Error.Stderr != "" || r.Chat.Error.Stderr != "" || r.Error.Message != "m" || r.Chat.Error.Code != CodeStartFailed || r.Chat.Title != "Fix it" {
+		t.Errorf("redacted %+v / %+v", r.Error, r.Chat.Error)
+	}
+	if ev.Error.Stderr != "secret" || chat.Error.Stderr != "boom" {
+		t.Error("Redacted changed what it was given")
+	}
+	if c := chat.Redacted(); c.Error.Stderr != "" || chat.Error.Stderr != "boom" {
+		t.Errorf("chat redacted %+v", c.Error)
+	}
+	plain := &Error{Code: CodeFailed, Message: "m"}
+	if plain.WithoutStderr() != plain || (*Error)(nil).WithoutStderr() != nil {
+		t.Error("WithoutStderr copied an error without one")
+	}
+	none := Event{T: EventState}
+	if r := none.Redacted(); r.Error != nil || r.Chat != nil {
+		t.Errorf("%+v", r)
+	}
 }

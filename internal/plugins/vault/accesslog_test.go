@@ -496,3 +496,107 @@ func TestAccessLogNeedsASession(t *testing.T) {
 		t.Errorf("locked %d", code)
 	}
 }
+
+// A read of the log that fails leaves it unread: a record added meanwhile
+// gets its ID after every row's (it replaces none, and the bounds do not
+// drop it), one whose write fails too is kept in memory, and the next use
+// reads the log with both.
+func TestAccessLogAfterAFailedRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
+	release := func(l *accessLog, name string) (Access, error) {
+		return l.add(Access{Time: time.Now(), M: "m1", Tool: "get", Names: []string{name}, Result: ResultAllowed}, false, true)
+	}
+	l := newAccessLog(path, nil)
+	l.maxReleases = 3
+	for _, n := range []string{"A", "B", "C"} {
+		if _, err := release(l, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.close()
+	origRead, origWrite := readRecords, writeRecord
+	defer func() { readRecords, writeRecord = origRead, origWrite }()
+	readRecords = func(*store.DB) ([]Access, error) { return nil, errors.New("database is locked") }
+	l = newAccessLog(path, nil)
+	l.maxReleases = 3
+	a, err := release(l, "D")
+	if err != nil || a.ID != 4 {
+		t.Fatalf("added while unread: %+v %v", a, err)
+	}
+	writeRecord = func(*sql.Tx, uint64, bool, []byte, int) error { return errors.New("disk I/O error") }
+	if a, err := release(l, "E"); err == nil || a.Result != ResultLogFailed {
+		t.Fatalf("a failed write: %+v %v", a, err)
+	}
+	readRecords, writeRecord = origRead, origWrite
+	var got []string
+	for _, a := range l.list() {
+		got = append(got, fmt.Sprintf("%d:%s:%s", a.ID, a.Names[0], a.Result))
+	}
+	if want := "5:E:log_failed,4:D:allowed,3:C:allowed,2:B:allowed"; strings.Join(got, ",") != want {
+		t.Errorf("read with what was added: %s, want %s", strings.Join(got, ","), want)
+	}
+	if a, err := release(l, "F"); err != nil || a.ID != 6 {
+		t.Errorf("next %+v %v", a, err)
+	}
+	l.close()
+	got = nil
+	for _, a := range newAccessLog(path, nil).list() {
+		got = append(got, a.Names[0])
+	}
+	if want := "F,D,C"; strings.Join(got, ",") != want {
+		t.Errorf("read back %s, want %s", strings.Join(got, ","), want)
+	}
+}
+
+// The file the log was kept in before, there again after the import ran
+// (a core of an earlier version wrote it since: a downgrade, then the
+// upgrade again), is merged, not removed unread: its records the table
+// lacks follow the table's, with new IDs, in the order of their times;
+// those it has already are not added again.
+func TestAccessLogImportAfterDowngrade(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault-access.jsonl")
+	at := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	line := func(a Access) string { b, _ := json.Marshal(a); return string(b) + "\n" }
+	first := line(Access{ID: 1, Time: at, M: "m1", Tool: "get", Names: []string{"OLD1"}, Result: ResultAllowed}) +
+		line(Access{ID: 2, Time: at.Add(time.Minute), M: "m1", Tool: "get", Names: []string{"OLD2"}, Result: "not_found"})
+	if err := os.WriteFile(path, []byte(first), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l := newAccessLog(path, nil)
+	if got := l.list(); len(got) != 2 {
+		t.Fatalf("imported %s", mustJSON(got))
+	}
+	if a, err := l.add(Access{Time: at.Add(time.Hour), M: "m1", Tool: "get", Names: []string{"NEW"}, Result: ResultAllowed}, false, true); err != nil || a.ID != 3 {
+		t.Fatalf("added %+v %v", a, err)
+	}
+	l.close()
+	// The earlier core wrote the file again: the records imported (a file
+	// whose removal failed, which it read) and its own after them, whose
+	// IDs follow theirs and take the table's (their times out of order
+	// here).
+	again := first +
+		line(Access{ID: 3, Time: at.Add(3 * time.Hour), M: "m2", Tool: "get", Names: []string{"DOWN2"}, Result: ResultApproved}) +
+		line(Access{ID: 4, Time: at.Add(2 * time.Hour), M: "m2", Tool: "list", Result: ResultListed})
+	if err := os.WriteFile(path, []byte(again), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := newAccessLog(path, nil).list()
+	var names []string
+	for _, a := range got {
+		n := a.Tool
+		if len(a.Names) > 0 {
+			n = a.Names[0]
+		}
+		names = append(names, fmt.Sprintf("%d:%s", a.ID, n))
+	}
+	if want := "5:DOWN2,4:list,3:NEW,2:OLD2,1:OLD1"; strings.Join(names, ",") != want {
+		t.Fatalf("merged %s, want %s", strings.Join(names, ","), want)
+	}
+	if _, err := os.Lstat(path); err == nil {
+		t.Error("the file stayed")
+	}
+	if rel, oth := accessRows(t, path); rel != 3 || oth != 2 {
+		t.Errorf("rows: %d releases, %d others", rel, oth)
+	}
+}

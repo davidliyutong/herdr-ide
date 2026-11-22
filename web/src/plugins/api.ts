@@ -6,6 +6,7 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { MenuEntry } from '../contextMenu';
 import type { MessageKey } from '../i18n';
+import type { AgentStatus } from '../lib/machine';
 import type { SettingDef } from '../settings';
 import type { PluginView, TerminalLeaf } from '../term/layout';
 
@@ -157,6 +158,21 @@ export interface TerminalHeaderProps {
  * tabIndex -1. A press leaves the keyboard where it is. */
 export type HeaderActionsComponent = ComponentType<TerminalHeaderProps>;
 
+/** Status of a plugin's panes as terminal agents have it, for dots, badges, the attention list and
+ * notifications (registry.ts viewStatus; notify.ts, seen.ts). */
+export interface ViewStatusDef {
+  /** Status of the pane showing `view` on machine m: 'working' | 'blocked' | 'done' | 'idle', or undefined.
+   * Pure: reads state only. */
+  status(m: string, view: PluginView): AgentStatus | undefined;
+  /** Calls fn whenever a status may have changed; returns an unsubscribe. */
+  subscribe(fn: () => void): () => void;
+  /** The pane key (`view:<id>`) an agent notification of this plugin (the /ws agent data, which has
+   * plugin-specific members such as `chat`) points to on machine m, if a pane shows it. */
+  paneOf?(m: string, data: Record<string, unknown>): string | undefined;
+  /** The user saw the pane (it is visible and focused while the page is visible) and its status was done. */
+  seen?(m: string, view: PluginView): void;
+}
+
 export interface PluginDef {
   /** As the core's plugin (internal/plugin): lower-case letters and digits. */
   id: string;
@@ -192,6 +208,9 @@ export interface PluginDef {
   onMessage?(m: string, data: unknown): void;
   /** Buttons in terminals' panes' headers (HeaderActionsComponent). */
   headerActions?: HeaderActionsComponent[];
+  /** The agent status of its panes, which the app shows and counts as it
+   * does terminals' agents' (ViewStatusDef). */
+  viewStatus?: ViewStatusDef;
   /** A React hook, as PaneViewDef.useGone, for a file of machine m: the
    * app's own panes that show a file (previews) mark their titles with
    * what the first plugin that is on with one says (the file explorer's);

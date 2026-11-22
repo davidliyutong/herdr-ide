@@ -2,8 +2,8 @@
 
 // Package history is the machine side of the terminal history plugin
 // (internal/plugins/history): snapshots of the terminals' output, with
-// their styles, in the machine's database (machine.db in the agent's data
-// directory, store.go), which pages show above the new shell of a terminal
+// their styles, in the machine's database (machine-<host>.db in the agent's
+// data directory, store.go), which pages show above the new shell of a terminal
 // whose program was replaced (its terminal core started again). The core
 // asks for captures only while history.capture is on for the machine.
 // Actions:
@@ -40,11 +40,13 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path"
 	"time"
 
 	"herdr-ide/internal/agent/plugin"
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/hc"
+	dbstore "herdr-ide/internal/store"
 )
 
 // ID names the plugin on every side.
@@ -137,7 +139,7 @@ func list(env *plugin.Env) agentproto.HistoryListResult {
 		return out
 	}
 	now := clock()
-	Prune(env.Base, now)
+	pruneAge(env.Base, now)
 	db, _ := openDB(env.Base) // also one of a newer version: it is read
 	if db == nil {
 		return out
@@ -187,7 +189,7 @@ func read(env *plugin.Env, p agentproto.HistoryReadParams) (agentproto.HistoryDa
 		return agentproto.HistoryData{}, notFound
 	}
 	now := clock()
-	Prune(env.Base, now)
+	pruneAge(env.Base, now)
 	db, _ := openDB(env.Base) // also one of a newer version: it is read
 	if db == nil {
 		return agentproto.HistoryData{}, notFound
@@ -217,12 +219,20 @@ func clearSnapshots(ctx context.Context, env *plugin.Env, p agentproto.HistoryCl
 	defer s.close()
 	forgetTerminal(p.Terminal)
 	if p.Terminal != "" {
-		if s.remove(p.Terminal) {
+		removed, err := s.removeTerminal(p.Terminal)
+		if err != nil {
+			return agentproto.HistoryClearResult{}, storeError(err)
+		}
+		if removed {
 			return agentproto.HistoryClearResult{Removed: 1}, nil
 		}
 		return agentproto.HistoryClearResult{}, nil
 	}
-	return agentproto.HistoryClearResult{Removed: s.clearAll()}, nil
+	n, err := s.clearAll()
+	if err != nil {
+		return agentproto.HistoryClearResult{}, storeError(err)
+	}
+	return agentproto.HistoryClearResult{Removed: n}, nil
 }
 
 // adopt gives terminal p.To, which took the place of p.From, the newest
@@ -284,13 +294,26 @@ func recorded(ctx context.Context, env *plugin.Env, addr string) (bool, error) {
 	return false, nil
 }
 
-// Prune applies the snapshots' retention below the agent's data directory
-// base, as the agent's housekeeping does when it starts and list and read
-// do: snapshots older than the days they were written under go, with what
-// is not whole; the snapshots kept in files before are imported first. It
-// does not wait for a writer that holds the lease: a capture running
-// meanwhile (also another agent's of the instance) does the same itself.
+// Prune is the agent's housekeeping of the machine's database below its
+// data directory base, when it starts: the databases of other hosts that
+// share the directory that no process opened for
+// store.HostFileRetention go (store.PruneHostFiles), and the snapshots'
+// retention applies (pruneAge).
 func Prune(base string, now time.Time) {
+	if base != "" && path.IsAbs(base) {
+		dbstore.PruneHostFiles(base, dbstore.MachineDB, dbstore.HostFileRetention, now)
+	}
+	pruneAge(base, now)
+}
+
+// pruneAge applies the snapshots' retention below the agent's data
+// directory base, as the agent's housekeeping does when it starts and list
+// and read do: snapshots older than the days they were written under go,
+// with what is not whole; the snapshots kept in files before are imported
+// first. It does not wait for a writer that holds the lease: a capture
+// running meanwhile (also another agent's of the instance) does the same
+// itself.
+func pruneAge(base string, now time.Time) {
 	if !exists(base) {
 		return
 	}

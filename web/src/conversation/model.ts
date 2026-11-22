@@ -296,8 +296,10 @@ export interface ChatError {
  * an increment of an item being streamed, without a seq, never stored.
  * Once an item is complete, or changes otherwise, a stored event carries
  * its whole content under the same item, which replaces what was taken
- * live for it; after attaching again, items that only have live
- * increments are dropped. */
+ * live for it (a stored notice under the item, when the host left the
+ * item out, too); after attaching again, items that only have live
+ * increments are dropped; once the turn ended, what arrived live and no
+ * stored state followed stays as it is. */
 export interface ChatEvent {
   /** Its place in the conversation; a transcript's is its line's byte
    * offset shifted left by 8 plus its index in the line. None for a live
@@ -415,6 +417,13 @@ export const CHAT_NOTICES = {
   /** What follows was imported from the agent's own record of the session
    * (params: {lossy?}: parts may differ or be missing). */
   imported: noticeMethod('imported'),
+  /** The agent started without the project's own settings (its hooks, MCP
+   * servers and instructions): nothing trusts the folder (params: {cwd}).
+   * The view offers to trust it (ChatSource.trust). */
+  untrustedFolder: noticeMethod('untrusted_folder'),
+  /** The chat had full access, which the machine's settings no longer
+   * allow: its agent started in the default mode (params: {mode}). */
+  fullAccessOff: noticeMethod('full_access_off'),
 } as const;
 
 /** The notice the view adds when a turn ends for another reason than the
@@ -448,7 +457,8 @@ export interface ThoughtItem {
 }
 export interface ToolItem {
   kind: 'tool';
-  /** The tool call's id. */
+  /** The tool call's id in the tool calls' own namespace (toolItemId):
+   * `tool:<toolCallId>`. */
   id: string;
   title: string;
   toolKind?: ToolKind;
@@ -581,6 +591,10 @@ export interface Conversation {
   stateError?: ChatError;
   /** Messages waiting for the agent, in the order sent. */
   queued?: QueuedMessage[];
+  /** The host's ids of messages taken or withdrawn that were not waiting
+   * here (queued on an earlier page): a page of earlier events no longer
+   * has them waiting (join), the latest MAX_LIST.queued. */
+  dequeued?: string[];
   /** What the agent does in the current turn besides its items. */
   activity?: 'compacting';
   /** The live overlay: for each item that took live increments since its
@@ -691,6 +705,7 @@ function readValue(v: unknown): ConfigValue | undefined {
   const out: ConfigValue = { value: v.value, name: asText(v.name) || v.value };
   const d = asText(v.description);
   if (d) out.description = d;
+  if (v.full === true) out.full = true;
   return out;
 }
 
@@ -789,8 +804,12 @@ export function configOf(chat: ChatInfo | undefined, category: string): ConfigOp
   return o && o.options.length > 1 ? o : undefined;
 }
 
+/** A question's id, which names its answer in a record: not a member every
+ * object has (__proto__, constructor, toString…). */
+const questionId = (id: unknown): id is string => !!nonEmpty(id) && !Object.hasOwn(Object.prototype, id as string);
+
 function readQuestion(q: unknown): Question | undefined {
-  if (!isObject(q) || !nonEmpty(q.id) || !nonEmpty(q.question)) return undefined;
+  if (!isObject(q) || !questionId(q.id) || !nonEmpty(q.question)) return undefined;
   const out: Question = { id: q.id as string, question: q.question as string };
   const header = asText(q.header);
   if (header) out.header = header;
@@ -830,7 +849,7 @@ function readAnswers(a: unknown): Record<string, string[]> | undefined {
   const out: Record<string, string[]> = Object.create(null);
   let any = false;
   for (const [k, v] of Object.entries(a)) {
-    if (!Array.isArray(v)) continue;
+    if (!Array.isArray(v) || !questionId(k)) continue;
     out[k] = v.filter((x): x is string => typeof x === 'string');
     any = true;
   }
@@ -854,6 +873,11 @@ function indexFor(byId: Record<string, number>, n: number): Record<string, numbe
   }
   return out;
 }
+
+/** The id of the item of a tool call: its call id in a namespace of its
+ * own, apart from the host's items (permission:…, question:…), the
+ * messages' and the notices', whatever an agent names its calls. */
+export const toolItemId = (toolCallId: string): string => `tool:${toolCallId}`;
 
 /** A new index of a list. */
 function indexOfList(items: readonly Item[]): Record<string, number> {
@@ -1117,7 +1141,7 @@ function applyTool(prev: ToolItem | undefined, id: string, u: ToolCall | ToolCal
 function tool(w: Work, ev: ChatEvent, u: ToolCall | ToolCallUpdate) {
   if (typeof u.toolCallId !== 'string' || u.toolCallId === '') return unknown(w);
   const c = w.c;
-  const id = u.toolCallId;
+  const id = toolItemId(u.toolCallId);
   const i = indexOf(c, id);
   const cur = i === undefined ? undefined : c.items[i];
   if (cur && cur.kind !== 'tool') return unknown(w);
@@ -1240,14 +1264,84 @@ function queued(w: Work, ev: ChatEvent) {
     return;
   }
   c.queued = at >= 0 ? list.filter((_, k) => k !== at) : list;
+  if (at < 0 && !c.dequeued?.includes(message)) c.dequeued = [...(c.dequeued ?? []), message].slice(-MAX_LIST.queued);
   if (ev.state === 'cancelled') return;
   const blocks = content.length ? content : at >= 0 ? list[at].content : [];
   userMessage(w, client ? clientItem(client) : queuedItem(message), blocks, ev.at);
 }
 
-function notice(w: Work, ev: ChatEvent, method: string, params: unknown) {
+function noticeItem(w: Work, ev: ChatEvent, method: string, params: unknown): NoticeItem {
   const item: NoticeItem = { kind: 'notice', id: fresh(w.c, `notice:${ev.seq ?? w.c.items.length}`), method };
-  add(w, withAt(params === undefined ? item : { ...item, params }, ev.at));
+  return withAt(params === undefined ? item : { ...item, params }, ev.at);
+}
+
+function notice(w: Work, ev: ChatEvent, method: string, params: unknown) {
+  add(w, noticeItem(w, ev, method, params));
+}
+
+/** Puts an item of another id at index i. */
+function replaceAt(w: Work, i: number, item: Item) {
+  put(w, i, item);
+  const c = w.c;
+  const n = c.items.length;
+  if (served.get(c.byId) !== n) c.byId = indexFor(c.byId, n);
+  c.byId[item.id] = i;
+  served.set(c.byId, n);
+}
+
+/** A stored notice under an item (the host left the item's stored state
+ * out: skipped) is that item's stored state: what arrived live for the
+ * item goes. An item that only arrived live gives its place to the notice
+ * (a subagent's call keeps its place, its conversation and what arrived
+ * for it); one with a stored state goes back to it, the notice after it.
+ * It reports whether the notice took an item's place. */
+function noticeForItem(w: Work, ev: ChatEvent, key: string, method: string): boolean {
+  let placed = false;
+  for (const id of [`message:agent:item:${key}`, `thought:agent:item:${key}`, `message:user:item:${key}`, toolItemId(key)]) {
+    const i = indexOf(w.c, id);
+    if (i === undefined || !hasBase(w.c, id)) continue;
+    const it = w.c.items[i];
+    const base = w.c.live![id];
+    forget(w, id);
+    if (base !== null) put(w, i, it.kind === 'tool' && base.kind === 'tool' && it.sub ? { ...base, sub: it.sub } : base);
+    else if (!placed && !(it.kind === 'tool' && it.sub)) {
+      replaceAt(w, i, noticeItem(w, ev, method, ev.params));
+      placed = true;
+    } else if (it.kind === 'message' || it.kind === 'thought') put(w, i, settledItem(it));
+  }
+  return placed;
+}
+
+/** The conversation with what arrived live kept as it is: no item waits
+ * for a stored state any more (its subagents' neither), which a turn that
+ * ended without one leaves (cancelled while it streamed). */
+function settleLive(c: Conversation): Conversation {
+  if (!hasLive(c)) return c;
+  const live = c.live ?? {};
+  let list: Item[] | undefined;
+  for (let k = 0; k < c.items.length; k++) {
+    const it = c.items[k];
+    let next = it;
+    if (Object.hasOwn(live, it.id) && (next.kind === 'message' || next.kind === 'thought')) next = settledItem(next);
+    if (next.kind === 'tool' && next.sub && hasLive(next.sub)) next = { ...next, sub: settleLive(next.sub) };
+    if (next !== it) (list ??= c.items.slice())[k] = next;
+  }
+  const out: Conversation = { ...c };
+  // The same ids at the same places: the index holds.
+  if (list) out.items = list;
+  delete out.live;
+  return out;
+}
+
+/** Settles what arrived live (settleLive) in the work. */
+function settle(w: Work) {
+  if (!hasLive(w.c)) return;
+  flush(w);
+  const items = w.c.items;
+  w.c = settleLive(w.c);
+  if (w.c.items !== items) w.own = true;
+  w.ownLive = false;
+  w.changed = true;
 }
 
 const NOTICE_METHODS: readonly string[] = [
@@ -1255,6 +1349,8 @@ const NOTICE_METHODS: readonly string[] = [
   CHAT_NOTICES.handedOff,
   CHAT_NOTICES.restarted,
   CHAT_NOTICES.imported,
+  CHAT_NOTICES.untrustedFolder,
+  CHAT_NOTICES.fullAccessOff,
   STOPPED,
 ];
 
@@ -1274,6 +1370,9 @@ function turn(w: Work, ev: ChatEvent) {
   c.turnSeen = true;
   delete c.activity;
   w.changed = true;
+  // What arrived live and no stored state followed (a turn cancelled while
+  // it streamed) stays as it is.
+  settle(w);
   const message = isObject(ev.error) ? asText(ev.error.message) : undefined;
   if (ev.state === 'error') notice(w, ev, NOTICES.error, message ? { message } : undefined);
   else if ((NOTABLE_STOPS as readonly unknown[]).includes(ev.stopReason)) notice(w, ev, STOPPED, { stopReason: ev.stopReason });
@@ -1287,7 +1386,12 @@ function permission(w: Work, ev: ChatEvent) {
   const id = `permission:${request}`;
   const raw: Record<string, unknown> = isObject(ev.toolCall) ? ev.toolCall : {};
   const callId = nonEmpty(raw.toolCallId) ?? request;
-  const call = applyTool(undefined, callId, { ...(raw as object), toolCallId: callId, sessionUpdate: 'tool_call' } as ToolCall, false);
+  const call = applyTool(
+    undefined,
+    toolItemId(callId),
+    { ...(raw as object), toolCallId: callId, sessionUpdate: 'tool_call' } as ToolCall,
+    false,
+  );
   const kind = (PERMISSION_KINDS as readonly unknown[]).includes(ev.kind) ? (ev.kind as PermissionKind) : 'other';
   const options = Array.isArray(ev.options) ? ev.options.slice(0, MAX_LIST.options).flatMap((o) => readOption(o) ?? []) : [];
   const item: PermissionItem = { kind: 'permission', id, request, permission: kind, call, options };
@@ -1316,7 +1420,16 @@ function permissionDone(w: Work, ev: ChatEvent) {
 
 function question(w: Work, ev: ChatEvent) {
   const request = nonEmpty(ev.id);
-  const questions = Array.isArray(ev.questions) ? ev.questions.slice(0, MAX_LIST.questions).flatMap((q) => readQuestion(q) ?? []) : [];
+  const seen = new Set<string>();
+  // Questions by id: one whose id an earlier one has is passed over.
+  const questions = Array.isArray(ev.questions)
+    ? ev.questions.slice(0, MAX_LIST.questions).flatMap((x) => {
+        const q = readQuestion(x);
+        if (!q || seen.has(q.id)) return [];
+        seen.add(q.id);
+        return [q];
+      })
+    : [];
   if (request === undefined || !questions.length) return unknown(w);
   const id = `question:${request}`;
   const item: QuestionItem = { kind: 'question', id, request, questions };
@@ -1383,6 +1496,8 @@ function noticeEvent(w: Work, ev: ChatEvent) {
   }
   if (typeof ev.method === 'string' && NOTICE_METHODS.includes(ev.method)) {
     if (ev.method === NOTICES.compacted) delete w.c.activity;
+    const key = ev.live === true ? undefined : nonEmpty(ev.item);
+    if (key !== undefined && noticeForItem(w, ev, key, ev.method)) return;
     return notice(w, ev, ev.method, ev.params);
   }
   unknown(w);
@@ -1426,31 +1541,33 @@ export function withoutLive(c: Conversation): Conversation {
   return out;
 }
 
-/** The work of the subagent's conversation that a tool call runs. */
-function subWork(w: Work, parent: string): Work | undefined {
-  const cached = w.subs?.get(parent);
+/** The work of the subagent's conversation that a tool call runs (call:
+ * the call's item id, toolItemId). */
+function subWork(w: Work, call: string): Work | undefined {
+  const cached = w.subs?.get(call);
   if (cached) return cached;
   const c = w.c;
-  let i = indexOf(c, parent);
+  let i = indexOf(c, call);
   if (i === undefined) {
     // A call of a subagent's own (deeper): its subagent's work takes it.
     for (const it of c.items) {
       if (it.kind !== 'tool' || !(it.sub || w.subs?.has(it.id))) continue;
       const sw = w.subs?.get(it.id);
-      if (sw ? runs(sw.c, parent) : runs(it.sub!, parent)) return subWork(w, it.id);
+      if (sw ? runs(sw.c, call) : runs(it.sub!, call)) return subWork(w, it.id);
     }
     // A call not seen yet: its item, to put the subagent's under.
-    add(w, { kind: 'tool', id: parent, title: '', toolKind: 'think', status: 'in_progress', content: [], locations: [] });
+    add(w, { kind: 'tool', id: call, title: '', toolKind: 'think', status: 'in_progress', content: [], locations: [] });
     i = c.items.length - 1;
   }
   const it = c.items[i];
   if (it.kind !== 'tool') return undefined;
   const sw = work(it.sub ?? emptyConversation());
-  (w.subs ??= new Map()).set(parent, sw);
+  (w.subs ??= new Map()).set(call, sw);
   return sw;
 }
 
-/** Whether a conversation has the tool call id, or a subagent's in it. */
+/** Whether a conversation has the tool call's item (id: toolItemId), or a
+ * subagent's in it does. */
 function runs(c: Conversation, id: string): boolean {
   if (indexOf(c, id) !== undefined) return true;
   return c.items.some((it) => it.kind === 'tool' && !!it.sub && runs(it.sub, id));
@@ -1459,10 +1576,10 @@ function runs(c: Conversation, id: string): boolean {
 /** Puts the subagents' conversations a batch changed into their calls. */
 function flush(w: Work) {
   if (!w.subs) return;
-  for (const [parent, sw] of w.subs) {
+  for (const [call, sw] of w.subs) {
     flush(sw);
     if (!sw.changed) continue;
-    const i = indexOf(w.c, parent);
+    const i = indexOf(w.c, call);
     const it = i === undefined ? undefined : w.c.items[i];
     if (i !== undefined && it?.kind === 'tool') put(w, i, { ...it, sub: sw.c });
   }
@@ -1472,10 +1589,11 @@ function flush(w: Work) {
 /** An event of a subagent (one with a parent): into the conversation of
  * the call that runs it; a deeper subagent's goes on down from there. */
 function nested(w: Work, ev: ChatEvent, parent: string) {
-  const sw = subWork(w, parent);
+  const call = toolItemId(parent);
+  const sw = subWork(w, call);
   if (!sw) return unknown(w);
   // A deeper subagent's event keeps its parent; the subagent's own drops it.
-  const own = indexOf(w.c, parent) !== undefined;
+  const own = indexOf(w.c, call) !== undefined;
   const inner: ChatEvent = { ...ev };
   if (own) delete inner.parent;
   step(sw, inner);
@@ -1491,7 +1609,7 @@ function step(w: Work, ev: SourceEvent) {
     w.c = emptyConversation();
     delete w.subs;
     w.own = true;
-    w.ownLive = true;
+    w.ownLive = false;
     w.changed = true;
     return;
   }
@@ -1501,7 +1619,8 @@ function step(w: Work, ev: SourceEvent) {
     if (next !== w.c) {
       w.c = next;
       w.own = true;
-      w.ownLive = true;
+      // No overlay: a live event after it in the batch makes one.
+      w.ownLive = false;
       w.changed = true;
     }
     return;
@@ -1549,7 +1668,7 @@ function step(w: Work, ev: SourceEvent) {
 /** The conversation after events, in their order. A stored event whose seq
  * is not above the highest one taken was taken already (a page fetched
  * again) and is passed over; a live one (live) adds to its item until a
- * stored one for the item gives it whole. Shown are the user's prompts, the
+ * stored one for the item gives it whole, or the turn ends. Shown are the user's prompts, the
  * agent's messages and thoughts (chunks of one message joined), tool calls
  * (by their id; a subagent's items in the conversation of the call that
  * runs it), the turn's plan, permissions and questions with their answers,
@@ -1594,7 +1713,9 @@ const continues = (a: Item | undefined, b: Item): a is MessageItem | ThoughtItem
  * events had followed e's: an item of an id e has goes into e's, the
  * chunk s began without a message id continues e's last message, and what
  * s has before its first turn's start (a plan, the prompt again) belongs to
- * e's last turn. What the chat states is s's, else e's. */
+ * e's last turn. What the chat states is s's, else e's; the messages
+ * waiting are e's that s did not take or withdraw, then s's; an item s took
+ * live has e's part in the stored state a reattach goes back to. */
 function join(e: Conversation, s: Conversation): Conversation {
   const list = e.items.slice();
   const byId: Record<string, number> = Object.create(null);
@@ -1647,11 +1768,26 @@ function join(e: Conversation, s: Conversation): Conversation {
   const st = s.state !== undefined ? s : e;
   if (st.state !== undefined) out.state = st.state;
   if (st.stateError) out.stateError = st.stateError;
-  const queue = s.queued ?? e.queued;
-  if (queue) out.queued = queue;
+  if (s.queued || e.queued) {
+    // The earlier page's waiting messages that the later one did not take,
+    // withdraw or have waiting itself come first.
+    const gone = new Set([...(s.dequeued ?? []), ...(s.queued ?? []).map((q) => q.message)]);
+    out.queued = [...(e.queued ?? []).filter((q) => !gone.has(q.message)), ...(s.queued ?? [])].slice(-MAX_LIST.queued);
+  }
+  if (e.dequeued || s.dequeued) out.dequeued = [...new Set([...(e.dequeued ?? []), ...(s.dequeued ?? [])])].slice(-MAX_LIST.queued);
   const activity = s.turnSeen ? s.activity : (s.activity ?? e.activity);
   if (activity) out.activity = activity;
-  if (s.live) out.live = s.live;
+  if (s.live) {
+    // An item the earlier page has too: what it gave the item belongs to
+    // the item's stored state, which a reattach goes back to.
+    const live: Record<string, Item | null> = Object.create(null);
+    for (const id of Object.keys(s.live)) {
+      const i = indexOf(e, id);
+      const base = s.live[id];
+      live[id] = i === undefined ? base : base === null ? e.items[i] : merge(e.items[i], base);
+    }
+    out.live = live;
+  }
   const first = e.first ?? s.first;
   if (first !== undefined) out.first = first;
   const lastSeq = s.last ?? e.last;

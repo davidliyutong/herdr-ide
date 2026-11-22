@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"slices"
 	"strings"
 	"sync"
@@ -321,4 +323,43 @@ func TestOutbox(t *testing.T) {
 	<-o.done
 	o.push(func() { t.Error("a call after close") })
 	o.reached(context.Background(), mark+5) // returns once done
+}
+
+// The values of a mode option that give the agent full access are marked
+// (chatproto.ConfigValue.Full), in an option of category mode and in the
+// option made of the agent's session modes alike; no other value is.
+func TestFullModeMarked(t *testing.T) {
+	full := func(cfg []chatproto.ConfigOption) []string {
+		var out []string
+		for _, o := range cfg {
+			for _, v := range o.Options {
+				if v.Full {
+					out = append(out, o.ID+"="+v.Value)
+				}
+			}
+		}
+		return out
+	}
+	s := newSession("kimi", log.New(io.Discard, "", 0), newHost(t.TempDir()), testTiming)
+	defer s.out.close()
+	s.mu.Lock()
+	s.setConfig(json.RawMessage(`[
+		{"type":"select","id":"mode","name":"Mode","category":"mode","currentValue":"default","options":[
+			{"value":"default","name":"Default"},{"value":"plan","name":"Plan"},{"value":"auto","name":"Auto"},{"value":"yolo","name":"YOLO"}]},
+		{"type":"select","id":"model","name":"Model","category":"model","currentValue":"yolo","options":[{"value":"yolo","name":"A model called yolo"}]}
+	]`), nil)
+	got := full(s.config)
+	s.mu.Unlock()
+	if !slices.Equal(got, []string{"mode=yolo"}) {
+		t.Errorf("full values %v", got)
+	}
+	s = newSession("other", log.New(io.Discard, "", 0), newHost(t.TempDir()), testTiming)
+	defer s.out.close()
+	s.mu.Lock()
+	s.setConfig(nil, json.RawMessage(`{"currentModeId":"ask","availableModes":[{"id":"ask","name":"Ask"},{"id":"bypassPermissions","name":"Bypass"}]}`))
+	got = full(s.config)
+	s.mu.Unlock()
+	if !slices.Equal(got, []string{"mode=bypassPermissions"}) {
+		t.Errorf("full values of the session modes %v", got)
+	}
 }

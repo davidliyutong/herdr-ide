@@ -179,7 +179,8 @@ func (ms models) configOptions(st settings) []chatproto.ConfigOption {
 	}
 	mode := chatproto.ConfigOption{ID: optMode, Name: "Mode", Category: chatproto.CategoryMode, Type: chatproto.ConfigSelect, CurrentValue: st.mode}
 	for _, m := range chatproto.Modes {
-		mode.Options = append(mode.Options, chatproto.ConfigValue{Value: m, Name: modeNames[m]})
+		// Full access: the host refuses it unless its settings allow it.
+		mode.Options = append(mode.Options, chatproto.ConfigValue{Value: m, Name: modeNames[m], Full: m == chatproto.ModeFull})
 	}
 	return append(out, mode)
 }

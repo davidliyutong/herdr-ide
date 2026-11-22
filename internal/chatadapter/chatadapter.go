@@ -57,6 +57,22 @@
 //   - It may call the Sink from any goroutine, with locks of its own
 //     held: the host never calls a Session method while holding a lock
 //     its Sink methods take.
+//   - It loads a project's own configuration (settings with their hooks,
+//     MCP servers, instructions) only in a folder the agent itself trusts
+//     or the user trusted through the host (StartParams.Trusted), where
+//     the agent lets a client choose: elsewhere it starts the agent
+//     without it and tells so with the stored notice
+//     agentproto.NoticeUntrustedFolder {cwd}.
+//   - It marks the value of its mode option that gives the agent full
+//     access with chatproto.ConfigValue.Full: the host refuses that value
+//     while the settings do not allow full access, and starts the agent of
+//     a chat that had it in chatproto.ModeDefault.
+//   - It ends what its agent left running in its process group: once the
+//     agent itself is gone, the group gets SIGTERM, then SIGKILL while a
+//     process of it is still there after a grace period.
+//   - The end of the agent's standard error it puts on an error
+//     (chatproto.Error.Stderr) is for the user's eyes only: the host keeps
+//     at most chatproto.MaxStderr bytes of it, in memory.
 //
 // A Session may also have a method PID() int: the id of its agent's
 // process, the leader of the agent's process group (0 while none runs).
@@ -164,7 +180,9 @@ type StartParams struct {
 	// Cwd is the session's working directory, an absolute path that
 	// exists.
 	Cwd string
-	// Resume is the session to take up; "" for a new one.
+	// Resume is the session to take up; "" for a new one. The host starts
+	// a new session for a chat whose session never had a turn (an agent
+	// may keep a session only once it took a prompt).
 	Resume string
 	// SessionID is the id the host chose for a new session, a lower-case
 	// UUID, for an agent that takes one (Claude Code's --session-id); an
@@ -173,8 +191,13 @@ type StartParams struct {
 	// NewSessionMeta is the Chat spec's _meta for ACP's session/new.
 	NewSessionMeta json.RawMessage
 	// Options are what the chat starts with; Mode is the setting's default
-	// when the chat named none.
+	// when the chat named none, never chatproto.ModeFull (nor a value the
+	// adapter marked Full) unless Settings.AllowFull.
 	Options chatproto.Options
+	// Trusted: the user trusted Cwd, or a folder above it, through the host
+	// (chatproto.OpTrust); the adapter loads the project's own settings as
+	// in a folder the agent trusts itself.
+	Trusted bool
 	Client  ClientInfo
 	// Settings are the host's settings, clamped.
 	Settings chatproto.HostSettings
