@@ -6,8 +6,8 @@ import { riskDialog } from '../dialog';
 import { t } from '../i18n';
 import { statusRank, type AgentStatus } from '../lib/machine';
 import { builtinDefaults, setSetting, useSettings, type Client, type Section } from '../settings';
-import type { PluginView } from '../term/layout';
 import type { NotificationTarget } from '../shell';
+import type { PluginView } from '../term/layout';
 import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef, TerminalHeaderProps, UnopenedAgent } from './api';
 
 let plugins: PluginDef[] = [];
@@ -278,19 +278,20 @@ export function viewSeen(m: string, view: PluginView) {
   if (o?.def.seen) guarded(o.p, 'seen', () => o.def.seen!(m, view));
 }
 
-/** Items of active plugins on machine m that have an agent status without an open pane. */
+/** Conversations/agents on machine m from active plugins that have no open pane. */
 export function viewUnopened(m: string): Array<UnopenedAgent & { plugin: string }> {
   const out: Array<UnopenedAgent & { plugin: string }> = [];
   for (const p of activePlugins()) {
     const def = p.viewStatus;
     if (!def?.unopened) continue;
     const list = guarded(p, 'unopened', () => def.unopened!(m));
-    if (Array.isArray(list)) for (const item of list) out.push({ ...item, plugin: p.id });
+    if (!Array.isArray(list)) continue;
+    for (const item of list) out.push({ ...item, plugin: p.id });
   }
   return out;
 }
 
-/** Opens/focuses an item referenced by a chat notification target through the active plugin that owns it. */
+/** Routes a chat notification click without an open pane to the plugin that owns it. */
 export function viewOpenTarget(target: Extract<NotificationTarget, { kind: 'chat' }>): boolean {
   for (const p of activePlugins()) {
     const def = p.viewStatus;

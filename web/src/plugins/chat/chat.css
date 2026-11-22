@@ -136,6 +136,10 @@
   align-items: center;
   min-width: 0;
 }
+.chat-row:hover,
+.chat-row:focus-within {
+  background: var(--bg-3);
+}
 .chat-row-main {
   display: flex;
   align-items: center;
@@ -151,7 +155,7 @@
   text-align: left;
 }
 .chat-row-main:hover {
-  background: var(--bg-3);
+  background: transparent;
 }
 .chat-row-text {
   display: flex;
@@ -173,11 +177,11 @@
   flex: none;
 }
 .chat-row-actions {
-  position: absolute;
-  right: 4px;
   display: none;
+  flex: none;
+  align-items: center;
   gap: 2px;
-  background: var(--bg-3);
+  padding-right: 4px;
 }
 .chat-row:hover .chat-row-actions,
 .chat-row:focus-within .chat-row-actions {
@@ -250,4 +254,127 @@
 }
 .agent-sessions-more {
   margin: 2px 12px 4px;
+}
+
+/* ---- settings management/debug panel (SettingsExtra.tsx) ---- */
+.chat-manage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-manage-refresh {
+  margin-left: auto;
+}
+.chat-trusted-machine {
+  margin-left: auto;
+  min-width: 8rem;
+  height: var(--ctl-sm);
+  min-height: var(--ctl-sm);
+  font-size: var(--fs-sm);
+}
+.chat-trusted-machine + .chat-manage-refresh {
+  margin-left: 4px;
+}
+.chat-manage-hosts,
+.chat-trusted-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.chat-host-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+.chat-host-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.chat-host-icon {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-dim);
+}
+.chat-host-name {
+  font-weight: 600;
+}
+.chat-host-badge {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+}
+.chat-host-badge.st-running {
+  color: var(--done);
+  border-color: color-mix(in srgb, var(--done) 40%, transparent);
+}
+.chat-host-badge.st-error {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+}
+.chat-host-badge.st-offline {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+}
+.chat-host-stop {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-host-stats {
+  font-variant-numeric: tabular-nums;
+}
+.chat-host-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.chat-host-session,
+.chat-trusted-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.chat-host-session-icon,
+.chat-trusted-icon {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-dim);
+}
+.chat-host-session-info,
+.chat-trusted-info {
+  flex: 1;
+  min-width: 0;
+}
+.chat-host-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.chat-trusted-row button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }

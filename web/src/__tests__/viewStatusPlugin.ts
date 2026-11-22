@@ -5,13 +5,14 @@
 
 import { Files } from 'lucide-react';
 import { createElement } from 'react';
-import type { PluginDef } from '../plugins/api';
 import type { AgentStatus } from '../lib/machine';
+import type { PluginDef, UnopenedAgent } from '../plugins/api';
 import * as L from '../term/layout';
 
 export const DUMMY = 'dummy';
 
 const statuses = new Map<string, AgentStatus>();
+const unopened = new Map<string, UnopenedAgent[]>();
 const listeners = new Set<() => void>();
 
 /** What the plugin was told was seen: machine and view id. */
@@ -27,8 +28,15 @@ export function setViewStatus(id: string, s: AgentStatus | undefined) {
   for (const f of [...listeners]) f();
 }
 
+export function setUnopenedAgents(m: string, list: UnopenedAgent[]) {
+  if (list.length) unopened.set(m, list);
+  else unopened.delete(m);
+  for (const f of [...listeners]) f();
+}
+
 export function resetViewStatuses() {
   statuses.clear();
+  unopened.clear();
   seenCalls.length = 0;
 }
 
@@ -59,5 +67,6 @@ export const dummyPlugin: PluginDef = {
     seen: (m, v) => {
       seenCalls.push(`${m}:${v.id}`);
     },
+    unopened: (m) => unopened.get(m) ?? [],
   },
 };

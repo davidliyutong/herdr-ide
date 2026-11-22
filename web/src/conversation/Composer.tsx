@@ -11,6 +11,7 @@
 // it resets. Read-only, every control is disabled.
 
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -22,7 +23,22 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from 'react';
-import { ArrowUp, Clock, FileText, ImagePlus, ListPlus, LoaderCircle, Square, SquareSlash, TriangleAlert, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import {
+  ArrowUp,
+  Check,
+  ChevronDown,
+  Clock,
+  FileText,
+  ImagePlus,
+  ListPlus,
+  LoaderCircle,
+  Square,
+  SquareSlash,
+  TriangleAlert,
+  X,
+} from 'lucide-react';
+import { useDismiss } from '../components/useDismiss';
 import { locale, t, type MessageKey } from '../i18n';
 import { AttachError, fits, formatBytes, IMAGE_TYPES, MAX_ATTACHMENTS, promptContent, readImage, type Attachment } from './attach';
 import { contextPercent, formatCost, formatTokens, relativeTime, tightest, windowLabel } from './format';
@@ -146,6 +162,51 @@ function modeName(v: ConfigValue): string {
  * read-only. */
 export type FullBlocked = 'off' | 'readOnly' | undefined;
 
+export interface ConfigMenuPlace {
+  placement: 'top' | 'bottom';
+  left: number;
+  minWidth: number;
+  maxWidth: number;
+  maxHeight: number;
+  top?: number;
+  bottom?: number;
+}
+
+/** Places a config picker popover below or above its trigger button,
+ * preferring upward placement when near the bottom of the viewport. */
+export function placeConfigMenu(
+  anchor: { left: number; top: number; right: number; bottom: number },
+  wanted: number,
+  view: { width: number; height: number },
+): ConfigMenuPlace {
+  const margin = 8;
+  const gap = 4;
+  const availW = Math.max(0, view.width - 2 * margin);
+  const minWidth = Math.min(Math.max(anchor.right - anchor.left, 160), availW);
+  const maxWidth = Math.min(340, Math.max(minWidth, availW));
+  const left = Math.max(margin, Math.min(anchor.left, view.width - minWidth - margin));
+  const below = view.height - anchor.bottom - margin - gap;
+  const above = anchor.top - margin - gap;
+  if (wanted <= below || (below >= above && below >= 120)) {
+    return {
+      placement: 'bottom',
+      left,
+      minWidth,
+      maxWidth,
+      top: anchor.bottom + gap,
+      maxHeight: Math.max(80, below),
+    };
+  }
+  return {
+    placement: 'top',
+    left,
+    minWidth,
+    maxWidth,
+    bottom: view.height - anchor.top + gap,
+    maxHeight: Math.max(80, above),
+  };
+}
+
 function ConfigSelect({
   option,
   label,
@@ -163,38 +224,211 @@ function ConfigSelect({
 }) {
   /** The value asked for until the host took it. */
   const [asked, setAsked] = useState<string | undefined>(undefined);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const [place, setPlace] = useState<ConfigMenuPlace>();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const popupId = useId();
+
   const value = asked ?? option.currentValue;
   const values = option.options.some((o) => o.value === value) ? option.options : [{ value, name: value }, ...option.options];
   const blocked = (v: ConfigValue) => !!fullBlocked && v.full === true;
+  const labelOf = (v: ConfigValue) => {
+    const name = nameOf ? nameOf(v) : v.name;
+    return blocked(v) ? t(fullBlocked === 'readOnly' ? 'conversation.config.fullReadOnly' : 'conversation.config.fullOff', { name }) : name;
+  };
+  const current = values.find((v) => v.value === value);
+  const currentLabel = current ? labelOf(current) : value;
+  const isDisabled = disabled || asked !== undefined;
+
   let title = option.description ? `${label}: ${option.description}` : label;
   if (fullBlocked === 'off' && values.some(blocked)) title += `\n${t('conversation.config.fullOffHint')}`;
+
+  const close = useCallback((returnFocus = false) => {
+    setOpen(false);
+    if (returnFocus) buttonRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useDismiss(open, menuRef, () => close(false), buttonRef);
+
+  const enabledIndexes = useMemo(
+    () => values.map((v, i) => (!blocked(v) ? i : -1)).filter((i) => i >= 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [values, fullBlocked],
+  );
+
+  const openMenu = (preferred?: 'first' | 'last') => {
+    if (isDisabled) return;
+    const curIdx = values.findIndex((v) => v.value === value && !blocked(v));
+    const init =
+      preferred === 'last'
+        ? (enabledIndexes[enabledIndexes.length - 1] ?? 0)
+        : preferred === 'first'
+          ? (enabledIndexes[0] ?? 0)
+          : curIdx >= 0
+            ? curIdx
+            : (enabledIndexes[0] ?? 0);
+    setActive(init);
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (isDisabled && open) setOpen(false);
+  }, [isDisabled, open]);
+
+  const updatePlace = useCallback(() => {
+    const btn = buttonRef.current;
+    if (!btn) return;
+    const estimated = Math.min(Math.max(menuRef.current?.scrollHeight ?? 0, values.length * 32 + 12), 320);
+    setPlace(placeConfigMenu(btn.getBoundingClientRect(), estimated, { width: window.innerWidth, height: window.innerHeight }));
+  }, [values.length]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPlace(undefined);
+      return;
+    }
+    updatePlace();
+    menuRef.current?.focus({ preventScroll: true });
+    window.addEventListener('resize', updatePlace);
+    window.addEventListener('scroll', updatePlace, true);
+    return () => {
+      window.removeEventListener('resize', updatePlace);
+      window.removeEventListener('scroll', updatePlace, true);
+    };
+  }, [open, updatePlace]);
+
+  const choose = (v: ConfigValue) => {
+    if (blocked(v)) return;
+    close(true);
+    if (v.value === value) return;
+    setAsked(v.value);
+    onSet(option.id, v.value).finally(() => setAsked(undefined));
+  };
+
+  const stepActive = (delta: number) => {
+    if (!enabledIndexes.length) return;
+    const pos = enabledIndexes.indexOf(active);
+    const next = pos < 0 ? 0 : (pos + delta + enabledIndexes.length) % enabledIndexes.length;
+    setActive(enabledIndexes[next]);
+  };
+
+  const onMenuKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      close(true);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      stepActive(1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      stepActive(-1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      if (enabledIndexes.length) setActive(enabledIndexes[0]);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      if (enabledIndexes.length) setActive(enabledIndexes[enabledIndexes.length - 1]);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      const item = values[active];
+      if (item && !blocked(item)) choose(item);
+    } else if (e.key === 'Tab') {
+      close(false);
+    }
+  };
+
   return (
-    <select
-      className="conv-select"
-      data-config={option.category}
-      value={value}
-      aria-label={label}
-      title={title}
-      disabled={disabled || asked !== undefined}
-      onChange={(e) => {
-        const v = e.target.value;
-        setAsked(v);
-        onSet(option.id, v).finally(() => setAsked(undefined));
-      }}
-    >
-      {values.map((v) => {
-        const name = nameOf ? nameOf(v) : v.name;
-        return blocked(v) ? (
-          <option key={v.value} value={v.value} disabled data-full={fullBlocked}>
-            {t(fullBlocked === 'readOnly' ? 'conversation.config.fullReadOnly' : 'conversation.config.fullOff', { name })}
-          </option>
-        ) : (
-          <option key={v.value} value={v.value} title={v.description}>
-            {name}
-          </option>
-        );
-      })}
-    </select>
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="conv-select"
+        data-config={option.category}
+        data-value={value}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? popupId : undefined}
+        aria-label={label}
+        title={title}
+        disabled={isDisabled}
+        onClick={() => (open ? close(false) : openMenu())}
+        onKeyDown={(e) => {
+          if (open) return;
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            openMenu();
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            openMenu('last');
+          }
+        }}
+      >
+        <span className="conv-select-label ellipsis">{currentLabel}</span>
+        <ChevronDown className="conv-select-chevron" aria-hidden />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            id={popupId}
+            className="conv-select-menu"
+            role="listbox"
+            tabIndex={-1}
+            data-config={option.category}
+            data-placement={place?.placement}
+            aria-label={label}
+            aria-activedescendant={active >= 0 ? `${popupId}-${active}` : undefined}
+            style={
+              place
+                ? {
+                    left: place.left,
+                    minWidth: place.minWidth,
+                    maxWidth: place.maxWidth,
+                    maxHeight: place.maxHeight,
+                    ...(place.top !== undefined ? { top: place.top } : { bottom: place.bottom }),
+                  }
+                : { visibility: 'hidden' }
+            }
+            onKeyDown={onMenuKeyDown}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {values.map((v, i) => {
+              const isBlocked = blocked(v);
+              const isSelected = v.value === value;
+              const isActive = i === active && !isBlocked;
+              return (
+                <div
+                  key={v.value}
+                  id={`${popupId}-${i}`}
+                  role="option"
+                  data-value={v.value}
+                  data-full={isBlocked ? fullBlocked : undefined}
+                  aria-selected={isSelected}
+                  aria-disabled={isBlocked || undefined}
+                  title={v.description}
+                  className={['conv-select-option', isActive && 'active', isSelected && 'selected', isBlocked && 'disabled']
+                    .filter(Boolean)
+                    .join(' ')}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => !isBlocked && setActive(i)}
+                  onClick={() => choose(v)}
+                >
+                  <span className="conv-select-option-text">
+                    <span className="conv-select-option-label ellipsis">{labelOf(v)}</span>
+                    {v.description && <span className="conv-select-option-desc ellipsis">{v.description}</span>}
+                  </span>
+                  {isSelected && <Check className="conv-select-option-check" aria-hidden />}
+                </div>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

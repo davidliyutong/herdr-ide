@@ -5,13 +5,13 @@
 // header. Below the chats, the agents' earlier sessions of the focused
 // pane's directory, which open as chats (Sessions.tsx).
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
-import { CirclePower, Plus, Trash2 } from 'lucide-react';
+import { Archive, CirclePower, Plus, Settings } from 'lucide-react';
 import { openMenu } from '../../contextMenu';
 import { relativeTime } from '../../conversation/format';
 import { locale, t } from '../../i18n';
 import { shortPath, statusRank, type AgentStatus } from '../../lib/machine';
 import { useStore } from '../../state/store';
-import { agentName, closeChat, deleteChat, kindIcon, kindsMenu, openChat } from './ops';
+import { agentName, archiveChat, closeChat, kindIcon, kindsMenu, openChat } from './ops';
 import { CHAT_STATUSES, type ChatState } from './protocol';
 import { PastSessions } from './Sessions';
 import { follow, loadAgents, useChats } from './state';
@@ -67,6 +67,15 @@ export function ChatsPanel() {
             <Plus />
           </button>
         )}
+        <button
+          type="button"
+          className="icon"
+          aria-label={t('chat.manage.open')}
+          title={t('chat.manage.open')}
+          onClick={() => useStore.getState().openSettings({ page: 'chat' })}
+        >
+          <Settings />
+        </button>
       </div>
       {!ready && <div className="chat-panel-empty muted small">{t('chat.panel.offline')}</div>}
       {ready && known && !list.length && <div className="chat-panel-empty muted small">{t('chat.panel.none')}</div>}
@@ -129,11 +138,11 @@ function ChatRow({ m, st, home, now, readOnly }: { m: string; st: ChatState; hom
           <button
             type="button"
             className="icon sm"
-            aria-label={t('chat.deleteNamed', { title })}
-            title={t('chat.delete')}
-            onClick={() => void deleteChat(m, st.id)}
+            aria-label={t('chat.archiveNamed', { title })}
+            title={t('chat.archive')}
+            onClick={() => void archiveChat(m, st.id)}
           >
-            <Trash2 />
+            <Archive />
           </button>
         </span>
       )}

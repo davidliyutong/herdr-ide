@@ -16,6 +16,7 @@ import { useStore } from '../../state/store';
 import type { PluginDef } from '../api';
 import { ChatPane } from './ChatPane';
 import { ChatsPanel } from './ChatsPanel';
+import { ChatSettingsExtra } from './SettingsExtra';
 import { agentName, chatMenu, kindIcon, kindsMenu, newChat, newTabTitle } from './ops';
 import { chatCwd } from './source';
 import { chatViewStatus } from './status';
@@ -48,7 +49,7 @@ export const chatPlugin: PluginDef = {
   title: 'chat.title',
   description: 'chat.description',
   icon: BotMessageSquare,
-  settings: { section: 'chat' },
+  settings: { section: 'chat', extra: ChatSettingsExtra },
   panels: [{ id: CHAT_PLUGIN, title: 'chat.panel.chats', icon: MessagesSquare, component: ChatsPanel }],
   paneViews: {
     [CHAT_VIEW]: {

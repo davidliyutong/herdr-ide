@@ -150,6 +150,62 @@ export interface ChatState {
   updated: string;
   seq: number;
   sessionId: string;
+  seen?: number;
+  unread?: boolean;
+  stale?: boolean;
+}
+
+/** A trusted folder persisted on a machine's chat host. */
+export interface TrustedFolder {
+  cwd: string;
+  /** RFC 3339. */
+  at: string;
+}
+
+/** A session on a machine's headless chat host (debug/management overview). */
+export interface ChatHostSession {
+  chat: string;
+  kind: string;
+  title: string;
+  cwd: string;
+  sessionId: string;
+  state: string;
+  status: string;
+  pid?: number;
+  starting?: boolean;
+  /** RFC 3339. */
+  idleSince?: string;
+  /** RFC 3339. */
+  updated: string;
+  bytes: number;
+  agentVersion?: string;
+}
+
+/** Overview of a machine's headless chat host (GET /api/p/chat/hosts). */
+export interface ChatHostOverview {
+  machine: string;
+  label: string;
+  machineStatus: string;
+  running: boolean;
+  status: 'running' | 'stopped' | 'offline' | 'error';
+  pid?: number;
+  version?: string;
+  proto?: number;
+  terminalId?: string;
+  /** RFC 3339. */
+  startedAt?: string;
+  socket?: string;
+  base?: string;
+  conns?: number;
+  watchers?: number;
+  liveAgents?: number;
+  totalChats: number;
+  totalBytes?: number;
+  ending?: number;
+  settings?: HostSettings;
+  sessions: ChatHostSession[];
+  error?: string;
+  message?: string;
 }
 
 /** Whether an agent kind can be started on a machine. */
@@ -355,6 +411,7 @@ export interface StatesData {
   states: ChatState[];
   full: boolean;
   rev: number;
+  stale?: boolean;
 }
 
 /** GET STATES_PATH: each machine's states as the core last read them (full,

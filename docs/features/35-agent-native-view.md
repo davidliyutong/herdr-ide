@@ -406,8 +406,10 @@ replaces what came live for an item with its stored event (or a stored
 notice under the item), drops items that only came live when it attaches
 again, keeps them as they are once their turn ended without one, and keys
 tool calls apart from the host's items (`tool:<id>`). The chat panes draw the view with the cards and the
-composer ([37](37-agent-chats.md)); the tests also drive it with sources
-of their own.
+composer (with custom-styled popover selectors for model, effort and
+mode that position upward near the bottom of the viewport and support
+keyboard navigation, [37](37-agent-chats.md)); the tests also drive it
+with sources of their own.
 
 ## Alternatives considered
 

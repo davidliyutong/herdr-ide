@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { placeConfigMenu } from '../conversation/Composer';
 import { Conversation } from '../conversation/Conversation';
 import { MAX_IMAGE, type ChatEvent, type ContentBlock, type SourceEvent } from '../conversation/model';
 import type { ChatSource, FileSuggestion } from '../conversation/source';
@@ -289,30 +290,39 @@ describe('the chat’s options', () => {
     },
   ];
 
-  it('are chosen with selectors: the model, the effort where there is a choice, the mode in the view’s words', async () => {
+  const menuOf = (cat: string) => document.body.querySelector<HTMLElement>(`.conv-select-menu[data-config="${cat}"]`);
+  const menuOptions = (cat: string) => Array.from(menuOf(cat)?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
+
+  it('are chosen with custom selectors: the model, the effort where there is a choice, the mode in the view’s words', async () => {
     const s = new FakeSource();
     s.emit(info({ config }));
     await show(s);
-    const selects = qa<HTMLSelectElement>('select.conv-select');
+    const selects = qa<HTMLButtonElement>('button.conv-select');
     expect(selects.map((x) => x.getAttribute('aria-label'))).toEqual([t('conversation.config.model'), t('conversation.config.mode')]);
     const [model, mode] = selects;
-    expect(Array.from(model.options).map((o) => o.textContent)).toEqual(['Haiku', 'Opus']);
-    expect(Array.from(mode.options).map((o) => o.textContent)).toEqual([
+    expect(model.dataset.value).toBe('claude-haiku-5-5');
+    expect(model.textContent).toBe('Haiku');
+    await click(model);
+    expect(menuOptions('model').map((o) => o.textContent)).toEqual(['Haiku', 'Opus']);
+    await click(model); // close
+    await click(mode);
+    expect(menuOptions('mode').map((o) => o.textContent)).toEqual([
       t('conversation.mode.default'),
       t('conversation.mode.acceptEdits'),
       t('conversation.mode.plan'),
       t('conversation.mode.full'),
       'agent custom',
     ]);
+    await click(mode); // close
+
     let done!: () => void;
     s.setConfig.mockImplementationOnce(() => new Promise<void>((r) => (done = r)));
-    await act(async () => {
-      model.value = 'claude-opus-5-5';
-      model.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await click(model);
+    await click(menuOptions('model')[1]);
     expect(s.setConfig).toHaveBeenCalledWith('model', 'claude-opus-5-5');
+    expect(menuOf('model')).toBeNull();
     // Shown as asked, and not changed again until the host took it.
-    expect(model.value).toBe('claude-opus-5-5');
+    expect(model.dataset.value).toBe('claude-opus-5-5');
     expect(model.disabled).toBe(true);
     await emit(
       s,
@@ -333,19 +343,69 @@ describe('the chat’s options', () => {
     await act(async () => done());
     await settle();
     expect(model.disabled).toBe(false);
-    expect(model.value).toBe('claude-opus-5-5');
+    expect(model.dataset.value).toBe('claude-opus-5-5');
     // The new model has a choice of effort.
-    expect(qa('select.conv-select')).toHaveLength(3);
+    expect(qa('button.conv-select')).toHaveLength(3);
     s.setConfig.mockImplementationOnce(async () => {
       throw Object.assign(new Error('x'), { code: 'busy' });
     });
-    await act(async () => {
-      mode.value = 'plan';
-      mode.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await click(mode);
+    await click(menuOptions('mode').find((o) => o.dataset.value === 'plan'));
     await settle();
     expect(q('[role="alert"]')?.textContent).toContain(t('conversation.error.busy', { agent: 'Claude Code' }));
-    expect(mode.value).toBe('default');
+    expect(mode.dataset.value).toBe('default');
+  });
+
+  it('support keyboard navigation and upward popover positioning near the bottom', async () => {
+    const s = new FakeSource();
+    s.emit(info({ config }));
+    await show(s);
+    const model = q<HTMLButtonElement>('button.conv-select[data-config="model"]')!;
+    vi.spyOn(model, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      right: 220,
+      top: 710,
+      bottom: 734,
+      width: 120,
+      height: 24,
+      x: 100,
+      y: 710,
+      toJSON: () => ({}),
+    });
+    await act(async () => {
+      model.focus();
+      model.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    });
+    await settle();
+    const popup = menuOf('model')!;
+    expect(popup).not.toBeNull();
+    expect(popup.dataset.placement).toBe('top');
+    expect(popup.style.bottom).toBeTruthy();
+    expect(document.activeElement).toBe(popup);
+    await act(async () => {
+      popup.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    });
+    expect(menuOptions('model')[1].classList.contains('active')).toBe(true);
+    await act(async () => {
+      popup.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(menuOf('model')).toBeNull();
+    expect(document.activeElement).toBe(model);
+    // Open again and pick with Enter.
+    await act(async () => {
+      model.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    });
+    const popup2 = menuOf('model')!;
+    await act(async () => {
+      popup2.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+      popup2.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(s.setConfig).toHaveBeenCalledWith('model', 'claude-opus-5-5');
+    expect(placeConfigMenu({ left: 10, top: 20, right: 150, bottom: 44 }, 160, { width: 1024, height: 768 }).placement).toBe('bottom');
+    expect(placeConfigMenu({ left: 10, top: 700, right: 150, bottom: 724 }, 160, { width: 1024, height: 768 }).placement).toBe('top');
   });
 
   it('that give full access are unavailable, saying why, while the machine does not allow it and read-only', async () => {
@@ -363,12 +423,15 @@ describe('the chat’s options', () => {
     };
     const s = new FakeSource();
     s.emit(info({ config: [modes] }));
-    const shown = () => {
-      const mode = q<HTMLSelectElement>('select.conv-select[data-config="mode"]')!;
-      return { mode, options: Array.from(mode.options).map((o) => [o.value, o.textContent, o.disabled]) };
+    const shown = async () => {
+      const mode = q<HTMLButtonElement>('button.conv-select[data-config="mode"]')!;
+      if (!mode.disabled) await click(mode);
+      const opts = menuOptions('mode').map((o) => [o.dataset.value, o.textContent, o.getAttribute('aria-disabled') === 'true']);
+      if (menuOf('mode')) await click(mode);
+      return { mode, options: opts };
     };
     await show(s, false, false);
-    let { mode, options } = shown();
+    let { mode, options } = await shown();
     const fullName = t('conversation.mode.full');
     expect(options).toEqual([
       ['default', t('conversation.mode.default'), false],
@@ -377,20 +440,24 @@ describe('the chat’s options', () => {
     ]);
     expect(mode.title).toContain(t('conversation.config.fullOffHint'));
     expect(mode.disabled).toBe(false);
+    // Disabled options cannot be clicked.
+    await click(mode);
+    await click(menuOptions('mode')[1]);
+    expect(s.setConfig).not.toHaveBeenCalled();
+    await click(mode);
     // Allowed: offered as any other.
     await show(s, false, true);
-    ({ mode, options } = shown());
+    ({ mode, options } = await shown());
     expect(options).toEqual([
       ['default', t('conversation.mode.default'), false],
       ['full', fullName, false],
       ['yolo', 'YOLO', false],
     ]);
     expect(mode.title).not.toContain(t('conversation.config.fullOffHint'));
-    // Read-only: nothing is chosen, full access said to be not from here.
+    // Read-only: nothing is chosen.
     await show(s, true, true);
-    ({ mode, options } = shown());
+    ({ mode } = await shown());
     expect(mode.disabled).toBe(true);
-    expect(options[1]).toEqual(['full', t('conversation.config.fullReadOnly', { name: fullName }), true]);
   });
 });
 
@@ -536,7 +603,7 @@ describe('a read-only composer', () => {
     );
     await show(s, true);
     expect(field().disabled).toBe(true);
-    expect(q<HTMLSelectElement>('select.conv-select')!.disabled).toBe(true);
+    expect(q<HTMLButtonElement>('button.conv-select')!.disabled).toBe(true);
     expect(q<HTMLButtonElement>('.conv-attach')!.disabled).toBe(true);
     expect(q<HTMLButtonElement>('.conv-send')!.disabled).toBe(true);
     expect(q('.conv-stop')).toBeNull();
