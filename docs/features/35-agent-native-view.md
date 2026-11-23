@@ -28,7 +28,7 @@ Goals: find the session each agent terminal runs, without changing the
 agents' configuration; resume it after the terminal core started again
 once the machine confirms it ([33](33-workspace-restore.md)); show its
 usage in the status bar ([29](29-ai-usage.md)); add a kind of agent by a
-row of a registry; read a session's transcript on its machine into events
+row of a registry; map Claude Code's transcripts on the machine to events
 shaped as the Agent Client Protocol's; a conversation view the chat panes
 draw ([37](37-agent-chats.md)).
 
@@ -43,8 +43,9 @@ headless is [37](37-agent-chats.md).
 The registry of the coding agents: per kind its `ID` (the detector's
 manifest id), `Title`, `UsageProvider` ([29](29-ai-usage.md)), `Start`
 (argv), `NewSession` (arguments that set the session id), `ContinueLatest`,
-`ResumeByID`, `Transcript` (its parser, or none) and `Chat` (how the chat
-host runs it, [37](37-agent-chats.md)). It is data only.
+`ResumeByID`, `Transcript` (the format of its transcripts, or none) and
+`Chat` (how the chat host runs it, [37](37-agent-chats.md)). It is data
+only.
 
 | Kind | Start | New session | Continue latest | Resume by id | Transcript | Chat |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -57,7 +58,7 @@ host runs it, [37](37-agent-chats.md)). It is data only.
 `make tokens` writes the kinds into `design/generated/registry.json` (key
 `agents`), which the page reads (`web/src/conversation/kinds.ts`): agents
 to start, the commands a restore types, the usage provider, whether a
-kind's conversations can be read, its chat adapter. Argv, environment and
+kind's transcripts are read, its chat adapter. Argv, environment and
 session metadata of chats stay on the machine, never in that JSON. A
 `{id}` placeholder is replaced only by a lower-case UUID; anything else
 makes no command. How to add a kind is in [AGENTS.md](../../AGENTS.md)
@@ -104,8 +105,8 @@ and the resolver's maps bounded.
 
 With the agents plugin on, the core opens the detect stream
 ([25](25-agent-detection.md)) with `Header.Sessions`; without it the
-agent reads no session file. For each terminal whose agent has a
-transcript parser, a goroutine resolves after the startup grace, retries
+agent reads no session file. For each terminal whose agent's
+transcripts are read, a goroutine resolves after the startup grace, retries
 with back-off while nothing is found, and resolves again when the stamp,
 the foreground pid or its command line changes
 (`internal/agent/agentdetect_session.go`).
@@ -126,37 +127,35 @@ wrote. The restore remembers `session` and writes `before`
 ([33](33-workspace-restore.md)); terminal history adopts a snapshot by
 `before` ([36](36-terminal-history.md)).
 
-### Transcripts (`internal/agent/transcript`)
+### Claude Code's transcripts (`internal/agent/transcript`)
 
-The parser maps a transcript's lines to events shaped as ACP v1
+The parser maps the lines of a Claude Code transcript, and the messages
+of its SDK protocol, which have their shapes, to events shaped as ACP v1
 `session/update` notifications (`internal/agentproto/transcript.go`):
 `update`, `user`, `turn` (`start`, `end`, `error` with a `stopReason`)
-and `notice` (`_<slug>/<name>`: `compacted`, `command`, `error`, `model`,
+and `notice` (`_<slug>/<name>`: `compacted`, `command`, `error`,
 `skipped`); the product's own marks are under `_meta.<slug>`. Each event
-is made from its line alone, so the machine keeps no state between reads.
-`Tail` reads a page of events back from the end or forward from a cursor
-(`seq` = line offset × 256 + index in the line; opaque to browsers);
-`EachClaude` and `ClaudeFrame` apply the same mapping line by line for the
-chat host's Claude Code adapter: imported sessions, what a session did in
-a terminal, and a live chat's tool results ([37](37-agent-chats.md)). No
-route sends a transcript to the page.
+is made from its line alone. `ClaudeFrame` maps one line, `EachClaude` a
+file's lines forward from an offset, for the chat host's Claude Code
+adapter: imported sessions, what a session did in a terminal, and a live
+chat's tool results ([37](37-agent-chats.md)). No route sends a
+transcript to the page.
 
 The mapping, in short: prompts make `turn` start and `user`; messages
 sent while the agent works join the running turn; assistant text,
 thinking and tool calls make chunks and `tool_call` (edit, execute,
 read, search, fetch, think, a plan); tool results make
 `tool_call_update` with diffs and outputs; usage makes `usage_update`;
-turn ends, interruptions, compactions, model changes and API errors make
+turn ends, interruptions, compactions and API errors make
 `turn` ends and notices; titles come from `custom-title`, `ai-title` or
-`summary`. Codex's newer item form and older `event_msg`/`response_item`
-form are both read. The program's own state lines make nothing; lines of
-unknown shape are counted in `unknown`. The shared vectors in
+`summary`; a response's usage is on each of its lines, and readers keep
+the last of a message. The program's own state lines make nothing; lines
+of unknown shape are counted in `unknown`. The shared vectors in
 `design/testdata/transcript/` are the exact specification.
 
-Transcripts are parsed as hostile input within bounds: 1 MiB of events a
-page, 256 KiB of text an event (32 KiB of a tool's output), 256 events and
-8 MiB a line (longer lines skipped with a notice), 64 MiB read per call;
-cut text is marked `truncated`.
+Transcripts are parsed as hostile input within bounds: 256 KiB of text an
+event (32 KiB of a tool's output), 256 events and 8 MiB a line (longer
+lines skipped with a notice); cut text is marked `truncated`.
 
 ### The agents plugin
 
@@ -250,10 +249,11 @@ agents' sessions, agent detection).
   and events, sessions ending (`TestTermAgentSessionEnds`), the plugin's
   switch (`TestTermRedetected`, `TestTermSwitchNotifiesOnce`).
 - `internal/agent/transcript`: the shared vectors (`vectors_test.go`, also
-  run by `web/src/__tests__/transcriptVectors.test.ts`), cursors, bounds,
-  `FuzzTail`, `FuzzLineMemory`. Vectors in `design/testdata/transcript/`:
-  two real sanitized transcripts (Claude Code 2.1.330, Codex 0.170.0), one
-  of a session driven through the SDK protocol, and hand-written ones.
+  run by `web/src/__tests__/transcriptVectors.test.ts`), frames, bounds
+  (`TestLineMemory`, `TestWalkPastALongLine`). Vectors in
+  `design/testdata/transcript/`: a real sanitized transcript (Claude Code
+  2.1.330), one of a session driven through the SDK protocol, and
+  hand-written ones.
   `design/testdata/layout/agent-leaves.json`: the leaf's fields.
 - `internal/plugins/agents` and `internal/agent/plugin/agents`: the route,
   validation, its limit (`TestResolveBusy`), the machine side.

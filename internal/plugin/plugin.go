@@ -15,7 +15,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -204,11 +203,6 @@ type Streamer interface {
 type MachineForgetter interface {
 	ForgetMachine(h Host, id string)
 }
-
-var validID = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
-
-// ValidID reports whether id can name a plugin.
-func ValidID(id string) bool { return validID.MatchString(id) }
 
 // EnableSetting is the setting that enables p (for a BrowserRisk plugin,
 // in the desktop app).

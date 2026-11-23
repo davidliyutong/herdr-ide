@@ -8,7 +8,6 @@
 import * as L from './term/layout';
 import { describeView, isPluginOn, viewStatus, viewUnopened } from './plugins/registry';
 import { isLive, type TerminalRecord } from './term/protocol';
-import { procName, SHELLS } from './term/place';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
 import { withView } from './state/panes';
@@ -232,19 +231,6 @@ function awaitLogin(m: string) {
   if (settle(decide())) return;
   off = useStore.subscribe(() => void settle(decide()));
   timer = setTimeout(() => off(), LOGIN_WAIT_MS);
-}
-
-/** What runs in a terminal in front of its shell: the agent's name for an
- * agent, the foreground program's otherwise; '' when only the shell waits
- * at its prompt or the program has ended. Jobs sent to the background do
- * not count. */
-export function runningProgram(r: TerminalRecord | undefined): string {
-  if (!r || !isLive(r)) return '';
-  const fg = r.foreground as { pid?: number; name?: string } | undefined;
-  if (!fg?.name) return '';
-  const name = procName(fg.name);
-  if (fg.pid === r.pid && SHELLS.has(name.toLowerCase())) return '';
-  return agentOf(r) ?? name;
 }
 
 /** Records panes about to close for Undo Close (each list a tab's, all

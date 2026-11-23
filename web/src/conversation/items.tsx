@@ -185,17 +185,9 @@ function Notice({ item, ctx }: { item: NoticeItem; ctx: ItemContext }) {
     case NOTICES.compacted:
       text = t('conversation.notice.compacted');
       break;
-    case NOTICES.cleared:
-      text = t('conversation.notice.cleared');
-      break;
     case NOTICES.skipped:
       text = t('conversation.notice.skipped');
       break;
-    case NOTICES.model: {
-      const model = str(p.model);
-      text = model ? t('conversation.notice.modelTo', { model }) : t('conversation.notice.model');
-      break;
-    }
     case NOTICES.error: {
       const message = str(p.message) ?? str(p.text) ?? str(p.error);
       if (p.willRetry === true)

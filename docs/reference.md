@@ -568,6 +568,7 @@ Build scripts and tests:
 | `DEV_LISTEN` | `make dev-core`, `make dev-web` | Development core address (default `127.0.0.1:7790`). |
 | `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
 | `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the core and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
+| `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |
 | `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets program-window tests fetch Xvfb. |
 
 ## Files and directories
@@ -612,7 +613,7 @@ removed):
 | `core[-<instance>]-<host>[-<id>].db` (with `-wal`, `-shm`) | The core's SQLite database ([38](features/38-sqlite-state.md)): the vault's access log (last 1000 releases, 500 other records; never values) and the AI usage history (30 days of windows' use, alert periods). Earlier `core[-<instance>].db`, `vault[-<instance>]-access.jsonl` and `usage-history[-<instance>].json` are imported once and removed. |
 
 Also on the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s`
-(Linux and macOS; owned by you, 0700), and code-server downloads with
+(`s-<instance>` for another instance; Linux and macOS; owned by you, 0700), and code-server downloads with
 `.sha256` sidecars in the user cache directory
 (`~/Library/Caches/herdr-ide/code-server`, `~/.cache/herdr-ide/code-server`,
 `%LocalAppData%\herdr-ide\code-server`).

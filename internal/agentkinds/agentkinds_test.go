@@ -76,8 +76,8 @@ func TestKindsKeepTheUIsCommands(t *testing.T) {
 	cont := map[string]string{}
 	var started []string
 	for _, k := range agentkinds.All() {
-		if c, ok := agentkinds.Command(k.ContinueLatest, ""); ok {
-			cont[k.ID] = c
+		if k.ContinueLatest != nil {
+			cont[k.ID] = strings.Join(k.ContinueLatest, " ")
 		}
 		if k.Start != nil {
 			started = append(started, k.ID)
@@ -94,15 +94,15 @@ func TestKindsKeepTheUIsCommands(t *testing.T) {
 		t.Errorf("started %v, want %v", started, want)
 	}
 	claude, _ := agentkinds.ByID("claude")
-	if c, ok := agentkinds.Command(claude.ResumeByID, "0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f"); !ok || c != "claude --resume 0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f" {
-		t.Errorf("claude resume %q %v", c, ok)
+	if !slices.Equal(claude.ResumeByID, []string{"claude", "--resume", agentkinds.Placeholder}) {
+		t.Errorf("claude resume %v", claude.ResumeByID)
 	}
 	if got := append(claude.Start, claude.NewSession...); !slices.Equal(got, []string{"claude", "--session-id", agentkinds.Placeholder}) {
 		t.Errorf("claude new session %v", got)
 	}
 	codex, _ := agentkinds.ByID("codex")
-	if c, ok := agentkinds.Command(codex.ResumeByID, "0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f"); !ok || c != "codex resume 0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f" {
-		t.Errorf("codex resume %q %v", c, ok)
+	if !slices.Equal(codex.ResumeByID, []string{"codex", "resume", agentkinds.Placeholder}) {
+		t.Errorf("codex resume %v", codex.ResumeByID)
 	}
 	if codex.NewSession != nil {
 		t.Errorf("codex takes a session id: %v", codex.NewSession)
@@ -112,9 +112,9 @@ func TestKindsKeepTheUIsCommands(t *testing.T) {
 	}
 }
 
-// Only a lower-case UUID is a session id, and nothing else reaches a
-// command line: quotes, separators, substitutions and newlines are refused.
-func TestSessionIDsAndCommands(t *testing.T) {
+// Only a lower-case UUID is a session id: quotes, separators,
+// substitutions and newlines are refused.
+func TestSessionIDs(t *testing.T) {
 	good := "0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f"
 	if !agentkinds.ValidSessionID(good) {
 		t.Fatal("a session id refused")
@@ -128,18 +128,6 @@ func TestSessionIDsAndCommands(t *testing.T) {
 		if agentkinds.ValidSessionID(bad) {
 			t.Errorf("%q taken for a session id", bad)
 		}
-		if c, ok := agentkinds.Command([]string{"claude", "--resume", agentkinds.Placeholder}, bad); ok || c != "" {
-			t.Errorf("%q made %q", bad, c)
-		}
-	}
-	if c, ok := agentkinds.Command([]string{"agent", "--session=" + agentkinds.Placeholder}, good); !ok || c != "agent --session="+good {
-		t.Errorf("a placeholder within a token: %q %v", c, ok)
-	}
-	if c, ok := agentkinds.Command([]string{"codex", "resume", "--last"}, "x; rm -rf ~"); !ok || c != "codex resume --last" || strings.Contains(c, "rm") {
-		t.Errorf("a command without a placeholder: %q %v", c, ok)
-	}
-	if _, ok := agentkinds.Command(nil, good); ok {
-		t.Error("no tokens made a command")
 	}
 }
 
@@ -189,7 +177,7 @@ func TestChatKinds(t *testing.T) {
 		if _, ok := ms[k.ID]; !ok {
 			t.Errorf("%s has a chat but no detector manifest", k.ID)
 		}
-		if !agentkinds.ValidAdapter(k.Chat.Adapter) {
+		if !slices.Contains(agentkinds.Adapters, k.Chat.Adapter) {
 			t.Errorf("%s: adapter %q", k.ID, k.Chat.Adapter)
 		}
 		if len(k.Chat.Argv) == 0 || len(k.Start) == 0 || k.Chat.Argv[0] != k.Start[0] {
@@ -217,7 +205,7 @@ func TestChatKinds(t *testing.T) {
 			t.Errorf("%s: %s, want %s", id, got, w)
 		}
 	}
-	if agentkinds.ValidAdapter("") || agentkinds.ValidAdapter("opencode") || !slices.Equal(agentkinds.Adapters, []string{"claude", "codex", "acp"}) {
+	if !slices.Equal(agentkinds.Adapters, []string{"claude", "codex", "acp"}) {
 		t.Error("the adapters changed")
 	}
 }

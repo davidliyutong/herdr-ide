@@ -250,13 +250,6 @@ func fakeMain() {
 	os.Exit(0)
 }
 
-// canonical is a JSON value decoded, for comparing.
-func canonical(raw []byte) any {
-	var v any
-	_ = json.Unmarshal(raw, &v)
-	return v
-}
-
 // match tells whether got is the adapter's line that want stands for, and
 // the ids of want's that got names otherwise (a user message's uuid, a
 // control request's id).

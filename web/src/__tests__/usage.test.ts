@@ -21,7 +21,6 @@ import {
   costOf,
   daily,
   dailyDetails,
-  dailyTokens,
   equivalents,
   rank,
   rankTokens,
@@ -185,13 +184,6 @@ describe('usage tokens', () => {
   });
 
   it('gives a series per day, unpriced rows included', () => {
-    const d = dailyTokens(rows, 3, today);
-    expect(d.map((x) => [x.day, x.total])).toEqual([
-      ['2026-11-14', 0],
-      ['2026-11-15', 1100],
-      ['2026-11-16', 200],
-    ]);
-    expect(d[2].cached).toBe(50);
     const det = dailyDetails(
       [...rows, row('2026-11-16', 'claude-opus-4-6', { provider: 'claude', cost: 2.5, input: 50, cached: 0, cacheWrite: 0, output: 10 })],
       3,

@@ -229,9 +229,6 @@ func (c *Conn) Vendor() int { return int(c.vendor.Load()) }
 // neither r nor w, and waits for nothing.
 func (c *Conn) Close() { c.end(ErrClosed) }
 
-// wait returns when the reader and every request's goroutine ended.
-func (c *Conn) wait() { c.wg.Wait() }
-
 // Call sends a request and waits for its response, whose result it decodes
 // into result unless that is nil. params are sent as JSON, and left out
 // when nil.

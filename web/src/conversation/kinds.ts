@@ -1,10 +1,10 @@
 // The kinds of coding agents (internal/agentkinds), as the core's registry
 // gives them to the UI (design/generated/registry.json, key "agents"):
 // how each starts, continues a directory's latest conversation or resumes
-// a session, the AI usage provider of its subscription, whether its
-// conversations have a native view, and the adapter the chat host runs it
-// through headless. Only a session id that is a lower-case UUID is ever put
-// into a command line.
+// a session, the AI usage provider of its subscription, the format of its
+// transcripts, and the adapter the chat host runs it through headless.
+// Only a session id that is a lower-case UUID is ever put into a command
+// line.
 import registry from '../../../design/generated/registry.json';
 import { isSessionId } from '../term/layout';
 
@@ -30,7 +30,8 @@ export interface AgentKind {
   continueLatest?: string[];
   /** The command line, as tokens, that resumes a session by its id ("{id}"). */
   resumeById?: string[];
-  /** The parser of its transcripts; none without a native view. */
+  /** The format of its transcripts, which the machines read; none when
+   * they are not read. */
   transcript?: string;
   /** How the chat host runs it headless; none for an agent without chats.
    * Its command stays on the machine's side. */
@@ -53,11 +54,6 @@ const byId = new Map(AGENT_KINDS.map((k) => [k.id, k]));
 /** The kind of a detector's id. */
 export function agentKind(id: string | undefined): AgentKind | undefined {
   return id === undefined ? undefined : byId.get(id);
-}
-
-/** Whether the agent's conversations can be shown as a native view. */
-export function hasNativeView(id: string | undefined): boolean {
-  return !!agentKind(id)?.transcript;
 }
 
 /** The adapter the chat host runs the agent through; undefined for an

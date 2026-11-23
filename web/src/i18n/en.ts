@@ -275,7 +275,6 @@ export const en = {
   'confirm.disableMachine':
     'Its connection ends and VS Code there stops. Its terminals keep running there. Enable it again from the sidebar.',
   'confirm.disableStopCore': 'Also stop its terminal service (ends every terminal there)',
-  'confirm.close': 'Close',
   'confirm.removeMachineTitle': 'Remove {machine}?',
   'confirm.removeMachine': 'The machine {target} is removed from this app. Nothing on it is deleted, and its terminals keep running.',
   'confirm.remove': 'Remove',

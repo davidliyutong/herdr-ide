@@ -217,7 +217,7 @@ type LoadSessionResult struct {
 // PromptParams are the params of session/prompt.
 type PromptParams struct {
 	SessionID string `json:"sessionId"`
-	// Prompt is the user's message as content blocks (TextBlock, or the
+	// Prompt is the user's message as content blocks (text, or the
 	// blocks a UI made). Blocks other than text and resource_link need the
 	// agent's PromptCapabilities.
 	Prompt []json.RawMessage `json:"prompt"`
@@ -367,15 +367,6 @@ func PermissionSelected(optionID string) PermissionResponse {
 // sends Cancel.
 func PermissionCancelled() PermissionResponse {
 	return PermissionResponse{Outcome: PermissionOutcome{Outcome: "cancelled"}}
-}
-
-// TextBlock is a text content block for a prompt.
-func TextBlock(text string) json.RawMessage {
-	b, _ := marshal(struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}{"text", text})
-	return b
 }
 
 func orEmpty(s []json.RawMessage) []json.RawMessage {

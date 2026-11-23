@@ -5,7 +5,6 @@ package transcript
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"strings"
 
 	"herdr-ide/internal/agentproto"
@@ -14,21 +13,15 @@ import (
 // Claude Code's transcripts: <claude dir>/projects/<dir>/<session>.jsonl,
 // a line per message (an assistant's message a line per content block,
 // the lines of one response sharing message.id and its usage) and lines of
-// the program's own state. Each line maps on its own; the usage of a
-// response is reported once a page (by message.id).
+// the program's own state. Each line maps on its own, the usage of a
+// response on each of its lines: a reader keeps the last of a message
+// (Frame.Message).
 //
 // The messages of Claude Code's SDK protocol (the assistant and user frames
 // of its stream-json output) have the shapes of these lines, but for the
 // tool result, which they name tool_use_result; ClaudeFrame maps them too.
 
-type claudeFormat struct{}
-
-// A Claude transcript needs nothing of the lines before a run.
-func (claudeFormat) run(io.ReaderAt, int64) run { return claudeRun{} }
-
 type claudeRun struct{}
-
-func (claudeRun) prepare([]rawLine) {}
 
 // claudeLine is what a line of a Claude transcript gives that is read.
 type claudeLine struct {
@@ -454,7 +447,7 @@ func claudeAssistant(d *claudeLine, o *lineOut) {
 		if used := u.Input + u.CacheRead + u.CacheCreation; used > 0 {
 			// The model's context window is not in the transcript: the
 			// update gives no size.
-			o.add(pev{t: agentproto.TranscriptUpdate, update: obj{"sessionUpdate": "usage_update", "used": used}, usage: m.ID})
+			o.add(pev{t: agentproto.TranscriptUpdate, update: obj{"sessionUpdate": "usage_update", "used": used}})
 		}
 	}
 	if stop := claudeStop(m.StopReason); stop != "" && len(blocks) > 0 && !thinking(blocks[len(blocks)-1].Type) {

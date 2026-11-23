@@ -19,16 +19,12 @@ import (
 // way down, so that shrink can walk them.
 type obj = map[string]any
 
-// noticeSkipped is the notice of a line that was not read (too long), or
-// of an event too large for a reply.
+// noticeSkipped is the notice of a line that was not read (too long).
 const noticeSkipped = "skipped"
 
 const (
 	// maxTitle is the most bytes of a tool call's title.
 	maxTitle = 1 << 10
-	// maxSessionTitle is the most bytes of a session's title: escaped in
-	// JSON (at most six bytes a byte) it stays within a reply's envelope.
-	maxSessionTitle = 512
 	// maxItems is the most items of an array a tool call's input keeps.
 	maxItems = 256
 	// maxDepth is how deep a tool call's input is kept.
@@ -39,7 +35,7 @@ const (
 	maxBlocks = 4 * agentproto.MaxLineEvents
 )
 
-// pev is an event a parser made of a line, before it has its place.
+// pev is an event a parser made of a line.
 type pev struct {
 	t       string
 	at      time.Time
@@ -49,16 +45,13 @@ type pev struct {
 	stop    string
 	method  string
 	params  obj
-	// usage is the message whose usage an update reports: of the updates
-	// of one message a page keeps the last.
-	usage string
 	// block is 1 + the index among the line's content blocks of the block
 	// the event was made of, 0 for none (ClaudeFrame).
 	block int
 }
 
 // limits are a read's Limits with the defaults in place.
-type limits struct{ bytes, text, tool int }
+type limits struct{ text, tool int }
 
 // lineOut is what a parser made of a line.
 type lineOut struct {
@@ -274,82 +267,9 @@ func (o *lineOut) bounded(u obj, v any) any {
 	return v
 }
 
-// shrink is a copy of v with every string cut to n bytes and every array
-// to n/64 items (at least 4): the last resort for an event that a reply
-// cannot hold.
-func shrink(v any, n int) any {
-	switch x := v.(type) {
-	case string:
-		s, _ := cutText(x, n)
-		return s
-	case obj:
-		out := make(obj, len(x))
-		for k, e := range x {
-			out[k] = shrink(e, n)
-		}
-		return out
-	case []any:
-		out := make([]any, min(len(x), max(n/64, 4)))
-		for i := range out {
-			out[i] = shrink(x[i], n)
-		}
-		return out
-	}
-	return v
-}
-
-// strBytes is the bytes of v's strings: of its maps' keys, and of the
-// others. Their sum is at most what v takes in JSON.
-func strBytes(v any) (keys, values int) {
-	switch x := v.(type) {
-	case string:
-		return 0, len(x)
-	case obj:
-		for k, e := range x {
-			ek, ev := strBytes(e)
-			keys, values = keys+len(k)+ek, values+ev
-		}
-	case []any:
-		for _, e := range x {
-			ek, ev := strBytes(e)
-			keys, values = keys+ek, values+ev
-		}
-	}
-	return keys, values
-}
-
-// strBytes is the bytes of the event's strings (strBytes).
-func (p *pev) strBytes() (keys, values int) {
-	keys, values = strBytes(p.update)
-	for _, v := range []any{p.content, p.params} {
-		k, s := strBytes(v)
-		keys, values = keys+k, values+s
-	}
-	return keys, values + len(p.t) + len(p.state) + len(p.stop) + len(p.method)
-}
-
-// shrunk is the event with its strings cut to n bytes, marked as cut.
-func (p *pev) shrunk(n int) pev {
-	q := *p
-	if q.update != nil {
-		q.update = shrink(q.update, n).(obj)
-		setMeta(q.update, "truncated", true)
-	}
-	if len(q.content) > 0 {
-		q.content = shrink(q.content, n).([]any)
-		if b, ok := q.content[0].(obj); ok {
-			setMeta(b, "truncated", true)
-		}
-	}
-	if q.params != nil {
-		q.params = shrink(q.params, n).(obj)
-	}
-	return q
-}
-
-// encode is the event with its place, and the bytes it takes in a reply.
-func encode(p *pev, seq uint64) (agentproto.TranscriptEvent, int) {
-	ev := agentproto.TranscriptEvent{Seq: seq, T: p.t, At: p.at, State: p.state, StopReason: p.stop, Method: p.method}
+// encode is the event as agentproto's.
+func encode(p *pev) agentproto.TranscriptEvent {
+	ev := agentproto.TranscriptEvent{T: p.t, At: p.at, State: p.state, StopReason: p.stop, Method: p.method}
 	if p.update != nil {
 		ev.Update, _ = json.Marshal(p.update)
 	}
@@ -360,12 +280,7 @@ func encode(p *pev, seq uint64) (agentproto.TranscriptEvent, int) {
 	if p.params != nil {
 		ev.Params, _ = json.Marshal(p.params)
 	}
-	b, err := json.Marshal(ev)
-	if err != nil {
-		return ev, 1 << 30
-	}
-	// A comma between events.
-	return ev, len(b) + 1
+	return ev
 }
 
 // ---- values decoded from JSON ----
@@ -401,17 +316,6 @@ func first(m obj, keys ...string) any {
 	return nil
 }
 
-// stringsOf is a JSON array of strings (other values left out).
-func stringsOf(v any) []string {
-	var out []string
-	for _, e := range asArr(v) {
-		if s, ok := e.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
 // plain is s without terminal escape sequences.
@@ -423,7 +327,7 @@ func plain(s string) string {
 }
 
 // exitCodeRE finds the exit code an error result states: Claude Code's
-// "Exit code N", Codex's "Exit code: N" and "Process exited with code N".
+// "Exit code N", and "Exit code: N" and "Process exited with code N".
 var exitCodeRE = regexp.MustCompile(`(?m)^(?:Error: )?(?:Exit code:? |Process exited with code )(-?\d+)\s*$`)
 
 // exitCode is the exit code the first lines of a command's output state.

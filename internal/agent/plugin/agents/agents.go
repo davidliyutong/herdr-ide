@@ -75,7 +75,7 @@ func resolver(env *plugin.Env) *sessions.Resolver {
 	return shared
 }
 
-// parser is the transcript parser of an agent's kind
+// parser is the transcript format of an agent's kind
 // (agentkinds.Kind.Transcript); "" for a kind without transcripts.
 func parser(kind string) string {
 	k, ok := agentkinds.ByID(kind)

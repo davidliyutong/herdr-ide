@@ -591,11 +591,16 @@ func TestAgentTakesFullAccess(t *testing.T) {
 func TestStderrIsNotStored(t *testing.T) {
 	h := startHost(t, nil)
 	stderr := strings.Repeat("e", 3000) + "TOKEN=secret-at-the-end"
+	// Start fails only once a client is attached: the agent's standard
+	// error reaches only the connections attached when it fails.
+	gate := make(chan struct{})
 	h.fake.set(func(a *fakeAdapter) {
 		a.startErr = &chatproto.Error{Code: chatproto.CodeStartFailed, Message: "exited", Stderr: "SECRET-AT-THE-START" + stderr}
+		a.startGate = gate
 	})
 	chat := h.create(chatproto.Request{})
 	s := h.attach(chat.ID, 0)
+	close(gate)
 	ev := s.until(isKind("state:failed"))
 	e := ev[len(ev)-1].Error
 	if e == nil || len(e.Stderr) > chatproto.MaxStderr || !strings.HasSuffix(e.Stderr, "TOKEN=secret-at-the-end") {

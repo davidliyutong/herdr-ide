@@ -17,7 +17,6 @@ export const en = {
   'files.filter': 'Filter',
   'files.noMatch': 'No names in the opened folders match.',
   'files.emptyDir': 'This folder is empty.',
-  'files.link': 'Symbolic link',
   'files.keep': 'Keep Open',
   'files.openChanges': 'Open Changes ({n} changed places)',
   'files.open': 'Open',

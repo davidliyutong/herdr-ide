@@ -3,8 +3,8 @@
 // Package plugin is the machine side of the core's plugins
 // (internal/plugin): handlers of the agent's plugin op, one per plugin,
 // registered by the plugins' packages. A handler answers one action per
-// stream: a reply with its result (Reply), or a reply followed by JSON
-// lines (Stream) until either side closes the stream.
+// stream: a reply with its result (Reply), or a reply followed by what the
+// action streams until either side closes the stream.
 package plugin
 
 import (
@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"sort"
 	"sync"
 
 	"herdr-ide/internal/agentproto"
@@ -80,18 +79,6 @@ func Lookup(id string) Handler {
 	mu.Lock()
 	defer mu.Unlock()
 	return handlers[id]
-}
-
-// IDs lists the registered plugins, sorted.
-func IDs() []string {
-	mu.Lock()
-	defer mu.Unlock()
-	ids := make([]string, 0, len(handlers))
-	for id := range handlers {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
 }
 
 // Error is a failure with a code the UIs translate.
@@ -186,30 +173,4 @@ func UntilClosed(ctx context.Context, st net.Conn) (context.Context, context.Can
 		cancel()
 	}()
 	return ctx, cancel
-}
-
-// Stream answers with first as the result, then writes the values next
-// sends as JSON lines until it returns nil, ctx ends or the core closes
-// the stream; it closes st.
-func Stream(ctx context.Context, st net.Conn, first any, next func(ctx context.Context) (any, error)) error {
-	defer st.Close()
-	if err := writeResult(st, first); err != nil {
-		return err
-	}
-	// The core sends nothing after the header: a read ends when it closes
-	// the stream.
-	ctx, cancel := UntilClosed(ctx, st)
-	defer cancel()
-	for {
-		v, err := next(ctx)
-		if err != nil || v == nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			return err
-		}
-		if err := agentproto.WriteLine(st, v); err != nil {
-			return err
-		}
-	}
 }

@@ -255,7 +255,7 @@ func serve(args []string, logger *log.Logger) {
 		}
 	}
 	specs := selectSpecs(machines.LoadSpecs(registry.Specs(), extraSpecs(extraSSH)), *localOnly, extraSSH, only)
-	controlDir, err := transport.ControlDir()
+	controlDir, err := transport.ControlDir(*instance)
 	if err != nil {
 		logger.Fatal(err)
 	}

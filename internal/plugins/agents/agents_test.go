@@ -29,7 +29,7 @@ const (
 // plugin.Settings gives, on by default.
 func TestPlugin(t *testing.T) {
 	p := New()
-	if p.ID() != "agents" || !plugin.ValidID(p.ID()) {
+	if p.ID() != "agents" {
 		t.Fatalf("plugin %q", p.ID())
 	}
 	st := settings.New("", plugin.Settings([]plugin.Plugin{p}, nil))

@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	// The sessions and the directory of the shared vectors' transcripts.
+	// The session and the directory of a shared vector's transcript, and a
+	// Codex session in the same directory (codexRollout).
 	claudeSession = "e6cdc860-1055-488f-9ed2-8b8019061bb9"
 	codexSession  = "01a1ffa2-e43b-7c13-8240-7eb9e6fa29f3"
 	vectorCwd     = "/home/dev/project"
@@ -66,6 +67,13 @@ func vectorLines(t *testing.T, name string) []string {
 		t.Fatal(err)
 	}
 	return v.Lines
+}
+
+// codexRollout is the start of a rollout of Codex CLI 0.170.0's of
+// codexSession, run in vectorCwd.
+var codexRollout = []string{
+	`{"timestamp":"2026-11-21T19:44:00.320Z","ordinal":0,"type":"session_meta","payload":{"id":"` + codexSession + `","session_id":"` + codexSession + `","timestamp":"2026-11-21T19:43:47.797Z","cwd":"` + vectorCwd + `","originator":"codex-tui","cli_version":"0.170.0"}}`,
+	`{"timestamp":"2026-11-21T19:44:00.321Z","ordinal":1,"type":"event_msg","payload":{"type":"task_started"}}`,
 }
 
 func content(lines []string) []byte {
@@ -175,7 +183,7 @@ func TestBadParams(t *testing.T) {
 func TestResolve(t *testing.T) {
 	e := newEnv(t)
 	e.write(e.claudePath(claudeSession), content(vectorLines(t, "claude-2.1.330-tools")))
-	e.write(e.codexPath(codexSession), content(vectorLines(t, "codex-0.170.0-exec")))
+	e.write(e.codexPath(codexSession), content(codexRollout))
 	e.write(e.claudePath(sid(1))+".zst", []byte("x"))
 	// A transcript that records no directory yet.
 	e.write(e.claudePath(sid(2)), []byte(`{"type":"mode","stub":true}`+"\n"))

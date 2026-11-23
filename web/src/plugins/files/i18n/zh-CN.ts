@@ -15,7 +15,6 @@ export const zhCN: Record<keyof typeof en, string> = {
   'files.filter': '筛选',
   'files.noMatch': '已打开的文件夹中没有匹配的名称。',
   'files.emptyDir': '此文件夹为空。',
-  'files.link': '符号链接',
   'files.keep': '保持打开',
   'files.openChanges': '打开更改（{n} 处修改）',
   'files.open': '打开',

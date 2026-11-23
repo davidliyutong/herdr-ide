@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"maps"
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -49,8 +48,9 @@ type Kind struct {
 	// ResumeByID is the command line, as tokens, that resumes a session by
 	// its id (Placeholder); nil when the agent has none.
 	ResumeByID []string `json:"resumeById,omitempty"`
-	// Transcript names the parser of the agent's session transcripts
-	// ("claude", "codex"); "" when its conversations have no native view.
+	// Transcript names the format of the agent's session transcripts
+	// ("claude", "codex"), which sessions are found and read in; "" for an
+	// agent whose transcripts are not read.
 	Transcript string `json:"transcript,omitempty"`
 	// Chat is how the chat host runs the agent headless; nil for an agent
 	// it does not run.
@@ -180,33 +180,9 @@ func ChatKinds() []Kind {
 	return out
 }
 
-// ValidAdapter reports whether name is one of Adapters.
-func ValidAdapter(name string) bool { return slices.Contains(Adapters, name) }
-
 var sessionID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // ValidSessionID reports whether s is a session id as the agents write
 // them: a UUID in lower-case hexadecimal, nothing else. Only such an id is
 // ever put into a command line.
 func ValidSessionID(s string) bool { return sessionID.MatchString(s) }
-
-// Command is the command line of tokens joined by spaces, each Placeholder
-// in them replaced by id. It is false when tokens is empty, and when they
-// hold a placeholder and id is not a session id (ValidSessionID); id is not
-// looked at otherwise.
-func Command(tokens []string, id string) (string, bool) {
-	if len(tokens) == 0 {
-		return "", false
-	}
-	out := make([]string, len(tokens))
-	for i, tok := range tokens {
-		if strings.Contains(tok, Placeholder) {
-			if !ValidSessionID(id) {
-				return "", false
-			}
-			tok = strings.ReplaceAll(tok, Placeholder, id)
-		}
-		out[i] = tok
-	}
-	return strings.Join(out, " "), true
-}

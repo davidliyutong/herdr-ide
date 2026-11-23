@@ -1,5 +1,5 @@
 // The shared transcript vectors (design/testdata/transcript): the events a
-// machine makes of Claude Code's and Codex's transcripts, which
+// machine makes of Claude Code's transcripts, which
 // internal/agent/transcript's tests produce from the same lines, hold to
 // the conversation model's types, and reduce.
 import { describe, expect, it } from 'vitest';
@@ -27,9 +27,6 @@ import claudeSessionEvents from '../../../design/testdata/transcript/claude-sess
 import claudeUnknown from '../../../design/testdata/transcript/claude-unknown.json';
 import claudeQueuedPrompts from '../../../design/testdata/transcript/claude-queued-prompts.json';
 import claudeHeadless from '../../../design/testdata/transcript/claude-headless.json';
-import codexExec from '../../../design/testdata/transcript/codex-0.170.0-exec.json';
-import codexItems from '../../../design/testdata/transcript/codex-items.json';
-import codexLegacy from '../../../design/testdata/transcript/codex-legacy-apply-patch.json';
 
 interface Vector {
   note: string;
@@ -47,9 +44,6 @@ const vectors: Record<string, Vector> = {
   'claude-unknown.json': claudeUnknown,
   'claude-queued-prompts.json': claudeQueuedPrompts,
   'claude-headless.json': claudeHeadless,
-  'codex-0.170.0-exec.json': codexExec,
-  'codex-items.json': codexItems,
-  'codex-legacy-apply-patch.json': codexLegacy,
 } as Record<string, Vector>;
 
 // The types and kinds a transcript's events may have, each checked
@@ -160,7 +154,7 @@ function checkUpdate(u: unknown, where: string) {
 
 function checkEvent(ev: Json, where: string) {
   expect(EVENT_TYPES, where).toContain(ev.t);
-  // The vectors leave out the event's place and time.
+  // The vectors leave out the event's time; transcript events have no place.
   expect(ev.seq, where).toBeUndefined();
   expect(ev.at, where).toBeUndefined();
   switch (ev.t as (typeof EVENT_TYPES)[number]) {
@@ -192,7 +186,7 @@ describe('transcript vectors', () => {
   for (const [name, v] of Object.entries(vectors)) {
     describe(name, () => {
       it('has its lines and its kind', () => {
-        expect(['claude', 'codex']).toContain(v.kind);
+        expect(v.kind).toBe('claude');
         expect(v.note).not.toBe('');
         expect(v.lines.length).toBeGreaterThan(0);
         expect(Number.isInteger(v.unknown)).toBe(true);
@@ -218,7 +212,6 @@ describe('transcript vectors', () => {
         if (isObj(ev.update)) seen.add(String(ev.update.sessionUpdate));
         if (typeof ev.method === 'string') seen.add(ev.method);
       }
-    for (const k of [...EVENT_TYPES, ...UPDATE_KINDS, NOTICES.command, NOTICES.compacted, NOTICES.error, NOTICES.model])
-      expect(seen).toContain(k);
+    for (const k of [...EVENT_TYPES, ...UPDATE_KINDS, NOTICES.command, NOTICES.compacted, NOTICES.error]) expect(seen).toContain(k);
   });
 });

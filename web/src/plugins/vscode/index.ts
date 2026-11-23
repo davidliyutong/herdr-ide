@@ -13,11 +13,7 @@ import { canGo } from '../../paneHistory';
 import { useStore } from '../../state/store';
 import * as L from '../../term/layout';
 import type { PluginDef } from '../api';
-import { isPluginOn } from '../registry';
 import { CodeIcon } from '../../components/icons';
-
-/** Whether VS Code is offered: its plugin is on. */
-export const codeOn = () => isPluginOn('vscode');
 
 const can = () => !useStore.getState().readOnly && !!actions.focusedContext();
 

@@ -296,17 +296,6 @@ export function tokenKinds(rows: CostRow[], n: number, today = new Date()): Toke
   return k;
 }
 
-/** Tokens per day of the last n days, oldest first, by kind. */
-export function dailyTokens(rows: CostRow[], n: number, today = new Date()): ({ day: string } & TokenKinds)[] {
-  const days = lastDays(n, today);
-  const by = new Map(days.map((d) => [d, emptyKinds()]));
-  for (const r of rows) {
-    const k = by.get(r.day);
-    if (k) addRow(k, r);
-  }
-  return days.map((day) => ({ day, ...by.get(day)! }));
-}
-
 export interface DailyProviderBreakdown {
   provider: string;
   cost: number;

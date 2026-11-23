@@ -241,8 +241,6 @@ describe('the conversation view’s messages', () => {
     const s = new FakeSource();
     s.emit(
       notice(NOTICES.compacted),
-      notice(NOTICES.cleared),
-      notice(NOTICES.model, { model: 'opus' }),
       notice(NOTICES.error, { message: 'API Error: overloaded' }),
       notice(NOTICES.command, { name: 'context', output: '\x1b[1mTokens\x1b[0m: 12k' }),
       notice(NOTICES.skipped),
@@ -257,8 +255,6 @@ describe('the conversation view’s messages', () => {
     await show(s);
     expect(qa('.conv-notice-text').map((n) => n.textContent)).toEqual([
       t('conversation.notice.compacted'),
-      t('conversation.notice.cleared'),
-      t('conversation.notice.modelTo', { model: 'opus' }),
       'API Error: overloaded',
       '/context',
       t('conversation.notice.skipped'),
@@ -782,7 +778,6 @@ describe('the conversation view with events of shapes no parser makes', () => {
       update({ sessionUpdate: 'usage_update', used: obj, size: obj }),
       update({ sessionUpdate: 'session_info_update', title: obj }),
       notice(NOTICES.command, { name: obj, args: obj, output: obj }),
-      notice(NOTICES.model, { model: obj }),
       notice(NOTICES.error, obj),
       notice(STOPPED, { stopReason: obj }),
       { seq: next(), t: 'turn', state: 'error', error: { message: obj } } as never,

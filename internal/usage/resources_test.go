@@ -39,7 +39,7 @@ func TestLocalClientClosesItsConnections(t *testing.T) {
 	e := testEnv(t, nil)
 	e.LocalClient = localClient
 	for range 5 {
-		if m := getUserStatus(context.Background(), e, port, "tok"); m == nil {
+		if m, _ := getUserStatusWithScheme(context.Background(), e, port, "tok"); m == nil {
 			t.Fatal("no answer")
 		}
 	}

@@ -15,7 +15,7 @@ import (
 
 // The session each agent uses (DetectEvent.Session), found while the core
 // asks for it (Header.Sessions) and only for the agents whose transcripts
-// have a parser (agentkinds.Kind.Transcript). Beside follow, with its
+// are read (agentkinds.Kind.Transcript). Beside follow, with its
 // lifetime, a goroutine asks the detector's sessions.Resolver once the
 // agent's startup grace is over; while nothing is found it asks again after
 // 1, 2, 4 and 8 s, then on every status change, whenever the files Resolve

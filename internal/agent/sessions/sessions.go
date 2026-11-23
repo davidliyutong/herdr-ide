@@ -23,7 +23,7 @@
 // followed, and the descriptor is the very file Locate saw. A miss is
 // remembered for a few seconds, so that asking for unknown ids again and
 // again does not search the session roots each time.
-// Only the agents with a transcript parser (agentkinds.Kind.Transcript
+// Only the agents whose transcripts are read (agentkinds.Kind.Transcript
 // "claude" or "codex") have sessions here.
 package sessions
 

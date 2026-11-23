@@ -45,11 +45,6 @@ export function resolveTheme(pref: Prefs['theme'], systemDark = useSystemDark.ge
   return systemDark ? 'dark' : 'light';
 }
 
-/** The theme kind in use. */
-export function themeKind(): ThemeKind {
-  return resolveTheme(getPrefs().theme);
-}
-
 /** The theme kind in use, for components: it changes with the setting and,
  * for "system", with the system's theme. */
 export function useThemeKind(): ThemeKind {

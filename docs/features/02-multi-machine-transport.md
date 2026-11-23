@@ -66,7 +66,8 @@ This avoids sshd's `MaxSessions` and any dependence on
 
 `SSHArgs` uses `BatchMode=yes`, keepalives (`ServerAliveInterval=15`,
 `ServerAliveCountMax=4`) and a ControlMaster (`ControlPersist=600`) in a
-private control directory `/tmp/herdr-ide-<uid>/s`.
+private control directory `/tmp/herdr-ide-<uid>/s`, one per instance
+(`s-<instance>`, a hash for names over 16 characters).
 
 The master exists so that an interactive login (password, 2FA, host key)
 done once is reused by the BatchMode connections. The UI's authentication
@@ -309,5 +310,10 @@ releases, Xvfb packages and video encoders are shared between instances.
   Linux, macOS and Windows.
 - `make it` (`TestIntegrationHC`, `TestIntegrationTerm`) with the real
   herdr-core.
+- `make e2e` (`e2e/tests/ssh.spec.ts`, with Docker): a container running
+  OpenSSH added from the dialog, its terminal and files, the machine
+  dropping and coming back with its terminal core, a chat there, and
+  nothing of the instance left on it once the terminal core and the core
+  stop.
 
 Verified manually against eight Ubuntu x86_64 hosts and an arm64 Ubuntu VM.

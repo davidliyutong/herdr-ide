@@ -19,6 +19,7 @@
 //
 //	go run ./scripts/registry           writes the files
 //	go run ./scripts/registry -check    writes nothing; fails if one is stale
+//	go run ./scripts/registry -routes   prints the plugins' routes, for scripts/check.sh
 package main
 
 import (
@@ -35,6 +36,7 @@ import (
 
 	"herdr-ide/internal/agentkinds"
 	"herdr-ide/internal/keybindings"
+	"herdr-ide/internal/plugin"
 	"herdr-ide/internal/registry"
 	"herdr-ide/internal/settings"
 )
@@ -268,7 +270,16 @@ func run(root string, check bool) error {
 func main() {
 	check := flag.Bool("check", false, "write nothing; fail if the file is stale")
 	root := flag.String("root", ".", "the repository")
+	routes := flag.Bool("routes", false, "print the plugins' routes (METHOD /path), one per line, and write nothing")
 	flag.Parse()
+	if *routes {
+		for _, p := range registry.Plugins() {
+			for _, rt := range p.Routes() {
+				fmt.Println(plugin.Pattern(p.ID(), rt))
+			}
+		}
+		return
+	}
 	if err := run(*root, *check); err != nil {
 		fmt.Fprintln(os.Stderr, "registry:", err)
 		os.Exit(1)

@@ -32,15 +32,13 @@ const (
 
 // session is an agent process running one session of a chat.
 type session struct {
-	kind   string
-	log    *log.Logger
-	sink   chatadapter.Sink
-	proc   *process
-	conn   *rpc.Conn
-	out    *outbox
-	t      timing
-	client chatadapter.ClientInfo
-	meta   json.RawMessage // the Chat spec's _meta of session/new
+	kind string
+	log  *log.Logger
+	sink chatadapter.Sink
+	proc *process
+	conn *rpc.Conn
+	out  *outbox
+	t    timing
 
 	// ctx ends when the session does: the requests of the agent that wait
 	// for the user return then.

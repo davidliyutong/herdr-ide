@@ -301,9 +301,7 @@ export interface ChatError {
  * increments are dropped; once the turn ended, what arrived live and no
  * stored state followed stays as it is. */
 export interface ChatEvent {
-  /** Its place in the conversation; a transcript's is its line's byte
-   * offset shifted left by 8 plus its index in the line. None for a live
-   * event and an ack. */
+  /** Its place in the conversation. None for a live event and an ack. */
   seq?: number;
   t: ChatEventType;
   /** RFC 3339. */
@@ -395,11 +393,9 @@ export const noticeMethod = (name: string): string => `_${APP_SLUG}/${name}`;
 /** The notices of a transcript, by name. */
 export const NOTICES = {
   compacted: noticeMethod('compacted'),
-  cleared: noticeMethod('cleared'),
   command: noticeMethod('command'),
   /** params: {message, willRetry?}: willRetry when the agent tries again. */
   error: noticeMethod('error'),
-  model: noticeMethod('model'),
   /** A line of the transcript too long to read was passed over. */
   skipped: noticeMethod('skipped'),
 } as const;

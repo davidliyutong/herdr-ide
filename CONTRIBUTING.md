@@ -49,6 +49,15 @@ role and accessible name, and wait on conditions (`expect`, `waitFor`),
 never on time; read what a terminal shows with the terminal protocol
 client (`harness/term.ts`), since the page draws it on a canvas.
 
+With Docker running, `tests/ssh.spec.ts` adds SSH machines: each test
+starts a container of `e2e/sshd` (OpenSSH on Linux, key-only sign-in)
+published on `127.0.0.1` only, with a throwaway key, `known_hosts` and ssh
+configuration in the instance's home (never `~/.ssh` or an ssh agent), and
+removes it at the end; a run removes the labelled containers of runs that
+died. `scripts/e2e.sh` builds the Linux machine build and fake agent of
+Docker's architecture and the image (cached). Without Docker these tests
+skip; `E2E_REQUIRE_DOCKER=1` (CI) makes them fail instead.
+
 Release archives are in `dist/release/`; the unpacked directories are in
 `dist/packages/`. herdr-core upgrades change the version and the four
 archive digests in `internal/hcdist`; its license and notices are taken

@@ -85,7 +85,7 @@ func (s *setup) call(method, m, path, body string) (int, map[string]any, map[str
 
 func TestPlugin(t *testing.T) {
 	p := New()
-	if p.ID() != "chat" || !plugin.ValidID(p.ID()) || plugin.EnableSetting(p) != "plugins.chat.enabled" {
+	if p.ID() != "chat" || plugin.EnableSetting(p) != "plugins.chat.enabled" {
 		t.Fatalf("plugin %q", p.ID())
 	}
 	var _ plugin.Starter = p

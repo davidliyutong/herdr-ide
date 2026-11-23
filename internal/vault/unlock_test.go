@@ -72,12 +72,11 @@ func TestKEKVectors(t *testing.T) {
 }
 
 const (
-	install  = "install-0123456789"
-	origin   = "https://localhost:8080"
-	rpID     = "localhost"
-	deskID   = "d1"
-	webID    = "w1"
-	deskKind = KindDesktop
+	install = "install-0123456789"
+	origin  = "https://localhost:8080"
+	rpID    = "localhost"
+	deskID  = "d1"
+	webID   = "w1"
 )
 
 var credential = []byte{1, 2, 3, 4}

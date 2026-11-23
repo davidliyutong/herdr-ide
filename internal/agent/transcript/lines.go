@@ -18,12 +18,8 @@ const (
 	// notice. Claude Code keeps pasted images in its lines as base64, so
 	// lines of several megabytes are ordinary.
 	maxLine = 8 << 20
-	// chunkRaw is about how many bytes of lines are parsed at once, and
-	// chunkLines the most lines.
-	chunkRaw   = 256 << 10
-	chunkLines = 4096
-	// backChunk is the size of a read backward.
-	backChunk = 64 << 10
+	// slabSize is the least a slab of copied lines takes.
+	slabSize = 64 << 10
 )
 
 // rawLine is a line of a transcript: a complete one (it ends in a
@@ -36,12 +32,11 @@ type rawLine struct {
 	// the line is longer than maxLine (long).
 	b    []byte
 	long bool
-	// open: the part ends without the line's newline: the line did not end
-	// within what the read scanned, or a read backward began inside it.
+	// open: the part ends without the line's newline: the line does not
+	// end yet.
 	open bool
-	// cont: the part does not begin at the line's start (a read began
-	// inside the line, or did not reach its start): it makes no notice,
-	// the part with the start does.
+	// cont: the part does not begin at the line's start (the read began
+	// inside the line): it makes no notice, the part with the start does.
 	cont bool
 }
 
@@ -56,45 +51,17 @@ func (l *rawLine) skipped() int64 {
 
 var errShort = errors.New("transcript: the file changed while it was read")
 
-// errBudget ends a read that read as much of its file as one read may
-// (maxScan): the reply says More, and its cursor goes on from there.
-var errBudget = errors.New("transcript: the read's scan budget is spent")
-
-// budget is what one read may still read of its file, until its context
-// ends.
-type budget struct {
-	r    io.ReaderAt
-	ctx  context.Context
-	left int64
+// ctxReader reads r until ctx ends.
+type ctxReader struct {
+	r   io.ReaderAt
+	ctx context.Context
 }
 
-// view reads the file within a budget, leaving keep bytes of it for other
-// views (a format's look back). Once the budget refused a read, the view
-// refuses every later one: what a read stopped at stays where it stopped.
-type view struct {
-	b    *budget
-	keep int64
-	err  error
-}
-
-func (v *view) ReadAt(p []byte, off int64) (int, error) {
-	if v.err == nil {
-		v.err = v.b.ctx.Err()
+func (c ctxReader) ReadAt(p []byte, off int64) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
 	}
-	if v.err != nil {
-		return 0, v.err
-	}
-	room := max(v.b.left-v.keep, 0)
-	short := int64(len(p)) > room
-	if short {
-		p = p[:room]
-	}
-	n, err := v.b.r.ReadAt(p, off)
-	v.b.left -= int64(n)
-	if short && err == nil {
-		v.err, err = errBudget, errBudget
-	}
-	return n, err
+	return c.r.ReadAt(p, off)
 }
 
 // readAt reads len(b) bytes at off, all of them or an error.
@@ -119,71 +86,8 @@ func isLineStart(r io.ReaderAt, off int64) bool {
 	return readAt(r, b[:], off-1) == nil && b[0] == '\n'
 }
 
-// lastNewline is the offset of the last newline in [lo, hi), -1 when there
-// is none; low is where its scan got to: [low, hi) has no newline but the
-// one it found. On an error low is how far it got before.
-func lastNewline(r io.ReaderAt, lo, hi int64) (p, low int64, err error) {
-	buf := make([]byte, min(backChunk, max(hi-lo, 0)))
-	for hi > lo {
-		n := min(int64(len(buf)), hi-lo)
-		b := buf[:n]
-		if err := readAt(r, b, hi-n); err != nil {
-			return -1, hi, err
-		}
-		hi -= n
-		if i := bytes.LastIndexByte(b, '\n'); i >= 0 {
-			return hi + int64(i), hi, nil
-		}
-	}
-	return -1, hi, nil
-}
-
-// firstNewline is the offset of the first newline in [lo, hi), -1 when
-// there is none.
-func firstNewline(r io.ReaderAt, lo, hi int64) (int64, error) {
-	buf := make([]byte, min(backChunk, max(hi-lo, 0)))
-	for lo < hi {
-		n := min(int64(len(buf)), hi-lo)
-		b := buf[:n]
-		if err := readAt(r, b, lo); err != nil {
-			return -1, err
-		}
-		if i := bytes.IndexByte(b, '\n'); i >= 0 {
-			return lo + int64(i), nil
-		}
-		lo += n
-	}
-	return -1, nil
-}
-
-// inLongLine tells whether off is inside a line longer than maxLine, after
-// its first byte: where a read that stopped inside a line it skips leaves
-// its cursor. It reads at most about maxLine bytes.
-func inLongLine(r io.ReaderAt, off, size int64) bool {
-	if off <= 0 || off > size {
-		return false
-	}
-	lo := max(off-maxLine-1, 0)
-	p, _, err := lastNewline(r, lo, off)
-	switch {
-	case err != nil:
-		return false
-	case p < 0 && lo > 0:
-		// No newline in the maxLine+1 bytes before off.
-		return true
-	}
-	start := p + 1
-	end := start + maxLine + 1
-	if start == off || end > size {
-		return false
-	}
-	q, err := firstNewline(r, off, end)
-	return err == nil && q < 0
-}
-
 // fwdReader reads the lines of a file from an offset on, up to a size
-// read before: the complete ones, and the parts of long lines a read can
-// take.
+// read before: the complete ones, and the parts of long lines.
 type fwdReader struct {
 	br  *bufio.Reader
 	off int64
@@ -194,7 +98,7 @@ type fwdReader struct {
 	// an allocation.
 	slab []byte
 	// done: no complete line is left; err: why, when it was no end (the
-	// budget, the context, the file).
+	// context, the file).
 	done bool
 	err  error
 }
@@ -244,10 +148,8 @@ func (r *fwdReader) next() (rawLine, bool) {
 		if err != io.EOF {
 			r.err = err
 		}
-		if long && r.off > start && (err == io.EOF || errors.Is(err, errBudget)) {
-			// A long line that does not end yet, or not within what the
-			// read scans: the part read is skipped, and the next read goes
-			// on inside the line.
+		if long && r.off > start && err == io.EOF {
+			// A long line that does not end yet: the part read is skipped.
 			return rawLine{off: start, n: r.off - start, long: true, open: true, cont: cont}, true
 		}
 		// What is left is a line that does not end (yet).
@@ -258,7 +160,7 @@ func (r *fwdReader) next() (rawLine, bool) {
 // keep is a copy of a line in the slab.
 func (r *fwdReader) keep(line []byte) []byte {
 	if len(r.slab)+len(line) > cap(r.slab) {
-		r.slab = make([]byte, 0, max(backChunk, len(line)))
+		r.slab = make([]byte, 0, max(slabSize, len(line)))
 	}
 	n := len(r.slab)
 	r.slab = append(r.slab, line...)
@@ -274,141 +176,6 @@ func appendLine(buf, chunk []byte) []byte {
 		buf = nb
 	}
 	return append(buf, chunk...)
-}
-
-// chunk is the next lines appended to lines, about raw bytes of them and
-// at most chunkLines (at least one line unless none is left).
-func (r *fwdReader) chunk(raw int64, lines []rawLine) []rawLine {
-	var n int64
-	for n < raw && len(lines) < chunkLines {
-		l, ok := r.next()
-		if !ok {
-			break
-		}
-		lines = append(lines, l)
-		n += l.n
-	}
-	return lines
-}
-
-// lineAt is the line that starts at off.
-func lineAt(r io.ReaderAt, off, size int64) (rawLine, bool) {
-	return newFwdReader(r, off, size).next()
-}
-
-// backReader reads the lines of a file backward from a line's end, not
-// below a floor.
-type backReader struct {
-	r io.ReaderAt
-	// buf holds the bytes [start, end) of the file; end is where the lines
-	// not yet returned end (after a newline, or 0).
-	buf        []byte
-	start, end int64
-	// floor is the lowest offset read.
-	floor int64
-	// block is the size of the first read; the others double what was
-	// read.
-	block int64
-	// open: the first line ends at end without its newline (end is inside
-	// a long line, where a read stopped).
-	open bool
-	err  error
-}
-
-func newBackReader(r io.ReaderAt, end, floor int64) *backReader {
-	return &backReader{r: r, start: end, end: end, floor: floor, block: backChunk, open: !isLineStart(r, end)}
-}
-
-// grow reads the bytes before buf into it; false at the floor or on an
-// error. Reads double buf up to what the longest line kept needs, so that
-// a long line is copied a few times only.
-func (b *backReader) grow() bool {
-	if b.start <= b.floor || b.err != nil {
-		return false
-	}
-	have := int64(len(b.buf))
-	n := min(max(b.block, min(have, maxLine+2-have)), b.start-b.floor)
-	nb := make([]byte, n+have)
-	if err := readAt(b.r, nb[:n], b.start-n); err != nil {
-		b.err = err
-		return false
-	}
-	copy(nb[n:], b.buf)
-	b.buf, b.start = nb, b.start-n
-	return true
-}
-
-// prev is the line before the ones returned so far; false at the file's
-// start, at the floor or on an error (err).
-func (b *backReader) prev() (rawLine, bool) {
-	if b.end <= b.floor {
-		return rawLine{}, false
-	}
-	for len(b.buf) == 0 {
-		if !b.grow() {
-			return rawLine{}, false
-		}
-	}
-	for {
-		// The last byte of buf is the line's newline, unless open.
-		last := len(b.buf) - 1
-		if b.open {
-			last = len(b.buf)
-		}
-		i := bytes.LastIndexByte(b.buf[:last], '\n')
-		if i >= 0 || b.start == 0 {
-			off := b.start + int64(i+1)
-			l := rawLine{off: off, n: b.end - off, open: b.open}
-			if b.open || l.n-1 > maxLine {
-				l.long = true
-			} else {
-				l.b = bytes.TrimSpace(b.buf[i+1 : last])
-			}
-			b.buf, b.end, b.open = b.buf[:i+1], off, false
-			return l, true
-		}
-		if len(b.buf) > maxLine+1 {
-			return b.skipLong()
-		}
-		if !b.grow() {
-			return rawLine{}, false
-		}
-	}
-}
-
-// skipLong finds the start of a line longer than maxLine that ends at end,
-// without keeping its bytes. When the read's budget ends first, the part of
-// the line it read is the line (cont): a read before it goes on from
-// there.
-func (b *backReader) skipLong() (rawLine, bool) {
-	end, open := b.end, b.open
-	b.buf, b.open = nil, false
-	chunk := make([]byte, backChunk)
-	for b.start > b.floor {
-		n := min(backChunk, b.start-b.floor)
-		c := chunk[:n]
-		if err := readAt(b.r, c, b.start-n); err != nil {
-			b.err = err
-			if errors.Is(err, errBudget) {
-				b.end = b.start
-				return rawLine{off: b.start, n: end - b.start, long: true, open: open, cont: true}, true
-			}
-			return rawLine{}, false
-		}
-		b.start -= n
-		if i := bytes.LastIndexByte(c, '\n'); i >= 0 {
-			off := b.start + int64(i+1)
-			b.buf, b.end = bytes.Clone(c[:i+1]), off
-			return rawLine{off: off, n: end - off, long: true, open: open}, true
-		}
-	}
-	if b.start > 0 {
-		// The line begins below the floor.
-		b.end = b.start
-		return rawLine{}, false
-	}
-	b.end = 0
-	return rawLine{off: 0, n: end, long: true, open: open}, true
 }
 
 // ---- reading members of a JSON object without decoding it ----
@@ -662,7 +429,7 @@ func unquote(q []byte) string {
 
 const (
 	// maxLineNodes is the most JSON values the parsers decode of one line
-	// into maps, slices and scalars (a tool call's input, a Codex item):
+	// into maps, slices and scalars (a tool call's input):
 	// what is beyond is left out, so that a line of many small values does
 	// not take many times its size.
 	maxLineNodes = 1 << 15

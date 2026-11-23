@@ -3,6 +3,9 @@
 package files
 
 import (
+	"context"
+	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/testexec"
 )
 
@@ -152,17 +156,25 @@ func TestRevealFailures(t *testing.T) {
 // not when the window closes, and its place is free then.
 func TestRevealLeavesTheFileManager(t *testing.T) {
 	env := testEnv(t)
-	shortWait(t, 5*time.Second)
-	fakeReveal(t, "sleep 30 &\necho 'file manager started' >&2\nexit 0\n")
+	// The wait's limit never ends a call here, and the file manager the
+	// command leaves runs until the test ends: an answer before that shows
+	// that reveal did not wait for it, however loaded the machine is.
+	shortWait(t, 10*time.Minute)
+	release := filepath.Join(t.TempDir(), "release")
+	t.Cleanup(func() { os.WriteFile(release, nil, 0o600) })
+	fakeReveal(t, "(while [ ! -e "+release+" ]; do sleep 0.05; done) &\necho 'file manager started' >&2\nexit 0\n")
 	for i := 0; i < maxRevealing+2; i++ {
-		start := time.Now()
-		if rep := call(t, env, "reveal", Params{Path: "~"}); !rep.OK {
-			t.Fatalf("reveal %d: %s %s", i, rep.Code, rep.Error)
+		a, b := net.Pipe()
+		raw, _ := json.Marshal(Params{Path: "~"})
+		go handle(context.Background(), a, "reveal", raw, env)
+		b.SetReadDeadline(time.Now().Add(2 * time.Minute))
+		var rep agentproto.Reply
+		if err := agentproto.ReadLine(b, &rep); err != nil {
+			t.Fatalf("reveal %d waited for the file manager: %v", i, err)
 		}
-		// Well below the wait's limit, which an answer that waited for the
-		// window would take, with room for a loaded machine.
-		if d := time.Since(start); d > 4*time.Second {
-			t.Fatalf("reveal %d answered after %v", i, d)
+		b.Close()
+		if !rep.OK {
+			t.Fatalf("reveal %d: %s %s", i, rep.Code, rep.Error)
 		}
 		if len(revealGate) != 0 {
 			t.Fatalf("reveal %d: %d places held by windows left open", i, len(revealGate))

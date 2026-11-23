@@ -827,11 +827,6 @@ func rootOnly(p string) (string, bool) {
 	}
 }
 
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
 func (g *gui) status() *agentproto.GUIStatus {
 	st := &agentproto.GUIStatus{Supported: runtime.GOOS == "linux"}
 	if !st.Supported {

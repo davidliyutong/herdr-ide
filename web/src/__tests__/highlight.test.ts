@@ -55,20 +55,31 @@ describe('the language table', () => {
   });
 });
 
+// Compiling a large grammar (C++'s) takes seconds on a loaded machine.
+const GRAMMAR_TIMEOUT = 60_000;
+
 describe('the grammars', () => {
   for (const l of LANGS) {
-    it(`load: ${l.id}`, async () => {
-      const mod = await l.grammar();
-      expect(mod.default.some((r) => r.name === nameOf(l))).toBe(true);
-    });
+    it(
+      `load: ${l.id}`,
+      async () => {
+        const mod = await l.grammar();
+        expect(mod.default.some((r) => r.name === nameOf(l))).toBe(true);
+      },
+      GRAMMAR_TIMEOUT,
+    );
   }
 
   for (const l of LANGS) {
-    it(`tokenize: ${l.id}`, async () => {
-      const lines = await highlight('x', l.id);
-      expect(lines).toBeDefined();
-      expect(lines?.length).toBeGreaterThanOrEqual(1);
-    });
+    it(
+      `tokenize: ${l.id}`,
+      async () => {
+        const lines = await highlight('x', l.id);
+        expect(lines).toBeDefined();
+        expect(lines?.length).toBeGreaterThanOrEqual(1);
+      },
+      GRAMMAR_TIMEOUT,
+    );
   }
 
   it('give nothing for a language that is none of ours', async () => {

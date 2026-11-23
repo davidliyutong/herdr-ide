@@ -57,13 +57,23 @@ for f in $( (go run "./cmd/${slug}" serve -h; go run "./cmd/${slug}" fetch-asset
 done
 
 echo "==> endpoints documented"
-# Every route of the server's route table (Server.routes), as `METHOD /path`
-# or `/path`.
+# Every route of the server's route table (Server.routes) and of the
+# plugins (internal/registry), as `METHOD /path` or `/path`.
 routes=$(sed -n 's/^[[:space:]]*\(route\)\{0,1\}{"\([^"]*\)", .*/\2/p' internal/server/server.go | tr ' ' '_')
 if [[ $(wc -w <<<"$routes") -lt 20 ]]; then echo "found only $(wc -w <<<"$routes") routes in internal/server/server.go"; fail=1; fi
+plugin_routes=$(go run ./scripts/registry -routes | tr ' ' '_') || { echo "listing the plugins' routes failed"; fail=1; }
+if [[ $(wc -w <<<"$plugin_routes") -lt 20 ]]; then echo "found only $(wc -w <<<"$plugin_routes") plugin routes"; fail=1; fi
+routes="$routes $plugin_routes"
+# A route may also be one of a group's: `METHOD /prefix/{name}` on a row
+# that names its last segment in backticks.
+documented() {
+  grep -qF -- "\`$1\`" docs/reference.md && return 0
+  local group=${1%/*} last=${1##*/}
+  grep -F -- "| \`$group/{" docs/reference.md | grep -qF -- "\`$last\`"
+}
 for route in $routes; do
   route=${route//_/ }
-  grep -qF -- "\`$route\`" docs/reference.md || { echo "endpoint $route missing from docs/reference.md"; fail=1; }
+  documented "$route" || { echo "endpoint $route missing from docs/reference.md"; fail=1; }
 done
 
 echo "==> third-party notices"

@@ -70,7 +70,8 @@ machine → 404).
 
 The op `plugin` (`Header.Plugin`, `Action`, `Params`) runs the handler
 registered with `plugin.Register`. It answers once (`plugin.Reply`) or
-streams JSON lines (`plugin.Stream`). Failures carry a code
+streams JSON lines after its reply until the core closes the stream
+(`plugin.UntilClosed`). Failures carry a code
 (`plugin.Errorf`); unknown plugin → `unknown_plugin`. A panicking handler
 fails its action with `failed` and is logged; the agent goes on. Handlers
 get the agent's directories and environment (`plugin.Env`), including

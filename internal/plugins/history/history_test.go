@@ -24,7 +24,7 @@ import (
 
 func TestPlugin(t *testing.T) {
 	p := New()
-	if p.ID() != "history" || !plugin.ValidID(p.ID()) {
+	if p.ID() != "history" {
 		t.Fatalf("plugin %q", p.ID())
 	}
 	if plugin.EnableSetting(p) != "plugins.history.enabled" {

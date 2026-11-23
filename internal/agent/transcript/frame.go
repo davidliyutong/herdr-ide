@@ -5,17 +5,16 @@ package transcript
 import (
 	"context"
 	"io"
-	"math"
 
 	"herdr-ide/internal/agentproto"
 )
 
 // Frame is what one line of a Claude Code transcript gives, read on its
-// own: the events a read gives of it, without their places, and what a
+// own: its events, and what a
 // reader that follows a whole conversation needs to name the items they
 // belong to (the chat host's import, its adapter's live frames).
 type Frame struct {
-	// Events are the line's events, in their order; their Seq is 0.
+	// Events are the line's events, in their order.
 	Events []agentproto.TranscriptEvent
 	// Blocks holds, for each event, the index among the line's content
 	// blocks of the block it was made of; -1 for an event of no block.
@@ -60,8 +59,7 @@ func frameOf(o *lineOut) Frame {
 	f := Frame{Message: o.message, Count: o.count, First: o.first - 1, Unknown: o.unknown, Title: o.title, Custom: o.custom}
 	for i := range o.events {
 		p := &o.events[i]
-		ev, _ := encode(p, 0)
-		f.Events = append(f.Events, ev)
+		f.Events = append(f.Events, encode(p))
 		f.Blocks = append(f.Blocks, p.block-1)
 	}
 	return f
@@ -75,8 +73,7 @@ func frameOf(o *lineOut) Frame {
 // is not read.
 func EachClaude(ctx context.Context, r io.ReaderAt, from, size int64, lim Limits, fn func(off int64, f Frame) bool) error {
 	l := lim.norm()
-	v := &view{b: &budget{r: r, ctx: ctx, left: math.MaxInt64}}
-	fr := newFwdReader(v, min(max(from, 0), size), size)
+	fr := newFwdReader(ctxReader{r, ctx}, min(max(from, 0), size), size)
 	var o lineOut
 	for {
 		line, ok := fr.next()

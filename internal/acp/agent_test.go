@@ -85,7 +85,7 @@ func ended(t *testing.T, c *Conn) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
-		c.wait()
+		c.wg.Wait()
 		close(done)
 	}()
 	select {

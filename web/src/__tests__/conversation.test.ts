@@ -11,7 +11,6 @@ import {
   CHAT_ADAPTERS,
   chatAdapter,
   chatKinds,
-  hasNativeView,
   isSessionId,
   PLACEHOLDER,
   resumeCommand,
@@ -82,10 +81,9 @@ describe('agent kinds', () => {
       'qwen',
       'amp',
     ]);
-    expect(hasNativeView('claude')).toBe(true);
-    expect(hasNativeView('codex')).toBe(true);
-    expect(hasNativeView('gemini')).toBe(false);
-    expect(hasNativeView(undefined)).toBe(false);
+    expect(agentKind('claude')?.transcript).toBe('claude');
+    expect(agentKind('codex')?.transcript).toBe('codex');
+    expect(agentKind('gemini')?.transcript).toBeUndefined();
   });
 
   it('name providers the AI usage plugin has', () => {

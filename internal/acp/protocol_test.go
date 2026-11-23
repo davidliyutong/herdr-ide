@@ -156,7 +156,7 @@ func TestPromptTurn(t *testing.T) {
 		notes int // the notifications handled when Prompt returned
 	}
 	done := async(func() (turn, error) {
-		res, err := c.Prompt(bg, PromptParams{SessionID: "sess_1", Prompt: []json.RawMessage{TextBlock("Fix the <failing> test")}})
+		res, err := c.Prompt(bg, PromptParams{SessionID: "sess_1", Prompt: []json.RawMessage{textBlock("Fix the <failing> test")}})
 		return turn{res, len(h.got())}, err
 	})
 	req := a.next()
@@ -261,7 +261,7 @@ func TestCancel(t *testing.T) {
 	}
 	c, a := start(t, h)
 	done := async(func() (*PromptResult, error) {
-		return c.Prompt(bg, PromptParams{SessionID: "sess_1", Prompt: []json.RawMessage{TextBlock("Run it")}})
+		return c.Prompt(bg, PromptParams{SessionID: "sess_1", Prompt: []json.RawMessage{textBlock("Run it")}})
 	})
 	req := a.next()
 	a.send(`{"jsonrpc":"2.0","id":5,"method":"session/request_permission","params":{"sessionId":"sess_1","toolCall":{"toolCallId":"call_1"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"}]}}`)
@@ -416,7 +416,7 @@ func TestSessionCalls(t *testing.T) {
 		{
 			name: "session/prompt with usage and _meta",
 			call: func(c *Conn) (any, error) {
-				return c.Prompt(bg, PromptParams{SessionID: "sess_1", Prompt: []json.RawMessage{TextBlock("hi")}})
+				return c.Prompt(bg, PromptParams{SessionID: "sess_1", Prompt: []json.RawMessage{textBlock("hi")}})
 			},
 			method: "session/prompt", params: `{"sessionId":"sess_1","prompt":[{"type":"text","text":"hi"}]}`,
 			result: `{"stopReason":"end_turn","usage":{"inputTokens":3},"_meta":{"usage":{"costUsdTicks":10}}}`,
@@ -528,7 +528,13 @@ func TestPermissionOutcomes(t *testing.T) {
 			t.Errorf("encoded %s, %v; want %s", b, err, want)
 		}
 	}
-	if got, want := string(TextBlock("a\n\"b\" <c>")), `{"type":"text","text":"a\n\"b\" <c>"}`; got != want {
-		t.Errorf("text block = %s, want %s", got, want)
-	}
+}
+
+// textBlock is a text content block for a prompt.
+func textBlock(text string) json.RawMessage {
+	b, _ := marshal(struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}{"text", text})
+	return b
 }

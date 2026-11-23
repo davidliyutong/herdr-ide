@@ -17,6 +17,10 @@ export const paths = {
   core: join(dir, 'core'),
   /** A directory with the fake coding agents (kimi: e2e/fakeacp). */
   fakeBin: join(dir, 'fakebin'),
+  /** The machine builds the core uploads to SSH machines (--agent-dir). */
+  agents: join(dir, 'agents'),
+  /** The fake agent built for an SSH machine's Linux. */
+  linuxFake: (arch: string) => join(dir, `linux-${arch}`, 'kimi'),
 };
 
 export function checkBuilt() {

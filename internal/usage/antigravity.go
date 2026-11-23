@@ -213,13 +213,9 @@ func procPorts(root string, pid int) []int {
 	return ports
 }
 
-// getUserStatus asks the language server on port, over HTTPS and then
-// HTTP; nil when it does not answer with an object.
-func getUserStatus(ctx context.Context, e *Env, port int, csrf string) map[string]any {
-	m, _ := getUserStatusWithScheme(ctx, e, port, csrf)
-	return m
-}
-
+// getUserStatusWithScheme asks the language server on port, over HTTPS
+// and then HTTP: its answer and the scheme it answered on; nil when it does
+// not answer with an object.
 func getUserStatusWithScheme(ctx context.Context, e *Env, port int, csrf string) (map[string]any, string) {
 	for _, scheme := range []string{"https", "http"} {
 		if m := getUserStatusOn(ctx, e, port, csrf, scheme); m != nil {

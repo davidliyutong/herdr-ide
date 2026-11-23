@@ -10,7 +10,6 @@
 
 import { choiceDialog } from '../../dialog';
 import { desktopShell } from '../../shell';
-import { filesAreOn } from '../../drop';
 import { t } from '../../i18n';
 import { uploadName } from '../../lib/files';
 import { shortPath } from '../../lib/machine';
@@ -360,7 +359,3 @@ export function localPaths(files: readonly File[]): string[] {
   }
   return [...out];
 }
-
-/** Whether uploads to m are copies on this computer (the desktop app's
- * own machine). */
-export const copiesInPlace = filesAreOn;

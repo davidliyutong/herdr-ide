@@ -76,8 +76,15 @@ func TestSlowSubscriberIsDropped(t *testing.T) {
 	s := h.newChat()
 	slow, _ := h.attachRaw(s.chat.ID, s.last)
 	chunk := strings.Repeat("y", 64<<10)
+	// The other connection takes each event before the next comes, so
+	// that only the slow one falls behind however loaded the machine.
 	for i := 0; i < (queueBytes>>16)+64; i++ {
 		s.session.stream("big", chunk)
+		select {
+		case <-s.lives:
+		case <-time.After(patience):
+			t.Fatal("the other connection got no live event")
+		}
 	}
 	eventually(t, "the slow connection dropped", func() bool { return strings.Contains(h.log.String(), "fell behind") })
 	s.session.say("after", "still here")

@@ -31,10 +31,10 @@ machine with the code `local_unsupported` and reaches SSH machines only
 | `cmd/herdr-ide` | The one binary: `serve`, `fetch-assets` (`serve.go`), `mcp`, `version`; on machines `agent`, `gui-keep`, `gui-wl` and `chat-host` (`machine_unix.go`, `chathost_unix.go`). Built with the tag `machine` it leaves out the server, UI and payloads; that build is what machines get. |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/agentproto` | Stream protocol shared by core and agent; yamux configuration; types both sides need (transcript events, history snapshots); `Hidden`, the rule that hides the product's own terminals by reserved name and label together. |
-| `internal/agentkinds` | Registry of coding agent kinds: commands to start, continue and resume, transcript parser, chat adapter; written into `design/generated/registry.json` ([35](features/35-agent-native-view.md)). |
+| `internal/agentkinds` | Registry of coding agent kinds: commands to start, continue and resume, transcript format, chat adapter; written into `design/generated/registry.json` ([35](features/35-agent-native-view.md)). |
 | `internal/agent` | The agent: terminal core, detection, files, code-server, displays, bridge and vault sockets, housekeeping. `//go:build unix`, so the Windows core never imports it. |
 | `internal/agent/detect` | Which coding agent runs in a terminal and its state ([25](features/25-agent-detection.md)). |
-| `internal/agent/sessions`, `internal/agent/transcript` | The session an agent's process runs; its transcript read a page at a time into ACP-shaped events ([35](features/35-agent-native-view.md)). |
+| `internal/agent/sessions`, `internal/agent/transcript` | The session an agent's process runs; Claude Code's transcript lines mapped to ACP-shaped events for the chat host ([35](features/35-agent-native-view.md)). |
 | `internal/chatproto` | The chat host's protocol on its unix socket ([37](features/37-agent-chats.md)). |
 | `internal/chathost` | The chat host: lifetime, chats and their agents, the journal and its bounds. Unix only. |
 | `internal/chatadapter`, `…/{claude,codex,acp}`, `internal/acp` | The adapters to the agents' protocols: Claude Code's Agent SDK, Codex's app-server, the Agent Client Protocol (Kimi Code, Grok). |
@@ -75,7 +75,7 @@ machine with the code `local_unsupported` and reaches SSH machines only
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 | `scripts` | Build, packaging, checks, pinned downloads and generators (`tokens`, `registry`). |
 | `design` | Design tokens (`tokens.json`, [24](features/24-design-tokens.md)), `generated/registry.json`, the pinned Codex app-server schema, and shared test vectors and recordings (`testdata/`) run by Go and web tests. |
-| `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`), and `fakeacp`, a scripted offline ACP agent installed as `kimi`. |
+| `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`), `fakeacp`, a scripted offline ACP agent installed as `kimi`, and `sshd`, the image of the SSH machines the tests run in Docker. |
 
 ## Desktop launcher
 

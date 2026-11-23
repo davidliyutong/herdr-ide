@@ -145,13 +145,6 @@ func (p *process) stop(grace, term time.Duration) {
 	})
 }
 
-// kill ends the process group at once: for an agent that never got its
-// session.
-func (p *process) kill() {
-	p.signal(syscall.SIGKILL)
-	p.stop(0, 0)
-}
-
 // wait returns whether ch was closed within d.
 func wait(ch <-chan struct{}, d time.Duration) bool {
 	if d <= 0 {

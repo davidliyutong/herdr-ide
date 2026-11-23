@@ -16,14 +16,18 @@ export class TermClient {
   private ready: Promise<void>;
   private onReady = () => {};
 
-  constructor(baseURL: string) {
+  /** A client of the terminals of machine m (the local one by default). */
+  constructor(
+    baseURL: string,
+    readonly m = 'local',
+  ) {
     this.ws = new WebSocket(baseURL.replace(/^http/, 'ws') + '/api/v1/term');
     this.ready = new Promise((resolve) => (this.onReady = resolve));
     this.opened = new Promise((resolve, reject) => {
       this.ws.addEventListener(
         'open',
         () => {
-          this.ws.send(JSON.stringify({ t: 'sub', m: 'local' }));
+          this.ws.send(JSON.stringify({ t: 'sub', m: this.m }));
           resolve();
         },
         { once: true },
@@ -33,7 +37,7 @@ export class TermClient {
     this.ws.addEventListener('message', (ev) => {
       if (typeof ev.data !== 'string') return;
       const m = JSON.parse(ev.data) as Msg;
-      if (m.t === 'backend' && m.state === 'ready') this.onReady();
+      if (m.t === 'backend' && m.state === 'ready' && m.m === this.m) this.onReady();
       if (m.t === 'res' && typeof m.rid === 'number') {
         this.waiting.get(m.rid)?.(m);
         this.waiting.delete(m.rid);
@@ -41,7 +45,7 @@ export class TermClient {
     });
   }
 
-  async call<T = unknown>(method: string, params: Record<string, unknown> = {}, m = 'local'): Promise<T> {
+  async call<T = unknown>(method: string, params: Record<string, unknown> = {}, m = this.m): Promise<T> {
     await this.opened;
     await this.ready;
     const rid = ++this.rid;

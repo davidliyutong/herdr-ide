@@ -679,7 +679,7 @@ func TestServingBound(t *testing.T) {
 // it, and Wait takes the response.
 func TestGo(t *testing.T) {
 	c, a := start(t, nil)
-	p, err := c.GoPrompt(bg, PromptParams{SessionID: "s", Prompt: []json.RawMessage{TextBlock("hi")}})
+	p, err := c.GoPrompt(bg, PromptParams{SessionID: "s", Prompt: []json.RawMessage{textBlock("hi")}})
 	if err != nil {
 		t.Fatal(err)
 	}

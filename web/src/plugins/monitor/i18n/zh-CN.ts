@@ -11,7 +11,6 @@ export const zhCN: Record<keyof typeof en, string> = {
   'monitor.refresh': '刷新',
   'monitor.pause': '暂停刷新',
   'monitor.resume': '恢复刷新',
-  'monitor.paused': '已暂停',
   'monitor.loading': '正在读取监控数据…',
   'monitor.loadingProcs': '正在读取进程列表…',
   'monitor.noMachine': '未选择主机。',
@@ -36,7 +35,6 @@ export const zhCN: Record<keyof typeof en, string> = {
   'monitor.diskIO': '读 {r} · 写 {w}',
   'monitor.statusTitle': '{machine} 的系统监控',
   'monitor.statusLabel': '监控',
-  'monitor.hoverHint': '按住 ⌘ 悬停主机可查看实时资源占用',
   // Task Manager
   'monitor.tm.search': '搜索 PID、名称、命令行、用户…',
   'monitor.tm.clearSearch': '清空搜索',

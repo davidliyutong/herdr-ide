@@ -267,7 +267,6 @@ export const zhCN: Messages = {
   'confirm.disableMachineTitle': '禁用 {machine}？',
   'confirm.disableMachine': '它的连接会断开，那里的 VS Code 会停止，终端则继续在那里运行。可以在侧栏重新启用。',
   'confirm.disableStopCore': '同时停止它的终端服务（结束那里的所有终端）',
-  'confirm.close': '关闭',
   'confirm.removeMachineTitle': '移除 {machine}？',
   'confirm.removeMachine': '机器 {target} 会从本应用中移除。那台机器上的内容不会被删除，终端继续运行。',
   'confirm.remove': '移除',

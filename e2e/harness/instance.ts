@@ -36,6 +36,9 @@ export class Instance {
   readonly home: string;
   /** A directory for the test's files (the workspace the tests open). */
   readonly work: string;
+  /** First in the core's PATH: the ssh of SSH machines (harness/sshd.ts). */
+  readonly bin: string;
+  private stopped?: Promise<void>;
   baseURL = '';
   private proc?: ChildProcess;
   private log: string[] = [];
@@ -46,6 +49,7 @@ export class Instance {
     // The real path: the terminal core reports directories resolved (/private/tmp on macOS).
     this.home = realpathSync(mkdtempSync(HOME_PREFIX));
     this.work = join(this.home, 'work');
+    this.bin = join(this.home, 'bin');
   }
 
   /** Starts a core on a new instance and waits until its terminal core runs. */
@@ -65,6 +69,7 @@ export class Instance {
   private prepare() {
     mkdirSync(join(this.home, 'tmp'), { recursive: true });
     mkdirSync(this.work, { recursive: true });
+    mkdirSync(this.bin, { recursive: true });
     // Login and interactive shells: the chat host reads the login shell's
     // PATH ($SHELL -l -i -c env), which puts the fake agent first.
     const rc = [`export PATH="${paths.fakeBin}:$PATH"`, `PS1='$ '`, ''].join('\n');
@@ -86,7 +91,7 @@ export class Instance {
       USER: user,
       LOGNAME: user,
       SHELL: '/bin/bash',
-      PATH: `${paths.fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+      PATH: `${this.bin}:${paths.fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
       LANG: 'en_US.UTF-8',
       TERM: 'xterm-256color',
       TMPDIR: join(this.home, 'tmp'),
@@ -103,7 +108,11 @@ export class Instance {
   }
 
   private async launch() {
-    const proc = spawn(paths.core, ['--instance', this.name, '--local-only', '--listen', '127.0.0.1:0', '--parent-stdio'], {
+    // --local-only leaves out stored machines only: the SSH machines a
+    // test adds while the core runs connect. --agent-dir holds the Linux
+    // machine build they get (scripts/e2e.sh).
+    const args = ['--instance', this.name, '--local-only', '--listen', '127.0.0.1:0', '--parent-stdio', '--agent-dir', paths.agents];
+    const proc = spawn(paths.core, args, {
       cwd: this.home,
       env: this.env(),
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -176,8 +185,28 @@ export class Instance {
     });
   }
 
-  /** Stops the terminal core, then the core, and removes the home directory. */
-  async stop() {
+  /** The machines of the core, as GET /api/machines lists them. */
+  async machines(): Promise<(Machine & Record<string, unknown>)[]> {
+    return this.api('GET', '/api/machines');
+  }
+
+  /** Stops the local terminal core, then the core, and removes the home
+   * directory; once, however often it is called. */
+  stop(): Promise<void> {
+    this.stopped ??= this.stopOnce();
+    return this.stopped;
+  }
+
+  private async stopOnce() {
+    await this.stopCore();
+    stopTerminalCore(this.home, this.name);
+    rmSync(this.home, { recursive: true, force: true });
+    rmSync(controlDir(this.name), { recursive: true, force: true });
+  }
+
+  /** Stops the local terminal core and the core, keeping the home
+   * directory (what a test checks after the core is gone). */
+  async stopCore() {
     if (this.baseURL && this.proc?.exitCode === null) {
       try {
         await this.api('POST', '/api/m/local/hc/stop');
@@ -193,8 +222,6 @@ export class Instance {
         await this.exited;
       }
     }
-    stopTerminalCore(this.home, this.name);
-    rmSync(this.home, { recursive: true, force: true });
   }
 }
 
@@ -229,10 +256,17 @@ export function sweepLeftovers() {
     if (alive(owner.pid)) continue;
     stopTerminalCore(home, owner.name);
     rmSync(home, { recursive: true, force: true });
+    rmSync(controlDir(owner.name), { recursive: true, force: true });
   }
 }
 
-function alive(pid: number): boolean {
+/** The instance's ssh control directory (transport.ControlDir; e2e
+ * instance names are short enough to be used as they are). */
+function controlDir(name: string): string {
+  return join('/tmp', `${paths.slug}-${process.getuid?.() ?? 0}`, `s-${name}`);
+}
+
+export function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;

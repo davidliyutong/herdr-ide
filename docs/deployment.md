@@ -212,7 +212,7 @@ ARCH=arm64 make desktop-dist            # arm64 packages, also on an x64 host
 | Key encrypting the vault's unlock secret (safeStorage) | login keychain item `herdr-ide Safe Storage`; the build that made it in `~/Library/Application Support/herdr-ide-desktop-keychain.json` | DPAPI | – |
 | code-server downloads | `~/Library/Caches/herdr-ide/code-server` | `%LocalAppData%\herdr-ide\code-server` | `~/.cache/herdr-ide/code-server` |
 | Local machine's agent state | `~/.herdr-ide-desktop/` | – | `~/.herdr-ide-desktop/` |
-| ssh control sockets | `/tmp/herdr-ide-<uid>/s` | – | `/tmp/herdr-ide-<uid>/s` |
+| ssh control sockets | `/tmp/herdr-ide-<uid>/s-desktop` | – | `/tmp/herdr-ide-<uid>/s-desktop` |
 
 SSH machines keep the instance's state in their own `~/.herdr-ide-desktop/`
 ([remote resources](#remote-resources)). Uninstalling removes only the app.

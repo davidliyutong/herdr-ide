@@ -10,7 +10,6 @@ export const en = {
   'monitor.refresh': 'Refresh',
   'monitor.pause': 'Pause updates',
   'monitor.resume': 'Resume updates',
-  'monitor.paused': 'Paused',
   'monitor.loading': 'Loading metrics…',
   'monitor.loadingProcs': 'Loading processes…',
   'monitor.noMachine': 'No machine selected.',
@@ -35,7 +34,6 @@ export const en = {
   'monitor.diskIO': 'R {r} · W {w}',
   'monitor.statusTitle': 'System monitor for {machine}',
   'monitor.statusLabel': 'Monitor',
-  'monitor.hoverHint': 'Hold ⌘ and hover a machine for live usage',
   // Task Manager
   'monitor.tm.search': 'Search PID, name, command, user…',
   'monitor.tm.clearSearch': 'Clear search',

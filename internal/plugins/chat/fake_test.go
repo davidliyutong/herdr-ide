@@ -283,17 +283,6 @@ func (f *fakeChatHost) serve(c *fakeConn) {
 	}
 }
 
-// release sends the acks held so far.
-func (f *fakeChatHost) release() {
-	f.mu.Lock()
-	held := f.held
-	f.held, f.holdAcks = nil, false
-	f.mu.Unlock()
-	for _, ack := range held {
-		ack()
-	}
-}
-
 // emit writes an event to every connection attached to chat; one that
 // does not take it within dropAfter is ended.
 func (f *fakeChatHost) emit(chat string, ev chatproto.Event) {

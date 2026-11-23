@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { badgeCount, notifyAgent, requestNotifyPermission, showsNotification, updateBadge } from '../notify';
+import { badgeCount, notifyAgent, requestNotifyPermission, updateBadge } from '../notify';
 import { builtinDefaults, useSettings, type SettingValue } from '../settings';
 import { useStore } from '../state/store';
 import { useTerms } from '../state/terms';
@@ -19,16 +19,6 @@ describe('which notifications show', () => {
     expect(builtinDefaults['notifications.system']).toBe(true);
     expect(builtinDefaults['notifications.badge']).toBe(true);
     expect(builtinDefaults['notifications.mutedAgents']).toEqual(['droid']);
-  });
-
-  it('shows a system notification for blocked and done in the background, when on and allowed', () => {
-    const c = { enabled: true, granted: true, visible: false };
-    expect(showsNotification({ agent_status: 'blocked' }, c)).toBe(true);
-    expect(showsNotification({ agent_status: 'done' }, c)).toBe(true);
-    expect(showsNotification({ agent_status: 'working' }, c)).toBe(false);
-    expect(showsNotification({ agent_status: 'blocked' }, { ...c, visible: true })).toBe(false);
-    expect(showsNotification({ agent_status: 'blocked' }, { ...c, granted: false })).toBe(false);
-    expect(showsNotification({ agent_status: 'blocked' }, { ...c, enabled: false })).toBe(false);
   });
 
   it('counts blocked agents on the badge unless it is off', () => {

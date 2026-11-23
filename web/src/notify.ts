@@ -62,11 +62,6 @@ export function onPermissionChange(fn: () => void): () => void {
   };
 }
 
-/** Whether notifications run through the Electron desktop native bridge. */
-export function isDesktopNotifications(): boolean {
-  return !!desktopShell?.notifications;
-}
-
 /** Current notification permission state for UI feedback. */
 export function notificationPermission(): NotificationPermission | 'desktop' | 'unsupported' {
   if (desktopShell?.notifications) return 'desktop';
@@ -92,16 +87,6 @@ export async function requestNotifyPermission(opts?: { force?: boolean }): Promi
     notifyPermListeners();
     return Notification.permission;
   }
-}
-
-/** Whether a status change shows a notification of the system: blocked or
- * done, while the page is in the background, with the setting on and the
- * browser's permission. */
-export function showsNotification(
-  ev: Pick<AgentStatusEvent, 'agent_status'>,
-  c: { enabled: boolean; granted: boolean; visible: boolean },
-): boolean {
-  return c.enabled && c.granted && !c.visible && (ev.agent_status === 'blocked' || ev.agent_status === 'done');
 }
 
 /** The pane an agent notification is about: its terminal, else the

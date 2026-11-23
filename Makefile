@@ -60,7 +60,8 @@ it:
 	go test -tags integration -count=1 ./internal/server -run Integration -v
 
 # End-to-end tests: the core of this platform on isolated instances,
-# driven through Chromium (e2e/, scripts/e2e.sh); not part of make test.
+# driven through Chromium, and SSH machines in Docker containers (e2e/,
+# scripts/e2e.sh); not part of make test.
 # Arguments for Playwright: make e2e E2E_ARGS='tests/chat.spec.ts'.
 e2e:
 	scripts/e2e.sh $(E2E_ARGS)

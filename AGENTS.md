@@ -34,7 +34,7 @@ extension.
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
 | Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
-| End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium; builds into `dist/e2e` (not part of `make test`) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
+| End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium, and SSH machines in Docker containers (skipped without Docker; `E2E_REQUIRE_DOCKER=1` fails instead); builds into `dist/e2e` (not part of `make test`) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
 | Full build into `dist/` | `make build` (or `scripts/build.sh`) |
 | Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
 | macOS: build the `.app` and install it into `/Applications` | `make desktop-install` |
@@ -49,7 +49,8 @@ Run `make check test` before finishing a change.
    tests and dev servers use `--instance dev` (state in `~/.herdr-ide-dev`,
    terminal core session `herdr-ide-dev`), the integration tests'
    session `herdr-ide-it` or the end-to-end tests' instances `e2e-<random>`
-   (homes in `/tmp/hie-*`); the desktop app's instance (`desktop`) and the
+   (homes in `/tmp/hie-*`, SSH machines in Docker containers labelled
+   `herdr-ide.e2e`); the desktop app's instance (`desktop`) and the
    default one are the user's. Stop a terminal core only through its own
    instance (`POST /api/m/{id}/hc/stop` of the dev core), never the user's,
    and do not attach to the user's terminals.
@@ -127,13 +128,14 @@ playbooks):
   uploads that expect a reply.
 - A coding agent kind is a row of `internal/agentkinds` with a detector
   manifest of the same id (`TestKindsMatchManifestsAndSettings`), then
-  `make tokens`. A native view of its conversations also needs a parser in
-  `internal/agent/transcript`, its sessions in `internal/agent/sessions`
-  and vectors in `design/testdata/transcript/`, which the Go and the web
-  tests both run; `go test ./internal/agent/transcript -run TestVectors
-  -update` rewrites a vector's expected events after a deliberate change
-  of the mapping (review the diff). Browsers hold transcript cursors as
-  opaque numbers: no bit operations on them. A chat with it (the chat
+  `make tokens`. Finding its sessions needs `internal/agent/sessions`.
+  Claude Code's transcripts are mapped to events by
+  `internal/agent/transcript` (the chat host's imports and its Claude
+  Code adapter), specified by the vectors in `design/testdata/transcript/`,
+  which the Go and the web tests both run; `go test
+  ./internal/agent/transcript -run TestVectors -update` rewrites a
+  vector's expected events after a deliberate change of the mapping
+  (review the diff). A chat with it (the chat
   host running it headless) also needs a `Chat` spec in its row, whose
   `Adapter` is one of `agentkinds.Adapters`, the protocols of the
   adapters behind `internal/chatadapter` (`TestChatKinds`); its argv,

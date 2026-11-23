@@ -26,12 +26,6 @@ func TestClaudeFrame(t *testing.T) {
 	if f.Blocks[0] != 0 || f.Blocks[1] != 1 || f.Blocks[2] != -1 || f.Events[2].T != agentproto.TranscriptTurn || f.Events[2].StopReason != "end_turn" {
 		t.Errorf("blocks %v events %+v", f.Blocks, f.Events)
 	}
-	for _, ev := range f.Events {
-		if ev.Seq != 0 {
-			t.Errorf("a place: %d", ev.Seq)
-		}
-	}
-
 	// The SDK protocol's frames: no apiBlockIndex, the tool's result as
 	// tool_use_result; a response still running ends no turn.
 	sdk := ClaudeFrame([]byte(jsonLine(t, obj{"type": "assistant", "parent_tool_use_id": nil, "message": obj{"id": "msg_2", "stop_reason": nil, "content": []any{

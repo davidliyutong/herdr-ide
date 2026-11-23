@@ -76,33 +76,3 @@ func TestReplyAndFail(t *testing.T) {
 		t.Fatalf("plain failure %+v %v", rep, err)
 	}
 }
-
-func TestStreamEndsWhenCoreCloses(t *testing.T) {
-	a, b := net.Pipe()
-	n := 0
-	done := make(chan error)
-	go func() {
-		done <- Stream(context.Background(), a, "first", func(ctx context.Context) (any, error) {
-			n++
-			if n > 2 {
-				<-ctx.Done()
-				return nil, ctx.Err()
-			}
-			return n, nil
-		})
-	}()
-	var rep agentproto.Reply
-	if err := agentproto.ReadLine(b, &rep); err != nil || string(rep.Plugin) != `"first"` {
-		t.Fatalf("reply %+v %v", rep, err)
-	}
-	for want := 1; want <= 2; want++ {
-		var v json.RawMessage
-		if err := agentproto.ReadLine(b, &v); err != nil || string(v) != string(rune('0'+want)) {
-			t.Fatalf("line %d: %s %v", want, v, err)
-		}
-	}
-	b.Close()
-	if err := <-done; err != nil {
-		t.Fatalf("stream: %v", err)
-	}
-}
