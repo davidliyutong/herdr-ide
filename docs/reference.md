@@ -613,7 +613,8 @@ removed):
 | `core[-<instance>]-<host>[-<id>].db` (with `-wal`, `-shm`) | The core's SQLite database ([38](features/38-sqlite-state.md)): the vault's access log (last 1000 releases, 500 other records; never values) and the AI usage history (30 days of windows' use, alert periods). Earlier `core[-<instance>].db`, `vault[-<instance>]-access.jsonl` and `usage-history[-<instance>].json` are imported once and removed. |
 
 Also on the core host: ssh control sockets in `/tmp/herdr-ide-<uid>/s`
-(`s-<instance>` for another instance; Linux and macOS; owned by you, 0700), and code-server downloads with
+(`s-<instance>` for another instance, `h-<hash>` for one longer than
+16 characters; Linux and macOS; owned by you, 0700), and code-server downloads with
 `.sha256` sidecars in the user cache directory
 (`~/Library/Caches/herdr-ide/code-server`, `~/.cache/herdr-ide/code-server`,
 `%LocalAppData%\herdr-ide\code-server`).

@@ -13,15 +13,38 @@ import { createRoot, type Root } from 'react-dom/client';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, send: () => {}, connected: true } }));
 
+/** Monaco's model: its line ends are of one kind, which its text decides
+ * (eolOf); setValue drops the undo history. */
 class FakeModel {
   value = '';
+  eol: '\n' | '\r\n' = '\n';
   version = 1;
+  /** setValue calls after the model was made. */
+  sets = 0;
   private listeners: Array<() => void> = [];
+  constructor(v = '') {
+    this.take(v);
+  }
+  private take(v: string) {
+    this.eol = eolOf(v) ?? this.eol;
+    this.value = v.replace(/\r\n|\r|\n/g, this.eol);
+  }
   getValue() {
     return this.value;
   }
   setValue(v: string) {
-    this.value = v;
+    this.take(v);
+    this.sets++;
+    this.version++;
+    this.listeners.forEach((l) => l());
+  }
+  getEOL() {
+    return this.eol;
+  }
+  pushEOL(seq: number) {
+    this.eol = seq === 1 ? '\r\n' : '\n';
+    this.value = this.value.replace(/\r\n|\r|\n/g, this.eol);
+    this.edits++;
     this.version++;
     this.listeners.forEach((l) => l());
   }
@@ -31,7 +54,10 @@ class FakeModel {
   onDidChangeContent(l: () => void) {
     this.listeners.push(l);
   }
-  dispose() {}
+  dispose() {
+    models.delete(this.uri);
+  }
+  uri = '';
   getVersionId() {
     return this.version;
   }
@@ -111,6 +137,8 @@ const editor = {
   },
 };
 let separate = false;
+/** The models not disposed, by their URI. */
+const models = new Map<string, FakeModel>();
 const monaco = {
   Uri: { from: (o: unknown) => o },
   KeyMod: { CtrlCmd: 2048 },
@@ -123,7 +151,17 @@ const monaco = {
       public endColumn = 1,
     ) {}
   },
-  editor: { getModel: () => null, createModel: () => new FakeModel(), OverviewRulerLane: { Left: 1 } },
+  editor: {
+    getModel: (uri: unknown) => models.get(JSON.stringify(uri)) ?? null,
+    createModel: vi.fn((v: string, _language: unknown, uri: unknown) => {
+      const model = new FakeModel(v);
+      model.uri = JSON.stringify(uri);
+      models.set(model.uri, model);
+      return model;
+    }),
+    OverviewRulerLane: { Left: 1 },
+    EndOfLineSequence: { LF: 0, CRLF: 1 },
+  },
 };
 vi.mock('../plugins/monaco', () => ({
   setLanguage: vi.fn(),
@@ -140,7 +178,16 @@ import { useTerms } from '../state/terms';
 import type { MachineState } from '../lib/machine';
 import type { Layout } from '../term/layout';
 import { t } from '../i18n';
-import { CHECK_MS, EditorPane, keepViewState, keptViewState, loadText, resetViewStates, versionOf } from '../plugins/files/EditorPane';
+import {
+  CHECK_MS,
+  EditorPane,
+  eolOf,
+  keepViewState,
+  keptViewState,
+  loadText,
+  resetViewStates,
+  versionOf,
+} from '../plugins/files/EditorPane';
 import { dropEdit } from '../unsaved';
 import { registerQuickDiff } from '../plugins/files/quickDiff';
 import { useGoneFiles } from '../plugins/files/gone';
@@ -246,6 +293,46 @@ describe('EditorPane', () => {
     await act(async () => root.unmount());
     host.remove();
     vi.unstubAllGlobals();
+  });
+
+  // The model's URI is the file's, which Monaco keeps the undo history of
+  // when its model is disposed; a second pane of the file has one of its own.
+  it('gives a file’s model the file’s URI unless another pane has it', async () => {
+    separate = true;
+    try {
+      const hosts = [document.createElement('div'), document.createElement('div')];
+      const roots = hosts.map((h) => {
+        document.body.append(h);
+        return createRoot(h);
+      });
+      const created = () => vi.mocked(monaco.editor.createModel).mock.calls.map((c) => (c[2] as { query: string }).query);
+      vi.mocked(monaco.editor.createModel).mockClear();
+      const render = async (i: number) => {
+        await act(async () =>
+          roots[i].render(
+            createElement(EditorPane, {
+              m: 'm',
+              pane: `view:v${i}`,
+              view: { id: `v${i}`, plugin: 'files', kind: 'editor', path: '/home/u/notes.txt' },
+              focused: false,
+            }),
+          ),
+        );
+        await flush();
+        await flush();
+      };
+      await render(0);
+      await render(1);
+      expect(created()).toEqual(['m=m', 'm=m&pane=view:v1']);
+      for (const r of roots) await act(async () => r.render(null));
+      expect(models.size).toBe(0);
+      await render(1);
+      expect(created()).toEqual(['m=m', 'm=m&pane=view:v1', 'm=m']);
+      for (const r of roots) await act(async () => r.unmount());
+      hosts.forEach((h) => h.remove());
+    } finally {
+      separate = false;
+    }
   });
 
   // The chord is each editor's own: with two panes mounted, Cmd+S in one
@@ -484,6 +571,25 @@ describe('EditorPane', () => {
       expect(editor.model?.getValue()).toBe('hello there');
       expect(editor.model?.edits).toBe(1);
       expect(host.querySelector('.files-dirty')).toBeNull();
+    });
+
+    it('makes the model with the file’s text, for Monaco to give it back the undo history it kept', async () => {
+      await renderNow();
+      expect(monaco.editor.createModel).toHaveBeenLastCalledWith('hello', undefined, expect.anything());
+      expect(editor.model?.sets).toBe(0);
+    });
+
+    it('loads a file again whose line ends changed by edits undo takes back', async () => {
+      await renderNow();
+      file = { text: 'hello\r\nthere\nyou\r\n', size: 19, mtime: 8000 };
+      await advance(CHECK_MS);
+      expect(editor.model?.getValue()).toBe('hello\r\nthere\r\nyou\r\n');
+      expect(editor.model?.edits).toBe(2);
+      expect(editor.model?.sets).toBe(0);
+      file = { text: 'hello\r\nthere\r\nyou\n', size: 19, mtime: 9000 };
+      await advance(CHECK_MS);
+      expect(editor.model?.edits).toBe(2);
+      expect(editor.model?.sets).toBe(0);
     });
 
     it('keeps the text of a file removed on the machine, and marks it gone until it is back', async () => {
@@ -729,5 +835,16 @@ describe('EditorPane', () => {
       rootEl.focus();
     });
     expect(focusSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('eolOf', () => {
+  it('gives the line end Monaco makes a model’s', () => {
+    expect(eolOf('one line')).toBeUndefined();
+    expect(eolOf('a\nb\n')).toBe('\n');
+    expect(eolOf('a\r\nb\r\n')).toBe('\r\n');
+    expect(eolOf('a\r\nb\n')).toBe('\n');
+    expect(eolOf('a\r\nb\r\nc\n')).toBe('\r\n');
+    expect(eolOf('a\rb\r')).toBe('\r\n');
   });
 });

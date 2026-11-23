@@ -3,6 +3,8 @@
 package transport
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,15 +14,21 @@ import (
 	"herdr-ide/internal/brand"
 )
 
-// Each instance has a control directory of its own, and its sockets' paths
-// stay within macOS's limit for the longest instance name.
+// Each instance has a control directory of its own, also a short name that
+// is the hash of a long one, and its sockets' paths stay within macOS's
+// limit for the longest instance name.
 func TestControlDirPerInstance(t *testing.T) {
 	long := strings.Repeat("a", 32)
 	if !brand.ValidInstance(long) {
 		t.Fatal("the longest instance name is not valid")
 	}
+	sum := sha256.Sum256([]byte(long))
+	hash := hex.EncodeToString(sum[:6])
+	if !brand.ValidInstance(hash) {
+		t.Fatal("the hash of a long name is not a valid instance name")
+	}
 	seen := map[string]string{}
-	for _, inst := range []string{"", "dev", "desktop", "e2e-0123abcd", long, long[:31] + "b"} {
+	for _, inst := range []string{"", "dev", "desktop", "e2e-0123abcd", long, long[:31] + "b", hash} {
 		name := controlName(inst)
 		if other, ok := seen[name]; ok {
 			t.Fatalf("instances %q and %q share %s", inst, other, name)

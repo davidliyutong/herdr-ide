@@ -42,6 +42,7 @@ vi.mock('../plugins/monaco', () => ({
             getValue: () => v,
             setValue: (x: string) => ((v = x), version++),
             getAlternativeVersionId: () => version,
+            getEOL: () => '\n',
             getVersionId: () => version,
             onDidChangeContent: () => ({ dispose() {} }),
             dispose() {},

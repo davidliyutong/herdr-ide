@@ -188,8 +188,9 @@ Look (`MediaView`).
   Again**. A new file whose write failed is removed. Readers of the file
   during the write may see part of it, as with VS Code.
 - **External changes.** Every 5 s while shown, the pane checks the file.
-  Unchanged text reloads as one undoable edit (the cursor stays); text with
-  unsaved changes gets the conflict bar at once. **Keep Editing** dismisses
+  Unchanged text reloads as one undoable edit (the cursor stays), a change
+  of line ends as another; text with unsaved changes gets the conflict bar
+  at once. **Keep Editing** dismisses
   the bar until the next change.
 - **Files gone** (`gone.ts`): an editor whose file was deleted or moved away
   has its title struck through ("Deleted"), as VS Code does; the text stays
@@ -200,6 +201,13 @@ Look (`MediaView`).
   ([04](04-layout-and-keyboard.md)). Unsaved text and Monaco's view state
   (cursor, selection, scroll, folding) survive the pane not being drawn
   ([27](27-plugins.md)); closing the pane drops them.
+- **Undo history** outlives the editor as in VS Code: a model's URI is the
+  file's (`file://<path>?m=<machine>`, with `&pane=<pane>` for a second
+  pane of a file shown at once), and it is made with the file's text, so
+  Monaco gives a file opened again with the text it closed with the history
+  it had (20 MB of closed files' history at most). A file changed
+  meanwhile starts without one. Never `setValue` a model that shows text:
+  that drops its history.
 - **Show in Explorer** reveals the file in the tree; outside its root the
   tree stops following and shows the file's folder.
 

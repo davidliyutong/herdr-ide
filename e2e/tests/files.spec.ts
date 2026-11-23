@@ -67,3 +67,56 @@ test('New File creates the file on the machine and the tree selects it', async (
   await waitFor(() => existsSync(join(instance.work, 'fresh.ts')), { what: 'fresh.ts on disk' });
   await expect(tree.getByRole('treeitem', { name: 'fresh.ts' })).toBeVisible();
 });
+
+test('the editor keeps its undo history while its tab is not shown', async ({ app, instance, term }) => {
+  await newTerminalTab(app);
+  await cdInTerminal(app, term, await terminalOfPane(term, 1), instance.work);
+  const tree = await explorer(app);
+  await tree.getByRole('treeitem', { name: 'notes.txt' }).dblclick();
+  const editorTab = app.getByRole('tab', { name: /notes\.txt/ });
+  await expect(editorTab).toHaveAttribute('aria-selected', 'true');
+  const lines = app.locator('.files-editor .monaco-editor .view-lines');
+  await expect(lines).toContainText('first line');
+
+  // Typed and saved: the text is clean, and undo still takes the typing back.
+  await lines.click();
+  await app.keyboard.press(`${mod}+End`);
+  await app.keyboard.type('typed');
+  await app.keyboard.press(`${mod}+s`);
+  await waitFor(() => readFileSync(join(instance.work, 'notes.txt'), 'utf8').includes('typed'), { what: 'the saved text' });
+  await expect(app.locator('.files-dirty')).toHaveCount(0);
+
+  // Another tab and back: the editor is mounted again.
+  await app.getByRole('tab', { name: /^Tab 1/ }).click();
+  await editorTab.click();
+  await expect(lines).toContainText('typed');
+  await lines.click();
+  await app.keyboard.press(`${mod}+z`);
+  await expect(lines).not.toContainText('typed');
+  await expect(app.locator('.files-dirty')).toHaveCount(1);
+  await app.keyboard.press(`${mod}+Shift+z`);
+  await expect(lines).toContainText('typed');
+});
+
+test('a file opened again has the undo history it had when its editor closed', async ({ app, instance, term }) => {
+  await newTerminalTab(app);
+  await cdInTerminal(app, term, await terminalOfPane(term, 1), instance.work);
+  const tree = await explorer(app);
+  await tree.getByRole('treeitem', { name: 'notes.txt' }).dblclick();
+  const editorTab = app.getByRole('tab', { name: /notes\.txt/ });
+  const lines = app.locator('.files-editor .monaco-editor .view-lines');
+  await expect(lines).toContainText('first line');
+  await lines.click();
+  await app.keyboard.press(`${mod}+End`);
+  await app.keyboard.type('typed');
+  await app.keyboard.press(`${mod}+s`);
+  await waitFor(() => readFileSync(join(instance.work, 'notes.txt'), 'utf8').includes('typed'), { what: 'the saved text' });
+
+  await editorTab.getByRole('button', { name: /close/i }).click();
+  await expect(editorTab).toHaveCount(0);
+  await tree.getByRole('treeitem', { name: 'notes.txt' }).dblclick();
+  await expect(lines).toContainText('typed');
+  await lines.click();
+  await app.keyboard.press(`${mod}+z`);
+  await expect(lines).not.toContainText('typed');
+});

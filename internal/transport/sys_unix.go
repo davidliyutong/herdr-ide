@@ -16,8 +16,9 @@ import (
 
 // ControlDir returns the private directory holding an instance's ssh
 // control sockets: s for the default instance, s-<instance> for another
-// (s-<hash> for a name longer than maxControlName), so instances never
-// share a connection. It lives in /tmp because unix socket paths are
+// (h-<hash> for a name longer than maxControlName: a prefix of its own, as
+// the hash is itself a valid short name), so instances never share a
+// connection. It lives in /tmp because unix socket paths are
 // limited to ~104 bytes; as /tmp is shared, both levels must be real
 // directories owned by us and not accessible to anyone else, otherwise
 // another local user could plant control sockets and hijack every ssh
@@ -48,7 +49,7 @@ func controlName(instance string) string {
 		return "s-" + instance
 	}
 	sum := sha256.Sum256([]byte(instance))
-	return "s-" + hex.EncodeToString(sum[:6])
+	return "h-" + hex.EncodeToString(sum[:6])
 }
 
 func checkPrivateDir(d string) error {

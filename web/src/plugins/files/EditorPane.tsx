@@ -60,13 +60,40 @@ function readFailure(r: Response, body = ''): string {
   return t('files.readFailed', { error: body.trim() || r.statusText || `HTTP ${r.status}` });
 }
 
+/** The line end Monaco gives a model of text (its text buffer's rule):
+ * CRLF when more than half the line ends have a CR; undefined without one. */
+export function eolOf(text: string): '\n' | '\r\n' | undefined {
+  let all = 0;
+  let cr = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 13) {
+      all++;
+      cr++;
+      if (text.charCodeAt(i + 1) === 10) i++;
+    } else if (c === 10) all++;
+  }
+  if (all === 0) return undefined;
+  return cr > all / 2 ? '\r\n' : '\n';
+}
+
 /** Puts text in model. Into text it showed already, as one edit of the
- * part that changed (the cursor stays, undo takes it back); a new model
- * just takes it. */
+ * part that changed (the cursor stays, undo takes it back), a change of
+ * the line ends as another; a new model just takes it. A model that holds
+ * the text already (with its line ends made one kind) stays as it is:
+ * setValue would drop its undo history, which Monaco gives a model made
+ * again with the same text. */
 export function applyText(monaco: Monaco, model: TextModel, text: string, edit: boolean) {
+  const eol = eolOf(text);
+  if (edit && eol && eol !== model.getEOL()) {
+    model.pushStackElement();
+    model.pushEOL(eol === '\r\n' ? monaco.editor.EndOfLineSequence.CRLF : monaco.editor.EndOfLineSequence.LF);
+  }
+  const want = text.replace(/\r\n|\r|\n/g, model.getEOL());
   const old = model.getValue();
-  if (old === text) return;
+  if (old === want) return;
   if (!edit) return model.setValue(text);
+  text = want;
   const max = Math.min(old.length, text.length);
   let a = 0;
   while (a < max && old.charCodeAt(a) === text.charCodeAt(a)) a++;
@@ -86,8 +113,6 @@ export function applyText(monaco: Monaco, model: TextModel, text: string, edit: 
     () => null,
   );
   model.pushStackElement();
-  // Line ends the model made its own.
-  if (model.getValue() !== text) model.setValue(text);
 }
 
 /** The version in a file response's ETag (W/"<size hex>-<mtime hex>",
@@ -500,7 +525,10 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
       const savedView = takeViewState(m, pane, path);
       if (savedView) pendingViewState.current = savedView;
       // A model of the pane's own: another pane of the file has its own text.
-      const uri = monaco.Uri.from({ scheme: 'file', path, query: `m=${m}&pane=${pane}` });
+      // It is the file's while no other pane has that one, so that the file
+      // opened again (in any pane) gets the undo history Monaco keeps for it.
+      const fileUri = monaco.Uri.from({ scheme: 'file', path, query: `m=${m}` });
+      const uri = monaco.editor.getModel(fileUri) ? monaco.Uri.from({ scheme: 'file', path, query: `m=${m}&pane=${pane}` }) : fileUri;
       const kept = takeEdit<KeptText>(m, pane, (k) => k.path === path);
       if (kept) {
         version.current = kept.version;
@@ -509,7 +537,10 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
         raw.current = kept.raw;
         setMixed(isMixed(kept.raw));
       }
-      const model = kept?.model ?? monaco.editor.getModel(uri) ?? monaco.editor.createModel('', undefined, uri);
+      // Made with the file's text: Monaco then gives it the undo history the
+      // model of that URI had when it was disposed with that text.
+      const model =
+        kept?.model ?? monaco.editor.getModel(uri) ?? monaco.editor.createModel(first.kind === 'text' ? first.text : '', undefined, uri);
       editor.setModel(model);
       ed.current = created;
       keys = editor.onKeyDown((e) => saveKeys.editor(e, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS));
