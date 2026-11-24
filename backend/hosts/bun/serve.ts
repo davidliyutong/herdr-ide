@@ -34,6 +34,7 @@ import { dialSSH } from '#kernel/machines/transport/ssh.ts';
 import { machinesFeature } from '#features/machines/core.ts';
 import { terminalsFeature } from '#features/terminals/core.ts';
 import { fileTransfersFeature, filesFeature } from '#features/files/core.ts';
+import { chatFeature } from '#features/chat/core.ts';
 import { readHello, desktopClient } from './parent.ts';
 import { openPayloads } from './payloads.ts';
 import { abortable } from './abortable.ts';
@@ -132,6 +133,7 @@ export async function serve(argv: string[]): Promise<void> {
     terminalsFeature({ hc: (os, arch) => payloads.hc(os, arch) }),
     fileTransfersFeature(),
     filesFeature(),
+    chatFeature(),
   ];
 
   const modules = coreModules(features);

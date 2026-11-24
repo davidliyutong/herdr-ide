@@ -1,0 +1,77 @@
+// Chats (docs/features/37-agent-chats.md): conversations with coding agents
+// that a machine's chat host runs headless (#shared/proto/chatproto),
+// relayed to the pages over one WebSocket per page (wire.ts, page.ts) and
+// through the machine side's open action (protocol.ts), which gives a
+// stream to the host's socket and starts the host, a hidden terminal of
+// the machine's terminal core, when asked to. Its settings are in the
+// section "chat", per machine, and reach each machine's host (settings.ts);
+// its switch is plugins.chat.enabled.
+//
+// The core watches a machine's chat host while the machine is connected,
+// the feature is on and the host is in use (watch.ts); the routes
+// (routes.ts) and the pages (page.ts) reach the hosts through the hub
+// (hub.ts).
+import { VERSION } from '#shared/proto/agentproto/index.ts';
+import { open } from '#kernel/agent.ts';
+import { defineFeature, type FeatureDef } from '#kernel/feature.ts';
+import { offline } from '#kernel/fail.ts';
+import type { Opener } from './hostconn.ts';
+import { ChatHub } from './hub.ts';
+import { chatProtocol } from './protocol.ts';
+import { routes } from './routes.ts';
+import { settings } from './settings.ts';
+import { DEFAULT_LIMITS, DEFAULT_TIMING, type Limits, type Timing } from './timing.ts';
+
+export interface ChatOptions {
+  /** Opens a connection to a machine's chat host; the machine side's open
+   * action by default. */
+  open?: Opener;
+  timing?: Partial<Timing>;
+  limits?: Partial<Limits>;
+  /** The clock, in milliseconds. */
+  now?: () => number;
+  /** This core's build, whose chat host a machine's is compared to. */
+  version?: () => string;
+}
+
+export interface ChatFeature extends FeatureDef {
+  /** The hub, once the core set the feature up (tests). */
+  hub(): ChatHub | undefined;
+}
+
+export function chatFeature(o: ChatOptions = {}): ChatFeature {
+  let hub: ChatHub | undefined;
+  const def = defineFeature({
+    id: 'chat',
+    settings,
+    setup(ctx) {
+      const timing: Timing = { ...DEFAULT_TIMING, ...o.timing };
+      const h = new ChatHub({
+        machines: ctx.machines,
+        settings: ctx.settings,
+        readOnly: ctx.readOnly,
+        audit: ctx.audit,
+        logger: ctx.logger,
+        enabled: () => ctx.enabledFor('desktop') || ctx.enabledFor('browser'),
+        broadcast: (data, m) => ctx.broadcast(data, m),
+        publishAgent: (ev) => ctx.machines.publishAgent(ev),
+        open:
+          o.open ??
+          (async (m, start, signal) => {
+            const mc = ctx.machines.get(m);
+            if (!mc) throw offline();
+            return (await open(mc, chatProtocol, 'open', start ? {} : { start: false }, { signal })).conn;
+          }),
+        version: o.version ?? (() => VERSION),
+        now: o.now ?? Date.now,
+        timing,
+        limits: { ...DEFAULT_LIMITS, ...o.limits },
+      });
+      hub = h;
+      routes(ctx, h, timing);
+      ctx.service('watch', (signal) => h.run(signal));
+      ctx.onForget((m) => h.forget(m));
+    },
+  });
+  return Object.assign(def, { hub: () => hub });
+}

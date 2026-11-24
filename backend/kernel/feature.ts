@@ -94,6 +94,16 @@ export interface FeatureContext {
     opts?: CallOptions,
   ): Promise<ResultOf<P['actions'][K]>>;
 
+  /** Calls a streaming action: its result and the stream after the reply,
+   * which the caller closes (kernel/agent.ts open). */
+  open<P extends Protocol, K extends keyof P['actions'] & string>(
+    m: Machine,
+    proto: P,
+    action: K,
+    params: ParamsOf<P['actions'][K]>,
+    opts?: CallOptions,
+  ): Promise<{ result: ResultOf<P['actions'][K]>; conn: AgentStream }>;
+
   /** Serves the streams agents open towards the core with op (after the
    * header); while the feature is off they fail with plugin_disabled. */
   agentStream(op: string, serve: (m: Machine, conn: AgentStream, h: Header) => void): void;

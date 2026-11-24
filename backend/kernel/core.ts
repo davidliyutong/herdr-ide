@@ -4,7 +4,7 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import type { Logger } from '#shared/lib/log.ts';
 import { writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
-import { call } from './agent.ts';
+import { call, open } from './agent.ts';
 import type { Audit } from './audit.ts';
 import type { Store as Settings } from './config/settings/index.ts';
 import { enableSetting, type FeatureContext, type FeatureDef } from './feature.ts';
@@ -138,6 +138,7 @@ export function createCore(o: CoreOptions): Core {
       forget: (machine) => forget(machine),
       broadcast: (data, machine = '') => pages.broadcast({ t: 'plugin', plugin: f.id, m: machine, data }),
       call: (m, proto, action, params, opts) => call(m, proto, action, params, opts),
+      open: (m, proto, action, params, opts) => open(m, proto, action, params, opts),
       agentStream: (op, serve) => {
         if (streams.has(op)) throw new Error(`agent op ${op} is served by ${streams.get(op)!.feature.id} already`);
         streams.set(op, { feature: f, serve });
