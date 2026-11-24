@@ -9,12 +9,12 @@ import { newTerminalTab, run, terminalOfPane } from '../harness/ui';
 import { waitFor } from '../harness/wait';
 import { paths } from '../harness/paths';
 
-/** The node processes of the instance (of the core executable exe; any
- * by default). */
-function nodes(name: string, exe?: string): string[] {
+/** The node processes of the instance: whichever executable runs them
+ * (the core's own, or the machine build it installed). */
+function nodes(name: string): string[] {
   return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
     .split('\n')
-    .filter((l) => l.includes(exe ?? paths.core) && l.includes(`node --instance ${name}`));
+    .filter((l) => l.includes(`node --instance ${name}`));
 }
 
 test('two cores share the local node: each sees the terminals of the other, and one leaving keeps the other', async ({
@@ -67,15 +67,14 @@ test('a newer build takes the node over: the other core moves to it and stays re
   })();
   const newer = await instance.second(false, paths.coreNewer);
   try {
-    // The newer build's node serves the instance; the old one ends once
-    // the first core moved.
-    await waitFor(
-      async () => nodes(instance.name, paths.coreNewer).length === 1 && nodes(instance.name).every((l) => l.includes(paths.coreNewer)),
-      {
-        what: 'the newer node alone to serve the instance',
-        timeout: 30_000,
-      },
-    );
+    // The newer build's node serves the instance, both cores through it;
+    // the old one ends once the first core moved.
+    const onNewer = async (i: { machine(): Promise<{ info?: { version: string } }> }) =>
+      (await i.machine()).info?.version === paths.newerVersion;
+    await waitFor(async () => nodes(instance.name).length === 1 && (await onNewer(instance)) && (await onNewer(newer)), {
+      what: 'the newer node alone to serve the instance',
+      timeout: 30_000,
+    });
     watching = false;
     await watch;
     expect([...seen]).toEqual(['ready']);

@@ -18,6 +18,9 @@ export const paths = {
   /** The same core built again as another, newer build: it takes the
    * nodes over from the first. */
   coreNewer: join(dir, 'core-newer'),
+  /** The version of the newer build, which its nodes report
+   * (scripts/e2e.sh). */
+  newerVersion: 'dev-e2e-newer',
   /** A directory with the fake coding agents (kimi: e2e/fakeacp). */
   fakeBin: join(dir, 'fakebin'),
   /** The machine builds the core uploads to SSH machines (--agent-dir). */

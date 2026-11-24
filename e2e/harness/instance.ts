@@ -31,6 +31,8 @@ const SETTINGS = { 'usage.claudeKeychain': false };
 export interface Machine {
   id: string;
   status: string;
+  /** What the machine's node reported in its last hello. */
+  info?: { version: string };
 }
 
 export class Instance {
