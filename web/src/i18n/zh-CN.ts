@@ -9,7 +9,6 @@ import { zhCN as browserZhCN } from '../plugins/browser/i18n/zh-CN';
 import { zhCN as agentsZhCN } from '../plugins/agents/i18n/zh-CN';
 import { zhCN as chatZhCN } from '../plugins/chat/i18n/zh-CN';
 import { zhCN as historyZhCN } from '../plugins/history/i18n/zh-CN';
-import { zhCN as migrateZhCN } from '../plugins/migrate/i18n/zh-CN';
 import { zhCN as conversationZhCN } from '../conversation/i18n/zh-CN';
 
 export const zhCN: Messages = {
@@ -923,9 +922,6 @@ export const zhCN: Messages = {
   // terminal history plugin
   'settings.plugins.history.enabled': '终端历史',
   'settings.plugins.history.enabled.desc': '机器在开启“保存终端输出的快照”后保存在磁盘上的终端输出，在终端核心重新启动后显示。',
-  // migrate plugin
-  'settings.plugins.migrate.enabled': '从旧名称迁移',
-  'settings.plugins.migrate.enabled.desc': '当机器上还有本应用旧名称留下的工作区时，显示其中的内容，并把其中的标签页迁移过来。',
   // unsaved changes
   'unsaved.title': '未保存的更改',
   'unsaved.one': '要保存对 {name} 的更改吗？',
@@ -947,6 +943,5 @@ export const zhCN: Messages = {
   ...agentsZhCN,
   ...chatZhCN,
   ...historyZhCN,
-  ...migrateZhCN,
   ...conversationZhCN,
 };

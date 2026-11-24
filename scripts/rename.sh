@@ -78,10 +78,6 @@ if [[ "$name" != "$new" ]]; then
   perl -pi -e "s/^(export const APP_NAME = )'[^']*'/\$1'\$ENV{NEW_NAME}'/" web/src/brand.ts
 fi
 
-# Record the old names for migration.
-perl -0pi -e 's/(LegacyDataDirNames = \[\]string\{)/$1".$ENV{OLD}", /; s/(LegacySlugs = \[\]string\{)/$1"$ENV{OLD}", /; s/(LegacyBridgeExtIDs = \[\]string\{)/$1"$ENV{OLD}.$ENV{OLD}-bridge", /' internal/brand/brand.go
-perl -0pi -e "s/(export const LEGACY_SLUGS: string\[\] = \[)/\$1'\$ENV{OLD}', /; s/, \]/]/" web/src/brand.ts
-
 mv_path() {
   [[ -e "$1" ]] || return 0
   if git ls-files --error-unmatch "$1" >/dev/null 2>&1; then git mv "$1" "$2"; else mv "$1" "$2"; fi

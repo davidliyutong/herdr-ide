@@ -336,20 +336,6 @@ func (c *codeServer) handle(ctx context.Context, s *session, st net.Conn, h agen
 			return agentproto.Fail(st, fmt.Errorf("%v: %s", err, lastN(out, 600)))
 		}
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, Exec: &agentproto.ExecResult{Stdout: lastN(out, 2000)}})
-	case "uninstall-ext":
-		bin, err := c.binFor(h)
-		if err != nil {
-			return agentproto.Fail(st, err)
-		}
-		args := c.baseArgs()
-		for _, id := range h.Args {
-			args = append(args, "--uninstall-extension", id)
-		}
-		// Not installed is fine; the result is informational.
-		cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		out, _ := exec.CommandContext(cctx, bin, args...).CombinedOutput()
-		cancel()
-		return agentproto.WriteLine(st, agentproto.Reply{OK: true, Exec: &agentproto.ExecResult{Stdout: lastN(string(out), 2000)}})
 	case "marker":
 		// Path names a marker file below the extensions dir (used to remember
 		// which bridge build is installed). Args[0]=="set" creates it.

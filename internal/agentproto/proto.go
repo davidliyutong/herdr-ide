@@ -349,7 +349,7 @@ type Stat struct {
 }
 
 // ExecResult is the output of a command the agent ran for an op
-// (code-server's install-ext and uninstall-ext).
+// (code-server's install-ext).
 type ExecResult struct {
 	ExitCode  int    `json:"exit_code"`
 	Stdout    string `json:"stdout"`

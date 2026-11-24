@@ -35,16 +35,6 @@ const (
 	DataDirName = "." + Slug
 )
 
-// Previous names, appended by scripts/rename.sh. Oldest last.
-var (
-	// LegacyDataDirNames are the data directories of previous names.
-	LegacyDataDirNames = []string{".herdr-ide", ".webherdr"}
-	// LegacySlugs name old cache directories (removed by the core).
-	LegacySlugs = []string{"herdr-ide", "webherdr"}
-	// LegacyBridgeExtIDs are uninstalled from code-server.
-	LegacyBridgeExtIDs = []string{"herdr-ide.herdr-ide-bridge", "webherdr.webherdr-bridge"}
-)
-
 // BridgeExtID is the extension identifier (publisher.name) in code-server.
 const BridgeExtID = Slug + "." + BridgeExt
 
@@ -72,18 +62,3 @@ func ValidInstance(s string) bool {
 // AgentDir holds uploaded agents (shared by instances; one directory per
 // build) relative to $HOME.
 const AgentDir = DataDirName + "/agent"
-
-// LegacyDataDirs are the data directories a previous name gave the
-// namespace whose data directory is named dataDir (DataDir of an
-// instance), newest name first.
-func LegacyDataDirs(dataDir string) []string {
-	suffix, ok := strings.CutPrefix(dataDir, DataDirName)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(LegacySlugs))
-	for _, s := range LegacySlugs {
-		out = append(out, "."+s+suffix)
-	}
-	return out
-}

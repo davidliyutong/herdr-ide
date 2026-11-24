@@ -14,7 +14,6 @@ import { monitorPlugin } from './monitor';
 import { agentsPlugin } from './agents';
 import { chatPlugin } from './chat';
 import { historyPlugin } from './history';
-import { migratePlugin } from './migrate';
 
 setPanelCommand((panel) => ({ run: () => togglePanel(panel.id) }));
 definePlugins([
@@ -30,5 +29,4 @@ definePlugins([
   agentsPlugin,
   chatPlugin,
   historyPlugin,
-  migratePlugin,
 ]);

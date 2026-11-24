@@ -32,7 +32,6 @@ import (
 	"veldr/internal/registry"
 	"veldr/internal/server"
 	"veldr/internal/settings"
-	"veldr/internal/store"
 	"veldr/internal/transport"
 	"veldr/internal/vault"
 	"veldr/web"
@@ -86,22 +85,13 @@ func besideSettings(settings, name string) string {
 	return filepath.Join(filepath.Dir(settings), strings.Replace(filepath.Base(settings), "settings", name, 1))
 }
 
-// settingsPath is the settings file on the core host. A directory left by a
-// previous product name is copied first (copyLegacyConfig): the previous
-// version may still run from it.
+// settingsPath is the settings file on the core host.
 func settingsPath(instance string) (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
 	dir := filepath.Join(base, brand.Slug)
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		for _, old := range brand.LegacySlugs {
-			if copyLegacyConfig(filepath.Join(base, old), dir) {
-				break
-			}
-		}
-	}
 	name := "settings.json"
 	if instance != "" {
 		name = "settings-" + instance + ".json"
@@ -321,7 +311,6 @@ func serve(args []string, logger *log.Logger) {
 		audit = f
 	}
 	cs := csf.manager(logger)
-	cs.RemoveLegacyCaches()
 	cs.Settings = prefs
 	srv := server.New(mg, server.Options{
 		AllowedOrigins:   origins,
@@ -457,35 +446,4 @@ func selectSpec(s machines.Spec, local, localOnly bool, extraSSH, only []string)
 		return false
 	}
 	return len(only) == 0 || in(only)
-}
-
-// copyLegacyConfig copies the configuration directory a previous name left
-// (settings, machines, keybindings, the vault, the core's databases) into
-// dir, which does not exist yet: its regular files, databases as
-// consistent copies (store.CopyDB) without their journals. It reports
-// whether there was one to copy. A copy that fails part-way leaves what it
-// copied; the previous directory stays as it was.
-func copyLegacyConfig(old, dir string) bool {
-	ents, err := os.ReadDir(old)
-	if err != nil {
-		return false
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return false
-	}
-	for _, e := range ents {
-		name := e.Name()
-		src, dst := filepath.Join(old, name), filepath.Join(dir, name)
-		if !e.Type().IsRegular() || strings.HasSuffix(name, "-wal") || strings.HasSuffix(name, "-shm") || strings.HasSuffix(name, "-journal") {
-			continue
-		}
-		if strings.HasSuffix(name, ".db") {
-			_, _ = store.CopyDB(src, dst)
-			continue
-		}
-		if b, err := os.ReadFile(src); err == nil {
-			_ = os.WriteFile(dst, b, 0o600)
-		}
-	}
-	return true
 }

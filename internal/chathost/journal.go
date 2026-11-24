@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"veldr/internal/brand"
 	"veldr/internal/chatproto"
 	"veldr/internal/store"
 )
@@ -117,23 +116,13 @@ type journal struct {
 }
 
 // openJournal opens this host's database in base (store.HostFile), migrating
-// any legacy un-hosted DBName into it first. Without one, this host's
-// database of the namespace a previous product name left beside base
-// (brand.LegacyDataDirs) is copied, so the chats moved tabs show come
-// along; that namespace keeps its own. A database a newer host wrote is
-// not used: its error is store.ErrNewer.
+// any legacy un-hosted DBName into it first. A database a newer host wrote
+// is not used: its error is store.ErrNewer.
 func openJournal(base string) (*journal, error) {
 	target := store.HostFile(base, DBName)
 	legacy := filepath.Join(base, DBName)
 	if _, err := store.MigrateLegacy(legacy, target); err != nil {
 		return nil, err
-	}
-	if !store.Exists(target) {
-		for _, d := range brand.LegacyDataDirs(filepath.Base(base)) {
-			if copied, _ := store.CopyDB(store.HostFile(filepath.Join(filepath.Dir(base), d), DBName), target); copied {
-				break
-			}
-		}
 	}
 	db, err := store.Open(target, store.Options{Migrations: migrations})
 	if errors.Is(err, store.ErrNewer) {

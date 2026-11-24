@@ -142,10 +142,6 @@ and run `./veldr`. Add SSH machines with **Add machine…** in the
 sidebar. Coming from a version that drew its panes from herdr: settings,
 keys and machines move over on the first start, terminals stay in herdr
 ([migration](docs/deployment.md#migrating-from-versions-that-used-herdr)).
-Coming from herdr-ide (this product's earlier name): veldr installs beside
-it and copies its settings; herdr-ide's terminals keep running until you
-move their tabs from the status bar's **herdr-ide** item, one at a time
-([moving](docs/deployment.md#moving-from-herdr-ide)).
 
 Open <http://127.0.0.1:7780>. The status bar opens the command palette and
 the list of shortcuts. All flags are listed in

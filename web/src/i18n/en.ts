@@ -11,7 +11,6 @@ import { en as browserEn } from '../plugins/browser/i18n/en';
 import { en as agentsEn } from '../plugins/agents/i18n/en';
 import { en as chatEn } from '../plugins/chat/i18n/en';
 import { en as historyEn } from '../plugins/history/i18n/en';
-import { en as migrateEn } from '../plugins/migrate/i18n/en';
 import { en as conversationEn } from '../conversation/i18n/en';
 
 export const en = {
@@ -952,10 +951,6 @@ export const en = {
   'settings.plugins.history.enabled': 'Terminal history',
   'settings.plugins.history.enabled.desc':
     'Terminal output that machines keep on their disks while Keep snapshots of terminal output is on for them, shown after their terminal core started again.',
-  // migrate plugin
-  'settings.plugins.migrate.enabled': 'Moving from a previous name',
-  'settings.plugins.migrate.enabled.desc':
-    'Shows, while a machine has workspaces of a previous name of this app, what they hold, and moves their tabs here.',
   // unsaved changes
   'unsaved.title': 'Unsaved Changes',
   'unsaved.one': 'Do you want to save the changes you made to {name}?',
@@ -977,7 +972,6 @@ export const en = {
   ...agentsEn,
   ...chatEn,
   ...historyEn,
-  ...migrateEn,
   ...conversationEn,
 } as const;
 

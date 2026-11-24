@@ -5,25 +5,8 @@ export const APP_NAME = 'veldr';
 export const APP_SLUG = 'veldr';
 /** The product's domain; reversed, it begins the desktop app's id. */
 export const APP_DOMAIN = 'veldr.app';
-/** Previous slugs, appended by scripts/rename.sh; their storage is migrated. */
-export const LEGACY_SLUGS: string[] = ['herdr-ide', 'webherdr'];
 
 const prefix = `${APP_SLUG}.`;
-
-// Move browser storage written under a previous product name, once.
-try {
-  for (const old of LEGACY_SLUGS) {
-    const oldPrefix = `${old}.`;
-    for (const key of Object.keys(localStorage)) {
-      if (!key.startsWith(oldPrefix)) continue;
-      const next = prefix + key.slice(oldPrefix.length);
-      if (localStorage.getItem(next) === null) localStorage.setItem(next, localStorage.getItem(key)!);
-      localStorage.removeItem(key);
-    }
-  }
-} catch {
-  /* storage unavailable */
-}
 
 /** Per-browser state (localStorage), namespaced by the product slug. */
 export const storage = {

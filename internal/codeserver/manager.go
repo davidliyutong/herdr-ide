@@ -471,12 +471,6 @@ func (mg *Manager) ensureExtensions(ctx context.Context, m *machines.Machine) er
 		}
 	}
 	var errs []error
-	if len(brand.LegacyBridgeExtIDs) > 0 && !mg.marker(ctx, m, "."+brand.Slug+"-legacy-removed", false) {
-		h := agentproto.Header{Action: "uninstall-ext", Args: brand.LegacyBridgeExtIDs}
-		if _, err := mg.request(ctx, m, h); err == nil {
-			mg.marker(ctx, m, "."+brand.Slug+"-legacy-removed", true)
-		}
-	}
 	for _, ext := range mg.Extensions {
 		name := "." + brand.Slug + "-ext-" + ext.ID + "-" + ext.Version
 		if mg.marker(ctx, m, name, false) {

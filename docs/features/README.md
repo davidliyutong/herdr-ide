@@ -16,7 +16,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 08 | [Web access and security](08-web-access-and-security.md) | Browser/PWA delivery, reverse-proxy model and the guardrails around it. |
 | 09 | [Air-gapped installs](09-air-gapped-installs.md) | Artifact resolution on the core host, seed directories, mirrors, pinned checksums. |
 | 10 | [Remote resource lifecycle](10-remote-resource-lifecycle.md) | Ownership and reclamation of every process and file created on machines. |
-| 11 | [Naming and renames](11-naming-and-renames.md) | Centralized product names, one-step renames; the previous name's namespace runs on while its workspaces move over, a tab at a time. |
+| 11 | [Naming and renames](11-naming-and-renames.md) | Centralized product names, one-step renames; a renamed version starts with namespaces of its own. |
 | 12 | [Internationalization](12-internationalization.md) | English and Chinese UI, translated extension, codes instead of server prose. |
 | 13 | [Settings, keybindings and appearance](13-settings-and-appearance.md) | One settings and one keybinding system in the core, VS Code style files and a generated settings UI; themes, terminal font and colors. |
 | 14 | [GUI windows](14-gui-windows.md) | Windows of programs on remote Linux machines in browser windows: a display per terminal core (Xwayland on the GPU, else Xvfb), captured as pictures or video. |

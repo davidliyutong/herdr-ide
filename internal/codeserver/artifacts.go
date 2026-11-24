@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"veldr/internal/brand"
 	"veldr/internal/checksum"
 )
 
@@ -293,27 +292,6 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.Rename(tmp, dst)
-}
-
-// RemoveLegacyCaches deletes download caches left under previous product
-// names (brand.LegacySlugs) but the newest.
-func (mg *Manager) RemoveLegacyCaches() {
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return
-	}
-	// The newest previous name's version may still run beside this one
-	// (its namespaces are moved from at the user's pace): its cache stays.
-	for i, old := range brand.LegacySlugs {
-		if i == 0 {
-			continue
-		}
-		dir := filepath.Join(cache, old)
-		if _, err := os.Stat(dir); err == nil {
-			mg.Logger.Printf("removing legacy cache %s", dir)
-			os.RemoveAll(dir)
-		}
-	}
 }
 
 // vsixContentHash identifies a VSIX by the names and contents of its files,

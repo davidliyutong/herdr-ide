@@ -218,8 +218,7 @@ ARCH=arm64 make desktop-dist            # arm64 packages, also on an x64 host
 | ssh control sockets | `/tmp/veldr-<uid>/s-desktop` | – | `/tmp/veldr-<uid>/s-desktop` |
 
 SSH machines keep their state in their own `~/.veldr/`
-([remote resources](#remote-resources)). What versions of an earlier name
-left is moved from as [below](#moving-from-herdr-ide). Uninstalling removes
+([remote resources](#remote-resources)). Uninstalling removes
 only the app.
 Removing the Electron profile also removes this install's vault unlock key:
 Touch ID or Windows Hello must then be turned on again in the vault's
@@ -529,49 +528,6 @@ For development:
 make dev-core     # go run ./cmd/veldr --instance dev --local-only --listen 127.0.0.1:7790 --agent-dir dist/agents
 make dev-web      # Vite on top of it
 ```
-
-## Moving from herdr-ide
-
-This product was called herdr-ide. veldr is installed beside it (its own
-app, `~/.veldr` on machines, its own terminal cores), so herdr-ide keeps
-running with its terminals while you move:
-
-1. Install veldr and start it. Its first start copies herdr-ide's
-   configuration (settings, machines, keybindings, the vault); herdr-ide's
-   stays as it was. A machine's chats are copied the first time veldr's
-   chat host runs there.
-2. Keep herdr-ide open, or reach its terminals in a browser with its own
-   core, which shares its default namespace with its desktop app. That
-   core's instance has a machine list of its own: copy the desktop app's
-   first (macOS paths).
-
-   ```bash
-   cd ~/Library/Application\ Support/herdr-ide
-   cp machines-desktop.json machines-legacy-web.json
-   cp -n settings-desktop.json settings-legacy-web.json
-   /Applications/herdr-ide.app/Contents/Resources/bin/herdr-ide serve \
-     --instance legacy-web --node-instance= --listen 127.0.0.1:7790
-   ```
-
-3. In veldr, the status bar shows **herdr-ide: N terminals** while a
-   connected machine has herdr-ide's terminals. Its dialog lists
-   herdr-ide's workspaces and tabs with what runs in each pane; move the
-   tabs you are done with. They close in herdr-ide and open in veldr, in a
-   workspace of the same name: a new shell in each terminal's directory,
-   Claude Code or Codex continuing their conversation; other programs end
-   ([11](features/11-naming-and-renames.md)).
-4. When a machine has nothing left to move, **Stop Previous Terminal
-   Service…** and then **Remove Previous Files…** in the same dialog end
-   herdr-ide's terminal core and remove `~/.herdr-ide` with its state.
-   Quit herdr-ide first: the files stay while it is connected.
-
-What is not moved: herdr-ide's Electron profile (Touch ID or Windows
-Hello for the vault is turned on again in veldr), VS Code's state on
-machines (`cs-data`, now kept per host), and the terminal history's
-snapshots. Namespaces of herdr-ide's older builds (`~/.herdr-ide-desktop`)
-are not listed; stop their core with their executable
-(`HC_SESSION=herdr-ide-desktop HC_SOCKET=~/.herdr-ide-desktop/run/hc.sock
-~/.herdr-ide-desktop/hc/herdr-core server stop`) and remove the directory.
 
 ## Migrating from versions that used herdr
 

@@ -23,14 +23,6 @@ func MigrateLegacy(legacyPath, targetPath string) (bool, error) {
 	return copyDB(legacyPath, targetPath, true)
 }
 
-// CopyDB copies the database at srcPath, which another process may be
-// using, to targetPath when targetPath does not exist yet: a consistent
-// snapshot (VACUUM INTO), verified, 0600. srcPath stays. It returns true
-// when this call created targetPath.
-func CopyDB(srcPath, targetPath string) (bool, error) {
-	return copyDB(srcPath, targetPath, false)
-}
-
 func copyDB(legacyPath, targetPath string, remove bool) (bool, error) {
 	if !filepath.IsAbs(legacyPath) || !filepath.IsAbs(targetPath) {
 		return false, fmt.Errorf("store: migration paths must be absolute")
