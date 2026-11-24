@@ -41,12 +41,12 @@ done
 echo "==> brand literals"
 # String literals containing the slug outside the brand files, ignoring Go
 # import paths and comments.
-hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src desktop/src 2>/dev/null \
-  | grep -vE '(internal/brand/|web/src/brand\.ts|extensions/[^/]+/src/brand\.ts|_test\.go:|__tests__/)' \
+hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src desktop/src backend --exclude-dir=node_modules 2>/dev/null \
+  | grep -vE '(internal/brand/|web/src/brand\.ts|backend/shared/lib/brand\.ts|extensions/[^/]+/src/brand\.ts|_test\.go:|\.test\.ts:|__tests__/)' \
   | grep -vE "\"${module}/" \
   | grep -vE '^[^:]+:[0-9]+:\s*(//|\*)' || true)
 if [[ -n "$hits" ]]; then
-  echo "hardcoded '${slug}' (use internal/brand, web/src/brand.ts or the extension's src/brand.ts):"
+  echo "hardcoded '${slug}' (use internal/brand, backend/shared/lib/brand.ts, web/src/brand.ts or the extension's src/brand.ts):"
   echo "$hits"
   fail=1
 fi

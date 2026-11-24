@@ -1,0 +1,9 @@
+{
+  // Code that also runs in the desktop app's Electron (Node): only Node's
+  // types, so a Bun API there fails to typecheck. Tests run under Bun; a
+  // feature's machine side (machine.ts, machine/) runs under Bun only.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["shared", "kernel", "features", "hosts/electron"],
+  "exclude": ["**/*.test.ts", "**/testdata", "features/**/machine.ts", "features/**/machine"]
+}

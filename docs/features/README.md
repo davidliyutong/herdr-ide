@@ -42,6 +42,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 39 | [Nodes](39-nodes.md) | One program on every machine: a node behind a local socket that several UIs attach to, locally or over ssh; the terminal core and chat host run as services of their own; upgrades without interrupting panes. |
 | 40 | [Homes several hosts share](40-shared-homes.md) | Hosts sharing one home (NFS) keep their sockets, locks, executables, logs and terminal cores apart: a host-local runtime directory, a directory per host, a terminal core session per host, and retention for hosts gone. |
 | 41 | [Project Search](41-project-search.md) | A Search panel that finds text in the files of a folder on a machine (VS Code's search view): match case, whole word, regular expressions, include and exclude globs, results by file opening at the match; ripgrep where the machine has it, a bounded walker of the agent's otherwise. |
+| 42 | [The backend in TypeScript](42-typescript-backend.md) | The core and the agent in TypeScript, one Bun executable; the desktop app's core in an Electron utility process without a listener; official SDKs for the coding agents; built in stages with the Go program's wire protocols. |
 
 ## Writing a feature document
 

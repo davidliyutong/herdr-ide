@@ -14,12 +14,14 @@ deps:
 	pnpm -C $(EXT) install --frozen-lockfile
 	pnpm -C desktop install --frozen-lockfile
 	pnpm -C e2e install --frozen-lockfile
+	pnpm -C backend install --frozen-lockfile
 
 build:
 	scripts/build.sh
 
 test:
 	go test ./...
+	pnpm -C backend test
 	pnpm -C web test
 	pnpm -C desktop test
 
@@ -34,6 +36,8 @@ check:
 	pnpm -C desktop format:check
 	pnpm -C e2e typecheck
 	pnpm -C e2e format:check
+	pnpm -C backend typecheck
+	pnpm -C backend format:check
 
 # The design tokens of the web UI and the core's terminal color defaults,
 # from spec/tokens.json; then what the clients take from the registered
