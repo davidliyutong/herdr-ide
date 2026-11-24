@@ -1,5 +1,8 @@
-// The status bar's AI usage item (usage.statusBar): the tightest window of
-// all accounts, in the warning color from the first threshold on; a click
+// The status bar's AI usage item (usage.statusBar): the tightest window
+// that counts the coding agent in the focused pane (its service's, on its
+// machine, its model's among the windows of models; useFocusedAgent), else
+// the tightest of all accounts, in the warning color from the first
+// threshold on; a click
 // shows the panel, and the mouse resting on it shows a card with a line per
 // account (the tightest first) and today's spend once the cost report is
 // loaded.
@@ -18,6 +21,7 @@ import {
   providerName,
   sortAccounts,
   tightest,
+  tightestFor,
   tightestWindow,
   tokens,
   windowName,
@@ -26,6 +30,7 @@ import {
 } from './model';
 import { Bar, tokensOf } from './UsagePanel';
 import { ProviderLogo, providerColor } from './logos';
+import { useFocusedAgent } from './focus';
 
 /** Accounts the card lists. */
 const MAX_ACCOUNTS = 6;
@@ -112,7 +117,11 @@ export function UsageStatusItem() {
     hover.cancel();
     setOpen(false);
   }, [hover]);
-  const top = tightest(snapshot);
+  // The window that counts the agent in the focused pane, its model's
+  // among the windows of models; else the tightest of all.
+  const agent = useFocusedAgent();
+  const followed = agent && tightestFor(snapshot, agent.provider, agent.m, agent.model);
+  const top = followed ?? tightest(snapshot);
   if (!top || !shown) return null;
   const label = pctText(top.window.usedPct, remaining);
   const level = levelOf(top.window.usedPct, warnAt);
@@ -135,7 +144,7 @@ export function UsageStatusItem() {
           togglePanel('usage');
         }}
       >
-        <Gauge />
+        {followed ? <ProviderLogo provider={top.account.provider} /> : <Gauge />}
         <span>{label}</span>
       </button>
       {open && (

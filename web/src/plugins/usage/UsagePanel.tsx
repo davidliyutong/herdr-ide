@@ -31,12 +31,16 @@ import {
   tightestWindow,
   tokenKinds,
   tokens,
+  windowSpend,
+  modelBreakdown,
   type CostReport,
   type CostRow,
   type RankBy,
   type TokenKinds,
   type UsageAccount,
   type UsageWindow,
+  type WindowSpend,
+  type ModelUsage,
 } from './model';
 import { OverviewLogo, ProviderLogo, providerColor } from './logos';
 import './usage.css';
@@ -370,7 +374,7 @@ function AccountCard({ account: a }: { account: UsageAccount }) {
         <div key={g.label ?? ''} className="usage-group">
           {g.label && <div className="usage-group-label">{g.label}</div>}
           {g.windows.map((w) => (
-            <WindowRow key={w.id ?? `${w.kind}|${w.label ?? ''}`} w={w} grouped={!!g.label} now={now} />
+            <WindowRow key={w.id ?? `${w.kind}|${w.label ?? ''}`} account={a} w={w} grouped={!!g.label} now={now} />
           ))}
         </div>
       ))}
@@ -444,8 +448,22 @@ function level(w: UsageWindow): 'out' | 'warn' | 'ok' {
   return w.usedPct >= 100 ? 'out' : w.usedPct >= th ? 'warn' : 'ok';
 }
 
-function WindowRow({ w, grouped, now }: { w: UsageWindow; grouped: boolean; now: number }) {
+/** What a window has cost so far at API prices, and the whole window at
+ * that rate (model.ts windowSpend). */
+function WindowSpendLine({ spend: s }: { spend: WindowSpend }) {
+  const cost = `${s.priced ? '' : '≥'}${money(s.cost)}`;
+  return (
+    <div className="usage-window-spend muted" data-spend>
+      {t('usage.window.spent', { cost, tokens: tokens(s.tokens) })}
+      {s.full && ` · ${t('usage.window.full', { cost: money(s.full.cost), tokens: tokens(Math.round(s.full.tokens)) })}`}
+    </div>
+  );
+}
+
+function WindowRow({ account, w, grouped, now }: { account: UsageAccount; w: UsageWindow; grouped: boolean; now: number }) {
   const remaining = useUsage((s) => s.remaining);
+  const cost = useUsage((s) => s.cost);
+  const spend = windowSpend(cost, account, w, now);
   useSettings((s) => s.values['usage.thresholds']);
   const shown = remaining ? 100 - w.usedPct : w.usedPct;
   const ahead = w.pace ? Math.round(w.usedPct - w.pace.expectedPct) : 0;
@@ -472,6 +490,7 @@ function WindowRow({ w, grouped, now }: { w: UsageWindow; grouped: boolean; now:
       </div>
       <Bar w={w} remaining={remaining} />
       {notes.length > 0 && <div className={`usage-window-note ${w.pace?.beforeReset ? 'warn' : ''}`}>{notes.join(' · ')}</div>}
+      {spend && spend.requests > 0 && <WindowSpendLine spend={spend} />}
     </div>
   );
 }
@@ -542,16 +561,23 @@ function MetricSwitch() {
   );
 }
 
+/** The kinds of tokens as a thin stacked bar of their shares. */
+function KindBar({ kinds }: { kinds: TokenKinds }) {
+  return (
+    <div className="usage-kinds" role="img" aria-label={t('usage.tokens.kinds')}>
+      {KINDS.map((k) =>
+        kinds[k] > 0 ? <i key={k} style={{ background: kindColor(k), width: `${(kinds[k] / kinds.total) * 100}%` }} /> : null,
+      )}
+    </div>
+  );
+}
+
 /** The kinds of tokens as a thin stacked bar of their shares, and a legend
  * with each one's count (the output says how much of it was reasoning). */
 function KindBreakdown({ kinds }: { kinds: TokenKinds }) {
   return (
     <>
-      <div className="usage-kinds" role="img" aria-label={t('usage.tokens.kinds')}>
-        {KINDS.map((k) =>
-          kinds[k] > 0 ? <i key={k} style={{ background: kindColor(k), width: `${(kinds[k] / kinds.total) * 100}%` }} /> : null,
-        )}
-      </div>
+      <KindBar kinds={kinds} />
       <div className="usage-legend usage-kind-legend">
         {KINDS.map((k) => (
           <span key={k} className="usage-legend-item">
@@ -561,6 +587,59 @@ function KindBreakdown({ kinds }: { kinds: TokenKinds }) {
           </span>
         ))}
       </div>
+    </>
+  );
+}
+
+/** Models a breakdown lists until asked for all. */
+const MODEL_ROWS = 8;
+
+/** A model's line of the breakdown. */
+function ModelLine({ m, logo, isTokens }: { m: ModelUsage; logo: boolean; isTokens: boolean }) {
+  return (
+    <li data-model={m.name}>
+      <div className="usage-model-line">
+        {logo && <ProviderLogo provider={m.provider} />}
+        <span className="ellipsis usage-model-name">{m.name}</span>
+        {m.unpriced && <span className="usage-noprice muted">{t('usage.tokens.noPrice')}</span>}
+        <span className="spacer" />
+        <span className="muted">{isTokens ? money(m.cost) : tokens(m.total)}</span>
+        <b className="usage-rank-cost">{isTokens ? tokens(m.total) : money(m.cost)}</b>
+      </div>
+      <KindBar kinds={m} />
+      <div className="usage-model-kinds muted">
+        {t('usage.model.kinds', {
+          input: tokens(m.input),
+          cached: tokens(m.cached),
+          cacheWrite: tokens(m.cacheWrite),
+          output: tokens(m.output),
+          requests: m.requests,
+        })}
+      </div>
+    </li>
+  );
+}
+
+/** Every model's use in the last days: its cost and tokens, a bar of its
+ * kinds of tokens and their counts with its requests; the first
+ * MODEL_ROWS, the rest on asking. */
+function ModelBreakdown({ rows, days, isTokens }: { rows: CostRow[]; days: number; isTokens: boolean }) {
+  const [all, setAll] = useState(false);
+  const list = modelBreakdown(rows, days, new Date(), isTokens ? 'tokens' : 'cost');
+  if (!list.length) return <div className="muted">{t('usage.cost.empty')}</div>;
+  const logo = new Set(list.map((m) => m.provider)).size > 1;
+  return (
+    <>
+      <ol className="usage-models">
+        {(all ? list : list.slice(0, MODEL_ROWS)).map((m) => (
+          <ModelLine key={`${m.provider}\u0000${m.name}`} m={m} logo={logo} isTokens={isTokens} />
+        ))}
+      </ol>
+      {list.length > MODEL_ROWS && (
+        <button className="link usage-models-more" onClick={() => setAll(!all)}>
+          {all ? t('usage.model.fewer') : t('usage.model.all', { n: list.length })}
+        </button>
+      )}
     </>
   );
 }
@@ -651,18 +730,21 @@ function Spend() {
                   ))}
                 </div>
               </div>
-              <ol className="usage-rank">
-                {ranking.map((r) => (
-                  <li key={r.name}>
-                    <span className="ellipsis">{r.name}</span>
-                    {r.unpriced && <span className="usage-noprice muted">{t('usage.tokens.noPrice')}</span>}
-                    {isTokens ? <span className="muted">{money(r.cost)}</span> : <span className="muted">{tokens(r.tokens)}</span>}
-                    <span className="usage-rank-cost">{isTokens ? tokens(r.tokens) : money(r.cost)}</span>
-                    <div className="usage-rank-bar" style={{ width: `${main(ranking[0]) ? (main(r) / main(ranking[0])) * 100 : 0}%` }} />
-                  </li>
-                ))}
-              </ol>
-              {ranking.length === 0 && <div className="muted">{t('usage.cost.empty')}</div>}
+              {by === 'model' && <ModelBreakdown rows={rows} days={costDays} isTokens={isTokens} />}
+              {by !== 'model' && (
+                <ol className="usage-rank">
+                  {ranking.map((r) => (
+                    <li key={r.name}>
+                      <span className="ellipsis">{r.name}</span>
+                      {r.unpriced && <span className="usage-noprice muted">{t('usage.tokens.noPrice')}</span>}
+                      {isTokens ? <span className="muted">{money(r.cost)}</span> : <span className="muted">{tokens(r.tokens)}</span>}
+                      <span className="usage-rank-cost">{isTokens ? tokens(r.tokens) : money(r.cost)}</span>
+                      <div className="usage-rank-bar" style={{ width: `${main(ranking[0]) ? (main(r) / main(ranking[0])) * 100 : 0}%` }} />
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {by !== 'model' && ranking.length === 0 && <div className="muted">{t('usage.cost.empty')}</div>}
               <p className="usage-footnote muted">{t('usage.cost.about')}</p>
               {unpriced.length > 0 && (
                 <p className="usage-footnote muted">
@@ -738,6 +820,10 @@ function ProviderSpend({ provider }: { provider: string }) {
       )}
       <DailyBars rows={rows} days={30} metric={metric} />
       {top && <div className="usage-sub muted">{t('usage.spend.topModel', { model: top.name })}</div>}
+      <div className="usage-card-line">
+        <span className="usage-heading">{t('usage.model.title')}</span>
+      </div>
+      <ModelBreakdown rows={rows} days={30} isTokens={isTokens} />
       <p className="usage-footnote muted">{t('usage.cost.about')}</p>
     </section>
   );

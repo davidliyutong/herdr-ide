@@ -468,7 +468,7 @@ changes are audited as `<plugin>.<action>` with their outcome
 | `GET /api/m/{id}/p/monitor/processes` | – | The machine's process table. |
 | `POST /api/m/{id}/p/monitor/signal` | writes | Sends an allowlisted signal (`{"pid", "signal"}`, default `TERM`); `pid` > 1. |
 | `GET /api/p/usage` | – | AI usage snapshot (accounts, windows, pace, status pages, alerts); `?watch=1` marks a panel open; `ETag` ([29](features/29-ai-usage.md)). |
-| `GET /api/p/usage/cost` | – | Log cost at API prices by day, provider, model, project and machine (`?days=` 1–90, `&tz=`); `ETag`. |
+| `GET /api/p/usage/cost` | – | Log cost at API prices by day, provider, model, project and machine (`?days=` 1–90, `&tz=`), and each machine's quarters of an hour with spend since `recentSince` (8 days back) by provider; `ETag`. |
 | `POST /api/p/usage/refresh` | writes | Polls every machine now, at most every 30 s (`202 {queued, at}`). |
 | `PUT /api/m/{id}/p/usage/deepseek-key` | writes | Writes the machine's DeepSeek key (`{"key"}`, `""` removes); never read back. |
 | `GET /api/m/{id}/p/usage/session` | – | One agent session's use at API prices (`?kind=claude\|codex&session=`). |

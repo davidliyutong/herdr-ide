@@ -8,41 +8,33 @@
 // that provider is turned off, and before the machine's first answer.
 // session.ts reads the numbers.
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { useStore } from '../../state/store';
-import { useTerms } from '../../state/terms';
-import { useSettings } from '../../settings';
 import { showPanel } from '../../panelPanes';
 import { useHoverOpen } from '../../components/useHoverOpen';
 import { t } from '../../i18n';
-import * as L from '../../term/layout';
-import { agentOf, agentStatus } from '../../lib/machine';
-import { rememberedSession } from '../../restore';
-import { agentKind, usageProvider } from '../../conversation/kinds';
+import { agentKind } from '../../conversation/kinds';
+import { useFocusedAgent } from './focus';
 import { fetchSnapshot, setView, useUsage } from './state';
-import { contextPct, contextShort, sessionAccount, sessionCost, tightestWindow, tokens, type SessionUsage } from './model';
+import {
+  contextPct,
+  contextShort,
+  sessionAccount,
+  sessionCost,
+  shortModel,
+  tightestFor,
+  tightestWindow,
+  tokens,
+  type SessionUsage,
+} from './model';
 import { sessionKey, useSessionReads, type SessionTarget } from './session';
 import { AccountLine, useCardOnScreen, useWarnAt } from './StatusItem';
 import { ProviderLogo } from './logos';
 
-/** The session of the agent in the focused terminal of the machine shown,
- * with its service; undefined without one or while the service is off. A
- * session the machine only guessed (the directory's newest transcript) is
- * none: it may be another program's, whose numbers would be shown as this
- * agent's. */
+/** The session of the agent in the focused terminal, with its service
+ * (useFocusedAgent); undefined without one. */
 function useFocusedSession(): { target: SessionTarget; provider: string } | undefined {
-  const m = useStore((s) => s.machineId);
-  const record = useTerms((s) => {
-    const mt = m ? s.machines[m] : undefined;
-    const terminal = mt?.layout ? L.focusedTerminal(mt.layout) : undefined;
-    return terminal ? mt?.terminals[terminal] : undefined;
-  });
-  const kind = agentOf(record);
-  const session = rememberedSession(record);
-  const provider = usageProvider(kind);
-  const on = useSettings((s) => !!provider && s.values[`usage.providers.${provider}`]?.value !== false);
-  const status = agentStatus(record);
-  if (!m || !kind || !session || !provider || !on) return undefined;
-  return { target: { m, kind, session, status }, provider };
+  const a = useFocusedAgent();
+  if (!a?.session) return undefined;
+  return { target: { m: a.m, kind: a.kind, session: a.session, status: a.status }, provider: a.provider };
 }
 
 /** The context in use in words: of the window and its share, else the
@@ -95,9 +87,10 @@ export function UsageSessionItem() {
   const agent = agentKind(target.kind)?.title ?? target.kind;
   const cost = sessionCost(u);
   const ctx = contextShort(u);
-  const account = sessionAccount(snapshot, provider, target.m);
   const nowSec = Date.now() / 1000;
-  const limit = account && tightestWindow(account, nowSec);
+  const counted = tightestFor(snapshot, provider, target.m, u.model, nowSec);
+  const account = counted?.account ?? sessionAccount(snapshot, provider, target.m);
+  const limit = counted?.window ?? (account && tightestWindow(account, nowSec));
   const accounts = (snapshot?.accounts ?? []).filter((a) => a.provider === provider).length;
   return (
     <span className="gui-menu-anchor" {...hover.anchor}>
@@ -113,6 +106,7 @@ export function UsageSessionItem() {
         }}
       >
         <ProviderLogo provider={provider} />
+        {u.model && <span className="usage-session-model">{shortModel(u.model)}</span>}
         <span className="usage-session-cost">{cost}</span>
         {ctx && <span className="usage-session-ctx">{t('usage.session.context.short', { context: ctx })}</span>}
       </button>

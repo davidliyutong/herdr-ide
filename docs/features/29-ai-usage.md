@@ -140,8 +140,11 @@ The action `session` (`internal/usage/session.go`, `SessionCost`) answers
 what one session of a coding agent used, for the status bar's session item.
 It takes an agent kind whose transcripts are priced (`claude`, `codex`;
 `SessionProvider`) and a session UUID. The agent finds the session's
-transcript, and Claude Code's subagents' ([35](35-agent-native-view.md)),
-and reads them with the cost parsers, decoding only the usage members. A
+transcript and its subagents' (Claude Code's `<session>/subagents/`,
+Codex's rollouts whose `session_meta` names the session as
+`parent_thread_id` or `session_id`: a review or a spawned agent;
+[35](35-agent-native-view.md)), and reads them with the cost parsers,
+decoding only the usage members. A
 response recorded in several transcripts counts once, and records are
 priced exactly as the spend prices them (`TestSessionCostEqualsCost`).
 
@@ -258,7 +261,12 @@ Each poll's snapshot goes to every page over `/ws` (`plugin` message) and
 is served by `GET /api/p/usage` with an `ETag`. `GET /api/p/usage/cost`
 asks the connected machines in parallel (2 min each, per-machine
 `ifNoneMatch`) and is cached for a minute per range, timezone, providers,
-Codex homes and prices. A disabled or offline machine's last report
+Codex homes and prices. Besides the days' rows it has each machine's
+quarters of an hour with spend (`recent`: provider, tokens, requests, cost)
+from the start of the UTC day 8 days back (`recentSince`, which moves once a
+day so that the machines' `ETag`s hold): a subscription's window starts at
+any minute and the days' rows cannot say what it has cost
+(`CostOptions.RecentSince`, `CostSlot`). A disabled or offline machine's last report
 (`usage_machine_costs`) stays in the total until the machine is removed. A
 machine runs one scan at a time; requests for the same range share it.
 
@@ -284,32 +292,47 @@ A core on Windows runs no local agent, so only SSH machines' CLIs are read.
   (15 min), and at once when `usage.prices` or a provider's switch
   changes.
 - **Overview**: the spend of the last 7, 30 or 90 days at API prices, daily
-  bars stacked by service (plain SVG), a ranking by model, project or
-  machine, unpriced models, machines whose logs failed; then a row per
-  account, tightest window first.
+  bars stacked by service (plain SVG), a ranking by project or machine, or
+  by model: every model (the first 8, all on asking) with its cost, tokens,
+  a bar of its kinds of tokens and their counts with its requests
+  (`modelBreakdown`); unpriced models, machines whose logs failed; then a
+  row per account, tightest window first.
 - **Spend / Tokens** switch: the same views by tokens, with the shares of
   input, cache reads, cache writes and output. Unpriced models count fully
   in Tokens.
 - **A service**: a card per account with plan, status-page incident, hints
   for a non-ok status, windows grouped by the models they count, each with
-  reset countdown, bar, even-pace mark and projected run-out; credits,
-  balances, machines; then the service's own spend and, for DeepSeek, the
-  key form. A window whose reset has passed is dimmed and left out of the
+  reset countdown, bar, even-pace mark and projected run-out, and what the
+  window has cost so far at API prices with the whole window at that rate
+  (the spend over the share used, from 5% used on; `windowSpend`); credits,
+  balances, machines; then the service's own spend with every model's use
+  and, for DeepSeek, the key form. A window's spend is the quarters of an
+  hour of the account's machines' logs of its service from the window's
+  start (its reset less its length) on; a window of models has none (the
+  logs' spend is of every model), and a machine where several accounts of
+  the service were used counts for each. A window whose reset has passed is dimmed and left out of the
   tightest window and alerts until the next poll.
 
-The status bar item shows the tightest window's percentage, in the warning
-color from the first of `usage.thresholds` (80, 95); `usage.statusBar` hides
-it. Hovering it with a mouse shows a card of the tightest accounts and
+The status bar item shows the percentage of the window that counts the
+coding agent in the focused terminal, with its service's mark: the tightest
+of its service's accounts read on its machine (any of the service's when
+none was), a window of models only when its label names the session's latest
+model (Opus, Sonnet, a Codex model's own limit; `tightestFor`), so it moves
+when the agent changes service, machine or model. Without such an agent it
+shows the tightest window of all accounts with a gauge. It is in the
+warning color from the first of `usage.thresholds` (80, 95);
+`usage.statusBar` hides it. Hovering it with a mouse shows a card of the tightest accounts and
 today's spend if already loaded (`web/src/components/useHoverOpen.ts`); a
 click opens the panel. The daily bars' columns show a tooltip with the
 date, cost, tokens, requests, per-service and per-kind breakdown.
 
 The **session item** (`usage.session`, `SessionItem.tsx`, `session.ts`)
 shows the session of the coding agent in the focused terminal: the
-service's mark, its cost at API prices and the context in use (a share of
-the window, or tokens when the window is unknown). Its hover card adds the
-model, requests, tokens by kind and the service's tightest window on that
-machine; a click opens the service's tab. It shows nothing without a
+service's mark, the model of its latest request (without the vendor's
+prefix and date), its cost at API prices and the context in use (a share
+of the window, or tokens when the window is unknown). Its hover card adds
+the full model, requests, tokens by kind and the window that counts that
+model on that machine; a click opens the service's tab. It shows nothing without a
 priced agent session, with the provider off, or for a session the machine
 only guessed ([35](35-agent-native-view.md)). It reads when the focused
 pane or session changes, every 30 s while the agent is in a turn, and once
@@ -383,6 +406,10 @@ threshold warning, and a pace alert is that warning ahead of time.
 - A session's context window unknown (Claude Code): the session item shows
   tokens without a share. Several accounts of a provider on one machine:
   its card shows the tightest window of those, not necessarily the agent's.
+- A Codex subagent's rollout (a review) open in the agent's process, or made
+  in its directory since it started: it stands for its parent session, never
+  for one of its own, so the item shows the session with its subagents'
+  spend rather than the subagent's few requests.
 
 ## Security
 
@@ -406,7 +433,8 @@ databases are parsed with bounded, read-only, lock-free code.
 - `internal/usage/kimiauth_test.go`: Kimi Code's renewal against a fake
   token endpoint: request, write-back byte for byte, the lock protocol,
   refusals, retries.
-- `internal/usage/cost_test.go`, `kimi_cost_test.go`,
+- `internal/usage/cost_test.go` (`TestCostRecent`: the quarters of an
+  hour), `kimi_cost_test.go`,
   `antigravity_cost_test.go`, `opencode_test.go`: parsers, dedupe, pricing
   tiers, user prices (`TestOwnPrices`), the incremental cache, databases in
   `testdata/` (made by `make.sh` with `sqlite3`).
@@ -429,6 +457,8 @@ databases are parsed with bounded, read-only, lock-free code.
 - `scripts/pricecheck/main_test.go`: the price comparison.
 - `web/src/__tests__/usage.test.ts`, `usageSettings.test.ts`,
   `hoverOpen.test.ts`: the panel, the settings page and its form of prices, alerts shown once per
-  browser, the status bar item and its card.
+  browser, the status bar item and its card, a window's spend and its
+  estimate of the whole, the breakdown by model; `usageSession.test.tsx`:
+  the status bar item following the focused agent's service and model.
 - `internal/server`: `TestMutatingRoutesAreGuarded` covers the plugin's
   routes.

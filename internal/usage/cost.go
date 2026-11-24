@@ -83,6 +83,10 @@ type CostOptions struct {
 	// Prices are the user's (usage.prices, ParsePrices), over the table's
 	// (PricingWith).
 	Prices map[string]Tier `json:"prices,omitempty"`
+	// RecentSince, when not 0, asks for Recent from that instant on (Unix
+	// seconds; at most Retention back), whatever Since is: the spend of a
+	// subscription's window (5 hours, a week) needs times finer than days.
+	RecentSince int64 `json:"recentSince,omitempty"`
 	// IfNoneMatch is the ETag of the caller's last report: when the cache
 	// and options yield the same ETag, Cost answers NotModified with no rows.
 	IfNoneMatch string `json:"ifNoneMatch,omitempty"`
@@ -104,10 +108,30 @@ type CostRow struct {
 	Priced     bool    `json:"priced"`
 }
 
+// SlotSec is the length of a CostSlot: a quarter of an hour.
+const SlotSec = 900
+
+// CostSlot is a provider's tokens and cost in a quarter of an hour
+// (SlotSec), all models and projects together.
+type CostSlot struct {
+	// At is the slot's start (Unix seconds, a multiple of SlotSec).
+	At       int64   `json:"at"`
+	Provider string  `json:"provider"`
+	Tokens   int64   `json:"tokens"`
+	Requests int64   `json:"requests"`
+	Cost     float64 `json:"cost"`
+	// Priced is false when a record of the slot had no price (its tokens
+	// count, its cost does not).
+	Priced bool `json:"priced"`
+}
+
 // CostReport is the cost of a machine's logs.
 type CostReport struct {
 	Since int64     `json:"since"`
 	Rows  []CostRow `json:"rows"`
+	// Recent are the slots with spend from CostOptions.RecentSince on,
+	// oldest first; none when it was 0.
+	Recent []CostSlot `json:"recent,omitempty"`
 	// Failed are the logs this scan could not read, as provider:code
 	// (readFailure): their records are those of the last read.
 	Failed   []string `json:"failed,omitempty"`
@@ -253,6 +277,9 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 	if o.Since < cutoff {
 		o.Since = cutoff
 	}
+	if o.RecentSince != 0 && o.RecentSince < cutoff {
+		o.RecentSince = cutoff
+	}
 	cachePath := ""
 	if e.Base != "" {
 		cachePath = path.Join(e.Base, CostCacheFile)
@@ -362,7 +389,7 @@ func Cost(ctx context.Context, e *Env, o CostOptions) (*CostReport, error) {
 // scans can short-circuit aggregation and SSH transfer.
 func costETag(gen uint64, o CostOptions, failed []string) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%d|%d|%d|", gen, o.Since, o.TZOffset)
+	fmt.Fprintf(h, "%d|%d|%d|%d|", gen, o.Since, o.TZOffset, o.RecentSince)
 	provs := slices.Clone(o.Providers)
 	sort.Strings(provs)
 	fmt.Fprintf(h, "%q|", provs)

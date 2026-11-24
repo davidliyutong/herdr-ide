@@ -8,7 +8,8 @@ import (
 type rowKey struct{ day, provider, model, project string }
 
 // aggregateCost dedupes the records (the most output wins) and sums them
-// by day, model and project.
+// by day, model and project from o.Since on, and by provider and quarter of
+// an hour from o.RecentSince on (when not 0).
 func aggregateCost(c *costCache, seen map[string]bool, o CostOptions) *CostReport {
 	rep := &CostReport{Since: o.Since, Rows: []CostRow{}}
 	sid := map[string]string{}
@@ -39,8 +40,12 @@ func aggregateCost(c *costCache, seen map[string]bool, o CostOptions) *CostRepor
 		}
 		prov := providerOf(ent.Kind)
 		rep.Files++
+		from := o.Since
+		if o.RecentSince != 0 {
+			from = min(from, o.RecentSince)
+		}
 		for _, r := range ent.Records {
-			if r.T < o.Since {
+			if r.T < from {
 				continue
 			}
 			if r.E {
@@ -63,6 +68,11 @@ func aggregateCost(c *costCache, seen map[string]bool, o CostOptions) *CostRepor
 		plain = append(plain, k)
 	}
 	rows := map[rowKey]*CostRow{}
+	type slotKey struct {
+		at       int64
+		provider string
+	}
+	slots := map[slotKey]*CostSlot{}
 	unpriced := map[string]bool{}
 	zone := time.FixedZone("", o.TZOffset*60)
 	for _, k := range plain {
@@ -91,7 +101,24 @@ func aggregateCost(c *costCache, seen map[string]bool, o CostOptions) *CostRepor
 			label, cost, priced = r.M, r.P, true
 		} else {
 			label = r.M
-			unpriced[k.provider+"/"+r.M] = true
+			if r.T >= o.Since {
+				unpriced[k.provider+"/"+r.M] = true
+			}
+		}
+		if o.RecentSince != 0 && r.T >= o.RecentSince {
+			sk := slotKey{r.T - r.T%SlotSec, k.provider}
+			s := slots[sk]
+			if s == nil {
+				s = &CostSlot{At: sk.at, Provider: sk.provider, Priced: true}
+				slots[sk] = s
+			}
+			s.Tokens += r.I + r.C + r.W + r.H + r.O
+			s.Requests += max(r.N, 1)
+			s.Cost += cost
+			s.Priced = s.Priced && priced
+		}
+		if r.T < o.Since {
+			continue
 		}
 		rk := rowKey{day, k.provider, label, r.J}
 		row := rows[rk]
@@ -124,6 +151,16 @@ func aggregateCost(c *costCache, seen map[string]bool, o CostOptions) *CostRepor
 			return a.Model < b.Model
 		}
 		return a.Project < b.Project
+	})
+	for _, s := range slots {
+		rep.Recent = append(rep.Recent, *s)
+	}
+	sort.Slice(rep.Recent, func(i, j int) bool {
+		a, b := rep.Recent[i], rep.Recent[j]
+		if a.At != b.At {
+			return a.At < b.At
+		}
+		return a.Provider < b.Provider
 	})
 	for k := range unpriced {
 		rep.Unpriced = append(rep.Unpriced, k)

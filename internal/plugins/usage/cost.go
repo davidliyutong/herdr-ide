@@ -26,6 +26,9 @@ const (
 	costKeep = 4
 	// machineCostKeep bounds per-machine ETag cached reports.
 	machineCostKeep = 64
+	// recentSpan is how far back the report's quarter hours go: past the
+	// start of a week's window (CostReport.Recent).
+	recentSpan = 8 * 24 * time.Hour
 )
 
 // CostRow is a machine's row of a cost report.
@@ -44,6 +47,12 @@ type MachineCost struct {
 	Failed []string `json:"failed,omitempty"`
 }
 
+// CostSlot is a machine's quarter of an hour of a provider's spend.
+type CostSlot struct {
+	usage.CostSlot
+	Machine string `json:"machine"`
+}
+
 // CostReport is GET /api/p/usage/cost.
 type CostReport struct {
 	GeneratedAt int64                  `json:"generatedAt"`
@@ -54,6 +63,12 @@ type CostReport struct {
 	MonthHours  float64                `json:"monthHours"`
 	Machines    map[string]MachineCost `json:"machines"`
 	Rows        []CostRow              `json:"rows"`
+	// Recent are the machines' quarters of an hour with spend since
+	// RecentSince (recentSpan back, at the start of a UTC day so that it
+	// changes once a day): what a subscription's window (5 hours, a week)
+	// has cost.
+	RecentSince int64      `json:"recentSince"`
+	Recent      []CostSlot `json:"recent"`
 }
 
 type costEntry struct {
@@ -119,11 +134,14 @@ func (p *Plugin) costWithETag(ctx context.Context, days, tz int) (*CostReport, s
 	zone := time.FixedZone("", tz*60)
 	local := now.In(zone)
 	since := time.Date(local.Year(), local.Month(), local.Day()-(days-1), 0, 0, 0, 0, zone).Unix()
-	params := usage.CostOptions{Since: since, TZOffset: tz, CodexHomes: o.CodexHomes, Providers: o.Providers, Prices: own}
+	recent := now.Add(-recentSpan).Unix()
+	recent -= recent % 86400
+	params := usage.CostOptions{Since: since, RecentSince: recent, TZOffset: tz, CodexHomes: o.CodexHomes, Providers: o.Providers, Prices: own}
 	rep := &CostReport{
 		GeneratedAt: now.Unix(), Days: days, TZOffset: tz, Since: since,
 		WeekHours: usage.Pricing.WeekHours, MonthHours: usage.Pricing.MonthHours,
 		Machines: map[string]MachineCost{}, Rows: []CostRow{},
+		RecentSince: recent, Recent: []CostSlot{},
 	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -145,6 +163,9 @@ func (p *Plugin) costWithETag(ctx context.Context, days, tz int) (*CostReport, s
 			rep.Machines[m] = MachineCost{Files: r.Files, Retries: r.Retries, Unpriced: r.Unpriced, Failed: r.Failed}
 			for _, row := range r.Rows {
 				rep.Rows = append(rep.Rows, CostRow{CostRow: row, Machine: m})
+			}
+			for _, s := range r.Recent {
+				rep.Recent = append(rep.Recent, CostSlot{CostSlot: s, Machine: m})
 			}
 		}()
 	}
@@ -169,6 +190,16 @@ func (p *Plugin) costWithETag(ctx context.Context, days, tz int) (*CostReport, s
 			return a.Model < b.Model
 		}
 		return a.Project < b.Project
+	})
+	sort.Slice(rep.Recent, func(i, j int) bool {
+		a, b := rep.Recent[i], rep.Recent[j]
+		if a.Machine != b.Machine {
+			return a.Machine < b.Machine
+		}
+		if a.At != b.At {
+			return a.At < b.At
+		}
+		return a.Provider < b.Provider
 	})
 	etag := costReportETag(rep)
 	if ctx.Err() != nil {
@@ -224,6 +255,9 @@ func (p *Plugin) appendCachedNonReadyCosts(rep *CostReport, ready []string, key 
 		for _, row := range r.Rows {
 			rep.Rows = append(rep.Rows, CostRow{CostRow: row, Machine: m})
 		}
+		for _, s := range r.Recent {
+			rep.Recent = append(rep.Recent, CostSlot{CostSlot: s, Machine: m})
+		}
 	}
 }
 
@@ -275,6 +309,11 @@ func filterMachineCostReport(r usage.CostReport, params usage.CostOptions) usage
 		Files:   r.Files,
 		Retries: r.Retries,
 		Rows:    make([]usage.CostRow, 0, len(r.Rows)),
+	}
+	for _, s := range r.Recent {
+		if s.At >= params.RecentSince && wantProvider(s.Provider) {
+			out.Recent = append(out.Recent, s)
+		}
 	}
 	unpricedSet := map[string]bool{}
 	for _, row := range r.Rows {

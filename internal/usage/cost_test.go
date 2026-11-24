@@ -127,6 +127,41 @@ func TestCost(t *testing.T) {
 	}
 }
 
+// Recent: a provider's quarters of an hour from RecentSince on, whatever
+// Since leaves out of the rows.
+func TestCostRecent(t *testing.T) {
+	e := testEnv(t, nil)
+	costFixtures(t, e)
+	day := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC).Unix()
+	rep, err := Cost(context.Background(), e, CostOptions{Since: day + 86400, RecentSince: day, Providers: []string{Claude, Codex}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Rows) != 0 {
+		t.Errorf("rows %+v", rep.Rows)
+	}
+	claude := (1000*5 + 2000*0.5 + 100*6.25 + 200*10 + 500*25) / 1e6
+	codex := (200000*10 + 100000*1 + 1000*45) / 1e6
+	want := []CostSlot{
+		{At: day + 9*3600, Provider: Claude, Tokens: 1000 + 2000 + 300 + 500, Requests: 1, Cost: claude, Priced: true},
+		{At: day + 10*3600, Provider: Codex, Tokens: 200000 + 100000 + 1000, Requests: 1, Cost: codex, Priced: true},
+	}
+	if len(rep.Recent) != len(want) {
+		t.Fatalf("recent %+v", rep.Recent)
+	}
+	for i, w := range want {
+		g := rep.Recent[i]
+		if g.At != w.At || g.Provider != w.Provider || g.Tokens != w.Tokens || g.Requests != w.Requests || !near(g.Cost, w.Cost) || !g.Priced {
+			t.Errorf("slot %d = %+v, want %+v", i, g, w)
+		}
+	}
+	// None unless asked; the ETag follows RecentSince.
+	plain, _ := Cost(context.Background(), e, CostOptions{Since: day})
+	if plain.Recent != nil || plain.ETag == rep.ETag {
+		t.Errorf("without RecentSince: %+v", plain.Recent)
+	}
+}
+
 func TestCostCache(t *testing.T) {
 	e := testEnv(t, nil)
 	costFixtures(t, e)

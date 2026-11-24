@@ -341,17 +341,19 @@ func TestStatusPages(t *testing.T) {
 func TestCostReport(t *testing.T) {
 	now := time.Date(2026, 11, 16, 3, 0, 0, 0, time.UTC)
 	p, _ := testPlugin(t, &now, []string{"local", "box"}, nil)
-	var since []int64
+	var since, recent []int64
 	var mu sync.Mutex
 	p.fetch = func(ctx context.Context, m, action string, params, out any) error {
 		o := params.(usage.CostOptions)
 		mu.Lock()
 		since = append(since, o.Since)
+		recent = append(recent, o.RecentSince)
 		mu.Unlock()
 		if m == "box" {
 			return &plugin.Error{Code: "transport"}
 		}
-		b, _ := json.Marshal(usage.CostReport{Files: 3, Rows: []usage.CostRow{{Day: "2026-11-16", Provider: "claude", Model: "claude-opus-4-6", Cost: 1.5, Priced: true}}})
+		b, _ := json.Marshal(usage.CostReport{Files: 3, Rows: []usage.CostRow{{Day: "2026-11-16", Provider: "claude", Model: "claude-opus-4-6", Cost: 1.5, Priced: true}},
+			Recent: []usage.CostSlot{{At: now.Unix() - 1800, Provider: "claude", Tokens: 10, Requests: 1, Cost: 0.5, Priced: true}}})
 		return json.Unmarshal(b, out)
 	}
 	w := httptest.NewRecorder()
@@ -364,6 +366,13 @@ func TestCostReport(t *testing.T) {
 	// The user's day (UTC+8: 11:00 on the 16th) and 6 before it.
 	if want := time.Date(2026, 11, 10, 0, 0, 0, 0, time.FixedZone("", 8*3600)).Unix(); since[0] != want {
 		t.Errorf("since %d, want %d", since[0], want)
+	}
+	// Quarters of an hour from the UTC day 8 days back, the machine's.
+	if want := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC).Unix(); recent[0] != want || rep.RecentSince != want {
+		t.Errorf("recent since %d (report %d), want %d", recent[0], rep.RecentSince, want)
+	}
+	if len(rep.Recent) != 1 || rep.Recent[0].Machine != "local" || rep.Recent[0].Cost != 0.5 {
+		t.Errorf("recent %+v", rep.Recent)
 	}
 	// Served again within a minute.
 	p.getCost(&plugin.Call{}, httptest.NewRecorder(), httptest.NewRequest("GET", "/api/p/usage/cost?days=7&tz=480", nil))

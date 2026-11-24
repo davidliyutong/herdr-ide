@@ -25,9 +25,16 @@ import {
   rank,
   rankTokens,
   sortAccounts,
+  modelBreakdown,
+  shortModel,
   tightest,
+  tightestFor,
   tokenKinds,
+  windowApplies,
+  windowSpend,
+  type CostReport,
   type CostRow,
+  type CostSlot,
   type UsageAccount,
   type UsageAlert,
   type UsageSnapshot,
@@ -147,6 +154,75 @@ describe('usage model', () => {
   });
 });
 
+describe('usage windows of an agent', () => {
+  it('follows the service, machine and model of the focused agent', () => {
+    const claude = account('claude:a', [30, 50], {
+      windows: [
+        { kind: 'session', usedPct: 30, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', usedPct: 50, resetsAt: now + 86400, windowSec: 604800 },
+        { kind: 'model', label: 'Opus', usedPct: 90, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const codex = account('codex:b', [95], { machines: ['box'] });
+    const s = snapshot([claude, codex]);
+    expect(tightest(s)!.account.key).toBe('codex:b');
+    expect(windowApplies(claude.windows[2], 'claude-opus-4-6-20260101')).toBe(true);
+    expect(windowApplies(claude.windows[2], 'claude-sonnet-4-6')).toBe(false);
+    expect(windowApplies(claude.windows[2])).toBe(false);
+    expect(tightestFor(s, 'claude', 'local', 'claude-opus-4-6')!.window.usedPct).toBe(90);
+    expect(tightestFor(s, 'claude', 'local', 'claude-sonnet-4-6')!.window.usedPct).toBe(50);
+    expect(tightestFor(s, 'claude', 'local')!.window.usedPct).toBe(50);
+    // Read on another machine only: that account.
+    expect(tightestFor(s, 'codex', 'local')!.account.key).toBe('codex:b');
+    expect(tightestFor(s, 'grok', 'local')).toBeUndefined();
+    expect(shortModel('claude-opus-4-6-20260101')).toBe('opus-4-6');
+    expect(shortModel('gpt-5.5')).toBe('gpt-5.5');
+  });
+
+  it('sums the spend of a window since it started, and the whole window at that rate', () => {
+    const a = account('claude:a', [20], {
+      windows: [{ kind: 'session', usedPct: 20, resetsAt: now + 3600, windowSec: 5 * 3600 }],
+      machines: ['local', 'box'],
+    });
+    const start = now + 3600 - 5 * 3600;
+    const slot = (at: number, over: Partial<CostSlot> = {}): CostSlot => ({
+      at,
+      provider: 'claude',
+      machine: 'local',
+      tokens: 1000,
+      requests: 2,
+      cost: 1,
+      priced: true,
+      ...over,
+    });
+    const rep = {
+      generatedAt: now,
+      days: 7,
+      weekHours: 168,
+      monthHours: 750,
+      machines: {},
+      rows: [],
+      recentSince: now - 8 * 86400,
+      recent: [
+        slot(start - 900), // before the window
+        slot(start - 300), // most of it in the window
+        slot(start + 600, { machine: 'box', priced: false }),
+        slot(start + 1200, { provider: 'codex' }),
+        slot(start + 1800, { machine: 'other' }),
+      ],
+    } satisfies CostReport;
+    const s = windowSpend(rep, a, a.windows[0], now)!;
+    expect(s).toMatchObject({ cost: 2, tokens: 2000, requests: 4, priced: false });
+    expect(s.full).toEqual({ cost: 10, tokens: 10000 });
+    // A model's window, a window that started before the slots, none at all.
+    expect(windowSpend(rep, a, { ...a.windows[0], kind: 'model', label: 'Opus' }, now)).toBeUndefined();
+    expect(windowSpend({ ...rep, recentSince: now }, a, a.windows[0], now)).toBeUndefined();
+    expect(windowSpend({ ...rep, recent: undefined }, a, a.windows[0], now)).toBeUndefined();
+    // Under 5% used: no estimate of the whole.
+    expect(windowSpend(rep, a, { ...a.windows[0], usedPct: 3 }, now)!.full).toBeUndefined();
+  });
+});
+
 describe('usage tokens', () => {
   const today = new Date(2026, 10, 16, 12);
   const row = (day: string, model: string, over: Partial<CostRow> = {}): CostRow => ({
@@ -170,6 +246,25 @@ describe('usage tokens', () => {
     row('2026-11-15', 'new-model', { cost: 0, priced: false, input: 1000 }),
     row('2026-08-01', 'known'),
   ];
+
+  it('breaks the days down by service and model, with their kinds', () => {
+    const more = [...rows, row('2026-11-16', 'known', { provider: 'claude', cost: 5 })];
+    const byCost = modelBreakdown(more, 7, today);
+    expect(byCost.map((m) => `${m.provider}/${m.name}`)).toEqual(['claude/known', 'codex/known', 'codex/new-model']);
+    expect(byCost[1]).toMatchObject({
+      input: 100,
+      cached: 50,
+      cacheWrite: 20,
+      output: 30,
+      reasoning: 10,
+      total: 200,
+      requests: 2,
+      cost: 1,
+    });
+    expect(byCost[2].unpriced).toBe(true);
+    expect(modelBreakdown(more, 7, today, 'tokens')[0].name).toBe('new-model');
+    expect(modelBreakdown(more, 7, today).some((m) => m.total === 400)).toBe(false);
+  });
 
   it('sums the kinds, with reasoning inside the output', () => {
     expect(tokenKinds(rows, 7, today)).toEqual({
@@ -504,7 +599,7 @@ describe('usage panel and status item', () => {
     expect(host.querySelector('.usage-big')!.textContent).toBe('~$12.50');
     expect(host.querySelectorAll('.usage-daily g')).toHaveLength(30);
     expect(host.querySelector('.usage-daily rect')!.getAttribute('fill')).toBe('var(--usage-claude)');
-    expect(host.querySelector('.usage-rank li')!.textContent).toContain('claude-opus-4-6');
+    expect(host.querySelector('.usage-models li')!.textContent).toContain('claude-opus-4-6');
     expect(host.querySelector('.usage-spend .callout.error')!.textContent).toContain('offline');
     // A service's own spend.
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
@@ -537,8 +632,10 @@ describe('usage panel and status item', () => {
       host.querySelector('.usage-daily-box')!.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
     });
     expect(host.querySelector('.usage-daily-tooltip')).toBeNull();
-    const first = host.querySelector('.usage-rank li')!;
+    // Every model by tokens, with its kinds.
+    const first = host.querySelector('.usage-models li')!;
     expect(first.textContent).toContain('mystery-1');
+    expect(first.querySelector('.usage-model-kinds')!.textContent).toContain('requests');
     expect(first.textContent).toContain('no price');
     expect(host.querySelectorAll('.usage-noprice')).toHaveLength(1);
     expect(useUsage.getState().metric).toBe('tokens');

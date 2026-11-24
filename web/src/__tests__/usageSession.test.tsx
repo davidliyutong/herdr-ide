@@ -19,6 +19,7 @@ import { useSettings } from '../settings';
 import { allPlugins, definePlugins } from '../plugins/registry';
 import { usagePlugin } from '../plugins/usage';
 import { UsageSessionItem } from '../plugins/usage/SessionItem';
+import { UsageStatusItem } from '../plugins/usage/StatusItem';
 import {
   resetSessionReads,
   SESSION_KEEP,
@@ -318,6 +319,44 @@ describe('usage session item', () => {
     expect(facts.Context).toBe('84.0k');
     expect(facts['Reasoning (part of output)']).toBe('300');
     expect(card.querySelector<HTMLElement>('.usage-session-account [data-account]')!.dataset.account).toBe('codex:c');
+  });
+});
+
+describe('usage window in the status bar', () => {
+  it('follows the agent in the focused pane: its service on its machine, its model among the windows of models', async () => {
+    const limit = () => host.querySelector<HTMLButtonElement>('.usage-status-item:not(.usage-session-item)');
+    useUsage.setState({
+      snapshot: snap([
+        account('claude:a', ['local'], [40, 70], {
+          windows: [
+            { kind: 'session', usedPct: 40, resetsAt: now + 3600, windowSec: 18000 },
+            { kind: 'weekly', usedPct: 70, resetsAt: now + 7200, windowSec: 604800 },
+            { kind: 'model', label: 'Sonnet', usedPct: 99, resetsAt: now + 7200, windowSec: 604800 },
+          ],
+        }),
+        account('claude:b', ['box'], [95]),
+        account('codex:c', ['local'], [10]),
+      ]),
+    });
+    // No agent: the tightest of all (Sonnet's).
+    show([{ address: 't0' }], 't0');
+    await set(() => root.render(createElement('div', null, createElement(UsageStatusItem), createElement(UsageSessionItem))));
+    expect(limit()!.textContent!.trim()).toBe('99% used');
+    expect(limit()!.querySelector('.ai-logo')).toBeNull();
+    // Claude Code on this machine with Opus: its account's weekly window,
+    // not Sonnet's; the session item names the model.
+    await set(() => show([rec('t1')], 't1'));
+    expect(limit()!.textContent!.trim()).toBe('70% used');
+    expect(limit()!.querySelector('.ai-logo')).not.toBeNull();
+    expect(item()!.querySelector('.usage-session-model')!.textContent).toBe('opus-4-6');
+    // The agent turned to Sonnet.
+    answers.set(S2, { status: 200, body: usage({ model: 'claude-sonnet-4-6' }) });
+    await set(() => show([rec('t1', { agent_session: S2 })], 't1'));
+    expect(limit()!.textContent!.trim()).toBe('99% used');
+    expect(item()!.querySelector('.usage-session-model')!.textContent).toBe('sonnet-4-6');
+    // Codex: its own account.
+    await set(() => show([rec('t2', { agent: 'codex', agent_session: S3 })], 't2'));
+    expect(limit()!.textContent!.trim()).toBe('10% used');
   });
 });
 

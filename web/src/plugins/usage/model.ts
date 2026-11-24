@@ -115,6 +115,21 @@ export interface CostRow {
   priced: boolean;
 }
 
+/** A machine's quarter of an hour of a provider's spend (CostReport.recent). */
+export interface CostSlot {
+  /** The slot's start (Unix seconds). */
+  at: number;
+  provider: string;
+  machine: string;
+  tokens: number;
+  requests: number;
+  cost: number;
+  priced: boolean;
+}
+
+/** The length of a CostSlot (s). */
+export const SLOT_SEC = 900;
+
 export interface CostReport {
   generatedAt: number;
   days: number;
@@ -123,6 +138,10 @@ export interface CostReport {
   /** failed: the logs a machine could not read, provider:code. */
   machines: Record<string, { error?: string; files: number; unpriced?: string[]; failed?: string[] }>;
   rows: CostRow[];
+  /** The quarters of an hour with spend since recentSince (Unix seconds),
+   * for the spend of a subscription's window. */
+  recentSince?: number;
+  recent?: CostSlot[];
 }
 
 /** In the core's order (usage.Providers); OpenCode has spend only. */
@@ -150,6 +169,84 @@ export function sortAccounts(list: UsageAccount[]): UsageAccount[] {
     if (wa !== wb) return wb - wa;
     return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
   });
+}
+
+/** A name reduced to its letters and digits, lower case, to compare a
+ * model's name with a window's label ("Opus", "GPT-5.3-Codex-Spark"). */
+const bare = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Whether a window counts the requests of model: every window but those of
+ * models (kind model), which count only the model their label names; none
+ * of those when the model is not known. */
+export function windowApplies(w: UsageWindow, model?: string): boolean {
+  if (w.kind !== 'model') return true;
+  return !!model && !!w.label && bare(model).includes(bare(w.label));
+}
+
+/** The tightest window that counts what the coding agent in the focused
+ * pane does: of its service's accounts read on its machine (any of the
+ * service's when none was), those of its model among the windows of
+ * models; undefined when no such account has one. */
+export function tightestFor(
+  s: UsageSnapshot | undefined,
+  provider: string,
+  m: string,
+  model?: string,
+  now = Date.now() / 1000,
+): { account: UsageAccount; window: UsageWindow } | undefined {
+  const all = (s?.accounts ?? []).filter((a) => a.provider === provider);
+  const here = all.filter((a) => (a.machines ?? []).includes(m));
+  let best: { account: UsageAccount; window: UsageWindow } | undefined;
+  for (const a of here.length ? here : all) {
+    for (const w of a.windows ?? []) {
+      if (pastReset(w, now) || !windowApplies(w, model)) continue;
+      if (!best || w.usedPct > best.window.usedPct) best = { account: a, window: w };
+    }
+  }
+  return best;
+}
+
+/** What a window of an account has cost so far at API prices. */
+export interface WindowSpend {
+  cost: number;
+  tokens: number;
+  requests: number;
+  /** Every request had a price. */
+  priced: boolean;
+  /** The whole window at the rate its share was used: the spend over the
+   * share; only from 5% used on. */
+  full?: { cost: number; tokens: number };
+}
+
+/** The spend of a window: the quarters of an hour of the account's
+ * machines' logs of its service since the window started (its reset less
+ * its length; a quarter counts when most of it is in the window).
+ * Undefined for a window without a start or past its reset, for a model's
+ * window (the logs' spend is of every model), and when the report's
+ * quarters do not reach back to its start. A machine where several
+ * accounts of the service were used counts for each. */
+export function windowSpend(
+  rep: CostReport | undefined,
+  a: UsageAccount,
+  w: UsageWindow,
+  now = Date.now() / 1000,
+): WindowSpend | undefined {
+  if (!rep?.recent || rep.recentSince === undefined || !w.resetsAt || !w.windowSec || w.kind === 'model' || pastReset(w, now)) {
+    return undefined;
+  }
+  const start = w.resetsAt - w.windowSec;
+  if (start < rep.recentSince) return undefined;
+  const machines = new Set(a.machines ?? []);
+  const out: WindowSpend = { cost: 0, tokens: 0, requests: 0, priced: true };
+  for (const s of rep.recent) {
+    if (s.provider !== a.provider || !machines.has(s.machine) || s.at + SLOT_SEC / 2 <= start) continue;
+    out.cost += s.cost;
+    out.tokens += s.tokens;
+    out.requests += s.requests;
+    out.priced = out.priced && s.priced;
+  }
+  if (w.usedPct >= 5) out.full = { cost: (out.cost * 100) / w.usedPct, tokens: (out.tokens * 100) / w.usedPct };
+  return out;
 }
 
 /** The tightest window of all accounts, for the status bar. */
@@ -342,6 +439,45 @@ export function dailyDetails(rows: CostRow[], n: number, today = new Date()): Da
       });
     return { day, cost: d.cost, kinds: d.kinds, byProvider };
   });
+}
+
+/** A model's use in the last n days: its tokens by kind, requests and
+ * cost. */
+export interface ModelUsage extends TokenKinds {
+  name: string;
+  provider: string;
+  cost: number;
+  /** A row of it had no price: its tokens count, its cost does not. */
+  unpriced: boolean;
+}
+
+/** Every model's use in the last n days, by service and model, the most
+ * cost first (by tokens). */
+export function modelBreakdown(rows: CostRow[], n: number, today = new Date(), by: 'cost' | 'tokens' = 'cost'): ModelUsage[] {
+  const from = lastDays(n, today)[0];
+  const sums = new Map<string, ModelUsage>();
+  for (const r of rows) {
+    if (r.day < from) continue;
+    const key = `${r.provider}\u0000${r.model}`;
+    let e = sums.get(key);
+    if (!e) {
+      e = { ...emptyKinds(), name: r.model || '–', provider: r.provider, cost: 0, unpriced: false };
+      sums.set(key, e);
+    }
+    addRow(e, r);
+    e.cost += r.cost;
+    if (!r.priced) e.unpriced = true;
+  }
+  const list = [...sums.values()];
+  return by === 'cost'
+    ? list.sort((a, b) => b.cost - a.cost || b.total - a.total)
+    : list.sort((a, b) => b.total - a.total || b.cost - a.cost);
+}
+
+/** A model's name for the status bar: without the vendor's prefix and a
+ * date at the end (claude-opus-4-6-20260101: opus-4-6). */
+export function shortModel(model: string): string {
+  return model.replace(/^(claude|anthropic)[-/]/, '').replace(/-\d{8}$/, '');
 }
 
 /** The tokens of the last n days by model, project or machine, most first;

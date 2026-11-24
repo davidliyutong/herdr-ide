@@ -690,7 +690,7 @@
 }
 
 /* The status bar's item of the focused pane's agent session (SessionItem.tsx):
-   the service's mark, the cost and the context in use; its card lists the
+   the service's mark, the model, the cost and the context in use; its card lists the
    session's numbers in two columns, then the account's tightest window. */
 .usage-session-item .ai-logo {
   width: var(--ic-sm);
@@ -700,6 +700,17 @@
 .usage-session-ctx,
 .usage-session-facts dd {
   font-variant-numeric: tabular-nums;
+}
+.usage-session-model {
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+.usage-status-item .ai-logo {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
 }
 .usage-session-ctx {
   padding-left: 4px;
@@ -831,4 +842,47 @@
 }
 .prices-hint {
   line-height: 1.4;
+}
+/* What a window has cost so far at API prices. */
+.usage-window-spend {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* Every model's use: its line, a bar of its kinds of tokens, their counts. */
+.usage-models {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.usage-models li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.usage-model-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-md);
+}
+.usage-model-line .muted {
+  font-size: var(--fs-sm);
+}
+.usage-model-name {
+  min-width: 0;
+}
+.usage-model-line .usage-rank-cost {
+  font-weight: 600;
+}
+.usage-model-kinds {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.usage-models-more {
+  align-self: flex-start;
+  margin-top: 4px;
 }
