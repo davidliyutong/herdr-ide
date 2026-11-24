@@ -8,7 +8,7 @@ import { call } from './agent.ts';
 import type { Audit } from './audit.ts';
 import type { Store as Settings } from './config/settings/index.ts';
 import { enableSetting, type FeatureContext, type FeatureDef } from './feature.ts';
-import { featureOff } from './fail.ts';
+import { Fail, featureOff } from './fail.ts';
 import { Http } from './http/app.ts';
 import type { Client, Env, Peer } from './http/env.ts';
 import type { Guard } from './http/guard.ts';
@@ -164,6 +164,12 @@ export function createCore(o: CoreOptions): Core {
       else http.app.on(r.method, path, ...(handlers as [MiddlewareHandler<Env>]));
     }
   }
+
+  // The pages' event channel (pages.ts).
+  http.app.get('/ws', (c) => {
+    if (!c.env.upgrade) throw new Fail('upgrade_required', 426);
+    return c.env.upgrade((ch) => pages.connect(ch, { client: c.var.client, readOnly: o.readOnly, who: c.var.who }), { compress: true });
+  });
 
   o.machines.setStreamHandler((m, conn, h) => {
     const s = streams.get(h.op);

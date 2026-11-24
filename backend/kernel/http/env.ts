@@ -22,8 +22,9 @@ export interface Peer {
    * launch the desktop app set). */
   desktop: boolean;
   /** Present on a WebSocket upgrade: adopts the connection as a channel
-   * and gives the answer the host expects. */
-  upgrade?: (open: ChannelOpen) => Response;
+   * and gives the answer the host expects. compress asks for messages
+   * compressed (permessage-deflate) where the client offers it. */
+  upgrade?: (open: ChannelOpen, opts?: { compress?: boolean }) => Response;
 }
 
 export interface Vars {

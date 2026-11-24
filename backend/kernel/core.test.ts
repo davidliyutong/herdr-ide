@@ -320,3 +320,33 @@ describe('the rest of the context', () => {
     expect(serviceEnded).toBe(true);
   });
 });
+
+describe('/ws', () => {
+  test('needs an upgrade', async () => {
+    const t = testCore({ features: [] });
+    const res = await t.request('GET', '/ws');
+    expect([res.status, (await res.json()).error]).toEqual([426, 'upgrade_required']);
+  });
+
+  test('adopts the channel as a page, compressed, with the client and read-only mode', async () => {
+    const t = testCore({ features: [], readOnly: true });
+    const { a, b } = channelPair();
+    const got: unknown[] = [];
+    b.adopt(() => ({ message: (m) => void got.push(JSON.parse(m as string)) }));
+    let compress: boolean | undefined;
+    const res = await t.request('GET', '/ws', {
+      desktop: true,
+      upgrade: (open, opts) => {
+        compress = opts?.compress;
+        a.adopt(open);
+        return new Response(null);
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(compress).toBe(true);
+    expect(t.core.pages.size).toBe(1);
+    b.send(JSON.stringify({ t: 'ping', rid: 7 }));
+    await waitFor('pong', () => got.length > 0);
+    expect(got).toEqual([{ t: 'pong', rid: 7 }]);
+  });
+});
