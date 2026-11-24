@@ -147,6 +147,23 @@ Behavior stays; a few answers become uniform where the Go core was not:
 - every audit record of a change carries `status` and, when it failed,
   `error` (the code), whichever feature made it.
 
+Where the web UI shows the core's text (the editor's file errors, the
+upload dialog, VS Code's bridge toasts) the answers keep it as before.
+Other differences a user or an operator can see:
+
+- the settings and keybindings files are read as JSONC (comments,
+  trailing commas), and a change from the UI rewrites only what changed,
+  keeping the file's comments and layout; a rule's member names in the
+  keybindings file are case-sensitive;
+- a request with a body over a route's limit answers 413 `too_large`;
+- a feature that is off answers `plugin_disabled` before read-only mode
+  answers `read_only`, and an unknown machine answers 404 before either;
+- a streamed download has no `Content-Length` (Bun sends it chunked): the
+  downloads panel's progress comes over `/ws` as before, and a download
+  that breaks off fails in the browser instead of ending short;
+- the core logs only its own failures (500), not a machine's or a
+  program's (502, 503, 504).
+
 ### Building and testing the core
 
 `backend/scripts/build.ts` packs the payloads (the web UI, the machine
