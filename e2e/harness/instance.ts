@@ -6,9 +6,11 @@
 // and shell startup files) is read or touched.
 //
 // The core runs with --parent-stdio: it stops when its stdin closes, also
-// when the test runner dies. The terminal core outlives it, so stop() stops
-// that first through the instance's own API, and failing that with the
-// instance's own herdr-core executable on the instance's own socket.
+// when the test runner dies. The local machine's node and terminal core
+// outlive it, so stop() stops them: the terminal core first through the
+// instance's own API, the node with `node stop --instance <name>`, and
+// failing the API the terminal core with the instance's own herdr-core
+// executable on the instance's own socket.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -190,8 +192,8 @@ export class Instance {
     return this.api('GET', '/api/machines');
   }
 
-  /** Stops the local terminal core, then the core, and removes the home
-   * directory; once, however often it is called. */
+  /** Stops the local terminal core, then the core and the node, and
+   * removes the home directory; once, however often it is called. */
   stop(): Promise<void> {
     this.stopped ??= this.stopOnce();
     return this.stopped;
@@ -199,6 +201,7 @@ export class Instance {
 
   private async stopOnce() {
     await this.stopCore();
+    stopNodes(this.home, this.name);
     stopTerminalCore(this.home, this.name);
     rmSync(this.home, { recursive: true, force: true });
     rmSync(controlDir(this.name), { recursive: true, force: true });
@@ -223,6 +226,16 @@ export class Instance {
       }
     }
   }
+}
+
+/** Stops the nodes of an instance of ours, with its own name and home. */
+export function stopNodes(home: string, name: string) {
+  if (!existsSync(paths.core)) return;
+  spawnSync(paths.core, ['node', 'stop', '--instance', name], {
+    env: { HOME: home, PATH: '/usr/bin:/bin' },
+    timeout: 15_000,
+    stdio: 'ignore',
+  });
 }
 
 /** Stops the terminal core of an instance of ours, if it still runs: with
@@ -254,6 +267,7 @@ export function sweepLeftovers() {
       continue;
     }
     if (alive(owner.pid)) continue;
+    stopNodes(home, owner.name);
     stopTerminalCore(home, owner.name);
     rmSync(home, { recursive: true, force: true });
     rmSync(controlDir(owner.name), { recursive: true, force: true });

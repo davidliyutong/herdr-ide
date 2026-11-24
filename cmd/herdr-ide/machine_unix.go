@@ -15,33 +15,15 @@ import (
 )
 
 // machineUsage names the commands of a machine's helper in the usage line.
-const machineUsage = "agent [--instance NAME] | "
+const machineUsage = "node [dial | stop] [--instance NAME] | "
 
-type stdio struct{}
-
-func (stdio) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
-func (stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
-func (stdio) Close() error {
-	os.Stdin.Close()
-	return os.Stdout.Close()
-}
-
-// machineCommand runs a command of a machine's helper: agent, which speaks
-// yamux on stdin and stdout and logs to stderr, gui-keep, gui-wl and
-// chat-host (chathost_unix.go). It reports whether cmd is one.
+// machineCommand runs a command of a machine's helper: node (node.go),
+// gui-keep, gui-wl and chat-host (chathost_unix.go). It reports whether cmd
+// is one.
 func machineCommand(cmd string, args []string) bool {
 	switch cmd {
-	case "agent":
-		logger := log.New(os.Stderr, brand.CoreBin+" agent: ", log.LstdFlags)
-		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-		defer cancel()
-		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-		instance := fs.String("instance", "", "state directory instance (see serve's --instance)")
-		fs.Parse(args)
-		if err := agent.Serve(ctx, stdio{}, agent.Options{Instance: *instance, Logger: logger}); err != nil {
-			logger.Printf("exit: %v", err)
-			os.Exit(1)
-		}
+	case "node":
+		os.Exit(nodeCommand(args))
 	case "gui-keep":
 		// Started by the agent: holds the virtual display while the
 		// instance's terminal core runs.

@@ -151,14 +151,17 @@ test('a chat on an SSH machine shows it offline and goes on, and nothing stays w
 
   // Rule 6: the terminal core stopped from the machine's menu ends its
   // terminals, the chat host and the agents it ran; the core stopped, its
-  // agent on the machine ends with the ssh session.
-  const mine = /herdr-core|chat-host|kimi|agent --instance/;
-  expect(await pidOf(sshd, /agent --instance/)).toHaveLength(1);
+  // `node dial` on the machine ends with the ssh session, and the node
+  // without a client after NodeIdle (15 s).
+  const mine = /herdr-core|chat-host|kimi|node --instance|node dial/;
+  expect(await pidOf(sshd, /node dial/)).toHaveLength(1);
+  expect(await pidOf(sshd, /node --instance/)).toHaveLength(1);
   await instance.api('POST', `/api/m/${id}/hc/stop`);
   await waitFor(async () => (await pidOf(sshd, /herdr-core|chat-host|kimi/)).length === 0, {
     what: 'the terminal core, the chat host and the agent to end on the machine',
     timeout: 45_000,
   });
   await instance.stopCore();
-  await waitFor(async () => (await pidOf(sshd, mine)).length === 0, { what: 'the agent to end on the machine', timeout: 30_000 });
+  await waitFor(async () => (await pidOf(sshd, /node dial/)).length === 0, { what: 'node dial to end on the machine', timeout: 30_000 });
+  await waitFor(async () => (await pidOf(sshd, mine)).length === 0, { what: 'the node to end on the machine', timeout: 45_000 });
 });

@@ -31,7 +31,8 @@ Windows core host; the interactive ssh login from a core on Windows.
 
 ### Agent
 
-The agent is the command `agent` of the one binary (`cmd/herdr-ide`). The
+The agent is served by each machine's node, the command `node` of the one
+binary (`cmd/herdr-ide`, [39](39-nodes.md)). The
 core carries it for machines as the same program built with the tag
 `machine`: a static Go binary (`CGO_ENABLED=0`) for linux/darwin ×
 amd64/arm64 without the server, the UI and the embedded payloads, embedded
@@ -53,8 +54,10 @@ yamux configuration (`agentproto.YamuxConfig`), lives in
 2. if `~/.herdr-ide/agent/<hash>/herdr-ide` is missing, upload it with
    `cat >` to a temporary name and rename it atomically; builds unused for
    14 days are removed in the same step;
-3. `exec` it with `agent --instance NAME` and speak yamux over the ssh
-   session's stdin/stdout.
+3. `exec` it with `node dial --instance NAME` and speak yamux over the ssh
+   session's stdin/stdout: `node dial` pipes them to the socket of the
+   machine's node of that build, which it starts when none answers, and
+   passes on the session's `SSH_CONNECTION`.
 
 One yamux session per machine carries every stream; each stream starts with
 a JSON header and reply
@@ -86,8 +89,10 @@ a passphrase) and an accepted host key.
 
 ### Local machine
 
-`transport.DialLocal` (`local.go`, unix) runs the same agent in-process over
-a socketpair: identical protocol, no ssh.
+`transport.DialNode` (`local.go`, unix) connects to the local machine's
+node through its socket, starting it from the core's own executable when
+none answers: identical protocol, no ssh. `transport.DialLocal` runs an
+agent in the tests' process over a socketpair.
 
 A core on Windows has no local agent (`cmd/herdr-ide/local_windows.go`): its
 local machine is listed in *error* with `local_unsupported` and never
@@ -286,8 +291,10 @@ releases, Xvfb packages and video encoders are shared between instances.
 
 ## Testing
 
-- `internal/agent/agent_test.go`: the agent over the in-process transport,
-  file ops, dial restrictions.
+- `internal/agent/agent_test.go`: the agent over the tests' in-process
+  transport, file ops, dial restrictions.
+- `internal/agent/node_test.go`: the node's socket, several clients, one
+  node per build, idle end, stop, retiring when its executable is gone.
 - `internal/transport/*_test.go`: error classification, arch normalization,
   quoting, the control directory checks, no `Control*` options without it,
   stopping the master only while ssh stays up.

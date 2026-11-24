@@ -6,7 +6,7 @@ desktop app (Electron shell)                            ├─ machines: registr
                                                         ├─ settings, keybindings (files on the core host)
                                                         ├─ server: event channel, terminal protocol, files, code-server proxy, bridge hub
                                                         ├─ gui: virtual displays per machine, window list, frame routing
-                                                        └─ one ssh session per machine ──yamux──▶ agent (`herdr-ide agent`)
+                                                        └─ one ssh session per machine ──yamux──▶ agent (served by `herdr-ide node`)
                                                                                                     ├─ herdr-core in a session of its own (raw pipe to its API socket)
                                                                                                     ├─ agent detection in its terminals, with the agents' sessions
                                                                                                     ├─ files (stat/list/range read/upload/zip)
@@ -18,8 +18,11 @@ desktop app (Electron shell)                            ├─ machines: registr
                                                                                                     └─ vault.sock ◀── the vault's MCP server (`<slug>-mcp`) ◀──stdio── coding agents' CLIs
 ```
 
-The local machine's agent runs inside the core over an in-process socket
-pair instead of ssh, so both paths run the same code. The agent builds for
+Each machine's agent sessions are served by its node (`herdr-ide node`), a
+process of its own listening on a socket in the instance's run directory:
+the core reaches the local machine's node through that socket, a remote
+machine's over ssh with `node dial`, so both paths run the same code
+([39](features/39-nodes.md)). The agent builds for
 Linux and macOS only. A core on Windows (the desktop app's) lists its local
 machine with the code `local_unsupported` and reaches SSH machines only
 ([02](features/02-multi-machine-transport.md)).
@@ -28,7 +31,7 @@ machine with the code `local_unsupported` and reaches SSH machines only
 
 | Directory | Role |
 | --- | --- |
-| `cmd/herdr-ide` | The one binary: `serve`, `fetch-assets` (`serve.go`), `mcp`, `version`; on machines `agent`, `gui-keep`, `gui-wl` and `chat-host` (`machine_unix.go`, `chathost_unix.go`). Built with the tag `machine` it leaves out the server, UI and payloads; that build is what machines get. |
+| `cmd/herdr-ide` | The one binary: `serve`, `fetch-assets` (`serve.go`), `mcp`, `version`; on machines `node` (`node`, `node dial`, `node stop`), `gui-keep`, `gui-wl` and `chat-host` (`machine_unix.go`, `node_unix.go`, `chathost_unix.go`). Built with the tag `machine` it leaves out the server, UI and payloads; that build is what machines get. |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/agentproto` | Stream protocol shared by core and agent; yamux configuration; types both sides need (transcript events, history snapshots); `Hidden`, the rule that hides the product's own terminals by reserved name and label together. |
 | `internal/agentkinds` | Registry of coding agent kinds: commands to start, continue and resume, transcript format, chat adapter; written into `design/generated/registry.json` ([35](features/35-agent-native-view.md)). |
@@ -39,7 +42,7 @@ machine with the code `local_unsupported` and reaches SSH machines only
 | `internal/chathost` | The chat host: lifetime, chats and their agents, the journal and its bounds. Unix only. |
 | `internal/chatadapter`, `…/{claude,codex,acp}`, `internal/acp` | The adapters to the agents' protocols: Claude Code's Agent SDK, Codex's app-server, the Agent Client Protocol (Kimi Code, Grok). |
 | `internal/store` | Private SQLite databases with versioned schemas ([38](features/38-sqlite-state.md)). |
-| `internal/transport` | yamux sessions (in-process or ssh stdio), agent upload, the ssh control directory. |
+| `internal/transport` | yamux sessions (the local node's socket, ssh stdio, or in-process for tests), agent upload, the ssh control directory. |
 | `internal/sshconfig` | Host aliases of the core host's `~/.ssh/config` for the Add Machine dialog. |
 | `internal/machines` | Machine registry (`machines[-<instance>].json`), connection state machine, ssh target rule (`ValidTarget`). |
 | `internal/hc` | Client of herdr-core's API: JSON-RPC, attached byte streams with credit, events. |
@@ -102,8 +105,9 @@ preload's surface are in [16](features/16-desktop-packaging.md).
 
 ## Core ↔ agent protocol (`internal/agentproto`)
 
-One yamux session per machine over ssh stdio (or the in-process socket
-pair). Every stream starts with a JSON header line from the opener and a
+One yamux session per machine over ssh stdio and `node dial`, or the
+local node's socket; the connection's first line, before yamux, is a
+`NodeHello` (`serve` with the ssh session's `SSH_CONNECTION`, or `stop`). Every stream starts with a JSON header line from the opener and a
 JSON reply line; after a successful reply it carries op-specific bytes.
 
 | Op | Direction | Purpose |

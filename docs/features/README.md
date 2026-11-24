@@ -39,6 +39,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 36 | [Terminal history](36-terminal-history.md) | Opt-in snapshots of terminal output on each machine's disk, within limits, shown above the new shell after the terminal core restarted. |
 | 37 | [Agent chats](37-agent-chats.md) | Claude Code, Codex, Kimi Code and Grok run headless by a chat host on each machine and drawn in panes; a bounded journal; sessions moved between terminals and chats. |
 | 38 | [State in SQLite](38-sqlite-state.md) | One private SQLite database per owner, named per host on shared homes, schemas versioned per feature; earlier state files imported once. |
+| 39 | [Nodes](39-nodes.md) | One program on every machine: a node behind a local socket that several UIs attach to, locally or over ssh; the terminal core and chat host run as services of their own; upgrades without interrupting panes. |
 
 ## Writing a feature document
 
@@ -59,6 +60,8 @@ and where the code lives. Leave out what the code and tests already state
 line by line, edge-case enumerations, history and trivia such as exact
 timeouts; link to another document instead of repeating it.
 
-Describe the system as it is. Open questions and planned work are tracked in
-the issue tracker, not in these documents. Update the document in the same
-pull request as the behavior it describes.
+On `main`, describe the system as it is. Open questions and planned work are
+tracked in the issue tracker, not in these documents. A feature built in
+stages may have its document describe the goal on its branch, which merges
+once the code matches it. Update the document in the same pull request as
+the behavior it describes.

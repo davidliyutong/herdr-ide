@@ -9,7 +9,7 @@ changes.
 
 One Go program (`cmd/herdr-ide`): the server, which serves a React terminal
 UI, and the per-machine agent it reaches several machines through over ssh
-(the command `agent` of the same binary). Every machine's terminals live in a terminal core of the agent's own
+(served by the command `node` of the same binary). Every machine's terminals live in a terminal core of the agent's own
 (herdr-core, `hc`, in a session apart from the user's); the browser emulates
 them with Ghostty's libghostty-vt as WebAssembly through the core's terminal
 protocol (`/api/v1/term`), and an Electron desktop app (`desktop/`) wraps the
@@ -69,9 +69,11 @@ Run `make check test` before finishing a change.
    a new document following `docs/features/README.md`); operations →
    `docs/deployment.md`; user-facing summary → `README.md` and
    `README.zh-CN.md` (same sections).
-   Documents describe the system as it is: no TODO, TBD or open questions in
-   files or code comments. Report open items to the user so they are tracked
-   in the issue tracker.
+   Documents on `main` describe the system as it is: no TODO, TBD or open
+   questions in files or code comments. A design for work done in stages
+   may describe its goal on its branch; the branch merges into `main` once
+   the code matches the document. Report open items to the user so they are
+   tracked in the issue tracker.
 5. **Keep the security guardrails.** Loopback by default, Host/Origin checks,
    proxy secret, the terminal protocol's method allowlist, read-only mode,
    0700/0600 unix sockets, nothing listening on TCP on machines, verified

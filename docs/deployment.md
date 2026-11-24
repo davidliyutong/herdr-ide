@@ -375,7 +375,8 @@ documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
 
 | Resource | Started | Ends |
 | --- | --- | --- |
-| Agent (`herdr-ide agent`) | One per core while connected. | With its ssh session; a dead link is detected by keepalives within about 45 s. |
+| Node (`herdr-ide node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node of its build answers; one per build and instance (`run/node-<build>.lock`), in a session of its own. | 15 s after its last client left, on `node stop`, or once its executable is removed (it then takes no new client). Log `<data>/node.log` (1 MiB, one old file). |
+| Agent session | One per core and machine while connected, served by the node. | With its ssh session or socket connection; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`). | A record in the machines file; **Remove machine…** deletes it and ends the session. The machine's terminal core and terminals keep running. |
 | ssh ControlMaster | Per machine, on Linux and macOS cores. | 10 min unused or 1 min without server answers; a core that finds it dead sends `ssh -O stop`. |
 | Desktop core | Launched by Electron. | When the app closes its stdin (quit, crash; on Windows and Linux also closing the window); killed after 20 s. Machines' terminal cores keep running. |
@@ -391,7 +392,7 @@ documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
 | A session's usage (`usage` action `session`) | The status bar's session item, at most every 10 s per session, ≤ 8 at once per machine. | Reads transcripts (≤ 256 MiB each); the last 16 (48 MiB) cached in memory. No process, no disk. |
 | Terminal history captures (plugin `history`, `history.capture`, off by default) | Every `history.interval` s (30) per connected machine; not for a `--read-only` core. | One at a time, ≤ 25 s: screen reads and short observing attaches over one terminal core connection. Data: see Files. |
 | Full Disk Access check (macOS) | `GET /api/m/{id}/privacy`; one at a time per agent. | A `/bin/sh` run by the terminal core (`machine.exec`) that opens one folder; ended by herdr-core within 10 s. None if no terminal core runs. |
-| code-server | First VS Code use. | `--code-server-idle` (20 min) without connections, agent exit (or the core's, for the local machine), **Stop VS Code**, or VS Code switched off for every client kind. Orphans are stopped by the next agent; code-server exits by itself after 1 h without connections. |
+| code-server | First VS Code use. | `--code-server-idle` (20 min) without connections, the end of the agent session that started it, **Stop VS Code**, or VS Code switched off for every client kind. Orphans are stopped by the next agent; code-server exits by itself after 1 h without connections. |
 | VS Code windows | One per VS Code pane on screen. | Off-screen windows stay loaded 10 min, at most 3 per page; a closed pane disconnects at once. |
 | VS Code extension hosts | One per VS Code window. | 5 min after the window disconnects. |
 | curl or wget (`--code-server-install=download`) | While a machine downloads code-server. | With the download (20 min limit) or when the core stops waiting; the partial file is removed. |

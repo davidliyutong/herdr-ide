@@ -117,8 +117,9 @@ Directories are per instance except the shared versioned ones above.
 
 - **Agent killed with SIGKILL**: its code-server survives until the next
   agent reaps it or its own 1 h idle timeout.
-- **Core stopped**: remote agents end with their ssh sessions; the local
-  agent runs inside the core, which waits for it to stop its code-server.
+- **Core stopped**: its agent sessions end with their ssh sessions or
+  socket connections, and each stops the code-server it started; a node
+  without clients ends 15 s later ([39](39-nodes.md)).
   Terminal cores and their programs keep running; the next core of the
   instance finds them.
 - **A terminal core nobody uses any more** (machine removed, instance no

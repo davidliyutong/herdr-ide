@@ -1,11 +1,11 @@
 //go:build unix
 
-// Package agent implements the agent (the command "agent" of the one
-// binary): the per-machine helper that the
-// core reaches over a yamux session (ssh stdio for remote machines, an
-// in-process pipe for the local machine). It runs on Linux and macOS only
-// (every file is built for unix): its sockets, peer checks, process groups,
-// code-server and program windows (Xvfb) are POSIX.
+// Package agent implements the agent: the per-machine helper that the core
+// reaches over a yamux session, served by the machine's node (the command
+// "node" of the one binary, node.go) on its socket, which ssh reaches
+// through `node dial`. It runs on Linux and macOS only (every file is built
+// for unix): its sockets, peer checks, process groups, code-server and
+// program windows (Xvfb) are POSIX.
 package agent
 
 import (
@@ -38,6 +38,7 @@ type Agent struct {
 	base      string // ~/<brand.DataDir(instance)>
 	runDir    string // base/run, mode 0700
 	uploadDir string // base/uploads
+	sshConn   string // SSH_CONNECTION of the session the core came through
 
 	hcOp     sync.Mutex // serializes installing, starting and stopping herdr-core
 	hcMu     sync.Mutex
@@ -54,6 +55,34 @@ type Options struct {
 	// Instance selects ~/<brand.DataDir(Instance)>; empty is the default.
 	Instance string
 	Logger   *log.Logger
+	// SSHConnection is SSH_CONNECTION of the ssh session the core reached
+	// the machine through, which hello reports; empty for the local machine.
+	SSHConnection string
+}
+
+// dataDirs returns the instance's data directory and its run directory,
+// made private (the run directory holds sockets with no other
+// authentication; they stay private even if they existed with looser
+// permissions).
+func dataDirs(instance string, logger *log.Logger) (home, base, runDir string, err error) {
+	if !brand.ValidInstance(instance) {
+		return "", "", "", fmt.Errorf("invalid instance name %q", instance)
+	}
+	home, err = os.UserHomeDir()
+	if err != nil {
+		return "", "", "", err
+	}
+	base = filepath.Join(home, brand.DataDir(instance))
+	if instance == "" {
+		migrateLegacyDataDir(home, base, logger)
+	}
+	runDir = filepath.Join(base, "run")
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return "", "", "", err
+	}
+	_ = os.Chmod(base, 0o700)
+	_ = os.Chmod(runDir, 0o700)
+	return home, base, runDir, nil
 }
 
 // Serve runs the agent over conn until the session ends.
@@ -62,25 +91,10 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 	if logger == nil {
 		logger = log.New(os.Stderr, brand.CoreBin+" agent: ", log.LstdFlags)
 	}
-	if !brand.ValidInstance(opts.Instance) {
-		return fmt.Errorf("invalid instance name %q", opts.Instance)
-	}
-	home, err := os.UserHomeDir()
+	home, base, runDir, err := dataDirs(opts.Instance, logger)
 	if err != nil {
 		return err
 	}
-	base := filepath.Join(home, brand.DataDir(opts.Instance))
-	if opts.Instance == "" {
-		migrateLegacyDataDir(home, base, logger)
-	}
-	runDir := filepath.Join(base, "run")
-	if err := os.MkdirAll(runDir, 0o700); err != nil {
-		return err
-	}
-	// The run directory holds sockets with no other authentication; keep it
-	// private even if it already existed with looser permissions.
-	_ = os.Chmod(base, 0o700)
-	_ = os.Chmod(runDir, 0o700)
 	// What the agent runs (requests, its sockets, housekeeping) is waited
 	// for when the session ends, at most handlerDrain, so it is done (a
 	// save or an upload removed what it staged, a socket was removed)
@@ -107,6 +121,7 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
 		base:      base,
 		runDir:    runDir,
 		uploadDir: filepath.Join(base, "uploads"),
+		sshConn:   opts.SSHConnection,
 	}
 	a.cs = newCodeServer(a)
 	defer a.cs.stopAll()
@@ -172,7 +187,7 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 	var err error
 	switch h.Op {
 	case agentproto.OpHello:
-		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info(), SSH: os.Getenv("SSH_CONNECTION")})
+		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info(), SSH: a.sshConn})
 		st.Close()
 	case agentproto.OpFsStat, agentproto.OpFsList, agentproto.OpFsRead, agentproto.OpFsWrite:
 		err = a.handleFS(st, h)

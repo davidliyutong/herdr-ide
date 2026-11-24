@@ -13,13 +13,32 @@ import (
 	"herdr-ide/internal/agent"
 )
 
-// DialLocal starts an in-process agent connected through a socketpair, so the
-// local machine uses exactly the same protocol as remote machines. A nil
+// DialNode connects to the local machine's node of this build, which it
+// starts from this executable when none answers (agent.DialNode), as
+// `node dial` does for a core that comes over ssh.
+func DialNode(ctx context.Context, instance, sshConn string, logger *log.Logger) (*Session, error) {
+	c, err := agent.DialNode(ctx, instance, sshConn, logger)
+	if err != nil {
+		return nil, err
+	}
+	s, err := newSession(c, c, logger, nil)
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// DialLocal starts an agent in this process, connected through a
+// socketpair: the tests' agent, which ends with the session. A nil
 // opts.Logger logs to stderr.
 func DialLocal(ctx context.Context, opts agent.Options) (*Session, error) {
 	logger := opts.Logger
 	if logger == nil {
 		logger = log.New(os.Stderr, "", log.LstdFlags)
+	}
+	if opts.SSHConnection == "" {
+		opts.SSHConnection = os.Getenv("SSH_CONNECTION")
 	}
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {

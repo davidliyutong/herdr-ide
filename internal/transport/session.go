@@ -1,6 +1,7 @@
-// Package transport establishes yamux sessions to herdr-ide agents: in-process
-// for the local machine (Linux and macOS, local.go), over ssh stdio for
-// remote machines.
+// Package transport establishes yamux sessions to herdr-ide agents, which
+// machines' nodes serve: through the node's socket for the local machine
+// (Linux and macOS, local.go), over ssh stdio and `node dial` for remote
+// machines.
 package transport
 
 import (

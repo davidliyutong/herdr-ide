@@ -13,8 +13,10 @@ instead of repeating it.
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
 | `herdr-ide mcp [--instance NAME] [--socket PATH]` | The variable vault's MCP server on stdio for coding agents' CLIs; asks the instance's agent through `vault.sock`, exits when stdin closes ([30](features/30-variable-vault.md)). |
 | `herdr-ide version` | Print the version. |
-| `herdr-ide agent [--instance NAME]` | Per-machine helper speaking the core's protocol on stdio; started by the core over ssh, never by hand. Linux and macOS. |
-| `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` | The MCP server on a machine: a link to the uploaded machine build (which has `mcp`, `agent`, `gui-keep`, `gui-wl`, `chat-host` and `version`); takes no arguments and asks the agent of its data directory. |
+| `herdr-ide node [--instance NAME]` | The machine's node: serves the core's protocol on `<data>/run/node-<build>.sock` to any number of cores; started by them, ends 15 s after its last client. Linux and macOS. |
+| `herdr-ide node dial [--instance NAME]` | Pipes stdio to the node of its build, starting it when none answers; what a core runs over ssh. |
+| `herdr-ide node stop [--instance NAME]` | Asks the instance's nodes of every build to stop. |
+| `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` | The MCP server on a machine: a link to the uploaded machine build (which has `mcp`, `node`, `gui-keep`, `gui-wl`, `chat-host` and `version`); takes no arguments and asks the agent of its data directory. |
 | `herdr-ide gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
 | `herdr-ide gui-wl --device NODE [--nvidia]` | Compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
 | `herdr-ide chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS. |
@@ -587,8 +589,9 @@ summarized in [deployment](deployment.md#remote-resources).
 | `~/.herdr-ide/gpupick/<sha256 prefix>/gpupick.so` | GPU selection library (0600, shared) | Unused 14 days, when another is installed. |
 | `<data>/hc/herdr-core` (0700 directory) | Terminal core executable, accepted only with its SHA-256 | Replaced by the next build. |
 | `~/.local/state/herdr-core/herdr-ide[-<instance>]/` (`$XDG_STATE_HOME`) | herdr-core's own state (records, saved screens, logs) | Until the user removes it. |
-| `<data>/run/` (0700) | Sockets (0600): `hc.sock` and its holders', `cs.sock`, `bridge.sock`, `vault.sock`, `chat.sock`; `cs.pid`; display files `gui.json`, `xauth`, `xauth.server` (0600), `gui.lock`, `gui-keep.lock` | Sockets while their owner runs; display files kept so terminals keep a valid environment. |
+| `<data>/run/` (0700) | Sockets (0600): `node-<build>.sock` (with its lock `node-<build>.lock`), `hc.sock` and its holders', `cs.sock`, `bridge.sock`, `vault.sock`, `chat.sock`; `cs.pid`; display files `gui.json`, `xauth`, `xauth.server` (0600), `gui.lock`, `gui-keep.lock` | Sockets while their owner runs; display files kept so terminals keep a valid environment. |
 | `<data>/xvfb.log`, `<data>/xwayland.log`, `<data>/gui-keep.log` | Output of the last display, compositor and keeper | Replaced at each start. |
+| `<data>/node.log`, `node.old.log` (0600) | The nodes' log | Moved to `node.old.log` past 1 MiB when a node starts. |
 | `<data>/cs-data/`, `<data>/cs-ext/` | VS Code settings and extensions | Kept; logs pruned after 7 days. |
 | `<data>/uploads/` | Pasted files, and dropped files without a terminal directory | 7 days. |
 | `<data>/staging/` (0700) | File explorer uploads in progress (0600) | Removed when the upload ends; leftovers after 7 days. |

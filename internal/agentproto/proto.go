@@ -112,6 +112,22 @@ const (
 	SessionFromGuess = "guess"
 )
 
+// NodeHello is the line a client writes first on a node's socket, before
+// anything else. With NodeServe the connection then carries the client's
+// yamux session; with NodeStop the node answers a Reply and ends.
+type NodeHello struct {
+	Op string `json:"op"`
+	// SSHConnection is SSH_CONNECTION of the ssh session that dialed the
+	// node (`node dial`), which hello reports (Reply.SSH).
+	SSHConnection string `json:"ssh_connection,omitempty"`
+}
+
+// NodeHello's operations.
+const (
+	NodeServe = "serve"
+	NodeStop  = "stop"
+)
+
 // Header is the first line of every stream.
 type Header struct {
 	Op Op `json:"op"`

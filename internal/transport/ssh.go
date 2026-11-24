@@ -153,7 +153,8 @@ func normArch(m string) string {
 const agentDir = brand.AgentDir
 
 // DialSSH probes the remote platform, uploads the matching agent if missing
-// and starts it over ssh stdio.
+// and reaches the machine's node of that build over ssh stdio (`node
+// dial`, which starts the node when none answers).
 func DialSSH(ctx context.Context, o SSHOptions) (*Session, *Platform, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	out, err := o.run(probeCtx, nil, `uname -s; uname -m; echo "$HOME"`)
@@ -199,7 +200,7 @@ func DialSSH(ctx context.Context, o SSHOptions) (*Session, *Platform, error) {
 		}
 	}
 
-	cmd := exec.Command("ssh", o.runArgs(`exec "`+remotePath+`" agent --instance '`+o.Instance+`'`)...)
+	cmd := exec.Command("ssh", o.runArgs(`exec "`+remotePath+`" node dial --instance '`+o.Instance+`'`)...)
 	noConsole(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
