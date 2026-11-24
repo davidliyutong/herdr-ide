@@ -541,9 +541,14 @@ running with its terminals while you move:
    stays as it was. A machine's chats are copied the first time veldr's
    chat host runs there.
 2. Keep herdr-ide open, or reach its terminals in a browser with its own
-   core, which shares its default namespace with its desktop app:
+   core, which shares its default namespace with its desktop app. That
+   core's instance has a machine list of its own: copy the desktop app's
+   first (macOS paths).
 
    ```bash
+   cd ~/Library/Application\ Support/herdr-ide
+   cp machines-desktop.json machines-legacy-web.json
+   cp -n settings-desktop.json settings-legacy-web.json
    /Applications/herdr-ide.app/Contents/Resources/bin/herdr-ide serve \
      --instance legacy-web --node-instance= --listen 127.0.0.1:7790
    ```
