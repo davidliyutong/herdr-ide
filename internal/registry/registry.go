@@ -24,11 +24,9 @@ import (
 	"veldr/internal/uisettings"
 )
 
-// Settings are the setting modules, user interfaces first, and the drop of
-// the desktop app's shortcut settings of earlier versions, which became
-// keybinding rules before the settings are loaded.
+// Settings are the setting modules, user interfaces first.
 func Settings() []settings.Module {
-	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, plugin.Settings(Plugins(), pluginsOff), legacyShortcuts(), browserplugin.Settings, files.Settings, gitplugin.Settings, monitorplugin.Settings, usageplugin.Settings, vaultplugin.Settings, historyplugin.Settings, chatplugin.Settings}
+	return []settings.Module{uisettings.Module, codeserver.Settings, gui.Settings, plugin.Settings(Plugins(), pluginsOff), browserplugin.Settings, files.Settings, gitplugin.Settings, monitorplugin.Settings, usageplugin.Settings, vaultplugin.Settings, historyplugin.Settings, chatplugin.Settings}
 }
 
 // Plugins are the core's plugins (internal/plugin), in the order the UIs
@@ -41,16 +39,6 @@ func Plugins() []plugin.Plugin {
 // VS Code, whose windows run on the UI's origin (its switch for browsers
 // is off by default too, plugin.BrowserRisk).
 var pluginsOff = plugin.Defaults{vscode.ID: true}
-
-// legacyShortcuts drops the desktop app's old shortcut settings
-// (desktop-*-key) from the settings file.
-func legacyShortcuts() settings.Module {
-	var m settings.Module
-	for _, name := range keybindings.LegacyShortcutSettings() {
-		m.Migrations = append(m.Migrations, settings.Migration{From: name})
-	}
-	return m
-}
 
 // Commands are the commands keys can run.
 func Commands() []keybindings.Command { return keybindings.Commands }

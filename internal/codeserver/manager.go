@@ -48,8 +48,7 @@ const (
 
 // Settings are the code-server settings that can be changed at runtime,
 // also per machine (where code-server comes from is a property of the
-// machine: one is offline, another has its own), with the flags and file
-// keys of earlier versions.
+// machine: one is offline, another has its own).
 var Settings = settings.Module{
 	Sections: []settings.Section{{ID: "codeServer", Order: 60, Advanced: true, Plugin: "vscode"}},
 	Defs: []settings.Def{
@@ -70,10 +69,6 @@ var Settings = settings.Module{
 				return nil
 			},
 		},
-	},
-	Migrations: []settings.Migration{
-		{From: "code-server-install", To: SettingInstall, Convert: settings.Renamed},
-		{From: "code-server-path", To: SettingPath, Convert: settings.Renamed},
 	},
 }
 

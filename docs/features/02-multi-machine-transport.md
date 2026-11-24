@@ -148,13 +148,10 @@ Key rules:
   `invalid_target` and never dialed; it can be renamed or removed.
 - The file is not re-read while the core runs; edit it while it is stopped.
 
-The first time a core of an instance starts without the file, it imports
-the SSH machines saved by herdr
-(`$XDG_STATE_HOME/herdr/client/endpoints.json`): ids, labels, targets and
-enabled flags. The herdr session names are dropped, since every machine
-gets the instance's own terminal core ([21](21-terminal-core.md)). The
-result is written at once, so the import happens once
-([deployment](../deployment.md#migrating-from-versions-that-used-herdr)).
+Without the file there are no stored machines yet; nothing is written
+until the first change. A file that is not a machines file (no `version`
+or `machines`) is an error: the core keeps its machines in memory and
+leaves the file alone.
 
 ### Choosing machines for a run
 
@@ -257,8 +254,6 @@ terminal core apart ([40](40-shared-homes.md)).
 | One ssh exec per request | One remote process per call, and no streaming of terminals, files or code-server. |
 | Helper written in Node or Python | Not on every machine; glibc and version constraints. |
 | Go `x/crypto/ssh` client instead of OpenSSH | Would not honour the user's ssh config (ProxyJump, Match, agents, certificates). |
-| Reading herdr's catalog at every start | The machine list would follow another program; one import suffices. |
-| Keeping the herdr session each imported machine named | The instance's own terminal core has no use for it, and it would suggest old terminals are shown. |
 | Ids derived from the target | Ids appear in URLs and settings; random ids keep the target out. |
 | Starting the terminal core when a machine connects | Unused machines would get a process outliving the core; the first subscription starts it. |
 | Node.js core (sharing TypeScript types with the UI) | Go cross-compiles to static binaries with no runtime on the host. |
@@ -283,8 +278,6 @@ terminal core apart ([40](40-shared-homes.md)).
   message, retried with backoff.
 - **Machines file damaged** → logged; the core runs with the local machine
   and `--ssh` targets, keeps changes in memory and leaves the file alone.
-  herdr's catalog unreadable at first start → nothing written, so the next
-  start imports again.
 - **Refused stored target** → *error* with `invalid_target`, never dialed;
   rename, remove or fix the file while the core is stopped.
 - **Writing the file fails** → the change is refused with `save`.
@@ -303,7 +296,7 @@ terminal core apart ([40](40-shared-homes.md)).
 - `internal/transport/*_test.go`: error classification, arch normalization,
   quoting, the control directory checks, no `Control*` options without it,
   stopping the master only while ssh stays up.
-- `internal/machines/machines_test.go`: the herdr import, the file's round
+- `internal/machines/machines_test.go`: no file, the file's round
   trip and errors, ordering, target validation from the shared vectors,
   refused targets never dialed, the local machine without an agent, adding,
   removing, renaming, enabling and disabling at runtime.

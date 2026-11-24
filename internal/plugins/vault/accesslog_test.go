@@ -54,7 +54,7 @@ func TestAccessLogSurvivesARestart(t *testing.T) {
 	if code, _ := c.do("POST", "/api/p/vault/vars/KEY/reveal", ""); code != 200 {
 		t.Fatalf("reveal %d", code)
 	}
-	path := coreDBOf(accessLogPath(p.Path))
+	path := plugin.CoreDBFile(settingsBeside(p.Path))
 	if path != plugin.CoreDBFile(filepath.Join(filepath.Dir(p.Path), "settings.json")) {
 		t.Fatalf("database %s", path)
 	}
@@ -159,7 +159,7 @@ func TestUnloggedReleaseIsRefused(t *testing.T) {
 	c := newClient(p, h)
 	c.session(t)
 	// The core's database cannot be opened: a directory takes its name.
-	if err := os.Mkdir(coreDBOf(accessLogPath(p.Path)), 0o700); err != nil {
+	if err := os.Mkdir(plugin.CoreDBFile(settingsBeside(p.Path)), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	r := p.Handle(context.Background(), h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}})
@@ -184,7 +184,7 @@ func TestUnloggedReleaseIsRefused(t *testing.T) {
 // The database keeps the newest records of each class within the bounds,
 // and reads back the same.
 func TestAccessLogBounds(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
+	path := filepath.Join(t.TempDir(), "settings.json")
 	l := newAccessLog(path, log.New(os.Stderr, "", 0))
 	l.maxReleases, l.maxOthers = 5, 5
 	for i := 0; i < 40; i++ {
@@ -215,7 +215,7 @@ func TestAccessLogBounds(t *testing.T) {
 // path, by class.
 func accessRows(t *testing.T, path string) (releases, others int) {
 	t.Helper()
-	db, err := store.OpenShared(coreDBOf(path))
+	db, err := store.OpenShared(plugin.CoreDBFile(path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func accessRows(t *testing.T, path string) (releases, others int) {
 // A write that fails refuses its release and leaves nothing behind; the
 // next release is written and read back after a restart.
 func TestAccessLogAfterAFailedWrite(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
+	path := filepath.Join(t.TempDir(), "settings.json")
 	release := func(l *accessLog, name string) (Access, error) {
 		return l.add(Access{Time: time.Now(), M: "m1", Tool: "get", Names: []string{name}, Result: ResultAllowed}, false, true)
 	}
@@ -265,76 +265,16 @@ func TestAccessLogAfterAFailedWrite(t *testing.T) {
 	}
 }
 
-// The file the log was kept in before, as that core wrote it (a record
-// written again with its count, a half line a crash left, lines that do not
-// parse), is imported once and removed; a core that starts again does not
-// import anything again. New records follow the imported ones.
-func TestAccessLogImport(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "vault-dev-access.jsonl")
-	at := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
-	line := func(a Access) string { b, _ := json.Marshal(a); return string(b) + "\n" }
-	legacy := line(Access{ID: 1, Time: at, M: "m1", Tool: "get", Names: []string{"KEY"}, Client: "claude", Result: ResultAllowed}) +
-		line(Access{ID: 2, Time: at, M: "m1", Tool: "get", Names: []string{"NOPE"}, Result: "not_found"}) +
-		"not json\n" +
-		line(Access{ID: 2, Time: at.Add(time.Minute), M: "m1", Tool: "get", Names: []string{"NOPE"}, Result: "not_found", Count: 3}) +
-		line(Access{Time: at, Tool: "get", Result: ResultAllowed}) + // no ID
-		line(Access{ID: 5, Time: at, Tool: "reveal", Names: []string{"KEY"}, Remote: "127.0.0.1:1", Result: ResultRevealed}) +
-		`{"id":6,"time":"2026-11-0`
-	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	l := newAccessLog(path, nil)
-	got := l.list()
-	if len(got) != 3 || got[0].ID != 5 || got[1].ID != 2 || got[1].Count != 3 || got[2].Client != "claude" {
-		t.Fatalf("imported %s", mustJSON(got))
-	}
-	if _, err := os.Lstat(path); err == nil {
-		t.Fatal("the file stayed")
-	}
-	if a, err := l.add(Access{Time: time.Now(), Tool: "get", Names: []string{"X"}, Result: ResultAllowed}, false, true); err != nil || a.ID != 6 {
-		t.Fatalf("after the import %+v %v", a, err)
-	}
-	l.close()
-	// A file left again is not imported again: the import ran.
-	os.WriteFile(path, []byte(legacy), 0o600)
-	if got := newAccessLog(path, nil).list(); len(got) != 4 || got[0].ID != 6 {
-		t.Errorf("after a second start %s", mustJSON(got))
-	}
-	if _, err := os.Lstat(path); err == nil {
-		t.Error("the file left again stayed")
-	}
-
-	// An import that fails leaves the file for the next start.
-	dir2 := t.TempDir()
-	bad := filepath.Join(dir2, "vault-access.jsonl")
-	os.Mkdir(bad, 0o700) // not a file: it cannot be read
-	if got := newAccessLog(bad, nil).list(); len(got) != 0 {
-		t.Errorf("imported %s", mustJSON(got))
-	}
-	if _, err := os.Lstat(bad); err != nil {
-		t.Error("a failed import removed what it imports")
-	}
-	db, err := store.OpenShared(coreDBOf(bad))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if done, _ := db.Imported(accessFeature, "access-log"); done {
-		t.Error("a failed import recorded")
-	}
-}
-
 // Tables of a newer version are read, not written: releases are refused
 // (log_failed), refusals are kept in memory.
 func TestAccessLogNewerVersion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
+	path := filepath.Join(t.TempDir(), "settings.json")
 	l := newAccessLog(path, nil)
 	if _, err := l.add(Access{Time: time.Now(), Tool: "get", Names: []string{"A"}, Result: ResultAllowed}, false, true); err != nil {
 		t.Fatal(err)
 	}
 	l.close()
-	db, err := store.OpenShared(coreDBOf(path))
+	db, err := store.OpenShared(plugin.CoreDBFile(path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,11 +302,11 @@ func TestAccessLogDatabase(t *testing.T) {
 	dir := t.TempDir()
 	for _, inst := range []string{"", "-dev"} {
 		vault := filepath.Join(dir, "vault"+inst+".json")
-		if got, want := coreDBOf(accessLogPath(vault)), plugin.CoreDBFile(filepath.Join(dir, "settings"+inst+".json")); got != want || !strings.HasPrefix(filepath.Base(got), "core"+inst+"-") {
+		if got, want := plugin.CoreDBFile(settingsBeside(vault)), plugin.CoreDBFile(filepath.Join(dir, "settings"+inst+".json")); got != want || !strings.HasPrefix(filepath.Base(got), "core"+inst+"-") {
 			t.Errorf("%s: %s, want %s", inst, got, want)
 		}
 	}
-	if coreDBOf("") != "" {
+	if settingsBeside("") != "" {
 		t.Error("a database without a file")
 	}
 }
@@ -374,7 +314,7 @@ func TestAccessLogDatabase(t *testing.T) {
 // A refusal repeated is written again with its count once the while is
 // over, so the count survives a restart too.
 func TestCoalescedCountIsWritten(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
+	path := filepath.Join(t.TempDir(), "settings.json")
 	l := newAccessLog(path, nil)
 	l.flushEvery = 20 * time.Millisecond
 	rec := Access{Time: time.Now(), M: "m1", Tool: "get", Names: []string{"NOPE"}, Result: "not_found"}
@@ -502,7 +442,7 @@ func TestAccessLogNeedsASession(t *testing.T) {
 // drop it), one whose write fails too is kept in memory, and the next use
 // reads the log with both.
 func TestAccessLogAfterAFailedRead(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "vault-access.jsonl")
+	path := filepath.Join(t.TempDir(), "settings.json")
 	release := func(l *accessLog, name string) (Access, error) {
 		return l.add(Access{Time: time.Now(), M: "m1", Tool: "get", Names: []string{name}, Result: ResultAllowed}, false, true)
 	}
@@ -545,58 +485,5 @@ func TestAccessLogAfterAFailedRead(t *testing.T) {
 	}
 	if want := "F,D,C"; strings.Join(got, ",") != want {
 		t.Errorf("read back %s, want %s", strings.Join(got, ","), want)
-	}
-}
-
-// The file the log was kept in before, there again after the import ran
-// (a core of an earlier version wrote it since: a downgrade, then the
-// upgrade again), is merged, not removed unread: its records the table
-// lacks follow the table's, with new IDs, in the order of their times;
-// those it has already are not added again.
-func TestAccessLogImportAfterDowngrade(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "vault-access.jsonl")
-	at := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
-	line := func(a Access) string { b, _ := json.Marshal(a); return string(b) + "\n" }
-	first := line(Access{ID: 1, Time: at, M: "m1", Tool: "get", Names: []string{"OLD1"}, Result: ResultAllowed}) +
-		line(Access{ID: 2, Time: at.Add(time.Minute), M: "m1", Tool: "get", Names: []string{"OLD2"}, Result: "not_found"})
-	if err := os.WriteFile(path, []byte(first), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	l := newAccessLog(path, nil)
-	if got := l.list(); len(got) != 2 {
-		t.Fatalf("imported %s", mustJSON(got))
-	}
-	if a, err := l.add(Access{Time: at.Add(time.Hour), M: "m1", Tool: "get", Names: []string{"NEW"}, Result: ResultAllowed}, false, true); err != nil || a.ID != 3 {
-		t.Fatalf("added %+v %v", a, err)
-	}
-	l.close()
-	// The earlier core wrote the file again: the records imported (a file
-	// whose removal failed, which it read) and its own after them, whose
-	// IDs follow theirs and take the table's (their times out of order
-	// here).
-	again := first +
-		line(Access{ID: 3, Time: at.Add(3 * time.Hour), M: "m2", Tool: "get", Names: []string{"DOWN2"}, Result: ResultApproved}) +
-		line(Access{ID: 4, Time: at.Add(2 * time.Hour), M: "m2", Tool: "list", Result: ResultListed})
-	if err := os.WriteFile(path, []byte(again), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got := newAccessLog(path, nil).list()
-	var names []string
-	for _, a := range got {
-		n := a.Tool
-		if len(a.Names) > 0 {
-			n = a.Names[0]
-		}
-		names = append(names, fmt.Sprintf("%d:%s", a.ID, n))
-	}
-	if want := "5:DOWN2,4:list,3:NEW,2:OLD2,1:OLD1"; strings.Join(names, ",") != want {
-		t.Fatalf("merged %s, want %s", strings.Join(names, ","), want)
-	}
-	if _, err := os.Lstat(path); err == nil {
-		t.Error("the file stayed")
-	}
-	if rel, oth := accessRows(t, path); rel != 3 || oth != 2 {
-		t.Errorf("rows: %d releases, %d others", rel, oth)
 	}
 }

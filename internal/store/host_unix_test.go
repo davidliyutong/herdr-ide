@@ -110,10 +110,9 @@ func TestPruneHostFiles(t *testing.T) {
 	// Another host's of this version: its whole name and its id's hash.
 	named := filepath.Join(dir, "machine-node01.cluster.example.org-0a1b2c3d.db")
 	recent := filepath.Join(dir, "machine-recent.db")
-	legacy := filepath.Join(dir, MachineDB)
 	held := filepath.Join(dir, "machine-held.db")
 	openHereP := filepath.Join(dir, "machine-here.db")
-	for _, p := range []string{mine, other, named, recent, legacy} {
+	for _, p := range []string{mine, other, named, recent} {
 		makeDB(t, p)
 	}
 	// A journal file left beside other's database goes with it.
@@ -133,7 +132,7 @@ func TestPruneHostFiles(t *testing.T) {
 	}
 	stop := hold(t, held) // creates it
 	here := openShared(t, openHereP)
-	for _, p := range []string{mine, other, named, legacy, held, openHereP, upper, dotted, chat} {
+	for _, p := range []string{mine, other, named, held, openHereP, upper, dotted, chat} {
 		age(t, p, month)
 	}
 	removed, err := PruneHostFiles(dir, MachineDB, HostFileRetention, time.Now())
@@ -141,10 +140,10 @@ func TestPruneHostFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	slices.Sort(removed)
-	if want := []string{"machine-node01.cluster.example.org-0a1b2c3d.db", "machine-other_host.db", "machine.db"}; !slices.Equal(removed, want) {
+	if want := []string{"machine-node01.cluster.example.org-0a1b2c3d.db", "machine-other_host.db"}; !slices.Equal(removed, want) {
 		t.Fatalf("removed %v, want %v", removed, want)
 	}
-	for _, p := range []string{other, other + "-wal", other + "-shm", named, legacy} {
+	for _, p := range []string{other, other + "-wal", other + "-shm", named} {
 		if exists(p) {
 			t.Errorf("%s stayed", filepath.Base(p))
 		}
@@ -271,28 +270,16 @@ func TestOpenKeepsMarked(t *testing.T) {
 	}
 }
 
-// Legacy un-hosted databases are cleaned up after LegacyFileRetention once
-// this host has its own per-host database, without waiting 30 days, and
-// core.db pruning skips other instances' databases in the shared config dir.
-func TestPruneHostFilesLegacyTimelyAndCoreInstances(t *testing.T) {
+// A database of no host's name is not one of PruneHostFiles', and core.db
+// pruning skips other instances' databases in the shared config dir.
+func TestPruneHostFilesCoreInstances(t *testing.T) {
 	dir := t.TempDir()
-	mine := HostFile(dir, MachineDB)
-	legacy := filepath.Join(dir, MachineDB)
-	other := filepath.Join(dir, "machine-other_host.db")
-	for _, p := range []string{mine, legacy, other} {
-		makeDB(t, p)
-	}
-	age(t, legacy, LegacyFileRetention+time.Minute)
-	age(t, other, LegacyFileRetention+time.Minute)
+	plain := filepath.Join(dir, MachineDB)
+	makeDB(t, plain)
+	age(t, plain, HostFileRetention+time.Hour)
 	removed, err := PruneHostFiles(dir, MachineDB, HostFileRetention, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(removed, []string{MachineDB}) {
-		t.Fatalf("removed %v, want [%s]", removed, MachineDB)
-	}
-	if exists(legacy) || !exists(other) || !exists(mine) {
-		t.Fatalf("legacy exists=%v other exists=%v mine exists=%v", exists(legacy), exists(other), exists(mine))
+	if err != nil || len(removed) != 0 || !exists(plain) {
+		t.Fatalf("removed %v %v", removed, err)
 	}
 
 	// Core instance isolation: pruning core.db must not remove core-dev-*.db.
@@ -315,50 +302,4 @@ func TestPruneHostFilesLegacyTimelyAndCoreInstances(t *testing.T) {
 	if !slices.Equal(removed, []string{"core-otherhost-0a1b2c3d.db"}) || !exists(coreDev) {
 		t.Fatalf("core prune removed %v, coreDev exists=%v", removed, exists(coreDev))
 	}
-}
-
-// MigrateLegacy copies a legacy un-hosted database (including WAL contents and
-// schema versions) to the per-host path, verifies it, and removes the legacy
-// file when unheld (leaving it in place if another process holds it).
-func TestMigrateLegacy(t *testing.T) {
-	dir := t.TempDir()
-	legacy := filepath.Join(dir, "core.db")
-	target := HostFile(dir, "core.db")
-
-	db := openShared(t, legacy)
-	if _, err := db.Migrate("vault", []string{`CREATE TABLE vault_access (id INTEGER PRIMARY KEY, v TEXT)`}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO vault_access (id, v) VALUES (1, 'secret-name')`); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
-
-	migrated, err := MigrateLegacy(legacy, target)
-	if err != nil || !migrated {
-		t.Fatalf("MigrateLegacy: migrated=%v err=%v", migrated, err)
-	}
-	if exists(legacy) || exists(legacy+"-wal") || !exists(target) {
-		t.Fatalf("after migrate: legacy=%v target=%v", exists(legacy), exists(target))
-	}
-	tdb := openShared(t, target)
-	var v string
-	if err := tdb.QueryRow(`SELECT v FROM vault_access WHERE id = 1`).Scan(&v); err != nil || v != "secret-name" {
-		t.Fatalf("migrated row = %q (%v)", v, err)
-	}
-	tdb.Close()
-
-	// Held legacy DB is still migrated safely, and left intact while held.
-	dir2 := t.TempDir()
-	legacy2 := filepath.Join(dir2, "core.db")
-	target2 := HostFile(dir2, "core.db")
-	stop := hold(t, legacy2)
-	migrated, err = MigrateLegacy(legacy2, target2)
-	if err != nil || !migrated {
-		t.Fatalf("held MigrateLegacy: migrated=%v err=%v", migrated, err)
-	}
-	if !exists(legacy2) || !exists(target2) {
-		t.Fatalf("held legacy=%v target=%v", exists(legacy2), exists(target2))
-	}
-	stop()
 }

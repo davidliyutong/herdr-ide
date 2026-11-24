@@ -3,7 +3,6 @@ package usage
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -217,14 +216,11 @@ func (p *Plugin) enabled() bool {
 	return h == nil || plugin.Enabled(h.Settings(), p)
 }
 
-// historyPath is usage-history[-<instance>].json beside the settings file.
-func (p *Plugin) historyPath() string {
+// persisted tells whether the history is kept in the core's database: the
+// core has a settings file, beside which its database is.
+func (p *Plugin) persisted() bool {
 	st := p.settings()
-	if st == nil || st.Path() == "" {
-		return ""
-	}
-	sp := st.Path()
-	return filepath.Join(filepath.Dir(sp), strings.Replace(filepath.Base(sp), "settings", "usage-history", 1))
+	return st != nil && st.Path() != ""
 }
 
 // Start runs the scheduler until ctx ends (plugin.Starter).
@@ -244,8 +240,8 @@ func (p *Plugin) Start(ctx context.Context, h plugin.Host) {
 		p.ready = func() []string { return readyMachines(h.Machines()) }
 	}
 	p.hostMu.Unlock()
-	if path := p.historyPath(); path != "" {
-		p.loadHistory(path)
+	if p.persisted() {
+		p.loadHistory()
 	}
 	cancel := h.Machines().Subscribe(p.onMachine, p.onAgent)
 	defer cancel()

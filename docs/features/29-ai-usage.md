@@ -131,8 +131,7 @@ time, the offset after the last complete line and its records. Unchanged
 logs are not read again; grown logs are read on from the offset. Logs and
 records older than 90 days leave the cache. Changed entries are saved in
 one transaction at most every 5 minutes (or after 8 MiB of logs), every
-20 s during a long scan, and on cancel, so a scan never starts over. The
-earlier `usage/cost-cache.json` is imported once and removed.
+20 s during a long scan, and on cancel, so a scan never starts over.
 
 #### One session's usage
 
@@ -248,8 +247,7 @@ the new status. Accounts unseen for 7 days are forgotten.
 
 The history (the core's database `core[-<instance>].db`, tables
 `usage_windows`, `usage_accounts`, `usage_alerts`, `usage_machine_costs`;
-[38](38-sqlite-state.md); the earlier `usage-history[-<instance>].json` is
-imported once) keeps a point per window when the use changed or 15 minutes passed, for 30
+[38](38-sqlite-state.md)) keeps a point per window when the use changed or 15 minutes passed, for 30
 days, plus the last accounts for a restart. A window's pace compares its use
 with the share of its time gone and projects when it runs out.
 

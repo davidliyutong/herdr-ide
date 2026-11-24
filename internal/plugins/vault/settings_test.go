@@ -3,8 +3,6 @@ package vault
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -75,30 +73,6 @@ func TestSettingsDefs(t *testing.T) {
 	}
 	if r := runLimits(h); *r != (agentproto.VaultRun{Timeout: 120, MaxTimeout: 600, MaxOutput: 64 << 10}) {
 		t.Errorf("run %+v", r)
-	}
-}
-
-// vault.passphraseDays replaced vault.passphraseHours: a settings file
-// that still has the old key loads without a problem and loses it, and the
-// new one is read.
-func TestPassphraseHoursDropped(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := os.WriteFile(path, []byte(`{"vault.passphraseHours": 24, "vault.passphraseDays": 7}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	st := settings.New(path, Settings)
-	if err := st.Load(); err != nil {
-		t.Fatal(err)
-	}
-	if ps := st.State().Problems; len(ps) != 0 {
-		t.Errorf("problems %v", ps)
-	}
-	if st.Get(SettingPassphraseDays) != 7.0 {
-		t.Errorf("days %v", st.Get(SettingPassphraseDays))
-	}
-	b, _ := os.ReadFile(path)
-	if strings.Contains(string(b), "passphraseHours") || !strings.Contains(string(b), "passphraseDays") {
-		t.Errorf("the file: %s", b)
 	}
 }
 

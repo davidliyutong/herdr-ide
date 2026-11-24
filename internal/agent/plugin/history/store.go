@@ -7,12 +7,10 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,11 +40,6 @@ import (
 // agent of a container started again with the same pid), or leaseTTL after
 // its last renewal. Memory follows the database: a change that fails
 // leaves what describes the snapshots as it was.
-//
-// The snapshots were kept before in <data dir>/history, as files: their
-// whole generations are imported once when the database is opened, then
-// the directory is removed (also one an agent of an older version left
-// again later).
 
 const (
 	// feature names the snapshots' tables in the machine's database.
@@ -57,14 +50,6 @@ const (
 	leaseTTL = time.Minute
 	// leaseRetry is how often a writer that waits for the lease asks again.
 	leaseRetry = 50 * time.Millisecond
-
-	// dirName is the directory below the data directory the snapshots were
-	// kept in before, as files (imported once).
-	dirName = "history"
-	// maxMeta bounds a former generation's .json file.
-	maxMeta = 64 << 10
-	// maxEntries bounds the former directory's entries the import looks at.
-	maxEntries = 4096
 )
 
 var migrations = []string{
@@ -174,32 +159,19 @@ var (
 func dbPath(base string) string { return dbstore.HostFile(base, dbstore.MachineDB) }
 
 // exists tells whether base has snapshots to look at: the machine's
-// database or the directory they were kept in before (a read creates
-// nothing).
+// database (a read creates nothing).
 func exists(base string) bool {
-	if base == "" || !path.IsAbs(base) {
-		return false
-	}
-	if dbstore.Exists(dbPath(base)) || dbstore.Exists(path.Join(base, dbstore.MachineDB)) {
-		return true
-	}
-	st, err := os.Lstat(path.Join(base, dirName))
-	return err == nil && st.IsDir()
+	return base != "" && path.IsAbs(base) && dbstore.Exists(dbPath(base))
 }
 
 // openDB opens the machine's database below base with the snapshots'
-// tables, after importing the files they were kept in before. With
+// tables. With
 // errNewer the database is returned to read. The caller closes it.
 func openDB(base string) (*dbstore.DB, error) {
 	if base == "" || !path.IsAbs(base) {
 		return nil, errNoData
 	}
-	target := dbPath(base)
-	legacy := path.Join(base, dbstore.MachineDB)
-	if _, err := dbstore.MigrateLegacy(legacy, target); err != nil {
-		return nil, err
-	}
-	db, err := dbstore.OpenShared(target)
+	db, err := dbstore.OpenShared(dbPath(base))
 	if db == nil {
 		return nil, err
 	}
@@ -211,7 +183,6 @@ func openDB(base string) (*dbstore.DB, error) {
 		db.Close()
 		return nil, err
 	}
-	importFiles(db, base)
 	return db, nil
 }
 
@@ -821,120 +792,6 @@ func (s *store) clearAll() (int, error) {
 }
 
 func clamp[T int | int64](v, lo, hi T) T { return max(lo, min(v, hi)) }
-
-// importFiles imports the snapshots kept below base before the database,
-// in <base>/history, once: every whole generation (a .json and a .vt of
-// the size it gives, regular files) of a valid address, unless the
-// database has that generation captured later; what is not whole, links
-// and temporary files are left out. Once the import committed (now
-// or before), the directory is removed; a failed import leaves it. A
-// directory that is a link or another user's is neither read nor removed.
-func importFiles(db *dbstore.DB, base string) {
-	dir := path.Join(base, dirName)
-	st, err := os.Lstat(dir)
-	if err != nil || !st.IsDir() {
-		return
-	}
-	if sys, ok := st.Sys().(*syscall.Stat_t); !ok || int(sys.Uid) != os.Getuid() {
-		return
-	}
-	_, err = db.Import(context.Background(), feature, "files", func(tx *sql.Tx) error {
-		ents, err := readDirNames(dir)
-		if err != nil {
-			return err
-		}
-		for _, name := range ents {
-			addr, prev, ext, ok := parseName(name)
-			if !ok || ext != ".json" {
-				continue
-			}
-			m := readMeta(dir, addr, prev)
-			if m == nil {
-				continue
-			}
-			data, err := readRegular(path.Join(dir, fileName(addr, prev, ".vt")), agentproto.HistoryMaxBytes)
-			if err != nil || int64(len(data)) != m.Bytes {
-				continue
-			}
-			// A generation the database has already, captured later (after
-			// an import that failed), stays.
-			if _, err := tx.Exec(`INSERT INTO history_snapshots (terminal, prev, pid, at, lines, cols, grid_rows, bytes, hash, days, restored, data)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT (terminal, prev) DO UPDATE SET pid = excluded.pid, at = excluded.at, lines = excluded.lines,
-					cols = excluded.cols, grid_rows = excluded.grid_rows, bytes = excluded.bytes, hash = excluded.hash,
-					days = excluded.days, restored = excluded.restored, data = excluded.data
-				WHERE excluded.at > history_snapshots.at`,
-				addr, prev, m.PID, m.At, m.Lines, m.Cols, m.Rows, m.Bytes, m.Hash, m.Days, m.Restored, data); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return
-	}
-	os.RemoveAll(dir)
-}
-
-// readDirNames lists a directory's names (at most maxEntries), sorted.
-func readDirNames(dir string) ([]string, error) {
-	d, err := os.Open(dir)
-	if err != nil {
-		return nil, err
-	}
-	defer d.Close()
-	names, err := d.Readdirnames(maxEntries)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
-// fileName is a former generation's file: ext is ".vt" or ".json".
-func fileName(addr string, prev bool, ext string) string {
-	if prev {
-		return addr + ".prev" + ext
-	}
-	return addr + ext
-}
-
-// parseName tells which former generation's file name is: its address,
-// whether it is the previous generation's and its extension; ok false for
-// a name of no generation.
-func parseName(name string) (addr string, prev bool, ext string, ok bool) {
-	for _, e := range []string{".json", ".vt"} {
-		if base, found := strings.CutSuffix(name, e); found {
-			addr, prev = strings.CutSuffix(base, ".prev")
-			return addr, prev, e, agentproto.ValidHistoryTerminal(addr)
-		}
-	}
-	return "", false, "", false
-}
-
-// readMeta reads the .json of a former generation whose files are whole,
-// nil otherwise.
-func readMeta(dir, addr string, prev bool) *meta {
-	b, err := readRegular(path.Join(dir, fileName(addr, prev, ".json")), maxMeta)
-	if err != nil {
-		return nil
-	}
-	var m meta
-	if json.Unmarshal(b, &m) != nil || m.Terminal != addr || !m.valid() {
-		return nil
-	}
-	st, err := os.Lstat(path.Join(dir, fileName(addr, prev, ".vt")))
-	if err != nil || !st.Mode().IsRegular() || st.Size() != m.Bytes {
-		return nil
-	}
-	return &m
-}
-
-// readRegular reads a regular file of at most max bytes, without following
-// a link and without waiting on a special file.
-func readRegular(p string, max int64) ([]byte, error) {
-	return readFile(p, max, syscall.O_NOFOLLOW)
-}
 
 // readFile reads a regular file of at most max bytes, opened with flags
 // added, without waiting on a special file (O_NONBLOCK: opening a FIFO

@@ -33,19 +33,6 @@ func testModule() Module {
 			{Key: "b.color", Type: TypeColor, Default: "#000000", Section: "b", Order: 2},
 			{Key: "b.palette", Type: TypeList, Item: TypeColor, Length: 2, Default: []string{"#000000", "#ffffff"}, Section: "b", Order: 3},
 		},
-		Migrations: []Migration{
-			{From: "old-mode", To: "a.mode", Convert: Renamed},
-			{From: "gui", To: "b.on", Convert: func(v any) (any, bool) {
-				switch v {
-				case "on":
-					return true, true
-				case "off":
-					return false, true
-				}
-				return nil, false
-			}},
-			{From: "desktop-key"},
-		},
 	}
 }
 
@@ -225,47 +212,6 @@ func TestValidation(t *testing.T) {
 	s.RegisterFlags(fs)
 	if err := fs.Parse([]string{"--mode", "z"}); err == nil {
 		t.Error("invalid flag value accepted")
-	}
-}
-
-// The file of earlier versions: flat strings, old key names, machines'
-// values under "machines".
-func TestMigration(t *testing.T) {
-	s, path := newStore(t, `{
-  "old-mode": "y",
-  "gui": "off",
-  "desktop-key": "cmd+t",
-  "future": {"x": 1},
-  "machines": {"m1": {"gui": "on", "other": "kept"}, "m2": {"gui": "maybe"}, "m3": null}
-}`)
-	if s.String("a.mode", "") != "y" || s.Bool("b.on", "") || !s.Bool("b.on", "m1") {
-		t.Errorf("migrated values: mode=%v on=%v m1=%v", s.Get("a.mode"), s.Get("b.on"), s.GetFor("b.on", "m1"))
-	}
-	f := readFile(t, path)
-	want := map[string]any{
-		"a.mode":       "y",
-		"b.on":         false,
-		"future":       map[string]any{"x": 1.0},
-		"[machine:m1]": map[string]any{"b.on": true, "other": "kept"},
-		"[machine:m2]": map[string]any{"gui": "maybe"},
-	}
-	b1, _ := json.Marshal(f)
-	b2, _ := json.Marshal(want)
-	if string(b1) != string(b2) {
-		t.Errorf("migrated file:\n%s\nwant\n%s", b1, b2)
-	}
-	// Global values come first in the file.
-	raw, _ := os.ReadFile(path)
-	if i, j := strings.Index(string(raw), `"b.on"`), strings.Index(string(raw), `"[machine:`); i < 0 || j < i {
-		t.Errorf("order:\n%s", raw)
-	}
-	// Loading the migrated file changes nothing.
-	before, _ := os.ReadFile(path)
-	if _, err := newStoreAt(path); err != nil {
-		t.Fatal(err)
-	}
-	if after, _ := os.ReadFile(path); string(after) != string(before) {
-		t.Errorf("second load rewrote the file")
 	}
 }
 

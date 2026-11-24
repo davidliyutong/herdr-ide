@@ -36,19 +36,13 @@ func CoreDBFile(settingsFile string) string {
 	return store.HostFile(filepath.Dir(settingsFile), base)
 }
 
-// OpenCoreDB opens the core's per-host database beside settingsFile,
-// migrating any legacy un-hosted core[-<instance>].db into it first and
-// cleaning up the legacy file once confirmed complete. nil, nil for "".
+// OpenCoreDB opens the core's per-host database beside settingsFile; nil,
+// nil for "".
 func OpenCoreDB(settingsFile string) (*store.DB, error) {
 	if settingsFile == "" {
 		return nil, nil
 	}
-	target := CoreDBFile(settingsFile)
-	legacy := filepath.Join(filepath.Dir(settingsFile), CoreDBBase(settingsFile))
-	if _, err := store.MigrateLegacy(legacy, target); err != nil {
-		return nil, err
-	}
-	return store.OpenShared(target)
+	return store.OpenShared(CoreDBFile(settingsFile))
 }
 
 // OpenDB opens the core's database for a use of h's plugin, as
@@ -63,8 +57,7 @@ func OpenDB(h Host) (*store.DB, error) {
 }
 
 // PruneCoreDBs removes unused core databases of other hosts (after
-// store.HostFileRetention) and any remaining legacy un-hosted core database
-// (after store.LegacyFileRetention) in the settings directory.
+// store.HostFileRetention) in the settings directory.
 func PruneCoreDBs(h Host) {
 	st := h.Settings()
 	if st == nil || st.Path() == "" {

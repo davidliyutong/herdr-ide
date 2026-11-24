@@ -5,9 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -15,7 +12,6 @@ import (
 	"veldr/internal/plugin"
 	"veldr/internal/store"
 	"veldr/internal/usage"
-	"veldr/internal/userfile"
 )
 
 const (
@@ -179,10 +175,7 @@ func (h *history) first(key, id string, w usage.Window, now time.Time) *[2]float
 // and the alerts fired (usage_alerts). A save writes the rows that
 // changed and removes those gone from memory, once the history was read
 // back (a save before reads it first, and writes nothing while it cannot:
-// what memory lacks would be removed). The file it was kept in before,
-// usage-history[-<instance>].json beside the settings file, is imported
-// once and then removed; one of another version, or that does not parse,
-// is not this version's to import: it stays, unimported.
+// what memory lacks would be removed).
 const historyFeature = "usage"
 
 var historyMigrations = []string{
@@ -236,10 +229,9 @@ func (p *Plugin) openHistoryDB() (db *store.DB, writable bool, err error) {
 }
 
 // loadHistory reads the history and the accounts it kept from the core's
-// database, after importing path, the file it was kept in before, into
-// what memory has (merge: at the start nothing; a read that failed then
-// is tried again by the next save).
-func (p *Plugin) loadHistory(path string) {
+// database into what memory has (merge: at the start nothing; a read that
+// failed then is tried again by the next save).
+func (p *Plugin) loadHistory() {
 	db, writable, err := p.openHistoryDB()
 	if db == nil {
 		if err != nil {
@@ -254,9 +246,6 @@ func (p *Plugin) loadHistory(path string) {
 		return
 	}
 	defer db.Close()
-	if writable {
-		p.importHistoryFile(db, path)
-	}
 	h, err := readHistory(db)
 	if err != nil {
 		p.logf("usage: %v", err)
@@ -326,7 +315,7 @@ func (p *Plugin) ensureMachineCosts() {
 	if loaded {
 		return
 	}
-	if p.historyPath() == "" {
+	if !p.persisted() {
 		p.mu.Lock()
 		p.machineCostsLoaded = true
 		p.mu.Unlock()
@@ -376,7 +365,7 @@ func (p *Plugin) ensureMachineCosts() {
 }
 
 func (p *Plugin) saveMachineCost(mcKey string, e machineCostEntry, evicted []string) {
-	if p.historyPath() == "" {
+	if !p.persisted() {
 		return
 	}
 	p.mu.Lock()
@@ -423,7 +412,7 @@ func (p *Plugin) saveMachineCost(mcKey string, e machineCostEntry, evicted []str
 }
 
 func (p *Plugin) deleteMachineCostsDB(machine string) {
-	if p.historyPath() == "" {
+	if !p.persisted() {
 		return
 	}
 	p.mu.Lock()
@@ -456,48 +445,6 @@ func (p *Plugin) deleteMachineCostsDB(machine string) {
 func (p *Plugin) logf(format string, args ...any) {
 	if h := p.getHost(); h != nil {
 		h.Logger().Printf(format, args...)
-	}
-}
-
-// errOtherHistory: the history file is of another version or does not
-// parse; it stays, and is not recorded as imported.
-var errOtherHistory = errors.New("not a history this version reads: it stays")
-
-// importHistoryFile imports the history file at path into db once, then
-// removes it (an empty one holds nothing); a failed import leaves it for
-// the next start, and so does one of another version or that does not
-// parse (errOtherHistory), for a program that reads it.
-func (p *Plugin) importHistoryFile(db *store.DB, path string) {
-	if path == "" {
-		return
-	}
-	if _, err := os.Lstat(path); err != nil {
-		return
-	}
-	_, err := db.Import(context.Background(), historyFeature, "history", func(tx *sql.Tx) error {
-		b, _, err := userfile.Read(path)
-		if err != nil {
-			return err
-		}
-		if len(b) == 0 {
-			return nil
-		}
-		h := newHistory()
-		if json.Unmarshal(b, h) != nil || h.Version != historyVersion {
-			return errOtherHistory
-		}
-		rows, err := h.rows()
-		if err != nil {
-			return err
-		}
-		return writeHistory(tx, rows)
-	})
-	if err != nil {
-		p.logf("usage: importing %s: %v", filepath.Base(path), err)
-		return
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		p.logf("usage: %v", err)
 	}
 }
 
@@ -674,8 +621,7 @@ func keysOf(tx *sql.Tx, query string) ([][2]string, error) {
 // without a settings file), once it was read back from there (loadHistory,
 // tried again here while it was not).
 func (p *Plugin) save() {
-	path := p.historyPath()
-	if path == "" {
+	if !p.persisted() {
 		return
 	}
 	p.saveMu.Lock()
@@ -684,7 +630,7 @@ func (p *Plugin) save() {
 	loaded := p.history.loaded
 	p.mu.Unlock()
 	if !loaded {
-		p.loadHistory(path)
+		p.loadHistory()
 		p.mu.Lock()
 		loaded = p.history.loaded
 		p.mu.Unlock()

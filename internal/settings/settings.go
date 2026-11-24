@@ -25,7 +25,6 @@ import (
 	"flag"
 	"fmt"
 	"math"
-	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -124,27 +123,10 @@ type Def struct {
 // Range returns pointers for Def.Min and Def.Max.
 func Range(min, max float64) (*float64, *float64) { return &min, &max }
 
-// Migration moves a value of an older file format: From is the old key,
-// To the new one ("" drops it; From itself when a value of an older type
-// changes in place), Convert turns the old value (decoded JSON) into a new
-// one (false: the value is not of the older format and stays as it is).
-type Migration struct {
-	From, To string
-	Convert  func(any) (any, bool)
-}
-
-// Renamed is the Convert of a string setting that only changed its key.
-func Renamed(v any) (any, bool) {
-	s, ok := v.(string)
-	return s, ok
-}
-
-// Module is what a package registers: its sections, settings and the
-// migrations of its old keys.
+// Module is what a package registers: its sections and settings.
 type Module struct {
-	Sections   []Section
-	Defs       []Def
-	Migrations []Migration
+	Sections []Section
+	Defs     []Def
 }
 
 // Problem is something wrong in the settings file: a key no definition
@@ -344,10 +326,9 @@ func validMachine(id string) bool {
 
 // Store holds the definitions and the current values.
 type Store struct {
-	sections   []Section
-	defs       []Def
-	byKey      map[string]int
-	migrations []Migration
+	sections []Section
+	defs     []Def
+	byKey    map[string]int
 
 	mu   sync.Mutex
 	path string
@@ -379,7 +360,6 @@ func New(path string, modules ...Module) *Store {
 			sectionIDs[sec.ID] = true
 			s.sections = append(s.sections, sec)
 		}
-		s.migrations = append(s.migrations, m.Migrations...)
 	}
 	sort.SliceStable(s.sections, func(i, j int) bool { return s.sections[i].Order < s.sections[j].Order })
 	for _, m := range modules {
@@ -450,24 +430,15 @@ func (s *Store) def(key string) (Def, bool) {
 	return s.defs[i], true
 }
 
-// Load reads the settings file (a missing file is empty) and migrates an
-// older format once, rewriting the file. A file that is not JSON is
-// reported as a problem and the defaults apply.
+// Load reads the settings file (a missing file is empty). A file that is
+// not JSON is reported as a problem and the defaults apply.
 func (s *Store) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.path == "" {
 		return nil
 	}
-	if err := s.read(); err != nil {
-		return err
-	}
-	if migrated, ok := s.migrate(s.raw); ok {
-		if err := s.write(migrated); err != nil {
-			return fmt.Errorf("migrating %s: %w", s.path, err)
-		}
-	}
-	return nil
+	return s.read()
 }
 
 // read loads the file into raw and the values; s.mu is held.
@@ -562,89 +533,6 @@ func sortedKeys[V any](m map[string]V) []string {
 	return out
 }
 
-// migrate returns raw in the current format when it holds entries of an
-// older one: string values under old keys, and machines' values under
-// "machines": {"<id>": {...}}.
-func (s *Store) migrate(raw map[string]json.RawMessage) (map[string]json.RawMessage, bool) {
-	changed := false
-	// convert returns where an entry goes: its new key ("" when it is
-	// dropped) and value; handled is false for entries of the current format.
-	convert := func(k string, v json.RawMessage) (key string, val json.RawMessage, handled bool) {
-		i := slices.IndexFunc(s.migrations, func(m Migration) bool { return m.From == k })
-		if i < 0 {
-			return k, v, false
-		}
-		m := s.migrations[i]
-		if m.To == "" {
-			changed = true
-			return "", nil, true
-		}
-		var old any
-		if json.Unmarshal(v, &old) != nil {
-			return k, v, false
-		}
-		nv, ok := m.Convert(old)
-		b, err := json.Marshal(nv)
-		// A value Convert does not take, or one a migration in place leaves
-		// as it was, is of the current format.
-		if !ok || err != nil || m.To == k && reflect.DeepEqual(old, decode(b)) {
-			return k, v, false
-		}
-		changed = true
-		return m.To, b, true
-	}
-	// place adds the entries to dst: those of the current format win over
-	// migrated ones.
-	place := func(dst, entries map[string]json.RawMessage) {
-		var moved [][2]any
-		for _, k := range sortedKeys(entries) {
-			nk, nv, handled := convert(k, entries[k])
-			switch {
-			case !handled:
-				dst[k] = entries[k]
-			case nk != "":
-				moved = append(moved, [2]any{nk, nv})
-			}
-		}
-		for _, m := range moved {
-			if _, ok := dst[m[0].(string)]; !ok {
-				dst[m[0].(string)] = m[1].(json.RawMessage)
-			}
-		}
-	}
-	out := map[string]json.RawMessage{}
-	top := map[string]json.RawMessage{}
-	for k, v := range raw {
-		if k != "machines" {
-			top[k] = v
-		}
-	}
-	place(out, top)
-	var machines map[string]map[string]json.RawMessage
-	if v, ok := raw["machines"]; ok {
-		if json.Unmarshal(v, &machines) != nil {
-			out["machines"] = v
-		} else {
-			changed = true
-		}
-	}
-	for _, id := range sortedKeys(machines) {
-		if machines[id] == nil || !validMachine(id) {
-			continue
-		}
-		own := map[string]json.RawMessage{}
-		if prev, ok := out[machineKey(id)]; ok && json.Unmarshal(prev, &own) != nil {
-			continue
-		}
-		place(own, machines[id])
-		if len(own) > 0 {
-			b, _ := json.Marshal(own)
-			out[machineKey(id)] = b
-		}
-	}
-	return out, changed
-}
-
 // write saves raw as the file and makes it current; s.mu is held.
 func (s *Store) write(raw map[string]json.RawMessage) error {
 	if s.path != "" {
@@ -711,9 +599,6 @@ func (s *Store) Reload() {
 	if err := s.read(); err != nil {
 		s.mu.Unlock()
 		return
-	}
-	if migrated, ok := s.migrate(s.raw); ok {
-		s.write(migrated)
 	}
 	changes := diff(before, s.effective())
 	notify := len(changes) > 0 || !slices.Equal(problems, s.problems)

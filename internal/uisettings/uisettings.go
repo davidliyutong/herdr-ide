@@ -7,7 +7,6 @@ package uisettings
 
 import (
 	"slices"
-	"strings"
 
 	"veldr/internal/agentkinds"
 	"veldr/internal/settings"
@@ -187,34 +186,7 @@ func defs() []settings.Def {
 	return out
 }
 
-// mutedList turns the comma-separated silent agents of earlier versions
-// into a list.
-func mutedList(v any) (any, bool) {
-	s, ok := v.(string)
-	if !ok {
-		return nil, false
-	}
-	out := []string{}
-	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
-		out = append(out, strings.ToLower(f))
-	}
-	return out, true
-}
-
-// scrollbackInRange brings a scrollback above MaxScrollback, which earlier
-// versions accepted, down to it.
-func scrollbackInRange(v any) (any, bool) {
-	n, ok := v.(float64)
-	if !ok {
-		return nil, false
-	}
-	return min(n, MaxScrollback), true
-}
-
-// Module is the user interfaces' sections and settings, with the values of
-// earlier versions changed in place: the silent agents were a string, the
-// scrollback went up to a million lines; the VS Code panel's place
-// (layout.panelPosition) went with the panel, VS Code being a pane.
+// Module is the user interfaces' sections and settings.
 var Module = settings.Module{
 	Sections: []settings.Section{
 		{ID: "appearance", Order: 10},
@@ -225,9 +197,4 @@ var Module = settings.Module{
 		{ID: "performance", Order: 90, Advanced: true},
 	},
 	Defs: defs(),
-	Migrations: []settings.Migration{
-		{From: MutedAgents, To: MutedAgents, Convert: mutedList},
-		{From: Scrollback, To: Scrollback, Convert: scrollbackInRange},
-		{From: "layout.panelPosition"},
-	},
 }

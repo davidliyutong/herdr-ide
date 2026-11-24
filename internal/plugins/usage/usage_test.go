@@ -258,10 +258,6 @@ func TestHistory(t *testing.T) {
 		now = now.Add(time.Hour)
 		pct += 5
 	}
-	path := p.historyPath()
-	if filepath.Base(path) != "usage-history-dev.json" {
-		t.Fatalf("history path %s", path)
-	}
 	// Kept in the core's database beside the settings file.
 	st, err := os.Stat(plugin.CoreDBFile(p.settings().Path()))
 	if err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
@@ -280,7 +276,7 @@ func TestHistory(t *testing.T) {
 	// from it).
 	q, _ := testPlugin(t, &now, nil, nil)
 	q.host = p.host
-	q.loadHistory(path)
+	q.loadHistory()
 	s2 := q.Snapshot()
 	if len(s2.Accounts) != 1 || len(s2.Accounts[0].Windows) != 1 || *s2.Accounts[0].Windows[0].Pace != *w.Pace {
 		t.Errorf("reloaded %+v", s2.Accounts)
@@ -602,7 +598,11 @@ func TestCostSharedScansAndCache(t *testing.T) {
 		<-block
 		return nil
 	}
-	go p.cost(context.Background(), 1, 0)
+	bg := make(chan struct{})
+	go func() {
+		defer close(bg)
+		p.cost(context.Background(), 1, 0)
+	}()
 	for {
 		p.mu.Lock()
 		n := len(p.costFlights)
@@ -618,6 +618,8 @@ func TestCostSharedScansAndCache(t *testing.T) {
 		t.Errorf("cancelled request %+v", rep.Machines)
 	}
 	close(block)
+	// The scan ends before the test's directory goes.
+	<-bg
 }
 
 // A machine that connects after the first poll is asked at the next tick,

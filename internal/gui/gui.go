@@ -26,19 +26,8 @@ const (
 	GPUAll    = "all"
 )
 
-// onOff reads the on/off values of earlier versions.
-func onOff(v any) (any, bool) {
-	switch v {
-	case "on":
-		return true, true
-	case "off":
-		return false, true
-	}
-	return nil, false
-}
-
 // Settings are the GUI settings that can be changed at runtime, also per
-// remote machine, with the flags and file keys of earlier versions.
+// remote machine.
 var Settings = settings.Module{
 	Sections: []settings.Section{{ID: "gui", Order: 70, Advanced: true}},
 	Defs: []settings.Def{
@@ -69,11 +58,6 @@ var Settings = settings.Module{
 			Flag:  "gui-video",
 			Usage: "send program windows that keep changing as video (H.264 on NVIDIA, Intel or AMD GPUs, else VP8 on the CPU) to browsers that decode it, encoded on the machine by the encoder the core brings; pictures otherwise (false: always pictures); also per machine in the UI",
 		},
-	},
-	Migrations: []settings.Migration{
-		{From: "gui", To: SettingGUI, Convert: onOff},
-		{From: "gui-gpu", To: SettingGPU, Convert: settings.Renamed},
-		{From: "gui-video", To: SettingVideo, Convert: onOff},
 	},
 }
 

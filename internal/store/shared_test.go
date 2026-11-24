@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"testing"
 )
 
@@ -185,76 +184,12 @@ func TestLayoutNewer(t *testing.T) {
 	if _, err := ro.Exec("INSERT INTO a_t VALUES (8)"); err == nil {
 		t.Error("written")
 	}
-	if _, err := ro.Import(context.Background(), "a", "files", func(*sql.Tx) error { return nil }); !errors.Is(err, ErrNewer) {
-		t.Errorf("Import %v", err)
-	}
 	// Another handle of the same pool is read-only too.
 	ro2, err := OpenShared(path)
 	if !errors.Is(err, ErrNewer) || !ro2.ReadOnly() {
 		t.Errorf("second handle %v", err)
 	}
 	ro2.Close()
-}
-
-// An import runs once per database, also when two run at once; one that
-// fails leaves nothing and runs again.
-func TestImportOnce(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "machine.db")
-	db := openShared(t, path)
-	migrateT(t, db, "a", "CREATE TABLE a_t (n INTEGER)")
-	ctx := context.Background()
-	fail := errors.New("unreadable")
-	ran, err := db.Import(ctx, "a", "files", func(tx *sql.Tx) error {
-		tx.Exec("INSERT INTO a_t VALUES (1)")
-		return fail
-	})
-	if ran || !errors.Is(err, fail) {
-		t.Fatalf("failed import: %v %v", ran, err)
-	}
-	if done, _ := db.Imported("a", "files"); done {
-		t.Fatal("a failed import recorded")
-	}
-	var n int
-	db.QueryRow("SELECT count(*) FROM a_t").Scan(&n)
-	if n != 0 {
-		t.Fatal("a failed import left rows")
-	}
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	runs := 0
-	for range 4 {
-		wg.Go(func() {
-			ran, err := db.Import(ctx, "a", "files", func(tx *sql.Tx) error {
-				_, err := tx.Exec("INSERT INTO a_t VALUES (1)")
-				return err
-			})
-			if err != nil {
-				t.Error(err)
-			}
-			if ran {
-				mu.Lock()
-				runs++
-				mu.Unlock()
-			}
-		})
-	}
-	wg.Wait()
-	db.QueryRow("SELECT count(*) FROM a_t").Scan(&n)
-	if runs != 1 || n != 1 {
-		t.Errorf("%d runs, %d rows", runs, n)
-	}
-	if done, _ := db.Imported("a", "files"); !done {
-		t.Error("not recorded")
-	}
-	if done, _ := db.Imported("b", "files"); done {
-		t.Error("recorded for another feature")
-	}
-	// A database opened again knows it too.
-	db.Close()
-	db = openShared(t, path)
-	if ran, err := db.Import(ctx, "a", "files", func(*sql.Tx) error { t.Error("ran again"); return nil }); ran || err != nil {
-		t.Errorf("again: %v %v", ran, err)
-	}
 }
 
 // Durable commits and leaves its connection as the others are; Update
@@ -304,9 +239,6 @@ func TestNotShared(t *testing.T) {
 	db := openT(t, filepath.Join(t.TempDir(), "chat.db"), v1)
 	if _, err := db.Migrate("a", nil); !errors.Is(err, ErrNotShared) {
 		t.Errorf("Migrate %v", err)
-	}
-	if _, err := db.Import(context.Background(), "a", "x", nil); !errors.Is(err, ErrNotShared) {
-		t.Errorf("Import %v", err)
 	}
 }
 

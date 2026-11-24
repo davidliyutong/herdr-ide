@@ -59,14 +59,6 @@ executable, `HC_*` variables, state directory).
   (`~/.<new>` on machines, its own terminal cores, configuration
   directory, browser storage and desktop app id); what the previous name
   left is not read, moved or removed.
-- **State moved into SQLite** ([38](38-sqlite-state.md)): a feature that
-  kept its state in a file of its own imports it once into its database,
-  in a transaction recorded in `store_imports`, and removes the file only
-  after that committed; a failed import changes nothing and is tried
-  again. The terminal history's `history/` and the cost cache's
-  `usage/cost-cache.json` go into the machine's `machine-<host>.db`; the
-  vault's access log and the usage history into the core's
-  `core[-<instance>].db`.
 
 ## Alternatives considered
 
@@ -88,10 +80,5 @@ executable, `HC_*` variables, state directory).
 
 - `internal/brand/brand_test.go` (`TestBrandMirrorsAgree`).
 - The brand step of `scripts/check.sh`.
-- The imports: `TestImportFiles`, `TestImportFailureLeavesFiles`
-  (`internal/agent/plugin/history`), `TestAccessLogImport`
-  (`internal/plugins/vault`), `TestHistoryImport` (`internal/plugins/usage`),
-  `TestCostCacheImport` (`internal/usage`), `TestImportOnce`
-  (`internal/store`).
 - The rename script was run on a copy of the repository: no old name
   remained, and tests and checks passed.

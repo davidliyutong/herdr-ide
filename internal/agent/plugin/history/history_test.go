@@ -104,7 +104,28 @@ func mustCapture(t *testing.T, env *plugin.Env, p agentproto.HistoryCaptureParam
 // historyPath names a generation as its file did before the database:
 // <address>.vt for its bytes, <address>.prev.vt for the previous one's,
 // .json for what describes it.
-func historyPath(env *plugin.Env, name string) string { return path.Join(env.Base, dirName, name) }
+func historyPath(env *plugin.Env, name string) string { return path.Join(env.Base, "history", name) }
+
+// fileName names a generation for the tests: ext is ".vt" or ".json".
+func fileName(addr string, prev bool, ext string) string {
+	if prev {
+		return addr + ".prev" + ext
+	}
+	return addr + ext
+}
+
+// parseName reads a generation's name as the tests write it: its address,
+// whether it is the previous generation, and the part asked for (.json
+// or .vt).
+func parseName(name string) (addr string, prev bool, ext string, ok bool) {
+	for _, e := range []string{".json", ".vt"} {
+		if base, found := strings.CutSuffix(name, e); found {
+			addr, prev = strings.CutSuffix(base, ".prev")
+			return addr, prev, e, agentproto.ValidHistoryTerminal(addr)
+		}
+	}
+	return "", false, "", false
+}
 
 // slurp reads from the database what the generation's file named p held:
 // its bytes (.vt), or what describes it as JSON (.json).
@@ -981,119 +1002,6 @@ func TestDatabasePrivate(t *testing.T) {
 	}
 	if _, err := os.Lstat(secret); err == nil {
 		t.Error("the link's target was created")
-	}
-}
-
-// writeFormer writes a generation as the agent wrote it before the
-// database, in <base>/history.
-func writeFormer(t *testing.T, base, addr string, prev bool, m meta, data []byte) {
-	t.Helper()
-	dir := path.Join(base, dirName)
-	os.MkdirAll(dir, 0o700)
-	m.Terminal, m.Bytes = addr, int64(len(data))
-	b, _ := json.Marshal(m)
-	if err := os.WriteFile(path.Join(dir, fileName(addr, prev, ".vt")), data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	os.WriteFile(path.Join(dir, fileName(addr, prev, ".json")), b, 0o600)
-}
-
-// The snapshots kept in files before the database are imported once, at
-// the first open (a list here), and their directory goes: every whole
-// generation, with what describes it; links (never followed), generations
-// that are not whole, temporary files and the lock are left out. A
-// directory that comes back is removed, not imported again.
-func TestImportFiles(t *testing.T) {
-	env, f := testEnv(t)
-	fast(t)
-	at := time.Now().Add(-time.Hour).UnixMilli()
-	snap := func(pid int) meta {
-		return meta{Hash: "h", Days: 7, Restored: pid == 2, HistorySnapshot: agentproto.HistorySnapshot{PID: pid, At: at + int64(pid), Lines: 100, Cols: 80, Rows: 24}}
-	}
-	writeFormer(t, env.Base, "t1", false, snap(2), []byte("current of t1"))
-	writeFormer(t, env.Base, "t1", true, snap(1), []byte("previous of t1"))
-	writeFormer(t, env.Base, "t2", false, snap(3), []byte("t2"))
-	dir := path.Join(env.Base, dirName)
-	// t2's bytes are not what its description says.
-	os.WriteFile(path.Join(dir, "t2.vt"), []byte("short"), 0o600)
-	// t3's bytes are a link to a file of the user's.
-	secret := path.Join(t.TempDir(), "secret")
-	os.WriteFile(secret, []byte("secret"), 0o600)
-	writeFormer(t, env.Base, "t3", false, snap(4), []byte("secret"))
-	os.Remove(path.Join(dir, "t3.vt"))
-	os.Symlink(secret, path.Join(dir, "t3.vt"))
-	// A .vt alone, a temporary file and the lock.
-	os.WriteFile(path.Join(dir, "t4.prev.vt"), []byte("x"), 0o600)
-	os.WriteFile(path.Join(dir, ".t1.vt.aa.tmp"), []byte("x"), 0o600)
-	os.WriteFile(path.Join(dir, ".lock"), nil, 0o600)
-
-	var l agentproto.HistoryListResult
-	if rep := call(t, env, "list", nil, &l); !rep.OK || len(l.Terminals) != 1 {
-		t.Fatalf("list %+v %+v", rep, l)
-	}
-	e := l.Terminals[0]
-	if e.Terminal != "t1" || e.PID != 2 || !e.Restored || e.Bytes != 13 || e.Previous == nil || e.Previous.PID != 1 || e.Previous.At != at+1 {
-		t.Fatalf("imported %+v %+v", e, e.Previous)
-	}
-	if got := string(slurp(t, historyPath(env, "t1.prev.vt"))); got != "previous of t1" {
-		t.Fatalf("bytes %q", got)
-	}
-	if m := metaOf(t, env, "t1", false); m.Hash != "h" || m.Days != 7 {
-		t.Errorf("meta %+v", m)
-	}
-	if _, err := os.Lstat(dir); err == nil {
-		t.Fatal("the directory stayed")
-	}
-	if b, err := os.ReadFile(secret); err != nil || string(b) != "secret" {
-		t.Fatal("the link's target changed")
-	}
-	// A capture goes on from what was imported: t1's program is still 2.
-	f.set(live("t1", 2))
-	f.setText("t1", "a")
-	f.setPaint("t1", painter(10, 10, "a"))
-	if res := mustCapture(t, env, params); res.Captured != 1 || metaOf(t, env, "t1", true).PID != 1 {
-		t.Fatalf("capture after the import %+v", res)
-	}
-	// The directory written again (an agent of an older version): it goes,
-	// nothing is imported again.
-	writeFormer(t, env.Base, "t9", false, snap(9), []byte("t9"))
-	if call(t, env, "list", nil, &l); len(l.Terminals) != 1 {
-		t.Fatalf("imported again %+v", l.Terminals)
-	}
-	if _, err := os.Lstat(dir); err == nil {
-		t.Fatal("the directory written again stayed")
-	}
-}
-
-// An import that fails changes nothing and leaves the files; the next open
-// imports them. A directory that is a link is neither read nor removed.
-func TestImportFailureLeavesFiles(t *testing.T) {
-	env, _ := testEnv(t)
-	writeFormer(t, env.Base, "t1", false, meta{HistorySnapshot: agentproto.HistorySnapshot{PID: 1, At: time.Now().UnixMilli()}}, []byte("t1"))
-	dir := path.Join(env.Base, dirName)
-	os.Chmod(dir, 0o300) // not readable: its names cannot be listed
-	var l agentproto.HistoryListResult
-	call(t, env, "list", nil, &l)
-	os.Chmod(dir, 0o700)
-	if len(l.Terminals) != 0 {
-		t.Fatalf("listed %+v", l.Terminals)
-	}
-	if _, err := os.Lstat(path.Join(dir, "t1.vt")); err != nil {
-		t.Fatal("a failed import removed the files")
-	}
-	if call(t, env, "list", nil, &l); len(l.Terminals) != 1 {
-		t.Fatalf("not imported at the next open: %+v", l.Terminals)
-	}
-
-	other, _ := testEnv(t)
-	elsewhere := t.TempDir()
-	writeFormer(t, elsewhere, "t1", false, meta{HistorySnapshot: agentproto.HistorySnapshot{PID: 1, At: time.Now().UnixMilli()}}, []byte("t1"))
-	os.Symlink(path.Join(elsewhere, dirName), path.Join(other.Base, dirName))
-	if call(t, other, "list", nil, &l); len(l.Terminals) != 0 {
-		t.Fatalf("read through a link: %+v", l.Terminals)
-	}
-	if _, err := os.Lstat(path.Join(elsewhere, dirName, "t1.vt")); err != nil {
-		t.Fatal("removed through a link")
 	}
 }
 
@@ -2078,33 +1986,6 @@ func TestAdoptFailureKeepsSource(t *testing.T) {
 	}
 	if metaOf(t, env, "t1", false) == nil {
 		t.Fatal("a failed adoption removed the source")
-	}
-}
-
-// An import that runs again (one before failed) leaves a generation the
-// database has captured later: the file's older one does not replace it.
-func TestImportKeepsNewer(t *testing.T) {
-	env, _ := testEnv(t)
-	db, err := openDB(env.Base) // no files yet: nothing imported, nothing recorded
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UnixMilli()
-	if _, err := db.Exec(`INSERT INTO history_snapshots (terminal, prev, pid, at, lines, cols, grid_rows, bytes, hash, days, restored, data)
-		VALUES ('t1', 0, 2, ?, 10, 80, 24, 5, 'h', 7, 0, 'newer')`, now); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
-	writeFormer(t, env.Base, "t1", false, meta{HistorySnapshot: agentproto.HistorySnapshot{PID: 1, At: now - 60_000}}, []byte("older"))
-	writeFormer(t, env.Base, "t1", true, meta{HistorySnapshot: agentproto.HistorySnapshot{PID: 0, At: now - 120_000}}, []byte("oldest"))
-	var l agentproto.HistoryListResult
-	call(t, env, "list", nil, &l)
-	if len(l.Terminals) != 1 || l.Terminals[0].PID != 2 || l.Terminals[0].Previous == nil || l.Terminals[0].Previous.At != now-120_000 {
-		t.Fatalf("listed %+v", l.Terminals)
-	}
-	var d agentproto.HistoryData
-	if call(t, env, "read", agentproto.HistoryReadParams{Terminal: "t1", Generation: agentproto.HistoryCurrent}, &d); string(d.Data) != "newer" {
-		t.Fatalf("current %q", d.Data)
 	}
 }
 

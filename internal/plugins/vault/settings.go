@@ -25,9 +25,6 @@ const (
 	// that an authenticator may unlock the vault; then only the passphrase
 	// does, once.
 	SettingPassphraseDays = "vault.passphraseDays"
-	// settingPassphraseHours is the setting it replaced (the hours the
-	// core held the key), which settings files drop.
-	settingPassphraseHours = "vault.passphraseHours"
 	// SettingRunTimeout and SettingRunMaxTimeout: run_with_env's default
 	// and longest timeout, in seconds; SettingRunOutput: the KiB of
 	// output it returns.
@@ -70,7 +67,6 @@ var Settings = func() settings.Module {
 			num(SettingRunMaxTimeout, DefaultRunMaxTimeout.Seconds(), 5, 3600, "vaultRun", 41),
 			num(SettingRunOutput, DefaultRunOutput/1024, 4, 1024, "vaultRun", 42),
 		},
-		Migrations: []settings.Migration{{From: settingPassphraseHours}},
 	}
 }()
 

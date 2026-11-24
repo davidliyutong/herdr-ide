@@ -85,7 +85,6 @@ cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
 
 也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./veldr`。
 SSH 机器用侧栏的「添加机器…」添加。
-从使用 herdr 绘制窗格的旧版本升级时，设置、快捷键和机器会在第一次启动时迁移过来，终端仍留在 herdr 里（见[迁移说明](docs/deployment.md#migrating-from-versions-that-used-herdr)）。
 
 打开 <http://127.0.0.1:7780>。
 状态栏可以打开命令面板和快捷键列表。

@@ -250,12 +250,3 @@ var Commands = func() []Command {
 	)
 	return out
 }()
-
-// Renamed are the commands of earlier versions that another one took the
-// place of: the user's rules naming the old id apply to the new one.
-var Renamed = map[string]string{
-	// The VS Code panel's toggle: VS Code is a pane now, opened as a tab.
-	"view.toggleCode": "code.open",
-	// Renaming a workspace became editing its name and directory.
-	"workspace.rename": "workspace.edit",
-}

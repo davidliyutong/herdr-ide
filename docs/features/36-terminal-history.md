@@ -78,8 +78,7 @@ table `history_snapshots`, one row per generation with its description
 and bytes. Each change is its own durable transaction, so readers take no
 lock. Writers hold a lease (`history_lease`) shared by the agents of an
 instance; it ends when the writer closes, its process is gone, or a minute
-after its last renewal. Snapshots kept earlier as files in
-`<data dir>/history/` are imported once and the directory removed.
+after its last renewal.
 
 | Limit | Setting (per machine) | Default | Hard bounds |
 | --- | --- | --- | --- |
@@ -227,8 +226,7 @@ refused read-only and audited. See [SECURITY.md](../../SECURITY.md)
   (`fakecore_test.go`): capture, paint end, resize, dropped and oversized
   paints, rotation, limits (`TestLimitsClamped`, `TestMaxTerminals`,
   `TestMaxTotalBytes`, `TestAge`), the database (`TestDatabasePrivate`,
-  `TestPerHostDatabase`, `TestNewerVersion`), the file import
-  (`TestImportFiles`), the lease (`TestTwoAgentsCapture`, `TestLease`),
+  `TestPerHostDatabase`, `TestNewerVersion`), the lease (`TestTwoAgentsCapture`, `TestLease`),
   failures that change nothing, adoption (`TestAdopt`,
   `TestAdoptRefused`, `TestVanishedGrace`). `hidden_test.go`: the chat
   host's terminal is never captured.

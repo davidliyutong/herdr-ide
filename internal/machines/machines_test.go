@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,87 +18,13 @@ import (
 	"veldr/internal/transport"
 )
 
-// herdrCatalog writes herdr's catalog under a private XDG_STATE_HOME.
-func herdrCatalog(t *testing.T, json string) {
-	state := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", state)
-	client := filepath.Join(state, "herdr", "client")
-	os.MkdirAll(client, 0o755)
-	os.WriteFile(filepath.Join(client, "endpoints.json"), []byte(json), 0o644)
-}
-
-const twoSaved = `{"version":1,"selected_profile":"a1","ssh":[
-	{"id":"a1","label":"gpu","target":"gpu-host","session":"work","enabled":true},
-	{"id":"b2","label":"","target":"robot","session":"","enabled":false}]}`
-
-// Without a machines file, herdr's saved machines are imported once and
-// written; afterwards herdr's catalog is not read again.
-func TestRegistryImportsHerdrOnce(t *testing.T) {
-	herdrCatalog(t, twoSaved)
-	path := filepath.Join(t.TempDir(), "conf", "machines-dev.json")
-	r, err := OpenRegistry(path, SavedSpecs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := r.Specs()
-	if len(got) != 2 || got[0] != (Spec{ID: "a1", Label: "gpu", Kind: KindSSH, Target: "gpu-host", Enabled: true}) ||
-		got[1] != (Spec{ID: "b2", Label: "robot", Kind: KindSSH, Target: "robot"}) {
-		t.Fatalf("imported %+v", got)
-	}
-	st, err := os.Stat(path)
-	if err != nil || runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
-		t.Fatalf("file: %v %v", st, err)
-	}
-	b, _ := os.ReadFile(path)
-	if strings.Contains(string(b), "session") || !strings.Contains(string(b), `"version": 1`) {
-		t.Fatalf("stored: %s", b)
-	}
-	// herdr's catalog changes: the core keeps its own machines.
-	herdrCatalog(t, `{"version":1,"ssh":[{"id":"c3","label":"new","target":"new","enabled":true}]}`)
-	r, err = OpenRegistry(path, SavedSpecs)
-	if err != nil || len(r.Specs()) != 2 || r.Specs()[0].ID != "a1" {
-		t.Fatalf("reopened: %+v %v", r.Specs(), err)
-	}
-	// An empty import is written too, and not repeated either.
-	herdrCatalog(t, `{"version":1,"ssh":[]}`)
-	empty := filepath.Join(t.TempDir(), "machines.json")
-	if r, err := OpenRegistry(empty, SavedSpecs); err != nil || len(r.Specs()) != 0 {
-		t.Fatalf("empty: %+v %v", r.Specs(), err)
-	}
-	herdrCatalog(t, twoSaved)
-	if r, _ := OpenRegistry(empty, SavedSpecs); len(r.Specs()) != 0 {
-		t.Fatalf("imported again: %+v", r.Specs())
-	}
-}
-
-// The file an earlier version kept (the machines enabled or disabled over
-// herdr's catalog) is migrated: herdr's machines are imported with those
-// choices, the local machine's included.
-func TestRegistryMigratesEnabledChoices(t *testing.T) {
-	herdrCatalog(t, twoSaved)
-	path := filepath.Join(t.TempDir(), "machines.json")
-	os.WriteFile(path, []byte(`{"enabled":{"a1":false,"b2":true,"local":false,"gone":true}}`), 0o600)
-	r, err := OpenRegistry(path, SavedSpecs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := r.Specs()
-	if len(got) != 3 || got[0].Enabled || !got[1].Enabled || got[2] != (Spec{ID: LocalID, Kind: KindLocal}) {
-		t.Fatalf("migrated %+v", got)
-	}
-	specs := LoadSpecs(got, nil)
-	if specs[0].ID != LocalID || specs[0].Enabled || len(specs) != 3 {
-		t.Fatalf("specs %+v", specs)
-	}
-}
-
-// Records are written at once and read back; a broken file is reported and
-// left alone (the registry then keeps changes in memory); a catalog that
-// cannot be read imports nothing and writes nothing.
+// Records are written at once and read back; a broken file, or one of
+// another kind, is reported and left alone (the registry then keeps
+// changes in memory); without a file there are no machines and none is
+// written.
 func TestRegistryRoundTripAndErrors(t *testing.T) {
-	herdrCatalog(t, `{"version":1,"ssh":[]}`)
 	path := filepath.Join(t.TempDir(), "machines.json")
-	r, err := OpenRegistry(path, SavedSpecs)
+	r, err := OpenRegistry(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,13 +43,13 @@ func TestRegistryRoundTripAndErrors(t *testing.T) {
 	if err := r.Delete("y2"); err != nil {
 		t.Fatal(err)
 	}
-	r, err = OpenRegistry(path, nil)
+	r, err = OpenRegistry(path)
 	if err != nil || len(r.Specs()) != 1 || r.Specs()[0] != (Spec{ID: "x1", Label: "box 2", Kind: KindSSH, Target: "u@box"}) {
 		t.Fatalf("read back %+v %v", r.Specs(), err)
 	}
 
 	os.WriteFile(path, []byte("{"), 0o600)
-	r, err = OpenRegistry(path, SavedSpecs)
+	r, err = OpenRegistry(path)
 	if err == nil {
 		t.Fatal("a broken file was accepted")
 	}
@@ -133,13 +58,16 @@ func TestRegistryRoundTripAndErrors(t *testing.T) {
 		t.Fatalf("the broken file was replaced: %s", b)
 	}
 
-	herdrCatalog(t, "{")
+	os.WriteFile(path, []byte(`{"enabled":{"a1":false}}`), 0o600)
+	if _, err := OpenRegistry(path); err == nil {
+		t.Fatal("a file without machines was accepted")
+	}
 	none := filepath.Join(t.TempDir(), "machines.json")
-	if _, err := OpenRegistry(none, SavedSpecs); err == nil {
-		t.Fatal("an unreadable catalog was imported")
+	if r, err := OpenRegistry(none); err != nil || len(r.Specs()) != 0 {
+		t.Fatalf("no file: %+v %v", r.Specs(), err)
 	}
 	if _, err := os.Stat(none); err == nil {
-		t.Fatal("wrote a file without herdr's machines")
+		t.Fatal("wrote a file for no machines")
 	}
 }
 
@@ -187,22 +115,25 @@ func TestValidTarget(t *testing.T) {
 	}
 }
 
-// A stored record or a machine of herdr's catalog whose target is refused
-// is kept: it is stored, written back with the file's other entries and
-// the fields this version does not know, and listed; new records with
-// such a target are refused.
+// A stored record whose target is refused is kept: it is stored, written
+// back with the file's other entries and the fields this version does not
+// know, and listed; new records with such a target are refused.
 func TestRegistryKeepsInvalidTargets(t *testing.T) {
-	herdrCatalog(t, `{"version":1,"ssh":[{"id":"a1","label":"gpu","target":"gpu-host","enabled":true},
-		{"id":"p1","label":"proxy","target":"-oProxyCommand=touch /tmp/pwned","enabled":true},
-		{"id":"s1","label":"","target":"host;id","enabled":true}]}`)
 	path := filepath.Join(t.TempDir(), "machines.json")
-	r, err := OpenRegistry(path, SavedSpecs)
+	os.WriteFile(path, []byte(`{"version":1,"machines":[
+		{"id":"a1","label":"gpu","kind":"ssh","target":"gpu-host","enabled":true},
+		{"id":"p1","label":"proxy","kind":"ssh","target":"-oProxyCommand=touch /tmp/pwned","enabled":true},
+		{"id":"s1","label":"","kind":"ssh","target":"host;id","enabled":true}]}`), 0o600)
+	r, err := OpenRegistry(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := r.Specs()
 	if len(got) != 3 || got[1].ID != "p1" || got[1].Target != "-oProxyCommand=touch /tmp/pwned" || got[2].Label != "s1" {
-		t.Fatalf("imported %+v", got)
+		t.Fatalf("read %+v", got)
+	}
+	if err := r.Put(got[0]); err != nil {
+		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(path); !strings.Contains(string(b), "ProxyCommand") || !strings.Contains(string(b), "host;id") {
 		t.Fatalf("stored %s", b)
@@ -230,7 +161,7 @@ func TestRegistryKeepsInvalidTargets(t *testing.T) {
 		{"id":"d1","kind":"docker","target":"c1"},
 		"not a record",
 		{"id":"local","kind":"local","enabled":false,"pinned":true}]}`), 0o600)
-	r, err = OpenRegistry(path, nil)
+	r, err = OpenRegistry(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +203,7 @@ func TestRegistryKeepsInvalidTargets(t *testing.T) {
 		}
 	}
 	// Read again, the same.
-	r, err = OpenRegistry(path, nil)
+	r, err = OpenRegistry(path)
 	if err != nil || len(r.Specs()) != 3 || r.Kept() != 4 {
 		t.Fatalf("read back %+v %d %v", r.Specs(), r.Kept(), err)
 	}
@@ -288,7 +219,7 @@ func TestRegistryKeepsInvalidTargets(t *testing.T) {
 func TestInvalidTargetNeverDialed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "machines.json")
 	os.WriteFile(path, []byte(`{"version":1,"machines":[{"id":"bad","kind":"ssh","target":"h$(id)","enabled":false}]}`), 0o600)
-	reg, err := OpenRegistry(path, nil)
+	reg, err := OpenRegistry(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +370,7 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 		return s, "test/test", err
 	}
 	path := filepath.Join(t.TempDir(), "machines.json")
-	reg, _ := OpenRegistry(path, nil)
+	reg, _ := OpenRegistry(path)
 	reg.Put(Spec{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Enabled: true})
 	mg := NewManager([]Spec{{ID: "x", Label: "x", Kind: KindSSH, Target: "x", Enabled: true}}, dial, logger)
 	mg.UseRegistry(reg)
@@ -480,7 +411,7 @@ func TestDisableAndEnableAtRuntime(t *testing.T) {
 	if st := m.State(); st.Status != StatusDisabled || st.Enabled || dials.Load() != 1 {
 		t.Fatalf("disabled: status %s enabled %v, %d dials", st.Status, st.Enabled, dials.Load())
 	}
-	if r, _ := OpenRegistry(path, nil); r.Specs()[0].Enabled {
+	if r, _ := OpenRegistry(path); r.Specs()[0].Enabled {
 		t.Fatal("the choice was not saved")
 	}
 
@@ -511,7 +442,7 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 		return s, "test/test", err
 	}
 	path := filepath.Join(t.TempDir(), "machines.json")
-	reg, _ := OpenRegistry(path, nil)
+	reg, _ := OpenRegistry(path)
 	// Stored, but left out of this run (--local-only).
 	reg.Put(Spec{ID: "off", Label: "elsewhere", Target: "u@elsewhere", Enabled: true})
 	mg := NewManager([]Spec{{ID: LocalID, Label: "local", Kind: KindLocal, Enabled: true}}, dial, logger)
@@ -556,7 +487,7 @@ func TestAddAndRemoveAtRuntime(t *testing.T) {
 	if st := mg.States(); len(st) != 2 || st[1].ID != "x" || st[1].Kind != KindSSH {
 		t.Fatalf("states = %+v", st)
 	}
-	if r, _ := OpenRegistry(path, nil); len(r.Specs()) != 2 || r.Specs()[1].Target != "u@x" {
+	if r, _ := OpenRegistry(path); len(r.Specs()) != 2 || r.Specs()[1].Target != "u@x" {
 		t.Fatalf("stored %+v", r.Specs())
 	}
 	sess := m.Session()
@@ -605,7 +536,7 @@ func TestSetLabelAndLocalRecord(t *testing.T) {
 	defer func(was bool) { LocalSupported = was }(LocalSupported)
 	LocalSupported = true
 	path := filepath.Join(t.TempDir(), "machines.json")
-	reg, _ := OpenRegistry(path, nil)
+	reg, _ := OpenRegistry(path)
 	reg.Put(Spec{ID: "a", Label: "a", Target: "a", Enabled: true})
 	reg.Put(Spec{ID: "off", Label: "elsewhere", Target: "e", Enabled: true})
 	mg := NewManager([]Spec{
@@ -637,7 +568,7 @@ func TestSetLabelAndLocalRecord(t *testing.T) {
 	if err := mg.SetEnabled(LocalID, false); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := OpenRegistry(path, nil)
+	r, _ := OpenRegistry(path)
 	got := r.Specs()
 	if len(got) != 3 || got[0].Label != "GPU" || got[2] != (Spec{ID: LocalID, Kind: KindLocal}) {
 		t.Fatalf("stored %+v", got)
@@ -650,7 +581,7 @@ func TestSetLabelAndLocalRecord(t *testing.T) {
 	if err := mg.SetLabel(LocalID, "Workstation"); err != nil || mg.Get(LocalID).Label() != "Workstation" {
 		t.Fatalf("local rename: %v", err)
 	}
-	r, _ = OpenRegistry(path, nil)
+	r, _ = OpenRegistry(path)
 	if s, _ := r.Get(LocalID); s != (Spec{ID: LocalID, Label: "Workstation", Kind: KindLocal}) {
 		t.Fatalf("stored local %+v", s)
 	}

@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -71,8 +69,8 @@ type record struct {
 }
 
 // Registry is the core's own list of machines, in the machines file beside
-// its settings: the SSH machines added from the UI (or imported once from
-// herdr's saved machines) and, once it was enabled or disabled, a record of
+// its settings: the SSH machines added from the UI and, once it was enabled
+// or disabled, a record of
 // the local machine. Machines given with --ssh are not in it. Every change
 // is written at once; the file is the core's, read when it starts. Writing
 // it keeps what the core does not use: entries it cannot read as machines,
@@ -93,14 +91,11 @@ type Registry struct {
 	extra   map[string]json.RawMessage
 }
 
-// OpenRegistry reads the machines file at path. When there is none, or it
-// holds what an earlier version kept there ({"enabled": {...}}), the
-// machines come once from imp (herdr's saved machines, SavedSpecs) with the
-// user's earlier choices applied, and are written: herdr's catalog is not
-// read again. An empty path keeps the machines in memory only. On an error
-// the registry returned keeps its machines in memory only, so that a file
-// that could not be read is not overwritten.
-func OpenRegistry(path string, imp func() ([]Spec, error)) (*Registry, error) {
+// OpenRegistry reads the machines file at path; without one there are no
+// machines yet. An empty path keeps the machines in memory only. On an
+// error the registry returned keeps its machines in memory only, so that a
+// file that could not be read is not overwritten.
+func OpenRegistry(path string) (*Registry, error) {
 	if path == "" {
 		return &Registry{}, nil
 	}
@@ -141,32 +136,10 @@ func OpenRegistry(path string, imp func() ([]Spec, error)) (*Registry, error) {
 		}
 		return r, nil
 	}
-	var old struct {
-		Enabled map[string]bool `json:"enabled"`
+	if b != nil {
+		return &Registry{}, fmt.Errorf("%s: not a machines file (no version or machines)", path)
 	}
-	if b != nil && json.Unmarshal(b, &old) != nil {
-		return &Registry{}, fmt.Errorf("%s: enabled is not a map of flags", path)
-	}
-	r := &Registry{path: path, version: registryVersion}
-	if imp != nil {
-		saved, err := imp()
-		if err != nil {
-			return &Registry{}, fmt.Errorf("importing herdr's machines: %w", err)
-		}
-		for _, s := range saved {
-			if on, ok := old.Enabled[s.ID]; ok {
-				s.Enabled = on
-			}
-			e, _ := json.Marshal(s)
-			r.list = append(r.list, r.parse(e))
-		}
-	}
-	if on, ok := old.Enabled[LocalID]; ok && !on && r.index(LocalID) < 0 {
-		r.list = append(r.list, record{spec: Spec{ID: LocalID, Kind: KindLocal}})
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r, r.save()
+	return &Registry{path: path, version: registryVersion}, nil
 }
 
 // parse reads one entry of the file; entries that are no machine this
@@ -423,49 +396,6 @@ func object(order []string, known map[string]any, extra map[string]json.RawMessa
 	}
 	b.WriteByte('}')
 	return b.Bytes(), nil
-}
-
-// herdr's saved machine catalog, imported once (SavedSpecs).
-type endpointCatalog struct {
-	Version int `json:"version"`
-	SSH     []struct {
-		ID      string `json:"id"`
-		Label   string `json:"label"`
-		Target  string `json:"target"`
-		Enabled bool   `json:"enabled"`
-	} `json:"ssh"`
-}
-
-// SavedSpecs returns the SSH machines saved by herdr, the terminal
-// multiplexer an earlier version drew its panes from, for the registry's
-// one-time import: herdr's client/endpoints.json in its state directory
-// ($XDG_STATE_HOME/herdr or ~/.local/state/herdr). No catalog means none;
-// one that cannot be read is an error.
-func SavedSpecs() ([]Spec, error) {
-	state := os.Getenv("XDG_STATE_HOME")
-	if state == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		state = filepath.Join(home, ".local", "state")
-	}
-	b, err := os.ReadFile(filepath.Join(state, "herdr", "client", "endpoints.json"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var cat endpointCatalog
-	if err := json.Unmarshal(b, &cat); err != nil {
-		return nil, fmt.Errorf("herdr's machines: %w", err)
-	}
-	var specs []Spec
-	for _, e := range cat.SSH {
-		specs = append(specs, Spec{ID: e.ID, Label: e.Label, Kind: KindSSH, Target: e.Target, Enabled: e.Enabled})
-	}
-	return specs, nil
 }
 
 // LoadSpecs returns the local machine, the stored SSH machines and the

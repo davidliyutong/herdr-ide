@@ -55,10 +55,6 @@ const (
 	LinksAll = "all"
 	// LinksExternal opens every address outside the app.
 	LinksExternal = "external"
-	// linksPane is the value of earlier versions, whose default it was: a
-	// pane for what one could show. It reads as LinksAll, which does the
-	// same, so that a file that chose it keeps its behavior.
-	linksPane = "pane"
 	// DefaultIdle is SettingIdle's default.
 	DefaultIdle = 30
 	// reapEvery is how often idle forwards are looked for.
@@ -73,8 +69,7 @@ const (
 	acceptPauseMax = time.Second
 )
 
-// Settings is the plugin's settings module (internal/registry). The links'
-// value of earlier versions, "pane", becomes LinksAll in place.
+// Settings is the plugin's settings module (internal/registry).
 var Settings = func() settings.Module {
 	mn, mx := settings.Range(0, 1440)
 	return settings.Module{
@@ -85,18 +80,8 @@ var Settings = func() settings.Module {
 			{Key: SettingIdle, Type: settings.TypeNumber, Default: float64(DefaultIdle), Min: mn, Max: mx, Integer: true,
 				Scope: settings.ScopeApp, Section: ID, Order: 20},
 		},
-		Migrations: []settings.Migration{{From: SettingLinks, To: SettingLinks, Convert: linksOfPane}},
 	}
 }()
-
-// linksOfPane turns the links' value of earlier versions into LinksAll,
-// what it did; any other value is of the current format.
-func linksOfPane(v any) (any, bool) {
-	if v == linksPane {
-		return LinksAll, true
-	}
-	return nil, false
-}
 
 // Forward is a forward as clients see it: Port on machine M is reachable
 // on the core host's loopback port Local.

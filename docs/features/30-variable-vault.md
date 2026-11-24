@@ -420,8 +420,9 @@ and browser; never a value. Reading it needs a session.
   Repeated lists and refusals merge into one record with a `count` and are
   audited at most once a minute per machine and result; releases are
   never merged.
-- The earlier file `vault[-<instance>]-access.jsonl` is imported once and
-  removed.
+- The core's database is the one beside the settings file that sits
+  beside the vault's (`settings[-<instance>].json` beside
+  `vault[-<instance>].json`).
 - With `--audit-log` every record is audited too (`vault.access`,
   `vault.revealed`, `vault.exported`).
 
@@ -452,8 +453,8 @@ ciphertext.
 - **Machine mapping.** `*` stays. An ssh machine maps by id only when this
   core's machine of that id has the same kind and target: ids of
   UI-added machines are random, but an `--ssh` machine's id is its target
-  and catalog-imported ids are herdr's, so an id alone may name another
-  host. The local machine, whose id is the same everywhere, maps only when
+  and a hand-edited machines file may hold any id, so an id alone may name
+  another host. The local machine, whose id is the same everywhere, maps only when
   its label matches too. Labels alone never map. Machines that do not map
   leave the list, so they ask every time; the preview names them.
 
@@ -465,8 +466,7 @@ The settings are `vault.approvalTimeout`, `vault.autoLock`,
 `vault.passphraseDays`, `vault.sessionIdle`, `vault.sessionMax`, and
 `run_with_env`'s `vault.runTimeout`, `vault.runMaxTimeout` and
 `vault.runOutput`, which the core sends with an `env`'s values
-(`VaultResponse.run`). A settings file's old `vault.passphraseHours` is
-dropped. Defaults and bounds are in [reference](../reference.md).
+(`VaultResponse.run`). Defaults and bounds are in [reference](../reference.md).
 
 ### Machines
 
@@ -705,11 +705,11 @@ variables from machines and the MCP server. Limits of the design:
   `TestRegistrationWrapsTheKey`, `TestLockDuringAnUnlock`,
   `TestMemoryError`), `accesslog_test.go`
   (`TestAccessLogSurvivesARestart`, `TestReleasesAreNeverCoalesced`,
-  `TestUnloggedReleaseIsRefused`, `TestAccessLogImport`,
+  `TestUnloggedReleaseIsRefused`, `TestAccessLogDatabase`,
   `TestAccessLogNewerVersion`, `TestWhoAskedComesFromTheAgent`),
   `transfer_test.go` (`TestExport`, `TestImport`,
   `TestImportMapsMachinesByTarget`), `settings_test.go` (`TestAutoLock`,
-  `TestAutoLockFollowsTheSetting`, `TestPassphraseHoursDropped`,
+  `TestAutoLockFollowsTheSetting`,
   `TestTimeLimitsCountSleep`), `exempt_test.go` (`TestExemptApps`). The
   automatic lock's tests drive their own clock.
 - `internal/vaultmcp`: `mcp_test.go` (JSON-RPC, masking,

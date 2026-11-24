@@ -385,8 +385,7 @@ settings in [13](13-settings-and-appearance.md); the full table in
 ## Testing
 
 - `internal/keybindings/keybindings_test.go`: key syntax, per-platform
-  defaults, user rules and problems, renamed commands, conflicts, reload,
-  migration of old desktop shortcut settings.
+  defaults, user rules and problems, renamed commands, conflicts, reload.
 - `design/testdata/layout` (run by `web/src/__tests__/term.test.ts`):
   layout operations, VS Code and preview panes, version 1 and malformed
   documents, workspace names; `pinned.json` and `tabs-block.json` for

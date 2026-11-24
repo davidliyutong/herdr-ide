@@ -182,7 +182,6 @@ Code**, **Browser**).
 `browser.forward` and `browser.forward_stop`),
 `GET /api/m/{id}/p/browser/listening`. Settings:
 `plugins.browser.enabled`, `browser.openLinks`, `browser.forwardIdle`.
-The legacy `browser.openLinks` value `pane` is migrated to `all`, which opens links as it did.
 
 ## Alternatives considered
 
@@ -249,8 +248,8 @@ never a page of a pane ([SECURITY.md](../../SECURITY.md)).
 - `internal/plugins/browser/browser_test.go` (a real agent in process):
   bytes over both loopback addresses, reuse, listing, stopping, refusals,
   idle expiry and what counts as use, connection and forward bounds,
-  listener failures, port choice. `settings_test.go`: the links setting
-  and the `pane` migration to `all`.
+  listener failures, port choice. `settings_test.go`: the links setting,
+  its default and values it refuses.
 - `internal/loopback`: the other address taken, held, absent.
 - `internal/agent/plugin/browser`: `dial` both ways and its refusals,
   listening ports (`listening_linux_test.go`).

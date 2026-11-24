@@ -144,9 +144,7 @@ cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
 
 Or extract the matching archive from `dist/release/` (or GitHub Releases)
 and run `./veldr`. Add SSH machines with **Add machine…** in the
-sidebar. Coming from a version that drew its panes from herdr: settings,
-keys and machines move over on the first start, terminals stay in herdr
-([migration](docs/deployment.md#migrating-from-versions-that-used-herdr)).
+sidebar.
 
 Open <http://127.0.0.1:7780>. The status bar opens the command palette and
 the list of shortcuts. All flags are listed in

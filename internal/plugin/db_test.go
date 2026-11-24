@@ -4,7 +4,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -54,40 +53,5 @@ func TestCoreDB(t *testing.T) {
 	defer b.Close()
 	if a.DB != b.DB {
 		t.Error("two pools of the core's database")
-	}
-}
-
-// A legacy core[-<instance>].db is migrated once into the per-host core
-// database when opened, preserving data and removing the legacy file.
-func TestCoreDBLegacyMigration(t *testing.T) {
-	dir := t.TempDir()
-	settingsPath := filepath.Join(dir, "settings-dev.json")
-	legacyPath := filepath.Join(dir, "core-dev.db")
-	legacyDB, err := store.OpenShared(legacyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := legacyDB.Migrate("testfeat", []string{`CREATE TABLE testfeat_items (id INTEGER PRIMARY KEY, val TEXT)`}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := legacyDB.Exec(`INSERT INTO testfeat_items (id, val) VALUES (1, 'keep')`); err != nil {
-		t.Fatal(err)
-	}
-	legacyDB.Close()
-
-	db, err := OpenCoreDB(settingsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	var val string
-	if err := db.QueryRow(`SELECT val FROM testfeat_items WHERE id = 1`).Scan(&val); err != nil || val != "keep" {
-		t.Fatalf("migrated value = %q (%v), want keep", val, err)
-	}
-	if _, err := os.Lstat(legacyPath); !os.IsNotExist(err) {
-		t.Errorf("legacy %s still exists after migration: %v", legacyPath, err)
-	}
-	if _, err := os.Lstat(CoreDBFile(settingsPath)); err != nil {
-		t.Errorf("per-host core db missing: %v", err)
 	}
 }

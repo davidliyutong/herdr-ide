@@ -1,7 +1,6 @@
 package browser
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,18 +27,6 @@ func TestLinksSetting(t *testing.T) {
 	}
 	if st, _ := load(t, ""); st.Get(SettingLinks) != LinksLoopback {
 		t.Fatalf("default %v", st.Get(SettingLinks))
-	}
-	st, path := load(t, `{"browser.openLinks": "pane"}`)
-	if st.Get(SettingLinks) != LinksAll || len(st.State().Problems) != 0 {
-		t.Fatalf("pane read as %v, problems %v", st.Get(SettingLinks), st.State().Problems)
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var file map[string]any
-	if err := json.Unmarshal(b, &file); err != nil || file[SettingLinks] != LinksAll {
-		t.Fatalf("file %s", b)
 	}
 	for _, v := range []string{LinksAll, LinksExternal, LinksLoopback} {
 		if st, _ := load(t, `{"browser.openLinks": "`+v+`"}`); st.Get(SettingLinks) != v {

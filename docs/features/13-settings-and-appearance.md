@@ -30,11 +30,9 @@ settings per browser; theming terminal applications.
 modules the core registers (`internal/uisettings` for the user interfaces,
 `codeserver.Settings`, `gui.Settings`, `plugin.Settings` with the plugin
 switches, the plugins' own (files, browser, git, monitor, usage, vault,
-history, chat; [27](27-plugins.md)), and a module that only migrates the
-desktop app's old `desktop-*-key` settings).
+history, chat; [27](27-plugins.md)).
 
-- A module (`settings.Module`) brings sections, definitions and migrations
-  of its old keys. A section can be advanced (listed last, under
+- A module (`settings.Module`) brings sections and definitions. A section can be advanced (listed last, under
   **Advanced**) or belong to a plugin.
 - A definition (`settings.Def`) has a dotted key (`terminal.fontSize`), a
   type (`bool`, `number`, `string`, `enum`, `color`, `list`), a default,
@@ -77,12 +75,6 @@ core is instance `desktop`.
   progress is never overwritten.
 - The core polls the file's modification time and size every 2 s; an API
   change first reads a pending hand edit so it is not lost.
-- Migrations run once on load: old key names and formats, values of an
-  older type (`notifications.mutedAgents` from a string to a list,
-  `terminal.scrollback` capped at 100,000), dropped keys
-  (`layout.panelPosition`), and the desktop app's old `desktop-*-key`
-  shortcut settings, which become keybinding rules
-  (`uisettings.TestMigrateValues`, `internal/registry`).
 
 ### Layering
 
@@ -144,8 +136,7 @@ the flag.
 - **User file** `keybindings[-<instance>].json`: an array of
   `{key, command, when?}` applied in order after the defaults;
   `"command": "-<id>"` removes a binding. Rules apply to every platform.
-  Rules for renamed commands follow the new id (`view.toggleCode` →
-  `code.open`). Unknown commands and malformed entries are kept and
+  Unknown commands and malformed entries are kept and
   reported. Watching, atomic writes and refusal over a broken file work as
   for settings.
 - **Effective bindings and conflicts** are computed by the core per
@@ -167,9 +158,8 @@ the flag.
   core answers, `registry.json`'s defaults apply. `prefs.ts` is the typed
   view (`usePrefs`, `getPrefs`); `setPref` saves and shows the value at
   once.
-- Settings that earlier versions kept in `localStorage` are moved to the
-  core once (not in read-only mode). Per-browser state (sidebar, selected
-  machine, transfer history) stays in `localStorage`.
+- Per-browser state (sidebar, selected machine, transfer history) stays
+  in `localStorage`; settings are only the core's.
 
 **Settings dialog** (`components/SettingsDialog.tsx`, laid out like VS
 Code's):
@@ -367,13 +357,13 @@ See [SECURITY.md](../../SECURITY.md).
 ## Testing
 
 - Settings: `internal/settings/settings_test.go` (layering, validation,
-  migration, kept unknown entries, reload over a broken file),
-  `internal/uisettings/uisettings_test.go` (`TestMigrateValues`),
+  kept unknown entries, reload over a broken file),
+  `internal/uisettings/uisettings_test.go`,
   `internal/server/settings_test.go` (both APIs, error codes, read-only,
   guards, audit, pushes after API changes and file edits).
 - Keybindings: `internal/keybindings/keybindings_test.go` (shared vectors,
   per-platform defaults without conflicts or terminal keys, user rules and
-  chords, renamed commands, conflicts, desktop migration);
+  chords, renamed commands, conflicts);
   `web/src/__tests__/keys.test.ts` (the same vectors, unbound keys left to
   the terminal, key hints).
 - Generated files: `scripts/registry/main_test.go`,

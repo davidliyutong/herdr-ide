@@ -248,13 +248,13 @@ func (p *Plugin) vaultPath(h plugin.Host) string {
 	return ""
 }
 
-// accessLog returns the access log, beside the vault's file (in memory
-// only without one).
+// accessLog returns the access log, in the core's database beside the
+// settings file the vault's file is beside (in memory only without one).
 func (p *Plugin) accessLog(h plugin.Host) *accessLog {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.alog == nil {
-		p.alog = newAccessLog(accessLogPath(p.vaultPath(h)), h.Logger())
+		p.alog = newAccessLog(settingsBeside(p.vaultPath(h)), h.Logger())
 	}
 	return p.alog
 }

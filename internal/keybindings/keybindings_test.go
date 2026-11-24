@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 )
@@ -292,29 +291,6 @@ func TestUserRules(t *testing.T) {
 	}
 }
 
-// A rule naming a command an earlier version had under another id applies
-// to the command that took its place.
-func TestRenamedCommands(t *testing.T) {
-	s := New(filepath.Join(t.TempDir(), "keybindings.json"), Commands)
-	if err := s.SetUser(rules(t,
-		`{"key": "cmd+j", "command": "-view.toggleCode"}`,
-		`{"key": "cmd+e", "command": "view.toggleCode", "when": "always"}`,
-		`{"key": "ctrl+k r", "command": "workspace.rename"}`,
-	)); err != nil {
-		t.Fatal(err)
-	}
-	st := s.State()
-	if got := effective(st, PlatformMac, "code.open"); !slices.Equal(got, []string{"cmd+e@always"}) {
-		t.Errorf("code.open = %v", got)
-	}
-	if got := effective(st, PlatformMac, "workspace.edit"); len(got) != 1 || !strings.HasPrefix(got[0], "ctrl+k r@") {
-		t.Errorf("workspace.edit = %v", got)
-	}
-	if len(st.Problems) != 0 {
-		t.Errorf("problems = %+v", st.Problems)
-	}
-}
-
 func TestConflicts(t *testing.T) {
 	got := Conflicts([]Rule{
 		{Key: "ctrl+b", Command: "a", When: WhenTerminal},
@@ -375,43 +351,5 @@ func TestReload(t *testing.T) {
 	edit(`[]`)
 	if got := effective(s.State(), PlatformLinux, "tab.new"); len(got) != 1 || len(s.State().Problems) != 0 {
 		t.Errorf("fixed file: %v", got)
-	}
-}
-
-// Shortcuts the desktop app kept in settings become rules once.
-func TestMigrateDesktopShortcuts(t *testing.T) {
-	dir := t.TempDir()
-	settingsFile := filepath.Join(dir, "settings.json")
-	os.WriteFile(settingsFile, []byte(`{"desktop-new-tab-key": "cmd+shift+t", "desktop-settings-key": "none",
-		"desktop-close-tab-key": "cmd+w", "desktop-toggle-code-key": "nonsense", "gui": "on"}`), 0o600)
-	path := filepath.Join(dir, "keybindings.json")
-	s := New(path, Commands)
-	if ok, err := s.MigrateDesktopShortcuts(settingsFile, true); !ok || err != nil {
-		t.Fatalf("migrate: %v %v", ok, err)
-	}
-	if err := s.Load(); err != nil {
-		t.Fatal(err)
-	}
-	st := s.State()
-	if got := effective(st, PlatformMac, "tab.new"); !slices.Equal(got, []string{"cmd+shift+t@terminal"}) {
-		t.Errorf("tab.new = %v", got)
-	}
-	if got := effective(st, PlatformMac, "app.settings"); len(got) != 0 {
-		t.Errorf("app.settings = %v", got)
-	}
-	// cmd+w was the desktop app's default for closing the tab: nothing to
-	// carry over (on macOS it closes the pane now, cmd+shift+w the tab).
-	if got := effective(st, PlatformMac, "tab.close"); !slices.Equal(got, []string{"cmd+shift+w@terminal"}) {
-		t.Errorf("tab.close = %v", got)
-	}
-	// Once only.
-	if ok, _ := s.MigrateDesktopShortcuts(settingsFile, true); ok {
-		t.Error("migrated twice")
-	}
-	// Nothing changed from the defaults: no file.
-	os.WriteFile(settingsFile, []byte(`{"desktop-new-tab-key": "ctrl+shift+t"}`), 0o600)
-	other := New(filepath.Join(dir, "other.json"), Commands)
-	if ok, _ := other.MigrateDesktopShortcuts(settingsFile, false); ok {
-		t.Error("defaults migrated")
 	}
 }

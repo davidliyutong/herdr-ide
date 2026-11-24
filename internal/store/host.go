@@ -53,11 +53,6 @@ func validHostKey(key string) bool { return hostid.ValidKey(key) }
 // before PruneHostFiles removes it.
 const HostFileRetention = 30 * 24 * time.Hour
 
-// LegacyFileRetention is how long a legacy un-hosted file (from before
-// per-host naming) stays unopened once this host has its own per-host file
-// (or for non-database files such as logs) before PruneHostFiles removes it.
-const LegacyFileRetention = time.Hour
-
 // maxDirEntries bounds the entries of a data directory PruneHostFiles
 // looks at.
 const maxDirEntries = 4096
@@ -66,9 +61,7 @@ const maxDirEntries = 4096
 var journals = []string{"-wal", "-shm", "-journal"}
 
 // PruneHostFiles removes from dir the databases of name (HostFile) of
-// other hosts, and name itself (a database of no host's name, from before
-// they were named per host), that no process opened for retention and no
-// process holds, with their journal files; this host's stays. It returns
+// other hosts that no process opened for retention and no process holds, with their journal files; this host's stays. It returns
 // the names of the databases it removed.
 //
 // A database is opened when its file's modification time is that of its
@@ -100,37 +93,27 @@ func PruneHostFiles(dir, name string, retention time.Duration, now time.Time) ([
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext) + "-"
 	mine := hostFileName(name, thisHost())
-	mineExists := Exists(filepath.Join(dir, mine))
 	otherInstances := coreInstances(names, name)
 	var removed []string
 	for _, n := range names {
 		if n == mine {
 			continue
 		}
-		fileRetention := retention
-		if n == name {
-			// Legacy un-hosted files are pruned promptly once this host has
-			// its own per-host database (migration complete) or for logs.
-			if ext != ".db" || mineExists {
-				fileRetention = min(retention, LegacyFileRetention)
-			}
-		} else {
-			host, ok := strings.CutPrefix(n, stem)
-			if !ok {
-				continue
-			}
-			if host, ok = strings.CutSuffix(host, ext); !ok || !validHostKey(host) {
-				continue
-			}
-			if hasInstancePrefix(host, otherInstances) {
-				continue
-			}
-		}
-		p := filepath.Join(dir, n)
-		if !stale(p, fileRetention, now) || openHere(p) {
+		host, ok := strings.CutPrefix(n, stem)
+		if !ok {
 			continue
 		}
-		ok, err := removeUnheld(p, func() bool { return stale(p, fileRetention, now) })
+		if host, ok = strings.CutSuffix(host, ext); !ok || !validHostKey(host) {
+			continue
+		}
+		if hasInstancePrefix(host, otherInstances) {
+			continue
+		}
+		p := filepath.Join(dir, n)
+		if !stale(p, retention, now) || openHere(p) {
+			continue
+		}
+		ok, err := removeUnheld(p, func() bool { return stale(p, retention, now) })
 		if err != nil {
 			return removed, err
 		}

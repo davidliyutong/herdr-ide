@@ -32,7 +32,7 @@ type machinesFixture struct {
 
 func newMachinesFixture(t *testing.T) *machinesFixture {
 	f := &machinesFixture{t: t, path: filepath.Join(t.TempDir(), "machines.json"), audit: &strings.Builder{}}
-	reg, err := machines.OpenRegistry(f.path, nil)
+	reg, err := machines.OpenRegistry(f.path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func (f *machinesFixture) request(s *Server, method, path, body string) *httptes
 
 // stored returns the machines file's records.
 func (f *machinesFixture) stored() []machines.Spec {
-	r, err := machines.OpenRegistry(f.path, nil)
+	r, err := machines.OpenRegistry(f.path)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestMachineOrder(t *testing.T) {
 	if w := f.request(f.srv, "PUT", "/api/machines/order", `{"order":["gpu","extra","local"]}`); w.Code != http.StatusOK || !reflect.DeepEqual(ids(f.mg), want) {
 		t.Fatalf("order: %d %s %v", w.Code, w.Body, ids(f.mg))
 	}
-	reg, err := machines.OpenRegistry(f.path, nil)
+	reg, err := machines.OpenRegistry(f.path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestHCEndpointsGuard(t *testing.T) {
 func TestMachineWithInvalidTarget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "machines.json")
 	os.WriteFile(path, []byte(`{"version":1,"machines":[{"id":"bad","label":"bad","kind":"ssh","target":"-oProxyCommand=touch /tmp/x","enabled":true,"future":1}]}`), 0o600)
-	reg, err := machines.OpenRegistry(path, nil)
+	reg, err := machines.OpenRegistry(path)
 	if err != nil {
 		t.Fatal(err)
 	}

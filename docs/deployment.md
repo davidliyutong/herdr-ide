@@ -11,7 +11,6 @@ listens on the machines.
 - [Remote resources](#remote-resources)
 - [Running as a service](#running-as-a-service)
 - [Several cores and development builds](#several-cores-and-development-builds)
-- [Migrating from versions that used herdr](#migrating-from-versions-that-used-herdr)
 
 ## Local use
 
@@ -46,9 +45,7 @@ What the core embeds:
   (`REQUIRE_ENCODER=1`); without it, windows are sent as pictures.
 
 Nothing needs to be installed on machines beforehand. Add SSH machines with
-**Add machine…** in the sidebar, or for one run with `--ssh`. The first start
-of an instance imports the SSH machines herdr saved
-(`~/.local/state/herdr/client/endpoints.json`). The machines file is listed
+**Add machine…** in the sidebar, or for one run with `--ssh`. The machines file is listed
 in [reference](reference.md#files-and-directories).
 
 veldr uses OpenSSH with your `~/.ssh/config` in BatchMode. A machine
@@ -440,11 +437,11 @@ host's key and `<run>` the namespace's runtime directory on the host
 | code-server logs (`<data>/hosts/<host>/cs-data/logs/`) | code-server. | After 7 days. |
 | Display and code-server logs (`<data>/hosts/<host>/xvfb.log`, `xwayland.log`, `gui-keep.log`, `code-server.log`) | Each start of the display, its keeper or code-server. | Overwritten at each start. |
 | MCP command (`<data>/bin/veldr-mcp`, a script, and `veldr-mcp-<system>-<machine>`, a link per platform) | Each agent start: the script if it differs, the link of its platform. | Replaced by the next agent; removed with the data directory. |
-| Machine database (`<data>/machine-<host>[-<id>].db`, 0600, [38](features/38-sqlite-state.md)) | Terminal history snapshots; the AI usage cost cache (Cost tab scans, ≤ 1/min per range, ≤ 2 min). | History: two generations per terminal of ≤ `history.lines` (2000) lines and 2 MiB, ≤ `history.maxTerminals` (32) terminals and `history.maxTotalMB` (64) in all, oldest first; removed after `history.days` (7), when the terminal ends or is gone 2 min, with **Clear Saved Output**, and when capture is turned off ([36](features/36-terminal-history.md)). Cost cache: records and logs older than 90 days leave at each scan. Earlier JSON files are imported once and removed. |
+| Machine database (`<data>/machine-<host>[-<id>].db`, 0600, [38](features/38-sqlite-state.md)) | Terminal history snapshots; the AI usage cost cache (Cost tab scans, ≤ 1/min per range, ≤ 2 min). | History: two generations per terminal of ≤ `history.lines` (2000) lines and 2 MiB, ≤ `history.maxTerminals` (32) terminals and `history.maxTotalMB` (64) in all, oldest first; removed after `history.days` (7), when the terminal ends or is gone 2 min, with **Clear Saved Output**, and when capture is turned off ([36](features/36-terminal-history.md)). Cost cache: records and logs older than 90 days leave at each scan. |
 | Chat journal (`<data>/chat-<host>[-<id>].db`, 0600) | The chat host. | Per chat ≤ `chat.maxChatMB` (64), in all ≤ `chat.maxTotalMB` (512) and `chat.maxChats` (500), archived then longest-closed first; closed and archived chats after `chat.retentionDays` (30); a deleted chat at once. |
 | DeepSeek key (`<data>/usage/deepseek.key`, 0600) | **Save** in the usage panel (audited). | **Remove**, or the user deletes it. |
 | Kimi Code credentials (`~/.kimi-code/`) | Renewed when expiring (`usage.kimiRefresh`; not in `--read-only`), with Kimi Code's own lock. | Kimi Code's files. |
-| Vault access log (core database `core[-<instance>]-<host>[-<id>].db`, core host, 0600) | Every MCP request and value a page takes; names, never values. | Keeps the last 1000 releases and 500 other records; an earlier `vault[-<instance>]-access.jsonl` is imported once and removed. |
+| Vault access log (core database `core[-<instance>]-<host>[-<id>].db`, core host, 0600) | Every MCP request and value a page takes; names, never values. | Keeps the last 1000 releases and 500 other records. |
 | Desktop vault unlock key | Enrolling the desktop authenticator. | `vault-unlock.json` in the Electron profile, the macOS keychain item (moved to a rebuilt app after one prompt) or the Windows Hello key `veldr-vault-<install>`; kept until removed by hand. |
 | Electron profile | First desktop launch. | Until removed by hand ([where](#where-the-app-keeps-its-files)); core stderr is kept in memory only (16 KiB). |
 
@@ -529,39 +526,3 @@ For development:
 make dev-core     # go run ./cmd/veldr --instance dev --local-only --listen 127.0.0.1:7790 --agent-dir dist/agents
 make dev-web      # Vite on top of it
 ```
-
-## Migrating from versions that used herdr
-
-Earlier versions drew panes from herdr, the terminal multiplexer. This
-version keeps everything in its own files and terminal core; the first start
-moves what can be moved, one way only.
-
-- **Settings.** An old-format `settings[-<instance>].json` is converted and
-  rewritten ([13](features/13-settings-and-appearance.md)). Settings a
-  browser kept in `localStorage` move into the core once.
-- **Keybindings.** The desktop app's `desktop-*-key` settings become rules
-  of a new `keybindings[-<instance>].json`. Keys in herdr's configuration no
-  longer apply. ⌘W in the desktop app closes the focused pane, not the tab.
-- **No prefix chords.** The `ctrl+b` chords are gone: `ctrl+b` and every
-  key that is not a default reach the terminal. Commands are in the menus,
-  pane headers and the command palette; defaults are in the
-  [reference](reference.md#keyboard-shortcuts). Chords can be bound again:
-
-  ```json
-  [
-    { "key": "ctrl+b c", "command": "tab.new" },
-    { "key": "ctrl+b v", "command": "pane.splitRight" },
-    { "key": "ctrl+b space", "command": "app.commandPalette" }
-  ]
-  ```
-
-- **Machines.** The first start without `machines[-<instance>].json`
-  imports herdr's SSH machines
-  (`$XDG_STATE_HOME/herdr/client/endpoints.json`) once. A target the core
-  refuses is imported but shown as `invalid_target` and never connected.
-- **Terminals.** herdr sessions are not migrated. Each machine gets the
-  instance's own, initially empty terminal core
-  ([21](features/21-terminal-core.md)); old terminals keep running in herdr
-  and this version neither stops nor attaches to them.
-- **Find** in a terminal matches plain text; regular expressions and
-  whole-word matching are gone.

@@ -7,7 +7,6 @@
 
 import { create } from 'zustand';
 import registry from '../../design/generated/registry.json';
-import { storage } from './brand';
 import { hasMessage, t } from './i18n';
 
 export type SettingType = 'bool' | 'number' | 'string' | 'enum' | 'color' | 'list';
@@ -187,70 +186,4 @@ export function resetSetting(key: string, machine?: string): Promise<string | un
   const q = new URLSearchParams({ key });
   if (machine) q.set('machine', machine);
   return change('DELETE', `/api/settings?${q}`);
-}
-
-/** Browser settings of earlier versions, kept in localStorage under these
- * names, and the settings that took their place. */
-export const legacyPrefs: Record<string, { key: string; parse(raw: string): SettingValue | undefined }> = {
-  locale: { key: 'appearance.language', parse: (r) => (['en', 'zh-CN'].includes(r) ? r : undefined) },
-  theme: { key: 'appearance.theme', parse: (r) => (['system', 'dark', 'light'].includes(r) ? r : undefined) },
-  uiFontSize: { key: 'appearance.uiFontSize', parse: (r) => num(r, 11, 20, true) },
-  termFontSize: { key: 'terminal.fontSize', parse: (r) => num(r, 6, 40, false) },
-  termFontWeight: { key: 'terminal.fontWeight', parse: (r) => (['regular', 'medium'].includes(r) ? r : undefined) },
-  // The VS Code panel's place, gone with the panel: dropped.
-  dockPosition: { key: '', parse: () => undefined },
-  optionIsMeta: { key: 'terminal.optionIsMeta', parse: bool },
-  programClipboard: { key: 'terminal.programClipboard', parse: (r) => (['auto', 'ask', 'off'].includes(r) ? r : undefined) },
-  mathHover: { key: 'terminal.mathHover', parse: bool },
-  notifySound: { key: 'notifications.sound', parse: bool },
-  notifySoundMuted: {
-    key: 'notifications.mutedAgents',
-    parse: (r) =>
-      r
-        .split(/[\s,]+/)
-        .map((x) => x.trim().toLowerCase())
-        .filter(Boolean),
-  },
-};
-
-function num(raw: string, min: number, max: number, integer: boolean): number | undefined {
-  const n = Number(raw);
-  if (raw === '' || !Number.isFinite(n)) return;
-  return Math.min(max, Math.max(min, integer ? Math.round(n) : n));
-}
-
-function bool(raw: string): boolean | undefined {
-  return raw === 'true' ? true : raw === 'false' ? false : undefined;
-}
-
-/** The values a browser kept before settings moved to the core, for the
- * settings still at their defaults there. */
-export function legacyImports(
-  get: (name: string) => string | null,
-  values: Record<string, SettingState>,
-): { name: string; key: string; value?: SettingValue }[] {
-  const out: { name: string; key: string; value?: SettingValue }[] = [];
-  for (const [name, l] of Object.entries(legacyPrefs)) {
-    const raw = get(name);
-    if (raw === null) continue;
-    const v = l.parse(raw);
-    const cur = values[l.key];
-    // Only a value the core does not have yet; the old key goes either way.
-    const take = v !== undefined && cur?.source === 'default' && JSON.stringify(v) !== JSON.stringify(cur.value);
-    out.push({ name, key: l.key, value: take ? v : undefined });
-  }
-  return out;
-}
-
-/** Moves the browser settings of earlier versions to the core once: each
- * value the core still has at its default is saved there, then the old key
- * is removed. Nothing happens in read-only mode (the keys stay for a later
- * writable session). */
-export async function importLegacyPrefs() {
-  const s = useSettings.getState();
-  if (!s.loaded || s.readOnly) return;
-  for (const { name, key, value } of legacyImports(storage.get, s.values)) {
-    if (value !== undefined && (await setSetting(key, value)) !== undefined) continue;
-    storage.remove(name);
-  }
 }

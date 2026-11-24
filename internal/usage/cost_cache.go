@@ -7,8 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"io"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -72,15 +70,10 @@ func costDB(p string) string {
 }
 
 // openCostDB opens the database of the cache at p with the cache's
-// tables; writable false when they are of a newer version. The file the
-// cache was kept in before is imported first. The caller closes it.
+// tables; writable false when they are of a newer version. The caller
+// closes it.
 func openCostDB(p string) (db *store.DB, writable bool, err error) {
-	target := costDB(p)
-	legacy := filepath.Join(filepath.Dir(target), store.MachineDB)
-	if _, err := store.MigrateLegacy(legacy, target); err != nil {
-		return nil, false, err
-	}
-	db, err = store.OpenShared(target)
+	db, err = store.OpenShared(costDB(p))
 	if db == nil {
 		return nil, false, err
 	}
@@ -92,48 +85,7 @@ func openCostDB(p string) (db *store.DB, writable bool, err error) {
 		db.Close()
 		return nil, false, err
 	}
-	importCostFile(db, p)
 	return db, true, nil
-}
-
-// importCostFile imports the file the cache was kept in before, p, into
-// db once (one of another version, or that does not parse, holds
-// nothing), then removes it; a failed import leaves it.
-func importCostFile(db *store.DB, p string) {
-	if _, err := os.Lstat(p); err != nil {
-		return
-	}
-	_, err := db.Import(context.Background(), costFeature, "cost-cache", func(tx *sql.Tx) error {
-		f, err := os.Open(p)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		st, err := f.Stat()
-		if err != nil {
-			return err
-		}
-		if !st.Mode().IsRegular() {
-			return errors.New("not a regular file")
-		}
-		if st.Size() > maxCacheMemory {
-			return nil
-		}
-		b, err := io.ReadAll(io.LimitReader(f, maxCacheMemory+1))
-		if err != nil {
-			return err
-		}
-		var c costCache
-		if json.Unmarshal(b, &c) != nil || c.Version != costCacheVer || c.Files == nil {
-			return nil
-		}
-		// Saved when the file was written: persistDue counts from then.
-		_, err = writeCostCache(tx, &c, st.ModTime())
-		return err
-	})
-	if err == nil {
-		os.Remove(p)
-	}
 }
 
 // memCostState keeps the last loaded costCache in memory (guarded by

@@ -151,10 +151,6 @@ func (s *Store) set(user []json.RawMessage) {
 			continue
 		}
 		id := strings.TrimPrefix(r.Command, "-")
-		if to, ok := Renamed[id]; ok {
-			r.Command = strings.TrimSuffix(r.Command, id) + to
-			id = to
-		}
 		if _, ok := s.byID[id]; !ok {
 			problems = append(problems, Problem{Index: i, Code: "unknown", Detail: r.Command})
 			continue

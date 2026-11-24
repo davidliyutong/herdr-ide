@@ -15,13 +15,12 @@ Constraints: the core builds for Linux, macOS and Windows and the machines'
 build for Linux and macOS, all without cgo; the files hold names,
 directories and terminal output, so they are the user's alone; a home may
 be shared by several hosts over NFS, where SQLite's write-ahead log works
-for one host only; a downgrade must not destroy what a newer version wrote;
-earlier files are taken over once, without loss.
+for one host only; a downgrade must not destroy what a newer version wrote.
 
 ## Goals / non-goals
 
 Goals: one way to open a private database with versioned schemas;
-transactions for every change; earlier files imported once, then removed;
+transactions for every change;
 per-host files on shared homes; a database a newer program wrote is read,
 not written.
 
@@ -60,10 +59,10 @@ The core's and a machine's database hold several features of one owner.
 and process (reopened when the file was replaced). Each feature brings its
 own prefixed tables to its own version with `DB.Migrate(feature, steps)`,
 recorded in `store_features`; a feature a newer program migrated further is
-read, not written (`ErrNewer`). `DB.Import(ctx, feature, name, fn)` runs a
-one-time import of earlier files in a transaction recorded in
-`store_imports`; a failed import changes nothing and runs again, and the
-caller removes its files only after success. A shared database's directory
+read, not written (`ErrNewer`). `store_features` is the store's own table,
+versioned by the database's `user_version`; the layout's first step also
+creates a table `store_imports`, unused, which its second step drops
+(applied steps never change). A shared database's directory
 may be a link of the user's to a directory of the user's (dotfile
 managers); `Open` alone refuses links.
 
@@ -92,23 +91,12 @@ is the host's key (`hostid.Key`, which also names the host's directory,
 `MachineGuid` on Windows). Cloned hosts or equal names on two clusters thus
 get separate files. The chat host's log files are named the same way.
 
-`store.MigrateLegacy` moves an earlier un-hosted database to the per-host
-name once (`VACUUM INTO`, `quick_check`, then removal of the old file).
 `store.PruneHostFiles` runs at each owner's start and removes other hosts'
 databases unused for 30 days (use is the file's modification time, which
-`Open` refreshes hourly) and leftover un-hosted files after an hour. It
-removes only under SQLite's writer lock taken without waiting, only this
+`Open` refreshes hourly). A file of no host's name is not its business and
+stays. It removes only under SQLite's writer lock taken without waiting, only this
 user's regular files, never files this process holds, and nothing on
 Windows; the core skips other instances' files.
-
-### One-time imports
-
-| Feature | Kept before | Notes |
-| --- | --- | --- |
-| Terminal history | `<data>/history/` (`.vt` and `.json` per terminal) | the directory is removed after; a link or foreign directory is neither read nor removed |
-| Vault access log | `vault[-<instance>]-access.jsonl` | a file written again after a downgrade has its missing records merged and is removed |
-| AI usage history | `usage-history[-<instance>].json` | a file of another version or that does not parse stays |
-| AI usage cost cache | `<data>/usage/cost-cache.json` | removed after |
 
 ## Alternatives considered
 
@@ -121,7 +109,6 @@ Windows; the core skips other instances' files.
 | A directory per host | Same isolation, one more directory to keep private and prune. |
 | The host's short name | Equal names in two domains, or clones, would share a file. |
 | Rollback journal on shared homes | Readers would wait for writers that write often. |
-| Keeping the earlier files | Two copies diverge after a downgrade; one recorded import is the one source. |
 
 ## Failure modes
 
@@ -130,7 +117,6 @@ Windows; the core skips other instances' files.
   does not serve.
 - **Directory or file not the user's, or a link** → `ErrUnsafe`; the same
   degradations as above.
-- **Failed import** → nothing changes; it runs again next time.
 - **Two agents of one instance** → SQLite's locks between them; a history
   capture that does not get the lease within 2 s answers `busy`.
 - **File system without locks** → per-host names keep each database to one
@@ -151,9 +137,9 @@ in [SECURITY.md](../../SECURITY.md).
 
 - `internal/store`: `store_test.go` (migrations, pragmas, newer databases,
   permissions, links), `shared_test.go` (pools, per-feature migration,
-  imports, `Durable`, `Reclaim`), `host_test.go`/`host_unix_test.go`
+  `Durable`, `Reclaim`), `host_test.go`/`host_unix_test.go`
   (names, pruning); `internal/hostid` (`TestID`, `TestMachineID`).
-- Feature tests for imports, newer versions and per-host files:
+- Feature tests for newer versions and per-host files:
   `internal/agent/plugin/history/history_test.go`,
   `internal/plugins/vault/accesslog_test.go`,
   `internal/plugins/usage/history_test.go`,

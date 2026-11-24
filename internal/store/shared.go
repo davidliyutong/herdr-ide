@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
-	"time"
 )
 
 // Shared databases. The core's database (core.db, beside its settings
@@ -37,8 +36,9 @@ import (
 const MachineDB = "machine.db"
 
 // layout is the store's own tables of a shared database, versioned by its
-// user_version: what each feature migrated to, and the imports of state a
-// feature kept before (files) that ran.
+// user_version: what each feature migrated to. (store_imports recorded
+// one-time imports of files features kept before; the second step drops
+// it.)
 var layout = []string{
 	`CREATE TABLE store_features (
 		feature TEXT PRIMARY KEY,
@@ -50,9 +50,10 @@ var layout = []string{
 		at INTEGER NOT NULL,
 		PRIMARY KEY (feature, name)
 	);`,
+	`DROP TABLE IF EXISTS store_imports;`,
 }
 
-// ErrNotShared is the error of Migrate and Import on a database that was
+// ErrNotShared is the error of Migrate on a database that was
 // not opened with OpenShared.
 var ErrNotShared = errors.New("store: not a shared database")
 
@@ -248,60 +249,6 @@ func featureVersion(ctx context.Context, q queryRower, feature string) (int, err
 		return 0, nil
 	}
 	return v, err
-}
-
-// Imported reports whether feature's import name (Import) ran in this
-// database.
-func (db *DB) Imported(feature, name string) (bool, error) {
-	if db.pool == nil {
-		return false, ErrNotShared
-	}
-	return imported(context.Background(), db.DB, feature, name)
-}
-
-func imported(ctx context.Context, q queryRower, feature, name string) (bool, error) {
-	var one int
-	err := q.QueryRowContext(ctx, "SELECT 1 FROM store_imports WHERE feature = ? AND name = ?", feature, name).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-// Import runs fn, feature's one-time import named name of the state it
-// kept before (files), in a transaction that records the import: once
-// that transaction committed, Import never runs fn again for this
-// database, also in another process. A failing fn changes nothing and runs
-// again at the next Import. It reports whether fn ran and committed now.
-// The caller removes what it imported only after Import returned without
-// an error (ran now or before), so that a failure leaves it in place.
-func (db *DB) Import(ctx context.Context, feature, name string, fn func(tx *sql.Tx) error) (bool, error) {
-	if db.pool == nil {
-		return false, ErrNotShared
-	}
-	if done, err := imported(ctx, db.DB, feature, name); err != nil || done {
-		return false, err
-	}
-	if db.readOnly {
-		return false, fmt.Errorf("%w (the database is read-only)", ErrNewer)
-	}
-	ran := false
-	err := db.Update(ctx, func(tx *sql.Tx) error {
-		// Another connection may have imported since the first look.
-		if done, err := imported(ctx, tx, feature, name); err != nil || done {
-			return err
-		}
-		if err := fn(tx); err != nil {
-			return err
-		}
-		ran = true
-		_, err := tx.ExecContext(ctx, "INSERT INTO store_imports (feature, name, at) VALUES (?, ?, ?)", feature, name, time.Now().UnixMilli())
-		return err
-	})
-	if err != nil {
-		return false, err
-	}
-	return ran, nil
 }
 
 // Update runs fn in a transaction, which takes the database's write lock

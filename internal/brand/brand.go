@@ -3,12 +3,8 @@
 // keys) derives from these constants; web/src/brand.ts and the bridge
 // extension's src/brand.ts mirror them (brand_test.go keeps them in sync).
 //
-// scripts/rename.sh renames the project in one step. Persisted names
-// (DataDirName, the cache directory, browser storage keys, the bridge
-// extension id) are migrated rather than abandoned: rename.sh records the old
-// values in the Legacy* lists below; the core copies its configuration, the
-// web UI its storage, and the migrate plugin moves a machine's workspaces
-// from the previous namespace when the user asks.
+// scripts/rename.sh renames the project in one step; the renamed version
+// starts with namespaces of its own (docs/features/11-naming-and-renames.md).
 package brand
 
 import "strings"

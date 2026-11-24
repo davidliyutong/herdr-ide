@@ -365,21 +365,20 @@ func TestFreshSessionIsNotResumed(t *testing.T) {
 // earlier versions left go once nobody used them for long.
 func TestOtherHostsJournalsGo(t *testing.T) {
 	old := time.Now().Add(-store.HostFileRetention - 24*time.Hour)
-	var other, legacy, recent string
+	var other, recent string
 	h := startHost(t, func(h *testHost) {
 		if err := os.MkdirAll(h.base, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		other, legacy, recent = filepath.Join(h.base, "chat-elsewhere.db"), filepath.Join(h.base, DBName), filepath.Join(h.base, "chat-recent.db")
-		for _, p := range []string{other, legacy, recent} {
+		other, recent = filepath.Join(h.base, "chat-elsewhere.db"), filepath.Join(h.base, "chat-recent.db")
+		for _, p := range []string{other, recent} {
 			if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
 		os.Chtimes(other, old, old)
-		os.Chtimes(legacy, old, old)
 	})
-	for p, want := range map[string]bool{other: false, legacy: false, recent: true, store.HostFile(h.base, DBName): true} {
+	for p, want := range map[string]bool{other: false, recent: true, store.HostFile(h.base, DBName): true} {
 		if _, err := os.Stat(p); (err == nil) != want {
 			t.Errorf("%s: there %v, want %v", filepath.Base(p), err == nil, want)
 		}

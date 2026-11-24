@@ -8,7 +8,7 @@ import { resolveTheme } from '../appearance';
 import { dropZone } from '../paneDrag';
 import { matchesSearch, problemText, valueLabel } from '../components/SettingsDialog';
 import { hasMessage } from '../i18n';
-import { applySettings, builtinDefaults, legacyImports, setSetting, useSettings, type SettingState } from '../settings';
+import { applySettings, builtinDefaults, setSetting, useSettings, type SettingState } from '../settings';
 import { getPrefs, usePrefs } from '../prefs';
 
 describe('resolveTheme', () => {
@@ -100,31 +100,6 @@ describe('settings store', () => {
       throw new Error('offline');
     });
     expect(await setSetting('terminal.fontSize', 18)).toBe('Could not reach the server');
-  });
-});
-
-describe('browser settings of earlier versions', () => {
-  it('moves values the core does not have yet', () => {
-    const stored: Record<string, string> = {
-      theme: 'light',
-      termFontSize: '30.5',
-      optionIsMeta: 'true',
-      locale: '',
-      dockPosition: 'left',
-      uiFontSize: '99',
-    };
-    const got = legacyImports((k) => stored[k] ?? null, values({ 'terminal.optionIsMeta': false }));
-    expect(got).toEqual([
-      { name: 'locale', key: 'appearance.language', value: undefined },
-      { name: 'theme', key: 'appearance.theme', value: 'light' },
-      { name: 'uiFontSize', key: 'appearance.uiFontSize', value: 20 },
-      { name: 'termFontSize', key: 'terminal.fontSize', value: 30.5 },
-      // The VS Code panel's place, a setting no more: dropped.
-      { name: 'dockPosition', key: '', value: undefined },
-      // Set on the core already: the core's value stays.
-      { name: 'optionIsMeta', key: 'terminal.optionIsMeta', value: undefined },
-    ]);
-    expect(legacyImports(() => null, values())).toEqual([]);
   });
 });
 

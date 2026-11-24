@@ -18,7 +18,7 @@ import { parseGuiPath, useGui } from './gui/state';
 import { conn } from './lib/conn';
 import { unlockAudio } from './sound';
 import { getPrefs } from './prefs';
-import { importLegacyPrefs, loadSettings } from './settings';
+import { loadSettings } from './settings';
 import { setLocale } from './i18n';
 import { GuiWindowPage } from './gui/GuiWindowPage';
 import { refuseStrayFileDrops } from './drop';
@@ -43,9 +43,8 @@ refuseStrayFileDrops();
 guardImeKeys();
 // The settings come from the core; until it answers the built-in defaults
 // apply. The language must be known before anything is rendered.
-const settingsLoaded = loadSettings().then((ok) => {
+const settingsLoaded = loadSettings().then(() => {
   setLocale(getPrefs().locale);
-  if (ok) void importLegacyPrefs();
 });
 // A browser window showing one program window (see gui/).
 const guiPage = parseGuiPath(location.pathname);

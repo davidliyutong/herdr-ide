@@ -247,7 +247,7 @@ of client
 ([05](features/05-vscode-panes.md),
 [deployment](deployment.md#remote-resources)).
 
-## Names, renames and migration
+## Names and renames
 
 Runtime identifiers derive from `internal/brand`, `web/src/brand.ts` and
 `extensions/veldr-bridge/src/brand.ts`, kept in sync by

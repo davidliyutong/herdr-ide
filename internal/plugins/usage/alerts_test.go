@@ -257,7 +257,7 @@ func TestAlertsKeptAcrossRestarts(t *testing.T) {
 		p.ready = func() []string { return []string{"local"} }
 		tp, _ := testPlugin(t, &now, nil, reply)
 		p.fetch = tp.fetch
-		p.loadHistory(p.historyPath())
+		p.loadHistory()
 		return p
 	}
 	p := start()

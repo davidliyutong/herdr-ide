@@ -212,10 +212,6 @@ func serve(args []string, logger *log.Logger) {
 		logger.Printf("settings are not saved: %v", err)
 	} else {
 		keys.SetPath(besideSettings(p, "keybindings"))
-		// Before the settings drop the desktop app's old shortcut settings.
-		if _, err := keys.MigrateDesktopShortcuts(p, runtime.GOOS == "darwin"); err != nil {
-			logger.Printf("migrating shortcuts: %v", err)
-		}
 		if err := keys.Load(); err != nil {
 			logger.Printf("ignoring keybindings: %v", err)
 		}
@@ -253,9 +249,8 @@ func serve(args []string, logger *log.Logger) {
 		}
 	}
 
-	// The core's own machines; herdr's saved machines are imported once,
-	// when the file does not exist yet.
-	registry, err := machines.OpenRegistry(machinesFile, machines.SavedSpecs)
+	// The core's own machines.
+	registry, err := machines.OpenRegistry(machinesFile)
 	if err != nil {
 		logger.Printf("machines are not stored: %v", err)
 	}
