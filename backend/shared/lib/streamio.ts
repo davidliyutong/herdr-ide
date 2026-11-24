@@ -125,18 +125,27 @@ export class Reader {
   }
 }
 
-/** Writes and waits while the stream is backed up. */
+/** Writes and waits while the stream is backed up. Fails at once on a
+ * stream that is destroyed or ended (Node's write() there only calls back
+ * with an error, emitting neither 'error' nor 'close' again), and when the
+ * write itself fails. */
 export async function write(w: Writable, b: Buffer | Uint8Array | string): Promise<void> {
-  if (!w.write(b))
-    await new Promise<void>((resolve, reject) => {
-      const done = (e?: Error) => {
-        w.off('drain', done).off('error', done).off('close', closed);
-        if (e) reject(e);
-        else resolve();
-      };
-      const closed = () => done(new Error('stream closed'));
-      w.once('drain', done).once('error', done).once('close', closed);
-    });
+  if (w.destroyed || w.writableEnded) throw new Error('stream closed');
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const done = (e?: Error | null) => {
+      if (settled) return;
+      settled = true;
+      w.off('drain', onDrain).off('error', done).off('close', onClose);
+      if (e) reject(e);
+      else resolve();
+    };
+    const onDrain = () => done();
+    const onClose = () => done(new Error('stream closed'));
+    const ok = w.write(b, (e) => e && done(e));
+    if (ok) return done();
+    w.once('drain', onDrain).once('error', done).once('close', onClose);
+  });
 }
 
 /** Writes v as one JSON line. */

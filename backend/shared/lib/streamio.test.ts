@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { PassThrough } from 'node:stream';
-import { EOFError, Reader } from './streamio.ts';
+import { EOFError, Reader, write } from './streamio.ts';
 
 function feed(...parts: string[]): PassThrough {
   const p = new PassThrough();
@@ -62,4 +62,29 @@ test('release hands on what was read ahead, also after the stream ended', async 
   got = '';
   for await (const c of s) got += c;
   expect(got).toBe('first second');
+});
+
+describe('write', () => {
+  test('fails at once on a destroyed or ended stream', async () => {
+    const d = new PassThrough();
+    d.destroy();
+    await expect(write(d, 'x')).rejects.toThrow('stream closed');
+    const e = new PassThrough();
+    e.end();
+    await expect(write(e, 'x')).rejects.toThrow('stream closed');
+  });
+
+  test('fails when the stream is destroyed while backed up', async () => {
+    const w = new PassThrough({ highWaterMark: 1 });
+    const p = write(w, Buffer.alloc(64));
+    w.destroy();
+    await expect(p).rejects.toThrow();
+  });
+
+  test('resolves after drain', async () => {
+    const w = new PassThrough({ highWaterMark: 1 });
+    const p = write(w, Buffer.alloc(64));
+    w.resume();
+    await p;
+  });
 });
