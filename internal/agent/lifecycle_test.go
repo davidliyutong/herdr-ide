@@ -18,8 +18,10 @@ func testAgent(t testing.TB) *Agent {
 	home := t.TempDir()
 	base := filepath.Join(home, ".x")
 	run := filepath.Join(base, "run")
+	host := filepath.Join(base, "hosts", "h")
 	os.MkdirAll(run, 0o700)
-	return &Agent{logger: log.New(io.Discard, "", 0), home: home, base: base, runDir: run}
+	os.MkdirAll(host, 0o700)
+	return &Agent{logger: log.New(io.Discard, "", 0), home: home, base: base, hostDir: host, runDir: run}
 }
 
 // A code-server whose owning agent died is stopped by the next agent.
@@ -65,7 +67,7 @@ func TestStopAllOnlyOwnProcess(t *testing.T) {
 	}
 }
 
-func TestHousekeepingAndMigration(t *testing.T) {
+func TestHousekeeping(t *testing.T) {
 	a := testAgent(t)
 	up := filepath.Join(a.base, "uploads")
 	os.MkdirAll(up, 0o755)
@@ -74,21 +76,53 @@ func TestHousekeepingAndMigration(t *testing.T) {
 	os.WriteFile(fresh, nil, 0o644)
 	past := time.Now().Add(-30 * 24 * time.Hour)
 	os.Chtimes(old, past, past)
-	housekeeping(a.base, a.logger)
+	housekeeping(a.base, a.hostDir, a.logger)
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
 		t.Error("expired upload kept")
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Error("fresh upload removed")
 	}
+}
 
-	home := t.TempDir()
-	legacy := filepath.Join(home, ".oldname")
-	os.MkdirAll(filepath.Join(legacy, "cs-data"), 0o700)
-	saved := brandLegacy(".oldname")
-	defer saved()
-	migrateLegacyDataDir(home, filepath.Join(home, ".newname"), a.logger)
-	if _, err := os.Stat(filepath.Join(home, ".newname", "cs-data")); err != nil {
-		t.Fatalf("legacy data dir not migrated: %v", err)
+// Other hosts' directories (a shared home): files of one unused for 30
+// days go, but its terminal core's executable stays, which a core may run
+// from; one unused for 180 days goes whole. This host's and recent ones
+// stay, and this host's is marked used.
+func TestPruneHosts(t *testing.T) {
+	a := testAgent(t)
+	hosts := filepath.Dir(a.hostDir)
+	mk := func(name string, age time.Duration) string {
+		d := filepath.Join(hosts, name)
+		os.MkdirAll(filepath.Join(d, "hc"), 0o700)
+		os.MkdirAll(filepath.Join(d, "cs-data"), 0o700)
+		os.WriteFile(filepath.Join(d, "hc", "herdr-core"), nil, 0o700)
+		os.WriteFile(filepath.Join(d, "node.log"), nil, 0o600)
+		when := time.Now().Add(-age)
+		os.Chtimes(d, when, when)
+		return d
+	}
+	recent := mk("recent", 10*24*time.Hour)
+	idle := mk("idle", 40*24*time.Hour)
+	gone := mk("gone", 200*24*time.Hour)
+	mine := a.hostDir
+	past := time.Now().Add(-300 * 24 * time.Hour)
+	os.Chtimes(mine, past, past)
+	housekeeping(a.base, a.hostDir, a.logger)
+	exists := func(p string) bool { _, err := os.Lstat(p); return err == nil }
+	if !exists(filepath.Join(recent, "node.log")) || !exists(filepath.Join(recent, "cs-data")) {
+		t.Error("a recent host's files were removed")
+	}
+	if exists(filepath.Join(idle, "node.log")) || exists(filepath.Join(idle, "cs-data")) || !exists(filepath.Join(idle, "hc", "herdr-core")) {
+		t.Error("an idle host: files kept or executable removed")
+	}
+	if fi, err := os.Stat(idle); err != nil || time.Since(fi.ModTime()) < 39*24*time.Hour {
+		t.Error("pruning made an idle host's directory look used")
+	}
+	if exists(gone) {
+		t.Error("a host gone for long was kept")
+	}
+	if fi, err := os.Stat(mine); err != nil || time.Since(fi.ModTime()) > time.Minute {
+		t.Error("this host's directory was not marked used")
 	}
 }

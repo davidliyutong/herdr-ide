@@ -19,7 +19,8 @@ import (
 // nodeCommand runs `node` (the machine's node, started by its clients),
 // `node dial` (standard input and output piped to the node, which it
 // starts when none answers; what ssh runs for a core) or `node stop` (asks
-// the instance's nodes of every build to stop). It returns the exit code.
+// the instance's nodes of every build to stop, with --terminal-core also
+// its terminal core). It returns the exit code.
 func nodeCommand(args []string) int {
 	sub := ""
 	if len(args) > 0 && (args[0] == "dial" || args[0] == "stop") {
@@ -29,6 +30,7 @@ func nodeCommand(args []string) int {
 	instance := fs.String("instance", "", "state directory instance (see serve's --instance)")
 	client := fs.String("client", "", "dial: the core that dials (its process), the same for its reconnects")
 	takeover := fs.Bool("takeover", false, "take over from the instance's running node, which drains")
+	core := fs.Bool("terminal-core", false, "stop: also stop the instance's terminal core on this host, ending its terminals")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -43,6 +45,16 @@ func nodeCommand(args []string) int {
 			return 1
 		}
 		fmt.Printf("stopped %d node(s)\n", n)
+		if *core {
+			stopped, err := agent.StopTerminalCore(context.Background(), *instance)
+			if err != nil {
+				logger.Print(err)
+				return 1
+			}
+			if stopped {
+				fmt.Println("stopped the terminal core")
+			}
+		}
 		return 0
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

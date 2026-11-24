@@ -296,13 +296,18 @@ func copyFile(src, dst string) error {
 }
 
 // RemoveLegacyCaches deletes download caches left under previous product
-// names (brand.LegacySlugs).
+// names (brand.LegacySlugs) but the newest.
 func (mg *Manager) RemoveLegacyCaches() {
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return
 	}
-	for _, old := range brand.LegacySlugs {
+	// The newest previous name's version may still run beside this one
+	// (its namespaces are moved from at the user's pace): its cache stays.
+	for i, old := range brand.LegacySlugs {
+		if i == 0 {
+			continue
+		}
 		dir := filepath.Join(cache, old)
 		if _, err := os.Stat(dir); err == nil {
 			mg.Logger.Printf("removing legacy cache %s", dir)

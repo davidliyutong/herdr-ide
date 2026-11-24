@@ -225,7 +225,7 @@ inherit:
 - Terminals access them as **herdr-core**: it runs the terminal core as a
   launchd job and its holders disclaim inherited responsibility, so a
   terminal's programs have what
-  `~/.herdr-ide[-<instance>]/hc/herdr-core` was granted. Starting the core
+  `~/.herdr-ide[-<instance>]/hosts/<host>/hc/herdr-core` was granted. Starting the core
   as the app's child would not change this.
 
 Both need the grant. The Terminal settings page shows a **Permissions** row

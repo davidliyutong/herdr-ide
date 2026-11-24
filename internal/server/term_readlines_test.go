@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 )
 
 // readCore is the fake terminal core of the terminal protocol's tests
@@ -93,7 +94,7 @@ func (r *readCore) read(t *testing.T, terminal string) map[string]json.RawMessag
 func termServerReads(t *testing.T, opts Options) (*Server, *readCore) {
 	t.Helper()
 	s, _, _ := termServer(t, opts, false)
-	socket := filepath.Join(os.Getenv("HOME"), "."+brand.Slug, "run", "hc.sock")
+	socket := filepath.Join(hostdirs.RunDir(filepath.Join(os.Getenv("HOME"), brand.DataDir(""))), "hc.sock")
 	os.Remove(socket)
 	ln, err := net.Listen("unix", socket)
 	if err != nil {

@@ -483,10 +483,15 @@ build's may linger); one whose socket was taken over checks every 2 s and
 serves it again once free; an exiting node removes the socket only if it
 is still its own (same inode).
 
-The MCP server is the `mcp` command of the agent and of the core. The agent
-keeps `<data dir>/bin/<slug>-mcp` a link to its running executable, a path
-that stays the same across agent updates; started by that name, the
-executable runs the MCP server without arguments.
+The MCP server is the `mcp` command of the agent and of the core.
+`<data dir>/bin/<slug>-mcp`, the path agents' configurations name, stays
+the same across agent updates: a POSIX shell script that runs
+`<slug>-mcp-$(uname -s)-$(uname -m)` beside it, and each agent keeps the
+link of its own platform pointing at its running executable, so hosts of
+several architectures sharing a home each run their own build
+([40](40-shared-homes.md)). Started by either name, the executable runs
+the MCP server without arguments and asks the vault socket in the
+runtime directory, on this host, of the data directory holding it.
 
 The server (`internal/vaultmcp`) speaks MCP over stdio (JSON-RPC 2.0, one
 message per line; revisions 2025-06-18, 2025-03-26, 2024-11-05). It names
@@ -708,10 +713,12 @@ variables from machines and the MCP server. Limits of the design:
   `TestTimeLimitsCountSleep`), `exempt_test.go` (`TestExemptApps`). The
   automatic lock's tests drive their own clock.
 - `internal/vaultmcp`: `mcp_test.go` (JSON-RPC, masking,
-  `TestMaskAtTheCut`, `TestRunLimitsFromTheCore`, cancellation),
+  `TestMaskAtTheCut`, `TestRunLimitsFromTheCore`, cancellation,
+  `TestSocketPath`),
   `run_unix_test.go` and `signal_unix_test.go` (background programs and
   signals including SIGKILL).
-- `internal/agent/vault_test.go` (`TestSocketsFollowTheNewestAgent`);
+- `internal/agent/vault_test.go` (`TestSocketsFollowTheNewestAgent`,
+  `TestLinkMCPReplacesTheLink`);
   `internal/server`: `TestMachineRemove`, `TestPluginCallClient`,
   `TestDesktopRelay`, `TestMutatingRoutesAreGuarded`.
 - `desktop/src`: `verify.test.ts` (MAC vectors, prompt text, unlock and

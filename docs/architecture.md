@@ -19,7 +19,10 @@ desktop app (Electron shell)                            ├─ machines: registr
 ```
 
 Each machine's agent sessions are served by its node (`herdr-ide node`), a
-process of its own listening on a socket in the instance's run directory:
+process of its own listening on a socket in the instance's runtime
+directory on that host (`internal/hostdirs`; a home several hosts share
+keeps each host's sockets, locks and executables apart,
+[40](features/40-shared-homes.md)):
 the core reaches the local machine's node through that socket, a remote
 machine's over ssh with `node dial`, so both paths run the same code
 ([39](features/39-nodes.md)). The agent builds for
@@ -33,6 +36,8 @@ machine with the code `local_unsupported` and reaches SSH machines only
 | --- | --- |
 | `cmd/herdr-ide` | The one binary: `serve`, `fetch-assets` (`serve.go`), `mcp`, `version`; on machines `node` (`node`, `node dial`, `node stop`), `gui-keep`, `gui-wl` and `chat-host` (`machine_unix.go`, `node_unix.go`, `chathost_unix.go`). Built with the tag `machine` it leaves out the server, UI and payloads; that build is what machines get. |
 | `internal/brand` | Product names; the only place they are defined in Go. |
+| `internal/hostid` | The host's key (name and a hash of its machine id) and id (the hash alone), for files and sessions kept per host ([40](features/40-shared-homes.md)). |
+| `internal/hostdirs` | A namespace's directories on a host: the data directory, the host's own directory in it, the host-local runtime directory. |
 | `internal/agentproto` | Stream protocol shared by core and agent; yamux configuration; types both sides need (transcript events, history snapshots); `Hidden`, the rule that hides the product's own terminals by reserved name and label together. |
 | `internal/agentkinds` | Registry of coding agent kinds: commands to start, continue and resume, transcript format, chat adapter; written into `design/generated/registry.json` ([35](features/35-agent-native-view.md)). |
 | `internal/agent` | The agent: terminal core, detection, files, code-server, displays, bridge and vault sockets, housekeeping. `//go:build unix`, so the Windows core never imports it. |
@@ -214,7 +219,8 @@ conversations ([37](features/37-agent-chats.md)). The path from a page:
    machine side starts the host as a hidden terminal of the instance's
    terminal core when none serves, and asks a host of an older build to
    make way.
-3. **Core ↔ chat host**: `chatproto` JSON lines on `run/chat.sock`: a
+3. **Core ↔ chat host**: `chatproto` JSON lines on `chat.sock` in the runtime
+   directory: a
    hello, one request and its response, then for `attach` the chat's stored
    and live events and for `watch` the chats' states.
 4. **Chat host ↔ agent**: one process per live chat, through its adapter
@@ -232,7 +238,7 @@ conversations ([37](features/37-agent-chats.md)). The path from a page:
 2. Install the bridge and default extensions.
 3. Start, reusing a running code-server only if it serves the workbench.
 
-The node owns the process (`run/cs.pid`) for every core it serves, stops it
+The node owns the process (`cs.pid` in the runtime directory) for every core it serves, stops it
 on exit and reaps orphans. A core releases it after `--code-server-idle`
 without proxied WebSockets, which stops it unless another core has a
 connection to it, and stops it when VS Code is switched off for every kind
@@ -246,7 +252,7 @@ Runtime identifiers derive from `internal/brand`, `web/src/brand.ts` and
 `extensions/herdr-ide-bridge/src/brand.ts`, kept in sync by
 `internal/brand/brand_test.go`; `scripts/check.sh` rejects hardcoded names.
 `scripts/rename.sh NEW` renames the project and appends the old names to the
-`Legacy*` lists, from which the agent moves `~/.<old>`, the core removes the
+`Legacy*` lists, from which the core removes the
 old download cache, the web UI moves `localStorage` keys and code-server
 uninstalls the old bridge ([11](features/11-naming-and-renames.md)).
 

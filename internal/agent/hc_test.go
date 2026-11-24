@@ -19,7 +19,9 @@ import (
 
 	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/brand"
 	"herdr-ide/internal/hc"
+	"herdr-ide/internal/hostdirs"
 	"herdr-ide/internal/transport"
 )
 
@@ -78,10 +80,10 @@ func TestHCInstallStartAndPipe(t *testing.T) {
 	t.Setenv("HC_TERMINAL_ID", "t7")
 	s, home := hcAgent(t, "dev")
 	ctx := context.Background()
-	socket := filepath.Join(home, ".herdr-ide-dev", "run", "hc.sock")
+	socket := filepath.Join(hostdirs.RunDir(filepath.Join(home, brand.DataDir("dev"))), "hc.sock")
 
 	rep, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "status"})
-	if err != nil || rep.HC.Digest != "" || rep.HC.Running || rep.HC.Session != "herdr-ide-dev" || rep.HC.Socket != socket {
+	if err != nil || rep.HC.Digest != "" || rep.HC.Running || rep.HC.Session != agent.HCSession("dev") || rep.HC.Socket != socket {
 		t.Fatalf("status = %+v %v", rep.HC, err)
 	}
 	rep, err = s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "start"})
@@ -105,7 +107,7 @@ func TestHCInstallStartAndPipe(t *testing.T) {
 	if !rep.OK || rep.HC.Digest != digest {
 		t.Fatalf("install: %+v", rep)
 	}
-	bin := filepath.Join(home, ".herdr-ide-dev", "hc", "herdr-core")
+	bin := filepath.Join(hostdirs.Of(filepath.Join(home, brand.DataDir("dev"))).Host, "hc", "herdr-core")
 	if st, err := os.Stat(bin); err != nil || st.Mode().Perm() != 0o700 {
 		t.Fatalf("executable: %v %v", st, err)
 	}
@@ -125,7 +127,7 @@ func TestHCInstallStartAndPipe(t *testing.T) {
 		t.Fatalf("start: %+v %v", rep, err)
 	}
 	ran, _ := os.ReadFile(filepath.Join(home, "ran"))
-	if want := "server start --json session=herdr-ide-dev socket=" + socket + " terminal=\n"; string(ran) != want {
+	if want := "server start --json session=" + agent.HCSession("dev") + " socket=" + socket + " terminal=\n"; string(ran) != want {
 		t.Fatalf("ran %q, want %q", ran, want)
 	}
 	rep, err = s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "stop"})
@@ -181,7 +183,7 @@ func TestHCInstallStartAndPipe(t *testing.T) {
 func TestHCSessionOfDefaultInstance(t *testing.T) {
 	s, home := hcAgent(t, "")
 	rep, err := s.Request(context.Background(), agentproto.Header{Op: agentproto.OpHC, Action: "status"})
-	if err != nil || rep.HC.Session != "herdr-ide" || rep.HC.Socket != filepath.Join(home, ".herdr-ide", "run", "hc.sock") {
+	if err != nil || rep.HC.Session != agent.HCSession("") || rep.HC.Socket != filepath.Join(hostdirs.RunDir(filepath.Join(home, brand.DataDir(""))), "hc.sock") {
 		t.Fatalf("status = %+v %v", rep.HC, err)
 	}
 }
@@ -197,7 +199,7 @@ func TestHCVerifiedBeforeStartAndSocketPrivate(t *testing.T) {
 	if !rep.OK {
 		t.Fatalf("install: %+v", rep)
 	}
-	socket := filepath.Join(home, ".herdr-ide-dev", "run", "hc.sock")
+	socket := filepath.Join(hostdirs.RunDir(filepath.Join(home, brand.DataDir("dev"))), "hc.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +230,7 @@ func TestHCVerifiedBeforeStartAndSocketPrivate(t *testing.T) {
 		t.Fatalf("start of another digest: %+v %v", rep, err)
 	}
 	// The file changes in place, keeping its size and modification time.
-	bin := filepath.Join(home, ".herdr-ide-dev", "hc", "herdr-core")
+	bin := filepath.Join(hostdirs.Of(filepath.Join(home, brand.DataDir("dev"))).Host, "hc", "herdr-core")
 	st, _ := os.Stat(bin)
 	tampered := []byte(strings.Replace(fakeHC, "exit 0", "exit 1", 1))
 	if len(tampered) != int(st.Size()) {

@@ -5,6 +5,7 @@ package files
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -67,6 +68,20 @@ func TestRevealCommand(t *testing.T) {
 // fakeReveal makes reveal run a script instead of the file manager, with
 // body after a line that writes its arguments into a file, which it
 // returns.
+// untilReleased is a shell loop that sleeps (each pause seconds) until the
+// test ends, then exits: when the test writes its release file, when the
+// file's directory is gone (Cleanup removes a TempDir right after the
+// release is written, before a loop may have looked), or after 10 minutes
+// at most, so that a test killed outright leaves no process looping. The
+// test may write release itself earlier.
+func untilReleased(t *testing.T, pause string) (loop, release string) {
+	t.Helper()
+	dir := t.TempDir()
+	release = filepath.Join(dir, "release")
+	t.Cleanup(func() { os.WriteFile(release, nil, 0o600) })
+	return fmt.Sprintf("end=$(( $(date +%%s) + 600 )); while [ -d %[1]q ] && [ ! -e %[2]q ] && [ $(date +%%s) -lt $end ]; do sleep %[3]s; done", dir, release, pause), release
+}
+
 func fakeReveal(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -160,9 +175,8 @@ func TestRevealLeavesTheFileManager(t *testing.T) {
 	// command leaves runs until the test ends: an answer before that shows
 	// that reveal did not wait for it, however loaded the machine is.
 	shortWait(t, 10*time.Minute)
-	release := filepath.Join(t.TempDir(), "release")
-	t.Cleanup(func() { os.WriteFile(release, nil, 0o600) })
-	fakeReveal(t, "(while [ ! -e "+release+" ]; do sleep 0.05; done) &\necho 'file manager started' >&2\nexit 0\n")
+	loop, _ := untilReleased(t, "0.05")
+	fakeReveal(t, "("+loop+") &\necho 'file manager started' >&2\nexit 0\n")
 	for i := 0; i < maxRevealing+2; i++ {
 		a, b := net.Pipe()
 		raw, _ := json.Marshal(Params{Path: "~"})
@@ -189,9 +203,8 @@ func TestRevealWaitsBounded(t *testing.T) {
 	env := testEnv(t)
 	shortWait(t, 100*time.Millisecond)
 	// The commands run until the test lets them go.
-	release := filepath.Join(t.TempDir(), "release")
-	t.Cleanup(func() { os.WriteFile(release, nil, 0o600) })
-	fakeReveal(t, "while [ ! -e "+release+" ]; do sleep 0.02; done\n")
+	loop, release := untilReleased(t, "0.02")
+	fakeReveal(t, loop+"\n")
 	start := time.Now()
 	if rep := call(t, env, "reveal", Params{Path: "~"}); !rep.OK {
 		t.Fatalf("reveal: %s", rep.Code)

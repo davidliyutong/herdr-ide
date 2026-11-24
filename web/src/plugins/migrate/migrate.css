@@ -1,0 +1,51 @@
+.migrate-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.migrate-status-item svg {
+  width: 14px;
+  height: 14px;
+}
+.migrate-dialog {
+  width: min(720px, calc(100vw - 32px));
+}
+.migrate-body {
+  max-height: min(70vh, 640px);
+  overflow: auto;
+}
+.migrate-tree,
+.migrate-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 16px;
+}
+.migrate-tree {
+  padding-left: 0;
+}
+.migrate-workspace {
+  font-weight: 600;
+  margin-top: 8px;
+}
+.migrate-panes li {
+  display: flex;
+  gap: 12px;
+  padding-left: 22px;
+  color: var(--ds-color-muted);
+}
+.migrate-dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+}
+.migrate-note,
+.migrate-warn {
+  color: var(--ds-color-muted);
+}
+.migrate-warn {
+  color: var(--ds-color-warning);
+}
+.migrate-error {
+  color: var(--error);
+}

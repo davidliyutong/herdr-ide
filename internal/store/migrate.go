@@ -20,6 +20,18 @@ import (
 //
 // It returns true when this call created targetPath from legacyPath.
 func MigrateLegacy(legacyPath, targetPath string) (bool, error) {
+	return copyDB(legacyPath, targetPath, true)
+}
+
+// CopyDB copies the database at srcPath, which another process may be
+// using, to targetPath when targetPath does not exist yet: a consistent
+// snapshot (VACUUM INTO), verified, 0600. srcPath stays. It returns true
+// when this call created targetPath.
+func CopyDB(srcPath, targetPath string) (bool, error) {
+	return copyDB(srcPath, targetPath, false)
+}
+
+func copyDB(legacyPath, targetPath string, remove bool) (bool, error) {
 	if !filepath.IsAbs(legacyPath) || !filepath.IsAbs(targetPath) {
 		return false, fmt.Errorf("store: migration paths must be absolute")
 	}
@@ -57,6 +69,9 @@ func MigrateLegacy(legacyPath, targetPath string) (bool, error) {
 		walEmpty = false
 	}
 	if st.Size() == 0 && walEmpty {
+		if !remove {
+			return false, nil
+		}
 		// An empty placeholder file with no data: remove if unheld and skip.
 		removeUnheld(legacyPath, func() bool {
 			cur, err := os.Lstat(legacyPath)
@@ -107,6 +122,9 @@ func MigrateLegacy(legacyPath, targetPath string) (bool, error) {
 		}
 	}
 
+	if !remove {
+		return true, nil
+	}
 	// Migration to targetPath is confirmed complete: remove legacyPath now
 	// if no process holds a lock on it and it was not written since snapshotMod.
 	removeUnheld(legacyPath, func() bool {

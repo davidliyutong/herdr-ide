@@ -1,8 +1,6 @@
 package store
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"io"
 	"io/fs"
@@ -12,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"herdr-ide/internal/hostid"
 )
 
 // Databases kept per host. A data directory may be on a home that several
@@ -31,26 +31,11 @@ func HostFile(dir, name string) string {
 	return filepath.Join(dir, hostFileName(name, thisHost()))
 }
 
-// thisHost is this host's key as database names have it: hostName, and
-// "-" with the first 8 hex digits of the SHA-256 of the machine id when
-// there is one. The id is hashed (systemd asks programs not to show it),
-// with a prefix of the store's own, so that the hash names no id
-// elsewhere. Without an id (a container without /etc/machine-id) the key
-// is the host's name alone.
-var thisHost = sync.OnceValue(func() string {
-	h, _ := os.Hostname()
-	return hostKey(h, machineID())
-})
+// thisHost is this host's key as database names have it (hostid.Key).
+var thisHost = hostid.Key
 
 // hostKey is the key of host name h with machine id id ("" for none).
-func hostKey(h, id string) string {
-	key := hostName(h)
-	if id = strings.TrimSpace(id); id != "" {
-		sum := sha256.Sum256([]byte("store host\x00" + id))
-		key += "-" + hex.EncodeToString(sum[:4])
-	}
-	return key
-}
+func hostKey(h, id string) string { return hostid.KeyOf(h, id) }
 
 // hostFileName is name with host before its extension.
 func hostFileName(name, host string) string {
@@ -58,49 +43,11 @@ func hostFileName(name, host string) string {
 	return strings.TrimSuffix(name, ext) + "-" + host + ext
 }
 
-// maxHostName is the length of a host's name in database names at most:
-// with the hash and a database's name, a file name stays far below the
-// 255 bytes file systems take.
-const maxHostName = 128
+// machineID is the machine's id (hostid.MachineID).
+func machineID() string { return hostid.MachineID() }
 
-// hostName is host name h as database names have it: the whole name,
-// lowercase, with what is not a letter, a digit, -, _ or . replaced by _,
-// without dots at its ends, at most maxHostName bytes; "localhost" for
-// none.
-func hostName(h string) string {
-	h = strings.ToLower(strings.TrimSpace(h))
-	var b strings.Builder
-	for _, r := range h {
-		if b.Len() >= maxHostName {
-			break
-		}
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	if n := strings.Trim(b.String(), "."); n != "" {
-		return n
-	}
-	return "localhost"
-}
-
-// validHostKey reports whether key may be a host's key in a database name
-// (thisHost of some host, or of an earlier version: the host's first
-// label): of the letters, digits, -, _ and . hostName leaves, without a
-// dot at its ends, at most as long as a name and a hash.
-func validHostKey(key string) bool {
-	if key == "" || len(key) > maxHostName+9 || key[0] == '.' || key[len(key)-1] == '.' {
-		return false
-	}
-	for _, r := range key {
-		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
-			return false
-		}
-	}
-	return true
-}
+// validHostKey reports whether key may be a host's key in a database name.
+func validHostKey(key string) bool { return hostid.ValidKey(key) }
 
 // HostFileRetention is how long another host's database stays unopened
 // before PruneHostFiles removes it.

@@ -15,6 +15,8 @@ import (
 	"github.com/hashicorp/yamux"
 
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 )
 
 // startTestNode runs the node of a temporary home in this process.
@@ -28,7 +30,7 @@ func startTestNode(t *testing.T) (sock string, done <-chan struct{}) {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
-	sock = nodeSocket(filepath.Join(home, ".herdr-ide", "run"))
+	sock = nodeSocket(hostdirs.RunDir(filepath.Join(home, brand.DataDir(""))))
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan struct{})
 	go func() {
@@ -244,9 +246,14 @@ func TestNodeTakeover(t *testing.T) {
 	if _, err := ys.Ping(); err != nil {
 		t.Fatalf("old session: %v", err)
 	}
+	// The new node replaces the socket: a dial between its removal and
+	// the new listener finds none.
 	for i := 0; ; i++ {
-		if rep, _ := helloThrough(t, sock, ""); rep.OK {
-			break
+		if c, _, err := dialNodeSocket(sock, agentproto.NodeHello{Op: agentproto.NodeServe}); err == nil {
+			c.Close()
+			if rep, _ := helloThrough(t, sock, ""); rep.OK {
+				break
+			}
 		}
 		if i > 100 {
 			t.Fatal("no node answers")

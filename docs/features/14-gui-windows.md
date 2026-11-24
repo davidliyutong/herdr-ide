@@ -46,7 +46,9 @@ Agent: `internal/agent/gui.go`.
     `-terminate` takes a delay and a GPU render node the user may open.
   - The *plain display* is Xvfb, drawing in memory. Where the machine has
     none it is fetched with `apt-get download xvfb` (no privileges; apt
-    verifies the package) and unpacked into `~/.herdr-ide/xvfb/<version>/`.
+    verifies the package) and unpacked into
+    `~/.herdr-ide/hosts/<host>/xvfb/<version>/` (per host: a package is of
+    the host's distribution and architecture).
     Xwayland is never fetched.
   - An Xwayland that does not come up, or comes up without DRI3, is ended
     and Xvfb started instead; the next connection tries again.
@@ -59,19 +61,21 @@ Agent: `internal/agent/gui.go`.
   it is committed and answers frame callbacks at 60 Hz only while there are
   any. The two talk over a socket pair (`WAYLAND_SOCKET`); no Wayland socket
   exists on disk.
-- **Display number** reserved in `run/gui.json` (from `:20`) and kept across
-  restarts, so terminals keep a valid `DISPLAY`. The socket must be
+- **Display number** reserved in `gui.json` of the runtime directory
+  ([40](40-shared-homes.md); from `:20`) and kept across restarts, so
+  terminals keep a valid `DISPLAY`. The socket must be
   `/tmp/.X11-unix/X<n>` (libxcb before 1.16 cannot use a path in
   `DISPLAY`), where anyone can create a socket and X clients cannot
   authenticate the server. So a number is used only while no lock file,
   socket or listener of another user is on it and `/tmp/.X11-unix` is safe
   (owned by root or the user, sticky or not group/other-writable). The agent
   sends its cookie only to a server whose peer credentials are the process
-  it started, on both the path and the abstract socket. `run/gui.lock`
+  it started, on both the path and the abstract socket. `gui.lock`
   serializes reservation and start between agents.
 - **Cookie.** Each start writes a new MIT-MAGIC-COOKIE-1: the server reads
-  `run/xauth.server`, terminals get `run/xauth` (both 0600), so a program
-  editing its `XAUTHORITY` cannot leave the server open.
+  `xauth.server`, terminals get `xauth` (both 0600, in the runtime
+  directory), so a program editing its `XAUTHORITY` cannot leave the
+  server open.
 - **Lifetime.** The server runs with `-nolisten tcp`, a 2560×1440 screen, in
   its own session (it survives the agent and ssh), and with `-terminate 60`:
   it exits a minute after its last client left. Its clients are the
@@ -80,7 +84,7 @@ Agent: `internal/agent/gui.go`.
   `DISPLAY` may start programs.
 - **Keeper** (`internal/agent/guikeep.go`): the machine's binary run as
   `gui-keep`, one per instance. It holds a connection to the display while
-  the instance's terminal core (`run/hc.sock`) runs, follows a terminal core
+  the instance's terminal core (`hc.sock`) runs, follows a terminal core
   restarted within a short grace period, and exits once none runs. The core
   asks for one (action `keep`) when the display is ready and whenever the
   terminal core becomes reachable again; never in read-only mode.
@@ -371,7 +375,8 @@ section and as flags ([reference](../reference.md#program-windows),
   the status bar shows the machine's display failed; clicking shows the
   error, how it is retried, and a link to the settings. Retries back off to
   one every 5 minutes. Logs on the machine:
-  `~/.herdr-ide[-<instance>]/xvfb.log`, `xwayland.log`, `gui-keep.log`.
+  `~/.herdr-ide[-<instance>]/hosts/<host>/xvfb.log`, `xwayland.log`,
+  `gui-keep.log`.
 - **Network interruption** → browser windows show "Reconnecting"; programs
   and windows stay and are adopted again.
 - **Display number taken** by another user after the display idled out →

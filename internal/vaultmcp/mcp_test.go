@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 )
 
 // fakeCore answers each connection as the core would, recording requests.
@@ -353,14 +355,22 @@ func TestSocketPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX paths")
 	}
-	if p := SocketPath("/home/u/.x-dev/bin/"+LinkName, "/home/u", ""); p != "/home/u/.x-dev/run/vault.sock" {
-		t.Errorf("link %s", p)
+	// The data directory holding the command, or the instance's: its
+	// runtime directory on this host.
+	if p, want := SocketPath("/home/u/.x-dev/bin/"+LinkName, "/home/u", ""), filepath.Join(hostdirs.RunDir("/home/u/.x-dev"), "vault.sock"); p != want {
+		t.Errorf("link %s, want %s", p, want)
 	}
-	want := filepath.Join("/home/u", ".herdr-ide-dev", "run", "vault.sock")
+	if p, want := SocketPath("/home/u/.x-dev/bin/"+PlatformLink("Linux", "x86_64"), "/home/u", ""), filepath.Join(hostdirs.RunDir("/home/u/.x-dev"), "vault.sock"); p != want {
+		t.Errorf("platform link %s, want %s", p, want)
+	}
+	want := filepath.Join(hostdirs.RunDir(filepath.Join("/home/u", brand.DataDir("dev"))), "vault.sock")
 	if p := SocketPath(LinkName, "/home/u", "dev"); p != want {
 		t.Errorf("by name %s", p)
 	}
 	if p := SocketPath("/usr/bin/agent", "/home/u", "dev"); p != want {
 		t.Errorf("subcommand %s", p)
+	}
+	if !IsLink("/x/bin/"+PlatformLink("Darwin", "arm64")) || IsLink("/x/bin/agent") {
+		t.Error("IsLink")
 	}
 }

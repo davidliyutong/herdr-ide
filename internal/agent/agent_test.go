@@ -17,6 +17,8 @@ import (
 
 	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 	"herdr-ide/internal/transport"
 )
 
@@ -45,7 +47,7 @@ func TestHelloAndPrivateRunDir(t *testing.T) {
 	if b, _ := json.Marshal(rep.Info); rep.SSH != "10.0.0.2 51000 10.0.0.9 22" || strings.Contains(string(b), "51000") {
 		t.Fatalf("ssh = %q, info = %s", rep.SSH, b)
 	}
-	st, err := os.Stat(filepath.Join(home, ".herdr-ide", "run"))
+	st, err := os.Stat(hostdirs.RunDir(filepath.Join(home, brand.DataDir(""))))
 	if err != nil || st.Mode().Perm() != 0o700 {
 		t.Fatalf("run dir perms: %v %v", st.Mode(), err)
 	}

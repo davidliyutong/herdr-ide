@@ -354,7 +354,10 @@ ipcMain.on(channels.notifyClickWanted, (event, wanted: unknown) => {
 const privacy = privacyActions(
   {
     platform,
-    executable: terminalCoreExecutable(app.getPath('home'), typeof instance === 'string' ? nodeInstance(instance) : ''),
+    // Looked up at each request: the agent installs it after the app started.
+    get executable() {
+      return terminalCoreExecutable(app.getPath('home'), typeof instance === 'string' ? nodeInstance(instance) : '');
+    },
     bundle: app.isPackaged ? bundleOf(process.execPath) : '',
     pid: process.pid,
     dev,

@@ -24,6 +24,7 @@
   Claude Code 和 Codex 经机器确认后回到各自原来的会话（`claude --resume <id>`、`codex resume <id>`），否则接着该文件夹里最近的一次对话继续（[33](docs/features/33-workspace-restore.md)）。
 - **多机器**：可以添加 `~/.ssh/config` 里的任意主机或任意 ssh 目标。
   每台机器只开一条 ssh 连接，在上面运行一个静态 agent，所有通信都在这条连接里多路复用；机器上不监听任何端口。
+  共用同一个主目录（NFS）的集群节点仍是各自独立的机器，各有自己的 socket、终端核心和文件（[40](docs/features/40-shared-homes.md)）。
 - **为 agent 设计**：汇总所有机器上 blocked 和 done 的 agent，并发通知、播放提示音。
   每台机器都能识别 Claude Code、Codex、Gemini、OpenCode 等，以及它们是在工作、等待还是已完成。
   还能找出 Claude Code 和 Codex 正在使用的会话（[35](docs/features/35-agent-native-view.md)）。
@@ -158,7 +159,7 @@ herdr-ide 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负�
 ## 开发
 
 ```bash
-make dev-core      # 在 :7790 以 --instance dev 运行 core（终端核心 session 为 herdr-ide-dev）
+make dev-core      # 在 :7790 以 --instance dev 运行 core（终端核心 session 为 herdr-ide-dev-<主机 id>）
 make dev-web       # 前端热更新，端口 5173
 make check test    # 提交 PR 之前运行
 ```

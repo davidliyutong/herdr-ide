@@ -33,6 +33,9 @@ workspaces and terminals of every machine in one browser tab, with VS Code
 - **Multi-machine.** Add any host of `~/.ssh/config` or any ssh target.
   One ssh connection per machine runs a small static agent that
   multiplexes everything; nothing listens on the machines.
+  Cluster nodes sharing one home directory (NFS) stay separate machines,
+  each with its own sockets, terminal core and files
+  ([40](docs/features/40-shared-homes.md)).
 - **Agent-native.** An inbox of agents that are blocked or done on every
   machine, with notifications and sounds. Each machine detects Claude
   Code, Codex, Gemini, OpenCode and more, whether they work, wait or
@@ -227,7 +230,7 @@ pinned SHA-256 digests. Details in
 ## Development
 
 ```bash
-make dev-core      # core on :7790 with --instance dev (terminal core session herdr-ide-dev)
+make dev-core      # core on :7790 with --instance dev (terminal core session herdr-ide-dev-<host id>)
 make dev-web       # UI with hot reload on :5173
 make check test    # before sending a PR
 ```

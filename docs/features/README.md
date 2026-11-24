@@ -16,7 +16,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 08 | [Web access and security](08-web-access-and-security.md) | Browser/PWA delivery, reverse-proxy model and the guardrails around it. |
 | 09 | [Air-gapped installs](09-air-gapped-installs.md) | Artifact resolution on the core host, seed directories, mirrors, pinned checksums. |
 | 10 | [Remote resource lifecycle](10-remote-resource-lifecycle.md) | Ownership and reclamation of every process and file created on machines. |
-| 11 | [Naming and renames](11-naming-and-renames.md) | Centralized product names, one-step renames and migration of persisted state. |
+| 11 | [Naming and renames](11-naming-and-renames.md) | Centralized product names, one-step renames; the previous name's namespace runs on while its workspaces move over, a tab at a time. |
 | 12 | [Internationalization](12-internationalization.md) | English and Chinese UI, translated extension, codes instead of server prose. |
 | 13 | [Settings, keybindings and appearance](13-settings-and-appearance.md) | One settings and one keybinding system in the core, VS Code style files and a generated settings UI; themes, terminal font and colors. |
 | 14 | [GUI windows](14-gui-windows.md) | Windows of programs on remote Linux machines in browser windows: a display per terminal core (Xwayland on the GPU, else Xvfb), captured as pictures or video. |
@@ -40,6 +40,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 37 | [Agent chats](37-agent-chats.md) | Claude Code, Codex, Kimi Code and Grok run headless by a chat host on each machine and drawn in panes; a bounded journal; sessions moved between terminals and chats. |
 | 38 | [State in SQLite](38-sqlite-state.md) | One private SQLite database per owner, named per host on shared homes, schemas versioned per feature; earlier state files imported once. |
 | 39 | [Nodes](39-nodes.md) | One program on every machine: a node behind a local socket that several UIs attach to, locally or over ssh; the terminal core and chat host run as services of their own; upgrades without interrupting panes. |
+| 40 | [Homes several hosts share](40-shared-homes.md) | Hosts sharing one home (NFS) keep their sockets, locks, executables, logs and terminal cores apart: a host-local runtime directory, a directory per host, a terminal core session per host, and retention for hosts gone. |
 
 ## Writing a feature document
 

@@ -30,6 +30,7 @@ import (
 	"github.com/hashicorp/yamux"
 
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/hostdirs"
 )
 
 // Agent is a machine's agent for one instance: what the agent sessions of
@@ -39,8 +40,9 @@ type Agent struct {
 	logger    *log.Logger
 	instance  string
 	home      string
-	base      string // ~/<brand.DataDir(instance)>
-	runDir    string // base/run, mode 0700
+	base      string // ~/<brand.DataDir(instance)>, shared by hosts sharing the home
+	hostDir   string // base/hosts/<host key>: this host's own files (hostdirs)
+	runDir    string // host-local runtime directory, mode 0700 (hostdirs.RunDir)
 	uploadDir string // base/uploads
 
 	hcOp     sync.Mutex // serializes installing, starting and stopping herdr-core
@@ -89,29 +91,15 @@ type Options struct {
 	Client string
 }
 
-// dataDirs returns the instance's data directory and its run directory,
-// made private (the run directory holds sockets with no other
-// authentication; they stay private even if they existed with looser
-// permissions).
-func dataDirs(instance string, logger *log.Logger) (home, base, runDir string, err error) {
-	if !brand.ValidInstance(instance) {
-		return "", "", "", fmt.Errorf("invalid instance name %q", instance)
-	}
-	home, err = os.UserHomeDir()
+// dataDirs returns the instance's directories on this host, made private
+// (the run directory holds sockets with no other authentication; they
+// stay private even if they existed with looser permissions).
+func dataDirs(instance string) (hostdirs.Dirs, error) {
+	d, err := hostdirs.For(instance)
 	if err != nil {
-		return "", "", "", err
+		return d, err
 	}
-	base = filepath.Join(home, brand.DataDir(instance))
-	if instance == "" {
-		migrateLegacyDataDir(home, base, logger)
-	}
-	runDir = filepath.Join(base, "run")
-	if err := os.MkdirAll(runDir, 0o700); err != nil {
-		return "", "", "", err
-	}
-	_ = os.Chmod(base, 0o700)
-	_ = os.Chmod(runDir, 0o700)
-	return home, base, runDir, nil
+	return d, d.Make()
 }
 
 // Serve runs an agent of its own over conn until the session ends: the
@@ -134,7 +122,7 @@ func NewAgent(opts Options) (*Agent, error) {
 	if logger == nil {
 		logger = log.New(os.Stderr, brand.CoreBin+" agent: ", log.LstdFlags)
 	}
-	home, base, runDir, err := dataDirs(opts.Instance, logger)
+	dirs, err := dataDirs(opts.Instance)
 	if err != nil {
 		return nil, err
 	}
@@ -142,17 +130,18 @@ func NewAgent(opts Options) (*Agent, error) {
 	a := &Agent{
 		logger:    logger,
 		instance:  opts.Instance,
-		home:      home,
-		base:      base,
-		runDir:    runDir,
-		uploadDir: filepath.Join(base, "uploads"),
+		home:      dirs.Home,
+		base:      dirs.Base,
+		hostDir:   dirs.Host,
+		runDir:    dirs.Run,
+		uploadDir: filepath.Join(dirs.Base, "uploads"),
 		ctx:       ctx,
 		stop:      stop,
 		sessions:  map[*session]struct{}{},
 	}
 	a.cs = newCodeServer(a)
 	a.gui = newGUI(a)
-	a.spawn(func() { housekeeping(base, logger) })
+	a.spawn(func() { a.housekeep(ctx) })
 	a.spawn(func() { a.serveBridge(ctx) })
 	a.spawn(func() { a.serveVault(ctx) })
 	a.spawn(a.linkMCP)

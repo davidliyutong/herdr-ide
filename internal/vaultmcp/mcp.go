@@ -21,16 +21,19 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 )
 
-// LinkName is the stable command's name in <data dir>/bin: a link to the
-// executable that serves this command, kept by the agent.
+// LinkName is the stable command's name in <data dir>/bin, which MCP
+// configurations name: a script (LinkScript) running the executable that
+// serves this command, kept by the agent.
 const LinkName = brand.Slug + "-mcp"
 
 // ServerName is the server's name in MCP (serverInfo) and the name the
@@ -369,25 +372,44 @@ func (s *Server) ask(ctx context.Context, req agentproto.VaultRequest) (*agentpr
 }
 
 // SocketPath is the vault socket of the agent whose data directory holds
-// the command at argv0 (started as <data dir>/bin/<slug>-mcp), else of the
-// instance's data directory in home.
+// the command at argv0 (started as <data dir>/bin/<slug>-mcp or a
+// platform's link beside it), else of the instance's data directory in
+// home: in that data directory's runtime directory on this host
+// (hostdirs.RunDir).
 func SocketPath(argv0, home, instance string) string {
-	if filepath.Base(argv0) == LinkName && filepath.Dir(argv0) != "." && filepath.IsAbs(argv0) {
-		return filepath.Join(filepath.Dir(filepath.Dir(argv0)), "run", "vault.sock")
+	if IsLink(argv0) && filepath.Dir(argv0) != "." && filepath.IsAbs(argv0) {
+		return filepath.Join(hostdirs.RunDir(filepath.Dir(filepath.Dir(argv0))), "vault.sock")
 	}
-	return filepath.Join(home, brand.DataDir(instance), "run", "vault.sock")
+	return filepath.Join(hostdirs.RunDir(filepath.Join(home, brand.DataDir(instance))), "vault.sock")
 }
 
-// IsLink tells whether the executable was started by the stable link's
-// name, which runs the mcp command without arguments.
-func IsLink(argv0 string) bool { return filepath.Base(argv0) == LinkName }
+// PlatformLink is the name of the link to the agent of a system and
+// architecture (uname -s, uname -m) beside the stable command, which
+// runs the one of the host it runs on: a home that hosts of several
+// architectures share has a link for each.
+func PlatformLink(system, machine string) string { return LinkName + "-" + system + "-" + machine }
+
+// LinkScript is the stable command, a POSIX shell script that runs this
+// host's PlatformLink.
+const LinkScript = `#!/bin/sh
+# The variable vault's MCP server: the agent of this host's system and
+# architecture, linked beside this script.
+exec "$(dirname "$0")/` + LinkName + `-$(uname -s)-$(uname -m)" "$@"
+`
+
+// IsLink tells whether the executable was started by the stable command's
+// name or a platform's link, which run the mcp command without arguments.
+func IsLink(argv0 string) bool {
+	b := filepath.Base(argv0)
+	return b == LinkName || strings.HasPrefix(b, LinkName+"-")
+}
 
 // Main runs the mcp command with its arguments; argv0 is the name the
 // executable was started by.
 func Main(argv0 string, args []string) int {
 	fl := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	instance := fl.String("instance", "", "state instance whose agent to ask (see --instance of serve)")
-	socket := fl.String("socket", "", "the agent's vault socket (default <data dir>/run/vault.sock)")
+	socket := fl.String("socket", "", "the agent's vault socket (default vault.sock in the data directory's runtime directory)")
 	fl.Usage = func() {
 		fmt.Fprintf(fl.Output(), "usage: %s mcp [--instance NAME] [--socket PATH]\n\nThe variable vault's MCP server (stdio), for coding agents' CLIs.\n\n", brand.CoreBin)
 		fl.PrintDefaults()

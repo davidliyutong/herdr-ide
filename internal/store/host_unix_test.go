@@ -8,9 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 )
@@ -273,41 +271,6 @@ func TestOpenKeepsMarked(t *testing.T) {
 	}
 }
 
-// The machine id is the system's own: macOS's platform UUID as ioreg
-// shows it, elsewhere the first machine-id file that has one.
-func TestMachineID(t *testing.T) {
-	out := []byte(`+-o J316sAP  <class IOPlatformExpertDevice, id 0x100000256, registered>
-    {
-      "IOPolledInterface" = "AppleARMWatchdogTimerHibernateHandler is not serializable"
-      "IOPlatformUUID" = "AB77F40E-2F67-5607-B4F1-6D5E54732E35"
-      "serial-number" = <0000>
-    }
-`)
-	if got := ioregUUID(out); got != "AB77F40E-2F67-5607-B4F1-6D5E54732E35" {
-		t.Errorf("ioregUUID = %q", got)
-	}
-	if got := ioregUUID([]byte("nothing")); got != "" {
-		t.Errorf("ioregUUID of nothing = %q", got)
-	}
-	id := machineID()
-	if runtime.GOOS == "darwin" {
-		if id == "" {
-			t.Error("no platform UUID")
-		}
-		return
-	}
-	want := ""
-	for _, p := range machineIDFiles {
-		if b, err := os.ReadFile(p); err == nil && strings.TrimSpace(string(b)) != "" {
-			want = strings.TrimSpace(string(b))
-			break
-		}
-	}
-	if id != want {
-		t.Errorf("machineID = %q, want %q", id, want)
-	}
-}
-
 // Legacy un-hosted databases are cleaned up after LegacyFileRetention once
 // this host has its own per-host database, without waiting 30 days, and
 // core.db pruning skips other instances' databases in the shared config dir.
@@ -398,4 +361,42 @@ func TestMigrateLegacy(t *testing.T) {
 		t.Fatalf("held legacy=%v target=%v", exists(legacy2), exists(target2))
 	}
 	stop()
+}
+
+// CopyDB copies a database another process has open, with what its log
+// holds, and leaves it; an existing target stays as it is.
+func TestCopyDB(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "chat-old.db")
+	target := filepath.Join(t.TempDir(), "chat-new.db")
+	db := openShared(t, src)
+	if _, err := db.Migrate("chat", []string{`CREATE TABLE chats (id INTEGER PRIMARY KEY, v TEXT)`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO chats (id, v) VALUES (1, 'one')`); err != nil {
+		t.Fatal(err)
+	}
+	copied, err := CopyDB(src, target)
+	if err != nil || !copied {
+		t.Fatalf("CopyDB: %v %v", copied, err)
+	}
+	if !exists(src) {
+		t.Fatal("the source was removed")
+	}
+	if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("target %v %v", fi, err)
+	}
+	tdb := openShared(t, target)
+	var v string
+	if err := tdb.QueryRow(`SELECT v FROM chats WHERE id = 1`).Scan(&v); err != nil || v != "one" {
+		t.Fatalf("copied row = %q (%v)", v, err)
+	}
+	tdb.Close()
+	if _, err := db.Exec(`INSERT INTO chats (id, v) VALUES (2, 'two')`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if copied, err := CopyDB(src, target); err != nil || copied {
+		t.Fatalf("an existing target: %v %v", copied, err)
+	}
 }

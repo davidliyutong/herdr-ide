@@ -42,9 +42,9 @@ rules behind it.
   window is no longer watched or stops changing.
 
 **What the user's programs depend on outlives the agent.** The terminal
-core (herdr-core, session `herdr-ide[-<instance>]`) runs detached from the
-agent as a user service, so programs survive disconnects and core restarts.
-The user ends it from the machine's menu ([21](21-terminal-core.md)).
+core (herdr-core, session `herdr-ide[-<instance>]-<host id>`) runs
+detached from the agent as a user service, so programs survive
+disconnects and core restarts. The user ends it from the machine's menu ([21](21-terminal-core.md)).
 Terminals of the layout are kept by the layout document and end when their
 pane closes ([33](33-workspace-restore.md)). The virtual display (Xvfb or
 Xwayland, [14](14-gui-windows.md)) also runs in its own session; a display
@@ -64,7 +64,8 @@ closes: input closed, SIGTERM, then SIGKILL after a grace.
 
 **code-server has an owner and several ends** (`internal/agent/codeserver.go`).
 
-- `run/cs.pid` holds the process id and the owning agent's pid.
+- `cs.pid` in the runtime directory holds the process id and the owning
+  agent's pid.
 - An agent stops only the process it owns on exit.
 - An agent adopts a running process whose owner died, and at startup stops
   an orphan whose owner is gone.
@@ -80,27 +81,30 @@ can run. A closed pane, or a disabled or removed machine, unmounts its
 windows at once (`web/src/codeFrames.ts`, `web/src/components/CodeLayer.tsx`).
 
 **Files.** Retention is by age (`internal/agent/housekeeping.go` prunes at
-agent start; Xvfb packages, gpupick libraries and video encoders when
-another build is installed):
+agent start and every 24 h; Xvfb packages, gpupick libraries and video
+encoders when another build is installed):
 
 - uploads, staging files and logs: 7 days;
-- shared versioned directories (`agent/`, `code-server/`, `xvfb/`,
-  `gpupick/`, `video/`): 14 days unused; running agents and starts touch
+- shared versioned directories (`agent/`, `code-server/`, `gpupick/`,
+  `video/`, and the host's `hosts/<host>/xvfb/`): 14 days unused; running agents and starts touch
   their directory, so a version another core uses is not deleted;
 - partial downloads and installs left by a killed agent: removed after 1 h;
-- `hc/herdr-core`: one file per instance, replaced whole by the next
-  install;
+- `hosts/<host>/hc/herdr-core`: one file per instance and host, replaced
+  whole by the next install;
 - the chat host's journal (`chat-<host>.db`): within the `chat.*` limits
   per chat, in total and in days after a chat closed; its log restarts at
   1 MiB with one old file kept;
 - databases and logs are named per host (`machine-<host>.db`,
   [38](38-sqlite-state.md)), since a data directory may be on a home
   shared by several hosts; other hosts' go after 30 days unused;
+- other hosts' directories (`hosts/<host>/`, [40](40-shared-homes.md)):
+  emptied but for `hc/` after 30 days unused, removed after 180;
 - herdr-core's own state, the display's reserved files and the core host's
   files (settings, keybindings, machines, download cache): kept, replaced
   whole on change.
 
-Directories are per instance except the shared versioned ones above.
+Directories are per instance except the shared versioned ones above;
+sockets, locks and pid files are in the host-local runtime directory.
 
 ## Alternatives considered
 
@@ -124,7 +128,7 @@ Directories are per instance except the shared versioned ones above.
   instance finds them.
 - **A terminal core nobody uses any more** (machine removed, instance no
   longer run): it runs until the user stops it from the machine's menu or
-  with herdr-core's `server stop`
+  with `herdr-ide node stop --terminal-core` on the machine
   ([deployment](../deployment.md#remote-resources)).
 - **An untracked code-server answers on the socket** (pid file lost):
   replaced when VS Code is next opened ([05](05-vscode-panes.md)).
@@ -137,7 +141,8 @@ Directories are per instance except the shared versioned ones above.
 ## Testing
 
 - `internal/agent/lifecycle_test.go`: orphan reaping, owner-only stop,
-  upload pruning and legacy directory migration.
+  upload pruning (`TestHousekeeping`), other hosts' directories
+  (`TestPruneHosts`).
 - `internal/server/server_test.go` (`TestCodeServerIdleTracking`): idle
   detection with open connections.
 - `web/src/__tests__/codePanes.test.ts`: VS Code windows kept off screen

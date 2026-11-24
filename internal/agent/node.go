@@ -20,6 +20,7 @@ import (
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 )
 
 // A machine's node is the agent as a service: a process of its own that
@@ -101,10 +102,11 @@ func RunNode(ctx context.Context, opts Options, takeover bool) error {
 	if logger == nil {
 		logger = log.New(os.Stderr, brand.CoreBin+" node: ", log.LstdFlags)
 	}
-	_, _, runDir, err := dataDirs(opts.Instance, logger)
+	dirs, err := dataDirs(opts.Instance)
 	if err != nil {
 		return err
 	}
+	runDir := dirs.Run
 	me, err := selfInfo()
 	if err != nil {
 		return err
@@ -356,10 +358,11 @@ func DialNode(ctx context.Context, instance, client, sshConn string, logger *log
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
 	}
-	_, base, runDir, err := dataDirs(instance, logger)
+	dirs, err := dataDirs(instance)
 	if err != nil {
 		return nil, err
 	}
+	runDir := dirs.Run
 	me, err := selfInfo()
 	if err != nil {
 		return nil, err
@@ -377,9 +380,9 @@ func DialNode(ctx context.Context, instance, client, sshConn string, logger *log
 		if there != nil {
 			logger.Printf("node: build %s (%s) takes over from %s (%s)", me.Build, me.Version, there.Build, there.Version)
 		}
-		err = startNode(instance, base, true)
+		err = startNode(instance, dirs.Host, true)
 	default:
-		err = startNode(instance, base, false)
+		err = startNode(instance, dirs.Host, false)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("start the node: %w", err)
@@ -403,7 +406,7 @@ func DialNode(ctx context.Context, instance, client, sshConn string, logger *log
 			if c, _, err := dialNodeSocket(sock, hello); err == nil {
 				return c, nil
 			}
-			return nil, fmt.Errorf("no node answers on %s; see %s: %w", sock, filepath.Join(base, "node.log"), err)
+			return nil, fmt.Errorf("no node answers on %s; see %s: %w", sock, filepath.Join(dirs.Host, "node.log"), err)
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
@@ -435,15 +438,16 @@ func dialNodeSocket(sock string, hello agentproto.NodeHello) (net.Conn, *agentpr
 }
 
 // startNode starts `node` from this executable in a session of its own,
-// with its output in the instance's node.log, and does not wait for it.
-func startNode(instance, base string, takeover bool) error {
+// with its output in this host's node.log of the instance (hostDir), and
+// does not wait for it.
+func startNode(instance, hostDir string, takeover bool) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	logPath := filepath.Join(base, "node.log")
+	logPath := filepath.Join(hostDir, "node.log")
 	if st, err := os.Stat(logPath); err == nil && st.Size() > nodeLogMax {
-		_ = os.Rename(logPath, filepath.Join(base, "node.old.log"))
+		_ = os.Rename(logPath, filepath.Join(hostDir, "node.old.log"))
 	}
 	out, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -469,10 +473,11 @@ func startNode(instance, base string, takeover bool) error {
 // StopNodes asks every node of the instance to stop (also those of earlier
 // builds, on node-<build>.sock), and reports how many did.
 func StopNodes(instance string) (int, error) {
-	_, _, runDir, err := dataDirs(instance, log.New(io.Discard, "", 0))
+	dirs, err := hostdirs.For(instance)
 	if err != nil {
 		return 0, err
 	}
+	runDir := dirs.Run
 	socks, _ := filepath.Glob(filepath.Join(runDir, "node*.sock"))
 	n := 0
 	for _, sock := range socks {

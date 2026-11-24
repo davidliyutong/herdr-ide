@@ -15,10 +15,13 @@ Goals:
 - one place per language defines the name;
 - one command renames everything;
 - existing state migrates instead of being orphaned;
+- the previous version keeps running, with its terminals, until the user
+  has moved what they want, one workspace or tab at a time;
 - CI rejects new hardcoded names.
 
-Non-goals: running two names side by side; renaming herdr-core's own
-identifiers (its executable, `HC_*` variables, state directory).
+Non-goals: moving a running program to another terminal core; renaming
+herdr-core's own identifiers (its executable, `HC_*` variables, state
+directory).
 
 ## Design
 
@@ -39,7 +42,7 @@ identifiers (its executable, `HC_*` variables, state directory).
   them.
 - **Derived at runtime**: the agent's state directory
   (`~/.<slug>[-<instance>]`), the terminal core's session
-  (`<slug>[-<instance>]`, [21](21-terminal-core.md)), the proxy-secret
+  (`<slug>[-<instance>]-<host id>`, [21](21-terminal-core.md)), the proxy-secret
   header, environment variables (`HERDR_IDE_*`), the core's configuration
   directory and download cache, browser storage keys, the label and name
   that hide the product's own terminals (`<slug>.hidden`,
@@ -51,17 +54,49 @@ identifiers (its executable, `HC_*` variables, state directory).
   `cmd/<slug>` and `extensions/<slug>-bridge`, sets the display name,
   removes generated artifacts, then builds and runs the brand test.
 - **Migration**: the script appends old names to the `Legacy*` lists
-  (`internal/brand/brand.go`) and `LEGACY_SLUGS` (`web/src/brand.ts`). At
-  runtime:
-  - the agent of the default instance renames `~/.<old>` to `~/.<new>`
-    when the new one does not exist (`internal/agent/housekeeping.go`);
-  - the core moves its configuration directory from the old name when the
-    new one does not exist (`cmd/herdr-ide/serve.go`) and deletes the old
-    download cache (`internal/codeserver/artifacts.go`);
-  - code-server uninstalls the old bridge extension once;
+  (`internal/brand/brand.go`) and `LEGACY_SLUGS` (`web/src/brand.ts`).
+  The renamed version is a namespace of its own beside the previous one
+  (`~/.<new>` and `~/.<old>` on machines, two terminal cores, two desktop
+  apps), so the previous version keeps working. At runtime:
+  - the core copies its configuration directory (settings, machines,
+    keybindings, the vault, its databases as consistent copies) from the
+    old name when the new one does not exist (`cmd/herdr-ide/serve.go`);
+    the old one stays for the previous version;
+  - a machine's chat host copies its database from the previous namespace
+    when it has none yet (`internal/chathost/journal.go`), so moved chat
+    panes find their chats;
+  - the download caches of names older than the newest previous one are
+    deleted (`internal/codeserver/artifacts.go`);
   - the web UI moves `localStorage` keys from the old prefix.
+- **Moving workspaces** (plugin `migrate`: `internal/plugins/migrate`,
+  `internal/agent/plugin/migrate`, `web/src/plugins/migrate`). While a
+  connected machine has a previous namespace, the status bar says so; its
+  dialog lists the previous layout's workspaces and tabs, each pane with
+  what runs in it: the coding agent the machine finds in the foreground
+  (and its session, from the agent's process), another program, or a
+  shell. Moving picked tabs:
+  1. starts a shell in this namespace's terminal core for each of their
+     terminals, in the directory its program is in;
+  2. writes the previous layout without them at the version read (another
+     client's change since is a conflict: nothing changes and the shells
+     end), then ends their previous terminals;
+  3. adds the tabs to this layout, in the workspace of the same name and
+     directory or a new one; terminals on the new shells, other panes with
+     new ids. A coding agent's terminal asks for its agent back (`resume`,
+     [33](33-workspace-restore.md)): its session by id when the machine
+     found it, else the directory's latest.
 
-  The terminal core's session name is not migrated.
+  Other programs end with their terminals; the dialog names them before.
+  When nothing is left, **Stop Previous Terminal Service…** stops the
+  previous terminal core and **Remove Previous Files…** removes the
+  previous data directory and herdr-core's state of its session, refused
+  while its core or a node of it runs (its UI connected) or, for the
+  default namespace, which also holds the previous version's builds,
+  while another of its namespaces runs.
+
+  The previous namespace is read in its own layout (`run/hc.sock`, session
+  `<old>[-<instance>]`), the one versions before
+  [40](40-shared-homes.md) had.
 - **State moved into SQLite** ([38](38-sqlite-state.md)): a feature that
   kept its state in a file of its own imports it once into its database,
   in a transaction recorded in `store_imports`, and removes the file only
@@ -78,15 +113,21 @@ identifiers (its executable, `HC_*` variables, state directory).
 | Search-and-replace when needed | Persisted state (remote directories, storage, extension ids) would be orphaned silently. |
 | A permanent internal id separate from the name | Leaves the old name in paths forever. |
 | Generating all files from one JSON | Manifests cannot import it without a generation step; the brand test gives the same guarantee. |
+| Moving `~/.<old>` to `~/.<new>` at the first start | The previous terminal core runs from that directory: its terminals would be lost, and the previous version could not run beside the new one. |
+| The new namespace adopting the previous terminal core | Two versions would write one layout and serve one set of sockets; the per-host layout ([40](40-shared-homes.md)) could not apply to it. |
+| Moving everything at once | Programs that run (builds, servers, agents mid-turn) end with their terminals; the user chooses when each tab can go. |
 
 ## Failure modes
 
-- **Both old and new data directories exist** → the agent keeps the new
-  one and leaves the old one for manual inspection.
-- **The previous version is still running** → its code-server would answer
-  on the moved socket with its files gone, so the agent stops whatever
-  listens on the old `cs.sock` before moving. Stop the previous core before
-  starting the renamed one.
+- **The previous layout changed while the dialog was open** (its UI is
+  open): the move is a conflict, nothing changes, and the dialog reads the
+  layout again.
+- **A move fails after the shells started**: they end; the previous
+  terminals keep running.
+- **A chat started in the previous version after the new one's chat host
+  first ran** is not in its database; continue it from its terminal or
+  import its session.
+
 - **VS Code keybindings to the bridge's commands** (`<slug>.sendToAgent`,
   `<slug>.download`) change with the slug and must be rebound. The core's
   own command ids carry no product name, so `keybindings[-<instance>].json`
@@ -95,9 +136,12 @@ identifiers (its executable, `HC_*` variables, state directory).
 ## Testing
 
 - `internal/brand/brand_test.go` (`TestBrandMirrorsAgree`).
-- `internal/agent/lifecycle_test.go` (`TestHousekeepingAndMigration`) and
-  `internal/agent/codeserver_test.go` (`TestMigrationStopsLegacyCodeServer`).
 - The brand step of `scripts/check.sh`.
+- Moving: `internal/agent/plugin/migrate` (`TestScanAndRelease`,
+  `TestRemove`, with a scripted previous terminal core),
+  `internal/plugins/migrate` (`TestRoutes`, `TestRelease`),
+  `web/src/__tests__/migratePlan.test.ts`; copies: `TestCopyDB`
+  (`internal/store`).
 - The imports: `TestImportFiles`, `TestImportFailureLeavesFiles`
   (`internal/agent/plugin/history`), `TestAccessLogImport`
   (`internal/plugins/vault`), `TestHistoryImport` (`internal/plugins/usage`),

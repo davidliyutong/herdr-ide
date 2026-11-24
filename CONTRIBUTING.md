@@ -20,7 +20,7 @@ make check           # formatting, vet, typecheck, import cycles of the web UI, 
 
 Day-to-day development, without touching the state or the terminals of your
 daily herdr-ide (the dev core's terminal core is the session
-`herdr-ide-dev`):
+`herdr-ide-dev-<host id>`, `<host id>` a hash of the machine id):
 
 ```bash
 make dev-core        # core on 127.0.0.1:7790: --instance dev --local-only
@@ -28,7 +28,8 @@ make dev-web         # Vite on http://localhost:5173, proxied to the dev core (D
 ```
 
 `make it` runs the integration tests against a real herdr-core in the
-isolated session `herdr-ide-it` with temporary state:
+isolated sessions `herdr-ide-it` and `herdr-ide-it-<host id>` (the
+agent's) with temporary state:
 `HC_TEST_BIN=<path to herdr-core> make it` (without it, `hc` on `PATH`;
 without either the tests are skipped).
 `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned,

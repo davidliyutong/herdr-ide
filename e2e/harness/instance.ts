@@ -266,17 +266,13 @@ export function stopNodes(home: string, name: string) {
 }
 
 /** Stops the terminal core of an instance of ours, if it still runs: with
- * the instance's own executable, session and socket, nothing else. */
+ * the instance's own name and home (the core's command finds its
+ * executable, session and socket), nothing else. */
 export function stopTerminalCore(home: string, name: string) {
-  const base = readdirSync(home).find((d) => d.startsWith('.') && d.endsWith('-' + name));
-  if (!base) return;
-  const bin = join(home, base, 'hc', 'herdr-core');
-  const socket = join(home, base, 'run', 'hc.sock');
-  if (!existsSync(bin) || !existsSync(socket)) return;
-  const slug = base.slice(1, -(name.length + 1));
-  spawnSync(bin, ['server', 'stop', '--json'], {
-    env: { HOME: home, PATH: '/usr/bin:/bin', HC_SESSION: `${slug}-${name}`, HC_SOCKET: socket },
-    timeout: 15_000,
+  if (!existsSync(paths.core)) return;
+  spawnSync(paths.core, ['node', 'stop', '--instance', name, '--terminal-core'], {
+    env: { HOME: home, PATH: '/usr/bin:/bin' },
+    timeout: 30_000,
     stdio: 'ignore',
   });
 }

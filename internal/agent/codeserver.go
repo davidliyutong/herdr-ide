@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,11 +72,16 @@ func newCodeServer(a *Agent) *codeServer {
 func (c *codeServer) root() string {
 	return filepath.Join(c.a.home, brand.DataDirName, "code-server")
 }
-func (c *codeServer) pidPath() string     { return filepath.Join(c.a.runDir, "cs.pid") }
-func (c *codeServer) dir(v string) string { return filepath.Join(c.root(), v) }
-func (c *codeServer) socket() string      { return filepath.Join(c.a.runDir, "cs.sock") }
-func (c *codeServer) dataDir() string     { return filepath.Join(c.a.base, "cs-data") }
-func (c *codeServer) extDir() string      { return filepath.Join(c.a.base, "cs-ext") }
+func (c *codeServer) pidPath() string { return filepath.Join(c.a.runDir, "cs.pid") }
+
+// dir is version v's directory, for this host's system and architecture:
+// a home several hosts share may be reached from others.
+func (c *codeServer) dir(v string) string {
+	return filepath.Join(c.root(), v+"-"+runtime.GOOS+"-"+runtime.GOARCH)
+}
+func (c *codeServer) socket() string  { return filepath.Join(c.a.runDir, "cs.sock") }
+func (c *codeServer) dataDir() string { return filepath.Join(c.a.hostDir, "cs-data") }
+func (c *codeServer) extDir() string  { return filepath.Join(c.a.hostDir, "cs-ext") }
 func (c *codeServer) bin(v string) string {
 	return filepath.Join(c.dir(v), "bin", "code-server")
 }
@@ -575,7 +581,7 @@ func (c *codeServer) start(ctx context.Context, h agentproto.Header) error {
 	// The bridge extension finds the agent's socket through this variable.
 	cmd.Env = append(cleanEnv(), "VSCODE_PROXY_URI=", brand.Env("BRIDGE_SOCKET")+"="+filepath.Join(c.a.runDir, "bridge.sock"))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	logPath := filepath.Join(c.a.base, "code-server.log")
+	logPath := filepath.Join(c.a.hostDir, "code-server.log")
 	if lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
 		cmd.Stdout = lf
 		cmd.Stderr = lf

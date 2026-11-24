@@ -6,8 +6,9 @@
 // scripts/rename.sh renames the project in one step. Persisted names
 // (DataDirName, the cache directory, browser storage keys, the bridge
 // extension id) are migrated rather than abandoned: rename.sh records the old
-// values in the Legacy* lists below and the agent, core and web UI move or
-// clean up the old state on start.
+// values in the Legacy* lists below; the core copies its configuration, the
+// web UI its storage, and the migrate plugin moves a machine's workspaces
+// from the previous namespace when the user asks.
 package brand
 
 import "strings"
@@ -33,7 +34,7 @@ const (
 
 // Previous names, appended by scripts/rename.sh. Oldest last.
 var (
-	// LegacyDataDirNames are moved to DataDirName by the agent.
+	// LegacyDataDirNames are the data directories of previous names.
 	LegacyDataDirNames = []string{".webherdr"}
 	// LegacySlugs name old cache directories (removed by the core).
 	LegacySlugs = []string{"webherdr"}
@@ -68,3 +69,18 @@ func ValidInstance(s string) bool {
 // AgentDir holds uploaded agents (shared by instances; one directory per
 // build) relative to $HOME.
 const AgentDir = DataDirName + "/agent"
+
+// LegacyDataDirs are the data directories a previous name gave the
+// namespace whose data directory is named dataDir (DataDir of an
+// instance), newest name first.
+func LegacyDataDirs(dataDir string) []string {
+	suffix, ok := strings.CutPrefix(dataDir, DataDirName)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(LegacySlugs))
+	for _, s := range LegacySlugs {
+		out = append(out, "."+s+suffix)
+	}
+	return out
+}

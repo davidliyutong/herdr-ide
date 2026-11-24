@@ -15,6 +15,7 @@ import (
 	"herdr-ide/internal/plugins/files"
 	gitplugin "herdr-ide/internal/plugins/git"
 	historyplugin "herdr-ide/internal/plugins/history"
+	migrateplugin "herdr-ide/internal/plugins/migrate"
 	monitorplugin "herdr-ide/internal/plugins/monitor"
 	usageplugin "herdr-ide/internal/plugins/usage"
 	vaultplugin "herdr-ide/internal/plugins/vault"
@@ -33,7 +34,7 @@ func Settings() []settings.Module {
 // Plugins are the core's plugins (internal/plugin), in the order the UIs
 // list them.
 func Plugins() []plugin.Plugin {
-	return []plugin.Plugin{vscode.New(), browserplugin.New(), files.New(), gitplugin.New(), monitorplugin.New(), usageplugin.New(), vaultplugin.New(), agentsplugin.New(), chatplugin.New(), historyplugin.New()}
+	return []plugin.Plugin{vscode.New(), browserplugin.New(), files.New(), gitplugin.New(), monitorplugin.New(), usageplugin.New(), vaultplugin.New(), agentsplugin.New(), chatplugin.New(), historyplugin.New(), migrateplugin.New()}
 }
 
 // pluginsOff are the plugins that are off until the user turns them on:

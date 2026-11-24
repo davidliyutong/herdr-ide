@@ -102,6 +102,7 @@ describe('plugins', () => {
       'agents',
       'chat',
       'history',
+      'migrate',
     ]);
     expect(pluginOn(git)).toBe(true);
     setValue('plugins.git.enabled', false);

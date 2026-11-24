@@ -109,12 +109,14 @@ one verified executable for the integration tests (`HC_TEST_BIN`).
 `embedded.HC` returns the compressed executable and the digest of the
 uncompressed one.
 
-**Agent** (`internal/agent/hc.go`). The session is `herdr-ide` or
-`herdr-ide-<instance>`; the socket is `run/hc.sock` in the agent's data
-directory (short, for macOS's socket path limit). Op `hc`:
+**Agent** (`internal/agent/hc.go`). The session is
+`herdr-ide[-<instance>]-<host id>`, so hosts sharing a home keep their
+cores and herdr-core's state apart ([40](40-shared-homes.md)); the socket
+is `hc.sock` in the namespace's runtime directory on the host (short, for
+macOS's socket path limit). Op `hc`:
 
 - `install` checks the upload's SHA-256 and renames it over
-  `hc/herdr-core`, as herdr-core's own updater does: a running core keeps
+  `<data>/hosts/<host>/hc/herdr-core`, as herdr-core's own updater does: a running core keeps
   the file it started from.
 - `start` / `restart` run `herdr-core server start` / `restart` (the
   successor adopts the programs) and make the socket 0600. The core sends
@@ -130,7 +132,9 @@ directory (short, for macOS's socket path limit). Op `hc`:
 Actions run one at a time. Op `hc-api` pipes the socket; op `detect`
 follows agents in the terminals ([25](25-agent-detection.md)). The agent
 never stops the core on its own; only the user's "stop terminal core"
-does ([02](02-multi-machine-transport.md)).
+does ([02](02-multi-machine-transport.md)), or `herdr-ide node stop
+--terminal-core` on the machine, which runs `server stop` when a core
+answers on the instance's socket.
 
 **Helpers as hidden terminals** (`internal/agent/hidden.go`). The chat host
 ([37](37-agent-chats.md)) must outlive the agent, so it runs as a terminal
@@ -224,4 +228,4 @@ build's digest before every start. See [SECURITY.md](../../SECURITY.md).
   chat host started again after the terminal core restarted.
 - `make it`: `TestIntegrationTerminal` (`internal/hc`) and
   `TestIntegrationHC` (`internal/agent`) against a real herdr-core in the
-  session `herdr-ide-it`.
+  sessions `herdr-ide-it` and `herdr-ide-it-<host id>` (the agent's).

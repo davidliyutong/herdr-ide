@@ -56,9 +56,10 @@ commands.
 
 ### The node
 
-- **Socket.** `<data>/run/node.sock`, 0600 in the 0700 run directory; a
-  connection whose peer is another uid (`SO_PEERCRED`, `getpeereid`) is
-  closed. Nothing else is listened on.
+- **Socket.** `node.sock`, 0600 in the namespace's runtime directory on
+  the host (0700, [40](40-shared-homes.md)); a connection whose peer is
+  another uid (`SO_PEERCRED`, `getpeereid`) is closed. Nothing else is
+  listened on.
 - **Hello.** A connection's first line (`agentproto.NodeHello`) says what
   the client wants (`serve`, `stop`, `takeover`), names its core (a random
   id per core process, the same across its reconnects) and its build: a
@@ -66,22 +67,24 @@ commands.
   written. The node answers with its own build; with `serve` the
   connection then carries one yamux session speaking `internal/agentproto`
   as the agent did.
-- **One per namespace.** `run/node.lock` is held while a node serves; a
-  second node started for the namespace exits unless it takes over
-  (below).
+- **One per namespace and host.** `node.lock` in the runtime directory
+  is held while a node serves; a second node started for the namespace
+  exits unless it takes over (below).
 - **Lifetime.** `node dial` (ssh) or the UI (its own machine) starts the
   node when none answers, in a session of its own (`setsid`), its output
-  in `<data>/node.log`. It ends 15 s after its last client left, on
-  `node stop`, or once it was taken over and its clients moved. One whose
-  executable is removed (a `go run` build, an uninstalled app) takes no
-  new client. Terminals and chats do not depend on it: herdr-core runs
-  as a service of its own (`herdr-core server start`), and the chat host
-  as one of its terminals.
+  in `<data>/hosts/<host>/node.log`. It ends 15 s after its last client
+  left, on `node stop` (with `--terminal-core` the instance's terminal
+  core on the host is stopped too), or once it was taken over and its
+  clients moved. One whose executable is removed (a `go run` build, an
+  uninstalled app) takes no new client. Terminals and chats do not depend
+  on it: herdr-core runs as a service of its own (`herdr-core server
+  start`), and the chat host as one of its terminals.
 
 ### The terminal core
 
 herdr-core stays its own executable, pinned by `internal/hcdist` and
-installed by a UI into `<data>/hc/herdr-core` only with its digest, as
+installed by a UI into `<data>/hosts/<host>/hc/herdr-core` only with its
+digest, as
 before ([21](21-terminal-core.md)). The node starts, restarts and stops it
 (op `hc`) and never links it, so a panic or an upgrade of the node does
 not end terminals, holders keep programs across the terminal core's own
@@ -124,7 +127,8 @@ start on the node and need a UI:
 ### Namespaces
 
 A node's namespace is the machine's data directory and terminal core
-session: `~/.herdr-ide` and `herdr-ide` by default. A core's `--instance`
+session: `~/.herdr-ide` and `herdr-ide-<host id>` by default
+([40](40-shared-homes.md)). A core's `--instance`
 names its own files on its host
 ([reference](../reference.md#files-and-directories)) and, unless
 `--node-instance` says otherwise, the namespace on machines too, which
@@ -187,7 +191,7 @@ chat works, the terminal core restarts only when asked.
   ssh loss; terminals and chats keep running, the code-server it ran is
   adopted or reaped by the next node.
 - **No node starts.** The client reports why (`no node answers on …; see
-  <data>/node.log`); the machine shows it. A lock whose holder is gone is
+  <data>/hosts/<host>/node.log`); the machine shows it. A lock whose holder is gone is
   taken.
 - **The running node does not give way.** A node taking over waits 5 s
   for the lock and exits; the client uses the node that serves.

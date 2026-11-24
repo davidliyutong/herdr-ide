@@ -47,8 +47,9 @@ Run `make check test` before finishing a change.
 
 1. **Never touch the user's real instance or terminals.** Experiments,
    tests and dev servers use `--instance dev` (state in `~/.herdr-ide-dev`,
-   terminal core session `herdr-ide-dev`), the integration tests'
-   session `herdr-ide-it` or the end-to-end tests' instances `e2e-<random>`
+   terminal core session `herdr-ide-dev-<host id>`), the integration tests'
+   sessions `herdr-ide-it` and `herdr-ide-it-<host id>` or the end-to-end
+   tests' instances `e2e-<random>`
    (homes in `/tmp/hie-*`, SSH machines in Docker containers labelled
    `herdr-ide.e2e`); the desktop app's instance (`desktop`) and the
    default one are the user's. Stop a terminal core only through its own

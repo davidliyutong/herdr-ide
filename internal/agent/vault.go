@@ -11,6 +11,8 @@ import (
 	"slices"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/vaultmcp"
 )
@@ -225,20 +227,38 @@ func (a *Agent) linkMCP() {
 }
 
 // LinkMCP makes dir/<slug>-mcp (vaultmcp.LinkName: the stable path an MCP
-// configuration names, so it outlives upgrades) a link to exe, replacing
-// another link atomically.
+// configuration names, so it outlives upgrades) the script that runs this
+// host's platform link (vaultmcp.LinkScript), and that link, beside it,
+// a link to exe; each replaced atomically.
 func LinkMCP(dir, exe string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	link := filepath.Join(dir, vaultmcp.LinkName)
-	if cur, err := os.Readlink(link); err == nil && cur == exe {
-		return nil
-	}
-	tmp := link + ".new"
-	os.Remove(tmp)
-	if err := os.Symlink(exe, tmp); err != nil {
+	var u unix.Utsname
+	if err := unix.Uname(&u); err != nil {
 		return err
 	}
-	return os.Rename(tmp, link)
+	link := filepath.Join(dir, vaultmcp.PlatformLink(unix.ByteSliceToString(u.Sysname[:]), unix.ByteSliceToString(u.Machine[:])))
+	if cur, err := os.Readlink(link); err != nil || cur != exe {
+		tmp := link + ".new"
+		os.Remove(tmp)
+		if err := os.Symlink(exe, tmp); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, link); err != nil {
+			return err
+		}
+	}
+	script := filepath.Join(dir, vaultmcp.LinkName)
+	if fi, err := os.Lstat(script); err == nil && fi.Mode().IsRegular() {
+		if b, err := os.ReadFile(script); err == nil && string(b) == vaultmcp.LinkScript {
+			return nil
+		}
+	}
+	tmp := script + ".new"
+	os.Remove(tmp)
+	if err := os.WriteFile(tmp, []byte(vaultmcp.LinkScript), 0o700); err != nil {
+		return err
+	}
+	return os.Rename(tmp, script)
 }

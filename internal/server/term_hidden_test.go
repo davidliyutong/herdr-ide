@@ -19,6 +19,7 @@ import (
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 	"herdr-ide/internal/machines"
 )
 
@@ -43,7 +44,7 @@ type hiddenTermCore struct {
 // machine x.
 func listenHiddenCore(t *testing.T, snap, list string, recs map[string]string) *hiddenTermCore {
 	t.Helper()
-	socket := filepath.Join(os.Getenv("HOME"), brand.DataDir(""), "run", "hc.sock")
+	socket := filepath.Join(hostdirs.RunDir(filepath.Join(os.Getenv("HOME"), brand.DataDir(""))), "hc.sock")
 	os.Remove(socket)
 	ln, err := net.Listen("unix", socket)
 	if err != nil {

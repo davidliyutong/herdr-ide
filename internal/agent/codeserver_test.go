@@ -222,23 +222,3 @@ func TestCodeServerReplacesBrokenListener(t *testing.T) {
 		t.Error("working code-server not recognized")
 	}
 }
-
-// Migrating a data directory first stops the code-server still running from
-// it, which would otherwise answer on the moved socket without its files.
-func TestMigrationStopsLegacyCodeServer(t *testing.T) {
-	defer brandLegacy(".old")()
-	home := shortTempDir(t)
-	run := filepath.Join(home, ".old", "run")
-	os.MkdirAll(run, 0o700)
-	done := startBrokenCodeServer(t, filepath.Join(run, "cs.sock"))
-	a := testAgent(t)
-	migrateLegacyDataDir(home, filepath.Join(home, ".new"), a.logger)
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("legacy code-server still running")
-	}
-	if _, err := os.Stat(filepath.Join(home, ".new", "run")); err != nil {
-		t.Errorf("not migrated: %v", err)
-	}
-}

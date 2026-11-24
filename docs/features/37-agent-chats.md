@@ -48,7 +48,7 @@ subagents' conversations as chats.
 page (chat pane) ──WebSocket──▶ core (plugin chat) ──yamux──▶ agent (plugin chat, action open)
   one per page                   relay, read-only, audit,        │ a stream per connection
                                  watch → /ws and notifications   ▼
-                                                             run/chat.sock
+                                                             <run>/chat.sock
                                                              chat host (`chat-host`, a hidden terminal
                                                              of the instance's terminal core)
                                                              ├─ journal: chat-<host>.db
@@ -72,7 +72,8 @@ command is looked up on the machine in the login shell's PATH.
 
 ### The chat host (`internal/chathost`)
 
-`chat-host --base <data dir> --run <run dir>` (machine build,
+`chat-host --base <data dir> --run <run dir>` (the namespace's runtime
+directory on the host, [40](40-shared-homes.md); machine build,
 `cmd/herdr-ide/chathost_unix.go`; Linux and macOS only) is the long-lived
 process that runs the agents and keeps their conversations. It serves
 `chat.sock` (0600) in the run directory (0700) under a lock; a second

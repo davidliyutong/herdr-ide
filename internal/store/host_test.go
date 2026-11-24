@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"herdr-ide/internal/hostid"
 )
 
 // A database of a host is named after the host's whole name, sanitized,
@@ -21,10 +23,10 @@ func TestHostFile(t *testing.T) {
 		{"..", "localhost"},
 		{"büro", "b_ro"},
 		{"x.", "x"},
-		{strings.Repeat("x", 200), strings.Repeat("x", maxHostName)},
+		{strings.Repeat("x", 200), strings.Repeat("x", hostid.MaxName)},
 	} {
-		if got := hostName(c.host); got != c.want {
-			t.Errorf("hostName(%q) = %q, want %q", c.host, got, c.want)
+		if got := hostid.Name(c.host); got != c.want {
+			t.Errorf("hostid.Name(%q) = %q, want %q", c.host, got, c.want)
 		}
 	}
 	// node01 of two clusters, and two machines of one name.
@@ -39,12 +41,12 @@ func TestHostFile(t *testing.T) {
 	if got := hostKey("Node01", " \n"); got != "node01" {
 		t.Errorf("without an id: %q", got)
 	}
-	for _, k := range []string{a, b, c, d, "node01", "elsewhere", strings.Repeat("x", maxHostName) + "-0123abcd"} {
+	for _, k := range []string{a, b, c, d, "node01", "elsewhere", strings.Repeat("x", hostid.MaxName) + "-0123abcd"} {
 		if !validHostKey(k) {
 			t.Errorf("%q is no host's key", k)
 		}
 	}
-	for _, k := range []string{"", "Upper", ".x", "x.", "a b", "a/b", strings.Repeat("x", maxHostName+10)} {
+	for _, k := range []string{"", "Upper", ".x", "x.", "a b", "a/b", strings.Repeat("x", hostid.MaxName+10)} {
 		if validHostKey(k) {
 			t.Errorf("%q is a host's key", k)
 		}

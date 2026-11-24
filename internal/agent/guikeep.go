@@ -5,7 +5,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -16,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 )
 
 // The display keeper ties Xvfb to the instance's terminal core, whose
@@ -86,7 +85,7 @@ func (g *gui) startKeeper() (bool, error) {
 	cmd.Dir = g.a.home
 	// Its own session: it outlives the agent and the ssh connection.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if lf, err := os.OpenFile(filepath.Join(g.a.base, "gui-keep.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
+	if lf, err := os.OpenFile(filepath.Join(g.a.hostDir, "gui-keep.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
 		cmd.Stdout, cmd.Stderr = lf, lf
 		defer lf.Close()
 	}
@@ -101,15 +100,11 @@ func (g *gui) startKeeper() (bool, error) {
 // instance's display until its terminal core no longer runs (and did not
 // come back within keepGrace), the display ended or ctx is done.
 func KeepDisplay(ctx context.Context, instance string, logger *log.Logger) error {
-	if !brand.ValidInstance(instance) {
-		return fmt.Errorf("invalid instance name %q", instance)
-	}
-	home, err := os.UserHomeDir()
+	d, err := hostdirs.For(instance)
 	if err != nil {
 		return err
 	}
-	base := filepath.Join(home, brand.DataDir(instance))
-	a := &Agent{logger: logger, home: home, base: base, runDir: filepath.Join(base, "run"), instance: instance}
+	a := &Agent{logger: logger, home: d.Home, base: d.Base, hostDir: d.Host, runDir: d.Run, instance: instance}
 	return (&gui{a: a}).keepDisplay(ctx, keepPoll, keepGrace)
 }
 

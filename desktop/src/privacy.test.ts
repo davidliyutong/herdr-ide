@@ -3,7 +3,7 @@ import test from 'node:test';
 import { APP_SLUG } from '../../web/src/brand';
 import { bundleOf, FULL_DISK_ACCESS_URL, privacyActions, reopenCommand, terminalCoreExecutable, type PrivacyOptions } from './privacy';
 
-const exe = `/Users/u/.${APP_SLUG}-desktop/hc/herdr-core`;
+const exe = `/Users/u/.${APP_SLUG}-desktop/hosts/mac-1/hc/herdr-core`;
 const app = `/Applications/${APP_SLUG}.app`;
 
 /** The privacy actions of a platform, with every effect recorded. */
@@ -48,9 +48,30 @@ test(
   "Finder shows the instance's terminal core executable, when it is installed",
   { skip: process.platform === 'win32' && 'POSIX paths: macOS only' },
   () => {
-    assert.equal(terminalCoreExecutable('/Users/u', 'desktop'), exe);
-    assert.equal(terminalCoreExecutable('/Users/u', 'fda'), `/Users/u/.${APP_SLUG}-fda/hc/herdr-core`);
-    assert.equal(terminalCoreExecutable('/Users/u', ''), `/Users/u/.${APP_SLUG}/hc/herdr-core`);
+    // The newest host directory's executable (a renamed Mac has two).
+    const files: Record<string, number> = {
+      [exe]: 2,
+      [`/Users/u/.${APP_SLUG}-desktop/hosts/old-1/hc/herdr-core`]: 1,
+      [`/Users/u/.${APP_SLUG}/hosts/mac-1/hc/herdr-core`]: 3,
+    };
+    const fs = {
+      readdirSync: (dir: string) => {
+        const names = new Set(
+          Object.keys(files)
+            .filter((f) => f.startsWith(dir + '/'))
+            .map((f) => f.slice(dir.length + 1).split('/')[0]),
+        );
+        if (!names.size) throw new Error('ENOENT');
+        return [...names, 'no-core'];
+      },
+      statSync: (p: string) => {
+        if (!(p in files)) throw new Error('ENOENT');
+        return { isFile: () => true, mtimeMs: files[p] };
+      },
+    } as never;
+    assert.equal(terminalCoreExecutable('/Users/u', 'desktop', fs), exe);
+    assert.equal(terminalCoreExecutable('/Users/u', '', fs), `/Users/u/.${APP_SLUG}/hosts/mac-1/hc/herdr-core`);
+    assert.equal(terminalCoreExecutable('/Users/u', 'fda', fs), '');
     const { a, done } = actions();
     a.revealTerminalCore();
     assert.deepEqual(done, [`showItemInFolder ${exe}`]);

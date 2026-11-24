@@ -10,12 +10,16 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"herdr-ide/internal/agent"
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 	"herdr-ide/internal/transport"
 	"herdr-ide/internal/vaultmcp"
 )
@@ -36,7 +40,7 @@ func TestVaultSocketRelaysToTheCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	sock := filepath.Join(home, ".herdr-ide", "run", "vault.sock")
+	sock := filepath.Join(hostdirs.RunDir(filepath.Join(home, brand.DataDir(""))), "vault.sock")
 	var st os.FileInfo
 	for i := 0; i < 100; i++ {
 		var err error
@@ -89,7 +93,7 @@ func TestVaultSocketRelaysToTheCore(t *testing.T) {
 		t.Errorf("process chain %+v", h.Process)
 	}
 
-	link := filepath.Join(home, ".herdr-ide", "bin", vaultmcp.LinkName)
+	link := platformLink(filepath.Join(home, brand.DataDir(""), "bin"))
 	exe, _ := os.Executable()
 	exe, _ = filepath.EvalSymlinks(exe)
 	for i := 0; i < 100; i++ {
@@ -146,7 +150,7 @@ func TestSocketsFollowTheNewestAgent(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
-	run := filepath.Join(home, ".herdr-ide", "run")
+	run := hostdirs.RunDir(filepath.Join(home, brand.DataDir("")))
 	start := func(tag string) *transport.Session {
 		s, err := transport.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
 		if err != nil {
@@ -220,18 +224,37 @@ func TestSocketsFollowTheNewestAgent(t *testing.T) {
 	}
 }
 
+// The stable command is a script running the link of the host's system
+// and architecture, which LinkMCP points at the agent.
 func TestLinkMCPReplacesTheLink(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bin")
-	if err := agent.LinkMCP(dir, "/old/agent"); err != nil {
+	agentAt := func(name string) string {
+		p := filepath.Join(t.TempDir(), name)
+		os.WriteFile(p, []byte("#!/bin/sh\necho "+name+" \"$@\"\n"), 0o700)
+		return p
+	}
+	if err := agent.LinkMCP(dir, agentAt("old")); err != nil {
 		t.Fatal(err)
 	}
-	if err := agent.LinkMCP(dir, "/new/agent"); err != nil {
+	newer := agentAt("new")
+	if err := agent.LinkMCP(dir, newer); err != nil {
 		t.Fatal(err)
 	}
-	if target, _ := os.Readlink(filepath.Join(dir, vaultmcp.LinkName)); target != "/new/agent" {
+	if target, _ := os.Readlink(platformLink(dir)); target != newer {
 		t.Errorf("link -> %s", target)
+	}
+	out, err := exec.Command(filepath.Join(dir, vaultmcp.LinkName), "a b").Output()
+	if err != nil || string(out) != "new a b\n" {
+		t.Errorf("the command ran %q %v", out, err)
 	}
 	if st, _ := os.Stat(dir); st.Mode().Perm() != 0o700 {
 		t.Errorf("bin dir %v", st.Mode())
 	}
+}
+
+// platformLink is the agent's link of this host in dir.
+func platformLink(dir string) string {
+	s, _ := exec.Command("uname", "-s").Output()
+	m, _ := exec.Command("uname", "-m").Output()
+	return filepath.Join(dir, vaultmcp.PlatformLink(strings.TrimSpace(string(s)), strings.TrimSpace(string(m))))
 }

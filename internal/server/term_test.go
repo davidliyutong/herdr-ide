@@ -22,6 +22,8 @@ import (
 	"github.com/coder/websocket"
 
 	"herdr-ide/internal/agentproto"
+	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 	"herdr-ide/internal/machines"
 	"herdr-ide/internal/registry"
 	"herdr-ide/internal/settings"
@@ -246,7 +248,7 @@ func termServerSSH(t *testing.T, opts Options, core bool, ssh string) (*Server, 
 	}
 	var f *fakeTermCore
 	if core {
-		f = listenTermCore(t, filepath.Join(home, ".herdr-ide", "run", "hc.sock"))
+		f = listenTermCore(t, filepath.Join(hostdirs.RunDir(filepath.Join(home, brand.DataDir(""))), "hc.sock"))
 	}
 	audit := &lockedWriter{w: &bytes.Buffer{}}
 	opts.Logger, opts.Audit = logger, audit
@@ -609,10 +611,10 @@ func TestTermWithoutCore(t *testing.T) {
 func TestHCLifecycle(t *testing.T) {
 	s, core, audit := termServer(t, Options{}, true)
 	home := os.Getenv("HOME")
-	socket := filepath.Join(home, ".herdr-ide", "run", "hc.sock")
+	socket := filepath.Join(hostdirs.RunDir(filepath.Join(home, brand.DataDir(""))), "hc.sock")
 	// A stand-in executable: its server commands succeed, and a start waits
 	// until the test plays the started core.
-	bin := filepath.Join(home, ".herdr-ide", "hc", "herdr-core")
+	bin := filepath.Join(hostdirs.Of(filepath.Join(home, brand.DataDir(""))).Host, "hc", "herdr-core")
 	os.MkdirAll(filepath.Dir(bin), 0o700)
 	os.WriteFile(bin, []byte("#!/bin/sh\nif [ \"$2\" = start ]; then touch \"$HOME/starting\"; while [ ! -e \"$HOME/listening\" ]; do sleep 0.05; done; fi\nexit 0\n"), 0o700)
 	c := dialTerm(t, s)

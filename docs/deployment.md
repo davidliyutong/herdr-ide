@@ -120,7 +120,7 @@ before they open Desktop, Documents, Downloads or external disks. Two
 programs need the grant:
 
 - the app, for the file browser, uploads, downloads and VS Code;
-- herdr-core (`~/.herdr-ide/hc/herdr-core`), which macOS holds
+- herdr-core (`~/.herdr-ide/hosts/<host>/hc/herdr-core`), which macOS holds
   responsible for the terminals' programs.
 
 **Settings → Terminal → Permissions → Full Disk Access** shows both and
@@ -378,18 +378,20 @@ Building needs Go modules, npm packages and the pinned herdr-core archives
 
 What herdr-ide starts or writes, and what ends or removes it. Feature
 documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
-`<data>` is `~/.herdr-ide[-<instance>]` on the machine.
+`<data>` is `~/.herdr-ide[-<instance>]` on the machine, `<host>` the
+host's key and `<run>` the namespace's runtime directory on the host
+([files](reference.md#files-and-directories)).
 
 ### Processes and connections
 
 | Resource | Started | Ends |
 | --- | --- | --- |
-| Node (`herdr-ide node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace (`run/node.lock`), in a session of its own. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/node.log` (1 MiB, one old file). |
+| Node (`herdr-ide node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace and host (`<run>/node.lock`), in a session of its own. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/hosts/<host>/node.log` (1 MiB, one old file). |
 | Agent session | One per core and machine while connected, served by the node. | With its ssh session or socket connection; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`). | A record in the machines file; **Remove machine…** deletes it and ends the session. The machine's terminal core and terminals keep running. |
 | ssh ControlMaster | Per machine, on Linux and macOS cores. | 10 min unused or 1 min without server answers; a core that finds it dead sends `ssh -O stop`. |
 | Desktop core | Launched by Electron. | When the app closes its stdin (quit, crash; on Windows and Linux also closing the window); killed after 20 s. Machines' terminal cores keep running. |
-| Terminal core (herdr-core) | First subscription to a machine with no core answering (`term.start`), or **Start Terminal Service** / **Restart Terminal Service…** in the machine's menu (`hc.start`, `hc.restart`). Never in `--read-only`. | Detached (systemd user service or launchd job), session `herdr-ide[-<instance>]`, socket `<data>/run/hc.sock`. Outlives agent and core. Ends with **Stop Terminal Service (Ends All Terminals)…** (`hc.stop`), the agent op `hc` action `stop`, `HC_SESSION=… HC_SOCKET=… herdr-core server stop`, or the machine. A restart keeps the programs. |
+| Terminal core (herdr-core) | First subscription to a machine with no core answering (`term.start`), or **Start Terminal Service** / **Restart Terminal Service…** in the machine's menu (`hc.start`, `hc.restart`). Never in `--read-only`. | Detached (systemd user service or launchd job), session `herdr-ide[-<instance>]-<host id>`, socket `<run>/hc.sock`. Outlives agent and core. Ends with **Stop Terminal Service (Ends All Terminals)…** (`hc.stop`), the agent op `hc` action `stop`, `herdr-ide node stop --terminal-core` on the machine, or the machine. A restart keeps the programs. |
 | Connection to the terminal core | One per machine while a `/api/v1/term` client is subscribed. | 10 s after the last subscriber, or with the agent. |
 | Terminals of the layout | New tabs, splits and agents (`terminal.run` with `keep: true`, audited); replacements after a terminal core restart ([33](features/33-workspace-restore.md)). | When the pane, tab or workspace closes (after the undo time), is killed, its program exits, or the terminal core stops. They outlive pages, core and agent. Finished records stay 24 h in herdr-core's state. |
 | A closed pane's terminal | **Close Pane** / **Close Tab**. | Labeled `closing`; any page showing the machine kills it after `layout.undoClose` (5 s) unless **Undo Close** brings it back. |
@@ -406,13 +408,13 @@ documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
 | VS Code extension hosts | One per VS Code window. | 5 min after the window disconnects. |
 | curl or wget (`--code-server-install=download`) | While a machine downloads code-server. | With the download (20 min limit) or when the core stops waiting; the partial file is removed. |
 | Xvfb or Xwayland | A remote Linux machine connects with GUI on (`gui.display` picks). | In its own session; exits 1 min after its last client (programs, window manager, display keeper). Replaced by the other kind only while no program is connected. |
-| GPU display compositor (`herdr-ide gui-wl`) | With each Xwayland. | Exits with its Xwayland; listens nowhere. Logs to `<data>/xwayland.log`. |
-| Display keeper (`herdr-ide gui-keep`) | When a display is ready and when the terminal core becomes reachable (`gui.keep`; not in `--read-only`). | One per instance (`run/gui-keep.lock`); holds the display while the terminal core runs, exits once it stops or the display ends. |
+| GPU display compositor (`herdr-ide gui-wl`) | With each Xwayland. | Exits with its Xwayland; listens nowhere. Logs to `<data>/hosts/<host>/xwayland.log`. |
+| Display keeper (`herdr-ide gui-keep`) | When a display is ready and when the terminal core becomes reachable (`gui.keep`; not in `--read-only`). | One per instance and host (`<run>/gui-keep.lock`); holds the display while the terminal core runs, exits once it stops or the display ends. |
 | `apt-get download xvfb` | A machine has no Xvfb (not in `--read-only`). | With the download (5 min limit); retried with backoff up to 5 min while connected. |
 | Video encoder | One per program window sent as video (`gui.video`). | 5 s without frames, window unwatched, resized or gone, video turned off, or with the agent (own process group). NVENC sessions are limited per machine; it falls back to VA-API, VP8 or pictures. |
 | Shared memory for captures | While the agent's window manager runs. | One System V segment ≤ 64 MB (0600), marked for removal once attached, so it goes with the agent. |
 | Port forwards (core host loopback) | A browser pane opens a machine's port ([32](features/32-browser-and-ports.md)). | Listeners on `127.0.0.1`/`::1`, at most 32 with 128 connections each; end when stopped, idle for `browser.forwardIdle` (30 min), the machine removed, the plugin off, or the core stops. Nothing listens on the machine. |
-| Vault and bridge sockets (`run/vault.sock`, `run/bridge.sock`) | Served by the newest node of the instance. | Unix sockets (0600); a node removes them on exit only if they are still its own. Each connection is one stream to the core (vault: at most 16 at once). |
+| Vault and bridge sockets (`<run>/vault.sock`, `<run>/bridge.sock`) | Served by the newest node of the instance. | Unix sockets (0600); a node removes them on exit only if they are still its own. Each connection is one stream to the core (vault: at most 16 at once). |
 | The vault's MCP servers | Started by a coding agent's CLI, never by herdr-ide. | Exit when the CLI closes stdin or signals them. A `run_with_env` command runs in its own process group, killed when it returns, at `vault.runTimeout` (120 s, max `vault.runMaxTimeout`), on cancel, or when the server dies. Output kept in memory, ≤ 128 KiB. Approvals wait `vault.approvalTimeout` (60 s); at most 4 per machine, 32 in all. |
 | File explorer (plugin `files`) | Changes, saves, uploads, polls. | No process on the machine. Long copies/removals stop when the request ends (10 min max). At most 8 stats at once per machine. **Reveal in Finder** (core's own machine) runs `/usr/bin/open -R` or `xdg-open` from a fixed path; at most 4 waited for. |
 | Git (plugin `git`) | One `git` process per request; `git.autoFetch` while a panel shows the repository. | At most 8 per machine, each its own process group, killed after 15 s (reads) or 120 s (changes, fetch, pull, push) or when the request ends. No background maintenance (`gc.autoDetach=false`). Hooks' background programs and fsmonitor daemons are the user's, as in a terminal. |
@@ -431,17 +433,17 @@ documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
 | Resource | Written | Removed |
 | --- | --- | --- |
 | Agent builds (`~/.herdr-ide/agent/`) | On connect, by content hash. | Unused for 14 days. |
-| herdr-core executable (`<data>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
-| herdr-core state (`~/.local/state/herdr-core/herdr-ide[-<instance>]/`) | By herdr-core. | Kept until the user removes it. |
-| code-server versions (`~/.herdr-ide/code-server/`) | Install. | Unused for 14 days. |
-| Xvfb packages (`~/.herdr-ide/xvfb/`), video encoders (`~/.herdr-ide/video/`, ~2 MB), GPU selection libraries (`~/.herdr-ide/gpupick/`, 0600, `gui.pick`) | When needed (not in `--read-only`). | Unused for 14 days, when another is installed. |
+| herdr-core executable (`<data>/hosts/<host>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
+| herdr-core state (`~/.local/state/herdr-core/herdr-ide[-<instance>]-<host id>/`) | By herdr-core. | Kept until the user removes it. |
+| code-server versions (`~/.herdr-ide/code-server/<version>-<os>-<arch>/`) | Install. | Unused for 14 days. |
+| Xvfb packages (`~/.herdr-ide/hosts/<host>/xvfb/`), video encoders (`~/.herdr-ide/video/`, ~2 MB), GPU selection libraries (`~/.herdr-ide/gpupick/`, 0600, `gui.pick`) | When needed (not in `--read-only`). | Unused for 14 days, when another is installed. |
 | Uploads (`<data>/staging/`, 0700/0600) | File explorer uploads (≤ 4 GiB). | When written or failed; one left by a killed agent is removed by an agent after 7 days. |
 | Pasted files (`<data>/uploads/`) | Pasted files, and dropped files when the terminal's directory cannot take them. | After 7 days. |
 | Dropped files (`.herdr-ide-upload-*` while writing) | Files dropped on a pane, into its terminal's directory. | The files are the user's; a temporary file is removed when its stream ends early. |
 | Trash | **Move to Trash** in the explorer. | The user's trash (`~/.local/share/Trash`, `~/.Trash` on macOS); emptied by the user. |
-| code-server logs (`<data>/cs-data/logs/`) | code-server. | After 7 days. |
-| Display logs (`<data>/xvfb.log`, `<data>/xwayland.log`) | Each display start. | Overwritten at each start. |
-| MCP link (`<data>/bin/herdr-ide-mcp`) | Each agent start. | Replaced by the next agent; removed with the data directory. |
+| code-server logs (`<data>/hosts/<host>/cs-data/logs/`) | code-server. | After 7 days. |
+| Display and code-server logs (`<data>/hosts/<host>/xvfb.log`, `xwayland.log`, `gui-keep.log`, `code-server.log`) | Each start of the display, its keeper or code-server. | Overwritten at each start. |
+| MCP command (`<data>/bin/herdr-ide-mcp`, a script, and `herdr-ide-mcp-<system>-<machine>`, a link per platform) | Each agent start: the script if it differs, the link of its platform. | Replaced by the next agent; removed with the data directory. |
 | Machine database (`<data>/machine-<host>[-<id>].db`, 0600, [38](features/38-sqlite-state.md)) | Terminal history snapshots; the AI usage cost cache (Cost tab scans, ≤ 1/min per range, ≤ 2 min). | History: two generations per terminal of ≤ `history.lines` (2000) lines and 2 MiB, ≤ `history.maxTerminals` (32) terminals and `history.maxTotalMB` (64) in all, oldest first; removed after `history.days` (7), when the terminal ends or is gone 2 min, with **Clear Saved Output**, and when capture is turned off ([36](features/36-terminal-history.md)). Cost cache: records and logs older than 90 days leave at each scan. Earlier JSON files are imported once and removed. |
 | Chat journal (`<data>/chat-<host>[-<id>].db`, 0600) | The chat host. | Per chat ≤ `chat.maxChatMB` (64), in all ≤ `chat.maxTotalMB` (512) and `chat.maxChats` (500), archived then longest-closed first; closed and archived chats after `chat.retentionDays` (30); a deleted chat at once. |
 | DeepSeek key (`<data>/usage/deepseek.key`, 0600) | **Save** in the usage panel (audited). | **Remove**, or the user deletes it. |
@@ -450,11 +452,18 @@ documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
 | Desktop vault unlock key | Enrolling the desktop authenticator. | `vault-unlock.json` in the Electron profile, the macOS keychain item (moved to a rebuilt app after one prompt) or the Windows Hello key `herdr-ide-vault-<install>`; kept until removed by hand. |
 | Electron profile | First desktop launch. | Until removed by hand ([where](#where-the-app-keeps-its-files)); core stderr is kept in memory only (16 KiB). |
 
-**Home directories several hosts share** (NFS). Each host keeps its own
-SQLite files and chat host log, named `<name>-<host>[-<id>]` by host name
-and a hash of its machine id. Another host's files are
-removed after 30 days unopened, only under SQLite's writers' lock, so a
-database in use stays ([38](features/38-sqlite-state.md)).
+**Home directories several hosts share** (NFS,
+[40](features/40-shared-homes.md)). Each host keeps its own SQLite files
+and chat host log, named `<name>-<host>[-<id>]` by host name and a hash of
+its machine id; another host's are removed after 30 days unopened, only
+under SQLite's writers' lock, so a database in use stays
+([38](features/38-sqlite-state.md)). Sockets, locks and pid files are in
+the host-local runtime directory, the terminal core's session ends in the
+host's id, and the terminal core's executable, code-server's data and
+the logs are in `<data>/hosts/<host>/`. Each agent touches its host's
+directory at start and every 24 h; another host's directory unused for
+30 days loses everything but the terminal core's executable (`hc/`), and
+goes whole after 180 days.
 
 How machines get code-server is a setting (`codeServer.install`, per
 machine, or `--code-server-install`): the core uploads it (default; works
@@ -516,7 +525,8 @@ host.
 
 Two cores reaching the same machine share only the agent build directory
 unless they use the same instance. Give each its own `--instance` (state in
-`~/.herdr-ide-<instance>`, terminal core session `herdr-ide-<instance>`).
+`~/.herdr-ide-<instance>`, terminal core session
+`herdr-ide-<instance>-<host id>`).
 For development:
 
 ```bash

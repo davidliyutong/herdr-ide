@@ -84,8 +84,10 @@ through its lease.
 
 WAL needs every connection on one host (`-shm` is shared memory), and data
 directories may be on shared homes, so each database is named after its
-host (`store.HostFile`): `<name>-<host>[-<id>].db`, where `<host>` is the
-sanitized full host name and `<id>` 8 hex digits of a hash of the machine id
+host (`store.HostFile`): `<name>-<host>[-<id>].db`, where `<host>[-<id>]`
+is the host's key (`hostid.Key`, which also names the host's directory,
+[40](40-shared-homes.md)): `<host>` the sanitized full host name and
+`<id>` 8 hex digits of a hash of the machine id
 (`/etc/machine-id` and similar on Linux, the platform UUID on macOS,
 `MachineGuid` on Windows). Cloned hosts or equal names on two clusters thus
 get separate files. The chat host's log files are named the same way.
@@ -150,7 +152,7 @@ in [SECURITY.md](../../SECURITY.md).
 - `internal/store`: `store_test.go` (migrations, pragmas, newer databases,
   permissions, links), `shared_test.go` (pools, per-feature migration,
   imports, `Durable`, `Reclaim`), `host_test.go`/`host_unix_test.go`
-  (names, pruning, machine ids).
+  (names, pruning); `internal/hostid` (`TestID`, `TestMachineID`).
 - Feature tests for imports, newer versions and per-host files:
   `internal/agent/plugin/history/history_test.go`,
   `internal/plugins/vault/accesslog_test.go`,

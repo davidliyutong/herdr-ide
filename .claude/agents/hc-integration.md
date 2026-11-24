@@ -23,9 +23,11 @@ Verify, don't assume:
   calls of `internal/agent/agentdetect.go` (`terminal.read`, foreground
   processes).
 - Experiment only in an isolated session: a dev core (`make dev-core`,
-  instance `dev`, terminal core session `herdr-ide-dev`, socket
-  `~/.herdr-ide-dev/run/hc.sock`) or the integration tests' session
-  `herdr-ide-it` with temporary state (`HC_TEST_BIN=<herdr-core> make it`).
+  instance `dev`, terminal core session `herdr-ide-dev-<host id>`, socket
+  `hc.sock` in its runtime directory, `/run/user/<uid>/herdr-ide-dev-<hash>`
+  or `~/.herdr-ide-dev/run-<host id>`) or the integration tests' sessions
+  `herdr-ide-it` and `herdr-ide-it-<host id>` with temporary state
+  (`HC_TEST_BIN=<herdr-core> make it`).
   Stop a dev core with `POST /api/m/local/hc/stop` of the dev core. Never
   use herdr-core's default session or the `desktop` instance's, never
   attach to terminals you did not create, never stop a core you did not

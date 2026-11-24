@@ -219,10 +219,11 @@ When the first client of `/api/v1/term` subscribes to a machine's terminals
 1. asks the agent for the terminal core's status (op `hc`);
 2. uploads this build's herdr-core (`internal/hcdist`) when the installed
    one differs; the agent checks the digest and swaps it into
-   `~/.herdr-ide[-<instance>]/hc/`, and a running core of another build is
-   restarted, its successor adopting the programs;
-3. starts a core if none runs (session `herdr-ide[-<instance>]`, detached
-   from the agent so its programs outlive it);
+   `~/.herdr-ide[-<instance>]/hosts/<host>/hc/`, and a running core of
+   another build is restarted, its successor adopting the programs;
+3. starts a core if none runs (session
+   `herdr-ide[-<instance>]-<host id>`, detached from the agent so its
+   programs outlive it);
 4. connects (op `hc-api`) and subscribes to its events.
 
 A read-only core installs and starts nothing. The connection closes shortly
@@ -240,10 +241,13 @@ subscribed to anew. Refused read-only, audited
 ### Instances
 
 `--instance NAME` makes agents use `~/.herdr-ide-NAME` (sockets, uploads,
-the terminal core and its session `herdr-ide-NAME`, code-server's data) and
+the terminal core and its session `herdr-ide-NAME-<host id>`, code-server's
+data) and
 the core its own settings, keybindings and machines files, so a daily and a
 development core can share machines safely. Agent builds, code-server
 releases, Xvfb packages and video encoders are shared between instances.
+A home several hosts share keeps each host's sockets, executables and
+terminal core apart ([40](40-shared-homes.md)).
 
 ## Alternatives considered
 

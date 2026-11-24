@@ -30,6 +30,8 @@ import (
 
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
+	"herdr-ide/internal/hostid"
 )
 
 // gui provides the virtual display that programs in terminals draw their
@@ -141,7 +143,12 @@ func (g *gui) cleanStaging() {
 }
 
 // root holds unpacked Xvfb packages, shared by instances.
-func (g *gui) root() string      { return filepath.Join(g.a.home, brand.DataDirName, "xvfb") }
+// root holds unpacked Xvfb packages, shared by the instances of this host
+// (the default instance's host directory): a package is of the host's
+// distribution and architecture.
+func (g *gui) root() string {
+	return filepath.Join(g.a.home, brand.DataDirName, hostdirs.HostsDir, hostid.Key(), "xvfb")
+}
 func (g *gui) statePath() string { return filepath.Join(g.a.runDir, "gui.json") }
 
 // xauthPath is the Xauthority file panes get (XAUTHORITY); serverAuthPath
@@ -624,9 +631,9 @@ func (g *gui) startServer(n int, kind string) error {
 	cmd.Env = cleanEnv()
 	// Its own session: it survives the agent and the ssh connection.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	logPath := filepath.Join(g.a.base, "xvfb.log")
+	logPath := filepath.Join(g.a.hostDir, "xvfb.log")
 	if kind == agentproto.GUIXwayland {
-		logPath = filepath.Join(g.a.base, "xwayland.log")
+		logPath = filepath.Join(g.a.hostDir, "xwayland.log")
 	}
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|os.O_APPEND, 0o600)
 	if err == nil {

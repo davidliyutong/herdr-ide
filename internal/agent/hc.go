@@ -20,6 +20,8 @@ import (
 	"herdr-ide/internal/agentproto"
 	"herdr-ide/internal/brand"
 	"herdr-ide/internal/hc"
+	"herdr-ide/internal/hostdirs"
+	"herdr-ide/internal/hostid"
 )
 
 // The agent's own herdr-core: an executable the core uploads, and one
@@ -41,16 +43,24 @@ type hcHashed struct {
 	digest string
 }
 
-func (a *Agent) hcDir() string { return filepath.Join(a.base, "hc") }
+// hcDir holds the executable, per host: one replaced on a shared home
+// would end another host's core, or be of another architecture.
+func (a *Agent) hcDir() string { return filepath.Join(a.hostDir, "hc") }
 func (a *Agent) hcBin() string { return filepath.Join(a.hcDir(), hcBinName) }
 
 // hcSession names the terminal core: herdr-core keeps a core, its terminals
-// and its state per session name.
-func (a *Agent) hcSession() string {
-	if a.instance == "" {
-		return brand.Slug
+// and its state (in ~/.local/state/herdr-core/<session>) per session name.
+// It ends in this host's id, so the cores of hosts sharing the home keep
+// their state apart.
+func (a *Agent) hcSession() string { return HCSession(a.instance) }
+
+// HCSession is the terminal core's session of instance on this host:
+// <slug>[-<instance>]-<hostid.ID>.
+func HCSession(instance string) string {
+	if instance == "" {
+		return brand.Slug + "-" + hostid.ID()
 	}
-	return brand.Slug + "-" + a.instance
+	return brand.Slug + "-" + instance + "-" + hostid.ID()
 }
 
 // hcSocket is the terminal core's API socket, in the private run directory;
@@ -239,4 +249,25 @@ func (a *Agent) handleHC(ctx context.Context, st net.Conn, h agentproto.Header) 
 		return agentproto.Fail(st, fmt.Errorf("hc: unknown action %q", h.Action))
 	}
 	return agentproto.WriteLine(st, agentproto.Reply{OK: true, HC: a.hcStatus(ctx)})
+}
+
+// StopTerminalCore stops the instance's terminal core on this host, ending
+// its programs, when one answers on its socket (`server stop` of the
+// instance's executable, session and socket; `server status` would start
+// one). It reports whether one was stopped.
+func StopTerminalCore(ctx context.Context, instance string) (bool, error) {
+	d, err := hostdirs.For(instance)
+	if err != nil {
+		return false, err
+	}
+	a := &Agent{instance: instance, home: d.Home, base: d.Base, hostDir: d.Host, runDir: d.Run}
+	c, err := net.DialTimeout("unix", a.hcSocket(), 2*time.Second)
+	if err != nil {
+		return false, nil
+	}
+	c.Close()
+	if a.hcDigest() == "" {
+		return false, errors.New("a terminal core answers but its executable is gone")
+	}
+	return true, a.hcRun(ctx, "server", "stop", "--json")
 }

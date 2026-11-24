@@ -3,12 +3,14 @@
 package agent
 
 import (
+	"context"
 	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"herdr-ide/internal/brand"
+	"herdr-ide/internal/hostdirs"
 )
 
 // Retention for files the agent creates on machines.
@@ -19,35 +21,34 @@ const (
 	versionRetention = 14 * 24 * time.Hour
 )
 
-// migrateLegacyDataDir moves state left by a previous product name (see
-// brand.LegacyDataDirNames) to base, once.
-func migrateLegacyDataDir(home, base string, logger *log.Logger) {
-	if _, err := os.Lstat(base); err == nil {
-		return
-	}
-	for _, name := range brand.LegacyDataDirNames {
-		old := filepath.Join(home, name)
-		if st, err := os.Lstat(old); err == nil && st.IsDir() {
-			// A code-server still running from the old directory would keep
-			// answering on the moved socket while its files are gone.
-			killListener(filepath.Join(old, "run", "cs.sock"))
-			if err := os.Rename(old, base); err != nil {
-				logger.Printf("migrate %s -> %s: %v", old, base, err)
-			} else {
-				logger.Printf("migrated %s -> %s", old, base)
-			}
-			return
-		}
-	}
-}
-
 // housekeepers are plugins' own retention rules, run with housekeeping on
 // the data directory.
 var housekeepers []func(base string, now time.Time)
 
-// housekeeping bounds disk use: old uploads and code-server logs go away, and
-// this agent's build directory is touched so other cores' cleanup keeps it.
-func housekeeping(base string, logger *log.Logger) {
+// housekeepInterval is how often a running agent applies its retention
+// rules: a node runs for weeks.
+const housekeepInterval = 24 * time.Hour
+
+// housekeep runs housekeeping now and every housekeepInterval until ctx
+// ends.
+func (a *Agent) housekeep(ctx context.Context) {
+	t := time.NewTicker(housekeepInterval)
+	defer t.Stop()
+	for {
+		housekeeping(a.base, a.hostDir, a.logger)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// housekeeping bounds disk use: old uploads and code-server logs go away,
+// other hosts' directories unused for long go (pruneHosts), and this
+// agent's build directory and this host's directories are touched, so
+// that other cores' and hosts' cleanups keep them.
+func housekeeping(base, hostDir string, logger *log.Logger) {
 	now := time.Now()
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
@@ -55,10 +56,61 @@ func housekeeping(base string, logger *log.Logger) {
 			_ = os.Chtimes(dir, now, now)
 		}
 	}
+	_ = os.Chtimes(hostDir, now, now)
+	if xvfb := filepath.Join(filepath.Dir(base), brand.DataDirName, hostdirs.HostsDir, filepath.Base(hostDir)); xvfb != hostDir {
+		_ = os.Chtimes(xvfb, now, now) // the Xvfb packages' host directory
+	}
 	pruneOlder(filepath.Join(base, "uploads"), now.Add(-uploadRetention), logger)
-	pruneOlder(filepath.Join(base, "cs-data", "logs"), now.Add(-logRetention), logger)
+	pruneOlder(filepath.Join(hostDir, "cs-data", "logs"), now.Add(-logRetention), logger)
+	pruneHosts(filepath.Join(base, hostdirs.HostsDir), filepath.Base(hostDir), now, logger)
 	for _, h := range housekeepers {
 		h(base, now)
+	}
+}
+
+// Other hosts' directories (a home several hosts share): their files go
+// after hostRetention unused, except the terminal core's executable,
+// which a core that ran all along without an agent may still run from
+// (removing it on NFS would end that core); the whole directory goes
+// after hostExeRetention.
+const (
+	hostRetention    = 30 * 24 * time.Hour
+	hostExeRetention = 180 * 24 * time.Hour
+)
+
+// pruneHosts applies the retention of other hosts' directories in dir;
+// mine is this host's.
+func pruneHosts(dir, mine string, now time.Time, logger *log.Logger) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if e.Name() == mine || !e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || now.Sub(info.ModTime()) < hostRetention {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		if now.Sub(info.ModTime()) >= hostExeRetention {
+			if err := os.RemoveAll(p); err != nil {
+				logger.Printf("prune host %s: %v", e.Name(), err)
+			}
+			continue
+		}
+		files, _ := os.ReadDir(p)
+		for _, f := range files {
+			if f.Name() == "hc" {
+				continue
+			}
+			if err := os.RemoveAll(filepath.Join(p, f.Name())); err != nil {
+				logger.Printf("prune host %s: %v", e.Name(), err)
+			}
+		}
+		// Removing changed the directory's time: keep its age.
+		_ = os.Chtimes(p, info.ModTime(), info.ModTime())
 	}
 }
 

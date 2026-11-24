@@ -59,7 +59,7 @@ func TestIntegrationHC(t *testing.T) {
 	conn.Close()
 
 	r, err := s.Request(ctx, agentproto.Header{Op: agentproto.OpHC, Action: "start"})
-	if err != nil || !r.HC.Running || r.HC.Version == "" || r.HC.Session != "herdr-ide-it" {
+	if err != nil || !r.HC.Running || r.HC.Version == "" || r.HC.Session != agent.HCSession("it") {
 		t.Fatalf("start: %+v %v", r, err)
 	}
 	t.Cleanup(func() {
@@ -119,7 +119,7 @@ func TestIntegrationHC(t *testing.T) {
 		st.Ack(len(o.Data))
 	}
 	line := string(out[bytes.Index(out, []byte("got-42")):])
-	if !strings.Contains(line, "session=[herdr-ide-it]") || !strings.Contains(line, "socket=["+r.HC.Socket+"]") {
+	if !strings.Contains(line, "session=["+agent.HCSession("it")+"]") || !strings.Contains(line, "socket=["+r.HC.Socket+"]") {
 		t.Fatalf("program environment: %q", line)
 	}
 
