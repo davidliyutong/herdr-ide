@@ -221,8 +221,8 @@ type GUIStats struct {
 // GUIEvent is sent by the agent.
 type GUIEvent struct {
 	// Ev: window (new or changed), gone, layer (new or changed),
-	// layer_gone, cursor, stats, video. The core adds child (a new dialog
-	// of the viewed window) for browsers.
+	// layer_gone, cursor, stats, video, role. The core adds child (a new
+	// dialog of the viewed window) for browsers.
 	Ev     string     `json:"ev"`
 	Window *GUIWindow `json:"window,omitempty"`
 	Layer  *GUILayer  `json:"layer,omitempty"`
@@ -230,15 +230,19 @@ type GUIEvent struct {
 	Cursor *GUICursor `json:"cursor,omitempty"`
 	Stats  *GUIStats  `json:"stats,omitempty"`
 	Video  *GUIVideo  `json:"video,omitempty"`
+	// Control (role): the stream's core controls the windows; false, it
+	// views them (agent; the core passes it on to its browsers).
+	Control bool `json:"control,omitempty"`
 }
 
 // GUICommand is sent by the core. Coordinates are relative to window ID.
 type GUICommand struct {
 	// Cmd: watch, unwatch (frames wanted or not), ack (frames up to Seq
 	// were shown), refresh (send the whole window again), codecs (the
-	// viewers changed), keyframe (the next video frame starts anew), focus,
+	// viewers changed), keyframe (the next video frame starts anew),
+	// control (the core takes control from another core, ID 0); focus,
 	// close, pointer, button, wheel, key, release (all pressed keys and
-	// buttons).
+	// buttons), which the agent takes from the core in control only.
 	Cmd     string `json:"cmd"`
 	ID      uint32 `json:"id"`
 	Seq     uint32 `json:"seq,omitempty"`

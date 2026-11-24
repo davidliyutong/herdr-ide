@@ -193,6 +193,15 @@ func (m *Manager) event(d *display, payload []byte) {
 		if ev.Stats != nil {
 			targets = viewersOf(d, ev.Stats.Window)
 		}
+	case "role":
+		// This core controls the windows, or views them while another
+		// does: every viewer is told.
+		d.viewOnly = !ev.Control
+		s := m.stateLocked(d)
+		st = &s
+		for id := range d.viewers {
+			targets = append(targets, viewersOf(d, id)...)
+		}
 	case "video":
 		// A new stream, which starts with a key frame, or (no codec) the
 		// end of the window's stream.
@@ -352,6 +361,9 @@ func (m *Manager) Attach(machine string, id uint32, v *Viewer) bool {
 	if d.cursor != nil {
 		v.Send(agentproto.GUIJSON, d.cursor)
 	}
+	if b, err := json.Marshal(agentproto.GUIEvent{Ev: "role", Control: !d.viewOnly}); err == nil {
+		v.Send(agentproto.GUIJSON, b)
+	}
 	if b := d.video[id]; b != nil {
 		v.Send(agentproto.GUIJSON, b)
 		v.needKey = true
@@ -462,8 +474,13 @@ func (m *Manager) Command(machine string, id uint32, v *Viewer, c agentproto.GUI
 			v.refreshed = time.Now()
 			m.sendLocked(d, agentproto.GUICommand{Cmd: "refresh", ID: id, Codecs: m.updateCodecsLocked(d, id)})
 		}
+	case "control":
+		// Taken at once from the core in control, which then views.
+		if input && d.viewOnly {
+			m.sendLocked(d, agentproto.GUICommand{Cmd: "control"})
+		}
 	case "focus", "close", "pointer", "button", "wheel", "key", "release":
-		if input {
+		if input && !d.viewOnly {
 			m.sendLocked(d, c)
 		}
 	}

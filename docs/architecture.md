@@ -126,7 +126,7 @@ JSON reply line; after a successful reply it carries op-specific bytes.
 | `plugin` | core → agent | A plugin's `Action` with `Params`; a result or JSON lines follow ([27](features/27-plugins.md)). |
 | `bridge` | agent → core | JSON lines between the VS Code extension (`bridge.sock`) and the core. |
 | `vault` | agent → core | One request from the vault's MCP server (`vault.sock`) with the caller's process chain from peer credentials, one response; asked of every core the node serves ([30](features/30-variable-vault.md)). |
-| `gui` | core → agent | Displays: `status`, `install`, `start`, `pick`, `keep`, `shells`, `video`, `video-install`, and `attach` for framed window events, frames and input ([14](features/14-gui-windows.md)). |
+| `gui` | core → agent | Displays: `status`, `install`, `start`, `pick`, `keep`, `shells`, `video`, `video-install`, and `attach` for framed window events, frames and input; every core of the node attaches to one window manager, which takes input from the one in control ([14](features/14-gui-windows.md)). |
 
 Rules:
 

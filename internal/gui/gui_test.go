@@ -141,7 +141,7 @@ func TestFrameRouting(t *testing.T) {
 	m, d, agent := attached(t)
 	var fast, slow recorder
 	fv, sv := fast.viewer(), slow.viewer()
-	if !m.Attach("m1", 7, fv) || len(fast.events) != 1 || fast.events[0] != "window" {
+	if !m.Attach("m1", 7, fv) || len(fast.events) != 2 || fast.events[0] != "window" || fast.events[1] != "role" {
 		t.Fatalf("attach: events %v", fast.events)
 	}
 	if c := readCmd(t, agent); c.Cmd != "watch" || c.ID != 7 {
@@ -191,6 +191,35 @@ func TestFrameRouting(t *testing.T) {
 	}
 }
 
+// While another core controls the windows (role), viewers are told, input
+// is not passed on, and a viewer may take control.
+func TestViewOnly(t *testing.T) {
+	m, d, agent := attached(t)
+	var r recorder
+	v := r.viewer()
+	m.Attach("m1", 7, v)
+	readCmd(t, agent) // watch
+	role := func(control bool) {
+		b, _ := json.Marshal(agentproto.GUIEvent{Ev: "role", Control: control})
+		m.event(d, b)
+	}
+	role(false)
+	if r.events[len(r.events)-1] != "role" || !m.States()[0].ViewOnly {
+		t.Fatalf("view only: events %v, state %+v", r.events, m.States()[0])
+	}
+	m.Command("m1", 7, v, agentproto.GUICommand{Cmd: "key", Keycode: 38, Down: true}, true)
+	m.Command("m1", 7, v, agentproto.GUICommand{Cmd: "control"}, false) // read-only
+	m.Command("m1", 7, v, agentproto.GUICommand{Cmd: "control", ID: 7}, true)
+	if c := readCmd(t, agent); c.Cmd != "control" || c.ID != 0 {
+		t.Fatalf("control: %+v", c)
+	}
+	role(true)
+	m.Command("m1", 7, v, agentproto.GUICommand{Cmd: "key", Keycode: 39, Down: true}, true)
+	if c := readCmd(t, agent); c.Cmd != "key" || c.Keycode != 39 {
+		t.Fatalf("input in control: %+v", c)
+	}
+}
+
 // A window's stats go to the browser windows showing it, not to others.
 func TestStatsRouting(t *testing.T) {
 	m, d, agent := attached(t)
@@ -203,7 +232,7 @@ func TestStatsRouting(t *testing.T) {
 	}
 	m.event(d, stats(8))
 	m.event(d, stats(7))
-	if len(r.events) != 2 || r.events[1] != "stats" {
+	if len(r.events) != 3 || r.events[2] != "stats" {
 		t.Fatalf("events %v", r.events)
 	}
 }

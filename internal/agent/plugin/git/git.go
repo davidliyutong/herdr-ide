@@ -467,12 +467,14 @@ func (c *capped) Write(p []byte) (int, error) {
 			c.buf.Write(p[:max(0, c.limit-c.buf.Len())])
 			return len(p), nil
 		}
+		// What fits is kept: a run with keep returns the first limit bytes.
+		n, _ := c.buf.Write(p[:max(0, c.limit-c.buf.Len())])
 		select {
 		case <-c.over:
 		default:
 			close(c.over)
 		}
-		return 0, io.ErrShortWrite
+		return n, io.ErrShortWrite
 	}
 	return c.buf.Write(p)
 }

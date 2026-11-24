@@ -87,9 +87,6 @@ const (
 	PhaseStarting    = "starting"
 	PhaseReady       = "ready"
 	PhaseError       = "error"
-	// PhaseElsewhere: another core shows the machine's windows; tried
-	// again every elsewhereRetry.
-	PhaseElsewhere = "elsewhere"
 	// PhaseNotRunning: read-only mode, which only shows a display that runs.
 	PhaseNotRunning = "not_running"
 	// PhaseDisconnected: the machine is disabled, reconnecting, failing or
@@ -112,7 +109,10 @@ type State struct {
 	// nvidia-smi counts them) that windows of Vulkan programs come from;
 	// Pick tells that new panes get the library that makes it the one a
 	// program's CUDA_VISIBLE_DEVICES names.
-	VulkanGPU *int                   `json:"vulkan_gpu,omitempty"`
-	Pick      bool                   `json:"pick,omitempty"`
-	Windows   []agentproto.GUIWindow `json:"windows"`
+	VulkanGPU *int `json:"vulkan_gpu,omitempty"`
+	Pick      bool `json:"pick,omitempty"`
+	// ViewOnly: another core controls the machine's windows; this one's
+	// viewers see them and may take control.
+	ViewOnly bool                   `json:"view_only,omitempty"`
+	Windows  []agentproto.GUIWindow `json:"windows"`
 }

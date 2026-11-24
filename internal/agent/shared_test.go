@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/yamux"
+	"github.com/jezek/xgb/xproto"
 
 	"herdr-ide/internal/agentproto"
 )
@@ -118,15 +119,19 @@ func answerWith(resp agentproto.VaultResponse) func(agentproto.VaultRequest, net
 // core's variables once.
 func TestVaultAsksEveryCore(t *testing.T) {
 	a := sharedAgent(t)
-	withdrawn := make(chan struct{})
+	asked, withdrawn := make(chan struct{}), make(chan struct{})
 	// The first core asks the user, who has not answered when the second
 	// grants.
 	fakeCore(t, a, "a", func(_ agentproto.VaultRequest, st net.Conn) {
+		close(asked)
 		var b [1]byte
 		st.Read(b[:])
 		close(withdrawn)
 	})
-	fakeCore(t, a, "b", answerWith(agentproto.VaultResponse{OK: true, Values: map[string]string{"TOKEN": "v"}}))
+	fakeCore(t, a, "b", func(_ agentproto.VaultRequest, st net.Conn) {
+		<-asked
+		agentproto.WriteLine(st, agentproto.VaultResponse{OK: true, Values: map[string]string{"TOKEN": "v"}})
+	})
 	if resp := askMCP(t, a, agentproto.VaultRequest{Tool: agentproto.VaultGet, Names: []string{"TOKEN"}}); !resp.OK || resp.Values["TOKEN"] != "v" {
 		t.Fatalf("get: %+v", resp)
 	}
@@ -194,16 +199,49 @@ func TestSessionsShareCodeServer(t *testing.T) {
 	}
 }
 
-// One core shows a machine's windows at a time: another core's attach is
-// refused while it does, the same core's (after a reconnect) replaces it.
-func TestGUIAttachOfAnotherCore(t *testing.T) {
-	g := &gui{wm: &windowManager{}, wmBy: &session{client: "a"}}
-	core, agentEnd := net.Pipe()
-	defer core.Close()
-	go g.attach(&session{client: "b"}, agentEnd)
-	var rep agentproto.Reply
-	_ = core.SetDeadline(time.Now().Add(5 * time.Second))
-	if err := agentproto.ReadLine(core, &rep); err != nil || rep.OK || rep.Code != agentproto.CodeGUIInUse {
-		t.Fatalf("attach: %v %+v", err, rep)
+// A viewer whose queue is full misses frames, gets none until its queue has
+// room, then the whole window from the next frame on; the pacer is the
+// controller while it watches, else the client attached longest.
+func TestGUIViewerCatchesUp(t *testing.T) {
+	ctl, view := newGUIClient(&session{id: 1}, nil), newGUIClient(&session{id: 2}, nil)
+	ctl.control = true
+	m := &managedWin{xwin: xwin{id: 5, w: 100, h: 100}}
+	wm := &windowManager{clients: []*guiClient{ctl, view}, wins: map[xproto.Window]*managedWin{5: m}, layers: map[xproto.Window]*layerWin{}, done: make(chan struct{})}
+	view.watched[5] = nil
+	wm.watchersChanged(m)
+	wm.repace(m)
+	if m.pacer != view {
+		t.Fatal("the viewer paces a window only it watches")
+	}
+	ctl.watched[5] = nil
+	wm.watchersChanged(m)
+	wm.repace(m)
+	if m.pacer != ctl {
+		t.Fatal("the controller paces a window it watches")
+	}
+	for range guiQueue {
+		view.q <- guiOut{}
+	}
+	m.seq = 10
+	wm.deliver(5, wm.targets(5, 10), []guiOut{{kind: agentproto.GUIFrame}})
+	if !view.stale[5] || len(ctl.q) != 1 {
+		t.Fatalf("stale %v, controller got %d", view.stale[5], len(ctl.q))
+	}
+	if ts := wm.targets(5, 11); len(ts) != 1 || ts[0].c != ctl || !ts[0].pace {
+		t.Fatalf("targets while behind: %+v", ts)
+	}
+	wm.resend(m)
+	if !view.stale[5] {
+		t.Fatal("sent again before the queue had room")
+	}
+	for len(view.q) > 0 {
+		<-view.q
+	}
+	wm.resend(m)
+	if view.stale[5] || view.from[5] != 11 || !m.keyWanted || m.dirty != m.all() {
+		t.Fatalf("after catching up: stale %v from %d key %v dirty %+v", view.stale[5], view.from[5], m.keyWanted, m.dirty)
+	}
+	if len(wm.targets(5, 10)) != 1 || len(wm.targets(5, 11)) != 2 {
+		t.Fatal("the viewer gets frames from the full one on")
 	}
 }

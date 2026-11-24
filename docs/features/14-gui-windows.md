@@ -257,11 +257,25 @@ Setting `gui.video`, on by default. Agent `internal/agent/guiwm_video.go`,
   setting or a reconnect starts over. Every `/ws` client gets `gui` messages
   with each machine's phase (`installing`, `starting`, `ready`, `error`,
   `unavailable`, `disconnected`, …) and windows.
-- **Several cores.** One core shows a machine's windows at a time: the
-  machine's node refuses another core's attach (`gui_in_use`) while one is
-  attached, which that core shows as `elsewhere` and tries again every
-  15 s; the same core's new attach after a reconnect replaces its old one
-  ([39](39-nodes.md)).
+- **Several cores** ([39](39-nodes.md)). Every core a machine's node
+  serves attaches to the one window manager (`internal/agent/guiclients.go`)
+  and gets every window. One controls them, the others view:
+  - input, focus and closing come from the controller only; a viewer's
+    browser windows show **View only** with **Take Control**, which takes
+    it at once (command `control`), the other core then viewing; the
+    agent tells each core its role (event `role`), the core its browsers
+    and the machine's state (`view_only`);
+  - the controller gone, the core attached longest takes control; the
+    same core's new attach after a reconnect replaces its old one with its
+    role;
+  - a window's flow is paced by the controller while it watches the
+    window, else by the core attached longest that does; another core's
+    frames go through a queue of its own (256 messages), and one that is
+    full misses them and gets the whole window (a key frame for video)
+    once it has room, so a slow viewer never slows the controller;
+  - a core that starts watching a window sent as video ends its stream, so
+    the next one starts for every watcher; the video codecs are those all
+    watchers decode.
 - A machine disabled, removed or disconnected is shown as `disconnected`
   without windows, not as an error.
 - **Viewers.** Frames go to every browser window showing the window. The

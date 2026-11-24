@@ -3,11 +3,13 @@
 // fit; pointer and keyboard input goes back with window coordinates.
 //
 // Messages from the core: JSON events {ev: window | gone | layer |
-// layer_gone | cursor | child | stats | video} and binary frames
+// layer_gone | cursor | child | stats | video | role} and binary frames
 // [window u32][layer u32][x i16][y i16][w u16][h u16][enc u8][seq u32][data]
 // (enc 1 JPEG, 2 PNG, 3 video, 4 video key frame). Each frame is
 // acknowledged once drawn. The WebSocket's ?video= says which video streams
-// this browser decodes (./video.ts).
+// this browser decodes (./video.ts). While another connection controls the
+// machine's windows (role {control: false}) the window is only viewed: no
+// input is sent until this one takes control (takeControl).
 
 import { xKeycode } from './keycodes';
 import type { GuiWindow } from './state';
@@ -32,6 +34,8 @@ export interface SessionEvents {
   child(w: GuiWindow): void;
   /** Frame statistics, once a second. */
   stats?(s: StatsView): void;
+  /** Whether this connection controls the window or only views it. */
+  role?(control: boolean): void;
 }
 
 const FRAME_HEADER = 21;
@@ -61,6 +65,7 @@ export class GuiSession {
   private stats = new FrameStats(performance.now());
   private video?: VideoStream;
   private ctx = new WeakMap<HTMLCanvasElement, CanvasRenderingContext2D | null>();
+  private control = true;
 
   constructor(
     private m: string,
@@ -133,6 +138,17 @@ export class GuiSession {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(cmd));
   }
 
+  /** Input for the program, sent only while this connection controls it. */
+  private input(cmd: Record<string, unknown>) {
+    if (this.control) this.send(cmd);
+  }
+
+  /** Takes control of the machine's windows from the connection that has
+   * it; a role event follows. */
+  takeControl() {
+    this.send({ cmd: 'control' });
+  }
+
   private message(e: MessageEvent) {
     if (typeof e.data !== 'string') {
       this.frame(e.data as ArrayBuffer);
@@ -173,6 +189,10 @@ export class GuiSession {
         break;
       case 'video':
         if (ev.video?.window === this.id) this.startVideo(ev.video);
+        break;
+      case 'role':
+        this.control = !!ev.control;
+        this.on.role?.(this.control);
         break;
     }
   }
@@ -314,23 +334,25 @@ export class GuiSession {
       this.pending = this.point(e);
       if (first)
         requestAnimationFrame(() => {
-          if (this.pending) this.send({ cmd: 'pointer', ...this.pending });
+          if (this.pending) this.input({ cmd: 'pointer', ...this.pending });
           this.pending = undefined;
         });
     });
     this.listen(el, 'pointerdown', (e) => {
+      if (!this.control) return;
       el.setPointerCapture(e.pointerId);
-      this.send({ cmd: 'button', ...this.point(e), button: BUTTONS[e.button] ?? 1, down: true });
+      this.input({ cmd: 'button', ...this.point(e), button: BUTTONS[e.button] ?? 1, down: true });
       e.preventDefault();
     });
     this.listen(el, 'pointerup', (e) => {
-      this.send({ cmd: 'button', ...this.point(e), button: BUTTONS[e.button] ?? 1, down: false });
+      this.input({ cmd: 'button', ...this.point(e), button: BUTTONS[e.button] ?? 1, down: false });
     });
     this.listen(el, 'contextmenu', (e) => e.preventDefault());
     this.listen(
       el,
       'wheel',
       (e) => {
+        if (!this.control) return;
         e.preventDefault();
         const unit = e.deltaMode === 1 ? WHEEL_STEP : e.deltaMode === 2 ? WHEEL_STEP * 10 : 1;
         this.wheel.x += e.deltaX * unit;
@@ -340,22 +362,22 @@ export class GuiSession {
         if (!dx && !dy) return;
         this.wheel.x -= dx * WHEEL_STEP;
         this.wheel.y -= dy * WHEEL_STEP;
-        this.send({ cmd: 'wheel', ...this.point(e), dx, dy });
+        this.input({ cmd: 'wheel', ...this.point(e), dx, dy });
       },
       { passive: false },
     );
     const key = (down: boolean) => (e: KeyboardEvent) => {
       // Command-key shortcuts stay with the browser (close, copy, reload).
-      if (e.metaKey) return;
+      if (e.metaKey || !this.control) return;
       const keycode = xKeycode(e.code);
       if (keycode === undefined) return;
       e.preventDefault();
-      this.send({ cmd: 'key', keycode, down });
+      this.input({ cmd: 'key', keycode, down });
     };
     this.listen(window, 'keydown', key(true));
     this.listen(window, 'keyup', key(false));
-    this.listen(window, 'focus', () => this.send({ cmd: 'focus' }));
+    this.listen(window, 'focus', () => this.input({ cmd: 'focus' }));
     // Keys held when focus leaves would stay pressed in the program.
-    this.listen(window, 'blur', () => this.send({ cmd: 'release' }));
+    this.listen(window, 'blur', () => this.input({ cmd: 'release' }));
   }
 }

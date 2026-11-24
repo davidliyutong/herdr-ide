@@ -102,7 +102,7 @@ restart, and on macOS terminals keep the privacy grants of that executable
 | Terminals, layout documents, chats | Machine: terminal core and chat host. |
 | code-server | Node: one process for every client; a UI's idle timeout releases it (`release`), which stops it only while no other client has a connection to it; it ends with the node. |
 | Terminal history captures, AI usage limits | Node: a capture or a fetch of one UI answers the others' for a while (10 s, a minute), so the UIs' schedules do the work about once between them. |
-| Program windows | Node: one capture and encoder per window, frames sent to every client that attached it. |
+| Program windows | Node: one window manager, one capture and encoder per window, every window sent to every client; one client controls them (input, focus, closing), the others view and may take control at once ([14](14-gui-windows.md)). |
 | Settings, keybindings, machines, vault, port forwards | UI's host, per UI instance. |
 | Read-only mode | UI: enforced on its own pages and requests. |
 

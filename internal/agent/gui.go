@@ -59,7 +59,6 @@ type gui struct {
 
 	wmMu sync.Mutex
 	wm   *windowManager
-	wmBy *session // the session whose attach runs wm
 
 	vglOnce sync.Once
 	vgl     vglInfo
@@ -945,51 +944,57 @@ func (g *gui) handle(ctx context.Context, s *session, st net.Conn, h agentproto.
 	return agentproto.WriteLine(st, agentproto.Reply{OK: true, GUI: g.status()})
 }
 
-// attach runs the window manager for the stream until either ends. A newer
-// attach of the same core (after a reconnect) replaces an older one; while
-// another core's session is attached, the attach fails with the code
-// gui_in_use (one core shows the windows at a time).
+// attach serves the stream as a client of the display's window manager,
+// which it starts when none runs, until the stream ends (guiclients.go):
+// the first core controls the windows, the others view them.
 func (g *gui) attach(s *session, st net.Conn) error {
-	g.wmMu.Lock()
-	if by := g.wmBy; g.wm != nil && by != nil && by != s && by.live() && (by.client == "" || by.client != s.client) {
-		g.wmMu.Unlock()
-		return agentproto.WriteLine(st, agentproto.Reply{Code: agentproto.CodeGUIInUse, Error: "gui: another core shows this machine's windows"})
-	}
-	g.wmMu.Unlock()
 	unlock := g.lock()
 	n, err := g.display()
 	unlock()
 	if err != nil {
 		return agentproto.Fail(st, err)
 	}
-	x, err := g.connect(n)
+	wm, err := g.windowManager(n)
 	if err != nil {
 		return agentproto.Fail(st, err)
 	}
-	g.wmMu.Lock()
-	if g.wm != nil {
-		g.wm.close()
-	}
-	g.wmMu.Unlock()
-	wm, err := newWindowManager(x, st, g.a.logger)
-	if err != nil {
-		return agentproto.Fail(st, err)
-	}
-	wm.tools = g.videoTools
-	wm.hcSocket = g.a.hcSocket()
-	g.wmMu.Lock()
-	g.wm, g.wmBy = wm, s
-	g.wmMu.Unlock()
-	defer func() {
-		g.wmMu.Lock()
-		if g.wm == wm {
-			g.wm, g.wmBy = nil, nil
-		}
-		g.wmMu.Unlock()
-		wm.close()
-	}()
 	if err := agentproto.WriteLine(st, agentproto.Reply{OK: true, GUI: g.status()}); err != nil {
 		return err
 	}
-	return wm.run()
+	// A window manager that ended as the stream came ends the stream; the
+	// core attaches again and starts the next one.
+	_, err = wm.serve(newGUIClient(s, st))
+	return err
+}
+
+// windowManager returns the display's running window manager, starting
+// one; it ends when its last client leaves or the display goes away.
+func (g *gui) windowManager(n int) (*windowManager, error) {
+	g.wmMu.Lock()
+	defer g.wmMu.Unlock()
+	if g.wm != nil && !g.wm.ended() {
+		return g.wm, nil
+	}
+	x, err := g.connect(n)
+	if err != nil {
+		return nil, err
+	}
+	wm, err := newWindowManager(x, g.a.logger)
+	if err != nil {
+		return nil, err
+	}
+	wm.tools = g.videoTools
+	wm.hcSocket = g.a.hcSocket()
+	g.wm = wm
+	go func() {
+		if err := wm.run(); err != nil {
+			g.a.logger.Printf("gui: window manager: %v", err)
+		}
+		g.wmMu.Lock()
+		if g.wm == wm {
+			g.wm = nil
+		}
+		g.wmMu.Unlock()
+	}()
+	return wm, nil
 }

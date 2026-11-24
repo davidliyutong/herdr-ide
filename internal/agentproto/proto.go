@@ -125,10 +125,6 @@ type NodeHello struct {
 	Client string `json:"client,omitempty"`
 }
 
-// CodeGUIInUse (op gui, action attach): another core's session shows the
-// machine's program windows; the attach may be tried again later.
-const CodeGUIInUse = "gui_in_use"
-
 // NodeHello's operations.
 const (
 	NodeServe = "serve"

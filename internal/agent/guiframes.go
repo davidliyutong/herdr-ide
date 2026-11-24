@@ -4,6 +4,7 @@ package agent
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"image"
 	"image/png"
@@ -272,11 +273,16 @@ func (wm *windowManager) send(jobs []capture) bool {
 		f := <-done[i]
 		wm.mu.Lock()
 		wm.encoded(j, f)
+		var ts []frameTarget
+		if f.data != nil {
+			ts = wm.targets(j.window, j.seq)
+		}
 		wm.mu.Unlock()
-		if f.data != nil && open {
-			if err := wm.write(j, f); err != nil && isClosedErr(err) {
-				open = false
-			}
+		if len(ts) > 0 {
+			wm.deliver(j.window, ts, wm.frameMsgs(j, f))
+		}
+		if wm.ended() {
+			open = false
 		}
 		if f.cost.enc != 0 || f.cost.vidErr != nil || f.cost.started != nil {
 			costs = append(costs, f.cost)
@@ -451,21 +457,22 @@ func (wm *windowManager) encoded(j capture, f frame) {
 	}
 }
 
-// write sends a frame, announcing a video stream it starts.
-func (wm *windowManager) write(j capture, f frame) error {
+// frameMsgs are the messages of a frame: the announcement of a video
+// stream it starts, then the frame.
+func (wm *windowManager) frameMsgs(j capture, f frame) []guiOut {
+	var msgs []guiOut
 	if e := f.cost.started; e != nil {
-		wm.emit(agentproto.GUIEvent{Ev: "video", Video: &agentproto.GUIVideo{
+		b, _ := json.Marshal(agentproto.GUIEvent{Ev: "video", Video: &agentproto.GUIVideo{
 			Window: uint32(j.window), Codec: e.codec(f.data), Encoder: e.name, W: e.cw, H: e.ch,
 		}})
+		msgs = append(msgs, guiOut{kind: agentproto.GUIJSON, parts: [][]byte{b}})
 	}
 	h := agentproto.GUIFrameHeader{
 		Window: uint32(j.window), Layer: uint32(j.layer),
 		X: int16(j.r.x), Y: int16(j.r.y), W: uint16(j.r.w), H: uint16(j.r.h),
 		Enc: f.cost.enc, Seq: j.seq,
 	}
-	wm.writeMu.Lock()
-	defer wm.writeMu.Unlock()
-	return agentproto.WriteGUI(wm.out, agentproto.GUIFrame, h.Marshal(), f.data)
+	return append(msgs, guiOut{kind: agentproto.GUIFrame, parts: [][]byte{h.Marshal(), f.data}})
 }
 
 // account adds frame costs to their windows' stats and reports the stats
@@ -531,6 +538,8 @@ func (wm *windowManager) collect(now time.Time) []capture {
 			wm.stopVideo(m)
 			continue
 		}
+		wm.repace(m)
+		wm.resend(m)
 		wm.trackMotion(m)
 		room, slots := m.flow.room(now)
 		if room <= 0 || slots <= 0 {

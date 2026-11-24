@@ -133,6 +133,9 @@ export const en = {
   'gui.status.open': 'Connected',
   'gui.status.reconnecting': 'Reconnecting…',
   'gui.status.gone': 'The window was closed',
+  'gui.viewOnly': 'View only: another connection controls the program windows',
+  'gui.takeControl': 'Take Control',
+  'gui.state.viewOnly': 'View only',
   'gui.stats.browser':
     'Browser: {fps} frames/s · {kb} kB/frame · {mbps} Mbit/s · decode {decode} ms · draw {draw} ms · skipped {skipped}/s',
   'gui.stats.machine':
@@ -170,7 +173,6 @@ export const en = {
   'gui.state.error': 'Error',
   'gui.state.not_running': 'Not running (read-only)',
   'gui.state.disconnected': 'Not connected',
-  'gui.state.elsewhere': 'In use by another connection',
   'gui.enableOpen': 'Enable in open panes',
   'gui.enabled': 'Program windows enabled in {n} panes ({already} had them already).',
   'gui.enableBusy': '{n} panes are running a program: run the copied command in them once it exits.',

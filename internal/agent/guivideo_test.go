@@ -205,10 +205,9 @@ func TestInstallVideo(t *testing.T) {
 
 // When a window becomes video, stays video and goes back to pictures.
 func TestVideoDecision(t *testing.T) {
-	var out bytes.Buffer
 	bin, kinds := "/enc", []string{"vp8"}
 	m := &managedWin{xwin: xwin{id: 1, w: 640, h: 480}, watched: true, codecs: []string{"avc1"}}
-	wm := &windowManager{out: &out, logger: testAgent(t).logger, wins: map[xproto.Window]*managedWin{1: m}, layers: map[xproto.Window]*layerWin{},
+	wm := &windowManager{clients: []*guiClient{newGUIClient(&session{}, nil)}, logger: testAgent(t).logger, wins: map[xproto.Window]*managedWin{1: m}, layers: map[xproto.Window]*layerWin{},
 		tools: func() (string, []string) { return bin, kinds }}
 	now := time.Now()
 	tick := func() []capture {

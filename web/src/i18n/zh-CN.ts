@@ -128,6 +128,9 @@ export const zhCN: Messages = {
   'gui.status.open': '已连接',
   'gui.status.reconnecting': '正在重新连接…',
   'gui.status.gone': '窗口已关闭',
+  'gui.viewOnly': '仅查看：程序窗口由另一个连接控制',
+  'gui.takeControl': '接管控制',
+  'gui.state.viewOnly': '仅查看',
   'gui.stats.browser': '浏览器：{fps} 帧/s · {kb} kB/帧 · {mbps} Mbit/s · 解码 {decode} ms · 绘制 {draw} ms · 跳过 {skipped}/s',
   'gui.stats.machine':
     '机器：{ups} 次更新/s（{fps} 帧/s，{mpx} Mpx/s）· 每次更新：截取 {capture} ms · 转换 {convert} ms · 编码 {encode} ms · JPEG {jpeg} · PNG {png}',
@@ -164,7 +167,6 @@ export const zhCN: Messages = {
   'gui.state.error': '出错',
   'gui.state.not_running': '未运行（只读）',
   'gui.state.disconnected': '未连接',
-  'gui.state.elsewhere': '正被另一个连接使用',
   'gui.enableOpen': '在已打开的窗格中启用',
   'gui.enabled': '已在 {n} 个窗格中启用程序窗口（另有 {already} 个原本已启用）。',
   'gui.enableBusy': '{n} 个窗格正在运行程序：程序退出后，在其中执行复制的命令即可。',

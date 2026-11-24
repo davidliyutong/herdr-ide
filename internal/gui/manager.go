@@ -55,7 +55,10 @@ type display struct {
 
 	sess   *transport.Session
 	stream net.Conn
-	cmds   chan []byte // to the agent, written by one goroutine per stream
+	// viewOnly: another core controls the windows (the agent's role
+	// event); input is not passed on.
+	viewOnly bool
+	cmds     chan []byte // to the agent, written by one goroutine per stream
 
 	windows map[uint32]*agentproto.GUIWindow
 	order   []uint32
@@ -185,6 +188,7 @@ func (m *Manager) stateLocked(d *display) State {
 			st.Pick = m.pickEnv(d.mc.ID(), d.status) != nil
 		}
 	}
+	st.ViewOnly = d.phase == PhaseReady && d.viewOnly
 	for _, id := range d.order {
 		if w := d.windows[id]; w != nil {
 			st.Windows = append(st.Windows, *w)

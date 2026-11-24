@@ -168,6 +168,7 @@ export function GuiMachineStatus({ m }: { m: string }) {
     <span className={`gui-state ${st.phase}`} title={st.error}>
       {t(`gui.state.${st.phase}` as 'gui.state.ready')}
       {st.phase === 'ready' && st.display === 'xwayland' && ` · ${t('gui.state.gpuDisplay')}`}
+      {st.phase === 'ready' && st.view_only && ` · ${t('gui.state.viewOnly')}`}
       {st.gpu && st.phase === 'ready' && ' · VirtualGL'}
       {st.phase === 'ready' && st.vulkan_gpu !== undefined && (
         <span

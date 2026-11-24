@@ -4,7 +4,6 @@ package agent
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -40,7 +39,6 @@ type windowManager struct {
 	x      *xgb.Conn
 	root   xproto.Window
 	check  xproto.Window
-	out    io.ReadWriter
 	logger *log.Logger
 	resOK  bool
 	// hcSocket is the instance's terminal core: windows of programs in its
@@ -48,9 +46,10 @@ type windowManager struct {
 	hcSocket string
 	atoms    map[string]xproto.Atom
 
-	writeMu sync.Mutex
+	mu sync.Mutex
+	// clients are the cores attached, oldest first (guiclients.go).
+	clients []*guiClient
 
-	mu      sync.Mutex
 	wins    map[xproto.Window]*managedWin
 	layers  map[xproto.Window]*layerWin
 	focused xproto.Window
@@ -127,6 +126,7 @@ type managedWin struct {
 	// window is sent as video (set by the pump), which recent ticks changed
 	// much of the window, and when to try again after the encoder failed.
 	codecs    []string
+	pacer     *guiClient // whose acknowledgements pace the window
 	vid       *videoEncoder
 	motion    uint16
 	lastVideo time.Time
@@ -177,7 +177,7 @@ var wmAtoms = []string{
 }
 
 // newWindowManager makes x the display's window manager.
-func newWindowManager(x *xgb.Conn, out io.ReadWriter, logger *log.Logger) (*windowManager, error) {
+func newWindowManager(x *xgb.Conn, logger *log.Logger) (*windowManager, error) {
 	fail := func(err error) (*windowManager, error) {
 		x.Close()
 		return nil, err
@@ -199,7 +199,6 @@ func newWindowManager(x *xgb.Conn, out io.ReadWriter, logger *log.Logger) (*wind
 	wm := &windowManager{
 		x:       x,
 		root:    xproto.Setup(x).DefaultScreen(x).Root,
-		out:     out,
 		logger:  logger,
 		atoms:   map[string]xproto.Atom{},
 		wins:    map[xproto.Window]*managedWin{},
@@ -247,31 +246,34 @@ func (wm *windowManager) close() {
 	})
 }
 
-// run serves the stream: windows that already exist are announced first.
+// run manages the display's windows and sends them to the clients
+// (serve) until the display goes away or the last client left (close).
 func (wm *windowManager) run() error {
 	wm.mu.Lock()
 	wm.adopt()
 	wm.mu.Unlock()
-	errc := make(chan error, 2)
-	go func() { errc <- wm.readCommands() }()
-	go func() { errc <- wm.readEvents() }()
 	go wm.pump()
-	err := <-errc
+	err := wm.readEvents()
 	wm.close()
+	wm.mu.Lock()
+	for _, c := range wm.clients {
+		c.close()
+	}
+	wm.mu.Unlock()
 	if isClosedErr(err) {
 		return nil
 	}
 	return err
 }
 
-func (wm *windowManager) emit(ev agentproto.GUIEvent) {
-	b, err := json.Marshal(ev)
-	if err != nil {
-		return
+// ended reports whether the window manager has ended.
+func (wm *windowManager) ended() bool {
+	select {
+	case <-wm.done:
+		return true
+	default:
+		return false
 	}
-	wm.writeMu.Lock()
-	defer wm.writeMu.Unlock()
-	_ = agentproto.WriteGUI(wm.out, agentproto.GUIJSON, b)
 }
 
 func (wm *windowManager) setupEWMH() error {
@@ -444,10 +446,14 @@ func (wm *windowManager) manage(w xproto.Window) {
 }
 
 func (wm *windowManager) emitWindow(m *managedWin) {
-	wm.emit(agentproto.GUIEvent{Ev: "window", Window: &agentproto.GUIWindow{
+	wm.emit(wm.windowEvent(m))
+}
+
+func (wm *windowManager) windowEvent(m *managedWin) agentproto.GUIEvent {
+	return agentproto.GUIEvent{Ev: "window", Window: &agentproto.GUIWindow{
 		ID: uint32(m.id), Title: m.title, W: m.w, H: m.h, Pid: m.pid,
 		Terminal: m.terminal, Transient: uint32(m.transient),
-	}})
+	}}
 }
 
 func (wm *windowManager) clientList() {
@@ -560,13 +566,19 @@ func (wm *windowManager) addLayer(w xproto.Window) {
 }
 
 func (wm *windowManager) emitLayer(l *layerWin) {
+	if ev, ok := wm.layerEvent(l); ok {
+		wm.emit(ev)
+	}
+}
+
+func (wm *windowManager) layerEvent(l *layerWin) (agentproto.GUIEvent, bool) {
 	owner := wm.wins[l.owner]
 	if owner == nil {
-		return
+		return agentproto.GUIEvent{}, false
 	}
-	wm.emit(agentproto.GUIEvent{Ev: "layer", Layer: &agentproto.GUILayer{
+	return agentproto.GUIEvent{Ev: "layer", Layer: &agentproto.GUILayer{
 		ID: uint32(l.id), Window: uint32(l.owner), X: l.x - owner.x, Y: l.y - owner.y, W: l.w, H: l.h,
-	}})
+	}}, true
 }
 
 // forget drops a window that was unmapped or destroyed.
@@ -788,28 +800,16 @@ func (wm *windowManager) closeWindow(m *managedWin) {
 	xproto.KillClient(wm.x, uint32(m.id))
 }
 
-func (wm *windowManager) readCommands() error {
-	for {
-		kind, payload, err := agentproto.ReadGUI(wm.out)
-		if err != nil {
-			return err
+// command applies a command of client cl. Called with mu held.
+func (wm *windowManager) command(cl *guiClient, c agentproto.GUICommand) {
+	switch c.Cmd {
+	case "control":
+		wm.setControl(cl)
+		return
+	case "release":
+		if cl.control {
+			wm.releaseAll()
 		}
-		if kind != agentproto.GUIJSON {
-			continue
-		}
-		var c agentproto.GUICommand
-		if json.Unmarshal(payload, &c) != nil {
-			continue
-		}
-		wm.mu.Lock()
-		wm.command(c)
-		wm.mu.Unlock()
-	}
-}
-
-func (wm *windowManager) command(c agentproto.GUICommand) {
-	if c.Cmd == "release" {
-		wm.releaseAll()
 		return
 	}
 	m := wm.wins[xproto.Window(c.ID)]
@@ -818,31 +818,59 @@ func (wm *windowManager) command(c agentproto.GUICommand) {
 	}
 	switch c.Cmd {
 	case "watch":
-		// A first viewer: nothing is on its way to anyone, and what was
-		// learned about the connection was about another.
-		m.watched = true
-		m.acked = m.seq
-		m.flow = flow{}
-		m.stats = agentproto.GUIStats{}
-		m.since = time.Now()
-		m.codecs = c.Codecs
+		if !m.watched {
+			// A first viewer: nothing is on its way to anyone.
+			m.acked = m.seq
+			m.flow = flow{}
+			m.inflight = nil
+			m.pacer = nil
+			m.stats = agentproto.GUIStats{}
+			m.since = time.Now()
+		} else {
+			// Another client: a stream it saw no start of ends, so the
+			// next starts for every watcher.
+			wm.stopVideo(m)
+		}
+		cl.watched[m.id] = c.Codecs
+		delete(cl.stale, m.id)
+		cl.from[m.id] = m.seq + 1
+		wm.watchersChanged(m)
 		m.keyWanted = true
 		wm.refresh(m)
+		return
 	case "unwatch":
-		m.watched = false
+		delete(cl.watched, m.id)
+		delete(cl.stale, m.id)
+		wm.watchersChanged(m)
+		return
 	case "codecs":
-		m.codecs = c.Codecs
+		if _, ok := cl.watched[m.id]; ok {
+			cl.watched[m.id] = c.Codecs
+			wm.watchersChanged(m)
+		}
+		return
 	case "keyframe":
 		m.keyWanted = true
+		return
 	case "ack":
-		if c.Seq > m.acked && c.Seq <= m.seq {
+		if cl == m.pacer && c.Seq > m.acked && c.Seq <= m.seq {
 			m.acked = c.Seq
 			m.ackedAt(c.Seq, time.Now())
 		}
+		return
 	case "refresh":
-		m.codecs = c.Codecs
+		if _, ok := cl.watched[m.id]; ok {
+			cl.watched[m.id] = c.Codecs
+			wm.watchersChanged(m)
+		}
 		m.keyWanted = true
 		wm.refresh(m)
+		return
+	}
+	if !cl.control {
+		return // input is the controller's
+	}
+	switch c.Cmd {
 	case "focus":
 		wm.focus(m)
 	case "close":
@@ -943,9 +971,16 @@ func (wm *windowManager) releaseAll() {
 
 // sendCursor sends the current pointer image.
 func (wm *windowManager) sendCursor() {
+	if ev, ok := wm.cursorEvent(); ok {
+		wm.emit(ev)
+	}
+}
+
+// cursorEvent is the current pointer image.
+func (wm *windowManager) cursorEvent() (agentproto.GUIEvent, bool) {
 	r, err := xfixes.GetCursorImage(wm.x).Reply()
 	if err != nil || r.Width == 0 || r.Height == 0 || len(r.CursorImage) < int(r.Width)*int(r.Height) {
-		return
+		return agentproto.GUIEvent{}, false
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, int(r.Width), int(r.Height)))
 	for i, v := range r.CursorImage[:int(r.Width)*int(r.Height)] {
@@ -958,7 +993,7 @@ func (wm *windowManager) sendCursor() {
 	}
 	var buf bytes.Buffer
 	if png.Encode(&buf, img) != nil {
-		return
+		return agentproto.GUIEvent{}, false
 	}
-	wm.emit(agentproto.GUIEvent{Ev: "cursor", Cursor: &agentproto.GUICursor{PNG: buf.Bytes(), XHot: int(r.Xhot), YHot: int(r.Yhot)}})
+	return agentproto.GUIEvent{Ev: "cursor", Cursor: &agentproto.GUICursor{PNG: buf.Bytes(), XHot: int(r.Xhot), YHot: int(r.Yhot)}}, true
 }

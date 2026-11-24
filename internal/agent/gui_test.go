@@ -694,10 +694,10 @@ func TestFlowBudget(t *testing.T) {
 // A watched window reports what its frames cost once a second: counts,
 // sizes, times, ticks held back and the latency of acknowledged frames.
 func TestFrameStats(t *testing.T) {
-	var out bytes.Buffer
+	out := newGUIClient(&session{}, nil)
 	m := &managedWin{xwin: xwin{id: 1, w: 20000, h: 20000}, watched: true}
 	m.dirty = m.all()
-	wm := &windowManager{out: &out, wins: map[xproto.Window]*managedWin{1: m}, layers: map[xproto.Window]*layerWin{}}
+	wm := &windowManager{clients: []*guiClient{out}, wins: map[xproto.Window]*managedWin{1: m}, layers: map[xproto.Window]*layerWin{}}
 	t0 := time.Now()
 	m.since = t0
 	// A budget of 300 kB: three tiles' worth.
@@ -710,7 +710,7 @@ func TestFrameStats(t *testing.T) {
 			encode: 3 * time.Millisecond, pixels: j.r.w * j.r.h, bytes: 1000, enc: agentproto.GUIEncJPEG})
 	}
 	wm.account(costs, t0.Add(10*time.Millisecond))
-	if out.Len() != 0 {
+	if len(out.q) != 0 {
 		t.Fatal("stats sent before a second passed")
 	}
 	m.ackedAt(2, t0.Add(40*time.Millisecond)) // acknowledges frames 1 and 2
@@ -719,12 +719,12 @@ func TestFrameStats(t *testing.T) {
 		t.Fatalf("in flight %+v", m.inflight)
 	}
 	wm.account(nil, t0.Add(time.Second))
-	kind, p, err := agentproto.ReadGUI(&out)
-	if err != nil || kind != agentproto.GUIJSON {
-		t.Fatalf("read: %v", err)
+	msg := <-out.q
+	if msg.kind != agentproto.GUIJSON {
+		t.Fatalf("message %d", msg.kind)
 	}
 	var ev agentproto.GUIEvent
-	json.Unmarshal(p, &ev)
+	json.Unmarshal(msg.parts[0], &ev)
 	st := ev.Stats
 	if ev.Ev != "stats" || st == nil || st.Window != 1 || st.Updates != 1 || st.Frames != 3 || st.JPEG != 3 || st.Bytes != 3000 ||
 		st.Capture != 3000 || st.Encode != 9000 || st.Waits != 1 || st.Acked != 1 || st.Latency != 40000 ||

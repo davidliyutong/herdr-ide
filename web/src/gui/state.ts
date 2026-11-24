@@ -19,17 +19,7 @@ export interface GuiWindow {
 }
 
 export type GuiPhase =
-  | 'off'
-  | 'local'
-  | 'unsupported'
-  | 'unavailable'
-  | 'installing'
-  | 'starting'
-  | 'ready'
-  | 'error'
-  | 'elsewhere'
-  | 'not_running'
-  | 'disconnected';
+  'off' | 'local' | 'unsupported' | 'unavailable' | 'installing' | 'starting' | 'ready' | 'error' | 'not_running' | 'disconnected';
 
 export interface GuiState {
   m: string;
@@ -44,6 +34,8 @@ export interface GuiState {
   vulkan_gpu?: number;
   /** New panes' programs see only the GPUs of their CUDA_VISIBLE_DEVICES. */
   pick?: boolean;
+  /** Another connection controls the windows; this one views them. */
+  view_only?: boolean;
   windows: GuiWindow[];
 }
 
