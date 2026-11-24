@@ -24,6 +24,7 @@ import { createCore } from '#kernel/core.ts';
 import { Guard, isLoopbackHost } from '#kernel/http/guard.ts';
 import type { Peer } from '#kernel/http/env.ts';
 import { serveUI } from '#kernel/http/static.ts';
+import { isBreakable } from '#kernel/http/breakable.ts';
 import { Machines } from '#kernel/machines/manager.ts';
 import { Registry } from '#kernel/machines/registry.ts';
 import { loadSpecs, validTarget, MAX_TARGET_LEN, type Spec } from '#kernel/machines/spec.ts';
@@ -34,6 +35,7 @@ import { machinesFeature } from '#features/machines/core.ts';
 import { terminalsFeature } from '#features/terminals/core.ts';
 import { readHello, desktopClient } from './parent.ts';
 import { openPayloads } from './payloads.ts';
+import { abortable } from './abortable.ts';
 import { bunPty } from './pty.ts';
 
 const OPTIONS = {
@@ -263,7 +265,7 @@ export async function serve(argv: string[]): Promise<void> {
         server.upgrade(req, { data: { open, compress: !!opts?.compress } })
           ? new Response(null, { status: 200 })
           : new Response('upgrade failed', { status: 400 });
-    return core.fetch(req, peer);
+    return core.fetch(req, peer).then((res) => (isBreakable(res) ? abortable(res) : res));
   };
   const websocket = {
     open(ws: ServerWebSocket<WSData>) {
