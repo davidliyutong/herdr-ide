@@ -221,10 +221,26 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 ## Security
 
 The desktop's core no longer listens: other local processes cannot reach
-it (SECURITY.md's residual risk of the loopback port goes). The vault's
-master key moves from memguard's locked memory to a non-extractable
-WebCrypto key: it is not swapped out by locking but never leaves native
-memory as bytes. Both go into SECURITY.md with the stage that makes them.
+it (SECURITY.md's residual risk of the loopback port goes). The vault:
+
+- its master key moves from memguard's locked memory to a non-extractable
+  WebCrypto key, which unlock entries open into directly and a lock
+  drops: it is not kept from swap by locking, but never leaves native
+  memory as bytes; the core no longer limits its core dumps for it, and
+  the answer `503 memory` (memguard failing) goes;
+- Argon2id is `node:crypto`'s (native, off the event loop, in Bun and in
+  Electron's Node); its output lies in a buffer only until it is imported
+  as the key, then is wiped;
+- adding an authenticator derives the key again from that request's
+  passphrase, as an extractable copy that lives for that request only, to
+  wrap it for the new entry;
+- WebAuthn assertions are verified by @simplewebauthn/server, with the
+  checks the Go code made beyond it kept (the trusted origin, no
+  cross-origin, user presence and verification, a growing counter, PRF
+  required, bounded inputs).
+
+These go into SECURITY.md with the stage that makes the TypeScript core
+the one that ships.
 
 ## Testing
 

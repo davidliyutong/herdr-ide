@@ -1,0 +1,94 @@
+{
+  "check": {
+    "nonce": "trK8HRbrHssYu54r",
+    "ciphertext": "QX/25yGhzm2RaEA73X+LuNBpBMbF4KjoPymK"
+  },
+  "entries": [
+    {
+      "name": "GITHUB_TOKEN",
+      "description": "GitHub",
+      "machines": ["m1", "local"],
+      "value": {
+        "nonce": "fG1BueNcptPizZ6Z",
+        "ciphertext": "9qr5ET3y7pSXV8xCvGSUuM5DDmobhF1Q/+w="
+      },
+      "created": "2026-11-20T10:00:00.123456789Z",
+      "updated": "2026-11-20T10:00:00.123456789Z"
+    },
+    {
+      "name": "OPENAI_KEY",
+      "machines": ["*"],
+      "injectOnly": true,
+      "value": {
+        "nonce": "pdOlD+eOGpZ7Wnh8",
+        "ciphertext": "+v8pVVMgvyV0t6zvsExAAzQlRqkeAPnt/Rc="
+      },
+      "created": "2026-11-20T10:00:00.123456789Z",
+      "updated": "2026-11-20T10:00:00.123456789Z"
+    },
+    {
+      "name": "EMPTY",
+      "machines": [],
+      "value": {
+        "nonce": "kH2ivYcHF81cDEaU",
+        "ciphertext": "hFYp8DA/Dc44Pfz4OIT7Ew=="
+      },
+      "created": "2026-11-20T10:00:00.123456789Z",
+      "updated": "2026-11-20T10:00:00.123456789Z"
+    }
+  ],
+  "guard": {
+    "nonce": "59iQDmClMos+Gzv9",
+    "ciphertext": "1xcLVO4qj0DX/CUrWc3RzPMFgirvTqZvGgJK0AUD8gwnw5p6ocAEVtRxgWLbe4Asm9vucM7HxszQxPZxSoKzzoh/vGa7d7Zq8cAFMHrsQEr9LAzmLgzRQtXlCbll6lowJrAiJIqC9D7oLnIqt3qPokcZhmrM3l7LX6XGkVppV2WESRt7f+td8OsclvzUflg7SC1EKBHBSmnDwmzDhQ/RgeMmT3VkZtFYDOOoitGJuH8cLB2nOitX4ftyAsIT85RgkOgQuVJ0jQZnJlX+fIx3LylNvDKNs3m+kD/klGodHm+ybocELKVPTksrY2TdKZ1/vCG/9QGJP0EMKyQKUnW8lx0AmwgEL2Mxu6tbwzU1FbOz5dr7WN35Ma7NVYMYZRrp+O9cljLPvglZ+9WAJYJQBrpY42ertMlrf/gwbuLYBnMJtGB4HG7D4j1XAqGZM3NvEz7iJcxJqBMx3eg7ngzvyfS2eHd0Egs+Iw7xVBCerLN7kkO0Ia9AdlbbHiFxk+vqVMhxlQrXxLhzywV7HJDq7aJfE6MWOvL9iPjAPQlGyn8gLoRq1oXwRdYPphyPVhKKz/6J4XtNONWYbDctELT41xOBA335cqJrNuAhedUfIz9xWDWWqkF2KemF7hNIDvNP60r0duiCDJJCOtFuqvNGfxyW/Wci2uKmbXzJJ9apz1qoxnOXn+csxvbUhCwyBY0UI0yTmsNCYBCN/cUlY/odos53IQ2JG+Pjdc6DEqPv7nKqyhiOM5xTlmNWkAo7krGCJGeOAv9aphVBKMDnqlTZAjFdIlL4OPws1youXJkU"
+  },
+  "kdf": {
+    "salt": "9SoimCC9vKsoTuwo7MmWrw==",
+    "time": 2,
+    "memory": 8192,
+    "threads": 4
+  },
+  "mode": "passphrase",
+  "passphraseAt": {
+    "nonce": "J4oRWXivWe3hhMQr",
+    "ciphertext": "I0S2ckyRqq5TLUN0CLumZ+Ig6n5fzzbdoJx1H5rBYCukPQhhwsPWOasoRVYYswCxk5Un43tRDMumVUVxeTnshMNsA7q+hyE="
+  },
+  "passphraseHint": "2026-12-04T10:00:00Z",
+  "passphraseSet": "2026-11-20T10:00:00.123456789Z",
+  "unlock": [
+    {
+      "id": "9S4DzepaCIQqksOkZ2qQ9w",
+      "authenticator": "a1b2c3d4e5f60718",
+      "kind": "prf",
+      "created": "2026-11-20T10:00:00.123456789Z",
+      "check": "7dcec823de3dd3cb1a7e46a299fe4eefd020210891790506f857aed279ebd9d8",
+      "prf": {
+        "origin": "http://localhost:7780",
+        "rpId": "localhost",
+        "credential": "Y3JlZGVudGlhbC1pZC0wMTIz",
+        "salt": "SmZebZSkwxa1spycC0X2ACjfTnTxh1uO/4poDkAC0lA="
+      },
+      "wrapped": {
+        "nonce": "7j8j1us6d9L85kpz",
+        "ciphertext": "9Qpb/XCMvmGaxMFKSAcu7+EQ+VVecz60HDsGfyMNNsGR0BQ4z286Em34G9G+d4QL"
+      }
+    },
+    {
+      "id": "8EbGcrCi564DvzNNSUNMFg",
+      "authenticator": "d0d1d2d3d4d5d6d7",
+      "kind": "enclave",
+      "created": "2026-11-20T10:00:00.123456789Z",
+      "check": "7dcec823de3dd3cb1a7e46a299fe4eefd020210891790506f857aed279ebd9d8",
+      "enclave": {
+        "install": "install-0123456789ab",
+        "blob": "YmxvYg==",
+        "sePub": "BC809ATbooLmkgqihbMZH5091MnBZZ+ibfA1No64B1ZLx8Jt1aWnGB0VT/q25UJOJapm3Nwdl7Tsr7jDUdn6sQg=",
+        "ephPub": "BFIV0rKPH2/zTfc+yozdhQzcU4x4ffS0j8fYN11o7LlfWenwb64PZaFiaMXiLWGks8TYQ9goJ6XJekPTg6lH2bs="
+      },
+      "wrapped": {
+        "nonce": "4UhoEVswUYibWCUr",
+        "ciphertext": "lhE/FlCkffxLKuc/mfaOOFH6WlDJTbZLfoGnyH1oSC9DiDV7dCIAqkUQQUeh3x3T"
+      }
+    }
+  ],
+  "version": 3
+}

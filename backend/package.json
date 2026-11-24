@@ -28,6 +28,7 @@
     "#hosts/*": "./hosts/*"
   },
   "dependencies": {
+    "@simplewebauthn/server": "14.1.0",
     "execa": "10.2.1",
     "hono": "4.13.21",
     "jsonc-parser": "3.3.1",

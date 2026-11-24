@@ -40,6 +40,7 @@ import { searchFeature } from '#features/search/core.ts';
 import { gitFeature } from '#features/git/core.ts';
 import { monitorFeature } from '#features/monitor/core.ts';
 import { usageFeature } from '#features/usage/core.ts';
+import { vaultFeature } from '#features/vault/core.ts';
 import { agentsFeature } from '#features/agents/core.ts';
 import { historyFeature } from '#features/history/core.ts';
 import { fileTransfersFeature, filesFeature } from '#features/files/core.ts';
@@ -159,6 +160,7 @@ export async function serve(argv: string[]): Promise<void> {
     gitFeature(),
     monitorFeature(),
     usageFeature(),
+    vaultFeature({ verifyKey: desktop.verifyKey }),
     agentsFeature(),
     chatFeature(),
     historyFeature(),
