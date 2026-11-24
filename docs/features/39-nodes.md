@@ -100,8 +100,8 @@ restart, and on macOS terminals keep the privacy grants of that executable
 | Concern | Where |
 | --- | --- |
 | Terminals, layout documents, chats | Machine: terminal core and chat host. |
-| code-server's idle stop | Node: counts every client's proxied connections. |
-| Terminal history captures, AI usage collection | Node: one schedule per machine, whatever UIs are attached. |
+| code-server | Node: one process for every client; a UI's idle timeout releases it (`release`), which stops it only while no other client has a connection to it; it ends with the node. |
+| Terminal history captures, AI usage limits | Node: a capture or a fetch of one UI answers the others' for a while (10 s, a minute), so the UIs' schedules do the work about once between them. |
 | Program windows | Node: one capture and encoder per window, frames sent to every client that attached it. |
 | Settings, keybindings, machines, vault, port forwards | UI's host, per UI instance. |
 | Read-only mode | UI: enforced on its own pages and requests. |
@@ -117,8 +117,8 @@ start on the node and need a UI:
   locked or is denied answers no, and the request fails only when every UI
   did or `vault.approvalTimeout` passed. The other UIs' approval prompts
   are withdrawn. Each UI logs what it released ([30](30-variable-vault.md)).
-- **Bridge.** A message goes to the UIs that proxy a VS Code window of the
-  machine, else to all.
+- **Bridge.** A connection of the extension goes to the UI that last
+  connected to code-server (it shows VS Code), else to the newest client.
 
 ### Namespaces
 

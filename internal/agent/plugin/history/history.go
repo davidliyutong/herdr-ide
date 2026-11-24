@@ -41,6 +41,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"sync"
 	"time"
 
 	"herdr-ide/internal/agent/plugin"
@@ -58,6 +59,44 @@ const clearTimeout = 40 * time.Second
 
 func init() { plugin.Register(ID, handle) }
 
+// captureShare is how long a capture of one core stands for the others
+// its node serves: their captures in that time do nothing (Busy), so the
+// cores of a machine capture it about once per interval between them.
+var captureShare = 10 * time.Second
+
+var (
+	lastMu      sync.Mutex
+	lastCapture = map[string]struct {
+		client string
+		at     time.Time
+	}{}
+)
+
+// sharedCapture reports whether another core's capture of env's data
+// directory ended less than captureShare ago.
+func sharedCapture(env *plugin.Env) bool {
+	if env.Client == "" {
+		return false
+	}
+	lastMu.Lock()
+	defer lastMu.Unlock()
+	last, ok := lastCapture[env.Base]
+	return ok && last.client != env.Client && clock().Sub(last.at) < captureShare
+}
+
+// capturedBy records that env's core captured env's data directory now.
+func capturedBy(env *plugin.Env) {
+	if env.Client == "" {
+		return
+	}
+	lastMu.Lock()
+	defer lastMu.Unlock()
+	lastCapture[env.Base] = struct {
+		client string
+		at     time.Time
+	}{env.Client, clock()}
+}
+
 func handle(ctx context.Context, st net.Conn, action string, params json.RawMessage, env *plugin.Env) error {
 	switch action {
 	case agentproto.HistoryCapture:
@@ -65,9 +104,13 @@ func handle(ctx context.Context, st net.Conn, action string, params json.RawMess
 		if err := plugin.Decode(params, &p); err != nil {
 			return plugin.Reply(st, nil, err)
 		}
+		if sharedCapture(env) {
+			return plugin.Reply(st, agentproto.HistoryCaptureResult{Busy: true}, nil)
+		}
 		ctx, cancel := untilClosed(ctx, st, captureTimeout)
 		defer cancel()
 		res, err := capture(ctx, env, p)
+		capturedBy(env)
 		return plugin.Reply(st, res, err)
 	case agentproto.HistoryList:
 		return plugin.Reply(st, list(env), nil)

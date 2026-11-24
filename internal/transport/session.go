@@ -6,6 +6,8 @@ package transport
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,14 @@ import (
 
 	"herdr-ide/internal/agentproto"
 )
+
+// ClientID names this core to the nodes it reaches (agentproto.NodeHello.
+// Client): random, the same for all its sessions while the process runs.
+var ClientID = func() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}()
 
 // Session is a live connection to one agent.
 type Session struct {

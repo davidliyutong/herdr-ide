@@ -39,8 +39,9 @@ the same in its sessions' database.
 (`internal/agent/plugin/usage`) runs its actions:
 
 - `limits`: asks each enabled provider in parallel (15 s per request,
-  through `HTTPS_PROXY`, one shared HTTP client, no redirects followed).
-  It returns a list of accounts with windows, credits, balances and a
+  through `HTTPS_PROXY`, one shared HTTP client, no redirects followed);
+  another core's same request through the same node within a minute gets
+  the same answer ([39](39-nodes.md)). It returns a list of accounts with windows, credits, balances and a
   `status`: `ok`, `stale` (expired token, or numbers from a log), `unauth`,
   `error` (with `code`) or `missing`. Accounts the core names in `skip` /
   `skipLocal` are answered `skipped` without a request; a 429 returns

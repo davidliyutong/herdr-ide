@@ -87,6 +87,9 @@ const (
 	PhaseStarting    = "starting"
 	PhaseReady       = "ready"
 	PhaseError       = "error"
+	// PhaseElsewhere: another core shows the machine's windows; tried
+	// again every elsewhereRetry.
+	PhaseElsewhere = "elsewhere"
 	// PhaseNotRunning: read-only mode, which only shows a display that runs.
 	PhaseNotRunning = "not_running"
 	// PhaseDisconnected: the machine is disabled, reconnecting, failing or

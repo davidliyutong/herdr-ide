@@ -17,7 +17,7 @@ import (
 // starts from this executable when none answers (agent.DialNode), as
 // `node dial` does for a core that comes over ssh.
 func DialNode(ctx context.Context, instance, sshConn string, logger *log.Logger) (*Session, error) {
-	c, err := agent.DialNode(ctx, instance, sshConn, logger)
+	c, err := agent.DialNode(ctx, instance, ClientID, sshConn, logger)
 	if err != nil {
 		return nil, err
 	}

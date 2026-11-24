@@ -470,13 +470,18 @@ dropped. Defaults and bounds are in [reference](../reference.md).
 
 ### Machines
 
-Every agent listens on `<run>/vault.sock` (0600; only its own user by peer
-credentials; at most 16 connections) and relays each connection to the
-core as an op `vault` stream, as the VS Code bridge's socket does. The
-newest agent of the instance serves it: after a reconnect the old agent may
-linger, and the socket must lead to the working session. An agent whose
-socket was taken over checks every 2 s and serves it again once free; an
-exiting agent removes the socket only if it is still its own (same inode).
+Every node listens on `<run>/vault.sock` (0600; only its own user by peer
+credentials; at most 16 connections) and asks each core it serves
+([39](39-nodes.md)) as an op `vault` stream. The first core that grants a
+`get` or an `env` answers, and the other cores' streams close, which
+withdraws their questions; `list` answers with every core's variables, a
+name once. A request every core refused fails with the most telling
+refusal: `denied`, then `vault_locked`, `inject_only`, `not_found`, `busy`,
+a request that is wrong, a core that could not answer. Each core logs what
+it released. The newest node of the instance serves the socket (another
+build's may linger); one whose socket was taken over checks every 2 s and
+serves it again once free; an exiting node removes the socket only if it
+is still its own (same inode).
 
 The MCP server is the `mcp` command of the agent and of the core. The agent
 keeps `<data dir>/bin/<slug>-mcp` a link to its running executable, a path

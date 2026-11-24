@@ -38,6 +38,47 @@ import (
 	"herdr-ide/internal/usage"
 )
 
+// limitsShare is how long the limits one core fetched answer the same
+// request of the other cores its node serves, so the cores of a machine
+// ask the providers about once between them.
+var limitsShare = time.Minute
+
+type sharedResult struct {
+	client, params string
+	at             time.Time
+	accounts       any
+}
+
+var (
+	limitsMu   sync.Mutex
+	lastLimits = map[string]sharedResult{}
+)
+
+// sharedLimits returns the limits another core fetched with the same params
+// for e's data directory less than limitsShare ago.
+func sharedLimits(e *plugin.Env, params json.RawMessage) (any, bool) {
+	if e.Client == "" {
+		return nil, false
+	}
+	limitsMu.Lock()
+	defer limitsMu.Unlock()
+	last, ok := lastLimits[e.Base]
+	if !ok || last.client == e.Client || last.params != string(params) || time.Since(last.at) >= limitsShare {
+		return nil, false
+	}
+	return last.accounts, true
+}
+
+// limitsBy records the limits e's core fetched with params.
+func limitsBy(e *plugin.Env, params json.RawMessage, accounts any) {
+	if e.Client == "" {
+		return
+	}
+	limitsMu.Lock()
+	defer limitsMu.Unlock()
+	lastLimits[e.Base] = sharedResult{client: e.Client, params: string(params), at: time.Now(), accounts: accounts}
+}
+
 // limitsTimeout bounds one limits action: the providers run in parallel,
 // each request within usage.Timeout, agy within usage.AgyTimeout.
 const limitsTimeout = 45 * time.Second
@@ -61,9 +102,16 @@ func handle(ctx context.Context, st net.Conn, action string, params json.RawMess
 		if err := plugin.Decode(params, &o); err != nil {
 			return plugin.Reply(st, nil, err)
 		}
+		if acc, ok := sharedLimits(e, params); ok {
+			return plugin.Reply(st, map[string]any{"accounts": acc}, nil)
+		}
 		ctx, cancel := untilClosed(ctx, st, limitsTimeout)
 		defer cancel()
-		return plugin.Reply(st, map[string]any{"accounts": usage.Limits(ctx, env(e), o)}, nil)
+		acc := usage.Limits(ctx, env(e), o)
+		if ctx.Err() == nil {
+			limitsBy(e, params, acc)
+		}
+		return plugin.Reply(st, map[string]any{"accounts": acc}, nil)
 	case "cost":
 		var o usage.CostOptions
 		if err := plugin.Decode(params, &o); err != nil {

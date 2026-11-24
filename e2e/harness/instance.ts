@@ -46,12 +46,32 @@ export class Instance {
   private log: string[] = [];
   private exited?: Promise<void>;
 
-  private constructor() {
-    this.name = 'e2e-' + randomBytes(4).toString('hex');
+  /** Another core of the instance (second()) leaves the instance's node,
+   * terminal core and home to the first. */
+  private readonly shares: boolean;
+
+  private constructor(of?: Instance) {
+    this.shares = !!of;
+    this.name = of?.name ?? 'e2e-' + randomBytes(4).toString('hex');
     // The real path: the terminal core reports directories resolved (/private/tmp on macOS).
-    this.home = realpathSync(mkdtempSync(HOME_PREFIX));
+    this.home = of?.home ?? realpathSync(mkdtempSync(HOME_PREFIX));
     this.work = join(this.home, 'work');
     this.bin = join(this.home, 'bin');
+  }
+
+  /** Starts a second core of this instance (its name and home): another UI
+   * of the same machines, which reaches the same local node. Its stop()
+   * stops that core only. */
+  async second(): Promise<Instance> {
+    const inst = new Instance(this);
+    try {
+      await inst.launch();
+      await waitFor(async () => (await inst.machine()).status === 'ready', { what: 'the second core to connect', timeout: 20_000 });
+    } catch (e) {
+      await inst.stop();
+      throw e;
+    }
+    return inst;
   }
 
   /** Starts a core on a new instance and waits until its terminal core runs. */
@@ -200,6 +220,10 @@ export class Instance {
   }
 
   private async stopOnce() {
+    if (this.shares) {
+      await this.stopCore(false);
+      return;
+    }
     await this.stopCore();
     stopNodes(this.home, this.name);
     stopTerminalCore(this.home, this.name);
@@ -207,10 +231,11 @@ export class Instance {
     rmSync(controlDir(this.name), { recursive: true, force: true });
   }
 
-  /** Stops the local terminal core and the core, keeping the home
-   * directory (what a test checks after the core is gone). */
-  async stopCore() {
-    if (this.baseURL && this.proc?.exitCode === null) {
+  /** Stops the local terminal core (unless terminalCore is false) and the
+   * core, keeping the home directory (what a test checks after the core is
+   * gone). */
+  async stopCore(terminalCore = true) {
+    if (terminalCore && this.baseURL && this.proc?.exitCode === null) {
       try {
         await this.api('POST', '/api/m/local/hc/stop');
       } catch {

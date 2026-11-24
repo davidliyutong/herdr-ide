@@ -36,7 +36,7 @@ func openPlugin(t *testing.T, a *Agent, h agentproto.Header, body []byte) (net.C
 	t.Helper()
 	core, st := net.Pipe()
 	t.Cleanup(func() { core.Close() })
-	go a.handlePlugin(context.Background(), st, h)
+	go a.handlePlugin(context.Background(), &session{}, st, h)
 	if len(body) > 0 {
 		go core.Write(body)
 	}

@@ -25,8 +25,9 @@ import (
 
 // A machine's node is the agent as a service: a process of its own that
 // listens on a socket in the instance's run directory and serves every
-// client that connects as an agent session (Serve), the core of the
-// machine itself as well as a core that came over ssh (`node dial`). It
+// client that connects as a session of one agent (Agent.Serve), the core
+// of the machine itself as well as cores that came over ssh (`node dial`):
+// they share its code-server, displays and sockets. It
 // runs detached from its clients, in a session of its own, and ends once it
 // has had no client for NodeIdle.
 //
@@ -107,6 +108,12 @@ func RunNode(ctx context.Context, opts Options) error {
 		return err
 	}
 	logger.Printf("serving %s (build %s, pid %d)", sock, build, os.Getpid())
+	agent, err := NewAgent(Options{Instance: opts.Instance, Logger: logger})
+	if err != nil {
+		l.Close()
+		return err
+	}
+	defer agent.Close()
 
 	// Retiring gives the socket and the lock up: no new client reaches
 	// this node, which ends once its clients have left.
@@ -168,7 +175,7 @@ func RunNode(ctx context.Context, opts Options) error {
 				}
 				mu.Unlock()
 			}()
-			serveNodeClient(ctx, c.(*net.UnixConn), opts, logger, stop)
+			serveNodeClient(ctx, agent, c.(*net.UnixConn), logger, stop)
 		}()
 	}
 	running.Wait()
@@ -206,7 +213,7 @@ func retireWhenGone(ctx context.Context, exe string, every time.Duration, retire
 
 // serveNodeClient serves one connection to the node: the user's own
 // processes only, which say first what they want.
-func serveNodeClient(ctx context.Context, c *net.UnixConn, opts Options, logger *log.Logger, stop func()) {
+func serveNodeClient(ctx context.Context, agent *Agent, c *net.UnixConn, logger *log.Logger, stop func()) {
 	defer c.Close()
 	if _, uid, err := peerCred(c); err != nil || uid != os.Getuid() {
 		logger.Printf("refused a connection of uid %d (%v)", uid, err)
@@ -220,9 +227,7 @@ func serveNodeClient(ctx context.Context, c *net.UnixConn, opts Options, logger 
 	_ = c.SetReadDeadline(time.Time{})
 	switch hello.Op {
 	case agentproto.NodeServe:
-		o := opts
-		o.SSHConnection = hello.SSHConnection
-		if err := Serve(ctx, c, o); err != nil {
+		if err := agent.Serve(ctx, c, hello.Client, hello.SSHConnection); err != nil {
 			logger.Printf("client: %v", err)
 		}
 	case agentproto.NodeStop:
@@ -236,9 +241,9 @@ func serveNodeClient(ctx context.Context, c *net.UnixConn, opts Options, logger 
 
 // DialNode connects to the instance's node of this build, starting one from
 // this executable when none answers, and asks it to serve the connection as
-// an agent session for a core that came through sshConn (SSH_CONNECTION;
-// empty for the local machine).
-func DialNode(ctx context.Context, instance, sshConn string, logger *log.Logger) (net.Conn, error) {
+// an agent session for the core client (agentproto.NodeHello.Client) that
+// came through sshConn (SSH_CONNECTION; empty for the local machine).
+func DialNode(ctx context.Context, instance, client, sshConn string, logger *log.Logger) (net.Conn, error) {
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
 	}
@@ -251,7 +256,7 @@ func DialNode(ctx context.Context, instance, sshConn string, logger *log.Logger)
 		return nil, err
 	}
 	sock := nodeSocket(runDir, build)
-	hello := agentproto.NodeHello{Op: agentproto.NodeServe, SSHConnection: sshConn}
+	hello := agentproto.NodeHello{Op: agentproto.NodeServe, Client: client, SSHConnection: sshConn}
 	if c, err := dialNodeSocket(sock, hello); err == nil {
 		return c, nil
 	}

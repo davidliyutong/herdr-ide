@@ -80,6 +80,10 @@ func (d *display) finish(sess, cur *transport.Session) *transport.Session {
 	return cur
 }
 
+// elsewhereRetry is how often a machine whose windows another core shows
+// is tried again.
+var elsewhereRetry = 15 * time.Second
+
 // retryDelay is the wait before the next attempt after n failures in a row.
 func retryDelay(n int) time.Duration {
 	return min(5*time.Second<<min(n, 6), 5*time.Minute)
@@ -294,6 +298,15 @@ func (m *Manager) prepare(d *display, sess *transport.Session) {
 		}
 	}
 	conn, rep, err := mc.Open(context.Background(), agentproto.Header{Op: agentproto.OpGUI, Action: "attach"})
+	if err != nil && rep != nil && rep.Code == agentproto.CodeGUIInUse {
+		m.setPhase(d, PhaseElsewhere, nil)
+		time.AfterFunc(elsewhereRetry, func() {
+			if d.mc.Session() == sess {
+				m.ensure(d.mc, true)
+			}
+		})
+		return
+	}
 	if err != nil {
 		m.fail(d, sess, err)
 		return

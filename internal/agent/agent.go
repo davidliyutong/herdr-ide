@@ -9,6 +9,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -20,8 +21,10 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/yamux"
@@ -29,16 +32,16 @@ import (
 	"herdr-ide/internal/agentproto"
 )
 
-// Agent serves streams opened by the core.
+// Agent is a machine's agent for one instance: what the agent sessions of
+// a node share (its code-server, displays, sockets, terminal core), each
+// session serving the streams of one core (Serve).
 type Agent struct {
-	sess      *yamux.Session
 	logger    *log.Logger
 	instance  string
 	home      string
 	base      string // ~/<brand.DataDir(instance)>
 	runDir    string // base/run, mode 0700
 	uploadDir string // base/uploads
-	sshConn   string // SSH_CONNECTION of the session the core came through
 
 	hcOp     sync.Mutex // serializes installing, starting and stopping herdr-core
 	hcMu     sync.Mutex
@@ -48,6 +51,30 @@ type Agent struct {
 
 	cs  *codeServer
 	gui *gui
+
+	// stop ends what the agent runs for all its sessions (its sockets,
+	// housekeeping), which running counts.
+	stop    context.CancelFunc
+	ctx     context.Context
+	running sync.WaitGroup
+
+	sessMu   sync.Mutex
+	sessions map[*session]struct{}
+	sessSeq  uint64
+}
+
+// session is one core's agent session.
+type session struct {
+	ys *yamux.Session
+	// id numbers the agent's sessions; client names the core (its
+	// process), the same for its sessions after reconnects.
+	id      uint64
+	client  string
+	sshConn string // SSH_CONNECTION of the ssh session the core came through
+	// csPipes counts the session's open connections to code-server, csLast
+	// is when it last opened one (Unix nanoseconds).
+	csPipes atomic.Int32
+	csLast  atomic.Int64
 }
 
 // Options configure an agent.
@@ -58,6 +85,8 @@ type Options struct {
 	// SSHConnection is SSH_CONNECTION of the ssh session the core reached
 	// the machine through, which hello reports; empty for the local machine.
 	SSHConnection string
+	// Client names the core of a session (agentproto.NodeHello.Client).
+	Client string
 }
 
 // dataDirs returns the instance's data directory and its run directory,
@@ -85,78 +114,152 @@ func dataDirs(instance string, logger *log.Logger) (home, base, runDir string, e
 	return home, base, runDir, nil
 }
 
-// Serve runs the agent over conn until the session ends.
+// Serve runs an agent of its own over conn until the session ends: the
+// agent of one session (the tests'). A node's sessions share one agent
+// (NewAgent, Agent.Serve).
 func Serve(ctx context.Context, conn io.ReadWriteCloser, opts Options) error {
+	a, err := NewAgent(opts)
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	return a.Serve(ctx, conn, opts.Client, opts.SSHConnection)
+}
+
+// NewAgent prepares the instance's data directory and starts what the
+// agent runs for every session: its sockets, housekeeping and the vault's
+// MCP link. Close ends them.
+func NewAgent(opts Options) (*Agent, error) {
 	logger := opts.Logger
 	if logger == nil {
 		logger = log.New(os.Stderr, brand.CoreBin+" agent: ", log.LstdFlags)
 	}
 	home, base, runDir, err := dataDirs(opts.Instance, logger)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	// What the agent runs (requests, its sockets, housekeeping) is waited
-	// for when the session ends, at most handlerDrain, so it is done (a
-	// save or an upload removed what it staged, a socket was removed)
-	// before the process may exit.
-	var running sync.WaitGroup
-	spawn := func(f func()) {
-		running.Add(1)
-		go func() {
-			defer running.Done()
-			f()
-		}()
-	}
-	spawn(func() { housekeeping(base, logger) })
-
-	sess, err := yamux.Server(conn, agentproto.YamuxConfig(logger))
-	if err != nil {
-		return err
-	}
+	ctx, stop := context.WithCancel(context.Background())
 	a := &Agent{
-		sess:      sess,
 		logger:    logger,
 		instance:  opts.Instance,
 		home:      home,
 		base:      base,
 		runDir:    runDir,
 		uploadDir: filepath.Join(base, "uploads"),
-		sshConn:   opts.SSHConnection,
+		ctx:       ctx,
+		stop:      stop,
+		sessions:  map[*session]struct{}{},
 	}
 	a.cs = newCodeServer(a)
-	defer a.cs.stopAll()
 	a.gui = newGUI(a)
+	a.spawn(func() { housekeeping(base, logger) })
+	a.spawn(func() { a.serveBridge(ctx) })
+	a.spawn(func() { a.serveVault(ctx) })
+	a.spawn(a.linkMCP)
+	return a, nil
+}
 
+// spawn runs f, which Close waits for.
+func (a *Agent) spawn(f func()) {
+	a.running.Add(1)
+	go func() {
+		defer a.running.Done()
+		f()
+	}()
+}
+
+// Close ends what the agent runs, waiting at most handlerDrain, so it is
+// done (a socket was removed) before the process may exit, and stops the
+// code-server it started.
+func (a *Agent) Close() {
+	a.stop()
+	waitAtMost(&a.running, handlerDrain)
+	a.cs.stopAll()
+}
+
+// Serve serves one core's session over conn until it ends: the core's
+// process is client (empty when unknown) and it came through the ssh
+// session sshConn (SSH_CONNECTION; empty for the local machine).
+func (a *Agent) Serve(ctx context.Context, conn io.ReadWriteCloser, client, sshConn string) error {
+	ys, err := yamux.Server(conn, agentproto.YamuxConfig(a.logger))
+	if err != nil {
+		return err
+	}
+	a.sessMu.Lock()
+	a.sessSeq++
+	s := &session{ys: ys, id: a.sessSeq, client: client, sshConn: sshConn}
+	a.sessions[s] = struct{}{}
+	a.sessMu.Unlock()
+	defer func() {
+		a.sessMu.Lock()
+		delete(a.sessions, s)
+		a.sessMu.Unlock()
+	}()
+	// The session's requests are waited for when it ends, at most
+	// handlerDrain, so they are done (a save or an upload removed what it
+	// staged).
+	var running sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
-		<-ctx.Done()
-		sess.Close()
+		select {
+		case <-ctx.Done():
+		case <-a.ctx.Done():
+		}
+		ys.Close()
 	}()
-	spawn(func() { a.serveBridge(ctx) })
-	spawn(func() { a.serveVault(ctx) })
-	spawn(a.linkMCP)
-
 	for {
-		st, err := sess.AcceptStream()
+		st, err := ys.AcceptStream()
 		if err != nil {
-			ended := errors.Is(err, io.EOF) || sess.IsClosed()
-			// The requests still running fail with their streams, the
-			// sockets close with the context.
+			ended := errors.Is(err, io.EOF) || ys.IsClosed()
+			// The requests still running fail with their streams.
 			cancel()
-			sess.Close()
+			ys.Close()
 			waitAtMost(&running, handlerDrain)
 			if ended {
 				return nil
 			}
 			return err
 		}
-		spawn(func() { a.handle(ctx, st) })
+		running.Add(1)
+		go func() {
+			defer running.Done()
+			a.handle(ctx, s, st)
+		}()
 	}
 }
 
-// handlerDrain is how long Serve waits, once its session ended, for what
-// it runs (requests, its sockets, housekeeping) to end.
+// live reports whether the session's connection is open (a session
+// without one stands for a core in tests).
+func (s *session) live() bool { return s.ys == nil || !s.ys.IsClosed() }
+
+// otherUses reports whether a session other than s has a connection to
+// code-server open.
+func (a *Agent) otherUses(s *session) bool {
+	for _, o := range a.liveSessions() {
+		if o != s && o.csPipes.Load() > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// liveSessions returns the agent's sessions, oldest first.
+func (a *Agent) liveSessions() []*session {
+	a.sessMu.Lock()
+	defer a.sessMu.Unlock()
+	list := make([]*session, 0, len(a.sessions))
+	for s := range a.sessions {
+		if s.live() {
+			list = append(list, s)
+		}
+	}
+	slices.SortFunc(list, func(x, y *session) int { return cmp.Compare(x.id, y.id) })
+	return list
+}
+
+// handlerDrain is how long Serve waits, once its session ended, for its
+// requests to end, and Close for what the agent runs.
 const handlerDrain = 5 * time.Second
 
 // waitAtMost waits for wg at most d, and reports whether it ended.
@@ -176,7 +279,7 @@ func waitAtMost(wg *sync.WaitGroup, d time.Duration) bool {
 	}
 }
 
-func (a *Agent) handle(ctx context.Context, st net.Conn) {
+func (a *Agent) handle(ctx context.Context, s *session, st net.Conn) {
 	var h agentproto.Header
 	_ = st.SetReadDeadline(time.Now().Add(30 * time.Second))
 	if err := agentproto.ReadLine(st, &h); err != nil {
@@ -187,18 +290,18 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 	var err error
 	switch h.Op {
 	case agentproto.OpHello:
-		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info(), SSH: a.sshConn})
+		err = agentproto.WriteLine(st, agentproto.Reply{OK: true, Info: a.info(), SSH: s.sshConn})
 		st.Close()
 	case agentproto.OpFsStat, agentproto.OpFsList, agentproto.OpFsRead, agentproto.OpFsWrite:
 		err = a.handleFS(st, h)
 	case agentproto.OpFsArchive:
 		err = a.handleArchive(st, h)
 	case agentproto.OpDialUnix:
-		err = a.handleDialUnix(st, h)
+		err = a.handleDialUnix(s, st, h)
 	case agentproto.OpCodeServer:
-		err = a.cs.handle(ctx, st, h)
+		err = a.cs.handle(ctx, s, st, h)
 	case agentproto.OpGUI:
-		err = a.gui.handle(ctx, st, h)
+		err = a.gui.handle(ctx, s, st, h)
 	case agentproto.OpHC:
 		err = a.handleHC(ctx, st, h)
 	case agentproto.OpHCAPI:
@@ -208,7 +311,7 @@ func (a *Agent) handle(ctx context.Context, st net.Conn) {
 	case agentproto.OpPrivacy:
 		err = a.handlePrivacy(ctx, st)
 	case agentproto.OpPlugin:
-		err = a.handlePlugin(ctx, st, h)
+		err = a.handlePlugin(ctx, s, st, h)
 	default:
 		err = agentproto.Fail(st, fmt.Errorf("unknown op %q", h.Op))
 		st.Close()
@@ -267,7 +370,7 @@ func (a *Agent) pipeUnix(st net.Conn, path string) error {
 	return nil
 }
 
-func (a *Agent) handleDialUnix(st net.Conn, h agentproto.Header) error {
+func (a *Agent) handleDialUnix(s *session, st net.Conn, h agentproto.Header) error {
 	defer st.Close()
 	// A bare name refers to a socket in the run directory.
 	path := h.Path
@@ -289,6 +392,13 @@ func (a *Agent) handleDialUnix(st net.Conn, h agentproto.Header) error {
 	if err := agentproto.WriteLine(st, agentproto.Reply{OK: true}); err != nil {
 		c.Close()
 		return err
+	}
+	// Connections to code-server keep it for the session (codeServer.release)
+	// and lead the VS Code bridge's connections to it (serveBridge).
+	if path == a.cs.socket() {
+		s.csPipes.Add(1)
+		s.csLast.Store(time.Now().UnixNano())
+		defer s.csPipes.Add(-1)
 	}
 	pipe(st, c)
 	return nil

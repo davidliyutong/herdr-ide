@@ -19,7 +19,17 @@ export interface GuiWindow {
 }
 
 export type GuiPhase =
-  'off' | 'local' | 'unsupported' | 'unavailable' | 'installing' | 'starting' | 'ready' | 'error' | 'not_running' | 'disconnected';
+  | 'off'
+  | 'local'
+  | 'unsupported'
+  | 'unavailable'
+  | 'installing'
+  | 'starting'
+  | 'ready'
+  | 'error'
+  | 'elsewhere'
+  | 'not_running'
+  | 'disconnected';
 
 export interface GuiState {
   m: string;

@@ -37,10 +37,12 @@ import (
 // core or downloaded by the machine; alternatively a code-server already
 // installed on the machine is used (Header.Bin).
 //
-// Ownership and reclamation: run/cs.pid records which agent started the
-// process. An agent stops the process it owns when it exits or when the core
-// asks (idle timeout); a process whose owner is gone (agent killed) is
-// adopted or reaped by the next agent. code-server itself also exits after
+// Ownership and reclamation: run/cs.pid records which agent (its process,
+// the node) started the process. An agent stops the process it owns when it
+// exits, when a core asks (stop), or when a core lets it go (release, its
+// idle timeout) while no other session of the agent has a connection to
+// it; a process whose owner is gone (agent killed) is adopted or reaped by
+// the next agent. code-server itself also exits after
 // --idle-timeout-seconds without connections, as a last resort.
 type codeServer struct {
 	a  *Agent
@@ -263,7 +265,7 @@ func (c *codeServer) status(h agentproto.Header) *agentproto.CSStatus {
 	return st
 }
 
-func (c *codeServer) handle(ctx context.Context, st net.Conn, h agentproto.Header) error {
+func (c *codeServer) handle(ctx context.Context, s *session, st net.Conn, h agentproto.Header) error {
 	defer st.Close()
 	if h.Version == "" || strings.ContainsAny(h.Version, "/\\") || strings.Contains(h.Version, "..") {
 		return agentproto.Fail(st, errors.New("code-server: bad version"))
@@ -299,6 +301,12 @@ func (c *codeServer) handle(ctx context.Context, st net.Conn, h agentproto.Heade
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h)})
 	case "stop":
 		c.stop()
+		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h)})
+	case "release":
+		// A core's idle timeout: another core's VS Code windows keep it.
+		if !c.a.otherUses(s) {
+			c.stop()
+		}
 		return agentproto.WriteLine(st, agentproto.Reply{OK: true, CS: c.status(h)})
 	case "install-ext":
 		// Args are extension ids; with Path set, the stream carries a vsix

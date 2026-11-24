@@ -164,6 +164,7 @@ export const zhCN: Messages = {
   'gui.state.error': '出错',
   'gui.state.not_running': '未运行（只读）',
   'gui.state.disconnected': '未连接',
+  'gui.state.elsewhere': '正被另一个连接使用',
   'gui.enableOpen': '在已打开的窗格中启用',
   'gui.enabled': '已在 {n} 个窗格中启用程序窗口（另有 {already} 个原本已启用）。',
   'gui.enableBusy': '{n} 个窗格正在运行程序：程序退出后，在其中执行复制的命令即可。',

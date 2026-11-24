@@ -170,6 +170,7 @@ export const en = {
   'gui.state.error': 'Error',
   'gui.state.not_running': 'Not running (read-only)',
   'gui.state.disconnected': 'Not connected',
+  'gui.state.elsewhere': 'In use by another connection',
   'gui.enableOpen': 'Enable in open panes',
   'gui.enabled': 'Program windows enabled in {n} panes ({already} had them already).',
   'gui.enableBusy': '{n} panes are running a program: run the copied command in them once it exits.',

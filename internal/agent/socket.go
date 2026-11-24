@@ -141,11 +141,12 @@ func waitFree(ctx context.Context, path string) bool {
 	}
 }
 
-// relayFirst opens a stream with hdr to the core once c sent its first
-// bytes, within wait (none: no limit), and pipes them; a connection that
-// sends nothing (another agent checking that the socket is served) opens
-// none. refused, when the core refuses the stream, tells c why.
-func (a *Agent) relayFirst(c net.Conn, hdr agentproto.Header, wait time.Duration, refused func(agentproto.Reply)) {
+// relayFirst opens a stream with hdr to the core of the session to picks
+// once c sent its first bytes, within wait (none: no limit), and pipes
+// them; a connection that sends nothing (another agent checking that the
+// socket is served) opens none. refused, when no session serves or the core
+// refuses the stream, tells c why.
+func (a *Agent) relayFirst(c net.Conn, hdr agentproto.Header, wait time.Duration, to func() *session, refused func(agentproto.Reply)) {
 	r := bufio.NewReader(c)
 	if wait > 0 {
 		c.SetReadDeadline(time.Now().Add(wait))
@@ -155,7 +156,15 @@ func (a *Agent) relayFirst(c net.Conn, hdr agentproto.Header, wait time.Duration
 		return
 	}
 	c.SetReadDeadline(time.Time{})
-	st, err := a.sess.OpenStream()
+	s := to()
+	if s == nil {
+		if refused != nil {
+			refused(agentproto.Reply{Code: "unavailable", Error: "no core is connected"})
+		}
+		c.Close()
+		return
+	}
+	st, err := s.ys.OpenStream()
 	if err != nil {
 		c.Close()
 		return

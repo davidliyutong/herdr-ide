@@ -120,7 +120,14 @@ type NodeHello struct {
 	// SSHConnection is SSH_CONNECTION of the ssh session that dialed the
 	// node (`node dial`), which hello reports (Reply.SSH).
 	SSHConnection string `json:"ssh_connection,omitempty"`
+	// Client names the core (its process): the same for its sessions
+	// after reconnects, another for another core.
+	Client string `json:"client,omitempty"`
 }
+
+// CodeGUIInUse (op gui, action attach): another core's session shows the
+// machine's program windows; the attach may be tried again later.
+const CodeGUIInUse = "gui_in_use"
 
 // NodeHello's operations.
 const (

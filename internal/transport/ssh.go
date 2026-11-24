@@ -200,7 +200,7 @@ func DialSSH(ctx context.Context, o SSHOptions) (*Session, *Platform, error) {
 		}
 	}
 
-	cmd := exec.Command("ssh", o.runArgs(`exec "`+remotePath+`" node dial --instance '`+o.Instance+`'`)...)
+	cmd := exec.Command("ssh", o.runArgs(`exec "`+remotePath+`" node dial --instance '`+o.Instance+`' --client `+ClientID)...)
 	noConsole(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

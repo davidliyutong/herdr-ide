@@ -431,7 +431,8 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // Run performs background maintenance until ctx ends: code-server instances
-// without VS Code connections are stopped after CodeServerIdle.
+// without VS Code connections are released after CodeServerIdle (the
+// machine stops them unless another core uses them).
 func (s *Server) Run(ctx context.Context) {
 	// The core's database stays open while the core runs: the plugins'
 	// uses (plugin.OpenDB) take its pool.
@@ -462,9 +463,9 @@ func (s *Server) Run(ctx context.Context) {
 			if mc == nil {
 				continue
 			}
-			s.logger.Printf("stopping idle code-server on %s", mc.Label())
+			s.logger.Printf("releasing idle code-server on %s", mc.Label())
 			sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			if err := s.cs.Stop(sctx, mc); err != nil {
+			if err := s.cs.Release(sctx, mc); err != nil {
 				s.logger.Printf("stop code-server on %s: %v", mc.Label(), err)
 			}
 			cancel()

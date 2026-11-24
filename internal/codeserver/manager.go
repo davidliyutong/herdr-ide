@@ -539,6 +539,21 @@ func (mg *Manager) Stop(ctx context.Context, m *machines.Machine) error {
 	return err
 }
 
+// Release lets code-server on m go after this core's idle timeout: the
+// machine stops it unless another core it serves has a VS Code window
+// connected. The next Ensure starts it again.
+func (mg *Manager) Release(ctx context.Context, m *machines.Machine) error {
+	s := mg.state(m.ID())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	mg.setStatus(m.ID(), func(st *Status) { *st = Status{Phase: PhaseIdle} })
+	if m.Session() == nil {
+		return nil
+	}
+	_, err := mg.request(ctx, m, agentproto.Header{Action: "release"})
+	return err
+}
+
 // Running lists machines whose code-server this manager considers ready.
 func (mg *Manager) Running() []string {
 	mg.mu.Lock()

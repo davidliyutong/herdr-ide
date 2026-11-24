@@ -27,13 +27,14 @@ func nodeCommand(args []string) int {
 	}
 	fs := flag.NewFlagSet("node", flag.ContinueOnError)
 	instance := fs.String("instance", "", "state directory instance (see serve's --instance)")
+	client := fs.String("client", "", "dial: the core that dials (its process), the same for its reconnects")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	logger := log.New(os.Stderr, brand.CoreBin+" node: ", log.LstdFlags)
 	switch sub {
 	case "dial":
-		return nodeDial(*instance, logger)
+		return nodeDial(*instance, *client, logger)
 	case "stop":
 		n, err := agent.StopNodes(*instance)
 		if err != nil {
@@ -56,10 +57,10 @@ func nodeCommand(args []string) int {
 
 // nodeDial pipes standard input and output to the node until either side
 // ends.
-func nodeDial(instance string, logger *log.Logger) int {
+func nodeDial(instance, client string, logger *log.Logger) int {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer cancel()
-	c, err := agent.DialNode(ctx, instance, os.Getenv("SSH_CONNECTION"), logger)
+	c, err := agent.DialNode(ctx, instance, client, os.Getenv("SSH_CONNECTION"), logger)
 	if err != nil {
 		logger.Print(err)
 		return 1

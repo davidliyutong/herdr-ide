@@ -25,6 +25,10 @@ type Env struct {
 	// (~/.<slug>[-<instance>]), RunDir its private run directory.
 	Home, Base, RunDir string
 	Logger             *log.Logger
+	// Client names the core that asked (its process; empty when unknown):
+	// the cores a node serves share work that concerns the machine
+	// (a history capture, AI usage limits) and tell each other apart by it.
+	Client string
 	// Expand resolves "~" and makes a path absolute relative to Home.
 	Expand func(string) (string, error)
 	// Environ is the environment of processes the agent starts: its own

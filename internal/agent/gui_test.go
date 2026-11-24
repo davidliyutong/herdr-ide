@@ -325,7 +325,7 @@ func testGUIWindows(t *testing.T, kind string) {
 
 	core, agentEnd := net.Pipe()
 	defer core.Close()
-	go g.attach(agentEnd)
+	go g.attach(&session{}, agentEnd)
 	core.SetDeadline(time.Now().Add(60 * time.Second))
 	var rep agentproto.Reply
 	if err := agentproto.ReadLine(core, &rep); err != nil || !rep.OK {

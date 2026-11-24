@@ -189,7 +189,10 @@ writing the same database.
 - **No room in the limits** → `limit`; otherwise the oldest-captured go.
 - **Too many terminals for the time budget** → the rest `timeout`; the
   next capture starts with them.
-- **Another agent of the instance captures** → `busy`.
+- **Another agent of the instance captures** → `busy`; so does another
+  core's capture through the same node that ended less than 10 s ago, so
+  the cores of a machine capture it about once per interval between them
+  ([39](39-nodes.md)).
 - **A snapshot at another grid** → written at its own grid, then resized
   with every line kept; beyond 1000 by 500 or unknown, at the pane's
   grid.

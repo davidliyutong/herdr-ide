@@ -59,6 +59,7 @@ type gui struct {
 
 	wmMu sync.Mutex
 	wm   *windowManager
+	wmBy *session // the session whose attach runs wm
 
 	vglOnce sync.Once
 	vgl     vglInfo
@@ -894,7 +895,7 @@ func (g *gui) shells(args []string, display string) []agentproto.GUIProc {
 	return out
 }
 
-func (g *gui) handle(ctx context.Context, st net.Conn, h agentproto.Header) error {
+func (g *gui) handle(ctx context.Context, s *session, st net.Conn, h agentproto.Header) error {
 	defer st.Close()
 	if runtime.GOOS != "linux" && h.Action != "status" {
 		return agentproto.Fail(st, errors.New("gui: no virtual display on "+runtime.GOOS))
@@ -937,7 +938,7 @@ func (g *gui) handle(ctx context.Context, st net.Conn, h agentproto.Header) erro
 			return agentproto.Fail(st, err)
 		}
 	case "attach":
-		return g.attach(st)
+		return g.attach(s, st)
 	default:
 		return agentproto.Fail(st, fmt.Errorf("gui: unknown action %q", h.Action))
 	}
@@ -945,8 +946,16 @@ func (g *gui) handle(ctx context.Context, st net.Conn, h agentproto.Header) erro
 }
 
 // attach runs the window manager for the stream until either ends. A newer
-// attach replaces an older one.
-func (g *gui) attach(st net.Conn) error {
+// attach of the same core (after a reconnect) replaces an older one; while
+// another core's session is attached, the attach fails with the code
+// gui_in_use (one core shows the windows at a time).
+func (g *gui) attach(s *session, st net.Conn) error {
+	g.wmMu.Lock()
+	if by := g.wmBy; g.wm != nil && by != nil && by != s && by.live() && (by.client == "" || by.client != s.client) {
+		g.wmMu.Unlock()
+		return agentproto.WriteLine(st, agentproto.Reply{Code: agentproto.CodeGUIInUse, Error: "gui: another core shows this machine's windows"})
+	}
+	g.wmMu.Unlock()
 	unlock := g.lock()
 	n, err := g.display()
 	unlock()
@@ -969,12 +978,12 @@ func (g *gui) attach(st net.Conn) error {
 	wm.tools = g.videoTools
 	wm.hcSocket = g.a.hcSocket()
 	g.wmMu.Lock()
-	g.wm = wm
+	g.wm, g.wmBy = wm, s
 	g.wmMu.Unlock()
 	defer func() {
 		g.wmMu.Lock()
 		if g.wm == wm {
-			g.wm = nil
+			g.wm, g.wmBy = nil, nil
 		}
 		g.wmMu.Unlock()
 		wm.close()

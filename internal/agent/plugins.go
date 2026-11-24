@@ -30,7 +30,7 @@ func (a *Agent) pluginEnv() *plugin.Env {
 // handlePlugin runs an action of a plugin's machine side (op plugin). Params
 // larger than a line follow the header (Header.ParamsLength). A handler that
 // panics fails its action (code failed) instead of ending the agent.
-func (a *Agent) handlePlugin(ctx context.Context, st net.Conn, h agentproto.Header) error {
+func (a *Agent) handlePlugin(ctx context.Context, s *session, st net.Conn, h agentproto.Header) error {
 	run := plugin.Lookup(h.Plugin)
 	params := h.Params
 	if h.ParamsLength > 0 {
@@ -49,7 +49,9 @@ func (a *Agent) handlePlugin(ctx context.Context, st net.Conn, h agentproto.Head
 		defer st.Close()
 		return plugin.Fail(st, plugin.Errorf("bad_params", "%s: no action", h.Plugin))
 	}
-	return runPlugin(ctx, run, &writtenConn{Conn: st}, h.Plugin, h.Action, params, a.pluginEnv())
+	env := a.pluginEnv()
+	env.Client = s.client
+	return runPlugin(ctx, run, &writtenConn{Conn: st}, h.Plugin, h.Action, params, env)
 }
 
 // runPlugin runs a handler and recovers from its panic: the action fails

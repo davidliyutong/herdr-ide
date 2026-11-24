@@ -257,6 +257,11 @@ Setting `gui.video`, on by default. Agent `internal/agent/guiwm_video.go`,
   setting or a reconnect starts over. Every `/ws` client gets `gui` messages
   with each machine's phase (`installing`, `starting`, `ready`, `error`,
   `unavailable`, `disconnected`, …) and windows.
+- **Several cores.** One core shows a machine's windows at a time: the
+  machine's node refuses another core's attach (`gui_in_use`) while one is
+  attached, which that core shows as `elsewhere` and tries again every
+  15 s; the same core's new attach after a reconnect replaces its old one
+  ([39](39-nodes.md)).
 - A machine disabled, removed or disconnected is shown as `disconnected`
   without windows, not as an error.
 - **Viewers.** Frames go to every browser window showing the window. The

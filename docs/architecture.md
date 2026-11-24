@@ -118,14 +118,14 @@ JSON reply line; after a successful reply it carries op-specific bytes.
 | `fs.write` | core → agent | Chunked upload, then a second reply; `unique` keeps existing files. |
 | `fs.archive` | core → agent | A zip of `Paths`, streamed. |
 | `dial-unix` | core → agent | Raw pipe to a socket in the agent's run directory. |
-| `code-server` | core → agent | `status`, `install`, `download`, `start`, `stop`, `install-ext`, `uninstall-ext`, `marker`. |
+| `code-server` | core → agent | `status`, `install`, `download`, `start`, `stop`, `release` (stops it unless another core's session has a connection to it), `install-ext`, `uninstall-ext`, `marker`. |
 | `hc` | core → agent | Terminal core `status`, `install` (digest-checked), `start`, `restart`, `stop` of the agent's instance. |
 | `hc-api` | core → agent | Raw pipe to the terminal core's API socket; starts nothing. |
 | `detect` | core → agent | Stream of `DetectEvent {terminal, agent, status}` lines, with the agent's `session` when asked ([25](features/25-agent-detection.md)). |
 | `privacy` | core → agent | macOS Full Disk Access of the agent and the terminal core. |
 | `plugin` | core → agent | A plugin's `Action` with `Params`; a result or JSON lines follow ([27](features/27-plugins.md)). |
 | `bridge` | agent → core | JSON lines between the VS Code extension (`bridge.sock`) and the core. |
-| `vault` | agent → core | One request from the vault's MCP server (`vault.sock`) with the caller's process chain from peer credentials, one response ([30](features/30-variable-vault.md)). |
+| `vault` | agent → core | One request from the vault's MCP server (`vault.sock`) with the caller's process chain from peer credentials, one response; asked of every core the node serves ([30](features/30-variable-vault.md)). |
 | `gui` | core → agent | Displays: `status`, `install`, `start`, `pick`, `keep`, `shells`, `video`, `video-install`, and `attach` for framed window events, frames and input ([14](features/14-gui-windows.md)). |
 
 Rules:
@@ -230,9 +230,11 @@ conversations ([37](features/37-agent-chats.md)). The path from a page:
 2. Install the bridge and default extensions.
 3. Start, reusing a running code-server only if it serves the workbench.
 
-The agent owns the process (`run/cs.pid`), stops it on exit and reaps
-orphans. The core stops it after `--code-server-idle` without proxied
-WebSockets, and when VS Code is switched off for every kind of client
+The node owns the process (`run/cs.pid`) for every core it serves, stops it
+on exit and reaps orphans. A core releases it after `--code-server-idle`
+without proxied WebSockets, which stops it unless another core has a
+connection to it, and stops it when VS Code is switched off for every kind
+of client
 ([05](features/05-vscode-panes.md),
 [deployment](deployment.md#remote-resources)).
 

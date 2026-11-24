@@ -4,9 +4,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"herdr-ide/internal/agentproto"
@@ -19,8 +21,8 @@ const maxVaultConns = 16
 
 // serveVault accepts connections of the variable vault's MCP servers on
 // <run>/vault.sock (0600, in the 0700 run directory, and only from this
-// user's processes) and relays each to the core over a stream with op
-// vault. It ends with the agent; the newest agent of the instance serves
+// user's processes) and asks the cores of the agent's sessions over
+// streams with op vault (relayVault). It ends with the agent; the newest agent of the instance serves
 // the socket (serveSocket).
 func (a *Agent) serveVault(ctx context.Context) {
 	slots := make(chan struct{}, maxVaultConns)
@@ -65,18 +67,146 @@ func processChain(pid int) []agentproto.VaultProcess {
 	return chain
 }
 
-// relayVault pipes one MCP server connection to the core, once it sent its
-// request (within 30 s, as the core waits for it), with the process chain
-// behind it in the stream's header.
+// vaultAsk bounds how long a request waits for the MCP server's request,
+// and each core for its reply to the stream.
+const vaultAsk = 30 * time.Second
+
+// relayVault asks every core of the agent's sessions for one MCP server
+// request (once it sent it, within vaultAsk), with the process chain behind
+// it in each stream's header: values live in the cores' vaults, and the
+// user may answer on any of them. The first core that grants get or env
+// answers, and the other cores' streams close, which withdraws their
+// questions; list answers with every core's variables. The request fails
+// only when every core refused it, with the most telling refusal
+// (vaultRefusal). The MCP server going away ends every question.
 func (a *Agent) relayVault(c net.Conn, chain []agentproto.VaultProcess) {
-	a.relayFirst(c, agentproto.Header{Op: agentproto.OpVault, Process: chain}, 30*time.Second, func(rep agentproto.Reply) {
-		// The core refused (the plugin is off): the MCP server reads why.
+	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(vaultAsk))
+	var raw json.RawMessage
+	if err := agentproto.ReadLine(c, &raw); err != nil {
+		return
+	}
+	_ = c.SetReadDeadline(time.Time{})
+	var req agentproto.VaultRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		agentproto.WriteLine(c, agentproto.VaultResponse{Code: "bad_request", Error: "not a request"})
+		return
+	}
+	sessions := a.liveSessions()
+	if len(sessions) == 0 {
+		agentproto.WriteLine(c, agentproto.VaultResponse{Code: "unavailable", Error: "no core is connected"})
+		return
+	}
+	ctx, cancel := context.WithCancel(a.ctx)
+	defer cancel()
+	go func() {
+		var b [1]byte
+		c.Read(b[:]) // the MCP server sends nothing more: this is its leaving
+		cancel()
+	}()
+	answers := make(chan agentproto.VaultResponse, len(sessions))
+	for _, s := range sessions {
+		go func() { answers <- askVault(ctx, s, chain, raw) }()
+	}
+	var refusals []agentproto.VaultResponse
+	var list *agentproto.VaultResponse
+	for range sessions {
+		resp := <-answers
+		switch {
+		case !resp.OK:
+			refusals = append(refusals, resp)
+		case req.Tool == agentproto.VaultList:
+			list = mergeVaultLists(list, resp)
+		default:
+			cancel()
+			agentproto.WriteLine(c, resp)
+			return
+		}
+	}
+	if list != nil {
+		agentproto.WriteLine(c, *list)
+		return
+	}
+	agentproto.WriteLine(c, vaultRefusal(refusals))
+}
+
+// askVault asks the core of session s for one request: a refusal when the
+// core does not take the stream (its vault plugin is off) or goes away.
+func askVault(ctx context.Context, s *session, chain []agentproto.VaultProcess, raw json.RawMessage) agentproto.VaultResponse {
+	gone := agentproto.VaultResponse{Code: "unavailable", Error: "the core went away"}
+	st, err := s.ys.OpenStream()
+	if err != nil {
+		return gone
+	}
+	defer st.Close()
+	stop := context.AfterFunc(ctx, func() { st.Close() })
+	defer stop()
+	_ = st.SetDeadline(time.Now().Add(vaultAsk))
+	if err := agentproto.WriteLine(st, agentproto.Header{Op: agentproto.OpVault, Process: chain}); err != nil {
+		return gone
+	}
+	var rep agentproto.Reply
+	if err := agentproto.ReadLine(st, &rep); err != nil {
+		return gone
+	}
+	if !rep.OK {
 		code := rep.Code
 		if code == "" {
 			code = "unavailable"
 		}
-		agentproto.WriteLine(c, agentproto.VaultResponse{Code: code, Error: rep.Error})
-	})
+		return agentproto.VaultResponse{Code: code, Error: rep.Error}
+	}
+	if err := agentproto.WriteLine(st, raw); err != nil {
+		return gone
+	}
+	// The core bounds the wait for the user's answer itself.
+	_ = st.SetDeadline(time.Time{})
+	var resp agentproto.VaultResponse
+	if err := agentproto.ReadLine(st, &resp); err != nil {
+		return gone
+	}
+	return resp
+}
+
+// mergeVaultLists adds resp's variables to list: a name listed by several
+// cores is listed once, as the first answer had it.
+func mergeVaultLists(list *agentproto.VaultResponse, resp agentproto.VaultResponse) *agentproto.VaultResponse {
+	if list == nil {
+		return &resp
+	}
+	have := map[string]bool{}
+	for _, v := range list.Variables {
+		have[v.Name] = true
+	}
+	for _, v := range resp.Variables {
+		if !have[v.Name] {
+			list.Variables = append(list.Variables, v)
+			have[v.Name] = true
+		}
+	}
+	return list
+}
+
+// vaultRefusalOrder ranks refusals: the user's own answer first, then what
+// the user can change, then what the request got wrong, then a core that
+// could not answer.
+var vaultRefusalOrder = []string{"denied", "vault_locked", "inject_only", "not_found", "busy", "bad_request"}
+
+// vaultRefusal is the refusal of a request every core refused.
+func vaultRefusal(refusals []agentproto.VaultResponse) agentproto.VaultResponse {
+	rank := func(code string) int {
+		if i := slices.Index(vaultRefusalOrder, code); i >= 0 {
+			return i
+		}
+		return len(vaultRefusalOrder)
+	}
+	best := agentproto.VaultResponse{Code: "unavailable", Error: "no core answered"}
+	for i, r := range refusals {
+		if i == 0 || rank(r.Code) < rank(best.Code) {
+			best = r
+		}
+	}
+	return best
 }
 
 // linkMCP points <data dir>/bin/<slug>-mcp at the running executable,
