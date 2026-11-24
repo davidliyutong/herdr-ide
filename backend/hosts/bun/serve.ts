@@ -39,6 +39,7 @@ import { browserFeature } from '#features/browser/core.ts';
 import { searchFeature } from '#features/search/core.ts';
 import { gitFeature } from '#features/git/core.ts';
 import { monitorFeature } from '#features/monitor/core.ts';
+import { usageFeature } from '#features/usage/core.ts';
 import { agentsFeature } from '#features/agents/core.ts';
 import { historyFeature } from '#features/history/core.ts';
 import { fileTransfersFeature, filesFeature } from '#features/files/core.ts';
@@ -157,6 +158,7 @@ export async function serve(argv: string[]): Promise<void> {
     searchFeature(),
     gitFeature(),
     monitorFeature(),
+    usageFeature(),
     agentsFeature(),
     chatFeature(),
     historyFeature(),
