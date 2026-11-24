@@ -115,6 +115,15 @@ const editor = {
     this.readOnly = o.readOnly;
   },
   focus: focusSpy,
+  /** Where the cursor was put and which lines were shown (revealAt). */
+  positions: [] as Array<{ lineNumber: number; column: number }>,
+  revealed: [] as number[],
+  setPosition(p: { lineNumber: number; column: number }) {
+    this.positions.push(p);
+  },
+  revealLineInCenter(line: number) {
+    this.revealed.push(line);
+  },
   dispose() {},
   savedState: undefined as unknown,
   restoredStates: [] as unknown[],
@@ -393,6 +402,25 @@ describe('EditorPane', () => {
     } finally {
       separate = false;
     }
+  });
+
+  // A search's match: the editor shows its line with the cursor at its
+  // column once the text is there, and again when asked again (reveal).
+  it('shows the line and column the view asks for', async () => {
+    editor.positions = [];
+    editor.revealed = [];
+    file = { text: 'a\nb\nneedle here\n', size: 16, mtime: 7000 };
+    const view = (reveal: number) => ({ id: 'v1', plugin: 'files', kind: 'editor', path: '/home/u/n.txt', line: 3, col: 2, reveal });
+    await act(async () => root.render(createElement(EditorPane, { m: 'm', pane: 'view:v1', view: view(1), focused: true })));
+    await flush();
+    await flush();
+    expect(editor.positions).toEqual([{ lineNumber: 3, column: 2 }]);
+    expect(editor.revealed).toEqual([3]);
+    // The same request, drawn again: nothing moves; a new one shows it again.
+    await act(async () => root.render(createElement(EditorPane, { m: 'm', pane: 'view:v1', view: view(1), focused: false })));
+    expect(editor.revealed).toEqual([3]);
+    await act(async () => root.render(createElement(EditorPane, { m: 'm', pane: 'view:v1', view: view(2), focused: false })));
+    expect(editor.revealed).toEqual([3, 3]);
   });
 
   it('reads the version from the ETag', () => {

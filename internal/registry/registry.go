@@ -16,6 +16,7 @@ import (
 	gitplugin "veldr/internal/plugins/git"
 	historyplugin "veldr/internal/plugins/history"
 	monitorplugin "veldr/internal/plugins/monitor"
+	searchplugin "veldr/internal/plugins/search"
 	usageplugin "veldr/internal/plugins/usage"
 	vaultplugin "veldr/internal/plugins/vault"
 	"veldr/internal/plugins/vscode"
@@ -33,7 +34,7 @@ func Settings() []settings.Module {
 // Plugins are the core's plugins (internal/plugin), in the order the UIs
 // list them.
 func Plugins() []plugin.Plugin {
-	return []plugin.Plugin{vscode.New(), browserplugin.New(), files.New(), gitplugin.New(), monitorplugin.New(), usageplugin.New(), vaultplugin.New(), agentsplugin.New(), chatplugin.New(), historyplugin.New()}
+	return []plugin.Plugin{vscode.New(), browserplugin.New(), files.New(), searchplugin.New(), gitplugin.New(), monitorplugin.New(), usageplugin.New(), vaultplugin.New(), agentsplugin.New(), chatplugin.New(), historyplugin.New()}
 }
 
 // pluginsOff are the plugins that are off until the user turns them on:

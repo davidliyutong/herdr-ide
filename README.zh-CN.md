@@ -48,6 +48,7 @@
 - **浏览器**：标签页可以通过端口转发显示机器 `localhost` 上的服务，效果与 `ssh -L` 相同；转发只在你自己打开时建立（[32](docs/features/32-browser-and-ports.md)）。
 - **Git**：不用 VS Code 也有 VS Code 的源代码管理和 Git Graph，作用于当前窗格所在的仓库，任何机器都可以：暂存所选范围、提交、分支、拉取和推送（[31](docs/features/31-git.md)）。
 - **系统监控与任务管理器**：每台机器的 CPU、内存、GPU、网络和磁盘，硬件温度与风扇转速，以及带确认的进程树（[34](docs/features/34-system-monitor.md)）。
+- **项目搜索**：搜索面板像 VS Code 的搜索视图一样，在任一机器上某个文件夹的文件中查找文本，支持区分大小写、全字匹配、正则表达式以及包含和排除的文件，点击即在匹配处打开；机器上有 ripgrep 时使用 ripgrep，否则使用自带的有限搜索（[41](docs/features/41-project-search.md)）。
 - **变量库**：API 密钥用你的主口令加密，保存在 core 所在电脑上，各机器上的编程 agent 通过 MCP 服务器读取；每次读取都按机器预先允许或由你用主口令、触控 ID、Windows Hello 或 WebAuthn 凭据批准（[30](docs/features/30-variable-vault.md)）。
 - **AI 用量**：显示各机器上已登录的 AI 订阅还剩多少（Claude、Codex、Grok、Antigravity、Kimi Code、DeepSeek）并发出提醒，按 API 价格折算本地日志的费用，并显示当前窗格里 Claude Code 或 Codex 会话到目前为止的费用（[29](docs/features/29-ai-usage.md)）。
 - **设置**：界面语言（中文、英文）、主题、终端字体和配色、通知以及所有快捷键，集中在一个与 VS Code 布局相同、可搜索的对话框里。

@@ -41,6 +41,7 @@ shortcuts, paths) lives in [reference.md](../reference.md).
 | 38 | [State in SQLite](38-sqlite-state.md) | One private SQLite database per owner, named per host on shared homes, schemas versioned per feature; earlier state files imported once. |
 | 39 | [Nodes](39-nodes.md) | One program on every machine: a node behind a local socket that several UIs attach to, locally or over ssh; the terminal core and chat host run as services of their own; upgrades without interrupting panes. |
 | 40 | [Homes several hosts share](40-shared-homes.md) | Hosts sharing one home (NFS) keep their sockets, locks, executables, logs and terminal cores apart: a host-local runtime directory, a directory per host, a terminal core session per host, and retention for hosts gone. |
+| 41 | [Project Search](41-project-search.md) | A Search panel that finds text in the files of a folder on a machine (VS Code's search view): match case, whole word, regular expressions, include and exclude globs, results by file opening at the match; ripgrep where the machine has it, a bounded walker of the agent's otherwise. |
 
 ## Writing a feature document
 

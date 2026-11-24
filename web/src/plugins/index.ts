@@ -7,6 +7,7 @@ import { guiPlugin } from './gui';
 import { vscodePlugin } from './vscode';
 import { browserPlugin } from './browser';
 import { filesPlugin } from './files';
+import { searchPlugin } from './search';
 import { usagePlugin } from './usage';
 import { vaultPlugin } from './vault';
 import { gitPlugin } from './git';
@@ -22,6 +23,7 @@ definePlugins([
   vscodePlugin,
   browserPlugin,
   filesPlugin,
+  searchPlugin,
   gitPlugin,
   monitorPlugin,
   usagePlugin,

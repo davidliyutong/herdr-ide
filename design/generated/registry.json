@@ -484,6 +484,11 @@
       "when": "terminal"
     },
     {
+      "id": "view.panel.search",
+      "section": "view",
+      "when": "terminal"
+    },
+    {
       "id": "find.open",
       "section": "find",
       "when": "terminal"
@@ -582,6 +587,7 @@
     "command.view.panel.files",
     "command.view.panel.git",
     "command.view.panel.monitor",
+    "command.view.panel.search",
     "command.view.panel.usage",
     "command.view.panel.vault",
     "command.view.togglePanel",
@@ -707,6 +713,7 @@
     "settings.plugins.git.enabled",
     "settings.plugins.history.enabled",
     "settings.plugins.monitor.enabled",
+    "settings.plugins.search.enabled",
     "settings.plugins.usage.enabled",
     "settings.plugins.vault.enabled",
     "settings.plugins.vscode.browser",
@@ -1282,6 +1289,11 @@
         "when": "terminal"
       },
       {
+        "key": "cmd+shift+f",
+        "command": "view.panel.search",
+        "when": "terminal"
+      },
+      {
         "key": "cmd+f",
         "command": "find.open",
         "when": "terminal"
@@ -1618,6 +1630,7 @@
     "plugins.git.enabled": true,
     "plugins.history.enabled": true,
     "plugins.monitor.enabled": true,
+    "plugins.search.enabled": true,
     "plugins.usage.enabled": true,
     "plugins.vault.enabled": true,
     "plugins.vscode.browser": false,

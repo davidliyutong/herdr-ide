@@ -64,6 +64,7 @@ machine with the code `local_unsupported` and reaches SSH machines only
 | `internal/plugins/files`, `internal/agent/plugin/files` | File explorer ([28](features/28-file-explorer.md)). |
 | `internal/plugins/git`, `internal/agent/plugin/git` | Git: `git` run with an argument vector built in the agent, no shell ([31](features/31-git.md)). |
 | `internal/plugins/monitor`, `internal/agent/plugin/monitor` | System monitor and task manager ([34](features/34-system-monitor.md)). |
+| `internal/plugins/search`, `internal/agent/plugin/search` | The Project Search plugin: its route `POST /api/m/{id}/p/search/search` (reads only, allowed in read-only mode) and its action on machines, which runs ripgrep (on `PATH` or the one code-server ships) without a shell or configuration file, else a bounded walker of its own, and answers the matching lines with previews, bounded in matches, time and size ([41](features/41-project-search.md)). |
 | `internal/plugins/browser`, `internal/agent/plugin/browser`, `internal/loopback` | Browser pane port forwards on the core host's loopback ([32](features/32-browser-and-ports.md)). |
 | `internal/plugins/agents`, `internal/agent/plugin/agents` | Whether a session ran in a directory, for restores ([33](features/33-workspace-restore.md)). |
 | `internal/plugins/history`, `internal/agent/plugin/history` | Terminal history snapshots ([36](features/36-terminal-history.md)). |

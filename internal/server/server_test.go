@@ -226,7 +226,9 @@ func TestMutatingRoutesAreGuarded(t *testing.T) {
 		"POST /api/m/{id}/code/stop": "only frees the machine's resources",
 		// A POST for the length of its paths.
 		"POST /api/m/{id}/p/files/stat": "only reads the state of paths",
-		"/m/{id}/code":                  "only redirects to /m/{id}/code/",
+		// A POST for the length of its query and patterns.
+		"POST /api/m/{id}/p/search/search": "only reads files",
+		"/m/{id}/code":                     "only redirects to /m/{id}/code/",
 	}
 	mutatingGET := map[string]bool{
 		"GET /api/m/{id}/auth": true, // starts an interactive ssh login

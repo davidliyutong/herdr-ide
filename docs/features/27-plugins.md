@@ -192,6 +192,7 @@ panels into panes.
 | `usage` | `plugins.usage.enabled` | AI usage panel, status items (tightest window, the focused agent's session) and scheduler ([29](29-ai-usage.md)). |
 | `git` | `plugins.git.enabled` | Source Control panel, graph and diff panes, explorer decorations ([31](31-git.md)). |
 | `monitor` | `plugins.monitor.enabled` | Resource dashboard and Task Manager ([34](34-system-monitor.md)). |
+| `search` | `plugins.search.enabled` | The Search panel: text in the files of a folder on the machine, opening at the match in VS Code or the file explorer's editor ([41](41-project-search.md)). |
 | `agents` | `plugins.agents.enabled` | Sessions of detected coding agents, the route confirming one before a restore resumes it, and **Continue in Chat** on a terminal whose agent quit ([35](35-agent-native-view.md)). |
 | `chat` | `plugins.chat.enabled` (and `chat.*`, per machine) | Chats run by each machine's chat host: chat pane, Chats panel, new-tab items, `chat.new`, the `chat.usage` status item, pane statuses, the core's WebSocket ([37](37-agent-chats.md)). |
 | `history` | `plugins.history.enabled` (and `history.capture`, off by default, per machine) | Snapshots of terminals' output on each machine, shown above the new shell of a terminal whose program was replaced ([36](36-terminal-history.md)). |

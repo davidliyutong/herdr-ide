@@ -167,6 +167,15 @@ type Status =
   | { kind: 'conflict'; removed: boolean; disk?: string }
   | Exclude<Loaded, { kind: 'text' }>;
 
+/** Shows line (1-based) and col of the editor's file in the middle of the
+ * view, with the cursor there (a search's match); Monaco keeps a place
+ * past the text's end within it. */
+export function revealAt(editor: Pick<CodeEditor, 'setPosition' | 'revealLineInCenter'>, line: number, col = 1) {
+  const position = { lineNumber: Math.max(1, Math.floor(line)), column: Math.max(1, Math.floor(col)) };
+  editor.setPosition(position);
+  editor.revealLineInCenter(position.lineNumber);
+}
+
 export function EditorPane(props: PaneViewProps) {
   const path = String(props.view.path ?? '');
   // Another component for media, so that the text editor's state starts
@@ -607,6 +616,17 @@ function TextEditor({ m, pane, view, focused }: PaneViewProps) {
   useEffect(() => {
     ed.current?.editor.updateOptions({ readOnly: locked });
   }, [locked]);
+
+  // The place the view asks for (openEditor's line and col), once the text
+  // is shown, and again each time it is asked for (reveal).
+  const place = typeof view.line === 'number' ? `${view.line}:${String(view.col)}:${String(view.reveal)}` : undefined;
+  const revealed = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const e = ed.current?.editor;
+    if (!place || !e || status.kind !== 'ready' || revealed.current === place) return;
+    revealed.current = place;
+    revealAt(e, Number(view.line), Number(view.col) || 1);
+  }, [place, status]);
 
   useEffect(() => {
     if (focused) ed.current?.editor.focus();

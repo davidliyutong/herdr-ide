@@ -89,6 +89,11 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   disks of each machine, hardware temperatures and fan speeds, and a
   process tree with guarded signals
   ([34](docs/features/34-system-monitor.md)).
+- **Project search.** A Search panel finds text in the files of a folder
+  on any machine, as VS Code's search view: match case, whole word,
+  regular expressions, include and exclude globs; a click opens the match.
+  ripgrep where the machine has it, a bounded search of its own otherwise
+  ([41](docs/features/41-project-search.md)).
 - **Variable vault.** API keys encrypted under your passphrase on the core's
   computer, read by coding agents on every machine through an MCP server;
   each read is allowed per machine or approved by you, with the passphrase

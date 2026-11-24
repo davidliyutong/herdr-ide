@@ -5,6 +5,7 @@
 import { en as filesEn } from '../plugins/files/i18n/en';
 import { en as gitEn } from '../plugins/git/i18n/en';
 import { en as monitorEn } from '../plugins/monitor/i18n/en';
+import { en as searchEn } from '../plugins/search/i18n/en';
 import { en as usageEn } from '../plugins/usage/i18n/en';
 import { en as vaultEn } from '../plugins/vault/i18n/en';
 import { en as browserEn } from '../plugins/browser/i18n/en';
@@ -940,6 +941,11 @@ export const en = {
   'settings.plugins.monitor.enabled.desc':
     'Live CPU, memory, per-GPU, network and disk usage on Cmd+hover or in the status bar, plus a searchable Task Manager with tree view.',
   'command.view.panel.monitor': 'Show Task Manager',
+  // search plugin
+  'settings.plugins.search.enabled': 'Project Search',
+  'settings.plugins.search.enabled.desc':
+    'A Search panel that finds text in the files of a folder on the machines (ripgrep when there is one).',
+  'command.view.panel.search': 'Show Search',
   // agents plugin
   'settings.plugins.agents.enabled': 'Coding agents',
   'settings.plugins.agents.enabled.desc':
@@ -966,6 +972,7 @@ export const en = {
   ...filesEn,
   ...gitEn,
   ...monitorEn,
+  ...searchEn,
   ...usageEn,
   ...vaultEn,
   ...browserEn,

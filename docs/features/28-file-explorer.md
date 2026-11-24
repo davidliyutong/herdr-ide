@@ -27,8 +27,8 @@ Goals:
 - Version control status in the tree's colors and the editor's gutter.
 
 Non-goals: an IDE (language services beyond Monaco's JSON, CSS and HTML,
-search across files — VS Code panes do that; version control is the Git
-plugin, [31](31-git.md)); a file-system watch on machines; restoring from
+search across files is Project Search, [41](41-project-search.md);
+version control is the Git plugin, [31](31-git.md)); a file-system watch on machines; restoring from
 the trash.
 
 ## Design

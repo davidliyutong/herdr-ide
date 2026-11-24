@@ -95,6 +95,7 @@ describe('plugins', () => {
       'vscode',
       'browser',
       'files',
+      'search',
       'git',
       'monitor',
       'usage',

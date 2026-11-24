@@ -231,6 +231,9 @@ var Commands = func() []Command {
 		cmd("view.panel.git", "view", on(macApp, "ctrl+shift+g"), on(winLinuxApp, "ctrl+shift+g")),
 		// The System Monitor & Task Manager plugin's panel (web/src/plugins/monitor).
 		cmd("view.panel.monitor", "view"),
+		// The Project Search plugin's panel (web/src/plugins/search); as
+		// VS Code's search view. Other systems keep Ctrl+Shift+F for Find.
+		cmd("view.panel.search", "view", on(macApp, "cmd+shift+f")),
 
 		cmd("find.open", "find", on(macAll, "cmd+f"), on(winLinuxAll, "ctrl+shift+f")),
 		cmd("find.next", "find", on(macApp, "cmd+g")),

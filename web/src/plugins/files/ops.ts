@@ -110,10 +110,14 @@ function editors(m: string): L.PluginView[] {
  * preview) unless this is a preview too. With side, the editor opens
  * split beside the focused pane instead (Open to the Side), unless that
  * pane's tab shows the file already. Media files show in the same editor,
- * as Quick Look shows them. */
-export function openEditor(m: string, path: string, o: { preview?: boolean; side?: boolean } = {}) {
+ * as Quick Look shows them. With line (1-based) and col, the editor
+ * shows that place with the cursor there (a search's match): `reveal`
+ * changes each time, so the same place is shown again after the user
+ * moved away. */
+export function openEditor(m: string, path: string, o: { preview?: boolean; side?: boolean; line?: number; col?: number } = {}) {
   const preview = !!o.preview && !o.side;
-  const view = { plugin: 'files', kind: 'editor', path };
+  const at = o.line && o.line > 0 ? { line: o.line, col: o.col && o.col > 0 ? o.col : 1, reveal: Date.now() } : {};
+  const view = { plugin: 'files', kind: 'editor', path, ...at };
   const tab = !o.side;
   if (editors(m).some((v) => v.path === path))
     return actions.openView(m, preview ? view : { ...view, preview: false }, { reuse: (v) => v.path === path, tab });

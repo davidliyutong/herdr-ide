@@ -3,6 +3,7 @@ import type { Messages } from './en';
 import { zhCN as filesZhCN } from '../plugins/files/i18n/zh-CN';
 import { zhCN as gitZhCN } from '../plugins/git/i18n/zh-CN';
 import { zhCN as monitorZhCN } from '../plugins/monitor/i18n/zh-CN';
+import { zhCN as searchZhCN } from '../plugins/search/i18n/zh-CN';
 import { zhCN as usageZhCN } from '../plugins/usage/i18n/zh-CN';
 import { zhCN as vaultZhCN } from '../plugins/vault/i18n/zh-CN';
 import { zhCN as browserZhCN } from '../plugins/browser/i18n/zh-CN';
@@ -912,6 +913,10 @@ export const zhCN: Messages = {
   'settings.plugins.monitor.enabled.desc':
     '按住 ⌘ 悬停主机或通过状态栏查看实时 CPU、内存、每块 GPU、网络与磁盘占用，并提供支持树状视图与搜索的任务管理器。',
   'command.view.panel.monitor': '显示任务管理器',
+  // search plugin
+  'settings.plugins.search.enabled': '项目搜索',
+  'settings.plugins.search.enabled.desc': '搜索面板，在主机上某个文件夹的文件中查找文本（有 ripgrep 时使用 ripgrep）。',
+  'command.view.panel.search': '显示搜索',
   // agents plugin
   'settings.plugins.agents.enabled': '编程智能体',
   'settings.plugins.agents.enabled.desc':
@@ -937,6 +942,7 @@ export const zhCN: Messages = {
   ...filesZhCN,
   ...gitZhCN,
   ...monitorZhCN,
+  ...searchZhCN,
   ...usageZhCN,
   ...vaultZhCN,
   ...browserZhCN,
