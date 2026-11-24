@@ -20,7 +20,10 @@ named by a UUID (measured with Claude Code 2.1.330 and Codex CLI 0.170.0):
   its environment writes neither file.
 - Codex writes `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl` at
   the first prompt and does not keep it open; its first line is
-  `session_meta` (`id`, `cwd`, `timestamp`).
+  `session_meta` (`id`, `cwd`, `timestamp`). A subagent's thread (a review,
+  a spawned agent; Codex 0.171.0) has a rollout of its own, whose
+  `session_meta` names its session as `parent_thread_id` and `session_id`
+  and whose `source` is `{"subagent": …}`.
 
 ## Goals / non-goals
 
@@ -82,18 +85,23 @@ program and a bounded set of its descendants (wrappers, npm's launcher).
   runs Claude Code in the directory, the newest transcript of the
   directory written since the process started that no running record
   names.
-- **Codex**: `argv` (`resume <id>`); else `fd` (Linux): an open rollout;
-  else `start`/`guess`: when no other terminal runs Codex in the
-  directory, the rollouts made since the process started whose
-  `session_meta` records the directory (one is `start`, the newest of
-  several a `guess`).
+- **Codex**: `argv` (`resume <id>`); else `fd` (Linux): an open rollout
+  (a subagent's stands for its session, and the session's own wins); else
+  `start`/`guess`: when no other terminal runs Codex in the directory, the
+  rollouts made since the process started whose `session_meta` records the
+  directory, subagents' left out (one is `start`, the newest of several a
+  `guess`).
 
 A guess is never remembered in the layout nor shown as the session's
 usage. `Stamp` is a cheap fingerprint of what `Resolve` reads, polled to
 know when to resolve again.
 
 `Locate(kind, id)` finds a transcript inside the kind's root (Claude
-Code's `projects/*/`, Codex's dated `sessions` and `archived_sessions`);
+Code's `projects/*/`, Codex's dated `sessions` and `archived_sessions`) and
+its subagents' (Claude Code's `<session>/subagents/*.jsonl`; Codex's
+rollouts naming the session as their parent, in its rollout's directory
+and the dated ones from the session's start to now, at most 256 first
+lines read);
 the id must be a lower-case UUID before it reaches a path. `OpenLocated`
 opens it without following any link (`openat2` with
 `RESOLVE_NO_SYMLINKS`, `O_NOFOLLOW_ANY` on macOS, else component by

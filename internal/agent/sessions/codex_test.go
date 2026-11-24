@@ -90,6 +90,14 @@ func TestCodexResolve(t *testing.T) {
 			t.Errorf("with another terminal there: %+v", f)
 		}
 	})
+	t.Run("a subagent's thread is not a session", func(t *testing.T) {
+		e := setup(t)
+		e.rollout("", sid(1), cwd, start.Add(20*time.Second), start.Add(time.Minute), 0)
+		e.subRollout("", sid(2), sid(1), cwd, start.Add(40*time.Second), start.Add(2*time.Minute), 0)
+		if f, _ := e.r.Resolve(ctx, "codex", p); f != (Found{ID: sid(1), Source: agentproto.SessionFromStart}) {
+			t.Errorf("got %+v", f)
+		}
+	})
 	t.Run("made just before the process", func(t *testing.T) {
 		e := setup(t)
 		e.rollout("", sid(1), cwd, start.Add(-1500*time.Millisecond), start.Add(time.Minute), 0)
@@ -197,6 +205,19 @@ func TestCodexFD(t *testing.T) {
 	if f, ok := e.r.Resolve(ctx, "codex", Proc{PID: 300, Cwd: "/nowhere"}); ok {
 		t.Errorf("a home not of the process: %+v", f)
 	}
+	// A subagent's rollout open stands for its session; the session's own,
+	// open too, is the answer.
+	sub := e.subRollout("", sid(5), sid(4), cwd, start.Add(-time.Hour), start, 0)
+	fs.add(400, 1, 400, "codex", start, []string{"PATH=/bin"}, map[string]string{"8": sub})
+	if f, _ := e.r.Resolve(ctx, "codex", Proc{PID: 400, Cwd: cwd}); f != (Found{ID: sid(4), Source: agentproto.SessionFromFD}) {
+		t.Errorf("a subagent's rollout: %+v", f)
+	}
+	own := e.rollout("", sid(6), cwd, start.Add(-time.Hour), start, 0)
+	sub2 := e.subRollout("", sid(7), sid(6), cwd, start.Add(-time.Hour), start, 0)
+	fs.add(500, 1, 500, "codex", start, []string{"PATH=/bin"}, map[string]string{"8": sub2, "9": own})
+	if f, _ := e.r.Resolve(ctx, "codex", Proc{PID: 500, Cwd: cwd}); f != (Found{ID: sid(6), Source: agentproto.SessionFromFD}) {
+		t.Errorf("the session's and a subagent's rollouts: %+v", f)
+	}
 }
 
 func TestCodexDays(t *testing.T) {
@@ -237,9 +258,23 @@ func TestDecodeSessionMeta(t *testing.T) {
 	}
 	for _, tt := range tests {
 		m, ok := decodeSessionMeta(strings.NewReader(tt.line + "\n{\"type\":\"next\"}\n"))
-		if ok != tt.ok || m.cwd != tt.cwd || (ok && (m.id != id || m.started.IsZero())) {
+		if ok != tt.ok || m.cwd != tt.cwd || m.parent != "" || (ok && (m.id != id || m.started.IsZero())) {
 			t.Errorf("%s: %+v %v", tt.name, m, ok)
 		}
+	}
+	// A subagent's thread (Codex 0.171.0): its session in parent_thread_id
+	// and session_id; either alone does.
+	for _, line := range []string{
+		`{"type":"session_meta","payload":{"session_id":"` + sid(2) + `","id":"` + id + `","parent_thread_id":"` + sid(2) + `","timestamp":"` + ts + `","cwd":"/p","source":{"subagent":"review"}}}`,
+		`{"type":"session_meta","payload":{"id":"` + id + `","parent_thread_id":"` + sid(2) + `","timestamp":"` + ts + `","cwd":"/p"}}`,
+		`{"type":"session_meta","payload":{"session_id":"` + sid(2) + `","id":"` + id + `","timestamp":"` + ts + `","cwd":"/p"}}`,
+	} {
+		if m, ok := decodeSessionMeta(strings.NewReader(line)); !ok || m.id != id || m.parent != sid(2) {
+			t.Errorf("subagent: %+v %v", m, ok)
+		}
+	}
+	if m, ok := decodeSessionMeta(strings.NewReader(`{"type":"session_meta","payload":{"session_id":"` + id + `","id":"` + id + `","timestamp":"` + ts + `","cwd":"/p"}}`)); !ok || m.parent != "" {
+		t.Errorf("the session's own thread: %+v %v", m, ok)
 	}
 	// The fields Resolve reads come first: a line much longer than what is
 	// read is enough.

@@ -180,11 +180,22 @@ func (e *testEnv) claudeTranscriptIn(dir, project, cwd, id string, at, mod time.
 // carries pad bytes of instructions after the fields Resolve reads.
 func (e *testEnv) rollout(home, id, cwd string, created, mod time.Time, pad int) string {
 	e.t.Helper()
+	return e.subRollout(home, id, id, cwd, created, mod, pad)
+}
+
+// subRollout writes the rollout of thread id of session (a subagent's,
+// as Codex 0.171.0 writes it, when they differ).
+func (e *testEnv) subRollout(home, id, session, cwd string, created, mod time.Time, pad int) string {
+	e.t.Helper()
 	if home == "" {
 		home = filepath.Join(e.home, ".codex")
 	}
-	meta := fmt.Sprintf(`{"timestamp":%q,"ordinal":0,"type":"session_meta","payload":{"id":%q,"session_id":%q,"timestamp":%q,"cwd":%q,"originator":"codex-tui","cli_version":"0.170.0","base_instructions":{"text":%q}}}`,
-		created.Add(time.Second).UTC().Format(time.RFC3339Nano), id, id, created.UTC().Format(time.RFC3339Nano), cwd, strings.Repeat("i", pad))
+	parent, source := "", `"cli"`
+	if session != id {
+		parent, source = fmt.Sprintf(`"parent_thread_id":%q,`, session), `{"subagent":"review"}`
+	}
+	meta := fmt.Sprintf(`{"timestamp":%q,"ordinal":0,"type":"session_meta","payload":{"session_id":%q,"id":%q,%s"timestamp":%q,"cwd":%q,"originator":"codex-tui","cli_version":"0.171.0","source":%s,"base_instructions":{"text":%q}}}`,
+		created.Add(time.Second).UTC().Format(time.RFC3339Nano), session, id, parent, created.UTC().Format(time.RFC3339Nano), cwd, source, strings.Repeat("i", pad))
 	body := meta + "\n" + `{"timestamp":"2026-11-22T14:00:00Z","type":"event_msg","payload":{"type":"task_started"}}` + "\n"
 	name := "rollout-" + created.Local().Format("2006-01-02T15-04-05") + "-" + id + ".jsonl"
 	return e.write(filepath.Join(home, "sessions", created.Local().Format("2006/01/02"), name), body, mod)

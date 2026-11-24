@@ -196,6 +196,30 @@ func TestLocateCodex(t *testing.T) {
 			t.Errorf("Describe = %+v, %v", info, err)
 		}
 	})
+	t.Run("subagents' threads", func(t *testing.T) {
+		e := newEnv(t)
+		f := e.rollout("", v7, cwd, made, made, 0)
+		// A review a second later, one the next day, another session's
+		// subagent and another session.
+		later := "01a1ffa2-e81b-7c13-8240-7eb9e6fa29f3"
+		next := "01a20000-0000-7c13-8240-7eb9e6fa29f3"
+		other := "01a1ffa2-f000-7c13-8240-7eb9e6fa29f3"
+		s1 := e.subRollout("", later, v7, cwd, made.Add(time.Second), made, 0)
+		s2 := e.subRollout("", next, v7, cwd, made.Add(30*time.Hour), made, 0)
+		e.subRollout("", other, sid(1), cwd, made.Add(2*time.Second), made, 0)
+		e.rollout("", sid(1), cwd, made, made, 0)
+		got, err := e.r.Locate("codex", v7)
+		if err != nil || got.Path != real(t, f) || strings.Join(got.Subagents, " ") != real(t, s1)+" "+real(t, s2) {
+			t.Fatalf("Locate = %+v, %v", got, err)
+		}
+		for i := range got.Subagents {
+			fh, err := got.OpenSubagent(i)
+			if err != nil {
+				t.Fatalf("OpenSubagent(%d): %v", i, err)
+			}
+			fh.Close()
+		}
+	})
 	t.Run("dated elsewhere, walked", func(t *testing.T) {
 		e := newEnv(t)
 		// The version 7 id's day has no match: the other days are read.

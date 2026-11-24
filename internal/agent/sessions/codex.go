@@ -19,10 +19,11 @@ import (
 )
 
 // resolveCodex tries the command line (codex resume <id>), then the rollout
-// a candidate process holds open (Linux), then the rollouts of the
-// program's directory made since it started: the only one (source start) or
-// the most recently written (a guess), both only when no other terminal
-// runs Codex there.
+// a candidate process holds open (Linux; a subagent's rollout stands for its
+// parent session, and the session's own wins), then the rollouts of the
+// program's directory made since it started, its subagents' left out: the
+// only one (source start) or the most recently written (a guess), both only
+// when no other terminal runs Codex there.
 func (r *Resolver) resolveCodex(ctx context.Context, kind string, p Proc) (Found, bool) {
 	if id, ok := codexArgv(p.Argv); ok {
 		return Found{ID: id, Source: agentproto.SessionFromArgv}, true
@@ -33,15 +34,27 @@ func (r *Resolver) resolveCodex(ctx context.Context, kind string, p Proc) (Found
 	homes := r.codexHomesOf(p.PID, p.Cwd)
 	if root, ok := r.procfs(); ok {
 		sessions := codexSessionDirs(homes)
+		parent := ""
 		for _, c := range r.candidates(p.PID) {
 			if ctx.Err() != nil {
 				return Found{}, false
 			}
 			for _, t := range procfsFDs(root, c) {
-				if id, ok := openRollout(t, sessions); ok {
-					return Found{ID: id, Source: agentproto.SessionFromFD}, true
+				id, ok := openRollout(t, sessions)
+				if !ok {
+					continue
 				}
+				if m, ok := r.rolloutMeta(t); ok && m.parent != "" {
+					if parent == "" && agentkinds.ValidSessionID(m.parent) {
+						parent = m.parent
+					}
+					continue
+				}
+				return Found{ID: id, Source: agentproto.SessionFromFD}, true
 			}
+		}
+		if parent != "" {
+			return Found{ID: parent, Source: agentproto.SessionFromFD}, true
 		}
 	}
 	if p.Cwd == "" {
@@ -199,7 +212,7 @@ func (r *Resolver) codexRollouts(ctx context.Context, homes []string, cwd string
 				}
 				reads++
 				m, ok := r.rolloutMeta(path.Join(dir, e.Name()))
-				if !ok || m.id != id || !samePath(m.cwd, cwd) || m.started.Before(since) {
+				if !ok || m.id != id || m.parent != "" || !samePath(m.cwd, cwd) || m.started.Before(since) {
 					continue
 				}
 				out = append(out, rollout{id: id, mod: info.ModTime()})
@@ -209,10 +222,14 @@ func (r *Resolver) codexRollouts(ctx context.Context, homes []string, cwd string
 	return out
 }
 
-// rolloutMeta is what a rollout's first line (session_meta) says.
+// rolloutMeta is what a rollout's first line (session_meta) says: its
+// thread's id, directory and start, and for a subagent's thread (a review,
+// a spawned agent) the session it works for: parent_thread_id, else a
+// session_id other than its own id; "" for a session's own thread and for
+// a Codex that writes neither before the thread's id, directory and start.
 type rolloutMeta struct {
-	id, cwd string
-	started time.Time
+	id, cwd, parent string
+	started         time.Time
 }
 
 // rolloutMeta reads a rollout's session_meta, kept by path once complete.
@@ -257,7 +274,7 @@ func decodeSessionMeta(rd io.Reader) (rolloutMeta, bool) {
 		return rolloutMeta{}, false
 	}
 	var m rolloutMeta
-	var typ, ts, lineTS string
+	var typ, ts, lineTS, session, parent string
 	done := func() bool { return typ == "session_meta" && m.id != "" && m.cwd != "" && ts != "" }
 	finish := func() (rolloutMeta, bool) {
 		t, err := time.Parse(time.RFC3339Nano, ts)
@@ -265,6 +282,12 @@ func decodeSessionMeta(rd io.Reader) (rolloutMeta, bool) {
 			return rolloutMeta{}, false
 		}
 		m.started = t
+		switch {
+		case parent != "" && parent != m.id:
+			m.parent = parent
+		case session != "" && session != m.id:
+			m.parent = session
+		}
 		return m, true
 	}
 	str := func(s *string) bool { return dec.Decode(s) == nil }
@@ -299,6 +322,10 @@ func decodeSessionMeta(rd io.Reader) (rolloutMeta, bool) {
 				switch pk {
 				case "id":
 					ok = str(&m.id)
+				case "session_id":
+					ok = str(&session)
+				case "parent_thread_id":
+					ok = str(&parent)
 				case "cwd":
 					ok = str(&m.cwd)
 				case "timestamp":

@@ -53,7 +53,7 @@ func (r *Resolver) Locate(kind, id string) (File, error) {
 	if err != nil {
 		return File{}, err
 	}
-	return fileOf(f, loc), nil
+	return r.fileOf(f, id, loc), nil
 }
 
 // OpenLocated is Locate and File.Open in one: the session's transcript,
@@ -72,14 +72,17 @@ func (r *Resolver) OpenLocated(kind, id string) (*os.File, File, error) {
 	if err != nil {
 		return nil, File{}, err
 	}
-	return fh, fileOf(f, loc), nil
+	return fh, r.fileOf(f, id, loc), nil
 }
 
-// fileOf is the File of a location of format f.
-func fileOf(f string, loc location) File {
+// fileOf is the File of session id's location of format f.
+func (r *Resolver) fileOf(f, id string, loc location) File {
 	out := File{Path: loc.file, id: loc.id}
-	if f == formatClaude {
+	switch f {
+	case formatClaude:
 		out.Subagents, out.subs = claudeSubagents(loc)
+	case formatCodex:
+		out.Subagents, out.subs = r.codexSubagents(loc, id)
 	}
 	return out
 }
@@ -397,6 +400,58 @@ func digits(s string) bool {
 		}
 	}
 	return true
+}
+
+// codexSubagents are the rollouts of a Codex session's subagents' threads
+// (a review, a spawned agent; rolloutMeta.parent is the session): those in
+// the session's rollout's directory and, in a dated tree, the dated
+// directories from the session's start to now (codexDays), each a regular
+// file of the user's own with one name inside the session root, in name
+// order; at most maxSubagents, reading at most maxMetaReads first lines.
+// A subagent's thread starts after its session's, so a rollout whose id
+// (a UUID of version 7) was made before the session's is not read.
+func (r *Resolver) codexSubagents(loc location, id string) ([]string, []fileID) {
+	dirs := []string{path.Dir(loc.file)}
+	if t, ok := uuidTime(id); ok && path.Dir(loc.file) != loc.root {
+		for _, d := range codexDays(t, r.clock()) {
+			if dir := path.Join(loc.root, d); !slices.Contains(dirs, dir) {
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+	start, timed := uuidTime(id)
+	var names []string
+	for _, dir := range dirs {
+		for _, e := range readDir(dir, maxEntries) {
+			sub, ok := rolloutID(e.Name())
+			if !ok || sub == id || !e.Type().IsRegular() {
+				continue
+			}
+			if t, ok := uuidTime(sub); ok && timed && t.Before(start) {
+				continue
+			}
+			names = append(names, path.Join(dir, e.Name()))
+		}
+	}
+	slices.Sort(names)
+	var out []string
+	var ids []fileID
+	reads := 0
+	for _, p := range names {
+		if len(out) >= maxSubagents || reads >= maxMetaReads {
+			break
+		}
+		reads++
+		if m, ok := r.rolloutMeta(p); !ok || m.parent != id {
+			continue
+		}
+		var s search
+		if s.consider(loc.root, p) {
+			out = append(out, s.best.file)
+			ids = append(ids, s.best.id)
+		}
+	}
+	return out, ids
 }
 
 // claudeSubagents are the transcripts of a Claude Code session's subagents
