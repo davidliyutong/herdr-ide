@@ -3,7 +3,7 @@
 // leaves are terminals, VS Code views and previews of a file. It is the
 // document "layout" in the machine's terminal core
 // (docs/features/22-terminal-protocol.md), tested with the vectors in
-// design/testdata/layout. The functions return new values and never change
+// spec/vectors/layout. The functions return new values and never change
 // their arguments; a layout is its own document value, and fields this
 // version does not know are kept at every level.
 

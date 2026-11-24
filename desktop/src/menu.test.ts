@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { MenuItemConstructorOptions } from 'electron';
-import registry from '../../design/generated/registry.json';
+import registry from '../../spec/generated/registry.json';
 import { translate } from '../../web/src/i18n';
 import { en, type MessageKey } from '../../web/src/i18n/en';
 import { zhCN } from '../../web/src/i18n/zh-CN';

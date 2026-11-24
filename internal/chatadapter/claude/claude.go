@@ -7,7 +7,7 @@
 // output. The protocol has no published specification: its shapes are
 // those of the TypeScript SDK's type definitions (version SDKVersion,
 // whose command line and environment this package reproduces) and of the
-// recordings of Claude Code 2.1.330 in design/testdata/chat/claude.
+// recordings of Claude Code 2.1.330 in spec/vectors/chat/claude.
 //
 // A session is one claude process (in a process group of its own) of one
 // Claude Code session: --session-id for a new chat, --resume for one taken

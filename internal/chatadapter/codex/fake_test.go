@@ -18,7 +18,7 @@ import (
 )
 
 // The test binary is also a fake app-server: with fakeEnv set it plays a
-// recorded conversation (design/testdata/chat/codex) to whatever client
+// recorded conversation (spec/vectors/chat/codex) to whatever client
 // talks to it on its standard input and output. The client's requests are
 // matched to the recording's by method (and their parameters, where
 // several have the method); what the recording's app-server sent after a

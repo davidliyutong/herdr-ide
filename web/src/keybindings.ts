@@ -3,10 +3,10 @@
 // "keybindings" pushes on /ws. The core works out the bindings in effect on
 // each platform; the page takes its platform's (keymap.ts matches keys
 // against them). Until the core answers, the defaults of
-// design/generated/registry.json apply.
+// spec/generated/registry.json apply.
 
 import { create } from 'zustand';
-import registry from '../../design/generated/registry.json';
+import registry from '../../spec/generated/registry.json';
 import { desktopShell } from './shell';
 import { hasMessage, t } from './i18n';
 

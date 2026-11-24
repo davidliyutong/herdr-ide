@@ -105,7 +105,7 @@ func defs() []settings.Def {
 		// Appearance.
 		{Key: Theme, Type: settings.TypeEnum, Default: "system", Enum: []string{"system", "light", "dark"},
 			Section: "appearance", Order: 10},
-		// The accent of the chrome (design/tokens.json themes); the neutrals
+		// The accent of the chrome (spec/tokens.json themes); the neutrals
 		// are the same in every one.
 		{Key: ColorTheme, Type: settings.TypeEnum, Default: tokenThemes[0], Enum: append([]string(nil), tokenThemes...),
 			Section: "appearance", Order: 15},

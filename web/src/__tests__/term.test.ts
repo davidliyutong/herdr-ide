@@ -134,7 +134,7 @@ describe('terminal store', () => {
   });
 });
 
-/** A vector of design/testdata/layout. */
+/** A vector of spec/vectors/layout. */
 interface LayoutVector {
   description: string;
   input: unknown;
@@ -146,7 +146,7 @@ interface LayoutVector {
   titles?: { home: string; names: string[] };
 }
 
-const vectors = import.meta.glob<LayoutVector>('../../../design/testdata/layout/*.json', { eager: true, import: 'default' });
+const vectors = import.meta.glob<LayoutVector>('../../../spec/vectors/layout/*.json', { eager: true, import: 'default' });
 
 function applyOp(layout: Layout, op: Record<string, unknown>): Layout {
   const s = (key: string) => op[key] as string;

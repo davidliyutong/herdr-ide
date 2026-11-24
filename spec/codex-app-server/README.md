@@ -20,6 +20,6 @@ permission mode, the requests it answers, the notifications and item types
 it maps. To move to another Codex version, generate the summary from that
 version's schema, update `version` in it, and fix what the test reports;
 then record the version's conversations again in
-`design/testdata/chat/codex/` when their shapes changed.
+`spec/vectors/chat/codex/` when their shapes changed.
 
 The whole schema (483 files, 6.3 MB for 0.171.0) is not kept here.

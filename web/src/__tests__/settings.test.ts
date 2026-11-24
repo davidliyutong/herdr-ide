@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, api: () => Promise.resolve({}) } }));
 
-import registry from '../../../design/generated/registry.json';
+import registry from '../../../spec/generated/registry.json';
 import { resolveTheme } from '../appearance';
 import { dropZone } from '../paneDrag';
 import { matchesSearch, problemText, valueLabel } from '../components/SettingsDialog';
@@ -34,7 +34,7 @@ describe('dropZone', () => {
 });
 
 describe('translations', () => {
-  // design/generated/registry.json lists the keys of every setting, option,
+  // spec/generated/registry.json lists the keys of every setting, option,
   // section and command the core registers.
   it('has every label the core’s registry needs', () => {
     expect(registry.i18n.length).toBeGreaterThan(80);

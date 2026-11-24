@@ -4,7 +4,7 @@
 // style and a legible color in both themes.
 
 import { describe, expect, it } from 'vitest';
-import tokens from '../../../design/tokens.json';
+import tokens from '../../../spec/tokens.json';
 import { highlight, lineTokenizer, type Piece } from '../highlight/highlighter';
 import { LANGS, languageByAlias, languageOf } from '../highlight/languages';
 import { ROLES } from '../highlight/roles';

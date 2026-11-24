@@ -4,7 +4,7 @@ import "encoding/json"
 
 // The members of Codex's app-server protocol (v2, with experimentalApi)
 // the adapter reads, as codex-cli 0.171.0 sends them
-// (design/codex-app-server/README.md). What is not read is not declared.
+// (spec/codex-app-server/README.md). What is not read is not declared.
 
 // The methods the adapter calls.
 const (

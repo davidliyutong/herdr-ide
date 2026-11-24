@@ -1,6 +1,6 @@
 // Command fakeacp is a coding agent for the end-to-end tests: it speaks the
 // Agent Client Protocol on its standard input and output as `kimi acp` does
-// (design/testdata/chat/acp), deterministic and offline. The tests install
+// (spec/vectors/chat/acp), deterministic and offline. The tests install
 // it as `kimi` in a directory of the isolated instance's PATH, so the chat
 // host runs it for the kind kimi.
 //

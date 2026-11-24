@@ -90,9 +90,9 @@ func TestLoadSpecs(t *testing.T) {
 // Targets are the destinations OpenSSH takes, never one that reads as an
 // option or holds whitespace, a control character or a shell
 // metacharacter: the vectors every client runs
-// (design/testdata/machines/targets.json).
+// (spec/vectors/machines/targets.json).
 func TestValidTarget(t *testing.T) {
-	b, err := os.ReadFile("../../design/testdata/machines/targets.json")
+	b, err := os.ReadFile("../../spec/vectors/machines/targets.json")
 	if err != nil {
 		t.Fatal(err)
 	}

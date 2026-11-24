@@ -101,7 +101,7 @@ workspaces can live in the ignored `.worktrees/` directory.
 - Add or update tests with behavior changes. Go tests live next to the code;
   web tests in `web/src/__tests__`, desktop tests in `desktop/src/*.test.ts`.
   Vectors the web tests run, and Go's tests where the rule is in Go too
-  (keys, ssh targets), live in `design/testdata/` (`make check` fails when
+  (keys, ssh targets), live in `spec/vectors/` (`make check` fails when
   a vector file is run by no web test).
 - Update the docs in the same PR: flags, endpoints and files in
   [docs/reference.md](docs/reference.md) (CI checks every flag and route is

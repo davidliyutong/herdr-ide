@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// step is a line of a script: a message of a recording (design/testdata/
+// step is a line of a script: a message of a recording (spec/vectors/
 // chat/acp: "in" the agent writes it, "out" the client is to send one like
 // it), or a directive of the fake: "exit" with Code (after writing Stderr
 // to its standard error), "child" (start a process in its group, its pid
@@ -251,11 +251,11 @@ func sameInit(a, b json.RawMessage) bool {
 	return reflect.DeepEqual(x, y)
 }
 
-// recording is a file of design/testdata/chat/acp as steps, its working
+// recording is a file of spec/vectors/chat/acp as steps, its working
 // directory /work made dir.
 func recording(t *testing.T, agent, name, dir string) []step {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "..", "..", "design", "testdata", "chat", "acp", agent, name+".jsonl"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "spec", "vectors", "chat", "acp", agent, name+".jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}

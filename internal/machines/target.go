@@ -36,7 +36,7 @@ var ErrInvalidTarget = errors.New("invalid ssh target")
 // internal/transport). Its characters are letters, digits, the
 // punctuation of targetPunct, and outside ASCII Unicode letters, marks and
 // numbers: no whitespace, control or format character and no shell
-// metacharacter. design/testdata/machines/targets.json holds the vectors
+// metacharacter. spec/vectors/machines/targets.json holds the vectors
 // the web UI's check (web/src/lib/machine.ts) runs too.
 func ValidTarget(t string) bool {
 	if t == "" || len(t) > MaxTargetLen || t[0] == '-' || !utf8.ValidString(t) {

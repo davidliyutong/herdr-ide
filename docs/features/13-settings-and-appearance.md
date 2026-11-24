@@ -44,7 +44,7 @@ history, chat; [27](27-plugins.md)).
 - Strings refuse control characters; lists and strings are bounded.
 - Descriptions are not in Go: the UI translates `settings.<key>`,
   `settings.<key>.desc`, options, sections and groups.
-- `scripts/registry` writes `design/generated/registry.json` (defaults,
+- `scripts/registry` writes `spec/generated/registry.json` (defaults,
   commands, each platform's default bindings, the translation keys the UI
   needs) and the settings and commands tables of
   [reference](../reference.md#settings). `make tokens` regenerates them;
@@ -122,7 +122,7 @@ the flag.
   layout's unshifted keys (`?` is `shift+slash`). The first stroke needs
   cmd, ctrl or alt (or is a function key), so a binding never takes a key
   that types text. Go (`keys.go`) and TypeScript (`web/src/keys.ts`) both
-  run the vectors in `design/testdata/keys`.
+  run the vectors in `spec/vectors/keys`.
 - **Defaults** are single strokes only: the desktop app's menu keys on
   `mac`, `ctrl+shift` keys on `windows` and `linux`, and in browsers only
   what browsers leave (find, the list of shortcuts, the palette on macOS).

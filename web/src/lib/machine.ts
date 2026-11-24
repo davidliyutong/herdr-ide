@@ -51,7 +51,7 @@ export interface MachineState {
 const targetPunct = new Set('#%+,-./:=@[]^_~');
 
 /** Whether an ssh target is one the core takes (machines.ValidTarget; the
- * vectors of design/testdata/machines/targets.json): at most 255 bytes of
+ * vectors of spec/vectors/machines/targets.json): at most 255 bytes of
  * UTF-8, not starting with "-", of ASCII letters, digits and
  * # % + , - . / : = @ [ ] ^ _ ~ and Unicode letters, marks and numbers. */
 export function validTarget(t: string): boolean {

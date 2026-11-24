@@ -2,7 +2,7 @@
 // its accent on the dark and the light background, chosen like a radio.
 import { colorThemes } from '../../themes';
 import { hasMessage, t } from '../../i18n';
-import tokens from '../../../../design/tokens.json';
+import tokens from '../../../../spec/tokens.json';
 
 export function themeLabel(id: string): string {
   const k = `settings.appearance.colorTheme.${id}`;

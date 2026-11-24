@@ -201,7 +201,7 @@ Every client of the machine shows the same arrangement. Version 2:
   tabs; split, close, swap and move panes; set ratios; prune ended
   terminals) give the same result in every client. Closing a workspace or
   tab ends no program; the client does. The contract is the vectors in
-  `design/testdata/layout/*.json`, run by the web tests.
+  `spec/vectors/layout/*.json`, run by the web tests.
 
 **Client.** `web/src/term`: `protocol.ts` (messages and frames),
 `connection.ts` (WebSocket, resubscribing, calls as promises, stream
@@ -260,7 +260,7 @@ history and makes every attach an observer. See the terminal clients row in
 - `web/src/__tests__/term.test.ts`: the TypeScript client against a
   scripted socket and every layout vector; `terms.test.ts` the UI's model;
   `restore.test.ts` restoring after a core restart; `agentLeaves.test.ts`
-  with `design/testdata/layout/agent-leaves.json` a leaf's `session` and
+  with `spec/vectors/layout/agent-leaves.json` a leaf's `session` and
   `before`.
 - `make it`: `TestIntegrationTerm`, `TestIntegrationDetect`,
   `TestIntegrationTermShells`, `TestIntegrationTermHidden` against a real

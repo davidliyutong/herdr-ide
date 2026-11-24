@@ -18,7 +18,7 @@ import (
 
 // The tests run Claude Code as a fake: the test binary started again with
 // FAKE_CLAUDE_SCRIPT set plays a script of the program's side of the
-// protocol (a recording of design/testdata/chat/claude, prepared by the
+// protocol (a recording of spec/vectors/chat/claude, prepared by the
 // test). It writes the "out" lines, and at each "in" line waits for the
 // adapter's line that matches it, answering the adapter's other control
 // requests from canned answers meanwhile (and after the script, until its

@@ -8,7 +8,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, api: () => Promise.r
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import registry from '../../../design/generated/registry.json';
+import registry from '../../../spec/generated/registry.json';
 import { SettingsDialog, formatNumber, machineScoped } from '../components/SettingsDialog';
 import { applySettings, builtinDefaults, useSettings, type SettingDef, type SettingState } from '../settings';
 import { colors } from '../prefs';

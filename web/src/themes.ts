@@ -1,8 +1,8 @@
-// The color themes of the chrome (design/tokens.json `themes`): each one is
+// The color themes of the chrome (spec/tokens.json `themes`): each one is
 // an accent and the text on it, in the dark and the light theme; the
 // neutrals are the same in all. The first is the default; another is
 // selected by <html data-accent="id"> (tokens.css).
-import tokens from '../../design/tokens.json';
+import tokens from '../../spec/tokens.json';
 
 export interface ColorTheme {
   id: string;

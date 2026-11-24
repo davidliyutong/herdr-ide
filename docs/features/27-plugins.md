@@ -235,4 +235,4 @@ panels into panes.
   `pluginSettings.test.ts`, `usageSettings.test.ts`,
   `pluginFramework.test.ts`, `keptEdits.test.ts`, `picker.test.ts`,
   `tree.test.ts`, `fileIcons.test.ts`.
-- `design/testdata/layout/plugin-views.json`: plugin panes in the layout.
+- `spec/vectors/layout/plugin-views.json`: plugin panes in the layout.

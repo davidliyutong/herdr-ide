@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createECDH, hkdfSync } from 'node:crypto';
 import test from 'node:test';
-import kek from '../../design/testdata/vault-unlock/kek.json';
-import vectors from '../../design/testdata/vault-unlock/relay.json';
+import kek from '../../spec/vectors/vault-unlock/kek.json';
+import vectors from '../../spec/vectors/vault-unlock/relay.json';
 import { fromBase64url, openRelay, relayAD, relayKey, sealRelay, type RelayPurpose } from './relay';
 
 const b = (s: string) => Buffer.from(s, 'base64url');

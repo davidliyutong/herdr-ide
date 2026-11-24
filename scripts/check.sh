@@ -11,11 +11,11 @@
 #   4. THIRD_PARTY_NOTICES.md matches the linked Go modules
 #   5. README.md and README.zh-CN.md have the same section structure
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
-#   7. the files generated from design/tokens.json and the settings
+#   7. the files generated from spec/tokens.json and the settings
 #      registry are current
 #   8. the web UI's terminal emulator (web/src/vt/ghostty-vt.wasm) is the
 #      module whose digest scripts/fetch-ghostty-vt.sh recorded
-#   9. every shared test vector (design/testdata) is run by the web UI's
+#   9. every shared test vector (spec/vectors) is run by the web UI's
 #      tests
 #  10. the GPU selection library the agent embeds (internal/agent/gpupick)
 #      is the one scripts/build-gpupick.sh built from its source
@@ -102,12 +102,12 @@ echo "==> shared test vectors"
 # The web UI's tests, or the desktop shell's for vectors the core shares
 # with the shell alone (the vault's unlock keys), run every vector: they
 # name the file (<dir>/<name>.json), the directory's files (<dir>/*.json)
-# or the directory itself ("…/testdata/<dir>"), so a new vector file
+# or the directory itself ("…/vectors/<dir>"), so a new vector file
 # cannot go unrun.
-for f in design/testdata/*/*.json; do
-  rel=${f#design/testdata/}
+for f in spec/vectors/*/*.json; do
+  rel=${f#spec/vectors/}
   dir=${rel%%/*}
-  grep -rqF -e "$rel" -e "$dir/*.json" -e "testdata/$dir\"" web/src/__tests__ desktop/src || { echo "$f is run by no test in web/src/__tests__ or desktop/src"; fail=1; }
+  grep -rqF -e "$rel" -e "$dir/*.json" -e "vectors/$dir\"" web/src/__tests__ desktop/src || { echo "$f is run by no test in web/src/__tests__ or desktop/src"; fail=1; }
 done
 
 exit $fail

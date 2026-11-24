@@ -1525,12 +1525,12 @@ func TestEnviron(t *testing.T) {
 }
 
 // The web UI's patches of selected ranges (web/src/plugins/git/patch.ts,
-// design/testdata/git/range-patches.json) apply with git apply and give
+// spec/vectors/git/range-patches.json) apply with git apply and give
 // the vectors' results.
 func TestRangePatchVectors(t *testing.T) {
 	env := testEnv(t)
 	dir := newRepo(t, env)
-	b, err := os.ReadFile("../../../../design/testdata/git/range-patches.json")
+	b, err := os.ReadFile("../../../../spec/vectors/git/range-patches.json")
 	if err != nil {
 		t.Fatal(err)
 	}

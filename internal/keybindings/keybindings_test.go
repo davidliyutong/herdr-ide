@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-// The vectors every client's parser runs (design/testdata/keys/parse.json).
+// The vectors every client's parser runs (spec/vectors/keys/parse.json).
 func TestParseVectors(t *testing.T) {
-	b, err := os.ReadFile("../../design/testdata/keys/parse.json")
+	b, err := os.ReadFile("../../spec/vectors/keys/parse.json")
 	if err != nil {
 		t.Fatal(err)
 	}

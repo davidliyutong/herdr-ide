@@ -11,15 +11,15 @@ import (
 	"veldr/internal/chatproto"
 )
 
-// The pinned protocol: design/codex-app-server/summary.json is what the
+// The pinned protocol: spec/codex-app-server/summary.json is what the
 // adapter relies on of Codex's app-server schema, generated from
 // `codex app-server generate-json-schema --experimental --out DIR` by
 //
 //	CODEX_SCHEMA_DIR=DIR go test ./internal/chatadapter/codex -run TestSchemaSummary -update
 //
-// (design/codex-app-server/README.md). TestSchemaPinned checks the
+// (spec/codex-app-server/README.md). TestSchemaPinned checks the
 // adapter's requests, answers, notifications and item types against it.
-const summaryPath = "../../../design/codex-app-server/summary.json"
+const summaryPath = "../../../spec/codex-app-server/summary.json"
 
 // summary is the pinned part of the schema.
 type summary struct {

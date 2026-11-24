@@ -58,7 +58,7 @@ only.
 | `gemini`, `opencode`, `cursor`, `copilot`, `qwen`, `amp` | its id | – | – | – | – | – |
 | the other kinds the detector knows | – | – | – | – | – | – |
 
-`make tokens` writes the kinds into `design/generated/registry.json` (key
+`make tokens` writes the kinds into `spec/generated/registry.json` (key
 `agents`), which the page reads (`web/src/conversation/kinds.ts`): agents
 to start, the commands a restore types, the usage provider, whether a
 kind's transcripts are read, its chat adapter. Argv, environment and
@@ -159,7 +159,7 @@ turn ends, interruptions, compactions and API errors make
 `summary`; a response's usage is on each of its lines, and readers keep
 the last of a message. The program's own state lines make nothing; lines
 of unknown shape are counted in `unknown`. The shared vectors in
-`design/testdata/transcript/` are the exact specification.
+`spec/vectors/transcript/` are the exact specification.
 
 Transcripts are parsed as hostile input within bounds: 256 KiB of text an
 event (32 KiB of a tool's output), 256 events and 8 MiB a line (longer
@@ -259,10 +259,10 @@ agents' sessions, agent detection).
 - `internal/agent/transcript`: the shared vectors (`vectors_test.go`, also
   run by `web/src/__tests__/transcriptVectors.test.ts`), frames, bounds
   (`TestLineMemory`, `TestWalkPastALongLine`). Vectors in
-  `design/testdata/transcript/`: a real sanitized transcript (Claude Code
+  `spec/vectors/transcript/`: a real sanitized transcript (Claude Code
   2.1.330), one of a session driven through the SDK protocol, and
   hand-written ones.
-  `design/testdata/layout/agent-leaves.json`: the leaf's fields.
+  `spec/vectors/layout/agent-leaves.json`: the leaf's fields.
 - `internal/plugins/agents` and `internal/agent/plugin/agents`: the route,
   validation, its limit (`TestResolveBusy`), the machine side.
 - `web/src/__tests__`: `agents.test.ts`, `chatImport.test.tsx`,

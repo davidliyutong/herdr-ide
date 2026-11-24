@@ -1,6 +1,6 @@
 :root {
   /* The UI's colors are the design tokens (tokens.css, generated from
-     design/tokens.json; docs/features/24-design-tokens.md). Neutrals are
+     spec/tokens.json; docs/features/24-design-tokens.md). Neutrals are
      the same in every color theme; the accent is the theme's. */
   --bg: var(--ds-color-background);
   --bg-1: var(--ds-color-sidebar);

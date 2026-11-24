@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, api: () => Promise.resolve({}) } }));
 
-import parseVectors from '../../../design/testdata/keys/parse.json';
-import eventVectors from '../../../design/testdata/keys/events.json';
-import sequenceVectors from '../../../design/testdata/keys/sequences.json';
-import defaultVectors from '../../../design/testdata/keys/defaults.json';
-import registry from '../../../design/generated/registry.json';
+import parseVectors from '../../../spec/vectors/keys/parse.json';
+import eventVectors from '../../../spec/vectors/keys/events.json';
+import sequenceVectors from '../../../spec/vectors/keys/sequences.json';
+import defaultVectors from '../../../spec/vectors/keys/defaults.json';
+import registry from '../../../spec/generated/registry.json';
 import { altOnly, KeyError, keyLabel, normalizeKeys, strokeOf } from '../keys';
 import {
   commandEnabled,
@@ -25,7 +25,7 @@ import { useStore } from '../state/store';
 import { keysOf, platform, resetRules, rulesFor, useKeys, type Binding, type Platform } from '../keybindings';
 import { conflictsOf } from '../components/KeyboardShortcuts';
 
-// The vectors of design/testdata/keys; internal/keybindings runs parse.json
+// The vectors of spec/vectors/keys; internal/keybindings runs parse.json
 // too.
 describe('key sequences', () => {
   it('normalizes as the core does', () => {

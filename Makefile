@@ -36,8 +36,8 @@ check:
 	pnpm -C e2e format:check
 
 # The design tokens of the web UI and the core's terminal color defaults,
-# from design/tokens.json; then what the clients take from the registered
-# settings and commands (design/generated) and the tables of settings and
+# from spec/tokens.json; then what the clients take from the registered
+# settings and commands (spec/generated) and the tables of settings and
 # commands in docs/reference.md.
 tokens:
 	go run ./scripts/tokens

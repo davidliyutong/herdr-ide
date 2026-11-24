@@ -34,7 +34,7 @@ reference documentation.
   `settings.<id>.…`, `command.<id>.…`, `plugins.<id>.…`).
 - **Core-defined settings and commands** are labelled by keys built from
   their names (`settings.<key>`, `command.<id>`).
-  `design/generated/registry.json` lists them and `settings.test.ts`
+  `spec/generated/registry.json` lists them and `settings.test.ts`
   checks the web UI has each; an untranslated one shows its key.
 - **Vocabulary**: one name per thing and per command everywhere (menus,
   palette, shortcuts page and tooltips all use `command.<id>`). English uses

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import registry from '../../../design/generated/registry.json';
+import registry from '../../../spec/generated/registry.json';
 import { agentsPlugin } from '../plugins/agents';
 import { allPlugins, definePlugins, enableSetting, newTabGroups, pluginOn } from '../plugins/registry';
 import { useSettings } from '../settings';

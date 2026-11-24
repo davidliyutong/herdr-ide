@@ -293,7 +293,7 @@ every deployment.
   `TestBridgeTheme`, `TestCodeServerPortProxyRefused`,
   `TestBridgeSendToAgent`), `internal/server/download_test.go`
   (`TestBridgeDownload`, `TestBridgeClose`).
-- Layout: `design/testdata/layout/views.json`.
+- Layout: `spec/vectors/layout/views.json`.
 - UI: `web/src/__tests__/codePanes.test.ts` (entry points, reuse, windows'
   lifetime and placement, command targeting, Send to Agent),
   `desktop.test.ts` (menu and keys), `paneHeader.test.ts`,

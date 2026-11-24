@@ -1,4 +1,4 @@
-// The shared transcript vectors (design/testdata/transcript): the events a
+// The shared transcript vectors (spec/vectors/transcript): the events a
 // machine makes of Claude Code's transcripts, which
 // internal/agent/transcript's tests produce from the same lines, hold to
 // the conversation model's types, and reduce.
@@ -21,12 +21,12 @@ import {
   type StopReason,
   type ToolDiff,
 } from '../conversation/model';
-import claudeTools from '../../../design/testdata/transcript/claude-2.1.330-tools.json';
-import claudeToolsErrors from '../../../design/testdata/transcript/claude-tools-errors.json';
-import claudeSessionEvents from '../../../design/testdata/transcript/claude-session-events.json';
-import claudeUnknown from '../../../design/testdata/transcript/claude-unknown.json';
-import claudeQueuedPrompts from '../../../design/testdata/transcript/claude-queued-prompts.json';
-import claudeHeadless from '../../../design/testdata/transcript/claude-headless.json';
+import claudeTools from '../../../spec/vectors/transcript/claude-2.1.330-tools.json';
+import claudeToolsErrors from '../../../spec/vectors/transcript/claude-tools-errors.json';
+import claudeSessionEvents from '../../../spec/vectors/transcript/claude-session-events.json';
+import claudeUnknown from '../../../spec/vectors/transcript/claude-unknown.json';
+import claudeQueuedPrompts from '../../../spec/vectors/transcript/claude-queued-prompts.json';
+import claudeHeadless from '../../../spec/vectors/transcript/claude-headless.json';
 
 interface Vector {
   note: string;
@@ -180,7 +180,7 @@ describe('transcript vectors', () => {
   it('are all here: every file of the directory', async () => {
     const fsModule = 'node:fs';
     const fs = (await import(/* @vite-ignore */ fsModule)) as { readdirSync(p: URL): string[] };
-    const files = fs.readdirSync(new URL('../../../design/testdata/transcript/', import.meta.url)).filter((f) => f.endsWith('.json'));
+    const files = fs.readdirSync(new URL('../../../spec/vectors/transcript/', import.meta.url)).filter((f) => f.endsWith('.json'));
     expect(Object.keys(vectors).sort()).toEqual(files.sort());
   });
   for (const [name, v] of Object.entries(vectors)) {

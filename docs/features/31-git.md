@@ -326,7 +326,7 @@ terminal; the plugin adds a way to reach it from the browser:
 - `internal/agent/plugins_git_test.go`, `internal/plugins/git/git_test.go`:
   routes, audit records, settings; `TestMutatingRoutesAreGuarded`
   (`internal/server`).
-- `design/testdata/git/range-patches.json`: range patch vectors, run by
+- `spec/vectors/git/range-patches.json`: range patch vectors, run by
   `web/src/__tests__/gitPatch.test.ts` and applied with git by the Go test.
 - Web: `gitGraph.test.ts` (lanes, rows, pages), `gitPanel.test.ts`,
   `gitGraphPane.test.ts`, `gitDiff.test.ts` (panel actions, pickers,

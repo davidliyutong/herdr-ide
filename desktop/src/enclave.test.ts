@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { APP_NAME } from '../../web/src/brand';
-import kek from '../../design/testdata/vault-unlock/kek.json';
+import kek from '../../spec/vectors/vault-unlock/kek.json';
 import { enclaveFor, HELPER_MAX_OUTPUT, HELPER_NAME, HELPER_TIMEOUT_MS, helperPath, runBounded, type RunHelper } from './enclave';
 
 const pub = Buffer.from(kek.enclave.sePub, 'base64url');

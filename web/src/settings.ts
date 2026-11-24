@@ -2,11 +2,11 @@
 // definitions and values from GET /api/settings, kept current by the core's
 // "settings" pushes on /ws, changed with PUT and DELETE. The settings dialog
 // renders itself from the definitions; prefs.ts reads the values the UI
-// uses. Until the core answers, the defaults of design/generated/registry.json
+// uses. Until the core answers, the defaults of spec/generated/registry.json
 // apply (the same build's registry).
 
 import { create } from 'zustand';
-import registry from '../../design/generated/registry.json';
+import registry from '../../spec/generated/registry.json';
 import { hasMessage, t } from './i18n';
 
 export type SettingType = 'bool' | 'number' | 'string' | 'enum' | 'color' | 'list';

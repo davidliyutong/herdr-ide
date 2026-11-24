@@ -43,7 +43,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   tree whose leaves are panes: terminals, VS Code views
   ([05](05-vscode-panes.md)) and previews ([06](06-quick-look-and-files.md)).
 - `layout.ts` implements the operations and runs the vectors of
-  `design/testdata/layout`. Unknown fields and node kinds are kept; a
+  `spec/vectors/layout`. Unknown fields and node kinds are kept; a
   version 1 document (tabs without workspaces) reads as one workspace.
 - The selected workspace, selected tab and focused pane are part of the
   document, so every client follows them. Zoom is the only per-browser
@@ -335,7 +335,7 @@ settings in [13](13-settings-and-appearance.md); the full table in
   command and are disabled when the page says the command cannot run
   (`desktopShell.setDisabledCommands`, [16](16-desktop-packaging.md)). The
   menu is rebuilt when keybindings change; the shell starts from the
-  defaults in `design/generated/registry.json`.
+  defaults in `spec/generated/registry.json`.
 
 ## Alternatives considered
 
@@ -386,7 +386,7 @@ settings in [13](13-settings-and-appearance.md); the full table in
 
 - `internal/keybindings/keybindings_test.go`: key syntax, per-platform
   defaults, user rules and problems, renamed commands, conflicts, reload.
-- `design/testdata/layout` (run by `web/src/__tests__/term.test.ts`):
+- `spec/vectors/layout` (run by `web/src/__tests__/term.test.ts`):
   layout operations, VS Code and preview panes, version 1 and malformed
   documents, workspace names; `pinned.json` and `tabs-block.json` for
   pinning and block moves.
@@ -400,7 +400,7 @@ settings in [13](13-settings-and-appearance.md); the full table in
   `paneDrag.test.ts`, `multiSelect.test.tsx`: drags, context menus,
   filtering, headers, multi-selection and row keyboard.
 - `web/src/__tests__/keys.test.ts` (key names, chords, defaults in
-  `design/testdata/keys/defaults.json`, `ctrl+b` leaving and returning
+  `spec/vectors/keys/defaults.json`, `ctrl+b` leaving and returning
   focus), `vt.test.ts`, `ime.test.tsx`,
   `palette.test.tsx`, `settingsDialog.test.ts` (palette ranking),
   `followed.test.ts`, `codePanes.test.ts`, `core.test.ts`,

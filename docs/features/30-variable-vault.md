@@ -263,7 +263,7 @@ for another passphrase, does not open. Each KEK is HKDF-SHA256 of:
   plus the shell's secret.
 - `prf` (WebAuthn): the credential's PRF output for a salt the core chose.
 
-Vectors: `design/testdata/vault-unlock/kek.json`, checked by the store's
+Vectors: `spec/vectors/vault-unlock/kek.json`, checked by the store's
 and the desktop shell's tests. At most 4 desktop entries, one per install,
 and one per credential. The key is not wrapped again after an unlock: it
 does not change until the passphrase does, so a new wrap would protect
@@ -314,7 +314,7 @@ session needed) removes the window.
   read it: AES-256-GCM under a key derived from the launch's verify key,
   bound to purpose, nonce and entry id. The core opens it only for a
   request of the desktop client (`plugin.Call.DesktopRelay`). Vectors:
-  `design/testdata/vault-unlock/relay.json`.
+  `spec/vectors/vault-unlock/relay.json`.
 - **Unlocking**: `GET proof/{nonce}` lists the desktop entries; the shell
   picks its install's, prompts, and answers `{id, relay}`, or
   `{invalidated: true}` when the system no longer has the key (the core

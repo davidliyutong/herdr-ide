@@ -50,7 +50,7 @@ import { commandOf, displayMath, exitCodeOf, formatTokens, plainOutput, spokenTe
 import { agentSession } from '../lib/machine';
 import { PROVIDERS } from '../plugins/usage/model';
 import { APP_SLUG } from '../brand';
-import registry from '../../../design/generated/registry.json';
+import registry from '../../../spec/generated/registry.json';
 import { en } from '../i18n/en';
 import { en as conversationEn } from '../conversation/i18n/en';
 import { hasMessage } from '../i18n';

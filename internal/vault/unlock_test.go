@@ -15,11 +15,11 @@ import (
 	"time"
 )
 
-// The KEKs are the contract's (design/testdata/vault-unlock/kek.json, made
+// The KEKs are the contract's (spec/vectors/vault-unlock/kek.json, made
 // with Node's crypto): the ECDH secret from either private key, and each
 // kind's HKDF.
 func TestKEKVectors(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "design", "testdata", "vault-unlock", "kek.json"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "spec", "vectors", "vault-unlock", "kek.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

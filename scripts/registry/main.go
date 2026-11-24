@@ -1,4 +1,4 @@
-// Command registry writes design/generated/registry.json from what the core
+// Command registry writes spec/generated/registry.json from what the core
 // registers (internal/registry), for the clients that need it before or
 // without a core:
 //
@@ -41,7 +41,7 @@ import (
 	"veldr/internal/settings"
 )
 
-const out = "design/generated/registry.json"
+const out = "spec/generated/registry.json"
 
 // keys returns the translation keys of the UI: every section, group,
 // setting label and enum option, and every command with its section.
@@ -170,7 +170,7 @@ func num(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 // its length.
 func defaultOf(d settings.Def) string {
 	if list, ok := d.Default.([]string); ok && d.Item == settings.TypeColor && len(list) > 4 {
-		return fmt.Sprintf("%d colors of `design/tokens.json`", len(list))
+		return fmt.Sprintf("%d colors of `spec/tokens.json`", len(list))
 	}
 	j, _ := json.Marshal(d.Default)
 	return "`" + string(j) + "`"

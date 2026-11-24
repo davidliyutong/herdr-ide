@@ -17,13 +17,13 @@ import (
 	"veldr/internal/agentproto"
 )
 
-// The shared vectors (design/testdata/transcript/*.json, which the web UI's
+// The shared vectors (spec/vectors/transcript/*.json, which the web UI's
 // tests check against its types): the lines of a Claude Code transcript and
 // the events a reader of the whole conversation gathers of their Frames
 // (readAll), without their times.
 var update = flag.Bool("update", false, "rewrite the vectors' expected events, unknown counts and titles")
 
-const vectorDir = "../../../design/testdata/transcript"
+const vectorDir = "../../../spec/vectors/transcript"
 
 type vector struct {
 	Note    string            `json:"note"`

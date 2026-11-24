@@ -26,7 +26,7 @@ import (
 
 var update = flag.Bool("update", false, "rewrite the golden files of the replays")
 
-const fixtureDir = "../../../design/testdata/chat/claude"
+const fixtureDir = "../../../spec/vectors/chat/claude"
 
 // testSession is the session id the replays run with.
 const testSession = "11111111-1111-4111-8111-111111111111"

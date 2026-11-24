@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import tokens from '../../../design/tokens.json';
+import tokens from '../../../spec/tokens.json';
 import { builtinDefaults } from '../settings';
 import { accentAttribute, colorThemes, DEFAULT_COLOR_THEME } from '../themes';
 import { sizePx } from '../lib/sizes';

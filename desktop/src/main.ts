@@ -18,8 +18,8 @@ import {
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import registry from '../../design/generated/registry.json';
-import tokens from '../../design/tokens.json';
+import registry from '../../spec/generated/registry.json';
+import tokens from '../../spec/tokens.json';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
 import { detectLocale, translate } from '../../web/src/i18n';
 import type { MessageKey } from '../../web/src/i18n/en';
@@ -423,7 +423,7 @@ async function proofPurpose(nonce: string): Promise<unknown> {
   return res.ok ? await res.json() : undefined;
 }
 
-/** The page's background (color.background in design/tokens.json), shown before it paints. */
+/** The page's background (color.background in spec/tokens.json), shown before it paints. */
 function windowBackground(): string {
   return tokens.color.background[nativeTheme.shouldUseDarkColors ? 'dark' : 'light'];
 }

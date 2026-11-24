@@ -258,7 +258,7 @@ resumed nor imported (`in_terminal`).
   and imports read `~/.claude/projects`.
 - **Codex** (`codex/`): `codex app-server`, protocol v2, one per live
   chat; the schema relied on is pinned in
-  `design/codex-app-server/summary.json` (`TestSchemaPinned`). A thread
+  `spec/codex-app-server/summary.json` (`TestSchemaPinned`). A thread
   started writable records its directory in `~/.codex/config.toml`, so
   threads start read-only and each turn carries the mode as policy:
 
@@ -426,7 +426,7 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
   (`journal_test.go`, `TestBoundsRemoveArchivedFirst`), signals
   (`signal_test.go`).
 - Adapters against fake agents replaying the recordings in
-  `design/testdata/chat/` (its README names the versions):
+  `spec/vectors/chat/` (its README names the versions):
   `internal/chatadapter/claude` (`TestReplay`, full access by restart,
   `in_terminal`), `internal/chatadapter/codex` (`TestSchemaPinned`,
   policies per mode, close order), `internal/chatadapter/acp`,

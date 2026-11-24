@@ -39,7 +39,7 @@ machine with the code `local_unsupported` and reaches SSH machines only
 | `internal/hostid` | The host's key (name and a hash of its machine id) and id (the hash alone), for files and sessions kept per host ([40](features/40-shared-homes.md)). |
 | `internal/hostdirs` | A namespace's directories on a host: the data directory, the host's own directory in it, the host-local runtime directory. |
 | `internal/agentproto` | Stream protocol shared by core and agent; yamux configuration; types both sides need (transcript events, history snapshots); `Hidden`, the rule that hides the product's own terminals by reserved name and label together. |
-| `internal/agentkinds` | Registry of coding agent kinds: commands to start, continue and resume, transcript format, chat adapter; written into `design/generated/registry.json` ([35](features/35-agent-native-view.md)). |
+| `internal/agentkinds` | Registry of coding agent kinds: commands to start, continue and resume, transcript format, chat adapter; written into `spec/generated/registry.json` ([35](features/35-agent-native-view.md)). |
 | `internal/agent` | The agent: terminal core, detection, files, code-server, displays, bridge and vault sockets, housekeeping. `//go:build unix`, so the Windows core never imports it. |
 | `internal/agent/detect` | Which coding agent runs in a terminal and its state ([25](features/25-agent-detection.md)). |
 | `internal/agent/sessions`, `internal/agent/transcript` | The session an agent's process runs; Claude Code's transcript lines mapped to ACP-shaped events for the chat host ([35](features/35-agent-native-view.md)). |

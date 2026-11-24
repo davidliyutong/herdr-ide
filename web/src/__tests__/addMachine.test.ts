@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import targetVectors from '../../../design/testdata/machines/targets.json';
+import targetVectors from '../../../spec/vectors/machines/targets.json';
 import { addMachineProblem } from '../components/AddMachineDialog';
 import { validTarget } from '../lib/machine';
 

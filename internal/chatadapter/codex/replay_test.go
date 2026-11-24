@@ -16,7 +16,7 @@ import (
 // serve the recordings that lack them.
 var handshake = fixture("01-handshake.jsonl")
 
-// The replays: each recording of design/testdata/chat/codex driven as the
+// The replays: each recording of spec/vectors/chat/codex driven as the
 // host would, the events checked against a golden file, what the adapter
 // asked checked against the policies it must keep.
 

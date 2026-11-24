@@ -23,7 +23,7 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden files of the replays")
 
 // fixtures is the recordings' directory.
-const fixtures = "../../../design/testdata/chat/codex"
+const fixtures = "../../../spec/vectors/chat/codex"
 
 func fixture(name string) string { return filepath.Join(fixtures, name) }
 

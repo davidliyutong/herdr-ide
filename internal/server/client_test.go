@@ -168,9 +168,9 @@ func TestBridgeMessagesFollowTheClientsSwitch(t *testing.T) {
 
 // The desktop shell's relays open with the key derived from the launch's
 // verify key, for the additional data they were sealed with only: the
-// vectors the shell's tests check too (design/testdata/vault-unlock).
+// vectors the shell's tests check too (spec/vectors/vault-unlock).
 func TestDesktopRelay(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "design", "testdata", "vault-unlock", "relay.json"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "spec", "vectors", "vault-unlock", "relay.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

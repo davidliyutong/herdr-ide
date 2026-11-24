@@ -58,7 +58,7 @@ func TestWithTheMachineSide(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
-	v, err := os.ReadFile(filepath.Join("../../../design/testdata/transcript", "claude-2.1.330-tools.json"))
+	v, err := os.ReadFile(filepath.Join("../../../spec/vectors/transcript", "claude-2.1.330-tools.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

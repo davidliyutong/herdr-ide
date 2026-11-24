@@ -23,7 +23,7 @@ const (
 	claudeSession = "e6cdc860-1055-488f-9ed2-8b8019061bb9"
 	codexSession  = "01a1ffa2-e43b-7c13-8240-7eb9e6fa29f3"
 	vectorCwd     = "/home/dev/project"
-	vectorDir     = "../../../../design/testdata/transcript"
+	vectorDir     = "../../../../spec/vectors/transcript"
 )
 
 // sid is a session id of its own for n.

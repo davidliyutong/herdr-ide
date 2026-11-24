@@ -24,7 +24,7 @@ white stay); user-defined themes; the colors programs draw with in panes
 
 ## Design
 
-**Source: `design/tokens.json`.** Each color has a light and a dark value,
+**Source: `spec/tokens.json`.** Each color has a light and a dark value,
 `"#rrggbb"` or `{"hex", "alpha"}`. Groups:
 
 - `color.*`: neutral interface colors named by purpose (`background`,
@@ -84,7 +84,7 @@ lists that need sizes in pixels take them from `web/src/lib/sizes.ts`.
   (`components/tree`).
 
 **Terminals and first paint.** Terminal colors come from the core's
-settings (from `design/generated/registry.json` until the core answers).
+settings (from `spec/generated/registry.json` until the core answers).
 The page's `theme-color` and manifest background are
 `color.background`; the desktop shell reads it from `tokens.json`, which
 its build bundles.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import test from 'node:test';
-import kek from '../../design/testdata/vault-unlock/kek.json';
+import kek from '../../spec/vectors/vault-unlock/kek.json';
 import { APP_SLUG } from '../../web/src/brand';
 import { translate } from '../../web/src/i18n';
 import type { AgreeResult, Enclave } from './enclave';

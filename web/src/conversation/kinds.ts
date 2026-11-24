@@ -1,11 +1,11 @@
 // The kinds of coding agents (internal/agentkinds), as the core's registry
-// gives them to the UI (design/generated/registry.json, key "agents"):
+// gives them to the UI (spec/generated/registry.json, key "agents"):
 // how each starts, continues a directory's latest conversation or resumes
 // a session, the AI usage provider of its subscription, the format of its
 // transcripts, and the adapter the chat host runs it through headless.
 // Only a session id that is a lower-case UUID is ever put into a command
 // line.
-import registry from '../../../design/generated/registry.json';
+import registry from '../../../spec/generated/registry.json';
 import { isSessionId } from '../term/layout';
 
 /** Whether s is a session id as the agents write them: a lower-case UUID

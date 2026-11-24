@@ -95,7 +95,7 @@ within the existing Content-Security-Policy.
 
 ## Testing
 
-- `design/testdata/math/find.json`: the cases (Claude Code's output,
+- `spec/vectors/math/find.json`: the cases (Claude Code's output,
   delimiters with and without backslashes, multi-line display formulas,
   matrices, shell variables, prices, calls, escaped dollars, empty lines),
   run by `web/src/__tests__/math.test.ts`, which also covers wrapping,

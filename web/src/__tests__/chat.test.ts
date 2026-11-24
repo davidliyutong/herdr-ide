@@ -11,7 +11,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import registry from '../../../design/generated/registry.json';
+import registry from '../../../spec/generated/registry.json';
 import { hasMessage, setLocale, t } from '../i18n';
 import { chatPlugin } from '../plugins/chat';
 import * as P from '../plugins/chat/protocol';

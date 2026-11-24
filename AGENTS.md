@@ -30,7 +30,7 @@ extension.
 | Install JS deps | `make deps` |
 | Unit tests (Go + web + desktop) | `make test` |
 | All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, generated tokens, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
-| Regenerate the design tokens' CSS and Go after editing `design/tokens.json`, and `design/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings, commands or agent kinds (`internal/agentkinds`) | `make tokens` |
+| Regenerate the design tokens' CSS and Go after editing `spec/tokens.json`, and `spec/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings, commands or agent kinds (`internal/agentkinds`) | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
 | Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
@@ -134,7 +134,7 @@ playbooks):
   `make tokens`. Finding its sessions needs `internal/agent/sessions`.
   Claude Code's transcripts are mapped to events by
   `internal/agent/transcript` (the chat host's imports and its Claude
-  Code adapter), specified by the vectors in `design/testdata/transcript/`,
+  Code adapter), specified by the vectors in `spec/vectors/transcript/`,
   which the Go and the web tests both run; `go test
   ./internal/agent/transcript -run TestVectors -update` rewrites a
   vector's expected events after a deliberate change of the mapping
@@ -144,7 +144,7 @@ playbooks):
   adapters behind `internal/chatadapter` (`TestChatKinds`); its argv,
   environment and session metadata stay on the machine's side, never in
   the registry's JSON. The adapters' protocol recordings are in
-  `design/testdata/chat/` (sanitized; its README says what each shows and
+  `spec/vectors/chat/` (sanitized; its README says what each shows and
   which version made it).
 - Chat adapters follow the rules in `internal/chatadapter`'s package
   comment: never write the agents' configuration (a Codex thread starts
@@ -153,7 +153,7 @@ playbooks):
   any SIGKILL (Codex killed outright leaves its shell snapshots), answer
   requests they do not serve with "method not found". The part of Codex's
   app-server schema the adapter relies on is pinned in
-  `design/codex-app-server/summary.json` (`TestSchemaPinned`; its README
+  `spec/codex-app-server/summary.json` (`TestSchemaPinned`; its README
   says how to move to another version).
 - A terminal the product runs for itself (the chat host) is hidden by its
   reserved name and label together (`agentproto.Hidden`): anything that

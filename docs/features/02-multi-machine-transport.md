@@ -203,7 +203,7 @@ zone ids, Unicode names) and refuses:
 
 This follows OpenSSH's own check of command-line destinations (9.6 and
 later) and adds a few characters ssh passes on. The web UI checks typed
-targets with the same vectors (`design/testdata/machines/targets.json`).
+targets with the same vectors (`spec/vectors/machines/targets.json`).
 A refused target answers `invalid_target`; `--ssh` with one stops the core.
 
 ### The terminal core of each machine

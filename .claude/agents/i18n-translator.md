@@ -26,7 +26,7 @@ strings (`desktop.*`; the menu's titles are `desktop.menu.*`, checked in
 both languages by `desktop/src/menu.test.ts`).
 
 Settings' and commands' labels are the keys the registry lists
-(`design/generated/registry.json`, `i18n`); `web/src/__tests__/settings.test.ts`
+(`spec/generated/registry.json`, `i18n`); `web/src/__tests__/settings.test.ts`
 fails when one is missing.
 
 Extension (`extensions/veldr-bridge/`): `package.nls*.json` for manifest

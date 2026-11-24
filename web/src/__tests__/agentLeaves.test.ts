@@ -1,5 +1,5 @@
 // A coding agent's terminal leaf: session and before checked when a
-// document is read (the vector design/testdata/layout/agent-leaves.json
+// document is read (the vector spec/vectors/layout/agent-leaves.json
 // runs with the others in term.test.ts), changed by setTerminalFields, and
 // kept by every other operation, also by the rules that restore terminals
 // after their core started again, as an older client keeps them; render,
@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import * as L from '../term/layout';
 import { rememberAgents, replaceTerminal, takeResume } from '../restore';
 import { FakeCore } from './fakeTerms';
-import vector from '../../../design/testdata/layout/agent-leaves.json';
+import vector from '../../../spec/vectors/layout/agent-leaves.json';
 
 const S1 = '0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f';
 const S2 = '1b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f';
