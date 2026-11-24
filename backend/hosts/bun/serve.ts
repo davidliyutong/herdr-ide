@@ -33,6 +33,7 @@ import { dialNode } from '#kernel/machines/transport/local.ts';
 import { dialSSH } from '#kernel/machines/transport/ssh.ts';
 import { machinesFeature } from '#features/machines/core.ts';
 import { terminalsFeature } from '#features/terminals/core.ts';
+import { guiFeature } from '#features/gui/core.ts';
 import { browserFeature } from '#features/browser/core.ts';
 import { searchFeature } from '#features/search/core.ts';
 import { gitFeature } from '#features/git/core.ts';
@@ -134,9 +135,14 @@ export async function serve(argv: string[]): Promise<void> {
   const controlDir = process.platform === 'win32' ? '' : makeControlDir(instance);
   const payloads = await openPayloads({ agentDir: f['agent-dir'], extDir: f['ext-dir'], webDir: f['web-dir'] });
   const agents = payloads.agent.bind(payloads);
+  // Program windows give new terminals their display and follow the
+  // terminal cores; they type into the terminals' shells.
+  const gui = guiFeature({ encoder: (os, arch) => payloads.encoder(os, arch), shells: (m) => terminals.shells(m) });
+  const terminals = terminalsFeature({ hc: (os, arch) => payloads.hc(os, arch), paneEnv: gui.paneEnv, onReady: gui.terminalReady });
   const features: FeatureDef[] = [
     machinesFeature({ home: () => userHomeDir(), controlDir, pty: bunPty }),
-    terminalsFeature({ hc: (os, arch) => payloads.hc(os, arch) }),
+    terminals,
+    gui,
     browserFeature(),
     fileTransfersFeature(),
     filesFeature(),
