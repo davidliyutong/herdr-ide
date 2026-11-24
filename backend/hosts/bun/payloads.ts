@@ -1,7 +1,10 @@
 // The command line's payloads (kernel/payloads.ts): a tar archive embedded
 // in the executable at build time (`bun build --compile … payload.tar`,
 // found among Bun.embeddedFiles), laid out as payloads() reads it; the
-// development flags --agent-dir, --ext-dir and --web-dir come first.
+// development flags --agent-dir, --ext-dir and --web-dir come first. A
+// development run from the sources (`make dev-core`) has no archive and
+// reads what scripts/build.sh staged in the repository's dist/payload.
+import { fileURLToPath } from 'node:url';
 import { dirFiles, layered, payloads, type Files, type Payloads } from '#kernel/payloads.ts';
 
 /** The embedded archive's files; null when the executable has none (a
@@ -33,7 +36,8 @@ export async function openPayloads(o: { agentDir: string; extDir: string; webDir
   const ext: Files | null = o.extDir
     ? { get: (p) => (p.startsWith('ext/') ? dirFiles(o.extDir).get(p.slice(4)) : Promise.resolve(null)) }
     : null;
-  const files = layered(ext, e?.files);
+  const staged = Bun.isStandaloneExecutable ? null : dirFiles(fileURLToPath(new URL('../../../dist/payload/', import.meta.url)));
+  const files = layered(ext, e?.files ?? staged);
   const web = o.webDir ? dirFiles(o.webDir) : (e?.web ?? null);
   return payloads({ files, web, agentDir: o.agentDir || undefined });
 }

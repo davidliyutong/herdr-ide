@@ -115,6 +115,10 @@ hook. The host composes them; features do not import each other.
 `make check` run them with the rest of the repository.
 
 `bun scripts/build.ts --out FILE --web ../web/dist --agents DIR --hc DIR
---ext DIR [--target bun-linux-x64-baseline] [--version V]` builds the
-core's executable; `E2E_CORE=ts scripts/e2e.sh` runs the end-to-end tests
-against it (with the Go machine builds while machines run them).
+--ext DIR --encoder DIR [--target bun-linux-x64-baseline] [--version V]`
+builds the core's executable; `scripts/build.sh` (`make build`) runs it for
+each platform with everything it embeds staged in `dist/payload`, and
+`scripts/e2e.sh` (`make e2e`) runs the end-to-end tests against it (with
+the Go machine builds while machines run them). `make dev-core` runs the
+core from its sources (`bun hosts/bun/main.ts`), which reads the payloads
+from `dist/payload`.

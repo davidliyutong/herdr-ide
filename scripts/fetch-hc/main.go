@@ -1,13 +1,14 @@
 // Fetch the pinned upstream herdr-core for the requested Go platforms and
-// write the executables, gzip-compressed, where the core embeds them. The
-// downloaded executables are never run.
+// write the executables, gzip-compressed, where the core's build takes
+// them (-out, default dist/payload/hc: hc-<os>-<arch>.gz). The downloaded
+// executables are never run.
 //
-//	go run ./scripts/fetch-hc linux/amd64 darwin/arm64 …
+//	go run ./scripts/fetch-hc [-out DIR] linux/amd64 darwin/arm64 …
 //	go run ./scripts/fetch-hc -exe FILE OS/ARCH
 //
 // -exe writes one platform's verified executable to FILE instead, as is
 // (for the integration tests' HC_TEST_BIN: make it in CI); nothing is
-// embedded.
+// staged.
 package main
 
 import (
@@ -28,19 +29,19 @@ import (
 const (
 	cacheDir   = "dist/hc"
 	licenseDir = "dist/hc/licenses"
-	embedDir   = "internal/embedded/hc"
 	// maxArchive bounds a download (release archives are about 8 MB).
 	maxArchive = 128 << 20
 )
 
 func main() {
-	exe := flag.String("exe", "", "write the executable of the one platform given to this file instead of embedding")
+	exe := flag.String("exe", "", "write the executable of the one platform given to this file instead of staging")
+	out := flag.String("out", "dist/payload/hc", "directory of the compressed executables the core's build embeds")
 	flag.Parse()
 	var err error
 	if *exe != "" {
 		err = writeExecutable(*exe, flag.Args())
 	} else {
-		err = run(flag.Args())
+		err = run(*out, flag.Args())
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -76,7 +77,7 @@ func writeExecutable(path string, platforms []string) error {
 	return nil
 }
 
-func run(platforms []string) error {
+func run(dir string, platforms []string) error {
 	if len(platforms) == 0 {
 		return fmt.Errorf("usage: go run ./scripts/fetch-hc OS/ARCH ...")
 	}
@@ -99,7 +100,7 @@ func run(platforms []string) error {
 		if err != nil {
 			return err
 		}
-		out := filepath.Join(embedDir, "hc-"+strings.ReplaceAll(p, "/", "-")+".gz")
+		out := filepath.Join(dir, "hc-"+strings.ReplaceAll(p, "/", "-")+".gz")
 		if err := writeFile(out, gz); err != nil {
 			return err
 		}
@@ -115,7 +116,7 @@ func run(platforms []string) error {
 				}
 			}
 		}
-		fmt.Printf("    herdr-core %s %s (verified, %d kB embedded)\n", hcdist.Version, p, len(gz)/1000)
+		fmt.Printf("    herdr-core %s %s (verified, %d kB compressed)\n", hcdist.Version, p, len(gz)/1000)
 	}
 	return nil
 }

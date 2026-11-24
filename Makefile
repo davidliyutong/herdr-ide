@@ -2,6 +2,7 @@
 # Development core address; keeps clear of a daily instance on the default port.
 DEV_LISTEN ?= 127.0.0.1:7790
 SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/brand.go)
+HOST_PLATFORM = $(shell go env GOOS)-$(shell go env GOARCH)
 EXT  := extensions/$(SLUG)-bridge
 
 .PHONY: deps build test check tokens vt-wasm gpupick it e2e dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
@@ -61,7 +62,7 @@ it:
 	go test -tags integration -count=1 ./internal/agent -run Integration -v
 	go test -tags integration -count=1 ./internal/agent/plugin/history -run Integration -v
 	go test -tags integration -count=1 ./internal/hc -run Integration -v
-	go test -tags integration -count=1 ./internal/server -run Integration -v
+	cd backend && bun test features/terminals/integration.test.ts
 
 # End-to-end tests: the core of this platform on isolated instances,
 # driven through Chromium, and SSH machines in Docker containers (e2e/,
@@ -70,8 +71,12 @@ it:
 e2e:
 	scripts/e2e.sh $(E2E_ARGS)
 
+# The core from its sources (bun) on the dev instance, with this host's
+# machine build built into dist/agents and herdr-core from dist/payload
+# (scripts/build.sh stages it; go run ./scripts/fetch-hc fetches it alone).
 dev-core:
-	go run ./cmd/$(SLUG) --instance dev --local-only --listen $(DEV_LISTEN) --agent-dir dist/agents
+	go build -tags machine -o dist/agents/$(SLUG)-$(HOST_PLATFORM) ./cmd/$(SLUG)
+	bun backend/hosts/bun/main.ts --instance dev --local-only --listen $(DEV_LISTEN) --agent-dir dist/agents --web-dir web/dist
 
 dev-web:
 	$(shell echo $(SLUG) | tr 'a-z-' 'A-Z_')_CORE=http://$(DEV_LISTEN) pnpm -C web dev
@@ -92,4 +97,4 @@ dev-desktop:
 	scripts/desktop.sh dev
 
 clean:
-	rm -rf dist desktop/dist web/dist/assets internal/embedded/agents/*.gz internal/embedded/hc/*.gz internal/embedded/ext/*.vsix
+	rm -rf dist desktop/dist web/dist/assets

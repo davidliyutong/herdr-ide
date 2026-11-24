@@ -3,9 +3,11 @@
 //
 //   bun scripts/build.ts --out FILE [--target bun-linux-x64-baseline]
 //     [--version V] [--web DIR] [--agents DIR] [--hc DIR] [--ext DIR]
+//     [--encoder DIR]
 //
 // --agents holds machine builds <bin>-<os>-<arch> (gzip-compressed here
-// unless they end in .gz), --hc hc-<os>-<arch>.gz, --ext <bridge>.vsix.
+// unless they end in .gz), --hc hc-<os>-<arch>.gz, --ext <bridge>.vsix,
+// --encoder encoder-<os>-<arch>.gz (scripts/build-ffmpeg.sh).
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -21,6 +23,7 @@ const { values: o } = parseArgs({
     agents: { type: 'string', default: '' },
     hc: { type: 'string', default: '' },
     ext: { type: 'string', default: '' },
+    encoder: { type: 'string', default: '' },
   },
 });
 if (!o.out) throw new Error('--out is required');
@@ -38,6 +41,9 @@ if (o.agents)
   }
 if (o.hc) for (const name of readdirSync(o.hc)) if (name.endsWith('.gz')) entries[`hc/${name}`] = readFileSync(join(o.hc, name));
 if (o.ext) for (const name of readdirSync(o.ext)) if (name.endsWith('.vsix')) entries[`ext/${name}`] = readFileSync(join(o.ext, name));
+if (o.encoder)
+  for (const name of readdirSync(o.encoder))
+    if (/^encoder-[a-z0-9]+-[a-z0-9]+\.gz$/.test(name)) entries[`encoder/${name}`] = readFileSync(join(o.encoder, name));
 
 const tmp = mkdtempSync(join(tmpdir(), 'core-build-'));
 try {
