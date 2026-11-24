@@ -7,8 +7,9 @@ import { Fail } from './fail.ts';
 import type { Machine } from './machines/machine.ts';
 import { AgentError, closeStream, type AgentStream } from './machines/transport/session.ts';
 
-/** The status a failure of an agent action answers with. */
-function statusOf(code: string): number {
+/** The status a failure of an agent action answers with: offline 409,
+ * transport 502, not_found 404, any other code 400. */
+export function statusOf(code: string): number {
   switch (code) {
     case 'offline':
       return 409;
@@ -20,13 +21,15 @@ function statusOf(code: string): number {
   return 400;
 }
 
+/** The Fail of an agent's refusal (its code and text). */
+export const agentFail = (code: string, message: string): Fail => new Fail(code || 'failed', statusOf(code || 'failed'), message || code);
+
 /** A failure the agent answered keeps its code; anything else is the
  * transport's. */
 function failOf(e: unknown): Fail {
   if (e instanceof Fail) return e;
   if (e instanceof AgentError && e.reply && !e.reply.ok) {
-    const code = e.reply.code || 'failed';
-    return new Fail(code, statusOf(code), e.reply.error ?? code);
+    return agentFail(e.reply.code ?? '', e.reply.error ?? '');
   }
   if (e instanceof Error && e.name === 'AbortError') throw e;
   return new Fail('transport', 502, e instanceof Error ? e.message : String(e));

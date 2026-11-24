@@ -25,7 +25,7 @@ export function hostOnly(hostport: string): string {
   return hostport;
 }
 
-const hasPort = (hostport: string) => hostport.startsWith('[') ? /\]:/.test(hostport) : hostport.split(':').length === 2;
+const hasPort = (hostport: string) => (hostport.startsWith('[') ? /\]:/.test(hostport) : hostport.split(':').length === 2);
 
 function isLoopbackIP(ip: string): boolean {
   const v = isIP(ip);
