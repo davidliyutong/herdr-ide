@@ -12,11 +12,16 @@
 #
 #   SKIP_WEB=1 scripts/e2e.sh       # reuse web/dist
 #   SKIP_BUILD=1 scripts/e2e.sh     # reuse dist/e2e
+#   E2E_CORE=ts scripts/e2e.sh      # the core in TypeScript (backend/)
+#   E2E_DIR=dist/e2e-b scripts/e2e.sh  # build into another directory
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SLUG=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
-OUT=dist/e2e
+OUT=${E2E_DIR:-dist/e2e}
+[[ "$OUT" == /* ]] || OUT="$PWD/$OUT"
+# The harness finds the builds there (e2e/harness/paths.ts).
+export E2E_DIR="$OUT"
 os=$(go env GOOS)
 arch=$(go env GOARCH)
 
@@ -61,6 +66,23 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
     CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -trimpath -tags machine -o "$OUT/agents/${SLUG}-linux-$darch" "./cmd/${SLUG}"
     CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -o "$OUT/linux-$darch/kimi" ./e2e/fakeacp
     CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -o "$OUT/linux-$darch/e2e-xclient" ./e2e/xclient
+  fi
+  if [[ "${E2E_CORE:-go}" == ts ]]; then
+    # The core in TypeScript (backend/, docs/features/42) with the Go
+    # machine builds: this host's and, for the newer core, the same code
+    # as another version.
+    echo "==> TypeScript core"
+    mod=$(sed -n 's/^module //p' go.mod)
+    rm -rf "$OUT/ts" && mkdir -p "$OUT/ts/agents" "$OUT/ts/agents-newer"
+    go build -trimpath -tags machine -o "$OUT/ts/agents/${SLUG}-$os-$arch" "./cmd/${SLUG}"
+    go build -trimpath -tags machine -ldflags "-X $mod/internal/agentproto.Version=dev-e2e-newer" -o "$OUT/ts/agents-newer/${SLUG}-$os-$arch" "./cmd/${SLUG}"
+    if [[ -n "$darch" && "linux/$darch" != "$os/$arch" ]]; then
+      cp "$OUT/agents/${SLUG}-linux-$darch" "$OUT/ts/agents/"
+      cp "$OUT/agents/${SLUG}-linux-$darch" "$OUT/ts/agents-newer/"
+    fi
+    common=(--web web/dist --hc internal/embedded/hc --ext internal/embedded/ext)
+    bun backend/scripts/build.ts --out "$OUT/core" --agents "$OUT/ts/agents" "${common[@]}"
+    bun backend/scripts/build.ts --out "$OUT/core-newer" --version dev-e2e-newer --agents "$OUT/ts/agents-newer" "${common[@]}"
   fi
 fi
 

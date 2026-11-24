@@ -1,48 +1,21 @@
+// The commands keys can run, with their default keys per platform. Labels
+// are not here: the UIs translate command.<id> and command.section.<id>.
+
 /** Where a binding applies: in the main window outside dialogs (terminal;
  * in a VS Code pane too, for the keys VS Code leaves), there except while a
  * terminal has the keyboard (editor: editors, VS Code panes, pane headers
  * and the application's own controls; the key goes to the terminal's
  * program), only while a VS Code pane has the keyboard (vscode), while a
  * dialog of the application is open (dialog), or everywhere (always). */
-export const When = {
-  Terminal: 'terminal',
-  Editor: 'editor',
-  VSCode: 'vscode',
-  Dialog: 'dialog',
-  Always: 'always',
-} as const;
-export type When = (typeof When)[keyof typeof When];
-
-const whens: ReadonlySet<string> = new Set(Object.values(When));
-
-/** Whether w is a When. */
-export function validWhen(w: string): w is When {
-  return whens.has(w);
-}
+export const WHENS = ['terminal', 'editor', 'vscode', 'dialog', 'always'] as const;
+export type When = (typeof WHENS)[number];
 
 /** Platforms the default bindings differ by: the desktop app on macOS,
  * Windows and Linux, and browsers on each. Browsers keep Cmd+T, Cmd+W and
  * similar keys for themselves, so most direct shortcuts exist only in the
  * desktop app. */
-export const Platform = {
-  Mac: 'mac',
-  Windows: 'windows',
-  Linux: 'linux',
-  MacBrowser: 'mac-browser',
-  WindowsBrowser: 'windows-browser',
-  LinuxBrowser: 'linux-browser',
-} as const;
-export type Platform = (typeof Platform)[keyof typeof Platform];
-
-/** Every platform, in the API's order. */
-export const PLATFORMS: readonly Platform[] = [
-  Platform.Mac,
-  Platform.Windows,
-  Platform.Linux,
-  Platform.MacBrowser,
-  Platform.WindowsBrowser,
-  Platform.LinuxBrowser,
-];
+export const PLATFORMS = ['mac', 'windows', 'linux', 'mac-browser', 'windows-browser', 'linux-browser'] as const;
+export type Platform = (typeof PLATFORMS)[number];
 
 /** Groups commands on the keyboard shortcuts page. */
 export interface Section {
@@ -53,16 +26,15 @@ export interface Section {
 /** A command's default key, on platforms (empty: all). */
 export interface Default {
   key: string;
-  platforms: readonly string[];
+  platforms: readonly Platform[];
 }
 
-/** Something a key can run. Its label in the UIs is the translation of
- * command.<id>. */
+/** Something a key can run. */
 export interface Command {
   id: string;
   section: string;
   when: When;
-  defaults: Default[];
+  defaults: readonly Default[];
 }
 
 /** The keyboard page's sections, in order. */
@@ -76,31 +48,23 @@ export const SECTIONS: readonly Section[] = [
   { id: 'code', order: 70 },
 ];
 
-const macApp = [Platform.Mac];
-const winApp = [Platform.Windows];
-const linuxApp = [Platform.Linux];
-const winLinuxApp = [Platform.Windows, Platform.Linux];
-const macBrowser = [Platform.MacBrowser];
-const macAll = [Platform.Mac, Platform.MacBrowser];
-const winLinuxAll = [Platform.Windows, Platform.WindowsBrowser, Platform.Linux, Platform.LinuxBrowser];
+const macApp: Platform[] = ['mac'];
+const winApp: Platform[] = ['windows'];
+const linuxApp: Platform[] = ['linux'];
+const winLinuxApp: Platform[] = ['windows', 'linux'];
+const macBrowser: Platform[] = ['mac-browser'];
+const macAll: Platform[] = ['mac', 'mac-browser'];
+const winLinuxAll: Platform[] = ['windows', 'windows-browser', 'linux', 'linux-browser'];
 
-function on(platforms: readonly string[], key: string): Default {
-  return { key, platforms };
-}
+const on = (platforms: readonly Platform[], key: string): Default => ({ key, platforms });
 
-function cmd(id: string, section: string, ...defaults: Default[]): Command {
-  return { id, section, when: When.Terminal, defaults };
-}
+const cmd = (id: string, section: string, ...defaults: Default[]): Command => ({ id, section, when: 'terminal', defaults });
 
 /** A command that does not run while a terminal has the keyboard. */
-function editor(id: string, section: string, ...defaults: Default[]): Command {
-  return { id, section, when: When.Editor, defaults };
-}
+const editor = (id: string, section: string, ...defaults: Default[]): Command => ({ id, section, when: 'editor', defaults });
 
 /** A command that also runs while a dialog has the keyboard. */
-function always(id: string, section: string, ...defaults: Default[]): Command {
-  return { id, section, when: When.Always, defaults };
-}
+const always = (id: string, section: string, ...defaults: Default[]): Command => ({ id, section, when: 'always', defaults });
 
 /** Every command, with the desktop app's direct shortcuts as defaults: on
  * macOS the Cmd keys of Terminal.app, iTerm, Chrome and VS Code (Cmd+T,

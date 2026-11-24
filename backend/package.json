@@ -9,7 +9,8 @@
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.bun.json",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "registry": "bun kernel/config/registry.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.5",
@@ -27,6 +28,8 @@
   },
   "dependencies": {
     "execa": "10.2.1",
+    "hono": "4.13.21",
+    "jsonc-parser": "3.3.1",
     "ssh-config": "5.3.1",
     "zod": "4.6.7"
   }

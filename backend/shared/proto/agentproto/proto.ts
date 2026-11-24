@@ -8,8 +8,11 @@ import type { Readable, Writable } from 'node:stream';
 import { EOFError, Reader, write, writeLine } from '#shared/lib/streamio.ts';
 import type { VaultProcess } from './vault.ts';
 
+/** Defined by the build (backend/scripts/build.ts: bun build --define). */
+declare const BUILD_VERSION: string | undefined;
+
 /** The build's version: git describe's, or "dev" (replaced at build time). */
-export let VERSION = 'dev';
+export let VERSION = typeof BUILD_VERSION === 'string' ? BUILD_VERSION : 'dev';
 export function setVersion(v: string): void {
   VERSION = v;
 }

@@ -128,13 +128,34 @@ as builds are.
 
 ### Wire compatibility while both exist
 
-yamux (`backend/shared/yamux.ts`) speaks hashicorp/yamux's protocol with
+yamux (`backend/shared/proto/yamux.ts`) speaks hashicorp/yamux's protocol with
 its semantics (a close is a half-close; window, keepalive and backlog as
 `agentproto.YamuxConfig`), and agentproto, herdr-core's protocol and the
 chat host's protocol keep their wire forms, so a TypeScript core serves Go
 machine builds and the other way round. The stages: shared libraries;
 the core in TypeScript with the Go machine builds; the desktop app's core
 in process; the machine side in TypeScript; the Go program removed.
+
+### What changes on the wire
+
+Behavior stays; a few answers become uniform where the Go core was not:
+
+- every refused request answers JSON `{error, message}` with a code (the Go
+  core answered some with plain text, an unknown machine among them);
+- read-only mode refuses with the code `read_only` (it was
+  `{"error": "read-only mode"}` on the core's own routes);
+- every audit record of a change carries `status` and, when it failed,
+  `error` (the code), whichever feature made it.
+
+### Building and testing the core
+
+`backend/scripts/build.ts` packs the payloads (the web UI, the machine
+builds, herdr-core, the VS Code extension) into one tar archive and
+compiles `backend/hosts/bun/main.ts` with it embedded (`bun build
+--compile`); the core reads it with `Bun.Archive`, keeping the UI's files
+in memory and reading a machine build when a machine needs one.
+`E2E_CORE=ts scripts/e2e.sh` runs the end-to-end tests against that
+executable, with the Go machine builds while machines run them.
 
 ### Claude Code
 
@@ -169,9 +190,12 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 
 ## Failure modes
 
-- A machine whose Linux cannot run Bun (an old kernel or libc): the probe
-  reports it and the machine is refused with a code, as an unknown
-  platform is today.
+- A machine Bun cannot run on: an x86-64 processor without SSE4.2 (Bun
+  stops with "this CPU is missing SSE4.2 support"; a VM given QEMU's
+  default model qemu64 is one), or musl without `libstdc++` and `libgcc`.
+  The probe reports it and the machine is refused with a code, as an
+  unknown platform is today. Kernels and C libraries as old as CentOS 7's
+  (3.10, glibc 2.17) run it (Testing).
 - A Bun runtime missing on the core's host for a platform (a musl machine
   without network on the core's host): the machine is refused with a code.
 - The SDK's undeclared `cancelAsyncMessage` disappears: its test fails at
@@ -190,9 +214,16 @@ memory as bytes. Both go into SECURITY.md with the stage that makes them.
 - `backend/**/*.test.ts` (`bun test`), ported from the Go tests package by
   package; `spec/vectors` run by both.
 - While both exist, yamux is tested against hashicorp/yamux
-  (`backend/shared/testdata/yamuxpeer`).
+  (`backend/shared/proto/testdata/yamuxpeer`).
 - `make e2e` unchanged, against each stage's executable; a Playwright
   smoke test of the desktop app.
-- Machines: Bun's runtimes were run on glibc 2.17 (CentOS 7), 2.27, 2.28
-  and musl (Alpine, with `libstdc++`) on arm64 and x64, and on macOS, with
-  every system call above.
+- Machines: `e2e/machines` boots old kernels in KVM from official cloud
+  images and old C libraries in containers, and runs a payload in each
+  (its README). With the Bun runtime 1.4.5 and every system call above
+  (`payloads/bun-probe`), all passed on CentOS 7 (kernel
+  3.10.0-1160, glibc 2.17; also on a processor without AVX), Ubuntu
+  16.04 (4.4), 18.04 (4.15), 20.04 (5.4) and 24.04 (6.8), Debian 10
+  (4.19), containers of glibc 2.17 to 2.28 and Alpine (musl 1.2.5 with
+  `libstdc++`), and macOS. `openat2` returns ENOSYS below 5.6, where the
+  agent falls back; `renameat2` works on CentOS 7's 3.10, which has it
+  backported (upstream it needs 3.15).

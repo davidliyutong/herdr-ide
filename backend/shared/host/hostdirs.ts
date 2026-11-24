@@ -138,3 +138,20 @@ function userRuntime(): string | null {
 function ownDir(fi: Stats): boolean {
   return process.platform === 'win32' || fi.uid === process.getuid!();
 }
+
+/** The user's configuration directory as Go's os.UserConfigDir has it:
+ * %AppData% on Windows, ~/Library/Application Support on macOS,
+ * $XDG_CONFIG_HOME or ~/.config elsewhere. */
+export function userConfigDir(): string {
+  if (process.platform === 'win32') {
+    if (!process.env.AppData) throw new Error('%AppData% is not defined');
+    return process.env.AppData;
+  }
+  if (process.platform === 'darwin') return join(userHomeDir(), 'Library', 'Application Support');
+  const xdg = process.env.XDG_CONFIG_HOME;
+  if (xdg) {
+    if (!xdg.startsWith('/')) throw new Error('path in $XDG_CONFIG_HOME is relative');
+    return xdg;
+  }
+  return join(userHomeDir(), '.config');
+}

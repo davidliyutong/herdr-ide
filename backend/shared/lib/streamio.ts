@@ -37,7 +37,8 @@ export class Reader {
 
   constructor(stream: Readable) {
     this.stream = stream;
-    stream.pause();
+    // A 'readable' listener puts the stream in paused mode by itself; an
+    // explicit pause() first would keep Bun's process.stdin from reading.
     stream.on('readable', this.wake).on('end', this.onEnd).on('close', this.onEnd).on('error', this.onError);
   }
 

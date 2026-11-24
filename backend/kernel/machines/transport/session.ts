@@ -106,8 +106,9 @@ export class Session {
     h: Header,
     opts: { signal?: AbortSignal; timeoutMs?: number; body?: Uint8Array } = {},
   ): Promise<{ conn: AgentStream; reply: Reply }> {
-    const st = await this.ys.open();
     const { signal } = opts;
+    if (signal?.aborted) throw signal.reason;
+    const st = await this.ys.open();
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;

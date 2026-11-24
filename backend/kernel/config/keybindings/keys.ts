@@ -177,7 +177,7 @@ function parseStroke(text: string): Stroke {
   return s;
 }
 
-// Go's strings.Fields: runs of unicode.IsSpace.
+// Runs of white space, as Unicode defines it.
 const fieldSep = /[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
 
 /** Reads a key sequence; throws a ParseError. The first stroke must hold

@@ -22,3 +22,5 @@ TODO.md
 
 # A go build of the binary in the repository root.
 /veldr
+# What bun build --compile leaves when it is interrupted.
+*.bun-build

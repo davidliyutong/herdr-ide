@@ -2,23 +2,22 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Fail } from '#kernel/fail.ts';
+import { REPO_ROOT } from '#shared/lib/repo.ts';
 import {
-  COMMANDS,
-  PLATFORMS,
-  Platform,
-  Store,
-  When,
   conflicts,
   functionKey,
-  isKeybindingsError,
+  Keybindings,
   normalize,
   parse,
   ParseError,
+  PLATFORMS,
   type Command,
+  type Platform,
   type Rule,
   type State,
+  type When,
 } from './index.ts';
-import { REPO_ROOT } from '#shared/lib/repo.ts';
 
 const vectors = join(REPO_ROOT, 'spec/vectors/keys');
 const registryPath = join(REPO_ROOT, 'spec/generated/registry.json');
@@ -35,7 +34,7 @@ function tempDir(): string {
   return d;
 }
 
-function effective(st: State, platform: string, command: string): string[] {
+function effective(st: State, platform: Platform, command: string): string[] {
   return st.effective[platform].filter((r) => r.command === command).map((r) => `${r.key}@${r.when}`);
 }
 
@@ -44,7 +43,7 @@ function errorOf(fn: () => void): string {
   try {
     fn();
   } catch (e) {
-    if (isKeybindingsError(e)) return e.code;
+    if (e instanceof Fail) return e.code;
     throw e;
   }
   return '';
@@ -148,85 +147,85 @@ describe('keybindings', () => {
   // escaping focus from a pane to app chrome, and a few keys browsers leave
   // to pages.
   test('defaults', () => {
-    const s = new Store('', COMMANDS);
-    const find = (platform: string, command: string) =>
+    const s = new Keybindings();
+    const find = (platform: Platform, command: string) =>
       s
         .defaults(platform)
         .filter((r) => r.command === command)
         .map((r) => r.key);
-    const cases: [string, string, string[]][] = [
-      [Platform.Mac, 'tab.new', ['cmd+t']],
-      [Platform.Windows, 'tab.new', ['ctrl+shift+t']],
-      [Platform.Linux, 'tab.new', ['ctrl+shift+t']],
-      [Platform.MacBrowser, 'tab.new', []],
-      [Platform.WindowsBrowser, 'find.open', ['ctrl+shift+f']],
-      [Platform.LinuxBrowser, 'find.open', ['ctrl+shift+f']],
-      [Platform.MacBrowser, 'find.open', ['cmd+f']],
-      [Platform.Mac, 'pane.close', ['cmd+w']],
-      [Platform.Windows, 'tab.close', ['ctrl+shift+w']],
-      [Platform.Linux, 'tab.close', ['ctrl+shift+w']],
-      [Platform.Mac, 'app.commandPalette', ['cmd+shift+p']],
-      [Platform.Windows, 'app.commandPalette', ['ctrl+shift+p']],
-      [Platform.Linux, 'app.commandPalette', ['ctrl+shift+p']],
-      [Platform.MacBrowser, 'app.commandPalette', ['cmd+k']],
-      [Platform.WindowsBrowser, 'app.commandPalette', []],
-      [Platform.LinuxBrowser, 'app.commandPalette', []],
-      [Platform.Mac, 'app.keyboardShortcuts', ['cmd+slash']],
-      [Platform.MacBrowser, 'app.keyboardShortcuts', ['cmd+slash']],
-      [Platform.Windows, 'app.keyboardShortcuts', ['ctrl+shift+slash']],
-      [Platform.Linux, 'app.keyboardShortcuts', ['ctrl+shift+slash']],
-      [Platform.WindowsBrowser, 'app.keyboardShortcuts', ['ctrl+shift+slash']],
-      [Platform.LinuxBrowser, 'app.keyboardShortcuts', ['ctrl+shift+slash']],
-      [Platform.WindowsBrowser, 'tab.select9', []],
-      [Platform.LinuxBrowser, 'tab.select9', []],
-      [Platform.MacBrowser, 'tab.select1', []],
-      [Platform.Mac, 'tab.select1', ['cmd+1']],
-      [Platform.Mac, 'tab.select9', ['cmd+9']],
-      [Platform.Windows, 'tab.select2', ['alt+2']],
-      [Platform.Linux, 'tab.select2', ['alt+2']],
-      [Platform.Mac, 'tab.close', ['cmd+shift+w']],
-      [Platform.Mac, 'tab.next', ['cmd+shift+bracketright', 'ctrl+tab']],
-      [Platform.Windows, 'tab.previous', ['ctrl+shift+tab']],
-      [Platform.Linux, 'tab.previous', ['ctrl+shift+tab', 'ctrl+pageup']],
-      [Platform.Mac, 'pane.zoom', ['cmd+shift+enter']],
-      [Platform.Mac, 'pane.leave', ['ctrl+b']],
-      [Platform.Windows, 'pane.leave', ['ctrl+b']],
-      [Platform.Linux, 'pane.leave', ['ctrl+b']],
-      [Platform.MacBrowser, 'pane.leave', ['ctrl+b']],
-      [Platform.WindowsBrowser, 'pane.leave', ['ctrl+b']],
-      [Platform.LinuxBrowser, 'pane.leave', ['ctrl+b']],
-      [Platform.Mac, 'pane.splitRight', ['cmd+d']],
-      [Platform.Windows, 'pane.splitRight', ['alt+shift+equal']],
-      [Platform.Linux, 'pane.splitRight', ['ctrl+shift+d']],
-      [Platform.Mac, 'pane.splitDown', ['cmd+shift+d']],
-      [Platform.Windows, 'pane.splitDown', ['alt+shift+minus']],
-      [Platform.Linux, 'pane.splitDown', ['ctrl+shift+o']],
-      [Platform.Mac, 'pane.focusLeft', ['cmd+alt+left']],
-      [Platform.Windows, 'pane.focusLeft', ['alt+shift+left']],
-      [Platform.Linux, 'pane.focusLeft', ['alt+shift+left']],
-      [Platform.Mac, 'pane.focusNext', []],
-      [Platform.Mac, 'pane.back', ['cmd+bracketleft']],
-      [Platform.Mac, 'pane.forward', ['cmd+bracketright']],
-      [Platform.Windows, 'pane.back', ['alt+left']],
-      [Platform.Linux, 'pane.back', ['alt+left']],
-      [Platform.Windows, 'pane.forward', ['alt+right']],
-      [Platform.Linux, 'pane.forward', ['alt+right']],
-      [Platform.Mac, 'pane.undoClose', ['cmd+z']],
-      [Platform.Windows, 'pane.undoClose', ['ctrl+shift+z']],
-      [Platform.Linux, 'pane.undoClose', ['ctrl+shift+z']],
-      [Platform.Windows, 'workspace.next', ['ctrl+shift+pagedown']],
-      [Platform.Linux, 'workspace.next', ['ctrl+alt+down']],
-      [Platform.MacBrowser, 'pane.zoom', []],
-      [Platform.Mac, 'code.open', ['cmd+j']],
-      [Platform.Windows, 'code.open', ['ctrl+shift+j']],
-      [Platform.Linux, 'code.open', ['ctrl+shift+j']],
-      [Platform.LinuxBrowser, 'code.open', []],
+    const cases: [Platform, string, string[]][] = [
+      ['mac', 'tab.new', ['cmd+t']],
+      ['windows', 'tab.new', ['ctrl+shift+t']],
+      ['linux', 'tab.new', ['ctrl+shift+t']],
+      ['mac-browser', 'tab.new', []],
+      ['windows-browser', 'find.open', ['ctrl+shift+f']],
+      ['linux-browser', 'find.open', ['ctrl+shift+f']],
+      ['mac-browser', 'find.open', ['cmd+f']],
+      ['mac', 'pane.close', ['cmd+w']],
+      ['windows', 'tab.close', ['ctrl+shift+w']],
+      ['linux', 'tab.close', ['ctrl+shift+w']],
+      ['mac', 'app.commandPalette', ['cmd+shift+p']],
+      ['windows', 'app.commandPalette', ['ctrl+shift+p']],
+      ['linux', 'app.commandPalette', ['ctrl+shift+p']],
+      ['mac-browser', 'app.commandPalette', ['cmd+k']],
+      ['windows-browser', 'app.commandPalette', []],
+      ['linux-browser', 'app.commandPalette', []],
+      ['mac', 'app.keyboardShortcuts', ['cmd+slash']],
+      ['mac-browser', 'app.keyboardShortcuts', ['cmd+slash']],
+      ['windows', 'app.keyboardShortcuts', ['ctrl+shift+slash']],
+      ['linux', 'app.keyboardShortcuts', ['ctrl+shift+slash']],
+      ['windows-browser', 'app.keyboardShortcuts', ['ctrl+shift+slash']],
+      ['linux-browser', 'app.keyboardShortcuts', ['ctrl+shift+slash']],
+      ['windows-browser', 'tab.select9', []],
+      ['linux-browser', 'tab.select9', []],
+      ['mac-browser', 'tab.select1', []],
+      ['mac', 'tab.select1', ['cmd+1']],
+      ['mac', 'tab.select9', ['cmd+9']],
+      ['windows', 'tab.select2', ['alt+2']],
+      ['linux', 'tab.select2', ['alt+2']],
+      ['mac', 'tab.close', ['cmd+shift+w']],
+      ['mac', 'tab.next', ['cmd+shift+bracketright', 'ctrl+tab']],
+      ['windows', 'tab.previous', ['ctrl+shift+tab']],
+      ['linux', 'tab.previous', ['ctrl+shift+tab', 'ctrl+pageup']],
+      ['mac', 'pane.zoom', ['cmd+shift+enter']],
+      ['mac', 'pane.leave', ['ctrl+b']],
+      ['windows', 'pane.leave', ['ctrl+b']],
+      ['linux', 'pane.leave', ['ctrl+b']],
+      ['mac-browser', 'pane.leave', ['ctrl+b']],
+      ['windows-browser', 'pane.leave', ['ctrl+b']],
+      ['linux-browser', 'pane.leave', ['ctrl+b']],
+      ['mac', 'pane.splitRight', ['cmd+d']],
+      ['windows', 'pane.splitRight', ['alt+shift+equal']],
+      ['linux', 'pane.splitRight', ['ctrl+shift+d']],
+      ['mac', 'pane.splitDown', ['cmd+shift+d']],
+      ['windows', 'pane.splitDown', ['alt+shift+minus']],
+      ['linux', 'pane.splitDown', ['ctrl+shift+o']],
+      ['mac', 'pane.focusLeft', ['cmd+alt+left']],
+      ['windows', 'pane.focusLeft', ['alt+shift+left']],
+      ['linux', 'pane.focusLeft', ['alt+shift+left']],
+      ['mac', 'pane.focusNext', []],
+      ['mac', 'pane.back', ['cmd+bracketleft']],
+      ['mac', 'pane.forward', ['cmd+bracketright']],
+      ['windows', 'pane.back', ['alt+left']],
+      ['linux', 'pane.back', ['alt+left']],
+      ['windows', 'pane.forward', ['alt+right']],
+      ['linux', 'pane.forward', ['alt+right']],
+      ['mac', 'pane.undoClose', ['cmd+z']],
+      ['windows', 'pane.undoClose', ['ctrl+shift+z']],
+      ['linux', 'pane.undoClose', ['ctrl+shift+z']],
+      ['windows', 'workspace.next', ['ctrl+shift+pagedown']],
+      ['linux', 'workspace.next', ['ctrl+alt+down']],
+      ['mac-browser', 'pane.zoom', []],
+      ['mac', 'code.open', ['cmd+j']],
+      ['windows', 'code.open', ['ctrl+shift+j']],
+      ['linux', 'code.open', ['ctrl+shift+j']],
+      ['linux-browser', 'code.open', []],
       // Browsers zoom pages with these keys themselves.
-      [Platform.Mac, 'view.zoomIn', ['cmd+shift+equal', 'cmd+equal']],
-      [Platform.Windows, 'view.zoomOut', ['ctrl+minus']],
-      [Platform.Linux, 'view.zoomReset', ['ctrl+0']],
-      [Platform.MacBrowser, 'view.zoomIn', []],
-      [Platform.LinuxBrowser, 'view.zoomReset', []],
+      ['mac', 'view.zoomIn', ['cmd+shift+equal', 'cmd+equal']],
+      ['windows', 'view.zoomOut', ['ctrl+minus']],
+      ['linux', 'view.zoomReset', ['ctrl+0']],
+      ['mac-browser', 'view.zoomIn', []],
+      ['linux-browser', 'view.zoomReset', []],
     ];
     for (const [platform, command, keys] of cases) expect(find(platform, command), `${platform} ${command}`).toEqual(keys);
     for (const p of PLATFORMS) {
@@ -246,7 +245,7 @@ describe('keybindings', () => {
       // The command palette and the list of shortcuts are on the keyboard
       // wherever a key is left for them.
       expect(find(p, 'app.keyboardShortcuts').length, p).toBeGreaterThan(0);
-      if (p !== Platform.WindowsBrowser && p !== Platform.LinuxBrowser) expect(find(p, 'app.commandPalette').length, p).toBeGreaterThan(0);
+      if (p !== 'windows-browser' && p !== 'linux-browser') expect(find(p, 'app.commandPalette').length, p).toBeGreaterThan(0);
     }
   });
 
@@ -254,17 +253,17 @@ describe('keybindings', () => {
   // wrote for the clients (spec/generated/registry.json), in its order.
   test('registry', () => {
     const registry = readJSON<{ commands: unknown; keybindings: Record<string, Rule[]> }>(registryPath);
-    const s = new Store('', COMMANDS);
-    expect(s.commandList()).toEqual(registry.commands as never);
+    const s = new Keybindings();
+    expect(s.commands()).toEqual(registry.commands as never);
     expect(JSON.stringify(s.allDefaults())).toBe(JSON.stringify(registry.keybindings));
   });
 
   // Strokes against each platform's defaults, as a client matches them
   // (spec/vectors/keys/defaults.json); and chords bound by the user.
   test('default and sequence vectors', () => {
-    const s = new Store('', COMMANDS);
+    const s = new Keybindings();
     const defaults = readJSON<{
-      cases: { description: string; platforms: string[]; context: KeyContext; strokes: string[]; results: string[] }[];
+      cases: { description: string; platforms: Platform[]; context: KeyContext; strokes: string[]; results: string[] }[];
     }>(join(vectors, 'defaults.json'));
     expect(defaults.cases.length).toBeGreaterThan(4);
     for (const c of defaults.cases) {
@@ -274,17 +273,17 @@ describe('keybindings', () => {
     const seq = readJSON<{ bindings: Rule[]; cases: { description: string; context: KeyContext; strokes: string[]; results: string[] }[] }>(
       join(vectors, 'sequences.json'),
     );
-    const user = new Store('', COMMANDS);
+    const user = new Keybindings();
     user.setUser(seq.bindings);
     expect(user.state().problems).toEqual([]);
-    for (const b of seq.bindings) expect(user.state().effective[Platform.Mac]).toContainEqual(b);
+    for (const b of seq.bindings) expect(user.state().effective['mac']).toContainEqual(b);
     for (const c of seq.cases) expect(run(seq.bindings, c.strokes, c.context), c.description).toEqual(c.results);
   });
 
   // Chords bound in the user's file still work, ctrl+b chords included once
   // pane.leave is unbound (otherwise ctrl+b reports a prefix conflict).
   test('user chords', () => {
-    const s = new Store(join(tempDir(), 'keybindings.json'), COMMANDS);
+    const s = new Keybindings(join(tempDir(), 'keybindings.json'));
     s.setUser([
       { key: 'ctrl+b', command: '-pane.leave' },
       { key: 'ctrl+b c', command: 'tab.new' },
@@ -296,14 +295,11 @@ describe('keybindings', () => {
       expect(effective(st, p, 'tab.new'), p).toContain('ctrl+b c@terminal');
       expect(st.conflicts[p], p).toEqual([]);
     }
-    expect(effective(st, Platform.LinuxBrowser, 'app.keyboardShortcuts')).toEqual([
-      'ctrl+shift+slash@terminal',
-      'ctrl+b shift+slash@terminal',
-    ]);
+    expect(effective(st, 'linux-browser', 'app.keyboardShortcuts')).toEqual(['ctrl+shift+slash@terminal', 'ctrl+b shift+slash@terminal']);
     // Keeping ctrl+b bound to pane.leave while adding a ctrl+b chord reports
     // a prefix conflict.
     s.setUser([{ key: 'ctrl+b c', command: 'tab.new' }]);
-    const c = s.state().conflicts[Platform.Mac];
+    const c = s.state().conflicts['mac'];
     expect(c.length).toBe(1);
     expect(c[0]).toMatchObject({ key: 'ctrl+b', prefix: true });
   });
@@ -312,7 +308,7 @@ describe('keybindings', () => {
   // rule for a command this version does not know is kept but does nothing.
   test('user rules', () => {
     const path = join(tempDir(), 'keybindings.json');
-    const s = new Store(path, COMMANDS);
+    const s = new Keybindings(path);
     s.load();
     let changed = 0;
     s.onChange(() => changed++);
@@ -325,14 +321,14 @@ describe('keybindings', () => {
       { key: 'cmd+w', command: 'tab.close' },
     ]);
     const st = s.state();
-    expect(effective(st, Platform.Mac, 'tab.new')).toEqual(['cmd+shift+t@terminal']);
+    expect(effective(st, 'mac', 'tab.new')).toEqual(['cmd+shift+t@terminal']);
     // User rules apply on every platform.
-    expect(effective(st, Platform.Windows, 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'cmd+shift+t@terminal']);
-    expect(effective(st, Platform.Linux, 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'cmd+shift+t@terminal']);
-    expect(effective(st, Platform.Mac, 'pane.zoom')).toEqual(['ctrl+k z@always']);
+    expect(effective(st, 'windows', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'cmd+shift+t@terminal']);
+    expect(effective(st, 'linux', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'cmd+shift+t@terminal']);
+    expect(effective(st, 'mac', 'pane.zoom')).toEqual(['ctrl+k z@always']);
     expect(st.problems).toEqual([{ index: 4, code: 'unknown', detail: 'future.command' }]);
     // cmd+w closes the pane and the tab now.
-    expect(st.conflicts[Platform.Mac]).toEqual([{ key: 'cmd+w', commands: ['pane.close', 'tab.close'] }]);
+    expect(st.conflicts['mac']).toEqual([{ key: 'cmd+w', commands: ['pane.close', 'tab.close'] }]);
     expect(changed).toBe(1);
 
     // The file keeps every entry as written, unknown ones included.
@@ -361,46 +357,79 @@ describe('keybindings', () => {
     expect(s.state().user.length).toBe(6);
   });
 
-  // Entries are read as Go decodes them into a struct: names in any case,
-  // null as no value; the file is written as Go indents it.
-  test('rules as Go reads and writes them', () => {
+  // The file is JSONC: comments and trailing commas are read; null members
+  // are no value; a change from the UI edits only the entries that change
+  // and keeps the rest of the text.
+  test('rules in the file', () => {
     const path = join(tempDir(), 'keybindings.json');
-    writeFileSync(path, `[{"KEY": "ctrl+k n", "Command": "tab.new", "when": null}, null, {"key": 1, "command": "tab.new"}, 3]`);
-    const s = new Store(path, COMMANDS);
+    writeFileSync(
+      path,
+      `// my keys
+[
+  {"key": "ctrl+k n", "command": "tab.new", "when": null}, // new tab
+  null,
+  {"key": 1, "command": "tab.new"},
+  3,
+  /* zoom */ {"key": "ctrl+k z", "command": "pane.zoom"},
+]
+`,
+    );
+    const s = new Keybindings(path);
     s.load();
-    expect(effective(s.state(), Platform.Linux, 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'ctrl+k n@terminal']);
+    expect(effective(s.state(), 'linux', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'ctrl+k n@terminal']);
     expect(s.state().problems).toEqual([
       { index: 1, code: 'invalid', detail: 'invalid command ""' },
       { index: 2, code: 'invalid', detail: 'not a rule object' },
       { index: 3, code: 'invalid', detail: 'not a rule object' },
     ]);
     expect(errorOf(() => s.setUser([null]))).toBe('invalid');
+    // What the UI sends: the entries it keeps and the rules it changes.
     s.setUser([
-      { KEY: 'ctrl+k n', Command: 'tab.new', when: null },
+      { key: 'ctrl+k n', command: 'tab.new', when: null },
+      { key: 'ctrl+k z', command: 'pane.zoom' },
       { key: 'ctrl+k <', command: '-tab.new', x: [] },
     ]);
-    expect(effective(s.state(), Platform.Linux, 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'ctrl+k n@terminal']);
+    expect(effective(s.state(), 'linux', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'ctrl+k n@terminal']);
     expect(s.state().problems).toEqual([]);
-    expect(readFileSync(path, 'utf8')).toBe(
-      '[\n  {\n    "KEY": "ctrl+k n",\n    "Command": "tab.new",\n    "when": null\n  },\n  {\n    "key": "ctrl+k \\u003c",\n    "command": "-tab.new",\n    "x": []\n  }\n]\n',
-    );
+    expect(readFileSync(path, 'utf8')).toBe(`// my keys
+[
+  {"key": "ctrl+k n", "command": "tab.new", "when": null}, // new tab
+  /* zoom */ {"key": "ctrl+k z", "command": "pane.zoom"},
+  {
+    "key": "ctrl+k <",
+    "command": "-tab.new",
+    "x": []
+  },
+]
+`);
+    expect(s.state().user[2]).toEqual({ key: 'ctrl+k <', command: '-tab.new', x: [] });
+    s.setUser([{ key: 'ctrl+k z', command: 'pane.zoom' }]);
+    expect(readFileSync(path, 'utf8')).toBe(`// my keys
+[
+  /* zoom */ {"key": "ctrl+k z", "command": "pane.zoom"},
+]
+`);
     s.setUser([]);
-    expect(readFileSync(path, 'utf8')).toBe('[]\n');
+    expect(readFileSync(path, 'utf8')).toBe('// my keys\n[]\n');
+    // A new file.
+    const fresh = join(tempDir(), 'keybindings.json');
+    new Keybindings(fresh).setUser([{ key: 'ctrl+k n', command: 'tab.new' }]);
+    expect(readFileSync(fresh, 'utf8')).toBe('[\n  {\n    "key": "ctrl+k n",\n    "command": "tab.new"\n  }\n]\n');
   });
 
   test('conflicts', () => {
     const got = conflicts([
-      { key: 'ctrl+b', command: 'a', when: When.Terminal },
-      { key: 'ctrl+b c', command: 'b', when: When.Terminal },
-      { key: 'ctrl+b c', command: 'c', when: When.VSCode },
-      { key: 'cmd+j', command: 'd', when: When.Always },
-      { key: 'cmd+j', command: 'e', when: When.VSCode },
-      { key: 'cmd+k', command: 'f', when: When.Dialog },
-      { key: 'cmd+k', command: 'g', when: When.Terminal },
-      { key: 'cmd+e', command: 'h', when: When.Editor },
-      { key: 'cmd+e', command: 'i', when: When.Terminal },
-      { key: 'cmd+l', command: 'j', when: When.Editor },
-      { key: 'cmd+l', command: 'k', when: When.Dialog },
+      { key: 'ctrl+b', command: 'a', when: 'terminal' },
+      { key: 'ctrl+b c', command: 'b', when: 'terminal' },
+      { key: 'ctrl+b c', command: 'c', when: 'vscode' },
+      { key: 'cmd+j', command: 'd', when: 'always' },
+      { key: 'cmd+j', command: 'e', when: 'vscode' },
+      { key: 'cmd+k', command: 'f', when: 'dialog' },
+      { key: 'cmd+k', command: 'g', when: 'terminal' },
+      { key: 'cmd+e', command: 'h', when: 'editor' },
+      { key: 'cmd+e', command: 'i', when: 'terminal' },
+      { key: 'cmd+l', command: 'j', when: 'editor' },
+      { key: 'cmd+l', command: 'k', when: 'dialog' },
     ]);
     // The main UI's bindings apply in VS Code panes too: b and c meet there;
     // those outside terminals (editor) meet the main UI's, not dialogs'.
@@ -419,7 +448,7 @@ describe('keybindings', () => {
   test('reload', () => {
     const path = join(tempDir(), 'keybindings.json');
     writeFileSync(path, `[{"key": "ctrl+k n", "command": "tab.new"}]`, { mode: 0o600 });
-    const s = new Store(path, COMMANDS);
+    const s = new Keybindings(path);
     s.load();
     let notified = 0;
     s.onChange(() => notified++);
@@ -430,16 +459,16 @@ describe('keybindings', () => {
       s.reload();
     };
     edit(`[{"key": "ctrl+k m", "command": "tab.new"}]`);
-    expect(effective(s.state(), Platform.Linux, 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'ctrl+k m@terminal']);
+    expect(effective(s.state(), 'linux', 'tab.new')).toEqual(['ctrl+shift+t@terminal', 'ctrl+k m@terminal']);
     expect(notified).toBe(1);
     edit(`[{"key": `);
-    expect(effective(s.state(), Platform.Linux, 'tab.new').length).toBe(2);
+    expect(effective(s.state(), 'linux', 'tab.new').length).toBe(2);
     expect(s.state().problems[0]).toMatchObject({ index: -1, code: 'parse' });
     expect(errorOf(() => s.setUser([]))).toBe('file');
     edit(`{"key": "ctrl+k m"}`);
     expect(s.state().problems[0]).toMatchObject({ index: -1, code: 'parse', detail: 'not a JSON array' });
     edit(`[]`);
-    expect(effective(s.state(), Platform.Linux, 'tab.new').length).toBe(1);
+    expect(effective(s.state(), 'linux', 'tab.new').length).toBe(1);
     expect(s.state().problems).toEqual([]);
     edit(`null`);
     expect(s.state().problems).toEqual([]);
@@ -447,30 +476,30 @@ describe('keybindings', () => {
 
   test('watch', async () => {
     const path = join(tempDir(), 'keybindings.json');
-    const s = new Store(path, COMMANDS);
+    const s = new Keybindings(path);
     s.load();
     const changed = new Promise<void>((resolve) => s.onChange(resolve));
     const ac = new AbortController();
     const done = s.watch(ac.signal, 10);
     writeFileSync(path, `[{"key": "ctrl+k m", "command": "tab.new"}]`);
     await changed;
-    expect(effective(s.state(), Platform.Mac, 'tab.new')).toEqual(['cmd+t@terminal', 'ctrl+k m@terminal']);
+    expect(effective(s.state(), 'mac', 'tab.new')).toEqual(['cmd+t@terminal', 'ctrl+k m@terminal']);
     ac.abort();
     await done;
   });
 
   test('invalid commands refused', () => {
     const bad: Command[][] = [
-      [{ id: 'a b', section: 'app', when: When.Terminal, defaults: [] }],
-      [{ id: '-a', section: 'app', when: When.Terminal, defaults: [] }],
+      [{ id: 'a b', section: 'app', when: 'terminal', defaults: [] }],
+      [{ id: '-a', section: 'app', when: 'terminal', defaults: [] }],
       [{ id: 'a', section: 'app', when: 'sometimes' as When, defaults: [] }],
-      [{ id: 'a', section: 'app', when: When.Terminal, defaults: [{ key: 'Ctrl+X', platforms: [] }] }],
-      [{ id: 'a', section: 'app', when: When.Terminal, defaults: [{ key: 'x', platforms: [] }] }],
+      [{ id: 'a', section: 'app', when: 'terminal', defaults: [{ key: 'Ctrl+X', platforms: [] }] }],
+      [{ id: 'a', section: 'app', when: 'terminal', defaults: [{ key: 'x', platforms: [] }] }],
       [
-        { id: 'a', section: 'app', when: When.Terminal, defaults: [] },
-        { id: 'a', section: 'app', when: When.Terminal, defaults: [] },
+        { id: 'a', section: 'app', when: 'terminal', defaults: [] },
+        { id: 'a', section: 'app', when: 'terminal', defaults: [] },
       ],
     ];
-    for (const commands of bad) expect(() => new Store('', commands), commands[0].id).toThrow();
+    for (const commands of bad) expect(() => new Keybindings('', { commands }), commands[0].id).toThrow();
   });
 });

@@ -47,6 +47,40 @@ The web UI's side stays in `web/src/plugins/<id>`. Whether a feature can be
 switched off is a property of its definition, not a different kind of
 code.
 
+A feature is exported as a factory (`machinesFeature(opts)`) whose options
+are what it needs from outside the kernel: the host's capabilities (a
+terminal on the core's host, `kernel/pty.ts`), paths, another feature's
+hook. The host composes them; features do not import each other.
+
+## The kernel
+
+- `core.ts` — `createCore` sets the features up and gives the host
+  `fetch(Request, Peer) → Response` and `run(signal)`. A feature's routes
+  are registered one by one behind its switch (404 `plugin_disabled` while
+  it is off for the requesting client) and, under `:id`, the machine's
+  resolution; prefixes are shared, so a feature's middleware never reaches
+  another's routes.
+- `http/` — Hono with the guards (`guard.ts`: Host/Origin, proxy secret,
+  CSP), `Fail` → `{error, message}`, `mutating(event)` (read-only refusal,
+  then an audit record with the path's parameters, what the handler put in
+  `c.var.audit`, the status and the error code), `jsonBody(schema)`, the
+  web UI's files (`static.ts`). `env.ts` is what a host hands in (`Peer`:
+  the remote address, whether the request is the desktop app's, how to
+  upgrade it to a channel) and what the middleware works out (`client`,
+  `sameHost`, `trustedOrigin`, `who`).
+- `channel.ts` — a WebSocket as the core sees it: text and binary
+  messages, `buffered` for backpressure; Bun's WebSocket or a MessagePort.
+- `pages.ts` — the pages on `/ws`: what each gets when it connects
+  (`onOpen`), messages dispatched by type (`on`), `broadcast`.
+- `machines/` — the machines file (`registry.ts`), one machine's
+  connection loop (`machine.ts`), the manager, the transports that reach
+  the agents (`transport/`).
+- `agent.ts` — calling a feature's action on a machine: params and result
+  validated by the protocol's schemas, large ones as bodies.
+- `payloads.ts` — what the core carries for others (the UI, machine
+  builds, herdr-core, the VS Code extension); `hosts/bun` reads them from
+  a tar archive embedded in its executable (`scripts/build.ts`).
+
 ## Rules
 
 - Errors are thrown as `Fail(code, status?, message?)`; the router answers
@@ -79,3 +113,8 @@ code.
 
 `pnpm test` (`bun test`), `pnpm typecheck`, `pnpm format`; `make test` and
 `make check` run them with the rest of the repository.
+
+`bun scripts/build.ts --out FILE --web ../web/dist --agents DIR --hc DIR
+--ext DIR [--target bun-linux-x64-baseline] [--version V]` builds the
+core's executable; `E2E_CORE=ts scripts/e2e.sh` runs the end-to-end tests
+against it (with the Go machine builds while machines run them).
