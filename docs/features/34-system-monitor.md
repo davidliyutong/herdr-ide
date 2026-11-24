@@ -31,13 +31,38 @@ three actions of the agent's `plugin` op:
 
 - `metrics`: CPU (overall, per core, load), memory and swap, per-GPU
   utilization, memory, temperature and power, network and disk throughput,
-  filesystem capacities.
+  filesystem capacities, hardware temperatures and fans.
   - Linux reads `/proc`, `/sys/class/drm` and `statfs` without a shell; the
     first sample takes two `/proc/stat` readings 100 ms apart so the first
     hover already shows CPU use. NVIDIA GPUs come from `nvidia-smi` (3 s
     bound).
   - macOS runs `sysctl`, `vm_stat`, `top`, `netstat`, `ioreg` and `df`
     concurrently with a 3 s timeout.
+  - Hardware sensors (`sensors`, left out when a machine has none):
+    temperatures (`temps`: `chip`, `label`, `tempC`, the hardware's `highC`
+    and `critC` when it reports them) and fans (`fans`: `chip`, `label`,
+    `rpm`, `minRpm`, `maxRpm`), sorted by chip, then label, numbers inside
+    by value ("Core 2" before "Core 10").
+    - Linux reads `/sys/class/hwmon/hwmon*`: `name` is the chip (a second
+      chip of the same name gets its directory appended, as two NVMe
+      drives), `tempN_input` (millidegrees) with `_label`, `_max`, `_crit`,
+      and `fanN_input` (RPM) with `_label`, `_min`, `_max`; a sensor without
+      a label is named by its file (`temp1`). A stopped fan stays with 0 RPM.
+      Without hwmon temperatures (some ARM boards, virtual machines) the
+      thermal zones supply them (`type`, `temp`; the lowest `hot` or
+      `passive` trip point as high, `critical` as critical). Temperatures
+      outside −50…200 °C are the error values of unconnected inputs and are
+      skipped. Plain file reads, no root.
+    - macOS shows the battery's temperature only (`ioreg -rn
+      AppleSmartBattery -w0`, about 10 ms, `Temperature` in hundredths of a
+      degree). Die temperatures and fans are behind the SMC and IOHID, which
+      need cgo (the binary is built without it) or `powermetrics` as root:
+      a Mac shows no fans, and a desktop Mac no sensors.
+    - Bounds: 128 temperatures and 128 fans, from at most 64 hwmon
+      directories and 64 thermal zones. The Linux scan runs beside the
+      `/proc` reads and a sample waits at most 1 s for it: a hung sysfs file
+      leaves that sample without sensors, and no new scan starts until the
+      hung one returns (one goroutine, not one per sample).
 - `processes`: the process table (command truncated to 512 bytes, CPU%,
   memory, state, elapsed time, per-process GPU memory on NVIDIA Linux).
   Linux reads `/proc/<pid>` and computes interval CPU% from tick deltas;
@@ -55,7 +80,13 @@ Routes below `/api/m/{id}/p/monitor/`: `GET metrics`, `GET processes`,
 
 ### Web UI (`web/src/plugins/monitor`)
 
-- `DashboardCard.tsx`: the shared card.
+- `DashboardCard.tsx`: the shared card. Its last section, **Sensors**,
+  shown only when the machine reports some, has the hottest temperature in
+  its head, the temperatures by chip in two columns, then the fans by chip,
+  scrolling past 180 px. A temperature is a warning within 10 °C of its
+  high threshold (15 °C of its critical one without a high one) and hot at
+  or above either; without thresholds from 80 °C and 90 °C. The sidebar's
+  hover card is the same card; the status bar item shows no sensors.
 - `StatusItem.tsx`: the status bar item and the ⌘+hover overlay. The
   overlay finds machine rows by `[data-machine-head]`, so `Sidebar.tsx`
   imports nothing from the plugin. Moving the pointer from a row to the card
@@ -95,8 +126,12 @@ and process reads never go through a shell (commands are run directly). See [SEC
 
 - `internal/agent/plugin/monitor/monitor_test.go`: the Linux and macOS
   parsers, live collection, signal guards.
+- `internal/agent/plugin/monitor/sensors_test.go`: hwmon and thermal zone
+  trees in a temporary directory (labels, thresholds, duplicate chips,
+  stopped fans, error values, the fallback, the bound), the 1 s budget
+  against a hung scan, the macOS battery's `ioreg` output.
 - `internal/plugins/monitor/monitor_test.go`: routes, mutating/audit flags,
   `invalid_pid`.
 - `web/src/__tests__/monitor.test.ts`: formatting, tree building and
-  sorting, search, the status item, the ⌘+hover overlay, Task Manager
+  sorting, temperature levels and the sensors section, search, the status item, the ⌘+hover overlay, Task Manager
   interactions.

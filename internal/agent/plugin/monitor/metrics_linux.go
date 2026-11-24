@@ -21,7 +21,7 @@ import (
 const linuxClkTck = 100.0
 
 // CollectMetrics gathers a Linux host's CPU, memory, per-GPU, network, disk I/O
-// and filesystem usage.
+// and filesystem usage, and its hardware sensors.
 func (c *Collector) CollectMetrics(ctx context.Context) (*Metrics, error) {
 	now := time.Now()
 	m := baseMetrics(now)
@@ -36,6 +36,12 @@ func (c *Collector) CollectMetrics(ctx context.Context) (*Metrics, error) {
 	go func() {
 		defer wg.Done()
 		gpus = collectLinuxGPUs(ctx)
+	}()
+	var sensors *Sensors
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sensors = c.sensorsWithin(ctx, func() *Sensors { return collectSysfsSensors("/sys") })
 	}()
 
 	// CPU: on the very first call (no previous sample), take two samples 100ms
@@ -116,6 +122,7 @@ func (c *Collector) CollectMetrics(ctx context.Context) (*Metrics, error) {
 	if gpus != nil {
 		m.GPUs = gpus
 	}
+	m.Sensors = sensors
 	return &m, nil
 }
 

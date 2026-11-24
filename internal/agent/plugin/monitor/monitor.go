@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -61,6 +62,9 @@ type Collector struct {
 	// Previous per-PID CPU ticks (Linux /proc).
 	prevProcTicks map[int]uint64
 	prevProcTime  time.Time
+
+	// sensorsBusy is set while a sensor scan runs (sensorsWithin).
+	sensorsBusy atomic.Bool
 }
 
 type cpuTicks struct {

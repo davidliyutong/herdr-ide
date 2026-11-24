@@ -3,7 +3,8 @@
 
 export const en = {
   'monitor.title': 'System Monitor',
-  'monitor.description': 'Live CPU, memory, GPU, network, disk metrics and a process task manager for each machine.',
+  'monitor.description':
+    'Live CPU, memory, GPU, network, disk metrics, temperatures and fans, and a process task manager for each machine.',
   'monitor.taskManager': 'Task Manager',
   'monitor.openTaskManager': 'Task Manager',
   'monitor.openInPane': 'Open in Pane',
@@ -32,6 +33,12 @@ export const en = {
   'monitor.netTotal': 'Total ↓ {rx} · ↑ {tx}',
   'monitor.disk': 'Disk',
   'monitor.diskIO': 'R {r} · W {w}',
+  'monitor.sensors': 'Sensors',
+  'monitor.sensorHottest': 'Hottest: {label} ({chip})',
+  'monitor.sensorHigh': 'High {t}',
+  'monitor.sensorCrit': 'Critical {t}',
+  'monitor.fans': 'Fans · {chip}',
+  'monitor.fanRpm': '{n} RPM',
   'monitor.statusTitle': 'System monitor for {machine}',
   'monitor.statusLabel': 'Monitor',
   // Task Manager

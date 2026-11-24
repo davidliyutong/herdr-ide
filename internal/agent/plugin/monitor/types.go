@@ -2,7 +2,8 @@
 
 // Package monitor is the machine side of the System Monitor & Task Manager
 // plugin (docs/features/34-system-monitor.md): live host resource metrics
-// (CPU, memory, per-GPU stats, network I/O, disk I/O and mounts), process
+// (CPU, memory, per-GPU stats, network I/O, disk I/O and mounts, hardware
+// temperatures and fan speeds), process
 // listing for the task manager, and allowlisted process signaling.
 package monitor
 
@@ -19,6 +20,7 @@ type Metrics struct {
 	Network     NetMetric    `json:"network"`
 	DiskIO      DiskIOMetric `json:"diskIO"`
 	Disks       []DiskMetric `json:"disks"`
+	Sensors     *Sensors     `json:"sensors,omitempty"`
 }
 
 // CPUMetric is overall and per-core CPU utilization plus load averages.
@@ -90,6 +92,32 @@ type DiskMetric struct {
 	UsedBytes  uint64  `json:"usedBytes"`
 	AvailBytes uint64  `json:"availBytes"`
 	UsedPct    float64 `json:"usedPct"`
+}
+
+// Sensors are a machine's hardware temperatures and fan speeds, each list
+// sorted by chip, then label, and bounded by maxSensors.
+type Sensors struct {
+	Temps []TempSensor `json:"temps,omitempty"`
+	Fans  []FanSensor  `json:"fans,omitempty"`
+}
+
+// TempSensor is one temperature reading in degrees Celsius, with the
+// thresholds the hardware reports for it, if any.
+type TempSensor struct {
+	Chip  string   `json:"chip"`
+	Label string   `json:"label"`
+	TempC float64  `json:"tempC"`
+	HighC *float64 `json:"highC,omitempty"`
+	CritC *float64 `json:"critC,omitempty"`
+}
+
+// FanSensor is one fan's speed in revolutions per minute; 0 is a stopped fan.
+type FanSensor struct {
+	Chip   string   `json:"chip"`
+	Label  string   `json:"label"`
+	RPM    float64  `json:"rpm"`
+	MinRPM *float64 `json:"minRpm,omitempty"`
+	MaxRPM *float64 `json:"maxRpm,omitempty"`
 }
 
 // ProcessInfo is one running process for the Task Manager.

@@ -19,9 +19,13 @@ import {
   flattenProcessTree,
   formatBytes,
   formatRate,
+  formatTemp,
   formatUptime,
+  groupByChip,
+  hottestTemp,
   peakGpuPct,
   pointInSafeCorridor,
+  tempLevel,
 } from '../plugins/monitor/model';
 import type { Metrics, ProcessInfo, ProcessesReply } from '../plugins/monitor/api';
 import { useMonitor } from '../plugins/monitor/state';
@@ -162,6 +166,17 @@ const sampleMetrics: Metrics = {
       usedPct: 42,
     },
   ],
+  sensors: {
+    temps: [
+      { chip: 'coretemp', label: 'Core 0', tempC: 51.2, highC: 84, critC: 100 },
+      { chip: 'coretemp', label: 'Package id 0', tempC: 78.6, highC: 84, critC: 100 },
+      { chip: 'nvme', label: 'Composite', tempC: 39 },
+    ],
+    fans: [
+      { chip: 'nct6798', label: 'CPU fan', rpm: 1180.4, minRpm: 300 },
+      { chip: 'nct6798', label: 'fan2', rpm: 0 },
+    ],
+  },
 };
 
 const sampleProcReply: ProcessesReply = {
@@ -182,6 +197,27 @@ describe('monitor model', () => {
     expect(formatUptime(3700)).toBe('1h 1m');
     expect(peakGpuPct(sampleMetrics.gpus)).toBe(78);
     expect(peakGpuPct([])).toBeUndefined();
+  });
+
+  it('rates temperatures against their thresholds and groups sensors by chip', () => {
+    const s = (tempC: number, highC?: number, critC?: number) => ({ chip: 'c', label: 'l', tempC, highC, critC });
+    expect(tempLevel(s(60, 84, 100))).toBe('ok');
+    expect(tempLevel(s(75, 84, 100))).toBe('warn');
+    expect(tempLevel(s(84, 84, 100))).toBe('hot');
+    expect(tempLevel(s(84, undefined, 100))).toBe('ok');
+    expect(tempLevel(s(86, undefined, 100))).toBe('warn');
+    expect(tempLevel(s(100, undefined, 100))).toBe('hot');
+    expect(tempLevel(s(79))).toBe('ok');
+    expect(tempLevel(s(80))).toBe('warn');
+    expect(tempLevel(s(90))).toBe('hot');
+    expect(formatTemp(78.6)).toBe('79°C');
+    expect(hottestTemp(sampleMetrics.sensors)?.label).toBe('Package id 0');
+    expect(hottestTemp(undefined)).toBeUndefined();
+    expect(groupByChip(sampleMetrics.sensors!.temps).map((g) => [g.chip, g.items.length])).toEqual([
+      ['coretemp', 2],
+      ['nvme', 1],
+    ]);
+    expect(groupByChip(undefined)).toEqual([]);
   });
 
   it('builds a cycle-safe process tree sorted by subtree CPU and preserves ancestors when searching', () => {
@@ -292,6 +328,36 @@ describe('monitor UI components', () => {
     expect(pop!.textContent).toContain('67°C');
     expect(pop!.textContent).toContain('12.5 MB/s');
     expect(pop!.textContent).toContain('420 GiB');
+
+    // Sensors: grouped by chip, the hottest in the head, a level near the high threshold.
+    const sensors = pop!.querySelector('.monitor-sensors');
+    expect(sensors).not.toBeNull();
+    expect(sensors!.querySelector('.monitor-sec-head .monitor-sec-val')!.textContent).toBe('79°C');
+    expect(sensors!.querySelector('.monitor-sec-head .monitor-sec-val')!.className).toContain('level-warn');
+    expect([...sensors!.querySelectorAll('.monitor-sensor-chip')].map((e) => e.textContent)).toEqual([
+      'coretemp',
+      'nvme',
+      'Fans · nct6798',
+    ]);
+    expect(sensors!.querySelectorAll('.monitor-sensor').length).toBe(5);
+    expect(sensors!.textContent).toContain('1180 RPM');
+    expect(sensors!.textContent).toContain('0 RPM');
+  });
+
+  it('hides the sensors section when the machine reports none', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ ...sampleMetrics, sensors: undefined }), { status: 200 })),
+    );
+    await act(async () => {
+      root.render(createElement(MonitorStatusItem));
+    });
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('.monitor-status-item')!.click();
+    });
+    const pop = host.querySelector('.monitor-popover');
+    expect(pop!.textContent).toContain('GPU Server');
+    expect(pop!.querySelector('.monitor-sensors')).toBeNull();
   });
 
   it('opens the same dashboard on Cmd+hover over a left-sidebar machine row and closes on Cmd release', async () => {

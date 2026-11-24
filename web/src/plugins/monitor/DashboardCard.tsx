@@ -12,11 +12,13 @@ import {
   Network,
   RefreshCw,
   SquareArrowOutUpLeft,
+  Fan,
+  Thermometer,
 } from 'lucide-react';
 import { t, type MessageKey } from '../../i18n';
 import { useStore } from '../../state/store';
-import type { DiskMetric, GPUMetric, Metrics } from './api';
-import { formatBytes, formatPct, formatRate, formatUptime, metricLevel } from './model';
+import type { DiskMetric, GPUMetric, Metrics, Sensors, TempSensor } from './api';
+import { formatBytes, formatPct, formatRate, formatTemp, formatUptime, groupByChip, hottestTemp, metricLevel, tempLevel } from './model';
 import { fetchMetrics, openTaskManagerFor, openTaskManagerTab, useMonitor, type HistoryPoint } from './state';
 
 interface Props {
@@ -247,8 +249,76 @@ function MetricsBody({ metrics, history, error }: { metrics: Metrics; history: r
           </div>
         )}
       </section>
+
+      {metrics.sensors && <SensorsSection sensors={metrics.sensors} />}
     </div>
   );
+}
+
+function SensorsSection({ sensors }: { sensors: Sensors }) {
+  const hottest = hottestTemp(sensors);
+  const temps = groupByChip(sensors.temps);
+  const fans = groupByChip(sensors.fans);
+  if (temps.length === 0 && fans.length === 0) return null;
+  return (
+    <section className="monitor-sec monitor-sensors">
+      <div className="monitor-sec-head">
+        <span className="monitor-sec-label">
+          <Thermometer />
+          <span>{t('monitor.sensors')}</span>
+        </span>
+        {hottest && (
+          <span
+            className={`monitor-sec-val level-${tempLevel(hottest)}`}
+            title={t('monitor.sensorHottest', { label: hottest.label, chip: hottest.chip })}
+          >
+            {formatTemp(hottest.tempC)}
+          </span>
+        )}
+      </div>
+      <div className="monitor-sensor-list">
+        {temps.map((g) => (
+          <div key={`t:${g.chip}`} className="monitor-sensor-group">
+            <div className="monitor-sensor-chip muted ellipsis">{g.chip}</div>
+            <div className="monitor-sensor-grid">
+              {g.items.map((s, i) => (
+                <div key={i} className="monitor-sensor" title={tempTitle(s)}>
+                  <span className="ellipsis">{s.label}</span>
+                  <span className={`monitor-nums level-${tempLevel(s)}`}>{formatTemp(s.tempC)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        {fans.map((g) => (
+          <div key={`f:${g.chip}`} className="monitor-sensor-group">
+            <div className="monitor-sensor-chip muted ellipsis">
+              <Fan />
+              {t('monitor.fans', { chip: g.chip })}
+            </div>
+            <div className="monitor-sensor-grid">
+              {g.items.map((f, i) => (
+                <div key={i} className="monitor-sensor">
+                  <span className="ellipsis">{f.label}</span>
+                  <span className="monitor-nums">{t('monitor.fanRpm', { n: Math.round(f.rpm) })}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function tempTitle(s: TempSensor): string {
+  return [
+    s.label,
+    s.highC !== undefined ? t('monitor.sensorHigh', { t: formatTemp(s.highC) }) : '',
+    s.critC !== undefined ? t('monitor.sensorCrit', { t: formatTemp(s.critC) }) : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function GpuRow({ gpu }: { gpu: GPUMetric }) {

@@ -78,6 +78,29 @@ export interface Metrics {
   network: NetMetric;
   diskIO: DiskIOMetric;
   disks: DiskMetric[];
+  /** Hardware temperatures and fans; absent when the machine shows none. */
+  sensors?: Sensors;
+}
+
+export interface Sensors {
+  temps?: TempSensor[];
+  fans?: FanSensor[];
+}
+
+export interface TempSensor {
+  chip: string;
+  label: string;
+  tempC: number;
+  highC?: number;
+  critC?: number;
+}
+
+export interface FanSensor {
+  chip: string;
+  label: string;
+  rpm: number;
+  minRpm?: number;
+  maxRpm?: number;
 }
 
 export interface ProcessInfo {

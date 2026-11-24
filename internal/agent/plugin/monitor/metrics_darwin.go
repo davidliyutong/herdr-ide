@@ -12,7 +12,7 @@ import (
 )
 
 // CollectMetrics gathers a macOS host's CPU, memory, per-GPU, network, disk I/O
-// and filesystem usage concurrently.
+// and filesystem usage, and the battery temperature, concurrently.
 func (c *Collector) CollectMetrics(ctx context.Context) (*Metrics, error) {
 	now := time.Now()
 	m := baseMetrics(now)
@@ -26,6 +26,7 @@ func (c *Collector) CollectMetrics(ctx context.Context) (*Metrics, error) {
 		gpuRaw     string
 		blockRaw   string
 		dfRaw      string
+		batteryRaw string
 	)
 
 	run := func(dst *string, name string, args ...string) {
@@ -45,6 +46,9 @@ func (c *Collector) CollectMetrics(ctx context.Context) (*Metrics, error) {
 	run(&gpuRaw, "ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator")
 	run(&blockRaw, "ioreg", "-r", "-c", "IOBlockStorageDriver", "-w", "0")
 	run(&dfRaw, "df", "-kP")
+	// The battery is the only temperature sensor readable without root or
+	// cgo (SMC, IOHID); a desktop Mac has none and shows no sensors.
+	run(&batteryRaw, "ioreg", "-rn", "AppleSmartBattery", "-w0")
 
 	wg.Wait()
 
@@ -95,6 +99,10 @@ func (c *Collector) CollectMetrics(ctx context.Context) (*Metrics, error) {
 
 	if dfRaw != "" {
 		m.Disks = parseDarwinDF(dfRaw)
+	}
+
+	if batteryRaw != "" {
+		m.Sensors = parseDarwinBatteryTemp(batteryRaw)
 	}
 
 	return &m, nil

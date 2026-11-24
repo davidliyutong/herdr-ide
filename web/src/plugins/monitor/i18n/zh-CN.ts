@@ -4,7 +4,7 @@ import type { en } from './en';
 
 export const zhCN: Record<keyof typeof en, string> = {
   'monitor.title': '系统监控',
-  'monitor.description': '实时查看各主机的 CPU、内存、GPU、网络、磁盘占用，并提供进程任务管理器。',
+  'monitor.description': '实时查看各主机的 CPU、内存、GPU、网络、磁盘占用及温度与风扇，并提供进程任务管理器。',
   'monitor.taskManager': '任务管理器',
   'monitor.openTaskManager': '任务管理器',
   'monitor.openInPane': '在窗格中打开',
@@ -33,6 +33,12 @@ export const zhCN: Record<keyof typeof en, string> = {
   'monitor.netTotal': '累计 ↓ {rx} · ↑ {tx}',
   'monitor.disk': '磁盘',
   'monitor.diskIO': '读 {r} · 写 {w}',
+  'monitor.sensors': '传感器',
+  'monitor.sensorHottest': '最高温：{label}（{chip}）',
+  'monitor.sensorHigh': '高温 {t}',
+  'monitor.sensorCrit': '临界 {t}',
+  'monitor.fans': '风扇 · {chip}',
+  'monitor.fanRpm': '{n} 转/分',
   'monitor.statusTitle': '{machine} 的系统监控',
   'monitor.statusLabel': '监控',
   // Task Manager
