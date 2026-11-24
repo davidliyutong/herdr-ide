@@ -7,10 +7,11 @@ import { stderrLogger } from '#shared/lib/log.ts';
 import { dirsFor } from '#shared/host/hostdirs.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { installLocal } from '#kernel/machines/transport/local.ts';
+import { fetchAssets } from '#features/vscode/fetchassets.ts';
 import { openPayloads } from './payloads.ts';
 import { serve } from './serve.ts';
 
-const USAGE = `usage: ${CORE_BIN} [serve] [flags] | node serve|dial|stop [flags] | version`;
+const USAGE = `usage: ${CORE_BIN} [serve] [flags] | fetch-assets [flags] DIR | node serve|dial|stop [flags] | version`;
 
 async function main(argv: string[]): Promise<void> {
   let cmd = 'serve';
@@ -21,6 +22,8 @@ async function main(argv: string[]): Promise<void> {
     case 'version':
       console.log(CORE_BIN, VERSION);
       return;
+    case 'fetch-assets':
+      process.exit(await fetchAssets(argv, { logger: stderrLogger(`${CORE_BIN}: `) }));
     case 'node': {
       // The local machine's node is the machine build's: install it as the
       // core would and run the command there (`node stop` of the tests).

@@ -17,3 +17,23 @@ export function parseRFC3339(s: string): Date | null {
   const t = Date.parse(s.replace(/(\.\d{3})\d+/, '$1'));
   return Number.isNaN(t) ? null : new Date(t);
 }
+
+const UNITS: Record<string, number> = { ns: 1e-6, us: 1e-3, µs: 1e-3, μs: 1e-3, ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+
+/** Milliseconds of a duration as Go's flags write it (time.ParseDuration:
+ * "20m", "1h30m", "90s", "0"); throws on anything else. */
+export function parseDuration(s: string): number {
+  const fail = () => new Error(`invalid duration ${JSON.stringify(s)}`);
+  const sign = s.startsWith('-') ? -1 : 1;
+  let rest = s.replace(/^[-+]/, '');
+  if (rest === '0') return 0;
+  if (rest === '') throw fail();
+  let ms = 0;
+  while (rest) {
+    const p = /^(\d*(?:\.\d*)?)([a-zµμ]+)/.exec(rest);
+    if (!p || p[1] === '' || p[1] === '.' || !(p[2] in UNITS)) throw fail();
+    ms += Number(p[1]) * UNITS[p[2]];
+    rest = rest.slice(p[0].length);
+  }
+  return sign * ms;
+}

@@ -12,6 +12,7 @@ import { stderrLogger, type Logger } from '#shared/lib/log.ts';
 import { userConfigDir, userHomeDir } from '#shared/host/hostdirs.ts';
 import { other as otherLoopback, inUse } from '#shared/host/loopback.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
+import { parseDuration } from '#shared/lib/gotime.ts';
 import { auditLog, noAudit } from '#kernel/audit.ts';
 import type { Channel, ChannelHandlers, ChannelOpen, Message } from '#kernel/channel.ts';
 import { Keybindings } from '#kernel/config/keybindings/index.ts';
@@ -42,6 +43,7 @@ import { agentsFeature } from '#features/agents/core.ts';
 import { historyFeature } from '#features/history/core.ts';
 import { fileTransfersFeature, filesFeature } from '#features/files/core.ts';
 import { chatFeature } from '#features/chat/core.ts';
+import { vscodeFeatures } from '#features/vscode/core.ts';
 import { readHello, desktopClient } from './parent.ts';
 import { openPayloads } from './payloads.ts';
 import { abortable } from './abortable.ts';
@@ -135,6 +137,12 @@ export async function serve(argv: string[]): Promise<void> {
   const controlDir = process.platform === 'win32' ? '' : makeControlDir(instance);
   const payloads = await openPayloads({ agentDir: f['agent-dir'], extDir: f['ext-dir'], webDir: f['web-dir'] });
   const agents = payloads.agent.bind(payloads);
+  let codeServerIdle: number;
+  try {
+    codeServerIdle = parseDuration(f['code-server-idle']);
+  } catch (e) {
+    fatal(logger, `--code-server-idle: ${(e as Error).message}`);
+  }
   // Program windows give new terminals their display and follow the
   // terminal cores; they type into the terminals' shells.
   const gui = guiFeature({ encoder: (os, arch) => payloads.encoder(os, arch), shells: (m) => terminals.shells(m) });
@@ -152,6 +160,15 @@ export async function serve(argv: string[]): Promise<void> {
     agentsFeature(),
     chatFeature(),
     historyFeature(),
+    ...vscodeFeatures({
+      version: f['code-server-version'],
+      tarballURL: f['code-server-url'],
+      extensionURL: f['extension-url'],
+      seedDirs: f['seed-dir'],
+      offline: f.offline,
+      idle: codeServerIdle,
+      bridgeVSIX: () => payloads.bridgeVSIX(),
+    }),
   ];
 
   const modules = coreModules(features);
