@@ -21,11 +21,12 @@ import { coreModules } from '#kernel/config/registry.ts';
 import { settingsRoutes } from '#kernel/config/routes.ts';
 import { Settings, settingFlags } from '#kernel/config/settings/index.ts';
 import type { FeatureDef } from '#kernel/feature.ts';
-import { createCore } from '#kernel/core.ts';
+import { createCore, type Core } from '#kernel/core.ts';
 import { Guard, isLoopbackHost } from '#kernel/http/guard.ts';
 import type { Peer } from '#kernel/http/env.ts';
 import { serveUI } from '#kernel/http/static.ts';
 import { isBreakable } from '#kernel/http/breakable.ts';
+import type { Files, Payloads } from '#kernel/payloads.ts';
 import { Machines } from '#kernel/machines/manager.ts';
 import { Registry } from '#kernel/machines/registry.ts';
 import { loadSpecs, validTarget, MAX_TARGET_LEN, type Spec } from '#kernel/machines/spec.ts';
@@ -51,7 +52,8 @@ import { openPayloads } from './payloads.ts';
 import { abortable } from './abortable.ts';
 import { bunPty } from './pty.ts';
 
-const OPTIONS = {
+/** The flags of serve besides the settings' (settingFlags). */
+export const OPTIONS = {
   listen: { type: 'string', default: '127.0.0.1:7780' },
   'parent-stdio': { type: 'boolean', default: false },
   'insecure-listen': { type: 'boolean', default: false },
@@ -88,6 +90,58 @@ export function selectSpecs(specs: Spec[], localOnly: boolean, extraSSH: readonl
     if (localOnly && i !== 0 && !named(extraSSH)) return false;
     return only.length === 0 || named(only);
   });
+}
+
+/** What the features take from the command line and the host. */
+export interface FeatureInputs {
+  payloads: Payloads;
+  /** The directory of ssh's control sockets; empty on Windows. */
+  controlDir: string;
+  /** The desktop app's key for its proofs (the launcher's hello). */
+  verifyKey: string;
+  codeServer: Omit<Parameters<typeof vscodeFeatures>[0], 'bridgeVSIX'>;
+}
+
+/** The core's features, as serve runs them (also what
+ * scripts/reference.ts lists the routes of). */
+export function coreFeatures(o: FeatureInputs): FeatureDef[] {
+  const { payloads } = o;
+  // Program windows give new terminals their display and follow the
+  // terminal cores; they type into the terminals' shells.
+  const gui = guiFeature({ encoder: (os, arch) => payloads.encoder(os, arch), shells: (m) => terminals.shells(m) });
+  const terminals = terminalsFeature({ hc: (os, arch) => payloads.hc(os, arch), paneEnv: gui.paneEnv, onReady: gui.terminalReady });
+  return [
+    machinesFeature({ home: () => userHomeDir(), controlDir: o.controlDir, pty: bunPty }),
+    terminals,
+    gui,
+    browserFeature(),
+    fileTransfersFeature(),
+    filesFeature(),
+    searchFeature(),
+    gitFeature(),
+    monitorFeature(),
+    usageFeature(),
+    vaultFeature({ verifyKey: o.verifyKey }),
+    agentsFeature(),
+    chatFeature(),
+    historyFeature(),
+    ...vscodeFeatures({ ...o.codeServer, bridgeVSIX: () => payloads.bridgeVSIX() }),
+  ];
+}
+
+/** The routes of the host beside the features': settings and
+ * keybindings, the configuration, the web UI. Returns what stops the
+ * settings' pushes. */
+export function hostRoutes(
+  core: Core,
+  o: { settings: Settings; keybindings: Keybindings; readOnly: boolean; sshLogin: boolean; web: Files | null },
+): () => void {
+  const stop = settingsRoutes(core.http, { settings: o.settings, keybindings: o.keybindings, pages: core.pages });
+  core.http.app.get('/api/config', (c) =>
+    c.json({ name: NAME, slug: SLUG, version: VERSION, read_only: o.readOnly, ssh_login: o.sshLogin, client: c.var.client }),
+  );
+  serveUI(core.http.app, o.web);
+  return stop;
 }
 
 /** A WebSocket of Bun.serve as a channel. */
@@ -145,35 +199,19 @@ export async function serve(argv: string[]): Promise<void> {
   } catch (e) {
     fatal(logger, `--code-server-idle: ${(e as Error).message}`);
   }
-  // Program windows give new terminals their display and follow the
-  // terminal cores; they type into the terminals' shells.
-  const gui = guiFeature({ encoder: (os, arch) => payloads.encoder(os, arch), shells: (m) => terminals.shells(m) });
-  const terminals = terminalsFeature({ hc: (os, arch) => payloads.hc(os, arch), paneEnv: gui.paneEnv, onReady: gui.terminalReady });
-  const features: FeatureDef[] = [
-    machinesFeature({ home: () => userHomeDir(), controlDir, pty: bunPty }),
-    terminals,
-    gui,
-    browserFeature(),
-    fileTransfersFeature(),
-    filesFeature(),
-    searchFeature(),
-    gitFeature(),
-    monitorFeature(),
-    usageFeature(),
-    vaultFeature({ verifyKey: desktop.verifyKey }),
-    agentsFeature(),
-    chatFeature(),
-    historyFeature(),
-    ...vscodeFeatures({
+  const features = coreFeatures({
+    payloads,
+    controlDir,
+    verifyKey: desktop.verifyKey,
+    codeServer: {
       version: f['code-server-version'],
       tarballURL: f['code-server-url'],
       extensionURL: f['extension-url'],
       seedDirs: f['seed-dir'],
       offline: f.offline,
       idle: codeServerIdle,
-      bridgeVSIX: () => payloads.bridgeVSIX(),
-    }),
-  ];
+    },
+  });
 
   const modules = coreModules(features);
   const flagDefs = settingFlags(modules);
@@ -282,11 +320,13 @@ export async function serve(argv: string[]): Promise<void> {
     settings,
     features,
   });
-  const stopSettingsPush = settingsRoutes(core.http, { settings, keybindings, pages: core.pages });
-  core.http.app.get('/api/config', (c) =>
-    c.json({ name: NAME, slug: SLUG, version: VERSION, read_only: f['read-only'], ssh_login: controlDir !== '', client: c.var.client }),
-  );
-  serveUI(core.http.app, payloads.web);
+  const stopSettingsPush = hostRoutes(core, {
+    settings,
+    keybindings,
+    readOnly: f['read-only'],
+    sshLogin: controlDir !== '',
+    web: payloads.web,
+  });
 
   const stop = new AbortController();
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => stop.abort());

@@ -31,21 +31,28 @@ jobs:
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
             e2e/pnpm-lock.yaml
+            backend/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
       - run: make deps
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      # gofmt, vet, types, formatting, brand, flags, notices, generated
-      # files, the terminal emulator's digest and the shared test vectors.
+      # gofmt, vet, types, formatting, brand, flags, endpoints, notices,
+      # generated files, the terminal emulator's digest and the shared test
+      # vectors.
       - run: make check
       - run: go test -race ./...
+      - run: pnpm -C backend test
       - run: pnpm -C web test
       - run: pnpm -C desktop test
       - name: Web build keeps the go:embed placeholder
         run: pnpm -C web build && test -f web/dist/.gitkeep
 
   # The integration tests against a real terminal core: the pinned
-  # herdr-core of internal/hcdist, fetched and verified as the build does.
+  # herdr-core of internal/hcdist, fetched and verified as the build does,
+  # driven by the machine build's packages and by the core's terminals.
   integration:
     runs-on: ubuntu-24.04
     steps:
@@ -53,6 +60,18 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: backend/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
+      - run: pnpm -C backend install --frozen-lockfile
       - name: Pinned terminal core
         run: go run ./scripts/fetch-hc -exe "$RUNNER_TEMP/hc/herdr-core" "$(go env GOOS)/$(go env GOARCH)"
       - run: make it
@@ -79,6 +98,10 @@ jobs:
           cache-dependency-path: |
             web/pnpm-lock.yaml
             e2e/pnpm-lock.yaml
+            backend/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
       - name: Chromium and its system libraries
         run: pnpm -C e2e install --frozen-lockfile && pnpm -C e2e exec playwright install --with-deps --no-shell chromium
       # The runner has Docker: the SSH machine tests must run, not skip.
@@ -91,10 +114,10 @@ jobs:
           name: e2e-results
           path: dist/e2e/results
 
-  # The core's tests on macOS and Windows (the check job runs them on
-  # Linux, with the race detector), the web UI's and the shell's tests, and
-  # the Electron app packaged as a directory on each system; the release
-  # workflow builds the installers.
+  # The machine build's tests on macOS and Windows (the check job runs them
+  # on Linux, with the race detector), the core's on macOS, the web UI's
+  # and the shell's tests, and the Electron app packaged as a directory on
+  # each system; the release workflow builds the installers.
   desktop:
     strategy:
       fail-fast: false
@@ -120,9 +143,17 @@ jobs:
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
             e2e/pnpm-lock.yaml
+            backend/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
       - if: runner.os != 'Linux'
         run: go test ./...
+      # The core's tests include the machine side's, which runs on Linux
+      # and macOS only.
+      - if: runner.os == 'macOS'
+        run: pnpm -C backend install --frozen-lockfile && pnpm -C backend test
       - if: runner.os != 'Linux'
         run: pnpm -C web install --frozen-lockfile && pnpm -C web test
       - run: pnpm -C desktop install --frozen-lockfile && pnpm -C desktop test
@@ -147,7 +178,11 @@ jobs:
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
             e2e/pnpm-lock.yaml
+            backend/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
       - run: make deps
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1

@@ -194,7 +194,7 @@ describe('JSON', () => {
     expect(JSON.stringify(byId('droid'))).toBe('{"id":"droid","title":"Droid"}');
   });
 
-  // The registry the Go program generated (scripts/registry) is the same,
+  // The registry the core generates (kernel/config/registry.ts) is the same,
   // member for member and in order.
   test('the generated registry', () => {
     expect(JSON.stringify(registry().agents)).toBe(JSON.stringify(all()));

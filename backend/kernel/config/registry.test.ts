@@ -41,23 +41,23 @@ describe('registry', () => {
   test('reference tables', () => {
     const doc = [
       'intro',
-      '<!-- scripts/registry: settings -->',
+      '<!-- make tokens: settings -->',
       'STALE-TABLE',
-      '<!-- end of scripts/registry: settings -->',
+      '<!-- end of make tokens: settings -->',
       'middle',
-      '<!-- scripts/registry: commands -->',
-      '<!-- end of scripts/registry: commands -->',
+      '<!-- make tokens: commands -->',
+      '<!-- end of make tokens: commands -->',
       'end',
       '',
     ].join('\n');
     const out = fillReference(doc);
     for (const want of [
-      'intro\n<!-- scripts/registry: settings -->\n\n| Setting |',
+      'intro\n<!-- make tokens: settings -->\n\n| Setting |',
       '| `terminal.fontSize` |',
       '| `gui.enabled` |',
       '`--gui`',
       '| `tab.new` | `terminal` | `cmd+t` | – | `ctrl+shift+t` | – | `ctrl+shift+t` | – |',
-      '<!-- end of scripts/registry: settings -->\nmiddle\n',
+      '<!-- end of make tokens: settings -->\nmiddle\n',
       '\nend\n',
     ]) {
       expect(out).toContain(want);

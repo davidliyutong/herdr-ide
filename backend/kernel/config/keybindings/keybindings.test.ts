@@ -249,7 +249,7 @@ describe('keybindings', () => {
     }
   });
 
-  // The commands and defaults the core serves are those scripts/registry
+  // The commands and defaults the core serves are those kernel/config/registry.ts
   // wrote for the clients (spec/generated/registry.json), in its order.
   test('registry', () => {
     const registry = readJSON<{ commands: unknown; keybindings: Record<string, Rule[]> }>(registryPath);

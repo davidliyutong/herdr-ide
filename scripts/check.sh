@@ -6,8 +6,8 @@
 #      link the server, the UI or what the core embeds
 #   2. the product slug appears in string literals only in the brand files
 #      (so a rename stays a one-file change plus scripts/rename.sh)
-#   3. every command-line flag and every HTTP route is documented in
-#      docs/reference.md
+#   3. every command-line flag and every HTTP route of the core
+#      (backend/scripts/reference.ts) is documented in docs/reference.md
 #   4. THIRD_PARTY_NOTICES.md matches the linked Go modules
 #   5. README.md and README.zh-CN.md have the same section structure
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
@@ -51,30 +51,10 @@ if [[ -n "$hits" ]]; then
   fail=1
 fi
 
-echo "==> flags documented"
-for f in $( (go run "./cmd/${slug}" serve -h; go run "./cmd/${slug}" fetch-assets -h) 2>&1 | sed -n 's/^  -\([a-z-]*\).*/\1/p' | sort -u); do
-  grep -qF -- "\`--$f\`" docs/reference.md || { echo "flag --$f missing from docs/reference.md"; fail=1; }
-done
-
-echo "==> endpoints documented"
-# Every route of the server's route table (Server.routes) and of the
-# plugins (internal/registry), as `METHOD /path` or `/path`.
-routes=$(sed -n 's/^[[:space:]]*\(route\)\{0,1\}{"\([^"]*\)", .*/\2/p' internal/server/server.go | tr ' ' '_')
-if [[ $(wc -w <<<"$routes") -lt 20 ]]; then echo "found only $(wc -w <<<"$routes") routes in internal/server/server.go"; fail=1; fi
-plugin_routes=$(go run ./scripts/registry -routes | tr ' ' '_') || { echo "listing the plugins' routes failed"; fail=1; }
-if [[ $(wc -w <<<"$plugin_routes") -lt 20 ]]; then echo "found only $(wc -w <<<"$plugin_routes") plugin routes"; fail=1; fi
-routes="$routes $plugin_routes"
-# A route may also be one of a group's: `METHOD /prefix/{name}` on a row
-# that names its last segment in backticks.
-documented() {
-  grep -qF -- "\`$1\`" docs/reference.md && return 0
-  local group=${1%/*} last=${1##*/}
-  grep -F -- "| \`$group/{" docs/reference.md | grep -qF -- "\`$last\`"
-}
-for route in $routes; do
-  route=${route//_/ }
-  documented "$route" || { echo "endpoint $route missing from docs/reference.md"; fail=1; }
-done
+echo "==> flags and endpoints documented"
+# Every flag of the command line and every route of the core, composed as
+# serve composes it (backend/scripts/reference.ts).
+(cd backend && bun scripts/reference.ts) || fail=1
 
 echo "==> third-party notices"
 scripts/notices.sh --check || fail=1
@@ -92,7 +72,7 @@ fi
 
 echo "==> design tokens and settings keys"
 go run ./scripts/tokens -check || fail=1
-go run ./scripts/registry -check || fail=1
+(cd backend && bun kernel/config/registry.ts --check) || fail=1
 
 echo "==> terminal emulator module"
 scripts/fetch-ghostty-vt.sh --check || fail=1

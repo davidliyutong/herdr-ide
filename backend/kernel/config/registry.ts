@@ -155,7 +155,7 @@ export function commandsTable(commands: readonly Command[] = COMMANDS): string {
   return head + rows.join('');
 }
 
-const markers = (name: string) => [`<!-- scripts/registry: ${name} -->`, `<!-- end of scripts/registry: ${name} -->`] as const;
+const markers = (name: string) => [`<!-- make tokens: ${name} -->`, `<!-- end of make tokens: ${name} -->`] as const;
 
 /** doc (docs/reference.md) with each generated table between its markers. */
 export function fillReference(doc: string, i: RegistryInput = core()): string {

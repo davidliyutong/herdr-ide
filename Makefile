@@ -46,7 +46,7 @@ check:
 # commands in docs/reference.md.
 tokens:
 	go run ./scripts/tokens
-	go run ./scripts/registry
+	pnpm -C backend registry
 
 # The web UI's terminal emulator, Ghostty's libghostty-vt as WebAssembly
 # (needs zig 0.17; GHOSTTY_SRC=<checkout> skips the clone).

@@ -21,6 +21,17 @@ air-gapped network. Then run: ${CORE_BIN} --offline --seed-dir DIR
   --offline                    never download
 `;
 
+/** The command's flags (docs/reference.md lists them). */
+export const FETCH_ASSETS_OPTIONS = {
+  platforms: { type: 'string', default: ALL_ASSETS.join(',') },
+  'code-server-version': { type: 'string', default: DEFAULT_VERSION },
+  'code-server-url': { type: 'string', default: DEFAULT_TARBALL_URL },
+  'extension-url': { type: 'string', default: DEFAULT_EXTENSION_URL },
+  'seed-dir': { type: 'string', multiple: true, default: [] as string[] },
+  offline: { type: 'boolean', default: false },
+  help: { type: 'boolean', short: 'h', default: false },
+} as const;
+
 /** Runs the command; the exit status (0, 1 on failure, 2 for a wrong
  * command line). The files written are printed on out. */
 export async function fetchAssets(
@@ -31,20 +42,7 @@ export async function fetchAssets(
   const err = o.err ?? ((t: string) => void process.stderr.write(t));
   let f;
   try {
-    f = parseArgs({
-      args: argv,
-      options: {
-        platforms: { type: 'string', default: ALL_ASSETS.join(',') },
-        'code-server-version': { type: 'string', default: DEFAULT_VERSION },
-        'code-server-url': { type: 'string', default: DEFAULT_TARBALL_URL },
-        'extension-url': { type: 'string', default: DEFAULT_EXTENSION_URL },
-        'seed-dir': { type: 'string', multiple: true, default: [] },
-        offline: { type: 'boolean', default: false },
-        help: { type: 'boolean', short: 'h', default: false },
-      },
-      allowPositionals: true,
-      strict: true,
-    });
+    f = parseArgs({ args: argv, options: FETCH_ASSETS_OPTIONS, allowPositionals: true, strict: true });
   } catch (e) {
     o.logger((e as Error).message);
     err(USAGE);
