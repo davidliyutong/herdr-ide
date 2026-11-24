@@ -78,7 +78,7 @@ machine with the code `local_unsupported` and reaches SSH machines only
 | `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
 | `scripts` | Build, packaging, checks, pinned downloads and generators (`tokens`, `registry`). |
 | `design` | Design tokens (`tokens.json`, [24](features/24-design-tokens.md)), `generated/registry.json`, the pinned Codex app-server schema, and shared test vectors and recordings (`testdata/`) run by Go and web tests. |
-| `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`), `fakeacp`, a scripted offline ACP agent installed as `kimi`, and `sshd`, the image of the SSH machines the tests run in Docker. |
+| `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`), `fakeacp`, a scripted offline ACP agent installed as `kimi`, `xclient`, an X program that reports its input for the program window tests, and `sshd`, the image of the SSH machines the tests run in Docker (with Xvfb). |
 
 ## Desktop launcher
 

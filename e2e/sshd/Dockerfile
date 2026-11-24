@@ -3,9 +3,10 @@
 # Each container gets a host key of its own at start and the test's
 # throwaway public key (E2E_AUTHORIZED_KEY); the harness publishes port 22
 # on 127.0.0.1 only. The agent and herdr-core the core uploads are static
-# executables: nothing else is needed but a POSIX userland.
+# executables: nothing else is needed but a POSIX userland, and Xvfb for
+# the program windows (feature 14), which the agent uses as installed.
 FROM alpine:3.22
-RUN apk add --no-cache bash openssh-server \
+RUN apk add --no-cache bash openssh-server xvfb \
   && adduser -D -s /bin/bash e2e \
   && sed -i 's/^e2e:!/e2e:*/' /etc/shadow \
   && rm -f /etc/ssh/ssh_host_* \

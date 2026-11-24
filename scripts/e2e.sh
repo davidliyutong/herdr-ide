@@ -57,6 +57,7 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
     mkdir -p "$OUT/agents" "$OUT/linux-$darch"
     CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -trimpath -tags machine -o "$OUT/agents/${SLUG}-linux-$darch" "./cmd/${SLUG}"
     CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -o "$OUT/linux-$darch/kimi" ./e2e/fakeacp
+    CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -o "$OUT/linux-$darch/e2e-xclient" ./e2e/xclient
   fi
 fi
 

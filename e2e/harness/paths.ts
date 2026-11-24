@@ -21,6 +21,9 @@ export const paths = {
   agents: join(dir, 'agents'),
   /** The fake agent built for an SSH machine's Linux. */
   linuxFake: (arch: string) => join(dir, `linux-${arch}`, 'kimi'),
+  /** The X program of the program window tests (e2e/xclient), for an SSH
+   * machine's Linux. */
+  linuxXClient: (arch: string) => join(dir, `linux-${arch}`, 'e2e-xclient'),
 };
 
 export function checkBuilt() {
