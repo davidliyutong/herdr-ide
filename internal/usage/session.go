@@ -14,8 +14,8 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
 )
 
 // What one session of a coding agent used (the conversation view's and the

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // stream records what items makes.

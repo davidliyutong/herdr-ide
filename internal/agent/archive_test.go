@@ -14,7 +14,7 @@ import (
 	"sort"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // readZip reads every entry of a zip: regular files and symbolic links by

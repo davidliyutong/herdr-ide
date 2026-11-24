@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // patience is how long a test waits for something that must happen.

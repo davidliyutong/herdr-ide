@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
 )
 
 // uploadText runs the upload action as saveText runs write.

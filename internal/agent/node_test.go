@@ -14,9 +14,9 @@ import (
 
 	"github.com/hashicorp/yamux"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
 )
 
 // startTestNode runs the node of a temporary home in this process.

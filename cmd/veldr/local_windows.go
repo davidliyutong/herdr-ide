@@ -6,8 +6,8 @@ import (
 	"context"
 	"log"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/transport"
+	"veldr/internal/machines"
+	"veldr/internal/transport"
 )
 
 // dialLocal is never called on Windows: the agent runs on Linux and macOS,

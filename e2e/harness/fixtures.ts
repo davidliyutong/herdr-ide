@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 // The tests' fixtures: an isolated instance per test, a page of it in
 // English that reaches nothing but the instance, and a terminal protocol
 // client for what the page draws on canvases.
@@ -23,7 +24,10 @@ export const test = base.extend<Fixtures>({
     try {
       await use(inst);
     } finally {
-      if (info.status !== info.expectedStatus) await info.attach('core.log', { body: inst.logs(), contentType: 'text/plain' });
+      if (info.status !== info.expectedStatus) {
+        await info.attach('core.log', { body: inst.logs(), contentType: 'text/plain' });
+        writeFileSync(info.outputPath('core.log'), inst.logs());
+      }
       await inst.stop();
     }
   },
@@ -37,6 +41,10 @@ export const test = base.extend<Fixtures>({
       if (info.status !== info.expectedStatus) {
         const log = await m.root('cat /var/log/sshd.log').catch((e) => String(e));
         await info.attach('sshd.log', { body: log, contentType: 'text/plain' });
+        // The machine's nodes' logs (in its host directories) and processes.
+        const nodes = await m.root('cat /home/*/.*/hosts/*/node.log 2>&1; ps -o pid,args').catch((e) => String(e));
+        await info.attach('machine.log', { body: nodes, contentType: 'text/plain' });
+        writeFileSync(info.outputPath('machine.log'), nodes);
       }
       await m.remove();
     }

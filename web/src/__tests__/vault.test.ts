@@ -434,7 +434,7 @@ describe('vault', () => {
   it('shows who asked: the process chain the agent saw, the directory, a page', async () => {
     useStore.setState({ machines: { m1: { label: 'gpu-box' } } as never });
     const chain = [
-      { pid: 4242, name: 'herdr-ide-mcp' },
+      { pid: 4242, name: 'veldr-mcp' },
       { pid: 4200, name: 'claude' },
     ];
     accessLog = [
@@ -470,7 +470,7 @@ describe('vault', () => {
     expect(entries[0].textContent).toContain(t('vault.result.revealed'));
     expect(entries[1].textContent).toContain(t('vault.log.count', { count: 3 }));
     expect(entries[2].textContent).toContain('/srv/app');
-    expect(entries[2].querySelector('.vault-entry-process')?.textContent).toBe('herdr-ide-mcp (4242) ← claude (4200)');
+    expect(entries[2].querySelector('.vault-entry-process')?.textContent).toBe('veldr-mcp (4242) ← claude (4200)');
     // Pages are a choice of the machine filter.
     const filter = host.querySelector<HTMLButtonElement>(`.picker-button[aria-label="${t('vault.log.machine')}"]`)!;
     expect(filter.textContent).toBe(t('vault.log.allMachines'));
@@ -483,7 +483,7 @@ describe('vault', () => {
     // The prompt shows the chain too.
     const request = { id: 'r8', m: 'm1', tool: 'get', names: ['A'], client: 'claude', process: chain, created: '1', expires: '2' };
     act(() => vaultMessage('m1', { type: 'request', request }));
-    expect(document.querySelector('[data-request="r8"] [data-meta="process"]')?.textContent).toBe('herdr-ide-mcp (4242) ← claude (4200)');
+    expect(document.querySelector('[data-request="r8"] [data-meta="process"]')?.textContent).toBe('veldr-mcp (4242) ← claude (4200)');
     act(() => vaultMessage('m1', { type: 'resolved', id: 'r8', answer: 'deny' }));
   });
 
@@ -515,14 +515,14 @@ describe('vault', () => {
   });
 
   it('gives each machine its setup', () => {
-    expect(mcpCommand({ home: '/home/u', data_dir: '/home/u/.x-dev' })).toBe('/home/u/.x-dev/bin/herdr-ide-mcp');
-    expect(mcpCommand({ home: '/Users/me' })).toBe('/Users/me/.herdr-ide/bin/herdr-ide-mcp');
-    const s = setupSnippets({ home: '/home/u', data_dir: '/home/u/.herdr-ide' });
-    expect(s.claude).toBe('claude mcp add --scope user herdr-ide-vault -- /home/u/.herdr-ide/bin/herdr-ide-mcp');
-    expect(s.codex).toBe('[mcp_servers.herdr-ide-vault]\ncommand = "/home/u/.herdr-ide/bin/herdr-ide-mcp"');
+    expect(mcpCommand({ home: '/home/u', data_dir: '/home/u/.x-dev' })).toBe('/home/u/.x-dev/bin/veldr-mcp');
+    expect(mcpCommand({ home: '/Users/me' })).toBe('/Users/me/.veldr/bin/veldr-mcp');
+    const s = setupSnippets({ home: '/home/u', data_dir: '/home/u/.veldr' });
+    expect(s.claude).toBe('claude mcp add --scope user veldr-vault -- /home/u/.veldr/bin/veldr-mcp');
+    expect(s.codex).toBe('[mcp_servers.veldr-vault]\ncommand = "/home/u/.veldr/bin/veldr-mcp"');
     expect(JSON.parse(s.json)).toEqual({
-      mcpServers: { 'herdr-ide-vault': { command: '/home/u/.herdr-ide/bin/herdr-ide-mcp', args: [] } },
+      mcpServers: { 'veldr-vault': { command: '/home/u/.veldr/bin/veldr-mcp', args: [] } },
     });
-    expect(setupSnippets({ home: '/home/a b' }).claude).toContain("'/home/a b/.herdr-ide/bin/herdr-ide-mcp'");
+    expect(setupSnippets({ home: '/home/a b' }).claude).toContain("'/home/a b/.veldr/bin/veldr-mcp'");
   });
 });

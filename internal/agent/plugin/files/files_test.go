@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
 )
 
 // testEnv is an agent's environment with HOME in a temporary directory.

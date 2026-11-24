@@ -12,10 +12,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/store"
-	"herdr-ide/internal/usage"
-	"herdr-ide/internal/userfile"
+	"veldr/internal/plugin"
+	"veldr/internal/store"
+	"veldr/internal/usage"
+	"veldr/internal/userfile"
 )
 
 const (

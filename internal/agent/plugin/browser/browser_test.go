@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // service is a listener on a loopback address of the test that answers

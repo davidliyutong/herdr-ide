@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"unicode/utf8"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatproto"
 )
 
 // elision joins the start and the end of a string that was cut, as the

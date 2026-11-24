@@ -14,9 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // The timings of a session; variables for the tests.

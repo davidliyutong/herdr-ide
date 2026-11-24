@@ -10,8 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"herdr-ide/internal/agent"
-	"herdr-ide/internal/brand"
+	"veldr/internal/agent"
+	"veldr/internal/brand"
 )
 
 // machineUsage names the commands of a machine's helper in the usage line.

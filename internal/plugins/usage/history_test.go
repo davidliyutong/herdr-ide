@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/store"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
+	"veldr/internal/store"
 )
 
 // legacyHistory is a history file as the core wrote it before the

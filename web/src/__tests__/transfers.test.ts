@@ -22,7 +22,7 @@ import { detail, duration, TransfersTray } from '../components/Transfers';
 const file = (name: string, size: number) => new File([new Uint8Array(size)], name);
 const active = () => useTransfers.getState().active;
 const history = () => useTransfers.getState().history;
-const stored = () => JSON.parse(localStorage.getItem('herdr-ide.uploads') ?? 'null');
+const stored = () => JSON.parse(localStorage.getItem('veldr.uploads') ?? 'null');
 const toasts = () => useStore.getState().toasts.map((t) => t.msg);
 const ok = (path: string): [number, unknown] => [200, { name: path.split('/').pop(), size: 1, path }];
 
@@ -133,7 +133,7 @@ describe('the upload history', () => {
     expect(stored()).toHaveLength(HISTORY_MAX);
 
     // Another tab of this browser finished one meanwhile: opening shows it.
-    localStorage.setItem('herdr-ide.uploads', JSON.stringify([{ ...history()[0], id: 'other', name: 'there.txt' }, { bogus: true }]));
+    localStorage.setItem('veldr.uploads', JSON.stringify([{ ...history()[0], id: 'other', name: 'there.txt' }, { bogus: true }]));
     useTransfers.getState().setPanel(true);
     expect(history().map((x) => x.name)).toEqual(['there.txt']);
 

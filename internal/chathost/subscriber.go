@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 const (

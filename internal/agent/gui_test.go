@@ -30,8 +30,8 @@ import (
 	"github.com/jezek/xgb/composite"
 	"github.com/jezek/xgb/xproto"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/jpegstrip"
+	"veldr/internal/agentproto"
+	"veldr/internal/jpegstrip"
 )
 
 // Each start writes a new cookie for the display, to Xvfb's file and the

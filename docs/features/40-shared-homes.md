@@ -2,7 +2,7 @@
 
 ## Context
 
-A machine's state is in the user's home (`~/.herdr-ide[-<instance>]`,
+A machine's state is in the user's home (`~/.veldr[-<instance>]`,
 [02](02-multi-machine-transport.md)). On clusters the home is often one
 NFS export that every node mounts, so several machines of the UI write
 the same directory. What a process of one host keeps there must not be
@@ -51,8 +51,8 @@ the host with the network, and names what a host must find again.
 | Kind | Where | What |
 | --- | --- | --- |
 | Runtime, host-local, private | `/run/user/<uid>/<data dir name without its dot>-<hash>` when the system has that directory (the user's, 0700; tmpfs per host); else `<data>/run-<hostid.ID>` | sockets (node, terminal core and its holders, code-server, vault, bridge, chat host), locks, `cs.pid`, the display's state and X authority |
-| Persistent, this host's | `<data>/hosts/<hostid.Key>/` | the terminal core's executable, code-server's user data and extensions, logs of node, code-server and displays; in `~/.herdr-ide/hosts/<hostid.Key>/xvfb/`, Xvfb packages for the host's instances |
-| Shared | `<data>/` and `~/.herdr-ide/` | databases named per host ([38](38-sqlite-state.md)), agent builds by content hash, code-server per version, system and architecture, uploads with unique names, the vault's MCP command |
+| Persistent, this host's | `<data>/hosts/<hostid.Key>/` | the terminal core's executable, code-server's user data and extensions, logs of node, code-server and displays; in `~/.veldr/hosts/<hostid.Key>/xvfb/`, Xvfb packages for the host's instances |
+| Shared | `<data>/` and `~/.veldr/` | databases named per host ([38](38-sqlite-state.md)), agent builds by content hash, code-server per version, system and architecture, uploads with unique names, the vault's MCP command |
 
 The runtime directory's name carries a hash of the data directory's real
 path, so another home (a test's `HOME`) never meets it. `/run/user/<uid>`
@@ -61,10 +61,10 @@ started by a login lack; it must be the user's and private, or the data
 directory's is used. A lingering user
 keeps `/run/user/<uid>` as long as the terminal core's service runs.
 
-**The terminal core's session** is `herdr-ide[-<instance>]-<hostid.ID>`:
+**The terminal core's session** is `veldr[-<instance>]-<hostid.ID>`:
 herdr-core's state directory and service are per host.
 
-**The vault's MCP command** (`<data>/bin/herdr-ide-mcp`, named by agents'
+**The vault's MCP command** (`<data>/bin/veldr-mcp`, named by agents'
 configurations, which a shared home shares) is a shell script that runs
 the link of the host's `uname -s` and `uname -m` beside it, each link
 pointing at that platform's agent build.
@@ -95,7 +95,7 @@ days.
   everything as one host would; give the clone a new id
   (`systemd-machine-id-setup`).
 - **A machine used by a build before this layout**: that build's
-  terminal core (session `herdr-ide[-<instance>]`, socket
+  terminal core (session `veldr[-<instance>]`, socket
   `<data>/run/hc.sock`) and its terminals run on unseen until stopped
   (`HC_SESSION=… HC_SOCKET=… <data>/hc/herdr-core server stop`); its
   files in `<data>` (`run/`, `hc/`, `cs-data/`, `cs-ext/`, logs) stay

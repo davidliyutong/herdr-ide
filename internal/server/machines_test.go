@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/transport"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/transport"
 )
 
 // machinesFixture is a core with the local machine, a stored SSH machine

@@ -14,7 +14,7 @@ import (
 	"os"
 	"path"
 
-	"herdr-ide/internal/checksum"
+	"veldr/internal/checksum"
 )
 
 const Version = "0.1.21"

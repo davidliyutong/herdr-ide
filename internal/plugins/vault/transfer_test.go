@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/machines"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/machines"
+	vaultstore "veldr/internal/vault"
 )
 
 const filePass = "a long export phrase"

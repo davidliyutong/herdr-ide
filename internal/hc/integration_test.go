@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const itSession = "herdr-ide-it"
+const itSession = "veldr-it"
 
 // startCore starts a core whose socket and state live in temporary
 // directories and returns a connection to it and its hello.

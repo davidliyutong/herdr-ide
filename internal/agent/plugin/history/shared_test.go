@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
+	"veldr/internal/agent/plugin"
 )
 
 // Another core's capture of the data directory stands for this core's for

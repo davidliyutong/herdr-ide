@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // The session updates of a conversation's content.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/settings"
+	"veldr/internal/settings"
 )
 
 // Values of earlier versions change once, in place: the silent agents

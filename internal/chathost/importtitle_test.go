@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatproto"
 )
 
 // A chat that imports a session takes the title its adapter states of the

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // The shared vectors (design/testdata/transcript/*.json, which the web UI's

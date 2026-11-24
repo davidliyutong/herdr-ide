@@ -17,8 +17,8 @@ import (
 	"github.com/jezek/xgb/shm"
 	"github.com/jezek/xgb/xproto"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/jpegstrip"
+	"veldr/internal/agentproto"
+	"veldr/internal/jpegstrip"
 )
 
 // Sending windows. Every guiTick the pump collects what changed in watched

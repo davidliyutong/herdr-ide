@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
+	"veldr/internal/chatproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
 )
 
 // fakeChatHost is a machine's chat host in the test: chatproto over

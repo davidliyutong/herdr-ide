@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // A session another Claude Code runs (its record names it, of a process

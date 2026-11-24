@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 // ControlDir returns the private directory holding an instance's ssh

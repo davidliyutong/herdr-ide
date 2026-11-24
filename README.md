@@ -1,4 +1,4 @@
-# herdr-ide
+# veldr
 
 English | [简体中文](README.zh-CN.md)
 
@@ -132,15 +132,19 @@ Requirements:
 
 ```bash
 make deps && make build
-cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
-./herdr-ide
+cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
+./veldr
 ```
 
 Or extract the matching archive from `dist/release/` (or GitHub Releases)
-and run `./herdr-ide`. Add SSH machines with **Add machine…** in the
+and run `./veldr`. Add SSH machines with **Add machine…** in the
 sidebar. Coming from a version that drew its panes from herdr: settings,
 keys and machines move over on the first start, terminals stay in herdr
 ([migration](docs/deployment.md#migrating-from-versions-that-used-herdr)).
+Coming from herdr-ide (this product's earlier name): veldr installs beside
+it and copies its settings; herdr-ide's terminals keep running until you
+move their tabs from the status bar's **herdr-ide** item, one at a time
+([moving](docs/deployment.md#moving-from-herdr-ide)).
 
 Open <http://127.0.0.1:7780>. The status bar opens the command palette and
 the list of shortcuts. All flags are listed in
@@ -174,7 +178,7 @@ Download it from GitHub Releases:
   OpenSSH Client and works on SSH machines only: accept each host key once
   with `ssh <target>` and use a key the ssh agent holds (`ssh-add`), since
   the app cannot ask for a password.
-- **Linux:** `sudo apt install ./herdr-ide-<version>-linux-amd64.deb`
+- **Linux:** `sudo apt install ./veldr-<version>-linux-amd64.deb`
   (Ubuntu 24.04 and later need the deb, which lets Chromium's sandbox run).
   The AppImage needs `chmod +x` and FUSE 2 (`libfuse2`, `libfuse2t64` on
   Ubuntu 24.04).
@@ -203,7 +207,7 @@ and isolated development.
 
 ## Remote access
 
-herdr-ide has no login of its own: keep it on `127.0.0.1` and put an
+veldr has no login of its own: keep it on `127.0.0.1` and put an
 authenticating reverse proxy with HTTPS in front (Tailscale, Caddy, nginx), then
 pass its origin with `--allowed-origin`. Optional guardrails: a proxy secret
 header, a read-only mode and an audit log. See
@@ -213,8 +217,8 @@ header, a read-only mode and an audit log. See
 
 Machines never download anything (the AI usage plugin asks the AI
 providers' hosts from the machines whose CLIs are signed in to them; it
-fails quietly without internet). If the host running herdr-ide is offline
-too, run `herdr-ide fetch-assets DIR` on a connected machine, carry `DIR` over
+fails quietly without internet). If the host running veldr is offline
+too, run `veldr fetch-assets DIR` on a connected machine, carry `DIR` over
 and start with `--offline --seed-dir DIR`. Downloads are verified against
 pinned SHA-256 digests. Details in
 [docs/deployment.md](docs/deployment.md#air-gapped-networks).
@@ -230,7 +234,7 @@ pinned SHA-256 digests. Details in
 ## Development
 
 ```bash
-make dev-core      # core on :7790 with --instance dev (terminal core session herdr-ide-dev-<host id>)
+make dev-core      # core on :7790 with --instance dev (terminal core session veldr-dev-<host id>)
 make dev-web       # UI with hot reload on :5173
 make check test    # before sending a PR
 ```

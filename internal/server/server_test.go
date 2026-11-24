@@ -26,9 +26,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/transport"
+	"veldr/internal/brand"
+	"veldr/internal/machines"
+	"veldr/internal/transport"
 )
 
 func TestParseRange(t *testing.T) {
@@ -152,8 +152,8 @@ func TestUploadNameUniqueAndSafe(t *testing.T) {
 
 func TestUploadIntoDirectory(t *testing.T) {
 	now := time.Date(2026, 10, 30, 2, 15, 0, 0, time.UTC)
-	h, err := uploadHeader(url.Values{"name": {"shot.png"}}, "/home/u/.herdr-ide/uploads", now)
-	if err != nil || !h.Mkdirs || h.Unique || path.Dir(h.Path) != "/home/u/.herdr-ide/uploads" {
+	h, err := uploadHeader(url.Values{"name": {"shot.png"}}, "/home/u/.veldr/uploads", now)
+	if err != nil || !h.Mkdirs || h.Unique || path.Dir(h.Path) != "/home/u/.veldr/uploads" {
 		t.Fatalf("upload directory: %+v %v", h, err)
 	}
 	// Into a pane's directory under the file's own name, without replacing.

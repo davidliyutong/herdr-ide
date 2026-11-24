@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // maxLimits bounds the rate limit windows a chat states.

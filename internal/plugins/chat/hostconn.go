@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/chatproto"
+	"veldr/internal/plugin"
 )
 
 // The machine side's action and its parameters (internal/agent/plugin/chat).

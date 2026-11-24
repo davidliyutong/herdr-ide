@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/hostdirs"
+	"veldr/internal/hostdirs"
 )
 
 // The display keeper ties Xvfb to the instance's terminal core, whose

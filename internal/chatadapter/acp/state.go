@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // Bounds of what a chat keeps of its agent's state.

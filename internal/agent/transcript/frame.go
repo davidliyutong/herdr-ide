@@ -6,7 +6,7 @@ import (
 	"context"
 	"io"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // Frame is what one line of a Claude Code transcript gives, read on its

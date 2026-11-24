@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 // Terminals of the product's own helpers. A machine's agent runs a helper

@@ -47,7 +47,7 @@ Agent: `internal/agent/gui.go`.
   - The *plain display* is Xvfb, drawing in memory. Where the machine has
     none it is fetched with `apt-get download xvfb` (no privileges; apt
     verifies the package) and unpacked into
-    `~/.herdr-ide/hosts/<host>/xvfb/<version>/` (per host: a package is of
+    `~/.veldr/hosts/<host>/xvfb/<version>/` (per host: a package is of
     the host's distribution and architecture).
     Xwayland is never fetched.
   - An Xwayland that does not come up, or comes up without DRI3, is ended
@@ -135,7 +135,7 @@ Agent: `internal/agent/guigpu.go`; library `scripts/gpupick`.
 - The library is ~10 kB of C, built for linux/amd64 and linux/arm64 against
   glibc 2.17 (`scripts/build-gpupick.sh`; builds and digests committed and
   checked by `make check`). The agent carries it and writes it to
-  `~/.herdr-ide/gpupick/<sha256 prefix>/` (0600) when the core asks (action
+  `~/.veldr/gpupick/<sha256 prefix>/` (0600) when the core asks (action
   `pick`, never in read-only mode), after checking the dynamic loader takes
   it (a `noexec` home would make every program complain). Machines with
   fewer than two NVIDIA GPUs get nothing.
@@ -230,7 +230,7 @@ Setting `gui.video`, on by default. Agent `internal/agent/guiwm_video.go`,
 - **Encoder.** A small program on ffmpeg's libraries (LGPL build with
   libvpx, libva and libdrm; static except glibc 2.28; linux/amd64 and
   arm64) that the core embeds and pushes to each Linux machine:
-  `~/.herdr-ide/video/<sha256 prefix>/encoder`, verified by digest. Release
+  `~/.veldr/video/<sha256 prefix>/encoder`, verified by digest. Release
   builds embed it (`scripts/build-ffmpeg.sh`, [deployment](../deployment.md));
   a build without it sends pictures.
   - H.264 comes from NVENC, else VA-API (the first usable render node whose
@@ -375,7 +375,7 @@ section and as flags ([reference](../reference.md#program-windows),
   the status bar shows the machine's display failed; clicking shows the
   error, how it is retried, and a link to the settings. Retries back off to
   one every 5 minutes. Logs on the machine:
-  `~/.herdr-ide[-<instance>]/hosts/<host>/xvfb.log`, `xwayland.log`,
+  `~/.veldr[-<instance>]/hosts/<host>/xvfb.log`, `xwayland.log`,
   `gui-keep.log`.
 - **Network interruption** → browser windows show "Reconnecting"; programs
   and windows stay and are adopted again.

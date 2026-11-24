@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // The messages a denial gives the model.

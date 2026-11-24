@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/plugins/vscode"
-	"herdr-ide/internal/settings"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/plugins/vscode"
+	"veldr/internal/settings"
 )
 
 // codeServerProxy serves /m/{id}/code/... from the machine's code-server,

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"herdr-ide/internal/usage"
+	"veldr/internal/usage"
 )
 
 const fixture = `{

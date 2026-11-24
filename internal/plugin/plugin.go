@@ -18,10 +18,10 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/settings"
+	"veldr/internal/transport"
 )
 
 // Route is an HTTP route of a plugin.

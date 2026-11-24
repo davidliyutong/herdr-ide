@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // A line's Frame: its events as a read gives them, the block each was

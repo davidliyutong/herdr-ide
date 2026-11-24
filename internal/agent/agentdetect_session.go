@@ -8,9 +8,9 @@ import (
 	"slices"
 	"time"
 
-	"herdr-ide/internal/agent/detect"
-	"herdr-ide/internal/agent/sessions"
-	"herdr-ide/internal/agentkinds"
+	"veldr/internal/agent/detect"
+	"veldr/internal/agent/sessions"
+	"veldr/internal/agentkinds"
 )
 
 // The session each agent uses (DetectEvent.Session), found while the core

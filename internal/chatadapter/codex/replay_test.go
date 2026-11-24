@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // handshake is the recording whose answers (model/list, account/read)
@@ -384,7 +384,7 @@ func TestReplayHandshake(t *testing.T) {
 	}
 	ci := in[0]["clientInfo"].(map[string]any)
 	caps := in[0]["capabilities"].(map[string]any)
-	if ci["name"] != clientName || ci["title"] != "herdr-ide" || ci["version"] != "1.2.3" || caps["experimentalApi"] != true || caps["requestAttestation"] != false {
+	if ci["name"] != clientName || ci["title"] != "veldr" || ci["version"] != "1.2.3" || caps["experimentalApi"] != true || caps["requestAttestation"] != false {
 		t.Errorf("initialize %v", in[0])
 	}
 	recv := f.received(t, 1)

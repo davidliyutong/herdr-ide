@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentkinds"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // own are the programs this process started (by pid) that have not exited:

@@ -18,12 +18,12 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agent/sessions"
-	"herdr-ide/internal/agent/transcript"
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agent/sessions"
+	"veldr/internal/agent/transcript"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 const (

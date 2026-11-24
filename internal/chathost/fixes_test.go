@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/store"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
+	"veldr/internal/store"
 )
 
 // rawDo sends a request and reads its answer, without the test's T (for

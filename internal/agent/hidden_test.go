@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
 )
 
 // hiddenCore is a terminal core on an agent's socket that takes
@@ -210,7 +210,7 @@ func TestRunHidden(t *testing.T) {
 	core.mu.Lock()
 	core.get = `"result":` + string(helperRec)
 	core.mu.Unlock()
-	core.set(`"error":{"code":-32000,"message":"a live terminal is already named \"herdr-ide-chat-host\"","data":{"kind":"name_taken"}}`)
+	core.set(`"error":{"code":-32000,"message":"a live terminal is already named \"veldr-chat-host\"","data":{"kind":"name_taken"}}`)
 	if err := a.runHidden(ctx, agentproto.ChatHostName, argv); err != nil {
 		t.Errorf("a name that is taken: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestKillHidden(t *testing.T) {
 	}
 }
 
-// When a user manually starts a terminal named herdr-ide-chat-host (without
+// When a user manually starts a terminal named veldr-chat-host (without
 // the hidden label/argv), runHidden leaves it alone and starts the chat host
 // under a disambiguated hidden fallback name, and killHidden only ever kills
 // the fallback helper (never the user's terminal).

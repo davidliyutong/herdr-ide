@@ -6,7 +6,7 @@ import (
 	"context"
 	"strings"
 
-	"herdr-ide/internal/agent/plugin"
+	"veldr/internal/agent/plugin"
 )
 
 // Done answers a change: what git printed.

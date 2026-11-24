@@ -33,7 +33,7 @@ import (
 	"github.com/awnumar/memguard"
 	"golang.org/x/crypto/argon2"
 
-	"herdr-ide/internal/userfile"
+	"veldr/internal/userfile"
 )
 
 // Limits of what the vault keeps.

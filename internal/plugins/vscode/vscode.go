@@ -11,7 +11,7 @@
 // neither fetched nor started on a machine for it.
 package vscode
 
-import "herdr-ide/internal/plugin"
+import "veldr/internal/plugin"
 
 // ID is the plugin's id.
 const ID = "vscode"

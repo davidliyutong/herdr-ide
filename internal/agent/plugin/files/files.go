@@ -31,8 +31,8 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
 )
 
 const (

@@ -36,10 +36,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/agentkinds"
+	"veldr/internal/chatproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
 )
 
 // ID names the plugin on every side.

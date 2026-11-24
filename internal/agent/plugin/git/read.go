@@ -20,7 +20,7 @@ import (
 	"syscall"
 	"unicode/utf8"
 
-	"herdr-ide/internal/agent/plugin"
+	"veldr/internal/agent/plugin"
 )
 
 // Repo is a repository as the panel shows it.

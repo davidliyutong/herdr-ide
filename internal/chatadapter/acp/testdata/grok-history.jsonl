@@ -1,4 +1,4 @@
-{"event":{"t":"notice","method":"_herdr-ide/imported","params":{"lossy":true}}}
+{"event":{"t":"notice","method":"_veldr/imported","params":{"lossy":true}}}
 {"event":{"t":"info","chat":{"id":"","kind":"","title":"Create hello.txt containing hi","cwd":"","sessionId":"","state":"","status":"","created":"0001-01-01T00:00:00Z","updated":"0001-01-01T00:00:00Z","seq":0,"seen":0,"capabilities":{"images":false,"compact":false,"queue":false,"plan":false,"questions":false,"effort":false,"model":false,"cancelQueued":false}}}}
 {"event":{"t":"user","content":[{"type":"text","text":"Reply with the word hi"}]}}
 {"event":{"t":"turn","state":"start"}}

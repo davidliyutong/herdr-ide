@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 // The agents' programs live in directories that only the user's shell

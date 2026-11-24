@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 // cleanEnv is the agent's environment for the programs it starts (the

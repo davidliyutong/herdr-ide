@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/settings"
+	"veldr/internal/transport"
 )
 
 func testMachines() *machines.Manager {

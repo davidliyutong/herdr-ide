@@ -32,7 +32,7 @@ Windows core host; the interactive ssh login from a core on Windows.
 ### Agent
 
 The agent is served by each machine's node, the command `node` of the one
-binary (`cmd/herdr-ide`, [39](39-nodes.md)). The
+binary (`cmd/veldr`, [39](39-nodes.md)). The
 core carries it for machines as the same program built with the tag
 `machine`: a static Go binary (`CGO_ENABLED=0`) for linux/darwin ×
 amd64/arm64 without the server, the UI and the embedded payloads, embedded
@@ -51,7 +51,7 @@ yamux configuration (`agentproto.YamuxConfig`), lives in
 
 1. probe `uname -s`, `uname -m` and `$HOME` through `/bin/sh -c` (works with
    any login shell);
-2. if `~/.herdr-ide/agent/<hash>/herdr-ide` is missing, upload it with
+2. if `~/.veldr/agent/<hash>/veldr` is missing, upload it with
    `cat >` to a temporary name and rename it atomically; builds unused for
    14 days are removed in the same step;
 3. `exec` it with `node dial --instance NAME` and speak yamux over the ssh
@@ -70,7 +70,7 @@ This avoids sshd's `MaxSessions` and any dependence on
 
 `SSHArgs` uses `BatchMode=yes`, keepalives (`ServerAliveInterval=15`,
 `ServerAliveCountMax=4`) and a ControlMaster (`ControlPersist=600`) in a
-private control directory `/tmp/herdr-ide-<uid>/s`, one per instance
+private control directory `/tmp/veldr-<uid>/s`, one per instance
 (`s-<instance>`, a hash for names over 16 characters).
 
 The master exists so that an interactive login (password, 2FA, host key)
@@ -95,7 +95,7 @@ node through its socket, starting it from the core's own executable when
 none answers: identical protocol, no ssh. `transport.DialLocal` runs an
 agent in the tests' process over a socketpair.
 
-A core on Windows has no local agent (`cmd/herdr-ide/local_windows.go`): its
+A core on Windows has no local agent (`cmd/veldr/local_windows.go`): its
 local machine is listed in *error* with `local_unsupported` and never
 dialed. WSL is not built in; a WSL distribution with an ssh server is added
 as an SSH machine.
@@ -158,7 +158,7 @@ result is written at once, so the import happens once
 
 ### Choosing machines for a run
 
-`cmd/herdr-ide` (`selectSpecs`):
+`cmd/veldr` (`selectSpecs`):
 
 - `--ssh TARGET` (repeatable) adds a machine for this run only, not stored;
 - `--local-only` connects the local machine and the `--ssh` targets;
@@ -219,10 +219,10 @@ When the first client of `/api/v1/term` subscribes to a machine's terminals
 1. asks the agent for the terminal core's status (op `hc`);
 2. uploads this build's herdr-core (`internal/hcdist`) when the installed
    one differs; the agent checks the digest and swaps it into
-   `~/.herdr-ide[-<instance>]/hosts/<host>/hc/`, and a running core of
+   `~/.veldr[-<instance>]/hosts/<host>/hc/`, and a running core of
    another build is restarted, its successor adopting the programs;
 3. starts a core if none runs (session
-   `herdr-ide[-<instance>]-<host id>`, detached from the agent so its
+   `veldr[-<instance>]-<host id>`, detached from the agent so its
    programs outlive it);
 4. connects (op `hc-api`) and subscribes to its events.
 
@@ -240,8 +240,8 @@ subscribed to anew. Refused read-only, audited
 
 ### Instances
 
-`--instance NAME` makes agents use `~/.herdr-ide-NAME` (sockets, uploads,
-the terminal core and its session `herdr-ide-NAME-<host id>`, code-server's
+`--instance NAME` makes agents use `~/.veldr-NAME` (sockets, uploads,
+the terminal core and its session `veldr-NAME-<host id>`, code-server's
 data) and
 the core its own settings, keybindings and machines files, so a daily and a
 development core can share machines safely. Agent builds, code-server
@@ -314,7 +314,7 @@ terminal core apart ([40](40-shared-homes.md)).
 - `internal/server/term_test.go` (`TestHCLifecycle`, `TestTermWithoutCore`)
   and `internal/agent/hc_test.go` (`TestHCInstallStartAndPipe`): install,
   start, stop and restart of the terminal core.
-- `cmd/herdr-ide/main_test.go`: `--local-only` and `--machine`.
+- `cmd/veldr/main_test.go`: `--local-only` and `--machine`.
 - Web: `menus.test.ts`, `sidebarMachines.test.ts`, `addMachine.test.ts`,
   `addMachineHosts.test.ts`, `codePanes.test.ts` in `web/src/__tests__`.
 - Tests that need an agent skip on Windows (`dialAgent` in

@@ -17,12 +17,12 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agent"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hc"
-	"herdr-ide/internal/hostdirs"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agent"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hc"
+	"veldr/internal/hostdirs"
+	"veldr/internal/transport"
 )
 
 // hcAgent is an agent whose home is short enough for a unix socket in its
@@ -96,7 +96,7 @@ func TestHCInstallStartAndPipe(t *testing.T) {
 	if rep.OK || rep.Code != agentproto.HCBadDigest || rep.HC.Digest != "" {
 		t.Fatalf("install with a wrong digest: %+v", rep)
 	}
-	if ents, _ := os.ReadDir(filepath.Join(home, ".herdr-ide-dev", "hc")); len(ents) != 0 {
+	if ents, _ := os.ReadDir(filepath.Join(home, ".veldr-dev", "hc")); len(ents) != 0 {
 		t.Fatalf("left behind: %v", ents)
 	}
 	if rep, _ = installHC(t, s, fakeHC, "nonsense"); rep.OK {

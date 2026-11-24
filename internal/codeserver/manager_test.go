@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"herdr-ide/internal/settings"
+	"veldr/internal/settings"
 )
 
 func TestInstallMode(t *testing.T) {

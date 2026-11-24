@@ -22,8 +22,8 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
 )
 
 // Video encoding of program windows (--gui-video). The core brings an

@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/chatproto"
 )
 
 // obj is an ACP value as the adapter builds it.

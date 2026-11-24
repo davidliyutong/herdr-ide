@@ -1,6 +1,6 @@
 package chat
 
-import "herdr-ide/internal/chatproto"
+import "veldr/internal/chatproto"
 
 // The page's WebSocket, GET /api/p/chat/ws: one per page, for the chats of
 // every machine (a browser opens at most six HTTP/1.1 connections to an

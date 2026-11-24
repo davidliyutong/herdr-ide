@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/plugin"
+	"veldr/internal/plugin"
 )
 
 func TestRoutesShape(t *testing.T) {

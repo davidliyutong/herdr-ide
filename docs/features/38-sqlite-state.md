@@ -72,7 +72,7 @@ managers); `Open` alone refuses links.
 | Database | Owner | Where | Holds |
 | --- | --- | --- | --- |
 | `core[-<instance>]-<host>[-<id>].db` | the core | beside its settings file ([reference](../reference.md#files-and-directories)) | the vault's access log, the AI usage history |
-| `machine-<host>[-<id>].db` | the machine's agent | the instance's data directory on the machine (`~/.herdr-ide[-<instance>]/`) | terminal history snapshots and their writers' lease, the AI usage cost cache |
+| `machine-<host>[-<id>].db` | the machine's agent | the instance's data directory on the machine (`~/.veldr[-<instance>]/`) | terminal history snapshots and their writers' lease, the AI usage cost cache |
 | `chat-<host>[-<id>].db` | the chat host | the same data directory | chats, events, trusted folders, the host's settings ([37](37-agent-chats.md)); opened with `Open`, not shared |
 
 The core keeps its database open while it runs (none without a settings

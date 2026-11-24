@@ -14,10 +14,10 @@ import (
 	"sync"
 	"testing"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentkinds"
+	"veldr/internal/chatproto"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
 )
 
 // setup is the plugin bound to a test core whose machines' chat host is

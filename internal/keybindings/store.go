@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/userfile"
+	"veldr/internal/userfile"
 )
 
 // Rule is a binding: a user's rule, or one in effect.

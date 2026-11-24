@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"herdr-ide/internal/agent/plugin"
+	"veldr/internal/agent/plugin"
 )
 
 func inode(t *testing.T, p string) uint64 {

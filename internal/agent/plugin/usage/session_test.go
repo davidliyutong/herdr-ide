@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/usage"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/usage"
 )
 
 const (

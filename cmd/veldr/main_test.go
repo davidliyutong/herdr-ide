@@ -5,7 +5,7 @@ package main
 import (
 	"testing"
 
-	"herdr-ide/internal/machines"
+	"veldr/internal/machines"
 )
 
 func TestSelectSpecsDedup(t *testing.T) {

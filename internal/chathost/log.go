@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/store"
+	"veldr/internal/store"
 )
 
 // The host's log file in the instance's data directory, one for each host

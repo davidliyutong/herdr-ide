@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/settings"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/agentproto"
+	"veldr/internal/settings"
+	vaultstore "veldr/internal/vault"
 )
 
 // withSettings gives the host the vault's settings with values.

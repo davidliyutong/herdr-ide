@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // subHost is a chat host of its own process (roleHost).

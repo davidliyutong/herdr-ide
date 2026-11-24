@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
 )
 
 func TestDownloadPaths(t *testing.T) {

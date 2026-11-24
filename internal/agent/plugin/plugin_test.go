@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // A result larger than a line follows the reply as a body; a small one

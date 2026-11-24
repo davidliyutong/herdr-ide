@@ -18,9 +18,9 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
 )
 
 // A machine's node is the agent as a service: a process of its own that

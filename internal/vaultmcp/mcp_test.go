@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
 )
 
 // fakeCore answers each connection as the core would, recording requests.

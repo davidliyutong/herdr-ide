@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 // The programs the agent starts (the terminal core and so its terminals)

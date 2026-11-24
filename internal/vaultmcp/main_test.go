@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // helperEnv makes the test binary an MCP server on its stdin and stdout, as

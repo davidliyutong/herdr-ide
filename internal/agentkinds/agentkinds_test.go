@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agent/detect"
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/uisettings"
-	"herdr-ide/internal/usage"
+	"veldr/internal/agent/detect"
+	"veldr/internal/agentkinds"
+	"veldr/internal/uisettings"
+	"veldr/internal/usage"
 )
 
 func ids(list []agentkinds.Kind) []string {

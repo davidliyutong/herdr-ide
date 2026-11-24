@@ -1,5 +1,5 @@
 // Package server exposes the web UI, the WebSocket protocol and the HTTP
-// endpoints (files, code-server proxy) of the herdr-ide core.
+// endpoints (files, code-server proxy) of the veldr core.
 package server
 
 import (
@@ -17,15 +17,15 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/codeserver"
-	"herdr-ide/internal/gui"
-	"herdr-ide/internal/keybindings"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/plugins/vscode"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/codeserver"
+	"veldr/internal/gui"
+	"veldr/internal/keybindings"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/plugins/vscode"
+	"veldr/internal/settings"
 )
 
 // Options configures the server.

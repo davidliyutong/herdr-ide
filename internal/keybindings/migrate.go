@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"herdr-ide/internal/userfile"
+	"veldr/internal/userfile"
 )
 
 // legacyShortcuts are the desktop app's shortcut settings of earlier

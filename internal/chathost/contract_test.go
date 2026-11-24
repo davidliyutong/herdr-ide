@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // The host records a prompt's EventUser when it believes no turn runs

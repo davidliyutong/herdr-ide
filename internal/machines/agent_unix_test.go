@@ -7,8 +7,8 @@ import (
 	"log"
 	"testing"
 
-	"herdr-ide/internal/agent"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agent"
+	"veldr/internal/transport"
 )
 
 // dialAgent returns a dial of an in-process agent, the machine of these

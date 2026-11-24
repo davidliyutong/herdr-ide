@@ -3,7 +3,7 @@
 ## Context
 
 Lab and robot machines often have no internet access, and some deployments
-have none at all. Everything herdr-ide installs on machines (agent,
+have none at all. Everything veldr installs on machines (agent,
 terminal core, code-server, extensions, video encoder) must reach them
 without the machines downloading anything, and downloads that do happen
 must be verifiable.
@@ -62,7 +62,7 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
 | Option | Why not |
 | --- | --- |
 | Machines download code-server and extensions themselves | Fails on offline machines; no central verification. |
-| Bundle code-server in the core binary | ~200 MB per platform; versions tied to herdr-ide releases. |
+| Bundle code-server in the core binary | ~200 MB per platform; versions tied to veldr releases. |
 | Trust HTTPS only | A compromised mirror or release would be installed on every machine. |
 
 ## Failure modes

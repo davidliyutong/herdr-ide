@@ -3,4 +3,4 @@
 package agent
 
 // The Git plugin's machine side (docs/features/31-git.md).
-import _ "herdr-ide/internal/agent/plugin/git"
+import _ "veldr/internal/agent/plugin/git"

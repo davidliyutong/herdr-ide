@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // runCall is a run_with_env call of command in dir with the variable V.

@@ -34,10 +34,10 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentkinds"
+	"veldr/internal/brand"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // SDKVersion is the version of @anthropic-ai/claude-agent-sdk whose way of

@@ -19,8 +19,8 @@ import (
 
 	"github.com/jezek/xgb/xproto"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/testexec"
+	"veldr/internal/agentproto"
+	"veldr/internal/testexec"
 )
 
 // TestHelperEncoder is not a test of its own: run through fakeEncoder, it

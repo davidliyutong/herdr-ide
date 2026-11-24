@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/testexec"
+	"veldr/internal/brand"
+	"veldr/internal/testexec"
 )
 
 // fakeShell writes a shell script that stands in for the user's shell and

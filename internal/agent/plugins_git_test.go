@@ -5,8 +5,8 @@ package agent_test
 import (
 	"testing"
 
-	agentgit "herdr-ide/internal/agent/plugin/git"
-	coregit "herdr-ide/internal/plugins/git"
+	agentgit "veldr/internal/agent/plugin/git"
+	coregit "veldr/internal/plugins/git"
 )
 
 // The core's routes of the Git plugin are its machine side's actions,

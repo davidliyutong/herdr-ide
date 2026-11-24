@@ -9,10 +9,10 @@ import (
 	"slices"
 	"strings"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
 )
 
 // pluginHost is the core as its plugins see it (plugin.Host).

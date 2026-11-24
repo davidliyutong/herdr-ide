@@ -6,8 +6,8 @@ web/dist/*
 !web/dist/.gitkeep
 internal/embedded/agents/*.gz
 internal/embedded/ext/*.vsix
-extensions/herdr-ide-bridge/dist/
-extensions/herdr-ide-bridge/*.vsix
+extensions/veldr-bridge/dist/
+extensions/veldr-bridge/*.vsix
 .DS_Store
 /bundle/
 coverage/
@@ -19,3 +19,7 @@ web/.deps/
 
 TODO.md
 .codegraph
+
+# A go build of the binary in the repository root.
+/veldr
+/herdr-ide

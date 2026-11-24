@@ -19,10 +19,10 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
-	dbstore "herdr-ide/internal/store"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
+	dbstore "veldr/internal/store"
 )
 
 // fast shortens the capture's waits for the test.

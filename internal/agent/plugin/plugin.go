@@ -16,7 +16,7 @@ import (
 	"net"
 	"sync"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // Env is what the agent gives its plugins.

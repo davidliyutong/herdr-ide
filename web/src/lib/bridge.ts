@@ -1,4 +1,4 @@
-// The VS Code bridge (extensions/herdr-ide-bridge, docs/features/05): commands
+// The VS Code bridge (extensions/veldr-bridge, docs/features/05): commands
 // for the VS Code window of a pane, and where what a window sends (Send to
 // Agent) goes. Each VS Code pane's iframe is a window of its own; the page
 // names the window when it knows it (codeFrames.ts), asks for a fresh one

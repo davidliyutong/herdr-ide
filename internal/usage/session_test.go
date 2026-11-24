@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // marker stands for what a transcript says: prompts, replies, thinking,

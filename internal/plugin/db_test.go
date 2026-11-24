@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/store"
+	"veldr/internal/machines"
+	"veldr/internal/settings"
+	"veldr/internal/store"
 )
 
 type settingsHost struct{ st *settings.Store }

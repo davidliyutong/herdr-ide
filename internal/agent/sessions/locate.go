@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
+	"veldr/internal/agentkinds"
 )
 
 // location is a transcript Locate found and the session root it lies in,

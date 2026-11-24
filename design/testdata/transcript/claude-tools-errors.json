@@ -72,7 +72,7 @@
       "t": "update",
       "update": {
         "_meta": {
-          "herdr-ide": {
+          "veldr": {
             "model": "claude-opus-5-5"
           }
         },
@@ -109,7 +109,7 @@
       "t": "update",
       "update": {
         "_meta": {
-          "herdr-ide": {
+          "veldr": {
             "exitCode": 1
           }
         },
@@ -212,7 +212,7 @@
           {
             "content": {
               "_meta": {
-                "herdr-ide": {
+                "veldr": {
                   "image": true
                 }
               },
@@ -359,7 +359,7 @@
       "t": "update",
       "update": {
         "_meta": {
-          "herdr-ide": {
+          "veldr": {
             "model": "claude-opus-5-5"
           }
         },

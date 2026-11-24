@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"herdr-ide/internal/plugin"
+	"veldr/internal/plugin"
 )
 
 const (

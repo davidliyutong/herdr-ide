@@ -8,7 +8,7 @@ import (
 	"slices"
 	"sync"
 
-	"herdr-ide/internal/usage"
+	"veldr/internal/usage"
 )
 
 // Status pages: Statuspage's summaries for Anthropic and OpenAI, Google's

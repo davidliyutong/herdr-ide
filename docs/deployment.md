@@ -1,6 +1,6 @@
 # Deployment
 
-herdr-ide runs on one host (your laptop or an always-on machine) and is used
+veldr runs on one host (your laptop or an always-on machine) and is used
 from browsers or its desktop app. It reaches its machines over ssh; nothing
 listens on the machines.
 
@@ -17,8 +17,8 @@ listens on the machines.
 
 ```bash
 scripts/build.sh
-cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
-./herdr-ide    # http://127.0.0.1:7780
+cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
+./veldr    # http://127.0.0.1:7780
 ```
 
 The core listens on `127.0.0.1:7780` and the same port on `::1`. Open it as
@@ -51,7 +51,7 @@ of an instance imports the SSH machines herdr saved
 (`~/.local/state/herdr/client/endpoints.json`). The machines file is listed
 in [reference](reference.md#files-and-directories).
 
-herdr-ide uses OpenSSH with your `~/.ssh/config` in BatchMode. A machine
+veldr uses OpenSSH with your `~/.ssh/config` in BatchMode. A machine
 that needs a password, 2FA or a host-key confirmation shows **Sign-in
 required**; **Sign in…** opens a terminal for it, and later connections
 reuse that ssh ControlMaster. Windows' OpenSSH has no ControlMaster, so a
@@ -70,9 +70,9 @@ for macOS (Apple Silicon and Intel), Windows (x64) and Linux (x64 and arm64)
 
 | System | Files |
 | --- | --- |
-| macOS | `herdr-ide-<version>-mac-arm64.dmg` and `.zip`, `herdr-ide-<version>-mac-x64.dmg` and `.zip` |
-| Windows | `herdr-ide-<version>-win-x64.exe` (setup) |
-| Linux | `herdr-ide-<version>-linux-amd64.deb`, `-linux-arm64.deb`, `-linux-x86_64.AppImage`, `-linux-arm64.AppImage` |
+| macOS | `veldr-<version>-mac-arm64.dmg` and `.zip`, `veldr-<version>-mac-x64.dmg` and `.zip` |
+| Windows | `veldr-<version>-win-x64.exe` (setup) |
+| Linux | `veldr-<version>-linux-amd64.deb`, `-linux-arm64.deb`, `-linux-x86_64.AppImage`, `-linux-arm64.AppImage` |
 
 All are listed in `SHA256SUMS`. Check the digest
 (`shasum -a 256 -c SHA256SUMS --ignore-missing`; on Windows `Get-FileHash`)
@@ -93,11 +93,11 @@ old one.
 
 The app's core listens on `127.0.0.1:7781` with instance `desktop` for its
 own settings, vault and machines list, separate from the CLI default and
-`dev`; on every machine it uses the default namespace (`~/.herdr-ide`), the
+`dev`; on every machine it uses the default namespace (`~/.veldr`), the
 same terminals and chats as a core of the default instance
 ([39](features/39-nodes.md)):
 
-- `HERDR_IDE_DESKTOP_PORT` overrides the port, which also changes the
+- `VELDR_DESKTOP_PORT` overrides the port, which also changes the
   browser storage origin. An occupied port fails visibly; the app never
   attaches to an existing listener.
 - Opening the app twice focuses the existing window.
@@ -112,7 +112,7 @@ Drag the app from the DMG (or zip) into Applications. A release without the
 Developer ID secrets is signed ad hoc and Gatekeeper refuses its first
 launch. Allow it once: on macOS 14 and earlier Control-click → **Open**; on
 macOS 15 and later **Open Anyway** under System Settings → Privacy &
-Security; or `xattr -dr com.apple.quarantine /Applications/herdr-ide.app`.
+Security; or `xattr -dr com.apple.quarantine /Applications/veldr.app`.
 To uninstall, move the app to the Trash (its files stay).
 
 **Full Disk Access.** macOS keeps programs out of other apps' data and asks
@@ -120,7 +120,7 @@ before they open Desktop, Documents, Downloads or external disks. Two
 programs need the grant:
 
 - the app, for the file browser, uploads, downloads and VS Code;
-- herdr-core (`~/.herdr-ide/hosts/<host>/hc/herdr-core`), which macOS holds
+- herdr-core (`~/.veldr/hosts/<host>/hc/herdr-core`), which macOS holds
   responsible for the terminals' programs.
 
 **Settings → Terminal → Permissions → Full Disk Access** shows both and
@@ -148,7 +148,7 @@ Local builds are signed ad hoc. With `CSC_LINK` and `CSC_KEY_PASSWORD` (or
 `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` they are notarized
 ([reference](reference.md#environment-variables)).
 
-`make desktop-install` copies the build over `/Applications/herdr-ide.app`
+`make desktop-install` copies the build over `/Applications/veldr.app`
 (`INSTALL_DIR` picks another folder). A running copy is quit first and
 reopened after; if it does not quit within 30 s nothing is installed. The
 new copy is assembled beside the old one, so a failure leaves the old app.
@@ -158,7 +158,7 @@ new copy is assembled beside the old one, so a failure leaves the old app.
 The app needs Windows' OpenSSH Client (installed by default on Windows 10
 1809+ and 11). The setup is unsigned: at SmartScreen choose **More info** →
 **Run anyway**. It installs per user, without administrator rights, into
-`%LOCALAPPDATA%\Programs\herdr-ide-desktop\`. Uninstall from Settings →
+`%LOCALAPPDATA%\Programs\veldr-desktop\`. Uninstall from Settings →
 Apps (its files stay).
 
 The app reaches SSH machines only (a WSL distribution running an ssh server
@@ -183,13 +183,13 @@ To build: install Go, Node.js 22.12+, pnpm and Git for Windows, and run
 ### Linux
 
 ```bash
-sudo apt install ./herdr-ide-<version>-linux-amd64.deb   # or -linux-arm64.deb
+sudo apt install ./veldr-<version>-linux-amd64.deb   # or -linux-arm64.deb
 ```
 
-The deb installs into `/opt/herdr-ide/`, adds the `herdr-ide` command and a
+The deb installs into `/opt/veldr/`, adds the `veldr` command and a
 desktop entry, and recommends `openssh-client`. On Ubuntu 24.04+ it also
 installs the AppArmor profile Chromium's sandbox needs. Uninstall with
-`sudo apt remove herdr-ide-desktop`.
+`sudo apt remove veldr-desktop`.
 
 The AppImage runs without installing and needs FUSE 2 (`libfuse2`,
 `libfuse2t64` on Ubuntu 24.04). On Ubuntu 24.04+ AppArmor keeps Chromium's
@@ -209,22 +209,18 @@ ARCH=arm64 make desktop-dist            # arm64 packages, also on an x64 host
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| The app | `/Applications/herdr-ide.app` | `%LOCALAPPDATA%\Programs\herdr-ide-desktop\` | `/opt/herdr-ide/` (deb), or the AppImage |
-| Settings, keybindings, machines (`*-desktop.json`), the core's database (`core-desktop-<host>[-<id>].db`: vault access log, AI usage history) | `~/Library/Application Support/herdr-ide/` | `%AppData%\herdr-ide\` | `$XDG_CONFIG_HOME/herdr-ide/` (default `~/.config/herdr-ide/`) |
-| Electron profile (browser storage, single-instance lock, the vault's `vault-unlock.json`) | `~/Library/Application Support/herdr-ide-desktop/` | `%AppData%\herdr-ide-desktop\` | `~/.config/herdr-ide-desktop/` |
-| Key encrypting the vault's unlock secret (safeStorage) | login keychain item `herdr-ide Safe Storage`; the build that made it in `~/Library/Application Support/herdr-ide-desktop-keychain.json` | DPAPI | – |
-| code-server downloads | `~/Library/Caches/herdr-ide/code-server` | `%LocalAppData%\herdr-ide\code-server` | `~/.cache/herdr-ide/code-server` |
-| Local machine's node and its state | `~/.herdr-ide/` | – | `~/.herdr-ide/` |
-| ssh control sockets | `/tmp/herdr-ide-<uid>/s-desktop` | – | `/tmp/herdr-ide-<uid>/s-desktop` |
+| The app | `/Applications/veldr.app` | `%LOCALAPPDATA%\Programs\veldr-desktop\` | `/opt/veldr/` (deb), or the AppImage |
+| Settings, keybindings, machines (`*-desktop.json`), the core's database (`core-desktop-<host>[-<id>].db`: vault access log, AI usage history) | `~/Library/Application Support/veldr/` | `%AppData%\veldr\` | `$XDG_CONFIG_HOME/veldr/` (default `~/.config/veldr/`) |
+| Electron profile (browser storage, single-instance lock, the vault's `vault-unlock.json`) | `~/Library/Application Support/veldr-desktop/` | `%AppData%\veldr-desktop\` | `~/.config/veldr-desktop/` |
+| Key encrypting the vault's unlock secret (safeStorage) | login keychain item `veldr Safe Storage`; the build that made it in `~/Library/Application Support/veldr-desktop-keychain.json` | DPAPI | – |
+| code-server downloads | `~/Library/Caches/veldr/code-server` | `%LocalAppData%\veldr\code-server` | `~/.cache/veldr/code-server` |
+| Local machine's node and its state | `~/.veldr/` | – | `~/.veldr/` |
+| ssh control sockets | `/tmp/veldr-<uid>/s-desktop` | – | `/tmp/veldr-<uid>/s-desktop` |
 
-SSH machines keep their state in their own `~/.herdr-ide/`
-([remote resources](#remote-resources)). Builds before the shared
-namespace used `~/.herdr-ide-desktop/` and the terminal core session
-`herdr-ide-desktop`, which stay as they were: that core's terminals keep
-running, not shown, until it is stopped with its own executable
-(`HC_SESSION=herdr-ide-desktop HC_SOCKET=~/.herdr-ide-desktop/run/hc.sock
-~/.herdr-ide-desktop/hc/herdr-core server stop`); the directory can then be
-removed. Uninstalling removes only the app.
+SSH machines keep their state in their own `~/.veldr/`
+([remote resources](#remote-resources)). What versions of an earlier name
+left is moved from as [below](#moving-from-herdr-ide). Uninstalling removes
+only the app.
 Removing the Electron profile also removes this install's vault unlock key:
 Touch ID or Windows Hello must then be turned on again in the vault's
 Settings.
@@ -239,21 +235,21 @@ This runs unpackaged Electron with the embedded UI (no hot reload), port
 7791, instance `dev` and local-only connections (on Windows it connects no
 machine). Quit other development cores of the `dev` instance first.
 
-For packaged smoke tests, set `HERDR_IDE_DESKTOP_DEV`: `1` for the `dev`
+For packaged smoke tests, set `VELDR_DESKTOP_DEV`: `1` for the `dev`
 instance, or a name of its own (not `desktop`) with port `0`:
 
 ```bash
-HERDR_IDE_DESKTOP_DEV=smoke HERDR_IDE_DESKTOP_PORT=0 \
-  dist/desktop/mac-arm64/herdr-ide.app/Contents/MacOS/herdr-ide --user-data-dir="$TMPDIR/herdr-ide-smoke"
-HERDR_IDE_DESKTOP_DEV=smoke HERDR_IDE_DESKTOP_PORT=0 \
-  dist/desktop/linux-unpacked/herdr-ide --user-data-dir=/tmp/herdr-ide-smoke
+VELDR_DESKTOP_DEV=smoke VELDR_DESKTOP_PORT=0 \
+  dist/desktop/mac-arm64/veldr.app/Contents/MacOS/veldr --user-data-dir="$TMPDIR/veldr-smoke"
+VELDR_DESKTOP_DEV=smoke VELDR_DESKTOP_PORT=0 \
+  dist/desktop/linux-unpacked/veldr --user-data-dir=/tmp/veldr-smoke
 ```
 
 On macOS launch the executable, not `open` (which activates a running
 copy). Development instances are local-only with an Electron profile of
 their own. A named instance leaves state like any instance
-(`settings-smoke.json`, `~/.herdr-ide-smoke/`, terminal core session
-`herdr-ide-smoke`); stop its terminal core (**Stop Terminal Service (Ends All Terminals)…** in
+(`settings-smoke.json`, `~/.veldr-smoke/`, terminal core session
+`veldr-smoke`); stop its terminal core (**Stop Terminal Service (Ends All Terminals)…** in
 the machine's menu) before
 removing it.
 
@@ -274,16 +270,16 @@ it on for browsers (`plugins.vscode.browser`, **Settings › Plugins**)
 applies to every browser of the server; the desktop app's switch
 (`plugins.vscode.enabled`) does not affect browsers.
 
-Tell herdr-ide the public origin so its Host/Origin checks accept it:
+Tell veldr the public origin so its Host/Origin checks accept it:
 
 ```bash
-herdr-ide --allowed-origin https://ide.example.com
+veldr --allowed-origin https://ide.example.com
 ```
 
 **Tailscale** (tailnet only, automatic certificates):
 
 ```bash
-herdr-ide --allowed-origin https://mac.your-tailnet.ts.net --user-header Tailscale-User-Login
+veldr --allowed-origin https://mac.your-tailnet.ts.net --user-header Tailscale-User-Login
 tailscale serve --bg --https=443 http://127.0.0.1:7780
 ```
 
@@ -296,7 +292,7 @@ ide.example.com {
 		copy_headers Remote-User
 	}
 	reverse_proxy 127.0.0.1:7780 {
-		header_up X-herdr-ide-Proxy-Secret {env.HERDR_IDE_PROXY_SECRET}
+		header_up X-veldr-Proxy-Secret {env.VELDR_PROXY_SECRET}
 	}
 }
 ```
@@ -311,7 +307,7 @@ location / {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
-    proxy_set_header X-herdr-ide-Proxy-Secret "<secret>";
+    proxy_set_header X-veldr-Proxy-Secret "<secret>";
     proxy_read_timeout 1d;
 }
 ```
@@ -319,7 +315,7 @@ location / {
 ### Guardrails
 
 - **Proxy secret** – `--proxy-secret-file FILE` requires the
-  `X-herdr-ide-Proxy-Secret` header on every request not from a browser on
+  `X-veldr-Proxy-Secret` header on every request not from a browser on
   the same host, so only your proxy can talk to the core. With a secret,
   `--listen` may use a non-loopback address; without one that needs
   `--insecure-listen`.
@@ -345,14 +341,14 @@ is the AI usage plugin, which asks the providers from the machines
 When the core host is offline too, prepare a bundle on a connected machine:
 
 ```bash
-herdr-ide fetch-assets ./bundle                          # all platforms
-herdr-ide fetch-assets --platforms linux-amd64 ./bundle  # only what you need
+veldr fetch-assets ./bundle                          # all platforms
+veldr fetch-assets --platforms linux-amd64 ./bundle  # only what you need
 ```
 
 Copy `./bundle` and the full release directory into the network, then run:
 
 ```bash
-herdr-ide --offline --seed-dir ./bundle
+veldr --offline --seed-dir ./bundle
 ```
 
 Lookup order: `--seed-dir` directories, the cache, then (unless
@@ -376,9 +372,9 @@ Building needs Go modules, npm packages and the pinned herdr-core archives
 
 ## Remote resources
 
-What herdr-ide starts or writes, and what ends or removes it. Feature
+What veldr starts or writes, and what ends or removes it. Feature
 documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
-`<data>` is `~/.herdr-ide[-<instance>]` on the machine, `<host>` the
+`<data>` is `~/.veldr[-<instance>]` on the machine, `<host>` the
 host's key and `<run>` the namespace's runtime directory on the host
 ([files](reference.md#files-and-directories)).
 
@@ -386,12 +382,12 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Started | Ends |
 | --- | --- | --- |
-| Node (`herdr-ide node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace and host (`<run>/node.lock`), in a session of its own. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/hosts/<host>/node.log` (1 MiB, one old file). |
+| Node (`veldr node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace and host (`<run>/node.lock`), in a session of its own. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/hosts/<host>/node.log` (1 MiB, one old file). |
 | Agent session | One per core and machine while connected, served by the node. | With its ssh session or socket connection; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`). | A record in the machines file; **Remove machine…** deletes it and ends the session. The machine's terminal core and terminals keep running. |
 | ssh ControlMaster | Per machine, on Linux and macOS cores. | 10 min unused or 1 min without server answers; a core that finds it dead sends `ssh -O stop`. |
 | Desktop core | Launched by Electron. | When the app closes its stdin (quit, crash; on Windows and Linux also closing the window); killed after 20 s. Machines' terminal cores keep running. |
-| Terminal core (herdr-core) | First subscription to a machine with no core answering (`term.start`), or **Start Terminal Service** / **Restart Terminal Service…** in the machine's menu (`hc.start`, `hc.restart`). Never in `--read-only`. | Detached (systemd user service or launchd job), session `herdr-ide[-<instance>]-<host id>`, socket `<run>/hc.sock`. Outlives agent and core. Ends with **Stop Terminal Service (Ends All Terminals)…** (`hc.stop`), the agent op `hc` action `stop`, `herdr-ide node stop --terminal-core` on the machine, or the machine. A restart keeps the programs. |
+| Terminal core (herdr-core) | First subscription to a machine with no core answering (`term.start`), or **Start Terminal Service** / **Restart Terminal Service…** in the machine's menu (`hc.start`, `hc.restart`). Never in `--read-only`. | Detached (systemd user service or launchd job), session `veldr[-<instance>]-<host id>`, socket `<run>/hc.sock`. Outlives agent and core. Ends with **Stop Terminal Service (Ends All Terminals)…** (`hc.stop`), the agent op `hc` action `stop`, `veldr node stop --terminal-core` on the machine, or the machine. A restart keeps the programs. |
 | Connection to the terminal core | One per machine while a `/api/v1/term` client is subscribed. | 10 s after the last subscriber, or with the agent. |
 | Terminals of the layout | New tabs, splits and agents (`terminal.run` with `keep: true`, audited); replacements after a terminal core restart ([33](features/33-workspace-restore.md)). | When the pane, tab or workspace closes (after the undo time), is killed, its program exits, or the terminal core stops. They outlive pages, core and agent. Finished records stay 24 h in herdr-core's state. |
 | A closed pane's terminal | **Close Pane** / **Close Tab**. | Labeled `closing`; any page showing the machine kills it after `layout.undoClose` (5 s) unless **Undo Close** brings it back. |
@@ -408,20 +404,20 @@ host's key and `<run>` the namespace's runtime directory on the host
 | VS Code extension hosts | One per VS Code window. | 5 min after the window disconnects. |
 | curl or wget (`--code-server-install=download`) | While a machine downloads code-server. | With the download (20 min limit) or when the core stops waiting; the partial file is removed. |
 | Xvfb or Xwayland | A remote Linux machine connects with GUI on (`gui.display` picks). | In its own session; exits 1 min after its last client (programs, window manager, display keeper). Replaced by the other kind only while no program is connected. |
-| GPU display compositor (`herdr-ide gui-wl`) | With each Xwayland. | Exits with its Xwayland; listens nowhere. Logs to `<data>/hosts/<host>/xwayland.log`. |
-| Display keeper (`herdr-ide gui-keep`) | When a display is ready and when the terminal core becomes reachable (`gui.keep`; not in `--read-only`). | One per instance and host (`<run>/gui-keep.lock`); holds the display while the terminal core runs, exits once it stops or the display ends. |
+| GPU display compositor (`veldr gui-wl`) | With each Xwayland. | Exits with its Xwayland; listens nowhere. Logs to `<data>/hosts/<host>/xwayland.log`. |
+| Display keeper (`veldr gui-keep`) | When a display is ready and when the terminal core becomes reachable (`gui.keep`; not in `--read-only`). | One per instance and host (`<run>/gui-keep.lock`); holds the display while the terminal core runs, exits once it stops or the display ends. |
 | `apt-get download xvfb` | A machine has no Xvfb (not in `--read-only`). | With the download (5 min limit); retried with backoff up to 5 min while connected. |
 | Video encoder | One per program window sent as video (`gui.video`). | 5 s without frames, window unwatched, resized or gone, video turned off, or with the agent (own process group). NVENC sessions are limited per machine; it falls back to VA-API, VP8 or pictures. |
 | Shared memory for captures | While the agent's window manager runs. | One System V segment ≤ 64 MB (0600), marked for removal once attached, so it goes with the agent. |
 | Port forwards (core host loopback) | A browser pane opens a machine's port ([32](features/32-browser-and-ports.md)). | Listeners on `127.0.0.1`/`::1`, at most 32 with 128 connections each; end when stopped, idle for `browser.forwardIdle` (30 min), the machine removed, the plugin off, or the core stops. Nothing listens on the machine. |
 | Vault and bridge sockets (`<run>/vault.sock`, `<run>/bridge.sock`) | Served by the newest node of the instance. | Unix sockets (0600); a node removes them on exit only if they are still its own. Each connection is one stream to the core (vault: at most 16 at once). |
-| The vault's MCP servers | Started by a coding agent's CLI, never by herdr-ide. | Exit when the CLI closes stdin or signals them. A `run_with_env` command runs in its own process group, killed when it returns, at `vault.runTimeout` (120 s, max `vault.runMaxTimeout`), on cancel, or when the server dies. Output kept in memory, ≤ 128 KiB. Approvals wait `vault.approvalTimeout` (60 s); at most 4 per machine, 32 in all. |
+| The vault's MCP servers | Started by a coding agent's CLI, never by veldr. | Exit when the CLI closes stdin or signals them. A `run_with_env` command runs in its own process group, killed when it returns, at `vault.runTimeout` (120 s, max `vault.runMaxTimeout`), on cancel, or when the server dies. Output kept in memory, ≤ 128 KiB. Approvals wait `vault.approvalTimeout` (60 s); at most 4 per machine, 32 in all. |
 | File explorer (plugin `files`) | Changes, saves, uploads, polls. | No process on the machine. Long copies/removals stop when the request ends (10 min max). At most 8 stats at once per machine. **Reveal in Finder** (core's own machine) runs `/usr/bin/open -R` or `xdg-open` from a fixed path; at most 4 waited for. |
 | Git (plugin `git`) | One `git` process per request; `git.autoFetch` while a panel shows the repository. | At most 8 per machine, each its own process group, killed after 15 s (reads) or 120 s (changes, fetch, pull, push) or when the request ends. No background maintenance (`gc.autoDetach=false`). Hooks' background programs and fsmonitor daemons are the user's, as in a terminal. |
 | AI usage limits (plugin `usage`) | The core's scheduler while the plugin is on (manual, 1–60 min, or adaptive). | HTTPS requests (15 s each, 45 s per action). On macOS `security` for Claude's keychain item (10 s), `ps`/`lsof` for Antigravity (5 s). Manual refresh at most every 30 s. |
 | `agy -p /usage` (plugin `usage`) | No Antigravity language server answers: at most every 10 min, 30 min after a failure. | Own process group, killed after 20 s; output ≤ 4 MiB. |
 | Download archives (`fs.archive`) | A folder or several files download. | Zipped into the stream; ends with it. No disk. |
-| Chat host (`herdr-ide chat-host`, plugin `chat`, [37](features/37-agent-chats.md)) | A writing chat request or a page's chat subscription with no host serving; a hidden terminal of the instance's terminal core, one per instance and machine. Never for a `--read-only` core. | Outlives ssh, agent and core. Exits after 60 s with no agent process and no connection, with the terminal core, or when a newer build asks it to make way while no chat works; a host holding its name without serving for 45 s is killed by the next agent. Log `<data>/chat-host-<host>[-<id>].log` (1 MiB, one old file). |
+| Chat host (`veldr chat-host`, plugin `chat`, [37](features/37-agent-chats.md)) | A writing chat request or a page's chat subscription with no host serving; a hidden terminal of the instance's terminal core, one per instance and machine. Never for a `--read-only` core. | Outlives ssh, agent and core. Exits after 60 s with no agent process and no connection, with the terminal core, or when a newer build asks it to make way while no chat works; a host holding its name without serving for 45 s is killed by the next agent. Log `<data>/chat-host-<host>[-<id>].log` (1 MiB, one old file). |
 | Agents of chats (`claude`, `codex app-server`, `kimi acp`, `grok agent … stdio`) | A chat's prompt, with the PATH of the user's login shell (`$SHELL -l -i -c env`, at most every 6 h). | Own process group under the chat host. Ended idle after `chat.idleStopMinutes` (30), the idlest beyond `chat.maxLive` (8), on close, archive, delete or handoff, and with the host: input closed, SIGTERM after 2 s, SIGKILL later. Their own session files are theirs and never removed. |
 | Short agent processes of a chat host | Listing a directory's sessions; importing a session (Codex without a live app-server, ACP agents). | ≤ 4 at once per host, each within 60 s (2 min for an ACP load). |
 | Connections to a chat host | Page subscriptions, chat requests and the core's watch, as streams of op `plugin` to the host's socket. | ≤ 128 per machine, ≤ 32 subscriptions per page; the host serves ≤ 256 and drops one 8192 events or 16 MiB behind. The watch lets a host go after 2 min unused. Nothing on TCP. |
@@ -432,24 +428,24 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Written | Removed |
 | --- | --- | --- |
-| Agent builds (`~/.herdr-ide/agent/`) | On connect, by content hash. | Unused for 14 days. |
+| Agent builds (`~/.veldr/agent/`) | On connect, by content hash. | Unused for 14 days. |
 | herdr-core executable (`<data>/hosts/<host>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
-| herdr-core state (`~/.local/state/herdr-core/herdr-ide[-<instance>]-<host id>/`) | By herdr-core. | Kept until the user removes it. |
-| code-server versions (`~/.herdr-ide/code-server/<version>-<os>-<arch>/`) | Install. | Unused for 14 days. |
-| Xvfb packages (`~/.herdr-ide/hosts/<host>/xvfb/`), video encoders (`~/.herdr-ide/video/`, ~2 MB), GPU selection libraries (`~/.herdr-ide/gpupick/`, 0600, `gui.pick`) | When needed (not in `--read-only`). | Unused for 14 days, when another is installed. |
+| herdr-core state (`~/.local/state/herdr-core/veldr[-<instance>]-<host id>/`) | By herdr-core. | Kept until the user removes it. |
+| code-server versions (`~/.veldr/code-server/<version>-<os>-<arch>/`) | Install. | Unused for 14 days. |
+| Xvfb packages (`~/.veldr/hosts/<host>/xvfb/`), video encoders (`~/.veldr/video/`, ~2 MB), GPU selection libraries (`~/.veldr/gpupick/`, 0600, `gui.pick`) | When needed (not in `--read-only`). | Unused for 14 days, when another is installed. |
 | Uploads (`<data>/staging/`, 0700/0600) | File explorer uploads (≤ 4 GiB). | When written or failed; one left by a killed agent is removed by an agent after 7 days. |
 | Pasted files (`<data>/uploads/`) | Pasted files, and dropped files when the terminal's directory cannot take them. | After 7 days. |
-| Dropped files (`.herdr-ide-upload-*` while writing) | Files dropped on a pane, into its terminal's directory. | The files are the user's; a temporary file is removed when its stream ends early. |
+| Dropped files (`.veldr-upload-*` while writing) | Files dropped on a pane, into its terminal's directory. | The files are the user's; a temporary file is removed when its stream ends early. |
 | Trash | **Move to Trash** in the explorer. | The user's trash (`~/.local/share/Trash`, `~/.Trash` on macOS); emptied by the user. |
 | code-server logs (`<data>/hosts/<host>/cs-data/logs/`) | code-server. | After 7 days. |
 | Display and code-server logs (`<data>/hosts/<host>/xvfb.log`, `xwayland.log`, `gui-keep.log`, `code-server.log`) | Each start of the display, its keeper or code-server. | Overwritten at each start. |
-| MCP command (`<data>/bin/herdr-ide-mcp`, a script, and `herdr-ide-mcp-<system>-<machine>`, a link per platform) | Each agent start: the script if it differs, the link of its platform. | Replaced by the next agent; removed with the data directory. |
+| MCP command (`<data>/bin/veldr-mcp`, a script, and `veldr-mcp-<system>-<machine>`, a link per platform) | Each agent start: the script if it differs, the link of its platform. | Replaced by the next agent; removed with the data directory. |
 | Machine database (`<data>/machine-<host>[-<id>].db`, 0600, [38](features/38-sqlite-state.md)) | Terminal history snapshots; the AI usage cost cache (Cost tab scans, ≤ 1/min per range, ≤ 2 min). | History: two generations per terminal of ≤ `history.lines` (2000) lines and 2 MiB, ≤ `history.maxTerminals` (32) terminals and `history.maxTotalMB` (64) in all, oldest first; removed after `history.days` (7), when the terminal ends or is gone 2 min, with **Clear Saved Output**, and when capture is turned off ([36](features/36-terminal-history.md)). Cost cache: records and logs older than 90 days leave at each scan. Earlier JSON files are imported once and removed. |
 | Chat journal (`<data>/chat-<host>[-<id>].db`, 0600) | The chat host. | Per chat ≤ `chat.maxChatMB` (64), in all ≤ `chat.maxTotalMB` (512) and `chat.maxChats` (500), archived then longest-closed first; closed and archived chats after `chat.retentionDays` (30); a deleted chat at once. |
 | DeepSeek key (`<data>/usage/deepseek.key`, 0600) | **Save** in the usage panel (audited). | **Remove**, or the user deletes it. |
 | Kimi Code credentials (`~/.kimi-code/`) | Renewed when expiring (`usage.kimiRefresh`; not in `--read-only`), with Kimi Code's own lock. | Kimi Code's files. |
 | Vault access log (core database `core[-<instance>]-<host>[-<id>].db`, core host, 0600) | Every MCP request and value a page takes; names, never values. | Keeps the last 1000 releases and 500 other records; an earlier `vault[-<instance>]-access.jsonl` is imported once and removed. |
-| Desktop vault unlock key | Enrolling the desktop authenticator. | `vault-unlock.json` in the Electron profile, the macOS keychain item (moved to a rebuilt app after one prompt) or the Windows Hello key `herdr-ide-vault-<install>`; kept until removed by hand. |
+| Desktop vault unlock key | Enrolling the desktop authenticator. | `vault-unlock.json` in the Electron profile, the macOS keychain item (moved to a rebuilt app after one prompt) or the Windows Hello key `veldr-vault-<install>`; kept until removed by hand. |
 | Electron profile | First desktop launch. | Until removed by hand ([where](#where-the-app-keeps-its-files)); core stderr is kept in memory only (16 KiB). |
 
 **Home directories several hosts share** (NFS,
@@ -475,31 +471,31 @@ change applies the next time code-server starts; **Stop VS Code on
 
 ## Running as a service
 
-macOS (launchd), `~/Library/LaunchAgents/dev.herdr-ide.plist`:
+macOS (launchd), `~/Library/LaunchAgents/dev.veldr.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>dev.herdr-ide</string>
+  <key>Label</key><string>dev.veldr</string>
   <key>ProgramArguments</key><array>
-    <string>/opt/herdr-ide/herdr-ide</string>
+    <string>/opt/veldr/veldr</string>
     <string>--allowed-origin</string><string>https://ide.example.com</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>/tmp/herdr-ide.log</string>
+  <key>StandardErrorPath</key><string>/tmp/veldr.log</string>
 </dict></plist>
 ```
 
-Linux (systemd user unit), `~/.config/systemd/user/herdr-ide.service`:
+Linux (systemd user unit), `~/.config/systemd/user/veldr.service`:
 
 ```ini
 [Unit]
-Description=herdr-ide
+Description=veldr
 
 [Service]
-ExecStart=%h/.local/lib/herdr-ide/herdr-ide --allowed-origin https://ide.example.com
+ExecStart=%h/.local/lib/veldr/veldr --allowed-origin https://ide.example.com
 Restart=on-failure
 # ssh ControlMasters outlive restarts, so machines that needed an
 # interactive login reconnect without one.
@@ -525,14 +521,52 @@ host.
 
 Two cores reaching the same machine share only the agent build directory
 unless they use the same instance. Give each its own `--instance` (state in
-`~/.herdr-ide-<instance>`, terminal core session
-`herdr-ide-<instance>-<host id>`).
+`~/.veldr-<instance>`, terminal core session
+`veldr-<instance>-<host id>`).
 For development:
 
 ```bash
-make dev-core     # go run ./cmd/herdr-ide --instance dev --local-only --listen 127.0.0.1:7790 --agent-dir dist/agents
+make dev-core     # go run ./cmd/veldr --instance dev --local-only --listen 127.0.0.1:7790 --agent-dir dist/agents
 make dev-web      # Vite on top of it
 ```
+
+## Moving from herdr-ide
+
+This product was called herdr-ide. veldr is installed beside it (its own
+app, `~/.veldr` on machines, its own terminal cores), so herdr-ide keeps
+running with its terminals while you move:
+
+1. Install veldr and start it. Its first start copies herdr-ide's
+   configuration (settings, machines, keybindings, the vault); herdr-ide's
+   stays as it was. A machine's chats are copied the first time veldr's
+   chat host runs there.
+2. Keep herdr-ide open, or reach its terminals in a browser with its own
+   core, which shares its default namespace with its desktop app:
+
+   ```bash
+   /Applications/herdr-ide.app/Contents/Resources/bin/herdr-ide serve \
+     --instance legacy-web --node-instance= --listen 127.0.0.1:7790
+   ```
+
+3. In veldr, the status bar shows **herdr-ide: N terminals** while a
+   connected machine has herdr-ide's terminals. Its dialog lists
+   herdr-ide's workspaces and tabs with what runs in each pane; move the
+   tabs you are done with. They close in herdr-ide and open in veldr, in a
+   workspace of the same name: a new shell in each terminal's directory,
+   Claude Code or Codex continuing their conversation; other programs end
+   ([11](features/11-naming-and-renames.md)).
+4. When a machine has nothing left to move, **Stop Previous Terminal
+   Service…** and then **Remove Previous Files…** in the same dialog end
+   herdr-ide's terminal core and remove `~/.herdr-ide` with its state.
+   Quit herdr-ide first: the files stay while it is connected.
+
+What is not moved: herdr-ide's Electron profile (Touch ID or Windows
+Hello for the vault is turned on again in veldr), VS Code's state on
+machines (`cs-data`, now kept per host), and the terminal history's
+snapshots. Namespaces of herdr-ide's older builds (`~/.herdr-ide-desktop`)
+are not listed; stop their core with their executable
+(`HC_SESSION=herdr-ide-desktop HC_SOCKET=~/.herdr-ide-desktop/run/hc.sock
+~/.herdr-ide-desktop/hc/herdr-core server stop`) and remove the directory.
 
 ## Migrating from versions that used herdr
 

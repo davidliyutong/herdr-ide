@@ -1,9 +1,9 @@
 {"dir": "out", "t": 1, "msg": {"id": 1, "method": "model/list", "params": {}}}
 {"dir": "in", "t": 315, "msg": {"error": {"code": -32600, "message": "Not initialized"}, "id": 1}}
-{"dir": "out", "t": 315, "msg": {"id": 2, "method": "initialize", "params": {"clientInfo": {"name": "herdr_ide", "title": "herdr-ide", "version": "0.0.0-spike"}, "capabilities": {"experimentalApi": true, "requestAttestation": false}}}}
+{"dir": "out", "t": 315, "msg": {"id": 2, "method": "initialize", "params": {"clientInfo": {"name": "herdr_ide", "title": "veldr", "version": "0.0.0-spike"}, "capabilities": {"experimentalApi": true, "requestAttestation": false}}}}
 {"dir": "in", "t": 319, "msg": {"id": 2, "result": {"userAgent": "herdr_ide/0.171.0 (Mac OS 26.6.2; arm64) ghostty (herdr_ide; 0.0.0-spike)", "codexHome": "/home/user/.codex", "platformFamily": "unix", "platformOs": "macos"}}}
 {"dir": "out", "t": 319, "msg": {"method": "initialized"}}
-{"dir": "out", "t": 319, "msg": {"id": 3, "method": "initialize", "params": {"clientInfo": {"name": "herdr_ide", "title": "herdr-ide", "version": "0.0.0-spike"}, "capabilities": {"experimentalApi": true, "requestAttestation": false}}}}
+{"dir": "out", "t": 319, "msg": {"id": 3, "method": "initialize", "params": {"clientInfo": {"name": "herdr_ide", "title": "veldr", "version": "0.0.0-spike"}, "capabilities": {"experimentalApi": true, "requestAttestation": false}}}}
 {"dir": "in", "t": 319, "msg": {"method": "configWarning", "params": {"summary": "`[features].multi_agent` is deprecated. It still controls the V1 fallback. `[agents].enabled = false` disables subagent tools even when the model selects a subagent version, unless `[features].multi_agent_v2` is enabled.", "details": null}, "emittedAtMs": 1795347741008}}
 {"dir": "in", "t": 320, "msg": {"method": "remoteControl/status/changed", "params": {"status": "disabled", "serverName": "host.local", "installationId": "installation-FAKE", "environmentId": null}, "emittedAtMs": 1795347741008}}
 {"dir": "in", "t": 320, "msg": {"error": {"code": -32600, "message": "Already initialized"}, "id": 3}}

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // fakeGPUs makes the kernel's description of a machine's GPUs below a

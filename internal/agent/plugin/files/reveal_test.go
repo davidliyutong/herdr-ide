@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/testexec"
+	"veldr/internal/agentproto"
+	"veldr/internal/testexec"
 )
 
 // The command each system shows a path with: the program by its absolute

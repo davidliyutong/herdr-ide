@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
-	"herdr-ide/internal/transport"
-	"herdr-ide/internal/vaultmcp"
+	"veldr/internal/agent"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
+	"veldr/internal/transport"
+	"veldr/internal/vaultmcp"
 )
 
 // An MCP server's connection to vault.sock reaches the core as a stream

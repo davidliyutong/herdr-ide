@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 
-	"herdr-ide/internal/keybindings"
-	"herdr-ide/internal/settings"
+	"veldr/internal/keybindings"
+	"veldr/internal/settings"
 )
 
 // Settings and keybindings (docs/features/13-settings-and-appearance.md):

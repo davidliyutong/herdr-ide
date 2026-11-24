@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // guiTestCore is a core attached to a test display's window manager.

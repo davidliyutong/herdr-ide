@@ -12,7 +12,7 @@ import (
 // not named.
 func TestTerminalFromEnv(t *testing.T) {
 	env := func(kv ...string) []byte { return []byte(strings.Join(kv, "\x00") + "\x00") }
-	const sock = "/home/u/.herdr-ide/run/hc.sock"
+	const sock = "/home/u/.veldr/run/hc.sock"
 	for _, c := range []struct {
 		env  []byte
 		want string

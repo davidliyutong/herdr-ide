@@ -12,14 +12,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/chathost"
+	"veldr/internal/brand"
+	"veldr/internal/chathost"
 
 	// The adapters of the agents' protocols register themselves
 	// (chatadapter.Register) under agentkinds.Adapters' names.
-	_ "herdr-ide/internal/chatadapter/acp"
-	_ "herdr-ide/internal/chatadapter/claude"
-	_ "herdr-ide/internal/chatadapter/codex"
+	_ "veldr/internal/chatadapter/acp"
+	_ "veldr/internal/chatadapter/claude"
+	_ "veldr/internal/chatadapter/codex"
 )
 
 // chatHost runs the chat-host command, the process of a machine that runs

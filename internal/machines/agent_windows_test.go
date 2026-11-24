@@ -5,7 +5,7 @@ import (
 	"log"
 	"testing"
 
-	"herdr-ide/internal/transport"
+	"veldr/internal/transport"
 )
 
 // dialAgent skips the test: the agent runs on Linux and macOS.

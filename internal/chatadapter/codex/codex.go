@@ -43,11 +43,11 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // clientName is the client's name Codex records as its threads'

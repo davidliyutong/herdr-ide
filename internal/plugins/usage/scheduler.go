@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/usage"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
+	"veldr/internal/usage"
 )
 
 const (

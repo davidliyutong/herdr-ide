@@ -5,10 +5,10 @@ import (
 	"errors"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/embedded"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agentproto"
+	"veldr/internal/embedded"
+	"veldr/internal/machines"
+	"veldr/internal/transport"
 )
 
 // Ensure prepares the machine's display and attaches to it, unless that is

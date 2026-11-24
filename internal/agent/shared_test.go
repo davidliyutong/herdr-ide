@@ -15,7 +15,7 @@ import (
 	"github.com/hashicorp/yamux"
 	"github.com/jezek/xgb/xproto"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // sharedAgent is an agent of a temporary home with no session yet.

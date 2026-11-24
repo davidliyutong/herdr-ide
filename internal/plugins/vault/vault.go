@@ -31,10 +31,10 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	vaultstore "veldr/internal/vault"
 )
 
 // ID is the plugin's id.

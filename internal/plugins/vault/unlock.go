@@ -9,8 +9,8 @@ import (
 	"slices"
 	"time"
 
-	"herdr-ide/internal/plugin"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/plugin"
+	vaultstore "veldr/internal/vault"
 )
 
 // Unlocks by an authenticator: a locked vault's key comes back from the

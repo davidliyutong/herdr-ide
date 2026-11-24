@@ -21,8 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostid"
+	"veldr/internal/brand"
+	"veldr/internal/hostid"
 )
 
 // Dirs are a namespace's directories on this host.

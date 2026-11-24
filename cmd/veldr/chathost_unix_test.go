@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chathost"
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/store"
+	"veldr/internal/agentkinds"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chathost"
+	"veldr/internal/chatproto"
+	"veldr/internal/store"
 )
 
 // The chat-host command serves the run directory's socket until a signal

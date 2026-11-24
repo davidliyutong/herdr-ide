@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/detect"
-	"herdr-ide/internal/agent/sessions"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agent/detect"
+	"veldr/internal/agent/sessions"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
 )
 
 // noCore is a terminal core that refuses the detector's attaches and

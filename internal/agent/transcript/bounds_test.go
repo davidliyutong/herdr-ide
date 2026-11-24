@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // allocated is the bytes fn allocates (garbage included): an upper bound of

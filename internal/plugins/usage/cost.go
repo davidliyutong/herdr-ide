@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/usage"
+	"veldr/internal/plugin"
+	"veldr/internal/usage"
 )
 
 const (

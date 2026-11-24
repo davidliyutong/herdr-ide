@@ -1,6 +1,6 @@
 package monitor
 
-import "herdr-ide/internal/settings"
+import "veldr/internal/settings"
 
 // The plugin's settings (section "monitor"), read by the web UI
 // (web/src/plugins/monitor).

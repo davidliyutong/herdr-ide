@@ -20,7 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // hcServer is a server whose machine x gets the real herdr-core

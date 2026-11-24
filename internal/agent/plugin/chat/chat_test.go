@@ -20,12 +20,12 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chathost"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chathost"
+	"veldr/internal/chatproto"
 )
 
 // patience is how long a test waits for something that must happen.

@@ -1,4 +1,4 @@
-// Package transport establishes yamux sessions to herdr-ide agents, which
+// Package transport establishes yamux sessions to veldr agents, which
 // machines' nodes serve: through the node's socket for the local machine
 // (Linux and macOS, local.go), over ssh stdio and `node dial` for remote
 // machines.
@@ -19,7 +19,7 @@ import (
 
 	"github.com/hashicorp/yamux"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // ClientID names this core to the nodes it reaches (agentproto.NodeHello.

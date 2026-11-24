@@ -19,8 +19,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
 )
 
 func (s *Server) machine(w http.ResponseWriter, r *http.Request) *machines.Machine {

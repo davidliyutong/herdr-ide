@@ -17,11 +17,11 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hc"
-	"herdr-ide/internal/hostdirs"
-	"herdr-ide/internal/hostid"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hc"
+	"veldr/internal/hostdirs"
+	"veldr/internal/hostid"
 )
 
 // The agent's own herdr-core: an executable the core uploads, and one

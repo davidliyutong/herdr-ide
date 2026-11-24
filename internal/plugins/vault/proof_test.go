@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/plugin"
-	vaultstore "herdr-ide/internal/vault"
-	"herdr-ide/internal/webauthn"
+	"veldr/internal/agentproto"
+	"veldr/internal/plugin"
+	vaultstore "veldr/internal/vault"
+	"veldr/internal/webauthn"
 )
 
 const testOrigin = "http://localhost:7780"

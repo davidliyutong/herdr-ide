@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/transport"
+	"veldr/internal/transport"
 )
 
 // herdrCatalog writes herdr's catalog under a private XDG_STATE_HOME.

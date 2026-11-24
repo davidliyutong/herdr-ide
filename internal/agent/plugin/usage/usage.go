@@ -31,11 +31,11 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agent/sessions"
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/usage"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agent/sessions"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/usage"
 )
 
 // limitsShare is how long the limits one core fetched answer the same

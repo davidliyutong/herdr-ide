@@ -1,4 +1,4 @@
-{"dir": "out", "t": 1, "msg": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "herdr_ide", "title": "herdr-ide", "version": "0.0.0-spike"}, "capabilities": {"experimentalApi": true, "requestAttestation": false}}}}
+{"dir": "out", "t": 1, "msg": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "herdr_ide", "title": "veldr", "version": "0.0.0-spike"}, "capabilities": {"experimentalApi": true, "requestAttestation": false}}}}
 {"dir": "in", "t": 340, "msg": {"id": 1, "result": {"userAgent": "herdr_ide/0.171.0 (Mac OS 26.6.2; arm64) ghostty (herdr_ide; 0.0.0-spike)", "codexHome": "/home/user/.codex", "platformFamily": "unix", "platformOs": "macos"}}}
 {"dir": "in", "t": 341, "msg": {"method": "configWarning", "params": {"summary": "`[features].multi_agent` is deprecated. It still controls the V1 fallback. `[agents].enabled = false` disables subagent tools even when the model selects a subagent version, unless `[features].multi_agent_v2` is enabled.", "details": null}, "emittedAtMs": 1795347320561}}
 {"dir": "out", "t": 341, "msg": {"method": "initialized"}}

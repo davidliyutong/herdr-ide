@@ -12,8 +12,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/transport"
+	"veldr/internal/machines"
+	"veldr/internal/transport"
 )
 
 // handleAuth runs an interactive ssh login for a machine in a PTY on the core

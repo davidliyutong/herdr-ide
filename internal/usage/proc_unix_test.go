@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/testexec"
+	"veldr/internal/testexec"
 )
 
 // fakeAgy writes a script that leaves `sleep 300` behind and records its

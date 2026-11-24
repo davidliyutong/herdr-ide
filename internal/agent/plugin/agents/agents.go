@@ -26,10 +26,10 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agent/sessions"
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agent/sessions"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
 )
 
 // ID names the plugin on every side.

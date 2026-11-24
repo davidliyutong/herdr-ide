@@ -75,7 +75,7 @@ machine gets code-server:
 
 - `push` (default): the release is resolved on the core host
   ([09](09-air-gapped-installs.md)), uploaded through the agent and
-  unpacked into `~/.herdr-ide/code-server/<version>` (shared by instances);
+  unpacked into `~/.veldr/code-server/<version>` (shared by instances);
 - `download`: the agent fetches the same release with the machine's curl or
   wget and checks the digest the core sends;
 - `existing`: the agent runs a code-server already on the machine
@@ -175,10 +175,10 @@ core share them.
 
 ### Bridge
 
-`extensions/herdr-ide-bridge`, `internal/server/bridge.go`.
+`extensions/veldr-bridge`, `internal/server/bridge.go`.
 
 The extension runs in code-server's extension host on the machine and
-connects to `$HERDR_IDE_BRIDGE_SOCKET`, which the agent tunnels to the core.
+connects to `$VELDR_BRIDGE_SOCKET`, which the agent tunnels to the core.
 It announces its window (a random id), its folders and keyboard focus.
 The extension host cannot see the page's URL, so a page learns which window
 its iframe shows by matching the window that reports focus with the iframe

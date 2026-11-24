@@ -213,8 +213,22 @@ export class SSHMachine {
    * drops and new ones are refused. The container and its processes, the
    * terminal core among them, keep running. */
   async offline() {
-    await this.root('pkill sshd; true');
-    await waitFor(async () => !(await this.processes()).some((p) => /sshd/.test(p)), { what: 'sshd to end' });
+    // By the program's name, not pkill's pattern, which busybox also
+    // matches against a command's path: the agent's paths hold the
+    // container's name (sshd-…, its host id without a machine id).
+    const sshd = (await this.root('ps -o pid,args'))
+      .split('\n')
+      .map((l) => /^\s*(\d+)\s+(.*)$/.exec(l))
+      .flatMap((m) => (m && isSSHD(m[2]) ? [m[1]] : []));
+    if (sshd.length) await this.root(`kill ${sshd.join(' ')}; true`);
+    await waitFor(
+      async () => {
+        const left = (await this.processes()).filter(isSSHD);
+        if (left.length) throw new Error(left.join('; '));
+        return true;
+      },
+      { what: 'sshd to end' },
+    );
   }
 
   /** Lets ssh in again. */
@@ -228,6 +242,13 @@ export class SSHMachine {
     this.removed = true;
     await docker('rm', '-f', '-v', this.container).catch(() => '');
   }
+}
+
+/** Whether a process's command line (as ps shows it) is sshd's: its
+ * listener or a session, by the program's name; other command lines may
+ * hold the container's name (sshd-…) in a path. */
+function isSSHD(args: string): boolean {
+  return /^\S*sshd(-session)?(\s|:|$)/.test(args);
 }
 
 /** Removes the containers earlier runs left: those with our label whose

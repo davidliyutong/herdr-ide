@@ -21,11 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agent"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
+	"veldr/internal/transport"
 )
 
 type fakeHost struct {

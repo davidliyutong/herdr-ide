@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/usage"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/usage"
 )
 
 func call(t *testing.T, e *plugin.Env, action, params string) agentproto.Reply {

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"herdr-ide/internal/agent/plugin"
+	"veldr/internal/agent/plugin"
 )
 
 // Limits one core fetched answer another core's same request; not the same

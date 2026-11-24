@@ -17,10 +17,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/perf"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/sshconfig"
+	"veldr/internal/machines"
+	"veldr/internal/perf"
+	"veldr/internal/plugin"
+	"veldr/internal/sshconfig"
 )
 
 // maxLabelLen bounds a label: no odd bytes in the audit log. Targets are

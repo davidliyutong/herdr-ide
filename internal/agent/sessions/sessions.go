@@ -41,7 +41,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"herdr-ide/internal/agentkinds"
+	"veldr/internal/agentkinds"
 )
 
 // Proc is the foreground program of a terminal as the terminal core reports it.

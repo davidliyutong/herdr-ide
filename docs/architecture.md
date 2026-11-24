@@ -1,24 +1,24 @@
 # Architecture
 
 ```
-browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (Go, `herdr-ide`)
+browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (Go, `veldr`)
 desktop app (Electron shell)                            ├─ machines: registry + connection state machine
                                                         ├─ settings, keybindings (files on the core host)
                                                         ├─ server: event channel, terminal protocol, files, code-server proxy, bridge hub
                                                         ├─ gui: virtual displays per machine, window list, frame routing
-                                                        └─ one ssh session per machine ──yamux──▶ agent (served by `herdr-ide node`)
+                                                        └─ one ssh session per machine ──yamux──▶ agent (served by `veldr node`)
                                                                                                     ├─ herdr-core in a session of its own (raw pipe to its API socket)
                                                                                                     ├─ agent detection in its terminals, with the agents' sessions
                                                                                                     ├─ files (stat/list/range read/upload/zip)
                                                                                                     ├─ code-server (unix socket only)
                                                                                                     ├─ Xvfb or Xwayland + window manager (programs' windows)
                                                                                                     ├─ plugins' machine sides (op plugin)
-                                                                                                    ├─ chat.sock ◀── chat host (`herdr-ide chat-host`, a hidden terminal of herdr-core) ──▶ coding agents headless
+                                                                                                    ├─ chat.sock ◀── chat host (`veldr chat-host`, a hidden terminal of herdr-core) ──▶ coding agents headless
                                                                                                     ├─ bridge.sock ◀── VS Code bridge extension
                                                                                                     └─ vault.sock ◀── the vault's MCP server (`<slug>-mcp`) ◀──stdio── coding agents' CLIs
 ```
 
-Each machine's agent sessions are served by its node (`herdr-ide node`), a
+Each machine's agent sessions are served by its node (`veldr node`), a
 process of its own listening on a socket in the instance's runtime
 directory on that host (`internal/hostdirs`; a home several hosts share
 keeps each host's sockets, locks and executables apart,
@@ -34,7 +34,7 @@ machine with the code `local_unsupported` and reaches SSH machines only
 
 | Directory | Role |
 | --- | --- |
-| `cmd/herdr-ide` | The one binary: `serve`, `fetch-assets` (`serve.go`), `mcp`, `version`; on machines `node` (`node`, `node dial`, `node stop`), `gui-keep`, `gui-wl` and `chat-host` (`machine_unix.go`, `node_unix.go`, `chathost_unix.go`). Built with the tag `machine` it leaves out the server, UI and payloads; that build is what machines get. |
+| `cmd/veldr` | The one binary: `serve`, `fetch-assets` (`serve.go`), `mcp`, `version`; on machines `node` (`node`, `node dial`, `node stop`), `gui-keep`, `gui-wl` and `chat-host` (`machine_unix.go`, `node_unix.go`, `chathost_unix.go`). Built with the tag `machine` it leaves out the server, UI and payloads; that build is what machines get. |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/hostid` | The host's key (name and a hash of its machine id) and id (the hash alone), for files and sessions kept per host ([40](features/40-shared-homes.md)). |
 | `internal/hostdirs` | A namespace's directories on a host: the data directory, the host's own directory in it, the host-local runtime directory. |
@@ -80,7 +80,7 @@ machine with the code `local_unsupported` and reaches SSH machines only
 | `internal/embedded` | Payloads compiled into the core: machine builds, herdr-core, video encoder, bridge VSIX. |
 | `web` | Browser UI (Vite, React, zustand). Terminals: `src/term` (protocol client, layout), `src/vt` (emulator, [26](features/26-web-terminals.md)); restores: `src/restore.ts`; conversation view: `src/conversation`; plugins: `src/plugins`. `web/embed.go` embeds `web/dist`. |
 | `desktop` | Electron shell and electron-builder configuration ([16](features/16-desktop-packaging.md)). |
-| `extensions/herdr-ide-bridge` | VS Code extension installed into code-server. |
+| `extensions/veldr-bridge` | VS Code extension installed into code-server. |
 | `scripts` | Build, packaging, checks, pinned downloads and generators (`tokens`, `registry`). |
 | `design` | Design tokens (`tokens.json`, [24](features/24-design-tokens.md)), `generated/registry.json`, the pinned Codex app-server schema, and shared test vectors and recordings (`testdata/`) run by Go and web tests. |
 | `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`), `fakeacp`, a scripted offline ACP agent installed as `kimi`, `xclient`, an X program that reports its input for the program window tests, and `sshd`, the image of the SSH machines the tests run in Docker (with Xvfb). |
@@ -249,7 +249,7 @@ of client
 ## Names, renames and migration
 
 Runtime identifiers derive from `internal/brand`, `web/src/brand.ts` and
-`extensions/herdr-ide-bridge/src/brand.ts`, kept in sync by
+`extensions/veldr-bridge/src/brand.ts`, kept in sync by
 `internal/brand/brand_test.go`; `scripts/check.sh` rejects hardcoded names.
 `scripts/rename.sh NEW` renames the project and appends the old names to the
 `Legacy*` lists, from which the core removes the

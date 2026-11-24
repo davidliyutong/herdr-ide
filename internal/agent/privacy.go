@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
 )
 
 // Full Disk Access on macOS (op privacy, docs/features/16). macOS grants it

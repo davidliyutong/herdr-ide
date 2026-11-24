@@ -3,7 +3,7 @@ package server
 import (
 	"sync"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 type termHub struct {

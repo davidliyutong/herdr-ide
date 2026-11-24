@@ -8,7 +8,7 @@ import (
 	"strings"
 	"syscall"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // fileID is a file's device and inode: what tells that a path still is the

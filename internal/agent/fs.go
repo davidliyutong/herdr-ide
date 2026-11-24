@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"herdr-ide/internal/brand"
 	"io"
 	"io/fs"
 	"net"
@@ -15,8 +14,9 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"veldr/internal/brand"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 const maxListEntries = 20000

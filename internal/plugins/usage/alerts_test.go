@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/usage"
+	"veldr/internal/settings"
+	"veldr/internal/usage"
 )
 
 // alertRun polls one account whose windows each poll sets.

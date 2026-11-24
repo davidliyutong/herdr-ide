@@ -25,9 +25,9 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/loopback"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
+	"veldr/internal/loopback"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
 )
 
 // ID names the plugin.

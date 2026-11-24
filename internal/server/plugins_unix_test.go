@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	agentplugin "herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/plugin"
+	agentplugin "veldr/internal/agent/plugin"
+	"veldr/internal/plugin"
 )
 
 // held is closed when the agent's side of a "testhold" stream ends.

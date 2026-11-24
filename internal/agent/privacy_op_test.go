@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"herdr-ide/internal/agent"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
+	"veldr/internal/agent"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
 )
 
 // Op privacy reports unknown off macOS and, on macOS, opens the protected

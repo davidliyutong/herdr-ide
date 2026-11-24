@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/store"
+	"veldr/internal/store"
 )
 
 // costDBOf opens the database of the cache at p for a test.

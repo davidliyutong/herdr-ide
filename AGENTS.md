@@ -7,7 +7,7 @@ changes.
 
 ## What this is
 
-One Go program (`cmd/herdr-ide`): the server, which serves a React terminal
+One Go program (`cmd/veldr`): the server, which serves a React terminal
 UI, and the per-machine agent it reaches several machines through over ssh
 (served by the command `node` of the same binary). Every machine's terminals live in a terminal core of the agent's own
 (herdr-core, `hc`, in a session apart from the user's); the browser emulates
@@ -46,12 +46,12 @@ Run `make check test` before finishing a change.
 ## Rules
 
 1. **Never touch the user's real instance or terminals.** Experiments,
-   tests and dev servers use `--instance dev` (state in `~/.herdr-ide-dev`,
-   terminal core session `herdr-ide-dev-<host id>`), the integration tests'
-   sessions `herdr-ide-it` and `herdr-ide-it-<host id>` or the end-to-end
+   tests and dev servers use `--instance dev` (state in `~/.veldr-dev`,
+   terminal core session `veldr-dev-<host id>`), the integration tests'
+   sessions `veldr-it` and `veldr-it-<host id>` or the end-to-end
    tests' instances `e2e-<random>`
    (homes in `/tmp/hie-*`, SSH machines in Docker containers labelled
-   `herdr-ide.e2e`); the desktop app's instance (`desktop`) and the
+   `veldr.e2e`); the desktop app's instance (`desktop`) and the
    default one are the user's. Stop a terminal core only through its own
    instance (`POST /api/m/{id}/hc/stop` of the dev core), never the user's,
    and do not attach to the user's terminals.
@@ -173,12 +173,12 @@ playbooks):
   that grow with features are lists with one item per line.
 - macOS limits unix socket paths to 104 bytes; keep socket paths short.
 - The core builds for Windows, the agent does not: `internal/agent` and
-  `cmd/herdr-ide/machine_unix.go` are `//go:build unix`, so code the core runs on
+  `cmd/veldr/machine_unix.go` are `//go:build unix`, so code the core runs on
   Windows must not import them (put what both need in
   `internal/agentproto`); POSIX-only tests skip on Windows. Paths on
   machines are POSIX: use package `path`, not `filepath`, for them.
   `.gitattributes` keeps LF line endings on Windows checkouts.
-- The binary a machine gets is `cmd/herdr-ide` built with the tag
+- The binary a machine gets is `cmd/veldr` built with the tag
   `machine`. Files of that directory that need the server, the UI or
   `internal/embedded` are `//go:build !machine`; `scripts/check.sh` fails
   when the machine build links them (it would embed itself).

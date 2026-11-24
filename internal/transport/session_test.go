@@ -14,8 +14,8 @@ import (
 
 	"github.com/hashicorp/yamux"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/testexec"
+	"veldr/internal/agentproto"
+	"veldr/internal/testexec"
 )
 
 // pair connects a core session to a bare yamux server standing in for the

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
+	"veldr/internal/agent/plugin"
 )
 
 func TestParseNvidiaSMICSV(t *testing.T) {

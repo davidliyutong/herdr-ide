@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
+	"veldr/internal/agent/plugin"
 )
 
 // Reveal in Finder (Reveal in File Manager): the system's file manager

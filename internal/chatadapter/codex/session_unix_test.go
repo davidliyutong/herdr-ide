@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // What the app-server left running in its group ends with it: SIGTERM

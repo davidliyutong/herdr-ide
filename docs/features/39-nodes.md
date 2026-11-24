@@ -21,7 +21,7 @@ herdr-core is another project, reached through its protocol
 
 Goals:
 
-- every machine runs one program, `herdr-ide`, in two roles: a **node**,
+- every machine runs one program, `veldr`, in two roles: a **node**,
   the machine's service that listens on a local socket only, and a **UI**,
   which serves the web UI and is a client of nodes;
 - a UI reaches its own machine's node exactly as it reaches another's,
@@ -39,7 +39,7 @@ a node reachable without ssh.
 
 ### Roles
 
-`herdr-ide` has these commands on Linux and macOS:
+`veldr` has these commands on Linux and macOS:
 
 | Command | Role |
 | --- | --- |
@@ -51,7 +51,7 @@ a node reachable without ssh.
 A machine needs only what it runs: the UI's host the full build, other
 machines the machine build (tag `machine`: no `serve`, no web UI, no
 payloads), which the UI uploads as before ([02](02-multi-machine-transport.md)).
-`internal/agent/node.go` is the node, `cmd/herdr-ide/node_unix.go` its
+`internal/agent/node.go` is the node, `cmd/veldr/node_unix.go` its
 commands.
 
 ### The node
@@ -127,7 +127,7 @@ start on the node and need a UI:
 ### Namespaces
 
 A node's namespace is the machine's data directory and terminal core
-session: `~/.herdr-ide` and `herdr-ide-<host id>` by default
+session: `~/.veldr` and `veldr-<host id>` by default
 ([40](40-shared-homes.md)). A core's `--instance`
 names its own files on its host
 ([reference](../reference.md#files-and-directories)) and, unless
@@ -174,7 +174,7 @@ chat works, the terminal core restarts only when asked.
 | Alternative | Why not |
 | --- | --- |
 | The local machine's agent in the core's process (before) | The machine's service ended with one UI and could serve no other. |
-| herdr-core linked into `herdr-ide`, run as `herdr-ide hc` | Saves one artifact at the cost of cgo in every Linux and macOS build, a build of another project's sources and its entry point, and terminals' macOS privacy grants moving to an executable that changes with every release. |
+| herdr-core linked into `veldr`, run as `veldr hc` | Saves one artifact at the cost of cgo in every Linux and macOS build, a build of another project's sources and its entry point, and terminals' macOS privacy grants moving to an executable that changes with every release. |
 | herdr-core's library called in the node's process | A node panic or upgrade would end every terminal; holders and macOS responsibility need processes of their own. |
 | `ssh -L` forwarding of the node's socket | Many servers disable stream-local forwarding; it cannot start a node. |
 | The node as one systemd unit with `KillMode=process` | Takeover needs two nodes at once, and leftovers of a stopped unit are not services anyone owns. |

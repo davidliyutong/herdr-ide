@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
 )
 
 // readCore is the fake terminal core of the terminal protocol's tests

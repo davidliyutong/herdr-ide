@@ -11,7 +11,7 @@ updates:
     groups:
       web: { patterns: ['*'] }
   - package-ecosystem: npm
-    directory: /extensions/herdr-ide-bridge
+    directory: /extensions/veldr-bridge
     schedule: { interval: weekly }
     groups:
       extension: { patterns: ['*'] }

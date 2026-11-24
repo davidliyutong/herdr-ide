@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/store"
+	"veldr/internal/brand"
+	"veldr/internal/chatproto"
+	"veldr/internal/store"
 )
 
 // DBName is the name of the chat host's database in the instance's data

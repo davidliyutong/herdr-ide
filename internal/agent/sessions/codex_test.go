@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 func TestCodexArgv(t *testing.T) {

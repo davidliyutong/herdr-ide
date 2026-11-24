@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	dbstore "herdr-ide/internal/store"
+	"veldr/internal/agentproto"
+	dbstore "veldr/internal/store"
 )
 
 // The snapshots live in the machine's database (store.MachineDB in the

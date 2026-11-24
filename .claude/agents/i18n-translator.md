@@ -29,7 +29,7 @@ Settings' and commands' labels are the keys the registry lists
 (`design/generated/registry.json`, `i18n`); `web/src/__tests__/settings.test.ts`
 fails when one is missing.
 
-Extension (`extensions/herdr-ide-bridge/`): `package.nls*.json` for manifest
+Extension (`extensions/veldr-bridge/`): `package.nls*.json` for manifest
 titles, `l10n/bundle.l10n.<locale>.json` for `vscode.l10n.t` strings (the key
 is the English text).
 

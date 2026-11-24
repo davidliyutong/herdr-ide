@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatproto"
+	"veldr/internal/plugin"
 )
 
 // clock is the time, which the test moves ahead.

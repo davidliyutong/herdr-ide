@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
 )
 
 // resolveCodex tries the command line (codex resume <id>), then the rollout

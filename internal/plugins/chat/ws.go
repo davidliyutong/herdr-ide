@@ -12,8 +12,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/chatproto"
+	"veldr/internal/plugin"
 )
 
 // backlogMessages and backlogBytes bound what waits to be sent to a page.

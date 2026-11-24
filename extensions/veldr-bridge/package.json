@@ -1,9 +1,9 @@
 {
-  "name": "herdr-ide-bridge",
+  "name": "veldr-bridge",
   "displayName": "%displayName%",
   "description": "%description%",
   "version": "0.1.0",
-  "publisher": "herdr-ide",
+  "publisher": "veldr",
   "license": "MIT",
   "engines": {
     "vscode": "^1.90.0"
@@ -21,59 +21,59 @@
   "contributes": {
     "commands": [
       {
-        "command": "herdr-ide.sendToAgent",
+        "command": "veldr.sendToAgent",
         "title": "%command.sendToAgent%",
-        "category": "herdr-ide"
+        "category": "veldr"
       },
       {
-        "command": "herdr-ide.download",
+        "command": "veldr.download",
         "title": "%command.download%",
-        "category": "herdr-ide"
+        "category": "veldr"
       },
       {
-        "command": "herdr-ide.reconnect",
+        "command": "veldr.reconnect",
         "title": "%command.reconnect%",
-        "category": "herdr-ide"
+        "category": "veldr"
       },
       {
-        "command": "herdr-ide.leave",
+        "command": "veldr.leave",
         "title": "%command.leave%",
-        "category": "herdr-ide"
+        "category": "veldr"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "herdr-ide.sendToAgent",
-          "group": "herdr-ide@1"
+          "command": "veldr.sendToAgent",
+          "group": "veldr@1"
         }
       ],
       "explorer/context": [
         {
-          "command": "herdr-ide.sendToAgent",
-          "group": "herdr-ide@1"
+          "command": "veldr.sendToAgent",
+          "group": "veldr@1"
         },
         {
-          "command": "herdr-ide.download",
-          "group": "herdr-ide@2"
+          "command": "veldr.download",
+          "group": "veldr@2"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "herdr-ide.sendToAgent",
+        "command": "veldr.sendToAgent",
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
         "when": "editorTextFocus"
       },
       {
-        "command": "herdr-ide.closePane",
+        "command": "veldr.closePane",
         "key": "ctrl+w",
         "mac": "cmd+w",
         "when": "!editorIsOpen && !multipleEditorGroups"
       },
       {
-        "command": "herdr-ide.leave",
+        "command": "veldr.leave",
         "key": "ctrl+alt+shift+b",
         "mac": "ctrl+b",
         "when": "!terminalFocus"
@@ -82,7 +82,7 @@
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --outfile=dist/extension.js",
-    "package": "pnpm run build && vsce package --no-dependencies --allow-missing-repository -o herdr-ide-bridge.vsix",
+    "package": "pnpm run build && vsce package --no-dependencies --allow-missing-repository -o veldr-bridge.vsix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "typecheck": "tsc -p ."

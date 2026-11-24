@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/uisettings"
+	"veldr/internal/machines"
+	"veldr/internal/uisettings"
 )
 
 // machineSSHEnv returns SSH_CONNECTION and SSH_CLIENT for the new terminals

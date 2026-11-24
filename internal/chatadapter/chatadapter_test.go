@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 type fakeAdapter struct{ name string }

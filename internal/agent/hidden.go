@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
 )
 
 // Helpers of the product's own that outlive the agent (the chat host) run

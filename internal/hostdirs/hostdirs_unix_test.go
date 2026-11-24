@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/hostid"
+	"veldr/internal/hostid"
 )
 
 func withRuntimeRoot(t *testing.T, root string) {

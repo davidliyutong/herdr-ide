@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
 )
 
-const itSession = "herdr-ide-it"
+const itSession = "veldr-it"
 
 // startCore starts a terminal core whose socket is the agent's in a run
 // directory of its own (short: holders listen beside it) and returns the

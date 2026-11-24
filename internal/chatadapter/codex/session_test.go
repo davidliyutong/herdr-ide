@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // script writes a recording for the fake app-server: what its client

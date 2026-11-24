@@ -7,7 +7,7 @@ import (
 	"net"
 	"path/filepath"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // serveBridge accepts connections from the VS Code bridge extension on

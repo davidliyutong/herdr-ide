@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/brand"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	vaultstore "veldr/internal/vault"
 )
 
 // Export and import: variables leave in an encrypted file

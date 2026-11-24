@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	agentplugin "herdr-ide/internal/agent/plugin"
-	_ "herdr-ide/internal/agent/plugin/agents"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
+	agentplugin "veldr/internal/agent/plugin"
+	_ "veldr/internal/agent/plugin/agents"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
 )
 
 // machineSide runs the actions on the machine side's handler in this

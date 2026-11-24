@@ -56,6 +56,7 @@ gpupick:
 it:
 	go test -tags integration -count=1 ./internal/agent -run Integration -v
 	go test -tags integration -count=1 ./internal/agent/plugin/history -run Integration -v
+	go test -tags integration -count=1 ./internal/agent/plugin/migrate -run Integration -v
 	go test -tags integration -count=1 ./internal/hc -run Integration -v
 	go test -tags integration -count=1 ./internal/server -run Integration -v
 

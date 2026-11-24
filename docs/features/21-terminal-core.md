@@ -33,7 +33,7 @@ core by the integration tests):
   wheel input to collect history, which every viewer sees.
 - **Size.** A terminal takes the size of the non-observing viewer active
   last; without one it gets the *headless* size from the user's own
-  herdr-core `config.toml` (200x120 by default), which herdr-ide never
+  herdr-core `config.toml` (200x120 by default), which veldr never
   writes. No call sets a size outside a stream, so a terminal's last viewer
   stays attached while no client shows it ([22](22-terminal-protocol.md)).
 - **Credit.** Output flows against credit: 256 KiB per channel, returned
@@ -50,7 +50,7 @@ core by the integration tests):
   was lost with the core gets a new shell at the same address, in its last
   directory, when the core runs again. The web UI starts terminals this way
   ([33](33-workspace-restore.md)). With the user's `restore_screen = true`
-  in `config.toml` (read, never written, by herdr-ide;
+  in `config.toml` (read, never written, by veldr;
   [36](36-terminal-history.md)), the new shell shows the old screen above
   a dim separator line, except after a power loss.
 - **Documents** (`doc.get`, `doc.set`) are versioned and persist across
@@ -71,7 +71,7 @@ core by the integration tests):
 
 ## Goals / non-goals
 
-Goals: a terminal core per machine owned by herdr-ide's instance, sharing
+Goals: a terminal core per machine owned by veldr's instance, sharing
 nothing with a herdr-core the user runs; its executable delivered through
 the agent and verified; a Go client whose backpressure reaches the slowest
 hop.
@@ -110,7 +110,7 @@ one verified executable for the integration tests (`HC_TEST_BIN`).
 uncompressed one.
 
 **Agent** (`internal/agent/hc.go`). The session is
-`herdr-ide[-<instance>]-<host id>`, so hosts sharing a home keep their
+`veldr[-<instance>]-<host id>`, so hosts sharing a home keep their
 cores and herdr-core's state apart ([40](40-shared-homes.md)); the socket
 is `hc.sock` in the namespace's runtime directory on the host (short, for
 macOS's socket path limit). Op `hc`:
@@ -132,14 +132,14 @@ macOS's socket path limit). Op `hc`:
 Actions run one at a time. Op `hc-api` pipes the socket; op `detect`
 follows agents in the terminals ([25](25-agent-detection.md)). The agent
 never stops the core on its own; only the user's "stop terminal core"
-does ([02](02-multi-machine-transport.md)), or `herdr-ide node stop
+does ([02](02-multi-machine-transport.md)), or `veldr node stop
 --terminal-core` on the machine, which runs `server stop` when a core
 answers on the instance's socket.
 
 **Helpers as hidden terminals** (`internal/agent/hidden.go`). The chat host
 ([37](37-agent-chats.md)) must outlive the agent, so it runs as a terminal
 of the instance's terminal core (`plugin.Env.RunHidden`): a reserved name,
-the label `herdr-ide.hidden`, `no_parent`, `no_notify` and `rm`, in the
+the label `veldr.hidden`, `no_parent`, `no_notify` and `rm`, in the
 user's home with a minimal environment. It thereby has the lifetime, owner
 and macOS privacy attribution of the user's terminals and ends with its
 program or the core's stop. The core gives a name to one live terminal at
@@ -153,7 +153,7 @@ terminal core is started for a helper: without one it answers
 
 **Environment of terminals.** The agent starts the core (and code-server
 and the display) with `cleanEnv` (`internal/agent/procutil.go`): without
-`HC_*`, `HERDR_*` (the product's own `HERDR_IDE_*` stay), `TMUX`,
+`HC_*`, `HERDR_*` (the product's own `VELDR_*` stay), `TMUX`,
 `TMUX_PANE`, `STY`, `ZELLIJ` and `ZELLIJ_*`. Otherwise a core started from
 a herdr pane or inside tmux would give its terminals the look of nested
 sessions, and agents' hooks would report to the wrong pane. It also drops
@@ -228,4 +228,4 @@ build's digest before every start. See [SECURITY.md](../../SECURITY.md).
   chat host started again after the terminal core restarted.
 - `make it`: `TestIntegrationTerminal` (`internal/hc`) and
   `TestIntegrationHC` (`internal/agent`) against a real herdr-core in the
-  sessions `herdr-ide-it` and `herdr-ide-it-<host id>` (the agent's).
+  sessions `veldr-it` and `veldr-it-<host id>` (the agent's).

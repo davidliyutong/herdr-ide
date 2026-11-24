@@ -34,11 +34,11 @@ import (
 	"strconv"
 	"strings"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/keybindings"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/registry"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentkinds"
+	"veldr/internal/keybindings"
+	"veldr/internal/plugin"
+	"veldr/internal/registry"
+	"veldr/internal/settings"
 )
 
 const out = "design/generated/registry.json"

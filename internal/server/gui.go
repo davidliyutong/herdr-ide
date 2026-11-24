@@ -14,10 +14,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/gui"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentproto"
+	"veldr/internal/gui"
+	"veldr/internal/machines"
+	"veldr/internal/settings"
 )
 
 // GUI windows (docs/features/14-gui-windows.md): every /ws client gets the

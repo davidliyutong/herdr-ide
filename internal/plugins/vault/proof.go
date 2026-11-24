@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/plugin"
-	vaultstore "herdr-ide/internal/vault"
-	"herdr-ide/internal/webauthn"
+	"veldr/internal/plugin"
+	vaultstore "veldr/internal/vault"
+	"veldr/internal/webauthn"
 )
 
 // Proofs: an authenticator's word, in the passphrase's stead, that the user

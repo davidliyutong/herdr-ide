@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // socketWatchEvery is how often (in nanoseconds) an agent checks that the

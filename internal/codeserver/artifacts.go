@@ -8,8 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/checksum"
 	"io"
 	"net/http"
 	"os"
@@ -17,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"veldr/internal/brand"
+	"veldr/internal/checksum"
 )
 
 // Artifacts (code-server tarballs, extension VSIXs) are resolved on the core
@@ -227,7 +227,7 @@ func (mg *Manager) extension(ctx context.Context, e Extension) (string, error) {
 	return mg.artifact(ctx, e.File(), url, nil)
 }
 
-// AllAssets lists the code-server platform assets herdr-ide can install.
+// AllAssets lists the code-server platform assets veldr can install.
 var AllAssets = []string{"linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64"}
 
 // FetchAssets downloads (or verifies) everything needed for the given assets

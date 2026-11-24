@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // Claude Code's transcripts: <claude dir>/projects/<dir>/<session>.jsonl,

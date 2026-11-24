@@ -23,7 +23,7 @@
   "title": "Screenshot question",
   "events": [
     {
-      "method": "_herdr-ide/command",
+      "method": "_veldr/command",
       "params": {
         "args": "opus",
         "name": "/model"
@@ -31,14 +31,14 @@
       "t": "notice"
     },
     {
-      "method": "_herdr-ide/command",
+      "method": "_veldr/command",
       "params": {
         "output": "Set model to opus"
       },
       "t": "notice"
     },
     {
-      "method": "_herdr-ide/command",
+      "method": "_veldr/command",
       "params": {
         "name": "/cost"
       },
@@ -56,7 +56,7 @@
         },
         {
           "_meta": {
-            "herdr-ide": {
+            "veldr": {
               "image": true
             }
           },
@@ -67,7 +67,7 @@
       "t": "user"
     },
     {
-      "method": "_herdr-ide/error",
+      "method": "_veldr/error",
       "params": {
         "text": "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"
       },
@@ -110,7 +110,7 @@
       "t": "turn"
     },
     {
-      "method": "_herdr-ide/compacted",
+      "method": "_veldr/compacted",
       "params": {
         "preTokens": 48211,
         "trigger": "manual"
@@ -118,7 +118,7 @@
       "t": "notice"
     },
     {
-      "method": "_herdr-ide/command",
+      "method": "_veldr/command",
       "params": {
         "args": "ls",
         "name": "!"
@@ -126,7 +126,7 @@
       "t": "notice"
     },
     {
-      "method": "_herdr-ide/command",
+      "method": "_veldr/command",
       "params": {
         "output": "go.mod\nparse.go"
       },

@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentkinds"
+	"veldr/internal/settings"
 )
 
 // terminalColors are a theme's terminal colors: the 16 ANSI colors are

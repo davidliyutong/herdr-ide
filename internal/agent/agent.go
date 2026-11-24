@@ -13,7 +13,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"herdr-ide/internal/brand"
 	"io"
 	"log"
 	"net"
@@ -26,11 +25,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"veldr/internal/brand"
 
 	"github.com/hashicorp/yamux"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hostdirs"
+	"veldr/internal/agentproto"
+	"veldr/internal/hostdirs"
 )
 
 // Agent is a machine's agent for one instance: what the agent sessions of

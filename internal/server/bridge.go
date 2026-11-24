@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugins/vscode"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugins/vscode"
 )
 
 // bridgeWindow is one VS Code window (extension host) of code-server: a

@@ -101,7 +101,7 @@ import (
 	"sort"
 	"sync"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // Adapter drives one protocol of coding agents.

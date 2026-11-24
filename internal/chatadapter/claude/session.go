@@ -12,9 +12,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // session is a chat's Claude Code session and its program.

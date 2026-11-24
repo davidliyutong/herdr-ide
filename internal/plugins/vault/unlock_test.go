@@ -23,10 +23,10 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/agentproto"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
+	vaultstore "veldr/internal/vault"
 )
 
 // testShell is the desktop app's shell of the tests: the key of its launch

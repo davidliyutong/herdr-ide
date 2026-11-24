@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/settings"
+	"veldr/internal/transport"
 )
 
 // Manager prepares displays and routes their windows.

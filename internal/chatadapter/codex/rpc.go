@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // The JSON-RPC codes the adapter answers with.

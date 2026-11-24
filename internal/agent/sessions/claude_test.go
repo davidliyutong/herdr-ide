@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 const cwd = "/home/dev/project"

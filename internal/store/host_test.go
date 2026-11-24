@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/hostid"
+	"veldr/internal/hostid"
 )
 
 // A database of a host is named after the host's whole name, sanitized,

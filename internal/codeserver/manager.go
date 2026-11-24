@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"herdr-ide/internal/brand"
 	"io"
 	"log"
 	"net"
@@ -19,10 +18,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"veldr/internal/brand"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/settings"
 )
 
 // DefaultVersion is the code-server release installed on machines.

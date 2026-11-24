@@ -5,7 +5,7 @@ package history
 import (
 	"testing"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // The terminal of the product's own helper (the chat host: its reserved

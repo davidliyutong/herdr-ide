@@ -1,8 +1,8 @@
 package chat
 
 import (
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/settings"
+	"veldr/internal/chatproto"
+	"veldr/internal/settings"
 )
 
 // The plugin's settings (section "chat"), each per machine: they bound

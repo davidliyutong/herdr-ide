@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"herdr-ide/internal/agentkinds"
+	"veldr/internal/agentkinds"
 )
 
 // ClaudeRunning is a running process of Claude Code that has session id

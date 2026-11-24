@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"herdr-ide/internal/settings"
+	"veldr/internal/settings"
 )
 
 // The links' setting: localhost in a pane by default, and the value of

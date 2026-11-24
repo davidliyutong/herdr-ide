@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 func marshal(t *testing.T, v any) string {

@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/detect"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	agentsplugin "herdr-ide/internal/plugins/agents"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agent/detect"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	agentsplugin "veldr/internal/plugins/agents"
+	"veldr/internal/settings"
 )
 
 const (

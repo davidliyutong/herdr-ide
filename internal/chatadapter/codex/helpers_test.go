@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files of the replays")
@@ -282,7 +282,7 @@ func (f *fakeRun) started() int {
 func (f *fakeRun) params(cwd string, opts chatproto.Options) chatadapter.StartParams {
 	return chatadapter.StartParams{
 		Kind: "codex", Argv: f.argv, Env: f.env, Cwd: cwd, SessionID: "", Options: opts,
-		Client:   chatadapter.ClientInfo{Name: "herdr-ide", Version: "1.2.3"},
+		Client:   chatadapter.ClientInfo{Name: "veldr", Version: "1.2.3"},
 		Settings: chatproto.DefaultHostSettings(),
 		Logger:   log.New(testWriter{}, "", 0),
 	}

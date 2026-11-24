@@ -14,7 +14,7 @@
  ],
  "env": {
   "CLAUDE_AGENT_SDK_VERSION": "0.3.323",
-  "CLAUDE_CODE_ENTRYPOINT": "herdr-ide",
+  "CLAUDE_CODE_ENTRYPOINT": "veldr",
   "CLAUDE_CODE_SDK_READS_SESSION_STATE": "1",
   "KEEP_ME": "1"
  },

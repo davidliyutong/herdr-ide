@@ -3,10 +3,10 @@ package vault
 import (
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/agentproto"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
+	vaultstore "veldr/internal/vault"
 )
 
 // Settings of the vault (section "vault"): how long things wait and last.

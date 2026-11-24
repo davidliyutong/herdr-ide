@@ -13,8 +13,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/vaultmcp"
+	"veldr/internal/agentproto"
+	"veldr/internal/vaultmcp"
 )
 
 // maxVaultConns bounds the MCP server connections relayed at once; more

@@ -20,7 +20,7 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // proc is one run of the claude program: its pipes, the control requests

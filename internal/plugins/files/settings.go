@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"herdr-ide/internal/settings"
+	"veldr/internal/settings"
 )
 
 // The explorer's settings (its page in Settings › Plugins), which the web

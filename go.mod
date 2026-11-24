@@ -1,4 +1,4 @@
-module herdr-ide
+module veldr
 
 go 1.27.1
 

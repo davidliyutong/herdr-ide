@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"herdr-ide/internal/plugin"
+	"veldr/internal/plugin"
 )
 
 // A change's audit record names the paths it acts on, at most

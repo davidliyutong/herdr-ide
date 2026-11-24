@@ -23,8 +23,8 @@ import (
 
 	"github.com/jezek/xgb/res"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
 )
 
 // GPUs and the display (see docs/features/14-gui-windows.md, "GPU").

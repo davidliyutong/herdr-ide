@@ -88,7 +88,7 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
 
 ### The owned core
 
-`desktop/src/core.ts`, `desktop/src/main.ts`, `cmd/herdr-ide/parent*.go`.
+`desktop/src/core.ts`, `desktop/src/main.ts`, `cmd/veldr/parent*.go`.
 
 - The shell starts one child core with `--parent-stdio`. The core reads a
   hello (one JSON line) on stdin, writes a JSON readiness line on stdout,
@@ -118,8 +118,8 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
   `keychain.ts`; [30](30-variable-vault.md)).
 - Production uses port 7781 and instance `desktop`; a stable origin keeps
   what the page stores per browser and the permissions granted to it.
-  `HERDR_IDE_DESKTOP_PORT` overrides the port. Development uses port 7791
-  and instance `dev`, or the instance `HERDR_IDE_DESKTOP_DEV` names (never
+  `VELDR_DESKTOP_PORT` overrides the port. Development uses port 7791
+  and instance `dev`, or the instance `VELDR_DESKTOP_DEV` names (never
   `desktop`); unpackaged runs are always development. Each instance has its
   own Electron profile and single-instance lock.
 - On macOS and Linux the core's PATH gains `~/.local/bin`, Homebrew's and
@@ -225,7 +225,7 @@ inherit:
 - Terminals access them as **herdr-core**: it runs the terminal core as a
   launchd job and its holders disclaim inherited responsibility, so a
   terminal's programs have what
-  `~/.herdr-ide[-<instance>]/hosts/<host>/hc/herdr-core` was granted. Starting the core
+  `~/.veldr[-<instance>]/hosts/<host>/hc/herdr-core` was granted. Starting the core
   as the app's child would not change this.
 
 Both need the grant. The Terminal settings page shows a **Permissions** row
@@ -356,7 +356,7 @@ See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
 
 ## Testing
 
-- `cmd/herdr-ide/parent_test.go`: the hello, readiness, cancellation on
+- `cmd/veldr/parent_test.go`: the hello, readiness, cancellation on
   pipe EOF, surviving broken pipes.
 - `desktop/src/*.test.ts` (fake Electron and Node children, no network):
   `platform`, `core` (token, cookie, stop by closing stdin, kill after
@@ -372,6 +372,6 @@ See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
   probe through a real herdr-core.
 - CI's `desktop` job runs the Go, web and desktop tests and
   `scripts/desktop.sh app` on Ubuntu, macOS and Windows.
-- Packaged smoke tests launch the executable with `HERDR_IDE_DESKTOP_DEV`
+- Packaged smoke tests launch the executable with `VELDR_DESKTOP_DEV`
   and their own `--user-data-dir`; the macOS app and the linux-arm64 deb
   (in a Debian 13 container under Xvfb) were run this way.

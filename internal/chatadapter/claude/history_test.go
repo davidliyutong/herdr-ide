@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/sessions"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agent/sessions"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 // headlessID is the session of the recorded transcript.

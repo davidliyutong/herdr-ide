@@ -1,4 +1,4 @@
-{"dir": "out", "t": 4, "msg": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "herdr_ide", "title": "herdr-ide", "version": "0.0.0-spike"}, "capabilities": {"experimentalApi": true, "requestAttestation": false}}}}
+{"dir": "out", "t": 4, "msg": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "herdr_ide", "title": "veldr", "version": "0.0.0-spike"}, "capabilities": {"experimentalApi": true, "requestAttestation": false}}}}
 {"dir": "in", "t": 436, "msg": {"id": 1, "result": {"userAgent": "herdr_ide/0.171.0 (Mac OS 26.6.2; arm64) ghostty (herdr_ide; 0.0.0-spike)", "codexHome": "/home/user/.codex", "platformFamily": "unix", "platformOs": "macos"}}}
 {"dir": "out", "t": 436, "msg": {"method": "initialized"}}
 {"dir": "out", "t": 436, "msg": {"id": 2, "method": "thread/start", "params": {"model": "gpt-6-luna", "cwd": "/work", "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "read-only"}}}

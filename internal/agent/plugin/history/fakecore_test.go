@@ -14,8 +14,8 @@ import (
 	"sync"
 	"testing"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/hc"
 )
 
 // fakeCore is a terminal core on a unix socket that speaks enough of

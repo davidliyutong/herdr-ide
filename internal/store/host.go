@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/hostid"
+	"veldr/internal/hostid"
 )
 
 // Databases kept per host. A data directory may be on a home that several

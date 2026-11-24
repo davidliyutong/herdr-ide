@@ -28,10 +28,10 @@ import (
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
-	"herdr-ide/internal/hostid"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
+	"veldr/internal/hostid"
 )
 
 // gui provides the virtual display that programs in terminals draw their

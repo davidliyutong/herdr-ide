@@ -3,7 +3,7 @@
 package codex
 
 import (
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // The chat host runs on Linux and macOS only.

@@ -20,11 +20,11 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/usage"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
+	"veldr/internal/usage"
 )
 
 // ID is the plugin's id.

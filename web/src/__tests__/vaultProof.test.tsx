@@ -734,7 +734,7 @@ describe('vault authenticators', () => {
       const o = create.mock.calls[0][0].publicKey;
       expect([...new Uint8Array(o.challenge)]).toEqual([...b64urlDecode(NONCE)]);
       expect(o).toMatchObject({
-        rp: { id: 'localhost', name: 'herdr-ide' },
+        rp: { id: 'localhost', name: 'veldr' },
         attestation: 'none',
         authenticatorSelection: { userVerification: 'required', residentKey: 'discouraged' },
       });

@@ -41,12 +41,12 @@ import (
 	"sync"
 	"time"
 
-	rpc "herdr-ide/internal/acp"
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	rpc "veldr/internal/acp"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 func init() { chatadapter.Register(agentkinds.AdapterACP, &Adapter{t: defaultTiming}) }

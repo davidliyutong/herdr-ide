@@ -118,7 +118,7 @@
       "t": "update",
       "update": {
         "_meta": {
-          "herdr-ide": {
+          "veldr": {
             "model": "claude-haiku-5-5"
           }
         },
@@ -184,7 +184,7 @@
       "t": "update",
       "update": {
         "_meta": {
-          "herdr-ide": {
+          "veldr": {
             "model": "claude-haiku-5-5"
           }
         },
@@ -238,7 +238,7 @@
       "t": "update",
       "update": {
         "_meta": {
-          "herdr-ide": {
+          "veldr": {
             "model": "claude-haiku-5-5"
           }
         },
@@ -306,7 +306,7 @@
       "t": "update",
       "update": {
         "_meta": {
-          "herdr-ide": {
+          "veldr": {
             "model": "claude-haiku-5-5"
           }
         },
@@ -347,7 +347,7 @@
       "t": "update",
       "update": {
         "_meta": {
-          "herdr-ide": {
+          "veldr": {
             "lines": 1
           }
         },
@@ -366,7 +366,7 @@
       "t": "update",
       "update": {
         "_meta": {
-          "herdr-ide": {
+          "veldr": {
             "model": "claude-haiku-5-5"
           }
         },

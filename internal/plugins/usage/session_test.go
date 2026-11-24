@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/usage"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/usage"
 )
 
 const testSession = "e6cdc860-1055-488f-9ed2-8b8019061bb9"

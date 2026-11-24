@@ -183,7 +183,7 @@ Focus is reported when asked (mode 1004).
 | Detaching every hidden terminal | Each return repaints from scratch and loses selection and scroll position. |
 | Passing the pane's size as `size` to `terminal.run` | herdr-core uses it only until the first viewer; after viewers leave, the headless size applies. |
 | A hidden zero-size stream per terminal to hold the size | A zero-size viewer's behavior is not part of herdr-core's API; the departing viewer's own stream is. |
-| Writing the size into herdr-core's `config.toml` | The user's own file, shared with their sessions; herdr-ide never writes it. |
+| Writing the size into herdr-core's `config.toml` | The user's own file, shared with their sessions; veldr never writes it. |
 | Closing the last viewer's stream | The terminal became 200x120 between viewers: full-screen programs laid out twice, lost their scroll position and painted wrongly. |
 | Restoring scroll by row number from the top | The core's history may be cut at the top where the page's was not. |
 | Restoring scroll by distance from the end alone | Output written meanwhile shifts it; the distance is only the search's start and fallback. |

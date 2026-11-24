@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/store"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatproto"
+	"veldr/internal/store"
 )
 
 // The host says who it is, and refuses what is not a request.

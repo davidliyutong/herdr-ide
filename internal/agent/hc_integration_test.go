@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agent"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
 )
 
 // TestIntegrationHC installs a real herdr-core through the agent, starts the

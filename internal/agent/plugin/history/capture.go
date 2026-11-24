@@ -15,9 +15,9 @@ import (
 	"strconv"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
 )
 
 // How a capture reads the terminals (docs/features/21-terminal-core.md):

@@ -58,7 +58,7 @@
    "item": "msg_0001/1",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -93,7 +93,7 @@
    "item": "msg_0002/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -161,7 +161,7 @@
    "item": "msg_0004/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -229,7 +229,7 @@
    "item": "msg_0006/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -297,7 +297,7 @@
    "item": "msg_0008/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -365,7 +365,7 @@
    "item": "msg_0010/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -448,7 +448,7 @@
    "item": "msg_0012/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -531,7 +531,7 @@
    "item": "msg_0014/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -734,7 +734,7 @@
    "item": "msg_0018/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -802,7 +802,7 @@
    "item": "msg_0020/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -861,7 +861,7 @@
    "item": "msg_0022/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -929,7 +929,7 @@
    "item": "msg_0024/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -988,7 +988,7 @@
    "item": "msg_0026/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -1047,7 +1047,7 @@
    "item": "msg_0028/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -1094,7 +1094,7 @@
    "item": "msg_0029/1",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -1129,7 +1129,7 @@
    "item": "msg_0030/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -1164,7 +1164,7 @@
    "item": "msg_0031/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -1190,7 +1190,7 @@
    "content": [
     {
      "_meta": {
-      "herdr-ide": {
+      "veldr": {
        "image": true
       }
      },
@@ -1208,7 +1208,7 @@
    "item": "msg_0032/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -1278,7 +1278,7 @@
    "item": "msg_0034/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -1297,7 +1297,7 @@
   },
   {
    "t": "notice",
-   "method": "_herdr-ide/compacted",
+   "method": "_veldr/compacted",
    "params": {
     "preTokens": 41753,
     "trigger": "manual"
@@ -1305,14 +1305,14 @@
   },
   {
    "t": "notice",
-   "method": "_herdr-ide/command",
+   "method": "_veldr/command",
    "params": {
     "name": "/compact"
    }
   },
   {
    "t": "notice",
-   "method": "_herdr-ide/command",
+   "method": "_veldr/command",
    "params": {
     "output": "Compacted "
    }
@@ -1382,7 +1382,7 @@
    "item": "msg_0036/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },
@@ -1459,7 +1459,7 @@
    "item": "msg_0038/0",
    "update": {
     "_meta": {
-     "herdr-ide": {
+     "veldr": {
       "model": "claude-haiku-5-5"
      }
     },

@@ -17,8 +17,8 @@ import (
 
 	"github.com/hashicorp/yamux"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
 )
 
 // When the session ends during an upload, Serve returns only once the

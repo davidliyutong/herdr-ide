@@ -1,5 +1,5 @@
-// Package agentproto defines the stream protocol spoken between the herdr-ide
-// core and a herdr-ide-agent over a yamux session.
+// Package agentproto defines the stream protocol spoken between the veldr
+// core and a veldr-agent over a yamux session.
 //
 // Every yamux stream starts with one JSON header line written by the opener,
 // answered by one JSON reply line. After a successful reply the stream carries

@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/usage"
+	"veldr/internal/usage"
 )
 
 const litellmURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"

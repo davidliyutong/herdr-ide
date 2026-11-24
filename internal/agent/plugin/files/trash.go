@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
+	"veldr/internal/agent/plugin"
 )
 
 // trash moves p into the user's trash and returns where it went: on macOS

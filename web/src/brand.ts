@@ -1,10 +1,10 @@
 // Product names for the web UI. Mirrors internal/brand (checked by
 // internal/brand/brand_test.go); scripts/rename.sh updates both.
 
-export const APP_NAME = 'herdr-ide';
-export const APP_SLUG = 'herdr-ide';
+export const APP_NAME = 'veldr';
+export const APP_SLUG = 'veldr';
 /** Previous slugs, appended by scripts/rename.sh; their storage is migrated. */
-export const LEGACY_SLUGS: string[] = ['webherdr'];
+export const LEGACY_SLUGS: string[] = ['herdr-ide', 'webherdr'];
 
 const prefix = `${APP_SLUG}.`;
 

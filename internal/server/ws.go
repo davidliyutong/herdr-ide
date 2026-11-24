@@ -10,8 +10,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
 )
 
 // /ws is the event channel of the clients (the browser UI and the desktop

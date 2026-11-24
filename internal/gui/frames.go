@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agentproto"
+	"veldr/internal/transport"
 )
 
 // Viewer is one browser window showing one program window.

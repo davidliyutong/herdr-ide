@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/store"
+	"veldr/internal/agentproto"
+	"veldr/internal/plugin"
+	"veldr/internal/store"
 )
 
 // The access log records every request of a machine's MCP server and every

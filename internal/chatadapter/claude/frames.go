@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agent/transcript"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agent/transcript"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/chatproto"
 )
 
 // maxTracked bounds the maps of tool calls and tasks a session keeps for

@@ -26,9 +26,9 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
 )
 
 // LinkName is the stable command's name in <data dir>/bin, which MCP

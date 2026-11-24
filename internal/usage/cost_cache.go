@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"herdr-ide/internal/store"
+	"veldr/internal/store"
 )
 
 type fileEntry struct {

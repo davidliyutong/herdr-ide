@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
 )
 
 func TestRoutes(t *testing.T) {

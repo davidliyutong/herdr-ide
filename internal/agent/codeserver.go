@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"herdr-ide/internal/brand"
 	"io"
 	"net"
 	"net/http"
@@ -26,9 +25,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"veldr/internal/brand"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
 )
 
 // codeServer installs and supervises code-server. Releases are shared by all

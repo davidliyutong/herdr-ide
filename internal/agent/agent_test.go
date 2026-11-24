@@ -15,11 +15,11 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agent"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agent"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
+	"veldr/internal/transport"
 )
 
 func dialAgent(t *testing.T) (*transport.Session, string) {
@@ -134,13 +134,13 @@ func TestWriteKeepsExistingFiles(t *testing.T) {
 	}
 	ents, _ := os.ReadDir(proj)
 	for _, e := range ents {
-		if strings.HasPrefix(e.Name(), ".herdr-ide-upload-") {
+		if strings.HasPrefix(e.Name(), ".veldr-upload-") {
 			t.Fatalf("temporary file left: %s", e.Name())
 		}
 	}
 }
 
-// Only sockets inside ~/.herdr-ide/run may be dialed.
+// Only sockets inside ~/.veldr/run may be dialed.
 func TestDialRestriction(t *testing.T) {
 	s, _ := dialAgent(t)
 	ctx := context.Background()

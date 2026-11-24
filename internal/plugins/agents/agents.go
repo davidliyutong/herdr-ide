@@ -27,10 +27,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
 )
 
 // ID names the plugin on every side.

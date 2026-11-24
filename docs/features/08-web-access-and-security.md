@@ -34,7 +34,7 @@ on `127.0.0.1:7781` ([16](16-desktop-packaging.md)). Flags are in
    `Referrer-Policy: same-origin` (so same-origin POSTs keep their Origin),
    `Cross-Origin-Opener-Policy`.
 2. **Proxy secret** (`--proxy-secret-file`): requests not from a same-host
-   browser must carry `X-herdr-ide-Proxy-Secret`, compared in constant time.
+   browser must carry `X-veldr-Proxy-Secret`, compared in constant time.
    A same-host proxy is recognized by a non-loopback Host or
    `X-Forwarded-For`, so it cannot skip the secret.
 3. **Host / Origin checks**. The Host must be loopback or an
@@ -88,7 +88,7 @@ applies (`client`).
 
 ### Startup checks
 
-`cmd/herdr-ide`:
+`cmd/veldr`:
 
 - A non-loopback `--listen` is refused unless a proxy secret is configured
   or `--insecure-listen` is given.
@@ -123,7 +123,7 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
   allowed" (fails closed).
 - **Plain HTTP over a LAN address**: terminals work, but VS Code webviews,
   the clipboard and notifications need a secure context; use HTTPS.
-- **A core the desktop app did not start** (`herdr-ide serve`): there is no
+- **A core the desktop app did not start** (`veldr serve`): there is no
   desktop token, so every client is a browser and VS Code follows
   `plugins.vscode.browser`. A desktop app whose cookie could not be set
   reports a startup failure rather than run as a browser.
@@ -137,7 +137,7 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
   switches and the desktop token (`TestCodeRoutesFollowTheirClientsSwitch`,
   `TestClientReported`, `TestDesktopCookieNotForwarded`,
   `TestBridgeMessagesFollowTheClientsSwitch`, `TestVSCodeOffEndsItsWork`);
-  `cmd/herdr-ide/parent_test.go` (`TestReadHello`).
+  `cmd/veldr/parent_test.go` (`TestReadHello`).
 - `internal/server/term_test.go`: allowlist and audit (`TestTermProtocol`),
   read-only terminals (`TestTermReadOnly`, `TestTermWithoutCore`).
 - `internal/server/settings_test.go` (`TestSettingsReadOnly`),

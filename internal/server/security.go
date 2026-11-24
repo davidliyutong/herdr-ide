@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/brand"
+	"veldr/internal/plugin"
 )
 
 // Security model (see SECURITY.md): the core has no login of its own. It

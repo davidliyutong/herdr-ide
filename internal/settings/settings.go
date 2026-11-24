@@ -35,7 +35,7 @@ import (
 	"time"
 	"unicode"
 
-	"herdr-ide/internal/userfile"
+	"veldr/internal/userfile"
 )
 
 // Type is the type of a setting's value.

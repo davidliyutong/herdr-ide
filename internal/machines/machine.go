@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agentproto"
+	"veldr/internal/transport"
 )
 
 // LocalSupported tells whether the local machine has an agent: the agent

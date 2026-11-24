@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"strings"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/brand"
+	"veldr/internal/plugin"
 )
 
 // Which client a request comes from (SECURITY.md): the desktop app's

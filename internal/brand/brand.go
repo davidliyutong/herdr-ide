@@ -15,12 +15,12 @@ import "strings"
 
 const (
 	// Name is the display name.
-	Name = "herdr-ide"
+	Name = "veldr"
 	// Slug is the lowercase identifier used for binaries, directories,
 	// protocol prefixes and storage keys.
-	Slug = "herdr-ide"
+	Slug = "veldr"
 	// EnvPrefix prefixes environment variables.
-	EnvPrefix = "HERDR_IDE_"
+	EnvPrefix = "VELDR_"
 
 	// CoreBin is the name of the binary: the core and, on machines, the
 	// agent it starts.
@@ -35,11 +35,11 @@ const (
 // Previous names, appended by scripts/rename.sh. Oldest last.
 var (
 	// LegacyDataDirNames are the data directories of previous names.
-	LegacyDataDirNames = []string{".webherdr"}
+	LegacyDataDirNames = []string{".herdr-ide", ".webherdr"}
 	// LegacySlugs name old cache directories (removed by the core).
-	LegacySlugs = []string{"webherdr"}
+	LegacySlugs = []string{"herdr-ide", "webherdr"}
 	// LegacyBridgeExtIDs are uninstalled from code-server.
-	LegacyBridgeExtIDs = []string{"webherdr.webherdr-bridge"}
+	LegacyBridgeExtIDs = []string{"herdr-ide.herdr-ide-bridge", "webherdr.webherdr-bridge"}
 )
 
 // BridgeExtID is the extension identifier (publisher.name) in code-server.

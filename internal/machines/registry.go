@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"herdr-ide/internal/userfile"
+	"veldr/internal/userfile"
 )
 
 // Kind of machine transport.

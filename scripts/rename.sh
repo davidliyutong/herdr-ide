@@ -49,7 +49,8 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 else
   files=$(find . -type f -not -path './.git/*' | sed 's#^\./##')
 fi
-files=$(echo "$files" | grep -vE '(^|/)(node_modules|dist)/|pnpm-lock\.yaml$|go\.sum$|\.(gz|vsix|png|ico|icns|woff2?)$' || true)
+# CHANGELOG.md is history: its entries keep the name of their release.
+files=$(echo "$files" | grep -vE '(^|/)(node_modules|dist)/|pnpm-lock\.yaml$|go\.sum$|^CHANGELOG\.md$|\.(gz|vsix|png|ico|icns|woff2?)$' || true)
 
 if [[ -n "$dry" ]]; then
   echo "files that would change:"

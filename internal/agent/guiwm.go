@@ -24,8 +24,8 @@ import (
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgb/xtest"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
 )
 
 // windowManager manages the top-level windows of the virtual display and

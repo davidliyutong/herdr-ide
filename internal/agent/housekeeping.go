@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
 )
 
 // Retention for files the agent creates on machines.

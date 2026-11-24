@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"herdr-ide/internal/keybindings"
-	"herdr-ide/internal/settings"
+	"veldr/internal/keybindings"
+	"veldr/internal/settings"
 )
 
 // The desktop app's old shortcut settings become keybinding rules, then

@@ -9,8 +9,8 @@ import (
 	"runtime/debug"
 	"sync/atomic"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
 )
 
 // pluginEnv is what the agent gives its plugins (internal/agent/plugin).

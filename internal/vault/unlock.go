@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 // An authenticator that can unlock the vault keeps the master key wrapped

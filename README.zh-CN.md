@@ -1,4 +1,4 @@
-# herdr-ide
+# veldr
 
 [English](README.md) | 简体中文
 
@@ -78,13 +78,14 @@
 
 ```bash
 make deps && make build
-cd dist/packages/herdr-ide-$(go env GOOS)-$(go env GOARCH)
-./herdr-ide
+cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
+./veldr
 ```
 
-也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./herdr-ide`。
+也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./veldr`。
 SSH 机器用侧栏的「添加机器…」添加。
 从使用 herdr 绘制窗格的旧版本升级时，设置、快捷键和机器会在第一次启动时迁移过来，终端仍留在 herdr 里（见[迁移说明](docs/deployment.md#migrating-from-versions-that-used-herdr)）。
+从 herdr-ide（本产品的旧名称）迁移时，veldr 与它并存安装并复制它的设置；herdr-ide 的终端会继续运行，直到你通过状态栏的「herdr-ide」项把标签页逐个迁移过来（见[迁移](docs/deployment.md#moving-from-herdr-ide)）。
 
 打开 <http://127.0.0.1:7780>。
 状态栏可以打开命令面板和快捷键列表。
@@ -110,7 +111,7 @@ SSH 机器用侧栏的「添加机器…」添加。
   要让终端不经询问就能打开桌面、文稿、下载或外置磁盘，请在「设置 → 终端 → 权限」中授予完全磁盘访问权限；采用临时签名（ad hoc）的应用每次更新后都需要重新授予。
 - **Windows**：运行安装程序；如果 SmartScreen 提示“Windows 已保护你的电脑”，点「更多信息」→「仍要运行」。
   应用需要 Windows 的 OpenSSH 客户端，并且只能使用 SSH 机器：先用 `ssh <目标>` 接受每台机器的主机密钥，并使用 ssh agent 持有的密钥（`ssh-add`），因为应用无法询问密码。
-- **Linux**：`sudo apt install ./herdr-ide-<version>-linux-amd64.deb`（Ubuntu 24.04 及以后需要用 deb 包，它让 Chromium 的沙箱能够运行）。
+- **Linux**：`sudo apt install ./veldr-<version>-linux-amd64.deb`（Ubuntu 24.04 及以后需要用 deb 包，它让 Chromium 的沙箱能够运行）。
   AppImage 需要先 `chmod +x`，并需要 FUSE 2（`libfuse2`，Ubuntu 24.04 上为 `libfuse2t64`）。
 
 没有自动更新：把新版本安装到旧版本上即可。
@@ -132,7 +133,7 @@ ARCH=x64 make desktop-dist       # 其他架构；默认使用当前 Node 的架
 
 ## 远程访问
 
-herdr-ide 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负责登录和 HTTPS 的反向代理（Tailscale、Caddy、nginx），再用 `--allowed-origin` 告诉它代理的对外地址。
+veldr 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负责登录和 HTTPS 的反向代理（Tailscale、Caddy、nginx），再用 `--allowed-origin` 告诉它代理的对外地址。
 另外还有几项可选的安全围栏：反代密钥头、只读模式、审计日志。
 详见 [docs/deployment.md](docs/deployment.md) 和 [SECURITY.md](SECURITY.md)。
 
@@ -140,8 +141,8 @@ herdr-ide 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负�
 
 各台机器永远不需要下载任何东西。
 （AI 用量插件会从已登录 CLI 的机器上访问各 AI 服务商的主机；没有网络时它会静默失败。）
-如果运行 herdr-ide 的主机也不能联网：
-1. 在一台能联网的机器上运行 `herdr-ide fetch-assets DIR`；
+如果运行 veldr 的主机也不能联网：
+1. 在一台能联网的机器上运行 `veldr fetch-assets DIR`；
 2. 把 `DIR` 拷进内网；
 3. 用 `--offline --seed-dir DIR` 启动。
 
@@ -159,7 +160,7 @@ herdr-ide 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负�
 ## 开发
 
 ```bash
-make dev-core      # 在 :7790 以 --instance dev 运行 core（终端核心 session 为 herdr-ide-dev-<主机 id>）
+make dev-core      # 在 :7790 以 --instance dev 运行 core（终端核心 session 为 veldr-dev-<主机 id>）
 make dev-web       # 前端热更新，端口 5173
 make check test    # 提交 PR 之前运行
 ```

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/agentproto"
+	vaultstore "veldr/internal/vault"
 )
 
 // An exempt app's requests on its machine read without asking while the
@@ -80,7 +80,7 @@ func TestExemptApps(t *testing.T) {
 
 	ctx := context.Background()
 	by := func(app string) []agentproto.VaultProcess {
-		return []agentproto.VaultProcess{{Pid: 7, Name: "herdr-ide-mcp"}, {Pid: 6, Name: app}, {Pid: 5, Name: "zsh"}}
+		return []agentproto.VaultProcess{{Pid: 7, Name: "veldr-mcp"}, {Pid: 6, Name: app}, {Pid: 5, Name: "zsh"}}
 	}
 	// It reads without a prompt, and the release is recorded with who asked.
 	r := p.Handle(ctx, h, "m1", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}, Process: by("claude")})
@@ -180,7 +180,7 @@ func TestExemptingTakesThePassphraseWhereEveryAllowIsVerified(t *testing.T) {
 	if code, out := c.do("POST", "/api/p/vault/exempt", `{"app":"claude","machines":["local"]}`); code != 403 || out["error"] != "passphrase_required" {
 		t.Fatalf("an exemption with the session: %d %v", code, out)
 	}
-	chain := []agentproto.VaultProcess{{Pid: 7, Name: "herdr-ide-mcp"}, {Pid: 6, Name: "claude"}}
+	chain := []agentproto.VaultProcess{{Pid: 7, Name: "veldr-mcp"}, {Pid: 6, Name: "claude"}}
 	ch := make(chan agentproto.VaultResponse, 1)
 	go func() {
 		ch <- p.Handle(context.Background(), h, "local", agentproto.VaultRequest{Tool: "get", Names: []string{"KEY"}, Process: chain})

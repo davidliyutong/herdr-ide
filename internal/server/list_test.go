@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // /list through a real agent: a directory of more names than a reply line

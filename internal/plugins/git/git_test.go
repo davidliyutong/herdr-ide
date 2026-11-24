@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
 )
 
 // auditHost records what the plugin audits.

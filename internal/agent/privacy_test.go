@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 func TestAccessOfTellsFullDiskAccessFromOtherErrors(t *testing.T) {

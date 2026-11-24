@@ -1,6 +1,6 @@
 package git
 
-import "herdr-ide/internal/settings"
+import "veldr/internal/settings"
 
 // The plugin's settings (its section of the settings, git); the web UI
 // reads them (web/src/plugins/git, web/src/eol.ts).

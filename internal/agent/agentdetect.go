@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"herdr-ide/internal/agent/detect"
-	"herdr-ide/internal/agent/sessions"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agent/detect"
+	"veldr/internal/agent/sessions"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
 )
 
 // Which coding agents run in the terminal core's terminals and what they do

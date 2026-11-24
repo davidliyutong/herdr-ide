@@ -21,9 +21,9 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/testexec"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/testexec"
 )
 
 // Paths from a request are literal: pathspec magic matches nothing, a

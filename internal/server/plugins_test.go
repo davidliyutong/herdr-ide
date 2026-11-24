@@ -19,11 +19,11 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/registry"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/registry"
+	"veldr/internal/settings"
 )
 
 // fakePlugin has a route of each kind, for the route table's tests.

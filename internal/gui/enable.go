@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
 )
 
 // Errors of Enable.

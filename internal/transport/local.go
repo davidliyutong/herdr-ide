@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agent"
+	"veldr/internal/agent"
 )
 
 // DialNode connects to the local machine's node of this build, which it

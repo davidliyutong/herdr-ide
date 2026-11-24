@@ -18,8 +18,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
 )
 
 // termIn is any text message from a terminal client.

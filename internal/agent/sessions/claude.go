@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
 )
 
 // ClaudeMaxName is the longest project directory name Claude Code makes

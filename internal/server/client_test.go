@@ -14,10 +14,10 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/registry"
-	"herdr-ide/internal/settings"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/registry"
+	"veldr/internal/settings"
 )
 
 // The core tells the page which kind of client it is, from the token of

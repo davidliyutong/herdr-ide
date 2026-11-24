@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"herdr-ide/internal/agent/plugin"
+	"veldr/internal/agent/plugin"
 )
 
 // argvBuilders are the changes without paths, each with what builds its run

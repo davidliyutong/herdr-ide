@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files of the replays")

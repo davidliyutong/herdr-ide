@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"herdr-ide/internal/usage"
+	"veldr/internal/usage"
 )
 
 // The core decides when a window's alert fires, once for every page and

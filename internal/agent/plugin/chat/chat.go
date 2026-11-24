@@ -39,9 +39,9 @@ import (
 	"syscall"
 	"time"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatproto"
 )
 
 // ID names the plugin on every side.

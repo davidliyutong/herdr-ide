@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	rpc "herdr-ide/internal/acp"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chatproto"
+	rpc "veldr/internal/acp"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chatproto"
 )
 
 const (

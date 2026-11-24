@@ -17,10 +17,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
-	"herdr-ide/internal/machines"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
+	"veldr/internal/machines"
 )
 
 // hiddenTermCore is a terminal core on machine x's socket that calls itself

@@ -21,14 +21,14 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hostdirs"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/registry"
-	"herdr-ide/internal/settings"
-	"herdr-ide/internal/transport"
-	"herdr-ide/internal/uisettings"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hostdirs"
+	"veldr/internal/machines"
+	"veldr/internal/registry"
+	"veldr/internal/settings"
+	"veldr/internal/transport"
+	"veldr/internal/uisettings"
 )
 
 // fakeTermCore is a terminal core on a machine's socket: it answers the
@@ -704,7 +704,7 @@ func TestHCLifecycle(t *testing.T) {
 func TestTermRunGetsTheDisplay(t *testing.T) {
 	s, core, audit := termServer(t, Options{}, true)
 	s.displayEnv = func(*machines.Machine) map[string]string {
-		return map[string]string{"DISPLAY": ":20", "XAUTHORITY": "/home/u/.herdr-ide/run/xauth"}
+		return map[string]string{"DISPLAY": ":20", "XAUTHORITY": "/home/u/.veldr/run/xauth"}
 	}
 	c := dialTerm(t, s)
 	c.ready()
@@ -716,7 +716,7 @@ func TestTermRunGetsTheDisplay(t *testing.T) {
 	core.mu.Lock()
 	got := strings.Join(core.calls, " ")
 	core.mu.Unlock()
-	if !strings.Contains(got, `"DISPLAY":":20"`) || !strings.Contains(got, `"TOKEN":"s3cret"`) || !strings.Contains(got, `"XAUTHORITY":"/home/u/.herdr-ide/run/xauth"`) {
+	if !strings.Contains(got, `"DISPLAY":":20"`) || !strings.Contains(got, `"TOKEN":"s3cret"`) || !strings.Contains(got, `"XAUTHORITY":"/home/u/.veldr/run/xauth"`) {
 		t.Fatalf("run params %s", got)
 	}
 	// The audit entry names the variables added and those the client gave,

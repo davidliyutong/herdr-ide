@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 // Export files carry variables (their values included) from one vault to

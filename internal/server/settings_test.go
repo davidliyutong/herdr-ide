@@ -16,9 +16,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/keybindings"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/settings"
+	"veldr/internal/keybindings"
+	"veldr/internal/machines"
+	"veldr/internal/settings"
 )
 
 func testSettings(t *testing.T) *settings.Store {

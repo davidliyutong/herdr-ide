@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
-	"herdr-ide/internal/machines"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
+	"veldr/internal/machines"
 )
 
 // termBackend is the core's connection to one machine's terminal core,

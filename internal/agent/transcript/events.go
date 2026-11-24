@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
 )
 
 // obj is a JSON object as the events are built: maps and []any all the

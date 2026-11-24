@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 // Each instance has a control directory of its own, also a short name that

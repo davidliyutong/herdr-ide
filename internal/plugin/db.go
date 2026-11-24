@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/store"
+	"veldr/internal/store"
 )
 
 // The core's database: core[-<instance>]-<host>[-<id>].db beside the

@@ -3,7 +3,7 @@ package codex
 import (
 	"slices"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // The ids of the chat's configuration options, their categories'.

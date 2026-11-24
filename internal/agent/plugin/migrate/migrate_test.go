@@ -16,10 +16,10 @@ import (
 	"sync"
 	"testing"
 
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hc"
 )
 
 // fakeCore answers what the plugin asks of a previous terminal core.

@@ -6,12 +6,12 @@ import (
 	"strconv"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/hc"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	agentsplugin "herdr-ide/internal/plugins/agents"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/hc"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	agentsplugin "veldr/internal/plugins/agents"
 )
 
 // indexTerminals sorts the terminal core's terminals into those clients are

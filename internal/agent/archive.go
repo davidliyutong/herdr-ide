@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // maxArchivePaths bounds the paths of one fs.archive request.

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"herdr-ide/internal/brand"
+	"veldr/internal/brand"
 )
 
 // A coding agent's session transcript as a machine reads it: Claude

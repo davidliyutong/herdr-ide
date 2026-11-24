@@ -39,13 +39,13 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agent/detect"
-	"herdr-ide/internal/agent/plugin"
-	"herdr-ide/internal/agent/sessions"
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/hc"
+	"veldr/internal/agent/detect"
+	"veldr/internal/agent/plugin"
+	"veldr/internal/agent/sessions"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/hc"
 )
 
 // ID names the plugin on every side.

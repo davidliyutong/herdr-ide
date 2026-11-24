@@ -12,8 +12,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"herdr-ide/internal/agent"
-	"herdr-ide/internal/brand"
+	"veldr/internal/agent"
+	"veldr/internal/brand"
 )
 
 // nodeCommand runs `node` (the machine's node, started by its clients),

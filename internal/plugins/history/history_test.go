@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/settings"
 )
 
 func TestPlugin(t *testing.T) {
@@ -654,7 +654,7 @@ func TestRouteGuards(t *testing.T) {
 	// What is not the machine's coded failure is answered with a fixed
 	// wording, never the error's text.
 	f.reply = func(m, action string, params any) (any, error) {
-		return nil, fmt.Errorf("open /home/u/.herdr-ide/history/t1.vt: %w", context.DeadlineExceeded)
+		return nil, fmt.Errorf("open /home/u/.veldr/history/t1.vt: %w", context.DeadlineExceeded)
 	}
 	w, _ = do(p.deleteSnapshots, "DELETE", "/", mc)
 	if w.Code != http.StatusGatewayTimeout || strings.Contains(w.Body.String(), "/home") {

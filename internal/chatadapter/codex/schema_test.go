@@ -8,7 +8,7 @@ import (
 	"sort"
 	"testing"
 
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/chatproto"
 )
 
 // The pinned protocol: design/codex-app-server/summary.json is what the

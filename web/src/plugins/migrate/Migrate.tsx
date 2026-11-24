@@ -4,6 +4,7 @@
 // them, moves the tabs picked into this namespace (plan.ts), stops the
 // previous terminal core and removes its files.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowRightLeft, X } from 'lucide-react';
 import { t } from '../../i18n';
 import { APP_NAME } from '../../brand';
@@ -74,16 +75,19 @@ export function MigrateItem() {
         <ArrowRightLeft />
         <span>{t('migrate.item', { old: slug, n: terminals })}</span>
       </button>
-      {open && (
-        <MigrateDialog
-          statuses={statuses}
-          onClose={() => {
-            setOpen(false);
-            refresh();
-          }}
-          onChange={refresh}
-        />
-      )}
+      {/* On the page's body: the status bar's own layout would hold it. */}
+      {open &&
+        createPortal(
+          <MigrateDialog
+            statuses={statuses}
+            onClose={() => {
+              setOpen(false);
+              refresh();
+            }}
+            onChange={refresh}
+          />,
+          document.body,
+        )}
     </>
   );
 }
@@ -278,6 +282,8 @@ function MigrateDialog({ statuses, onClose, onChange }: { statuses: Record<strin
               ) : null,
             )}
           </ul>
+        </div>
+        <div className="migrate-messages" aria-live="polite">
           {armed === 'move' && (
             <p className="migrate-warn">
               {ending.length ? t('migrate.confirmMoveEnding', { programs: ending.join(', ') }) : t('migrate.confirmMove')}

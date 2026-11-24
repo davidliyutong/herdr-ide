@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
 )
 
 // Reads are a machine's and answered read-only; what changes the

@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	"herdr-ide/internal/transport"
+	"veldr/internal/transport"
 )
 
 // dialLocal connects to the local machine's node, starting it from this

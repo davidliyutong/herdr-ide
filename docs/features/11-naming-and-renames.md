@@ -30,7 +30,7 @@ directory).
     `DataDir(instance)`, `AgentDir`, `BridgeExtID`, …);
   - web UI: `web/src/brand.ts` (`APP_NAME`, `APP_SLUG`, namespaced
     `storage`);
-  - extension: `extensions/herdr-ide-bridge/src/brand.ts`.
+  - extension: `extensions/veldr-bridge/src/brand.ts`.
 
   Display name and slug are separate, so the visible name can change
   without touching identifiers.
@@ -43,7 +43,7 @@ directory).
 - **Derived at runtime**: the agent's state directory
   (`~/.<slug>[-<instance>]`), the terminal core's session
   (`<slug>[-<instance>]-<host id>`, [21](21-terminal-core.md)), the proxy-secret
-  header, environment variables (`HERDR_IDE_*`), the core's configuration
+  header, environment variables (`VELDR_*`), the core's configuration
   directory and download cache, browser storage keys, the label and name
   that hide the product's own terminals (`<slug>.hidden`,
   `<slug>-chat-host`), the notices' methods (`_<slug>/<name>`), and the
@@ -60,7 +60,7 @@ directory).
   apps), so the previous version keeps working. At runtime:
   - the core copies its configuration directory (settings, machines,
     keybindings, the vault, its databases as consistent copies) from the
-    old name when the new one does not exist (`cmd/herdr-ide/serve.go`);
+    old name when the new one does not exist (`cmd/veldr/serve.go`);
     the old one stays for the previous version;
   - a machine's chat host copies its database from the previous namespace
     when it has none yet (`internal/chathost/journal.go`), so moved chat

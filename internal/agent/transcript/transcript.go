@@ -14,7 +14,7 @@
 // and the decoded values of a line; and it ends with its context.
 package transcript
 
-import "herdr-ide/internal/agentproto"
+import "veldr/internal/agentproto"
 
 // Limits bound a read. A member that is zero, or above agentproto's
 // maximum, is that maximum.

@@ -3,8 +3,8 @@ package vault
 import (
 	"time"
 
-	"herdr-ide/internal/plugin"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/plugin"
+	vaultstore "veldr/internal/vault"
 )
 
 // The automatic lock.

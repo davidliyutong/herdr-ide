@@ -6,8 +6,8 @@
 package gui
 
 import (
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/settings"
+	"veldr/internal/agentproto"
+	"veldr/internal/settings"
 )
 
 // Settings.

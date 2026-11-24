@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // handlePrivacy reports what macOS's Full Disk Access lets a machine's

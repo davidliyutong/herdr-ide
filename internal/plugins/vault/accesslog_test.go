@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/machines"
-	"herdr-ide/internal/plugin"
-	"herdr-ide/internal/store"
-	vaultstore "herdr-ide/internal/vault"
+	"veldr/internal/agentproto"
+	"veldr/internal/machines"
+	"veldr/internal/plugin"
+	"veldr/internal/store"
+	vaultstore "veldr/internal/vault"
 )
 
 // reopened is a plugin of the same vault as p, as after a restart of the

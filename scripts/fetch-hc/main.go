@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/hcdist"
+	"veldr/internal/hcdist"
 )
 
 const (

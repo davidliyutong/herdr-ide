@@ -9,7 +9,7 @@ import (
 
 	"github.com/jezek/xgb/damage"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // Video for windows that keep changing (--gui-video). While a watched

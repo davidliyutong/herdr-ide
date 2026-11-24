@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/uisettings"
+	"veldr/internal/uisettings"
 )
 
 // screen joins lines as herdr-core's terminal.read returns a screen.

@@ -24,14 +24,15 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentkinds"
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/brand"
-	"herdr-ide/internal/chatadapter"
-	"herdr-ide/internal/chathost"
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/hc"
-	"herdr-ide/internal/transport"
+	"veldr/internal/agentkinds"
+	"veldr/internal/agentproto"
+	"veldr/internal/brand"
+	"veldr/internal/chatadapter"
+	"veldr/internal/chathost"
+	"veldr/internal/chatproto"
+	"veldr/internal/hc"
+	"veldr/internal/hostdirs"
+	"veldr/internal/transport"
 )
 
 // The test binary is also the chat host the terminal core runs: the chat
@@ -43,7 +44,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// itChatHost is the chat-host command (cmd/herdr-ide) with the test's
+// itChatHost is the chat-host command (cmd/veldr) with the test's
 // adapter for the ACP kinds, logging to the data directory.
 func itChatHost(args []string) int {
 	fs := flag.NewFlagSet("chat-host", flag.ContinueOnError)
@@ -295,7 +296,7 @@ func TestIntegrationChatHost(t *testing.T) {
 		}
 	})
 	base := filepath.Join(home, brand.DataDir("it"))
-	runDir := filepath.Join(base, "run")
+	runDir := hostdirs.RunDir(base)
 	defer func() {
 		if t.Failed() {
 			if b, err := os.ReadFile(filepath.Join(base, "it-chat-host.log")); err == nil {

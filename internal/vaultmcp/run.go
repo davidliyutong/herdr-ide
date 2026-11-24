@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // Defaults of run_with_env.

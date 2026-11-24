@@ -10,7 +10,7 @@ import (
 
 	"github.com/jezek/xgb/xproto"
 
-	"herdr-ide/internal/agentproto"
+	"veldr/internal/agentproto"
 )
 
 // Several cores attach to one window manager, one stream each (gui.attach):

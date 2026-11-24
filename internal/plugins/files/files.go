@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/agentproto"
+	"veldr/internal/plugin"
 )
 
 const (

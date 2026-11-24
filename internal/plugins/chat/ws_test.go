@@ -16,8 +16,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"herdr-ide/internal/chatproto"
-	"herdr-ide/internal/plugin"
+	"veldr/internal/chatproto"
+	"veldr/internal/plugin"
 )
 
 // wsPage is a page's WebSocket in the test.

@@ -74,7 +74,7 @@ command is looked up on the machine in the login shell's PATH.
 
 `chat-host --base <data dir> --run <run dir>` (the namespace's runtime
 directory on the host, [40](40-shared-homes.md); machine build,
-`cmd/herdr-ide/chathost_unix.go`; Linux and macOS only) is the long-lived
+`cmd/veldr/chathost_unix.go`; Linux and macOS only) is the long-lived
 process that runs the agents and keeps their conversations. It serves
 `chat.sock` (0600) in the run directory (0700) under a lock; a second
 host exits. It runs as a **hidden terminal** of the instance's terminal
@@ -99,7 +99,7 @@ so the terminal core's crash sweep finds them. The host logs to
 The machine side has one action, `open`: a stream the core opens, joined
 to the host's socket. When no host serves, the agent has the terminal
 core run one (`plugin.Env.RunHidden`) with a minimal environment, named
-`herdr-ide-chat-host` and labeled `herdr-ide.hidden=chat-host`. If a
+`veldr-chat-host` and labeled `veldr.hidden=chat-host`. If a
 user's own terminal holds that name, it is left alone and a fallback name
 (`-1`..`-16`, `agentproto.IsChatHostName`) is used. The open waits up to
 15 s; a name held by a host that serves nothing for that long plus 30 s

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatproto"
 )
 
 // sayN stores n messages of about size bytes each.

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"herdr-ide/internal/agentproto"
-	"herdr-ide/internal/chatproto"
+	"veldr/internal/agentproto"
+	"veldr/internal/chatproto"
 )
 
 // OpTrust refuses what may not be trusted: the root, the home directory and
