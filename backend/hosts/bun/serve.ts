@@ -33,6 +33,12 @@ import { dialNode } from '#kernel/machines/transport/local.ts';
 import { dialSSH } from '#kernel/machines/transport/ssh.ts';
 import { machinesFeature } from '#features/machines/core.ts';
 import { terminalsFeature } from '#features/terminals/core.ts';
+import { browserFeature } from '#features/browser/core.ts';
+import { searchFeature } from '#features/search/core.ts';
+import { gitFeature } from '#features/git/core.ts';
+import { monitorFeature } from '#features/monitor/core.ts';
+import { agentsFeature } from '#features/agents/core.ts';
+import { historyFeature } from '#features/history/core.ts';
 import { fileTransfersFeature, filesFeature } from '#features/files/core.ts';
 import { chatFeature } from '#features/chat/core.ts';
 import { readHello, desktopClient } from './parent.ts';
@@ -131,9 +137,15 @@ export async function serve(argv: string[]): Promise<void> {
   const features: FeatureDef[] = [
     machinesFeature({ home: () => userHomeDir(), controlDir, pty: bunPty }),
     terminalsFeature({ hc: (os, arch) => payloads.hc(os, arch) }),
+    browserFeature(),
     fileTransfersFeature(),
     filesFeature(),
+    searchFeature(),
+    gitFeature(),
+    monitorFeature(),
+    agentsFeature(),
     chatFeature(),
+    historyFeature(),
   ];
 
   const modules = coreModules(features);
