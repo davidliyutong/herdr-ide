@@ -219,6 +219,16 @@
       "when": "terminal"
     },
     {
+      "id": "workspace.mute",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
+      "id": "workspace.unmute",
+      "section": "workspace",
+      "when": "terminal"
+    },
+    {
       "id": "workspace.close",
       "section": "workspace",
       "when": "terminal"
@@ -315,6 +325,16 @@
     },
     {
       "id": "tab.unpin",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.mute",
+      "section": "tab",
+      "when": "terminal"
+    },
+    {
+      "id": "tab.unmute",
       "section": "tab",
       "when": "terminal"
     },
@@ -542,6 +562,7 @@
     "command.tab.close",
     "command.tab.closeOthers",
     "command.tab.closeRight",
+    "command.tab.mute",
     "command.tab.new",
     "command.tab.next",
     "command.tab.pin",
@@ -556,6 +577,7 @@
     "command.tab.select7",
     "command.tab.select8",
     "command.tab.select9",
+    "command.tab.unmute",
     "command.tab.unpin",
     "command.view.panel.files",
     "command.view.panel.git",
@@ -570,10 +592,12 @@
     "command.workspace.close",
     "command.workspace.closeOthers",
     "command.workspace.edit",
+    "command.workspace.mute",
     "command.workspace.new",
     "command.workspace.next",
     "command.workspace.previous",
     "command.workspace.switch",
+    "command.workspace.unmute",
     "settings.appearance.colorTheme",
     "settings.appearance.colorTheme.amber",
     "settings.appearance.colorTheme.blue",

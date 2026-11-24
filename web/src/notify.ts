@@ -229,12 +229,38 @@ export async function dispatchNotification(opts: NotifyOptions): Promise<boolean
   return false;
 }
 
+/** How long a pane that was announced blocked stays quiet when it is
+ * blocked again before the user looked at it: an agent that keeps failing
+ * and retrying (a quota reached) announces it once. */
+export const REALERT_MS = 10 * 60_000;
+
+const announcedBlocked = new Map<string, number>();
+
+/** Whether a blocked agent at key is announced now; false while the last
+ * announcement is recent and the user has not looked at it since. */
+export function firstBlocked(key: string, now: number): boolean {
+  const at = announcedBlocked.get(key);
+  if (at !== undefined && now - at < REALERT_MS) return false;
+  announcedBlocked.set(key, now);
+  return true;
+}
+
+/** The user looked at the pane or chat at key: its next block is announced. */
+export function lookedAt(key: string) {
+  announcedBlocked.delete(key);
+}
+
 /** sound: the core chose this page to play sounds (see soundClient). */
 export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
   if (ev.agent_status !== 'blocked' && ev.agent_status !== 'done') return;
   const s = useStore.getState();
   const pane = notifiedPane(m, ev);
   const chatId = !ev.terminal && typeof ev.chat === 'string' && ev.chat ? ev.chat : undefined;
+  const key = pane ? `${m}|${pane}` : chatId ? `${m}|chat:${chatId}` : undefined;
+  // A muted tab or workspace makes no sound and no notification.
+  const layout = useTerms.getState().machines[m]?.layout;
+  if (pane && layout && L.paneMuted(layout, pane)) return;
+  if (ev.agent_status === 'blocked' && key && !firstBlocked(key, Date.now())) return;
   // Where the agent is: its machine, workspace and tab.
   const label = [s.machines[m]?.label ?? m, pane && terminalPlace(m, pane)].filter(Boolean).join(' · ');
   const who = ev.display_agent || ev.agent || 'agent';
@@ -258,7 +284,7 @@ export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
     : chatId
       ? { kind: 'chat', machine: m, chat: chatId, ...(agent ? { agent } : {}) }
       : undefined;
-  const tag = pane ? `${m}|${pane}` : chatId ? `${m}|chat:${chatId}` : undefined;
+  const tag = key;
 
   void dispatchNotification({
     title,
@@ -286,6 +312,7 @@ export function initNotifications(): () => void {
     const pane = layout ? L.focusedPane(layout) : undefined;
     if (!m || !pane || !paneFocused(m, pane)) return;
     const tag = `${m}|${pane}`;
+    lookedAt(tag);
     if (activeWeb.has(tag) || activeDesktopTags.has(tag)) closeNotification(tag);
   };
   offs.push(
@@ -348,6 +375,7 @@ followViewsSeen();
 
 /** Resets internal notification state (tests). */
 export function resetNotifyForTests() {
+  announcedBlocked.clear();
   asked = false;
   shown = -1;
   activeDesktopTags.clear();

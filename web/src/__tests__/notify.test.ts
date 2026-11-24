@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { badgeCount, notifyAgent, requestNotifyPermission, updateBadge } from '../notify';
+import { badgeCount, lookedAt, notifyAgent, requestNotifyPermission, resetNotifyForTests, updateBadge } from '../notify';
+import * as L from '../term/layout';
 import { builtinDefaults, useSettings, type SettingValue } from '../settings';
 import { useStore } from '../state/store';
 import { useTerms } from '../state/terms';
@@ -62,6 +63,7 @@ describe('the page', () => {
     useTerms.setState({ machines: { m: { terminals: { t1: rec('t1', 'blocked'), t2: rec('t2', 'blocked'), t3: rec('t3', 'working') } } } });
   });
   afterEach(() => {
+    resetNotifyForTests();
     shown.length = 0;
     badge.length = 0;
     asked = 0;
@@ -80,6 +82,46 @@ describe('the page', () => {
     set('notifications.system', true);
     notifyAgent('m', { terminal: 't2', agent: 'droid', agent_status: 'done' }, true);
     expect(shown.length).toBe(2);
+  });
+
+  it('announces a blocked agent once until the user looks at it', () => {
+    const blocked = () => notifyAgent('m', { terminal: 't2', agent: 'agy', agent_status: 'blocked' }, true);
+    blocked();
+    blocked(); // failing and retrying: still the same wait
+    expect(shown.length).toBe(1);
+    lookedAt('m|t2');
+    blocked();
+    expect(shown.length).toBe(2);
+  });
+
+  it('notifies nothing of a muted tab or workspace', () => {
+    const layout = (tabMuted: boolean, wsMuted: boolean) =>
+      L.parseLayout({
+        version: 2,
+        selected: 0,
+        workspaces: [
+          {
+            id: 'w',
+            name: '',
+            cwd: '',
+            selected: 0,
+            ...(wsMuted ? { muted: true } : {}),
+            tabs: [{ root: { terminal: 't3' }, focused: 't3', ...(tabMuted ? { muted: true } : {}) }],
+          },
+        ],
+      });
+    const terms = useTerms.getState().machines.m;
+    for (const [tabMuted, wsMuted] of [
+      [true, false],
+      [false, true],
+    ]) {
+      useTerms.setState({ machines: { m: { ...terms, layout: layout(tabMuted, wsMuted) } } });
+      notifyAgent('m', { terminal: 't3', agent: 'claude', agent_status: 'done' }, true);
+      expect(shown.length).toBe(0);
+    }
+    useTerms.setState({ machines: { m: { ...terms, layout: layout(false, false) } } });
+    notifyAgent('m', { terminal: 't3', agent: 'claude', agent_status: 'done' }, true);
+    expect(shown.length).toBe(1);
   });
 
   it('asks for the permission only when notifications are on', () => {

@@ -129,6 +129,20 @@ export const commands: Record<string, CommandDef> = {
       if (s.machineId && s.workspaceId) void actions.editWorkspace(s.machineId, s.workspaceId);
     },
   },
+  'workspace.mute': {
+    enabled: () => changes() && hasWorkspace() && !current()?.ws?.muted,
+    run() {
+      const s = store();
+      if (s.machineId && s.workspaceId) actions.muteWorkspace(s.machineId, s.workspaceId, true);
+    },
+  },
+  'workspace.unmute': {
+    enabled: () => changes() && !!current()?.ws?.muted,
+    run() {
+      const s = store();
+      if (s.machineId && s.workspaceId) actions.muteWorkspace(s.machineId, s.workspaceId, false);
+    },
+  },
   'workspace.close': {
     enabled: () => changes() && hasWorkspace(),
     run() {
@@ -180,6 +194,17 @@ export const commands: Record<string, CommandDef> = {
   'tab.unpin': {
     enabled: () => changes() && !!current()?.tab?.pinned,
     run: withTab((m, ws, index) => actions.pinTab(m, ws, index, false)),
+  },
+  'tab.mute': {
+    enabled() {
+      const tab = current()?.tab;
+      return changes() && !!tab && !tab.muted;
+    },
+    run: withTab((m, ws, index) => actions.muteTab(m, ws, index, true)),
+  },
+  'tab.unmute': {
+    enabled: () => changes() && !!current()?.tab?.muted,
+    run: withTab((m, ws, index) => actions.muteTab(m, ws, index, false)),
   },
 
   'pane.rename': {

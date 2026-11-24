@@ -488,6 +488,12 @@ export const actions = {
   },
 
   /** Pins a tab (it moves to the end of the pinned ones) or unpins it. */
+  muteTab(m: string, ws: string, index: number, muted: boolean) {
+    terms.mutate(m, (l) => L.muteTab(l, ws, index, muted));
+  },
+  muteWorkspace(m: string, ws: string, muted: boolean) {
+    terms.mutate(m, (l) => L.muteWorkspace(l, ws, muted));
+  },
   pinTab(m: string, ws: string, index: number, pinned: boolean) {
     terms.mutate(m, (l) => L.pinTab(l, ws, index, pinned));
   },

@@ -144,6 +144,14 @@
   color: var(--fg-mute);
   margin: 0 -2px;
 }
+/* A muted tab or workspace: no sounds or notifications. */
+.tab-muted.lucide,
+.ws-muted.lucide {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--fg-mute);
+  flex: none;
+}
 /* A preview pane's title (a file shown by a single click, replaced by the
    next one), as VS Code's preview editors. */
 .is-preview {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Ellipsis, FolderPlus, ServerPlus, Settings } from 'lucide-react';
+import { BellOff, ChevronDown, ChevronRight, Ellipsis, FolderPlus, ServerPlus, Settings } from 'lucide-react';
 import { SIDEBAR_WIDTH, useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import { conn } from '../lib/conn';
@@ -608,6 +608,7 @@ function MachineItem({ m }: { m: MachineState }) {
                 ) : (
                   <span className="ellipsis ws-name">{name}</span>
                 )}
+                {w.muted && <BellOff className="ws-muted" aria-label={t('workspace.muted')} />}
                 {agg && (
                   <span className="ws-meta">
                     <StatusDot status={agg} />

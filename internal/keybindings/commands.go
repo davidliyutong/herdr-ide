@@ -132,6 +132,8 @@ var Commands = func() []Command {
 		cmd("workspace.previous", "workspace", on(macApp, "cmd+ctrl+up"), on(winApp, "ctrl+shift+pageup"), on(linuxApp, "ctrl+alt+up")),
 		cmd("workspace.new", "workspace", on(macApp, "cmd+n"), on(winLinuxApp, "ctrl+shift+n")),
 		cmd("workspace.edit", "workspace"),
+		cmd("workspace.mute", "workspace"),
+		cmd("workspace.unmute", "workspace"),
 		cmd("workspace.close", "workspace"),
 		// Every other workspace of the machine, asking once as Close
 		// Workspace does.
@@ -155,6 +157,8 @@ var Commands = func() []Command {
 		// leave them; as VS Code and browsers offer, without a key.
 		cmd("tab.pin", "tab"),
 		cmd("tab.unpin", "tab"),
+		cmd("tab.mute", "tab"),
+		cmd("tab.unmute", "tab"),
 		// The browser plugin: a new tab with an empty browser pane on the
 		// focused machine, and the focused browser pane's page again.
 		cmd("browser.open", "tab"),

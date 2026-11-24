@@ -74,6 +74,13 @@ default:
   synthesized with Web Audio, so no audio files ship.
 - `notifications.mutedAgents`: agents that never sound (default `droid`).
   Their notifications and badge count still follow the other settings.
+- A muted tab or workspace ([04](04-layout-and-keyboard.md)) makes no sound
+  and no notification; the badge still counts its blocked agents.
+- An agent is announced blocked once until the user looks at its pane:
+  blocked again within 10 minutes of the last announcement, it makes no
+  sound or notification. An agent that fails and retries keeps reporting
+  `error`, which counts as `blocked` (Antigravity at a quota reports it at
+  every retry), and announced every time it would chime on and on.
 
 Only one browser sounds. Each page reports when it is used (`active` on the
 WebSocket, as durations so browser clocks do not matter). The core marks

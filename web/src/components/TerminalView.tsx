@@ -125,7 +125,8 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
         onReopen: () => setClosed(undefined),
         onBell: () => {
           const mode = getPrefs().bell;
-          if (mode === 'sound') playSound('bell');
+          const layout = useTerms.getState().machines[m]?.layout;
+          if (mode === 'sound' && !(layout && L.paneMuted(layout, terminal))) playSound('bell');
           if (mode !== 'visual') return;
           setFlash(true);
           window.clearTimeout(flashTimer);

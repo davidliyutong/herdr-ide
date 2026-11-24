@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Columns2, PanelLeft, Pin, Plus, X } from 'lucide-react';
+import { BellOff, ChevronDown, Columns2, PanelLeft, Pin, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
 import * as L from '../term/layout';
@@ -312,6 +312,7 @@ export function Workspace() {
                   <span className="tab-label tab-num">{tabLabel(tb, i)}</span>
                 )}
                 {count > 1 && <Columns2 className="tab-split" aria-label={t('workspace.paneCount', { n: count })} />}
+                {tb.muted && <BellOff className="tab-muted" aria-label={t('workspace.muted')} />}
                 {tb.pinned ? (
                   // A pinned tab shows its pin where others have ×. The pin is
                   // a mark, not a button: a click there shows the tab as one

@@ -12,7 +12,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 const played = vi.fn();
 vi.mock('../sound', async (orig) => ({ ...(await orig<typeof import('../sound')>()), playSound: (k: string) => played(k) }));
 
-import { notifiedPane, notifyAgent, updateBadge } from '../notify';
+import { notifiedPane, notifyAgent, resetNotifyForTests, updateBadge } from '../notify';
 import { useSettings } from '../settings';
 import { useStore } from '../state/store';
 import { allPlugins, definePlugins } from '../plugins/registry';
@@ -79,6 +79,7 @@ beforeEach(async () => {
   await settle();
 });
 afterEach(() => {
+  resetNotifyForTests();
   shown.length = 0;
   badge.length = 0;
   played.mockClear();

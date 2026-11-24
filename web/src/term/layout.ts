@@ -99,6 +99,9 @@ export type Tab = Extra & {
    * Right leave it, pane.close leaves its last pane, and it shows a pin
    * where the others have ×. */
   pinned?: true;
+  /** Muted: its agents and terminals make no sound and no notification;
+   * their status still shows. */
+  muted?: true;
   root: Node;
   /** The pane with the keyboard focus (paneKey). */
   focused: string;
@@ -112,6 +115,9 @@ export type Workspace = Extra & {
   cwd: string;
   tabs: Tab[];
   selected: number;
+  /** Muted: its tabs' agents and terminals make no sound and no
+   * notification, as each muted tab's. */
+  muted?: true;
 };
 
 export type Layout = Extra & { version: 2; workspaces: Workspace[]; selected: number };
@@ -303,13 +309,14 @@ function parseNode(raw: Extra): Node {
 
 function parseTab(raw: unknown): Tab | null {
   if (!isObject(raw) || !isObject(raw.root)) return null;
-  const { name, root: rawRoot, focused, pinned, ...extra } = raw;
+  const { name, root: rawRoot, focused, pinned, muted, ...extra } = raw;
   const root = parseNode(rawRoot);
   const panes = panesOf(root);
   return {
     ...extra,
     ...(typeof name === 'string' && name ? { name } : {}),
     ...(pinned === true ? { pinned: true as const } : {}),
+    ...(muted === true ? { muted: true as const } : {}),
     root,
     focused: typeof focused === 'string' && panes.includes(focused) ? focused : (panes[0] ?? ''),
   };
@@ -317,9 +324,17 @@ function parseTab(raw: unknown): Tab | null {
 
 function parseWorkspace(raw: unknown, seen: ReadonlySet<string>): Workspace | null {
   if (!isObject(raw) || typeof raw.id !== 'string' || !raw.id || seen.has(raw.id)) return null;
-  const { id: wsId, name, cwd, tabs: rawTabs, selected, ...extra } = raw;
+  const { id: wsId, name, cwd, tabs: rawTabs, selected, muted, ...extra } = raw;
   const tabs = (Array.isArray(rawTabs) ? rawTabs : []).map(parseTab).filter((t): t is Tab => t !== null);
-  return { ...extra, id: wsId as string, name: text(name), cwd: text(cwd), tabs, selected: readIndex(selected, tabs.length) };
+  return {
+    ...extra,
+    id: wsId as string,
+    name: text(name),
+    cwd: text(cwd),
+    tabs,
+    selected: readIndex(selected, tabs.length),
+    ...(muted === true ? { muted: true as const } : {}),
+  };
 }
 
 /**
@@ -475,6 +490,33 @@ export function pinTab(layout: Layout, workspace: string, tab: number, pinned: b
     const target = tabs.filter((t, i) => t.pinned && i !== tab).length;
     return { ...ws, tabs: moved(tabs, tab, target), selected: afterMove(ws.selected, tab, target) };
   });
+}
+
+/** Mutes a tab or lets it sound again. */
+export function muteTab(layout: Layout, workspace: string, tab: number, muted: boolean): Layout {
+  return updateWorkspace(layout, workspace, (ws) => {
+    const current = ws.tabs[tab];
+    if (!current || !!current.muted === muted) return ws;
+    const { muted: _, ...rest } = current;
+    const next: Tab = muted ? { ...rest, muted: true } : rest;
+    return { ...ws, tabs: ws.tabs.map((t, i) => (i === tab ? next : t)) };
+  });
+}
+
+/** Mutes a workspace or lets it sound again. */
+export function muteWorkspace(layout: Layout, workspace: string, muted: boolean): Layout {
+  return updateWorkspace(layout, workspace, (ws) => {
+    if (!!ws.muted === muted) return ws;
+    const { muted: _, ...rest } = ws;
+    return muted ? { ...rest, muted: true } : rest;
+  });
+}
+
+/** Whether the pane key is in a muted tab or workspace. */
+export function paneMuted(layout: Layout, key: string): boolean {
+  const at = locate(layout, key);
+  const ws = at ? layout.workspaces[at.workspace] : undefined;
+  return !!ws && (!!ws.muted || !!ws.tabs[at!.tab]?.muted);
 }
 
 /** A tree whose plugin views shown as previews (`preview: true`) are kept. */

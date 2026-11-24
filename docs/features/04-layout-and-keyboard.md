@@ -80,6 +80,12 @@ Non-goals: arbitrary docking of panes; floating panes.
   (`L.onlyPaneOfPinnedTab`); Close Tab, the pane header's Close Pane and
   Close Workspace still close it, with Undo. The pin is a mark, not a
   button, so a stray click never unpins.
+- A tab or a workspace can be muted (`tab.mute`, `tab.unmute`,
+  `workspace.mute`, `workspace.unmute`; `muted: true` in the layout
+  document, so every page and core of the machine has it): its agents and
+  terminals make no sound and no notification, while their status and the
+  badge count still show ([07](07-agent-native-workflow.md)). A muted tab
+  and workspace show a crossed-out bell.
 - Tabs wrap onto more rows instead of scrolling or shrinking. An unnamed
   tab shows its position number (several shells would all read
   `user@host:~`); a tab without a terminal shows its pane's mark and name.
