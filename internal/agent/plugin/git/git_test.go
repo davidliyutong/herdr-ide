@@ -1629,6 +1629,11 @@ func TestNestedAndSubmodules(t *testing.T) {
 	sh(t, dir, "-c", "protocol.file.allow=always", "submodule", "-q", "add", subSrc, "libs/sub")
 	sh(t, dir, "commit", "-q", "-m", "add submodule")
 	subDir := filepath.Join(dir, "libs", "sub")
+	// The submodule is a clone, which takes no configuration from its
+	// source: without an identity of its own, git would guess one from the
+	// host's name, and refuses to commit where that has no domain.
+	sh(t, subDir, "config", "user.name", "Sub")
+	sh(t, subDir, "config", "user.email", "sub@example.com")
 
 	// Independent nested repo and a deeper nested repo inside it.
 	indep := filepath.Join(dir, "packages", "indep")
