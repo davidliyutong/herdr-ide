@@ -26,10 +26,16 @@ directory).
 ## Design
 
 - **Definitions**:
-  - Go: `internal/brand/brand.go` (`Name`, `Slug`, `EnvPrefix`,
+  - Go: `internal/brand/brand.go` (`Name`, `Slug`, `Domain`, `EnvPrefix`,
     `DataDir(instance)`, `AgentDir`, `BridgeExtID`, …);
-  - web UI: `web/src/brand.ts` (`APP_NAME`, `APP_SLUG`, namespaced
-    `storage`);
+  - web UI: `web/src/brand.ts` (`APP_NAME`, `APP_SLUG`, `APP_DOMAIN`,
+    namespaced `storage`).
+
+  The domain (`veldr.app`), reversed, begins the desktop app's id
+  (`app.veldr.desktop`): macOS's bundle identifier, Windows's
+  AppUserModelID, the Linux desktop entry. A new id is a new app to
+  macOS: its Full Disk Access, notification permission and keychain
+  access are granted again;
   - extension: `extensions/veldr-bridge/src/brand.ts`.
 
   Display name and slug are separate, so the visible name can change

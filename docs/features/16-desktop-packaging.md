@@ -44,8 +44,10 @@ Windows and Linux packages; replacing browser access.
 
 Everything that depends on the system is a function of `process.platform`
 in `desktop/src/platform.ts`, so every system's rules run in the tests on
-any of them: the app id (`dev.<slug>.desktop`, also the Windows
-AppUserModelID that notifications need), the keybinding platform (`mac`,
+any of them: the app id (the product's domain reversed and `desktop`,
+`app.veldr.desktop`; also the Windows AppUserModelID that notifications
+need and the Linux desktop entry's name; the Secure Enclave helper's is
+`app.veldr.desktop.enclave`), the keybinding platform (`mac`,
 `windows` or `linux`), the core binary's path, whether closing the last window quits, and
 how a Linux command line names folders.
 

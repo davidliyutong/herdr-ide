@@ -34,7 +34,7 @@ func TestBrandMirrorsAgree(t *testing.T) {
 		t.Errorf("EnvPrefix %q does not match Slug %q", EnvPrefix, Slug)
 	}
 	web := readRepo(t, "web/src/brand.ts")
-	if tsConst(t, web, "APP_NAME") != Name || tsConst(t, web, "APP_SLUG") != Slug {
+	if tsConst(t, web, "APP_NAME") != Name || tsConst(t, web, "APP_SLUG") != Slug || tsConst(t, web, "APP_DOMAIN") != Domain {
 		t.Errorf("web/src/brand.ts disagrees with internal/brand")
 	}
 	extDir := filepath.Join("extensions", BridgeExt)

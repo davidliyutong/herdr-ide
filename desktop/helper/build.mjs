@@ -49,7 +49,7 @@ export async function swiftcFound() {
 export async function buildHelper(outDir) {
   const name = `${await brand('APP_NAME')} Enclave`;
   // The app's id (src/platform.ts APP_ID) and the helper's under it.
-  const id = `dev.${await brand('APP_SLUG')}.desktop.enclave`;
+  const id = `${(await brand('APP_DOMAIN')).split('.').reverse().join('.')}.desktop.enclave`;
   const plist = (await readFile(join(here, 'Info.plist'), 'utf8'))
     .replaceAll('@NAME@', name)
     .replaceAll('@ID@', id)

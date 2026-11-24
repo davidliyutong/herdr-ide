@@ -471,13 +471,13 @@ change applies the next time code-server starts; **Stop VS Code on
 
 ## Running as a service
 
-macOS (launchd), `~/Library/LaunchAgents/dev.veldr.plist`:
+macOS (launchd), `~/Library/LaunchAgents/app.veldr.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>dev.veldr</string>
+  <key>Label</key><string>app.veldr</string>
   <key>ProgramArguments</key><array>
     <string>/opt/veldr/veldr</string>
     <string>--allowed-origin</string><string>https://ide.example.com</string>

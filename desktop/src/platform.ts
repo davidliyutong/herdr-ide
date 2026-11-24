@@ -4,15 +4,21 @@
 import { statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { APP_SLUG } from '../../web/src/brand';
+import { APP_DOMAIN, APP_SLUG } from '../../web/src/brand';
 import type { OpenedFolders } from '../../web/src/shell';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 
 /** The app id: macOS's bundle identifier, Windows's AppUserModelID (which
- * its notifications need) and the Linux desktop entry's name; the same in
- * electron-builder.cjs. */
-export const APP_ID = `dev.${APP_SLUG}.desktop`;
+ * its notifications need) and the Linux desktop entry's name: the product's
+ * domain reversed (veldr.app → app.veldr) and "desktop"; the same in
+ * electron-builder.cjs, and helper/build.mjs's below it. */
+export const APP_ID = `${reverseDomain(APP_DOMAIN)}.desktop`;
+
+/** A domain's labels in reverse order, as reverse-DNS identifiers have it. */
+export function reverseDomain(domain: string): string {
+  return domain.split('.').reverse().join('.');
+}
 
 /** The keybindings' platform: macOS, Windows or Linux (web/src/keybindings.ts
  * picks the same). */

@@ -3,6 +3,8 @@
 
 export const APP_NAME = 'veldr';
 export const APP_SLUG = 'veldr';
+/** The product's domain; reversed, it begins the desktop app's id. */
+export const APP_DOMAIN = 'veldr.app';
 /** Previous slugs, appended by scripts/rename.sh; their storage is migrated. */
 export const LEGACY_SLUGS: string[] = ['herdr-ide', 'webherdr'];
 

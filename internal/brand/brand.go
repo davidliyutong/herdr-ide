@@ -19,6 +19,9 @@ const (
 	// Slug is the lowercase identifier used for binaries, directories,
 	// protocol prefixes and storage keys.
 	Slug = "veldr"
+	// Domain is the product's domain; reversed, it begins the desktop
+	// app's id (desktop/src/platform.ts APP_ID).
+	Domain = "veldr.app"
 	// EnvPrefix prefixes environment variables.
 	EnvPrefix = "VELDR_"
 

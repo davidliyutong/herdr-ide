@@ -12,8 +12,8 @@ function brand(key) {
 }
 const slug = brand('APP_SLUG');
 const name = brand('APP_NAME');
-// The same as APP_ID in src/platform.ts.
-const appId = `dev.${slug}.desktop`;
+// The same as APP_ID in src/platform.ts: the domain reversed and "desktop".
+const appId = `${brand('APP_DOMAIN').split('.').reverse().join('.')}.desktop`;
 const arch = process.env.DESKTOP_ARCH || process.arch;
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported architecture: ${arch}`);
 const goArch = arch === 'x64' ? 'amd64' : 'arm64';

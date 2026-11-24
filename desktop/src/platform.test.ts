@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { APP_SLUG } from '../../web/src/brand';
-import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow } from './platform';
+import { APP_DOMAIN, APP_SLUG } from '../../web/src/brand';
+import { APP_ID, coreBinary, reverseDomain, foldersOf, keyPlatform, quitsWithLastWindow } from './platform';
 
 test('the keybindings, the last window and the app id by platform', () => {
   assert.equal(keyPlatform('darwin'), 'mac');
@@ -11,7 +11,10 @@ test('the keybindings, the last window and the app id by platform', () => {
   assert.equal(quitsWithLastWindow('darwin'), false);
   assert.equal(quitsWithLastWindow('win32'), true);
   assert.equal(quitsWithLastWindow('linux'), true);
-  assert.equal(APP_ID, `dev.${APP_SLUG}.desktop`);
+  // The domain reversed, label by label.
+  assert.equal(reverseDomain('example.app'), 'app.example');
+  assert.equal(reverseDomain('a.example.org'), 'org.example.a');
+  assert.equal(APP_ID, `${reverseDomain(APP_DOMAIN)}.desktop`);
 });
 
 test("the core is the app's resource, or scripts/build.sh's in development", () => {
