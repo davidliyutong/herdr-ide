@@ -1,39 +1,50 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- veldr: the machines' terminals and agents (the nodes) converge in one
+       place (the point), as a V. web/public/icon.svg is the flat version
+       for 32 px and below; scripts/icons.sh renders both. -->
   <defs>
+    <linearGradient id="bg" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1b2d48"/>
+      <stop offset="1" stop-color="#0f1b2e"/>
+    </linearGradient>
     <linearGradient id="rim" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
       <stop stop-color="#a5bfdc" stop-opacity=".36"/>
       <stop offset=".4" stop-color="#6087ae" stop-opacity=".08"/>
       <stop offset="1" stop-color="#6087ae" stop-opacity=".2"/>
     </linearGradient>
-    <linearGradient id="active" x1="242" y1="300" x2="566" y2="720" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#86b4ff"/>
+    <linearGradient id="blue" x1="300" y1="330" x2="512" y2="704" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#93bcff"/>
       <stop offset="1" stop-color="#5686db"/>
     </linearGradient>
-    <linearGradient id="upper" x1="610" y1="300" x2="802" y2="498" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#73d1bd"/>
-      <stop offset="1" stop-color="#41a995"/>
+    <linearGradient id="teal" x1="724" y1="330" x2="512" y2="704" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7fdcc6"/>
+      <stop offset="1" stop-color="#3fa892"/>
     </linearGradient>
-    <linearGradient id="lower" x1="610" y1="526" x2="802" y2="724" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#4a658b"/>
-      <stop offset="1" stop-color="#344c70"/>
+    <linearGradient id="mid" x1="512" y1="340" x2="512" y2="704" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#c3d6f5" stop-opacity=".7"/>
+      <stop offset="1" stop-color="#c3d6f5" stop-opacity=".25"/>
     </linearGradient>
     <filter id="shadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse">
       <feDropShadow dx="0" dy="16" stdDeviation="14" flood-color="#030b17" flood-opacity=".25"/>
     </filter>
-    <filter id="panes" x="160" y="260" width="704" height="540" filterUnits="userSpaceOnUse">
-      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#020a18" flood-opacity=".3"/>
+    <filter id="lift" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#020a18" flood-opacity=".35"/>
     </filter>
   </defs>
-  <rect x="100" y="100" width="824" height="824" rx="184" fill="#17263c" filter="url(#shadow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#bg)" filter="url(#shadow)"/>
   <rect x="102" y="102" width="820" height="820" rx="182" fill="none" stroke="url(#rim)" stroke-width="4"/>
-  <g filter="url(#panes)">
-    <rect x="222" y="300" width="352" height="424" rx="48" fill="url(#active)"/>
-    <rect x="606" y="300" width="196" height="196" rx="40" fill="url(#upper)"/>
-    <rect x="606" y="528" width="196" height="196" rx="40" fill="url(#lower)"/>
+  <g filter="url(#lift)" fill="none" stroke-linecap="round">
+    <path d="M512 704V346" stroke="url(#mid)" stroke-width="60"/>
+    <path d="M300 330 512 704" stroke="url(#blue)" stroke-width="96"/>
+    <path d="M724 330 512 704" stroke="url(#teal)" stroke-width="96"/>
   </g>
-  <rect x="224" y="302" width="348" height="420" rx="46" fill="none" stroke="#d8e9ff" stroke-opacity=".24" stroke-width="4"/>
-  <path d="m292 448 64 64-64 64" fill="none" stroke="#f5f9ff" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M414 576h70" fill="none" stroke="#f5f9ff" stroke-width="36" stroke-linecap="round"/>
-  <path d="M666 398h76" fill="none" stroke="#e3fff7" stroke-width="24" stroke-linecap="round"/>
-  <path d="M666 626h76" fill="none" stroke="#a8c5ef" stroke-width="24" stroke-linecap="round"/>
+  <g filter="url(#lift)">
+    <circle cx="300" cy="330" r="70" fill="#d6e6ff"/>
+    <circle cx="724" cy="330" r="70" fill="#d3f6ec"/>
+    <circle cx="512" cy="346" r="50" fill="#e8f0ff"/>
+    <circle cx="512" cy="704" r="60" fill="#f5f9ff"/>
+  </g>
+  <circle cx="300" cy="330" r="32" fill="#5686db"/>
+  <circle cx="724" cy="330" r="32" fill="#3fa892"/>
+  <circle cx="512" cy="346" r="22" fill="#7f9cc6"/>
 </svg>
