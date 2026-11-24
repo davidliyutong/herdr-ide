@@ -134,8 +134,9 @@ the flag.
 - **Defaults** are single strokes only: the desktop app's menu keys on
   `mac`, `ctrl+shift` keys on `windows` and `linux`, and in browsers only
   what browsers leave (find, the list of shortcuts, the palette on macOS).
-  On every platform `ctrl+b` (`pane.leave`) moves the keyboard from a pane
-  to its header ([04](04-layout-and-keyboard.md)); apart from it no default
+  On every platform `ctrl+b` (`pane.leave`) moves the keyboard from an
+  editor to its pane header, and stays the program's in a terminal
+  ([04](04-layout-and-keyboard.md)); apart from it no default
   is a chord or `ctrl`/`alt` with a letter alone, so every unbound key
   reaches the terminal's program on the first press.
   Commands without a key run from menus, pane headers and the command

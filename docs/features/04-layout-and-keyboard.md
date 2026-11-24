@@ -5,8 +5,9 @@
 Terminal multiplexer users know a layout model: workspaces, tabs, and
 binary split trees of panes. This application is used with the mouse, so
 its default keys leave almost every key to the program in the terminal;
-the one exception, `ctrl+b`, moves the keyboard out of a pane to the app
-(users who keep it for tmux unbind `pane.leave`).
+the one exception, `ctrl+b`, moves the keyboard out of an editor to its
+pane header, and is left to the program while a terminal has the keyboard
+(tmux's prefix).
 
 The terminal core keeps terminals, not layouts. Every client of a machine
 arranges terminals, VS Code views and previews in the machine's layout
@@ -249,15 +250,22 @@ settings in [13](13-settings-and-appearance.md); the full table in
 
 - Commands have default keys per platform (`mac`, `windows`, `linux`: the
   desktop app; `mac-browser`, `windows-browser`, `linux-browser`) and a context (`when`: `terminal`,
-  `vscode`, `dialog`, `always`). User rules in
+  `editor`, `vscode`, `dialog`, `always`). `terminal` is the main window,
+  its terminals and VS Code panes included (for the keys VS Code leaves);
+  `editor` is the main window except while a terminal has the keyboard,
+  where the key goes to the program. User rules in
   `keybindings[-<instance>].json` on the core host add and remove keys.
   Clients follow the core's `keybindings` messages.
 - Command handlers are a table by id: a plugin's in its definition
   (`web/src/plugins/api.ts`), the rest in `web/src/commands.ts`.
-- `ctrl+b` (`pane.leave`) moves the keyboard from the focused editor,
-  terminal or pane to its pane header, so app keys run without the program
+- `ctrl+b` (`pane.leave`, `editor`) moves the keyboard from the focused
+  editor or pane to its pane header, so app keys run without the editor
   taking them; pressed again (or `Escape`) it returns. In Monaco and text
-  fields it is caught before the editor. Apart from it no default is a
+  fields it is caught before the editor. In a terminal it is the
+  program's: tmux and shells use it, and a key that sometimes leaves the
+  terminal and sometimes does not cannot be learned. A rule with
+  `"when": "terminal"` binds it there too. In a VS Code pane the bridge
+  extension's own key gives the keyboard back ([05](05-vscode-panes.md)). Apart from it no default is a
   chord, `ctrl` or `alt` with a letter alone, or a function key, so every
   other non-default key reaches the terminal on the first press.
 - Browsers get only keys they leave to pages: find (`cmd+f`,

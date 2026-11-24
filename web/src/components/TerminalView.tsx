@@ -11,7 +11,7 @@ import { isLive } from '../term/protocol';
 import { registerPane } from '../state/panes';
 import { usePrefs, getPrefs } from '../prefs';
 import { appearanceOf, useThemeKind } from '../appearance';
-import { handleKey } from '../keymap';
+import { handleKey, shellKeyContext } from '../keymap';
 import { uploadPasted } from '../transfers';
 import { droppedItems, droppedPaths, filesAreOn } from '../drop';
 import { shortPath } from '../lib/machine';
@@ -109,7 +109,7 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
           });
         },
         readOnly: () => useStore.getState().readOnly,
-        appKey: (ev) => handleKey(ev),
+        appKey: (ev) => handleKey(ev, shellKeyContext()),
         activate: () => activate.current(),
         linkContext: () => ({ m, pane: terminal, cwd: terms.directory(m, terminal), home: useStore.getState().machines[m]?.info?.home }),
         mathHover: () => getPrefs().mathHover,

@@ -376,7 +376,7 @@
     {
       "id": "pane.leave",
       "section": "pane",
-      "when": "terminal"
+      "when": "editor"
     },
     {
       "id": "pane.rename",
@@ -961,7 +961,7 @@
       {
         "key": "ctrl+b",
         "command": "pane.leave",
-        "when": "terminal"
+        "when": "editor"
       },
       {
         "key": "alt+shift+left",
@@ -1058,7 +1058,7 @@
       {
         "key": "ctrl+b",
         "command": "pane.leave",
-        "when": "terminal"
+        "when": "editor"
       },
       {
         "key": "ctrl+shift+f",
@@ -1205,7 +1205,7 @@
       {
         "key": "ctrl+b",
         "command": "pane.leave",
-        "when": "terminal"
+        "when": "editor"
       },
       {
         "key": "cmd+alt+left",
@@ -1317,7 +1317,7 @@
       {
         "key": "ctrl+b",
         "command": "pane.leave",
-        "when": "terminal"
+        "when": "editor"
       },
       {
         "key": "cmd+f",
@@ -1449,7 +1449,7 @@
       {
         "key": "ctrl+b",
         "command": "pane.leave",
-        "when": "terminal"
+        "when": "editor"
       },
       {
         "key": "alt+shift+left",
@@ -1546,7 +1546,7 @@
       {
         "key": "ctrl+b",
         "command": "pane.leave",
-        "when": "terminal"
+        "when": "editor"
       },
       {
         "key": "ctrl+shift+f",

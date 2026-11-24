@@ -20,8 +20,8 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   and reorder with the mouse; right-click anything for its commands. A
   pinned tab stays first and `cmd+w` does not close it.
 - **Keys left to the programs.** The few default keys take almost nothing
-  from the terminals; `ctrl+b` moves the keyboard from a pane to the app
-  and back. Every key can be rebound or unbound, chords included.
+  from the terminals; `ctrl+b` moves the keyboard from an editor to its
+  pane header and back, and stays the program's (tmux) in a terminal. Every key can be rebound or unbound, chords included.
 - **Terminal core included.** herdr-core is installed on a machine the
   first time its terminals are shown; machines need nothing installed and
   no internet. Programs keep running when the browser or the core stops.

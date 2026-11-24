@@ -10,7 +10,7 @@ import registry from '../../design/generated/registry.json';
 import { desktopShell } from './shell';
 import { hasMessage, t } from './i18n';
 
-export type When = 'terminal' | 'vscode' | 'dialog' | 'always';
+export type When = 'terminal' | 'editor' | 'vscode' | 'dialog' | 'always';
 
 export interface Binding {
   key: string;

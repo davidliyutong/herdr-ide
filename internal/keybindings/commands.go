@@ -3,13 +3,17 @@ package keybindings
 import "fmt"
 
 // When tells where a binding applies: in the main window outside dialogs
-// (terminal; in a VS Code pane too, for the keys VS Code leaves), only while
-// a VS Code pane has the keyboard (vscode), while a dialog of the
-// application is open (dialog), or everywhere (always).
+// (terminal; in a VS Code pane too, for the keys VS Code leaves), there
+// except while a terminal has the keyboard (editor: editors, VS Code panes,
+// pane headers and the application's own controls; the key goes to the
+// terminal's program), only while a VS Code pane has the keyboard (vscode),
+// while a dialog of the application is open (dialog), or everywhere
+// (always).
 type When string
 
 const (
 	WhenTerminal When = "terminal"
+	WhenEditor   When = "editor"
 	WhenVSCode   When = "vscode"
 	WhenDialog   When = "dialog"
 	WhenAlways   When = "always"
@@ -17,7 +21,7 @@ const (
 
 func validWhen(w When) bool {
 	switch w {
-	case WhenTerminal, WhenVSCode, WhenDialog, WhenAlways:
+	case WhenTerminal, WhenEditor, WhenVSCode, WhenDialog, WhenAlways:
 		return true
 	}
 	return false
@@ -94,6 +98,11 @@ func cmd(id, section string, defaults ...Default) Command {
 	return Command{ID: id, Section: section, When: WhenTerminal, Defaults: defaults}
 }
 
+// editor is a command that does not run while a terminal has the keyboard.
+func editor(id, section string, defaults ...Default) Command {
+	return Command{ID: id, Section: section, When: WhenEditor, Defaults: defaults}
+}
+
 // always is a command that also runs while a dialog has the keyboard.
 func always(id, section string, defaults ...Default) Command {
 	return Command{ID: id, Section: section, When: WhenAlways, Defaults: defaults}
@@ -108,8 +117,9 @@ func always(id, section string, defaults ...Default) Command {
 // workspace switches (Alt+Shift++/Alt+Shift+- on Windows Terminal;
 // Ctrl+Shift+D/O and Ctrl+Alt+Up/Down on Linux), Alt+Left/Right for
 // pane history navigation, and Ctrl with +, - or 0 for the zoom.
-// Ctrl+B escapes focus from the active editor, terminal or pane to the app
-// chrome on every platform (and returns focus when already there); no other
+// Ctrl+B escapes focus from the active editor or VS Code pane to its pane
+// header on every platform (and returns focus when already there), but is
+// left to the program of a terminal that has the keyboard; no other
 // default is a chord, Ctrl or Alt with a letter alone, or a function key.
 // Browsers get only keys they leave to pages: find, the command palette on
 // macOS (Cmd+K; Cmd+Shift+P opens a private window in Firefox, as
@@ -173,9 +183,10 @@ var Commands = func() []Command {
 		cmd("pane.splitDown", "pane", on(macApp, "cmd+shift+d"), on(winApp, "alt+shift+minus"), on(linuxApp, "ctrl+shift+o")),
 		cmd("pane.close", "pane", on(macApp, "cmd+w")),
 		cmd("pane.zoom", "pane", on(macApp, "cmd+shift+enter"), on(winLinuxApp, "ctrl+shift+enter")),
-		// Switches focus between the active pane (editor/terminal) and app
-		// chrome so app shortcuts run without editor/terminal interception.
-		cmd("pane.leave", "pane", Default{Key: "ctrl+b"}),
+		// Switches focus between the active pane (an editor, a VS Code pane)
+		// and its header so app shortcuts run without the editor's
+		// interception. Not in a terminal, whose programs (tmux) get ctrl+b.
+		editor("pane.leave", "pane", Default{Key: "ctrl+b"}),
 		// Renames the focused terminal's pane in its header. No default:
 		// F2 and the like belong to the programs in the terminals.
 		cmd("pane.rename", "pane"),

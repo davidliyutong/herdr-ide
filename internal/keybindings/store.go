@@ -316,10 +316,14 @@ func (s *Store) effective(platform string) []Rule {
 }
 
 // overlaps tells whether two bindings can apply at the same time; the main
-// UI's (terminal) also apply in VS Code panes, for the keys VS Code leaves.
+// UI's (terminal) also apply in VS Code panes, for the keys VS Code leaves,
+// and wherever outside terminals (editor) does.
 func overlaps(a, b When) bool {
-	return a == b || a == WhenAlways || b == WhenAlways ||
-		a == WhenTerminal && b == WhenVSCode || a == WhenVSCode && b == WhenTerminal
+	if a == b || a == WhenAlways || b == WhenAlways {
+		return true
+	}
+	main := func(w When) bool { return w == WhenTerminal || w == WhenEditor || w == WhenVSCode }
+	return main(a) && main(b)
 }
 
 // Conflicts finds keys that run several commands in the same place, and

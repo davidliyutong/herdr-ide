@@ -19,8 +19,9 @@ import { commandOfOffPlugin, pluginCommand } from './plugins/registry';
 import { useFrames, windowFocused } from './codeFrames';
 import { terms } from './state/terms';
 
-/** Where a key is pressed: the main UI, a VS Code pane, or a dialog. */
-export type KeyContext = 'terminal' | 'vscode' | 'dialog';
+/** Where a key is pressed: the main UI (terminal), a terminal of it
+ * (shell), a VS Code pane, or a dialog. */
+export type KeyContext = 'terminal' | 'shell' | 'vscode' | 'dialog';
 
 /** What a stroke did: nothing (the key is not the app's), a chord goes on,
  * a command ran, the chord's first stroke was pressed again (this press
@@ -30,10 +31,21 @@ export type StrokeResult =
   { kind: 'none' } | { kind: 'pending' } | { kind: 'run'; command: string } | { kind: 'literal' } | { kind: 'swallow' };
 
 /** Whether a binding for when runs where the key was pressed. A VS Code pane
- * is a pane of the main UI: the main UI's bindings run there too, for the
- * keys VS Code leaves (those it takes never reach the app). */
+ * and a terminal are panes of the main UI: the main UI's bindings run there
+ * too, for the keys VS Code leaves (those it takes never reach the app);
+ * those for outside terminals (editor) everywhere in it but a terminal,
+ * whose program gets the key. */
 export function applies(when: When, ctx: KeyContext): boolean {
-  return when === 'always' || when === ctx || (when === 'terminal' && ctx === 'vscode');
+  switch (when) {
+    case 'always':
+      return true;
+    case 'terminal':
+      return ctx === 'terminal' || ctx === 'shell' || ctx === 'vscode';
+    case 'editor':
+      return ctx === 'terminal' || ctx === 'vscode';
+    default:
+      return when === ctx;
+  }
 }
 
 /** One step of the matcher: the result of `stroke` after the strokes of an
@@ -92,6 +104,12 @@ const modifierKeys = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Al
 /** Where a key event happens: dialogs and the palette take the keyboard. */
 export function keyContext(): KeyContext {
   return typeof document !== 'undefined' && document.querySelector('.modal-backdrop, .palette-backdrop') ? 'dialog' : 'terminal';
+}
+
+/** Where a key pressed in a terminal of the main UI is: a dialog's, when
+ * one is open, else the terminal's (shell). */
+export function shellKeyContext(): KeyContext {
+  return keyContext() === 'dialog' ? 'dialog' : 'shell';
 }
 
 /** Commands a held key repeats, as in browsers and terminals: opening and

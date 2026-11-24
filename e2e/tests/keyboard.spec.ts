@@ -38,7 +38,21 @@ test('Close Pane leaves the last pane of a pinned tab', async ({ app, instance, 
   await expect(app.getByRole('tablist', { name: 'Tabs' }).getByRole('tab')).toHaveCount(1);
 });
 
-test('Ctrl+B moves the keyboard to the pane header, whose buttons Enter presses', async ({ app, term }) => {
+test("Ctrl+B is the program's in a terminal", async ({ app, term }) => {
+  await newTerminalTab(app);
+  const terminal = await terminalOfPane(term, 1);
+  await focusTerminal(app);
+  // read takes the byte ctrl+b sends (02) as typed; od shows it.
+  await app.keyboard.type(`IFS= read -r x; printf '%s' "$x" | od -An -tx1 | sed 's/^ */got-/'`);
+  await app.keyboard.press('Enter');
+  await app.keyboard.press('Control+b');
+  await app.keyboard.press('Enter');
+  await term.waitScreen(terminal, /^got-02$/m);
+  await expect(app.locator('.pane-header.focused')).not.toBeFocused();
+});
+
+test('Ctrl+B bound in terminals moves the keyboard to the pane header, whose buttons Enter presses', async ({ app, instance, term }) => {
+  await instance.api('PUT', '/api/keybindings', [{ key: 'ctrl+b', command: 'pane.leave', when: 'terminal' }]);
   await newTerminalTab(app);
   await terminalOfPane(term, 1);
   const input = focusedTerminal(app);

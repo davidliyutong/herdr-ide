@@ -324,9 +324,15 @@ func TestConflicts(t *testing.T) {
 		{Key: "cmd+j", Command: "e", When: WhenVSCode},
 		{Key: "cmd+k", Command: "f", When: WhenDialog},
 		{Key: "cmd+k", Command: "g", When: WhenTerminal},
+		{Key: "cmd+e", Command: "h", When: WhenEditor},
+		{Key: "cmd+e", Command: "i", When: WhenTerminal},
+		{Key: "cmd+l", Command: "j", When: WhenEditor},
+		{Key: "cmd+l", Command: "k", When: WhenDialog},
 	})
-	// The main UI's bindings apply in VS Code panes too: b and c meet there.
+	// The main UI's bindings apply in VS Code panes too: b and c meet there;
+	// those outside terminals (editor) meet the main UI's, not dialogs'.
 	want := []Conflict{
+		{Key: "cmd+e", Commands: []string{"h", "i"}},
 		{Key: "cmd+j", Commands: []string{"d", "e"}},
 		{Key: "ctrl+b", Commands: []string{"a", "b", "c"}, Prefix: true},
 		{Key: "ctrl+b c", Commands: []string{"b", "c"}},

@@ -138,13 +138,17 @@ describe('keybindings', () => {
     expect(withKey('New tab', 'tab.new')).toBe('New tab');
   });
 
-  it('runs pane.leave on ctrl+b and leaves every key without a binding to the terminal on every platform', () => {
+  it('runs pane.leave on ctrl+b outside terminals and leaves every key without a binding to the terminal on every platform', () => {
     const key = (init: KeyboardEventInit) => new KeyboardEvent('keydown', { cancelable: true, ...init });
     for (const p of ['mac', 'mac-browser', 'windows', 'windows-browser', 'linux', 'linux-browser'] as Platform[]) {
       useKeys.setState({ effective: (registry.keybindings as Record<Platform, Binding[]>)[p] });
       const leaveEv = key({ key: 'b', code: 'KeyB', ctrlKey: true });
       expect(handleKey(leaveEv, 'terminal'), `${p} ctrl+b`).toBe(true);
       expect(leaveEv.defaultPrevented, `${p} ctrl+b`).toBe(true);
+      // In a terminal ctrl+b is its program's (tmux).
+      const inTerminal = key({ key: 'b', code: 'KeyB', ctrlKey: true });
+      expect(handleKey(inTerminal, 'shell'), `${p} ctrl+b in a terminal`).toBe(false);
+      expect(inTerminal.defaultPrevented).toBe(false);
       for (const init of [
         { key: 'c', code: 'KeyC' },
         { key: 'a', code: 'KeyA', ctrlKey: true },
@@ -156,6 +160,18 @@ describe('keybindings', () => {
         expect(handleKey(ev, 'terminal'), `${p} ${init.code}`).toBe(false);
         expect(ev.defaultPrevented, `${p} ${init.code}`).toBe(false);
       }
+    }
+  });
+
+  it('runs pane.leave in a terminal when the user binds it there (when: terminal)', () => {
+    useKeys.setState({ effective: [{ key: 'ctrl+b', command: 'pane.leave', when: 'terminal' }] });
+    const leaveSpy = vi.spyOn(commands['pane.leave'], 'run').mockImplementation(() => {});
+    try {
+      const ev = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, cancelable: true });
+      expect(handleKey(ev, 'shell')).toBe(true);
+      expect(leaveSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      leaveSpy.mockRestore();
     }
   });
 
