@@ -83,7 +83,8 @@ machine with the code `local_unsupported` and reaches SSH machines only
 ## Desktop launcher
 
 The Electron shell (`desktop/src/main.ts`) runs the bundled core with
-`--parent-stdio`, loopback port 7781 and instance `desktop`:
+`--parent-stdio`, loopback port 7781, instance `desktop` and the default
+namespace on machines (`--node-instance=`, [39](features/39-nodes.md)):
 
 - The shell's first stdin line is its hello, `{ "desktop_token", "verify_key" }`.
   The token is also set as an HttpOnly cookie, so the core can tell the
@@ -125,6 +126,7 @@ JSON reply line; after a successful reply it carries op-specific bytes.
 | `privacy` | core → agent | macOS Full Disk Access of the agent and the terminal core. |
 | `plugin` | core → agent | A plugin's `Action` with `Params`; a result or JSON lines follow ([27](features/27-plugins.md)). |
 | `bridge` | agent → core | JSON lines between the VS Code extension (`bridge.sock`) and the core. |
+| `node.drain` | agent → core | The node was taken over by a newer build's: the core connects again and moves the machine to that session ([39](features/39-nodes.md)). |
 | `vault` | agent → core | One request from the vault's MCP server (`vault.sock`) with the caller's process chain from peer credentials, one response; asked of every core the node serves ([30](features/30-variable-vault.md)). |
 | `gui` | core → agent | Displays: `status`, `install`, `start`, `pick`, `keep`, `shells`, `video`, `video-install`, and `attach` for framed window events, frames and input; every core of the node attaches to one window manager, which takes input from the one in control ([14](features/14-gui-windows.md)). |
 

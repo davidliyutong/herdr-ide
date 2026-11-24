@@ -13,9 +13,9 @@ instead of repeating it.
 | `herdr-ide fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
 | `herdr-ide mcp [--instance NAME] [--socket PATH]` | The variable vault's MCP server on stdio for coding agents' CLIs; asks the instance's agent through `vault.sock`, exits when stdin closes ([30](features/30-variable-vault.md)). |
 | `herdr-ide version` | Print the version. |
-| `herdr-ide node [--instance NAME]` | The machine's node: serves the core's protocol on `<data>/run/node-<build>.sock` to any number of cores; started by them, ends 15 s after its last client. Linux and macOS. |
-| `herdr-ide node dial [--instance NAME]` | Pipes stdio to the node of its build, starting it when none answers; what a core runs over ssh. |
-| `herdr-ide node stop [--instance NAME]` | Asks the instance's nodes of every build to stop. |
+| `herdr-ide node [--instance NAME] [--takeover]` | The machine's node: serves the core's protocol on `<data>/run/node.sock` to any number of cores; started by them, ends 15 s after its last client; `--takeover` takes the socket from the running node, which drains ([39](features/39-nodes.md)). Linux and macOS. |
+| `herdr-ide node dial [--instance NAME] [--client ID]` | Pipes stdio to the node, starting one (or one that takes over from an older build's) when none answers; what a core runs over ssh, `--client` naming the core. |
+| `herdr-ide node stop [--instance NAME]` | Asks the instance's nodes to stop. |
 | `~/.herdr-ide[-<instance>]/bin/herdr-ide-mcp` | The MCP server on a machine: a link to the uploaded machine build (which has `mcp`, `node`, `gui-keep`, `gui-wl`, `chat-host` and `version`); takes no arguments and asks the agent of its data directory. |
 | `herdr-ide gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
 | `herdr-ide gui-wl --device NODE [--nvidia]` | Compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
@@ -46,7 +46,8 @@ and file change the value at runtime.
 | `--local-only` | `false` | Do not connect the stored SSH machines (`--ssh` targets still are). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
 | `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored (repeatable). At most 255 bytes, not starting with `-`, without whitespace, control characters or ``! " $ & ' ( ) * ; < > ? \ ` { \| }``; the core refuses to start otherwise. |
-| `--instance` | – | State instance: `~/.herdr-ide-<instance>` on machines, with its own sockets, terminal core session `herdr-ide-<instance>`, code-server and settings. |
+| `--instance` | – | State instance: this core's files (`settings-<instance>.json` and the rest of the configuration directory) and, unless `--node-instance` says otherwise, `~/.herdr-ide-<instance>` on machines, with its own node, sockets, terminal core session `herdr-ide-<instance>` and code-server. |
+| `--node-instance` | `--instance` | The namespace on machines: their `~/.herdr-ide[-<instance>]` and terminal core session, shared with every core of the same namespace; empty (`--node-instance=`) is the default one, which the desktop app uses ([39](features/39-nodes.md)). |
 
 ### code-server
 
@@ -589,7 +590,7 @@ summarized in [deployment](deployment.md#remote-resources).
 | `~/.herdr-ide/gpupick/<sha256 prefix>/gpupick.so` | GPU selection library (0600, shared) | Unused 14 days, when another is installed. |
 | `<data>/hc/herdr-core` (0700 directory) | Terminal core executable, accepted only with its SHA-256 | Replaced by the next build. |
 | `~/.local/state/herdr-core/herdr-ide[-<instance>]/` (`$XDG_STATE_HOME`) | herdr-core's own state (records, saved screens, logs) | Until the user removes it. |
-| `<data>/run/` (0700) | Sockets (0600): `node-<build>.sock` (with its lock `node-<build>.lock`), `hc.sock` and its holders', `cs.sock`, `bridge.sock`, `vault.sock`, `chat.sock`; `cs.pid`; display files `gui.json`, `xauth`, `xauth.server` (0600), `gui.lock`, `gui-keep.lock` | Sockets while their owner runs; display files kept so terminals keep a valid environment. |
+| `<data>/run/` (0700) | Sockets (0600): `node.sock` (with its lock `node.lock`), `hc.sock` and its holders', `cs.sock`, `bridge.sock`, `vault.sock`, `chat.sock`; `cs.pid`; display files `gui.json`, `xauth`, `xauth.server` (0600), `gui.lock`, `gui-keep.lock` | Sockets while their owner runs; display files kept so terminals keep a valid environment. |
 | `<data>/xvfb.log`, `<data>/xwayland.log`, `<data>/gui-keep.log` | Output of the last display, compositor and keeper | Replaced at each start. |
 | `<data>/node.log`, `node.old.log` (0600) | The nodes' log | Moved to `node.old.log` past 1 MiB when a node starts. |
 | `<data>/cs-data/`, `<data>/cs-ext/` | VS Code settings and extensions | Kept; logs pruned after 7 days. |
@@ -652,6 +653,6 @@ them on macOS). Electron's profile is `herdr-ide-desktop` (`-dev`, or
 uninstalling; on macOS `herdr-ide-desktop-keychain.json` beside it records
 which build owns the safeStorage keychain item
 ([30](features/30-variable-vault.md)). The desktop core uses
-`settings-desktop.json` and `~/.herdr-ide-desktop/`. No desktop log files
+`settings-desktop.json` and, on machines, the default `~/.herdr-ide/`. No desktop log files
 are kept: the last 16 KiB of the core's stderr stay in memory for error
 dialogs.

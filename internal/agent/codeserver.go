@@ -197,6 +197,17 @@ func (c *codeServer) stop() {
 	}
 }
 
+// handOver makes the node pid the owner of the code-server this agent owns
+// (a node that took over), which stopAll then leaves running.
+func (c *codeServer) handOver(pid int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if p, ok := c.readPid(); ok && p.Owner == os.Getpid() && pid > 0 {
+		p.Owner = pid
+		c.writePid(p)
+	}
+}
+
 // stopAll runs when the agent exits: only a process this agent owns is
 // stopped, so another core's session on the same machine keeps working.
 func (c *codeServer) stopAll() {

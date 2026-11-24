@@ -36,6 +36,7 @@ import {
   desktopCookie,
   desktopToken,
   ENV_PREFIX,
+  nodeInstance,
   verifyKey,
 } from './core';
 import { enclaveFor, helperPath, helperRunner, runBounded } from './enclave';
@@ -353,7 +354,7 @@ ipcMain.on(channels.notifyClickWanted, (event, wanted: unknown) => {
 const privacy = privacyActions(
   {
     platform,
-    executable: terminalCoreExecutable(app.getPath('home'), typeof instance === 'string' ? instance : ''),
+    executable: terminalCoreExecutable(app.getPath('home'), typeof instance === 'string' ? nodeInstance(instance) : ''),
     bundle: app.isPackaged ? bundleOf(process.execPath) : '',
     pid: process.pid,
     dev,

@@ -11,10 +11,57 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"strconv"
+	"strings"
 )
 
 // Version is the agent protocol/build version. Overridden at link time.
 var Version = "dev"
+
+// parseVersion reads a build's version as the build names it (git describe: the
+// tag, "v" and three numbers, then the commits after it, "-<n>-g<hash>",
+// and "-dirty", which scripts/build.sh follows with the build's time so
+// that two builds of local changes are told apart); ok false for any other
+// (a development build, "dev"). What follows "-dirty" does not order
+// builds: builds of local changes at one commit are of the same age, and
+// the page reminds the user to restart a host of another build
+// (internal/plugins/chat).
+func parseVersion(v string) (n [4]int, ok bool) {
+	v = strings.TrimPrefix(v, "v")
+	if base, _, dirty := strings.Cut(v, "-dirty"); dirty {
+		v = base
+	}
+	base, after, more := strings.Cut(v, "-")
+	parts := strings.Split(base, ".")
+	if len(parts) != 3 {
+		return n, false
+	}
+	for i, p := range parts {
+		x, err := strconv.Atoi(p)
+		if err != nil || x < 0 {
+			return n, false
+		}
+		n[i] = x
+	}
+	if more {
+		commits, hash, ok := strings.Cut(after, "-g")
+		x, err := strconv.Atoi(commits)
+		if !ok || err != nil || x < 0 || hash == "" {
+			return n, false
+		}
+		n[3] = x
+	}
+	return n, true
+}
+
+// OlderVersion tells whether build version a is older than b: both are
+// known (parseVersion) and a comes before b.
+func OlderVersion(a, b string) bool {
+	x, ok1 := parseVersion(a)
+	y, ok2 := parseVersion(b)
+	return ok1 && ok2 && slices.Compare(x[:], y[:]) < 0
+}
 
 type Op string
 
@@ -74,6 +121,10 @@ const (
 	// core's reply, one VaultRequest line and one VaultResponse line
 	// (vault.go).
 	OpVault Op = "vault"
+	// OpNodeDrain is opened by a node towards each core it serves once
+	// another node took over its socket: the core connects again, which
+	// reaches the new node, moves to that session and closes this one.
+	OpNodeDrain Op = "node.drain"
 )
 
 // DetectEvent is one line of an OpDetect stream: the agent a terminal runs
@@ -113,10 +164,15 @@ const (
 )
 
 // NodeHello is the line a client writes first on a node's socket, before
-// anything else. With NodeServe the connection then carries the client's
-// yamux session; with NodeStop the node answers a Reply and ends.
+// anything else; the node answers a Reply with its Node. With NodeServe the
+// connection then carries the client's yamux session; with NodeStop the
+// node ends; with NodeTakeover the node gives its socket to the node that
+// asks and drains (its sessions are told with OpNodeDrain).
 type NodeHello struct {
 	Op string `json:"op"`
+	// Node is the build of the client's executable (`node dial`, the
+	// core's for its own machine, or the node taking over).
+	Node *NodeInfo `json:"node,omitempty"`
 	// SSHConnection is SSH_CONNECTION of the ssh session that dialed the
 	// node (`node dial`), which hello reports (Reply.SSH).
 	SSHConnection string `json:"ssh_connection,omitempty"`
@@ -127,9 +183,35 @@ type NodeHello struct {
 
 // NodeHello's operations.
 const (
-	NodeServe = "serve"
-	NodeStop  = "stop"
+	NodeServe    = "serve"
+	NodeStop     = "stop"
+	NodeTakeover = "takeover"
 )
+
+// NodeInfo is a node's build, or the build of a client of one.
+type NodeInfo struct {
+	// Build is a digest of the executable, Version its version (Version),
+	// ExeTime when the executable was written (Unix nanoseconds), Pid the
+	// process.
+	Build   string `json:"build"`
+	Version string `json:"version"`
+	ExeTime int64  `json:"exe_time"`
+	Pid     int    `json:"pid,omitempty"`
+}
+
+// Newer reports whether build n is newer than o: by version when both are
+// known (OlderVersion), else by when their executables were written.
+func (n NodeInfo) Newer(o NodeInfo) bool {
+	if n.Build == o.Build {
+		return false
+	}
+	if _, ok := parseVersion(n.Version); ok {
+		if _, ok := parseVersion(o.Version); ok && n.Version != o.Version {
+			return OlderVersion(o.Version, n.Version)
+		}
+	}
+	return n.ExeTime > o.ExeTime
+}
 
 // Header is the first line of every stream.
 type Header struct {
@@ -193,6 +275,8 @@ type Reply struct {
 	Code string `json:"code,omitempty"`
 
 	Info *Info `json:"info,omitempty"`
+	// Node (NodeHello) is the node's build.
+	Node *NodeInfo `json:"node,omitempty"`
 	// SSH (OpHello) is the SSH_CONNECTION of the session the agent was
 	// started in ("" when it was not started over ssh). It is apart from
 	// Info, which every client of the core sees.

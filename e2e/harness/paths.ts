@@ -15,6 +15,9 @@ export const paths = {
   slug,
   /** The core, built with the web UI and the host's herdr-core embedded. */
   core: join(dir, 'core'),
+  /** The same core built again as another, newer build: it takes the
+   * nodes over from the first. */
+  coreNewer: join(dir, 'core-newer'),
   /** A directory with the fake coding agents (kimi: e2e/fakeacp). */
   fakeBin: join(dir, 'fakebin'),
   /** The machine builds the core uploads to SSH machines (--agent-dir). */

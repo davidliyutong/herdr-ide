@@ -28,16 +28,12 @@ func startTestNode(t *testing.T) (sock string, done <-chan struct{}) {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
-	build, err := BuildID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sock = nodeSocket(filepath.Join(home, ".herdr-ide", "run"), build)
+	sock = nodeSocket(filepath.Join(home, ".herdr-ide", "run"))
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
-		if err := RunNode(ctx, Options{Logger: log.New(io.Discard, "", 0)}); err != nil {
+		if err := RunNode(ctx, Options{Logger: log.New(io.Discard, "", 0)}, false); err != nil {
 			t.Errorf("node: %v", err)
 		}
 	}()
@@ -64,9 +60,12 @@ func startTestNode(t *testing.T) (sock string, done <-chan struct{}) {
 // hello opens a session through the node and returns its hello reply.
 func helloThrough(t *testing.T, sock, sshConn string) (*agentproto.Reply, *yamux.Session) {
 	t.Helper()
-	c, err := dialNodeSocket(sock, agentproto.NodeHello{Op: agentproto.NodeServe, SSHConnection: sshConn})
+	c, node, err := dialNodeSocket(sock, agentproto.NodeHello{Op: agentproto.NodeServe, SSHConnection: sshConn})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if me, _ := selfInfo(); node == nil || node.Build != me.Build {
+		t.Fatalf("node %+v", node)
 	}
 	ys, err := yamux.Client(c, agentproto.YamuxConfig(log.New(io.Discard, "", 0)))
 	if err != nil {
@@ -104,10 +103,10 @@ func TestNodeServesClients(t *testing.T) {
 	}
 }
 
-// A second node of the build leaves the instance to the one that serves.
-func TestNodeOnePerBuild(t *testing.T) {
+// A second node leaves the instance to the one that serves.
+func TestNodeOnePerInstance(t *testing.T) {
 	sock, _ := startTestNode(t)
-	if err := RunNode(context.Background(), Options{Logger: log.New(io.Discard, "", 0)}); err != nil {
+	if err := RunNode(context.Background(), Options{Logger: log.New(io.Discard, "", 0)}, false); err != nil {
 		t.Fatal(err)
 	}
 	if rep, _ := helloThrough(t, sock, ""); !rep.OK {
@@ -190,7 +189,7 @@ func TestNodeRetiresWhenItsExecutableIsGone(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	next := make(chan error, 1)
-	go func() { next <- RunNode(ctx, Options{Logger: log.New(io.Discard, "", 0)}) }()
+	go func() { next <- RunNode(ctx, Options{Logger: log.New(io.Discard, "", 0)}, false) }()
 	for i := 0; ; i++ {
 		if c, err := net.Dial("unix", sock); err == nil {
 			c.Close()
@@ -203,4 +202,81 @@ func TestNodeRetiresWhenItsExecutableIsGone(t *testing.T) {
 	}
 	cancel()
 	<-next
+}
+
+// A node taking over gets the socket at once: the old node tells its
+// sessions' cores to move (OpNodeDrain), serves them until they left and
+// ends then; new clients reach the new node.
+func TestNodeTakeover(t *testing.T) {
+	sock, oldDone := startTestNode(t)
+	_, ys := helloThrough(t, sock, "")
+	drained := make(chan struct{})
+	go func() {
+		st, err := ys.AcceptStream()
+		if err != nil {
+			return
+		}
+		var h agentproto.Header
+		if agentproto.ReadLine(st, &h) == nil && h.Op == agentproto.OpNodeDrain {
+			agentproto.WriteLine(st, agentproto.Reply{OK: true})
+			close(drained)
+		}
+		st.Close()
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	next := make(chan struct{})
+	go func() {
+		defer close(next)
+		if err := RunNode(ctx, Options{Logger: log.New(io.Discard, "", 0)}, true); err != nil {
+			t.Errorf("new node: %v", err)
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-next
+	})
+	select {
+	case <-drained:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the old node's session was not told to move")
+	}
+	// The old session still works until its core leaves.
+	if _, err := ys.Ping(); err != nil {
+		t.Fatalf("old session: %v", err)
+	}
+	for i := 0; ; i++ {
+		if rep, _ := helloThrough(t, sock, ""); rep.OK {
+			break
+		}
+		if i > 100 {
+			t.Fatal("no node answers")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	select {
+	case <-oldDone:
+		t.Fatal("the old node left a session that had not moved")
+	default:
+	}
+	ys.Close()
+	select {
+	case <-oldDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the drained node did not end")
+	}
+	if _, err := os.Stat(sock); err != nil {
+		t.Fatalf("the new node's socket: %v", err)
+	}
+}
+
+// A build is newer by its version when both are known, else by when its
+// executable was written.
+func TestNodeBuildOrder(t *testing.T) {
+	a := agentproto.NodeInfo{Build: "a", Version: "v1.2.0", ExeTime: 2}
+	b := agentproto.NodeInfo{Build: "b", Version: "v1.3.0", ExeTime: 1}
+	dev1 := agentproto.NodeInfo{Build: "c", Version: "dev", ExeTime: 1}
+	dev2 := agentproto.NodeInfo{Build: "d", Version: "dev", ExeTime: 2}
+	if !b.Newer(a) || a.Newer(b) || !dev2.Newer(dev1) || dev1.Newer(dev2) || a.Newer(a) {
+		t.Fatal("order")
+	}
 }

@@ -35,9 +35,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"slices"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -291,49 +288,9 @@ func gone(ctx context.Context, pid int, wait time.Duration) bool {
 	}
 }
 
-// version is a build's version as the build names it (git describe: the
-// tag, "v" and three numbers, then the commits after it, "-<n>-g<hash>",
-// and "-dirty", which scripts/build.sh follows with the build's time so
-// that two builds of local changes are told apart); ok false for any other
-// (a development build, "dev"). What follows "-dirty" does not order
-// builds: builds of local changes at one commit are of the same age, and
-// the page reminds the user to restart a host of another build
-// (internal/plugins/chat).
-func version(v string) (n [4]int, ok bool) {
-	v = strings.TrimPrefix(v, "v")
-	if base, _, dirty := strings.Cut(v, "-dirty"); dirty {
-		v = base
-	}
-	base, after, more := strings.Cut(v, "-")
-	parts := strings.Split(base, ".")
-	if len(parts) != 3 {
-		return n, false
-	}
-	for i, p := range parts {
-		x, err := strconv.Atoi(p)
-		if err != nil || x < 0 {
-			return n, false
-		}
-		n[i] = x
-	}
-	if more {
-		commits, hash, ok := strings.Cut(after, "-g")
-		x, err := strconv.Atoi(commits)
-		if !ok || err != nil || x < 0 || hash == "" {
-			return n, false
-		}
-		n[3] = x
-	}
-	return n, true
-}
-
-// older tells whether build version a is older than b: both are known
-// (version) and a comes before b.
-func older(a, b string) bool {
-	x, ok1 := version(a)
-	y, ok2 := version(b)
-	return ok1 && ok2 && slices.Compare(x[:], y[:]) < 0
-}
+// older tells whether build version a is older than b
+// (agentproto.OlderVersion).
+func older(a, b string) bool { return agentproto.OlderVersion(a, b) }
 
 // serving returns a connection to the chat host that serves, of any build
 // that speaks this agent's protocol, and starts none.

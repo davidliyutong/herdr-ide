@@ -91,8 +91,11 @@ old one.
 | Closing the main window | app stays in the Dock | quits | quits |
 | Signature | ad hoc, or Developer ID and notarized | none | none |
 
-The app's core listens on `127.0.0.1:7781` with instance `desktop`,
-separate from the CLI default and `dev`:
+The app's core listens on `127.0.0.1:7781` with instance `desktop` for its
+own settings, vault and machines list, separate from the CLI default and
+`dev`; on every machine it uses the default namespace (`~/.herdr-ide`), the
+same terminals and chats as a core of the default instance
+([39](features/39-nodes.md)):
 
 - `HERDR_IDE_DESKTOP_PORT` overrides the port, which also changes the
   browser storage origin. An occupied port fails visibly; the app never
@@ -117,7 +120,7 @@ before they open Desktop, Documents, Downloads or external disks. Two
 programs need the grant:
 
 - the app, for the file browser, uploads, downloads and VS Code;
-- herdr-core (`~/.herdr-ide-desktop/hc/herdr-core`), which macOS holds
+- herdr-core (`~/.herdr-ide/hc/herdr-core`), which macOS holds
   responsible for the terminals' programs.
 
 **Settings → Terminal → Permissions → Full Disk Access** shows both and
@@ -211,11 +214,17 @@ ARCH=arm64 make desktop-dist            # arm64 packages, also on an x64 host
 | Electron profile (browser storage, single-instance lock, the vault's `vault-unlock.json`) | `~/Library/Application Support/herdr-ide-desktop/` | `%AppData%\herdr-ide-desktop\` | `~/.config/herdr-ide-desktop/` |
 | Key encrypting the vault's unlock secret (safeStorage) | login keychain item `herdr-ide Safe Storage`; the build that made it in `~/Library/Application Support/herdr-ide-desktop-keychain.json` | DPAPI | – |
 | code-server downloads | `~/Library/Caches/herdr-ide/code-server` | `%LocalAppData%\herdr-ide\code-server` | `~/.cache/herdr-ide/code-server` |
-| Local machine's agent state | `~/.herdr-ide-desktop/` | – | `~/.herdr-ide-desktop/` |
+| Local machine's node and its state | `~/.herdr-ide/` | – | `~/.herdr-ide/` |
 | ssh control sockets | `/tmp/herdr-ide-<uid>/s-desktop` | – | `/tmp/herdr-ide-<uid>/s-desktop` |
 
-SSH machines keep the instance's state in their own `~/.herdr-ide-desktop/`
-([remote resources](#remote-resources)). Uninstalling removes only the app.
+SSH machines keep their state in their own `~/.herdr-ide/`
+([remote resources](#remote-resources)). Builds before the shared
+namespace used `~/.herdr-ide-desktop/` and the terminal core session
+`herdr-ide-desktop`, which stay as they were: that core's terminals keep
+running, not shown, until it is stopped with its own executable
+(`HC_SESSION=herdr-ide-desktop HC_SOCKET=~/.herdr-ide-desktop/run/hc.sock
+~/.herdr-ide-desktop/hc/herdr-core server stop`); the directory can then be
+removed. Uninstalling removes only the app.
 Removing the Electron profile also removes this install's vault unlock key:
 Touch ID or Windows Hello must then be turned on again in the vault's
 Settings.
@@ -375,7 +384,7 @@ documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
 
 | Resource | Started | Ends |
 | --- | --- | --- |
-| Node (`herdr-ide node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node of its build answers; one per build and instance (`run/node-<build>.lock`), in a session of its own. | 15 s after its last client left, on `node stop`, or once its executable is removed (it then takes no new client). Log `<data>/node.log` (1 MiB, one old file). |
+| Node (`herdr-ide node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace (`run/node.lock`), in a session of its own. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/node.log` (1 MiB, one old file). |
 | Agent session | One per core and machine while connected, served by the node. | With its ssh session or socket connection; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`). | A record in the machines file; **Remove machine…** deletes it and ends the session. The machine's terminal core and terminals keep running. |
 | ssh ControlMaster | Per machine, on Linux and macOS cores. | 10 min unused or 1 min without server answers; a core that finds it dead sends `ssh -O stop`. |

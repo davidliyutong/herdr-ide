@@ -28,6 +28,7 @@ func nodeCommand(args []string) int {
 	fs := flag.NewFlagSet("node", flag.ContinueOnError)
 	instance := fs.String("instance", "", "state directory instance (see serve's --instance)")
 	client := fs.String("client", "", "dial: the core that dials (its process), the same for its reconnects")
+	takeover := fs.Bool("takeover", false, "take over from the instance's running node, which drains")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -48,7 +49,7 @@ func nodeCommand(args []string) int {
 	defer cancel()
 	// A node outlives the ssh session or terminal that started it.
 	signal.Ignore(syscall.SIGHUP)
-	if err := agent.RunNode(ctx, agent.Options{Instance: *instance, Logger: logger}); err != nil {
+	if err := agent.RunNode(ctx, agent.Options{Instance: *instance, Logger: logger}, *takeover); err != nil {
 		logger.Printf("exit: %v", err)
 		return 1
 	}

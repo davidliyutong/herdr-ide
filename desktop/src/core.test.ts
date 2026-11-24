@@ -38,6 +38,10 @@ test('development is isolated; packaged mode has its own instance', () => {
   const release = coreArgs('desktop', 7781);
   assert.equal(release[release.indexOf('--instance') + 1], 'desktop');
   assert.ok(!release.includes('--local-only'));
+  // The app's machines are the default instance's, shared with a server's
+  // cores; a development instance keeps its own.
+  assert.ok(release.includes('--node-instance='));
+  assert.ok(args.includes('--node-instance=dev'));
   for (const port of ['-1', '65536', 'abc', '80;open', '0.0.0.0:7781'])
     assert.throws(
       () => corePort(port),

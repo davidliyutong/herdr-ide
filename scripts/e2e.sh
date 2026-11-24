@@ -49,6 +49,9 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   echo "==> core and fake agents"
   mkdir -p "$OUT/fakebin"
   go build -o "$OUT/core" "./cmd/${SLUG}"
+  # A newer build of the same code (another version, written later), which
+  # takes the nodes over from the first (tests/nodes.spec.ts).
+  go build -ldflags "-X $(sed -n 's/^module //p' go.mod)/internal/agentproto.Version=dev-e2e-newer" -o "$OUT/core-newer" "./cmd/${SLUG}"
   go build -o "$OUT/fakebin/kimi" ./e2e/fakeacp
   if [[ -n "$darch" ]]; then
     # The SSH machine's: the machine build the core uploads (--agent-dir)

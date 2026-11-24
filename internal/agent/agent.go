@@ -229,6 +229,26 @@ func (a *Agent) Serve(ctx context.Context, conn io.ReadWriteCloser, client, sshC
 	}
 }
 
+// drain tells the cores of the agent's sessions that the node next serves
+// the instance now (OpNodeDrain), after giving it the code-server.
+func (a *Agent) drain(next int) {
+	a.cs.handOver(next)
+	for _, s := range a.liveSessions() {
+		go func() {
+			st, err := s.ys.OpenStream()
+			if err != nil {
+				return
+			}
+			defer st.Close()
+			_ = st.SetDeadline(time.Now().Add(15 * time.Second))
+			if agentproto.WriteLine(st, agentproto.Header{Op: agentproto.OpNodeDrain}) == nil {
+				var rep agentproto.Reply
+				_ = agentproto.ReadLine(st, &rep)
+			}
+		}()
+	}
+}
+
 // live reports whether the session's connection is open (a session
 // without one stands for a core in tests).
 func (s *session) live() bool { return s.ys == nil || !s.ys.IsClosed() }

@@ -45,37 +45,38 @@ a node reachable without ssh.
 | --- | --- |
 | `node` | The machine's service: what the agent did, for any number of clients, detached from them. |
 | `node dial` | Pipes its standard input and output to the node's socket, starting the node first when none answers. Run by ssh. |
-| `chat-host` | The chat host, run by the node. |
+| `chat-host` | The chat host, which the node starts as a hidden terminal of the instance's terminal core ([37](37-agent-chats.md)). |
 | `serve` | The UI: HTTP and WebSocket front, plugins' core sides, the files of the UI's host. Also on Windows. |
 
 A machine needs only what it runs: the UI's host the full build, other
 machines the machine build (tag `machine`: no `serve`, no web UI, no
 payloads), which the UI uploads as before ([02](02-multi-machine-transport.md)).
-A machine that has the full build of the same version runs it instead.
+`internal/agent/node.go` is the node, `cmd/herdr-ide/node_unix.go` its
+commands.
 
 ### The node
 
 - **Socket.** `<data>/run/node.sock`, 0600 in the 0700 run directory; a
   connection whose peer is another uid (`SO_PEERCRED`, `getpeereid`) is
   closed. Nothing else is listened on.
-- **Sessions.** Each connection is one yamux session speaking
-  `internal/agentproto` as the agent did. `hello` carries the client's
-  build and protocol range; the node answers with its own and the
-  features they share, or `incompatible`.
+- **Hello.** A connection's first line (`agentproto.NodeHello`) says what
+  the client wants (`serve`, `stop`, `takeover`), names its core (a random
+  id per core process, the same across its reconnects) and its build: a
+  digest of its executable, its version and when the executable was
+  written. The node answers with its own build; with `serve` the
+  connection then carries one yamux session speaking `internal/agentproto`
+  as the agent did.
 - **One per namespace.** `run/node.lock` is held while a node serves; a
-  second node started for the namespace exits unless it is taking over
+  second node started for the namespace exits unless it takes over
   (below).
 - **Lifetime.** `node dial` (ssh) or the UI (its own machine) starts the
-  node when none answers. The node ends when it has had no client and no
-  process of its own (code-server, display, encoder) for
-  `node.idleMinutes`, on `node stop`, or when a newer node took over.
-  Terminals and chats do not depend on it.
-- **Detached services.** The node, herdr-core's server and the chat host
-  each run as a service of their own: a transient systemd user unit,
-  a launchd job, else a new session (`setsid`). None is a child that ends
-  with another: systemd ends a unit's processes with its main process and
-  launchd a job's with the job, so the node would otherwise take the
-  terminals with it. A node finds running services by their sockets.
+  node when none answers, in a session of its own (`setsid`), its output
+  in `<data>/node.log`. It ends 15 s after its last client left, on
+  `node stop`, or once it was taken over and its clients moved. One whose
+  executable is removed (a `go run` build, an uninstalled app) takes no
+  new client. Terminals and chats do not depend on it: herdr-core runs
+  as a service of its own (`herdr-core server start`), and the chat host
+  as one of its terminals.
 
 ### The terminal core
 
@@ -123,42 +124,46 @@ start on the node and need a UI:
 ### Namespaces
 
 A node's namespace is the machine's data directory and terminal core
-session: `~/.herdr-ide` and `herdr-ide` by default, for every UI,
-desktop app and server alike. `--instance` names a separate namespace for
-both roles, for development and tests (`dev`, `e2e-<random>`); a UI's
-instance also names its own files on its host
-([reference](../reference.md#files-and-directories)). A node finding the
-former desktop namespace (`~/.herdr-ide-desktop`) imports its layout
-documents and chat journal once and serves its terminal core beside its
-own until that core has no terminal.
+session: `~/.herdr-ide` and `herdr-ide` by default. A core's `--instance`
+names its own files on its host
+([reference](../reference.md#files-and-directories)) and, unless
+`--node-instance` says otherwise, the namespace on machines too, which
+keeps development and test cores (`dev`, `e2e-<random>`) apart from the
+user's. The desktop app runs `--instance desktop --node-instance=`: its
+own settings and vault, and the default namespace on every machine, which
+it shares with a server's cores. Earlier desktop builds used the
+namespace `desktop`; it is left as it was, its terminal core running until
+stopped ([deployment](../deployment.md#desktop-app)).
 
 ### Upgrades without interruption
 
-A UI whose build is newer than the node's starts the new node, which takes
-over:
+The client that reaches a node compares builds
+(`agentproto.NodeInfo.Newer`: by version when both builds have a release
+version, else by when their executables were written):
 
-1. The new node binds a temporary socket and renames it over `node.sock`
-   (likewise `vault.sock` and `bridge.sock`); new connections reach it.
-2. The old node sends every client a yamux GoAway and accepts no new
-   stream; its streams keep running.
-3. Clients open a session to the new node and move their long streams,
-   the new one before the old one ends: terminal attaches (herdr-core
-   takes several attaches of a terminal), chat subscriptions (resumed from
-   the last event's sequence) and watches (a full state first). Proxied
-   VS Code connections, uploads, git and other bounded requests finish on
-   the old node.
-4. Schedules and singletons pass by lock: the old node stops its
-   captures and collections and releases its locks; code-server is adopted
-   by its pid file; program windows' window manager runs in the display
-   keeper (`gui-keep`), not in the node.
-5. The old node exits when its last stream ends, at the latest after the
-   longest bounded request (10 min).
+- the node's build or a newer one: the client uses the node; the
+  protocol only grows (AGENTS.md rule 7), so a newer node serves an older
+  core;
+- an older node: the client starts `node --takeover` from its own
+  executable and connects to that.
 
-A UI speaks its own protocol version and the one before, so it serves
-both nodes during the move; an older UI attached to a newer node does the
-same. The chat host and the terminal core keep their own rules: a chat
-host makes way only while no chat works, the terminal core restarts only
-when asked.
+The node taking over asks the running one to give way (`takeover`), which
+closes its listener, gives up the lock and hands its code-server over (the
+pid file names the new node), then takes lock and socket. The old node
+tells each of its sessions' cores to move (op `node.drain`, agent to
+core), serves them meanwhile, and ends once they left, at the latest after
+10 minutes, the longest bounded request.
+
+A core told to move connects again, which reaches the new node, and makes
+that session the machine's while the machine stays ready; the old session
+ends 2 s later. What used it opens its streams again on the new session as
+after any lost stream, without the machine being shown as disconnected:
+terminal attaches (herdr-core takes a terminal's attach again with its
+screen), chat subscriptions (resumed from the journal) and watches (a full
+state first); program windows attach to the new node's window manager
+once the old one ended with its last client. The chat host and the
+terminal core keep their own rules: a chat host makes way only while no
+chat works, the terminal core restarts only when asked.
 
 ## Alternatives considered
 
@@ -171,25 +176,28 @@ when asked.
 | The node as one systemd unit with `KillMode=process` | Takeover needs two nodes at once, and leftovers of a stopped unit are not services anyone owns. |
 | Vault on the node | Values would leave the UI hosts where they were entered. |
 | Vault requests to the UI that started the terminal | A terminal outlives the UI that started it. |
-| Restart the node on upgrade and let clients reconnect | Every pane would blink and VS Code windows reload. |
+| Restart the node on upgrade and let clients reconnect | Every machine would be shown disconnected and every pane reconnect. |
+| Moving each stream to the new node before its old one ends | Every user of a session would have to know two; the streams resume on their own once theirs ends, while the machine stays ready. |
+| A node per build (the first step of this design) | Two nodes of one namespace contend for its sockets, code-server and display's window manager. |
+| Systemd or launchd services for the node and the chat host | The node holds nothing that must outlive it, and the chat host already runs as a terminal of the terminal core, which is such a service. |
 
 ## Failure modes
 
 - **Node crash.** Clients see the session end and reconnect as after an
-  ssh loss; terminals and chats keep running, the services it ran are
-  adopted by the next node.
-- **No node starts.** `node dial` reports why (missing build, lock held by
-  a node that does not answer, mkdir failure); the UI shows it on the
-  machine. A lock whose holder is gone is taken over.
-- **Incompatible builds.** `hello` answers `incompatible`; the UI offers to
-  upgrade the node, or tells an older UI to update.
-- **Takeover interrupted.** If the new node dies before the old one exits,
-  clients return to whichever node answers `node.sock`; the old node
-  takes it back after its drain timeout if no node serves.
-- **No user service manager** (containers, no linger). Services start in a
-  new session and end with the user's login session where the system ends
-  it; [deployment](../deployment.md#remote-resources) says how to enable
-  lingering.
+  ssh loss; terminals and chats keep running, the code-server it ran is
+  adopted or reaped by the next node.
+- **No node starts.** The client reports why (`no node answers on …; see
+  <data>/node.log`); the machine shows it. A lock whose holder is gone is
+  taken.
+- **The running node does not give way.** A node taking over waits 5 s
+  for the lock and exits; the client uses the node that serves.
+- **Takeover interrupted.** A new node that dies leaves no node on the
+  socket; the next client starts one. The old node ends with its clients.
+- **A core that knows no drain notice** (a build before it). It keeps its
+  session until the old node ends after 10 minutes, then reconnects.
+- **The user's login session ends.** Where the system ends the session's
+  processes (systemd's `KillUserProcesses`), the node ends with it; the
+  terminal core and the chat host do not.
 
 ## Security
 
@@ -204,12 +212,14 @@ when asked.
 
 ## Testing
 
-- `internal/node`: socket mode and peer check, lock, version negotiation,
-  GoAway and drain, takeover of sockets and schedules.
-- `cmd/herdr-ide`: `node dial` starts one node for concurrent dials.
-- Integration (`make it`): the terminal core started, restarted and
-  stopped by a node, which a takeover leaves running.
-- End to end: two UI processes on one node see each other's terminals,
-  workspaces and chats; a vault request answered by the second UI; a node
-  upgrade under a live terminal, chat and VS Code window, with nothing
-  reloaded; SSH machines in Docker over `node dial`.
+- `internal/agent/node_test.go`: the socket's mode, several clients, one
+  node per namespace, idle end and stop, retiring when the executable is
+  gone, takeover with its drain notice, the order of builds.
+- `internal/agent/shared_test.go`: vault requests asked of every core,
+  code-server kept for another core, bridge connections, a program window
+  viewer that falls behind; `guiclients_test.go` (Linux with Xvfb): two
+  cores on one window manager.
+- End to end (`e2e/tests/nodes.spec.ts`, `gui.spec.ts`): two cores of one
+  instance share the local node; a newer build takes the node over while
+  the other core stays ready and its page's terminal works on; two cores
+  show an SSH machine's program window, one in control.

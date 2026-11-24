@@ -42,6 +42,16 @@ type listFlag []string
 func (l *listFlag) String() string     { return strings.Join(*l, ",") }
 func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
 
+// optionalString is a string flag that tells whether it was given, also
+// as the empty string.
+type optionalString struct {
+	value string
+	set   bool
+}
+
+func (o *optionalString) String() string     { return o.value }
+func (o *optionalString) Set(v string) error { o.value, o.set = v, true; return nil }
+
 // codeServerFlags are shared by serve and fetch-assets.
 type codeServerFlags struct {
 	version, tarballURL, extensionURL string
@@ -153,7 +163,8 @@ func serve(args []string, logger *log.Logger) {
 		readOnly    = fl.Bool("read-only", false, "watch only: no input, no changes to terminals or settings, no uploads, no VS Code")
 		auditLog    = fl.String("audit-log", "", "append security-relevant events as JSON lines to this file")
 		userHeader  = fl.String("user-header", "", "request header carrying the authenticated user, for the audit log (e.g. Tailscale-User-Login)")
-		instance    = fl.String("instance", "", "state instance: machines use ~/"+brand.DataDirName+"-<instance> (lets a development core run next to the daily one)")
+		instance    = fl.String("instance", "", "state instance: this core's files are <name>-<instance>.json, and machines use ~/"+brand.DataDirName+"-<instance> unless --node-instance says otherwise (lets a development core run next to the daily one)")
+		nodeInst    optionalString
 		localOnly   = fl.Bool("local-only", false, "do not connect to the stored SSH machines (only to --ssh targets)")
 		csIdle      = fl.Duration("code-server-idle", 20*time.Minute, "stop a machine's code-server after this long without VS Code connections (0 disables)")
 		agentDir    = fl.String("agent-dir", "", "directory with uncompressed "+brand.CoreBin+"-<os>-<arch> machine builds (development)")
@@ -170,6 +181,7 @@ func serve(args []string, logger *log.Logger) {
 	fl.Var(&origins, "allowed-origin", "browser origin of the reverse proxy, e.g. https://ide.example.com (repeatable)")
 	fl.Var(&only, "machine", "connect only these machines, by id, label or ssh target (repeatable)")
 	fl.Var(&extraSSH, "ssh", "extra ssh target (~/.ssh/config alias or user@host) for this run, not stored (repeatable)")
+	fl.Var(&nodeInst, "node-instance", "the instance of the machines' nodes: their ~/"+brand.DataDirName+"-<instance> and terminal core session (default: --instance; empty: the default one, which every core of the default instance shares)")
 	csf.register(fl)
 	prefs.RegisterFlags(fl)
 	fl.Parse(args)
@@ -188,6 +200,15 @@ func serve(args []string, logger *log.Logger) {
 
 	if !brand.ValidInstance(*instance) {
 		logger.Fatalf("--instance must be lowercase letters, digits and dashes")
+	}
+	// The machines' namespace: the nodes, data directories and terminal
+	// cores this core shares with every core of the same namespace.
+	nodeInstance := *instance
+	if nodeInst.set {
+		nodeInstance = nodeInst.value
+	}
+	if !brand.ValidInstance(nodeInstance) {
+		logger.Fatalf("--node-instance must be lowercase letters, digits and dashes")
 	}
 	for _, t := range extraSSH {
 		if !machines.ValidTarget(t) {
@@ -262,7 +283,7 @@ func serve(args []string, logger *log.Logger) {
 	dial := func(ctx context.Context, spec machines.Spec) (*transport.Session, string, error) {
 		switch spec.Kind {
 		case machines.KindLocal:
-			s, err := dialLocal(ctx, *instance, logger)
+			s, err := dialLocal(ctx, nodeInstance, logger)
 			return s, runtime.GOOS + "/" + runtime.GOARCH, err
 		case machines.KindSSH:
 			// Machines never dial such a target; this keeps it from ssh
@@ -271,7 +292,7 @@ func serve(args []string, logger *log.Logger) {
 				return nil, "", machines.ErrInvalidTarget
 			}
 			s, p, err := transport.DialSSH(ctx, transport.SSHOptions{
-				Target: spec.Target, ControlDir: controlDir, Agents: embedded.Agent, Logger: logger, Instance: *instance,
+				Target: spec.Target, ControlDir: controlDir, Agents: embedded.Agent, Logger: logger, Instance: nodeInstance,
 			})
 			platform := ""
 			if p != nil {

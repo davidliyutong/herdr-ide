@@ -56,7 +56,8 @@ yamux configuration (`agentproto.YamuxConfig`), lives in
    14 days are removed in the same step;
 3. `exec` it with `node dial --instance NAME` and speak yamux over the ssh
    session's stdin/stdout: `node dial` pipes them to the socket of the
-   machine's node of that build, which it starts when none answers, and
+   machine's node, which it starts when none answers (or one that takes
+   over from an older build's, [39](39-nodes.md)), and
    passes on the session's `SSH_CONNECTION`.
 
 One yamux session per machine carries every stream; each stream starts with

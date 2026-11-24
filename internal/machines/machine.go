@@ -361,10 +361,13 @@ func (m *Machine) connect(ctx context.Context) {
 		}
 		backoff = 500 * time.Millisecond
 		err = m.serve(ctx, sess, platform)
-		sess.Close()
 		m.mu.Lock()
+		if m.sess != nil {
+			m.sess.Close()
+		}
 		m.sess = nil
 		m.mu.Unlock()
+		sess.Close()
 		if ctx.Err() != nil {
 			return
 		}
@@ -379,7 +382,49 @@ func (m *Machine) connect(ctx context.Context) {
 	}
 }
 
+// drainGrace is how long a session the machine moved from (its node was
+// taken over) stays open, so that what used it opens its streams on the
+// new one first.
+var drainGrace = 2 * time.Second
+
 func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform string) error {
+	if err := m.hello(ctx, sess, platform); err != nil {
+		return err
+	}
+	drain := make(chan struct{}, 1)
+	go m.acceptLoop(sess, drain)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-sess.Done():
+			return sess.Err()
+		case <-drain:
+		}
+		// The node was taken over: the machine moves to the session of
+		// the node that serves it now, staying ready; the old session
+		// ends after drainGrace.
+		next, nplat, err := m.dial(ctx, m.spec)
+		if err != nil {
+			m.logger.Printf("machine %s: its node drains; connecting again failed: %v", m.Label(), err)
+			continue
+		}
+		if err := m.hello(ctx, next, nplat); err != nil {
+			next.Close()
+			m.logger.Printf("machine %s: its node drains; the new one did not answer: %v", m.Label(), err)
+			continue
+		}
+		m.logger.Printf("machine %s: moved to the node that took over", m.Label())
+		old := sess
+		time.AfterFunc(drainGrace, func() { old.Close() })
+		sess, drain = next, make(chan struct{}, 1)
+		go m.acceptLoop(sess, drain)
+	}
+}
+
+// hello asks sess's agent for its host and makes it the machine's session:
+// the machine is ready.
+func (m *Machine) hello(ctx context.Context, sess *transport.Session, platform string) error {
 	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	rep, err := sess.Request(hctx, agentproto.Header{Op: agentproto.OpHello})
 	cancel()
@@ -391,7 +436,6 @@ func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform s
 	m.sess = sess
 	m.ssh = rep.SSH
 	m.mu.Unlock()
-	// The agent answered: the machine is ready.
 	m.update(func(st *State) {
 		st.Info = info
 		st.Platform = platform
@@ -400,17 +444,12 @@ func (m *Machine) serve(ctx context.Context, sess *transport.Session, platform s
 		}
 		st.Status, st.Error = StatusReady, ""
 	})
-	go m.acceptLoop(sess)
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-sess.Done():
-		return sess.Err()
-	}
+	return nil
 }
 
-// acceptLoop serves streams the agent opens towards the core.
-func (m *Machine) acceptLoop(sess *transport.Session) {
+// acceptLoop serves streams the agent opens towards the core; a node's
+// drain notice (OpNodeDrain) signals drain.
+func (m *Machine) acceptLoop(sess *transport.Session, drain chan<- struct{}) {
 	for {
 		st, err := sess.Accept()
 		if err != nil {
@@ -424,6 +463,15 @@ func (m *Machine) acceptLoop(sess *transport.Session) {
 				return
 			}
 			_ = st.SetReadDeadline(time.Time{})
+			if h.Op == agentproto.OpNodeDrain {
+				agentproto.WriteLine(st, agentproto.Reply{OK: true})
+				st.Close()
+				select {
+				case drain <- struct{}{}:
+				default:
+				}
+				return
+			}
 			if m.streams == nil {
 				agentproto.Fail(st, errors.New("unsupported"))
 				st.Close()

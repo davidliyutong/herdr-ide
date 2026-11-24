@@ -33,6 +33,14 @@ export function coreInstance(dev: boolean, devValue: string | undefined): string
   return devValue;
 }
 
+/** The instance of the machines' nodes (their data directory and terminal
+ * core) a core of instance uses: the app's is the default one, which it
+ * shares with every core of the default instance, as a server's UI;
+ * a development instance keeps its own. */
+export function nodeInstance(instance: string): string {
+  return instance === 'desktop' ? '' : instance;
+}
+
 export function coreArgs(instance: string, port: number): string[] {
   return [
     'serve',
@@ -41,6 +49,7 @@ export function coreArgs(instance: string, port: number): string[] {
     `127.0.0.1:${port}`,
     '--instance',
     instance,
+    `--node-instance=${nodeInstance(instance)}`,
     ...(instance === 'desktop' ? [] : ['--local-only']),
   ];
 }
