@@ -136,7 +136,19 @@ export class Stream extends Duplex {
   override _read(): void {
     this.reading = true;
     this.flush();
-    if (this.state !== 'reset' && this.state !== 'closed' && this.state !== 'remoteClose') this.sendWindowUpdate();
+    if (!this.open()) return;
+    this.sendWindowUpdate();
+    // Node calls _read before it takes what the reader asked for from its
+    // buffer, and not again until something is pushed: when a read() takes
+    // the whole buffer (the window's worth), the bytes still count as
+    // unconsumed here and no update would go out. Look again once the read
+    // took them.
+    queueMicrotask(() => this.open() && this.sendWindowUpdate());
+  }
+
+  /** The stream may still receive. */
+  private open(): boolean {
+    return this.state !== 'reset' && this.state !== 'closed' && this.state !== 'remoteClose';
   }
 
   override _write(chunk: Buffer, _enc: BufferEncoding, cb: (err?: Error | null) => void): void {

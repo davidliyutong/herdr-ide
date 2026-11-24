@@ -5,7 +5,7 @@ import type { Action, Protocol, ResultOf } from '#shared/proto/protocol.ts';
 import type { z } from 'zod';
 import { Fail } from './fail.ts';
 import type { Machine } from './machines/machine.ts';
-import { AgentError, closeStream, type AgentStream } from './machines/transport/session.ts';
+import { AgentError, closeStream, replyTimeoutMs, type AgentStream } from './machines/transport/session.ts';
 
 /** The status a failure of an agent action answers with: offline 409,
  * transport 502, not_found 404, any other code 400. */
@@ -69,22 +69,31 @@ export async function open<P extends Protocol, K extends keyof P['actions'] & st
     const r = await m.open(h, { signal: opts.signal, timeoutMs: opts.timeoutMs ?? def.timeoutMs, body });
     conn = r.conn;
     raw = r.reply.plugin;
+    // The stream ends with the caller's signal, also after the reply.
+    const st = conn.stream;
+    const onAbort = () => st.destroy();
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    st.once('close', () => opts.signal?.removeEventListener('abort', onAbort));
     if (r.reply.plugin_length && r.reply.plugin_length > 0) {
+      // A result too large for the line comes as its reply did: within the
+      // caller's bound, else the session's.
+      const timer = setTimeout(() => st.destroy(new Error('no result in time')), opts.timeoutMs ?? def.timeoutMs ?? replyTimeoutMs);
       try {
         raw = await readBody(conn.reader, r.reply.plugin_length);
       } catch (e) {
         conn.reader.release();
-        closeStream(conn.stream);
+        closeStream(st);
+        if (opts.signal?.aborted) throw opts.signal.reason;
         throw e;
+      } finally {
+        clearTimeout(timer);
       }
     }
   } catch (e) {
     throw failOf(e);
   }
-  const onAbort = () => conn.stream.destroy();
-  opts.signal?.addEventListener('abort', onAbort, { once: true });
-  conn.stream.once('close', () => opts.signal?.removeEventListener('abort', onAbort));
-  const parsed = def.result.safeParse(raw ?? {});
+  // An action without a result; null is a result (a Go nil slice).
+  const parsed = def.result.safeParse(raw === undefined ? {} : raw);
   if (!parsed.success) {
     conn.reader.release();
     closeStream(conn.stream);

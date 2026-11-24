@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { INITIAL_WINDOW, Session, Stream, pairDuplex } from './yamux.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
+import { Reader } from '#shared/lib/streamio.ts';
 
 // xorshift32, the pattern of testdata/yamuxpeer.
 function* pattern(n: number, seed: number, size = 64 * 1024): Generator<Buffer> {
@@ -151,6 +152,20 @@ async function pair(serverConfig = {}, clientConfig = {}): Promise<[Session, Ses
 }
 
 describe('TypeScript to TypeScript', () => {
+  test('a reader that takes the whole buffer at once keeps the window open', async () => {
+    // Reader.exactly reads with read() and no size: it takes everything
+    // buffered, a full window's worth, after Node already called _read.
+    const [client, server] = await pair();
+    const s = await client.open();
+    const accepted = await server.accept();
+    const n = 3_000_000;
+    const sent = Buffer.alloc(n, 7);
+    s.end(sent);
+    const got = await new Reader(accepted).exactly(n);
+    expect(got.equals(sent)).toBe(true);
+    client.close();
+  }, 10_000);
+
   test('echo, half-close, source', async () => {
     const [client, server] = await pair();
     serveAll(server);
