@@ -1,4 +1,4 @@
-// The keybindings (internal/keybindings): commands, their default keys and
+// The keybindings (backend/kernel/config/keybindings): commands, their default keys and
 // the user's rules from GET /api/keybindings, kept current by the core's
 // "keybindings" pushes on /ws. The core works out the bindings in effect on
 // each platform; the page takes its platform's (keymap.ts matches keys

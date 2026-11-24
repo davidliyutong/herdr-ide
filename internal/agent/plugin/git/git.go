@@ -1,6 +1,6 @@
 //go:build unix
 
-// Package git is the machine side of the Git plugin (internal/plugins/git,
+// Package git is the machine side of the Git plugin (backend/features/git,
 // docs/features/31-git.md): the state of a repository (its branch, status,
 // history, refs, the contents of files at a revision) and the changes the
 // panel and the graph make (staging, commits, branches, merges, stashes,

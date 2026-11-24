@@ -1,5 +1,5 @@
 // The commands that are no plugin's (declared in
-// internal/keybindings/commands.go): whether each can run now and what runs
+// backend/kernel/config/keybindings): whether each can run now and what runs
 // it, by id. Plugins bring theirs in their definitions (plugins/api.ts);
 // keymap.ts looks both up. The app imports this module at its start
 // (App.tsx), which defines the table.

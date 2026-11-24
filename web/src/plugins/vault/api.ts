@@ -1,4 +1,4 @@
-// The variable vault's core routes (/api/p/vault, internal/plugins/vault)
+// The variable vault's core routes (/api/p/vault, backend/features/vault)
 // and what the pages know of it: variables without their values, the
 // vault's state, requests waiting for an answer and the access log. Changes,
 // reveals and approvals pass the vault's gate: a session the page opens

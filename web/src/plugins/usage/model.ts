@@ -1,4 +1,4 @@
-// The AI usage plugin's data (internal/plugins/usage) and what the panel and
+// The AI usage plugin's data (backend/features/usage) and what the panel and
 // the status bar compute from it: the tightest window, durations, the text
 // of the core's alerts, the cost report's totals and rankings, and what a
 // coding agent's session used.

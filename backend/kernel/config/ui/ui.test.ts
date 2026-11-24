@@ -40,27 +40,33 @@ describe('ui settings', () => {
   });
 
   // The tokens read from spec/tokens.json are the values scripts/tokens
-  // wrote into the Go program (internal/uisettings/tokens.go).
-  test('tokens as tokens.go has them', () => {
-    const go = readFileSync(join(REPO_ROOT, 'internal/uisettings/tokens.go'), 'utf8');
-    for (const theme of ['dark', 'light'] as const) {
-      const m = new RegExp(
-        `"${theme}": \\{\\s*Background: "(#[0-9a-f]{6})", Foreground: "(#[0-9a-f]{6})", Cursor: "(#[0-9a-f]{6})", Selection: "(#[0-9a-f]{6})",\\s*Palette: \\[\\]string\\{([^}]*)\\}`,
-      ).exec(go);
-      expect(m, theme).not.toBeNull();
-      const palette = [...m![5]!.matchAll(/"(#[0-9a-f]{6})"/g)].map((p) => p[1]);
+  // wrote into the web UI's CSS (web/src/tokens.css): the terminal's colors
+  // of the dark (:root) and the light theme, and the color themes, the
+  // default first (the only one without a selector of its own).
+  test('tokens as tokens.css has them', () => {
+    const css = readFileSync(join(REPO_ROOT, 'web/src/tokens.css'), 'utf8');
+    const block = (selector: string) => {
+      const start = css.indexOf(`${selector} {\n`);
+      expect(start, selector).toBeGreaterThanOrEqual(0);
+      return css.slice(start, css.indexOf('\n}\n', start));
+    };
+    for (const [theme, selector] of [
+      ['dark', ':root'],
+      ['light', ":root[data-theme='light']"],
+    ] as const) {
+      const b = block(selector);
+      const v = (name: string) => new RegExp(`--ds-terminal-${name}: (#[0-9a-f]{6});`).exec(b)?.[1];
       expect(TOKEN_COLORS[theme]).toEqual({
-        background: m![1]!,
-        foreground: m![2]!,
-        cursor: m![3]!,
-        selection: m![4]!,
-        palette: palette as string[],
+        background: v('background')!,
+        foreground: v('foreground')!,
+        cursor: v('cursor')!,
+        selection: v('selection')!,
+        palette: Array.from({ length: 16 }, (_, i) => v(`ansi-${i}`)!),
       });
-      expect(palette.length).toBe(16);
     }
-    const themes = /var tokenThemes = \[\]string\{([^}]*)\}/.exec(go);
-    expect(themes).not.toBeNull();
-    expect([...TOKEN_THEMES]).toEqual([...themes![1]!.matchAll(/"([^"]+)"/g)].map((t) => t[1]!));
+    const accents = [...css.matchAll(/^:root\[data-accent='([^']+)'\] \{$/gm)].map((m) => m[1]!);
+    expect(TOKEN_THEMES.slice(1)).toEqual(accents);
+    expect(accents).not.toContain(TOKEN_THEMES[0]);
   });
 
   // The agents offered are the registry's kinds.

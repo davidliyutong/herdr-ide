@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the web UI, the VS Code bridge extension, the machine builds (the
-# Go program cmd/<slug> built with the tag "machine": the commands a machine
-# runs) for every agent platform, fetches the pinned herdr-core of each
+# Go program cmd/<slug>: the commands a machine runs) for every agent
+# platform, fetches the pinned herdr-core of each
 # agent platform, takes the video encoders scripts/build-ffmpeg.sh built,
 # stages them all (gzip) in dist/payload, then builds the core in
 # TypeScript (backend/, bun backend/scripts/build.ts: one executable with
@@ -66,7 +66,7 @@ rm -f "$PAYLOAD"/agents/*.gz
 for p in $AGENT_PLATFORMS; do
   os=${p%/*}; arch=${p#*/}
   out=dist/agents/${SLUG}-$os-$arch
-  CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -tags machine -ldflags "$LDFLAGS" -o "$out" "./cmd/${SLUG}"
+  CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "$out" "./cmd/${SLUG}"
   gzip -9 -n -c "$out" > "$PAYLOAD/agents/${SLUG}-$os-$arch.gz"
   echo "    $os/$arch $(du -h "$out" | cut -f1)"
 done

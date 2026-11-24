@@ -3,7 +3,7 @@
 // row each with its mark, its name and whether it is on (the bar of a
 // changed setting when one of its settings is). A row opens the
 // provider's own settings (its group: its switch, then its options,
-// internal/plugins/usage providerGroup), a page of its own below a Back
+// backend/features/usage providerGroup), a page of its own below a Back
 // button and the provider's name; the plugin and its switch are on the
 // first page only. Choosing AI Usage in the dialog's list again shows the
 // first page too. Opened at a provider's setting (openSettings({row})),

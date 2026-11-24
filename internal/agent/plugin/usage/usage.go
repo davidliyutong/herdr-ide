@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package usage is the machine side of the AI usage plugin
-// (internal/plugins/usage): it reads the subscriptions' limits and the
+// (backend/features/usage): it reads the subscriptions' limits and the
 // logs' cost on the machine with internal/usage and answers with numbers
 // only. Actions:
 //

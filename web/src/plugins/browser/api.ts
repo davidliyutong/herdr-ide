@@ -1,4 +1,4 @@
-// The browser plugin's requests to the core (internal/plugins/browser): port
+// The browser plugin's requests to the core (backend/features/browser): port
 // forwards, and the machine's listening ports; and the rules for addresses:
 // what the address field takes, and where a page is loaded from.
 import { create } from 'zustand';

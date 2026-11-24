@@ -26,7 +26,7 @@ var Version = "dev"
 // (a development build, "dev"). What follows "-dirty" does not order
 // builds: builds of local changes at one commit are of the same age, and
 // the page reminds the user to restart a host of another build
-// (internal/plugins/chat).
+// (backend/features/chat).
 func parseVersion(v string) (n [4]int, ok bool) {
 	v = strings.TrimPrefix(v, "v")
 	if base, _, dirty := strings.Cut(v, "-dirty"); dirty {

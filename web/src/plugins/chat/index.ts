@@ -1,7 +1,7 @@
 // The chat plugin: conversations with coding agents that a machine's chat
 // host runs headless (Claude Code, Codex, and Kimi Code and Grok through
 // the Agent Client Protocol), drawn by the app. Its core side is
-// internal/plugins/chat, its protocol protocol.ts. A chat is a pane of the
+// backend/features/chat, its protocol protocol.ts. A chat is a pane of the
 // kind chat (view.ts, ChatPane.tsx) whose events come over the page's one
 // WebSocket (connection.ts, source.ts); the chats' states come with the
 // core's messages (state.ts) and give the panes their agent statuses

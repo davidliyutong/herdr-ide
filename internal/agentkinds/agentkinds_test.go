@@ -3,13 +3,14 @@ package agentkinds_test
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"veldr/internal/agent/detect"
 	"veldr/internal/agentkinds"
-	"veldr/internal/uisettings"
 	"veldr/internal/usage"
 )
 
@@ -21,8 +22,32 @@ func ids(list []agentkinds.Kind) []string {
 	return out
 }
 
-// The registry, the detector's manifests and the settings' list of agents
-// name the same agents; each provider of the AI usage plugin a kind names
+// The kinds of the core's registry (spec/generated/registry.json, which
+// the TypeScript core writes from its own kinds, backend/shared/agents):
+// what the web UI starts, resumes and offers in the settings' list of
+// agents.
+func registryKinds(t *testing.T) any {
+	t.Helper()
+	b, err := os.ReadFile("../../spec/generated/registry.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reg struct {
+		Agents json.RawMessage `json:"agents"`
+	}
+	var kinds any
+	if err := json.Unmarshal(b, &reg); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(reg.Agents, &kinds); err != nil {
+		t.Fatal(err)
+	}
+	return kinds
+}
+
+// The registry, the detector's manifests and the core's registry (whose
+// kinds the settings list) name the same agents, the core's member for
+// member and in order; each provider of the AI usage plugin a kind names
 // is one of its providers.
 func TestKindsMatchManifestsAndSettings(t *testing.T) {
 	ms, err := detect.Manifests()
@@ -42,8 +67,16 @@ func TestKindsMatchManifestsAndSettings(t *testing.T) {
 	if !slices.Equal(sorted, manifests) {
 		t.Errorf("kinds %v, manifests %v", sorted, manifests)
 	}
-	if !slices.Equal(sorted, uisettings.Agents) {
-		t.Errorf("kinds %v, uisettings.Agents %v", sorted, uisettings.Agents)
+	b, err := json.Marshal(agentkinds.All())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mine any
+	if err := json.Unmarshal(b, &mine); err != nil {
+		t.Fatal(err)
+	}
+	if core := registryKinds(t); !reflect.DeepEqual(mine, core) {
+		t.Errorf("kinds %s\nthe core's registry %v", b, core)
 	}
 	for _, k := range agentkinds.All() {
 		if k.Title == "" {

@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package search is the machine side of the Project Search plugin
-// (internal/plugins/search, docs/features/41-project-search.md): it
+// (backend/features/search, docs/features/41-project-search.md): it
 // searches the contents of the files below a directory, as VS Code's
 // search view does.
 //

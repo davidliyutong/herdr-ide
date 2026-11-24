@@ -2,7 +2,7 @@
 // sidebar, its status bar items (the accounts' tightest window, and the
 // session of the agent in the focused pane), its settings page (the
 // providers' settings on pages of their own), and the core's snapshots
-// (/ws plugin messages). The core's side is internal/plugins/usage.
+// (/ws plugin messages). The core's side is backend/features/usage.
 import { Gauge } from 'lucide-react';
 import type { PluginDef } from '../api';
 import { UsagePanel } from './UsagePanel';

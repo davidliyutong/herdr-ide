@@ -599,7 +599,7 @@ type Limit struct {
 }
 
 // The bounds of HostSettings: their defaults, and the least and the most
-// each may be (what the core's settings offer, internal/plugins/chat, and
+// each may be (what the core's settings offer, backend/features/chat, and
 // what Clamp enforces whatever is asked).
 const (
 	IdleStopMinutesDefault, IdleStopMinutesMin, IdleStopMinutesMax = 30, 5, 1440

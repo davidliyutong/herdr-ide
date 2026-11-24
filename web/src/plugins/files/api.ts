@@ -1,4 +1,4 @@
-// The file explorer's requests to the core (internal/plugins/files): the
+// The file explorer's requests to the core (backend/features/files): the
 // changes, the stat it polls and saving an editor's text. Listings and
 // file contents come from the core's own routes (lib/files.ts).
 import { t } from '../../i18n';

@@ -79,7 +79,7 @@ export interface GroupedFile {
   letter: string;
 }
 
-/** The settings of the panel (internal/plugins/git). */
+/** The settings of the panel (backend/features/git). */
 export const CHANGES_VIEW = 'git.changesView';
 export const UNTRACKED_CHANGES = 'git.untrackedChanges';
 export const AUTO_FETCH = 'git.autoFetch';

@@ -6,8 +6,8 @@
 // and the machines allowed to read a variable are in the clear; each
 // value's encryption covers its name, its machines and its inject-only
 // flag (adOf), so a file edited to let a machine read a variable no longer
-// opens it. The file is the Go store's (internal/vault): either core opens
-// the other's (docs/features/30-variable-vault.md).
+// opens it. The file is the Go core's, which this core replaced: it opens
+// the files that one wrote (docs/features/30-variable-vault.md).
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import * as userfile from '#shared/host/userfile.ts';

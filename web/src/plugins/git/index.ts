@@ -2,7 +2,7 @@
 // Graph extension in one, without VS Code. A panel of the right sidebar
 // for the focused pane's repository, a graph pane and a diff pane in
 // Monaco, and the file explorer's colors for changed files. The core's
-// side is internal/plugins/git, the machine's internal/agent/plugin/git.
+// side is backend/features/git, the machine's internal/agent/plugin/git.
 import { FileDiff, GitBranch, GitGraph } from 'lucide-react';
 import type { PluginDef } from '../api';
 import { useStore } from '../../state/store';

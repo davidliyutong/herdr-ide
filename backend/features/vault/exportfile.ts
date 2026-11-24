@@ -3,7 +3,8 @@
 // says in the clear only its format, version, the key's derivation and the
 // cipher, all bound to the ciphertext as its additional data, and the
 // content sealed with AES-256-GCM. The core seals and opens them; values
-// never reach a browser. The Go store's format (internal/vault/export.go).
+// never reach a browser. The Go core's format, which files it exported
+// have.
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { SLUG } from '#shared/lib/brand.ts';

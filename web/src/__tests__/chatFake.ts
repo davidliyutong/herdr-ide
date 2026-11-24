@@ -1,5 +1,5 @@
 // A scripted core for the chat plugin's WebSocket (plugins/chat/connection.ts,
-// internal/plugins/chat/wire.go): the page's messages recorded, the core's
+// backend/features/chat): the page's messages recorded, the core's
 // sent as a test says, or answered by themselves (auto): an attach with the
 // chat the test gave and its events after from, a command with its ack.
 

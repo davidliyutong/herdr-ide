@@ -33,7 +33,7 @@ const walk = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
     e.isDirectory() ? walk(join(dir, e.name)) : e.isFile() ? [join(dir, e.name)] : [],
   );
-if (o.web) for (const f of walk(o.web)) if (!f.endsWith('.gitkeep')) entries[`web/${relative(o.web, f)}`] = readFileSync(f);
+if (o.web) for (const f of walk(o.web)) entries[`web/${relative(o.web, f)}`] = readFileSync(f);
 if (o.agents)
   for (const name of readdirSync(o.agents)) {
     const b = readFileSync(join(o.agents, name));

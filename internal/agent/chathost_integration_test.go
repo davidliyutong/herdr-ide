@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"veldr/internal/agent/agenttest"
 	"veldr/internal/agentkinds"
 	"veldr/internal/agentproto"
 	"veldr/internal/brand"
@@ -32,7 +33,6 @@ import (
 	"veldr/internal/chatproto"
 	"veldr/internal/hc"
 	"veldr/internal/hostdirs"
-	"veldr/internal/transport"
 )
 
 // The test binary is also the chat host the terminal core runs: the chat
@@ -216,7 +216,7 @@ func hostRecords(t *testing.T, ctx context.Context, socket string) []map[string]
 
 // openChat opens the chat plugin's stream on the agent and reads the
 // host's hello.
-func openChat(t *testing.T, ctx context.Context, s *transport.Session) (net.Conn, *bufio.Reader, chatproto.HostInfo) {
+func openChat(t *testing.T, ctx context.Context, s *agenttest.Session) (net.Conn, *bufio.Reader, chatproto.HostInfo) {
 	t.Helper()
 	conn, _, err := s.Open(ctx, agentproto.Header{Op: agentproto.OpPlugin, Plugin: "chat", Action: "open"})
 	if err != nil {

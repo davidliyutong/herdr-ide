@@ -6,9 +6,10 @@
 // how the chat host runs it headless (Chat). It is data only and builds
 // for every system the core runs on.
 //
-// The ids are the detector's (internal/agent/detect manifests), which
-// uisettings.Agents lists too; scripts/registry writes the kinds into
-// spec/generated/registry.json (key "agents") for the web UI
+// The ids are the detector's (internal/agent/detect manifests). The core
+// has the same kinds (backend/shared/agents, which the tests compare) and
+// writes them into spec/generated/registry.json (key "agents") for the web
+// UI
 // (web/src/conversation/kinds.ts), a Chat spec with its adapter only.
 // Adding a kind is a row here, a manifest and, for a native view of its
 // conversations, a transcript parser; for chats, a Chat spec whose adapter

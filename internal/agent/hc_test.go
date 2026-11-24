@@ -18,16 +18,16 @@ import (
 	"testing"
 
 	"veldr/internal/agent"
+	"veldr/internal/agent/agenttest"
 	"veldr/internal/agentproto"
 	"veldr/internal/brand"
 	"veldr/internal/hc"
 	"veldr/internal/hostdirs"
-	"veldr/internal/transport"
 )
 
 // hcAgent is an agent whose home is short enough for a unix socket in its
 // run directory.
-func hcAgent(t *testing.T, instance string) (*transport.Session, string) {
+func hcAgent(t *testing.T, instance string) (*agenttest.Session, string) {
 	t.Helper()
 	home, err := os.MkdirTemp("/tmp", "hca")
 	if err != nil {
@@ -35,7 +35,7 @@ func hcAgent(t *testing.T, instance string) (*transport.Session, string) {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
-	s, err := transport.DialLocal(context.Background(), agent.Options{Instance: instance, Logger: log.New(io.Discard, "", 0)})
+	s, err := agenttest.DialLocal(context.Background(), agent.Options{Instance: instance, Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func hcAgent(t *testing.T, instance string) (*transport.Session, string) {
 }
 
 // installHC uploads script as the executable, claiming digest ("" for its own).
-func installHC(t *testing.T, s *transport.Session, script, digest string) (*agentproto.Reply, string) {
+func installHC(t *testing.T, s *agenttest.Session, script, digest string) (*agentproto.Reply, string) {
 	t.Helper()
 	if digest == "" {
 		digest = fmt.Sprintf("%x", sha256.Sum256([]byte(script)))

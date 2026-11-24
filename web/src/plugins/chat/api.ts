@@ -1,4 +1,4 @@
-// The chat plugin's requests to the core (internal/plugins/chat), the
+// The chat plugin's requests to the core (backend/features/chat), the
 // page's one module of them (the agents plugin's part in chats uses it
 // too): a machine's agents, chats and sessions, and the changes (a new
 // chat, an agent's session imported, closing, deleting, seen, handing a

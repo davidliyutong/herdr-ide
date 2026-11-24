@@ -1,5 +1,5 @@
 // The page's one WebSocket to the core's chat plugin (protocol.ts WS_PATH,
-// internal/plugins/chat/wire.go): every chat of every machine this page
+// backend/features/chat): every chat of every machine this page
 // shows goes over it, each as a subscription of its own, and so do their
 // commands. It opens with the first subscription or command and closes
 // once none is left for IDLE_CLOSE_MS. When it drops it connects again

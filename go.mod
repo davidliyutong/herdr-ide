@@ -3,19 +3,14 @@ module veldr
 go 1.27.1
 
 require (
-	github.com/awnumar/memguard v0.23.0
-	github.com/coder/websocket v1.8.15
-	github.com/creack/pty v1.1.24
 	github.com/hashicorp/yamux v0.1.2
 	github.com/jezek/xgb v1.3.1
 	github.com/pelletier/go-toml/v2 v2.4.3
-	golang.org/x/crypto v0.59.0
 	golang.org/x/sys v0.50.0
 	modernc.org/sqlite v1.62.0
 )
 
 require (
-	github.com/awnumar/memcall v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

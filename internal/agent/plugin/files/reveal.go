@@ -19,7 +19,7 @@ import (
 // Reveal in Finder (Reveal in File Manager): the system's file manager
 // shows a path, as VS Code's command of that name does. The core asks only
 // for its own machine, whose agent runs in its process, and only for a
-// client on its own host (internal/plugins/files): the window opens on the
+// client on its own host (backend/features/files): the window opens on the
 // screen of the computer the user sits at.
 
 // revealWait bounds the wait for the command's answer. open and xdg-open

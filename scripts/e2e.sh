@@ -57,15 +57,15 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   mkdir -p "$OUT/fakebin"
   # This host's machine build, which the core runs for the local machine,
   # and the same code as another, newer version for the newer core.
-  go build -trimpath -tags machine -o "$OUT/payload/agents/${SLUG}-$os-$arch" "./cmd/${SLUG}"
-  go build -trimpath -tags machine -ldflags "-X $mod/internal/agentproto.Version=dev-e2e-newer" -o "$OUT/payload/agents-newer/${SLUG}-$os-$arch" "./cmd/${SLUG}"
+  go build -trimpath -o "$OUT/payload/agents/${SLUG}-$os-$arch" "./cmd/${SLUG}"
+  go build -trimpath -ldflags "-X $mod/internal/agentproto.Version=dev-e2e-newer" -o "$OUT/payload/agents-newer/${SLUG}-$os-$arch" "./cmd/${SLUG}"
   go build -o "$OUT/fakebin/kimi" ./e2e/fakeacp
   if [[ -n "$darch" ]]; then
     # The SSH machine's: the machine build the core uploads (--agent-dir)
     # and the fake agent the harness copies into the container.
     echo "==> machine build and fake agent for linux/$darch"
     mkdir -p "$OUT/agents" "$OUT/linux-$darch"
-    CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -trimpath -tags machine -o "$OUT/agents/${SLUG}-linux-$darch" "./cmd/${SLUG}"
+    CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -trimpath -o "$OUT/agents/${SLUG}-linux-$darch" "./cmd/${SLUG}"
     CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -o "$OUT/linux-$darch/kimi" ./e2e/fakeacp
     CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -o "$OUT/linux-$darch/e2e-xclient" ./e2e/xclient
     if [[ "linux/$darch" != "$os/$arch" ]]; then

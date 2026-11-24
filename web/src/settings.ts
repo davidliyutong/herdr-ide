@@ -1,4 +1,4 @@
-// The settings of the core and of the user interfaces (internal/settings):
+// The settings of the core and of the user interfaces (backend/kernel/config/settings):
 // definitions and values from GET /api/settings, kept current by the core's
 // "settings" pushes on /ws, changed with PUT and DELETE. The settings dialog
 // renders itself from the definitions; prefs.ts reads the values the UI

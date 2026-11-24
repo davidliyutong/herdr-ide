@@ -1,4 +1,4 @@
-// Project Search's request to the core (internal/plugins/search): a search
+// Project Search's request to the core (backend/features/search): a search
 // of the files below a directory of a machine.
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
 

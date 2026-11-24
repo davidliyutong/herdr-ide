@@ -1,12 +1,12 @@
 package detect
 
 import (
+	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
-
-	"veldr/internal/uisettings"
 )
 
 // screen joins lines as herdr-core's terminal.read returns a screen.
@@ -321,7 +321,9 @@ func TestTrackerSelfReported(t *testing.T) {
 	}
 }
 
-// The settings offer every agent the manifests know as a silent agent.
+// The settings offer every agent the manifests know as a silent agent:
+// the kinds of the core's registry (spec/generated/registry.json), which
+// the settings list, are the manifests'.
 func TestSettingsListEveryAgent(t *testing.T) {
 	ms, err := Manifests()
 	if err != nil {
@@ -332,7 +334,24 @@ func TestSettingsListEveryAgent(t *testing.T) {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
-	if !slices.Equal(ids, uisettings.Agents) {
-		t.Errorf("uisettings.Agents = %v, manifests %v", uisettings.Agents, ids)
+	b, err := os.ReadFile("../../../spec/generated/registry.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reg struct {
+		Agents []struct {
+			ID string `json:"id"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal(b, &reg); err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, a := range reg.Agents {
+		kinds = append(kinds, a.ID)
+	}
+	slices.Sort(kinds)
+	if !slices.Equal(ids, kinds) {
+		t.Errorf("the core's kinds %v, manifests %v", kinds, ids)
 	}
 }

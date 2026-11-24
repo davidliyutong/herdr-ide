@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package agents is the machine side of the agents plugin
-// (internal/plugins/agents): it answers questions about the sessions of
+// (backend/features/agents): it answers questions about the sessions of
 // the coding agents of this machine. A request names a session by its
 // agent's kind and session id, never by a path: the id is checked before
 // it reaches one, and the transcript is found inside the kind's own

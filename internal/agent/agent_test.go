@@ -16,16 +16,16 @@ import (
 	"testing"
 
 	"veldr/internal/agent"
+	"veldr/internal/agent/agenttest"
 	"veldr/internal/agentproto"
 	"veldr/internal/brand"
 	"veldr/internal/hostdirs"
-	"veldr/internal/transport"
 )
 
-func dialAgent(t *testing.T) (*transport.Session, string) {
+func dialAgent(t *testing.T) (*agenttest.Session, string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	s, err := transport.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
+	s, err := agenttest.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}

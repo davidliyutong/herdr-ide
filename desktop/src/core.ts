@@ -55,7 +55,7 @@ export function coreArgs(instance: string, port: number): string[] {
 }
 
 // The desktop app's token of a launch tells the core which requests are
-// its windows' (internal/server/client.go): VS Code has a switch for the
+// its windows' (backend/hosts/bun/parent.ts): VS Code has a switch for the
 // desktop app and one for browsers, and the core applies the requesting
 // client's. The token goes to the core on stdin, the first line of
 // --parent-stdio (never in its environment, which terminals, agents and

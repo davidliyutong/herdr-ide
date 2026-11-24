@@ -1,5 +1,5 @@
 // The vault's authenticators from the page's side (the core's model is in
-// internal/plugins/vault/proof.go): a proof is the user's word, made by
+// backend/features/vault): a proof is the user's word, made by
 // the desktop app's system prompt or by a WebAuthn credential, that stands
 // for the passphrase while the vault is unlocked. The core issues a nonce
 // for one purpose, the page has it signed, and the core checks it. A

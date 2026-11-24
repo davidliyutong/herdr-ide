@@ -47,7 +47,7 @@ describe.skipIf(!HC)('a real herdr-core', () => {
     const { os, arch } = localPlatform();
     agentBin = process.env.AGENT_TEST_BIN ?? join(home, `${CORE_BIN}-${os}-${arch}`);
     if (!process.env.AGENT_TEST_BIN)
-      execFileSync('go', ['build', '-trimpath', '-tags', 'machine', '-o', agentBin, `./cmd/${CORE_BIN}`], {
+      execFileSync('go', ['build', '-trimpath', '-o', agentBin, `./cmd/${CORE_BIN}`], {
         cwd: REPO_ROOT,
         stdio: 'inherit',
       });

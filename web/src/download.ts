@@ -54,7 +54,7 @@ export interface Download {
   waiting?: boolean;
 }
 
-/** An event of the core about a download (internal/server/downloads.go);
+/** An event of the core about a download (backend/features/files);
  * unknown: the core has not seen the id yet, or no longer knows it. */
 export interface DownloadEvent {
   id: string;
@@ -112,7 +112,7 @@ function end(id: string, p: Pick<Download, 'status'> & Partial<Download>) {
     useStore.getState().toast(t('download.failed', { name: entry.name, error: downloadError(entry.error) }), undefined, undefined, 'error');
 }
 
-/** An id the core accepts (internal/server/downloads.go), random enough
+/** An id the core accepts (backend/features/files), random enough
  * that no other page's download has it. */
 function newId(): string {
   const b = new Uint8Array(16);

@@ -90,13 +90,6 @@ func TestGenerate(t *testing.T) {
 			":root[data-accent='second'] {\n  --ds-accent: #0078d4;\n  --ds-on-accent: #fffffd;\n}\n",
 			":root[data-accent='second'][data-theme='light'] {\n  --ds-accent: #005fb8;\n  --ds-on-accent: #fffffe;\n}\n",
 		},
-		goOut: {
-			"// " + header + "\n\npackage uisettings\n",
-			"\"dark\": {\n\t\tBackground: \"#0a0a0a\", Foreground: \"#f0f0f0\", Cursor: \"#f0f0f0\", Selection: \"#3b4a6b\",\n",
-			"\"#100009\", \"#10000a\"",
-			"\"light\": {",
-			"var tokenThemes = []string{\"first\", \"second\"}\n",
-		},
 	} {
 		for _, s := range want {
 			if !strings.Contains(string(files[name]), s) {
@@ -147,7 +140,7 @@ func TestRejects(t *testing.T) {
 
 func TestCheck(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{source, cssOut, goOut} {
+	for _, name := range []string{source, cssOut} {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -156,7 +149,7 @@ func TestCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Nothing generated yet: stale, and the check writes nothing.
-	if err := run(root, true); err == nil || !strings.Contains(err.Error(), cssOut) || !strings.Contains(err.Error(), goOut) {
+	if err := run(root, true); err == nil || !strings.Contains(err.Error(), cssOut) {
 		t.Fatalf("check without generated files: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, cssOut)); !os.IsNotExist(err) {
@@ -177,7 +170,7 @@ func TestCheck(t *testing.T) {
 	if err := os.WriteFile(css, append(fresh, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(root, true); err == nil || !strings.Contains(err.Error(), cssOut) || strings.Contains(err.Error(), goOut) {
+	if err := run(root, true); err == nil || !strings.Contains(err.Error(), cssOut) {
 		t.Fatalf("check with an edited file: %v", err)
 	}
 	if got, _ := os.ReadFile(css); !bytes.Equal(got, append(fresh, '\n')) {

@@ -25,7 +25,7 @@ import { useStore } from '../state/store';
 import { keysOf, platform, resetRules, rulesFor, useKeys, type Binding, type Platform } from '../keybindings';
 import { conflictsOf } from '../components/KeyboardShortcuts';
 
-// The vectors of spec/vectors/keys; internal/keybindings runs parse.json
+// The vectors of spec/vectors/keys; backend/kernel/config/keybindings runs parse.json
 // too.
 describe('key sequences', () => {
   it('normalizes as the core does', () => {

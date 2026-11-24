@@ -116,7 +116,7 @@ export function applyText(monaco: Monaco, model: TextModel, text: string, edit: 
 }
 
 /** The version in a file response's ETag (W/"<size hex>-<mtime hex>",
- * internal/server/files.go). */
+ * backend/features/files). */
 export function versionOf(etag: string | null): Version | undefined {
   const m = /^W\/"([0-9a-f]+)-([0-9a-f]+)"$/i.exec(etag ?? '');
   return m ? { size: parseInt(m[1], 16), mtime: parseInt(m[2], 16) } : undefined;

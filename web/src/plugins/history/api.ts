@@ -1,4 +1,4 @@
-// The terminal history plugin's core routes (internal/plugins/history),
+// The terminal history plugin's core routes (backend/features/history),
 // all of a machine: the snapshots of its terminals' output it keeps, one
 // generation's bytes, and their removal. What the machine answers is
 // checked before use: entries with a terminal's address and numbers, bytes

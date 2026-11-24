@@ -2,10 +2,7 @@
 /.worktrees/
 /desktop/dist/
 node_modules/
-web/dist/*
-!web/dist/.gitkeep
-internal/embedded/agents/*.gz
-internal/embedded/ext/*.vsix
+web/dist/
 extensions/veldr-bridge/dist/
 extensions/veldr-bridge/*.vsix
 .DS_Store
@@ -13,8 +10,6 @@ extensions/veldr-bridge/*.vsix
 coverage/
 .claude/settings.local.json
 CLAUDE.local.md
-internal/embedded/encoder/*.gz
-internal/embedded/hc/*.gz
 web/.deps/
 
 TODO.md

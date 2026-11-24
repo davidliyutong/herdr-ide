@@ -1,17 +1,16 @@
-// The settings of the features whose core side is still the Go program's
-// (internal/codeserver, internal/gui, internal/plugins/*), defined here so
+// The settings of features that do not define them themselves yet, kept
+// here from the stages in which their core side was the Go program's, so
 // that the core's registry (spec/generated/registry.json, the reference's
-// tables, /api/settings) is complete while the features move to
-// features/<id>: a feature that moves takes its module into its definition
-// (FeatureDef.settings) and leaves this file.
+// tables, /api/settings) is complete: a feature that takes its module into
+// its definition (FeatureDef.settings) replaces the one here, which goes.
 import { posix } from 'node:path';
 import { GUIDisplay } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { bool, defineModule, enumOf, int, stringList, text, type Setting } from './settings/index.ts';
 import type { Switchable } from './toggles.ts';
 
-/** The features with a switch, in the order the UIs list them (Go's
- * internal/registry Plugins). */
+/** The features with a switch, in the order the UIs list them (the Go
+ * core's order). */
 export const STAGED_FEATURES: readonly Switchable[] = [
   // VS Code's windows run on the UI's origin: off until the user turns
   // them on, and in browsers only with a switch of their own.

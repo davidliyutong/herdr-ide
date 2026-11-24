@@ -1,5 +1,5 @@
 // The terminal history plugin: snapshots of the terminals' output that
-// machines keep on their disks (internal/plugins/history), shown above the
+// machines keep on their disks (backend/features/history), shown above the
 // new shell of a terminal whose program was replaced when its terminal
 // core started again (follow.ts), with its settings page (section
 // "history") and what it ends with (SettingsExtra.tsx).

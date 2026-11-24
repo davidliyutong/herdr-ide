@@ -25,7 +25,7 @@ describe('design tokens', () => {
   });
 
   // The color theme setting defaults to the tokens' first theme (the core
-  // offers them all: internal/uisettings).
+  // offers them all: backend/kernel/config/ui).
   it('defaults to the first color theme', () => {
     expect(builtinDefaults['appearance.colorTheme']).toBe(DEFAULT_COLOR_THEME);
   });

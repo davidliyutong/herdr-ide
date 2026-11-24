@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package chat is the machine side of the chat plugin
-// (internal/plugins/chat): the relay between the core and this machine's
+// (backend/features/chat): the relay between the core and this machine's
 // chat host, which runs coding agents headless and keeps their
 // conversations (internal/chathost, protocol internal/chatproto). Its one
 // action:

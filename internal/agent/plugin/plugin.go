@@ -1,7 +1,7 @@
 //go:build unix
 
-// Package plugin is the machine side of the core's plugins
-// (internal/plugin): handlers of the agent's plugin op, one per plugin,
+// Package plugin is the machine side of the core's features
+// (backend/features): handlers of the agent's plugin op, one per plugin,
 // registered by the plugins' packages. A handler answers one action per
 // stream: a reply with its result (Reply), or a reply followed by what the
 // action streams until either side closes the stream.

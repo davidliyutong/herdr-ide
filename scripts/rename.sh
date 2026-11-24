@@ -76,6 +76,7 @@ done
 if [[ "$name" != "$new" ]]; then
   perl -pi -e 's/^(\s*Name = )"[^"]*"/$1"$ENV{NEW_NAME}"/' internal/brand/brand.go
   perl -pi -e "s/^(export const APP_NAME = )'[^']*'/\$1'\$ENV{NEW_NAME}'/" web/src/brand.ts
+  perl -pi -e "s/^(export const NAME = )'[^']*'/\$1'\$ENV{NEW_NAME}'/" backend/shared/lib/brand.ts
 fi
 
 mv_path() {
@@ -84,7 +85,7 @@ mv_path() {
 }
 mv_path "cmd/$old" "cmd/$new"
 mv_path "extensions/$old-bridge" "extensions/$new-bridge"
-rm -rf dist internal/embedded/agents/*.gz internal/embedded/ext/*.vsix "extensions/$new-bridge/"*.vsix "extensions/$new-bridge/dist"
+rm -rf dist "extensions/$new-bridge/"*.vsix "extensions/$new-bridge/dist"
 
 gofmt -w internal cmd >/dev/null
 go build ./...

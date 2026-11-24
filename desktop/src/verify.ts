@@ -1,5 +1,5 @@
 // The proof of the user's presence for the variable vault (the core's
-// internal/plugins/vault/proof.go): the page hands over a nonce, this shell
+// backend/features/vault/desktop.ts): the page hands over a nonce, this shell
 // asks the core what the nonce is for, shows that in the system's prompt
 // (Touch ID, Windows Hello) and, once the user answered it, signs the nonce
 // with the key of this launch. The text of the prompt comes from the core's

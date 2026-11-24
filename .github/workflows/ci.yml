@@ -47,8 +47,6 @@ jobs:
       - run: pnpm -C backend test
       - run: pnpm -C web test
       - run: pnpm -C desktop test
-      - name: Web build keeps the go:embed placeholder
-        run: pnpm -C web build && test -f web/dist/.gitkeep
 
   # The integration tests against a real terminal core: the pinned
   # herdr-core of internal/hcdist, fetched and verified as the build does,

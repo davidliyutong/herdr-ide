@@ -5,7 +5,7 @@
 // carries (agent_session), and which a restore resumes the agent in once
 // the machine confirmed it (the core's route
 // /api/m/{id}/p/agents/resolve, restore.ts). Its core side is
-// internal/plugins/agents. A terminal whose agent quit can continue that
+// backend/features/agents. A terminal whose agent quit can continue that
 // session in a chat (ContinueInChat.tsx, through the chat plugin's
 // plugins/chat/imports.ts), with the chat plugin on.
 import { Bot } from 'lucide-react';

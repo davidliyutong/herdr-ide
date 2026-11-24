@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package files is the machine side of the file explorer plugin
-// (internal/plugins/files, docs/features/28-file-explorer.md): changes to
+// (backend/features/files, docs/features/28-file-explorer.md): changes to
 // files and directories the explorer makes (new files and folders, rename
 // and move without replacing anything, copies, the trash, permanent
 // removal, saving an editor's text with a check that nobody changed the

@@ -32,8 +32,6 @@ function brand(): Plugin {
     },
     generateBundle() {
       this.emitFile({ type: 'asset', fileName: 'manifest.webmanifest', source: manifest });
-      // dist/ is emptied on build but must keep a tracked file for go:embed.
-      this.emitFile({ type: 'asset', fileName: '.gitkeep', source: '' });
     },
   };
 }

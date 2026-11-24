@@ -27,7 +27,7 @@ test.skipIf(!go || !LOCAL_SUPPORTED)(
   'the core starts the local node of the machine build and talks to it',
   async () => {
     const build = join(home, 'build', CORE_BIN);
-    const b = spawnSync('go', ['build', '-tags', 'machine', '-o', build, `./cmd/${CORE_BIN}`], { cwd: root, encoding: 'utf8' });
+    const b = spawnSync('go', ['build', '-o', build, `./cmd/${CORE_BIN}`], { cwd: root, encoding: 'utf8' });
     if (b.status !== 0) throw new Error(b.stderr);
     const bin = readFileSync(build);
     const version = createHash('sha256').update(bin).digest('hex').slice(0, 16);

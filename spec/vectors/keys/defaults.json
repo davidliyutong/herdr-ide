@@ -1,5 +1,5 @@
 {
-  "description": "Strokes against each platform's default bindings (the keybindings of spec/generated/registry.json, which internal/keybindings writes): ctrl+b runs pane.leave (escaping focus to app chrome), direct shortcuts run their commands, and unbound keys give none (reaching the program in the terminal on their first press). Run by web/src/__tests__/keys.test.ts.",
+  "description": "Strokes against each platform's default bindings (the keybindings of spec/generated/registry.json, which the core writes): ctrl+b runs pane.leave (escaping focus to app chrome), direct shortcuts run their commands, and unbound keys give none (reaching the program in the terminal on their first press). Run by web/src/__tests__/keys.test.ts.",
   "cases": [
     {
       "description": "ctrl+b escapes focus to app chrome while other keys of shells and editors reach the terminal on their first press",

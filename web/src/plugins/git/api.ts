@@ -1,4 +1,4 @@
-// The Git plugin's requests to the core (internal/plugins/git): reads are
+// The Git plugin's requests to the core (backend/features/git): reads are
 // GETs with their parameters in the query, changes POSTs with a JSON body.
 // The types are those of the machine side (internal/agent/plugin/git).
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';

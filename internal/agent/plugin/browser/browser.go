@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package browser is the machine side of the browser plugin
-// (internal/plugins/browser, docs/features/32-browser-and-ports.md): it
+// (backend/features/browser, docs/features/32-browser-and-ports.md): it
 // connects the core to a service listening on the machine's own loopback
 // interface, the way ssh -L does, and lists what listens there. Nothing
 // listens on the machine for it: the core opens a stream per connection.

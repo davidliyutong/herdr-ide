@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"veldr/internal/agent"
+	"veldr/internal/agent/agenttest"
 	"veldr/internal/agentproto"
 	"veldr/internal/brand"
 	"veldr/internal/hostdirs"
-	"veldr/internal/transport"
 	"veldr/internal/vaultmcp"
 )
 
@@ -35,7 +35,7 @@ func TestVaultSocketRelaysToTheCore(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
-	s, err := transport.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
+	s, err := agenttest.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestVaultSocketRelaysToTheCore(t *testing.T) {
 
 // coreTagged answers the streams s's agent opens as a core would, with tag
 // as every variable's value and as the bridge's answer to a message.
-func coreTagged(s *transport.Session, tag string) {
+func coreTagged(s *agenttest.Session, tag string) {
 	for {
 		c, err := s.Accept()
 		if err != nil {
@@ -151,8 +151,8 @@ func TestSocketsFollowTheNewestAgent(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
 	run := hostdirs.RunDir(filepath.Join(home, brand.DataDir("")))
-	start := func(tag string) *transport.Session {
-		s, err := transport.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
+	start := func(tag string) *agenttest.Session {
+		s, err := agenttest.DialLocal(context.Background(), agent.Options{Logger: log.New(io.Discard, "", 0)})
 		if err != nil {
 			t.Fatal(err)
 		}

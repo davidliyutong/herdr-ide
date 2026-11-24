@@ -194,7 +194,7 @@ export const reveal = revealInExplorer;
 
 /** Whether Reveal in Finder is offered for each machine's paths here, as
  * the core said: only for its own machine, to a page on its computer
- * (internal/plugins/files revealable). Unknown until asked (loadRevealable). */
+ * (backend/features/files revealable). Unknown until asked (loadRevealable). */
 export const useRevealable = createStore<Record<string, boolean>>(() => ({}));
 const askingRevealable = new Set<string>();
 

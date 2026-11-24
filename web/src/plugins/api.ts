@@ -1,7 +1,7 @@
 // The web UI's side of plugins: features built into the app that add
 // panels to the right sidebar, kinds of panes, commands, status bar items,
 // palette items and handlers of their messages from the core (/ws
-// plugin {plugin, m, data}). The core's side of each is in internal/plugin;
+// plugin {plugin, m, data}). The core's side of each is in backend/kernel/feature.ts;
 // docs/features/27-plugins.md has the design. Plugins are compiled in.
 import type { ComponentType, ReactNode } from 'react';
 import type { MenuEntry } from '../contextMenu';
@@ -21,7 +21,7 @@ export interface PanelDef {
   title: MessageKey;
   icon: IconComponent;
   component: ComponentType;
-  /** The command that shows it (declared in internal/keybindings). */
+  /** The command that shows it (declared in backend/kernel/config/keybindings). */
   command?: string;
 }
 
@@ -57,7 +57,7 @@ export interface PaneViewDef {
   component: ComponentType<PaneViewProps>;
 }
 
-/** What runs a command declared in internal/keybindings/commands.go. */
+/** What runs a command declared in backend/kernel/config/keybindings. */
 export interface CommandDef {
   enabled?(): boolean;
   run(): void;
@@ -114,7 +114,7 @@ export interface SettingControlProps {
 
 /** A plugin's page in Settings. */
 export interface PluginSettingsDef {
-  /** The section of its settings (internal/settings), whose page the
+  /** The section of its settings (backend/kernel/config/settings), whose page the
    * Plugins page's settings button opens. The core's section names its
    * plugin as well; a section without settings is a page for extra alone. */
   section: string;
@@ -200,7 +200,7 @@ export interface ViewStatusDef {
 }
 
 export interface PluginDef {
-  /** As the core's plugin (internal/plugin): lower-case letters and digits. */
+  /** As the core's plugin (backend/kernel/feature.ts): lower-case letters and digits. */
   id: string;
   title: MessageKey;
   description?: MessageKey;

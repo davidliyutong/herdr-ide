@@ -35,7 +35,7 @@ const usage = (key: string, type: SettingDef['type'], group: string, order: numb
   ...extra,
 });
 
-// As internal/plugins/usage declares them.
+// As backend/features/usage declares them.
 const defs: SettingDef[] = [
   usage('usage.refresh', 'enum', 'usageRefresh', 10, { enum: ['manual', 'adaptive'] }),
   usage('usage.statusBar', 'bool', 'usageAlerts', 18),

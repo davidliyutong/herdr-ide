@@ -1,5 +1,5 @@
 {
-  "description": "Key sequences as written in keybindings and their canonical form (modifiers cmd, ctrl, alt, shift; US-layout key names), or why they are refused. Run by internal/keybindings and web/src/__tests__/keys.test.ts.",
+  "description": "Key sequences as written in keybindings and their canonical form (modifiers cmd, ctrl, alt, shift; US-layout key names), or why they are refused. Run by backend/kernel/config/keybindings and web/src/__tests__/keys.test.ts.",
   "cases": [
     { "input": "ctrl+b c", "key": "ctrl+b c" },
     { "input": "Ctrl+B  C", "key": "ctrl+b c" },

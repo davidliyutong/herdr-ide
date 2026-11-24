@@ -1,5 +1,5 @@
 // HTTP client of the System Monitor & Task Manager plugin
-// (internal/plugins/monitor).
+// (backend/features/monitor).
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
 
 export interface CPUMetric {

@@ -1,5 +1,5 @@
 // Terminal color schemes the settings offer (terminal.colorScheme.dark and
-// .light, internal/uisettings.Schemes): "default" is the design tokens'
+// .light, backend/kernel/config/ui SCHEMES): "default" is the design tokens'
 // colors of the theme in use, the others are the schemes of those names as
 // terminal emulators ship them. The user's own colors
 // (terminal.colors.<theme>.*) replace a scheme's.

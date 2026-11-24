@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package history is the machine side of the terminal history plugin
-// (internal/plugins/history): snapshots of the terminals' output, with
+// (backend/features/history): snapshots of the terminals' output, with
 // their styles, in the machine's database (machine-<host>.db in the agent's
 // data directory, store.go), which pages show above the new shell of a terminal
 // whose program was replaced (its terminal core started again). The core

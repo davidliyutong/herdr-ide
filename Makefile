@@ -75,7 +75,7 @@ e2e:
 # machine build built into dist/agents and herdr-core from dist/payload
 # (scripts/build.sh stages it; go run ./scripts/fetch-hc fetches it alone).
 dev-core:
-	go build -tags machine -o dist/agents/$(SLUG)-$(HOST_PLATFORM) ./cmd/$(SLUG)
+	go build -o dist/agents/$(SLUG)-$(HOST_PLATFORM) ./cmd/$(SLUG)
 	bun backend/hosts/bun/main.ts --instance dev --local-only --listen $(DEV_LISTEN) --agent-dir dist/agents --web-dir web/dist
 
 dev-web:

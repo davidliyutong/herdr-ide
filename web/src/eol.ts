@@ -14,7 +14,7 @@ export type Eol = '\n' | '\r\n' | '\r' | '';
 
 export type MixedLineEndings = 'keep' | 'unify' | 'readOnly';
 
-/** The setting (internal/plugins/git). */
+/** The setting (backend/features/git). */
 export const MIXED_LINE_ENDINGS = 'git.mixedLineEndings';
 
 const asMode = (v: unknown): MixedLineEndings => (v === 'unify' || v === 'readOnly' ? v : 'keep');

@@ -2,5 +2,5 @@
 
 package agent
 
-// The chat plugin's machine side (internal/plugins/chat).
+// The chat plugin's machine side (backend/features/chat).
 import _ "veldr/internal/agent/plugin/chat"

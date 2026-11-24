@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Repository checks run by `make check` and CI (besides tests):
-#   1. gofmt / go vet, also for the other desktop systems (the core and
-#      its tests build for Linux, macOS and Windows; the agent for unix)
-#      and for the machine builds (the tag "machine"), which must not
-#      link the server, the UI or what the core embeds
+#   1. gofmt / go vet of the Go program (the machine build and its
+#      tests), also for the other systems (it builds for Linux, macOS and
+#      Windows; the agent for unix only)
 #   2. the product slug appears in string literals only in the brand files
 #      (so a rename stays a one-file change plus scripts/rename.sh)
 #   3. every command-line flag and every HTTP route of the core
@@ -26,13 +25,10 @@ slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
 module=$(sed -n 's/^module //p' go.mod)
 
 echo "==> gofmt / go vet"
-unformatted=$(gofmt -l cmd internal scripts e2e web/*.go)
+unformatted=$(gofmt -l cmd internal scripts e2e backend/shared/proto/testdata)
 if [[ -n "$unformatted" ]]; then echo "gofmt needed:"; echo "$unformatted"; fail=1; fi
 go vet ./... || fail=1
 go vet -tags integration ./... || fail=1
-go vet -tags machine "./cmd/${slug}" || fail=1
-heavy=$(GOOS=linux go list -tags machine -deps "./cmd/${slug}" | grep -E "^${module}/(internal/(embedded|server|codeserver|machines|transport|registry)|web)$" || true)
-if [[ -n "$heavy" ]]; then echo "the machine build links packages of the core:"; echo "$heavy"; fail=1; fi
 for target in linux/amd64 darwin/arm64 windows/amd64; do
   [[ "$target" == "$(go env GOOS)/$(go env GOARCH)" ]] && continue
   GOOS=${target%/*} GOARCH=${target#*/} go vet ./... || fail=1

@@ -12,8 +12,9 @@ import (
 // terminal core, so that the helper has the lifetime, the owner and the
 // privacy attribution of the user's terminals. No client shows such a
 // terminal: the agent marks it with HiddenLabel, and the core keeps every
-// terminal that carries the label from its clients (internal/server's
-// terminal protocol), which can neither address one nor make one.
+// terminal that carries the label from its clients (its terminals
+// feature, backend/features/terminals), which can neither address one nor
+// make one.
 const (
 	// HiddenLabel is the key of the label that marks a terminal as one of
 	// the product's own helpers. Its value says which helper it is.

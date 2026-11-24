@@ -32,7 +32,7 @@ import (
 // MachineDB is the name of a machine's shared database in its agent's
 // data directory, which is kept per host (HostFile:
 // ~/.<slug>[-<instance>]/machine-<host>.db). The core's is core.db beside
-// its settings file (internal/plugin's CoreDBFile).
+// its settings file.
 const MachineDB = "machine.db"
 
 // layout is the store's own tables of a shared database, versioned by its

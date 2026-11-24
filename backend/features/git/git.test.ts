@@ -2,6 +2,9 @@
 // records, the parameters that reach a machine (a fake of the Go agent's
 // plugin op) and what passes back to the page; and its settings.
 import { afterEach, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { write } from '#shared/lib/streamio.ts';
 import { MAX_INLINE, Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { GIT } from '#kernel/config/staged.ts';
@@ -67,6 +70,20 @@ test('routes', async () => {
   // Each is an action of the machine's side, with its time limit.
   for (const a of READS) expect([a, gitProtocol.actions[a].timeoutMs]).toEqual([a, READ_MS]);
   for (const a of WRITES) expect([a, gitProtocol.actions[a].timeoutMs]).toEqual([a, WRITE_MS]);
+});
+
+// The machine build's actions (the Reads and Writes of the Go program's
+// internal/agent/plugin/git, read from its source while machines run it)
+// are the protocol's, reads as reads.
+test('the machine build has the same actions', () => {
+  const go = readFileSync(join(REPO_ROOT, 'internal/agent/plugin/git/git.go'), 'utf8');
+  const names = (v: string) => {
+    const block = new RegExp(`var ${v} = map\\[string\\]bool\\{([^}]*)\\}`).exec(go)?.[1];
+    if (!block) throw new Error(`internal/agent/plugin/git: no ${v}`);
+    return [...block.matchAll(/"(\w+)": true/g)].map((m) => m[1]!).sort();
+  };
+  expect(names('Reads')).toEqual([...READS].sort());
+  expect(names('Writes')).toEqual([...WRITES].sort());
 });
 
 // A change's audit record names what it acted on and how it ended, never

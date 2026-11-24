@@ -1,6 +1,6 @@
 // The chat plugin's protocol as the page sees it: the chat host's types
 // (internal/chatproto), which the core relays, and the page's WebSocket
-// GET /api/p/chat/ws (internal/plugins/chat/wire.go). Each mirrors its Go
+// GET /api/p/chat/ws (backend/features/chat). Each mirrors its Go
 // type's JSON. What comes from a machine is not trusted to have these
 // shapes: readers check the type of every member they keep and pass over
 // members and values this version does not know.

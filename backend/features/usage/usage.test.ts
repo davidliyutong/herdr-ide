@@ -1,6 +1,6 @@
 // The AI usage scheduler, its snapshot and the spend, with machines whose
-// agents answer what each test gives them and a clock of the test's (the
-// Go core's internal/plugins/usage/usage_test.go).
+// agents answer what each test gives them and a clock of the test's
+// (ported from the Go core's tests).
 import { afterAll, expect, test } from 'bun:test';
 import { statSync } from 'node:fs';
 import { USAGE } from '#kernel/config/staged.ts';
