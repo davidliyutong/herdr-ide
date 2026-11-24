@@ -160,6 +160,11 @@ export class Machine {
     return this.st.status === 'ready';
   }
 
+  /** Whether the machine has an agent session now. */
+  get connected(): boolean {
+    return this.session !== null;
+  }
+
   private update(fn: (st: State) => void): void {
     fn(this.st);
     this.st.updated_at = Date.now();

@@ -78,11 +78,12 @@ export function selectSpecs(specs: Spec[], localOnly: boolean, extraSSH: readonl
 /** A WebSocket of Bun.serve as a channel. */
 interface WSData {
   open: ChannelOpen;
+  compress: boolean;
   handlers?: ChannelHandlers;
 }
 function wsChannel(ws: ServerWebSocket<WSData>): Channel {
   return {
-    send: (d: Message) => void ws.send(d),
+    send: (d: Message) => void ws.send(d, ws.data.compress),
     get buffered() {
       return ws.getBufferedAmount();
     },
@@ -258,8 +259,10 @@ export async function serve(argv: string[]): Promise<void> {
     const remote = server.requestIP(req)?.address;
     const peer: Peer = { remote, desktop: desktopClient(req.headers, desktop.token) };
     if (req.headers.get('Upgrade')?.toLowerCase() === 'websocket')
-      peer.upgrade = (open) =>
-        server.upgrade(req, { data: { open } }) ? new Response(null, { status: 200 }) : new Response('upgrade failed', { status: 400 });
+      peer.upgrade = (open, opts) =>
+        server.upgrade(req, { data: { open, compress: !!opts?.compress } })
+          ? new Response(null, { status: 200 })
+          : new Response('upgrade failed', { status: 400 });
     return core.fetch(req, peer);
   };
   const websocket = {
@@ -278,8 +281,12 @@ export async function serve(argv: string[]): Promise<void> {
     maxPayloadLength: 64 << 20,
     perMessageDeflate: true,
   };
+  // Bun answers a body over maxRequestBodySize with a bare 413 before the
+  // core sees it: a little over the largest upload (4 GiB), so that the
+  // files feature answers its own too_large.
+  const maxRequestBodySize = 4 * 2 ** 30 + (1 << 20);
   const listen = (hostname: string, port: number) =>
-    Bun.serve<WSData>({ hostname, port, ipv6Only: hostname.includes(':'), fetch, websocket, idleTimeout: 0 });
+    Bun.serve<WSData>({ hostname, port, ipv6Only: hostname.includes(':'), fetch, websocket, idleTimeout: 0, maxRequestBodySize });
   let server: Server<WSData>;
   try {
     server = listen(listenHost, listenPort);

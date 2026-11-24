@@ -325,7 +325,7 @@ describe('/ws', () => {
   test('needs an upgrade', async () => {
     const t = testCore({ features: [] });
     const res = await t.request('GET', '/ws');
-    expect([res.status, (await res.json()).error]).toEqual([426, 'upgrade_required']);
+    expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([426, 'upgrade_required']);
   });
 
   test('adopts the channel as a page, compressed, with the client and read-only mode', async () => {
