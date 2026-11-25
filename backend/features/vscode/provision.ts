@@ -6,14 +6,13 @@
 // a unix socket of the agent's (cs.sock), which the proxy reaches through
 // the agent (proxy.ts). Preparing reports its phase, which the loading page
 // and the UI show.
-import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { BRIDGE_EXT, SLUG } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { ChunkWriter, Op, readLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import { AgentError, closeStream, type Session } from '#kernel/machines/transport/session.ts';
-import { extensionFile, platformAsset, sha256File, tarballFile, type Artifacts } from './artifacts.ts';
+import { extensionFile, platformAsset, readRegular, sha256File, tarballFile, type Artifacts } from './artifacts.ts';
 import { Install } from './settings.ts';
 import type { Timing } from './timing.ts';
 import { vsixContentHash } from './vsix.ts';
@@ -295,12 +294,8 @@ export class CodeServers {
     const digest = (await artifacts.knownDigest(tarballFile(artifacts.version, asset))) || (await sha256File(path));
     this.set(m.id, () => ({ phase: Phase.Upload, detail: artifacts.version, ready: false, total: size }));
     try {
-      await this.upload(
-        m,
-        { op: Op.CodeServer, action: 'install', digest },
-        createReadStream(path, { highWaterMark: 256 << 10 }),
-        signal,
-        (done) => this.set(m.id, (st) => ({ ...st, done })),
+      await this.upload(m, { op: Op.CodeServer, action: 'install', digest }, await readRegular(path), signal, (done) =>
+        this.set(m.id, (st) => ({ ...st, done })),
       );
     } catch (e) {
       signal.throwIfAborted();
@@ -366,12 +361,7 @@ export class CodeServers {
       this.phase(m.id, Phase.InstallExt, ext.id);
       try {
         const path = await this.o.artifacts.extension(ext, { signal });
-        await this.upload(
-          m,
-          { op: Op.CodeServer, action: 'install-ext', path: extensionFile(ext) },
-          createReadStream(path, { highWaterMark: 256 << 10 }),
-          signal,
-        );
+        await this.upload(m, { op: Op.CodeServer, action: 'install-ext', path: extensionFile(ext) }, await readRegular(path), signal);
       } catch (e) {
         signal.throwIfAborted();
         errors.push(`${ext.id}: ${errorText(e)}`);

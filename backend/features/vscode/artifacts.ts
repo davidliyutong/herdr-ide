@@ -14,9 +14,14 @@
 // downloaded again. A file with neither is used with a warning, and a
 // download of one has its digest recorded as a sidecar (trust on first
 // use).
+//
+// Every seeded or cached file is opened without blocking and used only when
+// it is a regular file (openRegular): a FIFO or a device under a seed's or
+// the cache's name answers at once instead of holding a thread of the
+// core's file I/O until something writes to it.
 import { createHash, randomBytes } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { constants, type ReadStream } from 'node:fs';
+import { copyFile, mkdir, open, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { SLUG } from '#shared/lib/brand.ts';
@@ -91,11 +96,37 @@ export const defaultCacheDir = (): string => join(userCacheDir(), SLUG, 'code-se
 const fill = (template: string, vars: Record<string, string>) =>
   Object.entries(vars).reduce((s, [k, v]) => s.replaceAll(`{${k}}`, v), template);
 
+/** A file of a seed directory or the cache: neither regular nor missing. */
+export class NotRegular extends Error {}
+
+/** The regular file at path, opened for reading without blocking (a FIFO
+ * or a device there answers at once rather than waiting for a writer) and
+ * without taking a controlling terminal; NotRegular for anything else,
+ * ENOENT when there is nothing. */
+export async function openRegular(path: string): Promise<FileHandle> {
+  const fh = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOCTTY ?? 0));
+  try {
+    if (!(await fh.stat()).isFile()) throw new NotRegular(`${path} is not a regular file`);
+    return fh;
+  } catch (e) {
+    await fh.close().catch(() => {});
+    throw e;
+  }
+}
+
+/** A stream of the regular file at path (openRegular), closed at its end. */
+export async function readRegular(path: string, highWaterMark = 256 << 10): Promise<ReadStream> {
+  return (await openRegular(path)).createReadStream({ highWaterMark });
+}
+
 export async function sha256File(path: string): Promise<string> {
   const h = createHash('sha256');
-  for await (const chunk of createReadStream(path)) h.update(chunk as Buffer);
+  for await (const chunk of await readRegular(path)) h.update(chunk as Buffer);
   return h.digest('hex');
 }
+
+/** A sidecar is one line of sha256sum's; anything longer is not one. */
+const MAX_SIDECAR = 4096;
 
 const sidecar = (digest: string, file: string) => `${digest}  ${file}\n`;
 
@@ -174,10 +205,21 @@ export class Artifacts {
   private async expected(dir: string, file: string): Promise<string> {
     const pinned = this.pinned[file];
     if (pinned) return pinned;
+    let fh: FileHandle;
     try {
-      return ((await readFile(join(dir, `${file}.sha256`), 'utf8')).trim().split(/\s+/)[0] ?? '').toLowerCase();
+      fh = await openRegular(join(dir, `${file}.sha256`));
     } catch {
       return '';
+    }
+    try {
+      const buf = Buffer.alloc(MAX_SIDECAR + 1);
+      const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+      if (bytesRead > MAX_SIDECAR) return '';
+      return (buf.subarray(0, bytesRead).toString('utf8').trim().split(/\s+/)[0] ?? '').toLowerCase();
+    } catch {
+      return '';
+    } finally {
+      await fh.close().catch(() => {});
     }
   }
 
@@ -231,8 +273,9 @@ export class Artifacts {
     for (const dir of this.dirs) {
       const path = join(dir, file);
       try {
-        await stat(path);
-      } catch {
+        await (await openRegular(path)).close();
+      } catch (e) {
+        if (e instanceof NotRegular) this.logger(`ignoring ${path}: not a regular file`);
         continue;
       }
       const want = await this.expected(dir, file);

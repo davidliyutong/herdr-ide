@@ -3,11 +3,22 @@
 // on first use, fetch-assets.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discard } from '#shared/lib/log.ts';
-import { Artifacts, DEFAULT_VERSION, MissingArtifact, PINNED, tarballFile, type ArtifactsOptions } from './artifacts.ts';
+import {
+  Artifacts,
+  DEFAULT_VERSION,
+  MissingArtifact,
+  NotRegular,
+  PINNED,
+  readRegular,
+  sha256File,
+  tarballFile,
+  type ArtifactsOptions,
+} from './artifacts.ts';
 import { fetchAssets } from './fetchassets.ts';
 
 let dir: string;
@@ -51,6 +62,30 @@ test('a seed is verified by its sidecar', async () => {
   writeFileSync(join(seed, file), 'evil');
   await expect(a.tarball('linux-amd64')).rejects.toThrow('does not match');
   expect(readFileSync(join(seed, file), 'utf8')).toBe('evil');
+});
+
+// A FIFO under a seed's or a sidecar's name would block whatever opened
+// it until something wrote to it (and with it a thread of the core's file
+// I/O): it is passed over as a file that is not there.
+test.skipIf(process.platform === 'win32')('FIFOs in a seed are passed over, never waited on', async () => {
+  const seed = join(dir, 'seed');
+  const cache = join(dir, 'cache');
+  mkdirSync(seed);
+  mkdirSync(cache);
+  const file = tarballFile('9.9.9', 'linux-amd64');
+  try {
+    execFileSync('mkfifo', ['-m', '600', join(seed, file), join(cache, `${file}.sha256`)]);
+  } catch {
+    return; // no mkfifo: nothing to check
+  }
+  writeFileSync(join(cache, file), 'tarball');
+  const a = artifacts({ seedDirs: [seed], offline: true });
+  // The cache's copy, unverified: its sidecar is a FIFO too.
+  expect(await a.tarball('linux-amd64')).toBe(join(cache, file));
+  expect(await a.knownDigest(file)).toBe('');
+  await expect(sha256File(join(seed, file))).rejects.toBeInstanceOf(NotRegular);
+  await expect(readRegular(join(seed, file))).rejects.toBeInstanceOf(NotRegular);
+  expect(await sha256File(join(cache, file))).toBe(sum('tarball'));
 });
 
 test('offline, a missing file is named with where to put it', async () => {
