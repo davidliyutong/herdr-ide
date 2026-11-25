@@ -10,11 +10,13 @@ import { join } from 'node:path';
 import { isoCBOR } from '@simplewebauthn/server/helpers';
 import { VAULT } from '#kernel/config/staged.ts';
 import { agentDialer, checkGuarded, running, sleep, sshSpec, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
+import type { Spec } from '#kernel/machines/spec.ts';
 import { openShared } from '#shared/store/index.ts';
 import { readLine, type VaultResponse } from '#shared/proto/agentproto/index.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { coreDBBeside } from './accesslog.ts';
 import { relayKey } from './desktop.ts';
+import { openExport, sealExport } from './exportfile.ts';
 import { settings } from './settings.ts';
 import { vaultFeature } from './core.ts';
 import type { VaultOptions } from './vault.ts';
@@ -24,6 +26,19 @@ const FAST = { time: 1, memory: 8 << 10, threads: 1 };
 const ORIGIN = 'https://vault.example';
 const HOST = 'vault.example';
 const VERIFY_KEY = 'verify-key-of-this-launch-0123456789abcdef';
+const MIN = 60_000;
+
+/** The desktop shell's MAC of a nonce and its purpose. */
+const mac = (nonce: string, p: string) => createHmac('sha256', VERIFY_KEY).update(`vault-proof\n${nonce}\n${p}\n\n`).digest('hex');
+/** The desktop shell's relay of plain for additional data ad. */
+const relay = (ad: string, plain: object) => {
+  const iv = randomBytes(12);
+  const c = createCipheriv('aes-256-gcm', relayKey(VERIFY_KEY), iv).setAAD(Buffer.from(ad));
+  const ct = Buffer.concat([c.update(JSON.stringify(plain)), c.final()]);
+  return Buffer.concat([iv, ct, c.getAuthTag()]).toString('base64url');
+};
+/** The Secure Enclave key of the vectors, which the tests play. */
+const enclaveVector = () => JSON.parse(readFileSync(join(REPO_ROOT, 'spec/vectors/vault-unlock/kek.json'), 'utf8')).enclave;
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
@@ -35,6 +50,9 @@ afterEach(async () => {
 interface V {
   t: TestCore;
   dir: string;
+  /** The feature's options: a test changes autoLockMs as a user would the
+   * setting it stands in for. */
+  opts: VaultOptions;
   token: string;
   /** A request as the page on ORIGIN sends it, with its session. */
   call(
@@ -48,18 +66,26 @@ interface V {
   log(): Promise<Array<Record<string, any>>>;
 }
 
-async function vault(o: VaultOptions = {}, setup = true): Promise<V> {
+/** A vault feature in a core of machines (m1 by default, whose agent asks
+ * as ask does), with a passphrase set unless !setup. */
+async function vault(o: VaultOptions = {}, setup = true, specs: Spec[] = [sshSpec('m1', 'u@box', 'box')]): Promise<V> {
   const dir = mkdtempSync(join(tmpdir(), 'tw-vault-'));
   dirs.push(dir);
   const dial = agentDialer();
-  const machines = testMachines([sshSpec('m1', 'u@box', 'box')], { dial });
-  const feature = vaultFeature({ path: join(dir, 'vault.json'), store: { kdf: FAST }, approvalTimeoutMs: 2000, ...o });
-  const t = testCore({ features: [feature], machines, settings: { 'plugins.vault.enabled': true }, guard: { allowedOrigins: [ORIGIN] } });
+  const machines = testMachines(specs, { dial });
+  const opts: VaultOptions = { path: join(dir, 'vault.json'), store: { kdf: FAST }, approvalTimeoutMs: 2000, ...o };
+  const t = testCore({
+    features: [vaultFeature(opts)],
+    machines,
+    settings: { 'plugins.vault.enabled': true },
+    guard: { allowedOrigins: [ORIGIN] },
+  });
   stops.push(running(t.core));
-  await waitFor('m1', () => machines.get('m1')!.ready);
+  await waitFor(specs[0].id, () => machines.get(specs[0].id)!.ready);
   const v: V = {
     t,
     dir,
+    opts,
     token: '',
     async call(method, path, body, r = {}) {
       const res = await t.request(method, `/api/p/vault${path}`, {
@@ -164,6 +190,63 @@ function credential(rpId = HOST, origin = ORIGIN) {
     /** Its authenticator's counter set back (a copy of it). */
     rewind: () => void (count = 0),
   };
+}
+
+type Credential = { cred: ReturnType<typeof credential>; prf: string };
+
+/** Adds a WebAuthn credential with PRF in v's passphrase session. */
+async function addCredential(v: V): Promise<Credential> {
+  const cred = credential();
+  const prf = randomBytes(32).toString('base64url');
+  const reg = await v.call('POST', '/proof', { for: 'register' });
+  const r = await v.call('POST', '/authenticators', {
+    kind: 'webauthn',
+    label: 'Key',
+    nonce: reg.json.nonce,
+    ...cred.create(reg.json.nonce),
+    assertion: cred.get(reg.json.nonce),
+    prf,
+    passphrase: PASS,
+  });
+  expect(r.status).toBe(200);
+  return { cred, prf };
+}
+
+/** Unlocks the locked v with c's PRF output and an assertion of a
+ * session's nonce. */
+async function unlockByPRF(v: V, c: Credential) {
+  const u = await v.call('POST', '/proof', { for: 'session' });
+  return v.call('POST', '/session', {
+    unlock: { nonce: u.json.nonce, prf: { credential: c.cred.id, output: c.prf }, assertion: c.cred.get(u.json.nonce) },
+  });
+}
+
+/** Adds the desktop app's authenticator with an enclave entry, as its shell
+ * does, in v's passphrase session. */
+async function enrollDesktop(v: V): Promise<void> {
+  const kv = enclaveVector();
+  const desk = { desktop: true };
+  const reg = await v.call('POST', '/proof', { for: 'register' }, desk);
+  const r = await v.call(
+    'POST',
+    '/authenticators',
+    {
+      kind: 'desktop',
+      label: 'Touch ID',
+      passphrase: PASS,
+      nonce: reg.json.nonce,
+      mac: mac(reg.json.nonce, 'register'),
+      relay: relay(`vault-relay\nregister\n${reg.json.nonce}\n`, {
+        kind: 'enclave',
+        install: 'install-0123456789ab',
+        sePub: kv.sePub,
+        blob: 'YmxvYg',
+        shellSecret: kv.shellSecret,
+      }),
+    },
+    desk,
+  );
+  expect(r.status).toBe(200);
 }
 
 describe('the gate', () => {
@@ -321,6 +404,29 @@ describe("machines' requests", () => {
     expect((await t.log()).map((a) => a.result).slice(0, 3)).toEqual(['log_failed', 'log_failed', 'allowed']);
   });
 
+  // The disk fails while a release's record is written: the MCP server
+  // gets log_failed without values, a reveal answers 500 without the
+  // value, the log and the audit record the failure and never the value;
+  // refusals are still answered.
+  test('a release whose record fails to be written: log_failed, and the value leaves in no answer, record or audit', async () => {
+    const v = await vault();
+    await v.call('PUT', '/vars/GH', { value: 's3cret', machines: ['m1'] });
+    expect((await v.ask({ tool: 'get', names: ['GH'] })).ok).toBe(true);
+    const db = openShared(coreDBBeside(join(v.dir, 'vault.json')));
+    db.run(`CREATE TRIGGER disk_fails AFTER INSERT ON vault_access BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`);
+    db.close();
+    const got = await v.ask({ tool: 'get', names: ['GH'] });
+    expect(got).toEqual({ ok: false, code: 'log_failed', error: expect.any(String) });
+    const rev = await v.call('POST', '/vars/GH/reveal');
+    expect([rev.status, rev.json.error, rev.json.value]).toEqual([500, 'log_failed', undefined]);
+    expect((await v.ask({ tool: 'get', names: ['NOPE'] })).code).toBe('not_found');
+    expect((await v.log()).map((a) => a.result)).toEqual(['not_found', 'log_failed', 'log_failed', 'allowed']);
+    const audit = v.t.audit.text();
+    expect(audit).toContain('"result":"log_failed"');
+    expect(audit).not.toContain('s3cret');
+    expect(JSON.stringify(await v.log())).not.toContain('s3cret');
+  });
+
   test('an exempt app reads without asking while unlocked', async () => {
     const v = await vault();
     await v.call('PUT', '/vars/ASK', { value: 'x' });
@@ -425,14 +531,7 @@ describe('authenticators', () => {
   test("the desktop app's MAC proves, and its relay enrolls and unlocks", async () => {
     const v = await vault({ verifyKey: VERIFY_KEY });
     await v.call('PUT', '/vars/A', { value: 'a' });
-    const mac = (nonce: string, p: string) => createHmac('sha256', VERIFY_KEY).update(`vault-proof\n${nonce}\n${p}\n\n`).digest('hex');
-    const relay = (ad: string, plain: object) => {
-      const iv = randomBytes(12);
-      const c = createCipheriv('aes-256-gcm', relayKey(VERIFY_KEY), iv).setAAD(Buffer.from(ad));
-      const ct = Buffer.concat([c.update(JSON.stringify(plain)), c.final()]);
-      return Buffer.concat([iv, ct, c.getAuthTag()]).toString('base64url');
-    };
-    const kv = JSON.parse(readFileSync(join(REPO_ROOT, 'spec/vectors/vault-unlock/kek.json'), 'utf8')).enclave;
+    const kv = enclaveVector();
     const desk = { desktop: true };
     const reg = await v.call('POST', '/proof', { for: 'register' }, desk);
     // What a nonce is for is the desktop shell's to read only.
@@ -536,6 +635,50 @@ describe('authenticators', () => {
     expect(v.t.audit.text()).toContain('"reason":"invalidated"');
   });
 
+  // Installing the key is one step with its session: a lock asked for
+  // while an authenticator's unlock runs waits for it and its session, then
+  // ends both, so the vault is not left unlocked after the lock nor locked
+  // with a session open.
+  test('a lock asked for during an unlock by an authenticator comes after it and its session, and ends them', async () => {
+    let armed = false;
+    let lock: Promise<unknown> | undefined;
+    let v!: V;
+    v = await vault({
+      keyStep: () => {
+        if (armed) lock ??= v.call('POST', '/lock');
+      },
+    });
+    const c = await addCredential(v);
+    await v.call('POST', '/lock');
+    armed = true;
+    const u = await unlockByPRF(v, c);
+    armed = false;
+    expect([u.status, typeof u.json.session]).toEqual([200, 'string']);
+    expect(lock).toBeDefined();
+    await lock;
+    expect((await v.call('GET', '', undefined, { token: u.json.session })).json).toMatchObject({
+      session: false,
+      status: { locked: true },
+    });
+  });
+
+  // An authenticator and its unlock entry are one step for a lock: a lock
+  // asked for between the guard's write and the entry's comes after both,
+  // so an authenticator is never left without its entry.
+  test('a lock asked for during an add comes after the authenticator and its unlock entry', async () => {
+    for (const kind of ['webauthn', 'desktop']) {
+      let lock: Promise<unknown> | undefined;
+      let v!: V;
+      v = await vault({ verifyKey: VERIFY_KEY, addStep: () => void (lock ??= v.call('POST', '/lock')) });
+      await (kind === 'webauthn' ? addCredential(v) : enrollDesktop(v));
+      expect([kind, lock === undefined]).toEqual([kind, false]);
+      await lock;
+      expect([kind, (await v.call('GET', '', undefined, { token: '' })).json.status.locked]).toEqual([kind, true]);
+      v.token = (await v.call('POST', '/session', { passphrase: PASS })).json.session;
+      expect((await v.call('GET', '')).json.guard.authenticators).toMatchObject([{ kind, unlock: true }]);
+    }
+  });
+
   test('where every Allow is verified, a session lets nothing out', async () => {
     const v = await vault();
     await v.call('PUT', '/vars/A', { value: 'a' });
@@ -575,6 +718,109 @@ describe('time', () => {
     wall -= 3600_000; // set back: the monotonic clock still counts
     mono += 31 * 60_000;
     expect((await v.call('GET', '')).json.session).toBe(false);
+  });
+
+  // The automatic lock counts by both clocks, whichever says longer: values
+  // a machine reads are uses and lists are not; asleep past its time (the
+  // monotonic clock stopped, the wall clock went on) the timer's next look
+  // locks; a wall clock set back lengthens nothing.
+  test('the automatic lock counts sleep (the wall clock) and never a clock set back (the monotonic one)', async () => {
+    let wall = Date.parse('2026-11-20T10:00:00Z');
+    let mono = 0;
+    const awake = (ms: number) => {
+      wall += ms;
+      mono += ms;
+    };
+    const v = await vault({ store: { kdf: FAST, now: () => new Date(wall) }, mono: () => mono, autoLockMs: 10 * MIN, lockCheckMs: 5 });
+    await v.call('PUT', '/vars/A', { value: 'a', machines: ['m1'] });
+    const locked = async () => (await v.call('GET', '', undefined, { token: '' })).json.status.locked as boolean;
+    const lockedSoon = async () => {
+      for (let i = 0; i < 400 && !(await locked()); i++) await sleep(5);
+      return locked();
+    };
+    for (let i = 0; i < 3; i++) {
+      awake(5 * MIN);
+      expect((await v.ask({ tool: 'get', names: ['A'] })).ok).toBe(true);
+    }
+    awake(10 * MIN - 1000);
+    expect((await v.ask({ tool: 'list' })).ok).toBe(true);
+    await sleep(50);
+    expect(await locked()).toBe(false);
+    awake(1000);
+    expect(await lockedSoon()).toBe(true);
+    expect(v.t.audit.text()).toContain('"reason":"idle"');
+
+    // Asleep past it: the monotonic clock says 1 minute, the wall clock 11.
+    v.token = (await v.call('POST', '/session', { passphrase: PASS })).json.session;
+    awake(MIN);
+    wall += 10 * MIN;
+    expect(await lockedSoon()).toBe(true);
+
+    // The wall clock set back two days, the monotonic one on by its time.
+    v.token = (await v.call('POST', '/session', { passphrase: PASS })).json.session;
+    wall -= 48 * 3600_000;
+    await sleep(50);
+    expect(await locked()).toBe(false);
+    awake(10 * MIN);
+    expect(await lockedSoon()).toBe(true);
+  });
+
+  // The time is a setting, which programs change without the gate: a
+  // change shortens the time of an unlocked vault but never lengthens it,
+  // and a longer one counts from the next unlock with the passphrase. An
+  // unlock by an authenticator gets at most the time sealed with the
+  // passphrase's window, whatever the setting says then or after. No page
+  // sets a time of its own.
+  test("the automatic lock follows the setting: a change shortens an unlock, never lengthens it; an authenticator's unlock is capped by the time sealed with the window", async () => {
+    const v = await vault({ autoLockMs: 30 * MIN });
+    const o = v.opts;
+    const after = async () => (await v.call('GET', '')).json.autoLock.after * 1000;
+    const withPassphrase = async () => {
+      await v.call('POST', '/lock');
+      v.token = (await v.call('POST', '/session', { passphrase: PASS })).json.session;
+    };
+    expect((await v.call('POST', '/autolock', { minutes: 0, passphrase: PASS })).status).toBe(404);
+
+    await withPassphrase();
+    expect(await after()).toBe(30 * MIN);
+    for (const [set, want] of [
+      [0, 30 * MIN], // never, set while unlocked
+      [600 * MIN, 30 * MIN],
+      [5 * MIN, 5 * MIN],
+    ]) {
+      o.autoLockMs = set;
+      expect([set, await after()]).toEqual([set, want]);
+    }
+    o.autoLockMs = 0;
+    await withPassphrase();
+    expect(await after()).toBe(0);
+
+    // The window seals 30 minutes, at the unlock and again with the
+    // passphrase that adds the credential.
+    o.autoLockMs = 30 * MIN;
+    await withPassphrase();
+    const c = await addCredential(v);
+    const byPRF = async () => {
+      await v.call('POST', '/lock');
+      const u = await unlockByPRF(v, c);
+      expect(u.json).toMatchObject({ proof: true, status: { locked: false } });
+      v.token = u.json.session;
+    };
+    o.autoLockMs = 0;
+    await byPRF();
+    expect(await after()).toBe(30 * MIN); // never, set before the unlock
+    o.autoLockMs = 600 * MIN;
+    expect(await after()).toBe(30 * MIN);
+    o.autoLockMs = 10 * MIN;
+    expect(await after()).toBe(10 * MIN);
+    await byPRF();
+    expect(await after()).toBe(10 * MIN); // shorter at the unlock
+    // Sealed never: the setting's time.
+    o.autoLockMs = 0;
+    await withPassphrase();
+    o.autoLockMs = 15 * MIN;
+    await byPRF();
+    expect(await after()).toBe(15 * MIN);
   });
 });
 
@@ -624,5 +870,31 @@ describe('export and import', () => {
     expect(imp.json).toEqual({ imported: ['A2', 'B'] });
     expect((await w.call('POST', '/vars/A2/reveal')).json).toEqual({ value: 'a' });
     expect((await w.call('POST', '/vars/A/reveal')).json).toEqual({ value: 'old' });
+  });
+
+  // An id alone need not name the same machine on another core: an ssh
+  // machine maps only when the file names it with the kind and target of
+  // this core's machine of that id, so the file's devbox does not let this
+  // core's devbox, another host, read without asking; a file written
+  // before targets were recorded maps none.
+  test('an import maps an ssh machine of another target to none, and a file without targets maps none', async () => {
+    const FILE = 'file passphrase';
+    const v = await vault({}, true, [sshSpec('devbox', 'devbox', 'devbox'), sshSpec('m1', 'me@gpu', 'gpu')]);
+    await v.call('PUT', '/vars/A', { value: 'v', machines: ['devbox', 'm1'] });
+    const file = JSON.stringify((await v.call('POST', '/export', { all: true, passphrase: PASS, filePassphrase: FILE })).json);
+    const e = await openExport(Buffer.from(file), FILE);
+    expect(e.machines).toEqual([
+      { id: 'devbox', label: 'devbox', kind: 'ssh', target: 'devbox' },
+      { id: 'm1', label: 'gpu', kind: 'ssh', target: 'me@gpu' },
+    ]);
+    const untargeted = (await sealExport({ ...e, machines: e.machines.map(({ id, label }) => ({ id, label })) }, FILE, FAST)).toString();
+
+    const w = await vault({}, true, [sshSpec('devbox', 'me@elsewhere', 'devbox'), sshSpec('m1', 'me@gpu', 'gpu')]);
+    const preview = async (f: string) => (await w.call('POST', '/import/preview', { file: f, passphrase: FILE })).json.variables[0];
+    expect(await preview(file)).toMatchObject({ machines: ['m1'], unknown: ['devbox'] });
+    expect(await preview(untargeted)).toMatchObject({ machines: [], unknown: ['devbox', 'm1'] });
+    const imp = await w.call('POST', '/import', { file, passphrase: FILE, choices: [{ i: 0, action: 'import' }] });
+    expect(imp.json).toEqual({ imported: ['A'] });
+    expect((await w.call('GET', '')).json.variables).toMatchObject([{ name: 'A', machines: ['m1'] }]);
   });
 });

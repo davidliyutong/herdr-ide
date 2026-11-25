@@ -2,6 +2,7 @@ import { afterAll, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { openShared } from '#shared/store/index.ts';
 import { AccessLog, coreDBBeside, noisy, released, type Access } from './accesslog.ts';
 
 const dirs: string[] = [];
@@ -55,6 +56,39 @@ test('releases and the others are bounded apart', () => {
   for (const r of ['allowed', 'denied', 'approved', 'denied', 'exempted']) add(l, rec(r, [r]));
   expect(l.list().map((a) => a.result)).toEqual(['exempted', 'denied', 'approved']);
   l.close();
+});
+
+// A record gets its id in the transaction that writes it, after every
+// row's; a write that fails (the disk, here a trigger, refuses it after
+// the row went in) is rolled back with its transaction and refuses its
+// release (log_failed), leaving nothing behind; the next release is
+// written and read back after a restart.
+test('a write that fails refuses its release and leaves nothing; the next is written after the rows', () => {
+  const db = dbOf();
+  const names = (l: AccessLog) => l.list().map((a) => [a.id, a.names![0], a.result]);
+  const l = new AccessLog({ db, logger: () => {} });
+  expect(add(l, rec('allowed', ['A'])).ok).toBe(true);
+  const d = openShared(db);
+  d.run(
+    `CREATE TRIGGER disk_fails AFTER INSERT ON vault_access WHEN instr(NEW.record, '"names":["B"]') > 0
+     BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`,
+  );
+  d.close();
+  const b = add(l, rec('allowed', ['B']));
+  expect([b.ok, b.kept.result]).toEqual([false, 'log_failed']);
+  expect(add(l, rec('allowed', ['C'])).ok).toBe(true);
+  expect(names(l)).toEqual([
+    [3, 'C', 'allowed'],
+    [2, 'B', 'log_failed'],
+    [1, 'A', 'allowed'],
+  ]);
+  l.close();
+  const again = new AccessLog({ db, logger: () => {} });
+  expect(names(again)).toEqual([
+    [3, 'C', 'allowed'],
+    [1, 'A', 'allowed'],
+  ]);
+  again.close();
 });
 
 test('a log that cannot be read keeps its records in memory and tries again', () => {

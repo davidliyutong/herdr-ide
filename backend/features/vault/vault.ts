@@ -91,6 +91,9 @@ export interface VaultOptions {
   changedEveryMs?: number;
   accessLog?: Partial<AccessLogOptions>;
   keyStep?: () => void | Promise<void>;
+  /** Run inside the key's lock between an authenticator's write and its
+   * unlock entry's. */
+  addStep?: () => void | Promise<void>;
 }
 
 /** A request of an MCP server waiting for the user's answer. */
@@ -750,6 +753,7 @@ export class Vault {
           made = true;
         });
         if (!relay) return;
+        await this.o.addStep?.();
         const secret = unb64url(reg.shellSecret);
         if (reg.kind === UNLOCK_ENCLAVE)
           await s.addEnclave(id, String(reg.install), unb64url(reg.blob), unb64url(reg.sePub), secret, passphrase);

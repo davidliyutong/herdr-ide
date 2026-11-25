@@ -693,22 +693,34 @@ variables from machines and the MCP server. Limits of the design:
   `the store` (binding of name, machines and flag; a lock forgetting the
   key, passphrase change; a passphrase-made entry wrapping the key; entries
   whose authenticator left the guard; removed machines; other versions,
-  damaged files and KDF bounds; `apps that can be exempted`).
+  damaged files and KDF bounds; `apps that can be exempted`; additional
+  data as one text per content, so that values, the guard, the check and
+  the window do not open in each other's place);
+  `unlock entries` (each kind unlocking after another start; an edited
+  entry refused, or dropped when malformed; an older build's writes
+  keeping the entries and its new passphrase ending them; one entry per
+  install, at most 4, one per credential, input and authenticator
+  checked).
 - `backend/shared/host/userfile.test.ts` (`TestWriteIsDurable`).
 - `backend/features/vault/webauthn.test.ts`: the three algorithms and
   every check of an assertion; malformed input only fails.
 - `backend/features/vault/core.test.ts`: `the gate` (sessions, wrong
   passphrases slowed, a lock during a passphrase check, guards),
   `machines' requests` (approvals, expiry and cancelling, the process
-  chain from the agent, a release whose record cannot be written, exempt
-  apps), `authenticators` (a WebAuthn credential with PRF added, proving
-  and unlocking; the desktop app's MAC and relay; a stale entry; Verify
-  every Allow covering values and grants), `time` (the automatic lock,
-  sessions counting sleep), `export and import` (machines mapped by
-  target). The time tests drive their own clock.
+  chain from the agent, a release whose record cannot be written or fails
+  to be, exempt apps), `authenticators` (a WebAuthn credential with PRF
+  added, proving and unlocking; the desktop app's MAC and relay; a stale
+  entry; a lock during an unlock and during an add; Verify every Allow
+  covering values and grants), `time` (the automatic lock: its uses, both
+  clocks, the setting shortening and never lengthening an unlock, an
+  authenticator's unlock capped by the sealed window; sessions counting
+  sleep), `export and import` (machines mapped by target; an ssh machine
+  of another target, and every machine of a file without targets, mapped
+  to none). The time tests drive their own clocks.
 - `backend/features/vault/accesslog.test.ts`: the database per host
   beside the vault's file, records surviving a restart, releases never
-  merged, releases and others bounded apart, a log that cannot be read.
+  merged, releases and others bounded apart, a write that fails leaving
+  nothing, a log that cannot be read.
 - `internal/vaultmcp`: `mcp_test.go` (JSON-RPC, masking,
   `TestMaskAtTheCut`, `TestRunLimitsFromTheCore`, cancellation,
   `TestSocketPath`),

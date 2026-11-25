@@ -532,6 +532,7 @@ export function vaultFeature(opts: VaultOptions = {}) {
                 return;
               }
               try {
+                await opts.addStep?.();
                 await s.addPRF(a.id, origin, rpId, cred, n.prfSalt!, output, b.passphrase);
               } catch (x) {
                 // Without its unlock entry it is not added.
