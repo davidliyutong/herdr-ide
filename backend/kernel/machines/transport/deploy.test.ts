@@ -28,13 +28,23 @@ afterAll(() => {
 });
 
 test('the probe reports the C library, its C++ runtime and SSE4.2; a machine the runtime cannot run on is refused', () => {
-  const p = parseProbe('motd\n@os=Linux\n@arch=x86_64\n@home=/home/u\n@libc=musl\n@libs=no\n@sse42=yes\n');
+  const alpine = '@gnulibc=\n@ldd=musl libc (x86_64)\n@muslloader=yes\n';
+  const p = parseProbe(`motd\n@os=Linux\n@arch=x86_64\n@home=/home/u\n${alpine}@libs=no\n@sse42=yes\n`);
   expect(p).toEqual({ os: 'linux', arch: 'amd64', home: '/home/u', libc: 'musl', libs: false, sse42: true });
   expect(() => checkRuntimeRuns(p)).toThrow(/^libs_missing/);
   expect(() => checkRuntimeRuns({ ...p, libc: 'glibc', sse42: false })).toThrow(/^cpu_unsupported/);
   expect(() => checkRuntimeRuns({ ...p, arch: 'arm64', libc: 'glibc', sse42: false })).not.toThrow();
   expect(() => checkRuntimeRuns({ os: 'darwin', arch: 'amd64', home: '/Users/u' })).not.toThrow();
   expect(() => parseProbe('Linux\nx86_64\n/home/u\n')).toThrow(/unexpected probe output/);
+  // Debian or Ubuntu with musl's package: musl's loader in /lib, glibc's
+  // library.
+  const debianWithMusl =
+    '@os=Linux\n@arch=aarch64\n@home=/h\n@gnulibc=glibc 2.41\n@ldd=ldd (Debian GLIBC 2.41-12+deb13u4) 2.41\n@muslloader=yes\n@libs=yes\n@sse42=no\n';
+  expect(parseProbe(debianWithMusl).libc).toBe('glibc');
+  // Without getconf, ldd says it; with neither, the loader.
+  expect(parseProbe('@os=Linux\n@arch=x86_64\n@home=/h\n@gnulibc=\n@ldd=ldd (GNU libc) 2.17\n@muslloader=yes\n').libc).toBe('glibc');
+  expect(parseProbe('@os=Linux\n@arch=x86_64\n@home=/h\n@gnulibc=\n@ldd=\n@muslloader=yes\n').libc).toBe('musl');
+  expect(parseProbe('@os=Linux\n@arch=x86_64\n@home=/h\n@gnulibc=\n@ldd=\n@muslloader=no\n').libc).toBe('glibc');
   // The probe itself, here.
   const here = parseProbe(spawnSync('/bin/sh', ['-c', PROBE_SCRIPT], { encoding: 'utf8' }).stdout);
   expect(here.os).toBe(process.platform);

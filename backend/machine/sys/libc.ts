@@ -8,22 +8,35 @@
 // of Linux's ABIs (x86-64 and AAPCS64) pass in the registers of a fixed
 // argument list, as the S1 probe ran it on every machine of the matrix.
 import { dlopen, FFIType, read, type Pointer } from 'bun:ffi';
-import { readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { constants } from 'node:os';
 
 export const linux = process.platform === 'linux';
 export const darwin = process.platform === 'darwin';
 
-/** The C library to open: musl's is its loader (/lib/ld-musl-<arch>.so.1),
- * glibc's libc.so.6, macOS's libSystem. */
-function libcPath(): string {
+/** The C library this process runs on, to open: macOS's libSystem; on
+ * Linux the one the process has mapped (its /proc/self/maps): musl's,
+ * which is its loader (/lib/ld-musl-<arch>.so.1), else glibc's libc.so.6.
+ * Not by what /lib holds: a glibc system with musl's package installed
+ * has musl's loader there too, and loading musl's libc into a glibc
+ * process corrupts it at the first failing call (its errno is somewhere
+ * else in the thread). */
+export function libcPath(maps: string | null = readMaps()): string {
   if (darwin) return 'libSystem.B.dylib';
-  try {
-    for (const f of readdirSync('/lib')) if (f.startsWith('ld-musl-')) return `/lib/${f}`;
-  } catch {
-    // no /lib
+  for (const line of (maps ?? '').split('\n')) {
+    const path = line.slice(line.indexOf('/'));
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    if (line.includes('/') && /^ld-musl-[^/]+\.so(\.\d+)*$/.test(name)) return path.trim();
   }
   return 'libc.so.6';
+}
+
+function readMaps(): string | null {
+  try {
+    return readFileSync('/proc/self/maps', 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 const common = {

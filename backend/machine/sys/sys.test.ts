@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tempHome } from '../testing.ts';
 import { AT_REMOVEDIR, linkGuard, openDirAt, openNoLinks, readDirAt, renameNoReplace, tryLock, unlinkAt, closeQuietly } from './fs.ts';
 import { parentOf, peerCred, socketFd } from './proc.ts';
+import { darwin, libcPath } from './libc.ts';
 
 const h = tempHome();
 afterAll(() => h.remove());
@@ -108,5 +109,25 @@ describe('renaming without replacing', () => {
     renameNoReplace(a, join(h.home, 'c'));
     expect(existsSync(a)).toBe(false);
     expect(readFileSync(join(h.home, 'c'), 'utf8')).toBe('a');
+  });
+});
+
+describe('the C library', () => {
+  test.skipIf(darwin)('is the one the process has mapped, not whatever /lib holds', () => {
+    const glibc = [
+      'aaaab0000000-aaaab0010000 r-xp 00000000 00:2c 123 /usr/local/bin/bun',
+      'ffff80000000-ffff80180000 r-xp 00000000 00:2c 456 /usr/lib/aarch64-linux-gnu/libc.so.6',
+      'ffff80200000-ffff80230000 r-xp 00000000 00:2c 789 /usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1',
+    ].join('\n');
+    // A glibc process on a system with musl's package (/lib/ld-musl-* there).
+    expect(libcPath(glibc)).toBe('libc.so.6');
+    const musl = [
+      '55555000-55556000 r-xp 00000000 08:01 1 /usr/local/bin/bun',
+      '7f0000000000-7f0000090000 r-xp 00000000 08:01 2 /lib/ld-musl-x86_64.so.1',
+    ].join('\n');
+    expect(libcPath(musl)).toBe('/lib/ld-musl-x86_64.so.1');
+    expect(libcPath(null)).toBe('libc.so.6');
+    // This process's own.
+    expect(libcPath()).toMatch(/^(libc\.so\.6|\/.*ld-musl-.*)$/);
   });
 });

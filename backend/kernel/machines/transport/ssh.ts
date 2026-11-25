@@ -46,11 +46,22 @@ export interface Probe extends Platform {
 export const PROBE_SCRIPT = [
   'echo "@os=$(uname -s)"; echo "@arch=$(uname -m)"; echo "@home=$HOME"',
   'if [ "$(uname -s)" = Linux ]; then',
-  '  if ls /lib/ld-musl-* >/dev/null 2>&1; then echo @libc=musl; else echo @libc=glibc; fi',
+  '  echo "@gnulibc=$(getconf GNU_LIBC_VERSION 2>/dev/null)"; echo "@ldd=$(ldd --version 2>&1 | head -n 1)"',
+  '  if ls /lib/ld-musl-* >/dev/null 2>&1; then echo @muslloader=yes; else echo @muslloader=no; fi',
   '  libs=yes; for f in libstdc++.so.6 libgcc_s.so.1; do found=; for d in /lib /usr/lib /lib64 /usr/lib64 /usr/local/lib; do [ -e "$d/$f" ] && found=1; done; [ -n "$found" ] || libs=no; done; echo "@libs=$libs"',
   '  if grep -qw sse4_2 /proc/cpuinfo 2>/dev/null; then echo @sse42=yes; else echo @sse42=no; fi',
   'fi',
 ].join('\n');
+
+/** Linux's C library from the probe's facts: glibc's getconf
+ * GNU_LIBC_VERSION and ldd --version say glibc whatever else is there (a
+ * glibc system with musl's package has musl's loader in /lib too); musl's
+ * ldd says musl; musl's loader alone, musl. */
+export function libcOf(gnulibc: string, ldd: string, muslLoader: boolean): 'glibc' | 'musl' {
+  if (/glibc/i.test(gnulibc) || /gnu libc|glibc/i.test(ldd)) return 'glibc';
+  if (/musl/i.test(ldd) || muslLoader) return 'musl';
+  return 'glibc';
+}
 
 /** The probe's answer. */
 export function parseProbe(out: string): Probe {
@@ -61,8 +72,8 @@ export function parseProbe(out: string): Probe {
   }
   if (!v.has('os') || !v.has('arch') || !v.has('home')) throw new Error(`unexpected probe output ${JSON.stringify(out)}`);
   const p: Probe = { os: v.get('os')!.toLowerCase(), arch: normArch(v.get('arch')!), home: v.get('home')! };
-  const libc = v.get('libc');
-  if (libc === 'glibc' || libc === 'musl') p.libc = libc;
+  if (v.has('gnulibc') || v.has('ldd') || v.has('muslloader'))
+    p.libc = libcOf(v.get('gnulibc') ?? '', v.get('ldd') ?? '', v.get('muslloader') === 'yes');
   if (v.has('libs')) p.libs = v.get('libs') === 'yes';
   if (v.has('sse42')) p.sse42 = v.get('sse42') === 'yes';
   return p;

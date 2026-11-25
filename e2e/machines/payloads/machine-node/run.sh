@@ -5,8 +5,10 @@
 # Each run has a home of its own, removed after. Exit status: 0 if all
 # passed.
 cd "$(dirname "$0")" || exit 2
+# glibc's getconf answers on glibc whatever else is there (a glibc system
+# with musl's package has musl's loader in /lib too).
 libc=glibc
-ls /lib/ld-musl-* >/dev/null 2>&1 && libc=musl
+getconf GNU_LIBC_VERSION >/dev/null 2>&1 || { ls /lib/ld-musl-* >/dev/null 2>&1 && libc=musl; }
 echo "machine ${MACHINE_NAME:-?} kernel $(uname -r) libc $libc"
 if [ $libc = musl ]; then rts=bun-linux-x64-musl-baseline; else rts=bun-linux-x64-baseline; fi
 # What the core's probe refuses (kernel/machines/transport/ssh.ts
