@@ -1,4 +1,4 @@
-// The kinds of coding agents (backend/shared/agents/kinds.ts), as the core's registry
+// The kinds of coding agents (backend/shared/agents/kinds.ts), as the hub's registry
 // gives them to the UI (spec/generated/registry.json, key "agents"):
 // how each starts, continues a directory's latest conversation or resumes
 // a session, the AI usage provider of its subscription, the format of its

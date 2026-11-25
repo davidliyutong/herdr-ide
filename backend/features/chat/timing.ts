@@ -11,7 +11,7 @@ export interface Timing {
   /** Bounds listing an agent's sessions, which may run the agent. */
   sessionsMs: number;
   /** Bounds getting Anthropic's Agent SDK to a machine before a Claude
-   * Code chat starts: the machine's download, else the core's and its
+   * Code chat starts: the machine's download, else the hub's and its
    * upload. */
   sdkMs: number;
   /** Bounds a handoff, from the open to the command's answer. */
@@ -20,8 +20,8 @@ export interface Timing {
   attachMs: number;
   /** Bounds what GET /api/p/chat/hosts asks each machine's chat host. */
   overviewMs: number;
-  /** How long the core keeps watching a host whose chats run no agent and
-   * that nothing of the core used. */
+  /** How long the hub keeps watching a host whose chats run no agent and
+   * that nothing of the hub used. */
   lingerMs: number;
   /** How often the watches are looked at. */
   tickMs: number;
@@ -55,7 +55,7 @@ export const DEFAULT_TIMING: Timing = {
 };
 
 export interface Limits {
-  /** The most connections the core has open to one machine's chat host,
+  /** The most connections the hub has open to one machine's chat host,
    * the pages' subscriptions and every request's together; the last
    * reservedConns of them only for the watch and the configures. */
   maxHostConns: number;
@@ -64,12 +64,12 @@ export interface Limits {
    * subscriptions share half of them: a subscription over its share is not
    * read from the chat host until the page took enough of them (the host
    * drops a connection that falls behind, and the page attaches again).
-   * The core's own messages take the rest: a page that falls that far
+   * The hub's own messages take the rest: a page that falls that far
    * behind is disconnected. One message of any size is taken when nothing
    * waits. */
   backlogMessages: number;
   backlogBytes: number;
-  /** Bytes the page's channel may hold unsent before the core keeps the
+  /** Bytes the page's channel may hold unsent before the hub keeps the
    * page's messages in its own backlog. */
   pageBuffered: number;
   /** How many commands of a subscription may wait to be written to its

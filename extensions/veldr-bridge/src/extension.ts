@@ -6,7 +6,7 @@
 // which the page addresses the window of one of its VS Code panes.
 //
 // The extension host runs on the machine itself and connects to the agent's
-// unix socket, which the agent tunnels to the core. The agent passes the
+// unix socket, which the agent tunnels to the hub. The agent passes the
 // socket path in <ENV_PREFIX>BRIDGE_SOCKET when it starts code-server.
 
 import * as net from 'net';
@@ -196,7 +196,7 @@ async function sendToAgent(uri?: vscode.Uri) {
 }
 
 /** Downloads the files and folders chosen in the explorer (or the active
- * editor's file) into the browser showing this window: the core streams one
+ * editor's file) into the browser showing this window: the hub streams one
  * file as itself, anything else as a zip. Unlike VS Code's own Download…, it
  * needs no File System Access API and takes folders in every browser. */
 function download(uri?: vscode.Uri, uris?: vscode.Uri[]) {

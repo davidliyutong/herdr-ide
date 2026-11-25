@@ -92,7 +92,7 @@ function settleHandoff(m: string, address: string, key: string): void {
  * that resumes its session: the one that already runs it, else a new tab
  * of the pane's workspace, in the chat's directory. What the machine
  * says of the chat decides (its kind, its session, its directory: its
- * chat host's list, else, while no host serves, the states the core read
+ * chat host's list, else, while no host serves, the states the hub read
  * of it); a failure is said in a toast, and no terminal starts unless the
  * host let the session go. */
 export async function continueInTerminal(m: string, view: PluginView): Promise<void> {

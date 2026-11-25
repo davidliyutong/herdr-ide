@@ -1,5 +1,5 @@
 // Reminds the user to restart a machine's chat host that is another build
-// than the core's (StatesData.outdated): the host outlives the app, so
+// than the hub's (StatesData.outdated): the host outlives the app, so
 // after an update or a reinstalled local build the chats still run in the
 // old one until it is restarted, which ends its agents. A machine's host
 // is said once per page and host build, when none of its chats starts,

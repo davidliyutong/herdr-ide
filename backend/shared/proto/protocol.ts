@@ -1,5 +1,5 @@
 // A feature's protocol: the actions its machine side serves, typed. Both
-// sides import the definition; the core calls an action (kernel/agent.ts),
+// sides import the definition; the hub calls an action (kernel/agent.ts),
 // the machine serves it (machine/), and each validates what it receives
 // with the action's schemas. On the wire an action is the agent protocol's
 // plugin op: {op: "plugin", plugin, action, params} and a reply whose

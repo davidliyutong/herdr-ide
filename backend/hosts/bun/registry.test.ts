@@ -1,5 +1,5 @@
-// The registry of the core serve composes (kernel/config/registry.ts):
-// what the clients read before a core and the reference's tables are its,
+// The registry of the hub serve composes (kernel/config/registry.ts):
+// what the clients read before a hub and the reference's tables are its,
 // byte for byte, and its settings follow the features' order.
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -12,7 +12,7 @@ import { describedFeatures } from '#hosts/common/compose.ts';
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), 'utf8');
 const input = registryInput(describedFeatures());
 
-describe("the composed core's registry", () => {
+describe("the composed hub's registry", () => {
   test('spec/generated/registry.json', () => {
     expect(buildRegistry(input)).toBe(read('spec/generated/registry.json'));
   });
@@ -49,7 +49,7 @@ describe("the composed core's registry", () => {
     ]);
   });
 
-  // A feature's section names a feature of the core (one with a switch),
+  // A feature's section names a feature of the hub (one with a switch),
   // so the UIs can list it under the plugins and say when it is off.
   test('plugin sections', () => {
     const s = new Settings('', { modules: input.modules });

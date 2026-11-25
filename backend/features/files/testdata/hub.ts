@@ -1,4 +1,4 @@
-// The files features in a core over machines whose agents serve the real
+// The files features in a hub over machines whose agents serve the real
 // file system (agent.ts), behind Bun.serve, so that requests end and break
 // off as a browser sees them; and pages on its /ws.
 import type { Channel } from '#kernel/channel.ts';
@@ -48,7 +48,7 @@ export async function filesHub(o: FilesHubOptions = {}): Promise<FilesHub> {
     port: 0,
     hostname: '127.0.0.1',
     idleTimeout: 0,
-    // As the host's: past the uploads' limit, which the core answers itself.
+    // As the host's: past the uploads' limit, which the hub answers itself.
     maxRequestBodySize: 8 * 2 ** 30,
     // As the Bun host passes them on (hosts/bun/serve.ts).
     fetch: async (req, srv) => {
@@ -70,15 +70,15 @@ export async function filesHub(o: FilesHubOptions = {}): Promise<FilesHub> {
   };
 }
 
-/** A page connected to a core's /ws: what it was sent, and its messages. */
-export function testPage(core: Hub) {
+/** A page connected to a hub's /ws: what it was sent, and its messages. */
+export function testPage(hub: Hub) {
   const sent: Array<Record<string, unknown>> = [];
   const ch: Channel = {
     send: (d) => void sent.push(JSON.parse(String(d))),
     buffered: 0,
     close() {},
   };
-  const h = core.pages.connect(ch, { client: 'browser', readOnly: false, who: { remote: '127.0.0.1' } });
+  const h = hub.pages.connect(ch, { client: 'browser', readOnly: false, who: { remote: '127.0.0.1' } });
   const seen = new Map<string, number>();
   const events = (id: string) => sent.filter((m) => m.t === 'download' && m.id === id) as unknown as DownloadEvent[];
   return {

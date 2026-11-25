@@ -1,4 +1,4 @@
-// The stream protocol between the core and a machine's agent.
+// The stream protocol between the hub and a machine's agent.
 export * from './proto.ts';
 export * from './gui.ts';
 export * from './hidden.ts';

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# End-to-end tests (make e2e): builds the web UI, the core of this platform
-# (backend/, bun backend/scripts/build.ts: one executable that is the core
+# End-to-end tests (make e2e): builds the web UI, the hub of this platform
+# (backend/, bun backend/scripts/build.ts: one executable that is the hub
 # and the machine side of its platform) with the pinned herdr-core of this
 # platform embedded (bun backend/scripts/fetch-hc.ts) and the fake coding
 # agents (e2e/fakes, compiled by Bun) into dist/e2e, then runs the
@@ -15,8 +15,8 @@
 # instead.
 #
 # The machine builds go into machines/ with their SHA256SUMS, which the
-# cores take as --agent-dir (a build of no release: nothing is
-# downloaded); core is this host's. They are built again as another, newer
+# hubs take as --agent-dir (a build of no release: nothing is
+# downloaded); hub is this host's. They are built again as another, newer
 # version into machines-newer/ (hub-newer), which takes the nodes over
 # from the first (tests/nodes.spec.ts).
 #
@@ -117,7 +117,7 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   # The bridge extension when a build staged it (scripts/build.sh).
   [[ -d dist/payload/ext ]] && common+=(--ext dist/payload/ext)
   # This host's, and Docker's Linux, glibc's and musl's; again as the newer
-  # version, whose node the newer core runs.
+  # version, whose node the newer hub runs.
   keys="$os-$arch"
   [[ -n "$darch" && "linux-$darch" != "$keys" ]] && keys="$keys linux-$darch"
   [[ -n "$darch" ]] && keys="$keys linux-$darch-musl"
@@ -144,7 +144,7 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   cp "$OUT/machines-newer/${SLUG}-$os-$arch" "$OUT/hub-newer"
   gzip -1 -c "$OUT/machines/${SLUG}-$os-$arch" > "$OUT/payload/machine/${SLUG}-$os-$arch.gz"
   # The desktop app's smoke test (tests/desktop.spec.ts) runs it unpackaged
-  # with the core bundled for its utility process and the payloads above;
+  # with the hub bundled for its utility process and the payloads above;
   # it skips where the desktop's packages are not installed.
   if [[ -d desktop/node_modules/electron ]]; then
     echo "==> desktop app"

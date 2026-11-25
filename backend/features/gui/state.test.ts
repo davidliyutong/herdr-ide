@@ -284,7 +284,7 @@ describe('wire', () => {
     expect(sharedCodecs([])).toEqual([]);
   });
 
-  // Commands as the Go core wrote them: cmd and id always, zero values
+  // Commands as the Go hub wrote them: cmd and id always, zero values
   // left out.
   test('commands', () => {
     expect(marshalCommand({ cmd: 'control', id: 0 })).toBe('{"cmd":"control","id":0}');

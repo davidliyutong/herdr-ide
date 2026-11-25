@@ -1,5 +1,5 @@
 # Common tasks; see CONTRIBUTING.md and AGENTS.md.
-# Development core address; keeps clear of a daily instance on the default port.
+# Development hub address; keeps clear of a daily instance on the default port.
 DEV_LISTEN ?= 127.0.0.1:7790
 SLUG := $(shell sed -n "s/^export const SLUG = '\(.*\)';$$/\1/p" backend/shared/lib/brand.ts)
 # This host as <os>-<arch> (darwin-arm64, linux-amd64…).
@@ -26,7 +26,7 @@ test:
 	pnpm -C web test
 	pnpm -C desktop test
 
-# The core's tests that wait on real time (backend/shared/testdata/slow.ts),
+# The hub's tests that wait on real time (backend/shared/testdata/slow.ts),
 # which make test skips.
 test-slow:
 	cd backend && SLOW_TESTS=1 bun test
@@ -45,7 +45,7 @@ check:
 	pnpm -C backend typecheck
 	pnpm -C backend format:check
 
-# The design tokens of the web UI and the core's terminal color defaults,
+# The design tokens of the web UI and the hub's terminal color defaults,
 # from spec/tokens.json; then what the clients take from the registered
 # settings and commands (spec/generated) and the tables of settings and
 # commands in docs/reference.md.
@@ -77,14 +77,14 @@ it:
 	cd backend && bun test machine/integration.test.ts
 	cd backend && bun test features/vscode/integration.test.ts
 
-# End-to-end tests: the core of this platform on isolated instances,
+# End-to-end tests: the hub of this platform on isolated instances,
 # driven through Chromium, and SSH machines in Docker containers (e2e/,
 # scripts/e2e.sh); not part of make test.
 # Arguments for Playwright: make e2e E2E_ARGS='tests/chat.spec.ts'.
 e2e:
 	scripts/e2e.sh $(E2E_ARGS)
 
-# The core from its sources (bun) on the dev instance. Its machine side is
+# The hub from its sources (bun) on the dev instance. Its machine side is
 # this host's TypeScript executable, built into dist/dev with the pinned
 # herdr-core (fetched once into dist/machines-hc) and staged in
 # dist/payload/machine as the desktop app carries it.

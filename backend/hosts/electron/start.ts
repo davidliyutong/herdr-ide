@@ -1,4 +1,4 @@
-// The desktop app's core: composed as the command line composes it
+// The desktop app's hub: composed as the command line composes it
 // (hosts/common/compose.ts) from what the app's main process starts it
 // with (HubStart): the payloads from the app's resources, a terminal
 // through node-pty, the guard with the app's origin, the verify key of

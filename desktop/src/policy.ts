@@ -1,6 +1,6 @@
 import type { ConfigureHostResolverOptions, WebPreferences } from 'electron';
 
-// Only the owned core may be shown in native windows. External HTTP(S) links
+// Only the owned hub may be shown in native windows. External HTTP(S) links
 // leave the app; file:, javascript:, custom schemes and credential URLs do not.
 export function isInternal(url: string, origin: string): boolean {
   try {
@@ -22,7 +22,7 @@ export function isExternal(url: string): boolean {
 
 // Clipboard reads match what the browser UI grants VS Code panes' frames
 // (allow="clipboard-read" in web/src/components/CodeLayer.tsx), where a browser
-// asks once; the desktop app has no prompt, so it grants them to the core.
+// asks once; the desktop app has no prompt, so it grants them to the hub.
 // fileSystem is the File System Access API: VS Code's Download… saves
 // folders and files over 32 MB into a folder the user picks in the native
 // dialog, which is the consent (Electron keeps system folders out).
@@ -55,7 +55,7 @@ export const APP_PARTITION = 'persist:app';
 /** A window of the app: its session, and its preload in each of its frames
  * (nodeIntegrationInSubFrames runs the preload in subframes; with the
  * sandbox it gives them no Node), which gives the frames of the app's
- * origin their channels to the core (frames.ts), VS Code's frames
+ * origin their channels to the hub (frames.ts), VS Code's frames
  * included. */
 export function appWindowPreferences(preload: string) {
   return { ...webPreferences, nodeIntegrationInSubFrames: true, partition: APP_PARTITION, preload };
@@ -86,7 +86,7 @@ export const hostResolver: ConfigureHostResolverOptions = { enableBuiltInResolve
 /** Whether url names the app's own host (origin's), under any scheme and
  * port; an origin that does not read counts as the app's, so that nothing
  * is taken for another page by mistake. A guest's session does not
- * intercept the app's origin, so such an address never reaches the core:
+ * intercept the app's origin, so such an address never reaches the hub:
  * a page there would be another program's passing for the app. */
 function leadsToHub(url: string, origin: string): boolean {
   try {
@@ -105,7 +105,7 @@ export function guestMayNavigate(url: string, origin: string): boolean {
 
 /** Decides a webview's attach (will-attach-webview): false cancels it. An
  * attach is allowed only for the browser partition and an http(s) address
- * that is not the core's (origin); the guest's preferences are then
+ * that is not the hub's (origin); the guest's preferences are then
  * rewritten in place, whatever the page asked for, so that it is an
  * ordinary sandboxed web page with no preload and no Node. */
 export function guestPreferences(prefs: WebPreferences, params: Record<string, string>, origin: string): boolean {

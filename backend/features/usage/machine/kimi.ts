@@ -15,7 +15,7 @@
 //     would find it compromised and throw). The lock is not the library:
 //     proper-lockfile patches fs.close and process.cwd and installs signal
 //     handlers in the process that imports it (graceful-fs, signal-exit),
-//     which the node, serving every core on one thread, does not take on
+//     which the node, serving every hub on one thread, does not take on
 //     for one provider; its protocol is a directory and its time.
 //   - Under the lock the file is read again and renewed only if the token
 //     still needs it (the CLI may just have).

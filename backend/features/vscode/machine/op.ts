@@ -1,4 +1,4 @@
-// Op code-server, as the core's provision.ts drives it (and the Go machine
+// Op code-server, as the hub's provision.ts drives it (and the Go machine
 // build answers it): every request names the release (version) and, for a
 // code-server installed on the machine, its executable (bin); a reply
 // carries the status (cs) of that code-server, a refusal its error.
@@ -6,14 +6,14 @@
 //   status                 the status.
 //   download {url, digest} the machine fetches the release and installs it;
 //                          the reply carries the tarball's digest, which
-//                          the core records when it knew none. The download
-//                          ends when the core closes the stream.
+//                          the hub records when it knew none. The download
+//                          ends when the hub closes the stream.
 //   install {digest}       a first reply, then the tarball in chunks
 //                          (ChunkWriter), checked against digest when the
-//                          core sends one, then the second reply.
+//                          hub sends one, then the second reply.
 //   start, stop            code-server started (once it answers), ended.
-//   release                ended unless another core's session has a
-//                          connection to it (a core's idle end).
+//   release                ended unless another hub's session has a
+//                          connection to it (a hub's idle end).
 //   install-ext {path, args}
 //                          a first reply, then (with path) a VSIX in
 //                          chunks; installs it and the extension ids args.
@@ -41,7 +41,7 @@ export interface OpOptions {
 const failed = (e: unknown): Reply => ({ ok: false, error: e instanceof Error ? e.message : String(e) });
 
 /** An upload that failed before its end is read on and dropped, so that the
- * core, which reads the reply only after its last chunk, gets it. */
+ * hub, which reads the reply only after its last chunk, gets it. */
 const dropRest = (conn: Conn) => conn.reader.release().resume();
 
 /** Serves one code-server op on conn; the agent closes the stream after. */
@@ -57,7 +57,7 @@ export async function serveCodeServer(cs: CodeServer, conn: Conn, h: Header, ctx
       case 'status':
         return await ok();
       case 'download': {
-        // The download ends when the core gives up (VS Code turned off, the
+        // The download ends when the hub gives up (VS Code turned off, the
         // request timed out): it sends nothing after the header.
         const ac = untilClosed(conn, ctx.signal);
         let tarball: Staged | null = null;
@@ -99,7 +99,7 @@ export async function serveCodeServer(cs: CodeServer, conn: Conn, h: Header, ctx
         await cs.stop();
         return await ok();
       case 'release':
-        // A core's idle end: another core's VS Code windows keep it.
+        // A hub's idle end: another hub's VS Code windows keep it.
         if (!ctx.sessions().some((s) => s !== ctx.session && s.dialed(l.socket).open > 0)) await cs.stop();
         return await ok();
       case 'install-ext': {

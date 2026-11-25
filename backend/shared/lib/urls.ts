@@ -1,4 +1,4 @@
-// The URLs an operator gives the core to download from (--npm-registry,
+// The URLs an operator gives the hub to download from (--npm-registry,
 // --code-server-url), which the machines get on their command lines, and
 // what messages and logs say of a URL. A URL's user information, query and
 // fragment are where credentials go (https://user:token@mirror/,
@@ -7,7 +7,7 @@
 // shows a URL by its origin and path only, since errors reach every page
 // and the log.
 
-/** Why s is no URL the core downloads from or has a machine download from:
+/** Why s is no URL the hub downloads from or has a machine download from:
  * one of http or https with a host, without user information, query or
  * fragment; "" when it is. Placeholders ({version}) may stand in its path. */
 export function downloadURLRefusal(s: string): string {

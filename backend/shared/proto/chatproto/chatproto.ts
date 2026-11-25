@@ -4,7 +4,7 @@
 // The chat host is the long-lived process of a machine that runs coding
 // agents headless, each through its adapter (Claude Code's SDK protocol,
 // Codex's app-server, the Agent Client Protocol), and keeps what each
-// conversation did in its log. A client (the core, for its pages) connects
+// conversation did in its log. A client (the hub, for its pages) connects
 // to <run dir>/SOCKET_NAME and reads the host's Hello. It then sends one
 // Request and reads one Response. Every request but Op.Attach and Op.Watch
 // ends the connection after its response. After the response to Op.Attach
@@ -103,8 +103,8 @@ export const Op = {
   /** Tells that the user saw Request.chat up to Request.seq: a turn that
    * ended at or before it is no longer Status.Done. */
   Seen: 'seen',
-  /** Gives the host the core's settings for this machine
-   * (Request.settings), which it clamps (clampHostSettings). The core sends
+  /** Gives the host the hub's settings for this machine
+   * (Request.settings), which it clamps (clampHostSettings). The hub sends
    * it when it connects and when they change. */
   Configure: 'configure',
   /** Ends the host so that another version can take over. It is refused
@@ -579,7 +579,7 @@ export interface Limit {
 }
 
 // The bounds of HostSettings: their defaults, and the least and the most
-// each may be (what the core's settings offer, the chat plugin, and what
+// each may be (what the hub's settings offer, the chat plugin, and what
 // clampHostSettings enforces whatever is asked).
 export const IDLE_STOP_MINUTES_DEFAULT = 30;
 export const IDLE_STOP_MINUTES_MIN = 5;
@@ -600,7 +600,7 @@ export const MAX_CHAT_MB_DEFAULT = 64;
 export const MAX_CHAT_MB_MIN = 8;
 export const MAX_CHAT_MB_MAX = 256;
 
-/** The core's settings for a machine's chat host (Op.Configure). A member
+/** The hub's settings for a machine's chat host (Op.Configure). A member
  * left out (or 0) means its default. */
 export interface HostSettings {
   /** An agent process with no turn and nothing waiting for this long is

@@ -1,4 +1,4 @@
-// The AI usage plugin's state in the page: the core's snapshot (GET
+// The AI usage plugin's state in the page: the hub's snapshot (GET
 // /api/p/usage, then its /ws messages), the cost report, the panel's view
 // options (kept per browser), the alerts the snapshots carry, each shown
 // once per browser, and the numbers of the coding agents' sessions the
@@ -16,14 +16,14 @@ export type UsageTab = string;
 
 export type Metric = 'spend' | 'tokens';
 
-/** Why the core has no numbers of a session: no transcript yet
+/** Why the hub has no numbers of a session: no transcript yet
  * (not_found), its provider turned off (provider_off), an agent whose
  * sessions are not priced (bad_request). */
 export type SessionCode = 'not_found' | 'provider_off' | 'bad_request';
 
 /** What the page knows of a coding agent's session. */
 export interface SessionEntry {
-  /** The last numbers the core gave; none while code is set. */
+  /** The last numbers the hub gave; none while code is set. */
   usage?: SessionUsage;
   code?: SessionCode;
   /** The agent's status when code came. */
@@ -77,7 +77,7 @@ export function setView(v: View) {
 /** The alerts shown in this browser, by id, with when they fired. */
 const SHOWN = 'usage.alerts';
 
-/** How long the core keeps an alert in its snapshot. */
+/** How long the hub keeps an alert in its snapshot. */
 const ALERT_KEEP = 3600;
 
 /** A page in the background waits this long before it takes an alert, so
@@ -93,7 +93,7 @@ function loadShown(): Record<string, number> {
   }
 }
 
-/** Takes a snapshot of the core and shows the alerts it carries that this
+/** Takes a snapshot of the hub and shows the alerts it carries that this
  * browser has not shown. */
 export function applySnapshot(s: UsageSnapshot) {
   if (!s || !Array.isArray(s.accounts)) return;
@@ -143,7 +143,7 @@ let snapshotEtag: string | undefined;
 let costEtag: string | undefined;
 let costEtagTZ: number | undefined;
 
-/** Fetches the snapshot; watch tells the core the panel is open. Sends
+/** Fetches the snapshot; watch tells the hub the panel is open. Sends
  * If-None-Match when a snapshot is already loaded so unchanged watch
  * heartbeats return 304 Not Modified. */
 export async function fetchSnapshot(watch = false): Promise<void> {
@@ -157,11 +157,11 @@ export async function fetchSnapshot(watch = false): Promise<void> {
       applySnapshot((await r.json()) as UsageSnapshot);
     }
   } catch {
-    /* the core is unreachable: the next message brings it */
+    /* the hub is unreachable: the next message brings it */
   }
 }
 
-/** Asks the core to poll now; an error code when it refuses. */
+/** Asks the hub to poll now; an error code when it refuses. */
 export async function refreshNow(): Promise<string | undefined> {
   try {
     const r = await fetch('/api/p/usage/refresh', { method: 'POST' });

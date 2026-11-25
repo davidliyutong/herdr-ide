@@ -87,7 +87,7 @@ export interface UIState {
   addMachine: boolean;
   /** The server runs with --read-only. */
   readOnly: boolean;
-  /** The core can hold an interactive ssh login (not on Windows, whose ssh
+  /** The hub can hold an interactive ssh login (not on Windows, whose ssh
    * shares no connections): the sidebar offers Sign in. */
   sshLogin: boolean;
 

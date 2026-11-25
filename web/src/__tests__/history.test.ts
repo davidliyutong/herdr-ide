@@ -5,11 +5,11 @@
 // generation of another program, else the one of the terminal it took
 // the place of; none where the terminal core restored the screen itself,
 // as the machine's capture of the new program tells, or until then as the
-// core's restore_screen suggests, the list read again a capture later),
+// terminal core's restore_screen suggests, the list read again a capture later),
 // the bytes read once per snapshot and refused beyond one generation's
 // size, the note with the time they were saved, the preludes taken away
 // again, and the list read soon, then at most every 5 s, never while the
-// page is hidden. The core's routes are a scripted fetch; the machines'
+// page is hidden. The hub's routes are a scripted fetch; the machines'
 // terminals and layouts are set in the page's state directly.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,7 +67,7 @@ const entries = (...list: HistoryEntry[]) => new Map(list.map((e) => [e.terminal
 describe('the snapshot a leaf shows', () => {
   const leaf: TerminalLeaf = { terminal: 't1' };
 
-  it('is its own terminal’s previous generation once the core gave it a new program', () => {
+  it('is its own terminal’s previous generation once the terminal core gave it a new program', () => {
     const c = chooseSnapshot(leaf, rec('t1', 200), entries(entry('t1', 200, 5000, { pid: 100, at: 3000 })), false);
     expect(c).toMatchObject({ terminal: 't1', generation: 'previous', snapshot: { pid: 100, at: 3000 } });
   });
@@ -116,7 +116,7 @@ describe('the snapshot a leaf shows', () => {
       expect(chooseSnapshot(leaf, rec('t1', 200), notRestored, restoreScreen)).toMatchObject({ generation: 'previous' });
       expect(awaitsCapture(leaf, rec('t1', 200), restored)).toBe(false);
     }
-    // The record's reason does not matter (the core clears it on a kept terminal that is live again).
+    // The record's reason does not matter (the terminal core clears it on a kept terminal that is live again).
     expect(chooseSnapshot(leaf, rec('t1', 200, { reason: 'stopped_by_restart' }), restored, false)).toBeUndefined();
     expect(chooseSnapshot(leaf, rec('t1', 200, { reason: 'server_stop' }), notRestored, true)).toMatchObject({ generation: 'previous' });
     // A restored flag of another program than the running one says nothing about it.
@@ -133,7 +133,7 @@ describe('the snapshot a leaf shows', () => {
     expect(awaitsCapture(leaf, rec('t1', 100), entries(entry('t1', 100, 3000)))).toBe(false);
     expect(awaitsCapture(leaf, undefined, entries(entry('t1', 100, 3000)))).toBe(false);
     expect(awaitsCapture({ terminal: 't2', before: 't1' }, rec('t2', 300), entries(entry('t1', 100, 3000)))).toBe(false);
-    // The core never shows another terminal's screen.
+    // The terminal core never shows another terminal's screen.
     expect(chooseSnapshot({ terminal: 't2', before: 't1' }, rec('t2', 300), entries(entry('t1', 100, 3000)), true)).toMatchObject({
       terminal: 't1',
     });
@@ -178,7 +178,7 @@ describe('the snapshot a leaf shows', () => {
   });
 });
 
-/** The core's history routes of machine a, scripted, with every request. */
+/** The hub's history routes of machine a, scripted, with every request. */
 class FakeHistory {
   list: { terminals: unknown[]; restoreScreen: boolean } = { terminals: [], restoreScreen: false };
   /** Bytes by "terminal generation", with the pid and time they are of. */
@@ -255,13 +255,13 @@ function setVisibility(state: 'visible' | 'hidden') {
 }
 
 describe('the history plugin in the page', () => {
-  let core: FakeHistory;
+  let hub: FakeHistory;
   let stop: (() => void) | undefined;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    core = new FakeHistory();
-    core.install();
+    hub = new FakeHistory();
+    hub.install();
     useTerms.setState({ connected: false, machines: {} });
     capture(undefined, { a: true });
   });
@@ -277,8 +277,8 @@ describe('the history plugin in the page', () => {
 
   /** Machine a's terminal t1 with a new program (200) and a snapshot of the one before (100). */
   function restarted() {
-    core.list = { restoreScreen: false, terminals: [entry('t1', 200, 5000, { pid: 100, at: 3000 })] };
-    core.data.set('t1 previous', { bytes: enc('before the restart'), pid: 100, at: 3000 });
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 200, 5000, { pid: 100, at: 3000 })] };
+    hub.data.set('t1 previous', { bytes: enc('before the restart'), pid: 100, at: 3000 });
     machine([rec('t1', 200)], layoutOf({ terminal: 't1' }));
   }
 
@@ -294,24 +294,24 @@ describe('the history plugin in the page', () => {
   it('shows the snapshot of the program before above a terminal, read once', async () => {
     restarted();
     stop = startHistory();
-    expect(core.lists()).toBe(0);
+    expect(hub.lists()).toBe(0);
     await settle();
-    expect(core.lists()).toBe(1);
-    expect(core.reads()).toEqual(['GET /api/m/a/p/history/read?terminal=t1&generation=previous']);
+    expect(hub.lists()).toBe(1);
+    expect(hub.reads()).toEqual(['GET /api/m/a/p/history/read?terminal=t1&generation=previous']);
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
     expect(preludeOf('a', 't1')?.note).toBe(noteOf(3000));
     // The layout and the records change, a list is read again: the same snapshot is not read again.
     machine([rec('t1', 200, { title: 'vim' })], layoutOf({ terminal: 't1', label: 'vim' }));
     machine([rec('t1', 200), rec('t2', 400)], layoutOf({ terminal: 't1' }, { terminal: 't2' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-    expect(core.lists()).toBe(2);
-    expect(core.reads()).toHaveLength(1);
+    expect(hub.lists()).toBe(2);
+    expect(hub.reads()).toHaveLength(1);
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
   });
 
   it('shows the snapshot of the terminal a leaf took the place of', async () => {
-    core.list = { restoreScreen: true, terminals: [entry('t1', 100, 3000)] };
-    core.data.set('t1 current', { bytes: enc('the old terminal'), pid: 100, at: 3000 });
+    hub.list = { restoreScreen: true, terminals: [entry('t1', 100, 3000)] };
+    hub.data.set('t1 current', { bytes: enc('the old terminal'), pid: 100, at: 3000 });
     machine([rec('t2', 300)], layoutOf({ terminal: 't2', before: 't1' }));
     stop = startHistory();
     await settle();
@@ -321,23 +321,23 @@ describe('the history plugin in the page', () => {
 
   it('refuses bytes beyond one generation’s size, and does not read them again until the next list', async () => {
     restarted();
-    core.data.set('t1 previous', { bytes: new Uint8Array(HISTORY_MAX_BYTES + 1), pid: 100, at: 3000 });
+    hub.data.set('t1 previous', { bytes: new Uint8Array(HISTORY_MAX_BYTES + 1), pid: 100, at: 3000 });
     stop = startHistory();
     await settle();
-    expect(core.reads()).toHaveLength(1);
+    expect(hub.reads()).toHaveLength(1);
     expect(preludeOf('a', 't1')).toBeUndefined();
     // Said too large before the body.
-    core.data.set('t1 previous', { bytes: enc('small'), pid: 100, at: 3000, length: HISTORY_MAX_BYTES + 1 });
+    hub.data.set('t1 previous', { bytes: enc('small'), pid: 100, at: 3000, length: HISTORY_MAX_BYTES + 1 });
     machine([rec('t1', 200, { title: 'x' })], layoutOf({ terminal: 't1' }));
     await settle();
-    expect(core.reads()).toHaveLength(1);
+    expect(hub.reads()).toHaveLength(1);
     // A terminal with a new program: the list is read again, and the snapshot.
     machine([rec('t1', 200), rec('t2', 500)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-    expect(core.reads()).toHaveLength(2);
+    expect(hub.reads()).toHaveLength(2);
     expect(preludeOf('a', 't1')).toBeUndefined();
     // Exactly one generation's size is taken.
-    core.data.set('t1 previous', { bytes: new Uint8Array(HISTORY_MAX_BYTES).fill(65), pid: 100, at: 3000 });
+    hub.data.set('t1 previous', { bytes: new Uint8Array(HISTORY_MAX_BYTES).fill(65), pid: 100, at: 3000 });
     machine([rec('t1', 200), rec('t2', 501)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
     expect(preludeOf('a', 't1')?.bytes.length).toBe(HISTORY_MAX_BYTES);
@@ -345,16 +345,16 @@ describe('the history plugin in the page', () => {
 
   it('takes a snapshot the machine moved since its list as failed, and lists again', async () => {
     restarted();
-    core.list = { restoreScreen: false, terminals: [entry('t1', 100, 3000)] };
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 100, 3000)] };
     // The machine captured the new program meanwhile: its current generation is another.
-    core.data.set('t1 current', { bytes: enc('the new program'), pid: 200, at: 6000 });
+    hub.data.set('t1 current', { bytes: enc('the new program'), pid: 200, at: 6000 });
     stop = startHistory();
     await settle();
-    expect(core.reads()).toEqual(['GET /api/m/a/p/history/read?terminal=t1&generation=current']);
+    expect(hub.reads()).toEqual(['GET /api/m/a/p/history/read?terminal=t1&generation=current']);
     expect(preludeOf('a', 't1')).toBeUndefined();
-    core.list = { restoreScreen: false, terminals: [entry('t1', 200, 6000, { pid: 100, at: 3000 })] };
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 200, 6000, { pid: 100, at: 3000 })] };
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
   });
 
@@ -364,13 +364,13 @@ describe('the history plugin in the page', () => {
     await settle();
     expect(preludeOf('a', 't1')).toBeDefined();
     // Gone from the list (the snapshot aged out): seen at the next list.
-    core.list = { restoreScreen: false, terminals: [] };
+    hub.list = { restoreScreen: false, terminals: [] };
     machine([rec('t1', 200), rec('t2', 400)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
     expect(preludeOf('a', 't1')).toBeUndefined();
 
     // Back, then its leaf closed.
-    core.list = { restoreScreen: false, terminals: [entry('t1', 200, 5000, { pid: 100, at: 3000 })] };
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 200, 5000, { pid: 100, at: 3000 })] };
     machine([rec('t1', 200), rec('t2', 401)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
     expect(preludeOf('a', 't1')).toBeDefined();
@@ -381,7 +381,7 @@ describe('the history plugin in the page', () => {
     machine([rec('t1', 200), rec('t2', 401)], layoutOf({ terminal: 't1' }));
     await settle();
     expect(preludeOf('a', 't1')).toBeDefined();
-    expect(core.reads()).toHaveLength(3);
+    expect(hub.reads()).toHaveLength(3);
     // Then the machine's setting turned off.
     capture(undefined, { a: false });
     expect(preludeOf('a', 't1')).toBeUndefined();
@@ -395,7 +395,7 @@ describe('the history plugin in the page', () => {
     historyCleared('a');
     expect(preludeOf('a', 't1')).toBeUndefined();
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
     expect(preludeOf('a', 't1')).toBeDefined();
     stop();
     stop = undefined;
@@ -403,33 +403,33 @@ describe('the history plugin in the page', () => {
     // Stopped, it follows nothing.
     machine([rec('t1', 201)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
   });
 
   it('reads the list once the terminals are known, again after new programs, at most every 5 s', async () => {
     machine([rec('t1', 100)], layoutOf({ terminal: 't1' }), 'starting');
     stop = startHistory();
     await settle();
-    expect(core.lists()).toBe(0);
+    expect(hub.lists()).toBe(0);
     machine([rec('t1', 100)], layoutOf({ terminal: 't1' }));
     await settle();
-    expect(core.lists()).toBe(1);
+    expect(hub.lists()).toBe(1);
     // Nothing new: no list.
     machine([rec('t1', 100, { title: 'top' })], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS * 2);
-    expect(core.lists()).toBe(1);
+    expect(hub.lists()).toBe(1);
     // A burst of restarts and a new terminal: one list soon.
     machine([rec('t1', 101)], layoutOf({ terminal: 't1' }));
     machine([rec('t1', 101), rec('t2', 300)], layoutOf({ terminal: 't1' }));
     await settle();
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
     // More: one list, 5 s after the last one.
     machine([rec('t1', 102), rec('t2', 300)], layoutOf({ terminal: 't1' }));
     machine([rec('t1', 103), rec('t2', 300)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS - 1000);
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
     await vi.advanceTimersByTimeAsync(1100);
-    expect(core.lists()).toBe(3);
+    expect(hub.lists()).toBe(3);
   });
 
   it('reads nothing while the page is hidden, and what is due once it is shown', async () => {
@@ -437,47 +437,47 @@ describe('the history plugin in the page', () => {
     restarted();
     stop = startHistory();
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS * 3);
-    expect(core.lists()).toBe(0);
+    expect(hub.lists()).toBe(0);
     setVisibility('visible');
     await settle();
-    expect(core.lists()).toBe(1);
+    expect(hub.lists()).toBe(1);
     expect(preludeOf('a', 't1')).toBeDefined();
   });
 
   it('reads the list again a capture later while a choice waits for it, and follows what the capture tells', async () => {
-    // The core restores screens itself: nothing is shown until the machine captured the new shell.
-    core.list = { restoreScreen: true, terminals: [entry('t1', 100, 3000)] };
-    core.data.set('t1 previous', { bytes: enc('before the restart'), pid: 100, at: 3000 });
+    // The terminal core restores screens itself: nothing is shown until the machine captured the new shell.
+    hub.list = { restoreScreen: true, terminals: [entry('t1', 100, 3000)] };
+    hub.data.set('t1 previous', { bytes: enc('before the restart'), pid: 100, at: 3000 });
     machine([rec('t1', 200)], layoutOf({ terminal: 't1' }));
     useSettings.setState((s) => ({ values: { ...s.values, [INTERVAL]: { value: 30, source: 'global', machines: { a: 10 } } } }));
     expect(intervalOf('a')).toBe(10);
     stop = startHistory();
     await settle();
-    expect(core.lists()).toBe(1);
+    expect(hub.lists()).toBe(1);
     expect(preludeOf('a', 't1')).toBeUndefined();
     // It did not restore (a power loss): the capture says so, and the page follows.
-    core.list = { restoreScreen: true, terminals: [entry('t1', 200, 6000, { pid: 100, at: 3000 })] };
+    hub.list = { restoreScreen: true, terminals: [entry('t1', 200, 6000, { pid: 100, at: 3000 })] };
     await vi.advanceTimersByTimeAsync(10_000 + LIST_GAP_MS + LIST_SETTLE_MS + 10);
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
     // Decided: no more lists.
     await vi.advanceTimersByTimeAsync(10 * (10_000 + LIST_GAP_MS));
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
   });
 
-  it('takes the prelude away when the capture shows the core restored the screen, and waits a bounded number of times', async () => {
-    core.list = { restoreScreen: false, terminals: [entry('t1', 100, 3000)] };
-    core.data.set('t1 current', { bytes: enc('before the restart'), pid: 100, at: 3000 });
+  it('takes the prelude away when the capture shows the terminal core restored the screen, and waits a bounded number of times', async () => {
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 100, 3000)] };
+    hub.data.set('t1 current', { bytes: enc('before the restart'), pid: 100, at: 3000 });
     machine([rec('t1', 200)], layoutOf({ terminal: 't1' }));
     stop = startHistory();
     await settle();
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
     // The machine has not captured yet: read again CAPTURE_WAITS times, then no more.
     await vi.advanceTimersByTimeAsync((CAPTURE_WAITS + 2) * (intervalOf('a') * 1000 + LIST_GAP_MS + LIST_SETTLE_MS));
-    expect(core.lists()).toBe(1 + CAPTURE_WAITS);
+    expect(hub.lists()).toBe(1 + CAPTURE_WAITS);
     expect(preludeOf('a', 't1')).toBeDefined();
-    // A new program restarts the waits; this time the capture shows the core's line.
-    core.list = { restoreScreen: false, terminals: [entry('t1', 200, 6000, { pid: 100, at: 3000 }, true)] };
+    // A new program restarts the waits; this time the capture shows the terminal core's line.
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 200, 6000, { pid: 100, at: 3000 }, true)] };
     machine([rec('t1', 200), rec('t2', 400)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + LIST_SETTLE_MS);
     expect(preludeOf('a', 't1')).toBeUndefined();
@@ -487,21 +487,21 @@ describe('the history plugin in the page', () => {
     restarted();
     stop = startHistory();
     await settle();
-    core.fail = true;
+    hub.fail = true;
     machine([rec('t1', 200), rec('t2', 400)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
   });
 
   it('gives the prelude the grid the read says, else the list’s, within bounds', async () => {
     restarted();
-    core.data.set('t1 previous', { bytes: enc('before the restart'), pid: 100, at: 3000, cols: 120, rows: 40 });
+    hub.data.set('t1 previous', { bytes: enc('before the restart'), pid: 100, at: 3000, cols: 120, rows: 40 });
     stop = startHistory();
     await settle();
     expect(preludeOf('a', 't1')).toMatchObject({ cols: 120, rows: 40 });
     // The read without the headers: the list's (80 by 24).
-    core.data.set('t1 previous', { bytes: enc('before the restart'), pid: 100, at: 3000 });
+    hub.data.set('t1 previous', { bytes: enc('before the restart'), pid: 100, at: 3000 });
     historyCleared('a');
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
     expect(preludeOf('a', 't1')).toMatchObject({ cols: 80, rows: 24 });
@@ -534,48 +534,48 @@ describe('the history plugin in the page', () => {
     expect(retryAfter(1)).toBe(RETRY_MIN_MS);
     expect(retryAfter(50)).toBe(RETRY_MAX_MS);
     restarted();
-    core.failLists = 3;
+    hub.failLists = 3;
     stop = startHistory();
     await settle();
-    expect(core.lists()).toBe(1);
+    expect(hub.lists()).toBe(1);
     expect(preludeOf('a', 't1')).toBeUndefined();
     // The first list was LIST_SETTLE_MS in, 10 ms ago.
     await vi.advanceTimersByTimeAsync(1990);
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
     await vi.advanceTimersByTimeAsync(3999);
-    expect(core.lists()).toBe(2);
+    expect(hub.lists()).toBe(2);
     await vi.advanceTimersByTimeAsync(1);
-    expect(core.lists()).toBe(3);
+    expect(hub.lists()).toBe(3);
     await vi.advanceTimersByTimeAsync(8000);
-    expect(core.lists()).toBe(4);
+    expect(hub.lists()).toBe(4);
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
     // Listed: no more tries.
     await vi.advanceTimersByTimeAsync(10 * RETRY_MAX_MS);
-    expect(core.lists()).toBe(4);
+    expect(hub.lists()).toBe(4);
   });
 
   it('tries a read that failed for the machine again after a back-off, and one it refused not before the next list', async () => {
     restarted();
-    core.failReads = 2;
-    core.failWith = { status: 400, body: '{"error":"busy"}' };
+    hub.failReads = 2;
+    hub.failWith = { status: 400, body: '{"error":"busy"}' };
     stop = startHistory();
     await settle();
-    expect(core.reads()).toHaveLength(1);
+    expect(hub.reads()).toHaveLength(1);
     expect(preludeOf('a', 't1')).toBeUndefined();
     await vi.advanceTimersByTimeAsync(2000);
-    expect(core.reads()).toHaveLength(2);
+    expect(hub.reads()).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(4000);
-    expect(core.reads()).toHaveLength(3);
+    expect(hub.reads()).toHaveLength(3);
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
-    expect(core.lists()).toBe(1);
+    expect(hub.lists()).toBe(1);
     // Refused: not tried again until a list says it is there.
     historyCleared('a');
-    core.failReads = 1;
-    core.failWith = { status: 400, body: '{"error":"bad_request"}' };
+    hub.failReads = 1;
+    hub.failWith = { status: 400, body: '{"error":"bad_request"}' };
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-    expect(core.reads()).toHaveLength(4);
+    expect(hub.reads()).toHaveLength(4);
     await vi.advanceTimersByTimeAsync(10 * RETRY_MAX_MS);
-    expect(core.reads()).toHaveLength(4);
+    expect(hub.reads()).toHaveLength(4);
     expect(preludeOf('a', 't1')).toBeUndefined();
   });
 
@@ -585,22 +585,22 @@ describe('the history plugin in the page', () => {
     await settle();
     const changed = vi.fn();
     const off = onPrelude('a', 't1', changed);
-    // The core's messages when the machine is back: its backend starting
+    // The hub's messages when the machine is back: its backend starting
     // (records dropped), ready, then the terminals' snapshot.
     machine([], layoutOf({ terminal: 't1' }), 'starting');
     machine([], layoutOf({ terminal: 't1' }));
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
     machine([rec('t1', 200)], layoutOf({ terminal: 't1' }));
-    // The connection to the core went: the layout is not known until it is read again.
+    // The connection to the hub went: the layout is not known until it is read again.
     useTerms.setState({ connected: false, machines: { a: { ...useTerms.getState().machines.a, layout: undefined } } });
     machine([rec('t1', 200)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-    expect(core.lists()).toBe(2);
-    expect(core.reads()).toHaveLength(1);
+    expect(hub.lists()).toBe(2);
+    expect(hub.reads()).toHaveLength(1);
     expect(changed).not.toHaveBeenCalled();
     expect(text(preludeOf('a', 't1')?.bytes)).toBe('before the restart');
     // The list after the return says it is gone: it goes.
-    core.list = { restoreScreen: false, terminals: [] };
+    hub.list = { restoreScreen: false, terminals: [] };
     machine([], layoutOf({ terminal: 't1' }));
     machine([rec('t1', 200)], layoutOf({ terminal: 't1' }));
     await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
@@ -610,13 +610,13 @@ describe('the history plugin in the page', () => {
 
   /** Machine a's t2, which took the place of t1, and t1's snapshot. */
   function replaced(restoreScreen = false) {
-    core.list = { restoreScreen, terminals: [entry('t1', 100, 3000, { pid: 90, at: 1000 })] };
-    core.data.set('t1 current', { bytes: enc('the old terminal'), pid: 100, at: 3000 });
+    hub.list = { restoreScreen, terminals: [entry('t1', 100, 3000, { pid: 90, at: 1000 })] };
+    hub.data.set('t1 current', { bytes: enc('the old terminal'), pid: 100, at: 3000 });
     // The machine moves t1's newest to t2 as its previous generation.
-    core.adopt = () => {
-      core.list = { restoreScreen, terminals: [entry('t2', 0, 0, { pid: 100, at: 3000 })] };
-      core.data.delete('t1 current');
-      core.data.set('t2 previous', { bytes: enc('the old terminal'), pid: 100, at: 3000 });
+    hub.adopt = () => {
+      hub.list = { restoreScreen, terminals: [entry('t2', 0, 0, { pid: 100, at: 3000 })] };
+      hub.data.delete('t1 current');
+      hub.data.set('t2 previous', { bytes: enc('the old terminal'), pid: 100, at: 3000 });
       return new Response('{"adopted":true}', { status: 200 });
     };
     machine([rec('t2', 300)], layoutOf({ terminal: 't2', before: 't1' }));
@@ -625,23 +625,23 @@ describe('the history plugin in the page', () => {
   it('moves the snapshot of the terminal a leaf took the place of to its own, once, and shows it all along', async () => {
     for (const restoreScreen of [false, true]) {
       replaced(restoreScreen);
-      core.requests = [];
+      hub.requests = [];
       stop = startHistory();
       await settle();
       expect(text(preludeOf('a', 't2')?.bytes)).toBe('the old terminal');
-      expect(core.adopts()).toEqual(['POST /api/m/a/p/history/adopt?from=t1&to=t2']);
+      expect(hub.adopts()).toEqual(['POST /api/m/a/p/history/adopt?from=t1&to=t2']);
       const changed = vi.fn();
       const off = onPrelude('a', 't2', changed);
       // The list is read again: the snapshot is t2's own now, shown as it was.
       await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-      expect(core.lists()).toBe(2);
-      expect(core.reads()).toHaveLength(1);
+      expect(hub.lists()).toBe(2);
+      expect(hub.reads()).toHaveLength(1);
       expect(changed).not.toHaveBeenCalled();
       expect(text(preludeOf('a', 't2')?.bytes)).toBe('the old terminal');
       // Not again, also when the terminals change.
       machine([rec('t2', 300), rec('t3', 400)], layoutOf({ terminal: 't2', before: 't1' }));
       await vi.advanceTimersByTimeAsync(LIST_GAP_MS + 10);
-      expect(core.adopts()).toHaveLength(1);
+      expect(hub.adopts()).toHaveLength(1);
       expect(text(preludeOf('a', 't2')?.bytes)).toBe('the old terminal');
       off();
       stop();
@@ -656,38 +656,38 @@ describe('the history plugin in the page', () => {
     stop = startHistory();
     await settle();
     expect(text(preludeOf('a', 't2')?.bytes)).toBe('the old terminal');
-    expect(core.adopts()).toEqual([]);
+    expect(hub.adopts()).toEqual([]);
     stop();
     useStore.setState({ readOnly: false });
 
     // Refused: not asked again.
     replaced();
-    core.adopt = () => new Response('{"error":"bad_request"}', { status: 400 });
-    core.requests = [];
+    hub.adopt = () => new Response('{"error":"bad_request"}', { status: 400 });
+    hub.requests = [];
     stop = startHistory();
     await settle();
     machine([rec('t2', 300), rec('t3', 400)], layoutOf({ terminal: 't2', before: 't1' }));
     await vi.advanceTimersByTimeAsync(10 * RETRY_MAX_MS);
-    expect(core.adopts()).toHaveLength(1);
+    expect(hub.adopts()).toHaveLength(1);
     expect(text(preludeOf('a', 't2')?.bytes)).toBe('the old terminal');
     stop();
 
     // The machine away: asked again after the back-off.
     replaced();
     let tries = 0;
-    const moving = core.adopt;
-    core.adopt = () => (++tries < 3 ? new Response('{"error":"offline"}', { status: 409 }) : moving());
-    core.requests = [];
+    const moving = hub.adopt;
+    hub.adopt = () => (++tries < 3 ? new Response('{"error":"offline"}', { status: 409 }) : moving());
+    hub.requests = [];
     stop = startHistory();
     await settle();
-    expect(core.adopts()).toHaveLength(1);
+    expect(hub.adopts()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(2000);
-    expect(core.adopts()).toHaveLength(2);
+    expect(hub.adopts()).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(4000);
-    expect(core.adopts()).toHaveLength(3);
+    expect(hub.adopts()).toHaveLength(3);
     await vi.advanceTimersByTimeAsync(10 * RETRY_MAX_MS);
-    expect(core.adopts()).toHaveLength(3);
-    expect(core.list.terminals).toEqual([entry('t2', 0, 0, { pid: 100, at: 3000 })]);
+    expect(hub.adopts()).toHaveLength(3);
+    expect(hub.list.terminals).toEqual([entry('t2', 0, 0, { pid: 100, at: 3000 })]);
     expect(text(preludeOf('a', 't2')?.bytes)).toBe('the old terminal');
   });
 });

@@ -1,6 +1,6 @@
 // The vault's cryptography: Argon2id (node:crypto), AES-256-GCM and HKDF
 // (WebCrypto), and the encodings the Go store wrote, which files of either
-// core keep.
+// hub keep.
 //
 // The master key is a WebCrypto CryptoKey that cannot be exported: its
 // bytes live in the runtime's native memory, never in JavaScript's. They

@@ -1,4 +1,4 @@
-// Terminals on the core's host through Bun.Terminal (kernel/pty.ts).
+// Terminals on the hub's host through Bun.Terminal (kernel/pty.ts).
 import type { Pty, SpawnPty } from '#kernel/pty.ts';
 
 export const bunPty: SpawnPty = (argv, size) => {

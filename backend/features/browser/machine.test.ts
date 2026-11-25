@@ -53,7 +53,7 @@ const freePort = async () => {
 
 describe('dial', () => {
   for (const host of ['127.0.0.1', '::1'])
-    test(`connects the stream to a service on ${host} and carries bytes both ways until the core closes it`, async () => {
+    test(`connects the stream to a service on ${host} and carries bytes both ways until the hub closes it`, async () => {
       const port = await service(host);
       if (port === null) return; // no such address here
       r = await rig({ features: [browserMachine()] });

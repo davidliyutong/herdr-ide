@@ -1,5 +1,5 @@
-// The file explorer's machine side, driven through the wire as the core
-// drives it (#kernel/agent.ts call and open), so the core's schemas check
+// The file explorer's machine side, driven through the wire as the hub
+// drives it (#kernel/agent.ts call and open), so the hub's schemas check
 // what it answers.
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
@@ -37,7 +37,7 @@ import { MAX_STAT, MAX_WRITE, filesProtocol, type Entry, type Result } from './p
 import { filesMachine, type FilesOptions } from './machine.ts';
 import { STAGING_DIR, STAGING_RETENTION_MS, pruneStaged } from './machine/save.ts';
 
-/** An agent with the files feature on home, a session of the core's. */
+/** An agent with the files feature on home, a session of the hub's. */
 interface Files {
   home: string;
   base: string;
@@ -112,7 +112,7 @@ function filesAt(home: string, o: FilesOptions = {}): Files {
   makeDirs(dirs);
   const agent = new Agent({ instance: '', dirs, logger: discard, features: [filesMachine({ platform: 'linux', dataHome: '', ...o })] });
   const [a, b] = duplexPair();
-  void agent.serve(a, 'core', '');
+  void agent.serve(a, 'hub', '');
   const s = new Session(b, () => b.destroy());
   return wrap(home, dirs.base, s, async () => {
     s.close();

@@ -33,7 +33,7 @@ export function retryDelay(n: number, t: Pick<Timing, 'retryMinMs' | 'retryMaxMs
   return Math.min(t.retryMinMs * 2 ** Math.min(n, 6), t.retryMaxMs);
 }
 
-/** What the core does on a machine once its display is ready: start the
+/** What the hub does on a machine once its display is ready: start the
  * display keeper, push the video encoder (when video is on for it; the
  * same decides installing the GPU selection library). Read-only mode
  * starts and pushes nothing. */

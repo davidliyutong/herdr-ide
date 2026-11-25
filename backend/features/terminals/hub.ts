@@ -1,7 +1,7 @@
 // Terminals: the machines' terminal cores (herdr-core, features 21 and 22)
 // for clients that draw terminals themselves. The WebSocket /api/v1/term
 // carries calls and events as JSON text messages and terminal bytes as
-// binary frames (messages.ts); a backend per machine holds the core's
+// binary frames (messages.ts); a backend per machine holds the hub's
 // connection to the machine's terminal core (backend.ts). The terminal
 // core's status, its start, stop and restart from the UI, and what macOS's
 // Full Disk Access lets a machine's processes do are routes of their own.
@@ -20,7 +20,7 @@ import { DEFAULT_TIMING, type Timing } from './timing.ts';
 
 export interface TerminalsOptions {
   /** herdr-core for a machine's platform (Payloads.hc); without it, or
-   * when the build has none for the platform, the core installs nothing
+   * when the build has none for the platform, the hub installs nothing
    * and uses the terminal core the machine has. */
   hc?: HCSource;
   /** The herdr-core digests a TypeScript build recorded
@@ -68,7 +68,7 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
     audit: 'term',
     setup(ctx) {
       const timing: Timing = { ...DEFAULT_TIMING, ...o.timing };
-      // A setting the core does not have takes its default: on.
+      // A setting the hub does not have takes its default: on.
       const setting = (key: string, machine = '') => {
         try {
           return ctx.settings.bool(key, machine);
@@ -147,7 +147,7 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
 
       // What macOS's Full Disk Access lets the machine's processes do:
       // files, for the agent's own process (on the local machine the
-      // core's), and terminals, for the terminal core's; each granted,
+      // hub's), and terminals, for the terminal core's; each granted,
       // denied or unknown, with the terminal core's executable, which a
       // grant for terminals names. The agent only opens and closes
       // protected folders, and in a terminal core that runs; it starts none.

@@ -1,4 +1,4 @@
-// What a host hands the core with each request, and what the core's
+// What a host hands the hub with each request, and what the hub's
 // middleware works out from it for the handlers (Hono's bindings and
 // variables).
 import type { Context } from 'hono';
@@ -6,20 +6,20 @@ import type { AuditFields, Who } from '../audit.ts';
 import type { ChannelOpen } from '../channel.ts';
 import type { Machine } from '../machines/machine.ts';
 
-/** The kinds of client the core tells apart (SECURITY.md): the desktop
+/** The kinds of client the hub tells apart (SECURITY.md): the desktop
  * app's windows and browsers. VS Code's windows run on the UI's origin,
  * where their scripts can do whatever the page can, so each kind has its
- * own switch for them, and the core applies the requesting client's. */
+ * own switch for them, and the hub applies the requesting client's. */
 export type Client = 'desktop' | 'browser';
 
 /** What the host knows of a request's connection. */
 export interface Peer {
   /** The connection's remote address (an IP); undefined for a request that
    * did not come over a network (the desktop app's windows, in process:
-   * a client on the core's own host). */
+   * a client on the hub's own host). */
   remote?: string;
   /** The request comes from the desktop app's windows: the host vouches
-   * for it: the app's main process, which hands the core in process the
+   * for it: the app's main process, which hands the hub in process the
    * requests of its windows (hosts/electron). The command line's clients
    * are browsers. */
   desktop: boolean;
@@ -31,10 +31,10 @@ export interface Peer {
 
 export interface Vars {
   client: Client;
-  /** A program of the core's own host talking to its loopback address
+  /** A program of the hub's own host talking to its loopback address
    * directly, not through a proxy (guard.ts sameHost). */
   sameHost: boolean;
-  /** The request's origin when the core vouches that no other program
+  /** The request's origin when the hub vouches that no other program
    * serves pages of it; "" otherwise (guard.ts trustedOrigin). */
   trustedOrigin: string;
   who: Who;

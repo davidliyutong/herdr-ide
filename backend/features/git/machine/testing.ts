@@ -2,7 +2,7 @@
 // a home of its own, whose runs of git see that home (so its global
 // configuration) and nothing of the user's, the tests' own runs of git for
 // their setup (no system or global configuration), and calls of its
-// actions through the core's call.
+// actions through the hub's call.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -52,7 +52,7 @@ export interface GitRig {
   sh(dir: string, ...args: string[]): string;
   /** A repository with one commit (a.txt) on main, at home/name. */
   newRepo(name?: string): string;
-  /** Runs an action, its result as the core reads it. */
+  /** Runs an action, its result as the hub reads it. */
   call(action: string, p: Params): Promise<any>;
   /** The code an action fails with. */
   fails(action: string, p: Params): Promise<string>;

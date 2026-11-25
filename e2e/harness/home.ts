@@ -1,5 +1,5 @@
-// The home directory of one isolated instance of the core, whichever host
-// runs it (the command line's core: instance.ts; the desktop app:
+// The home directory of one isolated instance of the hub, whichever host
+// runs it (the command line's hub: instance.ts; the desktop app:
 // desktop.ts): a short path below /tmp (macOS limits unix socket paths to
 // 104 bytes) with our marker, an instance name of its own and so its own
 // terminal core session, the instance's settings, shell startup files that
@@ -7,7 +7,7 @@
 // so nothing of the user's (their instances, terminal cores, settings,
 // agents and shell startup files) is read or touched.
 //
-// The local machine's node and terminal core outlive the core: remove()
+// The local machine's node and terminal core outlive the hub: remove()
 // stops them as the instance's own (its name and home), waits until no
 // process with the home as its HOME is left (everything the instance
 // started has it: the environment is the home's), then removes the
@@ -44,7 +44,7 @@ export class TestHome {
   readonly dir = realpathSync(mkdtempSync(HOME_PREFIX));
   /** A directory for the test's files (the workspace the tests open). */
   readonly work = join(this.dir, 'work');
-  /** First in the core's PATH: the ssh of SSH machines (harness/sshd.ts). */
+  /** First in the hub's PATH: the ssh of SSH machines (harness/sshd.ts). */
   readonly bin = join(this.dir, 'bin');
   /** The settings the instance started with. */
   readonly settings: Readonly<Record<string, unknown>>;
@@ -178,7 +178,7 @@ export function stopNodes(home: string, name: string) {
 }
 
 /** Stops the terminal core of an instance of ours, if it still runs: with
- * the instance's own name and home (the core's command finds its
+ * the instance's own name and home (the hub's command finds its
  * executable, session and socket), nothing else. */
 export function stopTerminalCore(home: string, name: string) {
   if (!existsSync(paths.hub)) return;
@@ -209,7 +209,7 @@ export function sweepLeftovers() {
   }
 }
 
-/** The instance's ssh control directory (the core's controlDir; e2e
+/** The instance's ssh control directory (the hub's controlDir; e2e
  * instance names are short enough to be used as they are). */
 export function controlDir(name: string): string {
   return join('/tmp', `${paths.slug}-${process.getuid?.() ?? 0}`, `s-${name}`);

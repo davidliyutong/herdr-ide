@@ -31,7 +31,7 @@ const ev = (m: Msg) => m.ev as Record<string, unknown>;
 
 describe('page', () => {
   // A page attaches to a chat and gets its events as the host sends them;
-  // its commands reach the host under the core's ids, and each host's
+  // its commands reach the host under the hub's ids, and each host's
   // answer reaches the page under the page's; those that decide what an
   // agent may do are audited, without what was answered.
   test('relay', async () => {
@@ -78,7 +78,7 @@ describe('page', () => {
     expect(audits[0]).not.toHaveProperty('error');
   });
 
-  // A read-only core takes attaches and refuses every command, audited; it
+  // A read-only hub takes attaches and refuses every command, audited; it
   // leaves out the agents' standard error and starts nothing.
   test('read-only', async () => {
     const id = chat.newChatID();
@@ -226,7 +226,7 @@ describe('page', () => {
   });
 
   // A large replay to a page that does not take it as fast as it comes
-  // fills only that subscription's share of the page's backlog: the core
+  // fills only that subscription's share of the page's backlog: the hub
   // stops reading it from the host, which drops that connection; the page
   // hears lost once it took what was sent and attaches again from its last
   // sequence number, while its other chats go on and its WebSocket stays.
@@ -273,10 +273,10 @@ describe('page', () => {
     expect(r.host.requests.at(-1)).toEqual({ op: 'attach', chat: big, from: last });
   });
 
-  // What only the core sends (answers, ends of subscriptions) is bounded by
+  // What only the hub sends (answers, ends of subscriptions) is bounded by
   // the page's backlog, the events of its subscriptions by their shares: a
   // page that falls behind on the former is disconnected (try again later).
-  test("the core's own messages overflow", async () => {
+  test("the hub's own messages overflow", async () => {
     const r = await start({ limits: { backlogMessages: 16, backlogBytes: 256 << 10, pageBuffered: 1 } });
     const pg = await r.page();
     await waitFor('the page', () => r.board.pages.size === 1);
@@ -305,7 +305,7 @@ describe('page', () => {
   });
 
   // Before an attach, on which a prompt may start the chat's agent, the
-  // host process the core reaches takes the machine's settings unless it
+  // host process the hub reaches takes the machine's settings unless it
   // took them as they are: a host started again (another pid) takes them
   // anew, and so after the settings changed.
   test('configures', async () => {
@@ -332,7 +332,7 @@ describe('page', () => {
     expect(r.host.requests.at(-2)?.settings?.allowFull).toBe(true);
   });
 
-  // The core keeps at most maxHostConns connections to a machine's chat
+  // The hub keeps at most maxHostConns connections to a machine's chat
   // host, the last reservedConns for the watch and the configures: beyond,
   // a subscription or a request is refused (too_many).
   test('connections to a host', async () => {
@@ -437,9 +437,9 @@ describe('page', () => {
 
   // A subscription to a Claude Code chat, whose next prompt may start its
   // agent, gets the machine Anthropic's Agent SDK without waiting for it,
-  // once per agent session within the hour; a read-only core asks nothing
+  // once per agent session within the hour; a read-only hub asks nothing
   // of the machine.
-  test("a subscription to a Claude Code chat gets the machine the Agent SDK; a read-only core's asks nothing", async () => {
+  test("a subscription to a Claude Code chat gets the machine the Agent SDK; a read-only hub's asks nothing", async () => {
     const id = chat.newChatID();
     const claude = (h: Rig['host']) => h.chats.set(id, testChat({ id, kind: 'claude' }));
     const ro = await start({ readOnly: true, host: claude });
@@ -482,7 +482,7 @@ describe('page', () => {
   test('a machine that could not get the Agent SDK is asked again by a new chat, not by each subscription', async () => {
     const id = chat.newChatID();
     const r = await start({ host: (h) => h.chats.set(id, testChat({ id, kind: 'claude' })) });
-    // Without it, and the core offline without a copy: every source fails.
+    // Without it, and the hub offline without a copy: every source fails.
     r.host.sdk = 'missing';
     const pg = await r.page();
     pg.send({ op: 'attach', sub: 's1', m: 'gpu', chat: id });
@@ -497,7 +497,7 @@ describe('page', () => {
     const installs = r.audit.records().filter((a) => a.event === SDK_AUDIT_EVENT);
     expect(installs).toHaveLength(2);
     for (const a of installs) expect(a).toMatchObject({ plugin: 'chat', machine: 'gpu', source: 'none', ok: false });
-    expect(String(installs[0]!.error)).toContain('the core is offline');
+    expect(String(installs[0]!.error)).toContain('the hub is offline');
     // Once the window passed, a subscription asks again.
     r.advance(SDK_FAILURE_MS);
     pg.send({ op: 'attach', sub: 's3', m: 'gpu', chat: id });

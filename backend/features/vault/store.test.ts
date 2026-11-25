@@ -349,7 +349,7 @@ const WEB = 'w1';
 const CRED = Buffer.from([1, 2, 3, 4]);
 
 /** A vault with a variable and, in its guard, the desktop authenticator and
- * a WebAuthn credential, whose unlock entries it adds as the core does
+ * a WebAuthn credential, whose unlock entries it adds as the hub does
  * (the test plays the Secure Enclave, the Hello key and the credential's
  * PRF) with the KEK each would give again. */
 async function withAuthenticators() {
@@ -376,7 +376,7 @@ async function withAuthenticators() {
   const f = {
     path,
     s,
-    /** Another start of the core: the file opened again, locked. */
+    /** Another start of the hub: the file opened again, locked. */
     reopen(): Store {
       return (f.s = Store.open(path, { kdf: FAST }));
     },

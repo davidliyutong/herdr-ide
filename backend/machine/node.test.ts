@@ -89,12 +89,12 @@ describe('the node', () => {
       await n.done;
     }));
 
-  test('a node taking over gets the socket: the old one tells its cores to move and ends once they left', () =>
+  test('a node taking over gets the socket: the old one tells its hubs to move and ends once they left', () =>
     withHome(async () => {
       const old = startNode();
       await until(() => existsSync(sock()), 'the node to listen');
       const { s } = await helloThrough();
-      // The core's side: the drain the old node announces.
+      // The hub's side: the drain the old node announces.
       let drained = false;
       void (async () => {
         const st = await s.accept();
@@ -110,7 +110,7 @@ describe('the node', () => {
       void old.done.then(() => (oldEnded = true));
       const next = startNode({ me: build('bbbb', 2), takeover: true });
       await until(() => drained, 'the old node to announce its drain');
-      // The old session still works until its core leaves.
+      // The old session still works until its hub leaves.
       expect((await s.request({ op: Op.Hello })).ok).toBe(true);
       await until(
         async () =>

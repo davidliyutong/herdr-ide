@@ -1,7 +1,7 @@
 // The agents feature's action on a machine, as the machine side serves it
 // (features/agents/machine): whether a coding agent's session is one to
 // resume in a directory. The machine looks for the session's transcript in
-// the agent's session directories (by kind and id, never by a path the core
+// the agent's session directories (by kind and id, never by a path the hub
 // names) and compares the directory it ran in with cwd.
 import { z } from 'zod';
 import { defineProtocol } from '#shared/proto/protocol.ts';
@@ -12,7 +12,7 @@ export const RESOLVE_MS = 15_000;
 
 /** The machine's answer (agentproto.ResolveReply): ok, or a code
  * (not_found, bad_request, other_cwd when the session ran elsewhere). Only
- * these members reach the page, as the Go core decoded the answer into its
+ * these members reach the page, as the Go hub decoded the answer into its
  * struct; an empty code is left out. */
 export const resolveReply = z
   .object({ ok: z.boolean().optional(), code: z.string().optional() })

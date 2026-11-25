@@ -64,7 +64,7 @@ interface V {
   log(): Promise<Array<Record<string, any>>>;
 }
 
-/** A vault feature in a core of machines (m1 by default, whose agent asks
+/** A vault feature in a hub of machines (m1 by default, whose agent asks
  * as ask does), with a passphrase set unless !setup. */
 async function vault(o: VaultOptions = {}, setup = true, specs: Spec[] = [sshSpec('m1', 'u@box', 'box')]): Promise<V> {
   const dir = mkdtempSync(join(tmpdir(), 'tw-vault-'));
@@ -385,7 +385,7 @@ describe("machines' requests", () => {
     const v = await vault();
     await v.call('PUT', '/vars/GH', { value: 'ghp_x', machines: ['m1'] });
     expect((await v.ask({ tool: 'get', names: ['GH'] })).ok).toBe(true);
-    // A newer core migrated the log's tables: this one reads them and does
+    // A newer hub migrated the log's tables: this one reads them and does
     // not write.
     const db = openShared(hubDBBeside(join(v.dir, 'vault.json')));
     db.run('UPDATE store_features SET version = 9 WHERE feature = ?', 'vault');
@@ -477,7 +477,7 @@ describe('authenticators', () => {
     const s = await v.call('POST', '/session', { proof: { nonce: p.json.nonce, ...cred.get(p.json.nonce) } });
     expect(s.json).toMatchObject({ proof: true });
     expect((await v.call('POST', '/proof', { for: 'register' }, { token: s.json.session })).json.error).toBe('vault_passphrase');
-    // A page of an origin the core does not vouch for proves nothing.
+    // A page of an origin the hub does not vouch for proves nothing.
     const q = await v.call('POST', '/proof', { for: 'session' });
     expect(
       (await v.call('POST', '/session', { proof: { nonce: q.json.nonce, ...cred.get(q.json.nonce) } }, { origin: '' })).json.error,
@@ -819,7 +819,7 @@ describe('time', () => {
 });
 
 describe('export and import', () => {
-  test('a file the core seals carries values to another vault, its machines mapped by target', async () => {
+  test('a file the hub seals carries values to another vault, its machines mapped by target', async () => {
     const v = await vault();
     await v.call('PUT', '/vars/A', { value: 'a', machines: ['m1', 'gone'] });
     await v.call('PUT', '/vars/B', { value: 'b', injectOnly: true, machines: ['*'] });
@@ -866,10 +866,10 @@ describe('export and import', () => {
     expect((await w.call('POST', '/vars/A/reveal')).json).toEqual({ value: 'old' });
   });
 
-  // An id alone need not name the same machine on another core: an ssh
+  // An id alone need not name the same machine on another hub: an ssh
   // machine maps only when the file names it with the kind and target of
-  // this core's machine of that id, so the file's devbox does not let this
-  // core's devbox, another host, read without asking; a file written
+  // this hub's machine of that id, so the file's devbox does not let this
+  // hub's devbox, another host, read without asking; a file written
   // before targets were recorded maps none.
   test('an import maps an ssh machine of another target to none, and a file without targets maps none', async () => {
     const FILE = 'file passphrase';

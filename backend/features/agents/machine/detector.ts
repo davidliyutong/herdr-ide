@@ -1,6 +1,6 @@
 // Which coding agents run in the terminal core's terminals and what they
 // do (op detect, docs/features/25-agent-detection.md), for as long as the
-// core keeps the stream open. The detector follows the terminals' records
+// hub keeps the stream open. The detector follows the terminals' records
 // (detect.ts feeds it the terminal core's events) and, for each terminal
 // whose foreground program is an agent, attaches as an observer (output
 // says when to read the screen again) and reads the screen
@@ -13,7 +13,7 @@
 // record, 5 s for Codex) and every 30 s.
 //
 // Every event of an agent carries the session last found, so an event
-// changes either the status or the session, and the core tells a new
+// changes either the status or the session, and the hub tells a new
 // session from news that way. Events leave in the order they were made.
 import { byId, validSessionId } from '#shared/agents/kinds.ts';
 import { HIDDEN_LABEL, hidden, type DetectEvent } from '#shared/proto/agentproto/index.ts';
@@ -136,7 +136,7 @@ class Wake {
 /** Whether the detector looks for an agent in the terminal of record r: a
  * live terminal's foreground process, unless the terminal is one of the
  * product's own helpers (the chat host's: its reserved name and hidden
- * label both, never the label alone), of which nothing reaches the core.
+ * label both, never the label alone), of which nothing reaches the hub.
  * Every walk over the terminals asks it. */
 export function watchable(r: Terminal): boolean {
   return r.state === 'live' && !!r.foreground && !hidden(r.name ?? '', (r.labels ?? {})[HIDDEN_LABEL] ?? '');
@@ -174,7 +174,7 @@ function foregroundOf(v: unknown): Foreground | null {
 
 export interface DetectorOptions {
   core: DetectCore;
-  /** Writes one event to the core, in order. */
+  /** Writes one event to the hub, in order. */
   send(ev: DetectEvent): void;
   /** Finds the agents' sessions; none for a stream opened without
    * sessions, and then no session file is read. */

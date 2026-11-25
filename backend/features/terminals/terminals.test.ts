@@ -177,7 +177,7 @@ describe('protocol', () => {
     expect(m.code).toBe('not_bundled');
     expect(kind(await c.call(1, 'terminal.list'))).toBe('unavailable');
 
-    // A read-only core starts nothing, also with an executable to offer.
+    // A read-only hub starts nothing, also with an executable to offer.
     const gz = gzipSync(Buffer.from('x'));
     const ro = await start({
       readOnly: true,
@@ -208,7 +208,7 @@ describe('protocol', () => {
 });
 
 // A machine build that carries its herdr-core (the TypeScript machine
-// executable) installs that one, from its own copy: the core uploads
+// executable) installs that one, from its own copy: the hub uploads
 // nothing, also when it carries one for the platform.
 test('a machine build that carries herdr-core installs and runs its own', async () => {
   const exe = Buffer.from('#!/bin/sh\n');
@@ -413,11 +413,11 @@ describe('agents', () => {
     expect(r.ws[1]).toMatchObject({ agent_status: 'done' });
   });
 
-  // A done the program reports itself (OSC 7501) outlives the core: a
-  // client that sees it labels the terminal with its turn, and a core that
+  // A done the program reports itself (OSC 7501) outlives the hub: a
+  // client that sees it labels the terminal with its turn, and a hub that
   // starts again reads that turn's done as seen; a later turn's done is
   // news.
-  test('a seen turn outlives the core', async () => {
+  test('a seen turn outlives the hub', async () => {
     const rec = (turn: number, labels: object) => [
       { address: 't1', state: 'live', cols: 80, rows: 24, labels, reported: true, status: { state: 'done' }, turn },
     ];

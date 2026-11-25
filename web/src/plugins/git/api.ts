@@ -1,4 +1,4 @@
-// The Git plugin's requests to the core (backend/features/git): reads are
+// The Git plugin's requests to the hub (backend/features/git): reads are
 // GETs with their parameters in the query, changes POSTs with a JSON body.
 // The types are those of the machine side (backend/features/git/protocol.ts).
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
@@ -152,7 +152,7 @@ export interface Watch {
   config?: string;
 }
 
-/** A failure with the code the core or the machine gave. */
+/** A failure with the code the hub or the machine gave. */
 export class GitError extends PluginError {
   constructor(code: string, message: string) {
     super(code, message);

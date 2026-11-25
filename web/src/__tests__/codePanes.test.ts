@@ -13,7 +13,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { actions } from '../actions';
 import {
   bindWindow,
@@ -54,13 +54,13 @@ function machine(id: string, status = 'ready'): MachineState {
 
 /** Machine a: workspace w1 (/home/u/w1) with a tab of a shell (in src) and
  * an agent; workspace w2 (/home/u/w2) with a tab of a shell. */
-function setup(core: FakeCore) {
-  core.machine(
+function setup(hub: FakeHub) {
+  hub.machine(
     'a',
     [
-      FakeCore.term('s1', { cwd: '/home/u/w1/src' }),
-      FakeCore.term('g1', { cwd: '/home/u/w1', agent: 'claude', agent_status: 'idle' }),
-      FakeCore.term('s2', { cwd: '/home/u/w2' }),
+      FakeHub.term('s1', { cwd: '/home/u/w1/src' }),
+      FakeHub.term('g1', { cwd: '/home/u/w1', agent: 'claude', agent_status: 'idle' }),
+      FakeHub.term('s2', { cwd: '/home/u/w2' }),
     ],
     {
       version: 2,
@@ -79,9 +79,9 @@ function setup(core: FakeCore) {
   );
 }
 
-let core: FakeCore;
+let hub: FakeHub;
 const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
-const layout = () => core.model.layout('a')!;
+const layout = () => hub.model.layout('a')!;
 const tabs = (ws = 0) => layout().workspaces[ws].tabs;
 const codeIn = (ws: number) => L.codeViews(layout().workspaces[ws]);
 
@@ -92,14 +92,14 @@ beforeEach(async () => {
     return new Response(JSON.stringify({ ok: true, window: 'from-reply' }), { status: 200 });
   });
   resetFrames();
-  core = new FakeCore();
-  setup(core);
-  core.install();
+  hub = new FakeHub();
+  setup(hub);
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([machine('a'), machine('b')]);
   s.selectMachine('a');
-  core.model.subscribe('a');
+  hub.model.subscribe('a');
   await settle();
 });
 
@@ -117,14 +117,14 @@ describe('Open in VS Code', () => {
     expect(tabs()[1]).toEqual({ root: { code: { id: view.view.id, folder: '/home/u/w1/src' } }, focused: view.key });
     expect(layout().workspaces[0].selected).toBe(1);
     // From the first tab again: the same folder selects that tab.
-    core.model.mutate('a', (l) => L.selectTab(l, 'w1', 0));
+    hub.model.mutate('a', (l) => L.selectTab(l, 'w1', 0));
     await actions.openCode('a', '/home/u/w1/src');
     expect(tabs().length).toBe(2);
     expect(layout().workspaces[0].selected).toBe(1);
     // Without a folder: the workspace's; another workspace has its own.
     await actions.openCode('a');
     expect(codeIn(0).map((v) => v.view.folder)).toEqual(['/home/u/w1/src', '/home/u/w1']);
-    core.model.mutate('a', (l) => L.selectWorkspace(l, 'w2'));
+    hub.model.mutate('a', (l) => L.selectWorkspace(l, 'w2'));
     await actions.openCode('a', '/home/u/w1');
     expect(codeIn(1).map((v) => v.view.folder)).toEqual(['/home/u/w1']);
     // Opening runs no command.
@@ -159,7 +159,7 @@ describe('changes and Git Graph', () => {
   it('wait for the window of a pane whose iframe the page has but does not know yet, then go by folder', async () => {
     vi.useFakeTimers();
     const view = { id: 'c1', folder: '/home/u/w1' };
-    core.model.mutate('a', (l) => L.splitPane(l, 's1', 'horizontal', { code: view }));
+    hub.model.mutate('a', (l) => L.splitPane(l, 's1', 'horizontal', { code: view }));
     useFrames.setState({ frames: { [frameKey('a', 'c1')]: { m: 'a', id: 'c1', folder: '/home/u/w1', load: 0 } } });
     const done = actions.openDiff('a', '/home/u/w1', 's1');
     await vi.advanceTimersByTimeAsync(1600);
@@ -186,8 +186,8 @@ describe('a path from a terminal', () => {
     expect(codeIn(0)).toHaveLength(1);
     // A pane in another tab holding the file wins over the tab's pane that does not.
     const other = { id: 'c9', folder: '/home/u/w1' };
-    core.model.mutate('a', (l) => L.openPane(l, { code: other }, 'w1'));
-    core.model.mutate('a', (l) => L.selectTab(l, 'w1', 0));
+    hub.model.mutate('a', (l) => L.openPane(l, { code: other }, 'w1'));
+    hub.model.mutate('a', (l) => L.selectTab(l, 'w1', 0));
     await actions.openPath('a', '/home/u/w1/README.md', 1, undefined, 'g1');
     expect(layout().workspaces[0].selected).toBe(1);
     expect(posts.at(-1)!.body).toMatchObject({ folder: '/home/u/w1', path: '/home/u/w1/README.md' });
@@ -208,10 +208,10 @@ describe('a path from a terminal', () => {
 describe('a VS Code pane', () => {
   it('closes without ending anything, and splits into a terminal of its folder', async () => {
     const view = { id: 'c1', folder: '/home/u/w1/docs' };
-    core.model.mutate('a', (l) => L.splitPane(l, 'g1', 'vertical', { code: view }));
+    hub.model.mutate('a', (l) => L.splitPane(l, 'g1', 'vertical', { code: view }));
     await actions.split('a', 'code:c1', 'right');
     await settle();
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
+    expect(hub.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
       keep: true,
       cwd: '/home/u/w1/docs',
       display: expect.any(Object),
@@ -226,7 +226,7 @@ describe('a VS Code pane', () => {
     await actions.closePane('a', 'code:c1');
     await settle();
     expect(L.findLeaf(layout(), 'code:c1')).toBeNull();
-    expect(core.calls.filter((c) => c.method === 'terminal.kill')).toEqual([]);
+    expect(hub.calls.filter((c) => c.method === 'terminal.kill')).toEqual([]);
   });
 
   it('stops and starts its machine’s code-server, and reloads', async () => {
@@ -276,7 +276,7 @@ describe('the windows of VS Code panes', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const root: Root = createRoot(host);
-    core.model.mutate('a', (l) => L.splitPane(l, 's1', 'horizontal', { code: { id: 'c1', folder: '/home/u/w1' } }));
+    hub.model.mutate('a', (l) => L.splitPane(l, 's1', 'horizontal', { code: { id: 'c1', folder: '/home/u/w1' } }));
     const box = { left: 10, top: 20, width: 300, height: 200, right: 310, bottom: 220, x: 10, y: 20, toJSON: () => ({}) };
     const proto = HTMLElement.prototype as unknown as { getBoundingClientRect(): DOMRect };
     const original = proto.getBoundingClientRect;
@@ -322,7 +322,7 @@ describe('the windows of VS Code panes', () => {
       await setCode(true);
       expect(frame()).not.toBeNull();
       // The pane closed in the layout: its window goes.
-      await act(async () => void core.model.mutate('a', (l) => L.closePane(l, 'code:c1')));
+      await act(async () => void hub.model.mutate('a', (l) => L.closePane(l, 'code:c1')));
       await render(false);
       expect(frame()).toBeNull();
     } finally {
@@ -333,8 +333,8 @@ describe('the windows of VS Code panes', () => {
   });
 
   it('give the keyboard back when VS Code takes it by itself as it starts, and keep it when asked', () => {
-    core.model.mutate('a', (l) => L.splitPane(l, 's1', 'horizontal', { code: { id: 'c1', folder: '/home/u/w1' } }));
-    core.model.mutate('a', (l) => L.focusPane(l, 's1'));
+    hub.model.mutate('a', (l) => L.splitPane(l, 's1', 'horizontal', { code: { id: 'c1', folder: '/home/u/w1' } }));
+    hub.model.mutate('a', (l) => L.focusPane(l, 's1'));
     useFrames.setState({ frames: { 'a|c1': { m: 'a', id: 'c1', folder: '/home/u/w1', load: 0 } } });
     const el = document.createElement('iframe');
     document.body.append(el);
@@ -389,8 +389,8 @@ describe('the windows of VS Code panes', () => {
 describe('Send to Agent', () => {
   it("goes to an agent of the sending pane's tab or workspace, else its terminal used last, never another workspace's", async () => {
     // w2's tab: a shell and a VS Code pane; w1 has the agent.
-    core.model.mutate('a', (l) => L.splitPane(l, 's2', 'horizontal', { code: { id: 'c2', folder: '/home/u/w2' } }));
-    core.model.mutate('a', (l) => L.splitPane(l, 's1', 'vertical', { code: { id: 'c1', folder: '/home/u/w1' } }));
+    hub.model.mutate('a', (l) => L.splitPane(l, 's2', 'horizontal', { code: { id: 'c2', folder: '/home/u/w2' } }));
+    hub.model.mutate('a', (l) => L.splitPane(l, 's1', 'vertical', { code: { id: 'c1', folder: '/home/u/w1' } }));
     useFrames.setState({
       frames: {
         'a|c1': { m: 'a', id: 'c1', folder: '/home/u/w1', load: 0 },
@@ -401,7 +401,7 @@ describe('Send to Agent', () => {
     expect(sendTarget('a', 'w1win', ['/home/u/w1'])).toEqual({ terminal: 'g1' });
     // w2 has no agent: nothing, the workspace named; once a shell there was used, that shell.
     expect(sendTarget('a', 'w2win', ['/home/u/w2'])).toEqual({ workspace: 'w2' });
-    core.model.mutate('a', (l) => L.focusPane(l, 's2'));
+    hub.model.mutate('a', (l) => L.focusPane(l, 's2'));
     noteFocusedTerminal('a', layout());
     expect(sendTarget('a', 'w2win', ['/home/u/w2'])).toEqual({ terminal: 's2' });
     // A window this page does not show, without the keyboard here: another page's.

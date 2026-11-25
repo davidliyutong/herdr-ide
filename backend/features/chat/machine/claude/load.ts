@@ -36,7 +36,7 @@ export function installedSdk(base: string, pin: NpmTarball = CLAUDE_SDK): SdkSou
     async load() {
       if (!mod) {
         if (!(await entryOk(dir, pin)))
-          throw unavailable(`${pin.name} ${pin.version} is not on this machine (${dir}); a core installs it before a chat starts`);
+          throw unavailable(`${pin.name} ${pin.version} is not on this machine (${dir}); a hub installs it before a chat starts`);
         const m = import(pathToFileURL(`${dir}/${pin.entry}`).href) as Promise<SdkModule>;
         mod = m;
         m.catch(() => {

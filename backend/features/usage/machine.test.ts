@@ -1,6 +1,6 @@
 // The usage feature's machine side through the wire: the actions as the
-// core calls them (#kernel/agent.ts, the protocol's schemas checking the
-// results), their refusals and codes, one core's limits answering
+// hub calls them (#kernel/agent.ts, the protocol's schemas checking the
+// results), their refusals and codes, one hub's limits answering
 // another's, no credential in a reply or an error.
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync, statSync, symlinkSync } from 'node:fs';
@@ -45,7 +45,7 @@ async function start(o: UsageMachineOptions = {}) {
   return { api, home: r.home, base: r.dirs.base, m };
 }
 
-/** The refusal's code of a call, as the core sees it. */
+/** The refusal's code of a call, as the hub sees it. */
 const refusal = async (p: Promise<unknown>) => {
   try {
     await p;
@@ -163,13 +163,13 @@ describe('the actions', () => {
   });
 });
 
-describe('the cores of a node', () => {
-  test('one core’s limits answer another’s same request within a minute; not the same core’s, nor other params', async () => {
+describe('the hubs of a node', () => {
+  test('one hub’s limits answer another’s same request within a minute; not the same hub’s, nor other params', async () => {
     const { api, base } = await start();
     api.json('/user/balance', '{"is_available":true}');
     write(join(base, 'usage/deepseek.key'), 'sk-shared\n');
     const a = machineOf(r!.session);
-    const b = machineOf(r!.connect('core-2'));
+    const b = machineOf(r!.connect('hub-2'));
     const ask = (m: typeof a, providers = ['deepseek']) => call(m, usageProtocol, 'limits', { providers });
     expect((await ask(a)).accounts[0]?.status).toBe('ok');
     expect(api.hits.get('/user/balance')).toBe(1);

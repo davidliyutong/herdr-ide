@@ -1,4 +1,4 @@
-// Files on the core's side, in two features:
+// Files on the hub's side, in two features:
 //
 //   - the transfers (fileTransfersFeature), always on, which the previews,
 //     the editor, dropped files and pasted images, VS Code's downloads and
@@ -13,7 +13,7 @@
 //     uploads into its folders and Reveal in Finder, each an action of its
 //     machine side (protocol.ts), and its settings.
 //
-// What a file is answered with is the Go core's: the editor and the
+// What a file is answered with is the Go hub's: the editor and the
 // previews read these answers as they were, with their errors (a listing's
 // and an upload's error is the agent's text, which the UI shows and
 // matches; a file's is plain text).
@@ -72,7 +72,7 @@ const prose = (status: number, e: unknown) => {
   return new Fail(text, status, text);
 };
 
-/** Answers the failures of a route as plain text, as the Go core's
+/** Answers the failures of a route as plain text, as the Go hub's
  * http.Error did: the editor shows that text (EditorPane readFailure). */
 const plainErrors = createMiddleware<Env>(async (c, next) => {
   await next();
@@ -360,7 +360,7 @@ async function send(
 }
 
 export interface FilesOptions {
-  /** The platform of the core's host, whose file manager Reveal opens. */
+  /** The platform of the hub's host, whose file manager Reveal opens. */
   platform?: string;
 }
 
@@ -430,8 +430,8 @@ export const filesFeature = (o: FilesOptions = {}) =>
         return c.json(r);
       });
 
-      // Reveal in Finder: only for the core's own machine (its agent runs on
-      // the core's host) and a client on that host, whose screen the window
+      // Reveal in Finder: only for the hub's own machine (its agent runs on
+      // the hub's host) and a client on that host, whose screen the window
       // opens on.
       const unrevealable = (c: Ctx): string =>
         !c.var.machine.local
@@ -445,7 +445,7 @@ export const filesFeature = (o: FilesOptions = {}) =>
         noStore(c);
         return c.json({ available: unrevealable(c) === '' });
       });
-      // It runs a program on the core's host: refused in read-only mode and
+      // It runs a program on the hub's host: refused in read-only mode and
       // audited, as the changes are.
       api.post(
         '/reveal',
@@ -455,7 +455,7 @@ export const filesFeature = (o: FilesOptions = {}) =>
           const { path } = c.req.valid('json');
           c.var.audit.path = path;
           const why = unrevealable(c);
-          if (why) throw new Fail(why, why === 'local_only' ? 403 : 400, "only the core's own machine, from its host's screen");
+          if (why) throw new Fail(why, why === 'local_only' ? 403 : 400, "only the hub's own machine, from its host's screen");
           const r = await ctx.call(c.var.machine, filesProtocol, 'reveal', { path }, { signal: c.req.raw.signal });
           noStore(c);
           return c.json(r);

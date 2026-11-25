@@ -1,7 +1,7 @@
 // The one keybinding system of every client (web UI, desktop app), modeled
 // on VS Code's: commands with default keys per platform (commands.ts), and
 // a hand-editable JSONC file of the user's rules ({key, command, when};
-// command "-<id>" removes a binding) on the core host. The core serves the
+// command "-<id>" removes a binding) on the hub host. The hub serves the
 // effective bindings of every platform and their conflicts (GET
 // /api/keybindings); the clients only match keys. See
 // docs/features/04-layout-and-keyboard.md.
@@ -20,7 +20,7 @@ export interface Rule {
 }
 
 /** Something wrong in the user's file: an entry that is not a valid rule
- * ("invalid"), a command no version of the core has ("unknown"), or a file
+ * ("invalid"), a command no version of the hub has ("unknown"), or a file
  * that is not a JSON array ("parse", index -1). */
 export interface Problem {
   index: number;

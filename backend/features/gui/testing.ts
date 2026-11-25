@@ -21,7 +21,7 @@ export class AgentAttach {
     this.conn = conn;
   }
 
-  /** Reads the core's commands until the core ends the stream. */
+  /** Reads the hub's commands until the hub ends the stream. */
   async serve(): Promise<void> {
     try {
       for (;;) {

@@ -277,7 +277,7 @@ export function machineMenu(m: string): MenuEntry[] {
   const s = useStore.getState();
   const st = s.machines[m];
   if (s.readOnly || !st) return [];
-  // A machine with a code (a target the core refuses, the local machine
+  // A machine with a code (a target the hub refuses, the local machine
   // where no agent runs) is never connected: it can be renamed or removed
   // only.
   const usable = !st.code;

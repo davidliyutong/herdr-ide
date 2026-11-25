@@ -37,7 +37,7 @@ function SettingsButton() {
 }
 
 /** Loads the vault again a moment after the auto-lock's time, should the
- * core's word that it locked not reach this page. */
+ * hub's word that it locked not reach this page. */
 function useLockReload() {
   const lockAt = useVault((s) => (s.session ? s.autoLock?.lockAt : undefined));
   useEffect(() => {

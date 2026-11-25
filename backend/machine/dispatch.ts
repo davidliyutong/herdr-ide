@@ -1,6 +1,6 @@
 // The plugin op: an action of a feature's machine side (feature.ts), its
 // params validated by the feature's protocol, its result written as the
-// core reads it (inline, or after the reply line when larger than
+// hub reads it (inline, or after the reply line when larger than
 // MAX_INLINE). A handler that throws fails its action with the Fail's code,
 // or failed, instead of ending the agent.
 import { Fail } from '#shared/lib/fail.ts';
@@ -24,7 +24,7 @@ export function resultLine(v: unknown): { line: string; body?: Buffer } {
   if (v === undefined) return { line: '{"ok":true}\n' };
   const b = Buffer.from(JSON.stringify(v));
   if (b.length > MAX_BODY) return { line: JSON.stringify(refusal(new Fail('too_large', 400, `result of ${b.length} bytes`))) + '\n' };
-  // A large result follows the reply line, which the core reads and bounds.
+  // A large result follows the reply line, which the hub reads and bounds.
   if (b.length > MAX_INLINE) return { line: `{"ok":true,"plugin_length":${b.length}}\n`, body: b };
   return { line: `{"ok":true,"plugin":${b.toString('utf8')}}\n` };
 }
@@ -36,11 +36,11 @@ export async function writeResult(conn: Conn, v: unknown): Promise<void> {
   if (body) await write(conn.stream, body);
 }
 
-/** An abort controller that also ends when the core closes conn's stream
+/** An abort controller that also ends when the hub closes conn's stream
  * (reading nothing more of it) or signal ends. */
 export function untilClosed(conn: Conn, signal: AbortSignal): AbortController {
   const ac = new AbortController();
-  const stop = () => ac.abort(new Error('the core closed the stream'));
+  const stop = () => ac.abort(new Error('the hub closed the stream'));
   if (signal.aborted) stop();
   signal.addEventListener('abort', stop, { once: true });
   const rest = conn.reader.release();

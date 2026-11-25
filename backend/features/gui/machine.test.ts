@@ -1,6 +1,6 @@
-// Program windows' machine side through the wire, as the core speaks it
+// Program windows' machine side through the wire, as the hub speaks it
 // (features/gui/agent.ts), with a fake GUI helper in place of the X
-// window manager: two cores of one display, one controls and the other
+// window manager: two hubs of one display, one controls and the other
 // views until it takes control; frames go to the watchers, input only from
 // the controller; a command of the wrong shape is ignored; the encoder's
 // install is held to its digest. The real helper against a real Xvfb is
@@ -100,7 +100,7 @@ async function guiRig(o: Parameters<typeof guiMachine>[0] = {}) {
   return r;
 }
 
-/** A core attached to the display: its events as they come. */
+/** A hub attached to the display: its events as they come. */
 async function attach(r: Rig, s = r.session) {
   const ac = new AbortController();
   const { conn } = await machineAgent.attach(machineOf(s), ac.signal);
@@ -122,7 +122,7 @@ async function attach(r: Rig, s = r.session) {
   return { conn, events, frames, send, role, close: () => conn.stream.destroy() };
 }
 
-describe('two cores of one display', () => {
+describe('two hubs of one display', () => {
   test('one controls, the other views until it takes control', async () => {
     const fake = fakeHelper();
     let started = 0;
@@ -142,7 +142,7 @@ describe('two cores of one display', () => {
       () => a.events.some((e) => e.ev === 'window' && e.window?.title === 'helper window' && e.window?.pid === 4242),
       'the window',
     );
-    const b = await attach(r, r.connect('core-2'));
+    const b = await attach(r, r.connect('hub-2'));
     await b.role(false);
     await until(() => b.events.some((e) => e.ev === 'window' && e.window?.id === 5), "b's window");
     expect(started).toBe(1);
@@ -211,7 +211,7 @@ describe('two cores of one display', () => {
     }
   });
 
-  test('cores attaching at once share one window manager', async () => {
+  test('hubs attaching at once share one window manager', async () => {
     const fake = fakeHelper();
     let started = 0;
     const r = await guiRig({
@@ -221,8 +221,8 @@ describe('two cores of one display', () => {
         return fake.proc;
       },
     });
-    const cores = await Promise.all([attach(r), attach(r, r.connect('core-2'))]);
-    const roles = () => cores.map((c) => c.events.find((e) => e.ev === 'role'));
+    const hubs = await Promise.all([attach(r), attach(r, r.connect('hub-2'))]);
+    const roles = () => hubs.map((c) => c.events.find((e) => e.ev === 'role'));
     await until(() => roles().every(Boolean), 'both roles');
     expect(roles().filter((e) => e!.control)).toHaveLength(1);
     expect(started).toBe(1);

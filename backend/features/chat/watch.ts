@@ -1,5 +1,5 @@
 // Watching the machines' chat hosts. While a machine is connected, the
-// feature is on and its host is in use, the core watches the host
+// feature is on and its host is in use, the hub watches the host
 // (Op.Watch): it keeps the states of the machine's chats, sends them to
 // every page (StatesData), tells the pages' notifications when a chat
 // becomes blocked or done (an agent event of the machine) and has the host
@@ -19,7 +19,7 @@ import { NOT_RUNNING } from './protocol.ts';
 import type { Timing } from './timing.ts';
 import { chatState, DATA_STATES, stateOf, type StatesData, type StatesSnapshot } from './wire.ts';
 
-/** How many watches in a row may fail before the core waits for the next
+/** How many watches in a row may fail before the hub waits for the next
  * use of the host, or the machine to connect again. */
 export const MAX_FAILURES = 6;
 
@@ -55,18 +55,18 @@ const asleep = (st: chat.ChatState, stale: boolean): chat.ChatState => {
   return stateOf(out);
 };
 
-/** What the core knows of one machine's chat host and its watch of it. */
+/** What the hub knows of one machine's chat host and its watch of it. */
 export interface Watched {
   readonly id: string;
   /** A watch runs (abort ends it); up: its stream told the states, and
-   * they are current; since: when it came up; dropping: the core ends it
+   * they are current; since: when it came up; dropping: the hub ends it
    * because the host has nothing to watch. */
   running: boolean;
   up: boolean;
   dropping: boolean;
   abort?: AbortController;
   since: number;
-  /** The states were read at least once since the core started; stale: the
+  /** The states were read at least once since the hub started; stale: the
    * machine disconnected since they were last read; states are every
    * chat's, as last read; rev numbers the messages of them. */
   known: boolean;
@@ -81,7 +81,7 @@ export interface Watched {
   /** A watch is to be tried, from retryAt on; failures counts those that
    * failed in a row. noChat: the machine has no chat host to give (an
    * agent of an older version): not tried until it connects again. ready:
-   * the machine was connected at the last step. lastUse: when the core
+   * the machine was connected at the last step. lastUse: when the hub
    * last used the host for a route or a page. */
   due: boolean;
   retryAt: number;
@@ -103,7 +103,7 @@ export interface WatcherOptions {
   publishAgent: (ev: AgentEvent) => void;
   /** The feature was turned off: the pages' subscriptions end. */
   turnedOff: () => void;
-  /** This core's build (agentproto's VERSION). */
+  /** This hub's build (agentproto's VERSION). */
   version: () => string;
   now: () => number;
   logger: Logger;
@@ -158,7 +158,7 @@ export class Watcher {
     return this.records.get(m)?.up ?? false;
   }
 
-  /** The machines whose records the core keeps. */
+  /** The machines whose records the hub keeps. */
   known(): string[] {
     return [...this.records.keys()];
   }
@@ -169,7 +169,7 @@ export class Watcher {
     else this.woken = true;
   }
 
-  /** Notes that the core used machine m's chat host for a route or a page:
+  /** Notes that the hub used machine m's chat host for a route or a page:
    * the host serves, so a watch is due if none runs. */
   used(m: string): void {
     const w = this.record(m);
@@ -187,7 +187,7 @@ export class Watcher {
     this.record(m).lastUse = this.o.now();
   }
 
-  /** How many chats of machine m the core knows (0 before it read them). */
+  /** How many chats of machine m the hub knows (0 before it read them). */
   chatCount(m: string): number {
     const w = this.records.get(m);
     return w?.known ? w.states.size : 0;
@@ -206,7 +206,7 @@ export class Watcher {
     };
   }
 
-  /** The states of every machine's chats the core read. */
+  /** The states of every machine's chats the hub read. */
   snapshot(): StatesSnapshot {
     const machines: Record<string, StatesData> = {};
     for (const [m, w] of this.records) if (w.known) machines[m] = this.data(w, sorted(w.states.values()), true);
@@ -314,7 +314,7 @@ export class Watcher {
     return this.data(w, sorted(w.states.values()), true);
   }
 
-  /** Whether the core has nothing to watch on w's host: no chat with an
+  /** Whether the hub has nothing to watch on w's host: no chat with an
    * agent process, no page's subscription, and no use for linger. */
   private quiet(w: Watched, now: number): boolean {
     const linger = this.o.timing.lingerMs;
@@ -374,14 +374,14 @@ export class Watcher {
     const now = this.o.now();
     let gone: StatesData | undefined;
     if (dropping) {
-      // The core ended it as the host had nothing to watch; a use since
+      // The hub ended it as the host had nothing to watch; a use since
       // makes the next one due.
       if (!this.quiet(w, now)) w.due = true;
     } else if (signal.aborted) {
-      // The core ended it: the machine left, the feature was turned off,
-      // the core stops.
+      // The hub ended it: the machine left, the feature was turned off,
+      // the hub stops.
     } else if (code === NOT_RUNNING) {
-      // No host serves, so no agent runs: chats the core still knows with
+      // No host serves, so no agent runs: chats the hub still knows with
       // one are sleeping now, the status of a turn that ran gone.
       const wasStale = w.stale;
       w.stale = false;
@@ -413,13 +413,13 @@ export class Watcher {
     if (gone) this.o.broadcast(gone, w.id);
   }
 
-  /** Whether st, which follows old (had: the core knew the chat), is a
+  /** Whether st, which follows old (had: the hub knew the chat), is a
    * notification: a chat that became blocked or done, never the same
-   * status at the same sequence number twice. Of the first states the core
+   * status at the same sequence number twice. Of the first states the hub
    * reads of a machine (initial), only the blocked ones are: what ended
-   * before the core started was told by the core of then, and what waits
+   * before the hub started was told by the hub of then, and what waits
    * for the user is to be answered still. After a gap in the watch (gap:
-   * the states a watch read first, not the core's first), a chat done at a
+   * the states a watch read first, not the hub's first), a chat done at a
    * later sequence number than it was is a turn that ran and ended
    * meanwhile, done again. */
   private publishes(w: Watched, st: chat.ChatState, old: chat.ChatState | undefined, initial: boolean, gap: boolean): boolean {
@@ -491,7 +491,7 @@ export class Watcher {
       });
   }
 
-  /** Drops what the core keeps of a removed machine. */
+  /** Drops what the hub keeps of a removed machine. */
   forget(m: string): void {
     const w = this.records.get(m);
     w?.abort?.abort();

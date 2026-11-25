@@ -1,4 +1,4 @@
-// What the frames of the app get (frames.ts): their channels to the core,
+// What the frames of the app get (frames.ts): their channels to the hub,
 // the ports the main process sends passed on to the page, and in VS
 // Code's frames the WebSocket that opens a channel.
 import test from 'node:test';

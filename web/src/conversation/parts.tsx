@@ -93,7 +93,7 @@ export const AnsweringContext = createContext<Answering>({
 });
 
 /** Why a command was not taken, in words: by the code of the source's
- * error (chatproto's codes, the core's), else in general. */
+ * error (chatproto's codes, the hub's), else in general. */
 export function errorText(e: unknown, agent: string, fallback: MessageKey): string {
   const code = typeof e === 'object' && e !== null ? (e as { code?: unknown }).code : undefined;
   const key = `conversation.error.${typeof code === 'string' ? code : ''}`;

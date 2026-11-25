@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Package each core with its license notices, including those of the
-# herdr-core the core embeds (backend/scripts/fetch-hc.ts), into
+# Package each hub with its license notices, including those of the
+# herdr-core the hub embeds (backend/scripts/fetch-hc.ts), into
 # dist/release/<slug>-<platform>.tar.gz, and dist/release/SHA256SUMS: the
 # archives' digests and those of the executables in them
-# (<slug>-<platform>/<slug>), which a core checks its machines' builds
+# (<slug>-<platform>/<slug>), which a hub checks its machines' builds
 # against (the archives are also what machines download).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -18,7 +18,7 @@ packaged=
 for p in $TARGETS; do
   case "$p" in
     linux/amd64|linux/arm64|darwin/amd64|darwin/arm64|linux/amd64-musl|linux/arm64-musl) ;;
-    # No Windows archive: there the core runs inside the desktop app.
+    # No Windows archive: there the hub runs inside the desktop app.
     windows/amd64) continue ;;
     *) echo "unsupported release platform: $p" >&2; exit 1 ;;
   esac

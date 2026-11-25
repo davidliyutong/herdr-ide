@@ -51,9 +51,9 @@ export interface GUIProc {
 
 /** Message kinds. */
 export const GUIMessage = {
-  /** One JSON object: a GUIEvent from the agent or a GUICommand from the core. */
+  /** One JSON object: a GUIEvent from the agent or a GUICommand from the hub. */
   JSON: 1,
-  /** Agent to core: a GUIFrameHeader and an encoded image. */
+  /** Agent to hub: a GUIFrameHeader and an encoded image. */
   Frame: 2,
 } as const;
 
@@ -135,7 +135,7 @@ export interface GUIStats {
 }
 
 /** Sent by the agent. ev: window, gone, layer, layer_gone, cursor, stats,
- * video, role; the core adds child for browsers. */
+ * video, role; the hub adds child for browsers. */
 export interface GUIEvent {
   ev: string;
   window?: GUIWindow;
@@ -147,7 +147,7 @@ export interface GUIEvent {
   control?: boolean;
 }
 
-/** Sent by the core; coordinates are relative to window id. */
+/** Sent by the hub; coordinates are relative to window id. */
 export interface GUICommand {
   cmd: string;
   id: number;
@@ -165,7 +165,7 @@ export interface GUICommand {
 /** Frame encodings. */
 export const GUIEnc = { JPEG: 1, PNG: 2, Video: 3, VideoKey: 4 } as const;
 
-/** Precedes the image of a frame message; the core relays both unchanged. */
+/** Precedes the image of a frame message; the hub relays both unchanged. */
 export interface GUIFrameHeader {
   window: number;
   layer: number;

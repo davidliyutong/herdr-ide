@@ -28,8 +28,8 @@ export function settingsRoutes(http: Http, { settings, keybindings, pages }: Set
   const { app } = http;
   const readOnly = http.options.readOnly;
 
-  /** A per-machine change names a machine the core has, and not the
-   * core's own for settings of remote machines only. */
+  /** A per-machine change names a machine the hub has, and not the
+   * hub's own for settings of remote machines only. */
   const target = (key: string, machine: string) => {
     if (!machine) return;
     const m = http.options.machine(machine);

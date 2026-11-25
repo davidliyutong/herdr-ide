@@ -3,7 +3,7 @@
 // compares its use with the share of its time gone and projects when it
 // runs out at the rate since its period's first point. The history also
 // keeps the alerts fired in each window's current period (alerts.ts);
-// store.ts keeps both in the core's database.
+// store.ts keeps both in the hub's database.
 import type { Account, Window } from './protocol.ts';
 
 const DAY = 86_400;
@@ -99,7 +99,7 @@ export class History {
   windows = new Map<string, Map<string, Point[]>>();
   /** account key|kind|label|length|alert → the period it fired in. */
   alerts = new Map<string, AlertRecord>();
-  /** What the core's database keeps was read into it (or it is kept in
+  /** What the hub's database keeps was read into it (or it is kept in
    * memory only): until then a save would remove what it did not read. */
   loaded = false;
 
@@ -135,8 +135,8 @@ export class History {
     }
   }
 
-  /** Adds what stored, read back from the core's database, has that this
-   * history (recorded since the core started) has not: each window's
+  /** Adds what stored, read back from the hub's database, has that this
+   * history (recorded since the hub started) has not: each window's
    * points before its first, and the alerts not fired since. */
   merge(stored: History): void {
     for (const [k, ws] of stored.windows) {

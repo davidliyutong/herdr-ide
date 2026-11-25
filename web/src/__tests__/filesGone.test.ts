@@ -4,8 +4,8 @@
 // titles of their tabs and headers are struck through, their tooltips say
 // so, also for a tab not shown, and the mark goes once the file is back; an
 // editor keeps its text, unsaved changes too. Reveal in Finder in the
-// explorer's and an editor tab's menus, only for the core's own machine
-// and when the core offers it.
+// explorer's and an editor tab's menus, only for the hub's own machine
+// and when the hub offers it.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -67,7 +67,7 @@ import { tabMenu } from '../menus';
 import { actions } from '../actions';
 import { useSettings } from '../settings';
 import { isItem, type MenuEntry, type MenuItem } from '../contextMenu';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 definePlugins([filesPlugin]);
@@ -86,7 +86,7 @@ const labels = (entries: MenuEntry[]) => entries.filter((e): e is MenuItem => is
 describe('editors of files gone', () => {
   let host: HTMLDivElement;
   let root: Root;
-  let core: FakeCore;
+  let hub: FakeHub;
   const flush = () => act(async () => settle());
   const tabLabel = (i: number) => host.querySelectorAll<HTMLElement>('.tab .tab-label')[i];
   const check = async () => {
@@ -131,8 +131,8 @@ describe('editors of files gone', () => {
       }
       return json({});
     });
-    core = new FakeCore();
-    core.machine('m', [], {
+    hub = new FakeHub();
+    hub.machine('m', [], {
       version: 2,
       workspaces: [
         {
@@ -150,14 +150,14 @@ describe('editors of files gone', () => {
       ],
       selected: 0,
     });
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([
       { id: 'm', label: 'm', kind: 'local', status: 'ready', info: { home: '/home/u', os: 'darwin' } } as unknown as MachineState,
     ]);
     s.selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
     host = document.createElement('div');
     document.body.append(host);
@@ -247,7 +247,7 @@ describe('editors of files gone', () => {
     }
   });
 
-  it('offers Reveal in Finder for the core’s own machine when the core does', async () => {
+  it('offers Reveal in Finder for the hub’s own machine when the hub does', async () => {
     const item = (entries: MenuEntry[]) =>
       entries.filter((e): e is MenuItem => isItem(e)).find((e) => e.label === t('files.revealInFinder'));
     // The editor's tab.
@@ -266,7 +266,7 @@ describe('editors of files gone', () => {
     useStore.getState().setReadOnly(true);
     expect(item(menuFor('m', ['/home/u/a.txt'], () => false))).toBeUndefined();
     useStore.getState().setReadOnly(false);
-    // A core that does not offer it (a page on another computer).
+    // A hub that does not offer it (a page on another computer).
     useRevealable.setState({}, true);
     revealable = false;
     labels(tabMenu('m', 'wwwwwwww', 1));
@@ -275,7 +275,7 @@ describe('editors of files gone', () => {
     expect(item(menuFor('m', ['/home/u/a.txt'], () => false))).toBeUndefined();
   });
 
-  it('offers no Reveal in Finder for another machine, nor asks the core', async () => {
+  it('offers no Reveal in Finder for another machine, nor asks the hub', async () => {
     useRevealable.setState({}, true);
     asks = 0;
     useStore

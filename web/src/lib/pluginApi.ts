@@ -1,12 +1,12 @@
-// What the plugins' requests to the core share (plugins/*/api.ts): a
-// failure that carries the core's error code, an answer read as JSON
+// What the plugins' requests to the hub share (plugins/*/api.ts): a
+// failure that carries the hub's error code, an answer read as JSON
 // whatever the status, the fetch options of a JSON body, and a failure's
 // text looked up by its code. What differs per plugin stays an option of
 // its own module: the failure's class, special statuses, headers.
 
 import { hasMessage, t } from '../i18n';
 
-/** A failure with the code the core or the machine gave; each plugin has
+/** A failure with the code the hub or the machine gave; each plugin has
  * its own class of it (FilesError, GitError, VaultError, BrowserError). */
 export class PluginError extends Error {
   constructor(

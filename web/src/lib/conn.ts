@@ -1,4 +1,4 @@
-// The core's event channel (/ws): machines, program windows, agent states,
+// The hub's event channel (/ws): machines, program windows, agent states,
 // downloads, the VS Code bridge, settings and keybindings. Terminals use
 // their own protocol (term/connection.ts).
 
@@ -29,7 +29,7 @@ type Listener = {
   /** The settings or keybindings changed: their new state. */
   onSettings?(m: Record<string, unknown>): void;
   onKeybindings?(m: Record<string, unknown>): void;
-  /** A message of a plugin's core side, for machine m ("" for the core's). */
+  /** A message of a plugin's hub side, for machine m ("" for the hub's). */
   onPlugin?(plugin: string, m: string, data: unknown): void;
 };
 
@@ -43,8 +43,8 @@ class Conn {
   // Messages sent while disconnected, sent once connected.
   private queue: string[] = [];
   private theme?: string;
-  // When the user last used the page (opening it counts) and when the core
-  // was last told; the core lets the most recently used page play sounds.
+  // When the user last used the page (opening it counts) and when the hub
+  // was last told; the hub lets the most recently used page play sounds.
   private lastInput = Date.now();
   private lastActiveSent = 0;
   connected = false;
@@ -138,7 +138,7 @@ class Conn {
     this.rawSend(obj);
   }
 
-  /** Tells the core the light/dark theme in use, now and after reconnects;
+  /** Tells the hub the light/dark theme in use, now and after reconnects;
    * VS Code windows follow it. */
   setTheme(kind: string) {
     if (kind === this.theme) return;

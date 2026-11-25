@@ -31,7 +31,7 @@ import { SettingsDialog } from '../components/SettingsDialog';
 import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { dummyPlugin, resetViewStatuses, thing } from './viewStatusPlugin';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -41,7 +41,7 @@ const set = (key: string, value: SettingValue) =>
   useSettings.setState({ values: { ...useSettings.getState().values, [key]: { value, source: 'global' } } });
 
 describe('unified notification dispatcher', () => {
-  let core: FakeCore;
+  let hub: FakeHub;
   let hasFocus = false;
   const shownWeb: Array<{ title: string; body?: string; tag?: string; silent?: boolean | null; closed: number; n: FakeNotification }> = [];
   let webPermission: NotificationPermission = 'granted';
@@ -89,8 +89,8 @@ describe('unified notification dispatcher', () => {
     vi.spyOn(document, 'hasFocus').mockImplementation(() => hasFocus);
     setPageVisible(false);
 
-    core = new FakeCore();
-    core.machine('m', [FakeCore.term('t1', { agent: 'claude', agent_status: 'working' })], {
+    hub = new FakeHub();
+    hub.machine('m', [FakeHub.term('t1', { agent: 'claude', agent_status: 'working' })], {
       version: 2,
       workspaces: [
         {
@@ -106,12 +106,12 @@ describe('unified notification dispatcher', () => {
       ],
       selected: 0,
     });
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([{ id: 'm', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]);
     s.selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
   });
 
@@ -347,6 +347,6 @@ describe('unified notification dispatcher', () => {
     await act(async () => root.unmount());
     host.remove();
     useStore.getState().openSettings(false);
-    L.focusPane(core.layout('m')!, 't1');
+    L.focusPane(hub.layout('m')!, 't1');
   });
 });

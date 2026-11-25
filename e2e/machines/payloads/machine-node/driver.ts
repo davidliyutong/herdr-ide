@@ -1,4 +1,4 @@
-// Drives the TypeScript machine side on a machine of the matrix as a core
+// Drives the TypeScript machine side on a machine of the matrix as a hub
 // does over ssh: `node dial` of the machine executable (MACHINE_EXE: the
 // platform's compiled executable), a yamux session over its standard
 // input and output, the agent protocol on it. It checks that the node
@@ -65,7 +65,7 @@ await step('a terminal of its terminal core', async () => {
   const st = await session.request({ op: Op.HC, action: 'status' }, { timeoutMs: 30_000 });
   const digest = st.hc?.embedded ?? '';
   check(!!digest, 'the executable embeds herdr-core');
-  // The executable's own herdr-core, as the core's terminal lifecycle has it installed.
+  // The executable's own herdr-core, as the hub's terminal lifecycle has it installed.
   const installed = await session.request({ op: Op.HC, action: 'install-embedded', digest }, { timeoutMs: 60_000 });
   check(
     installed.ok && installed.hc?.digest === digest,

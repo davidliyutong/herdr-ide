@@ -1,13 +1,13 @@
 // The desktop app (desktop/, unpackaged Electron) on an isolated instance:
-// a home of its own (home.ts) as its HOME and the core's instance
+// a home of its own (home.ts) as its HOME and the hub's instance
 // (<PREFIX>DESKTOP_DEV), its own Chromium profile (--user-data-dir) with the
 // mock keychain, so neither the user's app, its profile and instance nor
 // their keychain is read or touched; the payloads scripts/e2e.sh built.
-// Its core runs in the app's utility process, without a listener: the
+// Its hub runs in the app's utility process, without a listener: the
 // test reaches it through the app's window (api(), channelText()), as the
 // UI does.
 //
-// close() quits the app, which stops the core; the instance's node and
+// close() quits the app, which stops the hub; the instance's node and
 // terminal core outlive it and are stopped with the home.
 
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
@@ -48,7 +48,7 @@ export interface DesktopOptions {
   /** The instance's settings besides BASE_SETTINGS and English. */
   settings?: Record<string, unknown>;
   /** A directory with code-server-<version>-<os>-<arch>.tar.gz, which the
-   * core installs from instead of downloading. */
+   * hub installs from instead of downloading. */
   codeServerSeed?: string;
   /** More of the app's environment (a proxy's settings). */
   env?: Record<string, string>;
@@ -110,12 +110,12 @@ export class Desktop {
     }
   }
 
-  /** The last of what the app wrote to stderr (its core's log too). */
+  /** The last of what the app wrote to stderr (its hub's log too). */
   logs(): string {
     return tail(this.log);
   }
 
-  /** A request of the app's window to the core, its JSON answer; throws on
+  /** A request of the app's window to the hub, its JSON answer; throws on
    * an error status. */
   api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
     return this.win.evaluate(
@@ -133,7 +133,7 @@ export class Desktop {
     );
   }
 
-  /** The local machine's status, undefined while the core cannot answer. */
+  /** The local machine's status, undefined while the hub cannot answer. */
   async localStatus(): Promise<string | undefined> {
     const list = await this.api<Array<{ id: string; status: string }>>('GET', '/api/machines').catch(() => undefined);
     return list?.find((m) => m.id === 'local')?.status;
@@ -198,7 +198,7 @@ export class Desktop {
     );
   }
 
-  /** The core's utility process; waits for one other than not (the one
+  /** The hub's utility process; waits for one other than not (the one
    * that crashed). */
   hubPid(not?: number): Promise<number> {
     return waitFor(
@@ -206,11 +206,11 @@ export class Desktop {
         const pid = (await this.processes()).find((p) => p.type === 'Utility' && / hub$/.test(p.name))?.pid;
         return pid !== not ? pid : undefined;
       },
-      { what: "the core's utility process", timeout: 30_000 },
+      { what: "the hub's utility process", timeout: 30_000 },
     );
   }
 
-  /** Quits the app (which stops its core), stops the instance's node and
+  /** Quits the app (which stops its hub), stops the instance's node and
    * terminal core and removes the home; once. */
   close(): Promise<void> {
     this.closed ??= (async () => {

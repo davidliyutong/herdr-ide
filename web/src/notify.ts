@@ -250,7 +250,7 @@ export function lookedAt(key: string) {
   announcedBlocked.delete(key);
 }
 
-/** sound: the core chose this page to play sounds (see soundClient). */
+/** sound: the hub chose this page to play sounds (see soundClient). */
 export function notifyAgent(m: string, ev: AgentStatusEvent, sound: boolean) {
   if (ev.agent_status !== 'blocked' && ev.agent_status !== 'done') return;
   const s = useStore.getState();

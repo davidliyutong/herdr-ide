@@ -57,21 +57,21 @@ class Client {
   }
 }
 
-let cores: FakeHub[] = [];
+let hubs: FakeHub[] = [];
 let clients: Client[] = [];
 afterEach(async () => {
   for (const c of clients) {
     c.in.end();
     await c.done;
   }
-  for (const c of cores) c.close();
-  cores = [];
+  for (const c of hubs) c.close();
+  hubs = [];
   clients = [];
 });
 
-async function core(answer: (req: VaultRequest) => VaultResponse | null): Promise<FakeHub> {
+async function hub(answer: (req: VaultRequest) => VaultResponse | null): Promise<FakeHub> {
   const c = await fakeHub(answer);
-  cores.push(c);
+  hubs.push(c);
   return c;
 }
 
@@ -108,7 +108,7 @@ const runCall = (id: number | string, command: string, dir: string) => ({
 describe('the MCP server', () => {
   // TestProtocol
   test('speaks MCP: the handshake, the tools and their calls', async () => {
-    const fc = await core((req): VaultResponse => {
+    const fc = await hub((req): VaultResponse => {
       switch (req.tool) {
         case 'list':
           return { ok: true, variables: [{ name: 'TOKEN', description: 'd' }] };
@@ -178,8 +178,8 @@ describe('the MCP server', () => {
   });
 
   // TestErrorsReachTheModel
-  test("the core's refusals and an absent agent reach the model as the tool's errors", async () => {
-    const fc = await core(() => ({ ok: false, code: 'denied', error: 'the user denied the request' }));
+  test("the hub's refusals and an absent agent reach the model as the tool's errors", async () => {
+    const fc = await hub(() => ({ ok: false, code: 'denied', error: 'the user denied the request' }));
     let c = client({ dial: dialSocket(fc.path) });
     await c.init();
     let t = await c.tool('get_variable', { name: 'X' });
@@ -193,26 +193,26 @@ describe('the MCP server', () => {
   });
 
   // TestRunLimitsFromTheHub
-  test("the core's limits bound run_with_env's command", async () => {
-    const fc = await core(() => ({ ok: true, values: { K: 'v' }, run: { timeout: 1, max_timeout: 2, max_output: 50 } }));
+  test("the hub's limits bound run_with_env's command", async () => {
+    const fc = await hub(() => ({ ok: true, values: { K: 'v' }, run: { timeout: 1, max_timeout: 2, max_output: 50 } }));
     const c = client({ dial: dialSocket(fc.path) });
     await c.init();
     let t = await c.tool('run_with_env', { command: 'yes abcdefghij | head -c 5000', names: ['K'] });
     expect(t.text).toContain('[output truncated: 50 of 5000 bytes]');
-    // The call's own timeout, under the core's longest.
+    // The call's own timeout, under the hub's longest.
     t = await c.tool('run_with_env', { command: 'sleep 30', names: ['K'], timeout: 0.2 });
     expect(t.isError).toBe(true);
     expect(t.text).toContain('timed out after 200ms');
-    // The core's longest bounds the call's.
+    // The hub's longest bounds the call's.
     t = await c.tool('run_with_env', { command: 'sleep 30', names: ['K'], timeout: 3600 });
     expect(t.text).toContain('timed out after 2s');
   });
 
   // TestCancelledRequestLeavesTheHub: a call the client cancels while it
-  // waits for the user's approval ends: its request to the core goes away
-  // (the core takes it as a denial) and it gets no response.
-  test('a cancelled call leaves the core and gets no response', async () => {
-    const fc = await core(() => null);
+  // waits for the user's approval ends: its request to the hub goes away
+  // (the hub takes it as a denial) and it gets no response.
+  test('a cancelled call leaves the hub and gets no response', async () => {
+    const fc = await hub(() => null);
     const c = client({ dial: dialSocket(fc.path) });
     await c.init();
     c.send({ jsonrpc: '2.0', id: 'call-7', method: 'tools/call', params: { name: 'get_variable', arguments: { name: 'KEY' } } });
@@ -228,7 +228,7 @@ describe('the MCP server', () => {
   // TestCancelledCommandIsKilled: its command is killed, with what it left
   // in the background, and it gets no response.
   test('a cancelled command is killed with what it left in the background', async () => {
-    const fc = await core(() => ({ ok: true, values: { V: 'secret' } }));
+    const fc = await hub(() => ({ ok: true, values: { V: 'secret' } }));
     const c = client({ dial: dialSocket(fc.path) });
     await c.init();
     const dir = tmp();
@@ -244,7 +244,7 @@ describe('the MCP server', () => {
   });
 
   test('a command still running when the input ends is killed before the server returns', async () => {
-    const fc = await core(() => ({ ok: true, values: { V: 'secret' } }));
+    const fc = await hub(() => ({ ok: true, values: { V: 'secret' } }));
     const c = client({ dial: dialSocket(fc.path) });
     await c.init();
     const dir = tmp();
@@ -260,7 +260,7 @@ describe('the MCP server', () => {
   });
 
   test('a line longer than the server takes ends it with an error', async () => {
-    const fc = await core(() => ({ ok: true }));
+    const fc = await hub(() => ({ ok: true }));
     const c = client({ dial: dialSocket(fc.path) });
     c.in.write('{"x":"' + 'a'.repeat(MAX_LINE) + '"}\n');
     const e = (await c.done) as Error | null;

@@ -1,4 +1,4 @@
-// The chat plugin's requests to the core (backend/features/chat), the
+// The chat plugin's requests to the hub (backend/features/chat), the
 // page's one module of them (the agents plugin's part in chats uses it
 // too): a machine's agents, chats and sessions, and the changes (a new
 // chat, an agent's session imported, closing, deleting, seen, handing a
@@ -25,8 +25,8 @@ import {
   type TrustedFolder,
 } from './protocol';
 
-/** A failure with the core's or the chat host's code (chatproto's codes,
- * read_only, offline, …), or network when the core did not answer. */
+/** A failure with the hub's or the chat host's code (chatproto's codes,
+ * read_only, offline, …), or network when the hub did not answer. */
 export class ChatFailure extends PluginError {
   constructor(code: string, message: string) {
     super(code, message);
@@ -183,15 +183,15 @@ export function readSession(v: unknown): Session | undefined {
 const list = <T>(v: unknown, max: number, read: (x: unknown) => T | undefined): T[] =>
   Array.isArray(v) ? v.slice(0, max).flatMap((x) => read(x) ?? []) : [];
 
-/** A machine's states as the core sends them (StatesData), read;
+/** A machine's states as the hub sends them (StatesData), read;
  * undefined for what is none. */
 export interface States {
   states: ChatState[];
   full: boolean;
   rev: number;
   stale?: boolean;
-  /** The chat host's version as the core read it last ("" for none), and
-   * whether it is another build than the core's. */
+  /** The chat host's version as the hub read it last ("" for none), and
+   * whether it is another build than the hub's. */
   hostVersion: string;
   outdated: boolean;
 }
@@ -223,7 +223,7 @@ export interface NewChat {
 }
 
 export const chatApi = {
-  /** Every machine's states as the core last read them (StatesSnapshot). */
+  /** Every machine's states as the hub last read them (StatesSnapshot). */
   async states(): Promise<Record<string, States>> {
     const r = await send<{ machines?: unknown }>(STATES_PATH, { cache: 'no-store' });
     const out: Record<string, States> = {};

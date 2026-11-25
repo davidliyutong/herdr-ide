@@ -8,10 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { dropTargetAt } from '../paneDrag';
 
-let core: FakeCore;
+let hub: FakeHub;
 
 /** A tab bar as Workspace.tsx draws it, for machine m. */
 function bar(m: string, withNewTab = true) {
@@ -35,8 +35,8 @@ function dropOn(el: Element, skip: { pane?: string } = { pane: 's1' }) {
 }
 
 beforeEach(async () => {
-  core = new FakeCore();
-  core.machine('a', [FakeCore.term('s1'), FakeCore.term('s2'), FakeCore.term('s3')], {
+  hub = new FakeHub();
+  hub.machine('a', [FakeHub.term('s1'), FakeHub.term('s2'), FakeHub.term('s3')], {
     version: 2,
     workspaces: [
       {
@@ -52,8 +52,8 @@ beforeEach(async () => {
     ],
     selected: 0,
   });
-  core.install();
-  core.model.subscribe('a');
+  hub.install();
+  hub.model.subscribe('a');
   await settle();
 });
 

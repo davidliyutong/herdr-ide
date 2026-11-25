@@ -5,7 +5,7 @@
 // so the layer never moves one: moving its pane, switching tabs, workspaces
 // or machines only places it elsewhere or hides it. A window off screen
 // stays loaded for a while, so coming back is instant; then it is
-// unmounted, which closes its connection and lets the core stop that
+// unmounted, which closes its connection and lets the hub stop that
 // machine's idle code-server (docs/features/05-vscode-panes.md).
 //
 // Each iframe is a VS Code window of its own. The page learns which window
@@ -40,7 +40,7 @@ export interface ShownView {
 export const frameKey = (m: string, id: string) => `${m}|${id}`;
 
 /** A window off screen is unmounted after this long, which closes its
- * connection and lets the core stop that machine's idle code-server. */
+ * connection and lets the hub stop that machine's idle code-server. */
 export const FRAME_TTL = 10 * 60_000;
 /** At most this many windows off screen stay mounted (each is a whole VS Code
  * workbench); the ones hidden longest go first. */

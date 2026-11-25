@@ -1,8 +1,8 @@
 // Helpers of the chat feature's tests, never used by the product: a chat
 // host in memory (FakeChatHost) that the machines' fake agents give the
-// core with the open action, as the machine side does, and that records
+// hub with the open action, as the machine side does, and that records
 // what it gets; a page's WebSocket over a channel pair whose page can stop
-// taking messages; and a core with machines gpu (connected) and box
+// taking messages; and a hub with machines gpu (connected) and box
 // (disabled) that runs them.
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -96,7 +96,7 @@ export class FakeChatHost {
   readonly attached = new Map<HostSide, string>();
   readonly conns = new Set<HostSide>();
 
-  /** Serves a stream the core opened on a machine (the agent's part). */
+  /** Serves a stream the hub opened on a machine (the agent's part). */
   async serve(h: Header, conn: AgentStream): Promise<void> {
     const reply = async (r: Reply) => {
       await writeLine(conn.stream, r).catch(() => {});
@@ -293,14 +293,14 @@ export type Msg = Record<string, unknown>;
 export const errCode = (m: Msg): unknown => (m.error as { code?: unknown } | undefined)?.code;
 
 /** A page's WebSocket over a channel pair. While paused the page takes
- * nothing: what the core sends stays buffered in the channel. */
+ * nothing: what the hub sends stays buffered in the channel. */
 export class TestPage {
   private readonly q: Msg[] = [];
   private wake: (() => void) | null = null;
   ended = false;
   closeCode = 0;
   private ch!: Channel;
-  private core!: ChannelHandlers;
+  private hub!: ChannelHandlers;
   private held: Message[] = [];
   private heldBytes = 0;
   private paused = false;
@@ -323,7 +323,7 @@ export class TestPage {
           },
           close: (code, reason) => b.close(code, reason),
         };
-        b.adopt(() => (p.core = open(side)));
+        b.adopt(() => (p.hub = open(side)));
         return new Response(null);
       },
     });
@@ -353,7 +353,7 @@ export class TestPage {
     this.held = [];
     this.heldBytes = 0;
     for (const d of held) this.toPage.send(d);
-    this.core.drain?.();
+    this.hub.drain?.();
   }
 
   send(v: unknown): void {
@@ -408,12 +408,12 @@ export class TestPage {
 
 export interface RigOptions {
   readOnly?: boolean;
-  /** How the core gets the machines the Agent SDK: offline by default,
+  /** How the hub gets the machines the Agent SDK: offline by default,
    * with a cache of its own. */
   sdk?: Partial<SdkProvisionOptions>;
   timing?: Partial<Timing>;
   limits?: Partial<Limits>;
-  /** This core's build (the chat host's is "test"). */
+  /** This hub's build (the chat host's is "test"). */
   version?: string;
   /** Prepares the host before the machines connect. */
   host?: (h: FakeChatHost) => void;
@@ -448,7 +448,7 @@ export interface Rig {
   stop(): Promise<void>;
 }
 
-/** A core with ssh machines gpu (connected) and box (disabled) whose
+/** A hub with ssh machines gpu (connected) and box (disabled) whose
  * agents give FakeChatHost as their chat host, running the machines but
  * not the watches (start). */
 export async function rig(o: RigOptions = {}): Promise<Rig> {
@@ -467,7 +467,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   });
   const store = new Settings('', { modules: [chatSettings, toggles([feature])] });
   const audit = memoryAudit();
-  const core = createHub({
+  const hub = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: o.readOnly ?? false,
@@ -480,7 +480,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   const notes: Rig['notes'] = [];
   machines.subscribe({ agent: (ev) => void notes.push({ ...(ev.data as Record<string, unknown>), m: ev.m }) });
   // What the pages get on /ws.
-  core.pages.connect(
+  hub.pages.connect(
     {
       send: (d) => {
         const msg = JSON.parse(d as string) as Msg;
@@ -499,14 +499,14 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   const request: Rig['request'] = (method, path, r = {}) => {
     const headers = new Headers({ Host: '127.0.0.1:7780' });
     if (r.origin) headers.set('Origin', r.origin);
-    return core.fetch(new Request(`http://127.0.0.1:7780${path}`, { method, headers, body: r.body }), {
+    return hub.fetch(new Request(`http://127.0.0.1:7780${path}`, { method, headers, body: r.body }), {
       remote: '127.0.0.1',
       desktop: false,
       upgrade: r.upgrade,
     });
   };
   const r: Rig = {
-    hub: core,
+    hub: hub,
     host,
     board,
     machines,

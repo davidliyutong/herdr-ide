@@ -2,7 +2,7 @@
 # Runs the program windows of the TypeScript machine side on this machine:
 # the driver (driver.js, built with build.sh) with the executable of this
 # machine's C library (exe/) acting as Bun (BUN_BE_BUN=1), which drives
-# that executable's node as a core does: the display (the distribution's
+# that executable's node as a hub does: the display (the distribution's
 # Xvfb, installed here first when it is missing: the machines are
 # throwaway), a program's window through the GUI helper, input, the
 # keeper; the GPU display too where the machine has Xwayland and a render

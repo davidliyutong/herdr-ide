@@ -1,4 +1,4 @@
-// A node's clients: `node dial` (what ssh runs for a core: standard input
+// A node's clients: `node dial` (what ssh runs for a hub: standard input
 // and output piped to the node, which it starts when none answers, or
 // takes over from when the one that answers is of an older build), `node
 // stop` and the takeover's hello.
@@ -87,7 +87,7 @@ export function startNode(instance: string, dirs: Dirs, takeover: boolean, comma
 const NODE_START_WAIT_MS = 15_000;
 
 /** Connects to the instance's node and asks it to serve the connection as
- * an agent session for the core client that came through sshConn
+ * an agent session for the hub client that came through sshConn
  * (SSH_CONNECTION; "" for the local machine). With no node, or one of an
  * older build, it starts one of this build (which takes over from the
  * older one) and connects to that. */

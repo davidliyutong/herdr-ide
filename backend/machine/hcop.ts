@@ -8,8 +8,8 @@ import type { TerminalCore } from './hc.ts';
 import type { Conn } from './stream.ts';
 
 /** Serves op hc. Before a start or restart the executable is hashed again:
- * it runs only while it is the one the core expects (h.digest, the
- * executable the core carries and installed; empty when it carries none). */
+ * it runs only while it is the one the hub expects (h.digest, the
+ * executable the hub carries and installed; empty when it carries none). */
 export async function serveHC(conn: Conn, h: Header, hc: TerminalCore, signal: AbortSignal): Promise<void> {
   const st = conn.stream;
   const failed = async (code: string, e: unknown) =>
@@ -31,7 +31,7 @@ export async function serveHC(conn: Conn, h: Header, hc: TerminalCore, signal: A
         }
         break;
       case 'install-embedded':
-        // The herdr-core this build carries, when it is the one the core
+        // The herdr-core this build carries, when it is the one the hub
         // expects (the digest this build reported).
         try {
           await hc.installEmbedded(h.digest ?? '');

@@ -1,5 +1,5 @@
-// The registry's contents for a core of features (registry.ts); the
-// composed core's, against the files in the repository, are tested with
+// The registry's contents for a hub of features (registry.ts); the
+// composed hub's, against the files in the repository, are tested with
 // its composition (hosts/bun/registry.test.ts).
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -22,7 +22,7 @@ const extra = {
 };
 const input = registryInput([{ id: 'machines', toggle: false }, extra]);
 
-describe('core modules', () => {
+describe('hub modules', () => {
   // The user interface's module, the switches of the features that have
   // one in the features' order, then the features' own modules in that
   // order; a feature that is always on has no switch.

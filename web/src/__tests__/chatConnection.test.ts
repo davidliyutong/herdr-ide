@@ -1,7 +1,7 @@
 // The chat plugin's WebSocket (plugins/chat/connection.ts) and the chat
 // source on it (plugins/chat/source.ts): subscriptions multiplexed on one
 // connection that opens with the first and closes when idle, commands
-// answered by their acks, the bounds, what the core sends checked, the
+// answered by their acks, the bounds, what the hub sends checked, the
 // connection coming back (attaching again after the last stored seq, a
 // reattach before the replay), and the source's events (info first, the
 // same for a subscriber that comes later), its commands, its end.
@@ -22,16 +22,16 @@ const A = 'c0000000000000001';
 const B = 'c0000000000000002';
 const chatId = (n: number) => `c${n.toString(16).padStart(16, '0')}`;
 
-let core: FakeChatHub;
+let hub: FakeChatHub;
 beforeEach(() => {
-  core = new FakeChatHub();
-  core.install();
+  hub = new FakeChatHub();
+  hub.install();
   useStore.getState().setReadOnly(false);
   resetChats();
 });
 afterEach(() => {
   dropSources();
-  core.conn.close();
+  hub.conn.close();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -58,24 +58,24 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('the chat connection', () => {
   it('opens with the first subscription and multiplexes chats on it', async () => {
-    expect(core.sockets).toHaveLength(0);
+    expect(hub.sockets).toHaveLength(0);
     const a = handler();
     const b = handler(7);
-    const sa = core.conn.attach('m', A, a);
-    core.conn.attach('n', B, b);
-    expect(core.sockets).toHaveLength(1);
-    expect(core.sent).toEqual([]);
-    core.open();
-    expect(core.ops('attach')).toEqual([
+    const sa = hub.conn.attach('m', A, a);
+    hub.conn.attach('n', B, b);
+    expect(hub.sockets).toHaveLength(1);
+    expect(hub.sent).toEqual([]);
+    hub.open();
+    expect(hub.ops('attach')).toEqual([
       { op: 'attach', sub: sa.id, m: 'm', chat: A },
       { op: 'attach', sub: expect.any(String), m: 'n', chat: B, from: 7 },
     ]);
-    const [, sb] = core.ops('attach').map((m) => m.sub);
-    core.push({ t: 'attached', sub: sa.id, chat: { id: A }, first: 3 });
-    core.push({ t: 'event', sub: sa.id, ev: { seq: 4, t: 'turn', state: 'start' } });
-    core.push({ t: 'event', sub: sb, ev: { seq: 9, t: 'turn', state: 'start' } }); // before its attached: passed over
-    core.push({ t: 'attached', sub: sb, chat: { id: B } });
-    core.push({ t: 'event', sub: sb, ev: { seq: 10, t: 'user' } });
+    const [, sb] = hub.ops('attach').map((m) => m.sub);
+    hub.push({ t: 'attached', sub: sa.id, chat: { id: A }, first: 3 });
+    hub.push({ t: 'event', sub: sa.id, ev: { seq: 4, t: 'turn', state: 'start' } });
+    hub.push({ t: 'event', sub: sb, ev: { seq: 9, t: 'turn', state: 'start' } }); // before its attached: passed over
+    hub.push({ t: 'attached', sub: sb, chat: { id: B } });
+    hub.push({ t: 'event', sub: sb, ev: { seq: 10, t: 'user' } });
     expect(a.log).toEqual([
       ['attached', A, 3, false],
       ['event', 4],
@@ -85,67 +85,67 @@ describe('the chat connection', () => {
       ['event', 10],
     ]);
     sa.detach();
-    expect(core.ops('detach')).toEqual([{ op: 'detach', sub: sa.id }]);
-    core.push({ t: 'event', sub: sa.id, ev: { seq: 5, t: 'user' } });
+    expect(hub.ops('detach')).toEqual([{ op: 'detach', sub: sa.id }]);
+    hub.push({ t: 'event', sub: sa.id, ev: { seq: 5, t: 'user' } });
     expect(a.log).toHaveLength(2);
-    core.push({ t: 'detached', sub: sb, error: { code: 'offline', message: 'the machine left' } });
+    hub.push({ t: 'detached', sub: sb, error: { code: 'offline', message: 'the machine left' } });
     expect(b.log.at(-1)).toEqual(['detached', 'offline']);
   });
 
   it('passes over what is no message of the protocol', async () => {
     const a = handler();
-    const sa = core.conn.attach('m', A, a);
-    core.open();
-    for (const bad of ['not json', '[1]', 'null', '{"t":"nothing"}', { t: 'event', sub: 'other', ev: { t: 'user' } }]) core.push(bad);
-    core.push({ t: 'attached', sub: sa.id, chat: 'no object', first: -1 });
-    core.push({ t: 'event', sub: sa.id, ev: 'text' });
-    core.push({ t: 'event', sub: sa.id, ev: { seq: 1 } });
-    core.push({ t: 'ack', id: 'k999' });
+    const sa = hub.conn.attach('m', A, a);
+    hub.open();
+    for (const bad of ['not json', '[1]', 'null', '{"t":"nothing"}', { t: 'event', sub: 'other', ev: { t: 'user' } }]) hub.push(bad);
+    hub.push({ t: 'attached', sub: sa.id, chat: 'no object', first: -1 });
+    hub.push({ t: 'event', sub: sa.id, ev: 'text' });
+    hub.push({ t: 'event', sub: sa.id, ev: { seq: 1 } });
+    hub.push({ t: 'ack', id: 'k999' });
     expect(a.log).toEqual([['attached', undefined, undefined, false]]);
   });
 
   it('answers commands with their acks, and refuses what it cannot send', async () => {
-    core.open();
-    const sa = core.conn.attach('m', A, handler());
-    core.open();
-    core.push({ t: 'attached', sub: sa.id, chat: { id: A } });
-    const ok = core.conn.command('m', A, { op: 'cancel' });
-    const refused = core.conn.command('m', A, { op: 'compact' });
-    const [c1, c2] = core.ops('command');
+    hub.open();
+    const sa = hub.conn.attach('m', A, handler());
+    hub.open();
+    hub.push({ t: 'attached', sub: sa.id, chat: { id: A } });
+    const ok = hub.conn.command('m', A, { op: 'cancel' });
+    const refused = hub.conn.command('m', A, { op: 'compact' });
+    const [c1, c2] = hub.ops('command');
     expect(c1).toEqual({ op: 'command', id: expect.any(String), m: 'm', chat: A, cmd: { op: 'cancel' } });
-    core.push({ t: 'ack', id: c2.id, error: { code: 'unsupported', message: 'no compact' } });
-    core.push({ t: 'ack', id: c1.id });
+    hub.push({ t: 'ack', id: c2.id, error: { code: 'unsupported', message: 'no compact' } });
+    hub.push({ t: 'ack', id: c1.id });
     await expect(ok).resolves.toBeUndefined();
     await expect(refused).rejects.toMatchObject({ code: 'unsupported' });
-    // A prompt larger than the core takes is not sent.
-    const big = core.conn.command('m', A, { op: 'prompt', content: [{ type: 'text', text: 'x'.repeat(MAX_CLIENT_MESSAGE) }] });
+    // A prompt larger than the hub takes is not sent.
+    const big = hub.conn.command('m', A, { op: 'prompt', content: [{ type: 'text', text: 'x'.repeat(MAX_CLIENT_MESSAGE) }] });
     await expect(big).rejects.toMatchObject({ code: 'too_large' });
-    expect(core.ops('command')).toHaveLength(2);
+    expect(hub.ops('command')).toHaveLength(2);
   });
 
-  it('gives up a command the core does not answer, saying whether it was sent', async () => {
+  it('gives up a command the hub does not answer, saying whether it was sent', async () => {
     vi.useFakeTimers();
-    const sa = core.conn.attach('m', A, handler());
-    core.open();
-    core.push({ t: 'attached', sub: sa.id, chat: { id: A } });
-    const p = core.conn.command('m', A, { op: 'cancel' });
+    const sa = hub.conn.attach('m', A, handler());
+    hub.open();
+    hub.push({ t: 'attached', sub: sa.id, chat: { id: A } });
+    const p = hub.conn.command('m', A, { op: 'cancel' });
     const caught = p.catch((e: CommandError) => [e.code, e.unsure]);
     await vi.advanceTimersByTimeAsync(ACK_TIMEOUT_MS + 1);
     expect(await caught).toEqual(['timeout', true]);
     // One that never left the page.
-    core.drop();
-    const unsent = core.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => [e.code, e.unsure]);
+    hub.drop();
+    const unsent = hub.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => [e.code, e.unsure]);
     await vi.advanceTimersByTimeAsync(ACK_TIMEOUT_MS + 1);
     expect(await unsent).toEqual(['offline', false]);
   });
 
   it('says which refusals leave a command’s outcome unknown', async () => {
-    const sa = core.conn.attach('m', A, handler());
-    core.open();
-    core.push({ t: 'attached', sub: sa.id, chat: { id: A } });
+    const sa = hub.conn.attach('m', A, handler());
+    hub.open();
+    hub.push({ t: 'attached', sub: sa.id, chat: { id: A } });
     const codes = ['lost', 'offline', 'not_attached', 'busy', 'read_only', 'bad_request'];
-    const results = codes.map(() => core.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => [e.code, e.unsure]));
-    core.ops('command').forEach((c, i) => core.push({ t: 'ack', id: c.id, error: { code: codes[i], message: '' } }));
+    const results = codes.map(() => hub.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => [e.code, e.unsure]));
+    hub.ops('command').forEach((c, i) => hub.push({ t: 'ack', id: c.id, error: { code: codes[i], message: '' } }));
     expect(await Promise.all(results)).toEqual([
       ['lost', true],
       ['offline', true],
@@ -158,17 +158,17 @@ describe('the chat connection', () => {
 
   it('keeps to the subscriptions a page may have', async () => {
     const list = Array.from({ length: MAX_SUBS_PER_MACHINE + 1 }, () => handler());
-    list.forEach((h, i) => core.conn.attach('m', chatId(i + 1), h));
+    list.forEach((h, i) => hub.conn.attach('m', chatId(i + 1), h));
     await flush();
     expect(list.at(-1)!.log).toEqual([['detached', 'too_many']]);
-    expect(core.conn.size).toBe(MAX_SUBS_PER_MACHINE);
+    expect(hub.conn.size).toBe(MAX_SUBS_PER_MACHINE);
     const more = Array.from({ length: MAX_SUBS - MAX_SUBS_PER_MACHINE + 1 }, () => handler());
-    more.forEach((h, i) => core.conn.attach(`m${i}`, chatId(100 + i), h));
+    more.forEach((h, i) => hub.conn.attach(`m${i}`, chatId(100 + i), h));
     await flush();
     expect(more.at(-1)!.log).toEqual([['detached', 'too_many']]);
-    expect(core.conn.size).toBe(MAX_SUBS);
+    expect(hub.conn.size).toBe(MAX_SUBS);
     const bad = handler();
-    core.conn.attach('m9', '../c0', bad);
+    hub.conn.attach('m9', '../c0', bad);
     await flush();
     expect(bad.log).toEqual([['detached', 'bad_request']]);
   });
@@ -176,55 +176,55 @@ describe('the chat connection', () => {
   it('connects again and attaches again after the last stored seq', async () => {
     vi.useFakeTimers();
     const a = handler();
-    const sa = core.conn.attach('m', A, a);
-    core.open();
-    core.push({ t: 'attached', sub: sa.id, chat: { id: A } });
-    core.push({ t: 'event', sub: sa.id, ev: { seq: 5, t: 'user' } });
-    const pending = core.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => [e.code, e.unsure]);
+    const sa = hub.conn.attach('m', A, a);
+    hub.open();
+    hub.push({ t: 'attached', sub: sa.id, chat: { id: A } });
+    hub.push({ t: 'event', sub: sa.id, ev: { seq: 5, t: 'user' } });
+    const pending = hub.conn.command('m', A, { op: 'cancel' }).catch((e: CommandError) => [e.code, e.unsure]);
     const ups: boolean[] = [];
-    core.conn.onConnection((up) => ups.push(up));
-    core.drop();
+    hub.conn.onConnection((up) => ups.push(up));
+    hub.drop();
     expect(await pending).toEqual(['offline', true]);
     expect(a.log.at(-1)).toEqual(['offline']);
     expect(ups).toEqual([false]);
     await vi.advanceTimersByTimeAsync(RETRY_MIN_MS);
-    expect(core.sockets).toHaveLength(2);
-    core.open();
-    expect(core.ops('attach').at(-1)).toEqual({ op: 'attach', sub: sa.id, m: 'm', chat: A, from: 5 });
-    core.push({ t: 'attached', sub: sa.id, chat: { id: A } });
+    expect(hub.sockets).toHaveLength(2);
+    hub.open();
+    expect(hub.ops('attach').at(-1)).toEqual({ op: 'attach', sub: sa.id, m: 'm', chat: A, from: 5 });
+    hub.push({ t: 'attached', sub: sa.id, chat: { id: A } });
     expect(a.log.at(-1)).toEqual(['attached', A, undefined, true]);
     expect(ups).toEqual([false, true]);
     // A command sent while it is down waits for it.
-    core.drop();
-    const queued = core.conn.command('m', A, { op: 'compact' });
+    hub.drop();
+    const queued = hub.conn.command('m', A, { op: 'compact' });
     await vi.advanceTimersByTimeAsync(RETRY_MIN_MS * 2);
-    core.open();
-    const cmd = core.ops('command').at(-1)!;
+    hub.open();
+    const cmd = hub.ops('command').at(-1)!;
     expect(cmd.cmd).toEqual({ op: 'compact' });
-    core.push({ t: 'ack', id: cmd.id });
+    hub.push({ t: 'ack', id: cmd.id });
     await expect(queued).resolves.toBeUndefined();
   });
 
   it('closes once nothing used it for a while', async () => {
     vi.useFakeTimers();
-    const sa = core.conn.attach('m', A, handler());
-    core.open();
+    const sa = hub.conn.attach('m', A, handler());
+    hub.open();
     sa.detach();
     await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS - 10);
-    expect(core.socket!.closed).toBe(false);
+    expect(hub.socket!.closed).toBe(false);
     await vi.advanceTimersByTimeAsync(20);
-    expect(core.socket!.closed).toBe(true);
+    expect(hub.socket!.closed).toBe(true);
     // Nothing connects it again until it is used.
     await vi.advanceTimersByTimeAsync(RETRY_MIN_MS * 4);
-    expect(core.sockets).toHaveLength(1);
-    core.conn.attach('m', A, handler());
-    expect(core.sockets).toHaveLength(2);
+    expect(hub.sockets).toHaveLength(1);
+    hub.conn.attach('m', A, handler());
+    expect(hub.sockets).toHaveLength(2);
   });
 });
 
 describe('the chat source', () => {
   beforeEach(() => {
-    core.auto = true;
+    hub.auto = true;
   });
 
   function collect(source: ChatSourceImpl) {
@@ -236,7 +236,7 @@ describe('the chat source', () => {
     list.map((e) => (e.t === 'reset' || e.t === 'reattach' ? e.t : `${e.t}${'seq' in e && e.seq ? e.seq : ''}`));
 
   it('says the chat first, then its events; a later subscriber hears the same', async () => {
-    core.chat(
+    hub.chat(
       A,
       { kind: 'claude', state: 'idle', title: 'T', cwd: '/w', usage: { used: 10, size: 100, limits: [{ id: '5h', usedPercent: 40 }] } },
       [
@@ -249,20 +249,20 @@ describe('the chat source', () => {
     const first = collect(source);
     await flush();
     expect(ts(first.got)).toEqual(['info', 'user1', 'turn2']);
-    core.event(A, {
+    hub.event(A, {
       t: 'update',
       live: true,
       item: 'm1',
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'he' } },
     });
-    core.event(A, { seq: 2, t: 'turn', state: 'start' }); // again: passed over
-    core.event(A, {
+    hub.event(A, { seq: 2, t: 'turn', state: 'start' }); // again: passed over
+    hub.event(A, {
       t: 'update',
       live: true,
       item: 'x',
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'y' } },
     });
-    core.event(A, {
+    hub.event(A, {
       seq: 3,
       t: 'update',
       item: 'x',
@@ -273,17 +273,17 @@ describe('the chat source', () => {
     // The live increments of the item that is whole now are not given again.
     expect(ts(later.got)).toEqual(['info', 'user1', 'turn2', 'update3', 'update']);
     expect((later.got.at(-1) as ChatEvent).item).toBe('m1');
-    core.event(A, { seq: 4, t: 'turn', state: 'end', stopReason: 'end_turn' });
+    hub.event(A, { seq: 4, t: 'turn', state: 'end', stopReason: 'end_turn' });
     expect(ts(collect(source).got)).toEqual(['info', 'user1', 'turn2', 'update3', 'turn4']);
     // What the chat states is in the store.
     const live = useChats.getState().live[liveKey('m', A)];
     expect(live).toMatchObject({ link: 'attached', state: 'idle', info: { title: 'T', cwd: '/w' } });
-    core.event(A, {
+    hub.event(A, {
       seq: 5,
       t: 'update',
       update: { sessionUpdate: 'usage_update', used: 20, size: 0, cost: { amount: 0.5, currency: 'USD' } },
     });
-    core.event(A, { seq: 6, t: 'state', state: 'failed', error: { code: 'ended', message: 'gone', stderr: 'boom' } });
+    hub.event(A, { seq: 6, t: 'state', state: 'failed', error: { code: 'ended', message: 'gone', stderr: 'boom' } });
     expect(useChats.getState().live[liveKey('m', A)]).toMatchObject({
       state: 'failed',
       error: { code: 'ended', stderr: 'boom' },
@@ -293,44 +293,44 @@ describe('the chat source', () => {
 
   it('attaches again after the last stored event, with a reattach first', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    core.chat(A, { kind: 'codex', state: 'idle' }, [{ seq: 1, t: 'user' }]);
+    hub.chat(A, { kind: 'codex', state: 'idle' }, [{ seq: 1, t: 'user' }]);
     const source = new ChatSourceImpl('m', A);
     const { got } = collect(source);
     await vi.advanceTimersByTimeAsync(0);
-    core.event(A, { seq: 2, t: 'turn', state: 'start' });
-    core.drop();
+    hub.event(A, { seq: 2, t: 'turn', state: 'start' });
+    hub.drop();
     expect(useChats.getState().live[liveKey('m', A)].link).toBe('offline');
-    core.chats.get(A)!.events.push({ seq: 3, t: 'turn', state: 'end' });
+    hub.chats.get(A)!.events.push({ seq: 3, t: 'turn', state: 'end' });
     await vi.advanceTimersByTimeAsync(RETRY_MIN_MS);
-    expect(core.ops('attach').at(-1)).toMatchObject({ chat: A, from: 2 });
+    expect(hub.ops('attach').at(-1)).toMatchObject({ chat: A, from: 2 });
     expect(ts(got)).toEqual(['info', 'user1', 'turn2', 'reattach', 'info', 'turn3']);
-    // The core lost its connection to the host: at once, after the last.
-    const sub = core.ops('attach').at(-1)!.sub;
-    core.push({ t: 'detached', sub, error: { code: 'lost', message: '' } });
+    // The hub lost its connection to the host: at once, after the last.
+    const sub = hub.ops('attach').at(-1)!.sub;
+    hub.push({ t: 'detached', sub, error: { code: 'lost', message: '' } });
     await vi.advanceTimersByTimeAsync(0);
-    expect(core.ops('attach').at(-1)).toMatchObject({ chat: A, from: 3 });
+    expect(hub.ops('attach').at(-1)).toMatchObject({ chat: A, from: 3 });
     expect(ts(got).slice(-2)).toEqual(['reattach', 'info']);
   });
 
   it('starts over when the chat’s log went back below what it has', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    core.chat(A, { kind: 'codex', state: 'idle', seq: 9 }, [{ seq: 9, t: 'user' }]);
+    hub.chat(A, { kind: 'codex', state: 'idle', seq: 9 }, [{ seq: 9, t: 'user' }]);
     const source = new ChatSourceImpl('m', A);
     const { got } = collect(source);
     await vi.advanceTimersByTimeAsync(0);
-    core.chat(A, { kind: 'codex', state: 'idle', seq: 2 }, [
+    hub.chat(A, { kind: 'codex', state: 'idle', seq: 2 }, [
       { seq: 1, t: 'user' },
       { seq: 2, t: 'turn', state: 'start' },
     ]);
-    core.drop();
+    hub.drop();
     await vi.advanceTimersByTimeAsync(RETRY_MIN_MS);
     expect(ts(got)).toEqual(['info', 'user9', 'reset', 'info', 'user1', 'turn2']);
-    expect(core.ops('attach').at(-1)).toEqual(expect.not.objectContaining({ from: expect.anything() }));
+    expect(hub.ops('attach').at(-1)).toEqual(expect.not.objectContaining({ from: expect.anything() }));
   });
 
   it('starts over when the stored events now begin after the next one it lacks', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    core.chat(A, { kind: 'codex', state: 'idle', seq: 3 }, [
+    hub.chat(A, { kind: 'codex', state: 'idle', seq: 3 }, [
       { seq: 1, t: 'user' },
       { seq: 2, t: 'turn', state: 'start' },
       { seq: 3, t: 'turn', state: 'end' },
@@ -339,7 +339,7 @@ describe('the chat source', () => {
     const { got } = collect(source);
     await vi.advanceTimersByTimeAsync(0);
     // The host's limits removed the events up to 7 meanwhile.
-    core.chat(
+    hub.chat(
       A,
       { kind: 'codex', state: 'idle', seq: 9 },
       [
@@ -348,19 +348,19 @@ describe('the chat source', () => {
       ],
       8,
     );
-    core.drop();
+    hub.drop();
     await vi.advanceTimersByTimeAsync(RETRY_MIN_MS);
     expect(ts(got)).toEqual(['info', 'user1', 'turn2', 'turn3', 'reset', 'info', 'user8', 'turn9']);
-    expect(core.ops('attach').map((a) => a.from)).toEqual([undefined, 3, undefined]);
+    expect(hub.ops('attach').map((a) => a.from)).toEqual([undefined, 3, undefined]);
     // What follows what it has needs no start over.
-    core.chats.get(A)!.events.push({ seq: 10, t: 'turn', state: 'end' });
-    core.drop();
+    hub.chats.get(A)!.events.push({ seq: 10, t: 'turn', state: 'end' });
+    hub.drop();
     await vi.advanceTimersByTimeAsync(2 * RETRY_MIN_MS);
     expect(ts(got).slice(-3)).toEqual(['reattach', 'info', 'turn10']);
   });
 
   it('sends the view’s commands once the chat is attached', async () => {
-    core.chat(A, { kind: 'claude', state: 'idle' });
+    hub.chat(A, { kind: 'claude', state: 'idle' });
     const source = new ChatSourceImpl('m', A);
     const text = [{ type: 'text' as const, text: 'go' }];
     await Promise.all([
@@ -375,7 +375,7 @@ describe('the chat source', () => {
       source.compact(),
       source.rename('Title'),
     ]);
-    expect(core.ops('command').map((c) => c.cmd)).toEqual([
+    expect(hub.ops('command').map((c) => c.cmd)).toEqual([
       { op: 'prompt', content: text, clientId: 'u1' },
       { op: 'cancel' },
       { op: 'permission', request: 'p1', option: 'allow_once' },
@@ -387,19 +387,19 @@ describe('the chat source', () => {
       { op: 'compact' },
       { op: 'rename', title: 'Title' },
     ]);
-    expect(core.ops('command').every((c) => c.m === 'm' && c.chat === A)).toBe(true);
-    core.refuse.set('prompt', { code: 'busy', message: 'a turn runs' });
+    expect(hub.ops('command').every((c) => c.m === 'm' && c.chat === A)).toBe(true);
+    hub.refuse.set('prompt', { code: 'busy', message: 'a turn runs' });
     await expect(source.send(text, 'u2')).rejects.toMatchObject({ code: 'busy' });
   });
 
   it('refuses commands on a read-only page without sending them', async () => {
-    core.chat(A, { kind: 'claude', state: 'idle' });
+    hub.chat(A, { kind: 'claude', state: 'idle' });
     const source = new ChatSourceImpl('m', A);
     useStore.getState().setReadOnly(true);
     expect(source.readOnly).toBe(true);
     await expect(source.send([], 'u')).rejects.toMatchObject({ code: 'read_only' });
     await expect(source.respond('p', { option: 'allow_once' })).rejects.toBeInstanceOf(CommandError);
-    expect(core.ops('command')).toEqual([]);
+    expect(hub.ops('command')).toEqual([]);
   });
 
   it('tells that a chat is no more', async () => {
@@ -410,7 +410,7 @@ describe('the chat source', () => {
   });
 
   it('suggests the files of the chat’s directory after @', async () => {
-    core.chat(A, { kind: 'claude', state: 'idle', cwd: '/w/p' });
+    hub.chat(A, { kind: 'claude', state: 'idle', cwd: '/w/p' });
     const fetch = vi.fn(async (url: string) => {
       const path = new URL(url, 'http://x').searchParams.get('path');
       const entries =
@@ -440,20 +440,20 @@ describe('the chat source', () => {
 
   it('is kept a while after the last pane let go of it, then detached', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    core.chat(A, { kind: 'claude', state: 'idle' });
+    hub.chat(A, { kind: 'claude', state: 'idle' });
     const release = holdSource('m', A);
     await vi.advanceTimersByTimeAsync(0);
-    const sub = core.ops('attach')[0].sub;
+    const sub = hub.ops('attach')[0].sub;
     release();
     await vi.advanceTimersByTimeAsync(KEEP_MS - 100);
-    expect(core.ops('detach')).toEqual([]);
+    expect(hub.ops('detach')).toEqual([]);
     // Held again meanwhile: the same subscription.
     const again = holdSource('m', A);
     await vi.advanceTimersByTimeAsync(KEEP_MS);
-    expect(core.ops('attach')).toHaveLength(1);
+    expect(hub.ops('attach')).toHaveLength(1);
     again();
     await vi.advanceTimersByTimeAsync(KEEP_MS);
-    expect(core.ops('detach')).toEqual([{ op: 'detach', sub }]);
+    expect(hub.ops('detach')).toEqual([{ op: 'detach', sub }]);
     expect(useChats.getState().live[liveKey('m', A)]).toBeUndefined();
   });
 });

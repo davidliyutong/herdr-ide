@@ -1,4 +1,4 @@
-// VS Code's feature in a core whose machines' agents serve code-server's
+// VS Code's feature in a hub whose machines' agents serve code-server's
 // actions as the Go agent does (op code-server: status, install,
 // install-ext, marker, download, start, stop, release) and dial-unix to a
 // fake code-server: Bun.serve on a unix socket, with HTTP routes and a
@@ -262,7 +262,7 @@ export async function vscodeHub(o: VSCodeHubOptions = {}): Promise<VSCodeHub> {
   settings.set('plugins.vscode.enabled', '', o.desktopOn ?? true);
   settings.set('plugins.vscode.browser', '', o.browserOn ?? true);
   const audit = memoryAudit();
-  const core = createHub({
+  const hub = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: o.readOnly ?? false,
@@ -271,16 +271,16 @@ export async function vscodeHub(o: VSCodeHubOptions = {}): Promise<VSCodeHub> {
     settings,
     features,
   });
-  const stopHub = running(core);
+  const stopHub = running(hub);
   for (const m of machines.list()) if (m.state().enabled) await waitFor(`${m.id} ready`, () => m.ready);
   const request: VSCodeHub['request'] = (method, path, r = {}) => {
     const headers = new Headers(r.headers);
     headers.set('Host', '127.0.0.1:7780');
     const req = new Request(`http://127.0.0.1:7780${path}`, { method, headers, body: r.body, signal: r.signal });
-    return core.fetch(req, { remote: r.remote ?? '127.0.0.1', desktop: r.desktop ?? false, upgrade: r.upgrade });
+    return hub.fetch(req, { remote: r.remote ?? '127.0.0.1', desktop: r.desktop ?? false, upgrade: r.upgrade });
   };
   return {
-    hub: core,
+    hub: hub,
     settings,
     machines,
     audit,

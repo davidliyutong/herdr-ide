@@ -3,7 +3,7 @@
 // echoes a stream's input as output and records what it receives; an
 // agent (AgentSim) that serves the ops the backend uses (hc, hc-api,
 // detect, privacy) with it; a client of /api/v1/term over a channel pair;
-// and a core with machine x that runs them.
+// and a hub with machine x that runs them.
 import { createHash } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { gunzipSync } from 'node:zlib';
@@ -224,7 +224,7 @@ export class FakeHC {
   }
 }
 
-/** A detect stream the core opened. */
+/** A detect stream the hub opened. */
 export interface DetectStream {
   sessions: boolean;
   send(ev: object): void;
@@ -479,7 +479,7 @@ export interface Rig {
   stop(): Promise<void>;
 }
 
-/** A core with ssh machine x, whose agent is an AgentSim, running. */
+/** A hub with ssh machine x, whose agent is an AgentSim, running. */
 export async function rig(o: RigOptions = {}): Promise<Rig> {
   const sim = new AgentSim();
   o.sim?.(sim);

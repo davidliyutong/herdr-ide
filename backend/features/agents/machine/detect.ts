@@ -1,7 +1,7 @@
 // Op detect (docs/features/25-agent-detection.md): one connection to the
 // instance's terminal core with an event subscription, its notifications
 // fed to a Detector, which writes a DetectEvent line per change to the
-// core until the core closes the stream (it sends nothing after its
+// hub until the hub closes the stream (it sends nothing after its
 // header), the terminal core stops sending (it sends a heartbeat every 15
 // s) or the agent ends. With Header.sessions the detector also finds each
 // agent's session (#machine/agents/sessions.ts); without it no session
@@ -22,8 +22,8 @@ export interface DetectOptions {
   /** How long the terminal core may stay silent (it sends a heartbeat
    * every 15 s). */
   silenceMs?: number;
-  /** Events written and not yet taken by the core, past which the stream
-   * ends (the core opens it again). */
+  /** Events written and not yet taken by the hub, past which the stream
+   * ends (the hub opens it again). */
   maxQueued?: number;
   /** The session resolver of a stream opened with sessions (tests). */
   newResolver?: (home: string, peers: (kind: string, cwd: string) => number) => SessionResolver;
@@ -35,7 +35,7 @@ const SILENCE_MS = 45_000;
 const MAX_QUEUED = 10_000;
 
 /** The events of one stream, written in the order they were made, many
- * lines at once while the core reads slower than they come. */
+ * lines at once while the hub reads slower than they come. */
 class Outbox {
   private queue: DetectEvent[] = [];
   private writing = false;
@@ -101,7 +101,7 @@ export function serveDetect(o: DetectOptions = {}): OpHandler {
     let watchdog: ReturnType<typeof setInterval> | undefined;
     try {
       await writeLine(conn.stream, { ok: true } satisfies Reply);
-      // The core sends nothing more: the stream ends when it closes it.
+      // The hub sends nothing more: the stream ends when it closes it.
       void (async () => {
         try {
           while ((await conn.reader.chunk()) !== null);

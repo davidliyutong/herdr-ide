@@ -21,7 +21,7 @@ export interface RouterDeps {
 }
 
 /** The commands of viewers passed on to the agent as input, only from the
- * core in control and never in read-only mode. */
+ * hub in control and never in read-only mode. */
 const INPUT = new Set(['focus', 'close', 'pointer', 'button', 'wheel', 'key', 'release']);
 
 export class Router {
@@ -39,7 +39,7 @@ export class Router {
   readonly acked = new Map<number, number>();
   /** Windows whose browser window was closed, closed after a grace. */
   private readonly closing = new Map<number, ReturnType<typeof setTimeout>>();
-  /** Another core controls the windows (the agent's role event): input is
+  /** Another hub controls the windows (the agent's role event): input is
    * not passed on. */
   viewOnly = false;
 
@@ -137,7 +137,7 @@ export class Router {
         if (ev.stats) targets = this.viewersOf(ev.stats.window);
         break;
       case 'role':
-        // This core controls the windows, or views them while another
+        // This hub controls the windows, or views them while another
         // does: every viewer is told.
         this.viewOnly = !ev.control;
         changed = true;
@@ -289,7 +289,7 @@ export class Router {
   }
 
   /** Handles a command of viewer v of window id. Input is passed on only
-   * when allowed (input: not in read-only mode) and while this core
+   * when allowed (input: not in read-only mode) and while this hub
    * controls the windows. */
   command(id: number, v: Viewer, c: GUICommand, input: boolean): void {
     if (!this.viewers.get(id)?.has(v)) return;
@@ -325,7 +325,7 @@ export class Router {
         }
         return;
       case 'control':
-        // Taken at once from the core in control, which then views.
+        // Taken at once from the hub in control, which then views.
         if (input && this.viewOnly) this.d.send({ cmd: 'control', id: 0 });
         return;
     }

@@ -120,8 +120,8 @@ cloud images do) and an ssh server.
   credentials, flock, fcntl locks, SQLite locking, openat2, renameat2,
   process groups, PTYs). `fetch-runtimes.sh [DIR]` downloads the runtimes
   into `rt/` (or `DIR`, pinned digests) before a run.
-- `payloads/machine-node`: the TypeScript build's executable (the core
-  and the machine side) driven as a core drives it over ssh (`node dial`,
+- `payloads/machine-node`: the TypeScript build's executable (the hub
+  and the machine side) driven as a hub drives it over ssh (`node dial`,
   yamux on its standard input and output): the node answers, the terminal
   core it installs from its own copy and starts runs a terminal, a file is
   written and read back, links are refused where they must be (by the
@@ -131,10 +131,10 @@ cloud images do) and an ssh server.
   (`exe/`, `backend/scripts/build.ts`) and bundles
   `driver.js`; `run.sh` runs the driver with the executable of the
   machine's C library acting as Bun (`BUN_BE_BUN=1`, which the node it
-  starts does not get). A machine the core would refuse (musl
+  starts does not get). A machine the hub would refuse (musl
   without libstdc++ and libgcc, no SSE4.2) passes as refused.
 - `payloads/gui`: program windows of the TypeScript build's machine side
-  with its GUI helper, driven as a core drives them over ssh: the display
+  with its GUI helper, driven as a hub drives them over ssh: the display
   (the distribution's Xvfb, installed first on a throwaway machine; on
   `host`, fetched by the machine side with `apt-get download` into the
   run's home), a program's window (`e2e/fakes/xclient.ts`) announced with its

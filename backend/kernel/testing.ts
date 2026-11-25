@@ -1,8 +1,8 @@
 // Helpers of the kernel's and the features' tests, never used by the
 // product: an agent in memory (a yamux session over a duplex pair that
 // answers hello), settings that hold what a test gives them, the audit
-// records, a core over machines that do not connect, and the walk over a
-// core's routes that checks the guards of those that change state.
+// records, a hub over machines that do not connect, and the walk over a
+// hub's routes that checks the guards of those that change state.
 import { duplexPair } from 'node:stream';
 import { discard, type Logger } from '#shared/lib/log.ts';
 import { Reader } from '#shared/lib/streamio.ts';
@@ -67,23 +67,23 @@ export interface FakeAgentOptions {
   info?: Info;
   /** The ssh session the agent reports in its hello. */
   ssh?: string;
-  /** Serves a stream the core opened, after its header; hello is answered
+  /** Serves a stream the hub opened, after its header; hello is answered
    * by the agent itself. Without it every other op is refused. */
   serve?: (h: Header, conn: AgentStream) => void | Promise<void>;
 }
 
 export interface FakeAgent {
-  /** The core's side: what a dial returns. */
+  /** The hub's side: what a dial returns. */
   readonly session: Session;
-  /** The headers of the streams the core opened, in order. */
+  /** The headers of the streams the hub opened, in order. */
   readonly headers: Header[];
-  /** Opens a stream towards the core and writes its header, if any. */
+  /** Opens a stream towards the hub and writes its header, if any. */
   open(h?: Header): Promise<AgentStream>;
   /** Breaks the connection, as a lost one does. */
   kill(): void;
 }
 
-/** An agent in memory with a core session to it. */
+/** An agent in memory with a hub session to it. */
 export function fakeAgent(o: FakeAgentOptions = {}): FakeAgent {
   const [a, b] = duplexPair();
   const session = new Session(a);
@@ -204,16 +204,16 @@ export interface TestHub {
   readonly hub: Hub;
   readonly settings: Record<string, boolean>;
   readonly audit: ReturnType<typeof memoryAudit>;
-  /** Sends a request as a browser on the core's host would. */
+  /** Sends a request as a browser on the hub's host would. */
   request(method: string, path: string, o?: RequestOptions): Promise<Response>;
 }
 
-/** A core of features over machines that do not connect (the local
+/** A hub of features over machines that do not connect (the local
  * machine only by default). */
 export function testHub(o: TestHubOptions): TestHub {
   const audit = memoryAudit();
   const settings = o.settings ?? {};
-  const core = createHub({
+  const hub = createHub({
     guard: new Guard(o.guard),
     audit: audit.audit,
     readOnly: o.readOnly ?? false,
@@ -223,7 +223,7 @@ export function testHub(o: TestHubOptions): TestHub {
     features: o.features,
   });
   return {
-    hub: core,
+    hub,
     settings,
     audit,
     request(method, path, r = {}) {
@@ -232,18 +232,18 @@ export function testHub(o: TestHubOptions): TestHub {
       headers.set('Host', host);
       if (r.origin) headers.set('Origin', r.origin);
       const req = new Request(`http://${host}${path}`, { method, headers, body: r.body });
-      return core.fetch(req, { remote: r.remote ?? '127.0.0.1', desktop: r.desktop ?? false, upgrade: r.upgrade });
+      return hub.fetch(req, { remote: r.remote ?? '127.0.0.1', desktop: r.desktop ?? false, upgrade: r.upgrade });
     },
   };
 }
 
-/** The routes of a core that change state, as "METHOD path": every route
+/** The routes of a hub that change state, as "METHOD path": every route
  * whose method is not GET or HEAD, and the GETs writableGET names (they
  * start something, or hand out what only a client that may change things
  * needs). The guard of every request (ALL /*) is not one. */
-export function mutatingRoutes(core: Hub, writableGET: readonly string[] = []): string[] {
+export function mutatingRoutes(hub: Hub, writableGET: readonly string[] = []): string[] {
   const out = new Set<string>();
-  for (const r of core.http.app.routes) {
+  for (const r of hub.http.app.routes) {
     if (r.method === 'ALL' && r.path === '/*') continue;
     const key = `${r.method} ${r.path}`;
     if ((r.method !== 'GET' && r.method !== 'HEAD') || writableGET.includes(key)) out.add(key);
@@ -251,11 +251,11 @@ export function mutatingRoutes(core: Hub, writableGET: readonly string[] = []): 
   return [...out];
 }
 
-/** Checks each route that changes state (mutatingRoutes) of two cores
+/** Checks each route that changes state (mutatingRoutes) of two hubs
  * built alike, one of them read-only: a request from another site is
  * refused by the guard, and so is any request in read-only mode, with 403
  * read_only, unless readOnlyAllowed names the route. Path parameters are
- * filled in with machine, a machine both cores have. Returns what is
+ * filled in with machine, a machine both hubs have. Returns what is
  * wrong, and the routes checked. */
 export async function checkGuarded(
   rw: TestHub,

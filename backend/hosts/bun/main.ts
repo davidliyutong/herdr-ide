@@ -1,4 +1,4 @@
-// The command line: one executable, the core (`serve`, the default) and
+// The command line: one executable, the hub (`serve`, the default) and
 // the machine side's commands (`node`, `node dial`, `node stop`, `mcp`, the
 // vault's MCP server, which every build serves, also when started by the
 // name of its link in a data directory's bin, #machine/vault.ts). The

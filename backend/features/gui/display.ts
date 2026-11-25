@@ -1,4 +1,4 @@
-// The core's record of one machine's display: its phase, the agent's
+// The hub's record of one machine's display: its phase, the agent's
 // status, the attach stream and its windows, and the bookkeeping that
 // prepares the display once per connection of the machine.
 import type { GUIStatus, GUIWindow } from '#shared/proto/agentproto/index.ts';

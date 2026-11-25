@@ -6,7 +6,7 @@ export const en = {
   'plugins.vault.title': 'Variable Vault',
   'plugins.vault.description':
     'Environment variables such as API keys, kept encrypted on this computer, which coding agents on your machines read through an MCP server.',
-  'vault.unavailable': 'The vault is unavailable: this core keeps no settings file to keep it beside.',
+  'vault.unavailable': 'The vault is unavailable: this server keeps no settings file to keep it beside.',
   'vault.load.invalid':
     'The vault’s file cannot be read: it is damaged or was edited by hand. Restore it, or move it away to start a new vault.',
   'vault.load.failed': 'The vault could not be loaded.',
@@ -213,7 +213,7 @@ export const en = {
   'vault.guard.desktopOn': 'Turn on {way}',
   'vault.fresh.passphrase': 'Passphrase, to confirm this',
   'vault.fresh.change': 'Letting more machines or the model read this variable needs the passphrase.',
-  'vault.guard.untrusted': 'Not offered on this address: the core does not vouch for it, and another program could answer here.',
+  'vault.guard.untrusted': 'Not offered on this address: the server does not vouch for it, and another program could answer here.',
   'vault.error.webauthn_origin': 'Biometrics can be added only from the app’s own address by name, such as http://localhost on its port.',
   'vault.guard.verifyEach': 'Verify every Allow',
   'vault.guard.verifyEachText': 'Each Allow then needs biometrics or the passphrase, so a program driving this page cannot approve.',
@@ -232,7 +232,7 @@ export const en = {
   'vault.error.mismatch': 'The passphrases differ.',
   'vault.error.failed': 'The vault could not do that.',
   'vault.error.memory':
-    'The vault’s key could not be kept in locked memory: the core’s limit of locked memory is too small (raise it, such as with ulimit -l, and restart the core).',
+    'The vault’s key could not be kept in locked memory: the server’s limit of locked memory is too small (raise it, such as with ulimit -l, and restart the server).',
   'vault.error.corrupt':
     'A variable’s value cannot be decrypted (the vault’s file was changed outside the app): set it again or delete it, then try again.',
   'vault.error.full': 'The vault holds at most 1000 variables.',

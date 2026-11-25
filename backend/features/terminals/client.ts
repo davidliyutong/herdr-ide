@@ -148,7 +148,7 @@ export class TermClient implements Subscriber {
     this.audit('term.disconnect');
   }
 
-  /** Closes the channel (the core stops). */
+  /** Closes the channel (the hub stops). */
   close(code: number = CloseCode.GoingAway): void {
     this.ch.close(code);
   }

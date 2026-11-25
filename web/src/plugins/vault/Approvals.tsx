@@ -1,7 +1,7 @@
 // The vault's approval prompts, on every page: an MCP server on a machine
 // not allowed to read a variable asks, and the first answer of any page
-// wins; the others close the prompt when the core says it is resolved. No
-// answer within the core's timeout is a denial. Allowing passes the gate:
+// wins; the others close the prompt when the hub says it is resolved. No
+// answer within the hub's timeout is a denial. Allowing passes the gate:
 // a page without a session proves it is the user, by an authenticator
 // (biometrics: the app's prompt, a WebAuthn credential) when it has one,
 // else with the passphrase, asked in the prompt itself; where the vault
@@ -31,7 +31,7 @@ import './vault.css';
 
 /** The prompts (a status bar item of the plugin, drawn over the page). It
  * also loads the requests, and the vault, again whenever the page's
- * connection to the core comes back (after a restart of the core its
+ * connection to the hub comes back (after a restart of the hub its
  * requests and sessions are gone and the vault is locked). */
 export function VaultApprovals() {
   const requests = useVault((s) => s.requests);
@@ -100,7 +100,7 @@ export function RequestCard({ req }: { req: VaultRequest }) {
         await answerRequest(req.id, a, { proof });
       } else {
         // A page without a session opens one with the passphrase; only then
-        // does the core say whether every Allow is verified, where the
+        // does the hub say whether every Allow is verified, where the
         // passphrase comes with the answer too.
         if (!session) await openSession(pass);
         const ruled = !!useVault.getState().guard?.verifyEachAllow;

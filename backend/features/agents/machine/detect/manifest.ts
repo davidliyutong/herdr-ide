@@ -13,7 +13,7 @@ import { RE2JS } from 're2js';
 import { z } from 'zod';
 import { toLower, trimSpace } from '#shared/lib/gostrings.ts';
 
-/** The states of an agent, as rules and the core report them. */
+/** The states of an agent, as rules and the terminal core report them. */
 export const State = {
   Idle: 'idle',
   Working: 'working',

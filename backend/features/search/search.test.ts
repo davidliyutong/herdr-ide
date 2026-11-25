@@ -65,7 +65,7 @@ test('params', async () => {
   ]);
 });
 
-/** A core whose machine x answers the search with reply, after wait. */
+/** A hub whose machine x answers the search with reply, after wait. */
 async function withMachine(reply: (params: Record<string, unknown>) => Reply, o: SearchOptions & { wait?: Promise<void> } = {}) {
   const calls: Array<Record<string, unknown>> = [];
   const closed: Array<Promise<void>> = [];

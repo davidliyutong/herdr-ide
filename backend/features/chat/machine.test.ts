@@ -106,14 +106,14 @@ afterEach(async () => {
 
 const timing = { startMs: 4000, pollMs: 20, askAgainMs: 100, askMaxMs: 400, stopGraceMs: 2000, goneMs: 20 };
 
-/** Opens a connection to m's chat host as the core's stream would: the
+/** Opens a connection to m's chat host as the hub's stream would: the
  * reply, then the host's lines. */
 async function open(m: FakeMachine, o: { start?: boolean; version?: string } = {}) {
   const side = chatMachine({ timing, command: () => [process.execPath, HOST], version: o.version ?? 'v1.1.0' });
   const served = side.start(m.machineEnv());
   const [ours, theirs] = duplexPair();
   let reply: unknown = null;
-  const ctx = { ...m.machineEnv(), client: 'core-1', signal: new AbortController().signal } as ActionContext;
+  const ctx = { ...m.machineEnv(), client: 'hub-1', signal: new AbortController().signal } as ActionContext;
   const done = served.actions.open(o.start === undefined ? {} : { start: o.start }, ctx, {
     stream: theirs as unknown as Stream,
     reader: new Reader(theirs),

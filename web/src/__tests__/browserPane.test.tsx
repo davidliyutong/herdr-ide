@@ -211,7 +211,7 @@ describe('a view found in the layout', () => {
       await flush();
       expect(posts()).toBe(2);
       expect(iframe()).not.toBeNull();
-      // It ended (idle, stopped, the core restarted): nothing brings it
+      // It ended (idle, stopped, the hub restarted): nothing brings it
       // back but the user.
       exists = false;
       await act(async () => void vi.advanceTimersByTime(5 * 60_000 + 1));
@@ -275,11 +275,11 @@ describe('the address field', () => {
     expect(iframe()).toBeNull();
   });
 
-  it('refuses the core’s own address on this computer', async () => {
+  it('refuses the hub’s own address on this computer', async () => {
     const calls = fakeBrowserApi();
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     h = await mountPane({ url: '' });
-    // The pane's machine is this computer: its loopback is the core's own.
+    // The pane's machine is this computer: its loopback is the hub's own.
     await act(async () => {
       useStore
         .getState()
@@ -303,7 +303,7 @@ describe('the address field', () => {
     expect(iframe()).toBeNull();
   });
 
-  it('takes the core’s port number as a remote machine’s own port', async () => {
+  it('takes the hub’s port number as a remote machine’s own port', async () => {
     const calls = fakeBrowserApi();
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     h = await mountPane({ url: '' });
@@ -313,7 +313,7 @@ describe('the address field', () => {
     expect(h.host.querySelector('.browser-error')).toBeNull();
     expect(h.view()).toMatchObject({ url: 'http://localhost:5173/', m: 'a', port: 5173 });
     expect(calls.filter((c) => c.method === 'POST').map((c) => [c.url, c.body])).toEqual([['/api/m/a/p/browser/forwards', { port: 5173 }]]);
-    // Never opened outside, where the address would be the core's own.
+    // Never opened outside, where the address would be the hub's own.
     expect(open).not.toHaveBeenCalled();
   });
 

@@ -33,7 +33,7 @@ export const allPlugins = (): readonly PluginDef[] => plugins;
  * (browserRisk). */
 export const browserSetting = (p: PluginDef): string => `plugins.${p.id}.browser`;
 
-/** The setting that turns p on for this kind of client (the core's
+/** The setting that turns p on for this kind of client (the hub's
  * verdict on this page, settings.ts Client): the browsers' own for a
  * plugin with browserRisk in a browser; undefined when it is always on. */
 export function enableSetting(p: PluginDef, client: Client = useSettings.getState().client): string | undefined {
@@ -43,7 +43,7 @@ export function enableSetting(p: PluginDef, client: Client = useSettings.getStat
 }
 
 /** The value of p's switch for every machine without one of its own (the
- * app's value), on when the core has none; true for plugins always on. */
+ * app's value), on when the hub has none; true for plugins always on. */
 export function pluginSwitch(p: PluginDef, values = useSettings.getState().values, client = useSettings.getState().client): boolean {
   const key = enableSetting(p, client);
   if (!key) return true;
@@ -91,13 +91,13 @@ export async function setPluginSwitch(id: string, on: boolean): Promise<string |
 /** The plugins that are on. */
 export const activePlugins = (): PluginDef[] => plugins.filter((p) => pluginOn(p));
 
-/** The settings section of p: the one it names, else the one the core
+/** The settings section of p: the one it names, else the one the hub
  * says is its (Section.plugin). */
 export function pluginSection(p: PluginDef, sections: readonly Section[] = useSettings.getState().sections): string | undefined {
   return p.settings?.section ?? sections.find((s) => s.plugin === p.id)?.id;
 }
 
-/** The id of the plugin a settings section belongs to: the core's word
+/** The id of the plugin a settings section belongs to: the hub's word
  * for it (Section.plugin), else the plugin naming it. */
 export function sectionPlugin(section: string, sections: readonly Section[] = useSettings.getState().sections): string | undefined {
   return sections.find((s) => s.id === section)?.plugin ?? plugins.find((p) => p.settings?.section === section)?.id;
@@ -220,7 +220,7 @@ export function newTabGroups(m: string): NewTabItem[][] {
     .filter((items) => items.length > 0);
 }
 
-/** Hands a message of a plugin's core side to the plugin, when it is on. */
+/** Hands a message of a plugin's hub side to the plugin, when it is on. */
 export function pluginMessage(plugin: string, m: string, data: unknown) {
   const p = activePlugins().find((x) => x.id === plugin);
   p?.onMessage?.(m, data);

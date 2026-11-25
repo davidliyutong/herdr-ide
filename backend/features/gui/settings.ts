@@ -64,7 +64,7 @@ export const settings = defineModule({
       order: 30,
       flag: 'gui-video',
       usage:
-        'send program windows that keep changing as video (H.264 on NVIDIA, Intel or AMD GPUs, else VP8 on the CPU) to browsers that decode it, encoded on the machine by the encoder the core brings; pictures otherwise (false: always pictures); also per machine in the UI',
+        'send program windows that keep changing as video (H.264 on NVIDIA, Intel or AMD GPUs, else VP8 on the CPU) to browsers that decode it, encoded on the machine by the encoder the hub brings; pictures otherwise (false: always pictures); also per machine in the UI',
     }),
   },
 });

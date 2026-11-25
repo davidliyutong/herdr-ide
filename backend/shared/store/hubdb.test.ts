@@ -49,8 +49,7 @@ const exists = (p: string) => {
  * instances dev and desktop. */
 function configDir(): string {
   const dir = temp();
-  for (const f of ['settings.json', 'settings-dev.json', 'settings-desktop.json'])
-    fs.writeFileSync(join(dir, f), '{}', { mode: 0o600 });
+  for (const f of ['settings.json', 'settings-dev.json', 'settings-desktop.json']) fs.writeFileSync(join(dir, f), '{}', { mode: 0o600 });
   return dir;
 }
 

@@ -1,6 +1,6 @@
 // What this install keeps for the variable vault's unlock keys, in a file of
 // the app's user data (0600): its install id, which names its unlock entry
-// in the core, and the shellSecret, 32 random bytes that go into the entry's
+// in the hub, and the shellSecret, 32 random bytes that go into the entry's
 // key-encryption key beside what the Secure Enclave or Windows Hello gives.
 // The secret is encrypted with Electron's safeStorage (the macOS Keychain,
 // Windows DPAPI): a program that has the Enclave key's blob or the Hello key

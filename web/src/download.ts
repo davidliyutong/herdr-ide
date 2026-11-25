@@ -1,12 +1,12 @@
 // Downloading files and directories of a machine into the browser
 // (docs/features/06-quick-look-and-files.md): from a pane's menu (a path
 // under the pointer, or entries chosen in the pane's directory) and from
-// VS Code's explorer through the bridge. The core streams one file as
+// VS Code's explorer through the bridge. The hub streams one file as
 // itself and anything else as a zip the agent makes on the fly.
 //
 // The browser saves the response like any download. Each one carries an id
-// (?dl=) the page tells the core it follows ("download.watch", before the
-// download and after every reconnect); the core reports to this page alone
+// (?dl=) the page tells the hub it follows ("download.watch", before the
+// download and after every reconnect); the hub reports to this page alone
 // what it wrote and how it ended ("download" events), so the downloads panel
 // (components/Downloads.tsx) shows progress, speed and the result, and can
 // cancel it ("download.cancel"). The history of finished downloads is kept
@@ -34,7 +34,7 @@ export interface Download {
   /** The machine's id, and its name when the download started. */
   m: string;
   machine: string;
-  /** The name it is saved under, as the core names it once it knows. */
+  /** The name it is saved under, as the hub names it once it knows. */
   name: string;
   paths: string[];
   status: DownloadStatus;
@@ -54,8 +54,8 @@ export interface Download {
   waiting?: boolean;
 }
 
-/** An event of the core about a download (backend/features/files);
- * unknown: the core has not seen the id yet, or no longer knows it. */
+/** An event of the hub about a download (backend/features/files);
+ * unknown: the hub has not seen the id yet, or no longer knows it. */
 export interface DownloadEvent {
   id: string;
   state: 'running' | 'done' | 'failed' | 'cancelled' | 'unknown';
@@ -65,7 +65,7 @@ export interface DownloadEvent {
   error?: string;
 }
 
-/** How long a download may go without a word from the core (which reports
+/** How long a download may go without a word from the hub (which reports
  * it as soon as the request arrives) before it shows as not started yet;
  * the time while the page is not connected does not count. */
 export const NO_RESPONSE_MS = 30_000;
@@ -112,7 +112,7 @@ function end(id: string, p: Pick<Download, 'status'> & Partial<Download>) {
     useStore.getState().toast(t('download.failed', { name: entry.name, error: downloadError(entry.error) }), undefined, undefined, 'error');
 }
 
-/** An id the core accepts (backend/features/files), random enough
+/** An id the hub accepts (backend/features/files), random enough
  * that no other page's download has it. */
 function newId(): string {
   const b = new Uint8Array(16);
@@ -147,7 +147,7 @@ export function startDownload(m: string, paths: string[]): string | undefined {
     l.timer = setTimeout(() => {
       l.timer = undefined;
       if (find(id)?.status !== 'starting') return;
-      // Disconnected, the page cannot hear the core: it asks again after
+      // Disconnected, the page cannot hear the hub: it asks again after
       // reconnecting (resyncDownloads). Connected, the request has not
       // arrived: the browser holds it back or blocked it. It stays, and
       // can be cancelled.
@@ -158,7 +158,7 @@ export function startDownload(m: string, paths: string[]): string | undefined {
   wait();
   live.set(id, l);
   list.add([x]);
-  // Before the request, so that the core reports it to this page.
+  // Before the request, so that the hub reports it to this page.
   conn.send({ t: 'download.watch', ids: [id] });
   const a = document.createElement('a');
   a.href = `${downloadUrl(m, paths)}&dl=${id}`;
@@ -170,7 +170,7 @@ export function startDownload(m: string, paths: string[]): string | undefined {
   return id;
 }
 
-/** Applies the core's event about a download this page started; events of
+/** Applies the hub's event about a download this page started; events of
  * other pages' downloads are ignored. */
 export function downloadEvent(ev: DownloadEvent) {
   if (!ev || typeof ev.id !== 'string') return;
@@ -182,7 +182,7 @@ export function downloadEvent(ev: DownloadEvent) {
   if (typeof ev.total === 'number' && ev.total >= 0) p.size = ev.total;
   const sent = typeof ev.sent === 'number' && ev.sent >= 0 ? ev.sent : x.sent;
   if (ev.state === 'unknown') {
-    // A cancelled download the core does not know is over; one it reported
+    // A cancelled download the hub does not know is over; one it reported
     // and has forgotten (it restarted, or the page was away long) ended
     // somehow, as the browser's downloads tell. Before its request arrives,
     // a download is not known yet.
@@ -205,10 +205,10 @@ export function downloadEvent(ev: DownloadEvent) {
   list.patch(ev.id, { ...p, status: 'downloading', waiting: undefined, sent, speed });
 }
 
-/** Cancels a download: the core breaks off the response, so the browser's
+/** Cancels a download: the hub breaks off the response, so the browser's
  * download fails too, and reports it as cancelled, or how it ended before.
  * One whose request has not arrived counts as cancelled at once, and the
- * core refuses that request if it comes. */
+ * hub refuses that request if it comes. */
 export function cancelDownload(id: string) {
   const l = live.get(id);
   if (!find(id) || !l) return;
@@ -216,7 +216,7 @@ export function cancelDownload(id: string) {
   conn.send({ t: 'download.cancel', id });
 }
 
-/** Asks the core again about the downloads in progress, after the page
+/** Asks the hub again about the downloads in progress, after the page
  * (re)connected: events sent meanwhile were lost. */
 export function resyncDownloads() {
   const ids = useDownloads.getState().active.map((x) => x.id);

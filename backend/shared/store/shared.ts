@@ -12,7 +12,7 @@
 // A process opens a shared database once: openShared hands out a handle
 // of the connection it already has open on that file, and the connection
 // closes with its last handle. An owner that keeps a handle while it runs
-// (the core's server) makes every feature's use of the database take the
+// (the hub's server) makes every feature's use of the database take the
 // open connection.
 import * as fs from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';

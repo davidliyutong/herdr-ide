@@ -1,8 +1,8 @@
-// One terminal of a machine's terminal core in the page: the core's stream
+// One terminal of a machine's terminal core in the page: the hub's stream
 // feeds libghostty-vt (terminal.ts), whose screen a renderer draws
 // (renderer.ts), and the browser's keys, text, pastes, mouse and focus go
 // back as the bytes the program asked for (input.ts). Output is
-// acknowledged to the core once it was drawn, so a busy program runs at the
+// acknowledged to the hub once it was drawn, so a busy program runs at the
 // speed the page draws; the terminal's own answers (device attributes,
 // colors, cursor position) go back as automatic input.
 //
@@ -117,8 +117,8 @@ const PRELUDE_RESET = [
 
 const utf8 = new TextEncoder();
 
-/** Where a terminal's stream comes from: the core's terminal protocol
- * (term/connection.ts), or a PTY of the core host (components/AuthDialog.tsx). */
+/** Where a terminal's stream comes from: the hub's terminal protocol
+ * (term/connection.ts), or a PTY of the hub host (components/AuthDialog.tsx). */
 export interface TermLink {
   readonly connected: boolean;
   attach(o: AttachOptions, handler: StreamHandler): Promise<number>;

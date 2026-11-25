@@ -11,7 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: () => {} } }));
 
 import { useStore } from '../state/store';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import type { MachineState } from '../lib/machine';
 import { Sidebar } from '../components/Sidebar';
 
@@ -43,8 +43,8 @@ describe('Sidebar machines', () => {
   });
 
   it('offers to start the terminal core where it failed, except read-only', async () => {
-    const core = new FakeCore();
-    core.install();
+    const hub = new FakeHub();
+    hub.install();
     await settle();
     const start = () => Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Start Terminal Service');
     await act(async () =>
@@ -67,8 +67,8 @@ describe('Sidebar machines', () => {
   });
 
   it('lists the workspaces of a followed machine with their agents', async () => {
-    const core = new FakeCore();
-    core.machine('gpu', [FakeCore.term('t1', { agent: 'claude', agent_status: 'blocked' }), FakeCore.term('t2')], {
+    const hub = new FakeHub();
+    hub.machine('gpu', [FakeHub.term('t1', { agent: 'claude', agent_status: 'blocked' }), FakeHub.term('t2')], {
       version: 2,
       workspaces: [
         { id: 'aaaaaaaa', name: 'api', cwd: '/srv/api', tabs: [{ root: { terminal: 't1' }, focused: 't1' }], selected: 0 },
@@ -85,12 +85,12 @@ describe('Sidebar machines', () => {
       ],
       selected: 1,
     });
-    core.install();
+    hub.install();
     await act(async () =>
       useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]),
     );
     await act(async () => useStore.getState().selectMachine('gpu'));
-    await act(async () => core.model.subscribe('gpu'));
+    await act(async () => hub.model.subscribe('gpu'));
     await act(settle);
     const items = Array.from(host.querySelectorAll<HTMLElement>('.ws-item[data-ws-id]'));
     expect(items.map((e) => e.querySelector('.ellipsis')?.textContent)).toEqual(['api', 'web']);
@@ -100,14 +100,14 @@ describe('Sidebar machines', () => {
     expect(host.querySelector('.inbox')?.textContent).toContain('claude');
     await act(async () => items[0].click());
     await act(settle);
-    expect(core.layout('gpu')?.selected).toBe(0);
+    expect(hub.layout('gpu')?.selected).toBe(0);
   });
 
   it('moves between the agents with the arrows, one Tab stop, and shows one with Enter', async () => {
-    const core = new FakeCore();
-    core.machine(
+    const hub = new FakeHub();
+    hub.machine(
       'gpu',
-      [FakeCore.term('t1', { agent: 'claude', agent_status: 'blocked' }), FakeCore.term('t2', { agent: 'codex', agent_status: 'done' })],
+      [FakeHub.term('t1', { agent: 'claude', agent_status: 'blocked' }), FakeHub.term('t2', { agent: 'codex', agent_status: 'done' })],
       {
         version: 2,
         workspaces: [
@@ -117,11 +117,11 @@ describe('Sidebar machines', () => {
         selected: 0,
       },
     );
-    core.install();
+    hub.install();
     await act(async () =>
       useStore.getState().setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]),
     );
-    await act(async () => core.model.subscribe('gpu'));
+    await act(async () => hub.model.subscribe('gpu'));
     await act(settle);
     const agents = () => [...host.querySelectorAll<HTMLElement>('.inbox-item')];
     expect(agents().map((a) => a.tabIndex)).toEqual([0, -1]);
@@ -138,13 +138,13 @@ describe('Sidebar machines', () => {
     await key('End');
     await key('Enter');
     await act(settle);
-    expect(core.layout('gpu')?.selected).toBe(1);
+    expect(hub.layout('gpu')?.selected).toBe(1);
   });
 
   it('names workspaces without a name after their folder, keeps rows quiet and renames them in place', async () => {
-    const core = new FakeCore();
+    const hub = new FakeHub();
     const tab = (t: string) => ({ root: { terminal: t }, focused: t });
-    core.machine('gpu', [FakeCore.term('t1'), FakeCore.term('t2'), FakeCore.term('t3'), FakeCore.term('t4', { cwd: '/home/u/notes' })], {
+    hub.machine('gpu', [FakeHub.term('t1'), FakeHub.term('t2'), FakeHub.term('t3'), FakeHub.term('t4', { cwd: '/home/u/notes' })], {
       version: 2,
       workspaces: [
         { id: 'aaaaaaaa', name: '', cwd: '/home/u/src/website', tabs: [tab('t1'), tab('t2')], selected: 0 },
@@ -153,14 +153,14 @@ describe('Sidebar machines', () => {
       ],
       selected: 0,
     });
-    core.install();
+    hub.install();
     await act(async () =>
       useStore
         .getState()
         .setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]),
     );
     await act(async () => useStore.getState().selectMachine('gpu'));
-    await act(async () => core.model.subscribe('gpu'));
+    await act(async () => hub.model.subscribe('gpu'));
     await act(settle);
     const items = () => Array.from(host.querySelectorAll<HTMLElement>('.ws-item[data-ws-id]'));
     expect(items().map((e) => e.querySelector('.ws-name')?.textContent)).toEqual(['website', '~', 'notes']);
@@ -179,9 +179,9 @@ describe('Sidebar machines', () => {
       await act(settle);
     };
     await rename('aaaaaaaa', 'site');
-    expect(core.layout('gpu')?.workspaces[0].name).toBe('site');
+    expect(hub.layout('gpu')?.workspaces[0].name).toBe('site');
     await rename('cccccccc', '');
-    expect(core.layout('gpu')?.workspaces[2].name).toBe('');
+    expect(hub.layout('gpu')?.workspaces[2].name).toBe('');
     expect(items().map((e) => e.querySelector('.ws-name')?.textContent)).toEqual(['site', '~', 'notes']);
   });
 
@@ -253,7 +253,7 @@ describe('Sidebar machines', () => {
     expect(host.querySelectorAll('.machine-status button')).toHaveLength(0);
   });
 
-  it('offers Sign in only where the core keeps an ssh login, and says what to do elsewhere', async () => {
+  it('offers Sign in only where the hub keeps an ssh login, and says what to do elsewhere', async () => {
     const machine = { id: 'gpu', label: 'gpu', kind: 'ssh', status: 'auth_required', enabled: true } as unknown as MachineState;
     await act(async () => useStore.getState().setMachines([machine]));
     const buttons = () => Array.from(host.querySelectorAll('.machine-status button')).map((b) => b.textContent);

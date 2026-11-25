@@ -1,8 +1,8 @@
 # backend
 
-The core and the machine agent in TypeScript. Bun runs it on machines and
+The hub and the machine agent in TypeScript. Bun runs it on machines and
 as the command line, built into one executable; the desktop app runs the
-core inside Electron, whose runtime is Node. It replaced the Go program of
+hub inside Electron, whose runtime is Node. It replaced the Go program of
 earlier releases ([42](../docs/features/42-typescript-backend.md)):
 machines run the machine side here (`machine/`, `hosts/machine`, the
 features' `machine.ts`), which serves every feature
@@ -20,13 +20,13 @@ of the Go packages: their layout was not kept.
 
 Each layer imports only from the layers above it in this list.
 
-| Directory   | Runs in      | What                                                                                                                                                                                                                                                                                                                            |
-| ----------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds and Claude Code's transcripts (`agents/`)                                                                                                                                            |
-| `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                                                                                                                                                                              |
-| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core, the coding agents' sessions (`agents/`)                                                                                                                                           |
-| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                                                                                                                                                                                  |
-| `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process, served over MessagePorts; `machine/` the machine side's commands (`cli.ts`: `node`; `mcp.ts`: `mcp`; run by `bun/main.ts`) and the features its node serves (`features.ts`) |
+| Directory   | Runs in      | What                                                                                                                                                                                                                                                                                                                           |
+| ----------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds and Claude Code's transcripts (`agents/`)                                                                                                                                           |
+| `kernel/`   | Bun and Node | the hub's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                                                                                                                                                                              |
+| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core, the coding agents' sessions (`agents/`)                                                                                                                                          |
+| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                                                                                                                                                                                 |
+| `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the hub in the desktop app's utility process, served over MessagePorts; `machine/` the machine side's commands (`cli.ts`: `node`; `mcp.ts`: `mcp`; run by `bun/main.ts`) and the features its node serves (`features.ts`) |
 
 `tsconfig.node.json` typechecks what runs in Node with Node's types only,
 so a Bun API there does not compile; `tsconfig.bun.json` typechecks the
@@ -45,9 +45,9 @@ chats, agent detection, the browser pane. Its directory holds
   import it. On the wire an action is the agent protocol's `plugin` op, as
   before.
 - `hub.ts` — `defineFeature`: its routes, channels, background services,
-  settings, the streams agents open towards the core; it gets a
+  settings, the streams agents open towards the hub; it gets a
   `FeatureContext` with what it may use (machines, settings, broadcast to
-  the pages, audit, logger, read-only), never the whole core.
+  the pages, audit, logger, read-only), never the whole hub.
 - `machine.ts` — the handlers of its protocol's actions on the machine:
   `defineMachine(protocol, start)` (`#machine/feature.ts`), where `start`
   runs once per agent and returns the handlers, which keep what the
@@ -56,9 +56,9 @@ chats, agent detection, the browser pane. Its directory holds
   `detect`, VS Code's `code-server`), what it ends with the agent
   (`close`) and hands to a node that takes over (`handOver`); it sees the
   agent's sessions (`env.sessions()`, an action's own `ctx.session`: their
-  pipes per socket, a stream towards their core);
+  pipes per socket, a stream towards their hub);
   params come checked by the protocol's schemas, a `Fail` thrown is the
-  refusal's code, an action that does not stream ends with the core's
+  refusal's code, an action that does not stream ends with the hub's
   interest (`ctx.signal`); its own modules in `machine/`. Exported as a
   factory (`gitMachine(opts)`) whose options are timeouts and limits with
   defaults that tests override. `hosts/machine/features.ts` lists the ones
@@ -72,7 +72,7 @@ code.
 
 A feature is exported as a factory (`machinesFeature(opts)`) whose options
 are what it needs from outside the kernel: the host's capabilities (a
-terminal on the core's host, `kernel/pty.ts`), paths, another feature's
+terminal on the hub's host, `kernel/pty.ts`), paths, another feature's
 hook. The host composes them; features do not import each other.
 
 ## The kernel
@@ -91,7 +91,7 @@ hook. The host composes them; features do not import each other.
   the remote address, whether the request is the desktop app's, how to
   upgrade it to a channel) and what the middleware works out (`client`,
   `sameHost`, `trustedOrigin`, `who`).
-- `channel.ts` — a WebSocket as the core sees it: text and binary
+- `channel.ts` — a WebSocket as the hub sees it: text and binary
   messages, `buffered` for backpressure; Bun's WebSocket or a MessagePort.
 - `pages.ts` — the pages on `/ws`: what each gets when it connects
   (`onOpen`), messages dispatched by type (`on`), `broadcast`.
@@ -100,7 +100,7 @@ hook. The host composes them; features do not import each other.
   the agents (`transport/`).
 - `agent.ts` — calling a feature's action on a machine: params and result
   validated by the protocol's schemas, large ones as bodies.
-- `payloads.ts` — what the core carries for others (the UI, machine
+- `payloads.ts` — what the hub carries for others (the UI, machine
   builds, herdr-core, the VS Code extension); `hosts/bun` reads them from
   a tar archive embedded in its executable (`scripts/build.ts`).
 
@@ -143,7 +143,7 @@ hook. The host composes them; features do not import each other.
 
 `bun scripts/build.ts --out FILE --web ../web/dist --hc DIR --ext DIR
 --encoder DIR [--release-url URL] [--target bun-linux-x64-baseline]
-[--version V]` builds the core's executable: the core and the machine side of its platform (`hosts/machine/cli.ts`'s `node`
+[--version V]` builds the hub's executable: the hub and the machine side of its platform (`hosts/machine/cli.ts`'s `node`
 commands), with that platform's herdr-core of `--hc` embedded and the
 digests of all of them recorded, and the release's download URL from which
 machines get their platform's archive
@@ -153,5 +153,5 @@ herdr-core of each platform (`scripts/fetch-hc.ts`, `scripts/hcdist.ts`).
 runs it for each platform with everything it embeds staged in
 `dist/payload`, and `scripts/e2e.sh` (`make e2e`) runs the end-to-end
 tests against it. `make dev-hub` builds this host's
-executable, stages it in `dist/payload` and runs the core from its sources
+executable, stages it in `dist/payload` and runs the hub from its sources
 (`bun hosts/bun/main.ts`), which reads the payloads from `dist/payload`.

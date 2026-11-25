@@ -1,7 +1,7 @@
 // The web UI's side of plugins: features built into the app that add
 // panels to the right sidebar, kinds of panes, commands, status bar items,
-// palette items and handlers of their messages from the core (/ws
-// plugin {plugin, m, data}). The core's side of each is in backend/kernel/feature.ts;
+// palette items and handlers of their messages from the hub (/ws
+// plugin {plugin, m, data}). The hub's side of each is in backend/kernel/feature.ts;
 // docs/features/27-plugins.md has the design. Plugins are compiled in.
 import type { ComponentType, ReactNode } from 'react';
 import type { MenuEntry } from '../contextMenu';
@@ -115,7 +115,7 @@ export interface SettingControlProps {
 /** A plugin's page in Settings. */
 export interface PluginSettingsDef {
   /** The section of its settings (backend/kernel/config/settings), whose page the
-   * Plugins page's settings button opens. The core's section names its
+   * Plugins page's settings button opens. The hub's section names its
    * plugin as well; a section without settings is a page for extra alone. */
   section: string;
   /** Lays out the page's settings in place of their rows one after the
@@ -200,7 +200,7 @@ export interface ViewStatusDef {
 }
 
 export interface PluginDef {
-  /** As the core's plugin (backend/kernel/feature.ts): lower-case letters and digits. */
+  /** As the hub's plugin (backend/kernel/feature.ts): lower-case letters and digits. */
   id: string;
   title: MessageKey;
   description?: MessageKey;
@@ -209,7 +209,7 @@ export interface PluginDef {
    * it has one of its own; none for parts of the app that are always on. */
   enableSetting?: string | null;
   /** Its content runs on the UI's own origin (VS Code's windows), where
-   * its scripts reach whatever the page reaches (the core's
+   * its scripts reach whatever the page reaches (the hub's
    * plugin.BrowserRisk): enableSetting is then the desktop app's switch,
    * browsers have one of their own, plugins.<id>.browser, and turning that
    * on asks the user to accept this risk first (registry.ts
@@ -230,7 +230,7 @@ export interface PluginDef {
   /** The kinds of tab it adds to the new-tab menu for machine m: any
    * number, in the order it lists them. Nothing while the plugin is off. */
   newTabItems?(m: string): NewTabItem[];
-  /** A message of its core side for machine m ("" for the core's). */
+  /** A message of its hub side for machine m ("" for the hub's). */
   onMessage?(m: string, data: unknown): void;
   /** Buttons in terminals' panes' headers (HeaderActionsComponent). */
   headerActions?: HeaderActionsComponent[];

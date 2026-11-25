@@ -13,7 +13,7 @@ export const DOMAIN = 'veldr.app';
 /** Prefix of environment variables. */
 export const ENV_PREFIX = 'VELDR_';
 
-/** The binary: the core and, on machines, the agent it starts. */
+/** The binary: the hub and, on machines, the agent it starts. */
 export const HUB_BIN = SLUG;
 /** The VS Code bridge extension's name; its publisher is SLUG. */
 export const BRIDGE_EXT = `${SLUG}-bridge`;
@@ -27,7 +27,7 @@ export const AGENT_DIR = `${DATA_DIR_NAME}/agent`;
 /** The name of a product environment variable. */
 export const env = (name: string): string => ENV_PREFIX + name;
 
-/** The state directory name of an instance; several cores share machines without sharing state. */
+/** The state directory name of an instance; several hubs share machines without sharing state. */
 export const dataDir = (instance: string): string => (instance === '' ? DATA_DIR_NAME : `${DATA_DIR_NAME}-${instance}`);
 
 /** Whether s is usable as an instance name: empty, or up to 32 of a-z, 0-9 and '-'. */

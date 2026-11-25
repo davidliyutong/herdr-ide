@@ -15,7 +15,7 @@ const key = 'k3'.repeat(20);
 const nonce = 'abcDEF123_-abcDEF123_-abcDEF123_-abcDEF123x';
 const request = { id: 'r1', machine: 'build-box', target: '', tool: 'run', names: ['A', 'B'] };
 
-test('the MAC matches the core: the same vectors as its proofMessage', () => {
+test('the MAC matches the hub: the same vectors as its proofMessage', () => {
   assert.equal(
     proofMac(key, nonce, { for: 'answer', request, answer: 'once' }),
     '1afd96561024d832a5c57420c354c3f731c098bcd46c5023d75184c846ddb63e',
@@ -419,7 +419,7 @@ function unlockSetup(over: UnlockOver = {}) {
   return { v: verifier(over.key ?? key, deps), log, agreed, signed };
 }
 
-/** The relay's plaintext as the core would open it. */
+/** The relay's plaintext as the hub would open it. */
 function opened(purpose: 'session' | 'register', entry: string, relay: string): unknown {
   const plain = openRelay(relayKey(key), purpose, nonce, entry, relay);
   assert.ok(plain, 'the relay opens for its purpose, nonce and entry');
@@ -523,7 +523,7 @@ test('no entry of this install, no keys of its own: none without a prompt; no sa
   }
 });
 
-test('unlock takes only a session nonce of a locked vault with entries of exactly the core’s shape', async () => {
+test('unlock takes only a session nonce of a locked vault with entries of exactly the hub’s shape', async () => {
   const own = enclaveEntry(ownId, install);
   const bad: unknown[] = [
     undefined,

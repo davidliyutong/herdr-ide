@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Full Disk Access in the settings: shown only in the desktop app on macOS,
-// in the user's Terminal page (and its search), with the state the core
+// in the user's Terminal page (and its search), with the state the hub
 // reports for terminals and for the app, read again when the window comes
 // back to the front; its buttons ask the shell, and what to restart comes
 // with the matching action after asking. The command opens System Settings
@@ -150,7 +150,7 @@ describe('Full Disk Access in the settings', () => {
     expect(privacyReads()).toBe(0);
   });
 
-  it("ends the user's Terminal page on macOS, with the core's state of terminals and the app", async () => {
+  it("ends the user's Terminal page on macOS, with the hub's state of terminals and the app", async () => {
     bridge.shell = mac;
     await open({ page: 'terminal' });
     expect(qa('.settings-group').map((h) => h.textContent)).toEqual(['Text', 'Cursor', 'Permissions']);
@@ -214,7 +214,7 @@ describe('Full Disk Access in the settings', () => {
     expect(row()?.textContent).not.toContain('In the list');
   });
 
-  it('shows unknown when the core cannot tell, and nothing to restart', async () => {
+  it('shows unknown when the hub cannot tell, and nothing to restart', async () => {
     bridge.shell = mac;
     privacy = { files: 'unknown', terminals: 'unknown', hc: '' };
     await open({ page: 'terminal' });

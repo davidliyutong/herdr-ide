@@ -1,4 +1,4 @@
-// Where an instance keeps its hand-editable files on the core host: in the
+// Where an instance keeps its hand-editable files on the hub host: in the
 // user's configuration directory (%AppData%, ~/Library/Application Support,
 // $XDG_CONFIG_HOME), settings.json, keybindings.json and machines.json, or
 // settings-<instance>.json and so on beside each other.

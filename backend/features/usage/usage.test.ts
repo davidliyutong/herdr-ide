@@ -1,6 +1,6 @@
 // The AI usage scheduler, its snapshot and the spend, with machines whose
 // agents answer what each test gives them and a clock of the test's
-// (ported from the Go core's tests).
+// (ported from the Go hub's tests).
 import { afterAll, expect, test } from 'bun:test';
 import { statSync } from 'node:fs';
 import { Fail, offline } from '#kernel/fail.ts';
@@ -154,7 +154,7 @@ test('history', async () => {
     t.clock.now += HOUR;
     pct += 5;
   }
-  // Kept in the core's database beside the settings file.
+  // Kept in the hub's database beside the settings file.
   const st = statSync(hubDBFile(t.st.path));
   if (process.platform !== 'win32') expect(st.mode & 0o777).toBe(0o600);
   const w = t.snap().accounts[0]!.windows[0]!;
@@ -280,7 +280,7 @@ test('settings', () => {
   t.st.set('usage.codexHomes', '', ['~/work-codex']);
   const others = PROVIDERS.filter((p) => p !== 'deepseek');
   expect(t.u.options()).toEqual({ providers: others, codexHomes: ['~/work-codex'], claudeKeychain: false, kimiRefresh: false });
-  // A read-only core never has Kimi Code's sign-in renewed (it rewrites the
+  // A read-only hub never has Kimi Code's sign-in renewed (it rewrites the
   // credentials file on the machine), whatever the setting.
   t.st.set('usage.kimiRefresh', '', true);
   expect(t.u.options().kimiRefresh).toBe(true);

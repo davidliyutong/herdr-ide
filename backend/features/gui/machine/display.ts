@@ -250,7 +250,7 @@ export class Display {
   }
 
   /** Runs f alone: within this process and, with the lock file, between
-   * agents of the same instance (two cores, or a node taking over). */
+   * agents of the same instance (two hubs, or a node taking over). */
   locked<T>(f: () => Promise<T>): Promise<T> {
     const run = async () => {
       const fd = openSync(posix.join(this.o.run, 'gui.lock'), constants.O_CREAT | constants.O_RDWR, 0o600);
@@ -510,7 +510,7 @@ export class Display {
     return { bin, node: g.node, nvidia: g.nvidia, ...(g.minor !== undefined ? { minor: g.minor } : {}) };
   }
 
-  /** The kind of display to start for what the core asked for. */
+  /** The kind of display to start for what the hub asked for. */
   async wanted(asked: string): Promise<string> {
     if (asked !== GUIDisplay.Xvfb && (await this.gpuDisplay())) return GUIDisplay.Xwayland;
     return GUIDisplay.Xvfb;
@@ -790,7 +790,7 @@ export class Display {
     return this.vgl;
   }
 
-  /** The display's state as the core sees it. */
+  /** The display's state as the hub sees it. */
   async status(): Promise<GUIStatus> {
     const isLinux = this.o.linux ?? linux;
     const st: GUIStatus = { supported: isLinux, running: false };

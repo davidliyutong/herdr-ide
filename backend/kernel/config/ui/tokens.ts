@@ -1,5 +1,5 @@
 // The design tokens the settings take their defaults from, read from
-// spec/tokens.json when the core is built (backend/scripts/tokens.ts generates the
+// spec/tokens.json when the hub is built (backend/scripts/tokens.ts generates the
 // web UI's CSS from the same file and validates it: 16 opaque palette
 // colors per theme, themes with unique ids).
 import tokens from '../../../../spec/tokens.json' with { type: 'json' };

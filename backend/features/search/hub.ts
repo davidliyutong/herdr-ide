@@ -1,4 +1,4 @@
-// Project Search's core side (docs/features/41-project-search.md):
+// Project Search's hub side (docs/features/41-project-search.md):
 //
 //   - POST /api/m/:id/p/search/search {dir, query, regex, caseSensitive,
 //     wholeWord, include, exclude, maxResults}: the files below dir of the
@@ -6,7 +6,7 @@
 //     the search stopped early, as the machine's agent answered.
 //
 // A POST for the length of its query and patterns; it only reads, so it is
-// not mutating and a read-only core searches too. A search the machine
+// not mutating and a read-only hub searches too. A search the machine
 // does not answer in time is a 504 timeout; the machine stops it when the
 // request ends.
 import { z } from 'zod';
@@ -26,7 +26,7 @@ export interface SearchOptions {
 const str = z.string().nullish();
 const flag = z.boolean().nullish();
 
-/** A search's body as the Go core decoded it into its struct: members it
+/** A search's body as the Go hub decoded it into its struct: members it
  * does not know are ignored, null is none; what is empty or false is left
  * out of the parameters (omitempty). */
 const body = z

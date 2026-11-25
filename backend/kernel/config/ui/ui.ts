@@ -1,12 +1,12 @@
 // The settings of the user interface: the web UI (also inside the desktop
-// app) reads them from the core (/api/settings), so every client of a core
+// app) reads them from the hub (/api/settings), so every client of a hub
 // looks and behaves the same and the values survive browsers, profiles and
 // reinstalls. See docs/features/13-settings-and-appearance.md.
 import * as agentkinds from '#shared/agents/kinds.ts';
 import { bool, color, colorList, defineModule, enumOf, int, number, stringList, text, type Setting } from '../settings/index.ts';
 import { TOKEN_COLORS, TOKEN_THEMES } from './tokens.ts';
 
-/** Read by the core: whether the new terminals of an ssh machine get the
+/** Read by the hub: whether the new terminals of an ssh machine get the
  * variables of its ssh session (SSH_CONNECTION, SSH_CLIENT). */
 export const SSH_ENV = 'terminal.sshEnv';
 

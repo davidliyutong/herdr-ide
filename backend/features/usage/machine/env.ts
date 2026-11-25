@@ -43,11 +43,11 @@ export interface UsageTiming {
   requestMs: number;
   /** One limits action (the providers in parallel). */
   limitsMs: number;
-  /** How long one core's limits answer another core's same request. */
+  /** How long one hub's limits answer another hub's same request. */
   limitsShareMs: number;
-  /** One cost scan (the core waits 2 minutes). */
+  /** One cost scan (the hub waits 2 minutes). */
   costMs: number;
-  /** One session action (the core waits 30 s). */
+  /** One session action (the hub waits 30 s). */
   sessionMs: number;
   /** The keychain's security(1). */
   keychainMs: number;
@@ -266,7 +266,7 @@ export const copyAccount = (a: Account): Account => ({
   credits: a.credits && { ...a.credits },
 });
 
-/** The answer for an account the core already has: its identity only. */
+/** The answer for an account the hub already has: its identity only. */
 export const skipped = (a: Account): Account => ({
   provider: a.provider,
   id: a.id,
@@ -281,9 +281,9 @@ export interface LimitsOptions {
   providers?: string[];
   codexHomes?: string[];
   claudeKeychain?: boolean;
-  /** Accounts (provider:id) the core already has or holds back. */
+  /** Accounts (provider:id) the hub already has or holds back. */
   skip?: string[];
-  /** This machine's accounts without an id the core holds back: provider,
+  /** This machine's accounts without an id the hub holds back: provider,
    * or provider:home for a Codex home other than the default. */
   skipLocal?: string[];
   kimiRefresh?: boolean;

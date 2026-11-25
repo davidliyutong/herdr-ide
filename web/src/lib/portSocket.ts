@@ -1,8 +1,8 @@
 // A WebSocket over a MessagePort: what a channel of the desktop app to its
-// core (DesktopChannels in ../shell.ts) is to code that would open a
+// hub (DesktopChannels in ../shell.ts) is to code that would open a
 // WebSocket. transport.ts makes them for the web UI; the desktop app's
 // preload installs the same into VS Code's frames in place of WebSocket
-// for the core's own address. The preload hands this function to
+// for the hub's own address. The preload hands this function to
 // contextBridge.executeInMainWorld, which runs its source in the page:
 // it references nothing outside its body (its constants are written out;
 // the tests check them against shell.ts and the bridge,

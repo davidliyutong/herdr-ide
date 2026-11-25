@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // A terminal's pane (vt/pane.ts) with the real emulator, over a link that
-// records what reaches the core: a pane kept while its tab is not shown
+// records what reaches the hub: a pane kept while its tab is not shown
 // neither attaches nor draws (no renderer, so no WebGL context). A terminal's
 // prelude (state/preludes.ts) is replayed into each new emulator before
 // the stream's first paint, which leaves it in the scrollback; first
@@ -78,7 +78,7 @@ const fs = (await import(/* @vite-ignore */ fsModule)) as { readFileSync(p: stri
 const cwd = (globalThis as unknown as { process: { cwd(): string } }).process.cwd();
 const vt = vtFromBytes(fs.readFileSync(`${cwd}/src/vt/ghostty-vt.wasm`));
 
-/** A link to a core that takes every attach as stream 1 and records the
+/** A link to a hub that takes every attach as stream 1 and records the
  * rest; held, an attach is answered only when release (or refuse) is
  * called. */
 class Link implements TermLink {
@@ -162,7 +162,7 @@ function paint(history: string[], screen: string[], rows: number, o: { cursor?: 
   return PAINT_HEAD + hist + SCREEN_HEAD + screen.join('\r\n') + `\x1b[${row};${col}H\x1b[0m` + (o.end === false ? '' : '\x1b[?9001l');
 }
 
-/** The first paint of a new shell after the core started again, captured. */
+/** The first paint of a new shell after the terminal core started again, captured. */
 const NEW_SHELL = PAINT_HEAD + SCREEN_HEAD + '$ \x1b[1;3H\x1b[0m\x1b[?9001l';
 
 /** Every line of an emulator, its scrollback first, as text. */
@@ -464,7 +464,7 @@ describe('a terminal’s pane', () => {
       },
     );
 
-    it('keeps the saved lines of an observer’s pane that the core resizes before its first paint', async () => {
+    it('keeps the saved lines of an observer’s pane that the terminal core resizes before its first paint', async () => {
       const history = Array.from({ length: 80 }, (_, i) => `h${i + 1}`);
       const screen = [...Array.from({ length: 23 }, (_, i) => `s${i + 1}`), '$ '];
       setPrelude('a', 't1', enc(paint(history, screen, 24, { end: false })), 'NOTE', { cols: 80, rows: 24 });
@@ -582,7 +582,7 @@ describe('a terminal’s pane', () => {
       setPrelude('a', 't1', enc(hostile), 'saved');
       const { p, size } = pane();
       await loadEmulator();
-      // The core dropped the paint (above 4 MiB): only the program's output comes.
+      // The terminal core dropped the paint (above 4 MiB): only the program's output comes.
       link.handler!.output(enc('$ echo hi\r\nhi\r\n$ '));
       await settle(700);
       const term = p.term!;
@@ -683,12 +683,12 @@ describe('a terminal’s pane', () => {
       const { p, attached, reopened } = await ended();
       expect(p.attached).toBe(false);
       expect(attached).toHaveBeenCalledTimes(1);
-      // The record says finished, then the core is away: no program.
+      // The record says finished, then the terminal core is away: no program.
       p.setProgram(undefined);
       p.setProgram(undefined);
       await settle();
       expect(link.attaches).toHaveLength(1);
-      // The core started again and gave the kept terminal a new shell at its address.
+      // The terminal core started again and gave the kept terminal a new shell at its address.
       p.setProgram(201);
       expect(reopened).toHaveBeenCalledTimes(1);
       await settle();

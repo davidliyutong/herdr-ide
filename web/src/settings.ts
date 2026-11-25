@@ -1,8 +1,8 @@
-// The settings of the core and of the user interfaces (backend/kernel/config/settings):
-// definitions and values from GET /api/settings, kept current by the core's
+// The settings of the hub and of the user interfaces (backend/kernel/config/settings):
+// definitions and values from GET /api/settings, kept current by the hub's
 // "settings" pushes on /ws, changed with PUT and DELETE. The settings dialog
 // renders itself from the definitions; prefs.ts reads the values the UI
-// uses. Until the core answers, the defaults of spec/generated/registry.json
+// uses. Until the hub answers, the defaults of spec/generated/registry.json
 // apply (the same build's registry).
 
 import { create } from 'zustand';
@@ -58,10 +58,10 @@ export interface Section {
   plugin?: string;
 }
 
-/** The kind of client this page is, as the core tells from its requests
+/** The kind of client this page is, as the hub tells from its requests
  * (the desktop app's windows carry the token of its launch): which switch
  * of a plugin with one per kind of client applies here (plugins/api.ts
- * browserRisk). A browser until the core answers. */
+ * browserRisk). A browser until the hub answers. */
 export type Client = 'browser' | 'desktop';
 
 interface SettingsStore {
@@ -75,7 +75,7 @@ interface SettingsStore {
   client: Client;
 }
 
-/** The built-in defaults: what the UI uses before the core answers. */
+/** The built-in defaults: what the UI uses before the hub answers. */
 export const builtinDefaults = registry.settings as Record<string, SettingValue>;
 
 function defaultValues(): Record<string, SettingState> {
@@ -95,7 +95,7 @@ export const useSettings = create<SettingsStore>(() => ({
   client: 'browser',
 }));
 
-/** A setting's global value: the core's, else the built-in default. */
+/** A setting's global value: the hub's, else the built-in default. */
 export function settingValue(key: string): SettingValue | undefined {
   return useSettings.getState().values[key]?.value ?? builtinDefaults[key];
 }
@@ -170,7 +170,7 @@ async function change(
 
 /** Saves a value, globally or as a machine's own; resolves to an error
  * message, or undefined. A global value shows at once and is replaced by
- * the core's answer. */
+ * the hub's answer. */
 export function setSetting(key: string, value: SettingValue, machine?: string): Promise<string | undefined> {
   const s = useSettings.getState();
   const cur = s.values[key];

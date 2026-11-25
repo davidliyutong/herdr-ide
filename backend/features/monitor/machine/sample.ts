@@ -48,7 +48,7 @@ export interface Sampling {
   o: MonitorOptions;
   /** The environment of the helper programs. */
   env: Record<string, string>;
-  /** Ends when the core gives up on the action. */
+  /** Ends when the hub gives up on the action. */
   signal: AbortSignal;
 }
 

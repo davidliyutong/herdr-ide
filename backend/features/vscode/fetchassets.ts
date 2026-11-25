@@ -1,6 +1,6 @@
 // `fetch-assets [flags] DIR`: downloads and verifies the code-server
 // releases and the extensions machines need into DIR, with a .sha256
-// sidecar each, for carrying into an air-gapped network; the core there
+// sidecar each, for carrying into an air-gapped network; the hub there
 // runs with --offline --seed-dir DIR (docs/features/09).
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';

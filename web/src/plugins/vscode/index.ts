@@ -1,7 +1,7 @@
 // VS Code (docs/features/05-vscode-panes.md) as a plugin: code-server's
 // windows in panes, the commands that open them (a folder, its changes,
 // Git Graph) and the buttons and menu items that offer them. Off, nothing
-// offers VS Code, its panes say so and the core refuses its routes
+// offers VS Code, its panes say so and the hub refuses its routes
 // (backend/features/vscode), so code-server is neither fetched nor started.
 // The layout keeps VS Code panes ({code: …}) whether it is on or off.
 // Its windows run on the UI's origin, so it has a switch for the desktop

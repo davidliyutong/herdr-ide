@@ -26,7 +26,7 @@ export function keyPlatform(p: Platform): 'mac' | 'windows' | 'linux' {
   return p === 'darwin' ? 'mac' : p === 'win32' ? 'windows' : 'linux';
 }
 
-/** Where the core's payloads are: in the app's resources (payload/ as
+/** Where the hub's payloads are: in the app's resources (payload/ as
  * scripts/build.sh stages it: machine builds, herdr-core, the video
  * encoders, the VS Code extension; web/ the web UI), or in the repository
  * for unpackaged development (dist/payload, web/dist). */
@@ -36,7 +36,7 @@ export function hubResources(resources: string | undefined, repo: string): { pay
 }
 
 /** Whether closing the main window quits: everywhere but macOS, where the
- * app stays in the Dock (with its core) until it is quit. */
+ * app stays in the Dock (with its hub) until it is quit. */
 export function quitsWithLastWindow(p: Platform): boolean {
   return p !== 'darwin';
 }

@@ -2,8 +2,8 @@
 // another, encrypted under a passphrase of their own: a JSON envelope that
 // says in the clear only its format, version, the key's derivation and the
 // cipher, all bound to the ciphertext as its additional data, and the
-// content sealed with AES-256-GCM. The core seals and opens them; values
-// never reach a browser. The Go core's format, which files it exported
+// content sealed with AES-256-GCM. The hub seals and opens them; values
+// never reach a browser. The Go hub's format, which files it exported
 // have.
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
@@ -21,9 +21,9 @@ export const exportFormat = () => `${SLUG}-vault-export`;
 export interface ExportMachine {
   id: string;
   label?: string;
-  /** The core's own computer, whose id is the same on every core. */
+  /** The hub's own computer, whose id is the same on every hub. */
   local?: boolean;
-  /** Its kind and, for an ssh machine, its target on the exporting core:
+  /** Its kind and, for an ssh machine, its target on the exporting hub:
    * an import maps the id only to a machine of the same kind and target. */
   kind?: string;
   target?: string;

@@ -43,17 +43,17 @@ test('feature', () => {
 // Every route is a machine's; only the clear and the adopt change
 // something: guarded (refused in read-only mode, audited).
 test('routes', async () => {
-  const core = (readOnly: boolean) =>
+  const hub = (readOnly: boolean) =>
     testHub({
       features: [historyFeature()],
       machines: testMachines([sshSpec('x', 'x', 'x', false)]),
       readOnly,
       settings: { [SWITCH]: true },
     });
-  const { problems, checked } = await checkGuarded(core(false), core(true), { machine: 'x' });
+  const { problems, checked } = await checkGuarded(hub(false), hub(true), { machine: 'x' });
   expect(problems).toEqual([]);
   expect(checked.sort()).toEqual(['DELETE /api/m/:id/p/history', 'POST /api/m/:id/p/history/adopt']);
-  const gets = core(true).hub.http.app.routes.filter((r) => r.method === 'GET' && r.path.startsWith('/api/m/:id/p/history'));
+  const gets = hub(true).hub.http.app.routes.filter((r) => r.method === 'GET' && r.path.startsWith('/api/m/:id/p/history'));
   expect([...new Set(gets.map((r) => r.path))].sort()).toEqual(['/api/m/:id/p/history', '/api/m/:id/p/history/read']);
 });
 
@@ -245,7 +245,7 @@ describe('scheduler', () => {
 
   // Turning the setting off clears the machine's snapshots once, audited;
   // also when it happens while the machine is away (when it is back), and
-  // when it is turned on again before the next tick. Read-only cores clear
+  // when it is turned on again before the next tick. Read-only hubs clear
   // nothing.
   test('clears when turned off', async () => {
     const { f, st, audit, step, actions } = testScheduler('gpu', 'far');
@@ -336,7 +336,7 @@ describe('scheduler', () => {
   });
 });
 
-/** A core with the feature whose machine x answers the history actions
+/** A hub with the feature whose machine x answers the history actions
  * with reply (or waits while block is set). */
 async function withMachine(
   reply: (action: string, params: Record<string, unknown>) => Reply,
@@ -364,8 +364,8 @@ async function withMachine(
   const machines = testMachines([sshSpec('x'), sshSpec('far', 'far', 'far', false)], { dial: agentDialer({ serve }) });
   const audit = memoryAudit();
   // A real settings store: the scheduler reads numbers; capturing stays
-  // off, and the read-only core's scheduler asks nothing.
-  const core = createHub({
+  // off, and the read-only hub's scheduler asks nothing.
+  const hub = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: false,
@@ -374,13 +374,13 @@ async function withMachine(
     settings: newSettings(),
     features: [historyFeature({ ...o, timing: { tickMs: 20, ...o.timing } })],
   });
-  stops.push(running(core));
+  stops.push(running(hub));
   await waitFor('x ready', () => machines.get('x')!.ready);
   // The scheduler's clear of a machine first seen.
   await waitFor('the first clear', () => calls.length > 0);
   calls.length = 0;
   const request = (method: string, path: string) =>
-    core.fetch(new Request(`http://127.0.0.1:7780${path}`, { method, headers: { Host: '127.0.0.1:7780' } }), {
+    hub.fetch(new Request(`http://127.0.0.1:7780${path}`, { method, headers: { Host: '127.0.0.1:7780' } }), {
       remote: '127.0.0.1',
       desktop: false,
     });
@@ -450,7 +450,7 @@ test('route guards', async () => {
     expect(audit.records().at(-1)!.terminal).toBeUndefined();
   }
   expect(calls).toEqual([]);
-  // The list without what could not name a terminal, as the Go core wrote it.
+  // The list without what could not name a terminal, as the Go hub wrote it.
   let res = await request('GET', '/api/m/x/p/history');
   expect([res.status, res.headers.get('Cache-Control'), await res.json()]).toEqual([
     200,

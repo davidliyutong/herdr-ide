@@ -1,14 +1,14 @@
-// The core's part in getting Anthropic's Agent SDK to the machines whose
+// The hub's part in getting Anthropic's Agent SDK to the machines whose
 // chat hosts run Claude Code's chats (claudesdk.ts): before a request that
 // starts such a chat, the machine side's action sdk says whether the pinned
-// version is installed and, unless the core is offline, has the machine
+// version is installed and, unless the hub is offline, has the machine
 // download it itself from the npm registry (curl or wget, checked against
-// the pinned integrity). A machine that cannot gets it from the core
+// the pinned integrity). A machine that cannot gets it from the hub
 // (sdkUpload), as VS Code's releases and the machine builds come: first of
-// the operator's directories (--seed-dir), the core's cache, and the core's
+// the operator's directories (--seed-dir), the hub's cache, and the hub's
 // own download from the registry (through the proxy of its environment),
 // each checked against the pinned integrity before it is used, cached or
-// sent. Nothing of it is part of the core.
+// sent. Nothing of it is part of the hub.
 //
 // A machine of the Go build answers that it has no such action: its chat
 // host speaks Claude Code's protocol itself, and nothing is installed. A
@@ -39,9 +39,9 @@ import { chatProtocol } from './protocol.ts';
 export interface SdkProvisionOptions {
   /** The operator's directories of artifacts (--seed-dir), searched first. */
   seedDirs?: readonly string[];
-  /** The core's cache of the tarballs it got. */
+  /** The hub's cache of the tarballs it got. */
   cacheDir: string;
-  /** Never download: neither the core nor the machines (--offline). */
+  /** Never download: neither the hub nor the machines (--offline). */
   offline?: boolean;
   /** The npm registry (--npm-registry): http or https, without user
    * information, query or fragment (serve refuses another). */
@@ -49,12 +49,12 @@ export interface SdkProvisionOptions {
   logger: Logger;
   /** The pinned tarball (tests pin their own). */
   pin?: NpmTarball;
-  /** Bounds the core's download, the machine's (its action's answer), and
+  /** Bounds the hub's download, the machine's (its action's answer), and
    * the upload with its install. */
   downloadMs?: number;
   machineMs?: number;
   uploadMs?: number;
-  /** Bounds the core's load of its tarball, which the machines that need it
+  /** Bounds the hub's load of its tarball, which the machines that need it
    * share: one that has not settled by then is dropped, and the next ask
    * loads it anew. By default the download's bound and a minute. */
   loadMs?: number;
@@ -76,12 +76,12 @@ export const SDK_FAILURE_MS = 5 * 60_000;
 /** The audit record of an install. */
 export const SDK_AUDIT_EVENT = 'chat.sdk_install';
 
-/** Where a machine's copy came from: its own download, or the core's upload
+/** Where a machine's copy came from: its own download, or the hub's upload
  * of an operator's copy, its cache or its own download; none when nothing
  * was tried (offline, with no copy). */
 export type SdkSource = 'machine' | 'seed' | 'cache' | 'download' | 'none';
 
-/** What an ask of the core may say of its caller. */
+/** What an ask of the hub may say of its caller. */
 export interface EnsureOptions {
   /** Asks again although the machine failed lately (a new chat). */
   retry?: boolean;
@@ -89,7 +89,7 @@ export interface EnsureOptions {
   audit?: (event: string, fields: AuditFields) => void;
 }
 
-/** The core's refusal of a Claude Code chat the machine cannot run. */
+/** The hub's refusal of a Claude Code chat the machine cannot run. */
 export const sdkUnavailable = (message: string): Fail => new Fail(chat.Code.SdkUnavailable, 503, message);
 
 const sha512 = (b: Uint8Array): string => createHash('sha512').update(b).digest('base64');
@@ -133,13 +133,13 @@ export async function readRegular(p: string, max: number): Promise<Buffer | null
   }
 }
 
-/** The core's tarball and where it came from. */
+/** The hub's tarball and where it came from. */
 interface HubTarball {
   bytes: Buffer;
   source: Exclude<SdkSource, 'machine' | 'none'>;
 }
 
-/** Why the core has no tarball, with the last source it tried. */
+/** Why the hub has no tarball, with the last source it tried. */
 class NoTarball extends Error {
   readonly source: SdkSource;
   constructor(message: string, source: SdkSource) {
@@ -148,7 +148,7 @@ class NoTarball extends Error {
   }
 }
 
-/** What a machine's chat host needs of the SDK, as this core got it there. */
+/** What a machine's chat host needs of the SDK, as this hub got it there. */
 interface MachineState {
   /** The agent session the SDK was found installed on (or found needless
    * on: a Go build's); null until then. */
@@ -160,13 +160,13 @@ interface MachineState {
   lock: Promise<void>;
 }
 
-/** The SDK on the machines, as this core got it there. */
+/** The SDK on the machines, as this hub got it there. */
 export class SdkProvision {
   readonly pin: NpmTarball;
   readonly url: string;
   private readonly o: SdkProvisionOptions;
   private readonly states = new Map<string, MachineState>();
-  /** The core's tarball, loaded once for every machine that waits for it;
+  /** The hub's tarball, loaded once for every machine that waits for it;
    * a failure is tried again, and a load that does not settle within
    * loadMs is dropped. */
   private load: Promise<HubTarball> | null = null;
@@ -255,7 +255,7 @@ export class SdkProvision {
     }
     reasons.push(
       this.o.offline
-        ? 'the core is offline: the machine did not download it'
+        ? 'the hub is offline: the machine did not download it'
         : `the machine could not download it: ${redactURLs(res.error ?? 'no reason')}`,
     );
     let tarball: HubTarball;
@@ -280,7 +280,7 @@ export class SdkProvision {
         audit(false, messageOf(signal.reason));
         signal.throwIfAborted();
       }
-      reasons.push(`the core's upload failed: ${redactURLs(messageOf(e))}`);
+      reasons.push(`the hub's upload failed: ${redactURLs(messageOf(e))}`);
       const refusal = this.refusal(m, reasons);
       audit(false, refusal.message);
       throw refusal;
@@ -292,11 +292,11 @@ export class SdkProvision {
     const why = `${this.pin.name} ${this.pin.version} could not be installed on ${m.label}: ${reasons.join('; ')}`;
     this.o.logger(`chat: ${why}`);
     return sdkUnavailable(
-      `${why}; let the machine or this core reach ${shownURL(this.url)}, or put ${this.pin.file} into a --seed-dir of this core`,
+      `${why}; let the machine or this hub reach ${shownURL(this.url)}, or put ${this.pin.file} into a --seed-dir of this hub`,
     );
   }
 
-  /** The tarball as the core has it: from a seed directory, its cache or
+  /** The tarball as the hub has it: from a seed directory, its cache or
    * its own download, checked against the pinned integrity. */
   tarball(reasons: string[] = [], signal?: AbortSignal): Promise<HubTarball> {
     if (!this.load) {
@@ -305,7 +305,7 @@ export class SdkProvision {
       const ms = this.o.loadMs ?? (this.o.downloadMs ?? DOWNLOAD_MS) + 60_000;
       const bounded = new Promise<HubTarball>((resolve, reject) => {
         const timer = setTimeout(
-          () => reject(new NoTarball(`the core's own copy was not ready within ${Math.round(ms / 1000)} s`, 'none')),
+          () => reject(new NoTarball(`the hub's own copy was not ready within ${Math.round(ms / 1000)} s`, 'none')),
           ms,
         );
         p.then(resolve, reject).finally(() => clearTimeout(timer));
@@ -360,12 +360,12 @@ export class SdkProvision {
       this.o.logger(`chat: ${cached} refused: ${messageOf(e)}`);
       await rm(cached, { force: true });
     }
-    if (this.o.offline) throw new NoTarball(`the core is offline and has no ${t.file} in a --seed-dir or its cache`, tried);
+    if (this.o.offline) throw new NoTarball(`the hub is offline and has no ${t.file} in a --seed-dir or its cache`, tried);
     let b: Buffer;
     try {
       b = check((await download(this.url, MAX_SDK_TARBALL, this.o.downloadMs ?? DOWNLOAD_MS)).bytes);
     } catch (e) {
-      throw new NoTarball(`the core could not download ${shownURL(this.url)}: ${redactURLs(messageOf(e))}`, 'download');
+      throw new NoTarball(`the hub could not download ${shownURL(this.url)}: ${redactURLs(messageOf(e))}`, 'download');
     }
     await mkdir(this.o.cacheDir, { recursive: true, mode: 0o700 });
     await writeFile(`${cached}.${process.pid}`, b, { mode: 0o600 });

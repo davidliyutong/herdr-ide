@@ -1,4 +1,4 @@
-// What the core carries for others: the web UI, the record of its
+// What the hub carries for others: the web UI, the record of its
 // release, where machines get their build, the video encoder it installs
 // on machines, the VS Code extension it installs into code-server. The host provides them: the command line from the archive
 // embedded in its executable (or development directories), the desktop
@@ -95,7 +95,7 @@ export function payloads(o: {
   files: Files;
   web?: Files | null;
   agentDir?: string;
-  /** The cache of machine executables the core downloaded (default
+  /** The cache of machine executables the hub downloaded (default
    * ~/<DATA_DIR_NAME>/cache/machine). */
   machineCache?: string;
   /** Where what a machine build's sources refused is logged. */

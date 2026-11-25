@@ -1,8 +1,8 @@
 // The feature contract. A feature is everything one part of the product
-// does on the core's side: its routes, channels, background services,
-// settings, the streams agents open towards the core, what it keeps per
+// does on the hub's side: its routes, channels, background services,
+// settings, the streams agents open towards the hub, what it keeps per
 // machine. It is defined once (defineFeature) and set up by the kernel with
-// a FeatureContext that holds what it may use, never the whole core.
+// a FeatureContext that holds what it may use, never the whole hub.
 import type { Hono, MiddlewareHandler } from 'hono';
 import type { Logger } from '#shared/lib/log.ts';
 import type { Header } from '#shared/proto/agentproto/index.ts';
@@ -104,11 +104,11 @@ export interface FeatureContext {
     opts?: CallOptions,
   ): Promise<{ result: ResultOf<P['actions'][K]>; conn: AgentStream }>;
 
-  /** Serves the streams agents open towards the core with op (after the
+  /** Serves the streams agents open towards the hub with op (after the
    * header); while the feature is off they fail with plugin_disabled. */
   agentStream(op: string, serve: (m: Machine, conn: AgentStream, h: Header) => void): void;
 
-  /** Runs fn while the core runs, whether the feature is on or off (it
+  /** Runs fn while the hub runs, whether the feature is on or off (it
    * checks enabledFor itself); signal ends it. */
   service(name: string, fn: (signal: AbortSignal) => Promise<void>): void;
 

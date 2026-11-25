@@ -2,7 +2,7 @@
 //
 // The file explorer's panel (plugins/files): the tree's rows, its root
 // following the focused terminal, expanding, the filter, the keyboard, the
-// context menu's changes (the core's routes they call), polling, and
+// context menu's changes (the hub's routes they call), polling, and
 // read-only mode.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,7 +48,7 @@ import { definePlugins } from '../plugins/registry';
 import { filesPlugin } from '../plugins/files';
 import { MAX_BACKOFF_MS, startPolling } from '../plugins/files/poller';
 import { decorationsOf, registerFileDecorations } from '../plugins/files/decorations';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import type { RemoteStat } from '../lib/files';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -334,7 +334,7 @@ describe('file tree rows', () => {
 describe('FilesPanel', () => {
   let host: HTMLDivElement;
   let root: Root;
-  let core: FakeCore;
+  let hub: FakeHub;
   const rows = () => [...host.querySelectorAll<HTMLElement>('.files-row')].map((r) => r.dataset.path ?? '(new)');
   const row = (p: string) => host.querySelector<HTMLElement>(`.files-row[data-path="${p}"]`)!;
   const treeEl = () => host.querySelector<HTMLElement>('.files-tree')!;
@@ -345,11 +345,11 @@ describe('FilesPanel', () => {
   const flush = () => act(async () => settle());
   /** Opens a tab of its own for a new terminal in cwd. */
   const openTab = async (id: string, cwd: string) => {
-    const terminals = core.machines.get('m')!.terminals;
-    terminals.push(FakeCore.term(id, { cwd }));
+    const terminals = hub.machines.get('m')!.terminals;
+    terminals.push(FakeHub.term(id, { cwd }));
     await act(async () => {
-      core.push({ t: 'snapshot', m: 'm', terminals });
-      core.model.mutate('m', (l) => {
+      hub.push({ t: 'snapshot', m: 'm', terminals });
+      hub.model.mutate('m', (l) => {
         const ws = l.workspaces[0];
         return { ...l, workspaces: [{ ...ws, tabs: [...ws.tabs, { root: { terminal: id }, focused: id }], selected: ws.tabs.length }] };
       });
@@ -401,18 +401,18 @@ describe('FilesPanel', () => {
     answers = {};
     calls.length = 0;
     stubFetch();
-    core = new FakeCore();
-    core.machine('m', [FakeCore.term('p1', { cwd: '/home/u/src' })], {
+    hub = new FakeHub();
+    hub.machine('m', [FakeHub.term('p1', { cwd: '/home/u/src' })], {
       version: 2,
       workspaces: [{ id: 'w1w1w1w1', name: 'one', cwd: '', tabs: [{ root: { terminal: 'p1' }, focused: 'p1' }], selected: 0 }],
       selected: 0,
     });
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([{ id: 'm', label: 'm', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
     s.selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
     useTree.setState({
       m: undefined,
@@ -501,7 +501,7 @@ describe('FilesPanel', () => {
     expect(changes()[1]).toEqual(['remove', { paths: ['/home/u/src/main.go'] }]);
   });
 
-  it("offers the context menu's changes, which call the core", async () => {
+  it("offers the context menu's changes, which call the hub", async () => {
     await act(async () => {
       row('/home/u/src/main.go').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 1 }));
     });
@@ -893,7 +893,7 @@ describe('FilesPanel', () => {
     Object.defineProperty(el, 'clientHeight', { value: 110, configurable: true });
 
     // Switch to a tab showing a nested editor file: parent dirs expand, row is highlighted & scrolled into view.
-    core.model.mutate('m', (l) => ({
+    hub.model.mutate('m', (l) => ({
       ...l,
       workspaces: [
         {

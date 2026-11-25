@@ -3,7 +3,7 @@
 // (source.ts). Above it a line says which agent it is, the chat's title
 // (renamed in place: a double click, or Rename in the pane's menu), its
 // directory and its state; below that what keeps the chat from going on:
-// it is no more, the page or the machine is not connected, the core
+// it is no more, the page or the machine is not connected, the hub
 // refused it, or its agent failed (with what the agent wrote to its error
 // output). The composer says the rest (closed, handed off to a terminal,
 // sleeping agents start again with a message).

@@ -12,7 +12,7 @@ import { Activity } from './work.ts';
 const PROXY_SECRET = 'X-veldr-Proxy-Secret';
 
 describe('the desktop app cookie', () => {
-  // The desktop app's token stays in the core: the cookie that carries it
+  // The desktop app's token stays in the hub: the cookie that carries it
   // is removed from requests forwarded to code-server, the others kept.
   test('is not forwarded', () => {
     expect(DESKTOP_COOKIE).toBe(`${SLUG}-desktop`);
@@ -127,7 +127,7 @@ test('idle tracking', () => {
   expect(a.idleAmong(['m2'], 60_000)).toEqual(['m2']);
 });
 
-/** Waits until code-server is ready on the core's local machine. */
+/** Waits until code-server is ready on the hub's local machine. */
 async function ready(vc: VSCodeHub, machine = 'local'): Promise<void> {
   const res = await vc.request('POST', `/api/m/${machine}/code/start`);
   expect(res.status).toBe(202);
@@ -140,7 +140,7 @@ async function ready(vc: VSCodeHub, machine = 'local'): Promise<void> {
   throw new Error('not ready');
 }
 
-describe('through a core', () => {
+describe('through a hub', () => {
   let vc: VSCodeHub;
   beforeAll(async () => {
     vc = await vscodeHub();

@@ -1,4 +1,4 @@
-// Program windows of an SSH machine shown by two cores of one instance
+// Program windows of an SSH machine shown by two hubs of one instance
 // (feature 14, 39): the machine's node serves both, one controls the
 // windows and the other views them until it takes control. The machine is
 // a container with Xvfb (harness/sshd.ts); the program is
@@ -19,7 +19,7 @@ interface GuiState {
   windows: { id: number; title: string }[];
 }
 
-/** The SSH machine of the core, once ready. */
+/** The SSH machine of the hub, once ready. */
 async function remote(inst: Instance): Promise<string> {
   const m = await waitFor(
     async () => {
@@ -31,7 +31,7 @@ async function remote(inst: Instance): Promise<string> {
   return m.id;
 }
 
-/** The machine's display state in the core, once ok says so. */
+/** The machine's display state in the hub, once ok says so. */
 function display(inst: Instance, m: string, ok: (s: GuiState) => boolean, what: string): Promise<GuiState> {
   return waitFor(
     async () => {
@@ -43,7 +43,7 @@ function display(inst: Instance, m: string, ok: (s: GuiState) => boolean, what: 
 }
 
 /** A page of the program window in a browser context of its own, which
- * reaches the core and nothing else. */
+ * reaches the hub and nothing else. */
 async function windowPage(browser: Browser, inst: Instance, m: string, id: number): Promise<Page> {
   const context = await browser.newContext();
   const origin = new URL(inst.baseURL).origin;
@@ -64,7 +64,7 @@ async function click(page: Page) {
   await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
 }
 
-test('two cores show a program window: one controls it, the other views it until it takes control', async ({ browser, instance, sshd }) => {
+test('two hubs show a program window: one controls it, the other views it until it takes control', async ({ browser, instance, sshd }) => {
   void sshd;
   await instance.api('POST', '/api/machines', { target: ALIAS, label: '' });
   const m = await remote(instance);
@@ -80,10 +80,10 @@ test('two cores show a program window: one controls it, the other views it until
     const win = (await display(instance, m, (s) => s.windows.some((w) => w.title === 'e2e window'), 'the window')).windows.find(
       (w) => w.title === 'e2e window',
     )!;
-    await display(second, m, (s) => s.windows.some((w) => w.id === win.id) && !!s.view_only, 'the second core to view the window');
+    await display(second, m, (s) => s.windows.some((w) => w.id === win.id) && !!s.view_only, 'the second hub to view the window');
     const clicks = async () => ((await term.screen(rec.address)).match(/^button 1 /gm) ?? []).length;
 
-    // The first core controls: its page takes input; the second's views.
+    // The first hub controls: its page takes input; the second's views.
     const a = await windowPage(browser, instance, m, win.id);
     const b = await windowPage(browser, second, m, win.id);
     pages.push(a, b);
@@ -106,7 +106,7 @@ test('two cores show a program window: one controls it, the other views it until
     await new Promise((r) => setTimeout(r, 1_000));
     expect(await clicks()).toBe(2);
 
-    // The controller's core gone, the first core controls again.
+    // The controller's hub gone, the first hub controls again.
     await second.stopHub(false);
     await expect(banner(a)).toHaveCount(0, { timeout: 30_000 });
     await click(a);

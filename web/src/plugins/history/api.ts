@@ -1,4 +1,4 @@
-// The terminal history plugin's core routes (backend/features/history),
+// The terminal history plugin's hub routes (backend/features/history),
 // all of a machine: the snapshots of its terminals' output it keeps, one
 // generation's bytes, and their removal. What the machine answers is
 // checked before use: entries with a terminal's address and numbers, bytes
@@ -6,7 +6,7 @@
 import { isAddress } from '../../term/layout';
 import { answer, failureOf, jsonBody, makeErrorText, PluginError } from '../../lib/pluginApi';
 
-/** A failure with the core's or the machine's code (bad_request, busy,
+/** A failure with the hub's or the machine's code (bad_request, busy,
  * not_found, offline, bad_reply, transport; too_large and mismatch from
  * the page's own checks). */
 export class HistoryError extends PluginError {}
@@ -52,7 +52,7 @@ const MAX_ENTRIES = 1024;
 const base = (m: string) => `/api/m/${encodeURIComponent(m)}/p/history`;
 const fail = failureOf((code, message) => new HistoryError(code, message));
 
-/** A request to the core; one that does not reach it fails as network. */
+/** A request to the hub; one that does not reach it fails as network. */
 async function send(url: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(url, { cache: 'no-store', ...init });

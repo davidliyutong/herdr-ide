@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // The variable vault's panel and approval prompts (plugins/vault) against
-// a stand-in for the core's routes: values never come with the list; the
+// a stand-in for the hub's routes: values never come with the list; the
 // gate (a session opened with the passphrase, sent as X-Vault-Session)
 // stands before changes, reveals and approvals, a value is shown only
 // after a confirmed reveal, requests are answered once and close on every
@@ -57,7 +57,7 @@ describe('vault', () => {
   let answerError: Failure | undefined;
   let sessionError: Failure | undefined;
   let failPut: boolean;
-  /** The core forgot the session (a restart). */
+  /** The hub forgot the session (a restart). */
   let sessionGone: boolean;
   /** The requests GET requests answers. */
   let pending: unknown[];
@@ -254,7 +254,7 @@ describe('vault', () => {
     await act(async () => host.querySelector<HTMLButtonElement>('.vault-load-error button')!.click());
     await flush();
     expect(host.querySelector('[data-error="invalid"]')?.textContent).toContain(t('vault.load.invalid'));
-    // Anything else (the core unreachable) says so too, with the retry.
+    // Anything else (the hub unreachable) says so too, with the retry.
     listError = { code: 502, error: '' };
     await act(async () => host.querySelector<HTMLButtonElement>('.vault-load-error button')!.click());
     await flush();
@@ -264,21 +264,21 @@ describe('vault', () => {
     await flush();
     expect(host.querySelector('.vault-load-error')).toBeNull();
     expect([...host.querySelectorAll<HTMLElement>('.vault-row')].map((r) => r.dataset.name)).toEqual(['GITHUB_TOKEN', 'DB_PASS']);
-    // A core that keeps no file says that, without a retry.
+    // A hub that keeps no file says that, without a retry.
     listError = { code: 503, error: 'unavailable' };
     await act(async () => void loadVault());
     await flush();
     expect(host.textContent).toBe(t('vault.unavailable'));
   });
 
-  it('loads the requests and the vault again when the connection to the core comes back', async () => {
+  it('loads the requests and the vault again when the connection to the hub comes back', async () => {
     useStore.setState({ connected: true });
     await act(async () => root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultApprovals))));
     await flush();
     await unlock();
     expect(useVault.getState().session).toBe(true);
     act(() => useStore.setState({ connected: false }));
-    // The core restarted meanwhile: the session is gone, a request waits.
+    // The hub restarted meanwhile: the session is gone, a request waits.
     sessionGone = true;
     pending = [{ id: 'r9', m: 'm1', tool: 'get', names: ['X'], created: '1', expires: '2' }];
     calls = [];
@@ -291,7 +291,7 @@ describe('vault', () => {
     act(() => vaultMessage('m1', { type: 'resolved', id: 'r9', answer: 'deny' }));
   });
 
-  it('keeps a prompt whose answer failed, and says why; drops one the core no longer has', async () => {
+  it('keeps a prompt whose answer failed, and says why; drops one the hub no longer has', async () => {
     useStore.setState({ machines: { m1: { label: 'gpu-box' } } as never });
     await act(async () => root.render(createElement(VaultApprovals)));
     await flush();
@@ -424,7 +424,7 @@ describe('vault', () => {
     await flush();
     expect(calls.find((c) => c.url === '/api/p/vault/requests/r4')?.body).toEqual({ answer: 'deny' });
 
-    // Answered on another page: the core says it is resolved.
+    // Answered on another page: the hub says it is resolved.
     act(() => vaultMessage('m1', { type: 'request', request: { ...request, id: 'r2' } }));
     expect(document.querySelector('[data-request="r2"]')).not.toBeNull();
     act(() => vaultMessage('m1', { type: 'resolved', id: 'r2', answer: 'deny' }));
@@ -455,7 +455,7 @@ describe('vault', () => {
     await act(async () => root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultApprovals))));
     await flush();
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')][1].click());
-    // Without a session the log is not asked for: the core shows it to a
+    // Without a session the log is not asked for: the hub shows it to a
     // session only.
     expect(calls.some((c) => c.url === '/api/p/vault/log')).toBe(false);
     expect(host.querySelector('.vault-entry')).toBeNull();

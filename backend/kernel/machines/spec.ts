@@ -1,13 +1,13 @@
-// What a machine is to the core: its record (Spec), and what the pages see
+// What a machine is to the hub: its record (Spec), and what the pages see
 // of it (State).
 import type { Info } from '#shared/proto/agentproto/index.ts';
 
-/** The id of the machine the core runs on. */
+/** The id of the machine the hub runs on. */
 export const LOCAL_ID = 'local';
 
 export type Kind = 'local' | 'ssh';
 
-/** One machine: the record the core keeps in its machines file. */
+/** One machine: the record the hub keeps in its machines file. */
 export interface Spec {
   id: string;
   label: string;
@@ -27,7 +27,7 @@ export const Unusable = {
   LocalUnsupported: 'local_unsupported',
 } as const;
 
-/** What the core's connection to a machine's terminal core is doing. */
+/** What the hub's connection to a machine's terminal core is doing. */
 export interface HCState {
   state: 'starting' | 'ready' | 'error';
   code?: string;
@@ -57,7 +57,7 @@ export const MAX_TARGET_LEN = 255;
 const ASCII_OK = /^[A-Za-z0-9#%+,\-./:=@[\]^_~]$/;
 const UNICODE_OK = /^[\p{L}\p{M}\p{N}]$/u;
 
-/** An ssh target the core passes to ssh: a ~/.ssh/config alias, host,
+/** An ssh target the hub passes to ssh: a ~/.ssh/config alias, host,
  * user@host, ssh:// URL or IPv6 literal, of at most MAX_TARGET_LEN bytes of
  * UTF-8, not starting with "-" (which ssh would read as an option; every
  * ssh command also puts "--" before it). Its characters are ASCII letters,
@@ -77,7 +77,7 @@ export function validTarget(t: string): boolean {
  * not stored, each once. The local machine's stored record gives its
  * enabled flag and, when it has one, its label (else the host's name).
  * Stored machines whose target validTarget refuses are kept (they show an
- * error and are never dialed); extra ones are left out (the core refuses
+ * error and are never dialed); extra ones are left out (the hub refuses
  * to start with one). */
 export function loadSpecs(stored: readonly Spec[], extra: readonly Partial<Spec>[], hostname: string): Spec[] {
   const local: Spec = { id: LOCAL_ID, label: `${hostname.replace(/\.local$/, '')} (local)`, kind: 'local', enabled: true };

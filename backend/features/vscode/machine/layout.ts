@@ -18,11 +18,11 @@ export interface Layout {
   readonly socket: string;
   /** Who started the running code-server (Owner). */
   readonly pidFile: string;
-  /** The bridge extension's socket, which the agent tunnels to a core. */
+  /** The bridge extension's socket, which the agent tunnels to a hub. */
   readonly bridge: string;
   /** VS Code's settings and state (--user-data-dir), this host's. */
   readonly data: string;
-  /** Its extensions (--extensions-dir) and the markers of what the cores
+  /** Its extensions (--extensions-dir) and the markers of what the hubs
    * installed there. */
   readonly ext: string;
   /** code-server's output, overwritten at each start. */

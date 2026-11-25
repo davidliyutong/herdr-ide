@@ -1,11 +1,11 @@
-// The core's side of the machines' chat hosts, which the routes and the
+// The hub's side of the machines' chat hosts, which the routes and the
 // pages share: the connections to the hosts (HostLink), their settings
 // (Configurer), the watches of them (Watcher) and the pages' WebSockets.
 //
 // A change (a POST or DELETE route) and a page's subscription start the
-// machine's host when none serves, but a read-only core's, which reads what
+// machine's host when none serves, but a read-only hub's, which reads what
 // runs; a GET route and the watch never do. Before a request that may start
-// an agent, the core gives the host the machine's settings unless that host
+// an agent, the hub gives the host the machine's settings unless that host
 // process took them already.
 import type { Logger } from '#shared/lib/log.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
@@ -98,7 +98,7 @@ export class ChatSwitchboard {
   }
 
   /** A connection to machine m's chat host for a route or a page: with
-   * start (and a core that may), to a host the machine starts when none
+   * start (and a hub that may), to a host the machine starts when none
    * serves, else not_running then. One that may start an agent (agent)
    * goes to a host that took the machine's settings. Reaching the host
    * counts as a use of it. */
@@ -113,7 +113,7 @@ export class ChatSwitchboard {
 
   /** Makes sure machine m can run a chat of kind: Claude Code's chats run on
    * Anthropic's Agent SDK, which the machine gets before one starts
-   * (sdkprovision.ts). A read-only core installs nothing. Fails with
+   * (sdkprovision.ts). A read-only hub installs nothing. Fails with
    * sdk_unavailable when the machine could not get it; o says whether to
    * ask again after a failure (a new chat) and who to audit the install
    * as. */
@@ -186,7 +186,7 @@ export class ChatSwitchboard {
   }
 
   /** Tells each page's subscriptions that they ended with code (none for
-   * ""), then closes the pages: the feature was turned off, the core stops. */
+   * ""), then closes the pages: the feature was turned off, the hub stops. */
   closePages(code: string): void {
     for (const p of [...this.pages]) p.finish(code);
   }
@@ -209,7 +209,7 @@ export class ChatSwitchboard {
   }
 
   /** Watches the machines' chat hosts until signal ends; the pages are
-   * closed then (they connect to the next core). */
+   * closed then (they connect to the next hub). */
   async run(signal: AbortSignal): Promise<void> {
     const unsubscribe = this.o.settings.onChange((changes) => this.settingsChanged(changes, signal));
     try {
@@ -220,7 +220,7 @@ export class ChatSwitchboard {
     }
   }
 
-  /** Drops what the core keeps of a removed machine. */
+  /** Drops what the hub keeps of a removed machine. */
   forget(m: string): void {
     this.watch.forget(m);
     this.config.forget(m);

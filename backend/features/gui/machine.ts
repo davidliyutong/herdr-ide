@@ -2,7 +2,7 @@
 // agent protocol's op gui, as the Go machine build serves it. The display
 // (machine/display.ts), its GPU (gpu.ts), the GPU selection library
 // (pick.ts), the video encoder (video.ts) and the routing of windows,
-// frames and input between the cores and the display (wm.ts) are here; the
+// frames and input between the hubs and the display (wm.ts) are here; the
 // X client that manages and captures the windows, the GPU display's
 // Wayland compositor and the display keeper are the GUI helper, a native
 // executable the machine build carries (machine/helper.ts,
@@ -73,7 +73,7 @@ interface Running {
   ready: Promise<void>;
 }
 
-/** Turns a command of a core into GUICommand, as Go's decoder takes it: a
+/** Turns a command of a hub into GUICommand, as Go's decoder takes it: a
  * member of the wrong type fails the command, unknown members are ignored. */
 export function parseCommand(b: Buffer): GUICommand | null {
   let v: unknown;
@@ -156,7 +156,7 @@ export class GUI {
 
   /** A newer node takes the node over: the window manager ends at once,
    * so that the next node's can take the display (one client may manage
-   * it); the cores attach to that one. */
+   * it); the hubs attach to that one. */
   handOver(): void {
     this.endWM();
   }
@@ -217,7 +217,7 @@ export class GUI {
   }
 
   /** The display's status with whether the encoder of digest is installed
-   * and which stream kinds it makes here. A core without an encoder for
+   * and which stream kinds it makes here. A hub without an encoder for
    * this machine sends none: the encoder this build carries serves. */
   private async videoStatus(digest: string): Promise<GUIStatus> {
     const st = await this.display.status();
@@ -348,7 +348,7 @@ export class GUI {
   }
 
   /** Serves the stream as a client of the display's window manager, which
-   * it starts when none runs, until the stream ends: the first core
+   * it starts when none runs, until the stream ends: the first hub
    * controls the windows, the others view them. */
   private async attach(conn: Conn, ctx: ActionContext): Promise<void> {
     const st = conn.stream;
@@ -366,7 +366,7 @@ export class GUI {
       close: () => closeStream(st),
     });
     // A window manager that ended as the stream came ends the stream; the
-    // core attaches again and starts the next one.
+    // hub attaches again and starts the next one.
     const served = wm.attach(client);
     try {
       while (!client.closed) {

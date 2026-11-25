@@ -1,4 +1,4 @@
-// What both hosts compose (Node's APIs only): the core's features, its
+// What both hosts compose (Node's APIs only): the hub's features, its
 // settings and keybindings, the machines file and the machines this run
 // connects, and the host's own routes. The command line (hosts/bun) adds
 // its flags and listens; the desktop app's utility process
@@ -49,7 +49,7 @@ export interface FeatureInputs {
   controlDir: string;
   /** The desktop app's key for its proofs; empty on the command line. */
   verifyKey: string;
-  /** A terminal on the core's host, for an interactive ssh login. */
+  /** A terminal on the hub's host, for an interactive ssh login. */
   pty?: SpawnPty;
   codeServer: Omit<Parameters<typeof vscodeFeatures>[0], 'bridgeVSIX'>;
   /** Where machines get Anthropic's Agent SDK for Claude Code's chats:
@@ -58,7 +58,7 @@ export interface FeatureInputs {
   chatSdk?: { seedDirs?: readonly string[]; offline?: boolean; registry?: string };
 }
 
-/** The core's features, as both hosts run them (also what
+/** The hub's features, as both hosts run them (also what
  * scripts/reference.ts lists the routes of and scripts/registry.ts the
  * settings of), in the order the UIs list their switches and settings
  * (kernel/config/registry.ts hubModules). */
@@ -93,7 +93,7 @@ export function hubFeatures(o: FeatureInputs): FeatureDef[] {
 
 /** The features with placeholder inputs (no payloads, machines or
  * launcher): what they define, their settings, switches and routes, for
- * what describes the core without running it (scripts/registry.ts,
+ * what describes the hub without running it (scripts/registry.ts,
  * scripts/reference.ts, the registry's tests). */
 export function describedFeatures(): FeatureDef[] {
   return hubFeatures({
@@ -108,14 +108,14 @@ export function describedFeatures(): FeatureDef[] {
  * keybindings, the configuration, the web UI. Returns what stops the
  * settings' pushes. */
 export function hostRoutes(
-  core: Hub,
+  hub: Hub,
   o: { settings: Settings; keybindings: Keybindings; readOnly: boolean; sshLogin: boolean; web: Files | null },
 ): () => void {
-  const stop = settingsRoutes(core.http, { settings: o.settings, keybindings: o.keybindings, pages: core.pages });
-  core.http.app.get('/api/config', (c) =>
+  const stop = settingsRoutes(hub.http, { settings: o.settings, keybindings: o.keybindings, pages: hub.pages });
+  hub.http.app.get('/api/config', (c) =>
     c.json({ name: NAME, slug: SLUG, version: VERSION, read_only: o.readOnly, ssh_login: o.sshLogin, client: c.var.client }),
   );
-  serveUI(core.http.app, o.web);
+  serveUI(hub.http.app, o.web);
   return stop;
 }
 
@@ -129,7 +129,7 @@ export function selectSpecs(specs: Spec[], localOnly: boolean, extraSSH: readonl
 }
 
 export interface ComposeOptions {
-  /** The core's instance: its settings, machines and database files. */
+  /** The hub's instance: its settings, machines and database files. */
   instance: string;
   /** The instance of the machines' nodes. */
   nodeInstance: string;
@@ -161,7 +161,7 @@ export interface Composed {
   run(signal: AbortSignal): Promise<void>;
 }
 
-/** The core with its settings, keybindings and machines, not running yet:
+/** The hub with its settings, keybindings and machines, not running yet:
  * a host binds what it serves on first, so that a failed launch starts no
  * agent. */
 export function composeHub(o: ComposeOptions): Composed {
@@ -239,7 +239,7 @@ export function composeHub(o: ComposeOptions): Composed {
     },
   });
 
-  const core = createHub({
+  const hub = createHub({
     guard: o.guard,
     audit: o.audit,
     readOnly: o.readOnly,
@@ -249,7 +249,7 @@ export function composeHub(o: ComposeOptions): Composed {
     settings,
     features: o.features,
   });
-  const stopSettingsPush = hostRoutes(core, {
+  const stopSettingsPush = hostRoutes(hub, {
     settings,
     keybindings,
     readOnly: o.readOnly,
@@ -258,13 +258,13 @@ export function composeHub(o: ComposeOptions): Composed {
   });
 
   return {
-    hub: core,
+    hub,
     settings,
     specs,
     async run(signal) {
       // Edits of the files by hand apply without a restart.
       const watching = Promise.all([settings.watch(signal), keybindings.watch(signal)]).catch(() => {});
-      const running = core.run(signal);
+      const running = hub.run(signal);
       await new Promise<void>((r) => (signal.aborted ? r() : signal.addEventListener('abort', () => r(), { once: true })));
       let timer: ReturnType<typeof setTimeout> | undefined;
       const late = await Promise.race([

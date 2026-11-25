@@ -60,7 +60,7 @@ export type Decision = 'already' | 'busy' | 'type';
 
 /** What Enable does with a terminal whose shell is p (undefined when the
  * agent could not see it): idle means it waits at its prompt, typed that
- * the core typed the export into it before. */
+ * the hub typed the export into it before. */
 export function decide(p: GUIProc | undefined, idle: boolean, typed: boolean): Decision {
   if (typed || p?.display) return 'already';
   if (!p || !idle || !SHELLS.has(p.comm)) return 'busy';

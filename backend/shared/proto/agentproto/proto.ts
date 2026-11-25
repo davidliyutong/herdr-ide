@@ -1,4 +1,4 @@
-// The stream protocol between the core and a machine's agent over a yamux
+// The stream protocol between the hub and a machine's agent over a yamux
 // session.
 //
 // Every yamux stream starts with one JSON header line written by the
@@ -68,7 +68,7 @@ export const Op = {
   /** Dials a unix socket below the agent's run directory. */
   DialUnix: 'dial-unix',
   CodeServer: 'code-server',
-  /** Opened by the agent towards the core for each VS Code bridge connection. */
+  /** Opened by the agent towards the hub for each VS Code bridge connection. */
   Bridge: 'bridge',
   GUI: 'gui',
   /** The agent's own herdr-core: status, install, start, restart, stop. */
@@ -80,9 +80,9 @@ export const Op = {
   Privacy: 'privacy',
   /** Runs action of the agent's side of plugin with params. */
   Plugin: 'plugin',
-  /** Opened by the agent towards the core for each vault MCP connection. */
+  /** Opened by the agent towards the hub for each vault MCP connection. */
   Vault: 'vault',
-  /** Opened by a node towards each core once another node took its socket. */
+  /** Opened by a node towards each hub once another node took its socket. */
   NodeDrain: 'node.drain',
 } as const;
 export type Op = (typeof Op)[keyof typeof Op];
@@ -233,7 +233,7 @@ export interface HCStatus {
   digest?: string;
   /** The SHA-256 of the herdr-core the machine build carries, which action
    * install-embedded installs (the TypeScript machine build); absent when
-   * it carries none and the core uploads one (install). */
+   * it carries none and the hub uploads one (install). */
   embedded?: string;
   running: boolean;
   version?: string;

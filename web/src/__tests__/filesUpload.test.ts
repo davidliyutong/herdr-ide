@@ -26,7 +26,7 @@ import { dragOutUrl, FilesPanel } from '../plugins/files/FilesPanel';
 import { useTree } from '../plugins/files/tree';
 import { cancelUpload, uploadPlaced, useTransfers } from '../transfers';
 import { UploadCancelled } from '../lib/files';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 
 const file = (name: string, size = 3) => new File([new Uint8Array(size)], name);
 const pick = (rel: string, size = 3): Picked => ({ rel, file: file(rel.split('/').pop()!, size) });
@@ -421,15 +421,15 @@ describe('pasting locally copied files', () => {
 
   it('handles paste events on a focused folder/node in FilesPanel and ignores inputs and read-only mode', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const core = new FakeCore();
-    core.machine('m', [FakeCore.term('p1', { cwd: '/home/u/src' })], {
+    const hub = new FakeHub();
+    hub.machine('m', [FakeHub.term('p1', { cwd: '/home/u/src' })], {
       version: 2,
       workspaces: [{ id: 'w1w1w1w1', name: 'one', cwd: '', tabs: [{ root: { terminal: 'p1' }, focused: 'p1' }], selected: 0 }],
       selected: 0,
     });
-    core.install();
+    hub.install();
     useStore.getState().selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
 
     vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {

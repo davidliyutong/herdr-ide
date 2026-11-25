@@ -209,7 +209,7 @@ export class Usage {
   }
 
   /** The providers on (["none"] for none), the Codex homes, and the
-   * options of the machines' reads. A read-only core never has a machine
+   * options of the machines' reads. A read-only hub never has a machine
    * renew Kimi Code's sign-in, which rewrites its credentials file there. */
   options(): { providers: string[]; codexHomes: string[]; claudeKeychain: boolean; kimiRefresh: boolean } {
     const st = this.d.settings;
@@ -632,7 +632,7 @@ export class Usage {
     return jsonETag('u', { ...s, accounts });
   }
 
-  /** Reads the history and the accounts the core's database keeps into
+  /** Reads the history and the accounts the hub's database keeps into
    * what memory has; a read that failed is tried again by the next save. */
   loadHistory(): void {
     if (!this.d.store.file) {
@@ -651,7 +651,7 @@ export class Usage {
     }
   }
 
-  /** Writes the history into the core's database, once it was read back
+  /** Writes the history into the hub's database, once it was read back
    * from there. */
   save(): void {
     if (!this.d.store.file) return;

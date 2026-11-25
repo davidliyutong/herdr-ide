@@ -1,8 +1,8 @@
 // A VSIX identified by what it holds: the names and contents of its files,
 // not the zip's metadata (times), so that a rebuilt but identical bridge
 // extension is not installed again on every machine. The same digest as
-// the Go core's (vsixContentHash, before this core replaced it), so that
-// the marker a machine keeps (`.<bridge>-<hash>`) holds whichever core
+// the Go hub's (vsixContentHash, before this hub replaced it), so that
+// the marker a machine keeps (`.<bridge>-<hash>`) holds whichever hub
 // installed it.
 import { createHash } from 'node:crypto';
 import { inflateRawSync } from 'node:zlib';

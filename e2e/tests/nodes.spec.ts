@@ -1,6 +1,6 @@
-// Two cores of one instance on one computer: two UIs of the same machines,
+// Two hubs of one instance on one computer: two UIs of the same machines,
 // which reach the local machine through the same node; a newer build's
-// core takes the node over without the other noticing (the upgrade path).
+// hub takes the node over without the other noticing (the upgrade path).
 
 import { test, expect } from '../harness/fixtures';
 import { nodeProcesses as nodes, type Instance } from '../harness/instance';
@@ -9,20 +9,17 @@ import { newTerminalTab, run, terminalOfPane } from '../harness/ui';
 import { waitFor } from '../harness/wait';
 import { paths } from '../harness/paths';
 
-test('two cores share the local node: each sees the terminals of the other, and one leaving keeps the other', async ({
-  instance,
-  term,
-}) => {
+test('two hubs share the local node: each sees the terminals of the other, and one leaving keeps the other', async ({ instance, term }) => {
   const second = await instance.second();
   const other = new TermClient(second.baseURL);
   try {
     expect(nodes(instance.name)).toHaveLength(1);
 
-    // A terminal started through the first core runs for the second.
+    // A terminal started through the first hub runs for the second.
     const rec = await term.call<{ address: string }>('terminal.run', { argv: ['/bin/sh', '-c', 'echo "shared-$((6*7))"; sleep 600'] });
     await other.waitScreen(rec.address, /shared-42/);
 
-    // The first core gone, the second keeps its session to the node.
+    // The first hub gone, the second keeps its session to the node.
     await instance.stopHub(false);
     await new Promise((r) => setTimeout(r, 2_000));
     expect((await second.machine()).status).toBe('ready');
@@ -32,11 +29,11 @@ test('two cores share the local node: each sees the terminals of the other, and 
     other.close();
     await second.stop();
   }
-  // No core left: the node ends after its idle time.
+  // No hub left: the node ends after its idle time.
   await waitFor(async () => nodes(instance.name).length === 0, { what: 'the node to end', timeout: 30_000 });
 });
 
-/** A newer core (exe) of the instance takes its node over: the first core's
+/** A newer hub (exe) of the instance takes its node over: the first hub's
  * machine stays ready all along, both end up on the newer build's node
  * alone, and the terminals go on. */
 async function takeOver(app: import('@playwright/test').Page, instance: Instance, term: TermClient, exe: string): Promise<void> {
@@ -47,7 +44,7 @@ async function takeOver(app: import('@playwright/test').Page, instance: Instance
   await term.waitScreen(rec.address, /before-42/);
   expect(nodes(instance.name)).toHaveLength(1);
 
-  // The first core's machine is watched while the newer core starts.
+  // The first hub's machine is watched while the newer hub starts.
   const seen = new Set<string>();
   let watching = true;
   const watch = (async () => {
@@ -58,8 +55,8 @@ async function takeOver(app: import('@playwright/test').Page, instance: Instance
   })();
   const newer = await instance.second(false, exe);
   try {
-    // The newer build's node serves the instance, both cores through it;
-    // the old one ends once the first core moved.
+    // The newer build's node serves the instance, both hubs through it;
+    // the old one ends once the first hub moved.
     const onNewer = async (i: { machine(): Promise<{ info?: { version: string } }> }) =>
       (await i.machine()).info?.version === paths.newerVersion;
     await waitFor(async () => nodes(instance.name).length === 1 && (await onNewer(instance)) && (await onNewer(newer)), {
@@ -70,7 +67,7 @@ async function takeOver(app: import('@playwright/test').Page, instance: Instance
     await watch;
     expect([...seen]).toEqual(['ready']);
 
-    // Both cores work through the new node: the terminal goes on.
+    // Both hubs work through the new node: the terminal goes on.
     const other = new TermClient(newer.baseURL);
     try {
       expect(await term.screen(rec.address)).toMatch(/before-42/);
@@ -86,7 +83,7 @@ async function takeOver(app: import('@playwright/test').Page, instance: Instance
   }
 }
 
-test('a newer build takes the node over: the other core moves to it and stays ready, its terminals with it', async ({
+test('a newer build takes the node over: the other hub moves to it and stays ready, its terminals with it', async ({
   app,
   instance,
   term,

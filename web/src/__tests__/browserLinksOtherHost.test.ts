@@ -35,7 +35,7 @@ describe('a link with the UI on another host', () => {
     expect(open).toHaveBeenCalledWith('http://localhost:3000/', '_blank', 'noopener,noreferrer');
   });
 
-  it('opens a loopback URL with the UI’s port: there localhost is the viewer’s computer, not the core', async () => {
+  it('opens a loopback URL with the UI’s port: there localhost is the viewer’s computer, not the hub', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     openLink({ kind: 'url', text: 'http://localhost:5173/x' }, { m: 'l' });
     await settle();

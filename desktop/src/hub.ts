@@ -1,12 +1,12 @@
-// The app's core runs in an Electron utility process
+// The app's hub runs in an Electron utility process
 // (backend/hosts/electron), which the main process starts, restarts when
 // it crashes (the windows stay) and stops when the app quits. Nothing
-// listens: the main process hands the core the requests of the app's
+// listens: the main process hands the hub the requests of the app's
 // windows, which it intercepts at the app's origin (protocol.ts), and the
-// channels (WebSockets) it brokers between a frame and the core, over the
+// channels (WebSockets) it brokers between a frame and the hub, over the
 // bridge of backend/hosts/electron/bridge.ts. The client is the desktop
 // app because the main process says so; the verify key of the system's
-// prompts goes to the core in its start message only.
+// prompts goes to the hub in its start message only.
 import { randomBytes } from 'node:crypto';
 import { posix } from 'node:path';
 import {
@@ -30,7 +30,7 @@ import type { Platform } from './platform';
 export const ENV_PREFIX = APP_SLUG.toUpperCase().replaceAll('-', '_') + '_';
 
 // A failure the launcher explains in the UI language; detail is technical
-// (an exit code, the core's message) and shown as is.
+// (an exit code, the hub's message) and shown as is.
 export class DesktopError extends Error {
   constructor(
     readonly key: MessageKey,
@@ -51,15 +51,15 @@ export function hubInstance(dev: boolean, devValue: string | undefined): string 
 }
 
 /** The instance of the machines' nodes (their data directory and terminal
- * core) a core of instance uses: the app's is the default one, which it
- * shares with every core of the default instance, as a server's UI;
+ * hub) a hub of instance uses: the app's is the default one, which it
+ * shares with every hub of the default instance, as a server's UI;
  * a development instance keeps its own. */
 export function nodeInstance(instance: string): string {
   return instance === 'desktop' ? '' : instance;
 }
 
 /** A new key for the system's prompts (verify.ts): 32 random bytes as hex,
- * for one launch (the core's restarts keep it). It goes to the core in the
+ * for one launch (the hub's restarts keep it). It goes to the hub in the
  * start message and is kept in the main process: never in a cookie, an
  * environment variable, an argument or a log. */
 export function verifyKey(random: (n: number) => Buffer = randomBytes): string {
@@ -67,7 +67,7 @@ export function verifyKey(random: (n: number) => Buffer = randomBytes): string {
 }
 
 export function hubEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform): NodeJS.ProcessEnv {
-  // The core takes the user's proxy (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) for
+  // The hub takes the user's proxy (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) for
   // its own fetch itself (backend/shared/lib/proxy.ts): nothing is added
   // here that the programs it starts would inherit.
   // Windows keeps its Path as it is (its name differs in case, which a copy
@@ -110,21 +110,21 @@ export interface HubSpawner {
 export interface HubHostOptions {
   spawner: HubSpawner;
   start: HubStart;
-  /** The core keeps crashing: it is not started again. */
+  /** The hub keeps crashing: it is not started again. */
   lost(error: DesktopError): void;
   /** How long a start may take. */
   startMs?: number;
   /** How many restarts within restartWindowMs before giving up. */
   maxRestarts?: number;
   restartWindowMs?: number;
-  /** Writes the core's log (the app's standard error). */
+  /** Writes the hub's log (the app's standard error). */
   log?: (chunk: string) => void;
   now?: () => number;
 }
 
 const isFromHub = (m: unknown): m is FromHub => typeof m === 'object' && m !== null && typeof (m as { t?: unknown }).t === 'string';
 
-/** The core in its utility process. */
+/** The hub in its utility process. */
 export class HubHost {
   private child?: HubChild;
   /** The processes that exited. */
@@ -141,12 +141,12 @@ export class HubHost {
     this.ready.catch(() => {});
   }
 
-  /** The end of the core's log, for the failure dialog. */
+  /** The end of the hub's log, for the failure dialog. */
   get diagnostics(): string {
     return this.stderr;
   }
 
-  /** Starts the core; resolves once it serves, rejects when it could not
+  /** Starts the hub; resolves once it serves, rejects when it could not
    * start (then it is not started again). */
   start(): Promise<void> {
     return this.launch().then(() => {
@@ -187,7 +187,7 @@ export class HubHost {
     return ready;
   }
 
-  /** A crash after the core served: started again, unless it crashed
+  /** A crash after the hub served: started again, unless it crashed
    * maxRestarts times within the window. */
   private exited(child: HubChild, code: number): void {
     if (child !== this.child || this.stopping || !this.started) return;
@@ -201,11 +201,11 @@ export class HubHost {
       this.o.lost(new DesktopError('desktop.hubLost', String(code)));
       return;
     }
-    this.o.log?.(`core exited (${code}); starting it again\n`);
+    this.o.log?.(`hub exited (${code}); starting it again\n`);
     void this.launch().catch(() => {});
   }
 
-  /** Waits until the core serves (also through a restart). */
+  /** Waits until the hub serves (also through a restart). */
   private async serving(): Promise<HubChild> {
     const deadline = (this.o.now ?? Date.now)() + (this.o.startMs ?? 30_000) * 2;
     for (;;) {
@@ -223,16 +223,16 @@ export class HubHost {
   }
 
   /** A request of the app (a window's, intercepted, or the shell's own):
-   * the core's response, or 503 while it cannot be reached. origin is the
+   * the hub's response, or 503 while it cannot be reached. origin is the
    * origin of the page that made it (protocol.ts), undefined for one the
-   * browser or the shell started; it is the Origin the core sees, in place
+   * browser or the shell started; it is the Origin the hub sees, in place
    * of any the request carries. */
   async request(req: Request, origin?: string): Promise<Response> {
     let child: HubChild;
     try {
       child = await this.serving();
     } catch {
-      return Response.json({ error: 'unavailable', message: 'the core is not running' }, { status: 503 });
+      return Response.json({ error: 'unavailable', message: 'the hub is not running' }, { status: 503 });
     }
     const headers: [string, string][] = [];
     req.headers.forEach((v, k) => {
@@ -246,16 +246,16 @@ export class HubHost {
       child.postMessage({ t: 'request', head }, [theirs]);
       return await request(this.o.spawner.port(ours), head, req.body, req.signal);
     } catch {
-      return Response.json({ error: 'unavailable', message: 'the core went away' }, { status: 502 });
+      return Response.json({ error: 'unavailable', message: 'the hub went away' }, { status: 502 });
     }
   }
 
-  /** The shell's own request of the core at path. */
+  /** The shell's own request of the hub at path. */
   fetch(path: string, init?: RequestInit): Promise<Response> {
     return this.request(new Request(new URL(path, APP_ORIGIN), init));
   }
 
-  /** Hands the core one end of a channel (the other is a frame's): once it
+  /** Hands the hub one end of a channel (the other is a frame's): once it
    * serves, or the end is told the channel failed. */
   async connect(head: ChannelHead, end: unknown): Promise<void> {
     let child: HubChild;
@@ -263,17 +263,17 @@ export class HubHost {
       child = await this.serving();
     } catch {
       const port = this.o.spawner.port(end);
-      port.post({ t: 'close', code: ABNORMAL, reason: 'the core is not running' } satisfies ChannelControl);
+      port.post({ t: 'close', code: ABNORMAL, reason: 'the hub is not running' } satisfies ChannelControl);
       return;
     }
     try {
       child.postMessage({ t: 'channel', head }, [end]);
     } catch {
-      this.o.spawner.port(end).post({ t: 'close', code: ABNORMAL, reason: 'the core is not running' } satisfies ChannelControl);
+      this.o.spawner.port(end).post({ t: 'close', code: ABNORMAL, reason: 'the hub is not running' } satisfies ChannelControl);
     }
   }
 
-  /** The shell's own channel to the core at path. */
+  /** The shell's own channel to the hub at path. */
   channel(path: string, on: Parameters<typeof channelClient>[1]): ChannelClient {
     const [ours, theirs] = this.o.spawner.pair();
     const client = channelClient(this.o.spawner.port(ours), on);
@@ -291,7 +291,7 @@ export class HubHost {
     return client;
   }
 
-  /** Stops the core: it ends its machines' sessions (up to 15 s); only
+  /** Stops the hub: it ends its machines' sessions (up to 15 s); only
    * this owned process is killed if it has not ended within deadline ms,
    * never the terminal cores. */
   stop(deadline = 20_000): Promise<void> {

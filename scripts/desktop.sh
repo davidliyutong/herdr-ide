@@ -6,15 +6,15 @@
 # semver, optionally with the release tag's leading v (dropped for the app
 # metadata).
 #
-#   build    the web UI, the payloads the core carries (its own platform's
+#   build    the web UI, the payloads the hub carries (its own platform's
 #            executable, encoders, the VS Code extension) and the shell with
-#            the core bundled for its utility process
+#            the hub bundled for its utility process
 #   app      build, then the unpacked app in dist/desktop/<os>[-<arch>][-unpacked]/
 #   dist     build, then the installers: macOS DMG and zip, Windows NSIS
 #            setup, Linux AppImage and deb
 #   install  (macOS) the .app, copied over INSTALL_DIR/<app> (default
 #            /Applications). A copy running from there is quit first (its
-#            core stops, the terminal cores keep running) and started again
+#            hub stops, the terminal cores keep running) and started again
 #            afterwards.
 #   dev      build, then unpackaged Electron in development mode
 #
@@ -73,7 +73,7 @@ if [[ "$mode" == install && ! ( -d "$INSTALL_DIR" && -w "$INSTALL_DIR" ) ]]; the
   echo "$INSTALL_DIR is not a writable directory." >&2
   exit 1
 fi
-# VERSION is optional. Without it the core reports `git describe` like
+# VERSION is optional. Without it the hub reports `git describe` like
 # scripts/build.sh, and the app metadata uses desktop/package.json.
 
 if [[ -z "${SKIP_BUILD:-}" ]]; then
@@ -102,13 +102,13 @@ name=$(sed -n "s/^export const APP_NAME = '\\(.*\\)';$/\\1/p" web/src/brand.ts)
 built=dist/desktop/mac$([[ "$DESKTOP_ARCH" == x64 ]] || echo "-$DESKTOP_ARCH")/$name.app
 dest=$INSTALL_DIR/$name.app
 test -d "$built"
-# The installed app's main process; its helpers and core run from other paths.
+# The installed app's main process; its helpers and hub run from other paths.
 main="^$dest/Contents/MacOS/$name( |\$)"
 reopen=
 if pgrep -f "$main" >/dev/null; then
   echo "==> quitting $dest"
   reopen=1
-  # SIGTERM quits like the menu: the app stops its core (up to 20 s) first.
+  # SIGTERM quits like the menu: the app stops its hub (up to 20 s) first.
   pkill -TERM -f "$main" || true
   for _ in $(seq 60); do
     pgrep -f "$main" >/dev/null || break

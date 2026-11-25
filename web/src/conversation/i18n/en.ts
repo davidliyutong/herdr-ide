@@ -34,7 +34,7 @@ export const en = {
     'Not confirmed yet that {agent} got the message: it shows here once it has. Send it again to retry; it is not sent twice.',
   'conversation.commandFailed': 'That could not be done.',
   // Why a command was not taken, by the code of the chat host's or the
-  // core's error.
+  // hub's error.
   'conversation.error.bad_request': 'The chat did not take that request.',
   'conversation.error.busy': '{agent} is busy: try again once its turn ends.',
   'conversation.error.not_found': 'It is no longer there: another window may have answered first.',

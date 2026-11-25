@@ -1,7 +1,7 @@
 // What crosses the feature's boundaries: the display status and the events
 // the agent sends (validated where they enter), the commands a browser
 // window sends (only the fields a command may carry are kept) and the
-// commands and events the core writes, as the Go core wrote them (members
+// commands and events the hub writes, as the Go hub wrote them (members
 // in the same order, zero values left out).
 import { z } from 'zod';
 import type { GUICommand, GUIStatus, GUIWindow } from '#shared/proto/agentproto/index.ts';
@@ -60,7 +60,7 @@ const layer = z.object({
   h: int.default(0),
 });
 
-/** An event of the agent's window manager. Events the core passes on as
+/** An event of the agent's window manager. Events the hub passes on as
  * they came keep what this does not name. */
 const agentEvent = z.object({
   ev: z.string(),
@@ -76,7 +76,7 @@ const agentEvent = z.object({
 export type AgentEvent = z.output<typeof agentEvent>;
 
 /** Parses an event of the agent; undefined for one that does not parse
- * (ignored, as the Go core did). */
+ * (ignored, as the Go hub did). */
 export function parseAgentEvent(payload: Uint8Array): AgentEvent | undefined {
   let raw: unknown;
   try {
@@ -105,7 +105,7 @@ export function windowOf(w: z.output<typeof window> | GUIWindow): GUIWindow {
 /** {ev: "window" | "child", window}. */
 export const windowEvent = (ev: 'window' | 'child', w: GUIWindow): string => JSON.stringify({ ev, window: w });
 
-/** Tells a browser window whether its core controls the windows. */
+/** Tells a browser window whether its hub controls the windows. */
 export const roleEvent = (control: boolean): string => JSON.stringify(control ? { ev: 'role', control } : { ev: 'role' });
 
 /** Tells a browser window its program window is gone. */

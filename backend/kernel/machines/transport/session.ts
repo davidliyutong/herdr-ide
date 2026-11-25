@@ -8,7 +8,7 @@ import { write } from '#shared/lib/streamio.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { Session as Yamux, closeStream, type Stream } from '#shared/proto/yamux.ts';
 
-/** Names this core to the nodes it reaches (NodeHello.client): random, the
+/** Names this hub to the nodes it reaches (NodeHello.client): random, the
  * same for all its sessions while the process runs. */
 export const CLIENT_ID = randomBytes(8).toString('hex');
 

@@ -1,4 +1,4 @@
-// Reads and writes the hand-editable JSON files of the core host
+// Reads and writes the hand-editable JSON files of the hub host
 // (settings, keybindings, machines, the vault): atomic, durable
 // replacement with private permissions, and a signature that tells whether
 // someone else changed the file since it was last read or written.

@@ -1,7 +1,7 @@
 // How machines get their build (the section machines, which the web UI
 // shows among the advanced settings): whether a machine downloads its
 // build from the release itself, also per machine, for sites that forbid
-// machines to reach it (the core uploads it then).
+// machines to reach it (the hub uploads it then).
 import { bool, defineModule } from '#kernel/config/settings/index.ts';
 
 export const DOWNLOAD = 'machines.download';
@@ -16,7 +16,7 @@ export const settings = defineModule({
       order: 10,
       flag: 'machine-download',
       usage:
-        "whether a machine downloads its build (the TypeScript machine executable of the core's release) from the release itself, checked by its digest; else, and when it cannot, the core uploads it",
+        "whether a machine downloads its build (the TypeScript machine executable of the hub's release) from the release itself, checked by its digest; else, and when it cannot, the hub uploads it",
     }),
   },
 });

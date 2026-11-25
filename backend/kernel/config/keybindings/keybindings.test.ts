@@ -50,7 +50,7 @@ function errorOf(fn: () => void): string {
 }
 
 /** The client's matcher (web/src/keymap.ts's applies and feedStroke), to
- * run the vectors of strokes against the bindings the core serves. */
+ * run the vectors of strokes against the bindings the hub serves. */
 type KeyContext = 'terminal' | 'shell' | 'vscode' | 'dialog';
 function applies(when: string | undefined, ctx: KeyContext): boolean {
   switch (when) {
@@ -126,7 +126,7 @@ describe('keys', () => {
     expect(normalize('Ctrl+B\u00a0C')).toBe('ctrl+b c');
   });
 
-  // The strokes the other vectors name are canonical by the core's rules.
+  // The strokes the other vectors name are canonical by the hub's rules.
   test('vector strokes are canonical', () => {
     const events = readJSON<{ cases: { stroke: string | null }[] }>(join(vectors, 'events.json'));
     const sequences = readJSON<{ bindings: Rule[]; cases: { strokes: string[] }[] }>(join(vectors, 'sequences.json'));
@@ -249,7 +249,7 @@ describe('keybindings', () => {
     }
   });
 
-  // The commands and defaults the core serves are those kernel/config/registry.ts
+  // The commands and defaults the hub serves are those kernel/config/registry.ts
   // wrote for the clients (spec/generated/registry.json), in its order.
   test('registry', () => {
     const registry = readJSON<{ commands: unknown; keybindings: Record<string, Rule[]> }>(registryPath);
@@ -269,7 +269,7 @@ describe('keybindings', () => {
     for (const c of defaults.cases) {
       for (const p of c.platforms) expect(run(s.defaults(p), c.strokes, c.context), `${p}: ${c.description}`).toEqual(c.results);
     }
-    // The sequences' bindings are user rules the core takes as they are.
+    // The sequences' bindings are user rules the hub takes as they are.
     const seq = readJSON<{ bindings: Rule[]; cases: { description: string; context: KeyContext; strokes: string[]; results: string[] }[] }>(
       join(vectors, 'sequences.json'),
     );

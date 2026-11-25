@@ -1,6 +1,6 @@
-// The one settings system of the core and of its clients (the web UI, also
+// The one settings system of the hub and of its clients (the web UI, also
 // inside the desktop app), modeled on VS Code's: typed definitions
-// (define.ts), a hand-editable JSONC file on the core host, layered values
+// (define.ts), a hand-editable JSONC file on the hub host, layered values
 // and generic settings UIs rendered from the definitions.
 //
 // A value comes from, in order: the command line (which locks the setting,
@@ -99,7 +99,7 @@ export interface SettingFlag {
 }
 
 export interface SettingsOptions {
-  /** Every module of the core: the kernel's, the features'. */
+  /** Every module of the hub: the kernel's, the features'. */
   modules?: readonly Module[];
   /** The command line's values by flag name (the values of others are
    * ignored): they set and lock their settings. */
@@ -548,7 +548,7 @@ function diff(a: Map<string, { change: Change; value: SettingValue }>, b: Map<st
 }
 
 // Where a new member goes, so that a file the UIs write reads as the Go
-// core wrote it: global values sorted, then each machine's entry, sorted.
+// hub wrote it: global values sorted, then each machine's entry, sorted.
 const sortedSlot = (key: string) => (names: string[]) => slot(names, (n) => n > key);
 const globalSlot = (key: string) => (names: string[]) => slot(names, (n) => machineOf(n) !== undefined || n > key);
 const machineSlot = (mk: string) => (names: string[]) => slot(names, (n) => machineOf(n) !== undefined && n > mk);

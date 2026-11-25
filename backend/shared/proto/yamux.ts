@@ -1,4 +1,4 @@
-// yamux: the stream multiplexer between the core and an agent, speaking the
+// yamux: the stream multiplexer between the hub and an agent, speaking the
 // wire protocol of hashicorp/yamux v0.1.x (its spec.md) with the same
 // semantics: a stream's Close is a half-close (FIN; the closer still reads),
 // the first window update rides on SYN/ACK and grows the window to

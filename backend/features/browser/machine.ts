@@ -1,7 +1,7 @@
 // The browser pane's machine side (docs/features/32-browser-and-ports.md):
-// it connects the core to a service listening on the machine's own
+// it connects the hub to a service listening on the machine's own
 // loopback interface, the way ssh -L does, and lists what listens there.
-// Nothing listens on the machine for it: the core opens a stream per
+// Nothing listens on the machine for it: the hub opens a stream per
 // connection.
 import { connect, type Socket } from 'node:net';
 import { Fail } from '#shared/lib/fail.ts';
@@ -46,7 +46,7 @@ export function browserMachine(o: BrowserMachineOptions = {}) {
     actions: {
       // Connects the stream to the port of this machine's loopback, answers,
       // and then carries bytes both ways until either side ends. Only
-      // loopback is dialed: the core reaches what a program of this machine
+      // loopback is dialed: the hub reaches what a program of this machine
       // could, not the machine's network.
       dial: async (p, ctx, s) => {
         let c: Socket | null = null;

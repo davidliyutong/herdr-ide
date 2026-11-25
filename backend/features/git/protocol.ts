@@ -7,7 +7,7 @@
 // argument vector of its own, under its own timeouts (reads 15 s, changes
 // 120 s).
 //
-// The core passes results on to the page as the agent wrote them, so the
+// The hub passes results on to the page as the agent wrote them, so the
 // results are loose objects: they are typed, and a member a later agent
 // adds still reaches the page. A Go slice without omitempty may be null.
 import { z } from 'zod';

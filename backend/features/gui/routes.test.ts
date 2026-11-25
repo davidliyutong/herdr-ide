@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const s of stops.splice(0).reverse()) await s();
 });
 
-/** A core with program windows (and terminals, wired as the host does)
+/** A hub with program windows (and terminals, wired as the host does)
  * over machines (local and m1 by default, not connected). */
 function guiHub(o: { readOnly?: boolean; machines?: Machines; gui?: GUIOptions } = {}) {
   const audit = memoryAudit();
@@ -36,7 +36,7 @@ function guiHub(o: { readOnly?: boolean; machines?: Machines; gui?: GUIOptions }
   const gui = guiFeature({ timing: { interruptPauseMs: 1, closeGraceMs: 30 }, ...o.gui });
   const terminals = terminalsFeature({ paneEnv: gui.paneEnv, onReady: gui.terminalReady });
   const machines = o.machines ?? testMachines([localSpec(), sshSpec('m1')]);
-  const core = createHub({
+  const hub = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: o.readOnly ?? false,
@@ -45,20 +45,20 @@ function guiHub(o: { readOnly?: boolean; machines?: Machines; gui?: GUIOptions }
     settings,
     features: [terminals, gui],
   });
-  serveUI(core.http.app, { get: async (p) => (p === 'index.html' ? Buffer.from('<html></html>') : null) });
+  serveUI(hub.http.app, { get: async (p) => (p === 'index.html' ? Buffer.from('<html></html>') : null) });
   const request = (method: string, path: string, r: RequestOptions = {}) => {
     const host = r.host ?? '127.0.0.1:7780';
     const headers = new Headers(r.headers);
     headers.set('Host', host);
     if (r.origin) headers.set('Origin', r.origin);
-    return core.fetch(new Request(`http://${host}${path}`, { method, headers, body: r.body }), {
+    return hub.fetch(new Request(`http://${host}${path}`, { method, headers, body: r.body }), {
       remote: r.remote ?? '127.0.0.1',
       desktop: false,
       upgrade: r.upgrade,
     });
   };
   const t: TestHub & { mgr: () => NonNullable<ReturnType<typeof gui.manager>>; settings: Record<string, boolean> } = {
-    hub: core,
+    hub: hub,
     settings: {},
     audit,
     request,
@@ -151,7 +151,7 @@ describe('routes', () => {
 });
 
 describe('browser windows', () => {
-  /** A core whose machine m1 has a display with window 7. */
+  /** A hub whose machine m1 has a display with window 7. */
   async function withWindow(readOnly = false) {
     // Read-only mode attaches only to a display that runs.
     const disp = new FakeDisplay(readOnly ? { running: true, kind: 'xvfb' } : {});
@@ -177,7 +177,7 @@ describe('browser windows', () => {
   });
 
   // A browser window gets the window and its role, its commands reach
-  // the agent as the core builds them, frames reach it; leaving releases
+  // the agent as the hub builds them, frames reach it; leaving releases
   // the window. Opening is audited.
   test('viewing and input', async () => {
     const { t, agent } = await withWindow();

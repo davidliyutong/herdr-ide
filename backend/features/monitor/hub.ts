@@ -1,4 +1,4 @@
-// The System Monitor & Task Manager's core side
+// The System Monitor & Task Manager's hub side
 // (docs/features/34-system-monitor.md): routes below /api/m/:id/p/monitor/
 // that pass a machine's live metrics and process snapshots on to the page
 // as its agent wrote them, and send a process a signal, refused in
@@ -15,7 +15,7 @@ import { settings } from './settings.ts';
 /** Bounds a signal's JSON. */
 const MAX_SIGNAL_BODY = 4 << 10;
 
-/** A signal's body as the Go core decoded it into its struct: members it
+/** A signal's body as the Go hub decoded it into its struct: members it
  * does not know are ignored, null is none. */
 const signalBody = z
   .object({ pid: z.int().nullish(), signal: z.string().nullish() })
@@ -24,7 +24,7 @@ const signalBody = z
 
 /** A request's JSON body of at most limit bytes read with schema; a body
  * that is too large, not JSON or not of the schema fails with bad_request,
- * as the Go core's did. */
+ * as the Go hub's did. */
 async function readJSON<S extends z.ZodType>(c: Ctx, limit: number, schema: S): Promise<z.output<S>> {
   let bytes: Uint8Array;
   try {

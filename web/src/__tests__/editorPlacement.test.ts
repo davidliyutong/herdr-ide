@@ -12,14 +12,14 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { openEditor, openToSide } from '../plugins/files/ops';
 import { openDiff } from '../plugins/git/ops';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-let core: FakeCore;
-const layout = () => core.model.layout('a')!;
+let hub: FakeHub;
+const layout = () => hub.model.layout('a')!;
 const ws = () => layout().workspaces[0];
 const editorTabs = () =>
   ws().tabs.map((tab) =>
@@ -27,18 +27,18 @@ const editorTabs = () =>
   );
 
 beforeEach(async () => {
-  core = new FakeCore();
-  core.machine('a', [FakeCore.term('s1', { cwd: '/home/u/w1' })], {
+  hub = new FakeHub();
+  hub.machine('a', [FakeHub.term('s1', { cwd: '/home/u/w1' })], {
     version: 2,
     workspaces: [{ id: 'w1', name: '', cwd: '/home/u/w1', tabs: [{ root: { terminal: 's1' }, focused: 's1' }], selected: 0 }],
     selected: 0,
   });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([{ id: 'a', label: 'a', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
   s.selectMachine('a');
-  core.model.subscribe('a');
+  hub.model.subscribe('a');
   await settle();
 });
 
@@ -52,7 +52,7 @@ describe('opening files', () => {
     expect(editorTabs()).toEqual([['s1'], ['editor:/home/u/w1/a.go']]);
     expect(ws().selected).toBe(1);
     // The next preview takes the preview's tab.
-    core.model.mutate('a', (l) => L.selectTab(l, 'w1', 0));
+    hub.model.mutate('a', (l) => L.selectTab(l, 'w1', 0));
     await openEditor('a', '/home/u/w1/b.go', { preview: true });
     expect(editorTabs()).toEqual([['s1'], ['editor:/home/u/w1/b.go']]);
     expect(ws().selected).toBe(1);
@@ -74,7 +74,7 @@ describe('opening files', () => {
     expect(editorTabs()).toEqual([['s1', 'editor:/home/u/w1/a.go']]);
     expect(L.pluginViews(ws(), 'files', 'editor')[0].view.preview).toBe(false);
     // Its tab shows it already: that editor is focused.
-    core.model.mutate('a', (l) => L.focusPane(l, 's1'));
+    hub.model.mutate('a', (l) => L.focusPane(l, 's1'));
     await openToSide('a', '/home/u/w1/a.go');
     expect(editorTabs()).toEqual([['s1', 'editor:/home/u/w1/a.go']]);
   });
@@ -88,7 +88,7 @@ describe('opening diffs', () => {
     // A graph in a tab of its own; its files' diffs split beside it, and a
     // diff in another tab is not taken away to it.
     const graph = { id: 'g1', plugin: 'git', kind: 'graph', repo: '/home/u/w1' };
-    core.model.mutate('a', (l) => L.openPane(l, { view: graph }, 'w1'));
+    hub.model.mutate('a', (l) => L.openPane(l, { view: graph }, 'w1'));
     await openDiff('a', { repo: '/home/u/w1', path: 'c.go', mode: 'commit', rev: 'abc' }, L.viewKey('g1'), { beside: true });
     await openDiff('a', { repo: '/home/u/w1', path: 'a.go', mode: 'worktree' }, L.viewKey('g1'), { beside: true });
     expect(editorTabs()).toEqual([['s1'], ['diff:b.go'], ['graph:undefined', 'diff:a.go']]);

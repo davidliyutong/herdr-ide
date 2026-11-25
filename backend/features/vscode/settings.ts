@@ -6,9 +6,9 @@ import { defineModule, enumOf, text } from '#kernel/config/settings/index.ts';
 
 /** How a machine gets code-server (codeServer.install). */
 export const Install = {
-  /** The core resolves, verifies and uploads the release. */
+  /** The hub resolves, verifies and uploads the release. */
   Push: 'push',
-  /** The machine downloads the release, verified against the core's
+  /** The machine downloads the release, verified against the hub's
    * digest; falls back to Push. */
   Download: 'download',
   /** A code-server already on the machine; falls back to Push when there
@@ -30,7 +30,7 @@ export const settings = defineModule({
       order: 10,
       flag: 'code-server-install',
       usage:
-        "how machines get code-server: push (the core downloads, verifies and uploads it), download (the machine downloads it, verified) or existing (use the machine's own code-server); the last two fall back to push",
+        "how machines get code-server: push (the hub downloads, verifies and uploads it), download (the machine downloads it, verified) or existing (use the machine's own code-server); the last two fall back to push",
     }),
     [PATH]: text({
       default: '',

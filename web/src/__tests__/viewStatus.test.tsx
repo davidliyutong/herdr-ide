@@ -19,7 +19,7 @@ import { useSettings } from '../settings';
 import { allPlugins, definePlugins, onViewStatus, viewPaneOf, viewStatus } from '../plugins/registry';
 import type { PluginDef } from '../plugins/api';
 import type { MachineState } from '../lib/machine';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { Sidebar } from '../components/Sidebar';
 import { Workspace } from '../components/Workspace';
 import { followViewsSeen, paneFocused, paneOnScreen } from '../seen';
@@ -32,8 +32,8 @@ const saved = [...allPlugins()];
 
 /** Machine m: workspace aaaaaaaa with a tab of terminal t1 beside v1 (t1
  * focused) and a tab of v2; workspace bbbbbbbb with a working agent in t2. */
-function machine(core: FakeCore) {
-  core.machine('m', [FakeCore.term('t1'), FakeCore.term('t2', { agent: 'claude', agent_status: 'working' })], {
+function machine(hub: FakeHub) {
+  hub.machine('m', [FakeHub.term('t1'), FakeHub.term('t2', { agent: 'claude', agent_status: 'working' })], {
     version: 2,
     workspaces: [
       {
@@ -52,22 +52,22 @@ function machine(core: FakeCore) {
   });
 }
 
-let core: FakeCore;
+let hub: FakeHub;
 
 beforeEach(async () => {
   vi.stubGlobal('fetch', () => Promise.resolve(new Response('{}', { status: 200 })));
   resetViewStatuses();
   definePlugins([dummyPlugin]);
   useSettings.setState({ values: {} });
-  core = new FakeCore();
-  machine(core);
-  core.install();
+  hub = new FakeHub();
+  machine(hub);
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setZoomed(undefined);
   s.setMachines([{ id: 'm', label: 'gpu', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
   s.selectMachine('m');
-  core.model.subscribe('m');
+  hub.model.subscribe('m');
   await settle();
 });
 afterEach(() => {
@@ -141,7 +141,7 @@ describe('the registry', () => {
 
 describe('the layout', () => {
   it("lists a tab's, a workspace's and a layout's plugin panes in order", () => {
-    const layout = core.layout('m')!;
+    const layout = hub.layout('m')!;
     const [a, b] = layout.workspaces;
     expect(L.tabViews(a.tabs[0])).toEqual([{ key: 'view:v1', view: thing('v1', 'one').view }]);
     expect(L.workspaceViews(a).map((v) => v.key)).toEqual(['view:v1', 'view:v2']);
@@ -205,7 +205,7 @@ describe('seen', () => {
     Object.defineProperty(document, 'visibilityState', { value: v, configurable: true });
     document.dispatchEvent(new Event('visibilitychange'));
   };
-  const focus = (pane: string) => act(async () => core.model.mutate('m', (l) => L.focusPane(l, pane)));
+  const focus = (pane: string) => act(async () => hub.model.mutate('m', (l) => L.focusPane(l, pane)));
   const flush = () => act(async () => {});
 
   beforeEach(async () => {
@@ -237,7 +237,7 @@ describe('seen', () => {
     // A pane done while the user looks elsewhere is told once it is looked at.
     await act(async () => setViewStatus('v2', 'done'));
     expect(seenCalls).toEqual(['m:v1', 'm:v1']);
-    await act(async () => core.model.mutate('m', (l) => L.selectTab(l, 'aaaaaaaa', 1)));
+    await act(async () => hub.model.mutate('m', (l) => L.selectTab(l, 'aaaaaaaa', 1)));
     expect(seenCalls).toEqual(['m:v1', 'm:v1', 'm:v2']);
   });
 

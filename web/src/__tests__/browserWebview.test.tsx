@@ -100,7 +100,7 @@ describe('a page of the webview that does not load', () => {
       isMainFrame: false,
     });
     expect(failed()).toBeNull();
-    // The core's own address (the UI is on 127.0.0.1:5173), under another name.
+    // The hub's own address (the UI is on 127.0.0.1:5173), under another name.
     await fire('did-fail-load', {
       errorCode: -105,
       errorDescription: 'ERR_NAME_NOT_RESOLVED',

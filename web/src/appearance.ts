@@ -1,7 +1,7 @@
-// Applies the appearance settings: light/dark theme (also sent to the core,
+// Applies the appearance settings: light/dark theme (also sent to the hub,
 // which switches VS Code windows to match) and the UI font. Terminals follow
 // the terminal settings themselves (components/TerminalView.tsx); the
-// desktop app's shell reads the theme from the core itself.
+// desktop app's shell reads the theme from the hub itself.
 
 import { create } from 'zustand';
 import { getPrefs, usePrefs, type Prefs, type TermColors } from './prefs';

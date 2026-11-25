@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // How the Git plugin follows repositories (plugins/git/state.ts,
-// follow.ts) with the core's routes stubbed and time faked: the watch's
+// follow.ts) with the hub's routes stubbed and time faked: the watch's
 // tokens move the status, the diffs' version and the history's refs
 // version apart; the repository's info is read when its configuration
 // moved; reads back off after timeouts; a change gets a read that starts

@@ -1,4 +1,4 @@
-// What the file explorer does with files: changes through the core
+// What the file explorer does with files: changes through the hub
 // (api.ts) with the tree listed again after them, opening files (Quick
 // Look, the editor pane, VS Code, a terminal), the clipboard, downloads and
 // uploads, and the context menu that offers them. Nothing that changes
@@ -193,13 +193,13 @@ export function revealInExplorer(m: string, path: string) {
 export const reveal = revealInExplorer;
 
 /** Whether Reveal in Finder is offered for each machine's paths here, as
- * the core said: only for its own machine, to a page on its computer
+ * the hub said: only for its own machine, to a page on its computer
  * (backend/features/files revealable). Unknown until asked (loadRevealable). */
 export const useRevealable = createStore<Record<string, boolean>>(() => ({}));
 const askingRevealable = new Set<string>();
 
-/** Asks the core, once per page, whether machine m's paths can be shown in
- * the system's file manager; another machine than the core's own cannot. */
+/** Asks the hub, once per page, whether machine m's paths can be shown in
+ * the system's file manager; another machine than the hub's own cannot. */
 export function loadRevealable(m: string | undefined) {
   if (!m || m in useRevealable.getState() || askingRevealable.has(m)) return;
   if (useStore.getState().machines[m]?.kind !== 'local') return useRevealable.setState({ [m]: false });
@@ -212,7 +212,7 @@ export function loadRevealable(m: string | undefined) {
 }
 
 /** Reveal in Finder (Reveal in File Manager elsewhere) for path, when the
- * core offers it for m: the system's file manager of the core's computer
+ * hub offers it for m: the system's file manager of the hub's computer
  * shows it. It runs a program there, so read-only mode has none. */
 export function revealEntries(m: string, path: string): MenuEntry[] {
   loadRevealable(m);

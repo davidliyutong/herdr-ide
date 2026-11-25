@@ -1,7 +1,7 @@
 // The API prices the cost scan and a session's read apply: the table of
 // spec/pricing/pricing.json (by provider and the longest model prefix,
 // with long-prompt tiers and cache-write prices), and the user's own
-// (usage.prices), which the core sends with each scan.
+// (usage.prices), which the hub sends with each scan.
 import table from '../../../../spec/pricing/pricing.json' with { type: 'json' };
 
 /** A price tier, in USD per million tokens, for prompts of at most

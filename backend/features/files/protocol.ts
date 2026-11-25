@@ -8,7 +8,7 @@
 // the UI translates (not_found, exists, denied, refused, conflict,
 // partial_write, …).
 //
-// write and upload stream: the reply has no result; the core then sends
+// write and upload stream: the reply has no result; the hub then sends
 // the body as ChunkWriter chunks with their end marker, and the agent
 // answers a second line, {ok, plugin: Result} or {ok: false, code, error}.
 // A body that ends without the marker leaves nothing on the machine.
@@ -67,11 +67,11 @@ export const filesProtocol = defineProtocol('files', {
   /** paths into dir under their own names, replacing nothing. */
   move: { params: z.object({ paths, dir: z.string() }), result, timeoutMs: CHANGE_MS },
   /** Copies of paths into dir ("name copy", "name copy 2"… when taken);
-   * stops when the core closes the stream. */
+   * stops when the hub closes the stream. */
   copy: { params: z.object({ paths, dir: z.string() }), result, timeoutMs: CHANGE_MS },
   /** paths into the user's trash. */
   trash: { params: z.object({ paths }), result, timeoutMs: CHANGE_MS },
-  /** Removes paths for good; stops when the core closes the stream. */
+  /** Removes paths for good; stops when the hub closes the stream. */
   remove: { params: z.object({ paths }), result, timeoutMs: CHANGE_MS },
   /** Saves an editor's text (at most MAX_WRITE bytes) into path, which must
    * be as the editor loaded it (expect; none: the file must not exist)
@@ -86,7 +86,7 @@ export const filesProtocol = defineProtocol('files', {
    * replace over the file there; received in full before anything at path
    * changes. Streams (above). */
   upload: { params: z.object({ path, replace: z.boolean().optional() }), result: z.object({}), stream: true },
-  /** Shows path in the system's file manager (the core asks only for its
+  /** Shows path in the system's file manager (the hub asks only for its
    * own machine, for a client on its host). */
   reveal: { params: z.object({ path }), result, timeoutMs: 30_000 },
 });

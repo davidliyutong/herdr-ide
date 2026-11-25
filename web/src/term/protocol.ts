@@ -1,4 +1,4 @@
-// The core's terminal protocol (/api/v1/term): JSON text messages with a "t"
+// The hub's terminal protocol (/api/v1/term): JSON text messages with a "t"
 // field and binary frames [stream u32 LE][kind u8][payload].
 
 /** Output to the client, input from it. */
@@ -37,7 +37,7 @@ export function frameGrid(frame: Frame): { cols: number; rows: number } | null {
   return { cols: p[0] | (p[1] << 8), rows: p[2] | (p[3] << 8) };
 }
 
-/** A failed call: the core's error kind (not_found, read_only, refused, unavailable, ...). */
+/** A failed call: the hub's error kind (not_found, read_only, refused, unavailable, ...). */
 export class TermError extends Error {
   constructor(
     readonly kind: string,
@@ -56,7 +56,7 @@ export interface BackendState {
   version: string;
 }
 
-/** A terminal as the core reports it, with every field it sent. */
+/** A terminal as the hub reports it, with every field it sent. */
 export type TerminalRecord = Record<string, unknown> & { address: string };
 
 export function isLive(t: TerminalRecord): boolean {

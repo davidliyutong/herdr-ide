@@ -7,7 +7,7 @@
 const dropped = /[\p{Cc}\p{Cf}\s]/gu;
 
 /** Whether a URL's host name is one of a computer's own loopback, as the
- * core's guard reads a Host: `localhost` and the names below it, an address
+ * hub's guard reads a Host: `localhost` and the names below it, an address
  * of 127.0.0.0/8, `[::1]`, and such an IPv4 address written as an IPv6 one
  * (`[::ffff:7f00:1]`). */
 export function isLoopbackName(hostname: string): boolean {
@@ -29,7 +29,7 @@ export type PageAddress = Pick<Location, 'origin' | 'hostname' | 'port' | 'proto
 
 /** Whether u leads to the server of the page itself: the page's origin,
  * or, with the page on a loopback host, any loopback host with the page's
- * port under either scheme. The core answers under every name of its
+ * port under either scheme. The hub answers under every name of its
  * computer's loopback (`127.0.0.1` for a page on `localhost`, and the
  * reverse), so the other name is the UI's own routes again, only as
  * another origin. A page on any other host knows nothing of the kind: its

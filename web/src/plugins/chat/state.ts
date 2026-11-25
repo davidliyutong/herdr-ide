@@ -1,5 +1,5 @@
 // What the page knows of each machine's chats: their states (the chat
-// host's watch, which the core sends every page as the chat plugin's
+// host's watch, which the hub sends every page as the chat plugin's
 // message, protocol.ts StatesData, after the snapshot GET STATES_PATH the
 // page reads when it starts and each time its event channel comes back),
 // the chats that are no more, the agents each machine can start (GET
@@ -11,7 +11,7 @@
 // page has is passed over; one that changes chats while the page has no
 // full list of the machine (before the snapshot came, or after a gap)
 // waits for the snapshot, which is read again then. The snapshot read after
-// the page's event channel came back (a core that may have started again)
+// the page's event channel came back (a hub that may have started again)
 // replaces what the page has: a machine that is not in it, and of which
 // no message came meanwhile, has no states the page knows.
 import { create } from 'zustand';
@@ -35,7 +35,7 @@ export const SNAPSHOT_GAP_MS = 2_000;
 
 /** Where an attached chat's subscription is: attaching, attached, waiting
  * for the page's connection or the machine (offline), the chat is no more
- * (gone), or the core refused it (failed, with the error). */
+ * (gone), or the hub refused it (failed, with the error). */
 export type Link = 'attaching' | 'attached' | 'offline' | 'gone' | 'failed';
 
 /** What an attached chat states (source.ts). */
@@ -63,7 +63,7 @@ export interface ChatsState {
   /** What the attached chats state, by liveKey. */
   live: Record<string, LiveChat>;
   /** Each machine's chat host as its states last said: its version and
-   * whether it is another build than the core's (outdated). */
+   * whether it is another build than the hub's (outdated). */
   hosts?: Record<string, { version: string; outdated: boolean }>;
 }
 
@@ -313,7 +313,7 @@ export function offeredKinds(m: string): AgentKind[] {
 let following: (() => void) | undefined;
 
 /** Starts, once per page: reads the snapshot now and each time the
- * page's event channel comes back (the revs start over with a core that
+ * page's event channel comes back (the revs start over with a hub that
  * started again) or the plugin is turned on, and each machine's agents
  * when it is ready; all of it while the plugin is on. */
 export function follow() {

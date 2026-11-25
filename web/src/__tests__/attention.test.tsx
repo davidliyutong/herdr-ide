@@ -20,23 +20,23 @@ import { Palette } from '../components/Palette';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
 import { t } from '../i18n';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { dummyPlugin, resetViewStatuses, setUnopenedAgents, setViewStatus, thing } from './viewStatusPlugin';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const saved = [...allPlugins()];
-let core: FakeCore;
+let hub: FakeHub;
 
 beforeEach(async () => {
   vi.stubGlobal('fetch', () => Promise.resolve(new Response('{}', { status: 200 })));
   resetViewStatuses();
   definePlugins([dummyPlugin]);
   useSettings.setState({ values: {} });
-  core = new FakeCore();
-  core.machine(
+  hub = new FakeHub();
+  hub.machine(
     'm',
-    [FakeCore.term('d', { agent: 'claude', agent_status: 'done' }), FakeCore.term('w', { agent: 'codex', agent_status: 'working' })],
+    [FakeHub.term('d', { agent: 'claude', agent_status: 'done' }), FakeHub.term('w', { agent: 'codex', agent_status: 'working' })],
     {
       version: 2,
       workspaces: [
@@ -62,12 +62,12 @@ beforeEach(async () => {
       selected: 0,
     },
   );
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(true);
   s.setMachines([{ id: 'm', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]);
   s.selectMachine('m');
-  core.model.subscribe('m');
+  hub.model.subscribe('m');
   await settle();
   setViewStatus('v1', 'blocked');
   setViewStatus('v2', 'done');
@@ -100,13 +100,13 @@ describe('the attention list', () => {
   it('goes to the pane that most needs the user, a blocked one of a plugin', async () => {
     actions.openAttention();
     await settle();
-    const layout = core.layout('m')!;
+    const layout = hub.layout('m')!;
     expect(L.selectedTab(layout)?.focused).toBe('view:v1');
     setViewStatus('v1', 'idle');
     // Then the done terminal, before the done pane.
     actions.openAttention();
     await settle();
-    expect(L.selectedTab(core.layout('m')!)?.focused).toBe('d');
+    expect(L.selectedTab(hub.layout('m')!)?.focused).toBe('d');
   });
 });
 
@@ -139,7 +139,7 @@ describe('views', () => {
     expect(host.querySelector('.inbox .section-title')?.textContent).toContain(t('sidebar.working', { n: 2 }));
     await act(async () => rows()[0].click());
     await act(settle);
-    expect(L.selectedTab(core.layout('m')!)?.focused).toBe('view:v1');
+    expect(L.selectedTab(hub.layout('m')!)?.focused).toBe('view:v1');
   });
 
   it('includes unopened conversations in the inbox, attention list, palette, and openAttention, and opens them on click', async () => {

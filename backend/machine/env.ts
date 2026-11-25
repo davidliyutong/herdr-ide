@@ -5,7 +5,7 @@
 // programs belong to no terminal, no multiplexer and no agent's session. A
 // shell in their terminals that saw TMUX or HERDR_PANE_ID would take itself
 // for a nested session, or hand an agent's status to the herdr pane the
-// core was started from; Claude Code that saw CLAUDE_CODE_CHILD_SESSION
+// hub was started from; Claude Code that saw CLAUDE_CODE_CHILD_SESSION
 // would take itself for a child session and save no transcript.
 import { ENV_PREFIX } from '#shared/lib/brand.ts';
 

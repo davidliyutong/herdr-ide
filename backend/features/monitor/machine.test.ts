@@ -1,4 +1,4 @@
-// The monitor's machine side through the wire: the actions as the core
+// The monitor's machine side through the wire: the actions as the hub
 // calls them (#kernel/agent.ts, the protocol's schemas checking the
 // results), on this machine and over a Linux /proc and /sys of fixtures,
 // and the checks of a signal.
@@ -30,7 +30,7 @@ async function start(o: Partial<MonitorOptions> = {}) {
     metrics: () => call(m, monitorProtocol, 'metrics', {}),
     processes: () => call(m, monitorProtocol, 'processes', {}),
     signal: (pid: number, signal: string) => call(m, monitorProtocol, 'signal', { pid, signal }),
-    /** The machine's own answer to any pid (the core's schema bounds it
+    /** The machine's own answer to any pid (the hub's schema bounds it
      * before it sends). */
     rawSignal: async (pid: number, signal: string) => {
       try {
@@ -67,7 +67,7 @@ const refusal = async (p: Promise<unknown>) => {
 describe('on this machine', () => {
   // It runs this machine's ps, top, sysctl… each bounded by cmdTimeoutMs.
   slow(
-    'metrics and processes as the core reads them; the second sample has rates',
+    'metrics and processes as the hub reads them; the second sample has rates',
     async () => {
       const a = await start();
       const m = await a.metrics();

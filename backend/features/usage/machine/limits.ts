@@ -7,7 +7,7 @@
 //
 //   - Claude: ~/.claude/.credentials.json ($CLAUDE_CONFIG_DIR), or on macOS
 //     the keychain item Claude Code keeps them in; /api/oauth/usage.
-//   - Codex: auth.json of $CODEX_HOME or ~/.codex and of the homes the core
+//   - Codex: auth.json of $CODEX_HOME or ~/.codex and of the homes the hub
 //     names; /backend-api/wham/usage, else the newest session log's
 //     rate limits.
 //   - Grok: ~/.grok/auth.json; /v1/billing and /v1/settings.

@@ -26,7 +26,7 @@ import {
 
 describe('wire', () => {
   // The WebSocket's messages as the page reads and writes them
-  // (web/src/plugins/chat/protocol.ts), as the Go core wrote them.
+  // (web/src/plugins/chat/protocol.ts), as the Go hub wrote them.
   test('messages', () => {
     expect(attached('s1', { id: 'c1' }, 1)).toBe('{"t":"attached","sub":"s1","chat":{"id":"c1"},"first":1}');
     expect(attached('s1', undefined, 0)).toBe('{"t":"attached","sub":"s1"}');
@@ -56,9 +56,9 @@ describe('wire', () => {
     expect([MAX_SUBS, MAX_SUBS_PER_MACHINE, MAX_PAGE_ID]).toEqual([32, 16, 64]);
   });
 
-  // A page's message is taken as the Go core took it: members of other
+  // A page's message is taken as the Go hub took it: members of other
   // types make it none; a command keeps chatproto's members only, those
-  // that are empty left out, under the core's id.
+  // that are empty left out, under the hub's id.
   test('a page message', () => {
     const m = clientMessage.parse({ op: 'command', id: 'p1', m: 'gpu', chat: 'c1', cmd: { op: 'cancel', id: 'x', extra: 1, title: null } });
     expect(m).toMatchObject({ op: 'command', id: 'p1', m: 'gpu', chat: 'c1', sub: '', from: 0 });

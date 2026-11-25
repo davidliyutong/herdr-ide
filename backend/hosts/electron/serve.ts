@@ -1,8 +1,8 @@
 // The utility process's side of the bridge (bridge.ts): it starts the
-// core when the main process says so, answers each request and adopts
-// each channel the main process hands it, and stops the core when told
+// hub when the main process says so, answers each request and adopts
+// each channel the main process hands it, and stops the hub when told
 // (the app quits; Electron ends its utility processes with it). Nothing
-// here listens: the app's windows reach the core only through its main
+// here listens: the app's windows reach the hub only through its main
 // process.
 import type { Hub } from '#kernel/hub.ts';
 import type { Composed } from '#hosts/common/compose.ts';
@@ -20,28 +20,28 @@ export interface ServeOptions<P> {
   /** The bridge's view of a port the main process sent. */
   port(p: P): Port;
   logger: (line: string) => void;
-  /** Ends the process once the core stopped. */
+  /** Ends the process once the hub stopped. */
   exit(code: number): void;
 }
 
 const isToHub = (m: unknown): m is ToHub => typeof m === 'object' && m !== null && typeof (m as { t?: unknown }).t === 'string';
 
-/** Serves the main process on parent; the core it starts ends with stop. */
+/** Serves the main process on parent; the hub it starts ends with stop. */
 export function serveParent<P>(parent: Parent<P>, o: ServeOptions<P>): void {
-  let core: Hub | undefined;
+  let hub: Hub | undefined;
   const stop = new AbortController();
   // Requests of the app's windows: the main process vouches that they are
   // its windows' (the client is the desktop app's); none came over a
   // network.
   const answer = (req: Request) =>
-    core ? core.fetch(req, { desktop: true }) : Promise.resolve(Response.json({ error: 'starting' }, { status: 503 }));
+    hub ? hub.fetch(req, { desktop: true }) : Promise.resolve(Response.json({ error: 'starting' }, { status: 503 }));
   parent.on('message', (e) => {
     const m = e.data;
     if (!isToHub(m)) return;
     const port = e.ports[0];
     switch (m.t) {
       case 'start': {
-        if (core || stop.signal.aborted) return;
+        if (hub || stop.signal.aborted) return;
         let composed: Composed;
         try {
           composed = o.start(m.start);
@@ -50,12 +50,12 @@ export function serveParent<P>(parent: Parent<P>, o: ServeOptions<P>): void {
           o.exit(1);
           return;
         }
-        core = composed.hub;
+        hub = composed.hub;
         parent.postMessage({ t: 'ready' });
         void composed.run(stop.signal).then(
           () => o.exit(0),
           (err) => {
-            o.logger(`core: ${(err as Error).message}`);
+            o.logger(`hub: ${(err as Error).message}`);
             o.exit(1);
           },
         );
@@ -66,12 +66,12 @@ export function serveParent<P>(parent: Parent<P>, o: ServeOptions<P>): void {
         return;
       case 'channel':
         if (port)
-          void serveChannel(o.port(port), m.head, (req, upgrade) =>
-            core ? core.fetch(req, { desktop: true, upgrade }) : answer(req),
-          ).catch((err) => o.logger(`channel: ${(err as Error).message}`));
+          void serveChannel(o.port(port), m.head, (req, upgrade) => (hub ? hub.fetch(req, { desktop: true, upgrade }) : answer(req))).catch(
+            (err) => o.logger(`channel: ${(err as Error).message}`),
+          );
         return;
       case 'stop':
-        if (!core) return o.exit(0);
+        if (!hub) return o.exit(0);
         stop.abort();
         return;
     }

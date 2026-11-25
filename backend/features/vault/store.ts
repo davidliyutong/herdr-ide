@@ -1,4 +1,4 @@
-// The variable vault's store on the core host: named values encrypted one
+// The variable vault's store on the hub host: named values encrypted one
 // by one with AES-256-GCM in vault[-<instance>].json beside the settings
 // file, under a master key derived from the user's passphrase with
 // Argon2id and kept, while the vault is unlocked, as a CryptoKey that
@@ -6,7 +6,7 @@
 // and the machines allowed to read a variable are in the clear; each
 // value's encryption covers its name, its machines and its inject-only
 // flag (adOf), so a file edited to let a machine read a variable no longer
-// opens it. The file is the Go core's, which this core replaced: it opens
+// opens it. The file is the Go hub's, which this hub replaced: it opens
 // the files that one wrote (docs/features/30-variable-vault.md).
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';

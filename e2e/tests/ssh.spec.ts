@@ -11,7 +11,7 @@ import { explorer, focusTerminal, newTerminalTab, run, terminalOfPane } from '..
 import { waitFor } from '../harness/wait';
 import type { Locator, Page } from '@playwright/test';
 
-/** The SSH machine of the core, once its state is `status`. */
+/** The SSH machine of the hub, once its state is `status`. */
 async function remote(inst: Instance, status = 'ready', timeout = 60_000) {
   return waitFor(
     async () => {
@@ -96,7 +96,7 @@ test('an SSH machine that drops shows offline, then comes back with its terminal
     const workspaces = (await term.layout()).workspaces?.length;
 
     // The connection drops and sshd refuses new ones: the machine shows
-    // offline and the core keeps trying.
+    // offline and the hub keeps trying.
     await sshd.offline();
     const { head, body } = machineRow(app);
     await expect(head.locator('.mstatus.ms-error')).toBeVisible({ timeout: 60_000 });
@@ -118,7 +118,7 @@ test('an SSH machine that drops shows offline, then comes back with its terminal
   }
 });
 
-test('a chat on an SSH machine shows it offline and goes on, and nothing stays when the core stops', async ({ app, instance, sshd }) => {
+test('a chat on an SSH machine shows it offline and goes on, and nothing stays when the hub stops', async ({ app, instance, sshd }) => {
   const id = await addMachine(instance);
   await showMachine(app);
   // A chat in a new tab on the machine shown.
@@ -150,7 +150,7 @@ test('a chat on an SSH machine shows it offline and goes on, and nothing stays w
   await expect(log(pane)).toContainText('Echo #3: again');
 
   // Rule 6: the terminal core stopped from the machine's menu ends its
-  // terminals, the chat host and the agents it ran; the core stopped, its
+  // terminals, the chat host and the agents it ran; the hub stopped, its
   // `node dial` on the machine ends with the ssh session, and the node
   // without a client after NodeIdle (15 s).
   const mine = /herdr-core|chat-host|kimi|node --instance|node dial/;

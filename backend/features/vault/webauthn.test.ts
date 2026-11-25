@@ -1,5 +1,5 @@
 // WebAuthn's checks on @simplewebauthn/server: the three algorithms, every
-// refusal the Go core made, and malformed input that only ever fails.
+// refusal the Go hub made, and malformed input that only ever fails.
 import { describe, expect, test } from 'bun:test';
 import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { coseKey, EDDSA, ES256, RS256, verifyAssertion, verifyRegistration, WebAuthnError, type Expect } from './webauthn.ts';

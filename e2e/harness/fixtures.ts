@@ -32,8 +32,8 @@ export const test = base.extend<Fixtures>({
       await use(inst);
     } finally {
       if (info.status !== info.expectedStatus) {
-        await info.attach('core.log', { body: inst.logs(), contentType: 'text/plain' });
-        writeFileSync(info.outputPath('core.log'), inst.logs());
+        await info.attach('hub.log', { body: inst.logs(), contentType: 'text/plain' });
+        writeFileSync(info.outputPath('hub.log'), inst.logs());
       }
       await inst.stop();
     }
@@ -77,7 +77,7 @@ export const test = base.extend<Fixtures>({
     t.close();
   },
   app: async ({ instance, context, page }, use) => {
-    // Offline: the page reaches its own core and nothing else.
+    // Offline: the page reaches its own hub and nothing else.
     const origin = new URL(instance.baseURL).origin;
     await context.route(
       (url) => !url.href.startsWith(origin + '/') && /^https?:/.test(url.protocol),

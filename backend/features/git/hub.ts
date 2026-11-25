@@ -1,4 +1,4 @@
-// The Git feature's core side (docs/features/31-git.md): routes below
+// The Git feature's hub side (docs/features/31-git.md): routes below
 // /api/m/:id/p/git/ that run the actions of its machine side (protocol.ts).
 // Reads are GETs with their parameters in the query; changes are POSTs
 // with a JSON body, refused in read-only mode and audited as
@@ -66,7 +66,7 @@ export function auditFields(p: Record<string, unknown>): Record<string, unknown>
 }
 
 /** A change's JSON body: an object (null is none), at most MAX_BODY bytes;
- * anything else fails with bad_request, as the Go core's did. */
+ * anything else fails with bad_request, as the Go hub's did. */
 async function changeBody(c: Ctx): Promise<Record<string, unknown>> {
   let bytes: Uint8Array;
   try {

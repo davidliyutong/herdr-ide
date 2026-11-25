@@ -1,4 +1,4 @@
-// Settings dialog, rendered from the definitions the core serves
+// Settings dialog, rendered from the definitions the hub serves
 // (/api/settings, settings.ts), laid out as VS Code's: a scope bar (the
 // user's settings, then each machine's own), a list of sections (the
 // advanced ones last) and the section's settings, a search across them, a
@@ -409,7 +409,7 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
 }
 
 /** Opens settings.json (or keybindings.json) in a VS Code pane of the
- * core's own machine, where the file is; without one (a core on Windows,
+ * hub's own machine, where the file is; without one (a hub on Windows,
  * read-only mode) it copies the file's path. */
 function OpenFileButton({ file, which }: { file: string; which: 'settings' | 'keys' }) {
   const local = useStore((s) => s.order.map((id) => s.machines[id]).find((m) => m?.kind === 'local' && m.status === 'ready' && !m.code));

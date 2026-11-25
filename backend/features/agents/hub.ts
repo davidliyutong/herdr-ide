@@ -1,4 +1,4 @@
-// The agents feature's core side: the sessions of the coding agents in the
+// The agents feature's hub side: the sessions of the coding agents in the
 // machines' terminals. While it is on, the terminals feature asks each
 // machine's detect stream for the session each agent terminal runs
 // (plugins.agents.enabled); this feature serves the page's question
@@ -13,7 +13,7 @@
 // Everything a request names is checked here before the machine is asked
 // (400 bad_request), and the machine checks it again. The request to the
 // machine ends with the HTTP request, and within RESOLVE_MS. The route
-// only reads: a read-only core answers it, and it is not audited. The
+// only reads: a read-only hub answers it, and it is not audited. The
 // feature has no settings of its own.
 import { byId, validSessionId } from '#shared/agents/kinds.ts';
 import { defineFeature } from '#kernel/feature.ts';

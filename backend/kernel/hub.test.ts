@@ -65,7 +65,7 @@ describe('features', () => {
 
   // A route of one feature that would take the requests of another's (a
   // middleware or a wildcard under a shared prefix, the same route twice)
-  // is refused when the core is made: its gate and middleware would run
+  // is refused when the hub is made: its gate and middleware would run
   // before the other's handler. Under a prefix of its own a feature's
   // middleware reaches its own routes only.
   test('routes of features do not overlap', async () => {
@@ -241,7 +241,7 @@ describe('mutating routes', () => {
 });
 
 describe('agent streams', () => {
-  // The streams agents open towards the core go to the feature that serves
+  // The streams agents open towards the hub go to the feature that serves
   // their op, while it is on for any client; otherwise they are refused.
   test('dispatched by op', async () => {
     const got: Array<[string, string]> = [];
@@ -275,7 +275,7 @@ describe('agent streams', () => {
 
 describe('the rest of the context', () => {
   // broadcast reaches every page as a plugin message; forget runs every
-  // feature's onForget, whatever fails; services run until the core stops.
+  // feature's onForget, whatever fails; services run until the hub stops.
   test('broadcast, forget, services', async () => {
     const forgotten: string[] = [];
     let ctx!: FeatureContext;

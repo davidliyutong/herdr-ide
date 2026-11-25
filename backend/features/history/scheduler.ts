@@ -4,10 +4,10 @@
 // asks a machine that no longer keeps them for a clear until one succeeds:
 // when the setting or the feature was turned off, and when it is first
 // seen not keeping them (it may hold snapshots from before: the setting
-// was turned off while the core was down, or in the settings file). A
+// was turned off while the hub was down, or in the settings file). A
 // failed clear is asked again later, waiting twice as long after each
 // failure up to clearRetryMaxMs, and at once when the machine connects
-// again. Nothing is asked of a machine while the core is read-only.
+// again. Nothing is asked of a machine while the hub is read-only.
 import type { HistoryCaptureParams } from '#shared/proto/agentproto/index.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import type { Audit } from '#kernel/audit.ts';

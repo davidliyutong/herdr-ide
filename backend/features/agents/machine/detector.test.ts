@@ -465,7 +465,7 @@ test('an agent replacing another, finished, lost, removed and missed', async () 
   ]);
   d.event(ev('removed', 't2'));
   want(await evs.next(), '', '');
-  // Events of an added machine's terminals are not this core's.
+  // Events of an added machine's terminals are not this terminal core's.
   d.event({ ...foregroundEvent('t9', 9, 'claude', '/w'), machine: 'far' });
   await evs.none();
 });

@@ -20,19 +20,19 @@ interface Call {
   m: string;
   action: string;
   params: Record<string, unknown>;
-  /** Resolves when the core closed the call's stream. */
+  /** Resolves when the hub closed the call's stream. */
   closed: Promise<void>;
 }
 
 /** The test's machines: what they were asked, and how they answer. Every
- * action waits while block is set (or until the core gives up on it). */
+ * action waits while block is set (or until the hub gives up on it). */
 interface Agents {
   calls: Call[];
   block?: Promise<void>;
   reply?: (action: string, params: Record<string, unknown>) => Reply;
 }
 
-/** A core with the feature over machines box and gpu, whose agents answer
+/** A hub with the feature over machines box and gpu, whose agents answer
  * the plugin op as a.reply says. */
 async function setup(a: Agents, o: { readOnly?: boolean } = {}) {
   const serve = (m: string) => async (h: Header, conn: AgentStream) => {
@@ -90,10 +90,10 @@ test('switch', () => {
 // The route is a machine's read: answered in read-only mode, not audited,
 // and 404 plugin_disabled while the feature is off.
 test('routes', async () => {
-  const core = (readOnly: boolean) => testHub({ features: [agentsFeature()], readOnly, settings: { 'plugins.agents.enabled': true } });
-  const { problems, checked } = await checkGuarded(core(false), core(true), { machine: 'local' });
+  const hub = (readOnly: boolean) => testHub({ features: [agentsFeature()], readOnly, settings: { 'plugins.agents.enabled': true } });
+  const { problems, checked } = await checkGuarded(hub(false), hub(true), { machine: 'local' });
   expect([problems, checked]).toEqual([[], []]);
-  const ro = core(true);
+  const ro = hub(true);
   expect(ro.hub.http.app.routes.filter((r) => r.path.includes('/p/agents')).map((r) => `${r.method} ${r.path}`)).toContain(
     'GET /api/m/:id/p/agents/resolve',
   );

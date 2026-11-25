@@ -1,4 +1,4 @@
-// The web UI's files and the app shell (static.ts), behind the core's
+// The web UI's files and the app shell (static.ts), behind the hub's
 // guards.
 import { describe, expect, test } from 'bun:test';
 import { SLUG } from '#shared/lib/brand.ts';
@@ -12,7 +12,7 @@ const files = (m: Record<string, string>): Files => ({
 });
 const UI = files({ 'index.html': '<!doctype html>shell', 'assets/app-1.js': 'js', 'icon.svg': '<svg/>' });
 
-function core(f: Files | null) {
+function hub(f: Files | null) {
   const t = testHub({ features: [] });
   serveUI(t.hub.http.app, f);
   return t;
@@ -20,7 +20,7 @@ function core(f: Files | null) {
 
 describe('serveUI', () => {
   test('the shell and its files, with the policy and their caching', async () => {
-    const t = core(UI);
+    const t = hub(UI);
     const index = await t.request('GET', '/');
     expect(await index.text()).toBe('<!doctype html>shell');
     expect(index.headers.get('Content-Type')).toStartWith('text/html');
@@ -34,7 +34,7 @@ describe('serveUI', () => {
   });
 
   test('a client-side route gets the shell; an API path no route took does not', async () => {
-    const t = core(UI);
+    const t = hub(UI);
     const route = await t.request('GET', '/m/local/some/view');
     expect([route.status, await route.text(), route.headers.get('Cache-Control')]).toEqual([200, '<!doctype html>shell', 'no-cache']);
     const api = await t.request('GET', '/api/nothing');
@@ -45,7 +45,7 @@ describe('serveUI', () => {
   });
 
   test("the desktop app's windows frame nothing but the UI's own", async () => {
-    const t = core(UI);
+    const t = hub(UI);
     const res = await t.request('GET', '/', { host: 'localhost:7780', desktop: true });
     expect(res.headers.get('Content-Security-Policy')).toBe(appCSP('localhost:7780', true));
     expect(res.headers.get('Content-Security-Policy')).toContain("frame-src 'self';");
@@ -55,17 +55,17 @@ describe('serveUI', () => {
   });
 
   test('HEAD has the length and no body', async () => {
-    const res = await core(UI).request('HEAD', '/icon.svg');
+    const res = await hub(UI).request('HEAD', '/icon.svg');
     expect([res.status, res.headers.get('Content-Length'), await res.text()]).toEqual([200, '6', '']);
   });
 
-  test('a core without the UI says so', async () => {
-    const res = await core(null).request('GET', '/');
+  test('a hub without the UI says so', async () => {
+    const res = await hub(null).request('GET', '/');
     expect(await res.text()).toBe(`${SLUG}: the web UI is not built into this binary; run scripts/build.sh\n`);
   });
 
   test('every answer carries the security headers', async () => {
-    const res = await core(UI).request('GET', '/');
+    const res = await hub(UI).request('GET', '/');
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('Referrer-Policy')).toBe('same-origin');
     expect(res.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');

@@ -5,7 +5,7 @@
 // getPublicKeyAlgorithm(), never the attestation object: no attestation is
 // parsed (the vault does not ask which authenticator holds the key), and an
 // assertion by the new credential proves the key is the authenticator's.
-// The Go core stored the same SubjectPublicKeyInfo, which is turned into
+// The Go hub stored the same SubjectPublicKeyInfo, which is turned into
 // the COSE key the library verifies with.
 //
 // Beyond the library's checks: every input is bounded, the client data's
@@ -26,7 +26,7 @@ const MAX_SIGNATURE = 1 << 10;
 const MAX_SPKI = 2 << 10;
 const MAX_CRED_ID = 1023;
 
-/** What a ceremony must match: the nonce the core issued, the page's
+/** What a ceremony must match: the nonce the hub issued, the page's
  * origin and its host name (the relying party). */
 export interface Expect {
   challenge: Uint8Array;

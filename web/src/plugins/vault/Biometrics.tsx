@@ -3,7 +3,7 @@
 // Windows Hello, WebAuthn credentials of browsers with PRF), which also
 // unlocks the locked vault, the rule that every Allow needs it, and the
 // apps exempt from asking. One added before unlock entries only approves
-// until it is added again. The core shows them to a page with a session
+// until it is added again. The hub shows them to a page with a session
 // only: without one the page asks for the passphrase to unlock first.
 // Changes need a session the passphrase opened (a page whose session a
 // proof opened asks for the passphrase first), and adding an
@@ -130,7 +130,7 @@ export function BiometricsSettings({ readOnly }: { readOnly: boolean }) {
     }
   };
 
-  // Without a session (or while the core does not hold the key) the core
+  // Without a session (or while the hub does not hold the key) the hub
   // shows none of this: the passphrase unlocks it first.
   if (!guard?.full || !session)
     return (
@@ -431,7 +431,7 @@ function Exemptions({
   const [picked, setPicked] = useState<string[]>([]);
   const [pass, setPass] = useState('');
   const label = (m: string) => machines[m]?.label ?? m;
-  // The apps that asked on the machines chosen (or any), as the core saw them.
+  // The apps that asked on the machines chosen (or any), as the hub saw them.
   const seen = [...new Set(log.filter((a) => a.m && (!picked.length || picked.includes(a.m))).map((a) => appOf(a.process)))].filter(
     Boolean,
   );

@@ -17,7 +17,7 @@ test('the keybindings, the last window and the app id by platform', () => {
   assert.equal(APP_ID, `${reverseDomain(APP_DOMAIN)}.desktop`);
 });
 
-test("the core's payloads are the app's resources, or scripts/build.sh's and the web UI's build in development", () => {
+test("the hub's payloads are the app's resources, or scripts/build.sh's and the web UI's build in development", () => {
   assert.deepEqual(hubResources('/App/Resources', '/repo'), {
     payload: join('/App/Resources', 'payload'),
     web: join('/App/Resources', 'web'),

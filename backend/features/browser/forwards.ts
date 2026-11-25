@@ -1,15 +1,15 @@
 // Port forwards: a service that listens on a machine's loopback, reachable
-// on the core host's loopback as ssh -L makes it. A forward listens on a
-// loopback port of the core's host, on both loopback addresses, and
+// on the hub host's loopback as ssh -L makes it. A forward listens on a
+// loopback port of the hub's host, on both loopback addresses, and
 // carries each connection to the machine's port through its agent (the
-// dial action), so a page of the UI on the core's host can show the
+// dial action), so a page of the UI on the hub's host can show the
 // service in a browser pane under http://localhost:<port>.
 //
 // The listeners are on loopback only and exist only while their forward
 // does: the Forwards own them, and a forward ends when it is stopped,
 // unused for the idle time (reap), its machine removed, the feature
 // turned off, its listener failed for good, or the Forwards closed (the
-// core stopped); its connections end with it. At most maxForwards
+// hub stopped); its connections end with it. At most maxForwards
 // forwards, maxConns connections each.
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
@@ -18,7 +18,7 @@ import type { Logger } from '#shared/lib/log.ts';
 import { other } from '#shared/host/loopback.ts';
 import { Fail } from '#kernel/fail.ts';
 
-/** A forward as clients see it: port on machine m is reachable on the core
+/** A forward as clients see it: port on machine m is reachable on the hub
  * host's loopback port local. */
 export interface Forward {
   m: string;
@@ -50,7 +50,7 @@ export interface ForwardsOptions {
   maxConns?: number;
   /** How often at most the bytes a forward carries are noted as a use. */
   useEveryMs?: number;
-  /** Listens on the core host's loopback (listenLoopback). */
+  /** Listens on the hub host's loopback (listenLoopback). */
   listen?: (pref: number) => Promise<Listening>;
 }
 
@@ -71,7 +71,7 @@ function listenOn(host: string, port: number): Promise<Server> {
   });
 }
 
-/** Listens on the core host's loopback, on port pref when it is free (so
+/** Listens on the hub host's loopback, on port pref when it is free (so
  * the page's address is the one the service expects), else on one the
  * system picks. The same port is taken on ::1, where "localhost" may lead
  * first: a port whose ::1 side another program holds, or that cannot be
@@ -177,7 +177,7 @@ export class Forwards {
       have.used = this.now();
       return have.public();
     }
-    if (this.closed) throw new Fail('listen', 400, 'the core is stopping');
+    if (this.closed) throw new Fail('listen', 400, 'the hub is stopping');
     const max = this.o.maxForwards ?? MAX_FORWARDS;
     if (this.entries.size + this.making.size >= max) throw new Fail('too_many', 400, `at most ${max} forwards`);
     const making = this.make(m, port);
@@ -198,7 +198,7 @@ export class Forwards {
     }
     if (this.closed) {
       for (const s of l.servers) s.close();
-      throw new Fail('listen', 400, 'the core is stopping');
+      throw new Fail('listen', 400, 'the hub is stopping');
     }
     const f = new Entry(m, port, l, this.now());
     this.entries.set(key(m, port), f);

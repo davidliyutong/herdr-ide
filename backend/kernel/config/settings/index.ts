@@ -1,4 +1,4 @@
-// The settings of the core and of its clients: definitions (define.ts) and
+// The settings of the hub and of its clients: definitions (define.ts) and
 // the store of their values (store.ts).
 export * from './define.ts';
 export * from './store.ts';

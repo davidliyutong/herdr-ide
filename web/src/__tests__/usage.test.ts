@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
-// The AI usage plugin: ordering accounts, the core's alerts shown once per
+// The AI usage plugin: ordering accounts, the hub's alerts shown once per
 // browser, the cost report's sums, and the panel and status bar item drawn
-// from a stubbed core.
+// from a stubbed hub.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -76,7 +76,7 @@ describe('usage model', () => {
     expect(tightest(snapshot([past]))!.window.usedPct).toBe(30);
   });
 
-  it('shows each alert of the core once in a browser: again in a snapshot, another page or after a reload', () => {
+  it('shows each alert of the hub once in a browser: again in a snapshot, another page or after a reload', () => {
     const alert = (id: string, at = now): UsageAlert => ({
       id,
       kind: 'threshold',
@@ -424,7 +424,7 @@ describe('usage panel and status item', () => {
     const left = [...host.querySelectorAll<HTMLButtonElement>('.usage-meta [role=radio]')].find((b) => b.textContent === 'Remaining')!;
     await act(async () => left.click());
     expect(card.querySelector('.usage-pct')!.textContent).toBe('10% left');
-    // Refresh asks the core.
+    // Refresh asks the hub.
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-refresh')!.click());
     expect(calls).toContain('POST /api/p/usage/refresh');
     // A wallet in another currency says which.
@@ -483,7 +483,7 @@ describe('usage panel and status item', () => {
     expect(spend.textContent).toContain('deepseek-v4-flash');
   });
 
-  it('does not keep the core asking from a hidden page', async () => {
+  it('does not keep the hub asking from a hidden page', async () => {
     vi.useFakeTimers();
     const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     try {

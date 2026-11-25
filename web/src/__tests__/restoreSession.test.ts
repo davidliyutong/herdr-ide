@@ -15,7 +15,7 @@ import {
   resumeSession,
   takeResume,
 } from '../restore';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { useStore } from '../state/store';
 
 const S1 = '0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f';
@@ -48,7 +48,7 @@ const leaf = (l: L.Layout | undefined, address: string) => (l ? (L.findLeaf(l, a
 const never = () => false;
 /** A terminal's pane, attached, that records what is typed into it. */
 const into = (typed: string[]) => ({ attached: true, type: (text: string) => void typed.push(text) });
-const claude = (extra: Record<string, unknown> = {}) => FakeCore.term('t1', { pid: 7, agent: 'claude', ...extra });
+const claude = (extra: Record<string, unknown> = {}) => FakeHub.term('t1', { pid: 7, agent: 'claude', ...extra });
 
 /** An answer of the resolve route. */
 const answer = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }));
@@ -106,7 +106,7 @@ describe('the session a leaf remembers', () => {
     expect(
       rememberAgents(
         l,
-        () => FakeCore.term('t1', { pid: 7 }),
+        () => FakeHub.term('t1', { pid: 7 }),
         () => true,
       ),
     ).toBe(l);
@@ -119,14 +119,14 @@ describe('the session a leaf remembers', () => {
 
   it('is forgotten with the agent', () => {
     const l = layoutOf({ terminal: 't1', font: 12, agent: 'claude', pid: 7, session: S1 });
-    const without = () => FakeCore.term('t1', { pid: 7 });
+    const without = () => FakeHub.term('t1', { pid: 7 });
     expect(rememberAgents(l, without, never)).toBe(l);
     expect(leaves(rememberAgents(l, without, (a) => a === 't1'))).toEqual([{ terminal: 't1', font: 12 }]);
   });
 
   it('is another agent’s no longer when another agent runs in the terminal', () => {
     const l = layoutOf({ terminal: 't1', agent: 'claude', pid: 7, session: S1 });
-    const codex = (extra: Record<string, unknown> = {}) => FakeCore.term('t1', { pid: 7, agent: 'codex', ...extra });
+    const codex = (extra: Record<string, unknown> = {}) => FakeHub.term('t1', { pid: 7, agent: 'codex', ...extra });
     expect(leaves(rememberAgents(l, () => codex(), never))).toEqual([{ terminal: 't1', agent: 'codex', pid: 7 }]);
     expect(leaves(rememberAgents(l, () => codex({ agent_session: S2, agent_session_source: 'fd' }), never))).toEqual([
       { terminal: 't1', agent: 'codex', pid: 7, session: S2 },
@@ -135,13 +135,13 @@ describe('the session a leaf remembers', () => {
 
   it('stays when the agent’s program was lost, for its resume', () => {
     const l = layoutOf({ terminal: 't1', agent: 'claude', pid: 7, session: S1 });
-    const lost = rememberAgents(l, () => FakeCore.term('t1', { pid: 70 }), never);
+    const lost = rememberAgents(l, () => FakeHub.term('t1', { pid: 70 }), never);
     expect(leaves(lost)).toEqual([{ terminal: 't1', session: S1, resume: 'claude' }]);
     // Asked for while the new shell runs: unchanged until it is taken.
     expect(
       rememberAgents(
         lost,
-        () => FakeCore.term('t1', { pid: 70 }),
+        () => FakeHub.term('t1', { pid: 70 }),
         () => true,
       ),
     ).toBe(lost);
@@ -268,25 +268,25 @@ describe('a page resuming an agent', () => {
   /** A machine whose kept terminals t1 and t2 (in /srv/app) lost the
    * agents the layout remembers with their sessions. */
   const machine = (sessions: Array<string | undefined>, agent = 'claude') => {
-    const core = new FakeCore();
-    const records = sessions.map((_, i) => FakeCore.term(`t${i + 1}`, { pid: 70 + i, cwd: '/srv/app' }));
+    const hub = new FakeHub();
+    const records = sessions.map((_, i) => FakeHub.term(`t${i + 1}`, { pid: 70 + i, cwd: '/srv/app' }));
     const tabs = sessions.map((session, i) => ({
       terminal: `t${i + 1}`,
       agent,
       pid: 7 + i,
       ...(session === undefined ? {} : { session }),
     }));
-    const fm = core.machine('m', records, layoutOf(...tabs));
-    return { core, fm };
+    const fm = hub.machine('m', records, layoutOf(...tabs));
+    return { hub, fm };
   };
   const resolveCalls = (fetch: ReturnType<typeof vi.fn>) =>
     fetch.mock.calls.map((c) => Object.fromEntries(new URL(c[0] as string, 'http://host').searchParams));
 
   it('brings two agents of one kind in one directory back in their own sessions', async () => {
-    const { core } = machine([S1, S2]);
+    const { hub } = machine([S1, S2]);
     const fetch = vi.fn(() => answer({ ok: true }));
     vi.stubGlobal('fetch', fetch);
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
     expect(leaves(model.layout('m')!)).toEqual([
@@ -304,7 +304,7 @@ describe('a page resuming an agent', () => {
       { kind: 'claude', session: S1, cwd: '/srv/app' },
       { kind: 'claude', session: S2, cwd: '/srv/app' },
     ]);
-    expect(leaves(core.layout('m')!)).toEqual([
+    expect(leaves(hub.layout('m')!)).toEqual([
       { terminal: 't1', session: S1 },
       { terminal: 't2', session: S2 },
     ]);
@@ -316,12 +316,12 @@ describe('a page resuming an agent', () => {
   });
 
   it('resumes a Codex session by its id', async () => {
-    const { core } = machine([S1], 'codex');
+    const { hub } = machine([S1], 'codex');
     vi.stubGlobal(
       'fetch',
       vi.fn(() => answer({ ok: true })),
     );
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
     const typed: string[] = [];
@@ -337,10 +337,10 @@ describe('a page resuming an agent', () => {
       ['plugin off', () => answer({ error: 'plugin_disabled' }, 404)],
       ['failed', () => Promise.reject(new TypeError('network'))],
     ] as const) {
-      const { core } = machine([S1]);
+      const { hub } = machine([S1]);
       const fetch = vi.fn(reply);
       vi.stubGlobal('fetch', fetch);
-      const model = core.install();
+      const model = hub.install();
       model.subscribe('m');
       await flush();
       const typed: string[] = [];
@@ -348,16 +348,16 @@ describe('a page resuming an agent', () => {
       await flush();
       expect(fetch, name).toHaveBeenCalledTimes(1);
       expect(typed, name).toEqual(['claude --continue\r']);
-      expect(leaves(core.layout('m')!), name).toEqual([{ terminal: 't1', session: S1 }]);
+      expect(leaves(hub.layout('m')!), name).toEqual([{ terminal: 't1', session: S1 }]);
     }
   });
 
   it('continues the latest without asking for a leaf without a session or with a hostile one', async () => {
     for (const session of [undefined, ...HOSTILE]) {
-      const { core } = machine([session]);
+      const { hub } = machine([session]);
       const fetch = vi.fn(() => answer({ ok: true }));
       vi.stubGlobal('fetch', fetch);
-      const model = core.install();
+      const model = hub.install();
       model.subscribe('m');
       await flush();
       const typed: string[] = [];
@@ -369,13 +369,13 @@ describe('a page resuming an agent', () => {
   });
 
   it('continues the latest when the machine does not answer in time, and ignores a later answer', async () => {
-    const { core } = machine([S1]);
+    const { hub } = machine([S1]);
     let reply!: (r: Response) => void;
     vi.stubGlobal(
       'fetch',
       vi.fn(() => new Promise<Response>((resolve) => (reply = resolve))),
     );
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
     vi.useFakeTimers();
@@ -384,7 +384,7 @@ describe('a page resuming an agent', () => {
     await vi.advanceTimersByTimeAsync(RESOLVE_TIMEOUT_MS - 1);
     expect(typed).toEqual([]);
     // Still asked for while the answer is on its way.
-    expect(leaf(core.layout('m'), 't1')?.resume).toBe('claude');
+    expect(leaf(hub.layout('m'), 't1')?.resume).toBe('claude');
     await vi.advanceTimersByTimeAsync(1);
     vi.useRealTimers();
     await flush();
@@ -392,15 +392,15 @@ describe('a page resuming an agent', () => {
     reply(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     await flush();
     expect(typed).toEqual(['claude --continue\r']);
-    expect(leaves(core.layout('m')!)).toEqual([{ terminal: 't1', session: S1 }]);
+    expect(leaves(hub.layout('m')!)).toEqual([{ terminal: 't1', session: S1 }]);
   });
 
   it('asks once while an answer is on its way, and types into the newest pane', async () => {
-    const { core } = machine([S1]);
+    const { hub } = machine([S1]);
     let reply!: (r: Response) => void;
     const fetch = vi.fn(() => new Promise<Response>((resolve) => (reply = resolve)));
     vi.stubGlobal('fetch', fetch);
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
     const first: string[] = [];
@@ -416,17 +416,17 @@ describe('a page resuming an agent', () => {
   });
 
   it('types nothing when its write of the layout lost', async () => {
-    const { core, fm } = machine([S1]);
+    const { hub, fm } = machine([S1]);
     vi.stubGlobal(
       'fetch',
       vi.fn(() => answer({ ok: true })),
     );
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
-    const handle = core.handle.bind(core);
+    const handle = hub.handle.bind(hub);
     let first = true;
-    core.handle = (msg) => {
+    hub.handle = (msg) => {
       if (first && msg.t === 'call' && msg.method === 'doc.set') {
         first = false;
         // Another page took the request (and typed) just before.
@@ -438,19 +438,19 @@ describe('a page resuming an agent', () => {
     const typed: string[] = [];
     model.resumeAgent('m', 't1', into(typed));
     await flush();
-    expect(core.calls.filter((c) => c.method === 'doc.set').length).toBeGreaterThan(0);
+    expect(hub.calls.filter((c) => c.method === 'doc.set').length).toBeGreaterThan(0);
     expect(typed).toEqual([]);
     expect(leaves(model.layout('m')!)).toEqual([{ terminal: 't1', session: S1 }]);
   });
 
   it('types nothing when another page took the request while the answer was on its way', async () => {
-    const { core, fm } = machine([S1]);
+    const { hub, fm } = machine([S1]);
     let reply!: (r: Response) => void;
     vi.stubGlobal(
       'fetch',
       vi.fn(() => new Promise<Response>((resolve) => (reply = resolve))),
     );
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
     const typed: string[] = [];
@@ -458,23 +458,23 @@ describe('a page resuming an agent', () => {
     await flush();
     fm.layout = layoutOf({ terminal: 't1', session: S1 });
     fm.version++;
-    core.event('m', 'doc', '', { name: 'layout', version: fm.version });
+    hub.event('m', 'doc', '', { name: 'layout', version: fm.version });
     await flush();
-    const writes = core.calls.filter((c) => c.method === 'doc.set').length;
+    const writes = hub.calls.filter((c) => c.method === 'doc.set').length;
     reply(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     await flush();
     expect(typed).toEqual([]);
-    expect(core.calls.filter((c) => c.method === 'doc.set').length).toBe(writes);
+    expect(hub.calls.filter((c) => c.method === 'doc.set').length).toBe(writes);
   });
 
   it('resumes by the id only while the leaf names the session confirmed', async () => {
-    const { core, fm } = machine([S1]);
+    const { hub, fm } = machine([S1]);
     let reply!: (r: Response) => void;
     vi.stubGlobal(
       'fetch',
       vi.fn(() => new Promise<Response>((resolve) => (reply = resolve))),
     );
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
     const typed: string[] = [];
@@ -483,7 +483,7 @@ describe('a page resuming an agent', () => {
     // Another client wrote another session meanwhile.
     fm.layout = layoutOf({ terminal: 't1', session: S2, resume: 'claude' });
     fm.version++;
-    core.event('m', 'doc', '', { name: 'layout', version: fm.version });
+    hub.event('m', 'doc', '', { name: 'layout', version: fm.version });
     await flush();
     reply(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     await flush();
@@ -493,11 +493,11 @@ describe('a page resuming an agent', () => {
   /** A machine whose t1 asks for its agent back, a question for its
    * session on its way, and a pane of it: answer() replies. */
   async function asking() {
-    const { core, fm } = machine([S1]);
+    const { hub, fm } = machine([S1]);
     let reply!: (r: Response) => void;
     const fetch = vi.fn(() => new Promise<Response>((resolve) => (reply = resolve)));
     vi.stubGlobal('fetch', fetch);
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
     const typed: string[] = [];
@@ -508,16 +508,16 @@ describe('a page resuming an agent', () => {
       reply(new Response(JSON.stringify({ ok: true }), { status: 200 }));
       await flush();
     };
-    return { core, fm, model, fetch, typed, pane, confirm };
+    return { hub, fm, model, fetch, typed, pane, confirm };
   }
 
   it('leaves the request for the next attach when the pane is not attached, or gone, once the answer came', async () => {
-    const { core, model, fetch, typed, pane, confirm } = await asking();
+    const { hub, model, fetch, typed, pane, confirm } = await asking();
     // Attaching again (for a prelude), or unmounted: input reaches nothing.
     pane.attached = false;
     await confirm();
     expect(typed).toEqual([]);
-    expect(leaf(core.layout('m'), 't1')?.resume).toBe('claude');
+    expect(leaf(hub.layout('m'), 't1')?.resume).toBe('claude');
     // Its next attach asks again and types.
     pane.attached = true;
     model.resumeAgent('m', 't1', pane);
@@ -525,27 +525,27 @@ describe('a page resuming an agent', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     await confirm();
     expect(typed).toEqual([`claude --resume ${S1}\r`]);
-    expect(leaf(core.layout('m'), 't1')?.resume).toBeUndefined();
+    expect(leaf(hub.layout('m'), 't1')?.resume).toBeUndefined();
   });
 
   it('leaves the request when the terminal got another program while the answer was on its way', async () => {
-    const { core, typed, confirm } = await asking();
-    core.event('m', 'restarted', 't1', FakeCore.term('t1', { pid: 71, cwd: '/srv/app' }));
+    const { hub, typed, confirm } = await asking();
+    hub.event('m', 'restarted', 't1', FakeHub.term('t1', { pid: 71, cwd: '/srv/app' }));
     await flush();
     await confirm();
     expect(typed).toEqual([]);
-    expect(leaf(core.layout('m'), 't1')?.resume).toBe('claude');
+    expect(leaf(hub.layout('m'), 't1')?.resume).toBe('claude');
   });
 
   it('leaves the request when the user started a program in the shell meanwhile, and types once the shell waits again', async () => {
-    const { core, model, typed, pane, confirm } = await asking();
-    core.event('m', 'foreground', 't1', { pid: 900, name: 'vim', cwd: '/srv/app' });
+    const { hub, model, typed, pane, confirm } = await asking();
+    hub.event('m', 'foreground', 't1', { pid: 900, name: 'vim', cwd: '/srv/app' });
     await flush();
     await confirm();
     expect(typed).toEqual([]);
-    expect(leaf(core.layout('m'), 't1')?.resume).toBe('claude');
+    expect(leaf(hub.layout('m'), 't1')?.resume).toBe('claude');
     // The shell at its prompt again: its own program in the foreground.
-    core.event('m', 'foreground', 't1', { pid: 70, name: 'zsh', cwd: '/srv/app' });
+    hub.event('m', 'foreground', 't1', { pid: 70, name: 'zsh', cwd: '/srv/app' });
     await flush();
     model.resumeAgent('m', 't1', pane);
     await flush();
@@ -554,26 +554,26 @@ describe('a page resuming an agent', () => {
   });
 
   it('types nothing once the request was taken if the terminal runs something else by the time the layout is written', async () => {
-    const { core, typed, confirm } = await asking();
-    const handle = core.handle.bind(core);
-    core.handle = (msg) => {
-      // The user starts a program just before the core takes the layout.
-      if (msg.t === 'call' && msg.method === 'doc.set') core.event('m', 'foreground', 't1', { pid: 900, name: 'vim', cwd: '/srv/app' });
+    const { hub, typed, confirm } = await asking();
+    const handle = hub.handle.bind(hub);
+    hub.handle = (msg) => {
+      // The user starts a program just before the terminal core takes the layout.
+      if (msg.t === 'call' && msg.method === 'doc.set') hub.event('m', 'foreground', 't1', { pid: 900, name: 'vim', cwd: '/srv/app' });
       handle(msg);
     };
     await confirm();
     expect(typed).toEqual([]);
     // Taken: nothing more happens.
-    expect(leaf(core.layout('m'), 't1')?.resume).toBeUndefined();
+    expect(leaf(hub.layout('m'), 't1')?.resume).toBeUndefined();
   });
 
   it('asks nothing and types nothing in a read-only page', async () => {
     useStore.setState({ readOnly: true });
-    const core = new FakeCore();
-    core.machine('m', [FakeCore.term('t1', { pid: 70, cwd: '/srv/app' })], layoutOf({ terminal: 't1', session: S1, resume: 'claude' }));
+    const hub = new FakeHub();
+    hub.machine('m', [FakeHub.term('t1', { pid: 70, cwd: '/srv/app' })], layoutOf({ terminal: 't1', session: S1, resume: 'claude' }));
     const fetch = vi.fn(() => answer({ ok: true }));
     vi.stubGlobal('fetch', fetch);
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
     const typed: string[] = [];
@@ -581,29 +581,29 @@ describe('a page resuming an agent', () => {
     await flush();
     expect(fetch).not.toHaveBeenCalled();
     expect(typed).toEqual([]);
-    expect(core.calls.some((c) => c.method === 'doc.set')).toBe(false);
+    expect(hub.calls.some((c) => c.method === 'doc.set')).toBe(false);
   });
 
   it('remembers the session the record names, follows /clear, and never writes a guess', async () => {
-    const core = new FakeCore();
-    core.machine(
+    const hub = new FakeHub();
+    hub.machine(
       'm',
-      [FakeCore.term('t1', { pid: 70, agent: 'claude', agent_session: S1, agent_session_source: 'guess' })],
+      [FakeHub.term('t1', { pid: 70, agent: 'claude', agent_session: S1, agent_session_source: 'guess' })],
       layoutOf({ terminal: 't1' }),
     );
-    const model = core.install();
+    const model = hub.install();
     model.subscribe('m');
     await flush();
-    expect(leaves(core.layout('m')!)).toEqual([{ terminal: 't1', agent: 'claude', pid: 70 }]);
-    core.event('m', 'agent', 't1', { agent_session: S1, agent_session_source: 'pid' });
+    expect(leaves(hub.layout('m')!)).toEqual([{ terminal: 't1', agent: 'claude', pid: 70 }]);
+    hub.event('m', 'agent', 't1', { agent_session: S1, agent_session_source: 'pid' });
     await flush();
-    expect(leaves(core.layout('m')!)).toEqual([{ terminal: 't1', agent: 'claude', pid: 70, session: S1 }]);
+    expect(leaves(hub.layout('m')!)).toEqual([{ terminal: 't1', agent: 'claude', pid: 70, session: S1 }]);
     // /clear starts another session.
-    core.event('m', 'agent', 't1', { agent_session: S2, agent_session_source: 'pid' });
+    hub.event('m', 'agent', 't1', { agent_session: S2, agent_session_source: 'pid' });
     await flush();
-    expect(leaf(core.layout('m'), 't1')?.session).toBe(S2);
-    core.event('m', 'agent', 't1', { agent_session: S3, agent_session_source: 'guess' });
+    expect(leaf(hub.layout('m'), 't1')?.session).toBe(S2);
+    hub.event('m', 'agent', 't1', { agent_session: S3, agent_session_source: 'guess' });
     await flush();
-    expect(leaf(core.layout('m'), 't1')?.session).toBe(S2);
+    expect(leaf(hub.layout('m'), 't1')?.session).toBe(S2);
   });
 });

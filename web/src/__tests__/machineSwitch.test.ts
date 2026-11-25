@@ -20,7 +20,7 @@ vi.mock('../components/PaneHeader', () => ({ PaneHeader: () => createElement('di
 
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { Workspace } from '../components/Workspace';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -31,15 +31,15 @@ describe('switching machines', () => {
 
   beforeEach(async () => {
     vi.stubGlobal('fetch', () => Promise.resolve(new Response('{}', { status: 200 })));
-    const core = new FakeCore();
+    const hub = new FakeHub();
     const layout = {
       version: 2,
       workspaces: [{ id: 'wwwwwwww', name: '', cwd: '/home/u', tabs: [{ root: { terminal: 't1' }, focused: 't1' }], selected: 0 }],
       selected: 0,
     };
-    core.machine('local', [FakeCore.term('t1', { title: 'claude' })], layout);
-    core.machine('remote', [FakeCore.term('t1', { title: 'nvitop' })], layout);
-    core.install();
+    hub.machine('local', [FakeHub.term('t1', { title: 'claude' })], layout);
+    hub.machine('remote', [FakeHub.term('t1', { title: 'nvitop' })], layout);
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([
@@ -47,8 +47,8 @@ describe('switching machines', () => {
       { id: 'remote', label: 'nus-ws-1', kind: 'ssh', status: 'ready', info: { home: '/home/u' } },
     ] as unknown as MachineState[]);
     s.selectMachine('local');
-    core.model.subscribe('local');
-    core.model.subscribe('remote');
+    hub.model.subscribe('local');
+    hub.model.subscribe('remote');
     await settle();
     host = document.createElement('div');
     document.body.append(host);

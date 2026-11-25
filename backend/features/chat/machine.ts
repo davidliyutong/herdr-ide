@@ -1,24 +1,24 @@
 // The chat feature's machine side (docs/features/37-agent-chats.md): the
-// relay between the core and this machine's chat host (machine/host/), which
+// relay between the hub and this machine's chat host (machine/host/), which
 // runs coding agents headless and keeps their conversations. Its one action:
 //
 //   - open {start?}: a connection to the chat host's socket (<run
-//     dir>/chat.sock) for the core. After the reply the stream carries the
+//     dir>/chat.sock) for the hub. After the reply the stream carries the
 //     host's bytes both ways, the host's hello first, until either side
 //     closes; one open is one connection to the host.
 //
 // The host is no child of the agent: when no host serves the socket, the
 // agent has the instance's terminal core run one, this build's own
 // executable, as a terminal no client shows (MachineEnv.runHidden). It then
-// lives as the user's terminals do, while agents, ssh sessions and cores
+// lives as the user's terminals do, while agents, ssh sessions and hubs
 // come and go, and ends by itself when it has had nothing to do for a
 // while, when the terminal core stops, or when the agent of a newer build
-// asks it to make way (never one of an older build: two cores of different
+// asks it to make way (never one of an older build: two hubs of different
 // builds that reach one machine do not take turns). A host's terminal that
 // holds the host's name while nothing serves the socket for longer than a
 // host takes to end is stuck: the agent has the terminal core kill it
 // (MachineEnv.killHidden) and starts another. Nothing listens on the
-// machine for the core: the core opens a stream per connection.
+// machine for the hub: the hub opens a stream per connection.
 import { connect, type Socket } from 'node:net';
 import { posix } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
@@ -216,7 +216,7 @@ async function gone(pid: number, ms: number, t: ChatMachineTiming, signal: Abort
   }
 }
 
-/** Copies both ways between the core's stream (after the reply) and the
+/** Copies both ways between the hub's stream (after the reply) and the
  * host's connection, and closes both once either side ends. */
 function relay(s: ActionStream, h: HostConn, signal: AbortSignal): Promise<void> {
   const st = s.stream;
@@ -253,7 +253,7 @@ export function chatMachine(o: ChatMachineOptions = {}) {
     // Anthropic's Agent SDK in the instance's data directory, which this
     // build's chat host loads for Claude Code's chats.
     const sdk = new SdkStore({ base: env.base, logger: env.logger, pin: o.sdkPin, downloadMs: o.sdkDownloadMs });
-    // Held while a host is started or replaced: the streams the core opens
+    // Held while a host is started or replaced: the streams the hub opens
     // at the same time find the host the first of them started, instead
     // of each asking the terminal core for one. One start at a time.
     let connecting: Promise<unknown> = Promise.resolve();
@@ -455,7 +455,7 @@ export function chatMachine(o: ChatMachineOptions = {}) {
         },
         // The tarball in chunks after the reply, installed, then a second
         // line. An upload that failed before its end is read on and dropped,
-        // so that the core, which reads that line after its last chunk, gets
+        // so that the hub, which reads that line after its last chunk, gets
         // it.
         sdkUpload: async (_p, _ctx, s) => {
           await s.reply();

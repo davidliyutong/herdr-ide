@@ -49,7 +49,7 @@ export class Work {
     if (!any) this.stop('prepare');
   }
 
-  /** Ends all work (the core stops). */
+  /** Ends all work (the hub stops). */
   stopAll(): void {
     for (const k of [...this.controllers.keys()]) this.stop(k, true);
   }

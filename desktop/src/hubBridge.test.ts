@@ -1,4 +1,4 @@
-// The bridge between the main process and the core's utility process
+// The bridge between the main process and the hub's utility process
 // (backend/hosts/electron/bridge.ts), with worker_threads' MessagePorts
 // standing in for Electron's: requests and their bodies, with credit both
 // ways, failures and cancels; channels, with their opening, messages,
@@ -38,7 +38,7 @@ const head = (o: Partial<RequestHead> = {}): RequestHead => ({
   ...o,
 });
 
-/** A request through the bridge to handle, as the core would answer it. */
+/** A request through the bridge to handle, as the hub would answer it. */
 function roundTrip(
   h: RequestHead,
   handle: (req: Request) => Promise<Response>,
@@ -115,12 +115,12 @@ test('a body goes no further ahead than the window while its reader stalls', asy
   const res = await response;
   await new Promise((r) => setTimeout(r, 50));
   // The window in flight, half of it queued for the reader, and what the
-  // core's stream pulled ahead.
+  // hub's stream pulled ahead.
   assert.ok(pulled <= WINDOW + WINDOW / 2 + 2, `pulled ${pulled}`);
   assert.equal((await res.arrayBuffer()).byteLength, 100_000);
 });
 
-test('an upload streams in chunks, and the core reads it as it comes', async () => {
+test('an upload streams in chunks, and the hub reads it as it comes', async () => {
   const { response } = roundTrip(
     head({ method: 'PUT', body: true }),
     async (req) => new Response(String((await req.arrayBuffer()).byteLength)),
@@ -145,7 +145,7 @@ test('an answer that breaks off fails the response body; a handler that throws a
   assert.deepEqual(await failed.json(), { error: 'internal', message: 'bug' });
 });
 
-test("the client's cancel reaches the core: its request's signal aborts", async () => {
+test("the client's cancel reaches the hub: its request's signal aborts", async () => {
   let aborted = false;
   const give = new AbortController();
   const { response } = roundTrip(
@@ -163,7 +163,7 @@ test("the client's cancel reaches the core: its request's signal aborts", async 
   give.abort();
   await assert.rejects(response, /aborted/);
   await until(() => aborted);
-  // A response body the client stops reading is cancelled in the core.
+  // A response body the client stops reading is cancelled in the hub.
   let cancelled = false;
   const endless = new ReadableStream<Uint8Array>({
     pull: (c) => c.enqueue(new Uint8Array(100)),
@@ -178,11 +178,11 @@ test("the client's cancel reaches the core: its request's signal aborts", async 
   await until(() => cancelled);
 });
 
-test('a core that goes away fails what is in flight', async () => {
+test('a hub that goes away fails what is in flight', async () => {
   const { port1, port2 } = pair();
   const pending = request(nodePort(port1), head(), null);
   port2.close();
-  await assert.rejects(pending, /the core is gone/);
+  await assert.rejects(pending, /the hub is gone/);
 });
 
 /** A channel served by behave, and its client. */
@@ -197,10 +197,10 @@ function channel(behave: (req: Request, upgrade: Upgrade) => Promise<Response>) 
     message: (d) => got.push(d),
     close: (code, reason) => ends.push([code, reason]),
   });
-  return { client, got, ends, opened: () => opened, core: port2 };
+  return { client, got, ends, opened: () => opened, hub: port2 };
 }
 
-/** A core whose channel echoes and records. */
+/** A hub whose channel echoes and records. */
 function echo() {
   const seen = { ch: undefined as HubChannel | undefined, closes: [] as Array<[number, string]>, drains: 0, origin: '' };
   const behave = async (req: Request, upgrade: Upgrade) => {
@@ -218,26 +218,26 @@ function echo() {
 }
 
 test('a channel opens, carries text and bytes in order, and counts what the client has not taken in', async () => {
-  const core = echo();
-  const c = channel(core.behave);
+  const hub = echo();
+  const c = channel(hub.behave);
   await until(c.opened);
-  assert.equal(core.seen.origin, 'https://app.localhost');
+  assert.equal(hub.seen.origin, 'https://app.localhost');
   c.client.send('one');
   c.client.send(new Uint8Array([1, 2]));
   c.client.send('three');
   await until(() => c.got.length === 3);
   assert.deepEqual(c.got, ['one', new Uint8Array([1, 2]), 'three']);
   // Small messages are acked at the client's next turn.
-  await until(() => core.seen.ch!.buffered === 0);
-  core.seen.ch!.send(new Uint8Array(ACK_BYTES));
-  assert.equal(core.seen.ch!.buffered, ACK_BYTES);
-  await until(() => core.seen.ch!.buffered === 0);
-  assert.ok(core.seen.drains > 0);
+  await until(() => hub.seen.ch!.buffered === 0);
+  hub.seen.ch!.send(new Uint8Array(ACK_BYTES));
+  assert.equal(hub.seen.ch!.buffered, ACK_BYTES);
+  await until(() => hub.seen.ch!.buffered === 0);
+  assert.ok(hub.seen.drains > 0);
   c.client.close();
   await until(() => c.ends.length === 1);
 });
 
-test("closes: the core's with its code, the client's answered, a lost port abnormal", async () => {
+test("closes: the hub's with its code, the client's answered, a lost port abnormal", async () => {
   const a = echo();
   const one = channel(a.behave);
   await until(one.opened);
@@ -256,20 +256,20 @@ test("closes: the core's with its code, the client's answered, a lost port abnor
   const c = echo();
   const three = channel(c.behave);
   await until(three.opened);
-  three.core.close();
+  three.hub.close();
   await until(() => three.ends.length === 1 && c.seen.closes.length === 1);
   assert.deepEqual(three.ends, [[ABNORMAL, '']]);
   assert.deepEqual(c.seen.closes, [[ABNORMAL, '']]);
 });
 
-test('a channel the core answers without upgrading is refused with its status and code', async () => {
+test('a channel the hub answers without upgrading is refused with its status and code', async () => {
   const c = channel(async () => Response.json({ error: 'origin_not_allowed' }, { status: 403 }));
   await until(() => c.ends.length === 1);
   assert.equal(c.opened(), false);
   assert.deepEqual(c.ends, [[ABNORMAL, 'refused 403 origin_not_allowed']]);
 });
 
-test("a channel the core cannot take, or whose handler throws, ends as the server's failure", async () => {
+test("a channel the hub cannot take, or whose handler throws, ends as the server's failure", async () => {
   const failing = channel(async (_req, upgrade) =>
     upgrade(() => {
       throw new Error('posix_spawnp failed.');
@@ -315,7 +315,7 @@ test('a close handler that throws ends its channel only', async () => {
   }
 });
 
-test("a client's message above MAX_MESSAGE ends its channel as too big, also before the core took it", async () => {
+test("a client's message above MAX_MESSAGE ends its channel as too big, also before the hub took it", async () => {
   const a = echo();
   const open = channel(a.behave);
   await until(open.opened);
@@ -324,8 +324,8 @@ test("a client's message above MAX_MESSAGE ends its channel as too big, also bef
   assert.deepEqual(open.ends, [[TOO_BIG, 'message too big']]);
   assert.deepEqual(a.seen.closes, [[TOO_BIG, 'message too big']]);
 
-  // Sent while the core still decides: the channel opens, then ends. The
-  // core decides once both came (its port counts them).
+  // Sent while the hub still decides: the channel opens, then ends. The
+  // hub decides once both came (its port counts them).
   const b = echo();
   const { port1, port2 } = pair();
   let arrived = 0;

@@ -2,10 +2,10 @@
 # Builds the web UI and the VS Code bridge extension, fetches the pinned
 # herdr-core of each machine platform (backend/scripts/fetch-hc.ts), takes
 # the video encoders scripts/build-ffmpeg.sh built, stages them (gzip) in
-# dist/payload, then builds the core in TypeScript (backend/, bun
+# dist/payload, then builds the hub in TypeScript (backend/, bun
 # backend/scripts/build.ts: one executable with the payloads embedded) for
 # TARGETS (default: host platform), packaged with its license notices (a
-# Windows core gets no archive: the desktop app runs the core in process).
+# Windows hub gets no archive: the desktop app runs the hub in process).
 # Names come from backend/shared/lib/brand.ts.
 #
 #   scripts/build.sh                       # host archive in dist/release/
@@ -13,14 +13,14 @@
 #   SKIP_WEB=1 scripts/build.sh            # reuse web/dist
 #   PAYLOAD_ONLY=1 scripts/build.sh        # the web UI and dist/payload only
 #                                          # (the desktop app carries them and
-#                                          # runs the core in Electron)
+#                                          # runs the hub in Electron)
 #
-# Each target's executable is the core and the machine side of its
+# Each target's executable is the hub and the machine side of its
 # platform (docs/features/42-typescript-backend.md), with its platform's
 # herdr-core (TARGETS may name linux/amd64-musl and linux/arm64-musl too),
 # and RELEASE_URL, the release's download URL from which machines get
 # their platform's archive (none for a build of no release: machines get
-# theirs from the core's --agent-dir or its own executable). For the
+# theirs from the hub's --agent-dir or its own executable). For the
 # desktop app (PAYLOAD_ONLY=1), dist/payload carries the build's release
 # record and the executable of PAYLOAD_MACHINES (its own platform, as
 # <os>-<arch>; none for Windows), taken from EXECUTABLES (a directory with
@@ -42,7 +42,7 @@ SLUG=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.
 # The platforms of machines' herdr-core (backend/scripts/hcdist.ts).
 HC_PLATFORMS=${HC_PLATFORMS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"}
 TARGETS=${TARGETS:-"$(scripts/platform.sh --slash)"}
-# What the core embeds, staged by kind (backend/kernel/payloads.ts).
+# What the hub embeds, staged by kind (backend/kernel/payloads.ts).
 PAYLOAD=dist/payload
 RELEASE_URL=${RELEASE_URL:-}
 
@@ -57,7 +57,7 @@ bun_target() {
     linux/amd64-musl) echo bun-linux-x64-musl-baseline ;;
     linux/arm64-musl) echo bun-linux-arm64-musl ;;
     windows/amd64) echo bun-windows-x64-baseline ;;
-    *) echo "unsupported core platform: $1" >&2; return 1 ;;
+    *) echo "unsupported hub platform: $1" >&2; return 1 ;;
   esac
 }
 for p in $TARGETS; do bun_target "$p" >/dev/null; done
@@ -70,7 +70,7 @@ fi
 mkdir -p "$PAYLOAD/ext" "$PAYLOAD/encoder"
 if [[ -z "${SKIP_EXT:-}" && -d "extensions/${SLUG}-bridge" ]]; then
   echo "==> vscode bridge extension"
-  # Fixed timestamps keep the VSIX (and so the core binary) reproducible.
+  # Fixed timestamps keep the VSIX (and so the hub binary) reproducible.
   (cd "extensions/${SLUG}-bridge" && pnpm install --frozen-lockfile >/dev/null && pnpm run build >/dev/null &&
     find . -path ./node_modules -prune -o -type f -exec touch -h -t 198001010000 {} + &&
     pnpm exec vsce package --no-dependencies --allow-missing-repository -o "${SLUG}-bridge.vsix" >/dev/null)

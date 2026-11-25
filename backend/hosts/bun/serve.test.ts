@@ -28,7 +28,7 @@ describe('serve', () => {
   });
 
   // The executable refuses to start with one, before it opens anything.
-  test('the core does not start with credentials in a download URL', () => {
+  test('the hub does not start with credentials in a download URL', () => {
     const home = mkdtempSync(join(tmpdir(), 'serve-url-'));
     try {
       for (const args of [

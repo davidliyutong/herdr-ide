@@ -5,7 +5,7 @@
 // WebSockets are relayed message by message (relay.ts).
 //
 // What crosses the proxy is limited (SECURITY.md): the proxy's secret and
-// the desktop app's cookie stay in the core; code-server's answers may not
+// the desktop app's cookie stay in the hub; code-server's answers may not
 // widen a service worker's scope to the UI's pages, nor set the desktop
 // app's cookie, and only the UI's own pages frame them. code-server's port
 // proxy (/proxy/<port>/, /absproxy/<port>/) is refused: it would serve any

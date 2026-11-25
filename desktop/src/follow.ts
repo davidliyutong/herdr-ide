@@ -1,10 +1,10 @@
-// What the shell takes from its core: the keybindings in effect on its
+// What the shell takes from its hub: the keybindings in effect on its
 // platform (for the menu), the theme, the language and the zoom. It is a
 // client of the event channel like the page: once /ws is open it reads GET
 // /api/keybindings and GET /api/settings, then applies the "keybindings" and
-// "settings" messages the core sends after every change. The core is the
+// "settings" messages the hub sends after every change. The hub is the
 // shell's own utility process, reached directly (hub.ts), not over a
-// network; the channel is opened again if it drops (the core restarted).
+// network; the channel is opened again if it drops (the hub restarted).
 
 import type { Binding } from './menu';
 
@@ -53,22 +53,22 @@ export interface Follower {
   settings(s: ShellSettings): void;
 }
 
-/** What followHub uses of the core (hub.ts HubHost; stand-ins in
+/** What followHub uses of the hub (hub.ts HubHost; stand-ins in
  * tests). */
 export interface HubLink {
   fetch(path: string): Promise<{ ok: boolean; json(): Promise<unknown> }>;
   channel(path: string, on: { open(): void; message(data: string | Uint8Array): void; close(): void }): { close(): void };
 }
 
-/** Follows the core; returns a function that stops it. */
-export function followHub(core: HubLink, platform: string, on: Follower): () => void {
+/** Follows the hub; returns a function that stops it. */
+export function followHub(hub: HubLink, platform: string, on: Follower): () => void {
   let stopped = false;
   let channel: { close(): void } | undefined;
   let delay = 500;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const read = async (path: string, apply: (reply: unknown) => void) => {
     try {
-      const r = await core.fetch(path);
+      const r = await hub.fetch(path);
       if (r.ok && !stopped) apply(await r.json());
     } catch (error) {
       console.error(error);
@@ -83,7 +83,7 @@ export function followHub(core: HubLink, platform: string, on: Follower): () => 
     if (s) on.settings(s);
   };
   const connect = () => {
-    channel = core.channel('/ws', {
+    channel = hub.channel('/ws', {
       open() {
         delay = 500;
         void read('/api/settings', values);

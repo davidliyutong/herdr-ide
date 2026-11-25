@@ -1,4 +1,4 @@
-// A machine's backend: the core's connection to the machine's terminal
+// A machine's backend: the hub's connection to the machine's terminal
 // core, shared by the clients that subscribed to the machine. The first
 // subscriber starts it; it brings the terminal core up (lifecycle.ts),
 // dials it through the agent (op hc-api), keeps its terminal records as
@@ -50,13 +50,13 @@ export interface BackendDeps extends LifecycleDeps {
   /** Told whether the machine's terminal core is ready, at each state. */
   onReady?: (m: Machine, ready: boolean) => void;
   timing: Timing;
-  /** Ends every backend: the core stops. */
+  /** Ends every backend: the hub stops. */
   signal: AbortSignal;
 }
 
 /** Why a terminal a client names is none of the clients': a hidden one
  * (also the name kept for the chat host, whether one runs or not), or one
- * of another machine — the terminal core's own machines are the core's,
+ * of another machine — the terminal core's own machines are the hub's,
  * each with a terminal core of its own, and a client reaches none through
  * another's. */
 export class NotClients extends Error {

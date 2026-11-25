@@ -1,5 +1,5 @@
 // A stand-in for the agent's vault socket in the MCP server's tests: each
-// connection gets one request, which answer() answers as the core would
+// connection gets one request, which answer() answers as the hub would
 // (null: never, until the server leaves), recording the requests.
 import { createServer, type Server, type Socket } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -11,7 +11,7 @@ import type { VaultRequest, VaultResponse } from '#shared/proto/agentproto/index
 export interface FakeHub {
   path: string;
   seen: VaultRequest[];
-  /** Connections that left before an answer, which the core takes as a
+  /** Connections that left before an answer, which the hub takes as a
    * denial. */
   left: number;
   close(): void;
@@ -20,7 +20,7 @@ export interface FakeHub {
 export async function fakeHub(answer: (req: VaultRequest) => VaultResponse | null): Promise<FakeHub> {
   const dir = mkdtempSync(join(tmpdir(), 'vc-'));
   const path = join(dir, 'vault.sock');
-  const core: FakeHub = { path, seen: [], left: 0, close: () => {} };
+  const hub: FakeHub = { path, seen: [], left: 0, close: () => {} };
   const server: Server = createServer((c: Socket) => {
     c.on('error', () => {});
     void (async () => {
@@ -31,7 +31,7 @@ export async function fakeHub(answer: (req: VaultRequest) => VaultResponse | nul
       } catch {
         return c.destroy();
       }
-      core.seen.push(req);
+      hub.seen.push(req);
       const resp = answer(req);
       if (resp) {
         await writeLine(c, resp).catch(() => {});
@@ -41,13 +41,13 @@ export async function fakeHub(answer: (req: VaultRequest) => VaultResponse | nul
       // Waits for the user, until the requester leaves.
       r.release()
         .resume()
-        .once('close', () => core.left++);
+        .once('close', () => hub.left++);
     })();
   });
   await new Promise<void>((res) => server.listen(path, res));
-  core.close = () => {
+  hub.close = () => {
     server.close();
     rmSync(dir, { recursive: true, force: true });
   };
-  return core;
+  return hub;
 }

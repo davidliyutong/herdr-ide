@@ -168,7 +168,7 @@ test('on Windows and Linux, File and Help menus; platform-native keys are shown 
   assert.deepEqual(commands('win32'), commands('darwin'));
 });
 
-/** The bindings the core works out after the user's rules: a rule adds its
+/** The bindings the hub works out after the user's rules: a rule adds its
  * key; "-command" removes that key of the command. */
 function withRules(defaults: Binding[], rules: { key: string; command: string }[]): Binding[] {
   let out = [...defaults];

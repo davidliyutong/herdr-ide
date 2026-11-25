@@ -1,6 +1,6 @@
 // From a client of /api/v1/term to programs in a real herdr-core
 // (HC_TEST_BIN), through the local machine's node of the machine build
-// (AGENT_TEST_BIN, else built here with backend/scripts/build.ts): the core
+// (AGENT_TEST_BIN, else built here with backend/scripts/build.ts): the hub
 // installs the executable on the machine, starts the terminal core and the client runs
 // shells in it. Everything runs in a temporary home under the instance
 // ts-term, whose node and terminal core are stopped at the end; skipped
@@ -67,7 +67,7 @@ describe.skipIf(!HC)('a real herdr-core', () => {
     }
     const exe = readFileSync(HC);
     const hc = { gz: gzipSync(exe), digest: createHash('sha256').update(exe).digest('hex') };
-    // The executable as the core's own: uploaded, checked by its digest.
+    // The executable as the hub's own: uploaded, checked by its digest.
     const bin = readFileSync(agentBin);
     const digest = createHash('sha256').update(bin).digest('hex');
     const builds = async (): Promise<MachineBuild> => ({

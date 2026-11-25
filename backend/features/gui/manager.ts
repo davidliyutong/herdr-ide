@@ -229,7 +229,7 @@ export class Manager {
     d.sess = sess;
     d.stream = stream;
     // The keeper is asked for below; the next change with the terminal
-    // core reachable asks again, in case it was down meanwhile.
+    // hub reachable asks again, in case it was down meanwhile.
     d.up = false;
     d.router.attached();
     this.setPhase(d, Phase.Ready);

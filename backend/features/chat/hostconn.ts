@@ -1,7 +1,7 @@
 // Connections to a machine's chat host: each a stream the machine side's
 // open action gives (protocol.ts), on which the host's Hello comes first,
 // then one request and its answer, and for an attach or a watch what
-// follows. The core keeps at most Limits.maxHostConns of them open to one
+// follows. The hub keeps at most Limits.maxHostConns of them open to one
 // machine's host, the last reservedConns only for the watch and the
 // configures, so that pages cannot take the watch's place.
 import { z } from 'zod';
@@ -23,7 +23,7 @@ const hello = z.object({
 
 const chatErr = z.object({ code: z.string(), message: z.string().nullish(), stderr: z.string().nullish() });
 
-/** What a ChatError of the host is, as the core passes it on. */
+/** What a ChatError of the host is, as the hub passes it on. */
 export function readError(v: unknown): chat.ChatError | undefined {
   const r = chatErr.safeParse(v);
   if (!r.success) return undefined;
@@ -32,7 +32,7 @@ export function readError(v: unknown): chat.ChatError | undefined {
 
 const object = z.record(z.string(), z.unknown());
 
-/** The host's answer as the core reads it: what it checks has its type;
+/** The host's answer as the hub reads it: what it checks has its type;
  * what it passes on as it is (chats, sessions, the trusted folders, the
  * host's status) is only an object or a list. */
 const response = z.object({
@@ -183,7 +183,7 @@ export interface HostLinkOptions {
   reservedConns: number;
 }
 
-/** The connections of the core to the machines' chat hosts. */
+/** The connections of the hub to the machines' chat hosts. */
 export class HostLink {
   private readonly o: HostLinkOptions;
   /** By machine: every connection open, and those that are not the watch's

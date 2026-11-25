@@ -10,8 +10,8 @@
 //
 // Ownership: <run>/cs.pid names the process and the agent (its process,
 // the node) that started it, as the Go machine build writes it. The node
-// that owns it ends it when the node ends (close), when a core asks (stop)
-// or lets it go (release, its idle end) while no other core of the node has
+// that owns it ends it when the node ends (close), when a hub asks (stop)
+// or lets it go (release, its idle end) while no other hub of the node has
 // a connection to it; a node that gives way hands it to the next (handOver);
 // one whose owner is gone (a node killed) is ended by the next node
 // (reapOrphan), or adopted when that node finds it serving. code-server
@@ -255,7 +255,7 @@ export class CodeServer {
     });
   }
 
-  /** Ends code-server (a core asked, or let it go). */
+  /** Ends code-server (a hub asked, or let it go). */
   stop(): Promise<void> {
     return this.locked(async () => {
       const p = await this.readPid();
@@ -273,7 +273,7 @@ export class CodeServer {
   }
 
   /** The node ends: only a code-server it owns is ended, so another node's
-   * (a core of another build connected meanwhile) keeps working. */
+   * (a hub of another build connected meanwhile) keeps working. */
   close(): Promise<void> {
     return this.locked(async () => {
       const p = await this.readPid();

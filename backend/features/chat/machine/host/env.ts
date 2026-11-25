@@ -278,9 +278,9 @@ export { AGENT_SESSION_VARS };
  *
  *   - the terminal core's variables of the host's own terminal
  *     (HC_TERMINAL_*), which would name the hidden terminal to what the
- *     agent runs; the core's others stay: HC_SCOPE, by which the core's
+ *     agent runs; the terminal core's others stay: HC_SCOPE, by which its
  *     sweep finds the agents should the host's terminal be lost, and
- *     HC_SESSION and HC_SOCKET, which name the core itself;
+ *     HC_SESSION and HC_SOCKET, which name the terminal core itself;
  *   - herdr's and this product's (HERDR_*, ENV_PREFIX);
  *   - tmux's (TMUX, TMUX_PANE), GNU screen's (STY), zellij's (ZELLIJ,
  *     ZELLIJ_*);

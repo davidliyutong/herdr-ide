@@ -1,5 +1,5 @@
 // Opens the SQLite databases that hold the program's state, one database
-// per owner (the chat host's, a machine's agent's, the core's): no two
+// per owner (the chat host's, a machine's agent's, the hub's): no two
 // processes of different roles write one database. It uses node:sqlite
 // (DatabaseSync), which both Bun and the desktop app's Node have; every
 // call runs synchronously, so a statement that waits for another

@@ -1,8 +1,8 @@
-// The core's own list of machines, in the machines file beside its
+// The hub's own list of machines, in the machines file beside its
 // settings: the ssh machines added from the UI and, once it was enabled,
 // disabled or renamed, a record of the local machine. Machines given with
 // --ssh are not in it. Every change is written at once; the file is the
-// core's, read when it starts. Writing it keeps what this version does not
+// hub's, read when it starts. Writing it keeps what this version does not
 // use: entries it cannot read as machines (not an object, no id, an id
 // already taken, a kind it does not have), fields of records and of the
 // file it does not know, and machines whose target validTarget refuses
@@ -12,7 +12,7 @@ import { read, write } from '#shared/host/userfile.ts';
 import { Fail } from '../fail.ts';
 import { LOCAL_ID, validTarget, type Spec } from './spec.ts';
 
-/** The version of the machines file this core writes. */
+/** The version of the machines file this hub writes. */
 const VERSION = 1;
 
 type Json = Record<string, unknown>;
@@ -58,7 +58,7 @@ export class Registry {
   }
 
   /** Reads the machines file at path; a missing file is an empty list. A
-   * file that is not a machines file fails, and the core then keeps its
+   * file that is not a machines file fails, and the hub then keeps its
    * machines in memory only. */
   static open(path: string): Registry {
     const r = new Registry(path);

@@ -55,7 +55,7 @@ test('the local machine gets no ssh session', async () => {
   }
 });
 
-test('parseInbound reads members as the Go core did', () => {
+test('parseInbound reads members as the Go hub did', () => {
   expect(
     parseInbound('{"t":"attach","rid":3,"m":"x","terminal":"t1","cols":80,"rows":24,"display":{"bg":"#000","cell":[],"x":1}}'),
   ).toEqual({

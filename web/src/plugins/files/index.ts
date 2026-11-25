@@ -1,6 +1,6 @@
 // The file explorer (docs/features/28-file-explorer.md): a panel of the
 // right sidebar with the shown machine's files, and an editor pane for
-// text files. The core's side is backend/features/files, the machine's
+// text files. The hub's side is backend/features/files, the machine's
 // backend/features/files/machine.ts.
 import { FilePen, Files } from 'lucide-react';
 import type { PluginDef } from '../api';

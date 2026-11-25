@@ -89,7 +89,7 @@ describe('routing', () => {
     expect(t.cmds).toEqual([]);
   });
 
-  // While another core controls the windows (role), viewers are told,
+  // While another hub controls the windows (role), viewers are told,
   // input is not passed on, and a viewer may take control.
   test('view only', () => {
     const t = attached();
@@ -191,7 +191,7 @@ describe('routing', () => {
     expect(t.next()).toEqual({ cmd: 'codecs', id: 7, codecs: ['avc1'] });
   });
 
-  // Commands reaching the agent are the core's: a viewer's refresh carries
+  // Commands reaching the agent are the hub's: a viewer's refresh carries
   // the streams all viewers decode, not its own list, an acknowledgement
   // only its number, and the refresh after catching up the streams too.
   test('viewer commands', () => {
@@ -241,7 +241,7 @@ describe('routing', () => {
     // A viewer that is not one of the window's is ignored.
     t.r.command(7, new Viewer(() => true), { cmd: 'refresh', id: 0 }, true);
     expect(t.cmds).toEqual([]);
-    // A frame no viewer got is acknowledged by the core.
+    // A frame no viewer got is acknowledged by the hub.
     t.r.detach(7, v);
     expect(t.cmds.splice(0)).toEqual([
       { cmd: 'release', id: 7 },

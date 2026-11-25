@@ -1,13 +1,13 @@
-// The relay: what the shell hands the core through the page for the
+// The relay: what the shell hands the hub through the page for the
 // variable vault's unlock keys (a Secure Enclave secret, a Windows Hello
 // signature, this install's shellSecret). It is sealed with AES-256-GCM under
 // a key derived from the verify key of this launch, which only this process
-// and the core hold, so the page passes it on without reading it. The
-// additional data names the purpose, the nonce and the core's unlock entry,
+// and the hub hold, so the page passes it on without reading it. The
+// additional data names the purpose, the nonce and the hub's unlock entry,
 // so a relay made for one cannot be used for another.
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 
-/** The relay's purposes, as the core names its nonces. */
+/** The relay's purposes, as the hub names its nonces. */
 export type RelayPurpose = 'session' | 'register';
 
 /** The relay key: HKDF-SHA256 of the verify key's hex string (its UTF-8
@@ -24,7 +24,7 @@ export function relayAD(purpose: RelayPurpose, nonce: string, entry: string): Bu
 const IV = 12;
 const TAG = 16;
 
-/** Seals plaintext for the core: base64url (no padding) of iv ‖ ciphertext ‖
+/** Seals plaintext for the hub: base64url (no padding) of iv ‖ ciphertext ‖
  * tag. The iv is random unless given (the vectors fix it). */
 export function sealRelay(
   key: Buffer,
@@ -41,7 +41,7 @@ export function sealRelay(
 }
 
 /** Opens a relay sealed for purpose, nonce and entry; null when it does not
- * open. The core does this; the shell only in its tests. */
+ * open. The hub does this; the shell only in its tests. */
 export function openRelay(key: Buffer, purpose: RelayPurpose, nonce: string, entry: string, relay: string): Buffer | null {
   const sealed = fromBase64url(relay);
   if (!sealed || sealed.length < IV + TAG) return null;

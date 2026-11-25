@@ -1,6 +1,6 @@
 // The Full Disk Access row of the settings (the Terminal page's Permissions
 // group; the desktop app on macOS only): whether terminals (herdr-core) and
-// the file browser and VS Code (the app) have it, as the core finds them,
+// the file browser and VS Code (the app) have it, as the hub finds them,
 // read again whenever the window comes back to the front, as it does from
 // System Settings; buttons for System Settings at the list and for
 // herdr-core in Finder, and, while one of them lacks it, what to restart

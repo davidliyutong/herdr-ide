@@ -1,5 +1,5 @@
 // What a feature fetches onto a machine (code-server's releases, the chat
-// host's Agent SDK): a file the core uploads or the machine downloads
+// host's Agent SDK): a file the hub uploads or the machine downloads
 // lands beside the feature's directory of versions (root), hashed as it is
 // written, and a tarball is unpacked only once the feature checked it
 // against the digest it trusts. Versions unused for long go, and what an
@@ -89,7 +89,7 @@ export const sha256Of = (file: string): Promise<string> => digestOf(file);
 
 /** Checks that url is one a machine may fetch: http or https, with a host,
  * without user information, query or fragment, which would put credentials
- * on the tool's command line (shared/lib/urls.ts; the core refuses such a
+ * on the tool's command line (shared/lib/urls.ts; the hub refuses such a
  * flag). */
 export function downloadURL(url: string | undefined): URL {
   const why = downloadURLRefusal(url ?? '');

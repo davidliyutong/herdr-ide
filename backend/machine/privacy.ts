@@ -1,6 +1,6 @@
 // Full Disk Access on macOS (op privacy, docs/features/16). macOS grants
 // it to a process's responsible process, the one it attributes the file
-// accesses to: the agent's is the core's (or the ssh session's), and so is
+// accesses to: the agent's is the hub's (or the ssh session's), and so is
 // code-server's, which the agent starts (VS Code has what the files side
 // reports); the terminal core's is herdr-core's own (it starts as a launchd
 // job), so the programs of a terminal have what herdr-core's executable

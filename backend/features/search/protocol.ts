@@ -3,7 +3,7 @@
 // (features/search/machine): a search of the contents of the files below a
 // directory, with ripgrep when the machine has it and a walker of the
 // agent's own otherwise. The agent stops a search after 30 s and answers
-// what it found; it runs at most 4 at once (busy). The core passes the
+// what it found; it runs at most 4 at once (busy). The hub passes the
 // result on to the page as the agent wrote it: a loose object, typed, whose
 // members a later agent adds still reach the page.
 import { z } from 'zod';

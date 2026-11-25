@@ -64,7 +64,7 @@ async function setup(o: { install?: { mode: Install; bin: string }; bridge?: Uin
 
 const actions = (a: AgentState) => a.headers.map((h) => (h.bin ? `${h.action}:${h.bin}` : h.action));
 
-test('push: the core uploads the release, the bridge and the extensions once', async () => {
+test('push: the hub uploads the release, the bridge and the extensions once', async () => {
   const bridge = new Uint8Array(Buffer.from('bridge vsix'));
   const { m, agent, cs } = await setup({ bridge, extensions: true });
   expect(cs.status(m)).toEqual({ phase: Phase.Idle, ready: false });
@@ -73,7 +73,7 @@ test('push: the core uploads the release, the bridge and the extensions once', a
   expect(cs.ready(m)).toBe(true);
   expect(cs.running()).toEqual(['local']);
   expect(agent.uploads.get('install')?.toString()).toBe('release');
-  // The machine checks the upload against the digest the core verified it by.
+  // The machine checks the upload against the digest the hub verified it by.
   expect(agent.headers.find((h) => h.action === 'install')!.digest).toBe(sha('release'));
   expect(agent.uploads.get(`${BRIDGE_EXT}.vsix`)?.toString()).toBe('bridge vsix');
   expect(agent.uploads.get('pub.ext-1.0.0.vsix')?.toString()).toBe('vsix');
@@ -109,7 +109,7 @@ test('existing: the machine own code-server, else a release', async () => {
 
   const none = await setup({ install: { mode: Install.Existing, bin: 'auto' } });
   // A seed without a digest is used unverified: the machine checks the
-  // upload against the core's own hash of it.
+  // upload against the hub's own hash of it.
   rmSync(join(none.artifacts.seedDirs[0], `${tarballFile('9.9.9', 'linux-amd64')}.sha256`));
   await none.cs.ensure(none.m, AbortSignal.timeout(5000));
   expect(actions(none.agent)).toEqual(['status:auto', 'status', 'install', 'start']);
@@ -117,7 +117,7 @@ test('existing: the machine own code-server, else a release', async () => {
   expect(none.logs.some((l) => l.includes('installing a release instead'))).toBe(true);
 });
 
-test('download: the machine fetches it, verified; the core uploads when it cannot', async () => {
+test('download: the machine fetches it, verified; the hub uploads when it cannot', async () => {
   const { m, agent, cs } = await setup({ install: { mode: Install.Download, bin: '' }, offline: false });
   await cs.ensure(m, AbortSignal.timeout(5000));
   const dl = agent.headers.find((h) => h.action === 'download')!;
@@ -125,7 +125,7 @@ test('download: the machine fetches it, verified; the core uploads when it canno
   expect(dl.digest).toBe(sha('release'));
   expect(agent.uploads.has('install')).toBe(false);
 
-  // A digest the core does not know is recorded on first use.
+  // A digest the hub does not know is recorded on first use.
   const other = await setup({ install: { mode: Install.Download, bin: '' }, offline: false });
   rmSync(join(other.artifacts.seedDirs[0], `${tarballFile('9.9.9', 'linux-amd64')}.sha256`));
   other.agent.downloadDigest = 'd'.repeat(64);

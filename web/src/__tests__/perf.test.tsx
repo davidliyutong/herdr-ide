@@ -17,12 +17,12 @@ import { Performance } from '../components/settings/Performance';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const core = (cpu_ms: number, uptime_ms: number) => ({ cpu_ms, memory: 64 * 1024 * 1024, goroutines: 40, uptime_ms, cpus: 8 });
+const hub = (cpu_ms: number, uptime_ms: number) => ({ cpu_ms, memory: 64 * 1024 * 1024, goroutines: 40, uptime_ms, cpus: 8 });
 
 describe('performance', () => {
   let answer: unknown;
   beforeEach(() => {
-    answer = core(1000, 10_000);
+    answer = hub(1000, 10_000);
     vi.stubGlobal('fetch', (url: string) =>
       Promise.resolve(url === '/api/perf' ? new Response(JSON.stringify(answer), { status: 200 }) : new Response('{}', { status: 404 })),
     );
@@ -43,30 +43,30 @@ describe('performance', () => {
     expect(pageUsage()).toMatchObject({ shown: 1, kept: 2, webgl: 1, canvas: 0 });
   });
 
-  it('turns two samples of the core into its share of a processor, not across a restart', async () => {
+  it('turns two samples of the hub into its share of a processor, not across a restart', async () => {
     const first = await sample();
-    expect(first.core?.memory).toBe(64 * 1024 * 1024);
+    expect(first.hub?.memory).toBe(64 * 1024 * 1024);
     expect(first.hubCpu).toBeUndefined();
-    answer = core(1500, 12_000);
+    answer = hub(1500, 12_000);
     const second = await sample({ ...first, at: performance.now() - 2000 });
     expect(Math.round(second.hubCpu!)).toBe(25);
-    // The core started again: its counters did, too.
-    answer = core(20, 300);
+    // The hub started again: its counters did, too.
+    answer = hub(20, 300);
     expect((await sample(second)).hubCpu).toBeUndefined();
     // An answer that is not a usage is none.
     answer = { cpu_ms: 'much' };
-    expect((await sample()).core).toBeUndefined();
+    expect((await sample()).hub).toBeUndefined();
   });
 
-  it('shows the page and the core in a browser, where no process is counted', async () => {
+  it('shows the page and the hub in a browser, where no process is counted', async () => {
     const host = document.createElement('div');
     document.body.append(host);
     const root: Root = createRoot(host);
     await act(async () => root.render(createElement(Performance)));
     await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
     const rows = [...host.querySelectorAll('.perf-table tbody tr')].map((r) => (r as HTMLElement).dataset.kind);
-    expect(rows).toEqual(['page', 'core']);
-    expect(host.querySelector('tr[data-kind="core"]')?.textContent).toContain('64 MB');
+    expect(rows).toEqual(['page', 'hub']);
+    expect(host.querySelector('tr[data-kind="hub"]')?.textContent).toContain('64 MB');
     expect(host.querySelector('.perf-total')).toBeNull();
     expect([...host.querySelectorAll('.perf-facts dd')].slice(0, 2).map((d) => d.textContent)).toEqual(['1', '2']);
     await act(async () => root.unmount());

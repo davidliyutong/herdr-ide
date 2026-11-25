@@ -4,7 +4,7 @@
 // encodes what this asks for and replays input); this decides what is
 // sent, when and to whom.
 //
-// Several cores attach, one stream each: one controls the windows, the
+// Several hubs attach, one stream each: one controls the windows, the
 // others view them. Every client gets every window's events and the frames
 // of the windows it watches. Input, focus and closing come from the
 // controller only; a viewer asks for control (command control) and gets it
@@ -189,7 +189,7 @@ export interface ClientConn {
   close(): void;
 }
 
-/** One core's attach stream. */
+/** One hub's attach stream. */
 export class Client {
   readonly q: Msg[] = [];
   closed = false;
@@ -204,7 +204,7 @@ export class Client {
   readonly from = new Map<number, number>();
   control = false;
 
-  /** The agent session it came through, and its core ("" unknown). */
+  /** The agent session it came through, and its hub ("" unknown). */
   readonly session: number;
   readonly name: string;
   private readonly conn: ClientConn;
@@ -494,7 +494,7 @@ export class WindowManager {
   // Clients.
 
   /** Adds client c, announces what exists and runs until it leaves: a
-   * newer client of the same core replaces an older one (after a
+   * newer client of the same hub replaces an older one (after a
    * reconnect), with its role. */
   attach(c: Client): Promise<void> {
     if (this.ended_) {
@@ -644,7 +644,7 @@ export class WindowManager {
     }
   }
 
-  // Commands of the cores.
+  // Commands of the hubs.
 
   /** Applies a command of client cl. */
   command(cl: Client, c: GUICommand): void {

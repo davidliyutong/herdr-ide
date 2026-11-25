@@ -2,7 +2,7 @@
 // system as the Go agent does: fs.stat,
 // fs.list, fs.read, fs.write (into a private file renamed once the end
 // marker came) and fs.archive, whose "archive" is each file's name and
-// bytes in a line (the core passes the chunks on unread). The files
+// bytes in a line (the hub passes the chunks on unread). The files
 // plugin's actions go to a handler the test gives.
 import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
@@ -81,7 +81,7 @@ async function* walk(root: string, name: string): AsyncGenerator<{ path: string;
   for (const e of (await readdir(root)).sort()) yield* walk(join(root, e), `${name}/${e}`);
 }
 
-/** Serves the streams of the core (the fake agent's serve). */
+/** Serves the streams of the hub (the fake agent's serve). */
 export function fsAgent(plugin?: PluginHandler) {
   return async (h: Header, conn: AgentStream): Promise<void> => {
     const st = conn.stream;

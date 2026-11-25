@@ -705,7 +705,7 @@ export const zhCN: Messages = {
   'perf.process.page': '窗口',
   'perf.process.gpu': 'GPU 进程',
   'perf.process.helper': '辅助进程',
-  'perf.process.core': '核心',
+  'perf.process.core': '服务器',
   'perf.note.desktop': 'CPU 为占用单个处理器的比例。终端和 VS Code 里运行的程序不计入。',
   'perf.note.browser': '窗口的内存指其脚本占用；浏览器不向页面提供 CPU 和 GPU 占用。终端和 VS Code 里运行的程序不计入。',
   'perf.terminals': '终端',
@@ -906,7 +906,7 @@ export const zhCN: Messages = {
   'eol.readOnly': '{name} 混用了 LF 和 CRLF 换行符：以只读方式打开（设置 › Git）。',
   'settings.plugins.vault.enabled': '变量库',
   'settings.plugins.vault.enabled.desc':
-    '在 core 所在电脑上加密保存 API 密钥等变量，经你批准后，各机器上的编程智能体（Claude Code、Codex 等）可通过 MCP 服务器读取。',
+    '在服务器所在电脑上加密保存 API 密钥等变量，经你批准后，各机器上的编程智能体（Claude Code、Codex 等）可通过 MCP 服务器读取。',
   'command.view.panel.vault': '显示变量库',
   'settings.plugins.usage.enabled': 'AI 用量',
   'command.view.panel.usage': '显示 AI 用量',

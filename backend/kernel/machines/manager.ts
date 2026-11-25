@@ -1,4 +1,4 @@
-// The core's machines: their order, the changes the UI makes (add, remove,
+// The hub's machines: their order, the changes the UI makes (add, remove,
 // rename, enable, reorder), stored in the machines file, and the states and
 // agent events the pages follow.
 import type { Logger } from '#shared/lib/log.ts';
@@ -63,7 +63,7 @@ export class Machines {
     return m;
   }
 
-  /** Serves the streams agents open towards the core. */
+  /** Serves the streams agents open towards the hub. */
   setStreamHandler(h: StreamHandler): void {
     this.streams = h;
   }

@@ -3,7 +3,7 @@
 // one thread: SQLite opens a database and its write-ahead log and index by
 // name and reads them synchronously, so a FIFO or device swapped in at one
 // of those names after it was looked at, a mount that stopped answering or
-// a long read would otherwise stall every core's terminals. The node waits
+// a long read would otherwise stall every hub's terminals. The node waits
 // for each answer at most requestMs (and no longer than its request
 // lasts); past that it ends the worker and the read fails (unreadable).
 // A thread blocked in a system call ends only once the call returns: until

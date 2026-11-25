@@ -13,7 +13,7 @@ import { z } from 'zod';
 export type SettingType = 'bool' | 'number' | 'string' | 'enum' | 'color' | 'list';
 
 /** Which machines may have their own value: none (app), any, or those
- * other than the core's host. */
+ * other than the hub's host. */
 export type Scope = 'app' | 'machine' | 'remote-machine';
 
 export type SettingValue = boolean | number | string | string[];

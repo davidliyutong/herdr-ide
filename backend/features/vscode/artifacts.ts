@@ -1,5 +1,5 @@
 // code-server releases and VS Code extensions (VSIX) are resolved on the
-// core's host only, then uploaded to machines through their agents, so
+// hub's host only, then uploaded to machines through their agents, so
 // machines never need internet access (docs/features/09). A file comes
 // from, in order:
 //
@@ -18,7 +18,7 @@
 // Every seeded or cached file is opened without blocking and used only when
 // it is a regular file (openRegular): a FIFO or a device under a seed's or
 // the cache's name answers at once instead of holding a thread of the
-// core's file I/O until something writes to it.
+// hub's file I/O until something writes to it.
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, type ReadStream } from 'node:fs';
 import { copyFile, mkdir, open, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';

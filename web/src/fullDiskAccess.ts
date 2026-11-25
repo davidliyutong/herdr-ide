@@ -1,9 +1,9 @@
 // Full Disk Access in the desktop app on macOS. macOS gives it per program,
-// to the one it holds responsible for a file access: the app for its core
+// to the one it holds responsible for a file access: the app for its hub
 // (the file browser, uploads, downloads) and the VS Code it starts, and
 // herdr-core, the terminal service, for the programs of terminals (it is
 // started as a launchd job, not as a child of the app). The settings show
-// both as the core finds them (GET /api/m/{id}/privacy), and the app's
+// both as the hub finds them (GET /api/m/{id}/privacy), and the app's
 // shell opens System Settings at the list, shows herdr-core in Finder and
 // reopens the app. Browsers, Windows and Linux have none of it.
 
@@ -30,7 +30,7 @@ export function fullDiskAccessAvailable(): boolean {
   return !!desktopShell?.privacy;
 }
 
-/** The core's local machine, whose processes the access concerns. */
+/** The hub's local machine, whose processes the access concerns. */
 export function localMachine(): string | undefined {
   const s = useStore.getState();
   return s.order.find((id) => s.machines[id]?.kind === 'local');
@@ -39,7 +39,7 @@ export function localMachine(): string | undefined {
 const accessValues: readonly string[] = ['granted', 'denied', 'unknown'];
 const access = (v: unknown): Access => (accessValues.includes(v as string) ? (v as Access) : 'unknown');
 
-/** The access of machine m's processes; all unknown when the core cannot
+/** The access of machine m's processes; all unknown when the hub cannot
  * tell (machine offline, an error). */
 export async function fetchPrivacy(m: string): Promise<PrivacyState> {
   try {

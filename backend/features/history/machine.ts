@@ -2,14 +2,14 @@
 // snapshots of the terminals' output, with their styles, in the machine's
 // database (machine-<host>.db in the agent's data directory, machine/store.ts,
 // the tables the Go agent keeps), which pages show above the new shell of
-// a terminal whose program was replaced. The core asks for captures only
+// a terminal whose program was replaced. The hub asks for captures only
 // while history.capture is on for the machine. Actions:
 //
 //   - capture {lines, maxTerminals, maxTotalBytes, days}: snapshots every
 //     live terminal of the instance's terminal core whose screen changed
 //     since its last snapshot, within the limits (HistoryLimits), and
 //     removes what the limits, the age and the terminal core's records no
-//     longer allow; another core's capture of the node in the last
+//     longer allow; another hub's capture of the node in the last
 //     shareMs stands for this one's (busy);
 //   - list: the snapshots, whether the current one shows a screen the
 //     terminal core restored itself, and whether the user's herdr-core
@@ -20,11 +20,11 @@
 //     the previous one of to, a terminal of the terminal core's records
 //     that took from's place, and from's snapshots go.
 //
-// Every limit is enforced here, whatever the core asks. The days apply
+// Every limit is enforced here, whatever the hub asks. The days apply
 // also without captures: at the agent's housekeeping, and at every list
 // and read. The snapshots of a terminal that finished with its program go
 // at the next capture; those of one gone from the terminal core's records
-// once the agent has seen it gone for the grace. Errors reach the core
+// once the agent has seen it gone for the grace. Errors reach the hub
 // with a code and a fixed wording, never with a path of the machine.
 import { Fail } from '#shared/lib/fail.ts';
 import {
@@ -78,7 +78,7 @@ export function historyMachine(o: HistoryMachineOptions = {}) {
     const memory = o.memory ?? new Memory();
     const cap: CaptureEnv = { base: env.base, hcSocket: env.hcSocket, memory, timing, now };
     const within = (signal: AbortSignal, ms: number) => AbortSignal.any([signal, AbortSignal.timeout(ms)]);
-    /** Another core's capture ended less than shareMs ago. */
+    /** Another hub's capture ended less than shareMs ago. */
     const shared = (client: string) =>
       client !== '' && !!memory.last && memory.last.client !== client && now() - memory.last.at < timing.shareMs;
 

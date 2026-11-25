@@ -7,7 +7,7 @@
 // section "chat", per machine, and reach each machine's host (settings.ts);
 // its switch is plugins.chat.enabled.
 //
-// The core watches a machine's chat host while the machine is connected,
+// The hub watches a machine's chat host while the machine is connected,
 // the feature is on and the host is in use (watch.ts); the routes
 // (routes.ts) and the pages (page.ts) reach the hosts through the switchboard
 // (switchboard.ts).
@@ -34,7 +34,7 @@ export interface ChatOptions {
   limits?: Partial<Limits>;
   /** The clock, in milliseconds. */
   now?: () => number;
-  /** This core's build, whose chat host a machine's is compared to. */
+  /** This hub's build, whose chat host a machine's is compared to. */
   version?: () => string;
   /** How machines get Anthropic's Agent SDK for Claude Code's chats
    * (sdkprovision.ts): the operator's directories, offline, the registry,
@@ -43,7 +43,7 @@ export interface ChatOptions {
 }
 
 export interface ChatFeature extends FeatureDef {
-  /** The switchboard, once the core set the feature up (tests). */
+  /** The switchboard, once the hub set the feature up (tests). */
   switchboard(): ChatSwitchboard | undefined;
 }
 

@@ -1,4 +1,4 @@
-// The browser pane's port forwards: listeners on the core host's loopback
+// The browser pane's port forwards: listeners on the hub host's loopback
 // that carry connections to a machine's port through its agent (a fake of
 // the Go agent's dial action, which connects to this host's loopback, so
 // the test's services are the machine's), their bounds and their ends;
@@ -72,7 +72,7 @@ interface Setup {
   forget(m: string): void;
 }
 
-/** The feature in a core with two machines: x, an ssh machine whose agent
+/** The feature in a hub with two machines: x, an ssh machine whose agent
  * reaches the test's loopback, and the local one (not connected). */
 async function setup(o: BrowserOptions & { run?: boolean; listening?: () => Reply } = {}): Promise<Setup> {
   const listening = o.listening ?? (() => ({ ok: true, plugin: { ports: [] } }));
@@ -81,7 +81,7 @@ async function setup(o: BrowserOptions & { run?: boolean; listening?: () => Repl
   const st = new Settings('', { modules: hubModules([feature]) });
   const audit = memoryAudit();
   const logs: string[] = [];
-  const core = createHub({
+  const hub = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: false,
@@ -90,13 +90,13 @@ async function setup(o: BrowserOptions & { run?: boolean; listening?: () => Repl
     settings: st,
     features: [feature],
   });
-  // The core's services run only where a test asks; the machines always.
-  cleanups.push(o.run ? running(core) : running(machines));
+  // The hub's services run only where a test asks; the machines always.
+  cleanups.push(o.run ? running(hub) : running(machines));
   cleanups.push(() => feature.forwards()!.close());
   await waitFor('x ready', () => machines.get('x')!.ready);
   return {
     async request(method, path, r = {}) {
-      const res = await core.fetch(
+      const res = await hub.fetch(
         new Request(`http://127.0.0.1:7780${path}`, { method, headers: { Host: '127.0.0.1:7780' }, body: r.body }),
         {
           remote: r.remote ?? '127.0.0.1',
@@ -110,7 +110,7 @@ async function setup(o: BrowserOptions & { run?: boolean; listening?: () => Repl
     settings: st,
     audit,
     logs,
-    forget: (m) => core.forget(m),
+    forget: (m) => hub.forget(m),
   };
 }
 
@@ -191,7 +191,7 @@ const forward = async (t: Setup, port: number) => {
   return r.body.local as number;
 };
 
-// A forward listens on the core host's loopback and carries connections to
+// A forward listens on the hub host's loopback and carries connections to
 // the machine's port; it is found again, listed, and ends when stopped,
 // with its connections.
 test('forward', async () => {
@@ -252,7 +252,7 @@ test('one forward per port', async () => {
   expect(t.forwards.list().length).toBe(1);
 });
 
-// Forwards are for clients on the core's host and for other machines'
+// Forwards are for clients on the hub's host and for other machines'
 // ports; a port nothing answers on closes its connections.
 test('refusals', async () => {
   const t = await setup();
@@ -359,7 +359,7 @@ test('idle is about use', async () => {
 });
 
 // The service reaps with the setting's time; at 0 forwards stay until
-// stopped, with the feature off none does, and none outlives the core.
+// stopped, with the feature off none does, and none outlives the hub.
 test('reaper', async () => {
   const c = clock();
   const t = await setup({ now: c.now, run: true, reapEveryMs: 10 });
@@ -380,10 +380,10 @@ test('reaper', async () => {
   await waitFor('ended with the feature off', () => t.forwards.list().length === 0);
   t.settings.set('plugins.browser.enabled', '', true);
   const local = await forward(t, port);
-  await cleanups.shift()!(); // the core stops
+  await cleanups.shift()!(); // the hub stops
   expect(t.forwards.list()).toEqual([]);
   expect(await refusedAt('127.0.0.1', local)).toBe(true);
-  // A stopped core makes none.
+  // A stopped hub makes none.
   const r = await t.request('POST', '/api/m/x/p/browser/forwards', { body: JSON.stringify({ port }) });
   expect([r.status, r.body.error]).toEqual([400, 'listen']);
 });
@@ -499,14 +499,14 @@ test('listening', async () => {
 // The guards: the forwards' changes are refused to other sites and in
 // read-only mode; the reads are not.
 test('guards', async () => {
-  const core = (readOnly: boolean) =>
+  const hub = (readOnly: boolean) =>
     testHub({
       features: [browserFeature()],
       machines: testMachines([sshSpec('x', 'x', 'x', false)]),
       readOnly,
       settings: { 'plugins.browser.enabled': true },
     });
-  const { problems, checked } = await checkGuarded(core(false), core(true), { machine: 'x' });
+  const { problems, checked } = await checkGuarded(hub(false), hub(true), { machine: 'x' });
   expect(problems).toEqual([]);
   expect(checked.sort()).toEqual(['DELETE /api/m/:id/p/browser/forwards/:port', 'POST /api/m/:id/p/browser/forwards']);
 });

@@ -74,7 +74,7 @@ export interface EnsureOptions {
 
 /** Makes the machine's terminal core run the executable this build carries
  * and returns once it answers: "" when it runs, else the code of why not.
- * A read-only core installs and starts nothing: it uses a core that runs
+ * A read-only hub installs and starts nothing: it uses a terminal core that runs
  * already. */
 export async function ensure(m: Machine, o: EnsureOptions, d: LifecycleDeps): Promise<string> {
   const info = m.state().info;
@@ -92,7 +92,7 @@ export async function ensure(m: Machine, o: EnsureOptions, d: LifecycleDeps): Pr
     // The machine build carries its platform's herdr-core (the TypeScript
     // machine executable, verified by its digest when it was installed):
     // that one runs, installed from the machine's own copy, when it is the
-    // one the core's release recorded for the platform.
+    // one the hub's release recorded for the platform.
     const expected = await d.embeddedHC?.(info.os, info.arch);
     if (expected && expected !== st.embedded) {
       d.logger(`term ${o.id}: the machine build carries herdr-core ${st.embedded}, not the release's ${expected}`);

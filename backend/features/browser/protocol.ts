@@ -1,6 +1,6 @@
 // The browser pane's actions on a machine
 // (docs/features/32-browser-and-ports.md), as the machine side serves them
-// (features/browser/machine). Nothing listens on the machine: the core
+// (features/browser/machine). Nothing listens on the machine: the hub
 // opens a stream per connection of a forward.
 import { z } from 'zod';
 import { defineProtocol } from '#shared/proto/protocol.ts';
@@ -19,7 +19,7 @@ export const browserProtocol = defineProtocol('browser', {
   dial: { params: z.object({ port: z.int().min(1).max(65535) }), result: z.object({}), stream: true },
   /** The listening ports, sorted, one entry per port, at most 200; the
    * agent looks for at most 10 s. Only these members reach the page, as
-   * the Go core decoded the answer into its struct. */
+   * the Go hub decoded the answer into its struct. */
   listening: {
     params: z.object({}),
     result: z.object({

@@ -42,7 +42,7 @@ export interface State {
   /** New panes get the library that makes it the one a program's
    * CUDA_VISIBLE_DEVICES names. */
   pick?: boolean;
-  /** Another core controls the machine's windows; this one's viewers see
+  /** Another hub controls the machine's windows; this one's viewers see
    * them and may take control. */
   view_only?: boolean;
   windows: GUIWindow[];

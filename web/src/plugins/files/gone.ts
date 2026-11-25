@@ -15,7 +15,7 @@ import { startPolling } from './poller';
 
 /** How often the paths of the titles drawn are checked. */
 export const GONE_CHECK_MS = 5000;
-/** The paths of one machine checked in one request (the core's limit). */
+/** The paths of one machine checked in one request (the hub's limit). */
 const MAX_PATHS = 200;
 
 const key = (m: string, path: string) => `${m}\n${path}`;

@@ -1,5 +1,5 @@
 // Preparing code-server on a machine: installing it as the machine's
-// setting says (codeServer.install: the core uploads the release, the
+// setting says (codeServer.install: the hub uploads the release, the
 // machine downloads it, or the machine's own code-server), the bridge
 // extension and the default extensions, then starting it; stopping and
 // releasing it. Each is the agent's op code-server; code-server listens on
@@ -72,7 +72,7 @@ const session = (m: Machine): Session | null => (m.connected ? m.live() : null);
 /** What went wrong, as the UI shows it: an agent's refusal is its text. */
 const errorText = (e: unknown) => (e instanceof AgentError && e.reply?.error ? e.reply.error : e instanceof Error ? e.message : String(e));
 
-/** code-server on each machine, as this core prepared it. */
+/** code-server on each machine, as this hub prepared it. */
 export class CodeServers {
   private readonly o: ProvisionOptions;
   private readonly states = new Map<string, MachineState>();
@@ -130,7 +130,7 @@ export class CodeServers {
     return !!s && s.status.ready && s.session !== null && s.session === session(m);
   }
 
-  /** The machines whose code-server this core considers ready. */
+  /** The machines whose code-server this hub considers ready. */
   running(): string[] {
     return [...this.states].filter(([, s]) => s.status.ready).map(([id]) => id);
   }
@@ -172,8 +172,8 @@ export class CodeServers {
     return this.end(m, 'stop', signal);
   }
 
-  /** Lets code-server on m go after this core's idle timeout: the machine
-   * stops it unless another core it serves has a VS Code window
+  /** Lets code-server on m go after this hub's idle timeout: the machine
+   * stops it unless another hub it serves has a VS Code window
    * connected. */
   release(m: Machine, signal: AbortSignal): Promise<void> {
     return this.end(m, 'release', signal);
@@ -262,7 +262,7 @@ export class CodeServers {
   }
 
   /** Makes sure the release is in the agent's directory: the machine
-   * downloads it when allowed, else the core uploads it. */
+   * downloads it when allowed, else the hub uploads it. */
   private async installRelease(m: Machine, os: string, arch: string, machineDownload: boolean, signal: AbortSignal): Promise<void> {
     const rep = await this.request(m, { op: Op.CodeServer, action: 'status' }, signal);
     if (rep.cs?.installed) return;
@@ -274,7 +274,7 @@ export class CodeServers {
         return;
       } catch (e) {
         signal.throwIfAborted();
-        this.o.logger(`code-server download on ${m.label} failed, uploading from the core instead: ${errorText(e)}`);
+        this.o.logger(`code-server download on ${m.label} failed, uploading from the hub instead: ${errorText(e)}`);
       }
     }
     this.phase(m.id, Phase.Download, artifacts.version);
@@ -304,8 +304,8 @@ export class CodeServers {
   }
 
   /** Has the machine fetch the release itself, verified against the digest
-   * the core knows; an unknown digest is recorded on first use, as for the
-   * core's own downloads. */
+   * the hub knows; an unknown digest is recorded on first use, as for the
+   * hub's own downloads. */
   private async machineDownload(m: Machine, asset: string, signal: AbortSignal): Promise<void> {
     const { artifacts } = this.o;
     const file = tarballFile(artifacts.version, asset);

@@ -1,6 +1,6 @@
-// What the feature keeps in the core's database
+// What the feature keeps in the hub's database
 // (hub[-<instance>]-<host>[-<id>].db beside the settings file, shared with
-// the other features; the Go core's tables, so either core reads what the
+// the other features; the Go hub's tables, so either hub reads what the
 // other wrote): the points of each account's window (usage_windows), the
 // accounts of the last poll (usage_accounts), the alerts fired
 // (usage_alerts) and each machine's last cost report (usage_machine_costs).
@@ -70,7 +70,7 @@ export interface Stored {
   accounts: Kept[];
 }
 
-/** The account as the Go core kept it: its windows with an empty id. */
+/** The account as the Go hub kept it: its windows with an empty id. */
 export const keptJSON = (a: Kept) => {
   const { windows, ...rest } = a.account;
   return {
@@ -96,7 +96,7 @@ export class Store {
 
   /** Runs fn on the database with the feature's tables, and whether they
    * may be written; undefined when it cannot be opened (logged) or for a
-   * core without a database. */
+   * hub without a database. */
   use<T>(fn: (db: DB, writable: boolean) => T): T | undefined {
     if (!this.file) return undefined;
     let db: DB | undefined;
@@ -161,7 +161,7 @@ export class Store {
     const alerts = new Map<string, Buffer>([...history.alerts].map(([k, r]: [string, AlertRecord]) => [k, json(r)]));
     this.use((db, writable) => {
       if (!writable) {
-        if (!this.newerTold) this.log("usage: the core's database is of a newer version: the history is not kept");
+        if (!this.newerTold) this.log("usage: the hub's database is of a newer version: the history is not kept");
         this.newerTold = true;
         return;
       }

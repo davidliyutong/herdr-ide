@@ -1,10 +1,10 @@
-// A core's release (release.ts): the manifest from the operator's
-// directory, the cache, the core's own download (through the
-// environment's proxy) or, when the release is unreachable, the core's own
+// A hub's release (release.ts): the manifest from the operator's
+// directory, the cache, the hub's own download (through the
+// environment's proxy) or, when the release is unreachable, the hub's own
 // HTTPS through the machine (a stream to a server on loopback whose
 // certificate a test authority signed, which these tests alone trust:
 // testdata/), refused when it is another build's; never the machine's own
-// download of it. What the core uploads from the directory, the cache, its
+// download of it. What the hub uploads from the directory, the cache, its
 // own executable or a download, each checked against the manifest. The
 // executables are fakes; nothing leaves this host.
 import { afterAll, describe, expect, test } from 'bun:test';
@@ -85,7 +85,7 @@ async function release(files: Record<string, Buffer | string>) {
 
 /** The own executable of OTHER (another platform than KEY's), named in
  * the manifest by ownExe. */
-const OWN_EXE = Buffer.from('#!/bin/sh\necho the core\n');
+const OWN_EXE = Buffer.from('#!/bin/sh\necho the hub\n');
 const ownOther = (): OwnExecutable => ownGz(OTHER, async () => gzipSync(OWN_EXE))!;
 
 test('parseSums reads sha256sum lines, text and binary mode', () => {
@@ -128,7 +128,7 @@ async function tlsRelease(files: Record<string, string>) {
 }
 
 describe('the manifest', () => {
-  test("is the release's, fetched by the core and cached per version; the next core reads the cache", async () => {
+  test("is the release's, fetched by the hub and cached per version; the next hub reads the cache", async () => {
     const r = await release({ [SUMS]: sums() });
     const cacheDir = temp();
     const rel = new Release({ version: 'v1', url: r.url, cacheDir });
@@ -138,7 +138,7 @@ describe('the manifest', () => {
       source: `${r.url}/${SUMS}`,
     });
     expect(r.hits).toEqual([`/v1/${SUMS}`]);
-    // Kept: not fetched again, by this core nor by the next.
+    // Kept: not fetched again, by this hub nor by the next.
     await rel.digests(KEY);
     const next = new Release({ version: 'v1', url: r.url, cacheDir });
     expect((await next.digests(KEY)).source).toContain('SHA256SUMS-v1');
@@ -152,7 +152,7 @@ describe('the manifest', () => {
     expect((await rel.digests(KEY)).source).toBe(join(dir, SUMS));
   });
 
-  test("the build's own (a desktop app built from a release's executables without its URL): every platform's digests, if it names this core's executable", async () => {
+  test("the build's own (a desktop app built from a release's executables without its URL): every platform's digests, if it names this hub's executable", async () => {
     const mine = new Release({ version: 'v1', sums: sums({ ownExe: sha256(OWN_EXE) }), cacheDir: temp(), own: ownOther() });
     expect(await mine.digests(KEY)).toEqual({ exe: sha256(EXE), archive: sha256(ARCHIVE), source: "this build's SHA256SUMS" });
     const other = new Release({ version: 'v1', sums: sums({ ownExe: 'e'.repeat(64) }), cacheDir: temp(), own: ownOther() });
@@ -161,7 +161,7 @@ describe('the manifest', () => {
     expect((e as Error).message).toContain('of another build');
   });
 
-  test("one of another build is refused: it must name this core's own executable by its digest", async () => {
+  test("one of another build is refused: it must name this hub's own executable by its digest", async () => {
     const dir = temp();
     writeFileSync(join(dir, SUMS), sums({ ownExe: 'e'.repeat(64) }));
     const logged: string[] = [];
@@ -177,7 +177,7 @@ describe('the manifest', () => {
     expect((await new Release({ version: 'v1', dir: ok, cacheDir: temp(), own: ownOther() }).digests(KEY)).exe).toBe(sha256(EXE));
   });
 
-  test("an unreachable release: the core's own HTTPS through the machine, verified against the release's host name, then cached", async () => {
+  test("an unreachable release: the hub's own HTTPS through the machine, verified against the release's host name, then cached", async () => {
     const t = await tlsRelease({ [SUMS]: sums() });
     const cacheDir = temp();
     const rel = new Release({ version: 'v1', url: 'https://releases.test/v1', cacheDir, tunnelCA: TEST_CA });
@@ -195,7 +195,7 @@ describe('the manifest', () => {
     expect((e as Error).message).toContain('through the machine either');
   });
 
-  test('a fetch that reached something (a certificate the core does not trust, an HTTP answer) does not ask the machine', async () => {
+  test('a fetch that reached something (a certificate the hub does not trust, an HTTP answer) does not ask the machine', async () => {
     const t = await tlsRelease({ [SUMS]: sums() });
     for (const url of [`https://127.0.0.1:${t.port}/v1`, (await release({})).url]) {
       const asked: string[] = [];
@@ -203,7 +203,7 @@ describe('the manifest', () => {
         .digests(KEY, { tunnel: t.open(asked) })
         .catch((x) => x as Error);
       expect(deployCode(e)).toBe('build_unavailable');
-      expect((e as Error).message).toContain('the core could not download');
+      expect((e as Error).message).toContain('the hub could not download');
       expect(asked).toEqual([]);
     }
   });
@@ -252,12 +252,12 @@ describe('the manifest', () => {
     expect(() => parseSums(`${'a'.repeat(64)}  x\n${'b'.repeat(64)}  x\n`)).toThrow(/twice/);
   });
 
-  test('the core does not try again for 10 minutes after the release was unreachable; nothing anywhere: build_unavailable, saying what was tried', async () => {
+  test('the hub does not try again for 10 minutes after the release was unreachable; nothing anywhere: build_unavailable, saying what was tried', async () => {
     let now = 0;
     const rel = new Release({ version: 'v1', url: 'http://127.0.0.1:1/v1', cacheDir: temp(), now: () => now });
     const e = await rel.digests(KEY).catch((x) => x as Error);
     expect(deployCode(e)).toBe('build_unavailable');
-    expect((e as Error).message).toContain('the core cannot reach');
+    expect((e as Error).message).toContain('the hub cannot reach');
     expect((e as Error).message).toContain('--agent-dir');
     now += 60_000;
     expect(((await rel.digests(KEY).catch((x) => x)) as Error).message).toContain('lately');
@@ -265,13 +265,13 @@ describe('the manifest', () => {
     expect((none as Error).message).toContain('no release');
   });
 
-  test("without a manifest, the core's own executable gives its platform's digest", async () => {
+  test("without a manifest, the hub's own executable gives its platform's digest", async () => {
     const rel = new Release({ version: 'v1', cacheDir: temp(), own: ownOther() });
-    expect(await rel.digests(OTHER)).toEqual({ exe: sha256(OWN_EXE), source: "this core's own executable" });
+    expect(await rel.digests(OTHER)).toEqual({ exe: sha256(OWN_EXE), source: "this hub's own executable" });
   });
 });
 
-describe('what the core uploads', () => {
+describe('what the hub uploads', () => {
   const d = { exe: sha256(EXE), archive: sha256(ARCHIVE), source: 'test' };
 
   test("the operator's directory: the archive, or the executable; each checked, a tampered one refused naming no path", async () => {
@@ -346,15 +346,15 @@ describe('what the core uploads', () => {
     expect(existsSync(old)).toBe(false);
   });
 
-  test("the core's own executable is the running one: a file put at its path since is not taken for it", async () => {
+  test("the hub's own executable is the running one: a file put at its path since is not taken for it", async () => {
     const d = temp();
-    const path = join(d, 'core');
+    const path = join(d, 'hub');
     writeFileSync(path, OWN_EXE);
     const fd = openSync(path, 'r');
     try {
       const own = ownFile(OTHER, fd);
       // An upgrade in place: another file renamed over the path.
-      writeFileSync(join(d, 'new'), Buffer.from('a newer core'));
+      writeFileSync(join(d, 'new'), Buffer.from('a newer hub'));
       renameSync(join(d, 'new'), path);
       expect(await own.digest()).toBe(sha256(OWN_EXE));
       expect(gunzipSync(await own.gz())).toEqual(OWN_EXE);
@@ -364,7 +364,7 @@ describe('what the core uploads', () => {
     }
   });
 
-  test("the core's own executable for a machine of its platform, when it is the build; one load for machines deployed at once", async () => {
+  test("the hub's own executable for a machine of its platform, when it is the build; one load for machines deployed at once", async () => {
     let reads = 0;
     const own = ownGz(OTHER, async () => (reads++, gzipSync(OWN_EXE)))!;
     const rel = new Release({ version: 'v1', cacheDir: temp(), own });
@@ -374,6 +374,6 @@ describe('what the core uploads', () => {
     // One read for the digest, one for the upload.
     expect(reads).toBe(2);
     const e = await rel.load(OTHER, { exe: 'f'.repeat(64), source: 'test' }).catch((x) => x as Error);
-    expect((e as Error).message).toContain("the core's own executable: sha256");
+    expect((e as Error).message).toContain("the hub's own executable: sha256");
   });
 });

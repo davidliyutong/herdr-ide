@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// The chat plugin's parts outside its pane: the chats' states (the core's
+// The chat plugin's parts outside its pane: the chats' states (the hub's
 // messages numbered by rev, the snapshot, chats that are no more), the
 // panes' agent statuses (viewStatus: status, paneOf, seen), the new-tab
 // items (the agents a machine can start; a new chat in the focused
@@ -26,7 +26,7 @@ import { isItem, useMenu, closeMenu, type MenuItem } from '../contextMenu';
 import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { FakeChatHub } from './chatFake';
 
 const A = 'c00000000000000a1';
@@ -59,7 +59,7 @@ const status = (m: string, v: L.PluginView) => chatPlugin.viewStatus!.status(m, 
 type Call = { url: string; method: string; body?: unknown };
 let calls: Call[];
 let answers: Record<string, () => Response>;
-let core: FakeCore;
+let hub: FakeHub;
 let chats: FakeChatHub;
 
 function routeOf(url: string, method: string) {
@@ -87,8 +87,8 @@ beforeEach(async () => {
   chats = new FakeChatHub();
   chats.auto = true;
   chats.install();
-  core = new FakeCore();
-  core.machine('m', [FakeCore.term('p1', { cwd: '/src/proj' })], {
+  hub = new FakeHub();
+  hub.machine('m', [FakeHub.term('p1', { cwd: '/src/proj' })], {
     version: 2,
     workspaces: [
       { id: 'w1w1w1w1', name: 'one', cwd: '/src', tabs: [{ root: { terminal: 'p1' }, focused: 'p1' }], selected: 0 },
@@ -96,12 +96,12 @@ beforeEach(async () => {
     ],
     selected: 0,
   });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([{ id: 'm', label: 'box', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
   s.selectMachine('m');
-  core.model.subscribe('m');
+  hub.model.subscribe('m');
   await settle();
 });
 
@@ -116,7 +116,7 @@ afterEach(() => {
 });
 
 describe('the chats’ states', () => {
-  it('takes the core’s messages in the order of their revs', () => {
+  it('takes the hub’s messages in the order of their revs', () => {
     applyMessage('m', msg([st(A), st(B)], 4, true));
     expect(Object.keys(useChats.getState().states.m)).toEqual([A, B]);
     applyMessage('m', msg([st(A, { status: 'working', state: 'working' })], 5));
@@ -181,7 +181,7 @@ describe('the chats’ states', () => {
     chatPlugin.viewStatus!.subscribe(() => {});
     await settle();
     expect(Object.keys(useChats.getState().states).sort()).toEqual(['m', 'n']);
-    // A core that started again has read only machine m so far.
+    // A hub that started again has read only machine m so far.
     answers[`GET ${STATES_PATH}`] = () => new Response(JSON.stringify({ machines: { m: msg([st(A)], 1, true) } }), { status: 200 });
     useStore.getState().setConnected(false);
     useStore.getState().setConnected(true);
@@ -303,7 +303,7 @@ describe('the chat panes’ statuses', () => {
     ]);
     await chatPlugin.viewStatus!.openTarget!({ kind: 'chat', machine: 'm', chat: C });
     await settle();
-    expect(core.layout('m')!.workspaces[0].tabs).toHaveLength(2);
+    expect(hub.layout('m')!.workspaces[0].tabs).toHaveLength(2);
     expect(chatPlugin.viewStatus!.unopened!('m').map((u) => u.id)).toEqual([`chat:${A}`]);
   });
 });
@@ -391,7 +391,7 @@ describe('new chats', () => {
     const post = calls.find((c) => c.method === 'POST')!;
     expect(post.url).toBe('/api/m/m/p/chat/new');
     expect(post.body).toEqual({ kind: 'codex', cwd: '/src/proj', options: { mode: 'acceptEdits' } });
-    const ws = core.layout('m')!.workspaces[0];
+    const ws = hub.layout('m')!.workspaces[0];
     expect(ws.tabs).toHaveLength(2);
     const leaf = ws.tabs[1].root as L.PluginLeaf;
     expect(leaf.view).toMatchObject({ plugin: 'chat', kind: 'chat', chat: A, agent: 'codex' });
@@ -399,7 +399,7 @@ describe('new chats', () => {
     // Shown again: its pane, not another.
     await chatPlugin.newTabItems!('m')[0].run('m', 'w1w1w1w1');
     await settle();
-    expect(core.layout('m')!.workspaces[0].tabs).toHaveLength(2);
+    expect(hub.layout('m')!.workspaces[0].tabs).toHaveLength(2);
   });
 
   it('leave full access to the machine unless it allows it', () => {
@@ -426,7 +426,7 @@ describe('new chats', () => {
     await settle();
     await settle();
     expect(toast).toHaveBeenCalledWith(t('conversation.error.not_found', { agent: 'Codex' }), undefined, undefined, 'error');
-    expect(core.layout('m')!.workspaces[0].tabs).toHaveLength(1);
+    expect(hub.layout('m')!.workspaces[0].tabs).toHaveLength(1);
   });
 
   it('start from the command: the machine’s one agent, else a menu of them', async () => {
@@ -458,7 +458,7 @@ describe('new chats', () => {
 });
 
 describe('a chat’s folder', () => {
-  it('is trusted through the core’s route, not from a read-only page', async () => {
+  it('is trusted through the hub’s route, not from a read-only page', async () => {
     applyMessage('m', msg([st(A, { cwd: '/home/u/my proj' })], 1, true));
     await chatSource('m', A).trust();
     const post = calls.find((c) => c.method === 'POST')!;
@@ -473,7 +473,7 @@ describe('a chat’s folder', () => {
     expect(calls).toEqual([]);
   });
 
-  it('is trusted no more through the core’s route', async () => {
+  it('is trusted no more through the hub’s route', async () => {
     applyMessage('m', msg([st(A, { cwd: '/home/u/proj' })], 1, true));
     await chatSource('m', A).untrust();
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual([
@@ -509,7 +509,7 @@ describe('a chat pane’s menu', () => {
     await settle();
     expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual([`/api/m/m/p/chat/chat?chat=${B}`]);
     expect(chatGone(useChats.getState(), 'm', B)).toBe(true);
-    expect(core.layout('m')!.workspaces.flatMap((w) => L.pluginViews(w, 'chat'))).toEqual([]);
+    expect(hub.layout('m')!.workspaces.flatMap((w) => L.pluginViews(w, 'chat'))).toEqual([]);
   });
 
   it('has nothing for a closed chat’s close, a leaf without a chat, or a read-only page', () => {

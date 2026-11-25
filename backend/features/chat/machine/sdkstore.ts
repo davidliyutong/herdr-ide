@@ -1,12 +1,12 @@
 // Anthropic's Agent SDK on a machine (../claudesdk.ts): the pinned tarball,
-// downloaded by the machine (curl or wget, from the URL the core names) or
-// uploaded by the core, lands in a file beside the versions
+// downloaded by the machine (curl or wget, from the URL the hub names) or
+// uploaded by the hub, lands in a file beside the versions
 // (<data dir>/claude-agent-sdk), which is checked against the pinned
 // integrity before anything of it is unpacked; of it only the entry, its
 // package.json, license and readme are unpacked, into a directory of their
 // own that becomes the version once the entry's SHA-256 is the pinned one
 // too. A version unused for SDK_RETENTION_MS goes (housekeeping; a load by
-// the chat host and a core's look both count as a use), and what an
+// the chat host and a hub's look both count as a use), and what an
 // interrupted install left goes after a day. Everything goes through
 // #machine/artifacts.ts: no file or program holds the node's thread.
 import { mkdir, rename, rm, stat, utimes } from 'node:fs/promises';
@@ -50,7 +50,7 @@ export class SdkStore {
   readonly dir: string;
   private readonly logger: Logger;
   private readonly downloadMs: number;
-  /** One install at a time: two cores that ask at once install it once. */
+  /** One install at a time: two hubs that ask at once install it once. */
   private lock: Promise<unknown> = Promise.resolve();
 
   constructor(o: SdkStoreOptions) {
@@ -90,7 +90,7 @@ export class SdkStore {
     });
   }
 
-  /** Installs the tarball the core sends in chunks. */
+  /** Installs the tarball the hub sends in chunks. */
   receive(chunks: AsyncIterable<Buffer>): Promise<void> {
     return this.locked(async () => {
       const s = await receive(this.root, chunks, MAX_SDK_TARBALL);

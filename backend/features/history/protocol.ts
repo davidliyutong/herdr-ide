@@ -1,13 +1,13 @@
 // The terminal history feature's actions on a machine, as the machine side
 // serves them (features/history/machine, agentproto's History*): snapshots
 // of the terminals' output, with their styles, that the machine keeps on
-// its own disk while the core asks it to capture. A terminal's snapshot has
+// its own disk while the hub asks it to capture. A terminal's snapshot has
 // a current generation and at most one previous one: the current one of the
 // program that ran before. The machine clamps what it is asked to its hard
 // limits (HistoryLimits) and answers fixed wordings with its codes (busy,
 // not_found, not_running, io, …).
 //
-// The results are read as the Go core decoded them into its structs: a
+// The results are read as the Go hub decoded them into its structs: a
 // member that is absent or null is its zero value, members it does not
 // know are dropped.
 import { z } from 'zod';

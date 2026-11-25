@@ -1,12 +1,12 @@
-// The vault's authenticators from the page's side (the core's model is in
+// The vault's authenticators from the page's side (the hub's model is in
 // backend/features/vault): a proof is the user's word, made by
 // the desktop app's system prompt or by a WebAuthn credential, that stands
-// for the passphrase while the vault is unlocked. The core issues a nonce
-// for one purpose, the page has it signed, and the core checks it. A
+// for the passphrase while the vault is unlocked. The hub issues a nonce
+// for one purpose, the page has it signed, and the hub checks it. A
 // locked vault has forgotten its key: an authenticator unlocks it only
 // with an unlock entry, the key wrapped under what the authenticator alone
 // gives (the desktop app's Secure Enclave or Windows Hello key, which the
-// app answers sealed for the core; a credential's PRF output), and only
+// app answers sealed for the hub; a credential's PRF output), and only
 // within vault.passphraseDays of the passphrase.
 import { APP_NAME } from '../../brand';
 import type { DesktopVerifyUser } from '../../shell';
@@ -24,7 +24,7 @@ import {
   type WebAuthnProof,
 } from './api';
 
-// ---- base64url without padding, as the core's byte strings ----
+// ---- base64url without padding, as the hub's byte strings ----
 
 export function b64urlEncode(buf: ArrayBuffer | Uint8Array): string {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -60,7 +60,7 @@ function browserCan(): boolean {
  *   where the browser refuses them; opened by name (localhost for the same
  *   computer) it may work;
  * - 'unavailable': the browser or the connection has no WebAuthn;
- * - 'untrusted': the core does not vouch for this origin, so a credential
+ * - 'untrusted': the hub does not vouch for this origin, so a credential
  *   is neither added nor taken here (another program may answer on a
  *   localhost address, and its page would collect the user's touch);
  * - 'ready': credentials can be added and used from this origin. */
@@ -188,9 +188,9 @@ async function desktopMac(nonce: string): Promise<DesktopProof | null> {
   }
 }
 
-/** Asks the core for a nonce for the purpose and has it proved: by the
+/** Asks the hub for a nonce for the purpose and has it proved: by the
  * desktop prompt when the app has one on, else by a WebAuthn credential of
- * this origin (the core lists only those). Null when the user did not confirm. */
+ * this origin (the hub lists only those). Null when the user did not confirm. */
 export async function prove(purpose: ProofPurpose): Promise<Proof | null> {
   const ch = await vaultApi.proof(purpose);
   if (ch.desktop && verifyUser()) return desktopMac(ch.nonce);
@@ -202,7 +202,7 @@ export async function prove(purpose: ProofPurpose): Promise<Proof | null> {
 
 /** Unlocks the locked vault with the desktop app's unlock key: the app
  * prompts, and answers the entry it used and the relay sealed for the
- * core, which the page passes on. False when the user did not confirm;
+ * hub, which the page passes on. False when the user did not confirm;
  * unlock_stale when this install has no unlock entry (the app says so
  * without a prompt), which only the passphrase and a new enrollment mend. */
 export async function unlockWithDesktop(): Promise<boolean> {
@@ -245,10 +245,10 @@ export async function unlockWithPrf(): Promise<boolean> {
 // ---- adding an authenticator ----
 
 /** Adds a WebAuthn credential for this host: the browser creates it for the
- * core's nonce with the PRF extension, then the new credential signs the
- * same nonce, which shows the core that the key it stores is the
- * authenticator's, and evaluates its PRF of the core's salt, under which
- * the core wraps the vault's key. A credential without PRF cannot unlock
+ * hub's nonce with the PRF extension, then the new credential signs the
+ * same nonce, which shows the hub that the key it stores is the
+ * authenticator's, and evaluates its PRF of the hub's salt, under which
+ * the hub wraps the vault's key. A credential without PRF cannot unlock
  * the vault and is not added (prf_required). False when the user
  * cancelled. */
 export async function registerWebAuthn(label: string, passphrase: string): Promise<boolean> {
@@ -298,8 +298,8 @@ export async function registerWebAuthn(label: string, passphrase: string): Promi
 }
 
 /** Turns the desktop app's prompt on: the user answers it once for the
- * core's nonce, and the app makes this install's unlock key, which it
- * hands the core sealed (the relay). False when the user did not confirm
+ * hub's nonce, and the app makes this install's unlock key, which it
+ * hands the hub sealed (the relay). False when the user did not confirm
  * or the key could not be made. */
 export async function registerDesktop(label: string, passphrase: string): Promise<boolean> {
   const ch = await vaultApi.proof({ for: 'register' });
@@ -329,8 +329,8 @@ export type FreshResult<T> =
 /** Runs send for an action of the vault that, where every Allow is
  * verified, needs the user's word made for it (purpose): a proof when the
  * page can make one, else the passphrase given. `needed` is what the page
- * knows of the rule; a core that refuses with vault_proof anyway (the rule
- * was turned on elsewhere) gets the same. A proof the core refuses, or a
+ * knows of the rule; a hub that refuses with vault_proof anyway (the rule
+ * was turned on elsewhere) gets the same. A proof the hub refuses, or a
  * wrong passphrase, is thrown for the caller to say. */
 export async function withFresh<T>(o: {
   guard?: VaultGuard | null;
@@ -365,7 +365,7 @@ export async function withFresh<T>(o: {
 }
 
 /** Whether a change lets a variable's value go where it did not (the
- * core's test): a machine added to those that may read it without asking,
+ * hub's test): a machine added to those that may read it without asking,
  * or inject-only dropped. */
 export function widens(cur: { machines: string[]; injectOnly: boolean }, u: { machines?: string[]; injectOnly?: boolean }): boolean {
   if (u.injectOnly === false && cur.injectOnly) return true;

@@ -1,8 +1,8 @@
-// Shows one program window in this browser window: frames from the core are
+// Shows one program window in this browser window: frames from the hub are
 // drawn on canvases (the window and its menus/tooltips as layers), scaled to
 // fit; pointer and keyboard input goes back with window coordinates.
 //
-// Messages from the core: JSON events {ev: window | gone | layer |
+// Messages from the hub: JSON events {ev: window | gone | layer |
 // layer_gone | cursor | child | stats | video | role} and binary frames
 // [window u32][layer u32][x i16][y i16][w u16][h u16][enc u8][seq u32][data]
 // (enc 1 JPEG, 2 PNG, 3 video, 4 video key frame). Each frame is
@@ -81,7 +81,7 @@ export class GuiSession {
     this.stage.appendChild(this.base);
     host.appendChild(this.stage);
     this.listen(window, 'resize', () => this.fit());
-    // Closing this browser window closes the program window (the core waits
+    // Closing this browser window closes the program window (the hub waits
     // briefly, so a reload keeps it). A keepalive request survives the page
     // going away and, unlike a body-less beacon, carries the page's Origin.
     this.listen(window, 'pagehide', () => {
@@ -272,7 +272,7 @@ export class GuiSession {
         f.close();
         this.stats.drawn(t1 - t0, performance.now() - t1);
       } else if (v?.needKey) {
-        // Joined or fell behind mid-stream: the core sends a key frame.
+        // Joined or fell behind mid-stream: the hub sends a key frame.
         this.send({ cmd: 'keyframe' });
       }
       this.send({ cmd: 'ack', seq });

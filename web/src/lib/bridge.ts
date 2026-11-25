@@ -2,7 +2,7 @@
 // for the VS Code window of a pane, and where what a window sends (Send to
 // Agent) goes. Each VS Code pane's iframe is a window of its own; the page
 // names the window when it knows it (codeFrames.ts), asks for a fresh one
-// for an iframe it has just made, and the core goes by folder otherwise.
+// for an iframe it has just made, and the hub goes by folder otherwise.
 
 import { useTerms, type MachineTerms } from '../state/terms';
 import * as L from '../term/layout';
@@ -64,7 +64,7 @@ export const bridge = {
    * showing folder). fresh: the pane was just opened, so its window is the
    * first of that folder to connect. Otherwise the pane's window when the
    * page knows it (or learns it once the pane has the keyboard), else the
-   * window the core finds for the folder.
+   * window the hub finds for the folder.
    */
   async command(m: string, id: string, folder: string, c: BridgeCommand, fresh: boolean): Promise<void> {
     const k = frameKey(m, id);

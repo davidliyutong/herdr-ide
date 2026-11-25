@@ -1,5 +1,5 @@
 // The machines' backends and the clients of /api/v1/term: a backend per
-// machine a client followed, kept until the machine is removed or the core
+// machine a client followed, kept until the machine is removed or the hub
 // stops; a client per channel.
 import type { Logger } from '#shared/lib/log.ts';
 import type { Audit, Who } from '#kernel/audit.ts';
@@ -29,7 +29,7 @@ export interface SwitchboardDeps {
 export class Switchboard {
   private readonly backends = new Map<string, Backend>();
   private readonly clients = new Set<TermClient>();
-  /** Ends with the core: every backend's connection, every client. */
+  /** Ends with the hub: every backend's connection, every client. */
   private readonly life = new AbortController();
   private readonly d: SwitchboardDeps;
 
@@ -84,7 +84,7 @@ export class Switchboard {
     };
   }
 
-  /** The core stops: the backends close their connections, the clients
+  /** The hub stops: the backends close their connections, the clients
    * their channels. */
   close(): void {
     this.life.abort();

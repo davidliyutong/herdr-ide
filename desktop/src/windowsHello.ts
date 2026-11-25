@@ -1,7 +1,7 @@
 // Windows Hello through PowerShell and Windows.Security.Credentials: the
 // UserConsentVerifier for the proofs of presence, and KeyCredentialManager
 // for the variable vault's unlock key (an RSA key of the user's Hello
-// container, whose PKCS#1 v1.5 signature of a challenge the core keeps is
+// container, whose PKCS#1 v1.5 signature of a challenge the hub keeps is
 // the same each time). The app starts powershell.exe from the system
 // directory (powershellPath), with no profile and no questions, and gives it
 // a script on stdin; the values (a prompt's message, a key's name, a

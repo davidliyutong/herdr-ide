@@ -2,7 +2,7 @@
 // one, make it): E2E_CODE_SERVER_SEED names a directory with
 // code-server-<version>-<os>-<arch>.tar.gz of this machine's platform, as
 // the end-to-end tests take it. The release is uploaded through op
-// code-server with the digest the core knows, unpacked without holding the
+// code-server with the digest the hub knows, unpacked without holding the
 // node's thread, started on its socket (0600) with nothing of its process
 // group listening on TCP, serves VS Code's workbench, and ends with stop.
 import { afterAll, expect, setDefaultTimeout, test } from 'bun:test';

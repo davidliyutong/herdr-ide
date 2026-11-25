@@ -2,7 +2,7 @@
 //
 // The plugin framework: plugins on and off by their setting, the right
 // sidebar's rail and panels, commands that plugins run, their panes and
-// their messages from the core.
+// their messages from the hub.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';

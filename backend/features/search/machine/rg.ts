@@ -3,7 +3,7 @@
 // an argument vector of the agent's own (the query after "--", globs as
 // --glob=<value>), no configuration file (--no-config, RIPGREP_CONFIG_PATH
 // dropped) and so no preprocessor, in a session of its own whose process
-// group is killed when the search ends: at its time limit, when the core
+// group is killed when the search ends: at its time limit, when the hub
 // gives up on it, or once enough matches were read.
 import { spawn } from 'node:child_process';
 import { accessSync, constants, readdirSync, statSync } from 'node:fs';

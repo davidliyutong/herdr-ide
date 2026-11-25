@@ -1,7 +1,7 @@
 // The desktop app's Secure Enclave helper for the variable vault's unlock
 // key (desktop/src/enclave.ts runs it). It is a small app bundle inside the
 // desktop app's Contents/Helpers, so that the Touch ID sheet names it, and it
-// keeps nothing: the shell keeps the key's blob through the core.
+// keeps nothing: the shell keeps the key's blob through the hub.
 //
 // One JSON line on stdin (at most 64 KiB), one on stdout, exit 0:
 //

@@ -31,7 +31,7 @@ export const Code = {
   Stopped: 'stopped',
 } as const;
 
-/** A text message from a client, as the Go core read it into its struct:
+/** A text message from a client, as the Go hub read it into its struct:
  * absent members and nulls are their zero values. */
 export interface Inbound {
   t: string;
@@ -57,7 +57,7 @@ const INT64 = 2 ** 63;
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && Math.abs(v) < INT64;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** A display's facts as the core passes them on: the colors that are
+/** A display's facts as the hub passes them on: the colors that are
  * strings and a cell size that has members, nothing else (hc.Display). A
  * member of another type makes the whole message invalid (undefined). */
 function display(v: unknown): Display | null | undefined {
@@ -79,7 +79,7 @@ function display(v: unknown): Display | null | undefined {
 }
 
 /** Reads a text message; null for one that is not JSON or whose members
- * have the wrong types (the Go core ignored those as a whole). */
+ * have the wrong types (the Go hub ignored those as a whole). */
 export function parseInbound(text: string): Inbound | null {
   let v: unknown;
   try {
@@ -152,7 +152,7 @@ const shortEscapes: Record<string, string> = {
 };
 
 /** s quoted as Go's strconv.Quote does: the error messages name terminals
- * as the Go core named them. */
+ * as the Go hub named them. */
 export function goQuote(s: string): string {
   let out = '"';
   for (const ch of s) {

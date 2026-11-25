@@ -2,7 +2,7 @@
 // chatproto ChatError ({code, message}) and the routes' callers as the
 // same code with an HTTP status: the chat host's codes (chatproto's Code),
 // the machine's (offline, transport, not_running, upgrading,
-// no_terminal_core, start_failed), and the core's own (wire.ts HubCode).
+// no_terminal_core, start_failed), and the hub's own (wire.ts HubCode).
 import { Fail } from '#kernel/fail.ts';
 import { ChatProtoError, Code, type ChatError } from '#shared/proto/chatproto/index.ts';
 import { NOT_RUNNING } from './protocol.ts';

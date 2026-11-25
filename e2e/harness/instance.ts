@@ -1,8 +1,8 @@
-// One isolated instance of the core for a test, run from the command
+// One isolated instance of the hub for a test, run from the command
 // line: a home of its own (home.ts: instance name, settings, environment,
 // nothing of the user's), a free loopback port and --local-only.
 //
-// The core runs with --parent-stdio: it stops when its stdin closes, also
+// The hub runs with --parent-stdio: it stops when its stdin closes, also
 // when the test runner dies. The local machine's node and terminal core
 // outlive it, so stop() stops them: the terminal core first through the
 // instance's own API, then the home's remove() (the node with `node stop
@@ -34,7 +34,7 @@ export class Instance {
   readonly home: string;
   /** A directory for the test's files (the workspace the tests open). */
   readonly work: string;
-  /** First in the core's PATH: the ssh of SSH machines (harness/sshd.ts). */
+  /** First in the hub's PATH: the ssh of SSH machines (harness/sshd.ts). */
   readonly bin: string;
   private readonly h: TestHome;
   private stopped?: Promise<void>;
@@ -43,7 +43,7 @@ export class Instance {
   private log: string[] = [];
   private exited?: Promise<void>;
 
-  /** Another core of the instance (second()) leaves the instance's node,
+  /** Another hub of the instance (second()) leaves the instance's node,
    * terminal core and home to the first. */
   private readonly shares: boolean;
 
@@ -56,15 +56,15 @@ export class Instance {
     this.bin = this.h.bin;
   }
 
-  /** Starts a second core of this instance (its name and home): another UI
+  /** Starts a second hub of this instance (its name and home): another UI
    * of the same machines, which reaches the same local node, and with
-   * stored the machines the first one added. Its stop() stops that core
+   * stored the machines the first one added. Its stop() stops that hub
    * only. */
   async second(stored = false, exe = paths.hub): Promise<Instance> {
     const inst = new Instance(this);
     try {
       await inst.launch(stored, exe);
-      await waitFor(async () => (await inst.machine()).status === 'ready', { what: 'the second core to connect', timeout: 20_000 });
+      await waitFor(async () => (await inst.machine()).status === 'ready', { what: 'the second hub to connect', timeout: 20_000 });
     } catch (e) {
       await inst.stop();
       throw e;
@@ -72,7 +72,7 @@ export class Instance {
     return inst;
   }
 
-  /** Starts a core on a new instance and waits until its terminal core runs. */
+  /** Starts a hub on a new instance and waits until its terminal core runs. */
   static async start(): Promise<Instance> {
     const inst = new Instance();
     try {
@@ -87,7 +87,7 @@ export class Instance {
 
   private async launch(stored = false, exe = paths.hub) {
     // --local-only leaves out stored machines only: the SSH machines a
-    // test adds while the core runs connect. --agent-dir holds the Linux
+    // test adds while the hub runs connect. --agent-dir holds the Linux
     // machine build they get (scripts/e2e.sh).
     const args = ['--instance', this.name, '--listen', '127.0.0.1:0', '--parent-stdio', '--agent-dir', paths.agentsOf(exe)];
     if (!stored) args.push('--local-only');
@@ -100,7 +100,7 @@ export class Instance {
     this.exited = new Promise((resolve) => proc.once('exit', () => resolve()));
     createInterface({ input: proc.stderr! }).on('line', (l) => this.log.push(l));
     const url = await new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('the core did not get ready:\n' + this.logs())), 20_000);
+      const timer = setTimeout(() => reject(new Error('the hub did not get ready:\n' + this.logs())), 20_000);
       createInterface({ input: proc.stdout! }).on('line', (l) => {
         try {
           const m = JSON.parse(l) as { event?: string; url?: string };
@@ -114,7 +114,7 @@ export class Instance {
       });
       proc.once('exit', (code) => {
         clearTimeout(timer);
-        reject(new Error(`the core exited (${code}):\n${this.logs()}`));
+        reject(new Error(`the hub exited (${code}):\n${this.logs()}`));
       });
     });
     this.baseURL = url;
@@ -146,7 +146,7 @@ export class Instance {
     return m;
   }
 
-  /** A request to the core's API, its JSON answer; throws on an error status. */
+  /** A request to the hub's API, its JSON answer; throws on an error status. */
   async api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await this.fetch(method, path, body);
     const text = await res.text();
@@ -154,7 +154,7 @@ export class Instance {
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
-  /** A request to the core's API, its response as it came. */
+  /** A request to the hub's API, its response as it came. */
   fetch(method: string, path: string, body?: unknown): Promise<Response> {
     return fetch(this.baseURL + path, {
       method,
@@ -163,12 +163,12 @@ export class Instance {
     });
   }
 
-  /** The machines of the core, as GET /api/machines lists them. */
+  /** The machines of the hub, as GET /api/machines lists them. */
   async machines(): Promise<(Machine & Record<string, unknown>)[]> {
     return this.api('GET', '/api/machines');
   }
 
-  /** Stops the local terminal core, then the core and the node, and
+  /** Stops the local terminal core, then the hub and the node, and
    * removes the home directory; once, however often it is called. */
   stop(): Promise<void> {
     this.stopped ??= this.stopOnce();
@@ -185,7 +185,7 @@ export class Instance {
   }
 
   /** Stops the local terminal core (unless terminalCore is false) and the
-   * core, keeping the home directory (what a test checks after the core is
+   * hub, keeping the home directory (what a test checks after the hub is
    * gone). */
   async stopHub(terminalCore = true) {
     if (terminalCore && this.baseURL && this.proc?.exitCode === null) {

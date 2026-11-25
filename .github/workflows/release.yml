@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  # Where this release serves its assets: machines download their platform's archive and the core SHA256SUMS from there.
+  # Where this release serves its assets: machines download their platform's archive and the hub SHA256SUMS from there.
   RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     with:
       cache: false
 
-  # The cores (each the core and the machine side of its platform, musl's
+  # The hubs (each the hub and the machine side of its platform, musl's
   # too), packaged with their licenses; SHA256SUMS of the archives
   # and the executables in them.
   archives:
@@ -167,7 +167,7 @@ jobs:
           merge-multiple: true
       # The release's files, the archives and the installers, and the
       # executables in the archives (<slug>-<platform>/<slug>, which the
-      # cores check their machines' builds against).
+      # hubs check their machines' builds against).
       - name: Checksums
         run: |
           slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)

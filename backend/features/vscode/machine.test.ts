@@ -1,4 +1,4 @@
-// VS Code's machine side through the wire, as the core's provision.ts
+// VS Code's machine side through the wire, as the hub's provision.ts
 // drives it (op code-server), with a stand-in for code-server
 // (testdata/fakecs.ts, run by Bun) in test releases built here: the
 // executable a request names, releases uploaded and downloaded and checked
@@ -6,7 +6,7 @@
 // leave the release refused, code-server started on its socket only and
 // ended by its owner (stop, release, the node's end, a node taking over, an
 // orphan), a broken one replaced, extensions and markers, the bridge's
-// socket tunnelled to the core that last opened VS Code, the releases'
+// socket tunnelled to the hub that last opened VS Code, the releases'
 // retention, and unpacking that leaves the node's thread free.
 import { afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -268,7 +268,7 @@ describe('code-server listens on its socket only', () => {
 });
 
 describe('releases', () => {
-  // An upload is checked against the digest the core sends before
+  // An upload is checked against the digest the hub sends before
   // anything is unpacked: a wrong digest names both, whatever the bytes.
   test('an upload is checked against its digest before it is unpacked', async () => {
     const rr = await newRig();
@@ -294,7 +294,7 @@ describe('releases', () => {
     expect(readdirSync(layout(rr).root)).toEqual([posix.basename(dir)]);
   });
 
-  test('an upload without a digest (an older core) is installed', async () => {
+  test('an upload without a digest (an older hub) is installed', async () => {
     const rr = await newRig();
     const tb = release(tempDir());
     expect((await upload(rr.session, { action: 'install' }, tb)).cs?.installed).toBe(true);
@@ -314,7 +314,7 @@ describe('releases', () => {
     expect(readdirSync(layout(rr).root)).toEqual([]);
   });
 
-  test('an upload larger than its bound is refused, and the core still gets the reply', async () => {
+  test('an upload larger than its bound is refused, and the hub still gets the reply', async () => {
     const rr = await newRig({ limits: { maxTarball: 4096 } });
     const big = Buffer.alloc(64 << 10, 1);
     const rep = await upload(rr.session, { action: 'install', digest: sha(big) }, big);
@@ -449,8 +449,8 @@ describe('downloads made by the machine', () => {
       }
     };
 
-  // The machine's download is checked against the digest the core knows;
-  // with none, it is installed and its digest reported for the core to
+  // The machine's download is checked against the digest the hub knows;
+  // with none, it is installed and its digest reported for the hub to
   // record. Only http(s) URLs are fetched; nothing staged is left.
   test.skipIf(!hasTool)(
     'is verified before it is installed',
@@ -482,10 +482,10 @@ describe('downloads made by the machine', () => {
     }),
   );
 
-  // A download ends when the core gives up on it (its stream closes), and
+  // A download ends when the hub gives up on it (its stream closes), and
   // one larger than its bound ends too; neither leaves its file.
   test.skipIf(!hasTool)(
-    'ends with the core’s interest and within its bound',
+    'ends with the hub’s interest and within its bound',
     noProxy(async () => {
       let served = 0;
       const server = Bun.serve({
@@ -566,13 +566,13 @@ describe('the process', () => {
     expect((await refusalOf(cs(rr.session, { action: 'start', version: '1.2.3' }))).error).toBe('code-server is not installed');
   });
 
-  // A core's idle end keeps the code-server another core's session has a
+  // A hub's idle end keeps the code-server another hub's session has a
   // connection to; once that one is gone, it ends.
-  test('release keeps it for another core', async () => {
+  test('release keeps it for another hub', async () => {
     const rr = await newRig();
     await installRelease(rr, tempDir());
     await cs(rr.session, { action: 'start' });
-    const other = rr.connect('core-2');
+    const other = rr.connect('hub-2');
     const { conn } = await other.open({ op: Op.DialUnix, path: 'cs.sock' });
     await until(() => rr.agent.liveSessions().some((s) => s.dialed(layout(rr).socket).open > 0), 'the pipe');
     expect((await cs(rr.session, { action: 'release' })).cs!.running).toBe(true);
@@ -698,7 +698,7 @@ describe('extensions', () => {
 });
 
 describe('the bridge socket', () => {
-  /** The bridge streams a core's session gets, answered and echoed. */
+  /** The bridge streams a hub's session gets, answered and echoed. */
   function bridgeHub(s: Session, ok = true) {
     const seen: Header[] = [];
     void (async () => {
@@ -730,20 +730,20 @@ describe('the bridge socket', () => {
     }
   }
 
-  test('a window reaches the core that last opened VS Code, else the newest', async () => {
+  test('a window reaches the hub that last opened VS Code, else the newest', async () => {
     const rr = await newRig();
     const l = layout(rr);
     await until(() => existsSync(l.bridge), 'the bridge socket');
     expect(statSync(l.bridge).mode & 0o777).toBe(0o600);
     const one = bridgeHub(rr.session);
-    const second = rr.connect('core-2');
+    const second = rr.connect('hub-2');
     const two = bridgeHub(second);
     await until(() => rr.agent.liveSessions().length === 2, 'both sessions');
     // Nobody opened VS Code: the newest session.
     expect(await window(l.bridge, { type: 'hello', id: 'w1' })).toEqual({ echo: { type: 'hello', id: 'w1' } });
     expect(two.map((h) => h.op)).toEqual([Op.Bridge]);
     expect(one).toEqual([]);
-    // The first core opens code-server's socket (nothing need answer there
+    // The first hub opens code-server's socket (nothing need answer there
     // for the dial to count once it is connected).
     const fake = Bun.serve({ unix: l.socket, fetch: () => new Response('') });
     try {
@@ -757,7 +757,7 @@ describe('the bridge socket', () => {
     }
   });
 
-  test('a connection that sends nothing reaches no core; a refusal closes the window', async () => {
+  test('a connection that sends nothing reaches no hub; a refusal closes the window', async () => {
     const rr = await newRig();
     const l = layout(rr);
     await until(() => existsSync(l.bridge), 'the bridge socket');
@@ -858,7 +858,7 @@ describe('retention', () => {
   });
 });
 
-describe('one thread for every core', () => {
+describe('one thread for every hub', () => {
   // Unpacking runs in slices: the node's thread goes on (another session
   // is answered) and is never held long.
   test('unpacking a release leaves the thread free', async () => {
@@ -881,7 +881,7 @@ describe('one thread for every core', () => {
       last = now;
       ticks++;
     }, 1);
-    const other = rr.connect('core-2');
+    const other = rr.connect('hub-2');
     const t0 = performance.now();
     const installing = upload(rr.session, { action: 'install', digest: sha(tb) }, tb);
     const hello = await other.request({ op: Op.Hello });

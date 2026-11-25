@@ -1,4 +1,4 @@
-// The page's one WebSocket to the core's chat plugin (protocol.ts WS_PATH,
+// The page's one WebSocket to the hub's chat plugin (protocol.ts WS_PATH,
 // backend/features/chat): every chat of every machine this page
 // shows goes over it, each as a subscription of its own, and so do their
 // commands. It opens with the first subscription or command and closes
@@ -8,12 +8,12 @@
 // that it attached again (attached with again), so its source can say so
 // before the events that follow. A command's promise settles with its ack;
 // one sent before the connection dropped (offline), not answered within
-// ACK_TIMEOUT_MS (timeout), or whose subscription the core lost meanwhile
+// ACK_TIMEOUT_MS (timeout), or whose subscription the hub lost meanwhile
 // (lost, offline, not_attached) is refused with CommandError.unsure: it
 // was sent, and whether the host took it is not known. One that never left
 // the page is refused without it.
 //
-// What the core sends is checked member by member: a message that is no
+// What the hub sends is checked member by member: a message that is no
 // JSON object, of a type this version does not know or for a subscription
 // or command the page does not have is passed over.
 
@@ -39,16 +39,16 @@ export interface Socket {
   close(): void;
 }
 
-/** What a subscription tells its owner, in the order the core sent it. */
+/** What a subscription tells its owner, in the order the hub sent it. */
 export interface SubHandler {
   /** The last stored seq the owner has: attaching again sends the stored
    * events after it. */
   from(): number;
-  /** The core attached the chat: the chat as the host states it, the
+  /** The hub attached the chat: the chat as the host states it, the
    * lowest stored seq; again after the page's connection came back. */
   attached(chat: Record<string, unknown>, first: number | undefined, again: boolean): void;
   event(ev: Event): void;
-  /** The core ended the subscription (the machine left, the chat is gone,
+  /** The hub ended the subscription (the machine left, the chat is gone,
    * the plugin was turned off, too many): it is over; the owner may
    * attach again. */
   detached(error: ChatError): void;
@@ -64,7 +64,7 @@ export interface Subscription {
 }
 
 /** The error of a command or a subscription, with its code (chatproto's,
- * the core's, or the page's own: offline, timeout, too_many, too_large).
+ * the hub's, or the page's own: offline, timeout, too_many, too_large).
  * unsure: the command was sent and may have been carried out all the
  * same. */
 export class CommandError extends Error {
@@ -79,7 +79,7 @@ export class CommandError extends Error {
   }
 }
 
-/** The core's codes of a command's answer that say the command was sent
+/** The hub's codes of a command's answer that say the command was sent
  * on a subscription that ended before the host's answer came. */
 const UNSURE_ACKS: ReadonlySet<string> = new Set(['lost', 'offline', 'not_attached']);
 
@@ -97,7 +97,7 @@ export const RETRY_MAX_MS = 8_000;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** An error of the core, read from what it sent; undefined for none. */
+/** An error of the hub, read from what it sent; undefined for none. */
 export function readError(v: unknown): ChatError | undefined {
   if (!isObject(v)) return undefined;
   const code = typeof v.code === 'string' && v.code ? v.code.slice(0, 64) : 'failed';
@@ -113,7 +113,7 @@ interface Sub {
   m: string;
   chat: string;
   handler: SubHandler;
-  /** The core answered its attach on the current connection. */
+  /** The hub answered its attach on the current connection. */
   attached: boolean;
   /** It attached once already (an attach after that is again). */
   once: boolean;
@@ -144,7 +144,7 @@ export class ChatConnection {
 
   constructor(private readonly open: () => Socket) {}
 
-  /** A connection to the core that served the page. */
+  /** A connection to the hub that served the page. */
   static toHub(): ChatConnection {
     return new ChatConnection(() => openChannel(WS_PATH) as unknown as Socket);
   }
@@ -191,7 +191,7 @@ export class ChatConnection {
     return subscription;
   }
 
-  /** Sends a command for a chat the page has a subscription to (the core
+  /** Sends a command for a chat the page has a subscription to (the hub
    * relays it on that subscription; not_attached without one); resolves
    * once the host took it, rejects with a CommandError otherwise. */
   command(m: string, chat: string, cmd: Command): Promise<void> {

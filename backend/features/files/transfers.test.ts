@@ -1,4 +1,4 @@
-// The transfers through a core whose machine's agent serves the real file
+// The transfers through a hub whose machine's agent serves the real file
 // system (testdata/agent.ts), behind Bun.serve: what a browser gets.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
@@ -282,7 +282,7 @@ describe('downloads panel', () => {
   test('progress, ends and cancels', async () => {
     const page = testPage(fc.tc.hub);
     const other = testPage(fc.tc.hub);
-    // The page says it follows id before it downloads; the core has not
+    // The page says it follows id before it downloads; the hub has not
     // seen it yet.
     const follow = async (id: string) => {
       page.send({ t: 'download.watch', ids: [id] });
@@ -311,7 +311,7 @@ describe('downloads panel', () => {
     expect((await page.ending('invalid01')).at(-1)).toMatchObject({ state: 'failed', error: 'invalid' });
 
     // A page that asks after the end (its request came first, or it
-    // reconnected) learns how it ended; an id the core never saw is unknown.
+    // reconnected) learns how it ended; an id the hub never saw is unknown.
     await fetchAll('late-0001', at('proj/a.txt'));
     page.send({ t: 'download.watch', ids: ['late-0001', 'never-001', 'bad id!'] });
     expect(await page.next('late-0001')).toMatchObject({ state: 'done', sent: 5 });

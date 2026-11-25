@@ -1,4 +1,4 @@
-// Builds the core's executable: hosts/bun/main.ts compiled by Bun with the
+// Builds the hub's executable: hosts/bun/main.ts compiled by Bun with the
 // payloads (kernel/payloads.ts) embedded as one tar archive.
 //
 //   bun scripts/build.ts --out FILE [--target bun-linux-x64-baseline]
@@ -8,7 +8,7 @@
 // The executable is the machine build of its own platform too (its `node`
 // commands): it carries its platform's herdr-core (embedded as
 // herdr-core.gz, which its node installs), the SHA-256 of every
-// herdr-core of --hc (machine/hc.json, which the core holds the machines'
+// herdr-core of --hc (machine/hc.json, which the hub holds the machines'
 // builds to), and machine/release.json: its version, its platform and the
 // release's download URL (--release-url; none for a build of no release),
 // where machines get their platform's build (kernel/machines/transport/

@@ -63,7 +63,7 @@ export const channels = {
   notifyClick: 'desktop:notify-click',
   /** page → shell: whether the page takes notification click events. */
   notifyClickWanted: 'desktop:notify-click-wanted',
-  /** frame → shell, any frame of the app's origin: a channel to the core
+  /** frame → shell, any frame of the app's origin: a channel to the hub
    * (id, path, WebSocket subprotocols; frames.ts). */
   openChannel: 'desktop:open-channel',
   /** shell → frame: the channel's id, with its MessagePort. */

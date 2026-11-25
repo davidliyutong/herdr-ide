@@ -3,7 +3,7 @@
 // database in write-ahead logging is one host's), its own SQLite database
 // with the Go host's tables, so either build's host reads what the other
 // wrote. It holds the chats, their stored events, the trusted folders and
-// the core's last settings.
+// the hub's last settings.
 //
 // SQLite runs in a worker thread: node:sqlite's calls are synchronous, and
 // a write that waits (a data directory on a network mount that stopped
@@ -587,13 +587,13 @@ export class Journal {
     await this.tx({ sql: 'DELETE FROM chats WHERE id = ?', params: [chatId] });
   }
 
-  /** The settings the core gave last; undefined when none. */
+  /** The settings the hub gave last; undefined when none. */
   async settings(): Promise<chat.HostSettings | undefined> {
     const [r] = await this.all('SELECT value FROM settings WHERE key = ?', 'host');
     return r ? parse<chat.HostSettings | undefined>(text(r.value!), undefined) : undefined;
   }
 
-  /** Keeps the settings the core gave. */
+  /** Keeps the settings the hub gave. */
   async putSettings(s: chat.HostSettings): Promise<void> {
     await this.tx({
       sql: 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',

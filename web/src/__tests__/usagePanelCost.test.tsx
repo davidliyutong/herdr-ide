@@ -2,7 +2,7 @@
 //
 // The AI usage panel reads the cost report again when the user's prices or
 // the providers shown change, not only at its next refresh (the e2e test
-// tests/usage.spec.ts runs the same against a core).
+// tests/usage.spec.ts runs the same against a hub).
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';

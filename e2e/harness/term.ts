@@ -1,4 +1,4 @@
-// A client of the core's terminal protocol (/api/v1/term) for checks the
+// A client of the hub's terminal protocol (/api/v1/term) for checks the
 // page draws on a canvas: the terminals' records, their screens and the
 // layout document. Reads only, as a test's observer.
 
@@ -8,7 +8,7 @@ export type TerminalRecord = Record<string, unknown> & { address: string; state?
 
 type Msg = Record<string, unknown> & { t: string };
 
-/** What the core detected of a terminal's coding agent (its records'
+/** What the hub detected of a terminal's coding agent (its records'
  * members, null when unknown). */
 export interface AgentState {
   agent: string | null;
@@ -78,7 +78,7 @@ export class TermClient {
     return res.result as T;
   }
 
-  /** The agent the core last told of in a terminal. */
+  /** The agent the hub last told of in a terminal. */
   agent(terminal: string): AgentState {
     return this.agents.get(terminal) ?? agentOf({});
   }

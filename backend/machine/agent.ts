@@ -1,6 +1,6 @@
 // The agent of an instance on a machine: what the sessions of a node share
 // (its terminal core, its sockets, its features' machine sides), each
-// session serving the streams of one core over yamux (serve). A node
+// session serving the streams of one hub over yamux (serve). A node
 // (node.ts) runs one agent and hands it every client that connects.
 import { realpath } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
@@ -57,13 +57,13 @@ export const unknownPlugin = (id: string): Reply => ({
   error: `unknown_plugin: unknown plugin ${JSON.stringify(id)}`,
 });
 
-/** One core's session of the agent. */
+/** One hub's session of the agent. */
 export class AgentSession implements MachineSession {
   readonly id: number;
-  /** Names the core (its process), the same for its sessions after
+  /** Names the hub (its process), the same for its sessions after
    * reconnects. */
   readonly client: string;
-  /** SSH_CONNECTION of the ssh session the core came through; "" for the
+  /** SSH_CONNECTION of the ssh session the hub came through; "" for the
    * local machine. */
   readonly sshConn: string;
   readonly ys: Yamux;
@@ -100,7 +100,7 @@ export class AgentSession implements MachineSession {
     };
   }
 
-  /** Opens a stream towards the core with header h and reads its reply
+  /** Opens a stream towards the hub with header h and reads its reply
    * within timeoutMs; the stream and its reader after the reply. */
   async ask(h: Header, timeoutMs: number, signal?: AbortSignal): Promise<{ conn: Conn; reply: Reply }> {
     const stream = await this.ys.open();
@@ -279,7 +279,7 @@ export class Agent {
     return [...this.sessions].filter((s) => s.live).sort((a, b) => a.id - b.id);
   }
 
-  /** Serves one core's session over conn until it ends: the core's process
+  /** Serves one hub's session over conn until it ends: the hub's process
    * is client ("" when unknown), and it came through the ssh session
    * sshConn ("" for the local machine). */
   async serve(conn: Duplex, client: string, sshConn: string): Promise<void> {
@@ -313,7 +313,7 @@ export class Agent {
     }
   }
 
-  /** Tells the cores of the agent's sessions that the node next serves the
+  /** Tells the hubs of the agent's sessions that the node next serves the
    * instance now (op node.drain), after giving it what the features run
    * for the instance (Served.handOver). */
   drain(next?: NodeInfo): void {

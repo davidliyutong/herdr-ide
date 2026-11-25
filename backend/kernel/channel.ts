@@ -1,4 +1,4 @@
-// A channel is a WebSocket as the core sees it, whichever host carries it:
+// A channel is a WebSocket as the hub sees it, whichever host carries it:
 // a WebSocket of Bun.serve on the command line, a MessagePort in the
 // desktop app. Messages are text or binary, in order; the host frames
 // them.
@@ -48,7 +48,7 @@ export function parseJSON(data: Message): unknown {
 }
 
 /** Two channels joined to each other in memory (tests, and a host that
- * joins a port to the core in the same process): what one sends the other
+ * joins a port to the hub in the same process): what one sends the other
  * receives. Each side is adopted with its open. */
 export function channelPair(): {
   a: Channel & { adopt(open: ChannelOpen): void };

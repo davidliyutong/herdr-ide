@@ -280,7 +280,7 @@ function removeOwn(p: string, fd: number): void {
 
 /** Receives a ChunkWriter body (at most limit bytes) with sink. It reads
  * the body to its end marker whatever happens (a full disk, too much
- * text): the core sends all of it before it reads the answer. A body that
+ * text): the hub sends all of it before it reads the answer. A body that
  * breaks off throws. */
 export async function receive(chunks: ChunkReader, limit: number, sink: (b: Buffer) => Promise<void> | void): Promise<void> {
   let n = 0;

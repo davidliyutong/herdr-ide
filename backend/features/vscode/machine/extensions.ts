@@ -1,7 +1,7 @@
 // Extensions of the instance's code-server: the bridge extension and the
-// defaults, each a VSIX the core uploads (or an extension's id), installed
+// defaults, each a VSIX the hub uploads (or an extension's id), installed
 // by code-server's own installer into the instance's extensions directory,
-// and the markers by which the cores remember what they installed there.
+// and the markers by which the hubs remember what they installed there.
 import { randomBytes } from 'node:crypto';
 import { mkdir, open, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,7 +11,7 @@ import { dirArgs } from './server.ts';
 import type { Layout } from './layout.ts';
 import { lastN, run, runError } from './process.ts';
 
-/** Bounds a VSIX the core uploads. */
+/** Bounds a VSIX the hub uploads. */
 export const MAX_VSIX = 512 << 20;
 /** How long code-server's installer may take. */
 export const INSTALL_EXT_MS = 5 * 60_000;

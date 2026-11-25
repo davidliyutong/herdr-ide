@@ -127,7 +127,7 @@ describe('file operations', () => {
 
 describe('what features see of the sessions', () => {
   // A feature's op learns its session; the agent's sessions count their
-  // pipes to each socket (VS Code keeps code-server for the cores that
+  // pipes to each socket (VS Code keeps code-server for the hubs that
   // show it); the node's hand-over and the agent's end reach the features.
   test('sessions, their pipes, the hand-over and the end', async () => {
     const seen: Array<{ id: number; client: string; sessions: number[] }> = [];
@@ -146,13 +146,13 @@ describe('what features see of the sessions', () => {
         events.push('closed');
       },
     }));
-    r = await rig({ features: [side], client: 'core-1' });
-    const second = r.connect('core-2');
+    r = await rig({ features: [side], client: 'hub-1' });
+    const second = r.connect('hub-2');
     await r.session.request({ op: Op.GUI });
     await second.request({ op: Op.GUI });
     expect(seen).toEqual([
-      { id: 1, client: 'core-1', sessions: [1, 2] },
-      { id: 2, client: 'core-2', sessions: [1, 2] },
+      { id: 1, client: 'hub-1', sessions: [1, 2] },
+      { id: 2, client: 'hub-2', sessions: [1, 2] },
     ]);
 
     const sock = join(r.dirs.run, 'p.sock');
@@ -265,7 +265,7 @@ describe('the plugin op', () => {
     expect((await r.session.request({ op: Op.Hello })).ok).toBe(true);
   });
 
-  test('an action ends when the core gives up on it; a streaming one goes on after its reply', async () => {
+  test('an action ends when the hub gives up on it; a streaming one goes on after its reply', async () => {
     r = await rig({ features: [side] });
     const ac = new AbortController();
     const p = r.session.request({ op: Op.Plugin, plugin: 't', action: 'wait', params: {} }, { signal: ac.signal, timeoutMs: 60_000 });
@@ -305,7 +305,7 @@ describe('the terminal core', () => {
     );
   });
 
-  test('a start needs the executable the core expects; status names the session and socket', async () => {
+  test('a start needs the executable the hub expects; status names the session and socket', async () => {
     r = await rig();
     const st = await r.session.request({ op: Op.HC, action: 'status' });
     expect(st.hc?.running).toBe(false);
@@ -346,7 +346,7 @@ describe('the terminal core', () => {
   });
 });
 
-describe('through the core', () => {
+describe('through the hub', () => {
   test("the kernel's call runs an action and checks its result by the protocol", async () => {
     const { call } = await import('#kernel/agent.ts');
     const { machineOf } = await import('./testing.ts');
@@ -356,12 +356,12 @@ describe('through the core', () => {
   });
 });
 
-describe('one thread for every core', () => {
+describe('one thread for every hub', () => {
   test('fs.read of a FIFO fails at once, and another session is answered meanwhile', async () => {
     r = await rig();
     const fifo = join(r.home, 'fifo');
     Bun.spawnSync(['mkfifo', fifo]);
-    const other = r.connect('core-2');
+    const other = r.connect('hub-2');
     const started = Date.now();
     const read = await refusalOf(r.session.request({ op: Op.FsRead, path: fifo }, { timeoutMs: 5000 }));
     expect(read.error).toContain('not a regular file');
@@ -381,7 +381,7 @@ describe('one thread for every core', () => {
   test('a stat that does not return (a mount that stopped answering) holds its own request only', async () => {
     let stuck = 0;
     r = await rig({ fs: { lstat: () => (stuck++, new Promise(() => {})) } });
-    const other = r.connect('core-2');
+    const other = r.connect('hub-2');
     const pending = r.session.request({ op: Op.FsStat, path: '~' }, { timeoutMs: 60_000 });
     pending.catch(() => {});
     await until(() => stuck === 1, 'the stat to start');

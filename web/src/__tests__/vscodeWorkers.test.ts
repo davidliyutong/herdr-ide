@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // Service workers VS Code's content registered on the UI's origin do not
-// outlast VS Code's switch: while it is off for this client (once the core
+// outlast VS Code's switch: while it is off for this client (once the hub
 // told the settings) the page unregisters every one; while it is on, none.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

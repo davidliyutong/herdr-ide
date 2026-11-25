@@ -20,7 +20,7 @@ import { formatDuration } from '#shared/lib/gotime.ts';
 import type { VaultRun } from '#shared/proto/agentproto/index.ts';
 
 /** run_with_env's default and longest timeout and the output it returns,
- * when the core gives none. */
+ * when the hub gives none. */
 export const DEFAULT_TIMEOUT_MS = 120_000;
 export const MAX_TIMEOUT_MS = 600_000;
 export const MAX_OUTPUT = 64 << 10;
@@ -38,8 +38,8 @@ export interface RunLimits {
   maxTimeoutMs?: number;
 }
 
-/** limits bounded as the core says (the vault's settings, in seconds and
- * bytes); what the core leaves out (an older core, or none) keeps them. */
+/** limits bounded as the hub says (the vault's settings, in seconds and
+ * bytes); what the hub leaves out (an older hub, or none) keeps them. */
 export function withHub(limits: RunLimits, run: VaultRun | undefined): RunLimits {
   if (!run) return limits;
   const out = { ...limits };

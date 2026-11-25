@@ -54,7 +54,7 @@ test('OS external opens accept only credential-free HTTP(S)', () => {
     assert.equal(isExternal(url), false, url);
 });
 
-test('permissions require both the requesting frame and top window to belong to the core', () => {
+test('permissions require both the requesting frame and top window to belong to the hub', () => {
   for (const permission of ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'fileSystem', 'local-fonts']) {
     assert.ok(allowPermission(permission, origin + '/m/local/code/', origin, origin));
     assert.equal(allowPermission(permission, 'https://example.com', origin, origin), false);
@@ -87,7 +87,7 @@ test('permissions require both the requesting frame and top window to belong to 
   assert.notEqual(APP_PARTITION, BROWSER_PARTITION);
 });
 
-test('a webview attaches only for the browser partition and an http(s) address without credentials that is not the core’s', () => {
+test('a webview attaches only for the browser partition and an http(s) address without credentials that is not the hub’s', () => {
   const ok = { partition: BROWSER_PARTITION, src: 'https://example.com/a' };
   assert.ok(guestPreferences({}, ok, origin));
   assert.ok(guestPreferences({}, { ...ok, src: 'http://localhost:3000' }, origin));
@@ -111,7 +111,7 @@ test('a webview attaches only for the browser partition and an http(s) address w
     assert.equal(guestPreferences(prefs, params, origin), false, JSON.stringify(params));
     assert.equal(prefs.nodeIntegration, true, 'a refused attach leaves the preferences alone');
   }
-  // Without the core's origin nothing attaches.
+  // Without the hub's origin nothing attaches.
   assert.equal(guestPreferences({}, ok, ''), false);
 });
 
@@ -165,7 +165,7 @@ test('a guest navigates to http(s) addresses without credentials only', () => {
 });
 
 test("a guest never navigates to the app's own host", () => {
-  // The app's session alone takes the app's origin to the core; a page in
+  // The app's session alone takes the app's origin to the hub; a page in
   // a pane must not load the UI's address or open it as a tab.
   for (const url of [
     origin,

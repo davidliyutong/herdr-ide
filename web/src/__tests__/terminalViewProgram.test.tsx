@@ -47,11 +47,11 @@ vi.mock('../vt/pane', () => ({
 
 import { TerminalView } from '../components/TerminalView';
 import { useStore } from '../state/store';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-let core: FakeCore;
+let hub: FakeHub;
 let host: HTMLDivElement;
 let root: Root;
 const flush = () => act(async () => void (await settle()));
@@ -59,13 +59,13 @@ const flush = () => act(async () => void (await settle()));
 beforeEach(async () => {
   made.length = 0;
   useStore.setState({ readOnly: false });
-  core = new FakeCore();
-  core.machine('a', [FakeCore.term('t1', { pid: 200 })], {
+  hub = new FakeHub();
+  hub.machine('a', [FakeHub.term('t1', { pid: 200 })], {
     version: 2,
     workspaces: [{ id: 'w1', name: '', cwd: '/home/u', tabs: [{ root: { terminal: 't1' }, focused: 't1' }], selected: 0 }],
     selected: 0,
   });
-  core.install().subscribe('a');
+  hub.install().subscribe('a');
   await settle();
   host = document.createElement('div');
   document.body.append(host);
@@ -86,24 +86,24 @@ describe('a terminal’s view', () => {
     // The terminal core stops: the program ends, then its record says so.
     act(() => pane.o.onClosed('exited', 1));
     expect(host.querySelector('.term-ended')?.textContent).toBe('The program ended (exit code 1).');
-    core.event('a', 'finished', 't1', { reason: 'server_stop' });
+    hub.event('a', 'finished', 't1', { reason: 'server_stop' });
     await flush();
     expect(pane.programs).toEqual([200, undefined]);
     // Started again: the kept terminal has a new shell at its address.
-    core.event('a', 'restarted', 't1', FakeCore.term('t1', { pid: 201 }));
+    hub.event('a', 'restarted', 't1', FakeHub.term('t1', { pid: 201 }));
     await flush();
     expect(pane.programs).toEqual([200, undefined, 201]);
     // The pane attaches again and says so.
     act(() => pane.o.onReopen());
     expect(host.querySelector('.term-ended')).toBeNull();
     // Other changes of the record tell it nothing new.
-    core.event('a', 'title', 't1', { title: 'vim' });
+    hub.event('a', 'title', 't1', { title: 'vim' });
     await flush();
     expect(pane.programs).toEqual([200, undefined, 201]);
     expect(made).toHaveLength(1);
     // Gone, it is told nothing more.
     await act(async () => root.unmount());
-    core.event('a', 'restarted', 't1', FakeCore.term('t1', { pid: 202 }));
+    hub.event('a', 'restarted', 't1', FakeHub.term('t1', { pid: 202 }));
     await flush();
     expect(pane.programs).toEqual([200, undefined, 201]);
     root = createRoot(host);

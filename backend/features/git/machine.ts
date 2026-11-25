@@ -6,7 +6,7 @@
 // (machine/check.ts). git never asks for credentials or an editor; a fetch,
 // pull or push that would need a password fails with auth_required. Reads
 // take 15 s at most, changes 120 s, after which git's process group is
-// killed, as it is when the core gives up on the action; at most MAX_RUNS
+// killed, as it is when the hub gives up on the action; at most MAX_RUNS
 // run at once on the machine, another waits briefly and fails with busy.
 import { defineMachine, type ActionContext, type Handlers } from '#machine/feature.ts';
 import { READS, WRITES, gitProtocol, type Params, type Read, type Write } from './protocol.ts';

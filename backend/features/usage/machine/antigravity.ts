@@ -45,7 +45,7 @@ export interface LSProcess {
   csrf: string;
 }
 
-/** The quotas of Antigravity's account on the machine; one the core names
+/** The quotas of Antigravity's account on the machine; one the hub names
  * in skip (by the email's hash, known once the server answered) or
  * skipLocal is answered skipped. */
 export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promise<Account[]> {

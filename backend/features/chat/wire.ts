@@ -4,9 +4,9 @@
 // web/src/plugins/chat/protocol.ts mirrors them.
 //
 // The page subscribes to a chat with attach under an id of its own (sub):
-// the core answers attached with the chat and the lowest stored sequence
+// the hub answers attached with the chat and the lowest stored sequence
 // number, then event for each event of the chat after from (stored ones,
-// then live ones as they come), until the page sends detach or the core
+// then live ones as they come), until the page sends detach or the hub
 // sends detached (the machine left, the chat was deleted, the feature was
 // turned off). Each subscription is a connection of its own to the
 // machine's chat host, which fans the chat's events out. A page has at most
@@ -14,10 +14,10 @@
 // sends a chat's commands with command under an id of its own (id), on a
 // subscription of that chat it has, answered by ack with that id, exactly
 // once, also when the subscription ends first; a chatproto Command's own id
-// is the core's. A read-only core refuses every command (read_only) and
+// is the hub's. A read-only hub refuses every command (read_only) and
 // takes attaches.
 //
-// The chats' states reach every page through the core's event channel
+// The chats' states reach every page through the hub's event channel
 // (/ws) as {t: "plugin", plugin: "chat", m, data: StatesData}; a page that
 // (re)connects reads them all first from GET /api/p/chat/states
 // (StatesSnapshot) and then applies the messages whose rev is above the
@@ -25,16 +25,16 @@
 import { z } from 'zod';
 import * as chat from '#shared/proto/chatproto/index.ts';
 
-/** The core's error codes, besides chatproto's and the machine's. */
+/** The hub's error codes, besides chatproto's and the machine's. */
 export const HubCode = {
-  /** The core is read-only; commands are refused. */
+  /** The hub is read-only; commands are refused. */
   ReadOnly: 'read_only',
   /** The chat's machine is not connected. */
   Offline: 'offline',
   /** detach of a subscription the page does not have. */
   UnknownSub: 'unknown_sub',
   /** The page has MAX_SUBS subscriptions already, or MAX_SUBS_PER_MACHINE
-   * of the machine; or the core has as many connections to the machine's
+   * of the machine; or the hub has as many connections to the machine's
    * chat host as it keeps (Limits.maxHostConns). */
   TooMany: 'too_many',
   /** command for a chat the page has no subscription to, or one that the
@@ -131,8 +131,8 @@ export const clientMessage = z.object({
 });
 export type ClientMessage = z.output<typeof clientMessage>;
 
-/** The command line the core writes to the chat host for a page's
- * command, under the core's id: chatproto's members in their order, those
+/** The command line the hub writes to the chat host for a page's
+ * command, under the hub's id: chatproto's members in their order, those
  * that are empty left out. */
 export function commandLine(c: PageCommand, id: string): string {
   return chat.line({
@@ -151,7 +151,7 @@ export function commandLine(c: PageCommand, id: string): string {
   });
 }
 
-/** The messages of the core. */
+/** The messages of the hub. */
 export const T = {
   /** Answers attach: the chat as it is, and the lowest sequence number
    * still stored. */
@@ -175,7 +175,7 @@ export const eventPrefix = (sub: string): string => `{"t":"event","sub":${JSON.s
 /** The type of StatesData. */
 export const DATA_STATES = 'states';
 
-/** The data of the chat feature's message on the core's event channel for
+/** The data of the chat feature's message on the hub's event channel for
  * machine m. */
 export interface StatesData {
   t: typeof DATA_STATES;
@@ -186,21 +186,21 @@ export interface StatesData {
   full: boolean;
   /** The machine is not connected: its states were read when it was. */
   stale?: boolean;
-  /** Numbers the machine's states since the core started: each message has
+  /** Numbers the machine's states since the hub started: each message has
    * the next number, and a snapshot the number of the last message it
    * holds. A page applies a message only when its rev is above the one it
    * has. */
   rev: number;
   /** The version of the machine's chat host as the watch read it last
-   * (left out while none serves); outdated: that is not this core's build,
+   * (left out while none serves); outdated: that is not this hub's build,
    * whose host takes its place only when the user restarts it (POST
    * host/stop), which the page reminds of. */
   hostVersion?: string;
   outdated?: boolean;
 }
 
-/** Answers GET /api/p/chat/states: the last states the core read of each
- * machine's chats, full, by machine id. A machine whose chat host the core
+/** Answers GET /api/p/chat/states: the last states the hub read of each
+ * machine's chats, full, by machine id. A machine whose chat host the hub
  * has not read since it started is not there. The states of a machine that
  * is not connected are those it had when it was. */
 export interface StatesSnapshot {
@@ -210,7 +210,7 @@ export interface StatesSnapshot {
 /** The time Go writes for none. */
 export const ZERO_TIME = '0001-01-01T00:00:00Z';
 
-/** What the core reads of a chat's state from the host (Op.Watch). */
+/** What the hub reads of a chat's state from the host (Op.Watch). */
 export const chatState = z.object({
   id: str,
   kind: str,

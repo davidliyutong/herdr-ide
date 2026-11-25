@@ -29,7 +29,7 @@ const asyncFailCode = async (p: Promise<unknown>): Promise<string> =>
 
 describe('registry', () => {
   // Records are written at once and read back; a broken file, or one of
-  // another kind, is reported and left alone (the core then keeps its
+  // another kind, is reported and left alone (the hub then keeps its
   // machines in memory); without a file there are no machines and none is
   // written.
   test('round trip and errors', () => {
@@ -45,7 +45,7 @@ describe('registry', () => {
 
     writeFileSync(path, '{');
     expect(() => Registry.open(path)).toThrow();
-    // What the core falls back to writes nothing.
+    // What the hub falls back to writes nothing.
     Registry.memory().put(sshSpec('z'));
     expect(readFileSync(path, 'utf8')).toBe('{');
 
@@ -153,7 +153,7 @@ describe('registry', () => {
 describe('specs', () => {
   // The local machine comes first, then the stored SSH machines and the
   // --ssh targets, each once. A stored machine whose target is refused
-  // stays (it shows an error); an --ssh one does not (the core refuses to
+  // stays (it shows an error); an --ssh one does not (the hub refuses to
   // start with it).
   test('loadSpecs', () => {
     const stored: Spec[] = [
@@ -476,7 +476,7 @@ describe('machines', () => {
 
   // Machines added at runtime are stored, join a running manager and
   // connect; removing one ends its session, deletes its record and
-  // publishes nothing more for it. A target or id the core has is refused,
+  // publishes nothing more for it. A target or id the hub has is refused,
   // and the local machine cannot be removed.
   test('add and remove at runtime', async () => {
     const dial = agentDialer();
@@ -589,7 +589,7 @@ describe('machines', () => {
     expect(again.list().map((m) => m.id)).toEqual([LOCAL_ID, 'a', 'c']);
   });
 
-  // Agent events reach the listeners for machines the core has.
+  // Agent events reach the listeners for machines the hub has.
   test('agent events', () => {
     const mg = testMachines([localSpec()]);
     const got: unknown[] = [];

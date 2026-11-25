@@ -1,8 +1,8 @@
-// `serve`: the core on the command line. It listens on loopback (or behind
+// `serve`: the hub on the command line. It listens on loopback (or behind
 // an authenticating proxy with its secret), connects to the machines and
 // serves the web UI to browsers. With --parent-stdio a launcher (the
-// end-to-end tests) owns it: the core answers a ready line on stdout and
-// stops when stdin closes. The desktop app runs the core in process
+// end-to-end tests) owns it: the hub answers a ready line on stdout and
+// stops when stdin closes. The desktop app runs the hub in process
 // instead (hosts/electron).
 import { appendFileSync, openSync, readFileSync, closeSync } from 'node:fs';
 import { parseArgs } from 'node:util';
@@ -54,7 +54,7 @@ export const OPTIONS = {
   'npm-registry': { type: 'string', default: '' },
 } as const;
 
-/** The flags naming where the core and the machines download from: the
+/** The flags naming where the hub and the machines download from: the
  * machines get these URLs on their command lines, which every local user
  * there can read, so they hold no credentials (shared/lib/urls.ts). */
 const URL_FLAGS = ['npm-registry', 'code-server-url'] as const;
@@ -129,7 +129,7 @@ export async function serve(argv: string[]): Promise<void> {
   const features = hubFeatures({
     payloads,
     controlDir,
-    // The desktop app's proofs are its own core's (hosts/electron).
+    // The desktop app's proofs are its own hub's (hosts/electron).
     verifyKey: '',
     pty: bunPty,
     codeServer: {
@@ -219,8 +219,8 @@ export async function serve(argv: string[]): Promise<void> {
   // Bind before connecting to machines: a failed launch must not start agents.
   const fetch = (req: Request, server: Server<WSData>): Promise<Response> | Response | undefined => {
     const remote = server.requestIP(req)?.address;
-    // Every client of the command line's core is a browser: the desktop
-    // app runs its own core in process (hosts/electron).
+    // Every client of the command line's hub is a browser: the desktop
+    // app runs its own hub in process (hosts/electron).
     const peer: Peer = { remote, desktop: false };
     if (req.headers.get('Upgrade')?.toLowerCase() === 'websocket')
       peer.upgrade = (open, opts) =>
@@ -246,7 +246,7 @@ export async function serve(argv: string[]): Promise<void> {
     perMessageDeflate: true,
   };
   // Bun answers a body over maxRequestBodySize with a bare 413 before the
-  // core sees it: a little over the largest upload (4 GiB), so that the
+  // hub sees it: a little over the largest upload (4 GiB), so that the
   // files feature answers its own too_large.
   const maxRequestBodySize = 4 * 2 ** 30 + (1 << 20);
   const listen = (hostname: string, port: number) =>
@@ -259,7 +259,7 @@ export async function serve(argv: string[]): Promise<void> {
   }
   const address = `${server.hostname?.includes(':') ? `[${server.hostname}]` : server.hostname}:${server.port}`;
   // "localhost" names 127.0.0.1 and ::1, and a browser tries either first:
-  // the core takes the other one's port too, so that the name leads to it.
+  // the hub takes the other one's port too, so that the name leads to it.
   // Only then does it vouch for http://localhost:<port>.
   const o = await otherLoopback({ address: server.hostname ?? '', port: server.port ?? 0, family: '' }, async (host, port) =>
     listen(host, port),

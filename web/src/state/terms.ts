@@ -1,4 +1,4 @@
-// The machines' terminals as the core's terminal protocol reports them
+// The machines' terminals as the hub's terminal protocol reports them
 // (/api/v1/term, docs/features/22-terminal-protocol.md) and their shared
 // arrangement, the layout document of each machine: workspaces, tabs and
 // split panes. A machine is subscribed once the user turns to it (which
@@ -143,7 +143,7 @@ export class TermModel {
     };
   }
 
-  /** Follows a machine's terminals: the core installs and starts its
+  /** Follows a machine's terminals: the hub installs and starts its
    * terminal core. Kept for the page's life. */
   subscribe(m: string) {
     if (this.subscribed.has(m)) return;
@@ -677,7 +677,7 @@ function sameRecords(a: Record<string, TerminalRecord>, b: Record<string, Termin
   return ka.every((k) => a[k] === b[k]);
 }
 
-/** The page's model, on the core that served it. */
+/** The page's model, on the hub that served it. */
 export let terms = new TermModel(TermConnection.toHub());
 
 /** Replaces the page's model (tests). */

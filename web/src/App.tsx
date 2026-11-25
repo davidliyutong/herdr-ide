@@ -96,7 +96,7 @@ function followTerms() {
       show(s.machineId);
       noteFocused();
     }
-    // Machines removed from the core are no longer followed.
+    // Machines removed from the hub are no longer followed.
     for (const m of prev.order) if (!s.machines[m] && prev.machines[m]) terms.forget(m);
   });
   const offTerms = useTerms.subscribe((st, prev) => {
@@ -142,7 +142,7 @@ export function App() {
         useStore.getState().setConnected(c);
         if (c) {
           resyncDownloads();
-          // Changes made while the page was away (e.g. a core restart).
+          // Changes made while the page was away (e.g. a hub restart).
           void loadSettings();
           void loadKeybindings();
         }

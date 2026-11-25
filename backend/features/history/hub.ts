@@ -1,4 +1,4 @@
-// The terminal history feature's core side: snapshots of the terminals'
+// The terminal history feature's hub side: snapshots of the terminals'
 // output that a machine writes to its own disk while history.capture is on
 // for it, shown after the terminal core started again. A scheduler
 // (scheduler.ts) asks the machines for captures and clears; the routes,
@@ -63,7 +63,7 @@ async function asking<T>(c: Ctx, ms: number, fn: (signal: AbortSignal, timeoutMs
   }
 }
 
-/** An entry as the Go core wrote it: its snapshot's fields, restored only
+/** An entry as the Go hub wrote it: its snapshot's fields, restored only
  * when set, previous only when there is one. */
 const entryOut = (e: Entry) => ({
   terminal: e.terminal,

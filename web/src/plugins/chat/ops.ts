@@ -155,7 +155,7 @@ export const machineLabel = (m: string): string => useStore.getState().machines[
 const HOST_END_MS = 5000;
 const HOST_END_EVERY_MS = 250;
 
-/** Restarts machine m's chat host so that one of the core's build takes
+/** Restarts machine m's chat host so that one of the hub's build takes
  * its place: the host ends (it refuses while a chat starts, works or
  * waits), ending its idle agents, whose chats resume their sessions at
  * their next message; once it is gone, a host of this build starts. A
@@ -183,7 +183,7 @@ export async function restartHost(m: string): Promise<boolean> {
   } catch {
     // The next use starts it.
   }
-  // The core's watch tells the new host's build.
+  // The hub's watch tells the new host's build.
   useChats.setState((s) => ({ hosts: { ...s.hosts, [m]: { version: '', outdated: false } } }));
   useStore.getState().toast(t('chat.host.restarted', { machine }), undefined, undefined, 'info');
   return true;

@@ -1,6 +1,6 @@
 // Shared by the browser plugin's tests: a machine with a layout holding a
 // browser pane, the pane and the frame layer rendered as the app does, and
-// the core's routes scripted.
+// the hub's routes scripted.
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -15,7 +15,7 @@ import { PluginPane } from '../components/PluginPane';
 import { BrowserLayer } from '../plugins/browser/BrowserLayer';
 import { resetFrames } from '../plugins/browser/frames';
 import { grantForward, resetGrants, useForwards } from '../plugins/browser/api';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,7 +25,7 @@ export interface Call {
   body?: Record<string, unknown>;
 }
 
-/** What the core answers; a function may return a promise or throw. */
+/** What the hub answers; a function may return a promise or throw. */
 export interface Routes {
   forward?: (body: { port: number }) => Response | Promise<Response>;
   listening?: () => Response;
@@ -52,7 +52,7 @@ export function fakeBrowserApi(routes: Routes = {}) {
 }
 
 export interface Harness {
-  core: FakeCore;
+  hub: FakeHub;
   host: HTMLElement;
   root: Root;
   view(): L.PluginView;
@@ -87,8 +87,8 @@ export async function mountPane(fields: Record<string, unknown>, opts: { asked?:
   if (opts.asked && typeof fields.m === 'string' && typeof fields.port === 'number') grantForward(fields.m, fields.port);
   useForwards.setState({ forwards: [], available: undefined });
   definePlugins([browserPlugin]);
-  const core = new FakeCore();
-  core.machine('a', [FakeCore.term('s1')], {
+  const hub = new FakeHub();
+  hub.machine('a', [FakeHub.term('s1')], {
     version: 1,
     workspaces: [
       {
@@ -104,24 +104,24 @@ export async function mountPane(fields: Record<string, unknown>, opts: { asked?:
     ],
     selected: 0,
   });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([{ id: 'a', label: 'Box', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
   s.selectMachine('a');
-  core.model.subscribe('a');
+  hub.model.subscribe('a');
   await settle();
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
   await act(async () => root.render(createElement(Host)));
   return {
-    core,
+    hub,
     host,
     root,
-    layout: () => core.model.layout('a')!,
+    layout: () => hub.model.layout('a')!,
     view: () => {
-      const leaf = L.findLeaf(core.model.layout('a')!, 'view:p1');
+      const leaf = L.findLeaf(hub.model.layout('a')!, 'view:p1');
       return (leaf as L.PluginLeaf).view;
     },
     unmount() {

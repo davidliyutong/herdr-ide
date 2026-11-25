@@ -2,7 +2,7 @@
 // as the machine side serves it (features/chat/machine): open gives a
 // stream to the machine's chat host (a hidden terminal of the machine's
 // terminal core, which the machine side starts, replaces when it is of
-// another build, and never lets the core name). After the reply the stream
+// another build, and never lets the hub name). After the reply the stream
 // carries the chat host's protocol (#shared/proto/chatproto) as it is, the
 // host's Hello first.
 import { z } from 'zod';
@@ -30,7 +30,7 @@ export const chatProtocol = defineProtocol('chat', {
     result: z.object({ installed: z.boolean(), fetched: z.boolean().optional(), error: z.string().optional() }),
     timeoutMs: 6 * 60_000,
   },
-  /** The core's upload of the SDK's pinned tarball: after the reply, the
+  /** The hub's upload of the SDK's pinned tarball: after the reply, the
    * tarball in chunks (agentproto's ChunkWriter), then a second line,
    * {ok} once it is installed, else {ok: false, error}. */
   sdkUpload: { params: z.object({}), result: z.unknown(), stream: true },

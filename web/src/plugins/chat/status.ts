@@ -1,7 +1,7 @@
 // The chat panes' agent statuses (plugins/api.ts ViewStatusDef), from the
 // chats' states (state.ts): a pane is working, blocked (a permission or a
 // question waits), done (a turn ended that nobody saw) or idle as its chat
-// is. An agent notification of a chat (the core's, with member chat)
+// is. An agent notification of a chat (the hub's, with member chat)
 // points to the pane that shows that chat; seeing a pane whose chat is
 // done tells the host (POST seen with the chat's last seq), which ends
 // done for every page. The pane shows the chat idle from then on; a POST

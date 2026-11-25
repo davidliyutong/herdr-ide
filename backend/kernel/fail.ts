@@ -1,4 +1,4 @@
-// The core's failures (#shared/lib/fail.ts: Fail, which the machine side
+// The hub's failures (#shared/lib/fail.ts: Fail, which the machine side
 // throws too) and the ones the kernel answers with.
 import { Fail } from '#shared/lib/fail.ts';
 

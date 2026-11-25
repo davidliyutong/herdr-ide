@@ -1,7 +1,7 @@
 // Helpers of the machine side's tests: a home of their own (short, below
 // /tmp: macOS limits unix socket paths to 104 bytes), an agent on it, and
-// the core's side of a session with it (the kernel's Session, so the tests
-// speak the wire as the core does).
+// the hub's side of a session with it (the kernel's Session, so the tests
+// speak the wire as the hub does).
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { duplexPair } from 'node:stream';
 import { dirsOf, makeDirs, type Dirs } from '#shared/host/hostdirs.ts';
@@ -36,9 +36,9 @@ export interface Rig {
   home: string;
   dirs: Dirs;
   agent: Agent;
-  /** The core's side of a session with the agent. */
+  /** The hub's side of a session with the agent. */
   session: Session;
-  /** Another session of the same agent (a second core). */
+  /** Another session of the same agent (a second hub). */
   connect(client?: string): Session;
   close(): Promise<void>;
 }
@@ -69,7 +69,7 @@ export async function rig(
     carryHC: o.carryHC,
   });
   const sessions: Session[] = [];
-  const connect = (client = o.client ?? 'core-1', sshConn = o.sshConn ?? '') => {
+  const connect = (client = o.client ?? 'hub-1', sshConn = o.sshConn ?? '') => {
     const [a, b] = duplexPair();
     void agent.serve(a, client, sshConn);
     const s = new Session(b, () => b.destroy());
@@ -100,9 +100,9 @@ export async function until(cond: () => boolean | Promise<boolean>, what = 'the 
   }
 }
 
-/** A machine of the kernel whose agent is reached through s: the core's
+/** A machine of the kernel whose agent is reached through s: the hub's
  * own call and open (#kernel/agent.ts) run a feature's actions through the
  * wire, its params and results checked by the protocol's schemas as the
- * core checks them. */
+ * hub checks them. */
 export const machineOf = (s: Session): Machine =>
   ({ open: (h: never, o: never) => s.open(h, o), request: (h: never, o: never) => s.request(h, o) }) as unknown as Machine;

@@ -22,7 +22,7 @@ export type QuestionReply = { answers: Record<string, string[]> } | { cancelled:
 
 /** A chat as the view uses it. Every command resolves once the host took
  * it, and rejects with an error whose code (a string member, chatproto's
- * Error codes and the core's: read_only, offline, …) says why it did not;
+ * Error codes and the hub's: read_only, offline, …) says why it did not;
  * the view explains the codes it knows (conversation.error.<code>). An
  * error whose member unsure is true says that the command was sent and may
  * have been carried out all the same (the connection ended before the

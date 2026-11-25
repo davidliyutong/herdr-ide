@@ -8,13 +8,13 @@ import { checkGuarded, sleep, waitFor, type TestHub } from '#kernel/testing.ts';
 import { INSTALL, PATH } from './settings.ts';
 import { vscodeHub, type VSCodeHub, type VSCodeHubOptions } from './testdata/hub.ts';
 
-const cores: VSCodeHub[] = [];
+const hubs: VSCodeHub[] = [];
 afterEach(async () => {
-  for (const c of cores.splice(0)) await c.stop();
+  for (const c of hubs.splice(0)) await c.stop();
 });
 const newHub = async (o: VSCodeHubOptions = {}) => {
   const vc = await vscodeHub(o);
-  cores.push(vc);
+  hubs.push(vc);
   return vc;
 };
 
@@ -70,7 +70,7 @@ test('guards', async () => {
   const ro = await newHub({ readOnly: true });
   const asTestHub = (vc: VSCodeHub) =>
     ({
-      core: vc.hub,
+      hub: vc.hub,
       request: (method: string, path: string, o: { origin?: string; body?: string } = {}) =>
         vc.request(method, path, { body: o.body, headers: o.origin ? { Origin: o.origin } : {} }),
     }) as unknown as TestHub;

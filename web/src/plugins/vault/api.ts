@@ -1,10 +1,10 @@
-// The variable vault's core routes (/api/p/vault, backend/features/vault)
+// The variable vault's hub routes (/api/p/vault, backend/features/vault)
 // and what the pages know of it: variables without their values, the
 // vault's state, requests waiting for an answer and the access log. Changes,
 // reveals and approvals pass the vault's gate: a session the page opens
 // with the passphrase or biometrics (proof.ts), whose token it keeps in
 // memory only (never in storage, which programs on the computer could read)
-// and sends as X-Vault-Session; the core ends it once unused for a while (a
+// and sends as X-Vault-Session; the hub ends it once unused for a while (a
 // setting), and a page that is refused asks again.
 import { create } from 'zustand';
 import { hasMessage, t } from '../../i18n';
@@ -78,7 +78,7 @@ export function processText(ps?: VaultProcess[]): string {
 
 export type Answer = 'once' | 'always' | 'deny';
 
-/** A failed call: the core's error code. */
+/** A failed call: the hub's error code. */
 export class VaultError extends PluginError {
   /** The variable a failure of several is about (an import's, an export's). */
   readonly variable?: string;
@@ -92,7 +92,7 @@ export class VaultError extends PluginError {
 export const errorText = makeErrorText(VaultError, 'vault.error', { fallback: () => t('vault.error.failed') });
 
 /** Why the vault did not load, in the UI's language: its file of another
- * version or unreadable, the core keeps no file, or a failure. */
+ * version or unreadable, the hub keeps no file, or a failure. */
 export function loadErrorText(code: string): string {
   for (const key of [`vault.load.${code}`, `vault.error.${code}`]) if (hasMessage(key)) return t(key);
   return t('vault.load.failed');
@@ -188,7 +188,7 @@ export const vaultApi = {
   answer: (id: string, answer: Answer, verify?: { proof?: Proof; passphrase?: string }) =>
     call('POST', `/requests/${enc(id)}`, { answer, ...verify }),
   log: () => call<{ log: VaultAccess[] }>('GET', '/log'),
-  /** An export file of the variables named (or all), as its text: the core
+  /** An export file of the variables named (or all), as its text: the hub
    * seals it, so values never reach the page. */
   exportFile: async (body: { passphrase: string; filePassphrase: string; names?: string[]; all?: boolean }) =>
     (await request('POST', '/export', body)).text(),
@@ -207,7 +207,7 @@ export interface AuthenticatorWay {
   origin?: string;
 }
 
-/** What the core keeps beside the passphrase to approve with. */
+/** What the hub keeps beside the passphrase to approve with. */
 export interface Authenticator extends AuthenticatorWay {
   id: string;
   label: string;
@@ -215,7 +215,7 @@ export interface Authenticator extends AuthenticatorWay {
   rpId?: string;
   created: string;
   lastUsed?: string;
-  /** It also unlocks a locked vault (the core keeps the key wrapped for
+  /** It also unlocks a locked vault (the hub keeps the key wrapped for
    * it); false for one added before, which only approves. */
   unlock?: boolean;
 }
@@ -229,7 +229,7 @@ export type UnlockWay = 'enclave' | 'hello' | 'prf';
 export interface VaultUnlock {
   ways: UnlockWay[];
   /** When biometrics stop unlocking until the passphrase is entered again
-   * (ISO; '' when unknown). A hint: the core decides at the unlock. */
+   * (ISO; '' when unknown). A hint: the hub decides at the unlock. */
   due: string;
 }
 
@@ -242,7 +242,7 @@ export interface WebAuthnAssertion {
 }
 
 /** What unlocks a locked vault in POST session: the desktop app's answer
- * (the entry it used and the relay sealed for the core), or a credential's
+ * (the entry it used and the relay sealed for the hub), or a credential's
  * PRF output with its assertion of the same nonce. */
 export type UnlockBody =
   | { nonce: string; id: string; relay: string }
@@ -261,7 +261,7 @@ export interface VaultExemption {
 interface GuardBase {
   /** The app this page runs in can prompt the user itself. */
   desktop: boolean;
-  /** This page's origin is one the core vouches for: WebAuthn credentials
+  /** This page's origin is one the hub vouches for: WebAuthn credentials
    * can be added and used from it. */
   webauthn: boolean;
 }
@@ -284,7 +284,7 @@ export interface VaultGuardFull extends GuardBase {
   exempt: VaultExemption[];
 }
 
-/** Null while the core does not hold the key. */
+/** Null while the hub does not hold the key. */
 export type VaultGuard = VaultGuardWays | VaultGuardFull;
 
 export type ProofPurpose =
@@ -294,7 +294,7 @@ export type ProofPurpose =
   /** Showing the variable's value / letting more machines read it. */
   | { for: 'reveal' | 'change'; request: string };
 
-/** A nonce the core issued for a purpose; it is also WebAuthn's challenge
+/** A nonce the hub issued for a purpose; it is also WebAuthn's challenge
  * (base64url). */
 export interface ProofChallenge {
   nonce: string;
@@ -310,7 +310,7 @@ export interface ProofChallenge {
    * unlocks it (credential id → salt, base64url). */
   prf?: Record<string, string>;
   /** For a registration: the salt the new credential's PRF is evaluated
-   * with, whose output the core wraps the key under. */
+   * with, whose output the hub wraps the key under. */
   prfSalt?: string;
 }
 
@@ -351,7 +351,7 @@ export type NewAuthenticator =
       passphrase: string;
       nonce: string;
       mac: string;
-      /** This install's unlock key, sealed by the app for the core. */
+      /** This install's unlock key, sealed by the app for the hub. */
       relay: string;
     };
 
@@ -362,7 +362,7 @@ export interface ImportVariable {
   injectOnly: boolean;
   /** The machines it maps to here ('*': all). */
   machines: string[];
-  /** Machines of its list this core does not know: they will ask. */
+  /** Machines of its list this hub does not know: they will ask. */
   unknown?: string[];
   /** The vault has a variable of that name. */
   exists: boolean;
@@ -386,7 +386,7 @@ export interface ImportChoice {
   as?: string;
 }
 
-/** The auto-lock as the core keeps it (the setting vault.autoLock). */
+/** The auto-lock as the hub keeps it (the setting vault.autoLock). */
 export interface AutoLock {
   /** Seconds without use after which the vault locks; 0: never. */
   after: number;
@@ -403,17 +403,17 @@ interface VaultState {
   /** The session was opened by an authenticator's proof, not the
    * passphrase: what guards the vault asks for the passphrase. */
   sessionProof: boolean;
-  /** What guards the vault; null while the core does not hold the key,
+  /** What guards the vault; null while the hub does not hold the key,
    * undefined until loaded. */
   guard?: VaultGuard | null;
   variables: VaultVariable[];
   log: VaultAccess[];
   /** By id: requests waiting for an answer. */
   requests: Record<string, VaultRequest>;
-  /** The error code of the last load ('unavailable': the core keeps no
+  /** The error code of the last load ('unavailable': the hub keeps no
    * file; 'version', 'invalid': its file does not open). */
   error?: string;
-  /** Seconds a session lasts unused (the core's setting). */
+  /** Seconds a session lasts unused (the hub's setting). */
   idle?: number;
   autoLock?: AutoLock;
   /** How a locked vault unlocks without the passphrase on this page. */
@@ -487,17 +487,17 @@ export async function removeExemption(id: string) {
 }
 
 /** The app of a process chain: the process that started the one that
- * asked (the agent's CLI), as the core matches exemptions. */
+ * asked (the agent's CLI), as the hub matches exemptions. */
 export function appOf(ps?: VaultProcess[]): string {
   return ps?.[1]?.name ?? '';
 }
 
-/** Loads the variables and, with a session, the log again: the core shows
+/** Loads the variables and, with a session, the log again: the hub shows
  * the log to a session only (it tells what was read, by whom and which
  * apps are exempt). */
 export async function loadVault() {
   try {
-    // What the core says of the session counts only for the token sent: a
+    // What the hub says of the session counts only for the token sent: a
     // load that crossed a session's start or end says nothing of it.
     const sent = token;
     const [list, log] = await Promise.all([vaultApi.list(), sent ? vaultApi.log().catch(() => ({ log: [] })) : { log: [] }]);
@@ -525,11 +525,11 @@ export async function loadRequests() {
     const { requests } = await vaultApi.requests();
     useVault.setState({ requests: Object.fromEntries((requests ?? []).map((r) => [r.id, r])) });
   } catch {
-    /* the plugin is off or the core is gone */
+    /* the plugin is off or the hub is gone */
   }
 }
 
-/** A message of the core's side (/ws plugin {plugin: 'vault', m, data}). */
+/** A message of the hub's side (/ws plugin {plugin: 'vault', m, data}). */
 export function vaultMessage(_m: string, data: unknown) {
   const d = data as { type?: string; request?: VaultRequest; id?: string };
   switch (d?.type) {
@@ -556,10 +556,10 @@ export function vaultMessage(_m: string, data: unknown) {
 }
 
 /** Answers a request; the first answer of any page wins, and every page
- * drops it when the core says it is resolved. A request the core no longer
+ * drops it when the hub says it is resolved. A request the hub no longer
  * has (answered elsewhere or expired: 404) is dropped; any other failure
  * (the gate, which allowing passes only with the page's session, the
- * network, the core) leaves it and is thrown, for the prompt to say. */
+ * network, the hub) leaves it and is thrown, for the prompt to say. */
 export async function answerRequest(id: string, answer: Answer, verify?: { proof?: Proof; passphrase?: string }) {
   try {
     await vaultApi.answer(id, answer, verify);
@@ -569,7 +569,7 @@ export async function answerRequest(id: string, answer: Answer, verify?: { proof
   dropRequest(id);
 }
 
-/** Forgets a request the core no longer has. */
+/** Forgets a request the hub no longer has. */
 export function dropRequest(id: string) {
   useVault.setState((s) => {
     const requests = { ...s.requests };
@@ -579,7 +579,7 @@ export function dropRequest(id: string) {
 }
 
 /** Loads the requests, and the vault if it was loaded, again: the page's
- * connection to the core came back, and the core may have restarted (its
+ * connection to the hub came back, and the hub may have restarted (its
  * requests and sessions gone, the vault locked) or changed meanwhile. */
 export function reloadVault() {
   void loadRequests();

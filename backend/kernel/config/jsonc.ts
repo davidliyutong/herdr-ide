@@ -1,4 +1,4 @@
-// The hand-edited JSON files of the core host (settings, keybindings). They
+// The hand-edited JSON files of the hub host (settings, keybindings). They
 // are read as JSONC, as VS Code reads its own (comments and trailing commas
 // allowed), and changed by edits of their text, so a change made from the
 // UI keeps the user's comments and layout: a member or element is added on
@@ -200,7 +200,7 @@ function removeChild(text: string, child: Node): string {
   return out;
 }
 
-/** A file of the core host and the version of it last read or written
+/** A file of the hub host and the version of it last read or written
  * ("" keeps nothing on disk). */
 export class UserFile {
   readonly path: string;

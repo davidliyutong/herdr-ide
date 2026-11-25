@@ -1,5 +1,5 @@
 // The terminal history plugin's actions: snapshots of the terminals'
-// output, with their styles, that a machine keeps while the core asks it to
+// output, with their styles, that a machine keeps while the hub asks it to
 // capture. A terminal's snapshot has a current generation and at most one
 // previous one: the current one of the program that ran before.
 
@@ -15,7 +15,7 @@ export const HistoryAction = {
 
 export const HistoryGeneration = { Current: 'current', Previous: 'previous' } as const;
 
-/** Hard limits of the snapshots; the machine clamps what the core asks for. */
+/** Hard limits of the snapshots; the machine clamps what the hub asks for. */
 export const HistoryLimits = {
   minLines: 100,
   maxLines: 10000,

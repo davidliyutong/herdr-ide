@@ -1,4 +1,4 @@
-// The core's HTTP front: Hono, the same `Request → Response` under Bun.serve
+// The hub's HTTP front: Hono, the same `Request → Response` under Bun.serve
 // and behind the desktop app's protocol handler. Every request passes the
 // guard (guard.ts); errors are Fails (../fail.ts) answered as
 // {error, message}; routes that change state are `mutating`: refused in
@@ -82,8 +82,8 @@ export class Http {
     });
     app.onError((err, c) => {
       const f = failOf(err);
-      // The core's own failures; a machine's or a program's (502, 503,
-      // 504) are answers, not faults of the core.
+      // The hub's own failures; a machine's or a program's (502, 503,
+      // 504) are answers, not faults of the hub.
       if (f.status === 500) o.logger(`${c.req.method} ${c.req.path}: ${f.message}`);
       c.header('Cache-Control', 'no-store');
       return c.json(f.body(), f.status as 400);

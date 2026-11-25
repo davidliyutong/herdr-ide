@@ -1,6 +1,6 @@
 // One machine: keeps a session with its agent while it is enabled, dialing
 // again with backoff when it fails, and serves the streams the agent opens
-// towards the core.
+// towards the hub.
 import { Op, readLine, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import type { Logger } from '#shared/lib/log.ts';
@@ -14,7 +14,7 @@ import { Unusable, validTarget, type HCState, type Spec, type State, type Status
  * ("os/arch", "" when the dial does not know it). */
 export type Dialer = (spec: Spec, signal: AbortSignal) => Promise<{ session: Session; platform: string }>;
 
-/** Serves a stream the agent opened towards the core, after its header. */
+/** Serves a stream the agent opened towards the hub, after its header. */
 export type StreamHandler = (m: Machine, conn: AgentStream, h: Header) => void;
 
 export interface Timing {
@@ -184,8 +184,8 @@ export class Machine {
     });
   }
 
-  /** Publishes the state of the core's connection to the machine's
-   * terminal core; undefined when the core has none. */
+  /** Publishes the state of the hub's connection to the machine's
+   * terminal core; undefined when the hub has none. */
   setHC(hc: HCState | undefined): void {
     if (JSON.stringify(hc) === JSON.stringify(this.st.hc)) return;
     this.update((st) => {
@@ -388,7 +388,7 @@ export class Machine {
     });
   }
 
-  /** Serves the streams the agent opens towards the core; resolves when the
+  /** Serves the streams the agent opens towards the hub; resolves when the
    * node announces its drain (Op.NodeDrain). */
   private accept(sess: Session): Promise<void> {
     return new Promise((drained) => {

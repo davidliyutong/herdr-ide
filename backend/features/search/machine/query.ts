@@ -17,7 +17,7 @@ export interface Query extends SearchParams {
   limit: number;
 }
 
-/** How a search ends early: when signal aborts (the core gave up on it or
+/** How a search ends early: when signal aborts (the hub gave up on it or
  * it ran out of time); timedOut tells which. */
 export interface Stop {
   signal: AbortSignal;

@@ -2,13 +2,13 @@
 // document is read (the vector spec/vectors/layout/agent-leaves.json
 // runs with the others in term.test.ts), changed by setTerminalFields, and
 // kept by every other operation, also by the rules that restore terminals
-// after their core started again, as an older client keeps them; render,
+// after their terminal core started again, as an older client keeps them; render,
 // which earlier versions wrote, dropped when a document is read and never
 // written.
 import { describe, expect, it } from 'vitest';
 import * as L from '../term/layout';
 import { rememberAgents, replaceTerminal, takeResume } from '../restore';
-import { FakeCore } from './fakeTerms';
+import { FakeHub } from './fakeTerms';
 import vector from '../../../spec/vectors/layout/agent-leaves.json';
 
 const S1 = '0b6f5c1e-8d3a-4c2b-9e1f-2a3b4c5d6e7f';
@@ -53,7 +53,7 @@ describe('agent leaves', () => {
     ] as const) {
       expect(leaf(layoutOf({ terminal: 't1', [field]: value }), 't1'), `${field} ${String(value)}`).toEqual({ terminal: 't1' });
     }
-    // Every form of a core's address: letters and digits, then "_" and "-" too.
+    // Every form of a terminal core's address: letters and digits, then "_" and "-" too.
     for (const before of ['t1', 't3q', 'T12', '7', 't1-old_2', 'Ab-c_9'.padEnd(64, 'x')])
       expect(leaf(layoutOf({ terminal: 't1', before }), 't1').before, before).toBe(before);
     expect(L.isAddress('t3q')).toBe(true);
@@ -169,7 +169,7 @@ describe('agent leaves', () => {
     expect(leaves(taken.layout)).toEqual([{ terminal: 't5', ...agent, before: 't1' }]);
     const remembered = rememberAgents(
       taken.layout,
-      () => FakeCore.term('t5', { pid: 9, agent: 'claude' }),
+      () => FakeHub.term('t5', { pid: 9, agent: 'claude' }),
       () => false,
     );
     expect(leaves(remembered)).toEqual([{ terminal: 't5', ...agent, before: 't1', agent: 'claude', pid: 9 }]);

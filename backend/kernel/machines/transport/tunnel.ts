@@ -1,5 +1,5 @@
 // HTTPS through a stream the caller opens to host:port: an ssh stdio forward
-// through a machine (`ssh -W`, ssh.ts sshTunnel), for a core that cannot
+// through a machine (`ssh -W`, ssh.ts sshTunnel), for a hub that cannot
 // reach its release directly. The TLS is this process's, end to end: the
 // server's certificate is verified against the host name as fetch verifies
 // it, so the machine and its network carry bytes they can neither read nor

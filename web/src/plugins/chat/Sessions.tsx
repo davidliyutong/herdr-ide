@@ -9,7 +9,7 @@
 // restored; one deleted or removed since the listing, as the page's
 // chats tell, is no chat's any more and opens anew). They are read again
 // when the directory changes and with Refresh. Listing them may run the
-// agent (Codex, ACP agents), a change the core takes only from a page that
+// agent (Codex, ACP agents), a change the hub takes only from a page that
 // may make changes: a read-only page lists none.
 import { Archive, History, MessageSquareShare, MessagesSquare, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';

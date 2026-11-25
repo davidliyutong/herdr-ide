@@ -1,4 +1,4 @@
-// The browser plugin's requests to the core (backend/features/browser): port
+// The browser plugin's requests to the hub (backend/features/browser): port
 // forwards, and the machine's listening ports; and the rules for addresses:
 // what the address field takes, and where a page is loaded from.
 import { create } from 'zustand';
@@ -9,7 +9,7 @@ import { desktopShell } from '../../shell';
 import { answer, failureOf, jsonInit, PluginError } from '../../lib/pluginApi';
 import { isLoopbackName, isOwnAddress } from '../../lib/webUrl';
 
-/** A port of a machine reachable on the core's host: Port on machine M is
+/** A port of a machine reachable on the hub's host: Port on machine M is
  * on the loopback port Local there. */
 export interface Forward {
   m: string;
@@ -24,7 +24,7 @@ export interface ListeningPort {
   process?: string;
 }
 
-/** A failure with the code the core gave (forward_local_only, offline,
+/** A failure with the code the hub gave (forward_local_only, offline,
  * too_many, local_machine, ...) or `network` when it did not answer. */
 export class BrowserError extends PluginError {
   constructor(code: string, message: string) {
@@ -58,15 +58,15 @@ export const browserApi = {
     ),
 };
 
-/** The forwards the core has and whether this client can use them (it is
- * on the core's own computer); `available` is unknown until the core
+/** The forwards the hub has and whether this client can use them (it is
+ * on the hub's own computer); `available` is unknown until the hub
  * answers. */
 export const useForwards = create<{ forwards: Forward[]; available?: boolean }>(() => ({ forwards: [] }));
 
 let loading: Promise<boolean> | undefined;
 
 /** Reads the forwards again. Resolves to whether forwards are available;
- * false when the core does not answer. */
+ * false when the hub does not answer. */
 export function loadForwards(): Promise<boolean> {
   loading ??= browserApi
     .forwards()
@@ -83,7 +83,7 @@ export function loadForwards(): Promise<boolean> {
   return loading;
 }
 
-/** Whether forwards are available to this client: what the core last said,
+/** Whether forwards are available to this client: what the hub last said,
  * else it is asked. */
 export async function forwardsAvailable(): Promise<boolean> {
   return useForwards.getState().available ?? (await loadForwards());
@@ -131,10 +131,10 @@ export function resetGrants() {
 /**
  * The forward of a machine's port for a pane that shows it, a use of it:
  * made or found when the user asked for the port in this page
- * (forwardGranted); else only found, when the core's list has it, and
- * undefined when it has not: the pane asks the user. Fails as the core's
+ * (forwardGranted); else only found, when the hub's list has it, and
+ * undefined when it has not: the pane asks the user. Fails as the hub's
  * requests do, and with forward_local_only, without asking for a forward,
- * when the core says this client can use none.
+ * when the hub says this client can use none.
  */
 export async function attachForward(m: string, port: number): Promise<Forward | undefined> {
   if (!forwardGranted(m, port)) {
@@ -204,11 +204,11 @@ const REFUSED = /^(?:javascript|data|file|blob|about|vbscript|view-source|chrome
  * localhost, https:// for any other), or a full address; only http and
  * https are taken. A loopback name other than localhost (127.0.0.1, [::1],
  * 0.0.0.0) is written as localhost: for a machine it means that machine's
- * own. The core's own address, under any loopback name, is no page for a
+ * own. The hub's own address, under any loopback name, is no page for a
  * pane (isOwnAddress): the UI is not shown inside itself, where a page of a
  * pane could send it. With theirs the address is a machine's own (a pane of
  * a remote machine, a view shown through a forward): its loopback is that
- * machine's, where the core's port number is some other program's, and a
+ * machine's, where the hub's port number is some other program's, and a
  * name below localhost (app.localhost) is that loopback too. Of this
  * computer such a name stays as written, a page a webview loads itself.
  */
@@ -238,7 +238,7 @@ export function parseAddress(input: string, theirs = false): Parsed {
   const loopback = isLoopbackHost(u.hostname) || (theirs && belowLocalhost(u.hostname));
   const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
   if (loopback && u.hostname !== 'localhost') u.hostname = 'localhost';
-  // As it is written now: 0.0.0.0 with the core's port is the core too. A
+  // As it is written now: 0.0.0.0 with the hub's port is the hub too. A
   // machine's own loopback is another computer's, whatever its port.
   if (!(theirs && loopback) && isOwnAddress(u)) return { kind: 'refused', own: true };
   return { kind: 'page', url: u.href, loopback, port };

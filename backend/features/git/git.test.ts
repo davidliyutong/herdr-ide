@@ -25,7 +25,7 @@ interface Call {
   params: Record<string, unknown>;
 }
 
-/** A core whose machine x answers the git actions with reply. */
+/** A hub whose machine x answers the git actions with reply. */
 async function withMachine(reply: (action: string, params: Record<string, unknown>) => Reply) {
   const calls: Call[] = [];
   const serve = async (h: Header, conn: AgentStream) => {
@@ -97,7 +97,7 @@ test('change audit', async () => {
     event: 'git.commit.done',
     repo: '/home/u/r',
     name: 'topic',
-    // The change's remote, over the request's address, as the Go core
+    // The change's remote, over the request's address, as the Go hub
     // recorded it.
     remote: 'origin',
     force: true,

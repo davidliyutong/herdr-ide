@@ -1,9 +1,9 @@
 // The local machine (Linux and macOS): its node of this build, reached on
 // the node's socket, started from the machine build installed for this
-// platform when none answers, as `node dial` does for a core that comes
-// over ssh. The node is the same program a remote machine runs; the core
+// platform when none answers, as `node dial` does for a hub that comes
+// over ssh. The node is the same program a remote machine runs; the hub
 // installs it where an ssh upload would put it (~/<AGENT_DIR>/<version>),
-// a TypeScript build's executable from the core's own copy, checked by its
+// a TypeScript build's executable from the hub's own copy, checked by its
 // digest.
 import { spawn } from 'node:child_process';
 import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync } from 'node:fs';
@@ -20,7 +20,7 @@ import { CLIENT_ID, Session } from './session.ts';
 import { archiveMember, nodeBuild, tsVersion, type BuildSource, type MachineBuild } from './builds.ts';
 import { installScript } from './ssh.ts';
 
-/** The agent runs on Linux and macOS; on Windows the core reaches SSH
+/** The agent runs on Linux and macOS; on Windows the hub reaches SSH
  * machines only. */
 export const LOCAL_SUPPORTED = process.platform === 'linux' || process.platform === 'darwin';
 
@@ -39,7 +39,7 @@ const nodeSocket = (run: string) => join(run, 'node.sock');
 
 /** Installs a build where an upload would put it, unless it is there; the
  * file to run and the node build it is. A TypeScript build is installed by
- * the script an ssh upload runs (checked by its digest), from what the core
+ * the script an ssh upload runs (checked by its digest), from what the hub
  * has (its own executable, for its own platform). */
 export async function installBuild(b: MachineBuild, home: string, signal?: AbortSignal): Promise<{ exe: string; build: string }> {
   const d = await b.digests(signal ? { signal } : {});

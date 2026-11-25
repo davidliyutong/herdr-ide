@@ -498,7 +498,7 @@ export function vaultFeature(opts: VaultOptions = {}) {
               throw new Fail(
                 'webauthn_origin',
                 400,
-                "a WebAuthn credential is added from the UI's own address by name: http://localhost on the core's port, or the reverse proxy's",
+                "a WebAuthn credential is added from the UI's own address by name: http://localhost on the hub's port, or the reverse proxy's",
               );
             const e = { challenge: n.challenge, origin, rpId };
             const spki = unb64url(b.publicKey);
@@ -665,11 +665,11 @@ export function vaultFeature(opts: VaultOptions = {}) {
   });
 }
 
-// Export and import: variables leave in an encrypted file the core builds,
+// Export and import: variables leave in an encrypted file the hub builds,
 // so values never reach a browser, and come back in one write. An export is
 // a bulk release: the passphrase again, recorded before the file is sent.
 // An import sends the file and its passphrase twice, for the preview and
-// the changes: the core keeps nothing of a file between the two.
+// the changes: the hub keeps nothing of a file between the two.
 function transferRoutes(ctx: FeatureContext, v: Vault, gatedPassphrase: MiddlewareHandler<Env>): void {
   const { api } = ctx;
 
@@ -694,7 +694,7 @@ function transferRoutes(ctx: FeatureContext, v: Vault, gatedPassphrase: Middlewa
     return out;
   };
 
-  /** A variable's machines in a file mapped to this core's: "*" stays; an
+  /** A variable's machines in a file mapped to this hub's: "*" stays; an
    * ssh machine by its id only with the same kind and target here; the
    * local machine only when its label is the same too; labels alone map
    * nothing. The others leave the list (they ask every time). */

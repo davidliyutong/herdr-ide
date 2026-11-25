@@ -1,5 +1,5 @@
 // The chat plugin's protocol as the page sees it: the chat host's types
-// (backend/shared/proto/chatproto), which the core relays, and the page's WebSocket
+// (backend/shared/proto/chatproto), which the hub relays, and the page's WebSocket
 // GET /api/p/chat/ws (backend/features/chat). Each mirrors the JSON of its
 // type there. What comes from a machine is not trusted to have these
 // shapes: readers check the type of every member they keep and pass over
@@ -230,7 +230,7 @@ export interface Session {
   chat?: string;
 }
 
-/** The settings the core gives a machine's chat host (chatproto.
+/** The settings the hub gives a machine's chat host (chatproto.
  * HostSettings), from the machine's chat.* settings; a zero member is the
  * host's default. allowFull (chat.allowFullAccess) allows full access:
  * without it the host refuses a chat or a configuration value that asks
@@ -247,11 +247,11 @@ export interface HostSettings {
   allowFull?: boolean;
 }
 
-/** The requests the core makes of a chat host for the page's routes,
+/** The requests the hub makes of a chat host for the page's routes,
  * besides those of the chats' states (chatproto.Op*): trust lets the
  * agents load a directory's own project settings (POST trust?cwd=),
  * untrust takes that back (POST untrust?cwd=).
- * The core attaches a read-only page's subscription with noCatchUp: it
+ * The hub attaches a read-only page's subscription with noCatchUp: it
  * starts nothing on the machine (no catch-up of what the session did in
  * a terminal). */
 export const REQUEST_OPS = ['agents', 'chats', 'sessions', 'new', 'close', 'delete', 'seen', 'attach', 'trust', 'untrust'] as const;
@@ -278,7 +278,7 @@ export const COMMAND_OPS = [
 ] as const;
 export type CommandOp = (typeof COMMAND_OPS)[number];
 
-/** A command for an attached chat (chatproto.Command). The core sets its
+/** A command for an attached chat (chatproto.Command). The hub sets its
  * id; the page names the command in ClientMessage.id. */
 export interface Command {
   op: CommandOp;
@@ -328,7 +328,7 @@ export const MAX_SUBS = 32;
 export const MAX_SUBS_PER_MACHINE = 16;
 /** The longest id of a subscription or a command a page gives, in bytes. */
 export const MAX_PAGE_ID = 64;
-/** Every machine's chats' states as the core last read them
+/** Every machine's chats' states as the hub last read them
  * (StatesSnapshot), which a page reads before it applies the states
  * messages that follow. */
 export const STATES_PATH = '/api/p/chat/states';
@@ -342,7 +342,7 @@ export type ClientMessage =
   | { op: 'detach'; sub: string }
   | { op: 'command'; id: string; m: string; chat: string; cmd: Command };
 
-/** A message of the core: a subscription's chat and lowest stored seq, an
+/** A message of the hub: a subscription's chat and lowest stored seq, an
  * event of it, its end, and a command's answer. */
 export type ServerMessage =
   | { t: 'attached'; sub: string; chat: Chat; first?: number }
@@ -379,38 +379,29 @@ export const HOST_CODES = [
 ] as const;
 
 /** The machine's codes of reaching its chat host (its agent's open
- * action): not_running, no chat host serves and the core may not start
- * one (a read-only core); upgrading, a chat host of another version
+ * action): not_running, no chat host serves and the hub may not start
+ * one (a read-only hub); upgrading, a chat host of another version
  * serves until its chats are idle; no_terminal_core, the terminal core
  * that runs the host does not run; start_failed, the host did not start;
  * transport, the connection broke. */
 export const MACHINE_CODES = ['not_running', 'upgrading', 'no_terminal_core', 'start_failed', 'transport'] as const;
 
-/** The core's error codes of the WebSocket and the routes, besides the
+/** The hub's error codes of the WebSocket and the routes, besides the
  * chat host's: not_attached, a command for a chat the page has no
  * subscription to; lost, the subscription's connection to the chat host
  * ended while the machine stays (attach again; a command not answered may
  * have been carried out); plugin_disabled, the plugin was turned off;
  * timeout, the machine did not answer in time. */
-export const HUB_CODES = [
-  'read_only',
-  'offline',
-  'unknown_sub',
-  'too_many',
-  'not_attached',
-  'lost',
-  'plugin_disabled',
-  'timeout',
-] as const;
+export const HUB_CODES = ['read_only', 'offline', 'unknown_sub', 'too_many', 'not_attached', 'lost', 'plugin_disabled', 'timeout'] as const;
 
 /** Every code of an error the page may receive: the host's, the
- * machine's, the core's, and network when the page did not reach the
- * core. */
+ * machine's, the hub's, and network when the page did not reach the
+ * hub. */
 export const ERROR_CODES = [...new Set<string>([...HOST_CODES, ...MACHINE_CODES, ...HUB_CODES, 'network'])];
 
-/** The chat plugin's message on the core's event channel for a machine:
+/** The chat plugin's message on the hub's event channel for a machine:
  * every chat of it (full), or those that changed (one that is no more in
- * STATE_DELETED). rev numbers a machine's messages since the core started;
+ * STATE_DELETED). rev numbers a machine's messages since the hub started;
  * a page applies one only when its rev is above the one it has. */
 export interface StatesData {
   t: 'states';
@@ -419,14 +410,14 @@ export interface StatesData {
   rev: number;
   stale?: boolean;
   /** The machine's chat host's version, and whether it is another build
-   * than the core's (restarting the host brings the core's). */
+   * than the hub's (restarting the host brings the hub's). */
   hostVersion?: string;
   outdated?: boolean;
 }
 
-/** GET STATES_PATH: each machine's states as the core last read them (full,
+/** GET STATES_PATH: each machine's states as the hub last read them (full,
  * with the rev of the last message they hold), by machine; a machine whose
- * chat host the core has not read since it started is not there. */
+ * chat host the hub has not read since it started is not there. */
 export interface StatesSnapshot {
   machines: Record<string, StatesData>;
 }

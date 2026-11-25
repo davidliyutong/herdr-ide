@@ -27,7 +27,7 @@ afterEach(async () => {
   for (const s of stops.splice(0)) await s();
 });
 
-/** A core with the local machine, a stored SSH machine (gpu) and an --ssh
+/** A hub with the local machine, a stored SSH machine (gpu) and an --ssh
  * machine (extra), over a machines file in a temporary directory. The
  * machines do not connect. */
 function fixture(o: Partial<MachinesFeatureOptions> = {}) {
@@ -38,13 +38,13 @@ function fixture(o: Partial<MachinesFeatureOptions> = {}) {
   const forgotten: string[] = [];
   const forgetter = defineFeature({ id: 'forget', toggle: false, setup: (ctx) => ctx.onForget((id) => void forgotten.push(id)) });
   const opts: MachinesFeatureOptions = { home: () => '', controlDir: '', ...o };
-  const core = (readOnly = false) => testHub({ features: [machinesFeature(opts), forgetter], machines, readOnly });
-  const rw = core();
+  const hub = (readOnly = false) => testHub({ features: [machinesFeature(opts), forgetter], machines, readOnly });
+  const rw = hub();
   return {
     path,
     machines,
     rw,
-    ro: () => core(true),
+    ro: () => hub(true),
     forgotten,
     stored: () => Registry.open(path).specs(),
     audited: () => rw.audit.text(),
@@ -72,8 +72,8 @@ async function run(f: ReturnType<typeof fixture>, cases: Case[]) {
 const READ_ONLY = '"error":"read_only"';
 
 describe('machines API', () => {
-  // Adding stores an SSH machine and adds it to the running core; targets
-  // that would read as options, odd labels, a target the core has and
+  // Adding stores an SSH machine and adds it to the running hub; targets
+  // that would read as options, odd labels, a target the hub has and
   // read-only browsers are refused.
   test('add', async () => {
     const f = fixture();
@@ -151,7 +151,7 @@ describe('machines API', () => {
     for (const want of ['"event":"machine.rename"', '"from":"gpu"', '"label":"-GPU box"']) expect(f.audited()).toContain(want);
   });
 
-  // Ordering names every machine once; the order is stored, and a core
+  // Ordering names every machine once; the order is stored, and a hub
   // that starts over the machines file lists them in it.
   test('order', async () => {
     const f = fixture();
@@ -287,7 +287,7 @@ describe('machines API', () => {
       ['gpu', 'ssh', 'connecting'],
       ['extra', 'ssh', 'connecting'],
     ]);
-    // The core process's use of the system, also for read-only clients.
+    // The hub process's use of the system, also for read-only clients.
     const res = await ro.request('GET', '/api/perf', { host: 'localhost:7780' });
     const u = (await res.json()) as Record<string, number>;
     expect(res.status).toBe(200);
@@ -301,7 +301,7 @@ describe('machines API', () => {
   });
 });
 
-// Every route that changes something, taken from the core's own route
+// Every route that changes something, taken from the hub's own route
 // table: a request from another site is refused, and so is the request in
 // read-only mode. A route added without mutating or writable fails here.
 test('mutating routes are guarded', async () => {
@@ -315,7 +315,7 @@ test('mutating routes are guarded', async () => {
     });
   const writableGET = [
     'GET /api/m/:id/auth', // starts an interactive ssh login
-    // Changes nothing, but only adding a machine needs the core host's ssh
+    // Changes nothing, but only adding a machine needs the hub host's ssh
     // aliases: guarded as the changes are.
     'GET /api/ssh/hosts',
   ];
@@ -332,7 +332,7 @@ test('mutating routes are guarded', async () => {
   ]);
 });
 
-// The Add Machine dialog's list of the core host's ssh aliases: aliases
+// The Add Machine dialog's list of the hub host's ssh aliases: aliases
 // that are no machine's target yet, with their HostName and User only;
 // none from another site or in read-only mode, and an empty list without a
 // configuration or a home.
@@ -417,7 +417,7 @@ function fakePty(spawned: string[][] = [], sizes: Array<{ cols: number; rows: nu
 
 describe('ssh login', () => {
   // Without a control directory (Windows: ssh shares no connections) or a
-  // terminal on the core's host the endpoint refuses a login.
+  // terminal on the hub's host the endpoint refuses a login.
   test('needs a control directory', async () => {
     const machines = testMachines([sshSpec('gpu')]);
     const upgrade = () => new Response(null);
@@ -440,7 +440,7 @@ describe('ssh login', () => {
     expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([400, 'not_ssh']);
   });
 
-  // The login runs ssh in a terminal of the core's host, bridged to a
+  // The login runs ssh in a terminal of the hub's host, bridged to a
   // channel: what the page types reaches it, its output reaches the page,
   // and the channel closes with "done" once ssh exited; a closed channel
   // ends the program.

@@ -35,8 +35,8 @@ describe('dropZone', () => {
 
 describe('translations', () => {
   // spec/generated/registry.json lists the keys of every setting, option,
-  // section and command the core registers.
-  it('has every label the core’s registry needs', () => {
+  // section and command the hub registers.
+  it('has every label the hub’s registry needs', () => {
     expect(registry.i18n.length).toBeGreaterThan(80);
     for (const k of registry.i18n) expect(hasMessage(k), k).toBe(true);
   });
@@ -64,7 +64,7 @@ describe('settings store', () => {
     expect(p.colors.dark.background).toBe('#0a0a0a');
   });
 
-  it('follows the core’s pushes', () => {
+  it('follows the hub’s pushes', () => {
     applySettings({
       values: values({ 'terminal.fontSize': 15, 'terminal.colors.dark.foreground': '#ff0000' }),
       problems: [{ key: 'x', code: 'unknown' }],
@@ -77,7 +77,7 @@ describe('settings store', () => {
     expect(getPrefs().termFontSize).toBe(15);
   });
 
-  it('shows a change at once and keeps the core’s answer', async () => {
+  it('shows a change at once and keeps the hub’s answer', async () => {
     const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ values: values({ [body.key]: 16 }), problems: [] }), { status: 200 });
@@ -92,7 +92,7 @@ describe('settings store', () => {
     expect(fetch.mock.calls[1][1]?.body).toBe('{"key":"terminal.optionIsMeta","value":true}');
   });
 
-  it('reports the core’s error codes and shows the value before', async () => {
+  it('reports the hub’s error codes and shows the value before', async () => {
     vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error: 'locked' }), { status: 409 }));
     expect(await setSetting('terminal.fontSize', 18)).toBe('Fixed by a command-line flag');
     expect(getPrefs().termFontSize).toBe(13);

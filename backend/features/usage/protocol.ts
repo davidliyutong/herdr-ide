@@ -11,14 +11,14 @@
 //   - session: what one session of a coding agent used, from its
 //     transcripts.
 //
-// The results are read as the Go core decoded them into its structs: a
+// The results are read as the Go hub decoded them into its structs: a
 // member that is absent or null is its zero value, members it does not
 // know are dropped, and those Go writes with omitempty are left out when
-// empty (undefined here), so that the core writes them on as Go did.
+// empty (undefined here), so that the hub writes them on as Go did.
 import { z } from 'zod';
 import { defineProtocol } from '#shared/proto/protocol.ts';
 
-/** How long the core waits for each action. */
+/** How long the hub waits for each action. */
 export const LIMITS_MS = 60_000;
 export const COST_MS = 120_000;
 export const SESSION_MS = 30_000;
@@ -97,7 +97,7 @@ const prices = z.record(z.string(), tier).optional();
 const list = z.array(z.string()).optional();
 
 /** What limits reads (members in Go's order: the agent shares an answer
- * between the cores of a node whose params are the same bytes). */
+ * between the hubs of a node whose params are the same bytes). */
 export const limitsParams = z.object({
   providers: list,
   codexHomes: list,

@@ -13,7 +13,7 @@
 // lists none; both show the chat that has the session already (one handed
 // off to the terminal), from the machine's chats the page knows, or from
 // the machine's list of its chats when the host refuses a second chat of
-// the session. The core's chat routes are a scripted fetch.
+// the session. The hub's chat routes are a scripted fetch.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -24,7 +24,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: () => {} } })
 
 import { useStore } from '../state/store';
 import { useSettings } from '../settings';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import type { MachineState } from '../lib/machine';
 import { setLocale } from '../i18n';
 import * as L from '../term/layout';
@@ -64,7 +64,7 @@ interface Req {
   body?: Record<string, unknown>;
 }
 
-/** The core's chat routes of machine m, scripted. */
+/** The hub's chat routes of machine m, scripted. */
 class FakeChats {
   requests: Req[] = [];
   agents: unknown[] = [
@@ -140,8 +140,8 @@ afterEach(async () => {
  * focused in its first tab and b in a second, workspace w2 with a chat
  * pane of CHAT. */
 async function setup(o: { a?: Record<string, unknown>; b?: Record<string, unknown>; leaf?: Record<string, unknown> } = {}) {
-  const core = new FakeCore();
-  core.machine('m', [FakeCore.term('a', { cwd: DIR, ...o.a }), FakeCore.term('b', { pid: 200, ...o.b })], {
+  const hub = new FakeHub();
+  hub.machine('m', [FakeHub.term('a', { cwd: DIR, ...o.a }), FakeHub.term('b', { pid: 200, ...o.b })], {
     version: 2,
     selected: 0,
     workspaces: [
@@ -164,7 +164,7 @@ async function setup(o: { a?: Record<string, unknown>; b?: Record<string, unknow
       },
     ],
   });
-  const model = core.install();
+  const model = hub.install();
   useStore
     .getState()
     .setMachines([{ id: 'm', label: 'box', kind: 'local', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
@@ -172,7 +172,7 @@ async function setup(o: { a?: Record<string, unknown>; b?: Record<string, unknow
   model.subscribe('m');
   await settle();
   await settle();
-  return { core, model };
+  return { hub, model };
 }
 
 async function render(el: ReturnType<typeof createElement>) {
@@ -187,7 +187,7 @@ const rows = () => [...host!.querySelectorAll<HTMLElement>('.agent-session')];
 const rowOf = (session: string) => host!.querySelector<HTMLElement>(`.agent-session[data-session="${session}"]`)!;
 const labels = () => rows().map((r) => r.querySelector('.tree-label')!.textContent);
 const groups = () => [...host!.querySelectorAll('.agent-sessions-kind-title')].map((e) => e.textContent);
-const chatViews = (model: FakeCore['model']) =>
+const chatViews = (model: FakeHub['model']) =>
   model.layout('m')!.workspaces.flatMap((ws) => L.pluginViews(ws, 'chat', 'chat').map((v) => ({ ws: ws.id, tab: v.tab, view: v.view })));
 const toasts = () => useStore.getState().toasts;
 
@@ -452,7 +452,7 @@ describe('Continue in Chat in a terminal’s header', () => {
   it('shows while the leaf remembers an agent with chats and its session, and no agent runs', async () => {
     await setup({ leaf: quit });
     const leaf = { terminal: 'a', ...quit };
-    const live = FakeCore.term('a');
+    const live = FakeHub.term('a');
     expect(chatTarget(leaf, live)).toEqual({ kind: 'claude', session: S1 });
     expect(chatTarget(leaf, { ...live, agent: 'claude' })).toBeUndefined();
     expect(chatTarget(leaf, { ...live, state: 'finished' })).toBeUndefined();

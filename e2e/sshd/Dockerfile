@@ -2,7 +2,7 @@
 # Linux, one user `e2e` who signs in with a key only, bash as login shell.
 # Each container gets a host key of its own at start and the test's
 # throwaway public key (E2E_AUTHORIZED_KEY); the harness publishes port 22
-# on 127.0.0.1 only. The machine build the core uploads (for musl) and the
+# on 127.0.0.1 only. The machine build the hub uploads (for musl) and the
 # fake programs the harness copies in are Bun's executables, whose runtime
 # needs libstdc++ and libgcc; nothing else but a POSIX userland, and Xvfb
 # for the program windows (feature 14), which the node uses as installed.

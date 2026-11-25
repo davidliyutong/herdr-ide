@@ -57,8 +57,8 @@ export class Memory {
    * has been gone for the grace. An agent that starts again starts the
    * grace again. */
   readonly vanished = new Memo<number>();
-  /** The core (NodeHello.client) whose capture ended last, and when (ms):
-   * a capture of another core of the node in the share's time does
+  /** The hub (NodeHello.client) whose capture ended last, and when (ms):
+   * a capture of another hub of the node in the share's time does
    * nothing (busy). */
   last: { client: string; at: number } | null = null;
 

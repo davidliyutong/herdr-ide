@@ -2,7 +2,7 @@
   "name": "e2e",
   "private": true,
   "version": "0.1.0",
-  "description": "End-to-end tests: the real core binary on an isolated instance, driven through a browser",
+  "description": "End-to-end tests: the real hub binary on an isolated instance, driven through a browser",
   "license": "MIT",
   "type": "module",
   "scripts": {

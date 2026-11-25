@@ -68,7 +68,7 @@ test("work is taken only while its client's switch is on", () => {
   expect([own.aborted, prep.aborted]).toEqual([true, true]);
 });
 
-// The core stops: all work ends, whatever the switches.
+// The hub stops: all work ends, whatever the switches.
 test('stopAll ends every signal', () => {
   const { logs, work } = switches();
   const s = [work.signal('desktop', true)!, work.signal('browser', true)!, work.signal('desktop', false)!];

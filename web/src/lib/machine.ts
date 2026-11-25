@@ -1,4 +1,4 @@
-// The core's machines as /ws and GET /api/machines report them, the agent
+// The hub's machines as /ws and GET /api/machines report them, the agent
 // states of their terminals, and helpers shared by the views that show them.
 
 import { hasMessage, t, type MessageKey } from '../i18n';
@@ -21,7 +21,7 @@ export interface AgentInfo {
 
 export type MachineStatus = 'connecting' | 'ready' | 'auth_required' | 'error' | 'disabled';
 
-/** The core's connection to a machine's terminal core (docs/features/22). */
+/** The hub's connection to a machine's terminal core (docs/features/22). */
 export interface MachineHC {
   state: 'starting' | 'ready' | 'error';
   code?: string;
@@ -36,13 +36,13 @@ export interface MachineState {
   enabled: boolean;
   status: MachineStatus;
   /** Why a machine in error is never connected: invalid_target for a
-   * stored ssh target the core refuses (machines.ValidTarget),
+   * stored ssh target the hub refuses (machines.ValidTarget),
    * local_unsupported for the local machine where no agent runs
    * (Windows). */
   code?: string;
   error?: string;
   /** Why the machine build could not be deployed (platform_unsupported,
-   * cpu_unsupported, libs_missing, build_unavailable); the core tries
+   * cpu_unsupported, libs_missing, build_unavailable); the hub tries
    * again. */
   failure?: string;
   platform?: string;
@@ -54,7 +54,7 @@ export interface MachineState {
 /** Printable ASCII a target may hold besides letters and digits. */
 const targetPunct = new Set('#%+,-./:=@[]^_~');
 
-/** Whether an ssh target is one the core takes (machines.ValidTarget; the
+/** Whether an ssh target is one the hub takes (machines.ValidTarget; the
  * vectors of spec/vectors/machines/targets.json): at most 255 bytes of
  * UTF-8, not starting with "-", of ASCII letters, digits and
  * # % + , - . / : = @ [ ] ^ _ ~ and Unicode letters, marks and numbers. */

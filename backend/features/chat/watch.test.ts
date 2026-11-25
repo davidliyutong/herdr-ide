@@ -19,7 +19,7 @@ const last = (r: Rig) => r.broadcasts.at(-1)!.data as unknown as StatesData;
 const states = (r: Rig) => r.broadcasts.length;
 
 describe('watch', () => {
-  // The core reads every chat's state when it watches a host, sends them to
+  // The hub reads every chat's state when it watches a host, sends them to
   // the pages in full and then each change, numbered; it notifies of chats
   // that became blocked or done, once each, and of the first states it
   // reads only of the blocked ones.
@@ -79,7 +79,7 @@ describe('watch', () => {
   });
 
   // A chat done again after a gap in the watch (a turn ran and ended while
-  // the core did not watch) is told again; one whose state is as it was is
+  // the hub did not watch) is told again; one whose state is as it was is
   // not, nor one that only changed its title while done.
   test('done across a gap', async () => {
     const c = chatState(chat.Status.Working, chat.State.Working, 3);
@@ -106,7 +106,7 @@ describe('watch', () => {
     expect(r.notes.length).toBe(2);
   });
 
-  // After its host ended the core watches again, and notifies of what
+  // After its host ended the hub watches again, and notifies of what
   // became blocked or done meanwhile, not of what it told before.
   test('again', async () => {
     const a = chatState(chat.Status.Blocked, chat.State.Waiting, 5);
@@ -124,8 +124,8 @@ describe('watch', () => {
     expect(r.notes.length).toBe(2);
   });
 
-  // A watch starts no host: with none serving, the core waits for a change
-  // or a page to use the machine's. A host the core knew of agents in that
+  // A watch starts no host: with none serving, the hub waits for a change
+  // or a page to use the machine's. A host the hub knew of agents in that
   // is gone left them sleeping.
   test('starts no host', async () => {
     const r = await start({ host: (h) => (h.running = false) });
@@ -149,7 +149,7 @@ describe('watch', () => {
     expect(r.host.opens.at(-1)).toBe(false);
   });
 
-  // The core stops watching a host when none of its chats runs an agent, no
+  // The hub stops watching a host when none of its chats runs an agent, no
   // page is attached and nothing used it for a while: the host can end.
   test('lets a quiet host go', async () => {
     const working = chatState(chat.Status.Working, chat.State.Working, 2);
@@ -166,13 +166,13 @@ describe('watch', () => {
     const n = r.host.opens.length;
     await sleep(30);
     expect(r.host.opens.length).toBe(n);
-    // A use of the host makes the core watch it again.
+    // A use of the host makes the hub watch it again.
     expect((await r.call('GET', '/api/m/gpu/p/chat/chats'))[0]).toBe(200);
     await waitFor('the watch again', () => r.host.watchers.size === 1);
   });
 
   // The host gets the machine's settings when they change, the machine's
-  // own or everyone's; a read-only core configures nothing.
+  // own or everyone's; a read-only hub configures nothing.
   test('configures', async () => {
     const r = await start();
     r.start();
@@ -233,7 +233,7 @@ describe('watch', () => {
     await waitFor('the watch', () => r.host.watchers.size === 1);
   });
 
-  // When a machine goes offline, live and blocked chats in the core's cache
+  // When a machine goes offline, live and blocked chats in the hub's cache
   // are marked stale and sleeping so they do not appear working or blocked
   // while it is away, and fresh states clear the stale flag on reconnect.
   test('an offline machine marks its states stale', async () => {
@@ -288,7 +288,7 @@ describe('watch', () => {
   });
 
   // The states say which build the machine's chat host is and whether it
-  // is another than the core's, until no host serves.
+  // is another than the hub's, until no host serves.
   for (const build of ['test', 'v0.5.0-3-gabc-dirty.1700000002'])
     test(`a host of build ${build}`, async () => {
       const r = await start({ version: build, host: (h) => (h.states = [chatState(chat.Status.Working, chat.State.Working, 3)]) });

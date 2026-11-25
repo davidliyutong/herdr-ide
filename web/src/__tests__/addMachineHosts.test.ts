@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// The Add Machine dialog's hosts of the core host's ~/.ssh/config: listed
+// The Add Machine dialog's hosts of the hub host's ~/.ssh/config: listed
 // under the target field, narrowed as one types, picked with the keys or
 // the pointer; any other target can still be typed.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

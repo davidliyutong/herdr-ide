@@ -1,7 +1,7 @@
 import { decodeFrame, encodeFrame, frameGrid, FRAME_AUTOMATIC, FRAME_DATA, TermError } from './protocol';
 import { openChannel } from '../lib/transport';
 
-/** What a stream delivers to the pane that attached it, in the order the core sent it. */
+/** What a stream delivers to the pane that attached it, in the order the hub sent it. */
 export interface StreamHandler {
   output(data: Uint8Array): void;
   resized?(cols: number, rows: number): void;
@@ -46,7 +46,7 @@ export interface Socket {
 type Reply = { resolve: (v: Record<string, unknown>) => void; reject: (e: TermError) => void };
 
 /**
- * A connection to the core's terminal protocol. It reconnects by itself and
+ * A connection to the hub's terminal protocol. It reconnects by itself and
  * subscribes again; streams end with the connection they were opened on and
  * are attached again by their owners.
  */
@@ -69,7 +69,7 @@ export class TermConnection {
 
   constructor(private readonly open: () => Socket) {}
 
-  /** A connection to the core that served the page. */
+  /** A connection to the hub that served the page. */
   static toHub(): TermConnection {
     return new TermConnection(() => openChannel('/api/v1/term') as unknown as Socket);
   }

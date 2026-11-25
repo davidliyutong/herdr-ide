@@ -1,6 +1,6 @@
-// Channels to the core that served the page: a WebSocket in a browser; in
-// the desktop app, whose core runs in process and does not listen, a
-// channel its shell opens to the core (DesktopChannels), with the same
+// Channels to the hub that served the page: a WebSocket in a browser; in
+// the desktop app, whose hub runs in process and does not listen, a
+// channel its shell opens to the hub (DesktopChannels), with the same
 // interface. Requests need nothing of this: the app's shell answers its
 // origin's fetches itself.
 import type { DesktopChannels } from '../shell';
@@ -19,7 +19,7 @@ export function wsURL(path: string): string {
   return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
 }
 
-/** Opens a channel to the core at path (with its query). */
+/** Opens a channel to the hub at path (with its query). */
 export function openChannel(path: string): WebSocket {
   if (desktopChannels) {
     PortSocket ??= installPortSocket(false);

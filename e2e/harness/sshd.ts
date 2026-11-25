@@ -4,7 +4,7 @@
 //
 // Nothing of the user's ssh setup is used: the test's throwaway key pair,
 // known_hosts entry and ssh configuration are in the instance's home, and
-// the core finds an `ssh` first in its PATH that runs the system's ssh with
+// the hub finds an `ssh` first in its PATH that runs the system's ssh with
 // that configuration only (-F: neither ~/.ssh/config, which ssh reads from
 // the account's home whatever HOME says, nor /etc/ssh/ssh_config), no
 // ssh agent and no other key.

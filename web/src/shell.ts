@@ -1,5 +1,5 @@
 // The desktop app's bridge (desktop/src/preload.ts), present only in its
-// main window, and its channels to the core, in each of its frames; in a
+// main window, and its channels to the hub, in each of its frames; in a
 // browser there is neither. Kept without imports so any
 // module can ask early whether it runs in the desktop app. The preload
 // implements this interface.
@@ -56,7 +56,7 @@ export interface DesktopShell {
   browser?: DesktopBrowser;
   /** What the app's own processes use now, for the settings' Performance
    * page: Electron's count of each (the window's page, the GPU process, the
-   * shell itself, helpers); the core is not among them. */
+   * shell itself, helpers); the hub is not among them. */
   metrics?(): Promise<ProcessUsage[]>;
   /** Native OS notifications through Electron's Notification API. */
   notifications?: DesktopNotifications;
@@ -105,8 +105,8 @@ export interface DesktopBrowser {
   onOpen(fn: (url: string) => void): () => void;
 }
 
-/** What the shell answers for a locked vault's unlock: the core's unlock
- * entry it used and the relay, sealed for the core with the key of this
+/** What the shell answers for a locked vault's unlock: the hub's unlock
+ * entry it used and the relay, sealed for the hub with the key of this
  * launch, which the page only passes on. */
 export interface DesktopUnlock {
   id: string;
@@ -114,7 +114,7 @@ export interface DesktopUnlock {
 }
 
 /** What the shell answers when an authenticator is added: the proof's MAC
- * (hex) and the relay that carries this install's unlock key to the core. */
+ * (hex) and the relay that carries this install's unlock key to the hub. */
 export interface DesktopEnroll {
   mac: string;
   relay: string;
@@ -130,7 +130,7 @@ export interface DesktopVerifyUser {
    * null when the user did not confirm. */
   prove(nonce: string): Promise<string | null>;
   /** For a `session` nonce of a locked vault: prompts, and answers what the
-   * page sends the core to unlock (POST session {unlock}); 'none', without
+   * page sends the hub to unlock (POST session {unlock}); 'none', without
    * a prompt, when this install has no unlock entry (its keys were lost, or
    * the entries are other installs'); null when the user did not confirm. */
   unlock(nonce: string): Promise<DesktopUnlock | 'none' | null>;
@@ -169,12 +169,12 @@ export interface DesktopTitlebar {
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;
 
-/** The desktop app's channels to its core (desktop/src/frames.ts), present
+/** The desktop app's channels to its hub (desktop/src/frames.ts), present
  * as desktopChannels in every frame of the app's origin in the desktop
- * app, whose core does not listen: what a WebSocket to the core is in a
+ * app, whose hub does not listen: what a WebSocket to the hub is in a
  * browser (lib/transport.ts). */
 export interface DesktopChannels {
-  /** Asks for a channel to the core at path (with its query) offering the
+  /** Asks for a channel to the hub at path (with its query) offering the
    * WebSocket subprotocols; returns its id. Its MessagePort arrives as a
    * message to this window from its own origin, {[CHANNEL_PORT]: id} with
    * the port; the bridge's frames on it are

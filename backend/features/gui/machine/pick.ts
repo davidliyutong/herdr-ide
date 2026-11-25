@@ -3,7 +3,7 @@
 // started with CUDA_VISIBLE_DEVICES only the GPUs that names, so the chosen
 // one is its first. The machine build carries it for its architecture
 // (scripts/gpupick/bin, built against glibc 2.17) and writes it below
-// the data directory (shared by instances) when the core asks, after
+// the data directory (shared by instances) when the hub asks, after
 // checking that the dynamic loader takes it: a home directory mounted
 // noexec, or a C library it was not built for, would make every program of
 // a terminal complain.

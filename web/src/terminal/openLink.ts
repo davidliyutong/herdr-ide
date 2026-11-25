@@ -33,7 +33,7 @@ export function openWebLink(href: string, m: string, opts: { ask?: boolean } = {
   const place = linkPlace(m, url, linkMode(settingValue('browser.openLinks')));
   if (place === 'pane') return pane();
   if (place === 'outside') return outside();
-  // Whether forwards can be used is the core's word: known once asked.
+  // Whether forwards can be used is the hub's word: known once asked.
   const decide = (available: boolean) => (available ? pane() : outside());
   const known = useForwards.getState().available;
   if (known !== undefined) {

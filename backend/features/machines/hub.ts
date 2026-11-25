@@ -1,7 +1,7 @@
 // Machines as the UI manages them: the list and its order, adding an ssh
 // machine (with the Host aliases of the user's ssh configuration to choose
 // from), renaming, enabling, removing; an interactive ssh login in a
-// terminal on the core's host; and the machines' states and agents' events
+// terminal on the hub's host; and the machines' states and agents' events
 // on /ws.
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
@@ -56,13 +56,13 @@ const saving = <T>(fn: () => T): T => {
 };
 
 export interface MachinesFeatureOptions {
-  /** The core host user's home, whose ~/.ssh/config the Add Machine dialog
+  /** The hub host user's home, whose ~/.ssh/config the Add Machine dialog
    * lists. */
   home: () => string;
   /** The directory of ssh's control sockets; "" where ssh shares no
    * connections (Windows): there is no login in the UI then. */
   controlDir: string;
-  /** Terminals on the core's host, for the ssh login; undefined where the
+  /** Terminals on the hub's host, for the ssh login; undefined where the
    * host has none. */
   pty?: SpawnPty;
   /** How long the login's last output is forwarded after ssh exited. */
@@ -102,7 +102,7 @@ export const machinesFeature = (o: MachinesFeatureOptions) =>
       api.get('/machines', (c) => c.json(machines.states()));
       api.get('/perf', (c) => c.json(sample()));
 
-      // The Host aliases of the core host's ssh configuration that are no
+      // The Host aliases of the hub host's ssh configuration that are no
       // machine's target yet: each alias with its HostName and User,
       // nothing else. Only pages that may add machines get it.
       api.get('/ssh/hosts', ctx.writable, async (c) => {
@@ -186,7 +186,7 @@ export const machinesFeature = (o: MachinesFeatureOptions) =>
         return c.json(m.state());
       });
 
-      // An interactive ssh login in a terminal on the core's host, bridged
+      // An interactive ssh login in a terminal on the hub's host, bridged
       // to a channel. The control master it creates is reused by the
       // BatchMode connections afterwards; without a control directory
       // (Windows) a login would hold nothing, and it is refused.

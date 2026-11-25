@@ -284,7 +284,7 @@ export class Host {
       this.journal = journal;
       if (pruneError) this.logf(`removing other hosts' journals: ${pruneError.message}`);
       else if (pruned.length > 0) this.logf(`removed the journals nobody used for 30 days: ${pruned.join(', ')}`);
-      // Full access is the core's to allow, in this process: a host does
+      // Full access is the hub's to allow, in this process: a host does
       // not take it from what an earlier one stored.
       const stored = (await journal.settings()) ?? {};
       this.current = chat.clampHostSettings({ ...stored, allowFull: false });
@@ -1138,7 +1138,7 @@ export class Host {
     return { ok: true };
   }
 
-  /** Takes the core's settings. Without full access, a chat whose agent
+  /** Takes the hub's settings. Without full access, a chat whose agent
    * runs in a mode of full access starts it again in the default mode
    * (revokeFull). */
   private async configure(req: Request): Promise<chat.Response> {

@@ -726,7 +726,7 @@ export const en = {
   'perf.process.page': 'Window',
   'perf.process.gpu': 'GPU process',
   'perf.process.helper': 'Helper',
-  'perf.process.core': 'Core',
+  'perf.process.core': 'Server',
   'perf.note.desktop': 'CPU is the share of one processor. Programs in terminals and VS Code are not counted.',
   'perf.note.browser':
     'The window’s memory is its scripts’; a browser does not tell a page its CPU or GPU use. Programs in terminals and VS Code are not counted.',
@@ -934,7 +934,7 @@ export const en = {
   'eol.readOnly': '{name} mixes line endings (LF and CRLF): it opens read-only (Settings › Git).',
   'settings.plugins.vault.enabled': 'Variable vault',
   'settings.plugins.vault.enabled.desc':
-    'Keep API keys and other variables encrypted on the core’s computer and let coding agents (Claude Code, Codex…) on your machines read them through an MCP server, with your approval.',
+    'Keep API keys and other variables encrypted on the server’s computer and let coding agents (Claude Code, Codex…) on your machines read them through an MCP server, with your approval.',
   'command.view.panel.vault': 'Show Variable Vault',
   'settings.plugins.usage.enabled': 'AI usage',
   'command.view.panel.usage': 'Show AI Usage',

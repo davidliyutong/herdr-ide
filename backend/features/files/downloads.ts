@@ -1,6 +1,6 @@
 // Downloads a page started with an id (GET /api/m/:id/download?dl=…), for
 // its downloads panel (docs/features/06-quick-look-and-files.md): the
-// browser saves the answer itself, and the core tells the page how much of
+// browser saves the answer itself, and the hub tells the page how much of
 // it went out and how it ended, and cancels it on request. Events are
 // {t: "download", id, state: running|done|failed|cancelled|unknown, sent,
 // total?, name?, error?}, sent only to the page that follows the id: it
@@ -8,7 +8,7 @@
 // a reconnect, and is answered with the download's state at once. How a
 // download ended is kept for keepMs, so that a page that missed it (its
 // request came first, or its connection dropped) still learns it;
-// "unknown" answers an id the core has not seen or no longer knows.
+// "unknown" answers an id the hub has not seen or no longer knows.
 import type { Page } from '#kernel/pages.ts';
 import type { Ending, Transfer } from './body.ts';
 
@@ -216,7 +216,7 @@ export class Downloads {
     for (const [id, w] of this.watchers) if (!this.running.has(id) && now - w.since > this.keepMs) this.watchers.delete(id);
   }
 
-  /** What the core knows of download id: its progress, how it ended, or
+  /** What the hub knows of download id: its progress, how it ended, or
    * that it does not know it. */
   private stateOf(id: string): DownloadEvent {
     const d = this.running.get(id);
@@ -225,7 +225,7 @@ export class Downloads {
   }
 
   /** Makes page the one following the downloads ids (download.watch) and
-   * sends it what the core knows of each. */
+   * sends it what the hub knows of each. */
   watch(page: Page, ids: readonly string[]): void {
     this.prune();
     for (const id of ids.slice(0, this.maxWatchIds)) {
@@ -239,7 +239,7 @@ export class Downloads {
 
   /** Stops download id for page (download.cancel): the browser's download
    * fails, and the agent's stream closes; page follows the id from then on
-   * and hears how it ended. One the core has not seen counts as cancelled
+   * and hears how it ended. One the hub has not seen counts as cancelled
    * at once, and its request is refused if it comes after all. Whether a
    * cancel was recorded (for the audit log). */
   cancel(page: Page, id: string): boolean {

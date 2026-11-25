@@ -4,7 +4,7 @@
 // a snapshot of its processes, and a signal from an allowlist to one of
 // them. Linux is read from /proc and /sys (linux.ts), macOS from its own
 // programs (darwin.ts); rates and CPU shares are those of the interval
-// since the agent's previous sample, which the cores of a node share.
+// since the agent's previous sample, which the hubs of a node share.
 import { defineMachine } from '#machine/feature.ts';
 import { monitorProtocol } from './protocol.ts';
 import { darwinMetrics, darwinProcesses } from './machine/darwin.ts';

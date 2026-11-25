@@ -1,4 +1,4 @@
-// What a core that deploys the TypeScript machine side knows of its
+// What a hub that deploys the TypeScript machine side knows of its
 // release: the manifest (SHA256SUMS), which names the SHA-256 of each
 // platform's archive (<bin>-<platform>.tar.gz) and of the executable in it
 // (<bin>-<platform>/<bin>), and where the archives come from when a
@@ -6,26 +6,26 @@
 //
 // The manifest, first of:
 //   - the operator's directory (--agent-dir/SHA256SUMS: offline sites);
-//   - the core host's cache (a manifest the core fetched, per version);
-//   - the release, fetched by the core over its own HTTPS (Bun's or Node's
+//   - the hub host's cache (a manifest the hub fetched, per version);
+//   - the release, fetched by the hub over its own HTTPS (Bun's or Node's
 //     fetch, which verify the certificate; the proxy of the environment,
 //     shared/lib/proxy.ts), then cached;
 //   - when that fetch found the release unreachable (no name, no route, a
 //     refused connection, no answer in time), the release fetched by the
-//     core again, through the machine (tunnel: an ssh stdio forward), its
-//     TLS still the core's own, end to end (tunnel.ts), then cached.
-// A fetch that reached something (a certificate the core does not trust,
+//     hub again, through the machine (tunnel: an ssh stdio forward), its
+//     TLS still the hub's own, end to end (tunnel.ts), then cached.
+// A fetch that reached something (a certificate the hub does not trust,
 // an HTTP answer, a manifest it refuses) ends there: the machine is not
 // asked, whose own download of the manifest could not be told from one an
-// attacker on its path gave it. There is no manifest the core did not
+// attacker on its path gave it. There is no manifest the hub did not
 // verify itself.
-// A manifest is this build's only when it names this core's own executable
+// A manifest is this build's only when it names this hub's own executable
 // (its platform's line) by its digest: one of another release is refused.
-// A core without an executable of its own (the desktop app on Windows)
+// A hub without an executable of its own (the desktop app on Windows)
 // cannot tell, and says so in its log.
 //
-// What the core uploads, first of: the operator's directory (the archive,
-// or the executable as <bin>-<platform>), the cache, the core's own
+// What the hub uploads, first of: the operator's directory (the archive,
+// or the executable as <bin>-<platform>), the cache, the hub's own
 // executable for a machine of its platform, a download of the archive from
 // the release (then cached). Each is checked against the manifest's digest
 // (the own executable is the running one) before it is used or cached.
@@ -49,10 +49,10 @@ export const MAX_SUMS = 1 << 20;
 export const SUMS = 'SHA256SUMS';
 /** How long a cached archive or manifest is kept after its last use. */
 export const CACHE_RETENTION_MS = 14 * 24 * 60 * 60_000;
-/** How long a failed fetch of the manifest keeps the core from trying
+/** How long a failed fetch of the manifest keeps the hub from trying
  * again. */
 const FETCH_RETRY_MS = 10 * 60_000;
-/** How long the core's downloads may take in all (the manifest is small:
+/** How long the hub's downloads may take in all (the manifest is small:
  * a release that does not answer within this is unreachable). */
 const SUMS_TIMEOUT_MS = 15_000;
 const ARCHIVE_TIMEOUT_MS = 10 * 60_000;
@@ -111,7 +111,7 @@ export function unreachable(e: unknown): boolean {
   return codes.some((c) => typeof c === 'string' && UNREACHABLE.has(c));
 }
 
-/** The core's own executable, for a machine of its platform (and to tell
+/** The hub's own executable, for a machine of its platform (and to tell
  * its release's manifest from another). */
 export interface OwnExecutable {
   key: string;
@@ -240,7 +240,7 @@ export interface Manifest {
 }
 
 export interface ReleaseOptions {
-  /** The core's version (the cache's key). */
+  /** The hub's version (the cache's key). */
   version: string;
   /** The release's download URL (…/releases/download/<tag>); absent for a
    * build of no release. */
@@ -250,19 +250,19 @@ export interface ReleaseOptions {
   /** The build's own SHA256SUMS, carried by a desktop app built from a
    * release's executables without its URL (scripts/build.sh RELEASE_SUMS). */
   sums?: string;
-  /** The core host's cache of manifests and archives. */
+  /** The hub host's cache of manifests and archives. */
   cacheDir: string;
   own?: OwnExecutable | null;
   /** Certificate authorities the fetch through a machine trusts in place of
    * the default ones (tests). */
   tunnelCA?: string | Buffer;
   /** Where what was refused is logged with its paths (the errors the
-   * machines' states carry name none of the core's host). */
+   * machines' states carry name none of the hub's host). */
   logger?: (line: string) => void;
   now?: () => number;
 }
 
-/** A core's release: its manifest and the archives of every platform. */
+/** A hub's release: its manifest and the archives of every platform. */
 export class Release {
   private manifestP?: Promise<Manifest | null>;
   private unreachableAt = -Infinity;
@@ -288,23 +288,23 @@ export class Release {
     return this.o.url ? `${this.o.url.replace(/\/$/, '')}/${name}` : undefined;
   }
 
-  /** Refuses a manifest of another build: its line of this core's own
+  /** Refuses a manifest of another build: its line of this hub's own
    * executable must be that executable's digest. */
   private async ofThisBuild(sums: Map<string, string>, source: string): Promise<void> {
     const own = this.o.own;
     if (!own) {
-      if (!this.ownChecked) this.log(`${SUMS} from ${source}: this core has no executable of its own to check its version against`);
+      if (!this.ownChecked) this.log(`${SUMS} from ${source}: this hub has no executable of its own to check its version against`);
       this.ownChecked = true;
       return;
     }
     const line = sums.get(archiveMember(own.key));
     const mine = await own.digest();
     if (line !== mine)
-      throw new Error(`${SUMS} of another build: it names ${archiveMember(own.key)} ${line ?? 'not at all'}, this core is ${mine}`);
+      throw new Error(`${SUMS} of another build: it names ${archiveMember(own.key)} ${line ?? 'not at all'}, this hub is ${mine}`);
   }
 
   /** The manifest from the directory, the cache or the release (fetched
-   * by the core, directly or, when the release is unreachable, through
+   * by the hub, directly or, when the release is unreachable, through
    * tunnel); null when none has it. reasons gets what each source said. */
   private async find(reasons: string[], signal?: AbortSignal, tunnel?: OpenStream): Promise<Manifest | null> {
     const parse = async (text: string, source: string, label: string): Promise<Manifest | null> => {
@@ -352,7 +352,7 @@ export class Release {
       await writeFile(`${cached}.${process.pid}`, text, { mode: 0o600 });
       await rename(`${cached}.${process.pid}`, cached);
     };
-    // The core's own fetch, not again for a while once the release was
+    // The hub's own fetch, not again for a while once the release was
     // unreachable.
     if (this.now() - this.unreachableAt >= FETCH_RETRY_MS) {
       try {
@@ -363,17 +363,17 @@ export class Release {
       } catch (e) {
         if (signal?.aborted) throw e;
         const why = errorText(e);
-        this.log(`the core could not download ${url}: ${why}`);
+        this.log(`the hub could not download ${url}: ${why}`);
         if (!unreachable(e)) {
-          // It reached something that is not the release as the core
+          // It reached something that is not the release as the hub
           // trusts it: the machine is not asked instead.
-          reasons.push(`the core could not download ${url}: ${why}`);
+          reasons.push(`the hub could not download ${url}: ${why}`);
           return null;
         }
         this.unreachableAt = this.now();
-        reasons.push(`the core cannot reach ${url} (${why})`);
+        reasons.push(`the hub cannot reach ${url} (${why})`);
       }
-    } else reasons.push(`the core could not reach ${url} lately`);
+    } else reasons.push(`the hub could not reach ${url} lately`);
     if (!tunnel) return null;
     try {
       const text = (
@@ -390,9 +390,9 @@ export class Release {
     } catch (e) {
       if (signal?.aborted) throw e;
       const why = errorText(e);
-      reasons.push(`the core could not download ${url} through the machine either: ${why}`);
+      reasons.push(`the hub could not download ${url} through the machine either: ${why}`);
       this.log(
-        `the core could not download ${url} through the machine (ssh -W; a machine whose sshd forbids forwarding, AllowTcpForwarding no, cannot carry it: give the core a route to the release, or --agent-dir with the release's files): ${why}`,
+        `the hub could not download ${url} through the machine (ssh -W; a machine whose sshd forbids forwarding, AllowTcpForwarding no, cannot carry it: give the hub a route to the release, or --agent-dir with the release's files): ${why}`,
       );
       return null;
     }
@@ -419,14 +419,14 @@ export class Release {
       if (exe && HEX64.test(exe)) return { exe, ...(archive && HEX64.test(archive) ? { archive } : {}), source: m.source };
       reasons.push(`${SUMS} has no executable for ${key}`);
     }
-    if (this.o.own && this.o.own.key === key) return { exe: await this.o.own.digest(), source: "this core's own executable" };
+    if (this.o.own && this.o.own.key === key) return { exe: await this.o.own.digest(), source: "this hub's own executable" };
     throw new Unsupported(
       DeployCode.BuildUnavailable,
-      `no machine build for ${key}: ${reasons.join('; ')}; put the release's ${SUMS} and ${archiveName(key)} into the core's --agent-dir`,
+      `no machine build for ${key}: ${reasons.join('; ')}; put the release's ${SUMS} and ${archiveName(key)} into the hub's --agent-dir`,
     );
   }
 
-  /** What the core uploads for key's build of digests d (one load per
+  /** What the hub uploads for key's build of digests d (one load per
    * build, shared by the machines that wait for it; a failure is tried
    * again). */
   load(key: string, d: TSDigests): Promise<TSPayload> {
@@ -492,14 +492,14 @@ export class Release {
         if (mine !== d.exe) throw new Error(`sha256 ${mine} is not the build's ${d.exe}`);
         return { kind: 'gz', bytes: await own.gz() };
       } catch (e) {
-        refused("the core's own executable", '', e);
+        refused("the hub's own executable", '', e);
       }
     const url = this.url(archiveName(key));
     if (!url || !d.archive) {
       reasons.push(url ? `${SUMS} names no ${archiveName(key)}` : 'this build has no release to download it from');
       throw new Unsupported(
         DeployCode.BuildUnavailable,
-        `no machine build for ${key} (${reasons.join('; ')}); put ${archiveName(key)} of the release into the core's --agent-dir`,
+        `no machine build for ${key} (${reasons.join('; ')}); put ${archiveName(key)} of the release into the hub's --agent-dir`,
       );
     }
     let r: { bytes: Buffer; digest: string };
@@ -512,7 +512,7 @@ export class Release {
       this.log(`machine build ${key}: the download from ${url} failed: ${(e as Error).message}`);
       throw new Unsupported(
         DeployCode.BuildUnavailable,
-        `no machine build for ${key} (${reasons.join('; ')}); put ${archiveName(key)} of the release into the core's --agent-dir, or let the core or the machine reach ${url}`,
+        `no machine build for ${key} (${reasons.join('; ')}); put ${archiveName(key)} of the release into the hub's --agent-dir, or let the hub or the machine reach ${url}`,
       );
     }
     await mkdir(this.o.cacheDir, { recursive: true, mode: 0o700 });

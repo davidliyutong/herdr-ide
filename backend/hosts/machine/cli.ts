@@ -4,8 +4,8 @@
 //
 //	<slug> node [dial | stop] [--instance NAME] [--client ID] [--takeover] [--terminal-core]
 //
-// A machine runs them from the executable the core deployed
-// (~/.<slug>/agent/<version>/<slug>), the same program as the core's.
+// A machine runs them from the executable the hub deployed
+// (~/.<slug>/agent/<version>/<slug>), the same program as the hub's.
 import { parseArgs } from 'node:util';
 import { HUB_BIN } from '#shared/lib/brand.ts';
 import { dirsFor } from '#shared/host/hostdirs.ts';

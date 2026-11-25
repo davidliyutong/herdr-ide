@@ -15,7 +15,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, send: () => {}, conn
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { definePlugins } from '../plugins/registry';
 import { filesPlugin } from '../plugins/files';
 import { searchPlugin } from '../plugins/search';
@@ -76,13 +76,13 @@ describe('model', () => {
 });
 
 describe('the panel', () => {
-  let core: FakeCore;
+  let hub: FakeHub;
   let host: HTMLDivElement;
   let root: Root;
   let requests: Array<{ p: SearchParams; signal?: AbortSignal }>;
   /** Answers held until released (a slow machine). */
   let hold: Promise<void> | undefined;
-  const ws = () => core.model.layout('a')!.workspaces[0];
+  const ws = () => hub.model.layout('a')!.workspaces[0];
 
   beforeEach(async () => {
     requests = [];
@@ -99,18 +99,18 @@ describe('the panel', () => {
       }
       return new Response('{}');
     });
-    core = new FakeCore();
-    core.machine('a', [FakeCore.term('s1', { cwd: '/home/u/w1' })], {
+    hub = new FakeHub();
+    hub.machine('a', [FakeHub.term('s1', { cwd: '/home/u/w1' })], {
       version: 2,
       workspaces: [{ id: 'w1', name: '', cwd: '/home/u/w1', tabs: [{ root: { terminal: 's1' }, focused: 's1' }], selected: 0 }],
       selected: 0,
     });
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([{ id: 'a', label: 'a', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
     s.selectMachine('a');
-    core.model.subscribe('a');
+    hub.model.subscribe('a');
     await settle();
     useSearch.setState({
       query: '',

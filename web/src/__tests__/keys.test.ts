@@ -28,7 +28,7 @@ import { conflictsOf } from '../components/KeyboardShortcuts';
 // The vectors of spec/vectors/keys; backend/kernel/config/keybindings runs parse.json
 // too.
 describe('key sequences', () => {
-  it('normalizes as the core does', () => {
+  it('normalizes as the hub does', () => {
     expect(parseVectors.cases.length).toBeGreaterThan(30);
     for (const c of parseVectors.cases as { input: string; key?: string; error?: string }[]) {
       if (c.error) {

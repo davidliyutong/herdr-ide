@@ -2,7 +2,7 @@
 // docs/deployment.md#remote-resources): old uploads go, other hosts'
 // directories unused for long go, installs that did not finish go, and
 // this agent's build and this host's directories are touched,
-// so that other cores' and hosts' cleanups keep them (an upload removes
+// so that other hubs' and hosts' cleanups keep them (an upload removes
 // builds unused for 14 days, transport/ssh.ts). Every call is
 // asynchronous: the node's thread never waits for the file system. A link
 // is never followed: what it names is not this data directory's.
@@ -22,7 +22,7 @@ export const UPLOAD_RETENTION_MS = 7 * DAY;
  * directory goes after HOST_EXE_RETENTION_MS. */
 export const HOST_RETENTION_MS = 30 * DAY;
 export const HOST_EXE_RETENTION_MS = 180 * DAY;
-/** A build's file an install left behind (the core's upload, the machine's
+/** A build's file an install left behind (the hub's upload, the machine's
  * download or the local install was interrupted) goes after this long. */
 export const STAGING_RETENTION_MS = 60 * 60_000;
 /** How often a running agent applies its rules: a node runs for weeks. */

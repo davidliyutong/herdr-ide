@@ -4,7 +4,7 @@
 //
 // After each attach its subscribers hear the chat as the host stated it
 // (an info event) first, then its stored events after the last one the
-// source has; after the page's connection came back (or the core lost its
+// source has; after the page's connection came back (or the hub lost its
 // connection to the host) a reattach event comes before that, as live
 // increments may have been lost. A chat whose log went back below what the
 // source has (another host's), or whose stored events now begin after the
@@ -36,7 +36,7 @@ export const MAX_STORED = 20_000;
 export const MAX_LIVE = 4_000;
 /** How long a command waits for the chat to be attached. */
 export const ATTACH_WAIT_MS = 15_000;
-/** The waits before attaching again after the core ended a subscription. */
+/** The waits before attaching again after the hub ended a subscription. */
 const RETRY_MIN_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
 
@@ -65,14 +65,14 @@ export class ChatSourceImpl implements ChatSource {
   /** The last stored seq taken. */
   private last = 0;
   /** The current subscription (its handle is set once attach returned: the
-   * core may answer before that). */
+   * hub may answer before that). */
   private cur?: { sub?: Subscription };
   private attachedNow = false;
   private waiters: Array<{ resolve(): void; reject(e: CommandError): void; timer: ReturnType<typeof setTimeout> }> = [];
   private retry = RETRY_MIN_MS;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
-  /** The core said there is no such chat. */
+  /** The hub said there is no such chat. */
   private gone = false;
   private usage?: Usage;
   /** Its next subscription attaches again (a reattach first). */
@@ -133,13 +133,13 @@ export class ChatSourceImpl implements ChatSource {
     return this.command({ op: 'rename', title });
   }
   /** Trusts the chat's folder, and those below it, on its machine (the
-   * core's route trust, audited): its agents load the project's own
+   * hub's route trust, audited): its agents load the project's own
    * settings from their next start. */
   trust(): Promise<void> {
     return this.folderTrust(chatApi.trust);
   }
   /** Takes back the trust that covers the chat's folder on its machine
-   * (the core's route untrust, audited): its agents start without the
+   * (the hub's route untrust, audited): its agents start without the
    * project's own settings again. */
   untrust(): Promise<void> {
     return this.folderTrust(chatApi.untrust);
@@ -177,7 +177,7 @@ export class ChatSourceImpl implements ChatSource {
   }
 
   /** Attaches again now if the chat is not attached (a pane shows it
-   * again after the core ended its subscription). */
+   * again after the hub ended its subscription). */
   wake() {
     if (this.stopped || this.gone || this.cur) return;
     clearTimeout(this.retryTimer);

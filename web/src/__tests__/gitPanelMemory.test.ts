@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // The Git panel (plugins/git/GitPanel.tsx) as the directory it follows
-// moves and as it goes away and comes back, with the core's routes stubbed
+// moves and as it goes away and comes back, with the hub's routes stubbed
 // and the followed directory (files/FilesPanel followedDir) scripted: a
 // terminal's cd inside the repository changes nothing in the panel (also
 // while the directory's repository is asked or could not be asked); a

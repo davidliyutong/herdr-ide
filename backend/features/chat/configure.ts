@@ -1,9 +1,9 @@
 // Giving the machines' chat hosts their settings (Op.Configure). A host
 // starts with the defaults, without full access: before a request that may
 // start an agent (a new chat, a prompt, a listing that runs the agent) the
-// host the core reaches takes the machine's settings unless that host
+// host the hub reaches takes the machine's settings unless that host
 // process took them as they are (prepare, ensure), and a watched host takes
-// them when they change (configure). A read-only core configures nothing.
+// them when they change (configure). A read-only hub configures nothing.
 import type { Logger } from '#shared/lib/log.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { asChatError } from './errors.ts';
@@ -96,7 +96,7 @@ export class Configurer {
 
   /** Configures machine m's host before a request that may start an agent,
    * with start starting the host, unless a host took the machine's
-   * settings as they are since the core started. A failure is left to the
+   * settings as they are since the hub started. A failure is left to the
    * request that follows. */
   async prepare(m: string, start: boolean, signal: AbortSignal): Promise<void> {
     if (this.o.readOnly || this.configured(m)) return;

@@ -31,7 +31,7 @@ import { BusyError, NewerTablesError, Store, clamp, screenKey, type Meta } from 
 
 /** The bounds of a capture's waits. */
 export interface Timing {
-  /** One capture: shorter than the core waits for its answer (30 s), so
+  /** One capture: shorter than the hub waits for its answer (30 s), so
    * that the result, with the terminals the time did not reach, arrives in
    * time. */
   captureMs: number;
@@ -48,7 +48,7 @@ export interface Timing {
   lockWaitMs: number;
   /** A clear or an adopt, which waits for a capture that holds the lease. */
   clearMs: number;
-  /** How long a capture of one core stands for the others its node serves:
+  /** How long a capture of one hub stands for the others its node serves:
    * their captures in that time do nothing (busy). */
   shareMs: number;
   /** How long the snapshots of a terminal gone from the terminal core's
@@ -86,10 +86,10 @@ export interface CaptureEnv {
 }
 
 /** The instance's terminal core cannot be reached. Its wording is fixed:
- * the error goes to the core, without the socket's path. */
+ * the error goes to the hub, without the socket's path. */
 export const notRunning = () => new Fail('not_running', 503, 'history: the terminal core is not running');
 
-/** A failure to use the snapshots' database as the core gets it: a code and
+/** A failure to use the snapshots' database as the hub gets it: a code and
  * a fixed wording, never the database's path. */
 export function storeError(e: unknown): Fail {
   if (e instanceof BusyError || isAbort(e)) return new Fail('busy', 409, 'history: a capture holds the snapshots');
@@ -107,7 +107,7 @@ const CORE_ENDED = new Set(['stopped_by_restart', 'holder_lost', 'server_stop', 
 
 /** Whether a terminal of the terminal core's records gets snapshots: live,
  * running a program, with an address that can name a snapshot (a machine
- * linked to the core has addresses machine/t7), and none of the product's
+ * linked to the terminal core has addresses machine/t7), and none of the product's
  * own helpers (agentproto.hidden: the name and the label both); a terminal
  * that only carries the label is one of the user's and is captured. */
 export function capturable(t: Terminal): boolean {

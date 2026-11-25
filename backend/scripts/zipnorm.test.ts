@@ -1,4 +1,4 @@
-// The zip normalization of the VSIX the core embeds: the same files give
+// The zip normalization of the VSIX the hub embeds: the same files give
 // the same bytes, whatever their order and times, and keep their contents,
 // modes and compression.
 import { expect, test } from 'bun:test';

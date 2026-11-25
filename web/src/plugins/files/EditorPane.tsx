@@ -32,7 +32,7 @@ import { isMediaPath, MediaView } from '../../components/PreviewPane';
 import { isMixed, restoreEols, useMixedLineEndings } from '../../eol';
 import './files.css';
 
-/** The largest file the editor opens (the core's limit for a save). */
+/** The largest file the editor opens (the hub's limit for a save). */
 export const MAX_SIZE = 8 << 20;
 /** How often an open file is checked for changes on disk. */
 export const CHECK_MS = 5000;

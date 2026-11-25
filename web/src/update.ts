@@ -1,7 +1,7 @@
-// After the core is replaced, a page loaded from the old build keeps running
-// its old code against the new core (settings it has no labels for, missing
+// After the hub is replaced, a page loaded from the old build keeps running
+// its old code against the new hub (settings it has no labels for, missing
 // features). On every reconnect the page compares its entry script with the
-// one the core serves now and offers to reload.
+// one the hub serves now and offers to reload.
 
 import { useStore } from './state/store';
 import { t } from './i18n';

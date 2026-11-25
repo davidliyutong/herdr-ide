@@ -1,7 +1,7 @@
 // The System Monitor & Task Manager's actions on a machine
 // (docs/features/34-system-monitor.md), as the machine side serves them
 // (features/monitor/machine): live metrics, a snapshot of the processes,
-// and a signal from an allowlist to one of the user's processes. The core
+// and a signal from an allowlist to one of the user's processes. The hub
 // passes results on to the page as the agent wrote them, so they are loose
 // objects: typed, and a member a later agent adds still reaches the page. A
 // Go slice without omitempty may be null.

@@ -4,7 +4,7 @@
 // turns it into the bun command, and its configuration (BUN_CONFIG_*:
 // BUN_CONFIG_VERBOSE_FETCH=curl prints every fetch with its headers, a
 // provider's bearer token among them, into the node's log). The machine
-// side is started without them (the core's ssh command, its local spawn,
+// side is started without them (the hub's ssh command, its local spawn,
 // the command line's `node`) and drops them itself (machine/self.ts).
 export const FOREIGN_RUNTIME_VARS = [
   'BUN_OPTIONS',

@@ -28,7 +28,7 @@ const plainRec = (addr: string) => rec(addr, '', { name: 'mine' });
 /** The record of a chat host: its name and the hidden label. */
 const hiddenRec = (addr: string) => rec(addr, host, { [HIDDEN_LABEL]: HIDDEN_CHAT_HOST });
 
-/** A core with machine x whose terminal core calls itself c0ffee or box,
+/** A hub with machine x whose terminal core calls itself c0ffee or box,
  * has the terminals snap, answers terminal.list with list and
  * terminal.get with recs (by address or name; not_found for others). */
 async function hiddenRig(snap: object[], list: object, recs: Record<string, object>, readOnly = false) {

@@ -15,7 +15,7 @@
 // at, as the terminal's prelude. A prelude goes when its snapshot leaves
 // the list, its leaf leaves the layout, or the setting or the plugin is
 // turned off; it stays while the machine's terminals or layout are not
-// known (the machine, or the connection to the core, is coming back) until
+// known (the machine, or the connection to the hub, is coming back) until
 // the list read once they are says otherwise. While a choice waits for the
 // machine to capture a terminal's new program (awaitsCapture), the list is
 // read again one capture interval later, at most CAPTURE_WAITS times. A
@@ -229,7 +229,7 @@ let stopFollowing: (() => void) | undefined;
 const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 /** Codes of failures a later try may not have: the machine away or busy,
- * the network, a reply not understood, the core's own failure. */
+ * the network, a reply not understood, the hub's own failure. */
 const TRANSIENT: ReadonlySet<string> = new Set(['network', 'offline', 'busy', 'timeout', 'transport', 'bad_reply', 'failed']);
 
 /** Whether a failure is the machine's or the network's for the moment,

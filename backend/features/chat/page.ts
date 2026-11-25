@@ -7,7 +7,7 @@
 // not read from the chat host until the page took enough of them, and the
 // host, whose own bound for a connection that falls behind is reached then,
 // drops that connection (the page hears lost and attaches again from its
-// last sequence number), while the page's other chats go on. The core's own
+// last sequence number), while the page's other chats go on. The hub's own
 // messages (answers to attaches and commands, ends of subscriptions) take
 // the rest: a page that falls that far behind is disconnected (1013, try
 // again later), and so is one that takes nothing for Timing.pageWriteMs.
@@ -54,7 +54,7 @@ export interface PageDeps {
 }
 
 /** A message waiting to be sent: an event of a subscription (sub), or one
- * of the core's own. */
+ * of the hub's own. */
 interface Out {
   text: string;
   n: number;
@@ -67,7 +67,7 @@ export class ChatPage {
   readonly subs = new Map<string, Sub>();
   private readonly ch: Channel;
   /** What waits to be sent, from head on; ctrlN and ctrlBytes count the
-   * core's own messages among it. */
+   * hub's own messages among it. */
   private out: Out[] = [];
   private head = 0;
   private ctrlN = 0;
@@ -148,7 +148,7 @@ export class ChatPage {
   }
 
   /** Ends every subscription, telling each the code (none for ""), sends
-   * what waits and closes the channel: the feature was turned off, the core
+   * what waits and closes the channel: the feature was turned off, the hub
    * stops. */
   finish(code: string): void {
     const subs = [...this.subs.values()];
@@ -160,13 +160,13 @@ export class ChatPage {
     if (!this.closing && !this.closed) {
       this.closing = true;
       this.closeCode = CloseCode.GoingAway;
-      this.closeWhy = code || 'the core stops';
+      this.closeWhy = code || 'the hub stops';
       this.flush();
     }
     for (const s of subs) s.abort();
   }
 
-  /** Queues a message of the core's own. */
+  /** Queues a message of the hub's own. */
   send(text: string): void {
     this.enqueue(text);
   }
@@ -175,7 +175,7 @@ export class ChatPage {
     this.send(ack(id, e));
   }
 
-  /** Queues text, an event of subscription sub or a message of the core's
+  /** Queues text, an event of subscription sub or a message of the hub's
    * own. Of the latter, a page that fell too far behind is disconnected
    * instead; a subscription's are bounded by its share (Sub.relay). */
   enqueue(text: string, sub?: Sub): void {
@@ -374,7 +374,7 @@ export class Sub {
   private readonly cmds: string[] = [];
   private writing = false;
   private conn: HostConn | undefined;
-  /** The commands written or to be written, by the core's id; next numbers
+  /** The commands written or to be written, by the hub's id; next numbers
    * them; ended: the subscription ended, commands are refused. */
   private pending = new Map<string, Pending>();
   private next = 0;
@@ -398,23 +398,23 @@ export class Sub {
     else this.roomTaken = true;
   }
 
-  /** Queues a command for the host under an id of the core's; an error
+  /** Queues a command for the host under an id of the hub's; an error
    * refuses it at once. */
   submit(id: string, cmd: PageCommand, rec: AuditRecord | undefined): chat.ChatError | undefined {
     if (this.ended) return { code: HubCode.NotAttached, message: 'the subscription ended' };
     if (this.pending.size >= this.page.d.limits.maxPending)
       return { code: chat.Code.Busy, message: 'too many commands wait for their answer' };
-    const core = `k${++this.next}`;
+    const hub = `k${++this.next}`;
     let line: string;
     try {
-      line = commandLine(cmd, core);
+      line = commandLine(cmd, hub);
     } catch {
       return { code: chat.Code.BadRequest, message: 'the command does not encode' };
     }
     if (bytes(line) > chat.MAX_LINE + 1) return { code: chat.Code.TooLarge, message: 'a command longer than the protocol takes' };
     if (this.cmds.length >= this.page.d.limits.subCommands) return { code: chat.Code.Busy, message: 'too many commands wait to be sent' };
     this.cmds.push(line);
-    this.pending.set(core, { id, rec });
+    this.pending.set(hub, { id, rec });
     void this.write();
     return undefined;
   }

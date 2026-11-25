@@ -9,7 +9,7 @@ import { useStore } from '../state/store';
 import { insertSlot, near } from '../reorderDrag';
 import { dragBegins, edgeScroll, trackDrag } from '../drag';
 import type { MachineState } from '../lib/machine';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { closeMenu, isItem, openMenu, stepIndex, tidy, useMenu, type MenuEntry, type MenuItem } from '../contextMenu';
 import { machineMenu, paneMenu, sidebarMenu, tabMenu, workspaceMenu } from '../menus';
 import { actions } from '../actions';
@@ -203,18 +203,18 @@ const labels = (e: MenuEntry[]) => e.filter(isItem).map((i) => i.label);
 const find = (e: MenuEntry[], label: string) => e.filter(isItem).find((i) => i.label === label)!;
 
 describe('menus', () => {
-  let core: FakeCore;
-  const tabNames = () => core.layout('m')!.workspaces[0].tabs.map((t) => t.name);
+  let hub: FakeHub;
+  const tabNames = () => hub.layout('m')!.workspaces[0].tabs.map((t) => t.name);
   beforeEach(async () => {
-    core = new FakeCore();
-    const term = (a: string, cwd: string) => FakeCore.term(a, { cwd });
-    core.machine('m', [term('p1', '/src'), term('p2', '/src'), term('p3', '/src'), term('p4', '/tmp')], layout());
-    core.install();
+    hub = new FakeHub();
+    const term = (a: string, cwd: string) => FakeHub.term(a, { cwd });
+    hub.machine('m', [term('p1', '/src'), term('p2', '/src'), term('p3', '/src'), term('p4', '/tmp')], layout());
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.setMachines([{ id: 'm', label: 'm', kind: 'local', status: 'ready' } as unknown as MachineState]);
     s.selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
   });
 
@@ -245,11 +245,11 @@ describe('menus', () => {
     expect(labels(paneMenu('m', 'p1'))).toContain('Restore Pane');
     useStore.getState().setZoomed(undefined);
     find(paneMenu('m', 'p1'), 'Split Down').run!();
-    await vi.waitFor(() => expect(core.calls.some((c) => c.method === 'terminal.run')).toBe(true));
+    await vi.waitFor(() => expect(hub.calls.some((c) => c.method === 'terminal.run')).toBe(true));
     // The new terminal starts in the split one's folder and goes below it.
-    expect(core.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: true, cwd: '/src', display: expect.any(Object) });
+    expect(hub.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: true, cwd: '/src', display: expect.any(Object) });
     await settle();
-    expect(core.layout('m')!.workspaces[0].tabs[0]).toMatchObject({
+    expect(hub.layout('m')!.workspaces[0].tabs[0]).toMatchObject({
       root: { split: 'vertical', children: [{ terminal: 'p1' }, { terminal: 't1' }] },
       focused: 't1',
     });
@@ -260,7 +260,7 @@ describe('menus', () => {
     expect(labels(sub)).toEqual(['two', 'New Workspace…']);
     find(sub, 'two').run!();
     await settle();
-    let l = core.layout('m')!;
+    let l = hub.layout('m')!;
     expect(l.selected).toBe(1);
     expect(l.workspaces[0].tabs.map((t) => t.name)).toEqual(['b', 'd']);
     expect(l.workspaces[1].tabs.map((t) => t.focused)).toEqual(['p4', 'p1']);
@@ -272,7 +272,7 @@ describe('menus', () => {
     if (req.kind === 'workspace') req.resolve({ cwd: '/tmp', label: 'three' });
     await moving;
     await settle();
-    l = core.layout('m')!;
+    l = hub.layout('m')!;
     expect(l.workspaces.map((w) => w.name)).toEqual(['one', 'two', 'three']);
     expect(l.workspaces[2]).toMatchObject({ cwd: '/tmp', tabs: [{ root: { terminal: 'p4' }, focused: 'p4' }] });
     expect(l.workspaces[1].tabs.map((t) => t.focused)).toEqual(['p1']);
@@ -296,7 +296,7 @@ describe('menus', () => {
     await settle();
     expect(tabNames()).toEqual(['b', 'a', 'd']);
     // The selection stays with its tab.
-    expect(core.layout('m')!.workspaces[0].selected).toBe(1);
+    expect(hub.layout('m')!.workspaces[0].selected).toBe(1);
   });
 
   it('moves from where the item is when the menu item runs', async () => {
@@ -306,16 +306,16 @@ describe('menus', () => {
     const l = layout();
     l.workspaces[0].tabs = [l.workspaces[0].tabs[2], l.workspaces[0].tabs[0], l.workspaces[0].tabs[1]];
     l.workspaces.reverse();
-    const fm = core.machines.get('m')!;
+    const fm = hub.machines.get('m')!;
     fm.layout = l;
     fm.version++;
-    core.event('m', 'doc', '', { name: 'layout', version: fm.version });
+    hub.event('m', 'doc', '', { name: 'layout', version: fm.version });
     await settle();
     left.run!();
     down.run!();
     await settle();
-    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
-    expect(core.layout('m')!.workspaces[1].tabs.map((t) => t.name)).toEqual(['d', 'a', 'b']);
+    expect(hub.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
+    expect(hub.layout('m')!.workspaces[1].tabs.map((t) => t.name)).toEqual(['d', 'a', 'b']);
   });
 
   it('moves workspaces', async () => {
@@ -326,7 +326,7 @@ describe('menus', () => {
     expect(find(workspaceMenu('m', 'w1w1w1w1'), 'Close Workspace').hint).toBeUndefined();
     find(w2, 'Move Up').run!();
     await settle();
-    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
+    expect(hub.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two', 'one']);
   });
 
   it('closes the other tabs or those to the right, and the other workspaces, at once with one Undo', async () => {
@@ -351,12 +351,12 @@ describe('menus', () => {
     find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces').run!();
     await settle();
     expect(useDialog.getState().current?.kind).not.toBe('confirm');
-    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two']);
+    expect(hub.layout('m')!.workspaces.map((w) => w.name)).toEqual(['two']);
     expect(useStore.getState().toasts.at(-1)?.msg).toBe('Workspace “one” closed.');
     expect(find(workspaceMenu('m', 'w2w2w2w2'), 'Close Other Workspaces').disabled).toBe(true);
     actions.undoClose();
     await settle();
-    expect(core.layout('m')!.workspaces.map((w) => w.name)).toEqual(['one', 'two']);
+    expect(hub.layout('m')!.workspaces.map((w) => w.name)).toEqual(['one', 'two']);
   });
 
   it('pins a tab: it goes first, Close Others and Close to the Right leave it, Unpin takes it back', async () => {
@@ -366,7 +366,7 @@ describe('menus', () => {
     find(tabMenu('m', 'w1w1w1w1', 2), 'Pin Tab').run!();
     await settle();
     expect(tabNames()).toEqual(['d', 'a', 'b']);
-    expect(core.layout('m')!.workspaces[0].tabs[0].pinned).toBe(true);
+    expect(hub.layout('m')!.workspaces[0].tabs[0].pinned).toBe(true);
     // The pinned tab's menu unpins it; a tab moved before it stops after it.
     expect(labels(tabMenu('m', 'w1w1w1w1', 0))).toContain('Unpin Tab');
     find(tabMenu('m', 'w1w1w1w1', 1), 'Move Left').run!();
@@ -381,7 +381,7 @@ describe('menus', () => {
     expect(find(tabMenu('m', 'w1w1w1w1', 0), 'Close Tabs to the Right').disabled).toBe(false);
     find(tabMenu('m', 'w1w1w1w1', 0), 'Unpin Tab').run!();
     await settle();
-    expect(core.layout('m')!.workspaces[0].tabs.some((t) => t.pinned)).toBe(false);
+    expect(hub.layout('m')!.workspaces[0].tabs.some((t) => t.pinned)).toBe(false);
   });
 
   it('renames the focused pane and opens its menu from commands, which take no key', async () => {
@@ -400,19 +400,19 @@ describe('menus', () => {
 
   it("creates a tab in its workspace's folder, else the focused terminal's", async () => {
     await actions.newTab('m', 'w2w2w2w2');
-    expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
+    expect(hub.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
       keep: true,
       cwd: '/tmp',
       display: expect.any(Object),
     });
     await actions.newTab('m', 'w1w1w1w1');
-    expect(core.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
+    expect(hub.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
       keep: true,
       cwd: '/src',
       display: expect.any(Object),
     });
     await settle();
-    expect(core.layout('m')!.workspaces[0].tabs.length).toBe(4);
+    expect(hub.layout('m')!.workspaces[0].tabs.length).toBe(4);
   });
 });
 
@@ -602,7 +602,7 @@ describe('machineMenu', () => {
   const labels = (entries: MenuEntry[]) => entries.map((e) => (isItem(e) ? e.label : '-'));
   const ssh = (status: string) => ({ id: 'gpu', label: 'gpu', kind: 'ssh', status }) as unknown as MachineState;
 
-  it('moves a machine up or down among the machines, and puts it back when the core refuses', async () => {
+  it('moves a machine up or down among the machines, and puts it back when the hub refuses', async () => {
     const fetchMock = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve(new Response('{}', { status: 200 })));
     vi.stubGlobal('fetch', fetchMock);
     try {
@@ -657,7 +657,7 @@ describe('machineMenu', () => {
       expect(req.check).toBe('Also stop its terminal service (ends every terminal there)');
       expect(req.checked).toBe(false);
 
-      // Checked: the core stops first, then the machine is disabled.
+      // Checked: the terminal core stops first, then the machine is disabled.
       fetchMock.mockClear();
       useDialog.setState({ current: undefined });
       find(machineMenu('gpu'), 'Disable Machine…').run!();
@@ -667,7 +667,7 @@ describe('machineMenu', () => {
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
       expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/m/gpu/hc/stop', '/api/m/gpu/enabled']);
 
-      // A machine that is not connected cannot have its core stopped.
+      // A machine that is not connected cannot have its terminal core stopped.
       fetchMock.mockClear();
       useDialog.setState({ current: undefined });
       useStore.getState().setMachines([ssh('error')]);
@@ -699,7 +699,7 @@ describe('machineMenu', () => {
       expect(fetchMock.mock.calls[0][1]).toMatchObject({ body: JSON.stringify({ enabled: true }) });
       expect(useDialog.getState().current).toBeUndefined();
 
-      // A machine whose stored target the core refuses is never connected:
+      // A machine whose stored target the hub refuses is never connected:
       // rename and remove only.
       useStore.getState().setMachines([{ ...ssh('error'), code: 'invalid_target' }]);
       expect(labels(tidy(machineMenu('gpu')))).toEqual([
@@ -828,7 +828,7 @@ describe('machineMenu', () => {
         expect(toast).toHaveBeenLastCalledWith('Could not remove gpu: the machines file could not be saved (read-only file system).'),
       );
 
-      // Every code of the core is translated.
+      // Every code of the hub is translated.
       fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'unknown' }), { status: 404 }));
       useDialog.setState({ current: undefined });
       remove.run!();

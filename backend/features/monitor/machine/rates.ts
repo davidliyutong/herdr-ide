@@ -1,4 +1,4 @@
-// What the monitor keeps between samples, per agent (the cores a node
+// What the monitor keeps between samples, per agent (the hubs a node
 // serves share it): the previous cumulative counters, so throughput and
 // CPU percentages are those of the interval since the last sample. A
 // previous sample older than a minute, or taken a moment ago, gives no

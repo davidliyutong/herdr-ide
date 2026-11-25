@@ -1,15 +1,15 @@
 // The TypeScript build deployed as an ssh connection deploys it, through an
 // ssh that runs the remote commands here (homes of the test's own): the
-// probe; the release's manifest (SHA256SUMS), which the core fetches, by
+// probe; the release's manifest (SHA256SUMS), which the hub fetches, by
 // its own HTTPS through the machine when the release is unreachable from
 // it (an ssh -W stand-in forwarding to a TLS server on loopback whose
 // certificate a test authority signed, testdata/), and never otherwise
 // takes from the machine; the machine's own
 // download of the release's archive, checked against the manifest before
 // it is unpacked, bounded in size and time, with curl or wget alone; the
-// core's upload when the machine cannot (no tool, not allowed, a failed or
+// hub's upload when the machine cannot (no tool, not allowed, a failed or
 // tampered download), from the release, the operator's directory or the
-// core's own executable, checked again on the machine; the node of that
+// hub's own executable, checked again on the machine; the node of that
 // build, reached with node dial; what the node's environment gets. The
 // release is a server on loopback; the executable is this host's, built
 // from the sources.
@@ -69,7 +69,7 @@ let release: Server | undefined;
 let tlsRelease: HttpsServer | undefined;
 const homes: string[] = [];
 
-/** What the release serves, to the machine (curl, wget) and to the core
+/** What the release serves, to the machine (curl, wget) and to the hub
  * (its fetch) apart: bytes, 404, a stream that does not end, or one that
  * trickles a byte every 500 ms. */
 type Body = Buffer | string | 404 | 'flood' | 'trickle';
@@ -278,7 +278,7 @@ async function nodeEnvironment(session: Session): Promise<string> {
 }
 
 /** The build of this host's platform from a release of the test's own
- * (a new core: nothing remembered); loads counts the core's uploads. */
+ * (a new hub: nothing remembered); loads counts the hub's uploads. */
 function build(o: Partial<ReleaseOptions> = {}): TSBuild & { loads: number; logs: string[] } {
   const logs: string[] = [];
   const rel = new Release({
@@ -330,7 +330,7 @@ test('the probe reports the C library, its C++ runtime and SSE4.2; a machine Bun
 });
 
 describe.skipIf(!supported)('the TypeScript build over ssh', () => {
-  test("the core fetches the manifest, the machine downloads the release's archive and checks it; nothing is uploaded; its node answers", async () => {
+  test("the hub fetches the manifest, the machine downloads the release's archive and checks it; nothing is uploaded; its node answers", async () => {
     reset();
     const home = machine();
     const b = build();
@@ -353,7 +353,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
     expect(b.logs.filter((l) => l.includes('downloads its build'))).toHaveLength(1);
   }, 60_000);
 
-  test("without curl or wget, not allowed to download, a failed download and one tampered on the machine's path: the core uploads the release's archive, checked on the machine", async () => {
+  test("without curl or wget, not allowed to download, a failed download and one tampered on the machine's path: the hub uploads the release's archive, checked on the machine", async () => {
     const none = tools();
     for (const [why, path, hostArchive, download] of [
       ['no curl or wget', none, archive, true],
@@ -436,7 +436,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
     }
   }, 120_000);
 
-  test("a machine whose own download failed gets the core's upload at once for a day, then downloads again", async () => {
+  test("a machine whose own download failed gets the hub's upload at once for a day, then downloads again", async () => {
     reset();
     let now = 0;
     const failures = new DownloadFailures(24 * 60 * 60_000, () => now);
@@ -458,19 +458,19 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
     expect(failures.recent('box')).toBe(false);
   }, 120_000);
 
-  test('a release the core cannot reach: it fetches the manifest through the machine with its own TLS, the machine is never trusted for it; the build follows', async () => {
+  test('a release the hub cannot reach: it fetches the manifest through the machine with its own TLS, the machine is never trusted for it; the build follows', async () => {
     reset();
     writeFileSync(TUNNEL, String(tlsPort));
     rmSync(`${TUNNEL}.log`, { force: true });
     const home = machine();
-    // releases.test has no address: the core's own fetch finds it unreachable.
+    // releases.test has no address: the hub's own fetch finds it unreachable.
     const b = build({ url: `https://releases.test:${tlsPort}/v1`, tunnelCA: TEST_CA, own: ownFile(key, openSync(exePath, 'r')) });
     const { session } = await dialSSH(options(b));
     try {
       expect((await session.request({ op: Op.Hello })).ok).toBe(true);
       expect(tunnelled()).toEqual([`releases.test:${tlsPort}`]);
-      expect(saw(b, 'the core could not download')).toBe(true);
-      // The machine cannot resolve the release either: the core uploads its own.
+      expect(saw(b, 'the hub could not download')).toBe(true);
+      // The machine cannot resolve the release either: the hub uploads its own.
       expect(b.loads).toBe(1);
       expect(readFileSync(join(installed(home), HUB_BIN)).equals(exe)).toBe(true);
     } finally {
@@ -479,7 +479,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
     }
   }, 60_000);
 
-  test('a certificate the core does not trust, or an HTTP answer, on its own fetch: build_unavailable, and the machine is not asked for the manifest', async () => {
+  test('a certificate the hub does not trust, or an HTTP answer, on its own fetch: build_unavailable, and the machine is not asked for the manifest', async () => {
     reset();
     serve.hubSums = 404;
     writeFileSync(TUNNEL, String(tlsPort));
@@ -492,14 +492,14 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
         (x: unknown) => x as Error,
       );
       expect(deployCode(e), url).toBe('build_unavailable');
-      expect(e.message).toContain('the core could not download');
+      expect(e.message).toContain('the hub could not download');
       expect(tunnelled()).toEqual([]);
     }
     rmSync(TUNNEL, { force: true });
     reset();
   }, 60_000);
 
-  test('a release the core cannot reach and a machine whose sshd does not forward: build_unavailable, saying so', async () => {
+  test('a release the hub cannot reach and a machine whose sshd does not forward: build_unavailable, saying so', async () => {
     reset();
     writeFileSync(TUNNEL, 'refuse');
     machine();
@@ -514,7 +514,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
     rmSync(TUNNEL, { force: true });
   }, 60_000);
 
-  test('a machine whose download failed lately is asked again when the core has nothing to upload', async () => {
+  test('a machine whose download failed lately is asked again when the hub has nothing to upload', async () => {
     reset();
     serve.hubArchive = 404;
     const failures = new DownloadFailures();
@@ -566,7 +566,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
     }
   }, 60_000);
 
-  test('no route anywhere: the deployment ends with build_unavailable, saying what was tried, and the core logs it', async () => {
+  test('no route anywhere: the deployment ends with build_unavailable, saying what was tried, and the hub logs it', async () => {
     reset();
     machine(tools());
     const b = build({ url: 'http://127.0.0.1:9/v1' });
@@ -575,9 +575,9 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       (x: unknown) => x as Error & { code?: string },
     );
     expect(deployCode(e)).toBe('build_unavailable');
-    expect(e.message).toContain('the core cannot reach');
+    expect(e.message).toContain('the hub cannot reach');
     expect(e.message).toContain('through the machine either');
-    expect(saw(b, 'the core could not download')).toBe(true);
+    expect(saw(b, 'the hub could not download')).toBe(true);
   }, 60_000);
 
   test("a deployment failure keeps its code through the dial's error", async () => {
@@ -616,7 +616,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
 
     process.env.BUN_OPTIONS = `--preload=${join(home, 'evil.js')}`;
     process.env.BUN_CONFIG_VERBOSE_FETCH = 'curl';
-    // The core's own executable: this process fetches nothing meanwhile
+    // The hub's own executable: this process fetches nothing meanwhile
     // (it would print it).
     const { session } = await dialSSH(options(build({ url: undefined, own: ownFile(key, openSync(exePath, 'r')) })));
     try {
@@ -633,7 +633,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
     }
   }, 60_000);
 
-  test("the local machine gets the core's own executable, and its node none of BUN_OPTIONS, BUN_BE_BUN and BUN_INSPECT* of the core's environment", async () => {
+  test("the local machine gets the hub's own executable, and its node none of BUN_OPTIONS, BUN_BE_BUN and BUN_INSPECT* of the hub's environment", async () => {
     const home = machine();
     const marker = join(home, 'preloaded');
     writeFileSync(join(home, 'evil.js'), `require('fs').writeFileSync(${JSON.stringify(marker)} + '-' + process.pid, '')`);

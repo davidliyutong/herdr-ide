@@ -1,4 +1,4 @@
-// The core: the kernel's machinery with the features set up on it. A host
+// The hub: the kernel's machinery with the features set up on it. A host
 // (hosts/bun, hosts/electron) builds one, hands it each request with what
 // it knows of the connection (Peer) and runs it until it stops.
 import { Hono, type MiddlewareHandler } from 'hono';

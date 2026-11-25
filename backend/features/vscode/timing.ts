@@ -1,4 +1,4 @@
-// The durations of VS Code's side of the core, which tests shorten.
+// The durations of VS Code's side of the hub, which tests shorten.
 
 export interface Timing {
   /** A machine's code-server is released after this long without a VS Code
@@ -16,7 +16,7 @@ export interface Timing {
   /** Bounds a machine's own download of the release (the agent's limit is
    * 20 min). */
   machineDownloadMs: number;
-  /** Bounds a download on the core's host. */
+  /** Bounds a download on the hub's host. */
   downloadMs: number;
   /** Bounds stopping or releasing code-server. */
   stopMs: number;

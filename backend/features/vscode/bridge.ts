@@ -1,10 +1,10 @@
 // VS Code's bridge (docs/features/05): the bridge extension in each window
 // (extension host) of code-server connects to a socket of the agent's,
-// which the agent tunnels to the core as a stream of op bridge. Lines of
+// which the agent tunnels to the hub as a stream of op bridge. Lines of
 // JSON go both ways: a window says hello (its id, its folders, whether it
 // has the keyboard) and what the user did in it (Send to Agent, close the
 // pane, give the keyboard back, download), which goes to the pages; the
-// core sends it commands from the UI (open a file, a diff, Git Graph),
+// hub sends it commands from the UI (open a file, a diff, Git Graph),
 // which it acknowledges, and the theme the pages chose.
 import { z } from 'zod';
 import { writeLine, type Reply } from '#shared/proto/agentproto/index.ts';

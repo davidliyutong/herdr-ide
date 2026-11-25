@@ -1,4 +1,4 @@
-// Resolving code-server releases and extensions on the core's host: seeds
+// Resolving code-server releases and extensions on the hub's host: seeds
 // verified by their sidecars, offline, pinned digests, downloads recorded
 // on first use, fetch-assets.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -65,7 +65,7 @@ test('a seed is verified by its sidecar', async () => {
 });
 
 // A FIFO under a seed's or a sidecar's name would block whatever opened
-// it until something wrote to it (and with it a thread of the core's file
+// it until something wrote to it (and with it a thread of the hub's file
 // I/O): it is passed over as a file that is not there.
 test.skipIf(process.platform === 'win32')('FIFOs in a seed are passed over, never waited on', async () => {
   const seed = join(dir, 'seed');
@@ -178,7 +178,7 @@ test('the fetch-assets command', async () => {
       ],
       { logger: (l) => void logged.push(l), out: (l) => void lines.push(l), cacheDir: join(dir, 'cache') },
     );
-    // The tarballs are new to the core; Git Graph's pinned digest refuses
+    // The tarballs are new to the hub; Git Graph's pinned digest refuses
     // the mirror's file.
     expect(code).toBe(1);
     expect(lines).toEqual([join(out, 'code-server-9.9.9-linux-amd64.tar.gz'), join(out, 'code-server-9.9.9-macos-arm64.tar.gz')]);

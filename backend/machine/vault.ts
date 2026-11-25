@@ -1,9 +1,9 @@
 // The variable vault's machine side: the MCP servers of the vault connect
 // to <run>/vault.sock (0600, in the 0700 run directory, and only this
-// user's processes), and each request is asked of every core of the
+// user's processes), and each request is asked of every hub of the
 // agent's sessions over a stream with op vault, the process chain behind
 // it in the header, as the kernel names it (the request's own claims about
-// its client are not trusted). Values live in the cores' vaults, and the
+// its client are not trusted). Values live in the hubs' vaults, and the
 // user may answer on any of them.
 //
 // The vault's MCP server (the mcp command) is started by the coding agents'
@@ -35,7 +35,7 @@ import { parentOf, peerCred, socketFd } from './sys/proc.ts';
 
 /** Bounds the MCP server connections relayed at once; more wait. */
 const MAX_CONNS = 16;
-/** How long a request waits for the MCP server's request, and each core
+/** How long a request waits for the MCP server's request, and each hub
  * for its reply to the stream. */
 const ASK_MS = 30_000;
 
@@ -105,11 +105,11 @@ export function serveVault(
   );
 }
 
-/** Asks every session's core for one MCP server request (once it sent it,
- * within ASK_MS). The first core that grants get or env answers, and the
- * other cores' streams close, which withdraws their questions; list
- * answers with every core's variables. The request fails only when every
- * core refused it, with the most telling refusal. The MCP server going
+/** Asks every session's hub for one MCP server request (once it sent it,
+ * within ASK_MS). The first hub that grants get or env answers, and the
+ * other hubs' streams close, which withdraws their questions; list
+ * answers with every hub's variables. The request fails only when every
+ * hub refused it, with the most telling refusal. The MCP server going
  * away ends every question. */
 export async function relayVault(sessions: AgentSession[], c: Socket, chain: VaultProcess[], signal: AbortSignal): Promise<void> {
   const reader = new Reader(c);
@@ -133,7 +133,7 @@ export async function relayVault(sessions: AgentSession[], c: Socket, chain: Vau
     } catch {
       return void (await answer({ ok: false, code: 'bad_request', error: 'not a request' }));
     }
-    if (sessions.length === 0) return void (await answer({ ok: false, code: 'unavailable', error: 'no core is connected' }));
+    if (sessions.length === 0) return void (await answer({ ok: false, code: 'unavailable', error: 'no hub is connected' }));
     const ac = new AbortController();
     const stop = () => ac.abort();
     signal.addEventListener('abort', stop, { once: true });
@@ -168,10 +168,10 @@ export async function relayVault(sessions: AgentSession[], c: Socket, chain: Vau
   }
 }
 
-/** Asks the core of session s for one request: a refusal when the core does
+/** Asks the hub of session s for one request: a refusal when the hub does
  * not take the stream (its vault feature is off) or goes away. */
 async function askVault(s: AgentSession, chain: VaultProcess[], raw: unknown, signal: AbortSignal): Promise<VaultResponse> {
-  const gone: VaultResponse = { ok: false, code: 'unavailable', error: 'the core went away' };
+  const gone: VaultResponse = { ok: false, code: 'unavailable', error: 'the hub went away' };
   let conn;
   try {
     const r = await s.ask({ op: Op.Vault, process: chain }, ASK_MS, signal);
@@ -185,7 +185,7 @@ async function askVault(s: AgentSession, chain: VaultProcess[], raw: unknown, si
   signal.addEventListener('abort', end, { once: true });
   try {
     await writeLine(st, raw);
-    // The core bounds the wait for the user's answer itself.
+    // The hub bounds the wait for the user's answer itself.
     return await readLine<VaultResponse>(conn.reader);
   } catch {
     return gone;
@@ -196,7 +196,7 @@ async function askVault(s: AgentSession, chain: VaultProcess[], raw: unknown, si
   }
 }
 
-/** list's variables with resp's: a name listed by several cores is listed
+/** list's variables with resp's: a name listed by several hubs is listed
  * once, as the first answer had it. */
 export function mergeLists(list: VaultResponse | null, resp: VaultResponse): VaultResponse {
   if (!list) return { ...resp, variables: [...(resp.variables ?? [])] };
@@ -210,17 +210,17 @@ export function mergeLists(list: VaultResponse | null, resp: VaultResponse): Vau
 }
 
 /** Refusals ranked: the user's own answer first, then what the user can
- * change, then what the request got wrong, then a core that could not
+ * change, then what the request got wrong, then a hub that could not
  * answer. */
 const REFUSAL_ORDER = ['denied', 'vault_locked', 'inject_only', 'not_found', 'busy', 'bad_request'];
 
-/** The refusal of a request every core refused. */
+/** The refusal of a request every hub refused. */
 export function vaultRefusal(refusals: VaultResponse[]): VaultResponse {
   const rank = (code?: string) => {
     const i = REFUSAL_ORDER.indexOf(code ?? '');
     return i >= 0 ? i : REFUSAL_ORDER.length;
   };
-  let best: VaultResponse = { ok: false, code: 'unavailable', error: 'no core answered' };
+  let best: VaultResponse = { ok: false, code: 'unavailable', error: 'no hub answered' };
   refusals.forEach((r, i) => {
     if (i === 0 || rank(r.code) < rank(best.code)) best = r;
   });

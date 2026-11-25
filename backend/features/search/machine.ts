@@ -125,7 +125,7 @@ export function searchMachine(o: SearchMachineOptions = {}) {
     const findRg = o.findRg ?? defaultRg;
     return {
       actions: {
-        // The search ends when the core gives up on it (ctx.signal).
+        // The search ends when the hub gives up on it (ctx.signal).
         search: async (p, ctx) => {
           const q = check(p, ctx.expand);
           const release = await gate.take(o.slotWaitMs ?? 3000, ctx.signal);

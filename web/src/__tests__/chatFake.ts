@@ -1,5 +1,5 @@
-// A scripted core for the chat plugin's WebSocket (plugins/chat/connection.ts,
-// backend/features/chat): the page's messages recorded, the core's
+// A scripted hub for the chat plugin's WebSocket (plugins/chat/connection.ts,
+// backend/features/chat): the page's messages recorded, the hub's
 // sent as a test says, or answered by themselves (auto): an attach with the
 // chat the test gave and its events after from, a command with its ack.
 
@@ -12,10 +12,10 @@ export class FakeChatSocket implements Socket {
   onmessage: ((ev: { data: unknown }) => void) | null = null;
   closed = false;
 
-  constructor(private readonly core: FakeChatHub) {}
+  constructor(private readonly hub: FakeChatHub) {}
 
   send(data: string) {
-    this.core.received(this, JSON.parse(data));
+    this.hub.received(this, JSON.parse(data));
   }
 
   close() {
@@ -60,7 +60,7 @@ export class FakeChatHub {
     this.socket?.onopen?.();
   }
 
-  /** The core ends the latest socket. */
+  /** The hub ends the latest socket. */
   drop() {
     const s = this.socket;
     if (s) {

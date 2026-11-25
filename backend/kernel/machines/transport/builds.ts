@@ -1,5 +1,5 @@
-// The machine builds the core deploys: the TypeScript machine side, which
-// is the core's own program: one executable per platform holds the core,
+// The machine builds the hub deploys: the TypeScript machine side, which
+// is the hub's own program: one executable per platform holds the hub,
 // the machine side and that platform's herdr-core.
 // A release publishes each platform's as an archive
 // (<bin>-<platform>.tar.gz, the executable at <bin>-<platform>/<bin>) and
@@ -32,8 +32,8 @@ export interface TSDigests {
   source: string;
 }
 
-/** What the core uploads: the release's archive, or the executable
- * gzip-compressed (the core's own). */
+/** What the hub uploads: the release's archive, or the executable
+ * gzip-compressed (the hub's own). */
 export interface TSPayload {
   kind: 'archive' | 'gz';
   bytes: Buffer;
@@ -47,13 +47,13 @@ export interface TSBuild {
   /** The release's archive of the platform; absent for a build of no
    * release (development, the end-to-end tests). */
   url?: string;
-  /** The digests, from the release's manifest, which the core verified
-   * itself (or from the core's own executable); tunnel opens a stream
-   * through the machine for a core that cannot reach the release, over
-   * which the core speaks its own TLS. Fails with Unsupported
+  /** The digests, from the release's manifest, which the hub verified
+   * itself (or from the hub's own executable); tunnel opens a stream
+   * through the machine for a hub that cannot reach the release, over
+   * which the hub speaks its own TLS. Fails with Unsupported
    * build_unavailable. */
   digests(o?: { signal?: AbortSignal; tunnel?: OpenStream }): Promise<TSDigests>;
-  /** What the core uploads when the machine cannot download it, checked
+  /** What the hub uploads when the machine cannot download it, checked
    * against d; fails with Unsupported build_unavailable. */
   load(d: TSDigests, signal?: AbortSignal): Promise<TSPayload>;
 }

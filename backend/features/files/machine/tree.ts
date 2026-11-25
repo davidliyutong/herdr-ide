@@ -2,7 +2,7 @@
 // each directory is opened relative to its parent without following one
 // (machine/sys openDirAt), links are removed as links, so a link swapped
 // in meanwhile leads nowhere outside the tree. Copies and removals check
-// their signal before each entry and chunk: one the core gave up on stops.
+// their signal before each entry and chunk: one the hub gave up on stops.
 import { constants, closeSync, lstatSync, openSync, realpathSync, rmSync, type Stats } from 'node:fs';
 import { lstat, mkdir, open, readdir, readlink, symlink } from 'node:fs/promises';
 import { posix } from 'node:path';
@@ -91,7 +91,7 @@ export async function moveNoReplace(signal: AbortSignal, src: string, dst: strin
     if (made) rmSync(dst, { recursive: true, force: true });
     throw error;
   }
-  // Copied: the source goes whole, whatever the core does meanwhile.
+  // Copied: the source goes whole, whatever the hub does meanwhile.
   await removeTree(new AbortController().signal, src);
 }
 

@@ -1,4 +1,4 @@
-// The core's side of features' protocols (#shared/proto/protocol.ts):
+// The hub's side of features' protocols (#shared/proto/protocol.ts):
 // calling an action of a feature on a machine's agent.
 import { MAX_BODY, MAX_INLINE, Op, readBody, type Header } from '#shared/proto/agentproto/index.ts';
 import type { Action, Protocol, ResultOf } from '#shared/proto/protocol.ts';

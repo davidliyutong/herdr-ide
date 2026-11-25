@@ -3,7 +3,7 @@
 // relay.ts) after a prompt of the system the user answered:
 //
 //   - a proof: HMAC-SHA256 of a nonce and its purpose under the verify key;
-//   - a relay: what makes an unlock entry's KEK, sealed for the core with
+//   - a relay: what makes an unlock entry's KEK, sealed for the hub with
 //     AES-256-GCM under HKDF-SHA256(verify key, no salt, "vault-relay v1")
 //     and bound by its additional data to its purpose, nonce and entry
 //     (iv ‖ ciphertext ‖ tag). The page carries it and can read neither.

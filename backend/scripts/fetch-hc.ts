@@ -1,5 +1,5 @@
 // Fetches the pinned upstream herdr-core (hcdist.ts) of the platforms
-// given and writes each executable, gzip-compressed, where the core's
+// given and writes each executable, gzip-compressed, where the hub's
 // build takes it (--out, default dist/payload/hc: hc-<os>-<arch>.gz), and
 // the release's license and notices into dist/hc/licenses (which
 // scripts/package.sh puts in each archive). Archives are cached in dist/hc

@@ -11,14 +11,14 @@ export interface AddMachineForm {
   label: string;
 }
 
-/** A Host alias of the core host's ssh configuration (GET /api/ssh/hosts). */
+/** A Host alias of the hub host's ssh configuration (GET /api/ssh/hosts). */
 export interface SSHHost {
   alias: string;
   hostname?: string;
   user?: string;
 }
 
-/** Why the form cannot be sent, as the core checks it too: a target is an
+/** Why the form cannot be sent, as the hub checks it too: a target is an
  * ssh destination that does not read as an option and holds no whitespace,
  * control character or shell metacharacter (validTarget). */
 export function addMachineProblem(f: AddMachineForm): 'target' | undefined {
@@ -45,7 +45,7 @@ export function matchHosts(hosts: readonly SSHHost[], typed: string): SSHHost[] 
   return [...starts, ...holds];
 }
 
-/** The core host's ssh aliases that are no machine yet; none when the core
+/** The hub host's ssh aliases that are no machine yet; none when the hub
  * cannot say. */
 async function loadHosts(): Promise<SSHHost[]> {
   try {
@@ -57,10 +57,10 @@ async function loadHosts(): Promise<SSHHost[]> {
   }
 }
 
-/** Adds an SSH machine to the core's machines: it appears in the sidebar
+/** Adds an SSH machine to the hub's machines: it appears in the sidebar
  * and connects; one that needs a password, a key's passphrase or a host
  * key confirmed opens the authentication terminal (docs/features/02). The
- * target is typed, or picked from the Host aliases of the core host's ssh
+ * target is typed, or picked from the Host aliases of the hub host's ssh
  * configuration, listed below the field and narrowed as one types. */
 export function AddMachineDialog() {
   const open = useStore((s) => s.addMachine);

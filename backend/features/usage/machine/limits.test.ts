@@ -337,7 +337,7 @@ describe('Kimi Code', () => {
     }
   });
 
-  test('an account without an id the core holds back is not asked', async () => {
+  test('an account without an id the hub holds back is not asked', async () => {
     const api = fakeAPI();
     const home = tempHome();
     write(join(home, '.kimi-code/credentials/kimi-code.json'), '{"access_token":"opaque"}');

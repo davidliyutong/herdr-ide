@@ -36,7 +36,7 @@ describe('paths', () => {
 });
 
 describe('uploads', () => {
-  // Uploads are named with the local time, as the Go core's time.Now.
+  // Uploads are named with the local time, as the Go hub's time.Now.
   const now = new Date(2026, 9, 30, 2, 15, 0);
 
   test('upload names are unique and safe', () => {

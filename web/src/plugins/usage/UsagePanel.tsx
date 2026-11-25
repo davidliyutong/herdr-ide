@@ -67,7 +67,7 @@ export function UsagePanel() {
   const snapshot = useUsage((s) => s.snapshot);
   const cost = useUsage((s) => s.cost);
   const deepseekOn = useSettings((s) => s.values['usage.providers.deepseek']?.value !== false);
-  // While the panel is open and the page shown the core asks at
+  // While the panel is open and the page shown the hub asks at
   // usage.refreshOpen (adaptive); a hidden page says nothing, so a
   // forgotten tab does not keep it asking. The cost is read again once it
   // is older than usage.costRefresh, else on demand.

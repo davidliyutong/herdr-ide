@@ -1,5 +1,5 @@
-// The feature's routes in a core whose machines' agents answer the usage
-// actions as the Go agent does (the Go core's session_test.go and the
+// The feature's routes in a hub whose machines' agents answer the usage
+// actions as the Go agent does (the Go hub's session_test.go and the
 // routes of usage_test.go): what is guarded, the ETags, the refresh, the
 // DeepSeek key, and a session's numbers.
 import { afterEach, expect, test } from 'bun:test';
@@ -22,14 +22,14 @@ afterEach(async () => {
 });
 
 test('guards', async () => {
-  const core = (readOnly: boolean) =>
+  const hub = (readOnly: boolean) =>
     testHub({
       features: [usageFeature()],
       machines: testMachines([sshSpec('x', 'x', 'x', false)]),
       readOnly,
       settings: { [SWITCH]: true },
     });
-  const { problems, checked } = await checkGuarded(core(false), core(true), { machine: 'x' });
+  const { problems, checked } = await checkGuarded(hub(false), hub(true), { machine: 'x' });
   expect(problems).toEqual([]);
   expect(checked.sort()).toEqual(['POST /api/p/usage/refresh', 'PUT /api/m/:id/p/usage/deepseek-key']);
 });
@@ -49,7 +49,7 @@ test('the kinds whose sessions are priced', () => {
 
 type Answer = (action: string, params: Record<string, unknown>) => Reply | Promise<Reply>;
 
-/** A core with the feature whose machines box and gpu answer with answer
+/** A hub with the feature whose machines box and gpu answer with answer
  * (far is off); every call is recorded. */
 async function withHub(answer: Answer, readOnly = false) {
   const calls: Array<[string, Record<string, unknown>]> = [];
@@ -67,7 +67,7 @@ async function withHub(answer: Answer, readOnly = false) {
   const machines = testMachines([sshSpec('box'), sshSpec('gpu'), sshSpec('far', 'far', 'far', false)], { dial: agentDialer({ serve }) });
   const st = new Settings('', { modules: hubModules([usageFeature()]) });
   const audit = memoryAudit();
-  const core = createHub({
+  const hub = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly,
@@ -76,10 +76,10 @@ async function withHub(answer: Answer, readOnly = false) {
     settings: st,
     features: [usageFeature({ tickMs: 20, status: () => Promise.reject(new Error('no status pages in tests')) })],
   });
-  stops.push(running(core));
+  stops.push(running(hub));
   await waitFor('machines ready', () => machines.get('box')!.ready && machines.get('gpu')!.ready);
   const request = (method: string, path: string, o: { body?: string; headers?: Record<string, string> } = {}) =>
-    core.fetch(new Request(`http://127.0.0.1:7780${path}`, { method, body: o.body, headers: { Host: '127.0.0.1:7780', ...o.headers } }), {
+    hub.fetch(new Request(`http://127.0.0.1:7780${path}`, { method, body: o.body, headers: { Host: '127.0.0.1:7780', ...o.headers } }), {
       remote: '127.0.0.1',
       desktop: false,
     });
@@ -219,7 +219,7 @@ test('a session’s params', async () => {
     expect([kind, id, res.status, ((await res.json()) as { error: string }).error]).toEqual([kind, id, 400, 'bad_request']);
   }
   expect(of('session')).toEqual([]);
-  // Valid ones are asked, also of a read-only core.
+  // Valid ones are asked, also of a read-only hub.
   for (const kind of ['claude', 'codex']) expect((await session(request, kind, SESSION)).status).toBe(200);
   expect(of('session')).toEqual([
     { kind: 'claude', session: SESSION },

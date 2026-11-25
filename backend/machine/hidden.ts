@@ -3,7 +3,7 @@
 // agent, is their parent, so they have the lifetime, the owner (a user
 // service or launchd job) and, on macOS, the privacy attribution of the
 // user's terminals. They end with their program, or with the terminal core.
-// No client shows them: the core keeps a terminal that carries HIDDEN_LABEL
+// No client shows them: the hub keeps a terminal that carries HIDDEN_LABEL
 // with its name's value (agentproto.hidden) from its clients.
 import { connect } from 'node:net';
 import { Fail } from '#shared/lib/fail.ts';

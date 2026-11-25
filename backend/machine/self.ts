@@ -1,7 +1,7 @@
 // This process's build, named by a digest of its file, as nodes and their
 // clients tell it each other (agentproto.NodeInfo); and the command that
 // runs it again. A machine runs the machine side as the executable compiled
-// with Bun (backend/scripts/build.ts, the core and the machine side in one
+// with Bun (backend/scripts/build.ts, the hub and the machine side in one
 // file): the build is that file. A run from the sources (tests,
 // development) is the entry module run by bun.
 import { createHash } from 'node:crypto';

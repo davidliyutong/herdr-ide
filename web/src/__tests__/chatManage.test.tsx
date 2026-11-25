@@ -20,7 +20,7 @@ import { resetChats } from '../plugins/chat/state';
 import { definePlugins } from '../plugins/registry';
 import { useStore } from '../state/store';
 import * as L from '../term/layout';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,7 +30,7 @@ const B = 'c00000000000000b2';
 type Call = { method: string; url: string };
 let calls: Call[];
 let answers: Record<string, () => Response | Promise<Response>>;
-let core: FakeCore;
+let hub: FakeHub;
 let host: HTMLDivElement;
 let root: Root;
 
@@ -56,13 +56,13 @@ beforeEach(async () => {
   );
   definePlugins([chatPlugin]);
   resetChats();
-  core = new FakeCore();
-  core.machine('m1', [FakeCore.term('t1')], {
+  hub = new FakeHub();
+  hub.machine('m1', [FakeHub.term('t1')], {
     version: 2,
     workspaces: [{ id: 'w1w1w1w1', name: 'one', cwd: '/w', tabs: [{ root: { terminal: 't1' }, focused: 't1' }], selected: 0 }],
     selected: 0,
   });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([
@@ -71,7 +71,7 @@ beforeEach(async () => {
   ]);
   s.selectMachine('m1');
   s.openSettings({ page: 'chat' });
-  core.model.subscribe('m1');
+  hub.model.subscribe('m1');
   await settle();
   host = document.createElement('div');
   document.body.append(host);
@@ -216,7 +216,7 @@ describe('ChatSettingsExtra (debug/management panel)', () => {
     await act(async () => q<HTMLButtonElement>(`[aria-label="${t('chat.manage.openChat')}"]`)!.click());
     await act(settle);
     expect(useStore.getState().settings).toBeUndefined();
-    const ws = core.layout('m1')!.workspaces[0];
+    const ws = hub.layout('m1')!.workspaces[0];
     expect(ws.tabs).toHaveLength(2);
     expect((ws.tabs[1].root as L.PluginLeaf).view).toMatchObject({ plugin: 'chat', kind: 'chat', chat: A, agent: 'claude' });
   });

@@ -1,16 +1,16 @@
-// The core's own outbound HTTP(S) (downloads of machine builds,
+// The hub's own outbound HTTP(S) (downloads of machine builds,
 // code-server, extensions) goes through the user's proxy: HTTPS_PROXY,
 // HTTP_PROXY and NO_PROXY (or their lower-case forms), loopback never. Bun's
-// fetch reads them by itself. Node's (the desktop app's core, in Electron)
+// fetch reads them by itself. Node's (the desktop app's hub, in Electron)
 // does only when asked: useEnvProxy asks with http.setGlobalProxyFromEnv,
 // which sets the proxy of fetch and of the global agents of this process
 // alone. No environment variable is set for it (NODE_USE_ENV_PROXY would
-// reach every program the core starts, the local machine's terminals among
+// reach every program the hub starts, the local machine's terminals among
 // them, and make their Node programs send even their loopback requests to
 // the proxy).
 import http from 'node:http';
 
-/** What NO_PROXY always holds for the core: loopback. */
+/** What NO_PROXY always holds for the hub: loopback. */
 export const LOOPBACK = ['localhost', '.localhost', '127.0.0.1', '::1'];
 
 /** The proxy settings of env (upper or lower case, lower first as curl and

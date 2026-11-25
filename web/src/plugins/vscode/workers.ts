@@ -3,7 +3,7 @@
 // so can any script in a VS Code window. A worker stays registered in the
 // browser after VS Code is turned off, so while VS Code is off for this
 // kind of client the page unregisters every one, and nothing VS Code's
-// content left keeps running on the origin (the core also drops
+// content left keeps running on the origin (the hub also drops
 // code-server's Service-Worker-Allowed, so no worker of VS Code's can
 // claim the UI's own pages; SECURITY.md, Content on the UI's origin).
 import { useSettings } from '../../settings';
@@ -23,7 +23,7 @@ export async function dropServiceWorkers(sw: Workers | undefined = navigator.ser
 }
 
 /** Drops the service workers whenever VS Code is off for this client once
- * the core told the settings (dropServiceWorkers); returns the
+ * the hub told the settings (dropServiceWorkers); returns the
  * unsubscribe. */
 export function followVSCodeSwitch(sw?: Workers): () => void {
   let dropped = false;

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// The Git panel (plugins/git/GitPanel.tsx) with the core's routes stubbed:
+// The Git panel (plugins/git/GitPanel.tsx) with the hub's routes stubbed:
 // VS Code's groups, their rows and actions, the commit box, the file
 // explorer's decorations, and read-only mode.
 

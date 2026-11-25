@@ -1,11 +1,11 @@
 // What each frame of the app's origin gets, in every window of the app
 // (the main window's preload and the other windows', frames.ts's entry
-// framePreload.ts): the channels to the core (desktopChannels), which
-// stand in for WebSockets since the core does not listen, and in VS
+// framePreload.ts): the channels to the hub (desktopChannels), which
+// stand in for WebSockets since the hub does not listen, and in VS
 // Code's frames a WebSocket that opens one for the page's own host
 // (web/src/lib/portSocket.ts). A frame of another origin gets nothing.
 // Each channel's MessagePort comes from the main process, which checks the
-// frame's origin and hands the other end to the core; the preload passes
+// frame's origin and hands the other end to the hub; the preload passes
 // it on to the page as a window message of the page's own origin.
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { installPortSocket } from '../../web/src/lib/portSocket';

@@ -1,4 +1,4 @@
-// The history in the core's database (the Go core's history_test.go): the
+// The history in the hub's database (the Go hub's history_test.go): the
 // rows Go writes, a save before the history was read back, the merge of
 // what memory recorded meanwhile, rows gone, tables of a newer version.
 import { afterAll, expect, test } from 'bun:test';
@@ -42,7 +42,7 @@ const seedAccount = (): Kept => ({
 
 const dbOf = (dir: string) => hubDBFile(join(dir, 'settings-dev.json'));
 
-/** The rows of the history's tables in dir's core database. */
+/** The rows of the history's tables in dir's hub database. */
 function rowsIn(dir: string): [number, number, number] {
   const db = openShared(dbOf(dir));
   try {
@@ -53,7 +53,7 @@ function rowsIn(dir: string): [number, number, number] {
   }
 }
 
-// An account is kept as the Go core keeps it, so either reads the other's.
+// An account is kept as the Go hub keeps it, so either reads the other's.
 test('the rows are Go’s', () => {
   expect(JSON.stringify(keptJSON(seedAccount()))).toBe(
     '{"provider":"claude","id":"acc-1","status":"ok","windows":[{"kind":"weekly","usedPct":15,"resetsAt":1800259200,"windowSec":604800,"id":""}],' +

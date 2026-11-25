@@ -1,4 +1,4 @@
-// The instance's terminal core: herdr-core, an executable the core uploads
+// The instance's terminal core: herdr-core, an executable the hub uploads
 // (the release backend/scripts/hcdist.ts pins, which each executable carries), and one core
 // per instance in a session of its own, so it shares neither terminals nor
 // state with a herdr-core the user runs. The terminal core belongs to the

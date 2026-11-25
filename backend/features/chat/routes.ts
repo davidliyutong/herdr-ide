@@ -2,7 +2,7 @@
 //
 //   - GET    /api/m/{id}/p/chat/agents: which agent kinds with a chat the
 //     machine can start ({agents}), from a chat host that serves
-//     (not_running otherwise); refused on a read-only core (read_only), as
+//     (not_running otherwise); refused on a read-only hub (read_only), as
 //     the host asks the agents' programs;
 //   - POST   /api/m/{id}/p/chat/agents: the same, starting the host when
 //     none serves, audited as chat.agents;
@@ -39,10 +39,10 @@
 //   - GET    /api/p/chat/hosts: every machine with its chat host
 //     (overview.ts);
 //   - GET    /api/p/chat/states: the chats' states of every machine as the
-//     core last read them (StatesSnapshot);
+//     hub last read them (StatesSnapshot);
 //   - GET    /api/p/chat/ws: the page's WebSocket (wire.ts).
 //
-// Errors are {error: code, message} (errors.ts). A read-only core refuses
+// Errors are {error: code, message} (errors.ts). A read-only hub refuses
 // every change, and leaves out of a chat what only a reader who may change
 // it sees (its agent's standard error), here and on the WebSocket.
 import { z } from 'zod';

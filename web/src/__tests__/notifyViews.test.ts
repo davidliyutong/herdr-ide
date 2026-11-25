@@ -18,13 +18,13 @@ import { useStore } from '../state/store';
 import { allPlugins, definePlugins } from '../plugins/registry';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { dummyPlugin, resetViewStatuses, setViewStatus, thing } from './viewStatusPlugin';
 
 const saved = [...allPlugins()];
 const shown: Array<{ title: string; body?: string; tag?: string; n: { onclick: (() => void) | null } }> = [];
 const badge: Array<number | 'clear'> = [];
-let core: FakeCore;
+let hub: FakeHub;
 let hasFocus = false;
 
 const page = (visible: boolean) => {
@@ -54,8 +54,8 @@ beforeEach(async () => {
   resetViewStatuses();
   definePlugins([dummyPlugin]);
   useSettings.setState({ values: {} });
-  core = new FakeCore();
-  core.machine('m', [FakeCore.term('t1'), FakeCore.term('t2', { agent: 'claude', agent_status: 'working' })], {
+  hub = new FakeHub();
+  hub.machine('m', [FakeHub.term('t1'), FakeHub.term('t2', { agent: 'claude', agent_status: 'working' })], {
     version: 2,
     workspaces: [
       {
@@ -71,11 +71,11 @@ beforeEach(async () => {
     ],
     selected: 0,
   });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setMachines([{ id: 'm', label: 'gpu', kind: 'ssh', status: 'ready' } as unknown as MachineState]);
   s.selectMachine('m');
-  core.model.subscribe('m');
+  hub.model.subscribe('m');
   await settle();
 });
 afterEach(() => {
@@ -106,7 +106,7 @@ describe("a plugin's pane's notification", () => {
     ]);
     shown[0].n.onclick!();
     await settle();
-    const layout = core.layout('m')!;
+    const layout = hub.layout('m')!;
     expect(L.selectedTab(layout)?.focused).toBe('view:v1');
   });
 
@@ -117,7 +117,7 @@ describe("a plugin's pane's notification", () => {
     expect(shown.map(({ body, tag }) => ({ body, tag }))).toEqual([{ body: 'gpu\nfix tests', tag: undefined }]);
     shown[0].n.onclick!();
     await settle();
-    expect(L.selectedTab(core.layout('m')!)?.focused).toBe('t1');
+    expect(L.selectedTab(hub.layout('m')!)?.focused).toBe('t1');
   });
 
   it('says a blocked pane in a toast while the page is in front', () => {
@@ -134,11 +134,11 @@ describe("a plugin's pane's notification", () => {
     notifyAgent('m', chat('done'), true);
     expect(played.mock.calls).toEqual([['done']]);
     // Its tab is shown, another pane focused.
-    core.model.mutate('m', (l) => L.selectTab(l, 'aaaaaaaa', 1));
+    hub.model.mutate('m', (l) => L.selectTab(l, 'aaaaaaaa', 1));
     notifyAgent('m', chat('done'), true);
     expect(played.mock.calls.length).toBe(2);
     // Shown and focused.
-    core.model.mutate('m', (l) => L.focusPane(l, 'view:v1'));
+    hub.model.mutate('m', (l) => L.focusPane(l, 'view:v1'));
     notifyAgent('m', chat('done'), true);
     expect(played.mock.calls.length).toBe(2);
     // The request sound always plays.
@@ -157,7 +157,7 @@ describe('the badge', () => {
     setViewStatus('v1', 'blocked');
     expect(badge.at(-1)).toBe(1);
     expect(document.title).toMatch(/^\(1\) /);
-    core.event('m', 'agent', 't2', { agent_status: 'blocked' });
+    hub.event('m', 'agent', 't2', { agent_status: 'blocked' });
     await settle();
     // App.tsx counts again on every change of the terminals.
     updateBadge();

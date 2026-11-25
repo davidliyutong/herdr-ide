@@ -3,10 +3,10 @@
 // where it started is, after a moment.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { follows, nextPlace, settled, SETTLE_MS, type Place } from '../term/place';
-import { FakeCore } from './fakeTerms';
+import { FakeHub } from './fakeTerms';
 
 const term = (foreground?: Record<string, unknown> | null, extra: Record<string, unknown> = {}) =>
-  FakeCore.term('t1', { cwd: '/start', pid: 100, ...(foreground === undefined ? {} : { foreground }), ...extra });
+  FakeHub.term('t1', { cwd: '/start', pid: 100, ...(foreground === undefined ? {} : { foreground }), ...extra });
 const zsh = (cwd: string) => ({ pid: 100, name: '-zsh', cwd });
 const tar = (cwd: string) => ({ pid: 200, name: 'bsdtar', cwd });
 
@@ -61,7 +61,7 @@ describe('a terminal’s place', () => {
     expect(nextPlace(p, term({ pid: 301, name: 'bash', cwd: '/tmp' }), 90_000).dir).toBe('/tmp');
   });
 
-  it('stays where the user was when the core cannot read the foreground program', () => {
+  it('stays where the user was when the terminal core cannot read the foreground program', () => {
     let p: Place = nextPlace(undefined, term(zsh('/proj')), 0);
     p = nextPlace(p, term(null), 100);
     expect(p.dir).toBe('/proj');
@@ -81,26 +81,26 @@ describe('the model’s directory of a terminal', () => {
   afterEach(() => vi.useRealTimers());
 
   it('follows the shell, not tar, and an agent started in another directory once it stayed there', async () => {
-    const core = new FakeCore();
-    core.machine('m1', [FakeCore.term('t1', { cwd: '/home/u', pid: 100, foreground: zsh('/proj') })]);
-    const model = core.install();
+    const hub = new FakeHub();
+    hub.machine('m1', [FakeHub.term('t1', { cwd: '/home/u', pid: 100, foreground: zsh('/proj') })]);
+    const model = hub.install();
     model.subscribe('m1');
     await vi.advanceTimersByTimeAsync(0);
     expect(model.directory('m1', 't1')).toBe('/proj');
 
-    core.event('m1', 'foreground', 't1', tar('/proj'));
+    hub.event('m1', 'foreground', 't1', tar('/proj'));
     for (const d of ['/proj/yyy', '/proj/yyy/a', '/proj/yyy/b']) {
-      core.event('m1', 'foreground', 't1', tar(d));
+      hub.event('m1', 'foreground', 't1', tar(d));
       await vi.advanceTimersByTimeAsync(500);
       expect(model.directory('m1', 't1'), d).toBe('/proj');
     }
     await vi.advanceTimersByTimeAsync(10 * SETTLE_MS);
     expect(model.directory('m1', 't1')).toBe('/proj');
-    core.event('m1', 'foreground', 't1', zsh('/proj'));
+    hub.event('m1', 'foreground', 't1', zsh('/proj'));
     expect(model.directory('m1', 't1')).toBe('/proj');
 
     // cd sub && claude: the place once it stayed there, and the page is told.
-    core.event('m1', 'foreground', 't1', { pid: 300, name: 'claude', cwd: '/proj/sub' });
+    hub.event('m1', 'foreground', 't1', { pid: 300, name: 'claude', cwd: '/proj/sub' });
     expect(model.directory('m1', 't1')).toBe('/proj');
     let told = 0;
     const off = (await import('../state/terms')).useTerms.subscribe(() => told++);
@@ -110,7 +110,7 @@ describe('the model’s directory of a terminal', () => {
     off();
 
     // Gone with its terminal.
-    core.event('m1', 'removed', 't1');
+    hub.event('m1', 'removed', 't1');
     expect(model.directory('m1', 't1')).toBeUndefined();
   });
 });

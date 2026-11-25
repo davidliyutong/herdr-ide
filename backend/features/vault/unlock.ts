@@ -4,13 +4,13 @@
 // the authenticator can give again, HKDF-SHA256 of
 //
 //   - enclave (the desktop app on macOS): the P-256 ECDH secret of an
-//     ephemeral key the core made when the entry was added (only its public
+//     ephemeral key the hub made when the entry was added (only its public
 //     half is kept) and the app's Secure Enclave key, which the enclave
 //     gives only after Touch ID, with the desktop shell's own secret;
 //   - hello (the desktop app on Windows): the Windows Hello key's signature
-//     (RSA PKCS#1 v1.5, deterministic) of a challenge the core chose, with
+//     (RSA PKCS#1 v1.5, deterministic) of a challenge the hub chose, with
 //     the shell's secret;
-//   - prf (a WebAuthn credential): its PRF output for a salt the core chose.
+//   - prf (a WebAuthn credential): its PRF output for a salt the hub chose.
 //
 // The wrap's additional data binds every member of the entry and the hash
 // of the file's check, so an edited entry does not open and a new

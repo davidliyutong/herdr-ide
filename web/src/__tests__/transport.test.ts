@@ -1,8 +1,8 @@
-// Channels to the core (lib/transport.ts): a WebSocket in a browser; in the
+// Channels to the hub (lib/transport.ts): a WebSocket in a browser; in the
 // desktop app a PortSocket (lib/portSocket.ts) over the MessagePort the
-// shell hands the page, speaking the bridge's frames with the core's side
+// shell hands the page, speaking the bridge's frames with the hub's side
 // of it (backend/hosts/electron/bridge.ts serveChannel, run here as the
-// core's utility process runs it). And uploads, which the desktop app
+// hub's utility process runs it). And uploads, which the desktop app
 // streams with fetch.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,13 +29,13 @@ function port(p: MessagePort): Port {
   };
 }
 
-/** What the core does with a channel in these tests. */
+/** What the hub does with a channel in these tests. */
 type Behavior = (req: Request, upgrade: Upgrade) => Promise<Response>;
 
-/** The page's window, the shell's channels and the core behind them. */
+/** The page's window, the shell's channels and the hub behind them. */
 function desktop(behave: Behavior) {
   const win = new EventTarget();
-  const opened: Array<{ path: string; protocols: string[]; core: MessagePort }> = [];
+  const opened: Array<{ path: string; protocols: string[]; hub: MessagePort }> = [];
   let n = 0;
   vi.stubGlobal('location', { origin: ORIGIN, href: `${ORIGIN}/`, host: 'app.localhost', protocol: 'https:' });
   vi.stubGlobal('addEventListener', win.addEventListener.bind(win));
@@ -43,7 +43,7 @@ function desktop(behave: Behavior) {
     open(path: string, protocols: string[]) {
       const id = `channel-${++n}`;
       const { port1, port2 } = new MessageChannel();
-      opened.push({ path, protocols, core: port1 });
+      opened.push({ path, protocols, hub: port1 });
       void serveChannel(port(port1), { url: ORIGIN + path, headers: [] }, behave);
       // The port comes later, as a message to the window.
       setTimeout(() => win.dispatchEvent(new MessageEvent('message', { data: { [CHANNEL_PORT]: id }, origin: ORIGIN, ports: [port2] })), 1);
@@ -53,7 +53,7 @@ function desktop(behave: Behavior) {
   return { opened };
 }
 
-/** A core that echoes on its channel and records what it sees. */
+/** A hub that echoes on its channel and records what it sees. */
 function echoing() {
   const seen = { closes: [] as Array<[number, string]>, channel: undefined as HubChannel | undefined, messages: [] as unknown[] };
   const behave: Behavior = async (req, upgrade) => {
@@ -101,8 +101,8 @@ describe('openChannel', () => {
   });
 
   it('is a channel of the shell in the desktop app: open, text and bytes both ways, close', async () => {
-    const core = echoing();
-    const { opened } = desktop(core.behave);
+    const hub = echoing();
+    const { opened } = desktop(hub.behave);
     const { openChannel, viaDesktop } = await import('../lib/transport');
     expect(viaDesktop).toBe(true);
     const ws = openChannel('/ws?x=1');
@@ -122,17 +122,17 @@ describe('openChannel', () => {
     await until(() => got.length === 2);
     expect(got[0]).toBe('hello');
     expect([...new Uint8Array(got[1] as ArrayBuffer)]).toEqual([8, 7]);
-    expect(core.seen.messages[1]).toEqual(new Uint8Array([8, 7]));
+    expect(hub.seen.messages[1]).toEqual(new Uint8Array([8, 7]));
     ws.close(1000, 'bye');
     expect(ws.readyState).toBe(WebSocket.CLOSING);
     await until(() => events.length === 2);
     expect(events[1]).toBe('close 1000 bye true');
-    expect(core.seen.closes).toEqual([[1000, 'bye']]);
+    expect(hub.seen.closes).toEqual([[1000, 'bye']]);
   });
 
-  it('acks what it took in, so the core sees nothing buffered', async () => {
-    const core = echoing();
-    desktop(core.behave);
+  it('acks what it took in, so the hub sees nothing buffered', async () => {
+    const hub = echoing();
+    desktop(hub.behave);
     const { openChannel } = await import('../lib/transport');
     const ws = openChannel('/ws');
     const got: unknown[] = [];
@@ -142,15 +142,15 @@ describe('openChannel', () => {
     await until(() => got.length === 1);
     expect(got[0]).toBeInstanceOf(Blob);
     // Over ACK_BYTES: acked at once.
-    await until(() => core.seen.channel!.buffered === 0);
+    await until(() => hub.seen.channel!.buffered === 0);
     ws.send('small');
     await until(() => got.length === 2);
-    await until(() => core.seen.channel!.buffered === 0);
+    await until(() => hub.seen.channel!.buffered === 0);
   });
 
-  it('a channel the core refuses, or one whose core goes away, fails as a WebSocket does', async () => {
-    const core = echoing();
-    const { opened } = desktop(core.behave);
+  it('a channel the hub refuses, or one whose hub goes away, fails as a WebSocket does', async () => {
+    const hub = echoing();
+    const { opened } = desktop(hub.behave);
     const { openChannel } = await import('../lib/transport');
     const refused = openChannel('/nothing');
     const events: string[] = [];
@@ -163,15 +163,15 @@ describe('openChannel', () => {
     const ends: number[] = [];
     lost.onclose = (e) => ends.push(e.code);
     await new Promise<void>((r) => (lost.onopen = () => r()));
-    opened[1].core.close();
+    opened[1].hub.close();
     await until(() => ends.length === 1);
     expect(ends).toEqual([ABNORMAL]);
-    expect(core.seen.closes).toEqual([[ABNORMAL, '']]);
+    expect(hub.seen.closes).toEqual([[ABNORMAL, '']]);
   });
 
   it("in VS Code's frames it stands in for WebSocket, for the page's own host only", async () => {
-    const core = echoing();
-    desktop(core.behave);
+    const hub = echoing();
+    desktop(hub.behave);
     const native: string[] = [];
     class Native {
       constructor(url: string) {
@@ -191,8 +191,8 @@ describe('openChannel', () => {
   });
 
   it('runs from its own source alone, as the preload hands it to the page', () => {
-    const core = echoing();
-    desktop(core.behave);
+    const hub = echoing();
+    desktop(hub.behave);
     const again = new Function(`return (${installPortSocket.toString()})`)() as typeof installPortSocket;
     expect(typeof again(false)).toBe('function');
   });

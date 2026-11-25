@@ -2,7 +2,7 @@
   "name": "backend",
   "private": true,
   "version": "0.1.0",
-  "description": "The core and the machine agent, in TypeScript: Node APIs for what also runs in the desktop app, Bun for the machines and the command line",
+  "description": "The hub and the machine agent, in TypeScript: Node APIs for what also runs in the desktop app, Bun for the machines and the command line",
   "license": "MIT",
   "type": "module",
   "scripts": {

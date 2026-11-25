@@ -1,14 +1,14 @@
 // A machine's node: the agent as a service, a process of its own that
 // listens on the instance's <run>/node.sock and serves every client that
-// connects as a session of one agent (agent.ts): the local core as well as
-// cores that came over ssh (`node dial`). It runs detached from its
+// connects as a session of one agent (agent.ts): the local hub as well as
+// hubs that came over ssh (`node dial`). It runs detached from its
 // clients, in a session of its own, and ends once it has had no client for
 // NodeIdle.
 //
 // One node serves an instance (run/node.lock, flock). A client of a newer
 // build (agentproto.newer) starts a node of its own build, which takes the
 // socket over (NodeOp.Takeover): the old node gives up socket and lock,
-// tells its sessions' cores to move (Op.NodeDrain), and ends once they
+// tells its sessions' hubs to move (Op.NodeDrain), and ends once they
 // left, at the latest after DRAIN_MAX_MS. A client of an older build uses
 // the node as it is: the protocol only grows. The Go machine side of
 // earlier releases speaks the same, so a node of this build takes over from
@@ -202,7 +202,7 @@ export async function runNode(o: NodeOptions): Promise<void> {
     }
   };
 
-  /** Gives way to the node next: the socket and lock are its, and the cores
+  /** Gives way to the node next: the socket and lock are its, and the hubs
    * are told to move. */
   const takenOver = (next: NodeInfo) => {
     log(`taken over by build ${next.build} (version ${next.version}, pid ${next.pid ?? 0}); draining`);

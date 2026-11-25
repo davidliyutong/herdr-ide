@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// Plugins' settings pages: a section the core says is a plugin's (or a
+// Plugins' settings pages: a section the hub says is a plugin's (or a
 // plugin names) is listed under the plugins in the settings dialog, the
 // Plugins page opens it from the plugin's row, the page starts with the
 // plugin and its switch and says when the plugin is off, ends with the

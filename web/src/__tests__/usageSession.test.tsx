@@ -139,7 +139,7 @@ beforeEach(() => {
   hold = undefined;
   hang = false;
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-    const u = new URL(String(url), 'http://core');
+    const u = new URL(String(url), 'http://hub');
     if (u.pathname === '/api/m/local/p/usage/session') {
       const session = u.searchParams.get('session')!;
       reads.push(session);

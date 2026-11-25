@@ -310,7 +310,7 @@ describe('layout', () => {
   });
 });
 
-/** A socket the test drives: what the client sent, and messages from the core. */
+/** A socket the test drives: what the client sent, and messages from the hub. */
 class FakeSocket implements Socket {
   binaryType = '';
   onopen: (() => void) | null = null;
@@ -333,7 +333,7 @@ class FakeSocket implements Socket {
 }
 
 describe('terminal connection', () => {
-  it('tells the core the display a viewer answers programs with, but not for an observer', async () => {
+  it('tells the hub the display a viewer answers programs with, but not for an observer', async () => {
     const socket = new FakeSocket();
     const conn = new TermConnection(() => socket);
     conn.start();

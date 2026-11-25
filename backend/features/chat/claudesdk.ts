@@ -3,7 +3,7 @@
 // all rights reserved, so no executable or app of the product carries it.
 // A machine gets it when a Claude Code chat needs it: the npm registry's
 // tarball of this pinned version, which the machine downloads itself or
-// the core uploads (from an operator's directory, its cache or its own
+// the hub uploads (from an operator's directory, its cache or its own
 // download), checked against the pinned integrity before anything of it is
 // unpacked, into <data dir>/claude-agent-sdk/<version> (sdkprovision.ts,
 // machine/sdkstore.ts; the adapter loads it, machine/claude/load.ts).
@@ -18,7 +18,7 @@ export interface NpmTarball {
   name: string;
   version: string;
   /** The tarball's name: in the registry's URL, an operator's directory
-   * and the core's cache. */
+   * and the hub's cache. */
   file: string;
   /** Subresource Integrity of the tarball, as the registry and the lockfile
    * have it. */
@@ -43,7 +43,7 @@ export const CLAUDE_SDK: NpmTarball = Object.freeze({
   files: Object.freeze(['package.json', 'sdk.mjs', 'LICENSE.md', 'README.md']),
 });
 
-/** The npm registry the core and the machines download from (--npm-registry
+/** The npm registry the hub and the machines download from (--npm-registry
  * names a mirror). */
 export const NPM_REGISTRY = 'https://registry.npmjs.org';
 

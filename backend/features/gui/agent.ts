@@ -23,7 +23,7 @@ export interface DisplayAgent {
 }
 
 /** What ends a request: signal, and the longest its reply may take (as
- * the Go core's context deadline did; the session's default without). */
+ * the Go hub's context deadline did; the session's default without). */
 export interface Bounds {
   signal: AbortSignal;
   timeoutMs?: number;

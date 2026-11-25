@@ -24,13 +24,13 @@ import { definePlugins } from '../plugins/registry';
 import { browserPlugin } from '../plugins/browser';
 import { forwardGranted, resetGrants, useForwards } from '../plugins/browser/api';
 import { openLink } from '../terminal/openLink';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { fakeBrowserApi, json } from './browserHarness';
 
-let core: FakeCore;
+let hub: FakeHub;
 let open: ReturnType<typeof vi.spyOn>;
-const tabs = () => core.model.layout('a')!.workspaces[0].tabs;
-const views = () => L.pluginViews(core.model.layout('a')!.workspaces[0], 'browser', 'page').map((v) => v.view);
+const tabs = () => hub.model.layout('a')!.workspaces[0].tabs;
+const views = () => L.pluginViews(hub.model.layout('a')!.workspaces[0], 'browser', 'page').map((v) => v.view);
 const set = (key: string, value: unknown) =>
   useSettings.setState((s) => ({ values: { ...s.values, [key]: { value, source: 'global' } } }) as Partial<typeof s>);
 const click = async (text: string, m = 'a') => {
@@ -49,20 +49,20 @@ beforeEach(async () => {
   set('browser.openLinks', 'loopback');
   resetGrants();
   useForwards.setState({ forwards: [], available: true });
-  core = new FakeCore();
+  hub = new FakeHub();
   for (const id of ['a', 'l'])
-    core.machine(id, [FakeCore.term('s1')], {
+    hub.machine(id, [FakeHub.term('s1')], {
       version: 1,
       workspaces: [{ id: 'w1', name: '', cwd: '', tabs: [{ root: { terminal: 's1' }, focused: 's1' }], selected: 0 }],
       selected: 0,
     });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([machine('a', 'ssh'), machine('l', 'local')]);
   s.selectMachine('a');
-  core.model.subscribe('a');
-  core.model.subscribe('l');
+  hub.model.subscribe('a');
+  hub.model.subscribe('l');
   await settle();
 });
 
@@ -102,9 +102,9 @@ describe('a loopback URL in a terminal of a remote machine', () => {
     expect(forwardGranted('a', 3000)).toBe(false);
   });
 
-  it('opens nothing for the core’s own address, under either loopback name', async () => {
+  it('opens nothing for the hub’s own address, under either loopback name', async () => {
     // The UI is on 127.0.0.1:5173; a machine's port of that number reads
-    // as the core's address and is not opened from a text.
+    // as the hub's address and is not opened from a text.
     for (const url of ['http://127.0.0.1:5173/api/m/a/hc/stop', 'http://localhost:5173/', 'http://[::1]:5173/x', 'https://localhost:5173/'])
       await click(url);
     expect(open).not.toHaveBeenCalled();
@@ -112,7 +112,7 @@ describe('a loopback URL in a terminal of a remote machine', () => {
     expect(forwardGranted('a', 5173)).toBe(false);
   });
 
-  it('asks the core whether forwards are available when it does not know yet', async () => {
+  it('asks the hub whether forwards are available when it does not know yet', async () => {
     useForwards.setState({ available: undefined });
     const calls = fakeBrowserApi({ forwards: () => json({ forwards: [], available: false }) });
     await click('http://localhost:3000/');
@@ -126,7 +126,7 @@ describe('a loopback URL in a terminal of the local machine', () => {
   it('opens a browser pane without a forward when the UI is on a loopback host', async () => {
     useStore.getState().selectMachine('l');
     await click('http://localhost:3000/x', 'l');
-    const [v] = L.pluginViews(core.model.layout('l')!.workspaces[0], 'browser', 'page');
+    const [v] = L.pluginViews(hub.model.layout('l')!.workspaces[0], 'browser', 'page');
     expect(v.view.url).toBe('http://localhost:3000/x');
     expect(v.view.m).toBeUndefined();
     expect(v.view.port).toBeUndefined();
@@ -146,7 +146,7 @@ describe('a URL below localhost', () => {
 
   it('opens in a pane of the desktop app as written for the local machine, and outside in a browser', async () => {
     useStore.getState().selectMachine('l');
-    const local = () => L.pluginViews(core.model.layout('l')!.workspaces[0], 'browser', 'page').map((v) => v.view);
+    const local = () => L.pluginViews(hub.model.layout('l')!.workspaces[0], 'browser', 'page').map((v) => v.view);
     // A browser frames the other loopback name only.
     await click('http://app.localhost:3000/x', 'l');
     expect(open).toHaveBeenCalledWith('http://app.localhost:3000/x', '_blank', 'noopener,noreferrer');

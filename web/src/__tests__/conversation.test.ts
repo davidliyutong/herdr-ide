@@ -1,7 +1,7 @@
-// The native view's contracts: the kinds of agents from the core's
+// The native view's contracts: the kinds of agents from the hub's
 // registry (commands built only from a session id that is a UUID), the
 // conversation an agent's events reduce to (also from events of shapes no
-// parser makes), the session the core reports in a terminal's record, and
+// parser makes), the session the hub reports in a terminal's record, and
 // the text derived from items (diffs, a patch's lines, display formulas,
 // what is read out), in bounded time.
 import { describe, expect, it } from 'vitest';

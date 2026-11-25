@@ -117,7 +117,7 @@
   color: var(--fg-mute);
   font-size: var(--fs-sm);
 }
-/* How often the core reads, beside Refresh. */
+/* How often the hub reads, beside Refresh. */
 .usage-interval {
   max-width: 9em;
   font-size: var(--fs-sm);

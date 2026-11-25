@@ -5,9 +5,9 @@
 #      backend/scripts/build.ts)
 #   2. the product slug appears in string literals only in the brand files
 #      (so a rename stays a one-file change plus scripts/rename.sh)
-#   3. every command-line flag and every HTTP route of the core
+#   3. every command-line flag and every HTTP route of the hub
 #      (backend/scripts/reference.ts) is documented in docs/reference.md
-#   4. THIRD_PARTY_NOTICES.md matches the core's npm packages
+#   4. THIRD_PARTY_NOTICES.md matches the hub's npm packages
 #   5. README.md and README.zh-CN.md have the same section structure
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
 #   7. the files generated from spec/tokens.json and the settings
@@ -51,7 +51,7 @@ if [[ -n "$hits" ]]; then
 fi
 
 echo "==> Bun's APIs only where Bun alone runs"
-# The core's shared code, kernel and features' core sides also run in the
+# The hub's shared code, kernel and features' hub sides also run in the
 # desktop app's Electron (Node); tsconfig.node.json typechecks them with
 # Node's types, this catches the rest (the features' other modules).
 hits=$(grep -rnE "\bBun\.[A-Za-z]|from 'bun:|import\('bun:" --include='*.ts' backend/shared backend/kernel backend/features backend/hosts backend/machine --exclude-dir=node_modules 2>/dev/null \
@@ -84,7 +84,7 @@ if grep -qE '"@anthropic-ai/claude-agent-sdk"' <(sed -n '/"dependencies"/,/}/p' 
 fi
 
 echo "==> flags and endpoints documented"
-# Every flag of the command line and every route of the core, composed as
+# Every flag of the command line and every route of the hub, composed as
 # serve composes it (backend/scripts/reference.ts).
 (cd backend && bun scripts/reference.ts) || fail=1
 
@@ -115,7 +115,7 @@ scripts/build-gpupick.sh --check || fail=1
 scripts/build-gui-helper.sh --check || fail=1
 
 echo "==> shared test vectors"
-# The web UI's tests, or the desktop shell's for vectors the core shares
+# The web UI's tests, or the desktop shell's for vectors the hub shares
 # with the shell alone (the vault's unlock keys), run every vector: they
 # name the file (<dir>/<name>.json), the directory's files (<dir>/*.json)
 # or the directory itself ("…/vectors/<dir>"), so a new vector file

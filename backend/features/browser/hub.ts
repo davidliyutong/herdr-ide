@@ -1,13 +1,13 @@
-// The browser pane's core side (docs/features/32-browser-and-ports.md):
+// The browser pane's hub side (docs/features/32-browser-and-ports.md):
 // port forwards (forwards.ts) and the ports that listen on a machine.
 //
 //   - GET    /api/p/browser/forwards: the forwards, and whether this client
-//     can use them ({forwards, available}): they listen on the core host's
+//     can use them ({forwards, available}): they listen on the hub host's
 //     loopback, which is the client's localhost only when the client is on
 //     that host;
 //   - POST   /api/m/:id/p/browser/forwards {port}: makes (or finds) the
 //     forward of a port of the machine, a use of it; refused to a client
-//     that is not on the core's host (403 forward_local_only) and for the
+//     that is not on the hub's host (403 forward_local_only) and for the
 //     local machine, whose ports need none (400 local_machine); audited as
 //     browser.forward with both ports;
 //   - DELETE /api/m/:id/p/browser/forwards/:port: ends it, audited as
@@ -17,7 +17,7 @@
 //     a forward could reach ({ports}).
 //
 // A forwarded service is another site than the UI: it gets a port of its
-// own, hence an origin of its own, which the core's Origin guard refuses.
+// own, hence an origin of its own, which the hub's Origin guard refuses.
 import { z } from 'zod';
 import { defineFeature, type FeatureDef } from '#kernel/feature.ts';
 import { open } from '#kernel/agent.ts';
@@ -42,7 +42,7 @@ export interface BrowserFeature extends FeatureDef {
   forwards(): Forwards | undefined;
 }
 
-/** A forward's body as the Go core decoded it into its struct ({port});
+/** A forward's body as the Go hub decoded it into its struct ({port});
  * a body that is too large, not JSON or not of that shape fails with
  * bad_request. */
 async function portOf(c: Ctx): Promise<number> {
@@ -90,8 +90,8 @@ export function browserFeature(o: BrowserOptions = {}): BrowserFeature {
       });
       forwards = fw;
 
-      // Idle forwards end while the core runs, all of them while the
-      // feature is off, and every one when the core stops.
+      // Idle forwards end while the hub runs, all of them while the
+      // feature is off, and every one when the hub stops.
       ctx.service('forwards', async (signal) => {
         const reap = () => {
           const idle = ctx.settings.number('browser.forwardIdle');
@@ -110,7 +110,7 @@ export function browserFeature(o: BrowserOptions = {}): BrowserFeature {
       ctx.machineApi.post('/forwards', ctx.mutating('forward'), async (c) => {
         const port = await portOf(c);
         c.var.audit.port = port;
-        if (!c.var.sameHost) throw new Fail('forward_local_only', 403, "forwards listen on the core's host: open the UI on that host");
+        if (!c.var.sameHost) throw new Fail('forward_local_only', 403, "forwards listen on the hub's host: open the UI on that host");
         if (c.var.machine.local) throw new Fail('local_machine', 400, "the local machine's ports need no forward");
         if (port < 1 || port > 65535) throw new Fail('bad_request', 400, 'port is 1 to 65535');
         const f = await fw.ensure(c.var.machine.id, port);

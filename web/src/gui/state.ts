@@ -1,5 +1,5 @@
 // Windows of programs on machines (docs/features/14-gui-windows.md). The
-// core sends each machine's display state; a window that appeared while
+// hub sends each machine's display state; a window that appeared while
 // this page was open is "unseen" until it is opened, and marked on its
 // terminal's pane.
 

@@ -221,14 +221,14 @@ test('close, leave, download', async () => {
   ]);
 });
 
-describe('through a core', () => {
+describe('through a hub', () => {
   let vc: VSCodeHub;
   beforeAll(async () => {
     vc = await vscodeHub({ desktopOn: false, browserOn: false });
   });
   afterAll(() => vc.stop());
 
-  /** A page of a kind of client on the core's /ws. */
+  /** A page of a kind of client on the hub's /ws. */
   const page = (client: Client, readOnly = false) => {
     const sent: Array<Record<string, unknown>> = [];
     const ch: Channel = { send: (d) => void sent.push(JSON.parse(String(d))), buffered: 0, close() {} };

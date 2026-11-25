@@ -12,7 +12,7 @@ export const DeployCode = {
   /** musl without libstdc++ and libgcc, which Bun's musl executables need. */
   LibsMissing: 'libs_missing',
   /** The machine could not get its build: it could not download it, and
-   * the core has it neither in its directory, its cache nor its own
+   * the hub has it neither in its directory, its cache nor its own
    * executable, and cannot download it either. */
   BuildUnavailable: 'build_unavailable',
 } as const;

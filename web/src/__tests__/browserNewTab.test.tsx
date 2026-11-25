@@ -21,13 +21,13 @@ import { definePlugins } from '../plugins/registry';
 import { vscodePlugin } from '../plugins/vscode';
 import { browserPlugin } from '../plugins/browser';
 import { t } from '../i18n';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { vscodeOn } from './fakeSettings';
 import type { PluginDef } from '../plugins/api';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-let core: FakeCore;
+let hub: FakeHub;
 let host: HTMLDivElement;
 let root: Root;
 const set = (key: string, value: unknown) =>
@@ -35,7 +35,7 @@ const set = (key: string, value: unknown) =>
 const button = () => host.querySelector<HTMLElement>('.new-tab')!;
 const labels = (entries: MenuEntry[]) => entries.map((e) => (isItem(e) ? e.label : '-'));
 const menu = () => useMenu.getState().menu?.entries ?? [];
-const tabs = () => core.model.layout('m')!.workspaces[0].tabs;
+const tabs = () => hub.model.layout('m')!.workspaces[0].tabs;
 
 beforeEach(async () => {
   vi.stubGlobal(
@@ -45,18 +45,18 @@ beforeEach(async () => {
   definePlugins([vscodePlugin, browserPlugin]);
   vscodeOn();
   set('plugins.browser.enabled', true);
-  core = new FakeCore();
-  core.machine('m', [FakeCore.term('p1')], {
+  hub = new FakeHub();
+  hub.machine('m', [FakeHub.term('p1')], {
     version: 2,
     workspaces: [{ id: 'w1w1w1w1', name: 'one', cwd: '/src', tabs: [{ root: { terminal: 'p1' }, focused: 'p1' }], selected: 0 }],
     selected: 0,
   });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([{ id: 'm', label: 'box', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
   s.selectMachine('m');
-  core.model.subscribe('m');
+  hub.model.subscribe('m');
   await settle();
   host = document.createElement('div');
   document.body.append(host);
@@ -76,7 +76,7 @@ describe('the new-tab button', () => {
   it('makes a terminal on a plain click, with no menu', async () => {
     await act(async () => button().click());
     await settle();
-    expect(core.calls.filter((c) => c.method === 'terminal.run').length).toBe(1);
+    expect(hub.calls.filter((c) => c.method === 'terminal.run').length).toBe(1);
     expect(tabs().length).toBe(2);
     expect(useMenu.getState().menu).toBeUndefined();
   });
@@ -85,7 +85,7 @@ describe('the new-tab button', () => {
     const want = [t('tab.newKind.terminal'), '-', 'VS Code', '-', t('browser.title')];
     await act(async () => button().dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true, clientX: 5, clientY: 5 })));
     expect(labels(menu())).toEqual(want);
-    expect(core.calls.filter((c) => c.method === 'terminal.run').length).toBe(0);
+    expect(hub.calls.filter((c) => c.method === 'terminal.run').length).toBe(0);
     act(() => closeMenu(false));
     await act(async () => button().dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true, clientX: 5, clientY: 5 })));
     expect(labels(menu())).toEqual(want);
@@ -126,7 +126,7 @@ describe('the new-tab button', () => {
     expect(tabs().length).toBe(2);
     const leaf = tabs()[1].root;
     expect(L.isPluginLeaf(leaf) && leaf.view).toMatchObject({ plugin: 'browser', kind: 'page', url: '' });
-    expect(core.model.layout('m')!.workspaces[0].selected).toBe(1);
+    expect(hub.model.layout('m')!.workspaces[0].selected).toBe(1);
   });
 
   it('takes any number of items and groups, in plugin order', async () => {

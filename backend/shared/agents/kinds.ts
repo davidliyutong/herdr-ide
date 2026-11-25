@@ -4,7 +4,7 @@
 // continue a directory's latest conversation and resume a session by its
 // id, the parser of its session transcripts, and how the chat host runs it
 // headless (its chat spec). It is data only and runs on every system the
-// core runs on.
+// hub runs on.
 //
 // The ids are the detector's (features/agents/machine/detect/manifests), which the
 // settings' list of agents names too; the registry's JSON

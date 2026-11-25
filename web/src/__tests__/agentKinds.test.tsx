@@ -13,7 +13,7 @@ import { createRoot, type Root } from 'react-dom/client';
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: () => {} } }));
 
 import { useStore } from '../state/store';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import type { MachineState } from '../lib/machine';
 import { agentStartItems, Palette } from '../components/Palette';
 import { setLocale } from '../i18n';
@@ -47,14 +47,14 @@ afterEach(async () => {
 
 /** A machine "m" whose one workspace holds tabs, shown in a palette. */
 async function setup(tabs: L.Tab[]) {
-  const core = new FakeCore();
-  const terminals = tabs.flatMap((tab) => L.tabPanes(tab).map((a) => FakeCore.term(a)));
-  core.machine('m', terminals, {
+  const hub = new FakeHub();
+  const terminals = tabs.flatMap((tab) => L.tabPanes(tab).map((a) => FakeHub.term(a)));
+  hub.machine('m', terminals, {
     version: 2,
     workspaces: [{ id: 'xxxxxxxx', name: 'x', cwd: '', tabs, selected: 0 }],
     selected: 0,
   });
-  const model = core.install();
+  const model = hub.install();
   useStore.getState().setMachines([{ id: 'm', label: 'box', kind: 'local', status: 'ready' } as unknown as MachineState]);
   useStore.getState().selectMachine('m');
   model.subscribe('m');
@@ -63,7 +63,7 @@ async function setup(tabs: L.Tab[]) {
   document.body.append(host);
   root = createRoot(host);
   await act(async () => root!.render(createElement(Palette)));
-  return { core, model };
+  return { hub, model };
 }
 
 /** Opens the palette, types label and runs the first item, which must be it. */
@@ -87,12 +87,12 @@ describe('the palette’s agents', () => {
   });
 
   it('start the registry’s command line split to the right of the focused pane', async () => {
-    const { core, model } = await setup([{ root: { terminal: 'a' }, focused: 'a' }]);
+    const { hub, model } = await setup([{ root: { terminal: 'a' }, focused: 'a' }]);
     for (const item of PINNED) {
-      const before = core.calls.length;
+      const before = hub.calls.length;
       await choose(item.label);
       expect(host!.querySelector('.palette')).toBeNull();
-      const runs = core.calls.slice(before).filter((c) => c.method === 'terminal.run');
+      const runs = hub.calls.slice(before).filter((c) => c.method === 'terminal.run');
       expect(runs.map((c) => c.params.argv)).toEqual([item.argv]);
     }
     // One tab, its panes the first terminal and one per agent, in order.
@@ -102,9 +102,9 @@ describe('the palette’s agents', () => {
   });
 
   it('start in a new tab when no pane is focused', async () => {
-    const { core, model } = await setup([]);
+    const { hub, model } = await setup([]);
     await choose('New Agent: codex (Split Right)');
-    expect(core.calls.filter((c) => c.method === 'terminal.run').map((c) => c.params.argv)).toEqual([['codex']]);
+    expect(hub.calls.filter((c) => c.method === 'terminal.run').map((c) => c.params.argv)).toEqual([['codex']]);
     const ws = model.layout('m')!.workspaces[0];
     expect(ws.tabs.map((tab) => L.tabPanes(tab))).toEqual([['t1']]);
   });

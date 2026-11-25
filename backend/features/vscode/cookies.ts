@@ -1,6 +1,6 @@
 // The desktop app's cookie never crosses the proxy (SECURITY.md). It held
-// the token of the app's launch while the app ran the core as a child; the
-// app's core runs in process now and tells its windows apart without a
+// the token of the app's launch while the app ran the hub as a child; the
+// app's hub runs in process now and tells its windows apart without a
 // cookie (hosts/electron), so none is set any more. One left from an
 // earlier version is still neither passed to code-server nor set by it.
 import { SLUG } from '#shared/lib/brand.ts';

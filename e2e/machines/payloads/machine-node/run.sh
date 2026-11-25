@@ -2,7 +2,7 @@
 # Runs the TypeScript build's machine side on this machine: the driver (driver.js,
 # built with build.sh) with the executable of this machine's C
 # library (exe/: musl's on musl, glibc's elsewhere) acting as Bun
-# (BUN_BE_BUN=1), which drives that executable's node as a core does. The
+# (BUN_BE_BUN=1), which drives that executable's node as a hub does. The
 # run has a home of its own, removed after. Exit status: 0 if it passed.
 cd "$(dirname "$0")" || exit 2
 # glibc's getconf answers on glibc whatever else is there (a glibc system
@@ -14,7 +14,7 @@ suffix=
 [ $libc = musl ] && suffix=-musl
 own=$(ls exe/*-linux-amd64$suffix 2>/dev/null | head -1)
 [ -x "$own" ] || { echo "FAIL no machine executable for linux-amd64$suffix in exe/ (build.sh)"; exit 1; }
-# What the core's probe refuses (kernel/machines/transport/ssh.ts
+# What the hub's probe refuses (kernel/machines/transport/ssh.ts
 # checkRuntimeRuns): musl without libstdc++ and libgcc, an x86-64 processor
 # without SSE4.2. Such a machine passes when it is refused as the probe
 # would refuse it.
@@ -25,11 +25,11 @@ for f in libstdc++.so.6 libgcc_s.so.1; do
   [ -n "$found" ] || libs=no
 done
 if [ $libc = musl ] && [ $libs = no ]; then
-  echo "PASS refused as the core's probe refuses it: libs_missing (musl without libstdc++ and libgcc)"
+  echo "PASS refused as the hub's probe refuses it: libs_missing (musl without libstdc++ and libgcc)"
   exit 0
 fi
 if [ "$(uname -m)" = x86_64 ] && ! grep -qw sse4_2 /proc/cpuinfo; then
-  echo "PASS refused as the core's probe refuses it: cpu_unsupported (no SSE4.2)"
+  echo "PASS refused as the hub's probe refuses it: cpu_unsupported (no SSE4.2)"
   exit 0
 fi
 home=$(mktemp -d /tmp/hmx-XXXXXX)

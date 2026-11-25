@@ -1,22 +1,22 @@
-// The desktop app's bridge between its main process and the core in its
+// The desktop app's bridge between its main process and the hub in its
 // utility process: the requests of the app's windows, which the main
 // process intercepts at the app's origin (desktop/src/protocol.ts), and
 // channels, the WebSockets of a browser, as MessagePorts.
 //
 // A request has a MessagePort of its own. The main process sends the
 // request's head on the utility process's parent port with the port, then
-// the body in chunks; the core answers the response's head, then its body
+// the body in chunks; the hub answers the response's head, then its body
 // in chunks. Either side sends at most WINDOW chunks the other has not
 // taken yet: a receiver gives credit back as the chunks are read, so a
 // stalled reader stalls the writer instead of filling memory. A response
 // body that fails ends with an error, which the main process passes on as
 // a failed transfer.
 //
-// A channel is a MessagePort too, between the core and its client (a
+// A channel is a MessagePort too, between the hub and its client (a
 // page's frame, which gets the other end from the main process, or the
 // main process itself). Data are strings (text messages) and binary
 // messages; the rest are control frames (ChannelControl). The client acks
-// what it took in, so the core sees what is buffered as on a WebSocket.
+// what it took in, so the hub sees what is buffered as on a WebSocket.
 //
 // Without imports: the desktop shell's main process, the utility process,
 // the web UI's tests and the tests of both import it as it is.
@@ -92,17 +92,17 @@ function once(fn: () => void): () => void {
 
 // ---- the utility process's parent port
 
-/** What the core of the desktop app is started with: what the command
- * line's core gets as flags, and what the app holds for it. */
+/** What the hub of the desktop app is started with: what the command
+ * line's hub gets as flags, and what the app holds for it. */
 export interface HubStart {
-  /** The core's instance (`desktop`, or a development one). */
+  /** The hub's instance (`desktop`, or a development one). */
   instance: string;
   /** The instance of the machines' nodes. */
   nodeInstance: string;
   /** Connects the local machine only (development). */
   localOnly: boolean;
   /** The app's origin, https://<slug>.localhost: the one origin the
-   * core's guard allows besides its own. */
+   * hub's guard allows besides its own. */
   origin: string;
   /** The key with which the shell signs the user's answers to the
    * system's prompts (the vault's desktop proofs). */
@@ -285,8 +285,8 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** The main process's side of a request: sends it on port (whose other
  * end went to the utility process with the head) and resolves with the
- * core's response, whose body streams as it is read. A response body that
- * breaks off errors; cancelling it tells the core. */
+ * hub's response, whose body streams as it is read. A response body that
+ * breaks off errors; cancelling it tells the hub. */
 export function request(port: Port, head: RequestHead, body: ReadableStream<Uint8Array> | null, signal?: AbortSignal): Promise<Response> {
   return new Promise<Response>((resolve, reject) => {
     const credit = new Credit(WINDOW);
@@ -354,7 +354,7 @@ export function request(port: Port, head: RequestHead, body: ReadableStream<Uint
       },
       () => {
         if (finished) return;
-        const e = new Error('the core is gone');
+        const e = new Error('the hub is gone');
         inbound?.fail(e);
         if (!settled) {
           settled = true;
@@ -371,7 +371,7 @@ export function request(port: Port, head: RequestHead, body: ReadableStream<Uint
         if (complete && !finished) port.post({ t: 'end' } satisfies Frame);
       })
       .catch(() => {
-        // The body broke off (the page cancelled an upload): the core sees
+        // The body broke off (the page cancelled an upload): the hub sees
         // the request aborted, not a short body.
         abort();
       });
@@ -464,7 +464,7 @@ export interface ChannelHead {
 }
 
 /** The control frames of a channel; anything else on its port is a
- * message: a string, or bytes. open is the core's word that the channel
+ * message: a string, or bytes. open is the hub's word that the channel
  * is up (protocol: the subprotocol chosen); close ends it (from either
  * side; the other side answers with its own close, then the client closes
  * the port); ack counts what the client took in (strings by their length,
@@ -475,17 +475,17 @@ export type ChannelControl = { t: 'open'; protocol: string } | { t: 'close'; cod
  * than that at its next turn. */
 export const ACK_BYTES = 64 << 10;
 
-/** A close code for a channel the core refused or lost, as a browser
+/** A close code for a channel the hub refused or lost, as a browser
  * reports a failed WebSocket. */
 export const ABNORMAL = 1006;
 
-/** The close code of a channel whose handlers failed in the core. */
+/** The close code of a channel whose handlers failed in the hub. */
 const INTERNAL = 1011;
 /** WebSocket's close code for a message too big to take. */
 export const TOO_BIG = 1009;
 /** The largest message a channel takes from a client, as the command line
  * takes over a WebSocket (Bun.serve's maxPayloadLength, hosts/bun/serve.ts),
- * and the most a client may send before the core takes the channel. */
+ * and the most a client may send before the hub takes the channel. */
 export const MAX_MESSAGE = 64 << 20;
 
 const isControl = (m: unknown): m is ChannelControl =>
@@ -494,14 +494,14 @@ const isControl = (m: unknown): m is ChannelControl =>
 /** The size a message counts for in acks. */
 export const channelSize = (d: string | Uint8Array | ArrayBuffer): number => (typeof d === 'string' ? d.length : d.byteLength);
 
-/** A channel as the core's kernel takes it (kernel/channel.ts Channel). */
+/** A channel as the hub's kernel takes it (kernel/channel.ts Channel). */
 export interface HubChannel {
   send(data: string | Uint8Array): void;
   readonly buffered: number;
   close(code?: number, reason?: string): void;
 }
 
-/** What the core does with a channel (kernel/channel.ts ChannelHandlers). */
+/** What the hub does with a channel (kernel/channel.ts ChannelHandlers). */
 export interface HubChannelHandlers {
   message(data: string | Uint8Array): void;
   close?(code: number, reason: string): void;
@@ -518,7 +518,7 @@ const CLOSE_WAIT_MS = 5000;
 
 /** The utility process's side of a channel on port: the request with the
  * channel's head as handle gets it, with the upgrade that adopts port as
- * the channel. A request the core answers without upgrading is refused:
+ * the channel. A request the hub answers without upgrading is refused:
  * the client sees an abnormal close, with the status and the error code. */
 export async function serveChannel(
   port: Port,
@@ -526,7 +526,7 @@ export async function serveChannel(
   handle: (req: Request, upgrade: Upgrade) => Promise<Response>,
 ): Promise<void> {
   let open: ((ch: HubChannel) => HubChannelHandlers) | undefined;
-  // What the client sends before the core takes the channel, up to
+  // What the client sends before the hub takes the channel, up to
   // MAX_MESSAGE; more ends the channel once it opens.
   const early: unknown[] = [];
   let earlyBytes = 0;
@@ -602,7 +602,7 @@ export async function serveChannel(
     clearTimeout(timer);
     end(ABNORMAL, '');
   };
-  // What the core's handlers throw ends their channel, not the process.
+  // What the hub's handlers throw ends their channel, not the process.
   const safely = (fn: () => void) => {
     try {
       fn();
@@ -635,7 +635,7 @@ export async function serveChannel(
   try {
     handlers = open(ch);
   } catch (e) {
-    // The core could not take the channel (a program it starts failed):
+    // The hub could not take the channel (a program it starts failed):
     // the client sees it end as a server's failure.
     closed = true;
     port.post({ t: 'close', code: INTERNAL, reason: message(e).slice(0, 120) } satisfies ChannelControl);
@@ -648,7 +648,7 @@ export async function serveChannel(
   if (closedEarly) gone();
 }
 
-/** A channel's client in the main process (the shell following its core,
+/** A channel's client in the main process (the shell following its hub,
  * and tests): what the web UI's PortSocket is in a page. */
 export interface ChannelClient {
   send(data: string | Uint8Array): void;
@@ -702,7 +702,7 @@ export function channelClient(
       if (state === 'closed' || state === 'closing') return;
       state = 'closing';
       port.post({ t: 'close', code, reason } satisfies ChannelControl);
-      // The core answers; one that does not is not waited for.
+      // The hub answers; one that does not is not waited for.
       later(() => ended(code, reason), CLOSE_WAIT_MS);
     },
   };

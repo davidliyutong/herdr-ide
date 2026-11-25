@@ -1,7 +1,7 @@
 // Git (docs/features/31-git.md): VS Code's Source Control and the Git
 // Graph extension in one, without VS Code. A panel of the right sidebar
 // for the focused pane's repository, a graph pane and a diff pane in
-// Monaco, and the file explorer's colors for changed files. The core's
+// Monaco, and the file explorer's colors for changed files. The hub's
 // side is backend/features/git, the machine's
 // backend/features/git/machine.ts.
 import { FileDiff, GitBranch, GitGraph } from 'lucide-react';

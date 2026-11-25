@@ -79,7 +79,7 @@ if (platform === 'win32') app.setAppUserModelId(APP_ID);
 app.enableSandbox();
 const devValue = process.env[`${ENV_PREFIX}DESKTOP_DEV`];
 const dev = !app.isPackaged || !!devValue;
-// The core's instance; a name refused is reported once the app is ready.
+// The hub's instance; a name refused is reported once the app is ready.
 let instance: string | DesktopError;
 try {
   instance = hubInstance(dev, devValue);
@@ -97,14 +97,14 @@ if (!app.commandLine.hasSwitch('user-data-dir')) {
 // app's directory when Electron runs it unpackaged.
 const leadingArgs = process.defaultApp ? 2 : 1;
 
-// The core, once the app is ready (hub.ts).
-let core: HubHost | undefined;
+// The hub, once the app is ready (hub.ts).
+let hub: HubHost | undefined;
 let mainWindow: BrowserWindow | undefined;
 // The main window's page asks about unsaved changes before it closes.
 let guard: CloseGuard | undefined;
 // The origin of the app's pages, which only its session serves.
 const origin = APP_ORIGIN;
-// The core served once: windows may open.
+// The hub served once: windows may open.
 let serving = false;
 let quitting = false;
 // Quit was chosen while the main window was open: it closes first.
@@ -113,7 +113,7 @@ let stopped = false;
 let systemShutdown = false;
 let reportingError = false;
 let stopFollowing = () => {};
-// The keybindings of this platform: its defaults until the core's are read.
+// The keybindings of this platform: its defaults until the hub's are read.
 const keys = keyPlatform(platform);
 let bindings = registry.keybindings[keys] as Binding[];
 // appearance.language: "auto" follows the system's languages.
@@ -172,13 +172,13 @@ async function fail(error: unknown) {
   console.error(error);
   // Stop before showing a modal dialog, including after a startup timeout.
   stopFollowing();
-  await core?.stop();
+  await hub?.stop();
   if (quitting) return;
   await dialog.showMessageBox({
     type: 'error',
     title: APP_NAME,
     message: t('desktop.failed'),
-    detail: `${t('desktop.failureHelp')}\n\n${describe(error)}\n${core?.diagnostics ?? ''}`,
+    detail: `${t('desktop.failureHelp')}\n\n${describe(error)}\n${hub?.diagnostics ?? ''}`,
     buttons: [t('desktop.quit')],
   });
   app.quit();
@@ -191,7 +191,7 @@ function openExternal(url: string) {
 // Install on every window, including program windows and standalone VS Code.
 app.on('web-contents-created', (_event, contents) => {
   // A webview attaches only in the main window's own page, and only as the
-  // browser panes' guest, at an address that is not the core's (policy.ts
+  // browser panes' guest, at an address that is not the hub's (policy.ts
   // guestPreferences).
   contents.on('will-attach-webview', (event, prefs, params) => {
     const ok =
@@ -203,7 +203,7 @@ app.on('web-contents-created', (_event, contents) => {
   });
   if (contents.getType() === 'webview') {
     // A guest is a web page of the browser pane: it follows http(s) links
-    // itself, never to the core's own address, and a popup becomes a new
+    // itself, never to the hub's own address, and a popup becomes a new
     // browser tab in the page, a few at a time (policy.ts popupGate). Its
     // scripts never hand anything to the system's browser, and it gets no
     // menu.
@@ -234,7 +234,7 @@ app.on('web-contents-created', (_event, contents) => {
   });
   contents.setWindowOpenHandler(({ url }) => {
     // The app's other windows (program windows, VS Code's own): its
-    // session, and the channels to the core in each frame.
+    // session, and the channels to the hub in each frame.
     if (isInternal(url, origin)) {
       return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: appWindowPreferences(join(__dirname, 'frames.cjs')) } };
     }
@@ -297,7 +297,7 @@ function applyWindowButtons() {
   }
 }
 
-// The core's settings and keybindings: the theme becomes the title bar's and
+// The hub's settings and keybindings: the theme becomes the title bar's and
 // native controls' (also when it differs from the system's appearance), the
 // language the menu's, the zoom the windows'.
 function applySettings(s: ShellSettings) {
@@ -316,7 +316,7 @@ function applyBindings(b: Binding[]) {
   buildMenu();
 }
 
-// Messages count only from the top frame of the main window showing the core.
+// Messages count only from the top frame of the main window showing the hub.
 function fromMainPage(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   const frame = event.senderFrame;
   return (
@@ -416,7 +416,7 @@ ipcMain.handle(channels.metrics, (event) =>
 );
 
 // The system's prompt for the variable vault (verify.ts). The verifier
-// exists once the core runs, with the key of this launch, which only this
+// exists once the hub runs, with the key of this launch, which only this
 // process holds.
 let verify: Verifier | undefined;
 ipcMain.handle(channels.verifyAvailable, async (event) => (fromMainPage(event) && verify ? await verify.available() : null));
@@ -433,24 +433,24 @@ const runPowerShell: RunPowerShell = (script, env) =>
     maxOutput: 64 * 1024,
   });
 
-/** What the core says a nonce of the vault's proofs is for: asked of the
- * core directly, as the desktop client. */
+/** What the hub says a nonce of the vault's proofs is for: asked of the
+ * hub directly, as the desktop client. */
 async function proofPurpose(nonce: string): Promise<unknown> {
-  if (!core) return undefined;
-  const res = await core.fetch(`/api/p/vault/proof/${encodeURIComponent(nonce)}`, { signal: AbortSignal.timeout(5000) });
+  if (!hub) return undefined;
+  const res = await hub.fetch(`/api/p/vault/proof/${encodeURIComponent(nonce)}`, { signal: AbortSignal.timeout(5000) });
   return res.ok ? await res.json() : undefined;
 }
 
-// A channel to the core for a frame of the app's origin (frames.ts): the
+// A channel to the hub for a frame of the app's origin (frames.ts): the
 // main process checks the frame and builds the request from what it knows
-// of it, hands one end to the core and the other to the frame. A request
+// of it, hands one end to the hub and the other to the frame. A request
 // it refuses gets a channel that is closed at once.
 ipcMain.on(channels.openChannel, (event, id: unknown, path: unknown, protocols: unknown) => {
   const frame = event.senderFrame;
   if (!frame || !isChannelId(id)) return;
   const head = channelHead(frame.origin, path, protocols);
   const { port1, port2 } = new MessageChannelMain();
-  if (head && core) void core.connect(head, port1);
+  if (head && hub) void hub.connect(head, port1);
   else electronPort(port1).post({ t: 'close', code: ABNORMAL, reason: 'refused' } satisfies ChannelControl);
   frame.postMessage(channels.channelPort, id, [port2]);
 });
@@ -570,7 +570,7 @@ function createWindow() {
 
 app.on('before-quit', (event) => {
   // The main window closes first, so a page with unsaved changes can keep
-  // the app (will-prevent-unload) before the core stops; quitting goes on
+  // the app (will-prevent-unload) before the hub stops; quitting goes on
   // once it has closed.
   if (!stopped && !systemShutdown && mainWindow && !mainWindow.isDestroyed()) {
     event.preventDefault();
@@ -583,13 +583,13 @@ app.on('before-quit', (event) => {
   notifications.closeAll();
   if (stopped) return;
   if (systemShutdown) {
-    // Delaying a logout, restart or shutdown would cancel it. Stop the core
+    // Delaying a logout, restart or shutdown would cancel it. Stop the hub
     // and let it clean up on its own.
-    void core?.stop();
+    void hub?.stop();
     return;
   }
   event.preventDefault();
-  void (core?.stop() ?? Promise.resolve()).then(() => {
+  void (hub?.stop() ?? Promise.resolve()).then(() => {
     stopped = true;
     app.quit();
   });
@@ -661,7 +661,7 @@ if (!app.requestSingleInstanceLock()) {
       // Windows and Linux show these in About (macOS reads its bundle).
       app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: app.getVersion() });
       buildMenu();
-      // The key of the system's prompts: to the core in its start
+      // The key of the system's prompts: to the hub in its start
       // message, and to nothing else.
       const key = verifyKey();
       const home = app.getPath('home');
@@ -703,9 +703,9 @@ if (!app.requestSingleInstanceLock()) {
         lost: (error) => void fail(error),
         log: (text) => process.stderr.write(text),
       });
-      core = host;
+      hub = host;
       // The app's windows live in a session of their own, where the app's
-      // origin is the core's: the handler is there before a page loads.
+      // origin is the hub's: the handler is there before a page loads.
       const ses = session.fromPartition(APP_PARTITION);
       serveApp(ses, host);
       await host.start();
@@ -734,7 +734,7 @@ if (!app.requestSingleInstanceLock()) {
         return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
       });
       // The browser panes' guests live in their own partition, so they share
-      // nothing with the app, and the app's origin is not the core's there.
+      // nothing with the app, and the app's origin is not the hub's there.
       // A guest gets no permission but full screen; downloads keep
       // Electron's save dialog (no will-download handler saves by itself).
       const guests = session.fromPartition(BROWSER_PARTITION);

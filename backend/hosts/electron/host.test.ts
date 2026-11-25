@@ -1,7 +1,7 @@
-// The desktop app's host of the core: the utility process's side of the
-// bridge with a real core (requests and channels through MessagePorts, as
-// the main process hands them over), what the core makes of the app's
-// requests (the desktop client, on the core's host, from the app's
+// The desktop app's host of the hub: the utility process's side of the
+// bridge with a real hub (requests and channels through MessagePorts, as
+// the main process hands them over), what the hub makes of the app's
+// requests (the desktop client, on the hub's host, from the app's
 // origin), and what it checks of its start.
 import { describe, expect, test } from 'bun:test';
 import { MessageChannel, type MessagePort } from 'node:worker_threads';
@@ -17,7 +17,7 @@ import { startProblem } from './start.ts';
 
 const ORIGIN = `https://${SLUG}.localhost`;
 
-/** A feature with what the tests ask of the core. */
+/** A feature with what the tests ask of the hub. */
 const probe = defineFeature({
   id: 'probe',
   toggle: false,
@@ -135,7 +135,7 @@ function utility() {
 const sameOrigin = { 'sec-fetch-site': 'same-origin' };
 
 describe('requests of the app', () => {
-  test('are the desktop client, on the core host, of a trusted origin', async () => {
+  test('are the desktop client, on the hub host, of a trusted origin', async () => {
     const u = utility();
     u.start();
     expect(u.replies).toEqual([{ t: 'ready' }]);
@@ -179,7 +179,7 @@ describe('requests of the app', () => {
     expect(failed).toBe('the machine is gone');
   });
 
-  test('a request the client gives up aborts in the core', async () => {
+  test('a request the client gives up aborts in the hub', async () => {
     const u = utility();
     u.start();
     held.aborted = false;
@@ -188,16 +188,16 @@ describe('requests of the app', () => {
     await Bun.sleep(20);
     give.abort();
     await expect(res).rejects.toThrow('aborted');
-    await waitFor('the core to see the abort', () => held.aborted);
+    await waitFor('the hub to see the abort', () => held.aborted);
   });
 
-  test('before the core started: 503', async () => {
+  test('before the hub started: 503', async () => {
     const u = utility();
     const res = await u.fetch('/api/p/probe/who');
     expect(res.status).toBe(503);
   });
 
-  test('stop ends the core, then the process', async () => {
+  test('stop ends the hub, then the process', async () => {
     const u = utility();
     u.start();
     u.stop();
@@ -225,7 +225,7 @@ describe('channels of the app', () => {
     expect(c.got[2]).toBe('0');
   });
 
-  test("the core's close reaches the client with its code; the client's reaches the core", async () => {
+  test("the hub's close reaches the client with its code; the client's reaches the hub", async () => {
     const u = utility();
     u.start();
     closed.length = 0;
@@ -237,11 +237,11 @@ describe('channels of the app', () => {
     const b = u.channel('/api/p/probe/ch');
     await waitFor('open', b.opened);
     b.client.close(1000, 'bye');
-    await waitFor('the core to see it', () => closed.some(([code, reason]) => code === 1000 && reason === 'bye'));
+    await waitFor('the hub to see it', () => closed.some(([code, reason]) => code === 1000 && reason === 'bye'));
     await waitFor('the answer', () => b.ends.length === 1);
   });
 
-  test('a channel the core refuses closes abnormally with its status and code', async () => {
+  test('a channel the hub refuses closes abnormally with its status and code', async () => {
     const u = utility();
     u.start();
     const c = u.channel('/api/p/probe/ch', 'https://evil.example');

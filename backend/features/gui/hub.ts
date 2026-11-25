@@ -1,5 +1,5 @@
 // Program windows (docs/features/14-gui-windows.md): windows of programs
-// on remote Linux machines in browser windows. The core prepares each
+// on remote Linux machines in browser windows. The hub prepares each
 // machine's virtual display through its agent and attaches to its window
 // manager (manager.ts), routes windows, frames and input between the agent
 // and the browser windows showing them (router.ts, routes.ts), tells every
@@ -41,7 +41,7 @@ export interface GUIFeature extends FeatureDef {
   /** Follows whether m's terminal core is ready (the terminals feature's
    * onReady): the machine keeps its display while the terminal core runs. */
   terminalReady(m: Machine, ready: boolean): void;
-  /** The manager, once the core set the feature up (tests). */
+  /** The manager, once the hub set the feature up (tests). */
   manager(): Manager | undefined;
 }
 

@@ -29,7 +29,7 @@ import { setPluginSwitch, usePluginOn } from '../plugins/registry';
 type Machines = ReturnType<typeof useStore.getState>['machines'];
 let usableOf: { machines?: Machines; list: string } = { list: '' };
 
-/** The ids of the machines that can have VS Code (the core lists them and
+/** The ids of the machines that can have VS Code (the hub lists them and
  * they are not disabled), one per line: worked out again only when the
  * machines change, not on every change of the store. */
 function usableMachines(s: { machines: Machines }): string {

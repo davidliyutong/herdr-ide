@@ -1,8 +1,8 @@
-// The desktop app with its core in its utility process (harness/desktop.ts):
-// the UI loads from the app's origin with nothing of the core listening on
+// The desktop app with its hub in its utility process (harness/desktop.ts):
+// the UI loads from the app's origin with nothing of the hub listening on
 // TCP, the local machine gets ready, a terminal runs a command, a file
-// downloads, an ssh login runs in a terminal of the core's host
-// (node-pty), the core comes back after a crash with the window kept, and
+// downloads, an ssh login runs in a terminal of the hub's host
+// (node-pty), the hub comes back after a crash with the window kept, and
 // a VS Code window loads when a code-server release is at hand
 // (E2E_CODE_SERVER_SEED: a directory with
 // code-server-<version>-<os>-<arch>.tar.gz). Skips without the desktop
@@ -24,7 +24,7 @@ const seed = process.env.E2E_CODE_SERVER_SEED;
 // VS Code (off by default) is on when it can be installed.
 test.use({ desktopOptions: { settings: seed ? { 'plugins.vscode.enabled': true } : {}, codeServerSeed: seed } });
 
-test('the desktop app runs its core in process, without a listener', async ({ desktop }) => {
+test('the desktop app runs its hub in process, without a listener', async ({ desktop }) => {
   test.setTimeout(seed ? 300_000 : 180_000);
   const { win, home } = desktop;
   expect(
@@ -36,11 +36,11 @@ test('the desktop app runs its core in process, without a listener', async ({ de
     })),
   ).toEqual({ origin: ORIGIN, secure: true, shell: true, channels: true });
 
-  // Nothing of the core listens on TCP; nor any of the app's processes
+  // Nothing of the hub listens on TCP; nor any of the app's processes
   // but the main one, where only the debugging ports Playwright drives it
   // through are (loopback).
-  const core = await desktop.hubPid();
-  expect(tcpListeners(core)).toEqual([]);
+  const hub = await desktop.hubPid();
+  expect(tcpListeners(hub)).toEqual([]);
   for (const p of await desktop.processes()) {
     const lines = tcpListeners(p.pid);
     test.info().annotations.push({
@@ -57,7 +57,7 @@ test('the desktop app runs its core in process, without a listener', async ({ de
 
   // A page of another origin in the app's session (a data: URL, whose
   // origin is opaque, as a sandboxed frame's is; a site's in a VS Code
-  // window is another): the core sees who asked and refuses it, a write as
+  // window is another): the hub sees who asked and refuses it, a write as
   // a read, though a handler's answers are readable to any page.
   const secret = join(home.work, 'secret.txt');
   writeFileSync(secret, 'not for other origins\n');
@@ -98,7 +98,7 @@ test('the desktop app runs its core in process, without a listener', async ({ de
   await win.keyboard.press('Enter');
   await waitFor(() => existsSync(out) && readFileSync(out, 'utf8').trim() === 'desktop-42', { what: 'the command to run' });
 
-  // An ssh login runs in a terminal of the core's host (node-pty in the
+  // An ssh login runs in a terminal of the hub's host (node-pty in the
   // utility process): one to a port that refuses shows ssh's answer.
   const added = await desktop.api<{ id: string }>('POST', '/api/machines', { target: 'ssh://nobody@127.0.0.1:9', label: 'refusing' });
   expect(await desktop.channelText(`/api/m/${encodeURIComponent(added.id)}/auth?cols=80&rows=24`)).toMatch(/refused/i);
@@ -108,7 +108,7 @@ test('the desktop app runs its core in process, without a listener', async ({ de
   mkdirSync(saved);
   await desktop.saveDownloadsTo(saved);
   const file = join(home.work, 'report.txt');
-  writeFileSync(file, 'downloaded through the core\n'.repeat(1000));
+  writeFileSync(file, 'downloaded through the hub\n'.repeat(1000));
   await win.evaluate(
     (url) => {
       const a = document.createElement('a');
@@ -124,9 +124,9 @@ test('the desktop app runs its core in process, without a listener', async ({ de
     { what: 'the download' },
   );
 
-  // The core crashes: it comes back, the window stays and reconnects.
-  process.kill(core, 'SIGKILL');
-  const again = await desktop.hubPid(core);
+  // The hub crashes: it comes back, the window stays and reconnects.
+  process.kill(hub, 'SIGKILL');
+  const again = await desktop.hubPid(hub);
   expect(tcpListeners(again)).toEqual([]);
   await waitFor(async () => (await desktop.localStatus()) === 'ready', { what: 'the local machine again', timeout: 60_000 });
   // The page's terminal channel came back: the same terminal runs another.
@@ -162,12 +162,12 @@ test('the desktop app runs its core in process, without a listener', async ({ de
   expect(await code.evaluate(() => typeof (window as { desktopShell?: unknown }).desktopShell)).toBe('undefined');
 });
 
-// Behind the user's proxy (HTTPS_PROXY, HTTP_PROXY): the core's own
+// Behind the user's proxy (HTTPS_PROXY, HTTP_PROXY): the hub's own
 // downloads go through it (code-server's, from its release), and nothing it
 // starts gets a switch that sends all of a program's requests, loopback's
 // too, to the proxy (NODE_USE_ENV_PROXY): the local machine's terminals
 // get the user's settings as they are.
-test("behind a proxy, the core downloads through it and its programs get only the user's settings", async ({}, info) => {
+test("behind a proxy, the hub downloads through it and its programs get only the user's settings", async ({}, info) => {
   test.setTimeout(180_000);
   const why = desktopUnavailable();
   info.skip(!!why, why);
@@ -198,11 +198,11 @@ test("behind a proxy, the core downloads through it and its programs get only th
     const env = readFileSync(out, 'utf8');
     expect(env).toContain(`HTTPS_PROXY=${url}`);
     expect(env).not.toContain('NODE_USE_ENV_PROXY');
-    // code-server is not at hand: the core downloads it, through the proxy.
+    // code-server is not at hand: the hub downloads it, through the proxy.
     const started = await desktop.api('POST', '/api/m/local/code/start').catch((e: Error) => e.message);
     try {
       await waitFor(() => seen.some((s) => /^CONNECT [^ ]+:443$/.test(s)), {
-        what: "the core's download through the proxy",
+        what: "the hub's download through the proxy",
         timeout: 60_000,
       });
     } catch (e) {

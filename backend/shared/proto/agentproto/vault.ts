@@ -1,6 +1,6 @@
 // The variable vault's requests (Op.Vault): an MCP server on a machine asks
-// the core for variables through the agent, which only relays the stream.
-// The core decides from the machine the stream came from, never from what
+// the hub for variables through the agent, which only relays the stream.
+// The hub decides from the machine the stream came from, never from what
 // the request says about itself.
 
 /** Vault tools (VaultRequest.tool). */

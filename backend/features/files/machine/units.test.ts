@@ -43,7 +43,7 @@ describe('removal', () => {
     expect(existsSync(outside)).toBe(true);
   });
 
-  test('a removal or a copy the core gave up on stops before the next entry or chunk', async () => {
+  test('a removal or a copy the hub gave up on stops before the next entry or chunk', async () => {
     const root = fresh();
     const tree = join(root, 'tree');
     mkdirSync(join(tree, 'sub'), { recursive: true });

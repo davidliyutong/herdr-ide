@@ -1,4 +1,4 @@
-// The one way a request fails: throw a Fail. The core's router answers it
+// The one way a request fails: throw a Fail. The hub's router answers it
 // as {error: code, message} with its status and audits the code; a
 // machine's agent answers it as a refused reply with the code
 // ({ok: false, code, error}). Handlers do not write error responses

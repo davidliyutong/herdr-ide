@@ -1,6 +1,6 @@
 // Checks that docs/reference.md documents every flag of the command line
 // (serve's, the settings' flags among them, and fetch-assets') and every
-// HTTP route of the core, composed as `serve` composes it
+// HTTP route of the hub, composed as `serve` composes it
 // (hosts/common/compose.ts) with placeholder inputs; run by scripts/check.sh.
 //
 //   bun scripts/reference.ts            fails, listing what is missing
@@ -24,7 +24,7 @@ import { OPTIONS } from '#hosts/bun/serve.ts';
 const features = describedFeatures();
 const modules = hubModules(features);
 const settings = new Settings('', { modules });
-const core = createHub({
+const hub = createHub({
   guard: new Guard({ allowedOrigins: [], proxySecret: '', logger: discard }),
   audit: noAudit,
   readOnly: false,
@@ -38,7 +38,7 @@ const core = createHub({
   settings,
   features,
 });
-hostRoutes(core, { settings, keybindings: new Keybindings(''), readOnly: false, sshLogin: true, web: null })();
+hostRoutes(hub, { settings, keybindings: new Keybindings(''), readOnly: false, sshLogin: true, web: null })();
 
 const flags = [...new Set([...Object.keys(OPTIONS), ...settingFlags(modules).map((f) => f.name), ...Object.keys(FETCH_ASSETS_OPTIONS)])]
   .filter((f) => f !== 'help')
@@ -49,7 +49,7 @@ const flags = [...new Set([...Object.keys(OPTIONS), ...settingFlags(modules).map
 // every request) as its prefix with a trailing slash and no method.
 const routes = [
   ...new Set(
-    core.http.app.routes.map(({ method, path }) => {
+    hub.http.app.routes.map(({ method, path }) => {
       const doc = path.replace(/:([A-Za-z_]+)/g, '{$1}');
       if (doc.endsWith('/*')) return doc.slice(0, -1);
       return method === 'ALL' ? doc : `${method} ${doc}`;

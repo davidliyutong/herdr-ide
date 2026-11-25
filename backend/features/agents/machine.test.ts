@@ -1,4 +1,4 @@
-// The agents feature's machine side through the wire, as the core drives
+// The agents feature's machine side through the wire, as the hub drives
 // it: resolve with the kernel's call (the protocol's schemas check the
 // answers), and op detect over a fake terminal core (testdata/fakecore.ts).
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -187,9 +187,9 @@ describe('op detect', () => {
   });
 
   // Events follow the terminal core's notifications in order; the stream
-  // ends, and with it the connection to the terminal core, when the core
+  // ends, and with it the connection to the terminal core, when the hub
   // closes it.
-  test('follows the terminal core until the core closes the stream', async () => {
+  test('follows the terminal core until the hub closes the stream', async () => {
     const { r, core } = await setup();
     core.terminals = [claudeTerm('t1', 1) as never];
     const { conn, next } = await open(r, false);

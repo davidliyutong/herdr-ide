@@ -1,9 +1,9 @@
-// Video encoding of program windows (the Go agent's guivideo.go). The core
+// Video encoding of program windows (the Go agent's guivideo.go). The hub
 // brings an encoder built on ffmpeg (scripts/build-ffmpeg.sh,
 // scripts/encoder) and pushes it to ~/<data>/video/<digest prefix>/encoder,
 // shared by instances; the machine runs it only when its SHA-256 is the
-// digest the core sent. A machine build that carries its own encoder puts
-// that one there when the core has none for the machine. Builds not used
+// digest the hub sent. A machine build that carries its own encoder puts
+// that one there when the hub has none for the machine. Builds not used
 // for VERSION_RETENTION_MS are removed. Without one, or when it cannot
 // encode, windows are sent as pictures. The GUI helper runs the encoders
 // of windows; the node only probes once which kinds work.

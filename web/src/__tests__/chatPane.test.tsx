@@ -28,7 +28,7 @@ import { useDialog } from '../dialog';
 import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { FakeChatHub } from './chatFake';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,7 +60,7 @@ const view = (chat: string, extra: Record<string, unknown> = {}): L.PluginView =
 });
 
 let chats: FakeChatHub;
-let core: FakeCore;
+let hub: FakeHub;
 let host: HTMLDivElement;
 let root: Root;
 let calls: Array<{ url: string; method: string }>;
@@ -85,8 +85,8 @@ beforeEach(async () => {
   chats = new FakeChatHub();
   chats.auto = true;
   chats.install();
-  core = new FakeCore();
-  core.machine('m', [FakeCore.term('p1')], {
+  hub = new FakeHub();
+  hub.machine('m', [FakeHub.term('p1')], {
     version: 2,
     workspaces: [
       {
@@ -102,12 +102,12 @@ beforeEach(async () => {
     ],
     selected: 0,
   });
-  core.install();
+  hub.install();
   const s = useStore.getState();
   s.setReadOnly(false);
   s.setMachines([{ id: 'm', label: 'box', kind: 'ssh', status: 'ready', info: { home: '/home/u' } } as unknown as MachineState]);
   s.selectMachine('m');
-  core.model.subscribe('m');
+  hub.model.subscribe('m');
   await settle();
   host = document.createElement('div');
   document.body.append(host);
@@ -179,7 +179,7 @@ describe('the chat pane', () => {
     chats.chat(B, { kind: 'claude', title: 'Named', state: 'idle' });
     await pane(view(B));
     await tick();
-    const leaf = () => core.layout('m')!.workspaces[0].tabs[1].root as L.PluginLeaf;
+    const leaf = () => hub.layout('m')!.workspaces[0].tabs[1].root as L.PluginLeaf;
     expect(leaf().view.title).toBe('Named');
     expect(chatPlugin.paneViews!.chat.title('m', leaf().view)).toBe('Named');
     expect(chatPlugin.paneViews!.chat.title('m', { ...view(A), title: 'Kept' })).toBe('Kept');
@@ -312,7 +312,7 @@ describe('the Chats panel', () => {
     const row = (title: string) => qa('.chat-row-main').find((e) => e.textContent?.includes(title))!;
     await act(async () => row('in a pane').click());
     await tick();
-    const ws = () => core.layout('m')!.workspaces[0];
+    const ws = () => hub.layout('m')!.workspaces[0];
     expect(ws().selected).toBe(1);
     expect(ws().tabs).toHaveLength(2);
     await act(async () => row('no pane').click());
@@ -441,7 +441,7 @@ describe('the status bar’s chat usage', () => {
     expect(host.textContent).toBe('');
     useChats.setState({ live: { [liveKey('m', B)]: { link: 'attached', usage } } });
     // The chat's tab is shown and its pane focused.
-    await act(async () => core.model.mutate('m', (l) => L.selectTab(l, 'w1w1w1w1', 1)));
+    await act(async () => hub.model.mutate('m', (l) => L.selectTab(l, 'w1w1w1w1', 1)));
     await tick();
     const item = q('.chat-usage-item')!;
     expect(Array.from(item.querySelectorAll('.chat-usage-part')).map((e) => e.textContent)).toEqual([
@@ -451,7 +451,7 @@ describe('the status bar’s chat usage', () => {
     ]);
     expect(item.className).toContain('warn');
     // Another pane focused: nothing.
-    await act(async () => core.model.mutate('m', (l) => L.selectTab(l, 'w1w1w1w1', 0)));
+    await act(async () => hub.model.mutate('m', (l) => L.selectTab(l, 'w1w1w1w1', 0)));
     await tick();
     expect(q('.chat-usage-item')).toBeNull();
   });

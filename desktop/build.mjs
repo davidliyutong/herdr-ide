@@ -29,7 +29,7 @@ await build({
 
 // Sandboxed preloads may require only a few electron modules, so bundle
 // them: the main window's, and the app's other windows' (their frames'
-// channels to the core only).
+// channels to the hub only).
 for (const [entry, out] of [
   ['src/preload.ts', 'dist/preload.cjs'],
   ['src/framePreload.ts', 'dist/frames.cjs'],
@@ -44,12 +44,12 @@ for (const [entry, out] of [
   });
 }
 
-// The core, for the app's utility process (backend/hosts/electron), with
+// The hub, for the app's utility process (backend/hosts/electron), with
 // the backend's packages bundled (pnpm -C backend install first); node-pty,
 // a native module, stays a package of the app, loaded when an ssh login
 // needs it. ws's optional native helpers (bufferutil, utf-8-validate) are
 // not shipped: they are bundled as modules that fail to load, which ws
-// takes as their absence, so the core never looks for a module the app
+// takes as their absence, so the hub never looks for a module the app
 // does not carry (a search that leaves the app's directory would find one
 // anyone could put there). Nothing but Node's own modules and node-pty is
 // loaded at run time: checked below.

@@ -1,5 +1,5 @@
 // Drives program windows of the TypeScript machine side on a machine of the
-// matrix as a core does over ssh: `node dial` of the machine executable
+// matrix as a hub does over ssh: `node dial` of the machine executable
 // (MACHINE_EXE), a yamux session over its standard input and output, the
 // agent protocol's op gui on it. It checks that the display starts (the
 // machine's Xvfb), that a program's window (XCLIENT, e2e/xclient) is
@@ -255,7 +255,7 @@ else if (st.gpu_display) console.log('INFO the GPU display not tried (GUI_MATRIX
 else console.log(`INFO no GPU display here (Xwayland ${existsSync('/usr/bin/Xwayland')}, render nodes ${render})`);
 
 // Video: the encoder (ENCODER, scripts/build-ffmpeg.sh's encoder.gz) put on
-// the machine as the core pushes it, the kinds it makes here, and a window
+// the machine as the hub pushes it, the kinds it makes here, and a window
 // that keeps changing sent as a video stream.
 async function video(): Promise<void> {
   const gz = readFileSync(process.env.ENCODER!);
@@ -344,7 +344,7 @@ await step('gpupick', async () => {
     `the GPU selection library installed: ${st.pick} (${mode.toString(8)}); GPUs ${JSON.stringify(st.gpus ?? [])}`,
   );
   // With several NVIDIA GPUs: a program of a pane with gpupick's
-  // environment (as the core gives it) and CUDA_VISIBLE_DEVICES sees only
+  // environment (as the hub gives it) and CUDA_VISIBLE_DEVICES sees only
   // that GPU: its device node opens, the others' do not, and NVML lists it
   // alone.
   const env = pickEnv(true, st);

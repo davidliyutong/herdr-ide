@@ -4,7 +4,7 @@
 // its menu's Change) records keys that replace its own; + records one more;
 // × removes a key; reset returns to the defaults. The search matches
 // commands, ids and key names, or the keys pressed while "record keys" is on.
-// Changes replace the user's rules (PUT /api/keybindings), which the core
+// Changes replace the user's rules (PUT /api/keybindings), which the hub
 // turns into the bindings of every platform. Only the rows in view of the
 // settings' scrolling page are drawn (useTableWindow).
 
@@ -39,7 +39,7 @@ export function recordError(seq: string): string | undefined {
   }
 }
 
-/** The other commands a key also runs, by the conflicts the core found. */
+/** The other commands a key also runs, by the conflicts the hub found. */
 export function conflictsOf(conflicts: Conflict[], command: string, key: string): string[] {
   const out = new Set<string>();
   for (const c of conflicts) {

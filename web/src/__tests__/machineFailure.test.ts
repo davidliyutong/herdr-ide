@@ -1,5 +1,5 @@
 // The deployment failures a machine's state carries (MachineState.failure,
-// the core's transport/errors.ts DeployCode) are explained in every
+// the hub's transport/errors.ts DeployCode) are explained in every
 // locale; a code the UI does not know shows as it is.
 import { beforeAll, describe, expect, test } from 'vitest';
 import { setLocale } from '../i18n';

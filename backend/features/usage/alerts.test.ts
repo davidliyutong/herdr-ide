@@ -1,5 +1,5 @@
-// The alerts the core fires: at most once per period of a window and
-// threshold, whatever the numbers do between polls (the Go core's
+// The alerts the hub fires: at most once per period of a window and
+// threshold, whatever the numbers do between polls (the Go hub's
 // alerts_test.go). The first tests are the ways alerts fired again and
 // again when pages decided them: use jittering around a threshold, a reset
 // time that moves, a pace alert whose reset is a second off, a "started

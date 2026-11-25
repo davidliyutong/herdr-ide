@@ -33,7 +33,7 @@ export interface Timing {
   /** A browser window whose connection takes nothing this long is
    * disconnected. */
   viewerWriteMs: number;
-  /** How long an attach stream the core ended may take to end on the
+  /** How long an attach stream the hub ended may take to end on the
    * agent's side too before it is reset. */
   detachMs: number;
 }
@@ -64,7 +64,7 @@ export interface Limits {
   /** A viewer with this many frames, or bytes, not shown skips frames. */
   viewerMaxFrames: number;
   viewerMaxBytes: number;
-  /** Bytes a browser window's channel may hold unsent before the core
+  /** Bytes a browser window's channel may hold unsent before the hub
    * keeps its messages in its own queue. */
   viewerBuffered: number;
   /** The largest message a browser window may send. */

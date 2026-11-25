@@ -1,4 +1,4 @@
-// What the core carries for others (payloads.ts): the video encoder's
+// What the hub carries for others (payloads.ts): the video encoder's
 // digest is the SHA-256 of the uncompressed executable, which the machine's
 // install checks; the machine builds come from the release the build
 // records.
@@ -76,7 +76,7 @@ test('files of a directory, and layered sources', async () => {
   expect(await l.get('b')).toBeNull();
 });
 
-// The core is the machine build too: it
+// The hub is the machine build too: it
 // records its version, platform and release, and the herdr-core digests of
 // its release; a machine's build comes from the release (release.ts), the
 // desktop app's own platform's from its resources.

@@ -11,7 +11,7 @@ import type { PluginHandler } from './testdata/agent.ts';
 import { filesHub, type FilesHub } from './testdata/hub.ts';
 
 const ON = { 'plugins.files.enabled': true };
-const core = (o: { readOnly?: boolean; platform?: string } = {}) =>
+const hub = (o: { readOnly?: boolean; platform?: string } = {}) =>
   testHub({
     features: [fileTransfersFeature(), filesFeature({ platform: o.platform ?? 'linux' })],
     machines: testMachines([localSpec('here', false), sshSpec('far', 'far', 'far', false)]),
@@ -22,7 +22,7 @@ const core = (o: { readOnly?: boolean; platform?: string } = {}) =>
 // Everything but the stat (a POST for the length of its paths) changes
 // files or runs a program: refused to other sites and in read-only mode.
 test('the routes that change things are guarded', async () => {
-  const { problems, checked } = await checkGuarded(core(), core({ readOnly: true }), {
+  const { problems, checked } = await checkGuarded(hub(), hub({ readOnly: true }), {
     machine: 'local',
     readOnlyAllowed: ['POST /api/m/:id/p/files/stat'],
   });
@@ -32,7 +32,7 @@ test('the routes that change things are guarded', async () => {
 });
 
 test('switched off, the explorer answers plugin_disabled; the transfers stay', async () => {
-  const tc = core();
+  const tc = hub();
   tc.settings['plugins.files.enabled'] = false;
   let res = await tc.request('POST', '/api/m/local/p/files/stat', { body: '{"paths":["/"]}' });
   expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([404, 'plugin_disabled']);
@@ -41,10 +41,10 @@ test('switched off, the explorer answers plugin_disabled; the transfers stay', a
   expect(await res.json()).toEqual({ error: 'machine not connected', message: 'machine not connected' });
 });
 
-// Reveal in Finder only for the core's own machine and a client on the
-// core's host: anything else is refused before the machine is asked.
+// Reveal in Finder only for the hub's own machine and a client on the
+// hub's host: anything else is refused before the machine is asked.
 test('reveal gate', async () => {
-  const run = async (tc: ReturnType<typeof core>, m: string, remote: string) => {
+  const run = async (tc: ReturnType<typeof hub>, m: string, remote: string) => {
     const res = await tc.request('POST', `/api/m/${m}/p/files/reveal`, { body: '{"path":"/tmp"}', remote });
     const body = (await res.json()) as { error: string };
     const avail = (await (await tc.request('GET', `/api/m/${m}/p/files/reveal`, { remote })).json()) as { available: boolean };
@@ -52,17 +52,17 @@ test('reveal gate', async () => {
     expect([rec.event, rec.path, rec.plugin, rec.error]).toEqual(['files.reveal', '/tmp', 'files', body.error]);
     return [res.status, body.error, avail.available];
   };
-  const tc = core();
+  const tc = hub();
   expect(await run(tc, 'far', '127.0.0.1')).toEqual([400, 'remote_machine', false]);
   expect(await run(tc, 'local', '10.0.0.5')).toEqual([403, 'local_only', false]);
   // Past the gate, the local machine's agent is asked (here not connected).
   expect(await run(tc, 'local', '127.0.0.1')).toEqual([409, 'offline', true]);
-  expect(await run(core({ platform: 'win32' }), 'local', '127.0.0.1')).toEqual([400, 'reveal_unavailable', false]);
+  expect(await run(hub({ platform: 'win32' }), 'local', '127.0.0.1')).toEqual([400, 'reveal_unavailable', false]);
 });
 
 // The stat's paths are a JSON body: 1 to MAX_STAT of them.
 test('stat params', async () => {
-  const tc = core();
+  const tc = hub();
   for (const body of [
     '',
     '{}',

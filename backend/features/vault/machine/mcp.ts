@@ -1,9 +1,9 @@
 // The variable vault's MCP server: the mcp command of the machine side
 // (hosts/machine/cli.ts), which a coding agent's CLI (Claude Code, Codex…)
 // starts on a machine and speaks to over stdio (JSON-RPC 2.0, one message
-// per line). It asks the core for variables through the agent's
-// <run>/vault.sock, which relays each connection to the core (op vault,
-// #machine/vault.ts); the core decides what the machine may read
+// per line). It asks the hub for variables through the agent's
+// <run>/vault.sock, which relays each connection to the hub (op vault,
+// #machine/vault.ts); the hub decides what the machine may read
 // (docs/features/30-variable-vault.md). The Go build of earlier releases
 // answered the same.
 //
@@ -11,7 +11,7 @@
 // (@modelcontextprotocol/server): its stdio transport, the handshake and
 // its version negotiation, ping, "method not found" for what is not served,
 // and the client's notifications/cancelled, which aborts the call (its
-// request to the core is closed, which the core takes as a denial; its
+// request to the hub is closed, which the hub takes as a denial; its
 // command is killed) and leaves it unanswered. The tools are the low-level
 // Server's handlers, so that their definitions and refusals are the Go
 // server's to the byte: a call with arguments a tool does not take is
@@ -30,7 +30,7 @@ import { runWithEnv, withHub, type RunLimits } from './run.ts';
 export const SERVER_NAME = `${SLUG}-vault`;
 /** The longest line taken from the client. */
 export const MAX_LINE = 4 << 20;
-/** Bounds the core's answer (values of up to 64 variables). */
+/** Bounds the hub's answer (values of up to 64 variables). */
 const MAX_RESPONSE = 32 << 20;
 
 const INSTRUCTIONS =
@@ -84,7 +84,7 @@ export interface McpOptions {
   terminal?: string;
   /** The working directory a request names when the call names none. */
   cwd?: () => string;
-  /** run_with_env's bounds before the core's (tests). */
+  /** run_with_env's bounds before the hub's (tests). */
   limits?: RunLimits;
   /** How long a command's output may stay open after its shell exited. */
   waitDelayMs?: number;
@@ -113,7 +113,7 @@ export function dialSocket(path: string): (signal: AbortSignal) => Promise<Socke
 
 class Refused extends Error {}
 
-/** Sends one request to the core through the agent's socket. A refusal or
+/** Sends one request to the hub through the agent's socket. A refusal or
  * an agent that does not answer is an error whose text the model reads. */
 export async function ask(o: McpOptions, req: VaultRequest, signal: AbortSignal): Promise<VaultResponse> {
   req = { ...req, client: o.client ?? '', terminal: o.terminal ?? '' };

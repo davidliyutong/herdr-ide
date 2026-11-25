@@ -43,9 +43,9 @@ describe('run_with_env', () => {
     expect(ran.out).toBe('exit status: 0\none\ntwo\nthree\n');
   });
 
-  // TestRunLimitsFromTheHub (the runner's side): the core's timeouts, in
+  // TestRunLimitsFromTheHub (the runner's side): the hub's timeouts, in
   // seconds, become the runner's; without them the runner's own hold.
-  test("the core's limits replace the runner's", () => {
+  test("the hub's limits replace the runner's", () => {
     expect(withHub({}, { timeout: 1, max_timeout: 2, max_output: 50 })).toEqual({
       maxOutput: 50,
       defaultTimeoutMs: 1000,

@@ -14,7 +14,7 @@ import { otherMachine, isObject, type Rec } from './records.ts';
 
 /** The label that keeps which turn of a terminal's program a client saw
  * end: the record's turn, when the program reports its own status (OSC
- * 7501) and still says done. That report outlives the core: after the core
+ * 7501) and still says done. That report outlives the hub: after the hub
  * or the agent starts again, a new detection reads it as a turn that just
  * ended, and the label tells that it was seen. */
 export const SEEN_LABEL = 'seen';

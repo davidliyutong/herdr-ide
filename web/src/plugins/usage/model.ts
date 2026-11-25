@@ -1,6 +1,6 @@
 // The AI usage plugin's data (backend/features/usage) and what the panel and
 // the status bar compute from it: the tightest window, durations, the text
-// of the core's alerts, the cost report's totals and rankings, and what a
+// of the hub's alerts, the cost report's totals and rankings, and what a
 // coding agent's session used.
 import { t } from '../../i18n';
 
@@ -69,7 +69,7 @@ export interface StatusPage {
   url: string;
 }
 
-/** An alert the core fired (once per period of its window): a threshold
+/** An alert the hub fired (once per period of its window): a threshold
  * reached, a window that started over, a pace that runs it out before its
  * reset. */
 export interface UsageAlert {
@@ -144,7 +144,7 @@ export interface CostReport {
   recent?: CostSlot[];
 }
 
-/** In the core's order (usage.Providers); OpenCode has spend only. */
+/** In the hub's order (usage.Providers); OpenCode has spend only. */
 export const PROVIDERS = ['claude', 'codex', 'grok', 'antigravity', 'kimi', 'deepseek', 'opencode'] as const;
 
 /** A window whose reset has passed since it was read: its use is of the
@@ -550,7 +550,7 @@ export interface SessionUsage {
 
 const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
 
-/** A session's usage from the core's answer: numbers that are not finite
+/** A session's usage from the hub's answer: numbers that are not finite
  * and non-negative count 0, a model that is not text is left out;
  * undefined for an answer that is not an object. */
 export function sessionUsageOf(v: unknown): SessionUsage | undefined {

@@ -1,7 +1,7 @@
 // Rewrites a zip archive with its entries sorted by name and a fixed
 // modification time (1980-01-01, the earliest a zip can hold), so that
 // packaging the same files twice gives identical bytes (the VS Code bridge
-// VSIX the core's executable embeds; scripts/build.sh).
+// VSIX the hub's executable embeds; scripts/build.sh).
 //
 //   bun backend/scripts/zipnorm.ts FILE
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';

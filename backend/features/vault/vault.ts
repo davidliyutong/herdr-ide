@@ -1,13 +1,13 @@
-// The vault's core side: the store (store.ts) behind the pages' routes
+// The vault's hub side: the store (store.ts) behind the pages' routes
 // (hub.ts) and the requests of the MCP servers on machines (op vault).
 //
 // One gate stands before everything that reads a value or lets one be read,
-// for every caller, the core host's own programs included: a machine's MCP
+// for every caller, the hub host's own programs included: a machine's MCP
 // server gets a value only for a variable that lists it, with the user's
 // approval, or for an app the user exempted there; the pages' approvals,
 // reveals and changes need a vault session, which a page gets only with the
 // passphrase or an authenticator's proof, so a program that calls the
-// core's API cannot approve its own request or read a value. A lock forgets
+// hub's API cannot approve its own request or read a value. A lock forgets
 // the key; the passphrase, or an authenticator that keeps it wrapped,
 // unlocks again. docs/features/30-variable-vault.md has the design.
 import { randomBytes } from 'node:crypto';
@@ -192,7 +192,7 @@ export class Vault {
   // ---- the store and the settings
 
   /** The vault's file: the option, or vault[-<instance>].json beside the
-   * settings file; "" when the core keeps none. */
+   * settings file; "" when the hub keeps none. */
   path(): string {
     if (this.o.path) return this.o.path;
     const sp = this.ctx.settings.path;
@@ -204,7 +204,7 @@ export class Vault {
   open(): Store {
     if (this.#store) return this.#store;
     const path = this.path();
-    if (!path) throw new Fail('unavailable', 503, 'the vault has no file (the core keeps no settings)');
+    if (!path) throw new Fail('unavailable', 503, 'the vault has no file (the hub keeps no settings)');
     try {
       this.#store = Store.open(path, this.o.store);
     } catch (e) {
@@ -392,7 +392,7 @@ export class Vault {
 
   // ---- proofs
 
-  /** The origin of the page when the core vouches for it, and the host
+  /** The origin of the page when the hub vouches for it, and the host
    * name its credentials are for; "" for any other. */
   originOf(c: Ctx): { origin: string; rpId: string } {
     try {
@@ -733,7 +733,7 @@ export class Vault {
         (reg.kind !== UNLOCK_ENCLAVE && reg.kind !== UNLOCK_HELLO) ||
         (reg.kind === UNLOCK_HELLO && reg.keyName !== helloKeyName(install))
       )
-        throw new Fail('invalid', 400, "the desktop app's unlock key is not one the core takes");
+        throw new Fail('invalid', 400, "the desktop app's unlock key is not one the hub takes");
     }
     let id = '';
     let made = false;
@@ -1123,7 +1123,7 @@ export class Vault {
     this.changed();
   }
 
-  /** Ends the timers (the core stops). */
+  /** Ends the timers (the hub stops). */
   stop(): void {
     this.#stopped = true;
     if (this.#lockTimer) clearTimeout(this.#lockTimer);

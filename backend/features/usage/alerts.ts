@@ -1,4 +1,4 @@
-// The alerts the core fires after a poll, once for every page: a window
+// The alerts the hub fires after a poll, once for every page: a window
 // that reached a threshold, one whose pace runs it out before its reset,
 // one that started over after reaching the first threshold. Each fires at
 // most once per period of its window, recorded with the history (so a

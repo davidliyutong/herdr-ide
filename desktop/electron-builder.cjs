@@ -16,7 +16,7 @@ const name = brand('APP_NAME');
 const appId = `${brand('APP_DOMAIN').split('.').reverse().join('.')}.desktop`;
 const arch = process.env.DESKTOP_ARCH || process.arch;
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported architecture: ${arch}`);
-// The core runs in the app's utility process (dist/hub.mjs, bundled by
+// The hub runs in the app's utility process (dist/hub.mjs, bundled by
 // build.mjs), with node-pty beside it, a native module: prebuilt for macOS
 // and Windows, built for this machine on Linux by pnpm install. The
 // payloads it carries for machines and the web UI are resources:
@@ -68,7 +68,7 @@ module.exports = {
   asarUnpack: ['dist/hub.mjs', 'node_modules/node-pty/**'],
   extraMetadata: {
     name: `${slug}-desktop`,
-    // Release tags (vX.Y.Z) stay as is in the core; app metadata takes semver.
+    // Release tags (vX.Y.Z) stay as is in the hub; app metadata takes semver.
     version: (process.env.VERSION || require('./package.json').version).replace(/^v/, ''),
     homepage: homepage(),
     // Linux: Electron's app id (Wayland) and window class (X11), the name of
@@ -76,14 +76,14 @@ module.exports = {
     desktopName: `${slug}.desktop`,
   },
   extraResources: [
-    // Written by backend/scripts/fetch-hc.ts from the herdr-core release the core embeds.
+    // Written by backend/scripts/fetch-hc.ts from the herdr-core release the hub embeds.
     { from: '../dist/hc/licenses', to: 'licenses/herdr-core' },
     { from: '../licenses/herdr-detect', to: 'licenses/herdr-detect' },
     { from: '../licenses/encoder', to: 'licenses/encoder' },
     { from: '../LICENSE', to: 'LICENSE' },
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     { from: '../web/dist/licenses.md', to: 'licenses.md' },
-    // What the core carries (src/platform.ts hubResources).
+    // What the hub carries (src/platform.ts hubResources).
     {
       from: '../dist/payload',
       to: 'payload',
@@ -102,7 +102,7 @@ module.exports = {
   ],
   // node-pty is installed for DESKTOP_ARCH; refuse to put it into an
   // Electron app for another architecture (e.g. a manual --x64 run) or to
-  // package without the core and what it carries.
+  // package without the hub and what it carries.
   beforePack: async (context) => {
     const packing = Arch[context.arch];
     if (packing !== arch) {

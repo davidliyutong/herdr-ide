@@ -1,6 +1,6 @@
 // The attach stream to a machine's window manager (action attach): after
 // the agent's reply both sides exchange GUI messages, the agent's events
-// and frames one way, the core's commands the other. Commands are queued
+// and frames one way, the hub's commands the other. Commands are queued
 // and written one at a time; while the agent does not keep up, more are
 // dropped.
 import { EOFError } from '#shared/lib/streamio.ts';

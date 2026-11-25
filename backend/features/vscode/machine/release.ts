@@ -1,6 +1,6 @@
-// code-server's releases on a machine: a tarball the core uploads or the
+// code-server's releases on a machine: a tarball the hub uploads or the
 // machine downloads lands in a file beside the releases, hashed as it is
-// written; only a tarball of the digest the core knows is unpacked, into a
+// written; only a tarball of the digest the hub knows is unpacked, into a
 // directory of its own that becomes the release once its executable is
 // there and its Node runs on this machine. Other releases unused for
 // RELEASE_RETENTION_MS go (docs/deployment.md#remote-resources).
@@ -61,7 +61,7 @@ export const unpack = (tarball: string, dest: string, maxUnpacked = RELEASE_LIMI
   unpackTar(tarball, dest, maxUnpacked);
 
 /** Installs the staged tarball as release version: checked against expected
- * (the digest the core knows; none when it knows none) before anything is
+ * (the digest the hub knows; none when it knows none) before anything is
  * unpacked, unpacked beside the releases, accepted when it holds
  * bin/code-server and its Node runs here, then put in place of what was
  * there. Other releases unused for long go. The staged file stays the

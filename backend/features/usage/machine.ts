@@ -6,8 +6,8 @@
 //     kimiRefresh}: the accounts with their windows, credits and balances
 //     (machine/limits.ts), the providers asked in parallel within
 //     limitsMs; an ended Kimi Code token renewed first with kimiRefresh
-//     (machine/kimi.ts). Another core's same request through the same node
-//     within limitsShareMs gets the same answer: the cores of a machine ask
+//     (machine/kimi.ts). Another hub's same request through the same node
+//     within limitsShareMs gets the same answer: the hubs of a machine ask
 //     the providers about once between them;
 //   - cost {since, tzOffset, codexHomes, providers, prices, recentSince,
 //     ifNoneMatch}: the logs' tokens and cost (machine/scan.ts), within

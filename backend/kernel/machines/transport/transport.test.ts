@@ -25,7 +25,7 @@ import {
 } from './ssh.ts';
 import { createHash } from 'node:crypto';
 
-/** A core session and a bare yamux server standing in for the agent. */
+/** A hub session and a bare yamux server standing in for the agent. */
 function pair(lost?: () => void) {
   const [a, b] = duplexPair();
   const s = new Session(a, undefined, lost);
@@ -139,7 +139,7 @@ describe('ssh', () => {
   });
 
   // The control master is told to take no new sessions (not to exit, which
-  // would end every session through it), with this core's control path.
+  // would end every session through it), with this hub's control path.
   test.skipIf(process.platform === 'win32')('stop master arguments', async () => {
     const bin = mkdtempSync(join(tmpdir(), 'ssh-bin-'));
     const out = join(mkdtempSync(join(tmpdir(), 'ssh-out-')), 'args');

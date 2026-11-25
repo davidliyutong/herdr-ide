@@ -1,4 +1,4 @@
-// VS Code (code-server, docs/features/05-vscode-panes.md) on the core's
+// VS Code (code-server, docs/features/05-vscode-panes.md) on the hub's
 // side. code-server is served on the UI's own origin, so its extensions and
 // webviews can do whatever the page can: the feature is off by default and
 // has a switch per kind of client (browserRisk: plugins.vscode.enabled for
@@ -113,7 +113,7 @@ export function vscodeFeatures(o: VSCodeOptions = {}): FeatureDef[] {
         timing,
         bridgeVSIX: o.bridgeVSIX,
         install(machine) {
-          // A core without the settings (tests) pushes.
+          // A hub without the settings (tests) pushes.
           const read = (key: string) => {
             try {
               return ctx.settings.string(key, machine);
@@ -168,7 +168,7 @@ export function vscodeFeatures(o: VSCodeOptions = {}): FeatureDef[] {
 
       // A code-server without VS Code connections or requests for
       // --code-server-idle is released: the machine stops it unless another
-      // core it serves has a VS Code window connected.
+      // hub it serves has a VS Code window connected.
       ctx.service('idle code-servers', async (signal) => {
         if (timing.idleMs <= 0) return;
         while (!signal.aborted) {

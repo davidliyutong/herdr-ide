@@ -3,7 +3,7 @@
 // an hour, and serves the report for a minute per range, time zone,
 // providers, Codex homes and prices. A machine runs one scan at a time;
 // requests for the same range share it, and the scan is bounded by its
-// own time limit, not by the request that started it. The core keeps each
+// own time limit, not by the request that started it. The hub keeps each
 // machine's last reports with their ETags (also in its database), so that
 // an unchanged machine answers notModified without its rows, and a
 // disabled or offline machine's last report stays in the total until the
@@ -53,7 +53,7 @@ export interface Report {
   recent: (CostSlot & { machine: string })[];
 }
 
-/** A machine's last report for a cost key, as the Go core kept it. */
+/** A machine's last report for a cost key, as the Go hub kept it. */
 interface Entry {
   machine: string;
   tzOffset: number;
@@ -79,7 +79,7 @@ export interface SpendDeps {
   prices(): { own?: CostParams['prices']; key: string };
   store: Store;
   now(): number;
-  /** Ends the scans when the core stops. */
+  /** Ends the scans when the hub stops. */
   life: AbortSignal;
 }
 

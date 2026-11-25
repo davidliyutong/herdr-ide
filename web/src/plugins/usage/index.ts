@@ -1,8 +1,8 @@
 // The AI usage plugin (docs/features/29-ai-usage.md): its panel in the right
 // sidebar, its status bar items (the accounts' tightest window, and the
 // session of the agent in the focused pane), its settings page (the
-// providers' settings on pages of their own), and the core's snapshots
-// (/ws plugin messages). The core's side is backend/features/usage.
+// providers' settings on pages of their own), and the hub's snapshots
+// (/ws plugin messages). The hub's side is backend/features/usage.
 import { Gauge } from 'lucide-react';
 import type { PluginDef } from '../api';
 import { UsagePanel } from './UsagePanel';

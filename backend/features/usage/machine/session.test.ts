@@ -387,7 +387,7 @@ describe('bounds and errors', () => {
     await Promise.all(runs);
     expect(most).toBe(2);
     const ac = new AbortController();
-    ac.abort(new Error('the core stopped waiting'));
-    await expect(cost('claude', byName(p), undefined, { ...e, signal: ac.signal })).rejects.toThrow('the core stopped waiting');
+    ac.abort(new Error('the hub stopped waiting'));
+    await expect(cost('claude', byName(p), undefined, { ...e, signal: ac.signal })).rejects.toThrow('the hub stopped waiting');
   });
 });

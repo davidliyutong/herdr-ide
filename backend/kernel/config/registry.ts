@@ -1,11 +1,11 @@
-// What the core registers in its settings and keybindings, written for the
-// clients that need it before or without a core (spec/generated/registry.json):
+// What the hub registers in its settings and keybindings, written for the
+// clients that need it before or without a hub (spec/generated/registry.json):
 //
 //   - "settings": each setting's default, which the web UI uses until the
-//     core's values arrive;
+//     hub's values arrive;
 //   - "commands" and "keybindings": the commands and the default bindings
 //     of each platform, which the web UI and the desktop app's shell use
-//     until they have read the core's;
+//     until they have read the hub's;
 //   - "i18n": the translation keys the web UI needs for the settings and
 //     commands it shows; its tests fail when it lacks one;
 //   - "agents": the kinds of coding agents (shared/agents), which the web
@@ -14,7 +14,7 @@
 // It also writes the tables of every setting and of every command with its
 // default keys into docs/reference.md, between the markers there.
 //
-// The core's input is the features the host composes (registryInput of
+// The hub's input is the features the host composes (registryInput of
 // hosts/common/compose.ts describedFeatures): scripts/registry.ts writes the
 // files, or with --check only compares them (pnpm registry, make tokens).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -28,7 +28,7 @@ import { UI } from './ui/index.ts';
 /** What hubModules reads of a feature (FeatureDef's members). */
 export type FeatureSettings = Switchable & { settings?: Module };
 
-/** The settings modules of the core: the user interface's, the switches
+/** The settings modules of the hub: the user interface's, the switches
  * of the features that can be turned off and the features' own modules,
  * in the order the host composes the features (hosts/common/compose.ts
  * hubFeatures), which is the order the UIs list them in. */
@@ -42,7 +42,7 @@ export interface RegistryInput {
   agents: readonly agentkinds.Kind[];
 }
 
-/** The registry's input of a core of features: their settings, every
+/** The registry's input of a hub of features: their settings, every
  * command, every kind of coding agent. */
 export const registryInput = (features: readonly FeatureSettings[]): RegistryInput => ({
   modules: hubModules(features),

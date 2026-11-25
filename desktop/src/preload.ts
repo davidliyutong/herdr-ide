@@ -1,5 +1,5 @@
 // Preload of the main window (sandboxed, context-isolated), in each of its
-// frames. Every frame of the app's origin gets its channels to the core
+// frames. Every frame of the app's origin gets its channels to the hub
 // (frames.ts); the top frame's page also gets a narrow bridge and nothing
 // else: the commands of the menu items chosen,
 // where a file the user dropped is on disk, which folders were opened with
@@ -7,8 +7,8 @@
 // panes have unsaved changes and its answer when the window closes with
 // some (the shell asks it), the addresses the browser panes' webviews open as popups, and on macOS three requests without arguments
 // for Full Disk Access. verifyUser takes a nonce to the main process, which
-// asks the core what it is for and shows that in the system's prompt; for
-// the vault's unlock key it answers a relay sealed for the core, which the
+// asks the hub what it is for and shows that in the system's prompt; for
+// the vault's unlock key it answers a relay sealed for the hub, which the
 // page only passes on.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { DesktopEnroll, DesktopShell, DesktopUnlock, NotificationTarget, OpenedFolders, ProcessUsage } from '../../web/src/shell';

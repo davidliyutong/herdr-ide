@@ -10,7 +10,7 @@ import type { Entry } from '../protocol.ts';
 import { entryOf, errCode } from './guard.ts';
 
 export interface StatOptions {
-  /** How long one stat action waits for its paths (the core waits 20 s). */
+  /** How long one stat action waits for its paths (the hub waits 20 s). */
   waitMs: number;
   /** The stats running at once. */
   max: number;

@@ -1,5 +1,5 @@
 // What the plugins' requests share (lib/pluginApi.ts): failures with the
-// core's code under each plugin's own class, the options of a JSON request
+// hub's code under each plugin's own class, the options of a JSON request
 // and a failure's text by its code.
 import { describe, expect, it } from 'vitest';
 import { answer, failureOf, jsonBody, jsonInit, makeErrorText, PluginError } from '../lib/pluginApi';

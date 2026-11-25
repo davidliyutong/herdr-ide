@@ -186,7 +186,7 @@ function report(e: unknown) {
   useStore.getState().toast?.(msg);
 }
 
-/** The translations of the core's error codes for machine requests. */
+/** The translations of the hub's error codes for machine requests. */
 const machineErrors: Record<string, MessageKey> = {
   label_taken: 'machine.labelTaken',
   machine_exists: 'machine.exists',
@@ -197,7 +197,7 @@ const machineErrors: Record<string, MessageKey> = {
   save: 'machine.notSaved',
 };
 
-/** The reason a machine request failed, from the core's error code (with
+/** The reason a machine request failed, from the hub's error code (with
  * the system's reason when the file could not be saved). */
 async function machineError(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
@@ -533,7 +533,7 @@ export const actions = {
     actions.moveTabsToWorkspace(m, keys, L.newId(), { name: input.label, cwd: input.cwd });
   },
 
-  /** Adds an SSH machine to the core's machines (docs/features/02) and
+  /** Adds an SSH machine to the hub's machines (docs/features/02) and
    * reports whether it was added. It connects at once; when it needs an
    * interactive login (auth_required) the authentication terminal opens. */
   async addMachine(form: { target: string; label: string }): Promise<boolean> {
@@ -555,7 +555,7 @@ export const actions = {
     }
   },
 
-  /** Enables or disables a machine (stored by the core). Disabling a
+  /** Enables or disables a machine (stored by the hub). Disabling a
    * connected machine asks first: its agent disconnects and VS Code there
    * stops; its programs keep running there. */
   async setMachineEnabled(m: string, enabled: boolean) {
@@ -614,7 +614,7 @@ export const actions = {
     );
   },
 
-  /** Removes an SSH machine from the core's machines after asking. */
+  /** Removes an SSH machine from the hub's machines after asking. */
   async removeMachine(m: string) {
     const st = useStore.getState().machines[m];
     const machine = st?.label ?? m;
@@ -680,7 +680,7 @@ export const actions = {
   },
 
   /** Moves a machine to a slot of the machines (0 before the first, the
-   * machine count after the last): shown at once, stored by the core
+   * machine count after the last): shown at once, stored by the hub
    * (PUT /api/machines/order), which sends every page the new list. */
   async moveMachine(m: string, slot: number) {
     return actions.moveMachines([m], slot);

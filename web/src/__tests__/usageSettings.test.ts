@@ -262,7 +262,7 @@ describe('the AI usage settings page', () => {
     expect(serializePrices(Array.from({ length: 51 }, (_, i) => row(`m${i}`, '1', '2')))).toBeUndefined();
   });
 
-  it('shows a read-only core’s settings without letting them change', async () => {
+  it('shows a read-only hub’s settings without letting them change', async () => {
     await open({ page: 'usage' }, state(), true);
     expect(providerRow('opencode').disabled).toBe(false);
     await act(async () => providerRow('opencode').click());

@@ -1,4 +1,4 @@
-// A terminal on the core's own host (an interactive ssh login): the host
+// A terminal on the hub's own host (an interactive ssh login): the host
 // provides it, Bun.Terminal on the command line, node-pty in the desktop
 // app.
 

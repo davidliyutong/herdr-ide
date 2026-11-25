@@ -7,7 +7,7 @@ import type { AttachOptions, StreamHandler } from '../term/connection';
 import { t } from '../i18n';
 import { openChannel } from '../lib/transport';
 
-/** A PTY on the core host behind a WebSocket, as a terminal's stream: the
+/** A PTY on the hub host behind a WebSocket, as a terminal's stream: the
  * output in messages, input sent as it is. The PTY gets its size when it
  * starts. */
 export class PtyLink implements TermLink {
@@ -40,7 +40,7 @@ export class PtyLink implements TermLink {
   }
 }
 
-/** Interactive ssh authentication for a machine, run in a PTY on the core
+/** Interactive ssh authentication for a machine, run in a PTY on the hub
  * host; the resulting ControlMaster is reused by later connections. */
 export function AuthDialog() {
   const m = useStore((s) => s.auth);
@@ -78,7 +78,7 @@ export function AuthDialog() {
         scrollback: () => 1000,
         setTitle: () => {},
         onFind: () => {},
-        // The core connects the machine again when the terminal ends.
+        // The hub connects the machine again when the terminal ends.
         onClosed: () => setEnded(true),
         onBell: () => {},
       },

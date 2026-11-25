@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { vsixContentHash } from './vsix.ts';
 
 // testdata/a.vsix and b.vsix hold the same files with other times (stored,
-// deflated, a directory, out of order); the digests are the Go core's
-// (vsixContentHash, before this core replaced it), so that a machine's
-// marker holds for either core.
-test('the content hash ignores the zip metadata, as the Go core', () => {
+// deflated, a directory, out of order); the digests are the Go hub's
+// (vsixContentHash, before this hub replaced it), so that a machine's
+// marker holds for either hub.
+test('the content hash ignores the zip metadata, as the Go hub', () => {
   const a = readFileSync(join(import.meta.dir, 'testdata', 'a.vsix'));
   const b = readFileSync(join(import.meta.dir, 'testdata', 'b.vsix'));
   expect(a.equals(b)).toBe(false);

@@ -1,4 +1,4 @@
-// The Host aliases of the user's OpenSSH client configuration on the core
+// The Host aliases of the user's OpenSSH client configuration on the hub
 // host (~/.ssh/config and the files it includes), which the Add Machine
 // dialog offers (GET /api/ssh/hosts). It only reads, and keeps only each
 // concrete alias with its HostName and User: patterns, Match blocks and

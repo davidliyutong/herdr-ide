@@ -1,15 +1,15 @@
-// The proof of the user's presence for the variable vault (the core's
+// The proof of the user's presence for the variable vault (the hub's
 // backend/features/vault/desktop.ts): the page hands over a nonce, this shell
-// asks the core what the nonce is for, shows that in the system's prompt
+// asks the hub what the nonce is for, shows that in the system's prompt
 // (Touch ID, Windows Hello) and, once the user answered it, signs the nonce
-// with the key of this launch. The text of the prompt comes from the core's
+// with the key of this launch. The text of the prompt comes from the hub's
 // answer, never from the page, so a page cannot show the user one thing and
 // have another signed. The key stays in the main process's memory.
 //
 // The same key unlocks a locked vault through this install's unlock entry
 // (unlock) and makes that entry (enroll): the Secure Enclave on macOS
 // (enclave.ts), a Windows Hello key on Windows (windowsHello.ts), each with
-// this install's shellSecret (unlockStore.ts). What the core needs of them
+// this install's shellSecret (unlockStore.ts). What the hub needs of them
 // goes in a relay (relay.ts) sealed with a key derived from the verify key,
 // which the page passes on without reading. The shell, not the page, picks
 // the entry: the one of its own install id.
@@ -22,7 +22,7 @@ import { fromBase64url, relayKey, sealRelay } from './relay';
 import { INSTALL, type UnlockStore } from './unlockStore';
 import type { HelloKeys } from './windowsHello';
 
-/** What a nonce is for, as the core tells it. */
+/** What a nonce is for, as the hub tells it. */
 export interface Purpose {
   for: 'session' | 'register' | 'answer' | 'reveal' | 'change';
   /** The request an answer is for; with `answer` only. `target` is the
@@ -38,7 +38,7 @@ export interface Purpose {
   register?: { challenge: Buffer };
 }
 
-/** An unlock entry of the core, as GET proof/{nonce} lists it. */
+/** An unlock entry of the hub, as GET proof/{nonce} lists it. */
 export type UnlockEntry =
   | { id: string; kind: 'enclave'; install: string; blob: Buffer; ephPub: Buffer }
   | { id: string; kind: 'hello'; install: string; keyName: string; challenge: Buffer };
@@ -53,7 +53,7 @@ export interface VerifyDeps {
   canPromptTouchID(): boolean;
   promptTouchID(reason: string): Promise<void>;
   hello: HelloPrompt;
-  /** The JSON of GET /api/p/vault/proof/{nonce}; undefined when the core
+  /** The JSON of GET /api/p/vault/proof/{nonce}; undefined when the hub
    * does not know the nonce. */
   purpose(nonce: string): Promise<unknown>;
   t(key: MessageKey, vars?: Record<string, string>): string;
@@ -65,7 +65,7 @@ export interface VerifyDeps {
   unlockStore?: UnlockStore;
 }
 
-/** What unlock answers: the entry used and the relay for the core. */
+/** What unlock answers: the entry used and the relay for the hub. */
 export interface Unlock {
   id: string;
   relay: string;
@@ -90,7 +90,7 @@ export interface Verifier {
    * no entry (its id and shellSecret are lost, or the entries are other
    * installs'); null on a cancel or a failure, or while another prompt is
    * open. A key the system no longer has gives a relay that says so, so
-   * the core removes the entry. */
+   * the hub removes the entry. */
   unlock(nonce: unknown): Promise<Unlock | 'none' | null>;
   /** For a register nonce: the prompt, a new unlock key of this install,
    * and the MAC and relay; null as for unlock. */
@@ -102,12 +102,12 @@ const MAX_NAMES = 16;
 /** Bounds on user-chosen text before it goes into a prompt. */
 const MAX_MACHINE = 60;
 const MAX_TARGET = 60;
-/** A variable's name as the core allows it, at most this long in a prompt. */
+/** A variable's name as the hub allows it, at most this long in a prompt. */
 const MAX_NAME = 64;
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const MAX_NAMES_TEXT = 120;
 
-/** The proof's MAC: the core's proofMessage, signed with HMAC-SHA-256. The
+/** The proof's MAC: the hub's proofMessage, signed with HMAC-SHA-256. The
  * request's place is the request's id for an answer and the variable's name
  * for a reveal or a change. */
 export function proofMac(key: string, nonce: string, p: Purpose): string {
@@ -132,7 +132,7 @@ const MAX_ENTRIES = 4;
 /** The name of this install's Windows Hello key. */
 export const helloKeyName = (install: string) => `${APP_SLUG}-vault-${install}`;
 
-/** An unlock entry of exactly the shape the core sends, or undefined. */
+/** An unlock entry of exactly the shape the hub sends, or undefined. */
 function parseEntry(v: unknown): UnlockEntry | undefined {
   if (!isObject(v) || !isString(v.id) || !ENTRY_ID.test(v.id) || !isString(v.install) || !INSTALL.test(v.install)) return undefined;
   if (v.kind === 'enclave') {
@@ -153,13 +153,13 @@ function parseEntry(v: unknown): UnlockEntry | undefined {
   return undefined;
 }
 
-/** The purpose as the core sent it, or undefined when its shape is not
- * exactly one the core sends. */
+/** The purpose as the hub sent it, or undefined when its shape is not
+ * exactly one the hub sends. */
 function parsePurpose(value: unknown): Purpose | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const v = value as Record<string, unknown>;
   if (v.for === 'session' || v.for === 'register') {
-    // The core sends an empty answer here; nothing else belongs to these
+    // The hub sends an empty answer here; nothing else belongs to these
     // but a locked vault's unlock entries and a register's challenge.
     if (v.request !== undefined || v.name !== undefined || (v.answer !== undefined && v.answer !== '')) return undefined;
     if (v.for === 'session') {
@@ -275,7 +275,7 @@ export function verifier(key: string, deps: VerifyDeps): Verifier {
       busy = false;
     }
   };
-  /** Seals plaintext's JSON for the core, wiping the bytes afterwards. */
+  /** Seals plaintext's JSON for the hub, wiping the bytes afterwards. */
   const seal = (purpose: 'session' | 'register', nonce: string, entry: string, plaintext: object) => {
     const bytes = Buffer.from(JSON.stringify(plaintext), 'utf8');
     try {

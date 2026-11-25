@@ -1,4 +1,4 @@
-// The guards every request passes (SECURITY.md). The core has no login of
+// The guards every request passes (SECURITY.md). The hub has no login of
 // its own: it trusts whoever reaches it, so it listens on loopback behind an
 // authenticating reverse proxy, and these limit the damage of a
 // misconfiguration and of hostile web pages:
@@ -59,7 +59,7 @@ export interface RequestFacts {
   remote?: string;
 }
 
-/** The request comes from a program of the core's own host that talks to
+/** The request comes from a program of the hub's own host that talks to
  * the loopback address directly: a loopback peer, a loopback Host, and no
  * proxy in between (a proxy on the same host keeps the public Host or adds
  * X-Forwarded-For). */
@@ -96,12 +96,12 @@ export interface GuardOptions {
   logger?: (line: string) => void;
 }
 
-/** The Host/Origin rules of one core. */
+/** The Host/Origin rules of one hub. */
 export class Guard {
   private readonly origins = new Set<string>();
   private readonly hosts = new Set<string>();
   private readonly secret: string;
-  /** The port the core holds on both loopback addresses (ownLocalhost). */
+  /** The port the hub holds on both loopback addresses (ownLocalhost). */
   private localhostPort = '';
 
   constructor(o: GuardOptions = {}) {
@@ -117,7 +117,7 @@ export class Guard {
     }
   }
 
-  /** Tells the guard that the core listens on port on both loopback
+  /** Tells the guard that the hub listens on port on both loopback
    * addresses (127.0.0.1 and ::1), so that http://localhost:<port> leads to
    * it whichever a browser tries (trustedOrigin). */
   ownLocalhost(port: string): void {
@@ -139,11 +139,11 @@ export class Guard {
 
   /** Whether a request for host (its Host header) may carry origin: an
    * allowed origin, or the request's own origin on loopback, which is the
-   * page the core served. Another page of the same machine (a development
+   * page the hub served. Another page of the same machine (a development
    * server, a forwarded port, any program on another loopback port) is
    * another site: its scripts open WebSockets with their own Origin, and
-   * the core has no login to stop them. The scheme of a loopback origin is
-   * not compared: the core serves no TLS, so behind a proxy on loopback
+   * the hub has no login to stop them. The scheme of a loopback origin is
+   * not compared: the hub serves no TLS, so behind a proxy on loopback
    * that does, the page's is https and the request's is not. Without a
    * port in the Host the scheme tells http://localhost (port 80) from
    * https://localhost (443), so there the origin must be the http one; a
@@ -159,7 +159,7 @@ export class Guard {
   }
 
   /** The request's Origin when no other program can serve a page of that
-   * origin: an allowed origin, which the operator names, or the core's own
+   * origin: an allowed origin, which the operator names, or the hub's own
    * under the name localhost: its port, held on both loopback addresses,
    * asked for under that very Host from this host. "" otherwise. What a
    * browser binds to an origin (a WebAuthn credential) is taken only for
@@ -168,7 +168,7 @@ export class Guard {
    * A browser sends no Origin with a page's own GETs: there the page says
    * that the request is its own (Sec-Fetch-Site: same-origin) and the
    * origin is the request's Host, under the scheme that makes it one the
-   * core vouches for. */
+   * hub vouches for. */
   trustedOrigin(r: RequestFacts): string {
     const origin = r.headers.get('Origin');
     if (!origin) {
@@ -227,7 +227,7 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
  * UI's host: the policy names the other name only, as the page does when
  * it loads one (otherHost in web/src/plugins/browser/api.ts). Any other
  * host (a reverse proxy's name, [::1]) frames no loopback page: its
- * localhost is not known to be the core's. */
+ * localhost is not known to be the hub's. */
 export function frameSources(host: string): string {
   switch (hostOnly(host).toLowerCase()) {
     case 'localhost':

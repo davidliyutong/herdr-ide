@@ -1,5 +1,5 @@
 // Reveal in Finder (Reveal in File Manager): the system's file manager
-// shows a path, as VS Code's command of that name does. The core asks only
+// shows a path, as VS Code's command of that name does. The hub asks only
 // for its own machine, and only for a client on its own host
 // (backend/features/files): the window opens on the screen of the computer
 // the user sits at.
@@ -9,7 +9,7 @@ import { posix } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
 
 /** Where xdg-open is looked for: the system's own directories, never the
- * PATH of the environment the core was started in. */
+ * PATH of the environment the hub was started in. */
 export const REVEAL_DIRS = ['/usr/bin', '/bin', '/usr/local/bin'];
 
 /** The first regular, executable file named name in dirs, "" for none. */

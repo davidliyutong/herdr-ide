@@ -29,7 +29,7 @@ test('development is isolated; packaged mode has its own instance', () => {
       (e: unknown) => e instanceof DesktopError && e.key === 'desktop.badInstance',
     );
   // The app's machines are the default instance's, shared with a server's
-  // cores; a development instance keeps its own.
+  // hubs; a development instance keeps its own.
   assert.equal(nodeInstance('desktop'), '');
   assert.equal(nodeInstance('dev'), 'dev');
 });
@@ -42,8 +42,8 @@ test('PATH gains the usual installations on macOS and Linux; Windows keeps its o
   }
   const env = { Path: 'C:\\Windows\\System32' };
   assert.equal(hubEnv(env, 'C:\\Users\\test', 'win32'), env);
-  // Nothing that switches the proxy on for every program the core starts
-  // (the core sets its own, backend/shared/lib/proxy.ts).
+  // Nothing that switches the proxy on for every program the hub starts
+  // (the hub sets its own, backend/shared/lib/proxy.ts).
   for (const p of ['darwin', 'linux', 'win32'] as const) {
     const out = hubEnv({ HTTPS_PROXY: 'http://proxy:3128' }, '/home/test', p);
     assert.equal(out.NODE_USE_ENV_PROXY, undefined);
@@ -96,7 +96,7 @@ class FakeChild extends EventEmitter implements HubChild {
     const port = transfer[0] as MessagePort | undefined;
     setImmediate(() => {
       if (m.t === 'start') {
-        (this.stderr as unknown as EventEmitter).emit('data', Buffer.from('core: starting\n'));
+        (this.stderr as unknown as EventEmitter).emit('data', Buffer.from('hub: starting\n'));
         if (this.behavior === 'ready') this.emit('message', { t: 'ready' });
         if (this.behavior === 'failed') {
           // As the utility process does: it says why, then exits.
@@ -143,7 +143,7 @@ function spawner(
   return { s, children };
 }
 
-test('the core starts with what the main process holds for it, and answers the shell’s own requests', async () => {
+test('the hub starts with what the main process holds for it, and answers the shell’s own requests', async () => {
   const { s, children } = spawner(['ready']);
   const logged: string[] = [];
   const host = new HubHost({ spawner: s, start: START, lost: () => assert.fail('lost'), log: (t) => logged.push(t) });
@@ -151,12 +151,12 @@ test('the core starts with what the main process holds for it, and answers the s
   assert.deepEqual(children[0].got[0], { t: 'start', start: START });
   const res = await host.fetch('/api/settings');
   assert.deepEqual(await res.json(), { url: `${APP_ORIGIN}/api/settings`, host: APP_HOST });
-  assert.match(host.diagnostics, /core: starting/);
-  assert.deepEqual(logged, ['core: starting\n']);
+  assert.match(host.diagnostics, /hub: starting/);
+  assert.deepEqual(logged, ['hub: starting\n']);
   await host.stop();
 });
 
-test("a window's request reaches the core with the origin of the page that made it as its Origin, in place of its own", async () => {
+test("a window's request reaches the hub with the origin of the page that made it as its Origin, in place of its own", async () => {
   const { s } = spawner(['ready'], async (req) => Response.json({ origin: req.headers.get('origin') }));
   const host = new HubHost({ spawner: s, start: START, lost: () => assert.fail('lost') });
   await host.start();
@@ -176,14 +176,14 @@ test("a window's request reaches the core with the origin of the page that made 
   await host.stop();
 });
 
-test('a core that cannot start fails the start, and is not started again', async () => {
+test('a hub that cannot start fails the start, and is not started again', async () => {
   const failed = spawner(['failed']);
   const host = new HubHost({ spawner: failed.s, start: START, lost: () => {} });
   await assert.rejects(
     host.start(),
     (e: unknown) => e instanceof DesktopError && e.key === 'desktop.hubFailed' && e.detail === 'no payloads',
   );
-  // Stopping a core that is gone ends at once.
+  // Stopping a hub that is gone ends at once.
   await host.stop();
   const silent = spawner(['silent']);
   const slow = new HubHost({ spawner: silent.s, start: START, lost: () => {}, startMs: 30 });
@@ -193,7 +193,7 @@ test('a core that cannot start fails the start, and is not started again', async
   assert.equal(silent.children.length, 1);
 });
 
-test('a crash restarts the core, the requests meanwhile wait for it; crashing on and on gives up', async () => {
+test('a crash restarts the hub, the requests meanwhile wait for it; crashing on and on gives up', async () => {
   const { s, children } = spawner(['ready']);
   let now = 0;
   const lost: DesktopError[] = [];
@@ -229,7 +229,7 @@ test('a crash restarts the core, the requests meanwhile wait for it; crashing on
   }
 });
 
-test('channels: a frame’s end goes to the core once it serves; the shell’s own', async () => {
+test('channels: a frame’s end goes to the hub once it serves; the shell’s own', async () => {
   const { s, children } = spawner(['ready']);
   const host = new HubHost({ spawner: s, start: START, lost: () => {} });
   await host.start();
@@ -253,17 +253,17 @@ test('channels: a frame’s end goes to the core once it serves; the shell’s o
   });
   ch.close();
   await host.stop();
-  // A stopped core refuses the frame's channel on its end.
+  // A stopped hub refuses the frame's channel on its end.
   const { port1, port2 } = new MessageChannel();
   port1.unref();
   port2.unref();
   const closed = new Promise((r) => port2.once('message', r));
   await host.connect({ url: `${APP_ORIGIN}/ws`, headers: [] }, port1);
-  assert.deepEqual(await closed, { t: 'close', code: 1006, reason: 'the core is not running' });
+  assert.deepEqual(await closed, { t: 'close', code: 1006, reason: 'the hub is not running' });
   port2.close();
 });
 
-test('stop asks the core to stop; one that stays is killed after the deadline', async () => {
+test('stop asks the hub to stop; one that stays is killed after the deadline', async () => {
   const graceful = spawner(['ready']);
   const a = new HubHost({ spawner: graceful.s, start: START, lost: () => {} });
   await a.start();

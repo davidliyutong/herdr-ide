@@ -1,8 +1,8 @@
-// Terminals on the core's host through node-pty (kernel/pty.ts): the
-// desktop app's core runs an interactive ssh login in one. node-pty is
+// Terminals on the hub's host through node-pty (kernel/pty.ts): the
+// desktop app's hub runs an interactive ssh login in one. node-pty is
 // Node-API, so the same binary loads in Node and in Electron's utility
 // process without a rebuild for Electron. It is loaded when a login first
-// needs it: a core whose node-pty does not load runs without ssh logins.
+// needs it: a hub whose node-pty does not load runs without ssh logins.
 import { createRequire } from 'node:module';
 import type * as NodePty from 'node-pty';
 import type { Pty, SpawnPty } from '#kernel/pty.ts';

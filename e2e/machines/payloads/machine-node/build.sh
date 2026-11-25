@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds this payload on a computer with the repository: the TypeScript
 # build's executables of linux/amd64 for glibc and musl (exe/,
-# backend/scripts/build.ts: the core and the machine side, each with the
+# backend/scripts/build.ts: the hub and the machine side, each with the
 # pinned herdr-core embedded, fetched by bun backend/scripts/fetch-hc.ts),
 # which run.sh picks from, and the driver (driver.js). Then:
 # machines.py run-matrix payloads/machine-node/run.sh [IMAGE...].

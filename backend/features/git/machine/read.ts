@@ -3,7 +3,7 @@
 // a commit's or a compare's changes, a file's contents at a side, the
 // branches, tags and stashes, the lines changed per path, and the token the
 // panel polls. Results are written as the Go agent wrote them, which the
-// core passes on to the page: a member Go wrote with omitempty is left out
+// hub passes on to the page: a member Go wrote with omitempty is left out
 // when empty, a list it always wrote is a list.
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';

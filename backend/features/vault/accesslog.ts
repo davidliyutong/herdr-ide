@@ -1,6 +1,6 @@
 // The access log records every request of a machine's MCP server and every
 // value a page took (a reveal, an export): names only, never values. It is
-// kept in the core's database (hub[-<instance>]-<host>[-<id>].db beside the
+// kept in the hub's database (hub[-<instance>]-<host>[-<id>].db beside the
 // settings file, named for this host), table vault_access, and read back at
 // the first use, so the panel shows what happened before a restart too. A
 // record that lets values out is committed to disk before they leave; one
@@ -106,7 +106,7 @@ export function hubDBBeside(vaultFile: string): string {
 
 class Newer extends Error {
   constructor() {
-    super("the core's database is of a newer version: records are not kept");
+    super("the hub's database is of a newer version: records are not kept");
   }
 }
 

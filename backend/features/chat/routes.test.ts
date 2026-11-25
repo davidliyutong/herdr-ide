@@ -56,7 +56,7 @@ describe('routes', () => {
   });
 
   // Each route is one request of the machine's chat host, which a change
-  // starts when none serves; what it takes is checked on the core first.
+  // starts when none serves; what it takes is checked on the hub first.
   test('requests', async () => {
     const r = await start();
     const f = r.host;
@@ -187,8 +187,8 @@ describe('routes', () => {
   });
 
   // A GET route (which a browser sends without Origin from any page) never
-  // starts the machine's chat host, nor does a read-only core: they answer
-  // not_running; a read-only core asks no agent's program.
+  // starts the machine's chat host, nor does a read-only hub: they answer
+  // not_running; a read-only hub asks no agent's program.
   test('a GET starts no host', async () => {
     const r = await start();
     r.host.running = false;
@@ -204,7 +204,7 @@ describe('routes', () => {
     expect(ro.host.opens).toEqual([]);
   });
 
-  // A read-only core leaves out the agents' standard error, which may tell
+  // A read-only hub leaves out the agents' standard error, which may tell
   // what their environment holds, and starts no host.
   test('read-only redacts', async () => {
     const id = chat.newChatID();
@@ -243,7 +243,7 @@ describe('routes', () => {
     r.board.o.sdk.forget('gpu');
     r.host.sdk = 'go';
     expect((await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}'))[0]).toBe(200);
-    // Without it, and with the core offline and no operator's copy, the
+    // Without it, and with the hub offline and no operator's copy, the
     // chat is refused and the host never asked.
     r.board.o.sdk.forget('gpu');
     r.host.sdk = 'missing';
@@ -251,7 +251,7 @@ describe('routes', () => {
     const [status, body] = await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}');
     expect(status).toBe(503);
     expect(body.error).toBe(chat.Code.SdkUnavailable);
-    expect(String(body.message)).toContain('the core is offline');
+    expect(String(body.message)).toContain('the hub is offline');
     expect(String(body.message)).toContain('--seed-dir');
     expect(r.host.requests.filter((q) => q.op === chat.Op.New)).toHaveLength(news);
   });
@@ -276,7 +276,7 @@ describe('routes', () => {
         for (const secret of ['s3cret', 't0ken', 'fr4g']) expect(text).not.toContain(secret);
         expect(text).toContain('https://mirror.example/npm/x.tgz');
       }
-      expect(String(body.message)).toContain(`the core could not download ${registry}/@anthropic-ai/claude-agent-sdk/-/`);
+      expect(String(body.message)).toContain(`the hub could not download ${registry}/@anthropic-ai/claude-agent-sdk/-/`);
     } finally {
       reg.stop(true);
     }

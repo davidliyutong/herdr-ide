@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
-import { FakeCore, settle } from './fakeTerms';
+import { FakeHub, settle } from './fakeTerms';
 import { useStore } from '../state/store';
 import type { MachineState } from '../lib/machine';
 import { actions } from '../actions';
@@ -99,16 +99,16 @@ describe('layout.reopen', () => {
 });
 
 describe('closing with a way back, and going back, with a terminal core', () => {
-  let core: FakeCore;
+  let hub: FakeHub;
   const running = (address: string, cwd: string, extra = {}) =>
-    FakeCore.term(address, { pid: 10, cwd, foreground: { pid: 20, name: 'vim', argv: ['vim'], cwd }, ...extra });
-  const tabs = () => core.layout('m')!.workspaces[0].tabs;
+    FakeHub.term(address, { pid: 10, cwd, foreground: { pid: 20, name: 'vim', argv: ['vim'], cwd }, ...extra });
+  const tabs = () => hub.layout('m')!.workspaces[0].tabs;
 
   const setup = async (extra: ReturnType<typeof running>[] = []) => {
     resetClosed(300);
     resetHistory();
-    core = new FakeCore();
-    core.machine('m', [running('t1', '/srv/a'), running('t2', '/srv/b'), ...extra], {
+    hub = new FakeHub();
+    hub.machine('m', [running('t1', '/srv/a'), running('t2', '/srv/b'), ...extra], {
       version: 2,
       workspaces: [
         {
@@ -121,12 +121,12 @@ describe('closing with a way back, and going back, with a terminal core', () => 
       ],
       selected: 0,
     });
-    core.install();
+    hub.install();
     const s = useStore.getState();
     s.setReadOnly(false);
     s.upsertMachine({ id: 'm', label: 'm', kind: 'local', status: 'ready' } as unknown as MachineState);
     s.selectMachine('m');
-    core.model.subscribe('m');
+    hub.model.subscribe('m');
     await settle();
   };
   beforeEach(() => setup());
@@ -135,9 +135,9 @@ describe('closing with a way back, and going back, with a terminal core', () => 
     document.body.innerHTML = '';
   });
 
-  const killed = () => core.calls.filter((c) => c.method === 'terminal.kill').map((c) => c.params.terminal);
+  const killed = () => hub.calls.filter((c) => c.method === 'terminal.kill').map((c) => c.params.terminal);
   const closing = (a: string) =>
-    core.calls
+    hub.calls
       .filter((c) => c.method === 'terminal.label' && c.params.terminal === a)
       .map((c) => (c.params.labels as Record<string, string>).closing);
 
@@ -182,22 +182,22 @@ describe('closing with a way back, and going back, with a terminal core', () => 
   it('closes a workspace at once and puts it back with its tabs and terminals', async () => {
     // A second tab, shown, in the workspace.
     await setup([running('t3', '/srv/c')]);
-    core.model.mutate('m', (l) => L.openTerminal(l, 't3', 'wwwwwwww'));
+    hub.model.mutate('m', (l) => L.openTerminal(l, 't3', 'wwwwwwww'));
     await settle();
-    const before = core.layout('m')!;
+    const before = hub.layout('m')!;
     const terminals = L.workspaceTerminals(before.workspaces[0]);
     expect(terminals).toHaveLength(3);
     await actions.closeWorkspace('m', 'wwwwwwww');
     await settle();
     expect(useDialog.getState().current).toBeUndefined();
     // The machine's last workspace closes as any other: none is left.
-    expect(core.layout('m')!.workspaces).toEqual([]);
+    expect(hub.layout('m')!.workspaces).toEqual([]);
     expect(killed()).toEqual([]);
     for (const a of terminals) expect(Number(closing(a)[0])).toBeGreaterThan(Date.now());
     expect(commandEnabled('pane.undoClose')).toBe(true);
     runCommand('pane.undoClose');
     await settle();
-    const back = core.layout('m')!;
+    const back = hub.layout('m')!;
     expect(back.workspaces).toEqual(before.workspaces);
     for (const a of terminals) expect(closing(a).at(-1)).toBe('');
     await new Promise((r) => setTimeout(r, 500));
@@ -216,7 +216,7 @@ describe('closing with a way back, and going back, with a terminal core', () => 
   });
 
   it('goes back and forward through the panes focused, past those closed', async () => {
-    const focused = () => L.focusedPane(core.model.layout('m')!);
+    const focused = () => L.focusedPane(hub.model.layout('m')!);
     expect(commandEnabled('pane.back')).toBe(false);
     noteFocus({ m: 'm', pane: 't2' });
     actions.focusPane('m', 't1');

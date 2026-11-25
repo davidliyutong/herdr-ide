@@ -1,9 +1,9 @@
-// What the core's own process uses: processor time and memory, for the
+// What the hub's own process uses: processor time and memory, for the
 // settings' Performance page. It measures this process only, not the
 // agents, terminal cores and ssh connections it starts.
 import { availableParallelism, cpus } from 'node:os';
 
-/** The core process's use of the system at one moment (GET /api/perf). */
+/** The hub process's use of the system at one moment (GET /api/perf). */
 export interface Usage {
   /** The processor time the process has used since it started (user and
    * system), in milliseconds; a client turns two samples into a share of

@@ -1,7 +1,7 @@
-// The Agent SDK's way to a machine, the core and the machine side through
+// The Agent SDK's way to a machine, the hub and the machine side through
 // the wire (the kernel's own call and open), with tarballs made by the test
 // and a registry on loopback (never the real SDK, never the network): the
-// machine's own download, else the core's upload from an operator's
+// machine's own download, else the hub's upload from an operator's
 // directory, its cache or its own download; every copy checked against the
 // pinned integrity; sdk_unavailable saying what each source said; a machine
 // build without the action (the Go build's) left alone.
@@ -39,7 +39,7 @@ async function tsMachine(pin: NpmTarball): Promise<{ r: Rig; m: Machine; base: s
 const machine = (s: Session, id: string): Machine =>
   Object.assign(machineOf(s), { id, label: `machine ${id}`, connected: true, live: () => s }) as unknown as Machine;
 
-/** A core pinned to a tarball made here, a registry that serves it (or
+/** A hub pinned to a tarball made here, a registry that serves it (or
  * nothing, or other bytes under its name), an operator's directory with
  * seed in it. */
 async function setup(
@@ -93,7 +93,7 @@ const failure = async (p: Promise<unknown>): Promise<{ code: string; message: st
 };
 
 describe('the Agent SDK on a machine', () => {
-  test('the machine downloads it itself; the core fetches nothing, and asks no more on that session for an hour', async () => {
+  test('the machine downloads it itself; the hub fetches nothing, and asks no more on that session for an hour', async () => {
     let now = Date.now();
     const { f, reg, p, audits, audit } = await setup({ now: () => now });
     const { m, base } = await tsMachine(f.pin);
@@ -117,20 +117,20 @@ describe('the Agent SDK on a machine', () => {
     expect(audits.map((a) => `${a.source} ${a.ok}`)).toEqual(['machine true', 'machine true']);
   });
 
-  test('a machine that cannot download it gets it from the core, which downloads it once and keeps it', async () => {
+  test('a machine that cannot download it gets it from the hub, which downloads it once and keeps it', async () => {
     const { f, reg, p, dir, audits, audit } = await setup({ refuse: isCurl });
     const one = await tsMachine(f.pin);
     await p.ensure(one.m, sig(), { audit });
     expect(installed(one.base, f)).toBe(true);
     expect(reg.hits.filter((ua) => !isCurl(ua))).toHaveLength(1);
     expect(existsSync(join(dir, 'cache', f.pin.file))).toBe(true);
-    // Another machine: from the core's cache.
+    // Another machine: from the hub's cache.
     const two = await tsMachine(f.pin);
     await p.ensure(two.m, sig(), { audit });
     expect(installed(two.base, f)).toBe(true);
     expect(reg.hits.filter((ua) => !isCurl(ua))).toHaveLength(1);
     expect(audits.map((a) => `${a.source} ${a.ok}`)).toEqual(['download true', 'download true']);
-    // A core started again: from its cache.
+    // A hub started again: from its cache.
     const again = new SdkProvision({ pin: f.pin, registry: reg.url, cacheDir: join(dir, 'cache'), logger: () => {} });
     const three = await tsMachine(f.pin);
     await again.ensure(three.m, sig(), { audit });
@@ -138,7 +138,7 @@ describe('the Agent SDK on a machine', () => {
     expect(audits.at(-1)).toMatchObject({ source: 'cache', ok: true });
   });
 
-  test("offline, the machines are not asked to download it: the core uploads an operator's directory's copy", async () => {
+  test("offline, the machines are not asked to download it: the hub uploads an operator's directory's copy", async () => {
     const dir0 = tempDir('sdkp-');
     const seed = (await fakeSdk(dir0)).bytes;
     const { f, reg, p, audits, audit } = await setup({ offline: true, seed, serve: 'nothing' });
@@ -166,13 +166,13 @@ describe('the Agent SDK on a machine', () => {
     ]);
     expect(e.message).toContain('the machine could not download it');
     expect(e.message).toContain(`the seed directory's ${f.pin.file} was refused`);
-    expect(e.message).toContain('the core could not download');
+    expect(e.message).toContain('the hub could not download');
     expect(e.message).toContain(`put ${f.pin.file} into a --seed-dir`);
     expect(installed(base, f)).toBe(false);
     expect(logs.join('\n')).toContain('could not be installed on machine ts');
   });
 
-  test('other bytes under the pinned name in the registry are refused by the machine and by the core, and not cached', async () => {
+  test('other bytes under the pinned name in the registry are refused by the machine and by the hub, and not cached', async () => {
     const other = await fakeSdk(tempDir('sdkp-'), { entry: 'export const query = 3;\n' });
     const { f, p, dir } = await setup({ serve: other.bytes });
     const { m, base } = await tsMachine(f.pin);
@@ -221,16 +221,16 @@ describe('the Agent SDK on a machine', () => {
     expect(await readRegular(join(seedDir, 'absent.tgz'), 1 << 20)).toBeNull();
   });
 
-  // The core's load of its tarball, which every machine that needs it
+  // The hub's load of its tarball, which every machine that needs it
   // shares, is bounded: one that does not settle (a download that hangs)
   // is dropped, and the next ask loads it anew.
-  test("the core's load that does not settle is dropped; the next ask loads it anew", async () => {
+  test("the hub's load that does not settle is dropped; the next ask loads it anew", async () => {
     let hang = true;
     const { f, reg, p } = await setup({ refuse: isCurl, hang: () => hang, loadMs: 500 });
     const { m, base } = await tsMachine(f.pin);
     const e = await failure(p.ensure(m, sig()));
     expect(e.code).toBe('sdk_unavailable');
-    expect(e.message).toContain("the core's own copy was not ready within");
+    expect(e.message).toContain("the hub's own copy was not ready within");
     expect(installed(base, f)).toBe(false);
     hang = false;
     await p.ensure(m, sig(), { retry: true });
@@ -238,10 +238,10 @@ describe('the Agent SDK on a machine', () => {
     expect(reg.hits.filter((ua) => !isCurl(ua)).length).toBe(2);
   });
 
-  // A file in the core's cache that is not the pinned one is refused and
-  // removed: online the core downloads it again, offline the machine gets
+  // A file in the hub's cache that is not the pinned one is refused and
+  // removed: online the hub downloads it again, offline the machine gets
   // none.
-  test("a tampered copy in the core's cache is refused and removed; the next source is used", async () => {
+  test("a tampered copy in the hub's cache is refused and removed; the next source is used", async () => {
     const other = await fakeSdk(tempDir('sdkp-'), { entry: 'export const query = 4;\n' });
     const { f, reg, p, dir, logs, audits, audit } = await setup({ refuse: isCurl });
     const cached = join(dir, 'cache', f.pin.file);
@@ -278,7 +278,7 @@ describe('the Agent SDK on a machine', () => {
     ac.abort();
     await failure(p.ensure(m, ac.signal));
     const hits = reg.hits.length;
-    // The machine's download and the core's: both refused.
+    // The machine's download and the hub's: both refused.
     expect((await failure(p.ensure(m, sig()))).code).toBe('sdk_unavailable');
     expect(reg.hits.length).toBe(hits + 2);
     const again = await failure(p.ensure(m, sig()));

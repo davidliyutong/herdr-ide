@@ -1,4 +1,4 @@
-// The history feature's machine side, driven through the wire as the core
+// The history feature's machine side, driven through the wire as the hub
 // drives it (the kernel's call, the protocol's schemas), against a fake
 // terminal core (testdata/fakecore.ts).
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
@@ -419,7 +419,7 @@ describe('capture', () => {
     expect(metaOf(e, 't1', true)?.pid).toBe(200);
   });
 
-  test('what the core asks for is clamped to the hard limits', async () => {
+  test('what the hub asks for is clamped to the hard limits', async () => {
     expect(limitsOf({ lines: -5, maxTerminals: 0, maxTotalBytes: 10, days: 0 })).toEqual({
       lines: 100,
       terminals: 1,
@@ -799,7 +799,7 @@ describe('addresses, privacy and versions', () => {
     expect(dataOf(e, 't1').equals(body(10, 10, 'a', false))).toBe(true);
   });
 
-  test('errors reach the core with a code and a fixed wording, never a path', async () => {
+  test('errors reach the hub with a code and a fixed wording, never a path', async () => {
     const e = await setup();
     mkdirSync(dbPath(e.base));
     for (const p of [capture(e), clear(e)]) {
@@ -899,12 +899,12 @@ describe('writers and the lease', () => {
     expect(res.captured).toBe(1);
   });
 
-  test("another core's capture stands for this core's for the share's time; the same core's does not", async () => {
+  test("another hub's capture stands for this hub's for the share's time; the same hub's does not", async () => {
     const e = await setup({ start: Date.now() });
     const { f } = e;
     f.set(live('t1', 1));
     plain(f, 't1');
-    const other = e.r.connect('core-2');
+    const other = e.r.connect('hub-2');
     await capture(e);
     const second = (await call(machineOf(other), historyProtocol, 'capture', params)) as { busy?: boolean | null; skipped: number };
     expect(second.busy).toBe(true);

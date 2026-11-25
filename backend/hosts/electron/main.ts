@@ -1,6 +1,6 @@
 // The entry of the desktop app's utility process (Electron's
 // utilityProcess, which the app's main process forks and restarts after a
-// crash): the core of the app, served to the main process over
+// crash): the hub of the app, served to the main process over
 // MessagePorts (serve.ts), without a listener.
 import { HUB_BIN } from '#shared/lib/brand.ts';
 import { stderrLogger } from '#shared/lib/log.ts';
@@ -11,7 +11,7 @@ import { serveParent, type Parent } from './serve.ts';
 import { startHub } from './start.ts';
 
 const logger = stderrLogger(`${HUB_BIN}: `);
-// The core's downloads through the user's proxy, in this process only.
+// The hub's downloads through the user's proxy, in this process only.
 if (useEnvProxy()) logger('fetch goes through the proxy of HTTPS_PROXY and HTTP_PROXY (NO_PROXY and loopback excepted)');
 const parent = (process as unknown as { parentPort?: Parent<ElectronPort> }).parentPort;
 if (!parent) {

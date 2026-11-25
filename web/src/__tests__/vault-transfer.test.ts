@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // The vault's export and import dialogs and the variable list's choice
-// (plugins/vault) against a stand-in for the core: the core builds the
+// (plugins/vault) against a stand-in for the hub: the hub builds the
 // export file and reads an import, so the page sends passphrases and the
 // file's text and never gets a value; an export asks for the vault's
 // passphrase again; an import previews, takes a choice per variable and

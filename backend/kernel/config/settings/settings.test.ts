@@ -182,7 +182,7 @@ describe('settings', () => {
   });
 
   // The answers carry the reason as detail where the web UI shows it, as
-  // the Go core answered.
+  // the Go hub answered.
   test('failures', () => {
     const { s } = newStore('', { on: '1' });
     expect(failOf(() => s.set('a.size', '', 7)).body).toEqual({
@@ -332,7 +332,7 @@ describe('settings', () => {
 
   // A change from the UI edits the file's text: comments, trailing commas
   // and the layout of what it does not touch stay; what it adds goes
-  // where the Go core put it (global values sorted, then each machine's).
+  // where the Go hub put it (global values sorted, then each machine's).
   test('file edits keep the user text', () => {
     const { s, path } = newStore(`// my settings
 {

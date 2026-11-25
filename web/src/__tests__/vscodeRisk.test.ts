@@ -4,7 +4,7 @@
 // by default everywhere; a browser turns it on only after the user accepts
 // the risk (a dialog with a box to tick before Enable), the desktop app
 // just toggles its own switch, and each page follows the switch of the
-// kind of client the core says it is.
+// kind of client the hub says it is.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
@@ -77,7 +77,7 @@ describe('VS Code in browsers and in the desktop app', () => {
     expect(isPluginOn('vscode')).toBe(false);
   });
 
-  it('follows the switch of the kind of client the core says the page is', async () => {
+  it('follows the switch of the kind of client the hub says the page is', async () => {
     useSettings.setState({ values: { 'plugins.vscode.enabled': { value: true, source: 'global' } } });
     // The desktop app's switch on: not in a browser.
     expect(enableSetting(vscodePlugin)).toBe('plugins.vscode.browser');
@@ -147,7 +147,7 @@ describe('VS Code in browsers and in the desktop app', () => {
     await vi.waitFor(() => expect(value('plugins.vscode.enabled')).toBe(true));
     expect(puts).toEqual(['plugins.vscode.enabled']);
     expect(isPluginOn('vscode')).toBe(true);
-    // A browser opening the same core still finds it off.
+    // A browser opening the same hub still finds it off.
     client('browser');
     expect(isPluginOn('vscode')).toBe(false);
   });

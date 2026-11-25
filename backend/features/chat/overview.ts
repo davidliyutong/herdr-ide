@@ -83,7 +83,12 @@ const failed = (base: HostOverview, e: unknown): HostOverview => {
 };
 
 /** Asks one request of machine m's host without starting one. */
-async function ask(board: ChatSwitchboard, m: string, req: chat.Request, signal: AbortSignal): Promise<{ info: chat.HostInfo; res: Response }> {
+async function ask(
+  board: ChatSwitchboard,
+  m: string,
+  req: chat.Request,
+  signal: AbortSignal,
+): Promise<{ info: chat.HostInfo; res: Response }> {
   const c: HostConn = await board.link.dial(m, { start: false, reserved: false, signal });
   try {
     return { info: c.info, res: await c.send(req) };

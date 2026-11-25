@@ -92,7 +92,7 @@ const CLIP_TYPE = `application/x-${APP_SLUG}-clipboard`;
 
 /** The DownloadURL of rows dragged out of the page ("type:name:url", as
  * Chromium takes it): one file as itself, anything else as the zip the
- * core makes, named as the core names it. */
+ * hub makes, named as the hub names it. */
 export function dragOutUrl(m: string, paths: string[], isDir: (p: string) => boolean): string | undefined {
   if (!paths.length) return undefined;
   let name: string;

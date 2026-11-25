@@ -1,5 +1,5 @@
 // The agents plugin on the page (plugins/agents): its switch, which turns
-// the machines' session detection on and off (the core's side), and one
+// the machines' session detection on and off (the hub's side), and one
 // button in terminals' headers (Continue in Chat, chatImport.test.tsx); no
 // commands, no new-tab items.
 

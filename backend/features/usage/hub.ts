@@ -1,4 +1,4 @@
-// The AI usage feature's core side (docs/features/29-ai-usage.md): a
+// The AI usage feature's hub side (docs/features/29-ai-usage.md): a
 // scheduler (usage.ts) asks the connected machines for the limits of the
 // AI subscriptions signed in there, merges the accounts seen on several
 // machines, keeps their history, fires the alerts and sends the snapshot to
@@ -15,7 +15,7 @@
 //     machine's DeepSeek key file, never audited or returned;
 //   - GET  /api/m/:id/p/usage/session?kind=&session=: what a coding agent's
 //     session there used, at the user's prices: only reads, so a read-only
-//     core answers it, unaudited.
+//     hub answers it, unaudited.
 //
 // The refresh and the key change state: refused in read-only mode, audited
 // as usage.refresh and usage.deepseek_key.
@@ -152,7 +152,7 @@ export const usageFeature = (o: UsageOptions = {}) =>
 
 /** A request's JSON body of at most limit bytes read with schema; a body
  * too large, not JSON or not of the schema fails with bad_request, as the
- * Go core's did. */
+ * Go hub's did. */
 async function readJSON<S extends z.ZodType>(c: Ctx, limit: number, schema: S): Promise<z.output<S>> {
   let raw: unknown;
   try {

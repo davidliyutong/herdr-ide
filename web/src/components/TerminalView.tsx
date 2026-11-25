@@ -83,12 +83,12 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
         address: terminal,
         connection: terms.connection,
         // Attached again when the connection is back, and when the machine
-        // is: its streams end while the connection to the core stays.
+        // is: its streams end while the connection to the hub stays.
         onConnection: (fn) => {
-          const offCore = terms.onConnection(fn);
+          const offHub = terms.onConnection(fn);
           const offMachine = terms.onTerminals(m, () => fn(true));
           return () => {
-            offCore();
+            offHub();
             offMachine();
           };
         },

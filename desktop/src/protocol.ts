@@ -1,5 +1,5 @@
 // The app's origin in the app's session: each request to it goes to the
-// core (hub.ts HubHost.request), which answers it in process; requests
+// hub (hub.ts HubHost.request), which answers it in process; requests
 // to other addresses (VS Code's extension gallery, say) go to the network
 // as they would without the handler.
 //
@@ -10,7 +10,7 @@
 // VS Code window included. Who asked is the request's initiatorOrigin,
 // which Electron sets from the frame that made it and the page cannot
 // change ("null" for an opaque origin; none for a request the browser
-// started itself, such as the window's first load): the core gets it as
+// started itself, such as the window's first load): the hub gets it as
 // the request's Origin, and its guard refuses every origin but the app's.
 import { APP_HOST } from './origin';
 
@@ -33,10 +33,10 @@ export interface HandlingSession {
 /** A request as Electron hands it to a protocol handler. */
 export type InterceptedRequest = Request & { initiatorOrigin?: string };
 
-/** Intercepts https in ses: the app's origin goes to core, with the origin
+/** Intercepts https in ses: the app's origin goes to hub, with the origin
  * of the page that made the request. */
-export function serveApp(ses: HandlingSession, core: { request(req: Request, origin: string | undefined): Promise<Response> }): void {
+export function serveApp(ses: HandlingSession, hub: { request(req: Request, origin: string | undefined): Promise<Response> }): void {
   ses.protocol.handle('https', (req: InterceptedRequest) =>
-    forHub(req.url) ? core.request(req, req.initiatorOrigin) : ses.fetch(req, { bypassCustomProtocolHandlers: true }),
+    forHub(req.url) ? hub.request(req, req.initiatorOrigin) : ses.fetch(req, { bypassCustomProtocolHandlers: true }),
   );
 }

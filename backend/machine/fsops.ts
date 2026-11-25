@@ -1,10 +1,10 @@
 // The agent's own file operations (fs.stat, fs.list, fs.read, fs.write,
-// fs.archive), which the core's file routes use: a path's state, a
+// fs.archive), which the hub's file routes use: a path's state, a
 // directory's entries, a range of a file's bytes, an upload written whole
 // beside its target and renamed over it, and paths as one zip archive
 // (docs/features/06-quick-look-and-files.md).
 //
-// The node serves every core on one thread, so nothing here waits for the
+// The node serves every hub on one thread, so nothing here waits for the
 // file system on it: every call is asynchronous (a call that does not
 // return, on a mount that stopped answering, holds a thread of the pool,
 // not the node), and a file is opened to be read without blocking on a

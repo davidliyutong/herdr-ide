@@ -31,8 +31,8 @@ afterEach(async () => {
   r = undefined;
 });
 
-/** Answers the vault streams a core gets with answer(request, header). */
-function core(s: Session, answer: (req: Record<string, unknown>, h: Header) => VaultResponse | null) {
+/** Answers the vault streams a hub gets with answer(request, header). */
+function hub(s: Session, answer: (req: Record<string, unknown>, h: Header) => VaultResponse | null) {
   const seen: Header[] = [];
   void (async () => {
     for (;;) {
@@ -68,9 +68,9 @@ async function ask(sock: string, req: unknown): Promise<VaultResponse> {
 const sockOf = (rr: Rig) => join(rr.dirs.run, 'vault.sock');
 
 describe('the vault socket', () => {
-  test('relays a request to the core with the process chain the kernel names', async () => {
+  test('relays a request to the hub with the process chain the kernel names', async () => {
     r = await rig();
-    const seen = core(r.session, () => ({ ok: true, values: { A: '1' } }));
+    const seen = hub(r.session, () => ({ ok: true, values: { A: '1' } }));
     await until(() => existsSync(sockOf(r!)), 'the vault socket');
     const resp = await ask(sockOf(r), { tool: 'get', names: ['A'], client: 'claims-anything' });
     expect(resp).toEqual({ ok: true, values: { A: '1' } });
@@ -80,13 +80,13 @@ describe('the vault socket', () => {
     expect(await ask(sockOf(r), 'nonsense')).toEqual({ ok: false, code: 'bad_request', error: 'not a request' });
   });
 
-  test('asks every core: the first grant answers, lists merge, refusals rank', async () => {
+  test('asks every hub: the first grant answers, lists merge, refusals rank', async () => {
     r = await rig();
-    const second = r.connect('core-2');
-    core(r.session, (req) =>
+    const second = r.connect('hub-2');
+    hub(r.session, (req) =>
       req.tool === 'list' ? { ok: true, variables: [{ name: 'A' }, { name: 'B' }] } : { ok: false, code: 'vault_locked' },
     );
-    core(second, (req) => (req.tool === 'list' ? { ok: true, variables: [{ name: 'B' }, { name: 'C' }] } : null));
+    hub(second, (req) => (req.tool === 'list' ? { ok: true, variables: [{ name: 'B' }, { name: 'C' }] } : null));
     await until(() => existsSync(sockOf(r!)), 'the vault socket');
     await until(() => r!.agent.liveSessions().length === 2, 'both sessions');
     const list = await ask(sockOf(r), { tool: 'list' });
@@ -106,7 +106,7 @@ describe('the vault socket', () => {
     ).toEqual([{ name: 'A', description: 'first' }]);
   });
 
-  test('without a core a request is unavailable', async () => {
+  test('without a hub a request is unavailable', async () => {
     r = await rig();
     r.session.close();
     await until(() => r!.agent.liveSessions().length === 0, 'the session to end');
@@ -136,7 +136,7 @@ describe('the vault socket', () => {
     ]) {
       const logs: string[] = [];
       r = await rig({ peerCred, logger: (l) => logs.push(l) });
-      const seen = core(r.session, () => ({ ok: true, values: { A: '1' } }));
+      const seen = hub(r.session, () => ({ ok: true, values: { A: '1' } }));
       await until(() => existsSync(sockOf(r!)), 'the vault socket');
       await expect(ask(sockOf(r), { tool: 'get', names: ['A'] })).rejects.toThrow();
       expect(seen.filter((h) => h.op === Op.Vault)).toEqual([]);

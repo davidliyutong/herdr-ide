@@ -38,18 +38,18 @@ export interface SSHOptions {
   /** Selects the agent's state directory (brand.dataDir). */
   instance: string;
   /** false: the machine does not download its build from the release
-   * itself (the setting machines.download); the core uploads it. */
+   * itself (the setting machines.download); the hub uploads it. */
   machineDownload?: boolean;
-  /** The machines whose own download failed lately (shared by a core's
-   * connections): the core uploads to them at once. */
+  /** The machines whose own download failed lately (shared by a hub's
+   * connections): the hub uploads to them at once. */
   downloadFailures?: DownloadFailures;
 }
 
 /** The machines (by target) whose own download of a build failed (no curl
  * or wget, no route to the release, a timeout, not the build), for a while:
- * their next deployments go straight to the core's upload rather than
+ * their next deployments go straight to the hub's upload rather than
  * waiting for the download to fail again; after ttlMs, or once one
- * succeeds, they download again. Kept in the core's memory, not in the
+ * succeeds, they download again. Kept in the hub's memory, not in the
  * machines file. */
 export class DownloadFailures {
   private readonly failed = new Map<string, number>();
@@ -218,7 +218,7 @@ export function normArch(m: string): string {
 }
 
 /** ssh, without a console window of its own on Windows (the desktop
- * app's core has none, and Windows would give each ssh one). */
+ * app's hub has none, and Windows would give each ssh one). */
 const SSH_OPTIONS = { windowsHide: true, reject: false, stripFinalNewline: false } as const;
 
 /** Runs a script on the target; its standard output. */
@@ -359,13 +359,13 @@ const UNPACK_LIMIT_S = 120;
 
 /** The script that installs a TypeScript build as dir/name from the
  * release's archive (archive: its SHA-256 and the executable's path in it)
- * or the executable gzip-compressed, read from standard input (the core's
+ * or the executable gzip-compressed, read from standard input (the hub's
  * upload) or downloaded from url by the machine itself (fetchInto). An
  * archive is unpacked only when its SHA-256 is the manifest's, within
  * UNPACK_LIMIT_S; the executable is put in place only when its SHA-256,
  * computed on the machine, is exe (else it is removed and the script fails
  * with status 3; status 4: no tool to download with); the script prints
- * it, which the core checks again. Its files are removed when it ends (an
+ * it, which the hub checks again. Its files are removed when it ends (an
  * upload ends with its input); what a killed shell leaves, the nodes'
  * housekeeping removes after an hour. */
 export function installScript(o: {
@@ -399,8 +399,8 @@ export function installScript(o: {
 }
 
 /** A stream to host:port through the target (`ssh -W`, over the control
- * master when there is one; a core without one, on Windows, opens a
- * connection of its own, non-interactively): for the core's HTTPS through
+ * master when there is one; a hub without one, on Windows, opens a
+ * connection of its own, non-interactively): for the hub's HTTPS through
  * the machine (tunnel.ts). It fails with ssh's words when the machine's
  * sshd forbids forwarding (AllowTcpForwarding no). */
 export function sshTunnel(o: Pick<SSHOptions, 'controlDir' | 'target'>): OpenStream {
@@ -427,18 +427,18 @@ export function sshTunnel(o: Pick<SSHOptions, 'controlDir' | 'target'>): OpenStr
   };
 }
 
-/** Builds used by other cores are kept until unused for 14 days (running
+/** Builds used by other hubs are kept until unused for 14 days (running
  * nodes touch their directories). */
 const PRUNE = `find "$HOME/${AGENT_DIR}" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null; true`;
 
 /** What a TypeScript build's install does when the machine lacks it: the
- * digests from the release's manifest, which the core verified itself
+ * digests from the release's manifest, which the hub verified itself
  * (release.ts; through the machine with its own TLS when the release is
- * unreachable from the core); the machine downloads the release's archive
+ * unreachable from the hub); the machine downloads the release's archive
  * itself when it may (machineDownload) and the build has a release; else,
- * or when that fails, the core uploads the archive or its own executable
+ * or when that fails, the hub uploads the archive or its own executable
  * (release.ts). A machine whose download failed within the last day gets
- * the upload first, and is asked to download again only when the core has
+ * the upload first, and is asked to download again only when the hub has
  * nothing to upload. Each is checked on the machine before it is put in
  * place (installScript). */
 async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?: AbortSignal): Promise<string> {
@@ -468,7 +468,7 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
       o.logger(`ssh ${o.target}: the machine could not download its build (${(e as Error).message.trim()})`);
       return false;
     }
-    // The core checks what the machine computed, too.
+    // The hub checks what the machine computed, too.
     if (confirmed(out)) {
       o.downloadFailures?.success(o.target);
       return true;
@@ -479,7 +479,7 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
   };
   const remembered = canDownload && !!o.downloadFailures?.recent(o.target);
   if (canDownload && !remembered && (await download())) return `${dir}/${HUB_BIN}`;
-  if (remembered) o.logger(`ssh ${o.target}: the machine's own download failed within the last day; the core uploads its build`);
+  if (remembered) o.logger(`ssh ${o.target}: the machine's own download failed within the last day; the hub uploads its build`);
   let p: TSPayload;
   try {
     p = await b.load(d, signal);

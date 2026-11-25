@@ -1,6 +1,6 @@
 // The audit log (--audit-log): one JSON object per line for each
 // security-relevant event (SECURITY.md), with who did it as far as the
-// core can tell: the connection's address, the proxy's X-Forwarded-For and
+// hub can tell: the connection's address, the proxy's X-Forwarded-For and
 // the user an authenticating proxy names in a header.
 
 /** Who a request or channel comes from. */
@@ -40,7 +40,7 @@ export interface Audit {
 export const noAudit: Audit = { log() {} };
 
 /** An audit log that writes lines with write (an append-only file's). The
- * members are sorted, as the Go core wrote them. */
+ * members are sorted, as the Go hub wrote them. */
 export function auditLog(write: (line: string) => void, now: () => Date = () => new Date()): Audit {
   return {
     log(who, event, fields = {}) {

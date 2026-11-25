@@ -1,13 +1,13 @@
 // VS Code's machine side (docs/features/05-vscode-panes.md): code-server of
-// the instance, installed from a release the core uploads or the machine
-// downloads (checked against the digest the core knows before it is
+// the instance, installed from a release the hub uploads or the machine
+// downloads (checked against the digest the hub knows before it is
 // unpacked) or found on the machine, started on a unix socket of the run
 // directory and ended by its owner (op code-server: machine/op.ts,
 // machine/server.ts, machine/release.ts), and the bridge extension's socket,
-// tunnelled to a core (machine/bridge.ts). The core reaches code-server's
-// socket through op dial-unix, which the agent counts per session: a core's
-// idle end (release) keeps a code-server another core's windows use, and
-// the bridge leads to the core that opened VS Code last.
+// tunnelled to a hub (machine/bridge.ts). The hub reaches code-server's
+// socket through op dial-unix, which the agent counts per session: a hub's
+// idle end (release) keeps a code-server another hub's windows use, and
+// the bridge leads to the hub that opened VS Code last.
 import { posix } from 'node:path';
 import { Op } from '#shared/proto/agentproto/index.ts';
 import { defineMachine } from '#machine/feature.ts';

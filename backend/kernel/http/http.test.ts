@@ -30,12 +30,12 @@ describe('guard', () => {
     const { request } = testHttp({ allowedOrigins: ['https://ide.example.com', 'http://localhost:5173', 'https://dev.example.com/'] });
     const cases: Array<[string, string, number]> = [
       ['127.0.0.1:7780', '', 200],
-      ['localhost:7780', 'http://localhost:7780', 200], // the page the core served
+      ['localhost:7780', 'http://localhost:7780', 200], // the page the hub served
       ['LocalHost:7780', 'http://localhost:7780', 200],
       ['[::1]:7780', 'http://[::1]:7780', 200],
       ['localhost:8443', 'https://localhost:8443', 200], // behind a TLS proxy on loopback
       // Without a port the scheme tells the port: only the http one is the
-      // core's.
+      // hub's.
       ['localhost', 'http://localhost', 200],
       ['localhost', 'https://localhost', 403],
       ['[::1]', 'https://[::1]', 403],
@@ -116,7 +116,7 @@ describe('guard', () => {
       expect([i, hostOnly(i)]).toEqual([i, want]);
   });
 
-  // trustedOrigin vouches for allowed origins and for the core's own
+  // trustedOrigin vouches for allowed origins and for the hub's own
   // localhost port, asked for from this host under that very Host.
   test('trustedOrigin', () => {
     const g = new Guard({ allowedOrigins: ['https://ide.example.com'] });

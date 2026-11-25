@@ -1,6 +1,6 @@
 // Generates the design tokens of the web UI (its CSS) from
 // spec/tokens.json, the one place they are defined, and validates them;
-// the core reads the terminal colors' defaults from the same file
+// the hub reads the terminal colors' defaults from the same file
 // (backend/kernel/config/ui/tokens.ts).
 //
 //   bun backend/scripts/tokens.ts           writes the generated files
