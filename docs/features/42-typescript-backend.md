@@ -589,12 +589,15 @@ live increments behind the stored events made before them; an append is
 refused by the worker unless the chat's row has the event before it, so
 when one write fails, nothing made after it is stored or told, the chat
 fails and goes on numbering from its last stored event: the log never has
-a hole. What a write that waits holds is the chats' stored events (and
-the replays of attaches), at most 64 MiB of them waiting before the chats
-that make more fail; the agents' output is still read, the sockets
-served, the requests that need no journal answered. The host's log is
-written in order by the runtime's pool, at most 1 MiB waiting, the rest
-counted.
+a hole. A prompt counts as taken (a resend under its `clientId` is not
+sent again, [37](37-agent-chats.md)) from when its user or queued event is
+made, not only once that is stored: the prompt's answer may reach the page
+before the journal took it. What a write that waits holds is the chats'
+stored events (and the replays of attaches), at most 64 MiB of them
+waiting before the chats that make more fail; the agents' output is still
+read, the sockets served, the requests that need no journal answered. The
+host's log is written in order by the runtime's pool, at most 1 MiB
+waiting, the rest counted.
 
 Every process the host and its adapters start (the agents, the probes
 that list or import sessions, the login shell) goes through

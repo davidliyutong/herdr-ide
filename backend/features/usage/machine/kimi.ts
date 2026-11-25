@@ -465,7 +465,8 @@ async function writeKimiFile(file: string, data: string): Promise<void> {
 
 /** The CLI's lock, held here. */
 export interface KimiLock {
-  /** Whether it is still the one set here. */
+  /** Whether it is still the one set here, answered while no touch of it
+   * runs. */
   held(): Promise<boolean>;
   /** Stops keeping it and removes it while it is still the one set here. */
   release(): Promise<void>;
@@ -547,9 +548,15 @@ async function keepLock(e: UsageEnv, dir: string): Promise<KimiLock> {
     await rmdir(dir).catch(() => {});
     throw err;
   }
-  let busy = Promise.resolve();
+  // The touches and the looks of held(), one after another.
+  let busy: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(f: () => Promise<T>): Promise<T> => {
+    const p = busy.then(f);
+    busy = p.catch(() => {});
+    return p;
+  };
   const timer = setInterval(() => {
-    busy = busy.then(async () => {
+    void inTurn(async () => {
       if (lost) return;
       try {
         if (await held()) await touch();
@@ -561,10 +568,10 @@ async function keepLock(e: UsageEnv, dir: string): Promise<KimiLock> {
   }, e.t.kimiLockUpdateMs);
   timer.unref?.();
   return {
-    held: async () => {
-      await busy;
-      return held();
-    },
+    // No touch runs while it looks, and one that came due meanwhile starts
+    // only after the caller took the answer: a touch whose check came
+    // before a takeover would make the lock that took over its own.
+    held: () => inTurn(held),
     release: async () => {
       clearInterval(timer);
       await busy;

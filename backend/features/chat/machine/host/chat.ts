@@ -242,9 +242,12 @@ export class Chat {
   private caughtUp = 0;
 
   /** The page's ids of the chat's last prompts its log has, the oldest
-   * first; sending: the prompts being taken, by the page's id. */
+   * first; storing: those of the prompts whose events are on their way to
+   * the journal (how many of each); sending: the prompts being taken, by
+   * the page's id. */
   private readonly clients = new Set<string>();
   private readonly clientOrder: string[] = [];
+  private readonly storing = new Map<string, number>();
   private readonly sending = new Map<string, Promise<chat.ChatError | undefined>>();
 
   /** The value of the chat's mode option its agent stated last, the agent
@@ -294,6 +297,14 @@ export class Chat {
     this.clients.add(id);
     this.clientOrder.push(id);
     if (this.clientOrder.length > MAX_CLIENT_IDS) this.clients.delete(this.clientOrder.shift()!);
+  }
+
+  /** The journal took or refused an event of the page's prompt id. */
+  private storedClient(id: string | undefined): void {
+    if (!id) return;
+    const n = (this.storing.get(id) ?? 0) - 1;
+    if (n > 0) this.storing.set(id, n);
+    else this.storing.delete(id);
   }
 
   /** The chat as it is now. */
@@ -381,6 +392,9 @@ export class Chat {
     this.flow.push(o);
     const n = Buffer.byteLength(f.line);
     const client = st.t === chat.EventType.User || st.t === chat.EventType.Queued ? st.clientId : undefined;
+    // A prompt whose event is on its way is one the host took: its answer
+    // may reach the page before the journal took the event.
+    if (client) this.storing.set(client, (this.storing.get(client) ?? 0) + 1);
     const stored = this.h.journal
       .appendEvent(
         this.id,
@@ -397,7 +411,8 @@ export class Chat {
           this.refused(o, err);
           return false;
         },
-      );
+      )
+      .finally(() => this.storedClient(client));
     return { asIs: st.t === e.t, stored };
   }
 
@@ -989,9 +1004,10 @@ export class Chat {
    * agent's start on a chat that has none (its session resumed, and what it
    * did in a terminal brought in first), else queued for the agent. A prompt
    * with the page's id of one of the chat's last MAX_CLIENT_IDS prompts its
-   * log has is that one sent again by a page that did not get its answer:
-   * it is answered OK and not sent again; one with the id of a prompt being
-   * taken gets that one's answer. */
+   * log has, or of one whose event is on its way to the log, is that one
+   * sent again by a page that did not get its answer: it is answered OK and
+   * not sent again; one with the id of a prompt being taken gets that one's
+   * answer. */
   async prompt(cmd: chat.Command): Promise<chat.ChatError | undefined> {
     let images: boolean;
     try {
@@ -1002,7 +1018,7 @@ export class Chat {
     const clientId = cmd.clientId ?? '';
     if (typeof clientId !== 'string' || clientId.length > 256) return perr(chat.Code.BadRequest, 'clientId too long');
     if (clientId !== '' && !this.deleted) {
-      if (this.clients.has(clientId)) {
+      if (this.clients.has(clientId) || this.storing.has(clientId)) {
         this.logf('a prompt it took already came again');
         return undefined;
       }
