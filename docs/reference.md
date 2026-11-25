@@ -592,7 +592,7 @@ Build scripts and tests:
 | `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
 | `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the core and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
 | `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |
-| `E2E_MACHINE` | `make e2e` | `ts` runs the tests against the TypeScript build (`dist/e2e/core-ts`, its machines' builds and `SHA256SUMS` in `dist/e2e/machines`); the specs of the features it does not serve yet skip with the reason. Default `go`. |
+| `E2E_MACHINE` | `make e2e` | `ts` runs the tests against the TypeScript build (`dist/e2e/core-ts`, its machines' builds and `SHA256SUMS` in `dist/e2e/machines`). Default `go`. |
 | `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets program-window tests fetch Xvfb. |
 | `GUI_TEST_XCLIENT` | `bun test features/gui/integration.test.ts` (`make it`, `scripts/gui-it.sh`) | The X program of the program windows' integration test (e2e/xclient built for the machine); without it the test builds one with go. |
 

@@ -555,7 +555,6 @@ over from the other with the terminals kept, which is the upgrade path.
 host and Docker's Linux (glibc and musl) into a directory with its
 `SHA256SUMS`, which the cores take as `--agent-dir`, offline;
 `E2E_MACHINE=ts` runs the end-to-end tests against the TypeScript build,
-the specs of the features it does not serve yet skipped with the reason,
 and `tests/nodes.spec.ts` has a newer node of the other build take a node
 over.
 
