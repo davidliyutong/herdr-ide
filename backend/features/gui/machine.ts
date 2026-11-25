@@ -36,6 +36,7 @@ import { closeStream } from '#shared/proto/yamux.ts';
 import { defineMachine, type ActionContext, type MachineEnv } from '#machine/feature.ts';
 import type { Conn } from '#machine/stream.ts';
 import { Display, keeperFree, linux } from './machine/display.ts';
+import type { GPUPaths } from './machine/gpu.ts';
 import { HelperFile, lastLine, messages, Out, pruneHelpers, startHelper, type Carried, type Proc } from './machine/helper.ts';
 import { Pick } from './machine/pick.ts';
 import { Video } from './machine/video.ts';
@@ -60,6 +61,8 @@ export interface GUIMachineOptions {
   path?: string;
   /** Whether the machine is Linux (tests on other systems). */
   linux?: boolean;
+  /** Where the kernel describes GPUs (tests). */
+  gpu?: GPUPaths;
   /** Starts the window manager's helper with args (tests give a fake). */
   startWM?: (args: string[]) => Proc;
 }
@@ -139,6 +142,7 @@ export class GUI {
       xTmp: o.xTmp,
       path: o.path,
       linux: o.linux,
+      gpu: o.gpu,
     });
   }
 

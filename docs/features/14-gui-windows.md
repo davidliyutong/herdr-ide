@@ -563,7 +563,11 @@ See [SECURITY.md](../../SECURITY.md).
   the compositor's protocol, errors and bounds, NVIDIA's layouts.
 - `backend/features/gui/integration.test.ts` (`make it`, Linux with Xvfb;
   `scripts/gui-it.sh` runs it in Docker): the helper against a real Xvfb
-  through the node, as `TestGUIWindows`.
+  through the node, as `TestGUIWindows` (and on the GPU display where the
+  machine has one); an Xwayland that does not come up leaving Xvfb, as
+  `TestGPUDisplayFallsBack`; video through a stand-in encoder (the
+  encoder's protocol, VP8 only): probed, installed by digest, a window that
+  keeps changing sent as a stream that ends when nobody watches.
 - `backend/features/gui/state.test.ts`, `manager.test.ts`,
   `router.test.ts`: terminal environments, enabling open panes (`enable`),
   frame and video routing, forged acknowledgements and refresh floods

@@ -246,6 +246,15 @@ pub const WM = struct {
         return id;
     }
 
+    /// Whether drawable is window, a window this manages, or one of its
+    /// layers.
+    pub fn owns(wm: *WM, win: u32, drawable: u32) bool {
+        if (wm.wins.get(win) == null) return false;
+        if (drawable == win) return true;
+        const l = wm.layers.get(drawable) orelse return false;
+        return l.owner == win;
+    }
+
     /// The damage object of a window or layer, 0 for none.
     pub fn damageOf(wm: *WM, d: u32) u32 {
         if (wm.wins.get(d)) |m| return m.damage;

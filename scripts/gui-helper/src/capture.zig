@@ -30,6 +30,7 @@ const Seg = struct { id: u32, shmid: i32, ptr: [*]u8, size: usize };
 const Item = struct {
     job: proto.Job,
     pix: ?[]const u8 = null,
+    managed: bool = false,
     own: ?[]u8 = null,
     capture_us: u32 = 0,
     data: std.ArrayList(u8) = .empty,
@@ -163,7 +164,11 @@ pub const Capture = struct {
         var need: usize = 0;
         for (c.items, 0..) |*it, i| {
             it.* = .{ .job = try proto.job(jobs, i) };
-            need += @as(usize, it.job.w) * it.job.h * 4;
+            // Only the display's managed windows and their layers are
+            // captured: another drawable (the root, another client's
+            // pixmap) gives nothing.
+            it.managed = c.wm.owns(it.job.window, it.job.drawable);
+            if (it.managed) need += @as(usize, it.job.w) * it.job.h * 4;
         }
         c.busy = true;
         c.written = 0;
@@ -177,6 +182,7 @@ pub const Capture = struct {
         // The damage of what is captured: changes from here on are
         // reported again.
         for (c.items, 0..) |*it, i| {
+            if (!it.managed) continue;
             var seen = false;
             for (c.items[0..i]) |o| if (o.job.drawable == it.job.drawable) {
                 seen = true;
@@ -186,14 +192,16 @@ pub const Capture = struct {
             if (d != 0) try x.damageSubtract(c.wm.damage, d);
         }
         const seg = c.segment(need);
-        const Pending = struct { seq: u32, shm: bool, off: usize };
+        const Pending = struct { seq: u32, shm: bool, off: usize, skip: bool = false };
         const ps = try c.gpa.alloc(Pending, c.items.len);
         defer c.gpa.free(ps);
         var off: usize = 0;
         for (c.items, 0..) |*it, i| {
             const j = it.job;
             const size = @as(usize, j.w) * j.h * 4;
-            if (seg != null and off + size <= seg.?.size) {
+            if (!it.managed) {
+                ps[i] = .{ .seq = 0, .shm = false, .off = 0, .skip = true };
+            } else if (seg != null and off + size <= seg.?.size) {
                 ps[i] = .{ .seq = try x.shmGetImage(c.wm.shm, j.drawable, j.x, j.y, j.w, j.h, seg.?.id, @intCast(off)), .shm = true, .off = off };
                 off += size;
             } else {
@@ -204,6 +212,7 @@ pub const Capture = struct {
         for (c.items, 0..) |*it, i| {
             const j = it.job;
             const size = @as(usize, j.w) * j.h * 4;
+            if (ps[i].skip) continue;
             const r = x.reply(ps[i].seq) catch |e| blk: {
                 if (e != error.XError) return e;
                 if (ps[i].shm) if (x.last_err) |xe| if (xe.code == c.wm.shm.err or xe.code == 10) {
