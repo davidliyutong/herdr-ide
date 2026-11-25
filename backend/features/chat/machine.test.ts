@@ -81,7 +81,6 @@ class FakeMachine {
         await t.exited;
         return true;
       },
-      sessions: () => [],
       signal: new AbortController().signal,
     } as MachineEnv;
   }
