@@ -67,10 +67,9 @@ export function verifyKey(random: (n: number) => Buffer = randomBytes): string {
 }
 
 export function coreEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform): NodeJS.ProcessEnv {
-  // Node's fetch takes the proxy of HTTPS_PROXY, HTTP_PROXY and NO_PROXY
-  // only when asked (Node 24: NODE_USE_ENV_PROXY), as Bun's does by itself:
-  // the core's downloads (machine builds) go through the user's proxy.
-  env = { ...env, NODE_USE_ENV_PROXY: '1' };
+  // The core takes the user's proxy (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) for
+  // its own fetch itself (backend/shared/lib/proxy.ts): nothing is added
+  // here that the programs it starts would inherit.
   // Windows keeps its Path as it is (its name differs in case, which a copy
   // of the environment would duplicate).
   if (platform === 'win32') return env;

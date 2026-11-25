@@ -30,7 +30,12 @@ async function embedded(): Promise<{ files: Files; web: Files } | null> {
   };
 }
 
-export async function openPayloads(o: { agentDir: string; extDir: string; webDir: string }): Promise<Payloads> {
+export async function openPayloads(o: {
+  agentDir: string;
+  extDir: string;
+  webDir: string;
+  logger?: (line: string) => void;
+}): Promise<Payloads> {
   const e = await embedded();
   // --ext-dir holds <bridge>.vsix itself; the archive has it under ext/.
   const ext: Files | null = o.extDir
@@ -39,5 +44,5 @@ export async function openPayloads(o: { agentDir: string; extDir: string; webDir
   const staged = Bun.isStandaloneExecutable ? null : dirFiles(fileURLToPath(new URL('../../../dist/payload/', import.meta.url)));
   const files = layered(ext, e?.files ?? staged);
   const web = o.webDir ? dirFiles(o.webDir) : (e?.web ?? null);
-  return payloads({ files, web, agentDir: o.agentDir || undefined });
+  return payloads({ files, web, agentDir: o.agentDir || undefined, ...(o.logger ? { logger: o.logger } : {}) });
 }

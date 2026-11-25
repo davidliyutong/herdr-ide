@@ -122,13 +122,22 @@ test('the TypeScript machine side: every platform by its digests, the own execut
       [`agents/${CORE_BIN}-linux-amd64.gz`, gzipSync(Buffer.from('go'))],
     ]),
   );
-  const p = payloads({ files, machineCache: temp() });
+  // How often the core's own copy is read.
+  let reads = 0;
+  const counting = { get: (path: string) => (path.endsWith('-machine-linux-amd64.gz') && reads++, files.get(path)) };
+  const p = payloads({ files: counting, machineCache: temp() });
   const b = await p.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' });
   if (b.kind !== 'ts') throw new Error('not the TypeScript build');
   expect(b.digest).toBe(sha256(own));
   expect(b.version).toBe(sha256(own).slice(0, 16));
   expect(b.url).toBe(`https://releases.example/download/v1.2.3/${CORE_BIN}-machine-linux-amd64.gz`);
+  // Machines of one platform deployed at once: one load, shared, and
+  // kept for the next.
+  const again = await p.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' });
+  const loads = await Promise.all([b.load(), b.load(), again.kind === 'ts' ? again.load() : null]);
+  for (const l of loads) expect(l).toEqual(ownGz);
   expect(await b.load()).toEqual(ownGz);
+  expect(reads).toBe(1);
   const m = await p.machine({ os: 'linux', arch: 'amd64', libc: 'musl' });
   expect(m.kind === 'ts' && m.key).toBe('linux-amd64-musl');
   await expect(p.machine({ os: 'linux', arch: 'riscv64' })).rejects.toThrow(/^platform_unsupported/);

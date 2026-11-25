@@ -97,6 +97,8 @@ export function payloads(o: {
   /** The cache of machine executables the core downloaded (default
    * ~/<DATA_DIR_NAME>/cache/machine). */
   machineCache?: string;
+  /** Where what a machine build's sources refused is logged. */
+  logger?: (line: string) => void;
 }): Payloads {
   const agents = new Map<string, Promise<GoBuild>>();
   const gzs = new Map<string, Promise<{ gz: Buffer; digest: string }>>();
@@ -120,6 +122,9 @@ export function payloads(o: {
     manifest ??= o.files.get(MANIFEST_PATH).then((b) => (b ? (JSON.parse(Buffer.from(b).toString('utf8')) as Manifest) : null));
     return manifest;
   };
+  // One resolve per platform at a time and after: N machines of one
+  // platform load its executable once (a failure is tried again).
+  const loads = new Map<string, Promise<Buffer>>();
   const goBuild = (os: string, arch: string) =>
     cached(agents, `${os}-${arch}`, async () => {
       const name = `${CORE_BIN}-${os}-${arch}`;
@@ -137,13 +142,16 @@ export function payloads(o: {
       const m = await tsManifest();
       if (!m) return goBuild(t.os, t.arch);
       const key = machineKey(t);
-      const b = tsBuild(m, key, (signal) =>
-        resolveMachine(b!, {
-          dir: o.agentDir || undefined,
-          cacheDir: o.machineCache ?? join(userHomeDir(), DATA_DIR_NAME, 'cache', 'machine'),
-          own: () => o.files.get(ownMachinePath(key)),
-          signal,
-        }),
+      // Shared by the machines that wait for it: no machine's signal ends it.
+      const b = tsBuild(m, key, () =>
+        cached(loads, key, () =>
+          resolveMachine(b!, {
+            dir: o.agentDir || undefined,
+            cacheDir: o.machineCache ?? join(userHomeDir(), DATA_DIR_NAME, 'cache', 'machine'),
+            own: () => o.files.get(ownMachinePath(key)),
+            ...(o.logger ? { logger: o.logger } : {}),
+          }),
+        ),
       );
       if (!b) throw new Unsupported(DeployCode.PlatformUnsupported, `this build has no machine executable for ${key}`);
       return b;

@@ -41,9 +41,14 @@ test('PATH gains the usual installations on macOS and Linux; Windows keeps its o
     assert.ok(coreEnv({}, '/Users/test', p).PATH?.includes('/opt/homebrew/bin'));
   }
   const env = { Path: 'C:\\Windows\\System32' };
-  assert.deepEqual(coreEnv(env, 'C:\\Users\\test', 'win32'), { ...env, NODE_USE_ENV_PROXY: '1' });
-  // Node's fetch honours the proxy variables only when asked.
-  for (const p of ['darwin', 'linux', 'win32'] as const) assert.equal(coreEnv({}, '/home/test', p).NODE_USE_ENV_PROXY, '1');
+  assert.equal(coreEnv(env, 'C:\\Users\\test', 'win32'), env);
+  // Nothing that switches the proxy on for every program the core starts
+  // (the core sets its own, backend/shared/lib/proxy.ts).
+  for (const p of ['darwin', 'linux', 'win32'] as const) {
+    const out = coreEnv({ HTTPS_PROXY: 'http://proxy:3128' }, '/home/test', p);
+    assert.equal(out.NODE_USE_ENV_PROXY, undefined);
+    assert.equal(out.HTTPS_PROXY, 'http://proxy:3128');
+  }
 });
 
 test("the app's origin: https under .localhost, named after the product", () => {

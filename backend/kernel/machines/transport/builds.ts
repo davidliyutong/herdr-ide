@@ -38,6 +38,8 @@ export interface TSBuild {
   digest: string;
   /** The SHA-256 of its release asset, the executable gzip-compressed. */
   gzDigest: string;
+  /** The asset's size in bytes. */
+  gzSize: number;
   /** A digest of the executable: its directory on machines. */
   version: string;
   /** Where the release serves it; absent for a build of no release. */
@@ -94,6 +96,7 @@ export function tsBuild(m: Manifest, key: string, load: TSBuild['load']): TSBuil
     key,
     digest: e.sha256,
     gzDigest: e.gz,
+    gzSize: e.size,
     version: e.sha256.slice(0, 16),
     ...(m.release ? { url: `${m.release.replace(/\/$/, '')}/${machineAsset(key)}.gz` } : {}),
     load,

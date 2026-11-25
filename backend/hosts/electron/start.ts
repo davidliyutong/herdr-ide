@@ -32,7 +32,7 @@ export function startCore(s: CoreStart, o: { logger: Logger; pty?: SpawnPty }): 
   const problem = startProblem(s);
   if (problem) throw new Error(problem);
   const controlDir = process.platform === 'win32' ? '' : makeControlDir(s.instance);
-  const p = payloads({ files: dirFiles(s.payload), web: dirFiles(s.web), agentDir: s.agentDir });
+  const p = payloads({ files: dirFiles(s.payload), web: dirFiles(s.web), agentDir: s.agentDir, logger: o.logger });
   const features = coreFeatures({
     payloads: p,
     controlDir,

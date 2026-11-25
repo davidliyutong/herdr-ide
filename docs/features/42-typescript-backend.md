@@ -262,30 +262,49 @@ desktop app its own platform's). A machine that does not hold the
 executable gets it, in this order (`backend/kernel/machines/transport`,
 `ssh.ts` and `sources.ts`):
 
-1. The machine downloads the release's asset itself, with `curl` or
-   `wget` (10 s to connect, 5 minutes in all), unless the setting
-   `machines.download` is off for it (or `--machine-download=false`).
+1. The machine downloads the release's asset itself, with `curl`, else
+   `wget`, unless the setting `machines.download` is off for it (or
+   `--machine-download=false`) or its download failed within the last day
+   (the core keeps that in memory, per machine). The tool runs without its
+   user's configuration (`curl -q`; an empty `WGETRC`, GNU wget's
+   `--no-config` where it has it), over the URL's scheme only (`curl
+   --proto`, GNU wget's `--https-only` where it has it), with one try, few
+   redirects and 10 s to connect; the download goes to a file beside its
+   place through `head`, so no more than the asset's size is written, and
+   a watchdog ends it after 5 minutes in all, whatever the tool (wget's
+   `-T` bounds each read, not the whole). Only a file of the asset's size
+   and SHA-256 is decompressed. BusyBox's wget may not verify the
+   server's certificate: the digests still hold the file to the build.
 2. Else, or when that fails (neither tool, no route to the release, an
    asset that is not the executable), the core uploads it over ssh. It
    takes the executable from the first of: the operator's directory
    (`--agent-dir`, the asset as the release names it or uncompressed),
    its cache (`~/.<slug>/cache/machine/`), its own copy, a download from
    the release, which goes through the proxy of `HTTPS_PROXY`,
-   `HTTP_PROXY` and `NO_PROXY` (Bun's fetch reads them; the desktop app
-   starts its core with `NODE_USE_ENV_PROXY=1`, without which Node's
-   fetch ignores them) and is cached. Each is checked against the digests
-   built into the core before it is used or cached: a file of the
-   directory that is not the build is refused, a cached one removed.
+   `HTTP_PROXY` and `NO_PROXY` and is cached. Bun's fetch reads those
+   itself; the desktop app's core, in Node, sets them for its own process
+   with `http.setGlobalProxyFromEnv` (`backend/shared/lib/proxy.ts`,
+   loopback always excepted), so no variable reaches the programs it
+   starts (`NODE_USE_ENV_PROXY` would make every Node program of the local
+   machine send its requests, loopback's too, to the proxy). Each source
+   is read and hashed piecewise, no more than the asset's size, and
+   checked against the digests built into the core before it is used or
+   cached: a file of the directory that is not the build is refused, a
+   cached one removed. Machines of one platform share one load.
 
 Both install the same way: the gzip-compressed executable decompressed
 beside its place, its SHA-256 computed on the machine (`sha256sum`,
 `shasum` or `openssl`), renamed into place only when it is the one the
 core names, else removed and failed, and printed, which the core checks
-again once the script ran; an install the connection drops removes its
-file (`trap`), and the nodes' housekeeping what a killed shell left, after
-an hour. The local install checks it in process. When none of the sources
-has it the machine is refused with `build_unavailable` and what each
-source said, which the UI explains; it is dialed again later. A build of
+again once the script ran. Its files are removed when the script ends
+(`trap`): an upload ends when its input does (the connection went), a
+download within its bounds (sshd sends no hangup to a session without a
+terminal, so a dropped connection does not end it sooner); the nodes'
+housekeeping removes what a killed shell left, after an hour. The local
+install checks it in process. When none of the sources has it the machine
+is refused with `build_unavailable` and what each source said (naming no
+path of the core's host, which the core logs), which the UI explains; it
+is dialed again later. A build of
 no release (development, the end-to-end tests) has no download URL: its
 machines get their executable from `--agent-dir` or the core's own copy.
 Which C library a machine has is what glibc answers (`getconf

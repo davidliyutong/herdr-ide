@@ -50,6 +50,8 @@ export interface DesktopOptions {
   /** A directory with code-server-<version>-<os>-<arch>.tar.gz, which the
    * core installs from instead of downloading. */
   codeServerSeed?: string;
+  /** More of the app's environment (a proxy's settings). */
+  env?: Record<string, string>;
 }
 
 /** One of the app's processes (app.getAppMetrics). */
@@ -92,6 +94,7 @@ export class Desktop {
           [`${PREFIX}SEED_DIR`]: o.codeServerSeed,
           DISPLAY: process.env.DISPLAY,
           WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+          ...o.env,
         }),
         timeout: 60_000,
       });

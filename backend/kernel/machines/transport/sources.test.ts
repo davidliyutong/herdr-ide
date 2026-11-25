@@ -27,7 +27,7 @@ const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 const KEY = 'linux-amd64';
 const EXE = Buffer.from('#!/bin/sh\necho a machine build\n');
 const GZ = gzipSync(EXE);
-const build = (url?: string) => ({ key: KEY, digest: sha256(EXE), gzDigest: sha256(GZ), ...(url ? { url } : {}) });
+const build = (url?: string) => ({ key: KEY, digest: sha256(EXE), gzDigest: sha256(GZ), gzSize: GZ.length, ...(url ? { url } : {}) });
 const asset = machineAsset(KEY);
 
 describe("the operator's directory", () => {
@@ -42,14 +42,25 @@ describe("the operator's directory", () => {
     }
   });
 
-  test('a tampered file is refused, and says so when nothing else has the build', async () => {
+  test("a tampered file is refused, and says so (naming no path of the core's host, which it logs) when nothing else has the build", async () => {
     const dir = temp();
+    const cacheDir = temp();
     writeFileSync(join(dir, `${asset}.gz`), gzipSync(Buffer.from('tampered')));
     writeFileSync(join(dir, asset), Buffer.from('tampered too'));
-    const e = await resolveMachine(build(), { dir, cacheDir: temp() }).catch((x) => x as Error);
+    const logged: string[] = [];
+    const e = await resolveMachine(build(), { dir, cacheDir, logger: (l) => logged.push(l) }).catch((x) => x as Error);
     expect(deployCode(e)).toBe('build_unavailable');
-    expect((e as Error).message).toContain(`${asset}.gz refused`);
-    expect((e as Error).message).toContain(`${asset} refused`);
+    expect((e as Error).message).toContain(`--agent-dir's ${asset}.gz: sha256`);
+    expect((e as Error).message).toContain(`--agent-dir's ${asset}: sha256`);
+    expect((e as Error).message).not.toContain(dir);
+    expect(logged.join('\n')).toContain(join(dir, `${asset}.gz`));
+  });
+
+  test('a file larger than the asset is not read past its size', async () => {
+    const dir = temp();
+    writeFileSync(join(dir, `${asset}.gz`), Buffer.concat([GZ, Buffer.alloc(1 << 20)]));
+    const e = await resolveMachine(build(), { dir, cacheDir: temp() }).catch((x) => x as Error);
+    expect((e as Error).message).toContain(`larger than ${GZ.length} bytes`);
   });
 });
 
@@ -63,6 +74,8 @@ describe('the cache and the own copy', () => {
     writeFileSync(file, gzipSync(Buffer.from('tampered')));
     const e = await resolveMachine(build(), { cacheDir }).catch((x) => x as Error);
     expect(deployCode(e)).toBe('build_unavailable');
+    expect((e as Error).message).toContain("the cache's copy: sha256");
+    expect((e as Error).message).not.toContain(cacheDir);
     expect(existsSync(file)).toBe(false);
   });
 
@@ -79,7 +92,7 @@ describe('the cache and the own copy', () => {
   test("the core's own copy, checked", async () => {
     expect(gunzipSync(await resolveMachine(build(), { cacheDir: temp(), own: async () => GZ }))).toEqual(EXE);
     const e = await resolveMachine(build(), { cacheDir: temp(), own: async () => gzipSync(Buffer.from('x')) }).catch((x) => x as Error);
-    expect((e as Error).message).toContain("the core's own copy refused");
+    expect((e as Error).message).toContain("the core's own copy: sha256");
   });
 });
 

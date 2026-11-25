@@ -10,8 +10,9 @@
 // display.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
-import { APP_PARTITION, ORIGIN, tcpListeners } from '../harness/desktop';
+import { APP_PARTITION, Desktop, desktopUnavailable, ORIGIN, tcpListeners } from '../harness/desktop';
 import { expect, test } from '../harness/fixtures';
 import { unported } from '../harness/paths';
 import { newTerminalTab } from '../harness/ui';
@@ -159,4 +160,64 @@ test('the desktop app runs its core in process, without a listener', async ({ de
   }
   await expect(code.locator('.explorer-folders-view .monaco-list-row', { hasText: 'report.txt' })).toBeVisible({ timeout: 60_000 });
   expect(await code.evaluate(() => typeof (window as { desktopShell?: unknown }).desktopShell)).toBe('undefined');
+});
+
+// Behind the user's proxy (HTTPS_PROXY, HTTP_PROXY): the core's own
+// downloads go through it (code-server's, from its release), and nothing it
+// starts gets a switch that sends all of a program's requests, loopback's
+// too, to the proxy (NODE_USE_ENV_PROXY): the local machine's terminals
+// get the user's settings as they are.
+test("behind a proxy, the core downloads through it and its programs get only the user's settings", async ({}, info) => {
+  test.setTimeout(180_000);
+  const why = desktopUnavailable();
+  info.skip(!!why, why);
+  // A proxy on loopback that refuses every request, recording it.
+  const seen: string[] = [];
+  const proxy = createServer((req, res) => {
+    seen.push(`${req.method} ${req.url}`);
+    res.writeHead(403).end();
+  });
+  proxy.on('connect', (req, sock) => {
+    seen.push(`CONNECT ${req.url}`);
+    sock.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+  });
+  await new Promise<void>((r) => proxy.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+  const vscode = !unported('vscode');
+  const desktop = await Desktop.launch({
+    settings: vscode ? { 'plugins.vscode.enabled': true } : {},
+    // Both cases: the harness sets both to a proxy that answers nothing.
+    env: { HTTPS_PROXY: url, HTTP_PROXY: url, https_proxy: url, http_proxy: url },
+  });
+  try {
+    await desktop.localReady();
+    await newTerminalTab(desktop.win);
+    const out = join(desktop.home.dir, 'env.txt');
+    await desktop.win.keyboard.type(`env > '${out}'`);
+    await desktop.win.keyboard.press('Enter');
+    await waitFor(() => existsSync(out) && readFileSync(out, 'utf8').includes('HTTPS_PROXY='), { what: "the terminal's environment" });
+    const env = readFileSync(out, 'utf8');
+    expect(env).toContain(`HTTPS_PROXY=${url}`);
+    expect(env).not.toContain('NODE_USE_ENV_PROXY');
+    if (vscode) {
+      // code-server is not at hand: the core downloads it, through the proxy.
+      const started = await desktop.api('POST', '/api/m/local/code/start').catch((e: Error) => e.message);
+      try {
+        await waitFor(() => seen.some((s) => /^CONNECT [^ ]+:443$/.test(s)), {
+          what: "the core's download through the proxy",
+          timeout: 60_000,
+        });
+      } catch (e) {
+        const status = await desktop.api('GET', '/api/m/local/code/status').catch((x: Error) => x.message);
+        throw new Error(
+          `${(e as Error).message}\nstart: ${JSON.stringify(started)}\nstatus: ${JSON.stringify(status)}\nproxy: ${JSON.stringify(seen)}\n${desktop.logs()}`,
+        );
+      }
+    } else info.annotations.push({ type: 'skipped', description: "the core's download: VS Code is not served by this machine build" });
+    // Nothing asked the proxy for loopback.
+    expect(seen.filter((s) => /127\.0\.0\.1|localhost|\[::1\]/.test(s))).toEqual([]);
+  } finally {
+    await desktop.close();
+    proxy.close();
+  }
 });

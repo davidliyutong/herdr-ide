@@ -96,7 +96,7 @@ export async function serve(argv: string[]): Promise<void> {
       );
 
   const controlDir = process.platform === 'win32' ? '' : makeControlDir(instance);
-  const payloads = await openPayloads({ agentDir: f['agent-dir'], extDir: f['ext-dir'], webDir: f['web-dir'] });
+  const payloads = await openPayloads({ agentDir: f['agent-dir'], extDir: f['ext-dir'], webDir: f['web-dir'], logger });
   let codeServerIdle: number;
   try {
     codeServerIdle = parseDuration(f['code-server-idle']);

@@ -353,7 +353,8 @@ A core that deploys the TypeScript machine side (built with
 own platform's machine executable. A machine of another platform first
 tries to download its executable from the core's release itself (`curl` or
 `wget`; the setting `machines.download`, or `--machine-download=false`,
-turns this off), then gets it from the core over ssh: from the directory
+turns this off, and a machine whose download failed is not asked again
+for a day), then gets it from the core over ssh: from the directory
 of `--agent-dir`, the core's cache (`~/.veldr/cache/machine/`), the core's
 own copy, or a download from the release on the core host, through the
 proxy of `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. For an offline site,
@@ -459,7 +460,7 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Written | Removed |
 | --- | --- | --- |
-| Agent builds (`~/.veldr/agent/`) | On connect, by content hash: the Go executable, or the TypeScript machine side's executable (88–108 MB; downloaded by the machine from the core's release, or uploaded compressed, 41–52 MB); either is put in place only when the SHA-256 the machine computed is the one expected, which the core checks again. | Unused for 14 days (a running node touches its build's directory every 24 h). A partial download or upload is removed when its connection drops, or by a node's housekeeping after 1 h. |
+| Agent builds (`~/.veldr/agent/`) | On connect, by content hash: the Go executable, or the TypeScript machine side's executable (88–108 MB; downloaded by the machine from the core's release, or uploaded compressed, 41–52 MB); either is put in place only when the SHA-256 the machine computed is the one expected, which the core checks again. | Unused for 14 days (a running node touches its build's directory every 24 h). A partial download or upload is removed when its script ends: an upload when its input ends (the connection went), a download within its bounds (the asset's size, 5 min); what a killed shell left, by a node's housekeeping after 1 h. |
 | Machine executables (`~/.veldr/cache/machine/veldr-machine-<platform>-<digest>.gz`, core host) | Downloaded from the core's release when a machine needs one the core neither has in `--agent-dir` nor carries, checked against the digests built into the core first. | Unused for 14 days (touched on use); one that is not the build when it is read. |
 | herdr-core executable (`<data>/hosts/<host>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
 | herdr-core state (`~/.local/state/herdr-core/veldr[-<instance>]-<host id>/`) | By herdr-core. | Kept until the user removes it. |
