@@ -235,21 +235,24 @@ describe('the app-server and its requests', () => {
     { mode: 'ignore-eof', want: ['eof', 'term'], min: TEST_TIMING.grace },
     { mode: 'ignore-eof,ignore-term', want: ['eof', 'term'], min: TEST_TIMING.grace + TEST_TIMING.term },
   ]) {
-    extended(`close ends the app-server gracefully: its input first, SIGTERM after the grace, SIGKILL after more (${tc.mode || 'exits'})`, async () => {
-      const sc = new Script();
-      sc.begin();
-      const f = new FakeRun(tc.mode, HANDSHAKE, sc.file());
-      const { s } = await start(f);
-      const began = Date.now();
-      await s.close(AbortSignal.timeout(10_000));
-      let settled = false;
-      void s.done.then(() => (settled = true));
-      await Promise.resolve();
-      expect(settled).toBe(true);
-      expect(await s.done).toBeUndefined();
-      expect(f.events(1)).toEqual(tc.want);
-      expect(Date.now() - began).toBeGreaterThanOrEqual(tc.min);
-    });
+    extended(
+      `close ends the app-server gracefully: its input first, SIGTERM after the grace, SIGKILL after more (${tc.mode || 'exits'})`,
+      async () => {
+        const sc = new Script();
+        sc.begin();
+        const f = new FakeRun(tc.mode, HANDSHAKE, sc.file());
+        const { s } = await start(f);
+        const began = Date.now();
+        await s.close(AbortSignal.timeout(10_000));
+        let settled = false;
+        void s.done.then(() => (settled = true));
+        await Promise.resolve();
+        expect(settled).toBe(true);
+        expect(await s.done).toBeUndefined();
+        expect(f.events(1)).toEqual(tc.want);
+        expect(Date.now() - began).toBeGreaterThanOrEqual(tc.min);
+      },
+    );
   }
 
   extended('what the app-server left running in its group ends with it: after a close and after its own exit', async () => {

@@ -450,23 +450,27 @@ describe('the end', () => {
     expect(await s.done).toBeUndefined();
   }, 30_000);
 
-  extended('a run whose program exited tells no process while its group is being ended', async () => {
-    const { r, s } = await started([...initLines(), { dir: 'spawn', text: 'stubborn' }, userIn('go'), { dir: 'exit', code: 1 }], {
-      timing: { grace: 5000, term: 2000 },
-    });
-    await r.until(s, 3);
-    const pid = pids(r).runs[0]!;
-    expect(s.pid).toBe(pid);
-    await s.prompt({ content: text('go'), message: '', clientId: '', recorded: true }, sig());
-    const deadline = Date.now() + 5000;
-    while (s.pid !== 0 && Date.now() < deadline) await Bun.sleep(5);
-    expect(s.pid).toBe(0);
-    let done = false;
-    void s.done.then(() => (done = true));
-    await Bun.sleep(50);
-    expect(done).toBe(false);
-    await within(s.done, 10_000, 'the session did not end');
-  }, 30_000);
+  extended(
+    'a run whose program exited tells no process while its group is being ended',
+    async () => {
+      const { r, s } = await started([...initLines(), { dir: 'spawn', text: 'stubborn' }, userIn('go'), { dir: 'exit', code: 1 }], {
+        timing: { grace: 5000, term: 2000 },
+      });
+      await r.until(s, 3);
+      const pid = pids(r).runs[0]!;
+      expect(s.pid).toBe(pid);
+      await s.prompt({ content: text('go'), message: '', clientId: '', recorded: true }, sig());
+      const deadline = Date.now() + 5000;
+      while (s.pid !== 0 && Date.now() < deadline) await Bun.sleep(5);
+      expect(s.pid).toBe(0);
+      let done = false;
+      void s.done.then(() => (done = true));
+      await Bun.sleep(50);
+      expect(done).toBe(false);
+      await within(s.done, 10_000, 'the session did not end');
+    },
+    30_000,
+  );
 });
 
 describe('requests', () => {

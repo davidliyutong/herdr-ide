@@ -83,38 +83,42 @@ describe('a run of git', () => {
     expect(res.out.length).toBeLessThanOrEqual(1000);
   });
 
-  extended('a program git leaves holding its output does not hold the run, and keeps running (also in a session of its own)', async () => {
-    const detach = Bun.which('setsid') ?? (Bun.which('perl') ? `${Bun.which('perl')} -MPOSIX -e 'POSIX::setsid(); exec @ARGV'` : '');
-    const cases: Record<string, string> = { 'same group': 'sleep 30' };
-    if (detach) cases['own session'] = `${detach} sleep 30`;
-    for (const [name, child] of Object.entries(cases)) {
-      const pids = join(h.home, `bg-${name.replace(' ', '-')}.pids`);
-      try {
-        const f = fake(`${child} &\necho $! > ${pids}\necho ok\n`, { waitDelayMs: 200 });
-        const start = Date.now();
-        const res = await f.run({ args: ['status'] });
-        expect([name, res.code, res.out.toString()]).toEqual([name, 0, 'ok\n']);
-        expect(Date.now() - start).toBeLessThan(10_000);
-        const [pid] = pidsOf(pids);
-        expect(alive(pid)).toBe(true);
-      } finally {
-        killAll(pids);
+  extended(
+    'a program git leaves holding its output does not hold the run, and keeps running (also in a session of its own)',
+    async () => {
+      const detach = Bun.which('setsid') ?? (Bun.which('perl') ? `${Bun.which('perl')} -MPOSIX -e 'POSIX::setsid(); exec @ARGV'` : '');
+      const cases: Record<string, string> = { 'same group': 'sleep 30' };
+      if (detach) cases['own session'] = `${detach} sleep 30`;
+      for (const [name, child] of Object.entries(cases)) {
+        const pids = join(h.home, `bg-${name.replace(' ', '-')}.pids`);
+        try {
+          const f = fake(`${child} &\necho $! > ${pids}\necho ok\n`, { waitDelayMs: 200 });
+          const start = Date.now();
+          const res = await f.run({ args: ['status'] });
+          expect([name, res.code, res.out.toString()]).toEqual([name, 0, 'ok\n']);
+          expect(Date.now() - start).toBeLessThan(10_000);
+          const [pid] = pidsOf(pids);
+          expect(alive(pid)).toBe(true);
+        } finally {
+          killAll(pids);
+        }
       }
-    }
-    if (detach) {
-      // Over its time it ends although a child that left the group keeps
-      // its output open.
-      const pids = join(h.home, 'bg-timeout.pids');
-      try {
-        const f = fake(`${detach} sleep 30 &\necho $! > ${pids}\nsleep 30\n`, { waitDelayMs: 200 });
-        const start = Date.now();
-        expect(await codeOf(f.run({ args: ['status'], timeoutMs: 300 }))).toBe('timeout');
-        expect(Date.now() - start).toBeLessThan(10_000);
-      } finally {
-        killAll(pids);
+      if (detach) {
+        // Over its time it ends although a child that left the group keeps
+        // its output open.
+        const pids = join(h.home, 'bg-timeout.pids');
+        try {
+          const f = fake(`${detach} sleep 30 &\necho $! > ${pids}\nsleep 30\n`, { waitDelayMs: 200 });
+          const start = Date.now();
+          expect(await codeOf(f.run({ args: ['status'], timeoutMs: 300 }))).toBe('timeout');
+          expect(Date.now() - start).toBeLessThan(10_000);
+        } finally {
+          killAll(pids);
+        }
       }
-    }
-  }, 30_000);
+    },
+    30_000,
+  );
 
   test('at most MAX_RUNS at once; another waits briefly, then fails busy; the slots are free again after', async () => {
     const pids = join(h.home, 'busy.pids');

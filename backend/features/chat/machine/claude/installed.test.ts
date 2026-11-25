@@ -67,22 +67,26 @@ test('the SDK installed in a data directory runs a recording as the development 
   }
 }, 60_000);
 
-extended('a compiled executable loads it from the data directory', async () => {
-  const { base, pin } = await installed();
-  const out = join(tempDir('sdkc-'), 'compiled');
-  dirs.push(join(out, '..'));
-  const build = Bun.spawnSync(
-    [process.execPath, 'build', '--compile', join(import.meta.dir, 'testdata', 'compiled.ts'), '--outfile', out],
-    // In the temporary directory: Bun leaves a .<hash>.bun-build copy of
-    // the executable in its working directory.
-    { cwd: join(out, '..'), stdout: 'pipe', stderr: 'pipe' },
-  );
-  expect(build.exitCode).toBe(0);
-  // The executable carries none of the SDK.
-  expect(readFileSync(out).includes('CLAUDE_SDK_CAN_USE_TOOL' + '_SHADOWED')).toBe(false);
-  const run = Bun.spawnSync([out, base, JSON.stringify(pin)], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
-  expect(run.stderr.toString()).toBe('');
-  const line = JSON.parse(run.stdout.toString().trim()) as { type: string; request: { subtype: string } };
-  expect(line.type).toBe('control_request');
-  expect(line.request.subtype).toBe('initialize');
-}, 60_000);
+extended(
+  'a compiled executable loads it from the data directory',
+  async () => {
+    const { base, pin } = await installed();
+    const out = join(tempDir('sdkc-'), 'compiled');
+    dirs.push(join(out, '..'));
+    const build = Bun.spawnSync(
+      [process.execPath, 'build', '--compile', join(import.meta.dir, 'testdata', 'compiled.ts'), '--outfile', out],
+      // In the temporary directory: Bun leaves a .<hash>.bun-build copy of
+      // the executable in its working directory.
+      { cwd: join(out, '..'), stdout: 'pipe', stderr: 'pipe' },
+    );
+    expect(build.exitCode).toBe(0);
+    // The executable carries none of the SDK.
+    expect(readFileSync(out).includes('CLAUDE_SDK_CAN_USE_TOOL' + '_SHADOWED')).toBe(false);
+    const run = Bun.spawnSync([out, base, JSON.stringify(pin)], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
+    expect(run.stderr.toString()).toBe('');
+    const line = JSON.parse(run.stdout.toString().trim()) as { type: string; request: { subtype: string } };
+    expect(line.type).toBe('control_request');
+    expect(line.request.subtype).toBe('initialize');
+  },
+  60_000,
+);

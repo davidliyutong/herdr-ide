@@ -287,26 +287,38 @@ describe('a program’s process group', () => {
     ac.abort();
   }
 
-  extended('killed once the program exited', async () => {
-    const { bin, pidFile } = leaver(false);
-    const r = await run(bin, [], { env: {}, ms: 10_000 });
-    expect(r).toEqual({ out: 'done\n', ok: true });
-    await gone(pidFile);
-  }, 30_000);
+  extended(
+    'killed once the program exited',
+    async () => {
+      const { bin, pidFile } = leaver(false);
+      const r = await run(bin, [], { env: {}, ms: 10_000 });
+      expect(r).toEqual({ out: 'done\n', ok: true });
+      await gone(pidFile);
+    },
+    30_000,
+  );
 
-  extended('killed when it times out', async () => {
-    const { bin, pidFile } = leaver(true);
-    const start = Date.now();
-    expect((await run(bin, [], { env: {}, ms: 3000 })).ok).toBe(false);
-    expect(Date.now() - start).toBeLessThan(10_000);
-    await gone(pidFile);
-  }, 30_000);
+  extended(
+    'killed when it times out',
+    async () => {
+      const { bin, pidFile } = leaver(true);
+      const start = Date.now();
+      expect((await run(bin, [], { env: {}, ms: 3000 })).ok).toBe(false);
+      expect(Date.now() - start).toBeLessThan(10_000);
+      await gone(pidFile);
+    },
+    30_000,
+  );
 
-  extended('killed when its request ends', async () => {
-    const { bin, pidFile } = leaver(true);
-    const ac = new AbortController();
-    void abortWhenStarted(pidFile, ac);
-    expect((await run(bin, [], { env: {}, ms: 30_000, signal: ac.signal })).ok).toBe(false);
-    await gone(pidFile);
-  }, 30_000);
+  extended(
+    'killed when its request ends',
+    async () => {
+      const { bin, pidFile } = leaver(true);
+      const ac = new AbortController();
+      void abortWhenStarted(pidFile, ac);
+      expect((await run(bin, [], { env: {}, ms: 30_000, signal: ac.signal })).ok).toBe(false);
+      await gone(pidFile);
+    },
+    30_000,
+  );
 });
