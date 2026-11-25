@@ -58,6 +58,7 @@ class FakeMachine {
       expand: (p) => p,
       environ: () => ({}),
       hcSocket: join(this.run, 'hc.sock'),
+      sessions: () => [],
       runHidden: async (name, argv) => {
         if (this.noCore) throw new Fail('no_terminal_core', 503, 'the terminal core is not running');
         this.runs.push(argv);
