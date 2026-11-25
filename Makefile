@@ -63,6 +63,7 @@ it:
 	go test -tags integration -count=1 ./internal/agent/plugin/history -run Integration -v
 	go test -tags integration -count=1 ./internal/hc -run Integration -v
 	cd backend && bun test features/terminals/integration.test.ts
+	cd backend && bun test features/history/integration.test.ts
 
 # End-to-end tests: the core of this platform on isolated instances,
 # driven through Chromium, and SSH machines in Docker containers (e2e/,

@@ -4,9 +4,11 @@
 import type { MachineSide } from '#machine/feature.ts';
 import { browserMachine } from '#features/browser/machine.ts';
 import { filesMachine } from '#features/files/machine.ts';
+import { gitMachine } from '#features/git/machine.ts';
+import { historyMachine } from '#features/history/machine.ts';
 import { monitorMachine } from '#features/monitor/machine.ts';
 import { searchMachine } from '#features/search/machine.ts';
 
 export function machineFeatures(): MachineSide[] {
-  return [filesMachine(), searchMachine(), browserMachine(), monitorMachine()] as MachineSide[];
+  return [filesMachine(), gitMachine(), searchMachine(), browserMachine(), monitorMachine(), historyMachine()] as MachineSide[];
 }
