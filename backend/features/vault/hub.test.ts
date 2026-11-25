@@ -16,7 +16,7 @@ import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { coreDBBeside } from './accesslog.ts';
 import { relayKey } from './desktop.ts';
 import { openExport, sealExport } from './exportfile.ts';
-import { vaultFeature } from './core.ts';
+import { vaultFeature } from './hub.ts';
 import type { VaultOptions } from './vault.ts';
 
 const PASS = 'correct horse';

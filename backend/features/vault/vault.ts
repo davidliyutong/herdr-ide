@@ -1,5 +1,5 @@
 // The vault's core side: the store (store.ts) behind the pages' routes
-// (core.ts) and the requests of the MCP servers on machines (op vault).
+// (hub.ts) and the requests of the MCP servers on machines (op vault).
 //
 // One gate stands before everything that reads a value or lets one be read,
 // for every caller, the core host's own programs included: a machine's MCP

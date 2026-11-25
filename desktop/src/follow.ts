@@ -3,7 +3,7 @@
 // client of the event channel like the page: once /ws is open it reads GET
 // /api/keybindings and GET /api/settings, then applies the "keybindings" and
 // "settings" messages the core sends after every change. The core is the
-// shell's own utility process, reached directly (core.ts), not over a
+// shell's own utility process, reached directly (hub.ts), not over a
 // network; the channel is opened again if it drops (the core restarted).
 
 import type { Binding } from './menu';
@@ -53,7 +53,7 @@ export interface Follower {
   settings(s: ShellSettings): void;
 }
 
-/** What followCore uses of the core (core.ts CoreHost; stand-ins in
+/** What followCore uses of the core (hub.ts CoreHost; stand-ins in
  * tests). */
 export interface CoreLink {
   fetch(path: string): Promise<{ ok: boolean; json(): Promise<unknown> }>;

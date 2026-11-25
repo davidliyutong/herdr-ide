@@ -101,7 +101,7 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
 
 ### The core in process
 
-`desktop/src/core.ts`, `protocol.ts`, `frames.ts`, `main.ts`,
+`desktop/src/hub.ts`, `protocol.ts`, `frames.ts`, `main.ts`,
 `backend/hosts/electron` ([42](42-typescript-backend.md)).
 
 - The core runs in an Electron utility process the main process forks
@@ -387,7 +387,7 @@ See [SECURITY.md](../../SECURITY.md) for the trust boundaries.
 - `desktop/src/*.test.ts` (fake Electron and Node children, no network):
   `platform`, `core` (the start message, restarts after crashes and their
   bound, start failures and timeouts, stop and kill after the deadline, a
-  frame's channel request), `coreBridge` (requests, bodies with credit,
+  frame's channel request), `hubBridge` (requests, bodies with credit,
   cancels, failures, channels), `protocol`, `frames`, `folders`, `follow`, `menu`
   (items, accelerators, per-system menus, no keys registered on Windows and
   Linux), `policy`, `privacy`, `preload`, `closeGuard`, `titlebar`,

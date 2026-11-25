@@ -5,10 +5,10 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { connect } from 'node:net';
 import { ChunkReader, writeLine, type Reply } from '#shared/proto/agentproto/index.ts';
 import { checkGuarded, localSpec, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
-import { auditTargets, conflictOf, fileTransfersFeature, filesFeature, uploadParams, writeParams } from './core.ts';
+import { auditTargets, conflictOf, fileTransfersFeature, filesFeature, uploadParams, writeParams } from './hub.ts';
 import { MAX_STAT, MAX_UPLOAD, MAX_WRITE } from './protocol.ts';
 import type { PluginHandler } from './testdata/agent.ts';
-import { filesCore, type FilesCore } from './testdata/core.ts';
+import { filesCore, type FilesCore } from './testdata/hub.ts';
 
 const ON = { 'plugins.files.enabled': true };
 const core = (o: { readOnly?: boolean; platform?: string } = {}) =>

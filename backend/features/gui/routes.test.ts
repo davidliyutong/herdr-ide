@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { discard } from '#shared/lib/log.ts';
 import { channelPair, CloseCode, type ChannelOpen, type Message } from '#kernel/channel.ts';
-import { createCore } from '#kernel/core.ts';
+import { createCore } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { serveUI } from '#kernel/http/static.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
@@ -18,8 +18,8 @@ import {
   type RequestOptions,
   type TestCore,
 } from '#kernel/testing.ts';
-import { terminalsFeature } from '#features/terminals/core.ts';
-import { guiFeature, type GUIOptions } from './core.ts';
+import { terminalsFeature } from '#features/terminals/hub.ts';
+import { guiFeature, type GUIOptions } from './hub.ts';
 import type { Shells } from './enable.ts';
 import { FakeDisplay, testSettings } from './testing.ts';
 

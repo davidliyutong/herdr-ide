@@ -144,7 +144,7 @@ sockets, locks and pid files are in the host-local runtime directory.
   stop; `backend/machine/housekeeping.test.ts`: upload pruning, other
   hosts' directories.
 - `backend/features/vscode/proxy.test.ts` (`idle tracking`) and
-  `core.test.ts` (`idle code-servers are released`): idle detection with
+  `hub.test.ts` (`idle code-servers are released`): idle detection with
   open connections.
 - `web/src/__tests__/codePanes.test.ts`: VS Code windows kept off screen
   until they expire or exceed 3, gone when their pane closes.

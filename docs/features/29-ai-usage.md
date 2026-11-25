@@ -484,7 +484,7 @@ writer up (SQLite immutable without a writer, a WAL reader with one).
 ## Testing
 
 - One session: `backend/features/usage/machine/session.test.ts` (below),
-  `backend/features/usage/core.test.ts` (`a session’s params`, `a machine
+  `backend/features/usage/hub.test.ts` (`a session’s params`, `a machine
   busy reading sessions`), `web/src/__tests__/usageSession.test.tsx` (the
   item, its card and the reads' schedule).
 - `backend/features/usage/usage.test.ts`, `alerts.test.ts`,
@@ -520,5 +520,5 @@ writer up (SQLite immutable without a writer, a WAL reader with one).
 - `e2e/tests/usage.spec.ts`: a Claude Code log's cost in the panel, at
   the table's price and the user's, and OpenCode's database read on the
   machine through the compiled executable's SQLite worker.
-- `backend/features/usage/core.test.ts` (`guards`) walks the plugin's
+- `backend/features/usage/hub.test.ts` (`guards`) walks the plugin's
   routes with `checkGuarded`.

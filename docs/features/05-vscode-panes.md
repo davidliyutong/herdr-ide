@@ -288,12 +288,12 @@ every deployment.
 
 ## Testing
 
-- Switches: `backend/features/vscode/core.test.ts` (`routes follow their
+- Switches: `backend/features/vscode/hub.test.ts` (`routes follow their
   client's switch`, `a switch turned off ends its work`, `a switch turned
   off ends its requests and bridge commands in flight`, `preparations end
   with the last switch`), `backend/features/vscode/work.test.ts` (work
   taken only while its client's switch is on, ended when it goes off),
-  `backend/kernel/core.test.ts` (`browserRisk`,
+  `backend/kernel/hub.test.ts` (`browserRisk`,
   `enabledFor`: `plugins.vscode.enabled` is the desktop app's switch only),
   `backend/features/vscode/proxy.test.ts` (the desktop app's cookie, header
   filtering), `bridge.test.ts` (bridge messages per switch),
@@ -316,7 +316,7 @@ every deployment.
   close/leave and downloads: `backend/features/vscode/bridge.test.ts`
   (`pick`, `targets`, `theme`, `send to agent, focus`, `close, leave,
   download`), `proxy.test.ts` (`idle tracking`, `the port proxy is
-  refused`), `core.test.ts` (`idle code-servers are released`).
+  refused`), `hub.test.ts` (`idle code-servers are released`).
 - Layout: `spec/vectors/layout/views.json`.
 - UI: `web/src/__tests__/codePanes.test.ts` (entry points, reuse, windows'
   lifetime and placement, command targeting, Send to Agent),

@@ -432,7 +432,7 @@ and browser; never a value. Reading it needs a session.
 - With `--audit-log` every record is audited too (`vault.access`,
   `vault.revealed`, `vault.exported`).
 
-### Export and import (`exportfile.ts`, `core.ts`)
+### Export and import (`exportfile.ts`, `hub.ts`)
 
 Variables move between vaults in an **export file** encrypted under a
 passphrase of its own. The core seals and opens it; the browser only holds
@@ -721,7 +721,7 @@ variables from machines and the MCP server. Limits of the design:
 - `backend/shared/host/userfile.test.ts` (`TestWriteIsDurable`).
 - `backend/features/vault/webauthn.test.ts`: the three algorithms and
   every check of an assertion; malformed input only fails.
-- `backend/features/vault/core.test.ts`: `the gate` (sessions, wrong
+- `backend/features/vault/hub.test.ts`: `the gate` (sessions, wrong
   passphrases slowed, a lock during a passphrase check, guards),
   `machines' requests` (approvals, expiry and cancelling, the process
   chain from the agent, a release whose record cannot be written or fails

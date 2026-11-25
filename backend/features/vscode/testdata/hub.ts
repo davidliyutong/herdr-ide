@@ -14,14 +14,14 @@ import { ChunkReader, Op, writeLine, type Header, type Reply } from '#shared/pro
 import { channelPair, type Channel, type Message } from '#kernel/channel.ts';
 import { coreModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { createCore, type Core } from '#kernel/core.ts';
+import { createCore, type Core } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import type { Peer } from '#kernel/http/env.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
 import { agentDialer, localSpec, memoryAudit, running, testMachines, waitFor, type FakeAgent } from '#kernel/testing.ts';
 import type { Spec } from '#kernel/machines/spec.ts';
-import { vscodeFeatures, type VSCodeOptions } from '../core.ts';
+import { vscodeFeatures, type VSCodeOptions } from '../hub.ts';
 
 /** The fake code-server: what it was asked, and its WebSockets. */
 export interface FakeCodeServer {

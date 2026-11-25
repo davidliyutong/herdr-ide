@@ -15,7 +15,7 @@ import {
   verifyKey,
   type CoreChild,
   type CoreSpawner,
-} from './core';
+} from './hub';
 import { APP_HOST, APP_ORIGIN } from './origin';
 
 test('development is isolated; packaged mode has its own instance', () => {

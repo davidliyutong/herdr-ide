@@ -20,7 +20,7 @@ import {
   waitFor,
   type TestCore,
 } from '#kernel/testing.ts';
-import { machinesFeature, targetHost, type MachinesFeatureOptions } from './core.ts';
+import { machinesFeature, targetHost, type MachinesFeatureOptions } from './hub.ts';
 
 const stops: Array<() => Promise<void>> = [];
 afterEach(async () => {

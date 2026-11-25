@@ -7,7 +7,7 @@ import { Reader } from '#shared/lib/streamio.ts';
 import type { VaultRequest, VaultResponse } from '#shared/proto/agentproto/index.ts';
 import { MAX_LINE, dialSocket, serveMcp, type McpOptions } from './mcp.ts';
 import { survivors } from './testdata/procs.ts';
-import { fakeCore, type FakeCore } from './testdata/fakecore.ts';
+import { fakeCore, type FakeCore } from './testdata/fakehub.ts';
 
 type Msg = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 

@@ -18,7 +18,7 @@ import { dialNode, localPlatform } from '#kernel/machines/transport/local.ts';
 import { bareName, machineKey, type MachineBuild } from '#kernel/machines/transport/builds.ts';
 import { localSpec, running, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
-import { terminalsFeature, type TerminalsFeature } from './core.ts';
+import { terminalsFeature, type TerminalsFeature } from './hub.ts';
 import { FrameKind } from './messages.ts';
 import { errKind, TestClient } from './testing.ts';
 

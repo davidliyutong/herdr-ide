@@ -16,13 +16,13 @@ import {
 } from '#shared/proto/agentproto/index.ts';
 import { coreModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { createCore } from '#kernel/core.ts';
+import { createCore } from '#kernel/hub.ts';
 import { enableSetting } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, memoryAudit, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
-import { historyFeature, type HistoryOptions } from './core.ts';
+import { historyFeature, type HistoryOptions } from './hub.ts';
 import { Scheduler, TIMING } from './scheduler.ts';
 import { LIMITS, settings } from './settings.ts';
 

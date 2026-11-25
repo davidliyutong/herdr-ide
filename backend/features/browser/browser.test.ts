@@ -11,11 +11,11 @@ import { join } from 'node:path';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { coreModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { createCore } from '#kernel/core.ts';
+import { createCore } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, localSpec, memoryAudit, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
-import { browserFeature, type BrowserOptions } from './core.ts';
+import { browserFeature, type BrowserOptions } from './hub.ts';
 import { Forwards, listenLoopback, MAX_FORWARDS, temporary } from './forwards.ts';
 import { DEFAULT_IDLE, settings } from './settings.ts';
 

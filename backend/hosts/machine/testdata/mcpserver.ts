@@ -2,7 +2,7 @@
 // (signals included), with a core that gives every variable it is asked
 // for: the tests that end a server with a signal run it (mcp.test.ts).
 import { mcpCommand } from '../mcp.ts';
-import { fakeCore } from '#features/vault/machine/testdata/fakecore.ts';
+import { fakeCore } from '#features/vault/machine/testdata/fakehub.ts';
 
 const core = await fakeCore((req) => ({
   ok: true,

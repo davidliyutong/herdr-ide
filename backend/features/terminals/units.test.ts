@@ -35,7 +35,7 @@ test('sshEnv', () => {
 });
 
 test('the local machine gets no ssh session', async () => {
-  const { terminalsFeature } = await import('./core.ts');
+  const { terminalsFeature } = await import('./hub.ts');
   const { testCore, testMachines, localSpec, agentDialer, running, waitFor } = await import('#kernel/testing.ts');
   const { AgentSim } = await import('./testing.ts');
   const sim = new AgentSim();

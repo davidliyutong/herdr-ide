@@ -4,12 +4,12 @@
 import type { Channel } from '#kernel/channel.ts';
 import { isBreakable } from '#kernel/http/breakable.ts';
 import { abortable } from '#hosts/bun/abortable.ts';
-import type { Core } from '#kernel/core.ts';
+import type { Core } from '#kernel/hub.ts';
 import { agentDialer, localSpec, running, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
 import type { Spec } from '#kernel/machines/spec.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
 import type { Info } from '#shared/proto/agentproto/index.ts';
-import { fileTransfersFeature, filesFeature } from '../core.ts';
+import { fileTransfersFeature, filesFeature } from '../hub.ts';
 import { Downloads, type DownloadEvent } from '../downloads.ts';
 import { fsAgent, type PluginHandler } from './agent.ts';
 

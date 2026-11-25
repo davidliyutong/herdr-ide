@@ -44,7 +44,7 @@ chats, agent detection, the browser pane. Its directory holds
   parameters, results, whether they stream (`defineProtocol`); both sides
   import it. On the wire an action is the agent protocol's `plugin` op, as
   before.
-- `core.ts` — `defineFeature`: its routes, channels, background services,
+- `hub.ts` — `defineFeature`: its routes, channels, background services,
   settings, the streams agents open towards the core; it gets a
   `FeatureContext` with what it may use (machines, settings, broadcast to
   the pages, audit, logger, read-only), never the whole core.
@@ -77,7 +77,7 @@ hook. The host composes them; features do not import each other.
 
 ## The kernel
 
-- `core.ts` — `createCore` sets the features up and gives the host
+- `hub.ts` — `createCore` sets the features up and gives the host
   `fetch(Request, Peer) → Response` and `run(signal)`. A feature's routes
   are registered one by one behind its switch (404 `plugin_disabled` while
   it is off for the requesting client) and, under `:id`, the machine's
@@ -116,7 +116,7 @@ hook. The host composes them; features do not import each other.
   clocks are parameters with defaults, which tests override.
 - Everything started has an owner and an end: services take an
   `AbortSignal`, and what they start ends with it (rule 6 of AGENTS.md).
-- Code under `shared/`, `kernel/` and the `core.ts` of features uses
+- Code under `shared/`, `kernel/` and the `hub.ts` of features uses
   Node's modules only (`node:fs`, `node:net`, `node:child_process`,
   `node:sqlite`, `node:crypto`); `Bun.*` and `bun:*` only in `machine/`,
   `hosts/bun/`, `hosts/machine/`, the features' `machine.ts` and

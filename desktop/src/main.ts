@@ -41,7 +41,7 @@ import {
   verifyKey,
   type CoreChild,
   type CoreSpawner,
-} from './core';
+} from './hub';
 import { enclaveFor, helperPath, helperRunner, runBounded } from './enclave';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
@@ -97,7 +97,7 @@ if (!app.commandLine.hasSwitch('user-data-dir')) {
 // app's directory when Electron runs it unpackaged.
 const leadingArgs = process.defaultApp ? 2 : 1;
 
-// The core, once the app is ready (core.ts).
+// The core, once the app is ready (hub.ts).
 let core: CoreHost | undefined;
 let mainWindow: BrowserWindow | undefined;
 // The main window's page asks about unsaved changes before it closes.

@@ -13,7 +13,7 @@ import { agentDialer, localSpec, running, testMachines, waitFor } from '#kernel/
 import { Artifacts, tarballFile } from './artifacts.ts';
 import { CodeServers, Phase } from './provision.ts';
 import { INSTALL, Install, PATH, settings } from './settings.ts';
-import { agentState, codeServerAgent, type AgentState } from './testdata/core.ts';
+import { agentState, codeServerAgent, type AgentState } from './testdata/hub.ts';
 import { DEFAULT_TIMING } from './timing.ts';
 import { vsixContentHash } from './vsix.ts';
 

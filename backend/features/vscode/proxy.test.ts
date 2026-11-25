@@ -6,7 +6,7 @@ import { SLUG } from '#shared/lib/brand.ts';
 import { sleep, waitFor } from '#kernel/testing.ts';
 import { DESKTOP_COOKIE, keepSetCookie, stripDesktopCookie } from './cookies.ts';
 import { belowCode, portProxyPath, requestHeaders, responseHeaders } from './proxy.ts';
-import { vscodeCore, type VSCodeCore } from './testdata/core.ts';
+import { vscodeCore, type VSCodeCore } from './testdata/hub.ts';
 import { Activity } from './work.ts';
 
 const PROXY_SECRET = 'X-veldr-Proxy-Secret';

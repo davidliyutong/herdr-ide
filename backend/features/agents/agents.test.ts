@@ -8,7 +8,7 @@ import { Settings } from '#kernel/config/settings/index.ts';
 import { enableSetting } from '#kernel/feature.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
-import { agentsFeature, goQuery, MAX_CWD, MAX_RESOLVING } from './core.ts';
+import { agentsFeature, goQuery, MAX_CWD, MAX_RESOLVING } from './hub.ts';
 import { agentsProtocol, RESOLVE_MS } from './protocol.ts';
 
 const sid1 = 'e6cdc860-1055-488f-9ed2-8b8019061bb9';

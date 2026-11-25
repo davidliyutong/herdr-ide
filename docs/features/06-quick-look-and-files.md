@@ -74,7 +74,7 @@ only picks entries.
 
 ### Downloads
 
-`web/src/download.ts`, `backend/features/files/core.ts`, `names.ts`,
+`web/src/download.ts`, `backend/features/files/hub.ts`, `names.ts`,
 `backend/machine/fsops.ts`.
 
 - `GET /api/m/<machine>/download?path=…&path=…` takes up to 1000 absolute

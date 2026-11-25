@@ -4,7 +4,7 @@
 // (the app quits; Electron ends its utility processes with it). Nothing
 // here listens: the app's windows reach the core only through its main
 // process.
-import type { Core } from '#kernel/core.ts';
+import type { Core } from '#kernel/hub.ts';
 import type { Composed } from '#hosts/common/compose.ts';
 import { serveChannel, serveRequest, type CoreStart, type FromCore, type Port, type ToCore } from './bridge.ts';
 

@@ -239,7 +239,7 @@ playbooks):
 - macOS limits unix socket paths to 104 bytes; keep socket paths short.
 - The core builds for Windows, the agent does not: the core's code runs
   in Bun and in Electron's Node (`shared/`, `kernel/` and the features'
-  `core.ts` use Node's modules only, `tsconfig.node.json`; the machine
+  `hub.ts` use Node's modules only, `tsconfig.node.json`; the machine
   side is Bun on Linux and macOS, backend/README.md's rules); POSIX-only
   tests skip on Windows. Paths on machines are POSIX: use `node:path`'s
   `posix` for them. `.gitattributes` keeps LF line endings on Windows checkouts.

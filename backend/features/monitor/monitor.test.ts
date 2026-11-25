@@ -6,7 +6,7 @@ import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/
 import { Settings } from '#kernel/config/settings/index.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
-import { monitorFeature } from './core.ts';
+import { monitorFeature } from './hub.ts';
 import { settings } from './settings.ts';
 
 const ON = { 'plugins.monitor.enabled': true };

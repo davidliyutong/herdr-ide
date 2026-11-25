@@ -68,7 +68,7 @@ runs inside the app and listens on nothing ([16](16-desktop-packaging.md)). Flag
 
 ### VS Code on the UI's origin
 
-`backend/hosts/electron/serve.ts`, `backend/features/vscode/core.ts`. code-server is proxied below `/m/{id}/code/`
+`backend/hosts/electron/serve.ts`, `backend/features/vscode/hub.ts`. code-server is proxied below `/m/{id}/code/`
 on the UI's own origin, so any script in it (an extension, a webview) can do
 what the page can, on every machine. VS Code is therefore off by default,
 with one switch per kind of client ([05](05-vscode-panes.md)):
@@ -131,12 +131,12 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
   `refusals`, `proxy secret`), `CSP` (`appCSP`, `frames`).
 - Every feature's `routes that change state are guarded` (or `mutating
   routes are guarded`, `guards`) with `checkGuarded`; read-only retries
-  keep the session: `backend/features/machines/core.test.ts` (`retry`);
+  keep the session: `backend/features/machines/hub.test.ts` (`retry`);
   the refused port proxy: `backend/features/vscode/proxy.test.ts` (`the
   port proxy is refused`).
 - Per-client VS Code switches and the desktop token:
-  `backend/kernel/core.test.ts` (`browserRisk`),
-  `backend/features/vscode/core.test.ts` (`routes follow their client's
+  `backend/kernel/hub.test.ts` (`browserRisk`),
+  `backend/features/vscode/hub.test.ts` (`routes follow their client's
   switch`, `a switch turned off ends its work`), `proxy.test.ts` (`the
   desktop app cookie`), `bridge.test.ts` (`messages follow each client's
   switch; the pages' theme`), `backend/kernel/config/routes.test.ts`
@@ -146,7 +146,7 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
   (`read-only clients observe`, `without a terminal core`), the terminal
   core's endpoints (`routes that change state are guarded`).
 - `backend/kernel/config/routes.test.ts` (`read-only`),
-  `backend/features/machines/core.test.ts` (`needs a control directory`).
+  `backend/features/machines/hub.test.ts` (`needs a control directory`).
 - `backend/kernel/machines/transport/transport.test.ts`: `a private
   directory only`, `args without a control directory`;
   `backend/machine/agent.test.ts`: `hello and the run directory`, `only

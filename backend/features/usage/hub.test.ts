@@ -7,11 +7,11 @@ import { discard } from '#shared/lib/log.ts';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { coreModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { createCore } from '#kernel/core.ts';
+import { createCore } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, memoryAudit, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
-import { MAX_SESSION_READS, sessionProvider, usageFeature } from './core.ts';
+import { MAX_SESSION_READS, sessionProvider, usageFeature } from './hub.ts';
 
 const SESSION = 'e6cdc860-1055-488f-9ed2-8b8019061bb9';
 const SWITCH = 'plugins.usage.enabled';

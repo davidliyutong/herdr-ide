@@ -9,7 +9,7 @@ const dir = await mkdtemp(join(tmpdir(), 'desktop-tests-'));
 const tests = [
   'closeGuard',
   'core',
-  'coreBridge',
+  'hubBridge',
   'enclave',
   'folders',
   'follow',

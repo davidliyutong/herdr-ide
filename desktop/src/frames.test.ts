@@ -7,7 +7,7 @@ import { posted } from './fakeWindow';
 import { installPortSocket } from '../../web/src/lib/portSocket';
 import { CHANNEL_PORT, type DesktopChannels } from '../../web/src/shell';
 import { channels } from './bridge';
-import { isChannelId } from './core';
+import { isChannelId } from './hub';
 import { executed, exposed, receive, sent } from './fakeElectron';
 import { isCodeFrame, setUpFrame } from './frames';
 import { APP_ORIGIN } from './origin';

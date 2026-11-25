@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { checkGuarded, testCore, testMachines, sshSpec, waitFor, sleep } from '#kernel/testing.ts';
-import { terminalsFeature } from './core.ts';
+import { terminalsFeature } from './hub.ts';
 import { FrameKind } from './messages.ts';
 import { shells } from './shells.ts';
 import { errKind, rig, type Rig } from './testing.ts';

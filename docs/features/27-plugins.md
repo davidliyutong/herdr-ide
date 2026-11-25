@@ -229,11 +229,11 @@ panels into panes.
 
 ## Testing
 
-- `backend/kernel/core.test.ts`: routes and switches (`the switch of a
+- `backend/kernel/hub.test.ts`: routes and switches (`the switch of a
   feature reaches its routes only`, `routes of features do not overlap`,
   `browserRisk`, `enabledFor`), agents' streams (`dispatched by op`),
   audit outcomes and read-only (`mutating routes`);
-  `backend/features/vscode/core.test.ts`: VS Code off ending its work, the
+  `backend/features/vscode/hub.test.ts`: VS Code off ending its work, the
   per-client switch (`routes follow their client's switch`).
 - `backend/kernel/agent.test.ts`: large params and results (`inline and
   as bodies`), the agent's codes (`agent errors`), `open` closing with

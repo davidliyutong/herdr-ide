@@ -9,9 +9,9 @@ import { SLUG } from '#shared/lib/brand.ts';
 import { AgentError } from '#kernel/machines/transport/session.ts';
 import { sleep, TEST_INFO, waitFor } from '#kernel/testing.ts';
 import { offline } from '#kernel/fail.ts';
-import { statStatus } from './core.ts';
+import { statStatus } from './hub.ts';
 import { serveFile, TransferFail } from './serve.ts';
-import { filesCore, testPage, type FilesCore } from './testdata/core.ts';
+import { filesCore, testPage, type FilesCore } from './testdata/hub.ts';
 
 let dir: string;
 let fc: FilesCore;

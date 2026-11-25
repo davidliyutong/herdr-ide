@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
-import { MAX_BODY, problem, searchFeature, type SearchOptions } from './core.ts';
+import { MAX_BODY, problem, searchFeature, type SearchOptions } from './hub.ts';
 import { MAX_GLOBS, MAX_QUERY } from './protocol.ts';
 
 const ON = { 'plugins.search.enabled': true };

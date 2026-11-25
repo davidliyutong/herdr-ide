@@ -7,7 +7,7 @@ import { MAX_INLINE, Op, readBody, writeLine, type Header, type Reply } from '#s
 import { Settings } from '#kernel/config/settings/index.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
-import { auditFields, gitFeature, MAX_BODY, queryParams } from './core.ts';
+import { auditFields, gitFeature, MAX_BODY, queryParams } from './hub.ts';
 import { gitProtocol, READ_MS, READS, WRITE_MS, WRITES } from './protocol.ts';
 import { settings } from './settings.ts';
 

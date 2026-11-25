@@ -91,7 +91,7 @@ requests reach it.
   secret, read-only). Its clients are browsers.
 - **Electron** (`backend/hosts/electron`): the core runs in a
   `utilityProcess` (a crash leaves the window, heavy work does not block
-  it), which the main process (`desktop/src/core.ts`) forks with the
+  it), which the main process (`desktop/src/hub.ts`) forks with the
   app's bundle of it (`dist/core.mjs`), starts with a message on its parent
   port (instance, node instance, the verify key of the launch, where the
   payloads are) and restarts after a crash, at most 3 times a minute. The
@@ -1065,7 +1065,7 @@ SECURITY.md has both.
   its terminal kept, and, given a code-server release
   (`E2E_CODE_SERVER_SEED`), a VS Code window loads its workbench over
   channels.
-- The bridge: `desktop/src/coreBridge.test.ts` (requests, credit, cancels,
+- The bridge: `desktop/src/hubBridge.test.ts` (requests, credit, cancels,
   failures, channels, with worker_threads' MessagePorts),
   `backend/hosts/electron/host.test.ts` (through a real core),
   `web/src/__tests__/transport.test.ts` (PortSocket against the core's

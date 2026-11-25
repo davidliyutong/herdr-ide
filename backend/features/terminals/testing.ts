@@ -16,7 +16,7 @@ import type { Machines } from '#kernel/machines/manager.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, running, sshSpec, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
 import type { Backend } from './backend.ts';
-import { terminalsFeature, type TerminalsFeature, type TerminalsOptions } from './core.ts';
+import { terminalsFeature, type TerminalsFeature, type TerminalsOptions } from './hub.ts';
 import type { Timing } from './timing.ts';
 
 /** Durations short enough for tests. */

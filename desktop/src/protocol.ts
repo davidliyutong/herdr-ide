@@ -1,5 +1,5 @@
 // The app's origin in the app's session: each request to it goes to the
-// core (core.ts CoreHost.request), which answers it in process; requests
+// core (hub.ts CoreHost.request), which answers it in process; requests
 // to other addresses (VS Code's extension gallery, say) go to the network
 // as they would without the handler.
 //

@@ -6,7 +6,7 @@ import { Reader } from '#shared/lib/streamio.ts';
 import { Op } from '#shared/proto/agentproto/index.ts';
 import { checkGuarded, sleep, waitFor, type TestCore } from '#kernel/testing.ts';
 import { INSTALL, PATH } from './settings.ts';
-import { vscodeCore, type VSCodeCore, type VSCodeCoreOptions } from './testdata/core.ts';
+import { vscodeCore, type VSCodeCore, type VSCodeCoreOptions } from './testdata/hub.ts';
 
 const cores: VSCodeCore[] = [];
 afterEach(async () => {

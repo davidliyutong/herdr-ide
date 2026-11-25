@@ -9,7 +9,7 @@ import type { Client } from '#kernel/http/env.ts';
 import type { AgentStream } from '#kernel/machines/transport/session.ts';
 import { sleep, waitFor } from '#kernel/testing.ts';
 import { Bridge, type BridgeEvent, type Target } from './bridge.ts';
-import { vscodeCore, type VSCodeCore } from './testdata/core.ts';
+import { vscodeCore, type VSCodeCore } from './testdata/hub.ts';
 import { DEFAULT_TIMING } from './timing.ts';
 
 const timing = { ...DEFAULT_TIMING, bridgeGraceMs: 100, bridgeWindowMs: 600, bridgePollMs: 20, bridgeAckMs: 300 };

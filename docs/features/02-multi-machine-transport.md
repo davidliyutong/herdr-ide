@@ -323,7 +323,7 @@ terminal core apart ([40](40-shared-homes.md)).
   trip and errors, ordering, target validation from the shared vectors,
   refused targets never dialed, the local machine without an agent, adding,
   removing, enabling and disabling at runtime.
-- `backend/features/machines/core.test.ts`: the HTTP endpoints (adding,
+- `backend/features/machines/hub.test.ts`: the HTTP endpoints (adding,
   renaming, ordering, removing, enabling), read-only and audit, `ssh_login`
   without a control directory, the ssh aliases offered (`ssh hosts`).
 - `backend/features/machines/sshconfig.test.ts`: the config parser and its

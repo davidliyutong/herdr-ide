@@ -10,7 +10,7 @@ import { Op, readLine, writeLine, type Header, type Info, type Reply } from '#sh
 import { Session as Yamux, type Stream } from '#shared/proto/yamux.ts';
 import { auditLog } from './audit.ts';
 import type { Store as Settings } from './config/settings/index.ts';
-import { createCore, type Core } from './core.ts';
+import { createCore, type Core } from './hub.ts';
 import type { FeatureDef } from './feature.ts';
 import type { Peer } from './http/env.ts';
 import { Guard, type GuardOptions } from './http/guard.ts';
