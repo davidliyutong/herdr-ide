@@ -9,6 +9,136 @@ theirs under Added, Changed and Fixed, after
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+- **Breaking:** renamed from herdr-ide to veldr: the executable, the
+  `~/.veldr` directories on machines, `VELDR_*` variables, the
+  `veldr-bridge` extension and the desktop app (`app.veldr.desktop`, so
+  macOS asks again for Full Disk Access, notifications and keychain
+  access). Nothing of herdr-ide is read, moved or removed: settings,
+  machines, keybindings, the vault, workspaces and browser preferences
+  start fresh, as do the AI usage history and the vault's access log, and
+  herdr-ide's terminals keep running in its own terminal core until you
+  stop it.
+
+- **Breaking:** the server is now one executable per platform built with
+  Bun, and is also that platform's machine side; the Go program is gone,
+  and a machine still running one from an earlier release is taken over
+  when the new version connects. A machine that lacks its build downloads
+  its platform's archive from the GitHub release, checked against the
+  release's `SHA256SUMS`, or the server uploads it over ssh; **Settings →
+  Machines → Machines download their build** (`--machine-download`) turns
+  the machines' own download off. `--agent-dir` now takes the release's
+  `SHA256SUMS` with its archives, for offline sites. Linux machines on
+  x86-64 need a processor with SSE4.2, and musl systems such as Alpine
+  need `libstdc++` and `libgcc`; a machine that cannot run the build says
+  why. The server is called the hub in the documentation; for development,
+  `make dev-hub` and `VELDR_HUB` replace `make dev-core` and the old
+  variable. `--code-server-url` and `--npm-registry` refuse URLs with
+  credentials, a query or a fragment (serve such a mirror through
+  `--seed-dir`).
+
+- The desktop app runs its server inside the app and listens on no port,
+  so other programs on the computer cannot reach it. It shares the
+  machines' terminals, workspaces and chats with a server of the default
+  instance reaching the same machines.
+
+- Several servers and desktop apps reaching one machine share its
+  terminals, workspaces, chats, VS Code and program windows, as tmux
+  clients share a session. One of them controls the program windows;
+  the others show **View only** with **Take Control**. A newer version
+  takes over a machine's service without interrupting the others' panes,
+  and machines whose home directory several hosts share over NFS keep
+  each host's sockets, processes and terminals apart.
+
+- **Agent Chats** run Claude Code, Codex, Kimi Code and Grok on a machine
+  without a terminal, in chat panes: streamed replies and thinking,
+  permissions, questions and plans in cards, model, effort and mode per
+  chat, compacting, images, `@` files, queued messages, subagents under
+  the call that started them, and usage, context and limits. Start one
+  from the new-tab menu or **New Agent Chat**; the **Chats** panel lists,
+  renames, archives and restores chats and opens an agent's **Earlier
+  Sessions**. **Continue in Chat** moves a terminal's Claude Code or Codex
+  session into a chat and **Continue in Terminal** moves it back. Chats
+  keep going when the page, the server or ssh go away, appear in
+  notifications and the attention list, and are bounded per machine under
+  **Settings → Agent Chats** (permission mode of new chats, **Allow full
+  access**, idle stop, how many chats and how much space they keep).
+  Project settings load only in trusted folders, managed with chat hosts
+  under **Manage Chat Hosts & Trusted Folders**. Claude Code chats run on
+  Anthropic's Agent SDK, which is never shipped: machines fetch the pinned
+  version from the npm registry when needed (`--npm-registry` for a
+  mirror, `--seed-dir` for offline sites).
+
+- Claude Code and Codex in terminals are tracked by their session: after
+  the terminal core starts again, each comes back in its own conversation
+  instead of the folder's latest, and the status bar shows the focused
+  agent's session cost at API prices, tokens and context. Codex reviews
+  and spawned agents count toward their session.
+
+- **Terminal History** keeps snapshots of terminal output on a machine's
+  disk when **Keep snapshots of terminal output** is on for it (off by
+  default; `--history-capture`), and shows what each terminal showed above
+  its new shell after the terminal core started again, such as after a
+  reboot. Lines, terminals, space and days are bounded, and **Clear Saved
+  Output** removes the snapshots.
+
+- **Project Search** searches the contents of files in a folder of a
+  machine from a **Search** panel, as VS Code's search view: **Match
+  Case**, **Match Whole Word**, regular expressions, files to include and
+  exclude, results by file that open at the match. It follows the focused
+  pane's folder and uses ripgrep when the machine has it.
+
+- **AI Usage** shows what each limit window has cost so far at API
+  prices and the whole window at that rate, every model's tokens and
+  requests, and a status bar item that follows the focused agent's
+  service and model. **Your prices** is a form with a row per model, the
+  built-in prices cover newer GPT, Grok and Claude models, and spend
+  statistics include disabled machines.
+
+- **Mute Tab** and **Mute Workspace** silence their agents and terminals,
+  bell included, while status and badge counts still show. The desktop
+  app shows the system's own notifications, and browsers ask for
+  permission from **Settings** with **Allow browser notifications**;
+  notifications name the machine, workspace and tab and focus the pane or
+  chat when clicked. A blocked agent is announced again only after 10
+  minutes unless you looked at it.
+
+- **Explorer** reveals the focused editor's file, remembers expanded
+  folders, selection, filter and scroll position per machine and folder,
+  and uploads files pasted from the system clipboard. Editors keep their
+  undo history, cursor, selection, scrolling and folding when their tab
+  is hidden or closed and reopened.
+
+- **Source Control** finds repositories nested in the folder and
+  submodules, offers them in a list and with **Open Repository**, and
+  follows the focused editor or diff's repository.
+
+- **System Monitor** shows hardware temperatures and fan speeds of Linux
+  machines, with their high and critical marks, and the battery's
+  temperature on macOS.
+
+- Default shortcuts are separate for Windows and Linux, with back and
+  forward, undo close, sidebar, **Explorer**, split, workspace and tab
+  keys of their own. `ctrl+b` (**Focus App Chrome**) moves the keyboard
+  from an editor to its pane header and back; in terminals it stays the
+  program's. Editing keys such as `cmd+z`, `cmd+[`, `cmd+]`, `cmd+d` and
+  `cmd+f` stay with editors and text fields. The settings and keybindings
+  files accept comments and trailing commas, which changes from the UI
+  keep.
+
+- The variable vault forgets its key whenever it locks. Touch ID, Windows
+  Hello or a passkey with the PRF extension unlock it again within
+  **Biometric unlock for** (14 days by default) of the last passphrase,
+  replacing **Passphrase again after**; the per-unlock auto-lock choice
+  and countdown are gone, and authenticators without PRF can no longer be
+  added. Its access log is shown only while it is unlocked.
+
+- `cmd+w` keeps the last pane of a pinned tab. A rebuilt desktop app on
+  macOS no longer asks for keychain access at every launch. **Task
+  Manager** refuses process ids outside the valid range: a crafted request
+  could make a machine signal every process of the user.
+
 ## [0.5.0] - 2026-11-22
 
 - **Breaking:** VS Code is off by default. Enable it under **Settings →
