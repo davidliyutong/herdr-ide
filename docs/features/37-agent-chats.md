@@ -306,9 +306,12 @@ resumed nor imported (`in_terminal`).
   validate the recordings and what it sends against the schema itself.
   Its framing is its own (no `jsonrpc` member, as Codex writes it; a line
   over 16 MiB passed over), every message handed on in the order of the
-  app-server's output. Its tests replay `spec/vectors/chat/codex` through
-  a fake app-server and compare the events with the Go adapter's golden
-  files of the same recordings.
+  app-server's output. What it keeps of the tool calls that started and
+  did not complete and of the subagents' threads is bounded (4096 each,
+  the oldest going: such a call is then not marked cancelled at its
+  turn's end, and such a thread is its own parent). Its tests replay
+  `spec/vectors/chat/codex` through a fake app-server and compare the
+  events with the Go adapter's golden files of the same recordings.
 - **Claude Code in the TypeScript build** (`backend/features/chat/machine/claude`,
   on `@anthropic-ai/claude-agent-sdk`): the same behaviour, the protocol
   spoken by Anthropic's Agent SDK rather than by hand

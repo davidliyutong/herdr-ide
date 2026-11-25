@@ -1146,7 +1146,9 @@ SECURITY.md has both.
   (`codex/testdata/fakeappserver.ts`, the Go fake's directives), its
   events compared with the Go adapter's golden files of every recording,
   its scenarios the Go adapter's, and the recordings and what it sends
-  validated against Codex's schema (`codex/appserver.test.ts`).
+  validated against Codex's schema (`codex/appserver.test.ts`); the
+  tool calls and subagents an app-server never completes bounded
+  (`codex/session.test.ts`).
 - The Claude Code adapter (`backend/features/chat/machine/claude/*.test.ts`):
   the 17 recordings of `spec/vectors/chat/claude` replayed through the
   SDK against a fake Claude Code (`testdata/fakeclaude.ts`, run by Bun),

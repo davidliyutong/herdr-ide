@@ -13,7 +13,7 @@ import { MAX_LINE } from '#shared/proto/chatproto/index.ts';
 import { codexAdapter } from './adapter.ts';
 import { Models, Opt, policy } from './config.ts';
 import { RpcError } from './rpc.ts';
-import { callError, type CodexSession } from './session.ts';
+import { MAX_TRACKED, callError, type CodexSession } from './session.ts';
 import {
   FakeRun,
   HANDSHAKE,
@@ -171,6 +171,42 @@ describe('the app-server and its requests', () => {
     expect(JSON.stringify(k.events[1]!.update)).toContain('still here');
     const c = s.conn!;
     expect([c.malformed, c.oversized, c.strayReplies, c.unknownCount()]).toEqual([2, 1, 1, 2]);
+  });
+
+  // An app-server that starts tool calls and subagents it never completes
+  // grows no map without end: the oldest go beyond MAX_TRACKED.
+  test('the tool calls that never complete and the subagents it tells of are bounded', async () => {
+    const n = 5000;
+    const sc = new Script();
+    sc.begin();
+    const turn = sc.request('turn/start');
+    sc.reply(turn, inProgress('t1'));
+    sc.turnStarted('t1');
+    for (let i = 0; i < n; i++) {
+      sc.item(true, {
+        type: 'commandExecution',
+        id: `c${i}`,
+        command: 'sleep 1',
+        cwd: '/work',
+        status: 'inProgress',
+        aggregatedOutput: null,
+        exitCode: null,
+        commandActions: [],
+      });
+      sc.item(true, { type: 'subAgentActivity', id: `a${i}`, kind: 'started', agentThreadId: `th${i}`, agentPath: 'helper' });
+    }
+    sc.item(false, agentMessage('last', 'all told'));
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const { s, k } = await start(f);
+    await prompt(s, 'm1', 'go');
+    await k.wait('the last message', (k) => k.events.some((e) => JSON.stringify(e.update ?? '').includes('all told')), 30_000);
+    const st = s as unknown as { items: Map<string, unknown>; children: Map<string, unknown> };
+    expect(st.items.size).toBeLessThanOrEqual(MAX_TRACKED);
+    expect(st.children.size).toBeLessThanOrEqual(MAX_TRACKED);
+    // The newest are kept.
+    expect(st.items.has(`c${n - 1}`)).toBe(true);
+    expect(st.items.has('c0')).toBe(false);
+    expect(st.children.has(`th${n - 1}`)).toBe(true);
   });
 
   test('an app-server that ends in a turn ends the session with an error, and the turn with it', async () => {

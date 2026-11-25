@@ -167,6 +167,19 @@ const QUIET = new Set<string>([
  * local writer"). */
 const ACTIVE_WRITER = ['already has an active writer', 'already has a live local writer'];
 
+/** Bounds the maps of the tool calls that started and did not complete and
+ * of the subagents' threads a session keeps (an app-server that never
+ * completes what it starts would grow them without end): beyond it the
+ * oldest goes. A call forgotten is not marked cancelled at its turn's end
+ * nor given its output's increments; a thread forgotten is its own parent. */
+export const MAX_TRACKED = 4096;
+
+/** Sets k to v in m, the oldest entry going when m holds MAX_TRACKED. */
+function setBounded<K, V>(m: Map<K, V>, k: K, v: V): void {
+  if (!m.has(k) && m.size >= MAX_TRACKED) m.delete(m.keys().next().value as K);
+  m.set(k, v);
+}
+
 const perr = (code: string, message: string): ChatProtoError => new ChatProtoError({ code, message });
 const errEnded = (): ChatProtoError => perr(Code.Ended, 'the session ended');
 
@@ -1086,7 +1099,7 @@ export class CodexSession implements Session {
       case ItemType.CollabTool:
         if (it.tool === 'spawnAgent')
           for (const t of Array.isArray(it.receiverThreadIds) ? it.receiverThreadIds : [])
-            if (!this.children.has(t)) this.children.set(t, { call: it.id, parent, state: collabCall(it) });
+            if (!this.children.has(t)) setBounded(this.children, t, { call: it.id, parent, state: collabCall(it) });
         break;
       case ItemType.Plan:
         if (completed && main) this.plan = { id: it.id, text: strOf(it.text) };
@@ -1099,7 +1112,7 @@ export class CodexSession implements Session {
     }
     if (isTool(it.type) && evs.length === 1) {
       if (completed) this.items.delete(it.id);
-      else this.items.set(it.id, { type: it.type, item: it, parent, last: evs[0]!.update as Obj, shown: true });
+      else setBounded(this.items, it.id, { type: it.type, item: it, parent, last: evs[0]!.update as Obj, shown: true });
     }
     return evs;
   }
@@ -1145,7 +1158,7 @@ export class CodexSession implements Session {
       case SubAgent.Started: {
         if (this.children.has(it.agentThreadId) && completed) return [];
         const u = subAgentCall(it, Tool.InProgress);
-        if (it.agentThreadId) this.children.set(it.agentThreadId, { call: it.id, parent, state: u });
+        if (it.agentThreadId) setBounded(this.children, it.agentThreadId, { call: it.id, parent, state: u });
         return [updateEvent(it.id, parent, false, u, at)];
       }
       case SubAgent.Completed:
