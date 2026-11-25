@@ -68,7 +68,12 @@ makes no command. How to add a kind is in [AGENTS.md](../../AGENTS.md)
 (gotchas); `TestKindsMatchManifestsAndSettings` and `TestChatKinds` hold
 the pieces together.
 
-### Finding a session (`internal/agent/sessions`)
+### Finding a session (`internal/agent/sessions`, `backend/machine/agents`)
+
+Both machine builds find sessions alike; the TypeScript side's
+`Resolver` (`backend/machine/agents/sessions.ts`) reads everything
+asynchronously, so the node's one thread never waits for the file system
+([42](42-typescript-backend.md)).
 
 `Resolver.Resolve(kind, Proc{PID, Argv, Cwd})` answers the session id of a
 terminal's foreground program and a source word. Candidates are the
@@ -103,9 +108,11 @@ rollouts naming the session as their parent, in its rollout's directory
 and the dated ones from the session's start to now, at most 256 first
 lines read);
 the id must be a lower-case UUID before it reaches a path. `OpenLocated`
-opens it without following any link (`openat2` with
+opens it without following any link (Go: `openat2` with
 `RESOLVE_NO_SYMLINKS`, `O_NOFOLLOW_ANY` on macOS, else component by
-component) and checks it is a regular file of the user's with one link
+component; TypeScript: `O_NOFOLLOW_ANY` on macOS, on Linux `O_NOFOLLOW`
+and the descriptor refused before any read when `/proc/self/fd` names
+another path) and checks it is a regular file of the user's with one link
 and the identity `Locate` saw. Searches for unknown ids are rate-limited
 and the resolver's maps bounded.
 
@@ -114,10 +121,11 @@ and the resolver's maps bounded.
 With the agents plugin on, the core opens the detect stream
 ([25](25-agent-detection.md)) with `Header.Sessions`; without it the
 agent reads no session file. For each terminal whose agent's
-transcripts are read, a goroutine resolves after the startup grace, retries
+transcripts are read, a follower resolves after the startup grace, retries
 with back-off while nothing is found, and resolves again when the stamp,
 the foreground pid or its command line changes
-(`internal/agent/agentdetect_session.go`).
+(`internal/agent/agentdetect_session.go`; `followSession` of
+`backend/features/agents/machine/detector.ts`).
 
 The core accepts only a lower-case UUID with a known source and keeps it
 in the terminal record as `agent_session` and `agent_session_source`
@@ -135,7 +143,7 @@ wrote. The restore remembers `session` and writes `before`
 ([33](33-workspace-restore.md)); terminal history adopts a snapshot by
 `before` ([36](36-terminal-history.md)).
 
-### Claude Code's transcripts (`internal/agent/transcript`)
+### Claude Code's transcripts (`internal/agent/transcript`, `backend/shared/agents/transcript`)
 
 The parser maps the lines of a Claude Code transcript, and the messages
 of its SDK protocol, which have their shapes, to events shaped as ACP v1
@@ -143,9 +151,9 @@ of its SDK protocol, which have their shapes, to events shaped as ACP v1
 `update`, `user`, `turn` (`start`, `end`, `error` with a `stopReason`)
 and `notice` (`_<slug>/<name>`: `compacted`, `command`, `error`,
 `skipped`); the product's own marks are under `_meta.<slug>`. Each event
-is made from its line alone. `ClaudeFrame` maps one line, `EachClaude` a
-file's lines forward from an offset, for the chat host's Claude Code
-adapter: imported sessions, what a session did in a terminal, and a live
+is made from its line alone. `ClaudeFrame` (`claudeFrame`) maps one line,
+`EachClaude` (`eachClaude`) a file's lines forward from an offset, for the
+chat host's Claude Code adapter: imported sessions, what a session did in a terminal, and a live
 chat's tool results ([37](37-agent-chats.md)). No route sends a
 transcript to the page.
 
@@ -250,23 +258,29 @@ agents' sessions, agent detection).
   settings and usage providers; UUID substitution; chat specs) and
   `backend/shared/agents/kinds.test.ts` (the same of the core's kinds;
   `the generated registry`).
-- `internal/agent/sessions`: command lines, records trusted and refused,
-  guesses, stamps, `Locate`, opening through no link, hard links, the
-  process table; also run on Linux with `openat2` allowed and denied.
-- `internal/agent/agentdetect_session_test.go` and
+- `internal/agent/sessions` and `backend/machine/agents/sessions.test.ts`
+  (the same cases): command lines, records trusted and refused, guesses,
+  stamps, `Locate`, opening through no link, hard links, the process
+  table; the Go tests also run on Linux with `openat2` allowed and denied,
+  the TypeScript ones on Linux in a container.
+- `internal/agent/agentdetect_session_test.go`,
+  `backend/features/agents/machine/detector.test.ts` and
   `backend/features/terminals/sessions.test.ts`: schedule, sessions in
   records and events, sessions ending (`a session ends`), the plugin's
   switch (`detected again after a switch`, `a switch notifies once`).
-- `internal/agent/transcript`: the shared vectors (`vectors_test.go`, also
-  run by `web/src/__tests__/transcriptVectors.test.ts`), frames, bounds
-  (`TestLineMemory`, `TestWalkPastALongLine`). Vectors in
+- `internal/agent/transcript` and `backend/shared/agents/transcript`: the
+  shared vectors (`vectors_test.go`, `transcript.test.ts`, also run by
+  `web/src/__tests__/transcriptVectors.test.ts` against the conversation
+  model), frames, bounds (`TestLineMemory`, `TestWalkPastALongLine`; `a
+  line of many small values`, `walking past a long line`). Vectors in
   `spec/vectors/transcript/`: a real sanitized transcript (Claude Code
   2.1.330), one of a session driven through the SDK protocol, and
   hand-written ones.
   `spec/vectors/layout/agent-leaves.json`: the leaf's fields.
-- `backend/features/agents/agents.test.ts` and
+- `backend/features/agents/agents.test.ts`,
+  `backend/features/agents/machine.test.ts` and
   `internal/agent/plugin/agents`: the route, validation, its limit
-  (`busy`), the machine side.
+  (`busy`), the machine side (`resolve` through the wire).
 - `web/src/__tests__`: `agents.test.ts`, `chatImport.test.tsx`,
   `agentLeaves.test.ts`, `conversation.test.ts`,
   `conversationMemo.test.tsx`, `conversationView.test.tsx`,

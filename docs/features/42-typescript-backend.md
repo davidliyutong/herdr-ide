@@ -60,8 +60,9 @@ handler), zod validates input, jsonc-parser reads and edits the
 hand-edited JSON files (keeping the user's formatting and comments),
 ssh-config reads the OpenSSH configuration, execa runs processes,
 @simplewebauthn/server verifies WebAuthn, yazl writes zip archives,
-node-pty gives the desktop's core a terminal for an ssh login. yamux is
-the exception: the maintained implementation (`@chainsafe/libp2p-yamux`)
+node-pty gives the desktop's core a terminal for an ssh login, re2js runs
+the agent detection rules' regular expressions on machines (below). yamux
+is the exception: the maintained implementation (`@chainsafe/libp2p-yamux`)
 is bound to libp2p's stream framework; ours is a few hundred lines over
 Node streams, tested against hashicorp/yamux.
 
@@ -176,14 +177,18 @@ Linux and macOS:
   `hc`, `hc-api`, `privacy` and `plugin`), the dispatch of `plugin` to the
   features' machine sides (`dispatch.ts`, `feature.ts`), the terminal core
   (`hc.ts`), hidden terminals (`hidden.ts`), housekeeping, the vault's
-  socket and system calls (`sys/`).
+  socket, the coding agents' sessions, which the agents feature, AI usage
+  and the chat host read (`agents/`), and system calls (`sys/`).
 - A feature's machine side is its `machine.ts` (and `machine/`), made with
   `defineMachine(protocol, start)`: `start` runs once per agent and
   returns the handlers of the protocol's actions, which keep what the
   feature shares between requests; params are checked by the protocol's
   schemas, a `Fail` thrown is the refusal's code (the error reads
   `code: message`, as the Go agent wrote it), an action that does not
-  stream ends when the core closes its stream.
+  stream ends when the core closes its stream. A feature may serve ops of
+  the agent protocol besides (`Served.ops`: the agents feature's `detect`,
+  which the core opens as an op of its own); an op no feature serves is
+  refused as an unknown plugin.
 - `backend/hosts/machine`: the machine side's commands (`cli.ts`: `node`,
   `node dial`, `node stop [--terminal-core]`, with the Go build's flags),
   which the one command line (`backend/hosts/bun/main.ts`) runs, and the
@@ -193,13 +198,13 @@ Linux and macOS:
   the desktop app's core runs: backend/README.md).
 
 It serves the machine sides of the terminals (the terminal core and hidden
-terminals), files, git, search, monitor, history, browser and AI usage
-features. The ops and plugins of the features it does not serve yet
-(agents and detection, chat, gui, vscode: `code-server`, `gui`, `detect`)
-are refused as an unknown plugin is (`unknown_plugin`); the core treats
-them as a machine without that feature. AI usage's `session` action finds
-a session's transcripts with the agents feature's locator, which the host
-gives it: until that feature is here, every session is `not_found`
+terminals), files, git, search, monitor, history, browser, AI usage and
+agents (detection and the agents' sessions) features. The ops and plugins
+of the features it does not serve yet (chat, gui, vscode: `code-server`,
+`gui`) are refused as an unknown plugin is (`unknown_plugin`); the core
+treats them as a machine without that feature. AI usage's `session`
+action finds a session's transcripts with the agents feature's locator
+(`backend/machine/agents`), which the host gives it
 ([29](29-ai-usage.md#one-sessions-usage)).
 
 AI usage on the machine side ([29](29-ai-usage.md)) keeps the Go agent's
@@ -218,13 +223,42 @@ scan runs on the node's thread in slices (chunks of a log read with
 8 ms) rather than in a Worker, which would need its own entrypoint in the
 compiled executable and its own copy of the cache.
 
+Agent detection ([25](25-agent-detection.md)) reads herdr's manifests,
+the Go build's files (`internal/agent/detect/manifests`), embedded as text
+and parsed with Bun's TOML parser strictly (unknown members, types,
+herdr's limits); what every manifest parses to is a file both builds'
+tests compare with (`testdata/manifests.json`, which `go test -update`
+writes), and the screens, identifications, regions and gates of
+`testdata/` are both builds' cases. The rules' regular expressions are
+RE2's, run by re2js, a JavaScript port of RE2 (by way of RE2/J) with Go's
+syntax and semantics, in linear time: JavaScript's RegExp would read the
+same rules otherwise (`\s` is ASCII space in RE2 and Unicode space in
+RegExp; case folding; `\A`, `\x{…}` and `(?s)` it does not take) and
+backtrack, so a screen could make a rule take long; Google's WebAssembly build of RE2
+(`re2-wasm`) is unmaintained since 2022, and the native `re2` package
+would need a build per platform inside the compiled executable. The
+detector follows the terminal core's events, attaches as an observer and
+reads screens without history lines, as the Go build's; its timing and the
+sessions' schedule are the same. The coding agents' sessions
+(`backend/machine/agents`) are found from their files as the Go build
+finds them, reading everything with `fs/promises`: a transcript is opened
+with no link on its path (`O_NOFOLLOW_ANY` on macOS; on Linux, which has
+no such flag for `open(2)` and whose `openat2` would be a call through FFI
+on the node's thread, with `O_NOFOLLOW` in the runtime's pool, the
+descriptor refused before any read when `/proc/self/fd` names another
+path than the one located), a Claude Code record relative to its checked
+directory's descriptor (`/proc/self/fd/<dir>/<name>` on Linux), processes
+from `/proc` on Linux and through sysctl on macOS. Claude Code's
+transcripts are mapped to events by `backend/shared/agents/transcript`,
+which the chat host will use, against the shared vectors.
+
 System calls Node lacks go through `bun:ffi` to libc (`machine/sys`): peer
 credentials of unix sockets (`SO_PEERCRED`; `LOCAL_PEERCRED`,
 `LOCAL_PEERPID`), `flock`, `openat2` with `RESOLVE_NO_SYMLINKS` (falling
 back on ENOSYS, below 5.6, and on EPERM, a seccomp filter, to the last
 name's `O_NOFOLLOW`), `openat` relative to a directory, `renameat2` and
-`renamex_np` without replacing, `unlinkat`, `sysctl` `kern.proc.pid` on
-macOS. Variadic C functions are not called through FFI (on macOS/arm64
+`renamex_np` without replacing, `unlinkat`, `sysctl` `kern.proc.pid` and
+`kern.proc.pgrp` on macOS (a process's parent, group and start time). Variadic C functions are not called through FFI (on macOS/arm64
 their arguments go on the stack): files are opened with `fs.openSync`,
 which passes flags such as `O_NOFOLLOW_ANY` through (without `O_NOFOLLOW`,
 which macOS refuses beside it), and the system calls Linux's C libraries
@@ -379,7 +413,8 @@ to this, not a change of it.
 
 The node serves every core on one thread: what a user or a mount controls
 is not waited for on it. The core's file ops, git's reads of a repository,
-the node's check of its executable and housekeeping are asynchronous (a call
+the reads of the coding agents' sessions and records, the node's check of
+its executable and housekeeping are asynchronous (a call
 that does not return holds a thread of the runtime's pool and its own
 request), and a file is opened to be read with `O_NONBLOCK` and read only
 when it is a regular file, so a FIFO swapped in waits for no writer. The
@@ -507,6 +542,16 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 - **Bare executables as release assets.** One more 55 MB file per platform
   beside the archive users download, without the licenses of what it
   holds.
+- **JavaScript's RegExp for the detection rules.** herdr's rules are
+  written for RE2's semantics, which RegExp reads otherwise (`\s`, `\b`,
+  case folding, `\A`, `\x{…}`), and it backtracks: a rule on a screen the
+  program draws could take long. re2js keeps Go's reading, linear in
+  time, in plain JavaScript inside the compiled executable.
+- **The sessions' strict opens through FFI on Linux** (`openat2`,
+  `openat` relative to a directory). Synchronous on the node's one thread,
+  where a home on a mount that stopped answering would stall every core;
+  opening in the runtime's pool and checking the descriptor's path in
+  `/proc/self/fd` gives the same refusal without waiting on it.
 - **A loopback listener for VS Code only.** Not needed: the tunnel works.
 - **A custom scheme for the desktop's origin.** Breaks code-server's
   resources and CacheStorage.
@@ -626,8 +671,18 @@ SECURITY.md has both.
   refusal of another build's, and the uploads' sources (tampered files of
   the directory or the cache refused, a download through a proxy checked
   and cached, one load for the machines of a platform).
+- The agents feature's machine side: the manifests' cases shared with the
+  Go build (`internal/agent/detect/testdata`), the detector's schedule on a
+  fake clock, `detect` and `resolve` through the wire against a fake
+  terminal core, the sessions' cases on temporary homes with fake process
+  tables and `/proc` (also run on Linux), and, in `make it`, a fake Claude
+  Code in a real herdr-core followed through `detect` with its session
+  (`features/agents/integration.test.ts`); the transcript vectors and the
+  bounds of a read (`backend/shared/agents/transcript`).
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
-  runs the suite against the TypeScript build (21 passed,
-  the specs of chats, attention and program windows skipped with
-  the reason), and `tests/nodes.spec.ts` has the newer node of the other
-  build take a node over in both runs.
+  runs the suite against the TypeScript build (22 passed, the specs of
+  chats and program windows skipped with the reason;
+  `tests/attention.spec.ts` has a fake Claude Code in a terminal draw
+  attention, its session found and confirmed for a resume), and
+  `tests/nodes.spec.ts` has the newer node of the other build take a node
+  over in both runs.

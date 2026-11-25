@@ -8,8 +8,20 @@ export type TerminalRecord = Record<string, unknown> & { address: string; state?
 
 type Msg = Record<string, unknown> & { t: string };
 
+/** What the core detected of a terminal's coding agent (its records'
+ * members, null when unknown). */
+export interface AgentState {
+  agent: string | null;
+  agent_status: string | null;
+  agent_session: string | null;
+  agent_session_source: string | null;
+}
+
 export class TermClient {
   private ws: WebSocket;
+  /** The agents of the machine's terminals, from the subscription's
+   * snapshot and its agent events (terminal.list is herdr-core's own). */
+  private readonly agents = new Map<string, AgentState>();
   private rid = 0;
   private waiting = new Map<number, (m: Msg) => void>();
   private opened: Promise<void>;
@@ -38,6 +50,10 @@ export class TermClient {
       if (typeof ev.data !== 'string') return;
       const m = JSON.parse(ev.data) as Msg;
       if (m.t === 'backend' && m.state === 'ready' && m.m === this.m) this.onReady();
+      if (m.t === 'snapshot' && m.m === this.m && Array.isArray(m.terminals))
+        for (const r of m.terminals as TerminalRecord[]) this.agents.set(r.address, agentOf(r));
+      if (m.t === 'event' && m.type === 'agent' && m.m === this.m && typeof m.terminal === 'string')
+        this.agents.set(m.terminal, agentOf(m.data as Record<string, unknown>));
       if (m.t === 'res' && typeof m.rid === 'number') {
         this.waiting.get(m.rid)?.(m);
         this.waiting.delete(m.rid);
@@ -60,6 +76,11 @@ export class TermClient {
     const err = res.error as { kind?: string; message?: string } | undefined;
     if (err) throw new Error(`${method}: ${err.kind} ${err.message ?? ''}`);
     return res.result as T;
+  }
+
+  /** The agent the core last told of in a terminal. */
+  agent(terminal: string): AgentState {
+    return this.agents.get(terminal) ?? agentOf({});
   }
 
   async terminals(): Promise<TerminalRecord[]> {
@@ -114,6 +135,16 @@ export interface Layout {
   workspaces?: { name?: string; cwd?: string; tabs?: LayoutTab[]; [k: string]: unknown }[];
   [k: string]: unknown;
 }
+
+const agentOf = (r: Record<string, unknown>): AgentState => {
+  const v = (k: string) => (typeof r[k] === 'string' ? (r[k] as string) : null);
+  return {
+    agent: v('agent'),
+    agent_status: v('agent_status'),
+    agent_session: v('agent_session'),
+    agent_session_source: v('agent_session_source'),
+  };
+};
 
 /** The terminal addresses of a layout node, in order. */
 export function leafTerminals(node: unknown): string[] {

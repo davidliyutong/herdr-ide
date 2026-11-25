@@ -9,7 +9,7 @@ default, or the machine side here (`machine/`, `hosts/machine`, the
 features' `machine.ts`) in a core built to deploy it
 (`scripts/build.ts --machine ts`), which serves the features whose machine
 side is here (terminals, files, git, search, monitor, history, browser,
-AI usage).
+agents, AI usage).
 Both speak the same wire protocols, and a node of either takes over from
 the other. It is not a translation of the Go packages: their layout is not
 kept.
@@ -20,9 +20,9 @@ Each layer imports only from the layers above it in this list.
 
 | Directory   | Runs in      | What                                                                                                                                                                                                                                                                                                           |
 | ----------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds (`agents/`)                                                                                                                                                         |
+| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds and Claude Code's transcripts (`agents/`)                                                                                                                         |
 | `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                                                                                                                                                             |
-| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core                                                                                                                                                                   |
+| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core, the coding agents' sessions (`agents/`)                                                                                                                        |
 | `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                                                                                                                                                                 |
 | `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process, served over MessagePorts; `machine/` the machine side's commands (`cli.ts`: `node`, run by `bun/main.ts`) and the features its node serves (`features.ts`) |
 
@@ -49,7 +49,9 @@ chats, agent detection, the browser pane. Its directory holds
 - `machine.ts` — the handlers of its protocol's actions on the machine:
   `defineMachine(protocol, start)` (`#machine/feature.ts`), where `start`
   runs once per agent and returns the handlers, which keep what the
-  feature shares between requests (a limit on searches at once);
+  feature shares between requests (a limit on searches at once), and the
+  ops of the agent protocol it serves besides (`ops`: the agents feature's
+  `detect`);
   params come checked by the protocol's schemas, a `Fail` thrown is the
   refusal's code, an action that does not stream ends with the core's
   interest (`ctx.signal`); its own modules in `machine/`. Exported as a

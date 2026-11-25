@@ -149,6 +149,10 @@ const sameProc = (a: { pid: number; argv: readonly string[] | null } | null, b: 
   return a.pid === b.pid && x.length === y.length && x.every((v, i) => v === y[i]);
 };
 
+/** The state a terminal's program reported itself (OSC 7501); "" for
+ * none. */
+const stateOf = (r: Terminal): string => (typeof r.status?.state === 'string' ? r.status.state : '');
+
 /** Makes r a copy of t. */
 function replace(r: Terminal, t: Terminal): void {
   for (const k of Object.keys(r)) delete r[k];
@@ -328,7 +332,7 @@ export class Detector {
       return;
     }
     if (!agent) return;
-    const state = w.rec.status?.state ?? '';
+    const state = stateOf(w.rec);
     if (state !== '' || w.tracker!.selfReported()) {
       const [status, changed] = w.tracker!.report(state);
       if (changed) {
@@ -346,7 +350,7 @@ export class Detector {
     w.agent = agent;
     w.tracker = tracker;
     w.stop = stop;
-    if (w.rec.status) tracker.report(w.rec.status.state);
+    if (w.rec.status) tracker.report(stateOf(w.rec));
     this.send(this.eventOf(addr, w, tracker.status()));
     void this.follow(addr, w, tracker, stop.signal);
     if (this.resolver && hasSessions(agent)) {

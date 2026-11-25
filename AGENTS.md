@@ -148,14 +148,19 @@ playbooks):
 - A coding agent kind is a row of `backend/shared/agents/kinds.ts` and of
   `internal/agentkinds` (the machine's, compared with the core's registry
   by `TestKindsMatchManifestsAndSettings`) with a detector manifest of the
-  same id, then `make tokens`. Finding its sessions needs `internal/agent/sessions`.
-  Claude Code's transcripts are mapped to events by
-  `internal/agent/transcript` (the chat host's imports and its Claude
-  Code adapter), specified by the vectors in `spec/vectors/transcript/`,
-  which the Go and the web tests both run; `go test
-  ./internal/agent/transcript -run TestVectors -update` rewrites a
-  vector's expected events after a deliberate change of the mapping
-  (review the diff). A chat with it (the chat
+  same id (`internal/agent/detect/manifests`, which the TypeScript machine
+  side embeds too: `MANIFEST_FILES` of
+  `backend/features/agents/machine/detect/manifests.ts` lists them, and
+  `go test ./internal/agent/detect -run TestManifestsParsed -update`
+  rewrites what both builds' tests expect them to parse to), then `make
+  tokens`. Finding its sessions needs `internal/agent/sessions` and
+  `backend/machine/agents`. Claude Code's transcripts are mapped to events
+  by `internal/agent/transcript` and `backend/shared/agents/transcript`
+  (the chat host's imports and its Claude Code adapter), specified by the
+  vectors in `spec/vectors/transcript/`, which the Go, the core's and the
+  web tests run; `go test ./internal/agent/transcript -run TestVectors
+  -update` rewrites a vector's expected events after a deliberate change
+  of the mapping (review the diff; both parsers must give them). A chat with it (the chat
   host running it headless) also needs a `Chat` spec in its row, whose
   `Adapter` is one of `agentkinds.Adapters`, the protocols of the
   adapters behind `internal/chatadapter` (`TestChatKinds`); its argv,
