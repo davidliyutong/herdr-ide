@@ -25,6 +25,9 @@
 #  11. Bun's APIs (Bun.*, bun:*) are used only by what runs under Bun alone:
 #      the machine side (backend/machine, hosts/machine, the features'
 #      machine.ts and machine/), the command line (hosts/bun) and tests
+#  12. the types of Codex's app-server the chat host's Codex adapter
+#      speaks are those its pinned schema makes (spec/codex-app-server,
+#      backend/scripts/codex-schema.ts)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -90,6 +93,9 @@ fi
 echo "==> design tokens and settings keys"
 go run ./scripts/tokens -check || fail=1
 (cd backend && bun scripts/registry.ts --check) || fail=1
+
+echo "==> Codex's app-server types"
+(cd backend && bun scripts/codex-schema.ts --check) || fail=1
 
 echo "==> terminal emulator module"
 scripts/fetch-ghostty-vt.sh --check || fail=1
