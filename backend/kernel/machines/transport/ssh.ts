@@ -330,17 +330,18 @@ const bounded = (pipeline: string, limitS: number, what: string): string[] => [
 /** The lines that download url into "$t.in": at most cap bytes (head), with
  * curl, else wget (status 4 with neither), each without its user's
  * configuration (curl -q first, so no .curlrc applies; an empty WGETRC, GNU
- * wget's --no-config where it has it), one try, few redirects, 10 s to
- * connect; curl keeps to the URL's scheme, redirects included (--proto,
- * --proto-redir); wget may follow a redirect to another scheme, which only
- * the archive's digest then answers for. A watchdog ends it after limitS
- * seconds in all, whatever the tool (wget's -T bounds one read only). */
+ * wget's --no-config where its untranslated help says it has it), one try,
+ * few redirects, 10 s to connect; curl keeps to the URL's scheme, redirects
+ * included (--proto, --proto-redir); wget may follow a redirect to another
+ * scheme, which only the archive's digest then answers for. A watchdog ends
+ * it after limitS seconds in all, whatever the tool (wget's -T bounds one
+ * read only). */
 function fetchInto(url: string, cap: number, limitS: number): string[] {
   const scheme = new URL(url).protocol.replace(/:$/, '');
   if (scheme !== 'https' && scheme !== 'http') throw new Error(`not a download URL: ${url}`);
   return [
     `if command -v curl >/dev/null 2>&1; then set -- curl -q -fsSL --proto =${scheme} --proto-redir =${scheme} --max-filesize ${cap} --max-redirs 5 --connect-timeout 10 --max-time ${limitS}`,
-    `elif command -v wget >/dev/null 2>&1; then set -- wget -q -T 10 -O -; if wget --version 2>/dev/null | grep -q 'GNU Wget'; then set -- "$@" -t 1 --max-redirect=5; wget --help 2>&1 | grep -q -- --no-config && set -- "$@" --no-config; fi`,
+    `elif command -v wget >/dev/null 2>&1; then set -- wget -q -T 10 -O -; if wget --version 2>/dev/null | grep -q 'GNU Wget'; then set -- "$@" -t 1 --max-redirect=5; LC_ALL=C wget --help 2>&1 | grep -q -- --no-config && set -- "$@" --no-config; fi`,
     `else echo "no curl or wget" >&2; exit 4; fi`,
     `: > "$t.rc"`,
     ...bounded(`WGETRC="$t.rc" "$@" ${shQuote(url)} | head -c ${cap + 1} > "$t.in"`, limitS, 'the download'),

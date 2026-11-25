@@ -22,6 +22,7 @@
 import { rm } from 'node:fs/promises';
 import { ChunkReader, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import type { Logger } from '#shared/lib/log.ts';
+import { shownURL } from '#shared/lib/urls.ts';
 import { untilClosed } from '#machine/dispatch.ts';
 import type { ActionContext } from '#machine/feature.ts';
 import type { Conn } from '#machine/stream.ts';
@@ -62,7 +63,13 @@ export async function serveCodeServer(cs: CodeServer, conn: Conn, h: Header, ctx
         let tarball: Staged | null = null;
         try {
           tarball = await download(l, h.url ?? '', { env: ctx.environ(), signal: ac.signal, limits });
-          await install(l, h.version, tarball, { expected: h.digest, what: h.url, env: ctx.environ(), logger: o.logger, limits });
+          await install(l, h.version, tarball, {
+            expected: h.digest,
+            what: shownURL(h.url ?? ''),
+            env: ctx.environ(),
+            logger: o.logger,
+            limits,
+          });
         } finally {
           ac.abort();
           if (tarball) await rm(tarball.file, { force: true });

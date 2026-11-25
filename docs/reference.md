@@ -63,11 +63,11 @@ and file change the value at runtime.
 | --- | --- | --- |
 | `--code-server-version` | `4.144.0` | code-server release for machines; default versions have pinned SHA-256 digests. |
 | `--code-server-idle` | `20m` | Stop a machine's code-server after this long without VS Code connections; `0` keeps it while the agent lives. |
-| `--code-server-url` | GitHub releases | Download URL template (`{version}`, `{asset}`, `{file}`); point it at a mirror. |
+| `--code-server-url` | GitHub releases | Download URL template (`{version}`, `{asset}`, `{file}`); point it at a mirror. An `http` or `https` URL without user information, query or fragment: machines get it on their command line (`--code-server-install=download`), so the core refuses to start with credentials in it; serve a mirror that needs credentials through a `--seed-dir`. |
 | `--extension-url` | Open VSX | Extension URL template (`{publisher}`, `{name}`, `{version}`, `{file}`). |
 | `--seed-dir` | – | Directory of pre-downloaded tarballs and VSIXs (from `fetch-assets`), and of Anthropic's Agent SDK tarball (`claude-agent-sdk-0.3.322.tgz`, for Claude Code's chats on machines of the TypeScript build), searched before the cache (repeatable). |
 | `--offline` | `false` | Never download; artifacts come from `--seed-dir` or the cache. Machines are not asked to download the Agent SDK either. |
-| `--npm-registry` | `https://registry.npmjs.org` | npm registry or mirror from which the core and the machines download Anthropic's Agent SDK when a Claude Code chat on a machine of the TypeScript build needs it; the tarball is checked against the pinned integrity whatever its source ([42](features/42-typescript-backend.md#claude-code)). |
+| `--npm-registry` | `https://registry.npmjs.org` | npm registry or mirror from which the core and the machines download Anthropic's Agent SDK when a Claude Code chat on a machine of the TypeScript build needs it; the tarball is checked against the pinned integrity whatever its source ([42](features/42-typescript-backend.md#claude-code)). An `http` or `https` URL without user information, query or fragment: machines get it on their command line, so the core refuses to start with credentials in it; put the tarball of a mirror that needs credentials into a `--seed-dir`. |
 | `--code-server-install` | `push` | `push` (the core uploads), `download` (the machine fetches with curl or wget, same digest; off with `--offline`) or `existing`; the last two fall back to `push`. Setting `codeServer.install`. |
 | `--code-server-path` | – | code-server on machines for `existing`; empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/snap/bin`. Setting `codeServer.path`. |
 

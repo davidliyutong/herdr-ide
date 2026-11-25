@@ -21,6 +21,7 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { SLUG } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
+import { shownURL } from '#shared/lib/urls.ts';
 import { DEFAULT_TIMING } from './timing.ts';
 
 /** The code-server release installed on machines. */
@@ -262,13 +263,13 @@ export class Artifacts {
     o: { progress?: (done: number, total: number) => void; signal?: AbortSignal },
   ): Promise<string> {
     await mkdir(this.cacheDir, { recursive: true, mode: 0o755 });
-    this.logger(`downloading ${url}`);
+    this.logger(`downloading ${shownURL(url)}`);
     const signal = AbortSignal.any([AbortSignal.timeout(this.downloadMs), ...(o.signal ? [o.signal] : [])]);
     // The file as it is: a decoded body would not match its digest.
     const res = await this.fetch(url, { signal, redirect: 'follow', headers: { 'Accept-Encoding': 'identity' } });
     if (res.status !== 200 || !res.body) {
       await res.body?.cancel().catch(() => {});
-      throw new Error(`GET ${url}: ${res.status} ${res.statusText}`);
+      throw new Error(`GET ${shownURL(url)}: ${res.status} ${res.statusText}`);
     }
     const total = Number(res.headers.get('Content-Length') ?? -1);
     const tmp = join(this.cacheDir, `.dl-${randomBytes(6).toString('hex')}`);

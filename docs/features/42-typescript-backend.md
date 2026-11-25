@@ -798,6 +798,15 @@ its peer dependencies but zod. The product's code imports nothing of it
 but its types (`scripts/check.sh`), and `backend/scripts/build.ts` refuses
 an executable that holds its code.
 
+`--npm-registry` is an `http` or `https` URL without user information,
+query or fragment, where credentials go: the machines get the tarball's
+URL on their command lines, which every local user there can read, so the
+core refuses to start with one (`hosts/bun/serve.ts`), and so does
+`--code-server-url`; a mirror that needs credentials is served through a
+`--seed-dir`. What the core and the machines say of a URL, in an error a
+page gets or in the log, is its origin and path only
+(`shared/lib/urls.ts`).
+
 Before a request that starts a Claude Code chat (a new chat or an import:
 `POST new`; and, without waiting for it, a page's subscription to such a
 chat, whose next prompt may start its agent), the core makes sure the
@@ -807,9 +816,10 @@ back one its retention removed):
 
 1. the machine side's action `sdk` says whether the pinned version is
    installed, and, unless the core is `--offline`, has the machine download
-   it itself from the registry (`curl -q`, else `wget` without its
-   configuration, at most 32 MiB in 5 minutes; `#machine/artifacts.ts`, as
-   code-server's releases come);
+   it itself from the registry (`curl -q`, else `wget` with an empty
+   regular file as its `WGETRC` and GNU wget's `--no-config` when its
+   untranslated help names it, at most 32 MiB in 5 minutes;
+   `#machine/artifacts.ts`, as code-server's releases come);
 2. a machine that could not gets it from the core (`sdkUpload`, in chunks):
    from an operator's directory (`--seed-dir`, as code-server's tarballs),
    the core's cache (`~/.veldr/cache/npm`, 14 days unused), or the core's

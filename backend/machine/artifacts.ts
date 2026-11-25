@@ -10,7 +10,8 @@
 // in the runtime's pool) and unpacked by node-tar, which parses the headers
 // on the thread a block at a time and writes with asynchronous calls; curl
 // and wget are processes of their own, run with the user's configuration
-// files ignored (curl -q, wget's --no-config).
+// files ignored (curl -q; wget with an empty WGETRC and, GNU wget's,
+// --no-config).
 //
 // Unpacking refuses the whole archive on an absolute path, a ".." in a path,
 // a link (symbolic or hard) whose target leaves the directory, or an entry
@@ -29,6 +30,7 @@ import { createGunzip } from 'node:zlib';
 import { extract, type ReadEntry } from 'tar';
 import { Fail } from '#shared/lib/fail.ts';
 import type { Logger } from '#shared/lib/log.ts';
+import { downloadURLRefusal, redactURLs, shownURL } from '#shared/lib/urls.ts';
 import { lastN, lookPath, run, runError } from './programs.ts';
 
 /** Where a feature keeps its versions: what is fetched or unpacked is
@@ -85,26 +87,25 @@ export async function digestOf(file: string, algorithm = 'sha256', encoding: Bin
 /** The SHA-256 of a file, read in chunks. */
 export const sha256Of = (file: string): Promise<string> => digestOf(file);
 
-/** Checks that url is one a machine may fetch: http or https, with a host. */
+/** Checks that url is one a machine may fetch: http or https, with a host,
+ * without user information, query or fragment, which would put credentials
+ * on the tool's command line (shared/lib/urls.ts; the core refuses such a
+ * flag). */
 export function downloadURL(url: string | undefined): URL {
-  let u: URL;
-  try {
-    u = new URL(url ?? '');
-  } catch {
-    throw new Fail('bad_params', 400, `bad download URL ${JSON.stringify(url ?? '')}`);
-  }
-  if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.hostname === '')
-    throw new Fail('bad_params', 400, `bad download URL ${JSON.stringify(url)}`);
-  return u;
+  const why = downloadURLRefusal(url ?? '');
+  if (why) throw new Fail('bad_params', 400, `bad download URL ${JSON.stringify(shownURL(url ?? ''))}: ${why}`);
+  return new URL(url!);
 }
 
 /** Whether wget takes --no-config (GNU wget 1.15 and later says so in its
- * help); asked once per program. */
+ * help, untranslated: a translation may leave the line out); asked once per
+ * program. */
 const noConfig = new Map<string, Promise<boolean>>();
 function wgetNoConfig(wget: string, env: Record<string, string>): Promise<boolean> {
   let p = noConfig.get(wget);
   if (!p) {
-    p = run(wget, ['--help'], { env, timeoutMs: 5000 }).then((r) => r.out.includes('--no-config'));
+    const { LANGUAGE: _, ...rest } = env;
+    p = run(wget, ['--help'], { env: { ...rest, LC_ALL: 'C' }, timeoutMs: 5000 }).then((r) => r.out.includes('--no-config'));
     noConfig.set(wget, p);
   }
   return p;
@@ -126,6 +127,10 @@ export async function download(
   await mkdir(l.root, { recursive: true, mode: 0o755 });
   const file = staged(l, 'download');
   await (await open(file, 'wx', 0o600)).close();
+  // wget's WGETRC: an empty regular file (GNU wget refuses one that is not,
+  // /dev/null among them).
+  const rc = wget ? `${file}.rc` : '';
+  if (rc) await (await open(rc, 'wx', 0o600)).close();
   const ac = new AbortController();
   const stop = () => ac.abort();
   o.signal.addEventListener('abort', stop, { once: true });
@@ -149,13 +154,15 @@ export async function download(
     const args = curl
       ? ['-q', '-fsSL', '--retry', '2', '--proto', '=http,https', '--proto-redir', '=http,https', '-o', file, u.href]
       : [...((await wgetNoConfig(wget!, o.env)) ? ['--no-config'] : []), '-q', '-O', file, u.href];
-    const env = curl ? o.env : { ...o.env, WGETRC: '/dev/null' };
+    const env = curl ? o.env : { ...o.env, WGETRC: rc };
     const r = await run(curl ?? wget!, args, { env, timeoutMs: o.timeoutMs, signal: ac.signal });
-    if (tooLarge) throw new Error(`download ${u.href}: larger than ${o.max} bytes`);
+    // What is said of it names the URL by its origin and path only.
+    const shown = shownURL(u.href);
+    if (tooLarge) throw new Error(`download ${shown}: larger than ${o.max} bytes`);
     const err = runError(r);
-    if (err) throw new Error(`download ${u.href}: ${err} ${lastN(r.out, 400)}`.trim());
+    if (err) throw new Error(redactURLs(`download ${shown}: ${err} ${lastN(r.out, 400)}`.trim()));
     const st = await lstat(file);
-    if (st.size > o.max) throw new Error(`download ${u.href}: larger than ${o.max} bytes`);
+    if (st.size > o.max) throw new Error(`download ${shown}: larger than ${o.max} bytes`);
     return { file, digest: await sha256Of(file) };
   } catch (e) {
     await rm(file, { force: true });
@@ -163,6 +170,7 @@ export async function download(
   } finally {
     clearInterval(watch);
     o.signal.removeEventListener('abort', stop);
+    if (rc) await rm(rc, { force: true });
   }
 }
 

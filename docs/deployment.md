@@ -391,7 +391,8 @@ veldr --offline --seed-dir ./bundle
 
 Lookup order: `--seed-dir` directories, the cache, then (unless
 `--offline`) `--code-server-url` / `--extension-url`, which can point at a
-mirror. Verification:
+mirror (`--code-server-url` without user information, query or fragment:
+machines downloading releases get it on their command lines). Verification:
 
 - Default versions have SHA-256 digests compiled into the core.
 - Other versions are checked against a `<file>.sha256` beside the file
@@ -411,9 +412,12 @@ Anthropic's Agent SDK, which no executable or app carries
 starts, a machine that lacks it downloads the npm registry's tarball of
 the pinned version itself (curl or wget; not with `--offline`), else the
 core uploads it from a `--seed-dir`, its cache (`~/.veldr/cache/npm/`) or
-its own download through `HTTPS_PROXY`. `--npm-registry` names a mirror.
-For an offline site, put the tarball into a `--seed-dir` directory under
-its own name; on a connected machine:
+its own download through `HTTPS_PROXY`. `--npm-registry` names a mirror:
+an `http` or `https` URL without user information, query or fragment, as
+`--code-server-url` is, since the machines get it on their command lines
+(the core does not start with credentials in either). For a mirror that
+needs credentials, or an offline site, put the tarball into a `--seed-dir`
+directory under its own name (a regular file); on a connected machine:
 
 ```bash
 curl -fsSLO https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.322.tgz

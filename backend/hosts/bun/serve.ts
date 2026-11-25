@@ -12,6 +12,7 @@ import { stderrLogger, type Logger } from '#shared/lib/log.ts';
 import { other as otherLoopback, inUse } from '#shared/host/loopback.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { parseDuration } from '#shared/lib/gotime.ts';
+import { downloadURLRefusal } from '#shared/lib/urls.ts';
 import { auditLog, noAudit } from '#kernel/audit.ts';
 import type { Channel, ChannelHandlers, ChannelOpen, Message } from '#kernel/channel.ts';
 import { coreModules } from '#kernel/config/registry.ts';
@@ -53,6 +54,25 @@ export const OPTIONS = {
   'npm-registry': { type: 'string', default: '' },
 } as const;
 
+/** The flags naming where the core and the machines download from: the
+ * machines get these URLs on their command lines, which every local user
+ * there can read, so they hold no credentials (shared/lib/urls.ts). */
+const URL_FLAGS = ['npm-registry', 'code-server-url'] as const;
+
+/** Why the download URLs of flags f are refused, "" when they are not: each
+ * http or https with a host, without user information, query or fragment.
+ * A mirror that needs credentials is served through a --seed-dir. */
+export function urlFlagsRefusal(f: Partial<Record<(typeof URL_FLAGS)[number], unknown>>): string {
+  for (const name of URL_FLAGS) {
+    const v = f[name];
+    if (v === undefined || v === '') continue;
+    const why = typeof v === 'string' ? downloadURLRefusal(v) : 'no value';
+    if (why)
+      return `--${name}: ${why}; it must be an http or https URL without user information, query or fragment (put what a mirror that needs credentials serves into a --seed-dir instead)`;
+  }
+  return '';
+}
+
 function fatal(logger: Logger, msg: string): never {
   logger(msg);
   process.exit(1);
@@ -89,8 +109,8 @@ export async function serve(argv: string[]): Promise<void> {
   if (!validInstance(instance)) fatal(logger, '--instance must be lowercase letters, digits and dashes');
   const nodeInstance = f['node-instance'] ?? instance;
   if (!validInstance(nodeInstance)) fatal(logger, '--node-instance must be lowercase letters, digits and dashes');
-  if (f['npm-registry'] !== '' && !/^https?:\/\/[^/\s]+/.test(f['npm-registry']))
-    fatal(logger, '--npm-registry must be an http or https URL');
+  const badURL = urlFlagsRefusal(f);
+  if (badURL) fatal(logger, badURL);
   for (const t of f.ssh)
     if (!validTarget(t))
       fatal(
