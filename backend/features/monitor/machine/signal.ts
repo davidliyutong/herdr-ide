@@ -4,13 +4,14 @@
 // agent itself.
 import { constants } from 'node:os';
 import { Fail } from '#shared/lib/fail.ts';
+import { MAX_PID } from '../protocol.ts';
 
 /** The signals the task manager may send. */
 export const ALLOWED_SIGNALS = ['TERM', 'KILL', 'INT', 'HUP', 'STOP', 'CONT'] as const;
 
 /** Sends the signal named name (TERM when none) to pid; what it sent. */
 export function sendSignal(pid: number, name: string, self = process.pid): { ok: true; pid: number; signal: string } {
-  if (pid <= 1) throw new Fail('invalid_pid', 400, `refusing to signal pid ${pid}`);
+  if (pid <= 1 || pid > MAX_PID) throw new Fail('invalid_pid', 400, `refusing to signal pid ${pid}`);
   if (pid === self) throw new Fail('invalid_pid', 400, 'refusing to signal the agent process');
   const sig = name.trim().toUpperCase() || 'TERM';
   if (!(ALLOWED_SIGNALS as readonly string[]).includes(sig))

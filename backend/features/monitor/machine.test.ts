@@ -8,6 +8,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { call } from '#kernel/agent.ts';
+import { Op } from '#shared/proto/agentproto/index.ts';
 import { Fail } from '#shared/lib/fail.ts';
 import { machineOf, rig, type Rig } from '#machine/testing.ts';
 import { monitorMachine, type MonitorOptions } from './machine.ts';
@@ -28,6 +29,16 @@ async function start(o: Partial<MonitorOptions> = {}) {
     metrics: () => call(m, monitorProtocol, 'metrics', {}),
     processes: () => call(m, monitorProtocol, 'processes', {}),
     signal: (pid: number, signal: string) => call(m, monitorProtocol, 'signal', { pid, signal }),
+    /** The machine's own answer to any pid (the core's schema bounds it
+     * before it sends). */
+    rawSignal: async (pid: number, signal: string) => {
+      try {
+        await r!.session.request({ op: Op.Plugin, plugin: 'monitor', action: 'signal', params: { pid, signal } });
+        return 'sent';
+      } catch (e) {
+        return (e as { reply?: { code?: string } }).reply?.code ?? 'failed';
+      }
+    },
   };
 }
 
@@ -201,9 +212,9 @@ describe('Linux', () => {
 describe('signals', () => {
   test('refused for pids up to 1, the agent and signals off the list; sent otherwise; a process that is gone is not_found', async () => {
     const a = await start();
-    expect(await refusal(a.signal(0, 'TERM'))).toBe('invalid_pid');
-    expect(await refusal(a.signal(1, 'TERM'))).toBe('invalid_pid');
-    expect(await refusal(a.signal(-5, 'TERM'))).toBe('invalid_pid');
+    // Up to 1, and beyond pid_t (which kill(2) would take as -1, every
+    // process, and as the agent itself): refused by the protocol.
+    for (const pid of [0, 1, -5, 2 ** 32 - 1, 2 ** 32 + process.pid, 2 ** 31]) expect(await a.rawSignal(pid, 'CONT')).toBe('bad_params');
     expect(await refusal(a.signal(process.pid, 'TERM'))).toBe('invalid_pid');
     expect(await refusal(a.signal(999999, 'SEGV'))).toBe('invalid_signal');
     const child = spawn('sleep', ['30'], { stdio: 'ignore' });

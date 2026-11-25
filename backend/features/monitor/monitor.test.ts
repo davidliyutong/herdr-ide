@@ -41,6 +41,12 @@ test('signal params', async () => {
   });
   await tc.request('POST', '/api/m/x/p/monitor/signal', { body: '{"pid":0}' });
   expect(tc.audit.records().at(-1)).toMatchObject({ pid: 0, signal: 'TERM', error: 'invalid_pid' });
+  // Beyond pid_t (the Go machine build's kill would take 2^32-1 as -1,
+  // every process of the user, and 2^32+pid as pid).
+  for (const pid of [2 ** 32 - 1, 2 ** 32 + process.pid, 2 ** 31]) {
+    const r = await tc.request('POST', '/api/m/x/p/monitor/signal', { body: JSON.stringify({ pid, signal: 'CONT' }) });
+    expect([r.status, ((await r.json()) as { error: string }).error]).toEqual([400, 'invalid_pid']);
+  }
   for (const body of ['', 'nope', '{"pid":"7"}', '{"pid":1.5}', JSON.stringify({ pid: 7, signal: 'x'.repeat(5000) })]) {
     const r = await tc.request('POST', '/api/m/x/p/monitor/signal', { body });
     expect([body.slice(0, 12), r.status, ((await r.json()) as { error: string }).error]).toEqual([body.slice(0, 12), 400, 'bad_request']);

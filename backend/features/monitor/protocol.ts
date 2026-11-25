@@ -97,13 +97,19 @@ export const processes = z.looseObject({
   timestampMs: num,
 });
 
+/** The largest pid: kill(2)'s pid_t is 32 bits, and a larger number would
+ * wrap on a machine that passes it on as an int (4294967295 is -1, every
+ * process of the user). */
+export const MAX_PID = 2 ** 31 - 1;
+
 export const monitorProtocol = defineProtocol('monitor', {
   metrics: { params: z.object({}), result: metrics, timeoutMs: 10_000 },
   processes: { params: z.object({}), result: processes, timeoutMs: 15_000 },
   /** A signal (TERM, KILL, INT, HUP, STOP, CONT) to a process of the
-   * agent's user; the agent refuses others and pids up to 1. */
+   * agent's user; the agent refuses others, pids up to 1 and beyond
+   * MAX_PID. */
   signal: {
-    params: z.object({ pid: z.int(), signal: z.string() }),
+    params: z.object({ pid: z.int().min(2).max(MAX_PID), signal: z.string() }),
     result: z.looseObject({ ok: z.boolean(), pid: num, signal: z.string() }),
     timeoutMs: 10_000,
   },

@@ -214,6 +214,11 @@ func TestSendSignalGuardsAndSuccess(t *testing.T) {
 	checkCode(SignalParams{PID: 1, Signal: "TERM"}, "invalid_pid")
 	checkCode(SignalParams{PID: -5, Signal: "TERM"}, "invalid_pid")
 	checkCode(SignalParams{PID: os.Getpid(), Signal: "TERM"}, "invalid_pid")
+	// Beyond pid_t: kill(2) would take them as -1 (every process) and as
+	// the agent itself.
+	checkCode(SignalParams{PID: 1<<32 - 1, Signal: "CONT"}, "invalid_pid")
+	checkCode(SignalParams{PID: 1<<32 + os.Getpid(), Signal: "CONT"}, "invalid_pid")
+	checkCode(SignalParams{PID: 1 << 31, Signal: "CONT"}, "invalid_pid")
 	checkCode(SignalParams{PID: 999999, Signal: "SEGV"}, "invalid_signal")
 
 	// Start a short-lived child process and terminate it cleanly.

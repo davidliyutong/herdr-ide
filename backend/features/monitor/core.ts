@@ -9,7 +9,7 @@ import { defineFeature } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import { readBody } from '#kernel/http/app.ts';
 import type { Ctx } from '#kernel/http/env.ts';
-import { monitorProtocol } from './protocol.ts';
+import { MAX_PID, monitorProtocol } from './protocol.ts';
 import { settings } from './settings.ts';
 
 /** Bounds a signal's JSON. */
@@ -64,7 +64,7 @@ export const monitorFeature = () =>
       api.post('/signal', ctx.mutating('signal'), async (c) => {
         const p = await readJSON(c, MAX_SIGNAL_BODY, signalBody);
         Object.assign(c.var.audit, { pid: p.pid, signal: p.signal });
-        if (p.pid <= 1) throw new Fail('invalid_pid', 400, 'invalid pid');
+        if (p.pid <= 1 || p.pid > MAX_PID) throw new Fail('invalid_pid', 400, 'invalid pid');
         return answer(c, await ctx.call(c.var.machine, monitorProtocol, 'signal', p, { signal: c.req.raw.signal }));
       });
     },

@@ -117,10 +117,15 @@ var allowedSignals = map[string]syscall.Signal{
 	"CONT": syscall.SIGCONT,
 }
 
-// sendSignal sends an allowlisted signal to pid, refusing PID <= 1 and the
-// agent's own process.
+// maxPID is the largest pid the kernel's pid_t holds: kill(2) takes 32
+// bits, so a larger int would wrap (4294967295 is -1, every process of
+// the user; 2^32 plus the agent's pid is the agent).
+const maxPID = math.MaxInt32
+
+// sendSignal sends an allowlisted signal to pid, refusing PID <= 1, a pid
+// beyond pid_t and the agent's own process.
 func sendSignal(p SignalParams) (*SignalReply, error) {
-	if p.PID <= 1 {
+	if p.PID <= 1 || p.PID > maxPID {
 		return nil, plugin.Errorf("invalid_pid", "refusing to signal pid %d", p.PID)
 	}
 	if p.PID == os.Getpid() {
