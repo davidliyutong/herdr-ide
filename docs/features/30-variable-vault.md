@@ -57,12 +57,12 @@ Non-goals:
 
 ## Design
 
-### Store (`internal/vault`)
+### Store (`backend/features/vault/store.ts`)
 
 The vault is `vault[-<instance>].json` beside the settings file: 0600,
-written atomically and durably (`internal/userfile` flushes the content
-before the rename and the directory after), so a crash leaves the old file
-or the new one. Fields the version does not know are kept.
+written atomically and durably (`backend/shared/host/userfile.ts` flushes
+the content before the rename and the directory after), so a crash leaves
+the old file or the new one. Fields the version does not know are kept.
 
 - **Key.** Derived from the user's passphrase (at least 8 characters) with
   Argon2id (time 3, 64 MiB, 4 threads, a 16-byte salt; parameters stored in
@@ -92,7 +92,7 @@ or the new one. Fields the version does not know are kept.
   passphrase needs no session, so one set by a program shows as one the
   user did not choose.
 - **Removed machines.** A machine removed from the core
-  (`plugin.MachineForgetter`) leaves every variable's list, so a machine
+  (`onForget`) leaves every variable's list, so a machine
   added later under the same id asks again. While locked it goes into
   `forgotten`, which no variable lets read without asking, and leaves the
   lists at the next unlock or change. `forgotten` only ever narrows.
@@ -103,25 +103,25 @@ or the new one. Fields the version does not know are kept.
   them out of the conversation by accident, not against a command written
   to print them encoded.
 
-#### The key in memory (`internal/vault/key.go`)
+#### The key in memory (`crypto.ts`)
 
-While unlocked, the master key is in a memguard Enclave: encrypted under a
-session key memguard keeps in locked, guarded pages. Each store operation
-opens it into a LockedBuffer destroyed right after. A lock overwrites the
-Enclave's ciphertext in place (memguard has no destroy; the store checks
-memguard's layout first) and drops it; the core purges memguard at
-shutdown. Memory that cannot be locked (`ulimit -l` too small) fails the
-unlock with `503 memory`: the key never falls back to an ordinary slice.
+While unlocked, the master key is a WebCrypto `CryptoKey` that cannot be
+exported: its bytes live in the runtime's native memory, where each store
+operation encrypts and decrypts with it. They pass through JavaScript only
+for the moment Argon2id (`node:crypto`'s: native, off the event loop)
+returns them, in a buffer wiped once they are imported as the key. An
+unlock entry's wrap is opened by `unwrapKey` straight into such a key, and
+a KEK's bytes are wiped once imported. Adding an authenticator derives the key
+again from that request's passphrase, as an extractable copy that lives for
+that request only, to wrap it for the new entry. A lock drops the key
+([42](42-typescript-backend.md#security)).
 
-Not covered: Go's AES key schedule during an operation, passphrases and
-PRF outputs of requests (Go strings), Argon2's output and unwrapped keys
-for the moment before they move into the Enclave, memguard's own session
-key, and the desktop shell's strings. memguard sets the process's core
-dump limit to 0, which everything the core starts inherits
-([deployment](../deployment.md#remote-resources)); machines run the
-machine build, which does not link memguard.
+Not covered: the key's native memory is not locked, so it may be swapped
+out; passphrases and PRF outputs of requests; the extractable copy for the
+moment it is wrapped; and the desktop shell's strings. The core sets no
+core dump limit.
 
-### Core (`internal/plugins/vault`)
+### Core (`backend/features/vault`)
 
 The plugin `vault` (`plugins.vault.enabled`, on by default) opens the store
 at first use. A file that does not open answers `503` with its code
@@ -168,7 +168,7 @@ exempting an app, ending Verify every Allow, an export), because a page's
 session is something a program driving the page has too. So biometrics
 never extend themselves.
 
-#### Authenticators (`proof.go`, `unlock.go`, `internal/webauthn`)
+#### Authenticators (`vault.ts`, `desktop.ts`, `webauthn.ts`)
 
 Biometrics, the desktop app's Touch ID or Windows Hello or a browser's
 WebAuthn credential (a platform authenticator or a security key), stand in
@@ -192,17 +192,19 @@ Proofs:
   issued, good for an unlock only; nonces of an unlocked vault never
   unlock.
 - A **WebAuthn credential** signs the nonce as its challenge. The core
-  checks it with the standard library only: client data (`webauthn.get`,
-  challenge, origin, not cross-origin), authenticator data (host name hash,
-  user present and verified), the signature (ES256, RS256 or EdDSA) and a
-  growing signature counter.
+  checks it with @simplewebauthn/server and checks of its own beyond it
+  (bounded inputs): client data (`webauthn.get`, challenge, origin, not
+  cross-origin), authenticator data (host name hash, user present and
+  verified), the signature (ES256, RS256 or EdDSA) and a growing signature
+  counter.
 - **Bound to an origin.** A browser keeps a credential for a host name,
   whatever the port, and a program writes its requests' `Origin` as it
   likes. So the credential is bound to the origin the authenticator signed,
   and credentials are added and used only for origins the core vouches for
-  (`plugin.Call.TrustedOrigin`): an `--allowed-origin`, or
-  `http://localhost` on the core's port while the core holds that port on
-  both `127.0.0.1` and `::1` (`internal/loopback`). A page another program
+  (the request's `trustedOrigin`, `backend/kernel/http/guard.ts`): an
+  `--allowed-origin`, or `http://localhost` on the core's port while the
+  core holds that port on both `127.0.0.1` and `::1`
+  (`backend/shared/host/loopback.ts`). A page another program
   serves on `localhost:3000` can get the user's biometrics to sign, but the
   signature names its origin and is refused. WebAuthn does not work on a
   page opened by IP address; the settings page links to `localhost`.
@@ -245,7 +247,7 @@ unlock entries as `vault.unlock_removed` (with a reason), refusals as
 `denied.vault_proof` and `denied.vault_passphrase`; never with a key, a
 relay's content or a PRF output.
 
-#### Unlock entries (`internal/vault/unlock.go`)
+#### Unlock entries (`unlock.ts`)
 
 The file keeps, outside the sealed guard, a list `unlock` of entries
 `{id, authenticator, kind, created, check, <kind's parameters>, wrapped}`:
@@ -278,7 +280,7 @@ relay is its own proof), and the passphrase's window. Only then is the key
 installed and a session opened, marked as a proof's. Failures leave the
 vault locked: `401 vault_proof` (does not open or verify), `403
 passphrase_due` (outside the window), `409 unlock_stale` (an entry gone,
-invalidated or orphaned, which is removed), `503 memory`.
+invalidated or orphaned, which is removed).
 
 **The passphrase's window.** An authenticator unlocks only within
 `vault.passphraseDays` (14; 1–90) of the last time the passphrase was
@@ -313,7 +315,8 @@ session needed) removes the window.
 - **The relay** carries what makes a KEK through the page, which cannot
   read it: AES-256-GCM under a key derived from the launch's verify key,
   bound to purpose, nonce and entry id. The core opens it only for a
-  request of the desktop client (`plugin.Call.DesktopRelay`). Vectors:
+  request of the desktop client (`desktopCan` in `vault.ts`; the relay
+  in `desktop.ts`). Vectors:
   `spec/vectors/vault-unlock/relay.json`.
 - **Unlocking**: `GET proof/{nonce}` lists the desktop entries; the shell
   picks its install's, prompts, and answers `{id, relay}`, or
@@ -335,7 +338,7 @@ written, the old item is put back with its password. A refused prompt
 leaves this launch without biometric unlock and asks again next launch.
 Development runs only record; Windows and Linux skip the step.
 
-#### The automatic lock (`autolock.go`)
+#### The automatic lock (`vault.ts`)
 
 `vault.autoLock` (60 minutes; 0 is never) locks an unused vault and
 forgets its key, ending every session and nonce. A use is an unlock, a
@@ -376,7 +379,7 @@ settings page says so.
 #### Requests from machines
 
 The MCP servers' requests arrive as streams the agent opens with op
-`vault` (`plugin.Streamer`). The header carries the process connected to
+`vault` (`ctx.agentStream`). The header carries the process connected to
 `vault.sock` (by peer credentials) and up to 7 parents, `{pid, name}` as
 the kernel names them. Then one `VaultRequest {tool, names, client,
 terminal, cwd}` line and one `VaultResponse` line. The core takes the
@@ -399,7 +402,7 @@ shown.
   under one lock, so a `200` answer is what the requesters get and a late
   one gets `404`. Pages then get `resolved`.
 
-#### The access log (`accesslog.go`)
+#### The access log (`accesslog.ts`)
 
 Each MCP request and each value a page takes (reveal, export) is a record
 in the core's database (`core[-<instance>].db`, table `vault_access`;
@@ -426,7 +429,7 @@ and browser; never a value. Reading it needs a session.
 - With `--audit-log` every record is audited too (`vault.access`,
   `vault.revealed`, `vault.exported`).
 
-### Export and import (`internal/vault/export.go`, `transfer.go`)
+### Export and import (`exportfile.ts`, `core.ts`)
 
 Variables move between vaults in an **export file** encrypted under a
 passphrase of its own. The core seals and opens it; the browser only holds
@@ -483,7 +486,7 @@ build's may linger); one whose socket was taken over checks every 2 s and
 serves it again once free; an exiting node removes the socket only if it
 is still its own (same inode).
 
-The MCP server is the `mcp` command of the agent and of the core.
+The MCP server is the `mcp` command of the machine build.
 `<data dir>/bin/<slug>-mcp`, the path agents' configurations name, stays
 the same across agent updates: a POSIX shell script that runs
 `<slug>-mcp-$(uname -s)-$(uname -m)` beside it, and each agent keeps the
@@ -575,7 +578,7 @@ between changes.
 | The loopback API or the page's origin as proof of the user | Programs on the core host call the API as pages do, and content on the core's origin passes the origin check. |
 | Upgrading files sealed with less additional data | Their machine lists were not authenticated; an upgrade would seal a widened list in. |
 | Every lock forgetting the key with only the passphrase to unlock | The passphrase after every automatic lock is what users disable the lock to avoid. Unlock entries give biometrics the key back without the core keeping it. |
-| Holding the key in memory for a bounded time and only suspending on lock | The plaintext key stayed in memory while locked. With unlock entries a lock forgets the key, and the unlocked key is in memguard's Enclave. |
+| Holding the key in memory for a bounded time and only suspending on lock | The plaintext key stayed in memory while locked. With unlock entries a lock forgets the key, and the unlocked key is a `CryptoKey` that cannot be exported. |
 | Wrapping the key again after each unlock | The key does not change until the passphrase does; a KEK captured once opens any copy of the file anyway. |
 | Credentials without PRF for unlocking | A proof holds no key; the core would have to keep the key for them. |
 | WebAuthn or Electron's Touch ID in the desktop app | Its page is on `http://127.0.0.1:<port>`, which no credential can be for; Electron's Touch ID needs entitlements ad hoc builds lack and gives no secret to wrap under. A Secure Enclave key used after Touch ID does. |
@@ -589,7 +592,7 @@ between changes.
 | Verify every Allow for requests only | A session could then widen readers or reveal, the same value by another door. |
 | A proof's session changing what guards the vault | Biometrics could add an authenticator, exempt an app or end the rule, after which the passphrase is never asked again. |
 | A page's own automatic lock time | It was set with a page's session, which a program driving the page has too. |
-| Locked memory of our own instead of memguard | mlock, guard pages, VirtualLock, canaries and an encrypted enclave are what memguard maintains; its cost is the core dump limit and a layout-dependent destroy, checked at upgrades. |
+| The key in locked memory (memguard or mlock of our own) | Costs a core dump limit that everything the core starts inherits and, with memguard, a layout-dependent destroy checked at upgrades; a `CryptoKey` that cannot be exported keeps the bytes out of JavaScript without either, though not out of swap. |
 | An import session between preview and import | Decrypted values would wait in memory for the user; sending the file again costs one derivation. |
 | Mapping machines by label, or ssh machines by id alone, on import | Labels may be shared and ids may name another host on another core; a match could let a different machine read without asking. |
 | Exporting or editing values in the browser | Values would pass through the page, its memory and its extensions. |
@@ -612,8 +615,6 @@ between changes.
   unlocks with the passphrase only.
 - **An older copy of the file put back**: entries whose authenticator the
   guard no longer has are removed (`409 unlock_stale`).
-- **Memory cannot be locked**: every unlock is `503 memory`; raise
-  `ulimit -l` and restart the core.
 - **File of another version or damaged**: `503 version` / `invalid`, said
   in the panel; move it away and Retry.
 - **File edited** (machines widened, values swapped): that value is
@@ -662,9 +663,9 @@ variables from machines and the MCP server. Limits of the design:
   program until the shell deletes it a moment later.
 - A PRF output passes through the page's script: content on the UI's
   origin that sees it, with the file, has the master key.
-- memguard does not protect what is listed under the key in memory; a
-  debugger of the same user is outside the model. It sets the core's core
-  dump limit to 0 for everything the core starts.
+- The key's native memory is not locked against swap, and what is listed
+  under the key in memory is not covered; a debugger of the same user is
+  outside the model.
 - A program that can rewrite the app bundle (one signed ad hoc in
   `/Applications`) can replace the helper and get the secrets at the next
   Touch ID.
@@ -685,42 +686,36 @@ variables from machines and the MCP server. Limits of the design:
 
 ## Testing
 
-- `internal/vault`: `vault_test.go` (passphrase, binding of name, machines
-  and flag, other versions and malformed files, KDF bounds, passphrase
-  change, removed machines, renames), `guard_test.go` (sealed guard,
-  `TestLockForgetsTheKey`, `TestMemoryFailureFailsTheUnlock`,
-  `TestExemptions`, `TestCheckApp`), `unlock_test.go` (`TestKEKVectors`,
-  `TestUnlockEachKind`, `TestEditedEntriesDoNotOpen`, `TestOrphanEntries`,
-  `TestPassphraseWindow`, `TestOlderBuildRoundTrip`), `export_test.go`
-  (round trip, tampering, bounds, one-write import).
-- `internal/userfile/userfile_test.go` (`TestWriteIsDurable`).
-- `internal/webauthn/webauthn_test.go`: the three algorithms and every
-  check of an assertion; malformed input never panics.
-- `internal/plugins/vault`: `vault_test.go` (approvals, races, bounds,
-  coalescing, the gate, `TestLockDuringAPassphraseCheck`), `proof_test.go`
-  (proofs, sessions they open, origins, desktop MAC,
-  `TestVerifyEveryAllowCoversValuesAndGrants`, `TestListWithoutASession`),
-  `unlock_test.go` (`TestDesktopUnlock`, `TestPRFUnlock`,
-  `TestPassphraseDue`, `TestDeadDesktopEntry`,
-  `TestRegistrationWrapsTheKey`, `TestLockDuringAnUnlock`,
-  `TestMemoryError`), `accesslog_test.go`
-  (`TestAccessLogSurvivesARestart`, `TestReleasesAreNeverCoalesced`,
-  `TestUnloggedReleaseIsRefused`, `TestAccessLogDatabase`,
-  `TestAccessLogNewerVersion`, `TestWhoAskedComesFromTheAgent`),
-  `transfer_test.go` (`TestExport`, `TestImport`,
-  `TestImportMapsMachinesByTarget`), `settings_test.go` (`TestAutoLock`,
-  `TestAutoLockFollowsTheSetting`,
-  `TestTimeLimitsCountSleep`), `exempt_test.go` (`TestExemptApps`). The
-  automatic lock's tests drive their own clock.
+- `backend/features/vault/store.test.ts`: `vectors` (`KEKs`, `relays`);
+  files the earlier Go core wrote (passphrase, Argon2id, values, guard,
+  exemptions, unlock entries of each kind, the passphrase's window, export
+  files);
+  `the store` (binding of name, machines and flag; a lock forgetting the
+  key, passphrase change; a passphrase-made entry wrapping the key; entries
+  whose authenticator left the guard; removed machines; other versions,
+  damaged files and KDF bounds; `apps that can be exempted`).
+- `backend/shared/host/userfile.test.ts` (`TestWriteIsDurable`).
+- `backend/features/vault/webauthn.test.ts`: the three algorithms and
+  every check of an assertion; malformed input only fails.
+- `backend/features/vault/core.test.ts`: `the gate` (sessions, wrong
+  passphrases slowed, a lock during a passphrase check, guards),
+  `machines' requests` (approvals, expiry and cancelling, the process
+  chain from the agent, a release whose record cannot be written, exempt
+  apps), `authenticators` (a WebAuthn credential with PRF added, proving
+  and unlocking; the desktop app's MAC and relay; a stale entry; Verify
+  every Allow covering values and grants), `time` (the automatic lock,
+  sessions counting sleep), `export and import` (machines mapped by
+  target). The time tests drive their own clock.
+- `backend/features/vault/accesslog.test.ts`: the database per host
+  beside the vault's file, records surviving a restart, releases never
+  merged, releases and others bounded apart, a log that cannot be read.
 - `internal/vaultmcp`: `mcp_test.go` (JSON-RPC, masking,
   `TestMaskAtTheCut`, `TestRunLimitsFromTheCore`, cancellation,
   `TestSocketPath`),
   `run_unix_test.go` and `signal_unix_test.go` (background programs and
   signals including SIGKILL).
 - `internal/agent/vault_test.go` (`TestSocketsFollowTheNewestAgent`,
-  `TestLinkMCPReplacesTheLink`);
-  `internal/server`: `TestMachineRemove`, `TestPluginCallClient`,
-  `TestDesktopRelay`, `TestMutatingRoutesAreGuarded`.
+  `TestLinkMCPReplacesTheLink`).
 - `desktop/src`: `verify.test.ts` (MAC vectors, prompt text, unlock and
   enroll), `enclave.test.ts`, `relay.test.ts` (relay and KEK vectors),
   `unlockStore.test.ts`, `keychain.test.ts` (the item's move to a new

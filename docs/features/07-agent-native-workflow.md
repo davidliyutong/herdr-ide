@@ -138,9 +138,9 @@ the right ([05](05-vscode-panes.md)).
 
 ## Testing
 
-- `internal/server`: `TestTermAgents` and `TestIntegrationDetect` (agent
-  messages, seen by focus), `TestSoundClientMostRecentlyActive` (the
-  sounding browser).
+- `backend/features/terminals/terminals.test.ts` (`agents`) and
+  `integration.test.ts` (`agent detection`): agent messages, seen by focus;
+  `backend/kernel/pages.test.ts` (`sound page`): the sounding browser.
 - `web/src/__tests__`: `terms.test.ts` (attention order),
   `sidebarMachines.test.ts` (inbox, workspace dots), `codePanes.test.ts`
   (*Send to Agent* targets), `sound.test.ts`, `notify.test.ts` (the

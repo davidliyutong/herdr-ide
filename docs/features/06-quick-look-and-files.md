@@ -74,7 +74,8 @@ only picks entries.
 
 ### Downloads
 
-`web/src/download.ts`, `internal/server/files.go`, `internal/agent/archive.go`.
+`web/src/download.ts`, `backend/features/files/core.ts`, `names.ts`,
+`internal/agent/archive.go`.
 
 - `GET /api/m/<machine>/download?path=…&path=…` takes up to 1000 absolute
   paths. One file comes as itself; a directory or several paths come as one
@@ -128,7 +129,8 @@ only picks entries.
 ### Transfer panels
 
 Uploads: `web/src/transfers.ts`, `web/src/components/Transfers.tsx`.
-Downloads: `web/src/components/Downloads.tsx`, `internal/server/downloads.go`.
+Downloads: `web/src/components/Downloads.tsx`,
+`backend/features/files/downloads.ts`.
 Shared: `web/src/transferList.ts`, `web/src/components/TransferPanel.tsx`,
 `web/src/components/useHoverOpen.ts`.
 
@@ -219,16 +221,18 @@ Shared: `web/src/transferList.ts`, `web/src/components/TransferPanel.tsx`,
 
 ## Testing
 
-- `internal/server/server_test.go`: ranges (`TestParseRange`), content types
-  (`TestContentTypeNeverActive`), upload names
-  (`TestUploadNameUniqueAndSafe`, `TestUploadIntoDirectory`), aborted uploads
-  (`TestCancelledUploadLeavesNoFile`).
+- `backend/features/files/serve.test.ts`: ranges (`parseRange`), content
+  types (`content types are never active`); `names.test.ts`: upload names
+  (`upload names are unique and safe`, `upload into a directory`);
+  `transfers.test.ts`: aborted uploads (`a cancelled upload leaves no
+  file`).
 - `internal/agent/agent_test.go`: ranged reads and chunked writes
   (`TestFileOps`, `TestWriteKeepsExistingFiles`).
 - `internal/agent/archive_test.go`: archive contents, names, links, the end
   mark.
-- `internal/server/download_test.go`: `TestDownloadPaths`, `TestDownload`,
-  `TestDownloadProgress`, `TestDownloadEdges`.
+- `backend/features/files/names.test.ts` (`downloadPaths`),
+  `transfers.test.ts` (`files and archives`, `progress, ends and cancels`,
+  `edges`): downloads.
 - Web (`web/src/__tests__`): `core.test.ts` (path resolution, wrapped and
   selected links), `codePanes.test.ts` (where a path opens), `vt.test.ts`
   (hyperlinks), `filesGone.test.ts`, `drop.test.ts`, `transfers.test.ts`,

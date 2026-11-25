@@ -31,23 +31,23 @@ Windows core host; the interactive ssh login from a core on Windows.
 
 ### Agent
 
-The agent is served by each machine's node, the command `node` of the one
-binary (`cmd/veldr`, [39](39-nodes.md)). The
-core carries it for machines as the same program built with the tag
-`machine`: a static Go binary (`CGO_ENABLED=0`) for linux/darwin ×
-amd64/arm64 without the server, the UI and the embedded payloads, embedded
-gzipped in the core (`internal/embedded`). Its version is its content hash,
+The agent is served by each machine's node, the command `node` of the
+machine build (`cmd/veldr`, [39](39-nodes.md)). The
+core carries it for machines: a static Go binary (`CGO_ENABLED=0`) for
+linux/darwin × amd64/arm64, embedded gzipped in the core's executable
+(`backend/kernel/payloads.ts`). Its version is its content hash,
 so a changed build is always re-uploaded and core and agent never disagree
 on the protocol.
 
 The agent is `//go:build unix` (unix sockets with peer checks, process
-groups, code-server and Xvfb are POSIX). What both ends need, such as the
-yamux configuration (`agentproto.YamuxConfig`), lives in
-`internal/agentproto` so the core builds without the agent.
+groups, code-server and Xvfb are POSIX). The core speaks the same
+protocol in TypeScript (`backend/shared/proto`: agentproto, and yamux with
+the window, keepalive and backlog of `agentproto.YamuxConfig`,
+[42](42-typescript-backend.md)).
 
 ### Connect
 
-`internal/transport/ssh.go` (`DialSSH`):
+`backend/kernel/machines/transport/ssh.ts` (`dialSSH`):
 
 1. probe `uname -s`, `uname -m` and `$HOME` through `/bin/sh -c` (works with
    any login shell);
@@ -68,10 +68,10 @@ This avoids sshd's `MaxSessions` and any dependence on
 
 ### ssh options and login
 
-`SSHArgs` uses `BatchMode=yes`, keepalives (`ServerAliveInterval=15`,
+`sshArgs` uses `BatchMode=yes`, keepalives (`ServerAliveInterval=15`,
 `ServerAliveCountMax=4`) and a ControlMaster (`ControlPersist=600`) in a
 private control directory `/tmp/veldr-<uid>/s`, one per instance
-(`s-<instance>`, a hash for names over 16 characters).
+(`s-<instance>`, a hash for names over 16 characters; `controldir.ts`).
 
 The master exists so that an interactive login (password, 2FA, host key)
 done once is reused by the BatchMode connections. The UI's authentication
@@ -80,7 +80,7 @@ terminal (`GET /api/m/{id}/auth`, WebSocket) runs `ssh -t` with
 closes, the machine tries again at once.
 
 On Windows, Win32-OpenSSH cannot share connections, so the control directory
-is empty (`sys_windows.go`): no `Control*` option is passed and every
+is empty (`controlDir`): no `Control*` option is passed and every
 connection authenticates by itself. A login typed in a terminal would hold
 nothing for later connections, so the core offers none (`ssh_login: false`
 in `GET /api/config`, `501 ssh_login_unsupported` from the auth endpoint),
@@ -90,22 +90,26 @@ a passphrase) and an accepted host key.
 
 ### Local machine
 
-`transport.DialNode` (`local.go`, unix) connects to the local machine's
-node through its socket, starting it from the core's own executable when
-none answers: identical protocol, no ssh. `transport.DialLocal` runs an
-agent in the tests' process over a socketpair.
+`dialNode` (`transport/local.ts`, Linux and macOS) connects to the local
+machine's node through its socket, starting it when none answers from this
+platform's machine build, which the core installs where an upload would
+put it (`~/.veldr/agent/<hash>/veldr`): identical protocol, no ssh. The
+Go tests serve an agent in the test's process over a socketpair
+(`internal/agent/agenttest`); the core's tests use an agent in memory
+(`backend/kernel/testing.ts`).
 
-A core on Windows has no local agent (`cmd/veldr/local_windows.go`): its
+A core on Windows has no local agent (`LOCAL_SUPPORTED` in
+`transport/local.ts`): its
 local machine is listed in *error* with `local_unsupported` and never
 dialed. WSL is not built in; a WSL distribution with an ssh server is added
 as an SSH machine.
 
-Paths on machines are POSIX, so the core handles them with Go's `path`, not
-`filepath`, also on Windows.
+Paths on machines are POSIX, so the core handles them with `node:path`'s
+`posix`, also on Windows.
 
 ### Machine states
 
-`internal/machines/machine.go` runs one `Machine` per machine:
+`backend/kernel/machines/machine.ts` runs one `Machine` per machine:
 
 - *disabled* until enabled;
 - *connecting* while it dials;
@@ -122,8 +126,9 @@ Every state change goes to every `/ws` client.
 
 ### The machines file
 
-`internal/machines/registry.go`. The machines are the local machine (always
-first), the stored SSH machines and the `--ssh` targets of this run. They
+`backend/kernel/machines/registry.ts`. The machines are the local machine
+(always first), the stored SSH machines and the `--ssh` targets of this
+run. They
 are stored in `machines[-<instance>].json` beside the settings
 ([reference](../reference.md#files-and-directories)):
 
@@ -155,7 +160,7 @@ leaves the file alone.
 
 ### Choosing machines for a run
 
-`cmd/veldr` (`selectSpecs`):
+`backend/hosts/bun/serve.ts` (`selectSpecs`):
 
 - `--ssh TARGET` (repeatable) adds a machine for this run only, not stored;
 - `--local-only` connects the local machine and the `--ssh` targets;
@@ -166,7 +171,8 @@ leaves the file alone.
 
 - **Add machine…** (`POST /api/machines {target, label}`). The dialog
   suggests the Host aliases of the core host's ssh configuration that are
-  not machines yet (`GET /api/ssh/hosts`, `internal/sshconfig`). The parser
+  not machines yet (`GET /api/ssh/hosts`,
+  `backend/features/machines/sshconfig.ts`). The parser
   follows `Include` and keeps only concrete aliases with their `HostName`
   and `User`; no other option (keys, proxies, commands) leaves the core.
   Reading is bounded in file size, count and include depth. A machine that
@@ -190,9 +196,9 @@ All of these are refused for read-only browsers and audited
 
 ### Target validation
 
-`machines.ValidTarget` accepts what OpenSSH takes as a destination
-(`[user@]host`, `ssh://[user@]host[:port]`, aliases, IPv6 literals with
-zone ids, Unicode names) and refuses:
+`validTarget` (`backend/kernel/machines/spec.ts`) accepts what OpenSSH
+takes as a destination (`[user@]host`, `ssh://[user@]host[:port]`,
+aliases, IPv6 literals with zone ids, Unicode names) and refuses:
 
 - a leading `-` (ssh would read an option);
 - whitespace, control and format characters;
@@ -208,10 +214,10 @@ A refused target answers `invalid_target`; `--ssh` with one stops the core.
 
 ### The terminal core of each machine
 
-`internal/server/term_backend.go`, `internal/agent/hc.go`
-([21](21-terminal-core.md)). Connecting a machine starts only its agent.
-When the first client of `/api/v1/term` subscribes to a machine's terminals
-([22](22-terminal-protocol.md)), the core:
+`backend/features/terminals/backend.ts` and `lifecycle.ts`,
+`internal/agent/hc.go` ([21](21-terminal-core.md)). Connecting a machine
+starts only its agent. When the first client of `/api/v1/term` subscribes
+to a machine's terminals ([22](22-terminal-protocol.md)), the core:
 
 1. asks the agent for the terminal core's status (op `hc`);
 2. uploads this build's herdr-core (`internal/hcdist`) when the installed
@@ -253,10 +259,10 @@ terminal core apart ([40](40-shared-homes.md)).
 | `ssh -L`/`-R` unix-socket forwarding over a ControlMaster | One ssh session per stream (`MaxSessions`); needs stream-local forwarding; stale remote sockets. |
 | One ssh exec per request | One remote process per call, and no streaming of terminals, files or code-server. |
 | Helper written in Node or Python | Not on every machine; glibc and version constraints. |
-| Go `x/crypto/ssh` client instead of OpenSSH | Would not honour the user's ssh config (ProxyJump, Match, agents, certificates). |
+| An ssh library (Node's `ssh2`, Go's `x/crypto/ssh`) instead of OpenSSH | Would not honour the user's ssh config (ProxyJump, Match, agents, certificates). |
 | Ids derived from the target | Ids appear in URLs and settings; random ids keep the target out. |
 | Starting the terminal core when a machine connects | Unused machines would get a process outliving the core; the first subscription starts it. |
-| Node.js core (sharing TypeScript types with the UI) | Go cross-compiles to static binaries with no runtime on the host. |
+| A core in Go, as the agent | The core is TypeScript, one Bun executable per platform ([42](42-typescript-backend.md)): one language with the UI and the desktop shell, and the SDKs the coding agents publish. |
 
 ## Failure modes
 
@@ -293,27 +299,33 @@ terminal core apart ([40](40-shared-homes.md)).
   transport, file ops, dial restrictions.
 - `internal/agent/node_test.go`: the node's socket, several clients, one
   node per build, idle end, stop, retiring when its executable is gone.
-- `internal/transport/*_test.go`: error classification, arch normalization,
-  quoting, the control directory checks, no `Control*` options without it,
-  stopping the master only while ssh stays up.
-- `internal/machines/machines_test.go`: no file, the file's round
+- `backend/kernel/machines/transport/transport.test.ts`: error
+  classification, arch normalization, quoting, the target after `--`, the
+  control directory checks, no `Control*` options without it, stopping the
+  master only while ssh stays up.
+- `backend/kernel/machines/transport/local.test.ts`: the core starts the
+  local node of the machine build and talks to it.
+- `backend/kernel/machines/machines.test.ts`: no file, the file's round
   trip and errors, ordering, target validation from the shared vectors,
   refused targets never dialed, the local machine without an agent, adding,
-  removing, renaming, enabling and disabling at runtime.
-- `internal/server/machines_test.go`: the HTTP endpoints, read-only and
-  audit, `ssh_login` without a control directory, the terminal core's
-  endpoints' guards, the ssh aliases offered (`TestSSHHosts`).
-- `internal/sshconfig/*_test.go`: the config parser and its bounds.
-- `internal/server/term_test.go` (`TestHCLifecycle`, `TestTermWithoutCore`)
-  and `internal/agent/hc_test.go` (`TestHCInstallStartAndPipe`): install,
-  start, stop and restart of the terminal core.
-- `cmd/veldr/main_test.go`: `--local-only` and `--machine`.
+  removing, enabling and disabling at runtime.
+- `backend/features/machines/core.test.ts`: the HTTP endpoints (adding,
+  renaming, ordering, removing, enabling), read-only and audit, `ssh_login`
+  without a control directory, the ssh aliases offered (`ssh hosts`).
+- `backend/features/machines/sshconfig.test.ts`: the config parser and its
+  bounds.
+- `backend/features/terminals/terminals.test.ts` (`installs and starts the
+  build’s terminal core`, `the terminal core’s lifecycle from the UI`,
+  `without a terminal core`, `routes that change state are guarded`) and
+  `internal/agent/hc_test.go` (`TestHCInstallStartAndPipe`): install,
+  start, stop and restart of the terminal core, its endpoints' guards.
 - Web: `menus.test.ts`, `sidebarMachines.test.ts`, `addMachine.test.ts`,
   `addMachineHosts.test.ts`, `codePanes.test.ts` in `web/src/__tests__`.
-- Tests that need an agent skip on Windows (`dialAgent` in
-  `internal/{machines,server}/agent_unix_test.go`); CI runs the Go tests on
-  Linux, macOS and Windows.
-- `make it` (`TestIntegrationHC`, `TestIntegrationTerm`) with the real
+- The agent's Go tests skip on Windows, and the core's tests that run the
+  machine build build it with Go; CI runs the Go tests on Linux, macOS and
+  Windows and the core's on Linux and macOS.
+- `make it` (`TestIntegrationHC`,
+  `backend/features/terminals/integration.test.ts`) with the real
   herdr-core.
 - `make e2e` (`e2e/tests/ssh.spec.ts`, with Docker): a container running
   OpenSSH added from the dialog, its terminal and files, the machine

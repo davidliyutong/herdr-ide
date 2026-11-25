@@ -7,7 +7,8 @@
 #      (so a rename stays a one-file change plus scripts/rename.sh)
 #   3. every command-line flag and every HTTP route of the core
 #      (backend/scripts/reference.ts) is documented in docs/reference.md
-#   4. THIRD_PARTY_NOTICES.md matches the linked Go modules
+#   4. THIRD_PARTY_NOTICES.md matches the machine build's Go modules and
+#      the core's npm packages
 #   5. README.md and README.zh-CN.md have the same section structure
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
 #   7. the files generated from spec/tokens.json and the settings

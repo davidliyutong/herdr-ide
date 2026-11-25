@@ -1,12 +1,11 @@
 # Architecture
 
 ```
-browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (Go, `veldr`)
-desktop app (Electron shell)                            ├─ machines: registry + connection state machine
+browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (TypeScript on Bun, `veldr`)
+desktop app (Electron shell)                            ├─ kernel: guards, event channel, machines (registry + connection state machine)
                                                         ├─ settings, keybindings (files on the core host)
-                                                        ├─ server: event channel, terminal protocol, files, code-server proxy, bridge hub
-                                                        ├─ gui: virtual displays per machine, window list, frame routing
-                                                        └─ one ssh session per machine ──yamux──▶ agent (served by `veldr node`)
+                                                        ├─ features: terminals, files, VS Code proxy and bridge hub, program windows, plugins
+                                                        └─ one ssh session per machine ──yamux──▶ agent (Go machine build, served by `veldr node`)
                                                                                                     ├─ herdr-core in a session of its own (raw pipe to its API socket)
                                                                                                     ├─ agent detection in its terminals, with the agents' sessions
                                                                                                     ├─ files (stat/list/range read/upload/zip)
@@ -32,58 +31,44 @@ machine with the code `local_unsupported` and reaches SSH machines only
 
 ## Code map
 
+The core is TypeScript under `backend/` (its
+[README](../backend/README.md) has the layers and their rules), built with
+Bun into one executable per platform; machines run the Go program
+`cmd/veldr` (the machine build), which the core embeds and uploads
+([42](features/42-typescript-backend.md)).
+
 | Directory | Role |
 | --- | --- |
-| `cmd/veldr` | The one binary: `serve`, `fetch-assets` (`serve.go`), `mcp`, `version`; on machines `node` (`node`, `node dial`, `node stop`), `gui-keep`, `gui-wl` and `chat-host` (`machine_unix.go`, `node_unix.go`, `chathost_unix.go`). Built with the tag `machine` it leaves out the server, UI and payloads; that build is what machines get. |
+| `backend/shared` | What the core and the machine side share: wire protocols (`proto/`: agentproto, yamux, herdr-core's, the chat host's), libraries (`lib/`: brand names, logging, Go-compatible times), SQLite state (`store/`), the host's directories, ids, loopback and file rules (`host/`), the coding agents' kinds (`agents/`). |
+| `backend/kernel` | The core's machinery: HTTP routing and guards (`http/`: Host/Origin, proxy secret, CSP), `Fail` codes and audit, channels and the pages on `/ws`, machines and their connections (`machines/`: the registry `machines[-<instance>].json`, the connection state machine, the ssh target rule, the transports to the local node and over ssh), settings and keybindings (`config/`: typed settings, the hand-editable files, the registry written to `spec/generated/registry.json` and `docs/reference.md`, [13](features/13-settings-and-appearance.md)), typed agent actions, the payloads it carries for machines (`payloads.ts`). |
+| `backend/features/<id>` | Everything the product does, one directory per feature: its typed protocol (`protocol.ts`), its core side (`core.ts`: routes, channels, services, settings) and, while machines run the Go build, the tests of the wire it shares with it ([27](features/27-plugins.md)): `machines`, `terminals` ([22](features/22-terminal-protocol.md)), `files` ([28](features/28-file-explorer.md)), `git` ([31](features/31-git.md)), `search` ([41](features/41-project-search.md)), `monitor` ([34](features/34-system-monitor.md)), `browser` ([32](features/32-browser-and-ports.md)), `agents` ([33](features/33-workspace-restore.md)), `history` ([36](features/36-terminal-history.md)), `chat` ([37](features/37-agent-chats.md)), `usage` ([29](features/29-ai-usage.md)), `vault` ([30](features/30-variable-vault.md)), `gui` ([14](features/14-gui-windows.md)), `vscode` ([05](features/05-vscode-panes.md), [09](features/09-air-gapped-installs.md)). |
+| `backend/hosts/bun` | The command line (`main.ts`: `serve`, `fetch-assets`, `version`, `node` passed on to the machine build) and `serve` on `Bun.serve` (`serve.ts`), the launcher's hello (`parent.ts`), the payloads embedded in the executable (`payloads.ts`). |
+| `backend/scripts` | The executable's build (`build.ts`), the reference check (`reference.ts`), the npm packages' notices. |
+| `cmd/veldr` | The machine build: `node` (`node`, `node dial`, `node stop`), `gui-keep`, `gui-wl`, `chat-host`, `mcp` and `version` (`machine_unix.go`, `node_unix.go`, `chathost_unix.go`). |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/hostid` | The host's key (name and a hash of its machine id) and id (the hash alone), for files and sessions kept per host ([40](features/40-shared-homes.md)). |
 | `internal/hostdirs` | A namespace's directories on a host: the data directory, the host's own directory in it, the host-local runtime directory. |
 | `internal/agentproto` | Stream protocol shared by core and agent; yamux configuration; types both sides need (transcript events, history snapshots); `Hidden`, the rule that hides the product's own terminals by reserved name and label together. |
-| `internal/agentkinds` | Registry of coding agent kinds: commands to start, continue and resume, transcript format, chat adapter; written into `spec/generated/registry.json` ([35](features/35-agent-native-view.md)). |
-| `internal/agent` | The agent: terminal core, detection, files, code-server, displays, bridge and vault sockets, housekeeping. `//go:build unix`, so the Windows core never imports it. |
+| `internal/agentkinds` | Registry of coding agent kinds: commands to start, continue and resume, transcript format, chat adapter; the same as the core's (`backend/shared/agents`, [35](features/35-agent-native-view.md)). |
+| `internal/agent` | The agent: terminal core, detection, files, code-server, displays, bridge and vault sockets, housekeeping. `//go:build unix`. `agenttest` serves one in a test's process. |
 | `internal/agent/detect` | Which coding agent runs in a terminal and its state ([25](features/25-agent-detection.md)). |
 | `internal/agent/sessions`, `internal/agent/transcript` | The session an agent's process runs; Claude Code's transcript lines mapped to ACP-shaped events for the chat host ([35](features/35-agent-native-view.md)). |
+| `internal/agent/plugin`, `internal/agent/plugin/*` | Machine side of the features: handlers of the `plugin` op (files, git, monitor, search, browser, agents, history, chat, usage); a panic fails the action, not the agent. |
 | `internal/chatproto` | The chat host's protocol on its unix socket ([37](features/37-agent-chats.md)). |
 | `internal/chathost` | The chat host: lifetime, chats and their agents, the journal and its bounds. Unix only. |
 | `internal/chatadapter`, `…/{claude,codex,acp}`, `internal/acp` | The adapters to the agents' protocols: Claude Code's Agent SDK, Codex's app-server, the Agent Client Protocol (Kimi Code, Grok). |
 | `internal/store` | Private SQLite databases with versioned schemas ([38](features/38-sqlite-state.md)). |
-| `internal/transport` | yamux sessions (the local node's socket, ssh stdio, or in-process for tests), agent upload, the ssh control directory. |
-| `internal/sshconfig` | Host aliases of the core host's `~/.ssh/config` for the Add Machine dialog. |
-| `internal/machines` | Machine registry (`machines[-<instance>].json`), connection state machine, ssh target rule (`ValidTarget`). |
 | `internal/hc` | Client of herdr-core's API: JSON-RPC, attached byte streams with credit, events. |
-| `internal/hcdist` | Pinned herdr-core release: version, archive names, SHA-256 ([21](features/21-terminal-core.md)). |
+| `internal/hcdist` | Pinned herdr-core release: version, archive names, SHA-256 ([21](features/21-terminal-core.md)); `scripts/fetch-hc` fetches it for the build. |
 | `internal/checksum` | SHA-256 of files. |
-| `internal/codeserver` | code-server provisioning: artifacts, checksums, install modes, start/stop. |
-| `internal/settings` | Typed settings, the settings file, per-machine values ([13](features/13-settings-and-appearance.md)). |
-| `internal/keybindings` | Commands, default keys per platform, the keybindings file, conflicts. |
-| `internal/uisettings` | UI settings; `tokens.go` is generated from the design tokens. |
-| `internal/registry` | The setting modules and commands the core registers (also read by `scripts/registry`). |
-| `internal/userfile` | Atomic writes and change detection of hand-editable files; private configuration directory. |
-| `internal/plugin` | Core side of plugins: routes, `/ws` messages, switches, calls to machine sides ([27](features/27-plugins.md)). |
-| `internal/agent/plugin` | Machine side of plugins: handlers of the `plugin` op; a panic fails the action, not the agent. |
-| `internal/plugins/files`, `internal/agent/plugin/files` | File explorer ([28](features/28-file-explorer.md)). |
-| `internal/plugins/git`, `internal/agent/plugin/git` | Git: `git` run with an argument vector built in the agent, no shell ([31](features/31-git.md)). |
-| `internal/plugins/monitor`, `internal/agent/plugin/monitor` | System monitor and task manager ([34](features/34-system-monitor.md)). |
-| `internal/plugins/search`, `internal/agent/plugin/search` | The Project Search plugin: its route `POST /api/m/{id}/p/search/search` (reads only, allowed in read-only mode) and its action on machines, which runs ripgrep (on `PATH` or the one code-server ships) without a shell or configuration file, else a bounded walker of its own, and answers the matching lines with previews, bounded in matches, time and size ([41](features/41-project-search.md)). |
-| `internal/plugins/browser`, `internal/agent/plugin/browser`, `internal/loopback` | Browser pane port forwards on the core host's loopback ([32](features/32-browser-and-ports.md)). |
-| `internal/plugins/agents`, `internal/agent/plugin/agents` | Whether a session ran in a directory, for restores ([33](features/33-workspace-restore.md)). |
-| `internal/plugins/history`, `internal/agent/plugin/history` | Terminal history snapshots ([36](features/36-terminal-history.md)). |
-| `internal/plugins/chat`, `internal/agent/plugin/chat` | Chats: the pages' WebSocket, the hosts' watch, the stream to `chat.sock` ([37](features/37-agent-chats.md)). |
-| `internal/vault` | Variable vault store: AES-256-GCM per value, Argon2id master key held in memory, unlock entries, export files ([30](features/30-variable-vault.md)). |
-| `internal/plugins/vault` | Vault plugin: sessions, approvals, MCP requests (op `vault`), access log. |
 | `internal/vaultmcp` | The vault's MCP server (`mcp` command): `list_variables`, `get_variable`, `run_with_env`. |
 | `internal/usage` | AI subscription usage and log cost on one machine, run by the agent ([29](features/29-ai-usage.md)). |
-| `internal/agent/plugin/usage`, `internal/plugins/usage` | AI usage plugin: machine actions; core scheduler, merge, history, alerts. |
-| `internal/gui` | Virtual displays, windows, frames and input between agents and browsers ([14](features/14-gui-windows.md)). |
 | `internal/jpegstrip` | Parallel JPEG encoding of window captures in row groups. |
-| `internal/server` | HTTP/WS front: guards, event channel, terminal streams, files, proxy, bridge, audit. |
-| `internal/perf` | The core process's own resource use (`GET /api/perf`). |
-| `internal/embedded` | Payloads compiled into the core: machine builds, herdr-core, video encoder, bridge VSIX. |
-| `web` | Browser UI (Vite, React, zustand). Terminals: `src/term` (protocol client, layout), `src/vt` (emulator, [26](features/26-web-terminals.md)); restores: `src/restore.ts`; conversation view: `src/conversation`; plugins: `src/plugins`. `web/embed.go` embeds `web/dist`. |
+| `web` | Browser UI (Vite, React, zustand). Terminals: `src/term` (protocol client, layout), `src/vt` (emulator, [26](features/26-web-terminals.md)); restores: `src/restore.ts`; conversation view: `src/conversation`; plugins: `src/plugins`. The core embeds `web/dist`. |
 | `desktop` | Electron shell and electron-builder configuration ([16](features/16-desktop-packaging.md)). |
 | `extensions/veldr-bridge` | VS Code extension installed into code-server. |
-| `scripts` | Build, packaging, checks, pinned downloads and generators (`tokens`, `registry`). |
-| `design` | Design tokens (`tokens.json`, [24](features/24-design-tokens.md)), `generated/registry.json`, the pinned Codex app-server schema, and shared test vectors and recordings (`testdata/`) run by Go and web tests. |
+| `scripts` | Build (`build.sh`: payloads staged in `dist/payload`, the core of each platform), packaging, checks, pinned downloads and the design tokens' generator (`tokens`). |
+| `spec` | Design tokens (`tokens.json`, [24](features/24-design-tokens.md)), `generated/registry.json`, the pinned Codex app-server schema, and shared test vectors and recordings (`vectors/`) run by Go, core and web tests. |
 | `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`), `fakeacp`, a scripted offline ACP agent installed as `kimi`, `xclient`, an X program that reports its input for the program window tests, and `sshd`, the image of the SSH machines the tests run in Docker (with Xvfb). |
 
 ## Desktop launcher
@@ -204,7 +189,7 @@ machines' terminals are in no snapshot, event or list; a call or attach
 naming one is answered as for a missing terminal and audited as
 `denied.term`.
 
-## Chats (`internal/chatproto`, `internal/plugins/chat`)
+## Chats (`internal/chatproto`, `backend/features/chat`)
 
 A machine's chat host runs coding agents headless and keeps their
 conversations ([37](features/37-agent-chats.md)). The path from a page:

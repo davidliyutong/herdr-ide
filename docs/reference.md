@@ -8,6 +8,11 @@ repeating it.
 
 ## Commands
 
+The core's executable has `serve`, `fetch-assets`, `version` and `node`,
+which it passes on to the machine build of its own host; the other
+commands are the machine build's, the program the core uploads to each
+machine (`~/.veldr/agent/<build>/veldr`).
+
 | Command | Description |
 | --- | --- |
 | `veldr [serve] [flags]` | Run the server (default command). |
@@ -89,7 +94,7 @@ remote machine.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--agent-dir` | – | Directory of uncompressed `veldr-<os>-<arch>` machine builds (`go build -tags machine`) used instead of the embedded ones. |
+| `--agent-dir` | – | Directory of uncompressed `veldr-<os>-<arch>` machine builds (`go build ./cmd/veldr`) used instead of the embedded ones. |
 | `--ext-dir` | – | Directory containing `veldr-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
 | `--parent-stdio` | `false` | Launcher lifecycle (Electron): read a hello line on stdin (`{"desktop_token":"…"}`, the token the app's windows carry in the cookie `veldr-desktop`, or `{}`; missing or malformed stops the core), write `{"event":"ready","url":"…"}` to stdout after binding, clean up when stdin closes. Does not change HTTP guards. |
@@ -249,7 +254,7 @@ UI's origin, so its extensions can do whatever the page can; setting
 
 ## Keyboard shortcuts
 
-Keys come from `internal/keybindings` and can be changed in **Settings →
+Keys come from `backend/kernel/config/keybindings` and can be changed in **Settings →
 Keyboard Shortcuts** or in `keybindings[-<instance>].json` on the core host
 ([04](features/04-layout-and-keyboard.md)):
 
@@ -403,7 +408,7 @@ machine's id. `make check` fails when a route of the core is missing here
 | `DELETE /api/settings` | writes | Removes one value. |
 | `GET /api/keybindings` | – | Commands, default keys per platform, user rules, bindings in effect, conflicts. |
 | `PUT /api/keybindings` | writes | Replaces the user's rules. |
-| `GET /api/perf` | – | The core process's own use: `{"cpu_ms", "memory", "goroutines", "uptime_ms", "cpus"}` ([13](features/13-settings-and-appearance.md)). |
+| `GET /api/perf` | – | The core process's own use: `{"cpu_ms", "memory", "goroutines" (the event loop's active resources), "uptime_ms", "cpus"}` ([13](features/13-settings-and-appearance.md)). |
 | `/` | – | The web UI (`/licenses.md`: its bundle's notices); other paths get the app shell, except unknown `/api/…` paths (404). |
 
 ### Machines
@@ -507,7 +512,7 @@ it, except on a read-only core, which refuses them.
 | `POST /api/m/{id}/p/chat/host/stop` | writes | Stops the chat host; `409 busy` while a chat works. |
 | `GET /api/p/chat/hosts` | – | Every machine's chat host and its active sessions, starting none. |
 | `GET /api/p/chat/states` | – | Every machine's chat states as last read, with revisions continued on `/ws`. |
-| `GET /api/p/chat/ws` | – | The chat WebSocket, one per page ([architecture](architecture.md#chats-internalchatproto-internalpluginschat)): subscriptions (≤ 32, 16 per machine) and commands; read-only cores refuse commands. |
+| `GET /api/p/chat/ws` | – | The chat WebSocket, one per page ([architecture](architecture.md#chats-internalchatproto-backendfeatureschat)): subscriptions (≤ 32, 16 per machine) and commands; read-only cores refuse commands. |
 
 ### Variable vault
 

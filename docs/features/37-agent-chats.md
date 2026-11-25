@@ -280,7 +280,7 @@ resumed nor imported (`in_terminal`).
   process (`session/list`, `session/load`, whose replay is lossy). An ACP
   agent cannot tell that a terminal runs a session.
 
-### The core's plugin (`internal/plugins/chat`)
+### The core's plugin (`backend/features/chat`)
 
 **Routes** below `/api/m/{id}/p/chat/` and `/api/p/chat/`
 ([reference](../reference.md#http-and-websocket-endpoints)). A GET never
@@ -290,7 +290,7 @@ audited as `chat.<route>`. Before a request that may start an agent the
 core sends the host the machine's settings. A machine has at most 128
 core connections to its host.
 
-**The page's WebSocket** (`wire.go`, `ws.go`; mirrored by
+**The page's WebSocket** (`wire.ts`, `page.ts`; mirrored by
 `web/src/plugins/chat/protocol.ts`): one per page for every chat (browsers
 allow six HTTP/1.1 connections per origin). Each subscription is its own
 connection to the host; commands go on a subscription and get one `ack`
@@ -301,13 +301,13 @@ chats. A read-only core refuses commands and omits agents' stderr.
 Commands that change what an agent may do are audited (never a prompt's
 text or an answer's).
 
-**Watch and notifications** (`watch.go`): while a machine's host is in
+**Watch and notifications** (`watch.ts`): while a machine's host is in
 use, the core watches it without starting one, sends the states to pages
 as the plugin's `/ws` message `states` (with the host's build and
 `outdated`), and publishes an agent event when a chat becomes blocked or
 done. When a machine disconnects its cached states become
 sleeping/idle with `stale: true`; a state read before the machine left
-never revives them (`TestWatchChangeAfterOfflineDropped`).
+never revives them (`a change after the machine left is dropped`).
 
 ### The page (`web/src/plugins/chat`, `web/src/conversation`)
 
@@ -434,12 +434,13 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
 - `internal/agent/plugin/chat`: start, name taken, handover
   (`TestDirtyBuildKept`), a stuck host killed; `internal/agent`
   `hidden_test.go`.
-- `internal/plugins/chat`: routes, read-only, the watch
-  (`TestWatchHostOutdated`, `TestWatchChangeAfterOfflineDropped`), the
-  WebSocket's limits and flow control.
-- Hidden terminals: `internal/server/term_hidden_test.go`,
+- `backend/features/chat`: `routes.test.ts` (routes, read-only),
+  `watch.test.ts` (the watch: `a host of build …`, `a change after the
+  machine left is dropped`), `page.test.ts` (the WebSocket's `limits` and
+  `flow control`), `wire.test.ts`.
+- Hidden terminals: `backend/features/terminals/hidden.test.ts`,
   `TestDetectSkipsHelperTerminals`, `TestHiddenTerminalsNotCaptured`.
 - Integration (`make it`): `TestIntegrationChatHost`,
-  `TestIntegrationTermHidden`.
+  `backend/features/terminals/integration.test.ts` (`hidden terminals`).
 - `web/src/__tests__`: `chat*.test.ts(x)`, `conversation*.test.ts(x)`,
   `viewStatus.test.tsx`, `notifyViews.test.ts`, `attention.test.tsx`.

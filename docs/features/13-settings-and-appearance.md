@@ -26,32 +26,37 @@ settings per browser; theming terminal applications.
 
 ### Registry
 
-`internal/settings` defines the model; `internal/registry` lists the
-modules the core registers (`internal/uisettings` for the user interfaces,
-`codeserver.Settings`, `gui.Settings`, `plugin.Settings` with the plugin
-switches, the plugins' own (files, browser, git, monitor, usage, vault,
-history, chat; [27](27-plugins.md)).
+`backend/kernel/config/settings` defines the model (`define.ts`) and the
+store of values (`store.ts`); `coreModules`
+(`backend/kernel/config/registry.ts`) lists the modules the core registers
+(`config/ui` for the user interfaces, VS Code's, program windows', the
+feature switches (`toggles.ts`), the features' own (files, browser, git,
+monitor, usage, vault, history, chat; [27](27-plugins.md)). A feature
+brings its module in its definition (`settings`); the modules of features
+that do not yet are in `config/staged.ts`.
 
-- A module (`settings.Module`) brings sections and definitions. A section can be advanced (listed last, under
+- A module (`defineModule`) brings sections and definitions. A section can be advanced (listed last, under
   **Advanced**) or belong to a plugin.
-- A definition (`settings.Def`) has a dotted key (`terminal.fontSize`), a
+- A definition (`Setting`, made by helpers such as `bool`, `int`,
+  `enumOf`) has a dotted key (`terminal.fontSize`), a
   type (`bool`, `number`, `string`, `enum`, `color`, `list`), a default,
   constraints (enum values, range, step, offered list values), a section,
-  group and order, an optional command-line flag and a validator.
-  Invalid definitions panic at start.
+  group and order, an optional command-line flag and a zod schema that
+  validates. Invalid definitions are refused at start.
 - Scope: `app` (one value), `machine` (any machine may have its own value),
   `remote-machine` (machines other than the core's host).
 - Strings refuse control characters; lists and strings are bounded.
-- Descriptions are not in Go: the UI translates `settings.<key>`,
+- Descriptions are not in the core: the UI translates `settings.<key>`,
   `settings.<key>.desc`, options, sections and groups.
-- `scripts/registry` writes `spec/generated/registry.json` (defaults,
+- `backend/kernel/config/registry.ts` (`pnpm -C backend registry`)
+  writes `spec/generated/registry.json` (defaults,
   commands, each platform's default bindings, the translation keys the UI
   needs) and the settings and commands tables of
   [reference](../reference.md#settings). `make tokens` regenerates them;
   `make check` fails when they are stale.
-- The terminal colors' defaults are design tokens, written into
-  `internal/uisettings/tokens.go` by `scripts/tokens`
-  ([24](24-design-tokens.md)).
+- The terminal colors' defaults are design tokens, which the core reads
+  from `spec/tokens.json` when it is built
+  (`backend/kernel/config/ui/tokens.ts`, [24](24-design-tokens.md)).
 
 Every setting with its type, default, flag and scope is in
 [reference](../reference.md#settings).
@@ -65,8 +70,11 @@ core is instance `desktop`.
 
 - Global values are top-level `"key": value` pairs; a machine's own values
   are under `"[machine:<id>]": {…}`.
-- Written atomically, sorted, mode 0600 in a 0700 directory
-  (`internal/userfile`).
+- Read as JSONC (comments and trailing commas allowed); a change edits
+  only its value, keeping the file's comments and layout, a new value in
+  its sorted place (`backend/kernel/config/jsonc.ts`). Written
+  atomically, mode 0600 in a 0700 directory
+  (`backend/shared/host/userfile.ts`).
 - Unknown keys and invalid values are kept on rewrite (another version may
   know them), count as unset and are reported as problems (`unknown`,
   `invalid`, `scope`).
@@ -79,18 +87,19 @@ core is instance `desktop`.
 ### Layering
 
 Command-line flag → the machine's own value → the global value → the
-default. Readers ask for a machine's value (`Store.Bool(key, machine)`);
+default. Readers ask for a machine's value (`settings.bool(key, machine)`);
 code-server and GUI settings are read when they are used, so changes apply
 on the next start or frame.
 
-A flag (`Def.Flag`, registered by `RegisterFlags`) locks its setting for
+A flag (a definition's `flag`, which `serve` registers through
+`settingFlags`) locks its setting for
 every machine: the UI shows it disabled with the flag's name, and changes
 are refused (`locked`). The file's value stays and applies again without
 the flag.
 
 ### API
 
-`internal/server/settings.go`; endpoints in
+`backend/kernel/config/routes.ts`; endpoints in
 [reference](../reference.md#http-and-websocket-endpoints).
 
 - `GET /api/settings` returns sections, definitions, values (with source,
@@ -104,9 +113,9 @@ the flag.
 
 ### Keybindings
 
-`internal/keybindings`.
+`backend/kernel/config/keybindings`.
 
-- **Commands** are registered in Go (`commands.go`): an id (`tab.new`,
+- **Commands** are registered in the core (`commands.ts`): an id (`tab.new`,
   `code.open`), a section, a `when` context and default keys per platform.
   Labels are `command.<id>`.
 - **Contexts**: `terminal` (the main window, and VS Code panes for keys VS
@@ -121,8 +130,8 @@ the flag.
   strokes separated by spaces (`ctrl+k c`). Keys are named after the US
   layout's unshifted keys (`?` is `shift+slash`). The first stroke needs
   cmd, ctrl or alt (or is a function key), so a binding never takes a key
-  that types text. Go (`keys.go`) and TypeScript (`web/src/keys.ts`) both
-  run the vectors in `spec/vectors/keys`.
+  that types text. The core (`keys.ts`) and the web UI (`web/src/keys.ts`)
+  both run the vectors in `spec/vectors/keys`.
 - **Defaults** are single strokes only: the desktop app's menu keys on
   `mac`, `ctrl+shift` keys on `windows` and `linux`, and in browsers only
   what browsers leave (find, the list of shortcuts, the palette on macOS).
@@ -228,7 +237,8 @@ Electron's `nativeTheme`, `appearance.language` the menu's language,
 
 ### What the app uses
 
-`web/src/perf.ts`, `components/settings/Performance.tsx`, `internal/perf`.
+`web/src/perf.ts`, `components/settings/Performance.tsx`,
+`backend/shared/host/perf.ts`.
 
 The user's **Performance** page shows, below `performance.keptTerminals`
 (how many hidden terminals a page keeps attached, [26](26-web-terminals.md)),
@@ -244,8 +254,9 @@ terminal holds no WebGL context and is not drawn.
 - **Browser**: the window's script memory where Chromium tells it, and the
   core's row. A page cannot learn its own processor or GPU use, which a
   note says; no total.
-- **The core's row** comes from `GET /api/perf` (`perf.Sample`): processor
-  time since start, memory held from the system, goroutines, uptime and
+- **The core's row** comes from `GET /api/perf` (`sample`): processor
+  time since start, resident memory, the resources the process waits on
+  (sockets, timers, requests; the field `goroutines`), uptime and
   processors. The client turns two answers into a processor share; none
   across a core restart. Agents, terminal cores, ssh and the programs in
   terminals are other processes and not counted.
@@ -297,8 +308,8 @@ terminal holds no WebGL context and is not drawn.
 | --- | --- |
 | Settings kept per browser (`localStorage`) | Values differ per browser and profile; the desktop shell cannot read a page's storage. |
 | JSON Schema for the definitions | Clients would need a validator plus sections, scopes and platforms; small typed records suffice. |
-| Descriptions in Go | The UI translates everything else; one place keeps translators' files complete. |
-| A file watcher library (fsnotify) | A dependency for two small files; polling every 2 s suffices for hand edits. |
+| Descriptions in the core's definitions | The UI translates everything else; one place keeps translators' files complete. |
+| A file watcher (`fs.watch`, chokidar) | Loses a file replaced by a rename, or a dependency for two small files; polling every 2 s suffices for hand edits. |
 | Clients working out the effective bindings | A second implementation of rules and conflicts; the core serves them per platform. |
 | One platform per OS | The desktop app and a browser on the same Mac need different defaults. |
 | A prefix keymap by default (`ctrl+b` then a key, as herdr and tmux) | Makes every press wait; users can bind chords themselves. |
@@ -356,17 +367,18 @@ See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- Settings: `internal/settings/settings_test.go` (layering, validation,
-  kept unknown entries, reload over a broken file),
-  `internal/uisettings/uisettings_test.go`,
-  `internal/server/settings_test.go` (both APIs, error codes, read-only,
-  guards, audit, pushes after API changes and file edits).
-- Keybindings: `internal/keybindings/keybindings_test.go` (shared vectors,
-  per-platform defaults without conflicts or terminal keys, user rules and
-  chords, renamed commands, conflicts);
+- Settings: `backend/kernel/config/settings/settings.test.ts` (layering,
+  validation, kept unknown entries, reload over a broken file, file edits
+  keeping the user's text), `backend/kernel/config/jsonc.test.ts`,
+  `backend/kernel/config/ui/ui.test.ts`,
+  `backend/kernel/config/routes.test.ts` (both APIs, error codes,
+  read-only, audit, pushes after API changes and file edits).
+- Keybindings: `backend/kernel/config/keybindings/keybindings.test.ts`
+  (shared vectors, per-platform defaults without conflicts or terminal
+  keys, user rules and chords, conflicts);
   `web/src/__tests__/keys.test.ts` (the same vectors, unbound keys left to
   the terminal, key hints).
-- Generated files: `scripts/registry/main_test.go`,
+- Generated files: `backend/kernel/config/registry.test.ts`,
   `scripts/tokens/main_test.go`.
 - Web UI: `settings.test.ts`, `settingsDialog.test.ts`,
   `pluginSettings.test.ts`, `keysTable.test.tsx`, `localFonts.test.ts`,
@@ -374,7 +386,7 @@ See [SECURITY.md](../../SECURITY.md).
   `perf.test.tsx`, `keptPanes.test.ts` in `web/src/__tests__`.
 - Desktop: `desktop/src/follow.test.ts`, `menu.test.ts`,
   `preload.test.ts` (`metrics`).
-- Usage: `internal/perf/perf_test.go`.
+- Usage: `backend/shared/host/perf.test.ts`.
 - Manually: a dev core changed through the API and by editing its file,
   with pushes observed on `/ws`; the dialog used in headless Chromium and
   the desktop app, in English and Chinese, light and dark.

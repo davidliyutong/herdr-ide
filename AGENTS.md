@@ -7,9 +7,11 @@ changes.
 
 ## What this is
 
-One Go program (`cmd/veldr`): the server, which serves a React terminal
-UI, and the per-machine agent it reaches several machines through over ssh
-(served by the command `node` of the same binary). Every machine's terminals live in a terminal core of the agent's own
+The core (`backend/`, TypeScript, built with Bun into one executable per
+platform; [its README](backend/README.md)) serves a React terminal UI and
+reaches several machines over ssh through a per-machine agent: the Go
+program `cmd/veldr` (the machine build), which the core embeds and uploads,
+its command `node` serving the core's protocol. Every machine's terminals live in a terminal core of the agent's own
 (herdr-core, `hc`, in a session apart from the user's); the browser emulates
 them with Ghostty's libghostty-vt as WebAssembly through the core's terminal
 protocol (`/api/v1/term`), and an Electron desktop app (`desktop/`) wraps the
@@ -18,29 +20,30 @@ Linux and macOS only, so a core on Windows reaches SSH machines only.
 code-server provides VS Code panels. A chat host on each machine (the
 command `chat-host`, a hidden terminal of that terminal core) runs coding
 agents headless for the chat panes, its state in SQLite
-(`internal/store`). One binary embeds the UI, its own
-machine builds (the tag `machine`: the same program without the server, the
-UI and these payloads) and herdr-core for 4 platforms, and a VS Code
-extension.
+(`internal/store`). The core's executable embeds the UI, the machine builds
+and herdr-core for 4 platforms, the video encoder of Linux machines and a
+VS Code extension. The machine side moves to TypeScript too
+([42](docs/features/42-typescript-backend.md)); until then both sides speak
+the same wire protocols from their own code.
 
 ## Commands
 
 | Task | Command |
 | --- | --- |
 | Install JS deps | `make deps` |
-| Unit tests (Go + web + desktop) | `make test` |
-| All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, generated tokens, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
-| Regenerate the design tokens' CSS and Go after editing `spec/tokens.json`, and `spec/generated/registry.json` with the settings and commands tables of `docs/reference.md` after changing settings, commands or agent kinds (`internal/agentkinds`) | `make tokens` |
+| Unit tests (the machine build's Go, the core's `bun test`, web, desktop) | `make test` |
+| All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, the core's flags and routes in `docs/reference.md` (`backend/scripts/reference.ts`), generated tokens and registry, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
+| Regenerate the design tokens' CSS after editing `spec/tokens.json`, and `spec/generated/registry.json` with the settings and commands tables of `docs/reference.md` (`backend/kernel/config/registry.ts`) after changing settings, commands or agent kinds (`backend/shared/agents`, `internal/agentkinds`) | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
-| Integration test with a real terminal core (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
+| Integration tests with a real terminal core, the machine build's and the core's terminals (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
 | Old kernels and C libraries: KVM guests from official cloud images and containers of old distributions, a payload run in each (on a Linux host with KVM and Docker; not part of any make target) | `e2e/machines/machines.py run-matrix <script>` ([its README](e2e/machines/README.md)) |
 | End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium, and SSH machines in Docker containers (skipped without Docker; `E2E_REQUIRE_DOCKER=1` fails instead); builds into `dist/e2e` (not part of `make test`) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
-| Full build into `dist/` | `make build` (or `scripts/build.sh`) |
+| Full build into `dist/`: the machine builds (Go), everything the core embeds staged in `dist/payload`, the core of each `TARGETS` platform (`bun backend/scripts/build.ts`) and the release archives | `make build` (or `scripts/build.sh`) |
 | Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
 | macOS: build the `.app` and install it into `/Applications` | `make desktop-install` |
 | Isolated desktop development | `make dev-desktop` |
-| Run for development | `make dev-core` and `make dev-web` |
+| Run for development: the core from its sources (`bun`, instance `dev`, this host's machine build in `dist/agents`, the payloads of `dist/payload`) and Vite | `make dev-core` and `make dev-web` |
 
 Run `make check test` before finishing a change.
 
@@ -56,7 +59,8 @@ Run `make check test` before finishing a change.
    default one are the user's. Stop a terminal core only through its own
    instance (`POST /api/m/{id}/hc/stop` of the dev core), never the user's,
    and do not attach to the user's terminals.
-2. **No hardcoded product name.** Use `brand.*` (Go), `APP_NAME`/`APP_SLUG`/
+2. **No hardcoded product name.** Use `brand.*` (Go),
+   `backend/shared/lib/brand.ts` (the core), `APP_NAME`/`APP_SLUG`/
    `storage` from `web/src/brand.ts`, `src/brand.ts` in the extension.
    `scripts/check.sh` fails otherwise. Renames: `scripts/rename.sh`.
 3. **All UI text through i18n.** Add the key to `web/src/i18n/en.ts` and the
@@ -64,8 +68,8 @@ Run `make check test` before finishing a change.
    messages are in its own `web/src/plugins/<id>/i18n/` instead. The server
    returns codes, not prose. Comments, logs and identifiers are English.
 4. **Docs move with code.** New or changed flags and endpoints →
-   `docs/reference.md` (CI checks; its settings and commands tables are
-   generated by `make tokens`); protocol or component changes →
+   `docs/reference.md` (CI checks with `backend/scripts/reference.ts`; its
+   settings and commands tables are generated by `make tokens`); protocol or component changes →
    `docs/architecture.md`; behavior
    and its reasoning → the feature's `docs/features/NN-*.md` (new features get
    a new document following `docs/features/README.md`); operations →
@@ -85,12 +89,16 @@ Run `make check test` before finishing a change.
    written to disk needs a retention rule. Document it in
    `docs/deployment.md#remote-resources`.
 7. **Protocol compatibility.** Core and agent ship together, but extend
-   `internal/agentproto` by adding fields/ops. herdr-core's API is external:
-   speak its protocol generation (`internal/hc`), honor stream credit, and
+   the agent protocol by adding fields/ops, on both sides
+   (`backend/shared/proto/agentproto` and `internal/agentproto`, which the
+   vectors and the end-to-end tests hold to the same wire). herdr-core's
+   API is external: speak its protocol generation
+   (`backend/shared/proto/hc`, `internal/hc`), honor stream credit, and
    take a `missed` notification as the subscription's new complete state.
 8. **Tests.** Go tests beside the code (agent tests set `HOME` to a temp
-   dir); web tests in `web/src/__tests__`; the desktop shell's beside its
-   sources in `desktop/src`. Don't add tests that need network access or
+   dir); the core's beside its sources in `backend/` (`<name>.test.ts`,
+   `bun test`); web tests in `web/src/__tests__`; the desktop shell's
+   beside its sources in `desktop/src`. Don't add tests that need network access or
    real machines to `make test`.
 9. **`CHANGELOG.md` changes only in a release.** Feature and fix branches
    do not touch it. When a release is cut, a `release-manager` subagent
@@ -128,11 +136,12 @@ playbooks):
   `scripts/gpupick/gpupick.c` with recorded digests, of the source too:
   after changing the source run `make gpupick` (zig 0.17) and commit the
   libraries with it. Its tests run on Linux only (`TestGPUPick`).
-- yamux streams cannot be half-closed: use `agentproto.ChunkWriter` for
-  uploads that expect a reply.
-- A coding agent kind is a row of `internal/agentkinds` with a detector
-  manifest of the same id (`TestKindsMatchManifestsAndSettings`), then
-  `make tokens`. Finding its sessions needs `internal/agent/sessions`.
+- yamux streams cannot be half-closed: use `ChunkWriter` (agentproto, in
+  both languages) for uploads that expect a reply.
+- A coding agent kind is a row of `backend/shared/agents/kinds.ts` and of
+  `internal/agentkinds` (the machine's, compared with the core's registry
+  by `TestKindsMatchManifestsAndSettings`) with a detector manifest of the
+  same id, then `make tokens`. Finding its sessions needs `internal/agent/sessions`.
   Claude Code's transcripts are mapped to events by
   `internal/agent/transcript` (the chat host's imports and its Claude
   Code adapter), specified by the vectors in `spec/vectors/transcript/`,
@@ -157,31 +166,34 @@ playbooks):
   `spec/codex-app-server/summary.json` (`TestSchemaPinned`; its README
   says how to move to another version).
 - A terminal the product runs for itself (the chat host) is hidden by its
-  reserved name and label together (`agentproto.Hidden`): anything that
+  reserved name and label together (`agentproto.Hidden`, `hidden` of
+  `backend/shared/proto/agentproto`): anything that
   walks a terminal core's terminals (the core's terminal protocol, agent
   detection, terminal history) skips it with that function, never by the
   label alone, which any program can set.
 - Never call herdr-core's `terminal.read` with `lines` above 0 for a
   read-only client or from a background task: with history lines the core
   scrolls a program on the alternate screen, which every viewer sees.
-- `web/dist` is embedded at build time; run `pnpm -C web build` (or
-  `make build`) before `go build` if the UI changed. The build keeps
-  `web/dist/.gitkeep`, which `go:embed` needs in a clean checkout.
-- Adding a Go dependency changes `THIRD_PARTY_NOTICES.md`; run
-  `scripts/notices.sh`.
+- `web/dist` is embedded into the core's executable when it is built
+  (`backend/scripts/build.ts --web`); `make build` builds the UI first, and
+  `make dev-core` serves `web/dist` as it is (`--web-dir`).
+- Adding a Go dependency of the machine build or an npm dependency of
+  `backend/` changes `THIRD_PARTY_NOTICES.md`; run `scripts/notices.sh`.
 - Files many changes touch are laid out so that parallel branches merge:
   `README.zh-CN.md` has one sentence per line, and enumerations in the docs
   that grow with features are lists with one item per line.
 - macOS limits unix socket paths to 104 bytes; keep socket paths short.
-- The core builds for Windows, the agent does not: `internal/agent` and
-  `cmd/veldr/machine_unix.go` are `//go:build unix`, so code the core runs on
-  Windows must not import them (put what both need in
-  `internal/agentproto`); POSIX-only tests skip on Windows. Paths on
-  machines are POSIX: use package `path`, not `filepath`, for them.
-  `.gitattributes` keeps LF line endings on Windows checkouts.
-- The binary a machine gets is `cmd/veldr` built with the tag
-  `machine`. Files of that directory that need the server, the UI or
-  `internal/embedded` are `//go:build !machine`; `scripts/check.sh` fails
-  when the machine build links them (it would embed itself).
+- The core builds for Windows, the agent does not: the core's code runs
+  in Bun and in Electron's Node (`shared/`, `kernel/` and the features'
+  `core.ts` use Node's modules only, `tsconfig.node.json`; the machine
+  side is Bun on Linux and macOS, backend/README.md's rules), and in Go
+  `internal/agent` and `cmd/veldr/machine_unix.go` are `//go:build unix`;
+  POSIX-only tests skip on Windows. Paths on machines are POSIX: use
+  package `path`, not `filepath`, for them in Go, `node:path`'s `posix` in
+  TypeScript. `.gitattributes` keeps LF line endings on Windows checkouts.
+- The binary a machine gets is `cmd/veldr` (`go build ./cmd/veldr`, with
+  `-X …/internal/agentproto.Version` for releases); the core finds it by
+  platform in its payloads (`backend/kernel/payloads.ts`) or in
+  `--agent-dir`.
 - code-server's webviews need a secure context; test VS Code features on
   `http://localhost` or HTTPS, not a LAN IP.

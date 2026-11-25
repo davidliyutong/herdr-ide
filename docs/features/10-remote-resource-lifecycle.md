@@ -143,13 +143,15 @@ sockets, locks and pid files are in the host-local runtime directory.
 - `internal/agent/lifecycle_test.go`: orphan reaping, owner-only stop,
   upload pruning (`TestHousekeeping`), other hosts' directories
   (`TestPruneHosts`).
-- `internal/server/server_test.go` (`TestCodeServerIdleTracking`): idle
-  detection with open connections.
+- `backend/features/vscode/proxy.test.ts` (`idle tracking`) and
+  `core.test.ts` (`idle code-servers are released`): idle detection with
+  open connections.
 - `web/src/__tests__/codePanes.test.ts`: VS Code windows kept off screen
   until they expire or exceed 3, gone when their pane closes.
 - `internal/agent/hc_test.go` (`TestHCInstallStartAndPipe`) and
-  `internal/server/term_test.go` (`TestHCLifecycle`): herdr-core installs
-  and a stopped terminal core staying stopped.
+  `backend/features/terminals/terminals.test.ts` (`the terminal core’s
+  lifecycle from the UI`): herdr-core installs and a stopped terminal core
+  staying stopped.
 - `internal/agent/guikeep_test.go`, `gui_test.go`, `guivideo_test.go`: the
   display keeper, unfinished Xvfb installs, old encoder builds.
 - `internal/chathost` (idle exit and stop, `TestMaxLive`, shutdown, agents'

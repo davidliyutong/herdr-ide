@@ -174,7 +174,7 @@ with chats whose agent has quit, opening it as a chat
 ([37](37-agent-chats.md)).
 
 `GET /api/m/{id}/p/agents/resolve?kind=&session=&cwd=`
-(`internal/plugins/agents`, machine side `internal/agent/plugin/agents`)
+(`backend/features/agents`, machine side `internal/agent/plugin/agents`)
 answers `{ok}` when the machine has the session's transcript and it
 records that directory, else a code (`not_found`, `other_cwd`,
 `compressed`, `bad_request`). It is validated on the core and again on
@@ -248,14 +248,15 @@ agents' sessions, agent detection).
 
 - `internal/agentkinds/agentkinds_test.go` (kinds against manifests,
   settings and usage providers; UUID substitution; chat specs) and
-  `scripts/registry/main_test.go` (`TestAgents`).
+  `backend/shared/agents/kinds.test.ts` (the same of the core's kinds;
+  `the generated registry`).
 - `internal/agent/sessions`: command lines, records trusted and refused,
   guesses, stamps, `Locate`, opening through no link, hard links, the
   process table; also run on Linux with `openat2` allowed and denied.
 - `internal/agent/agentdetect_session_test.go` and
-  `internal/server/term_session_test.go`: schedule, sessions in records
-  and events, sessions ending (`TestTermAgentSessionEnds`), the plugin's
-  switch (`TestTermRedetected`, `TestTermSwitchNotifiesOnce`).
+  `backend/features/terminals/sessions.test.ts`: schedule, sessions in
+  records and events, sessions ending (`a session ends`), the plugin's
+  switch (`detected again after a switch`, `a switch notifies once`).
 - `internal/agent/transcript`: the shared vectors (`vectors_test.go`, also
   run by `web/src/__tests__/transcriptVectors.test.ts`), frames, bounds
   (`TestLineMemory`, `TestWalkPastALongLine`). Vectors in
@@ -263,8 +264,9 @@ agents' sessions, agent detection).
   2.1.330), one of a session driven through the SDK protocol, and
   hand-written ones.
   `spec/vectors/layout/agent-leaves.json`: the leaf's fields.
-- `internal/plugins/agents` and `internal/agent/plugin/agents`: the route,
-  validation, its limit (`TestResolveBusy`), the machine side.
+- `backend/features/agents/agents.test.ts` and
+  `internal/agent/plugin/agents`: the route, validation, its limit
+  (`busy`), the machine side.
 - `web/src/__tests__`: `agents.test.ts`, `chatImport.test.tsx`,
   `agentLeaves.test.ts`, `conversation.test.ts`,
   `conversationMemo.test.tsx`, `conversationView.test.tsx`,

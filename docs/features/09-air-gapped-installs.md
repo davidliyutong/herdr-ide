@@ -33,7 +33,7 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
   has one ([14](14-gui-windows.md)) and the bridge extension. The terminal
   core therefore needs no bundle ([21](21-terminal-core.md)). The agent
   checks the digest of every herdr-core and encoder it receives.
-- **Resolved on the core host** (`internal/codeserver/artifacts.go`):
+- **Resolved on the core host** (`backend/features/vscode/artifacts.ts`):
   code-server tarballs and extension VSIXs, in this order:
   1. `--seed-dir` directories (repeatable);
   2. the download cache;
@@ -94,8 +94,8 @@ A release carries the licenses of embedded components:
 
 ## Security
 
-- Pinned digests are updated together with `DefaultVersion` and
-  `DefaultExtensions` (the release role in `.claude/agents/`), and
+- Pinned digests (`PINNED`) are updated together with `DEFAULT_VERSION`
+  and `DEFAULT_EXTENSIONS` (the release role in `.claude/agents/`), and
   herdr-core's together with `hcdist.Version`.
 - Extraction rejects absolute paths, `..` and links leaving the install
   directory.
@@ -104,15 +104,16 @@ A release carries the licenses of embedded components:
 
 ## Testing
 
-- `internal/codeserver/artifacts_test.go`: seeds verified by sidecar and
-  tampered (`TestSeedDirVerifiedBySidecar`), offline errors
-  (`TestOfflineMissing`), pinned digests rejecting mirror content
-  (`TestPinnedChecksumRejectsMirror`), sidecar recording and `FetchAssets`
-  (`TestDownloadRecordsSidecarAndFetchAssets`).
+- `backend/features/vscode/artifacts.test.ts`: seeds verified by sidecar
+  and tampered (`a seed is verified by its sidecar`), offline errors
+  (`offline, a missing file is named with where to put it`), pinned
+  digests rejecting mirror content (`a pinned digest refuses what a mirror
+  sends`), sidecar recording and `fetch-assets` (`downloads record their
+  digest, fetch-assets copies with sidecars`, `the fetch-assets
+  command`).
 - `internal/agent/codeserver_test.go` (`TestCodeServerDownload`): a
   machine's own download checked against the core's digest.
-- `internal/hcdist/release_test.go`, `internal/embedded/embedded_test.go`,
-  `internal/agent/hc_test.go`: pinned herdr-core archives and embedded
-  executables.
+- `internal/hcdist/release_test.go`, `internal/agent/hc_test.go`: pinned
+  herdr-core archives and the executables a machine receives.
 - `internal/agent/guivideo_test.go` (`TestInstallVideo`): a wrong digest
   installs nothing.

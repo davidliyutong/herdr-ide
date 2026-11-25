@@ -142,7 +142,8 @@ Agent: `internal/agent/guigpu.go`; library `scripts/gpupick`.
 
 ### Terminals
 
-`internal/server/gui.go`, `internal/server/term_backend.go`, `internal/gui`.
+`backend/features/gui/manager.ts`, `state.ts`, `enable.ts`,
+`backend/features/terminals/backend.ts`, `shells.ts`.
 
 - **New terminals.** When the GUI is on for a machine and its display is
   ready, the core adds `DISPLAY` and `XAUTHORITY` to the `env` of the
@@ -253,7 +254,7 @@ Setting `gui.video`, on by default. Agent `internal/agent/guiwm_video.go`,
 
 ### Routing
 
-`internal/gui/display.go`, `internal/gui/frames.go`.
+`backend/features/gui/manager.ts`, `display.ts`, `router.ts`.
 
 - The core prepares a machine's display once per connection (status,
   install, start, attach), keeps one attach stream per machine, and retries
@@ -452,12 +453,15 @@ See [SECURITY.md](../../SECURITY.md).
   video and pictures).
 - `internal/jpegstrip`: one row group equals `image/jpeg`'s bytes, any
   number its pixels.
-- `internal/gui/gui_test.go`: terminal environments, enabling open panes
-  (`TestEnable`), frame and video routing, forged acknowledgements, refresh
-  floods, read-only, the close grace, retry backoff, the keeper request.
-- `internal/server/term_test.go` and `TestIntegrationTermShells` (real
+- `backend/features/gui/state.test.ts`, `manager.test.ts`,
+  `router.test.ts`: terminal environments, enabling open panes (`enable`),
+  frame and video routing, forged acknowledgements and refresh floods
+  (`abuse`), read-only, the close grace, retry backoff, the keeper request.
+- `backend/features/terminals/terminals.test.ts` (`terminal.run gets the
+  display`, `shells`) and `integration.test.ts` (`shells`, real
   herdr-core): display variables in `terminal.run` and typing into a shell;
-  `internal/server/server_test.go`: the close request's Origin check.
+  `backend/features/gui/routes.test.ts` (`close`): the close request's
+  Origin check.
 - `web/src/__tests__/gui.test.ts`, `guiVideo.test.ts`, `guiError.test.ts`,
   `guiStatus.test.ts`: keycodes, decoding, the status bar's error, the
   window list, the display state.

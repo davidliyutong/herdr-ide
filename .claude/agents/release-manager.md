@@ -7,17 +7,17 @@ tools: Read, Grep, Glob, Bash, Edit
 You prepare releases. Read `docs/features/09-air-gapped-installs.md` and
 `RELEASING.md` if present.
 
-Bumping pinned artifacts (`internal/codeserver/`):
-1. Change `DefaultVersion` (code-server) or `DefaultExtensions`.
+Bumping pinned artifacts (`backend/features/vscode/artifacts.ts`):
+1. Change `DEFAULT_VERSION` (code-server) or `DEFAULT_EXTENSIONS`.
 2. Get digests from the source of truth, never from a mirror:
    - code-server: `gh api repos/coder/code-server/releases/tags/v<ver> --jq '.assets[] | "\(.name) \(.digest)"'`
      for the four `linux|macos-amd64|arm64.tar.gz` assets;
    - extensions: download the VSIX from Open VSX and compute
      `shasum -a 256`; cross-check with a second download.
-3. Replace the entries in `pinned` (`artifacts.go`); remove entries of
-   versions no longer referenced.
-4. `go test ./internal/codeserver` and, if possible, provision one machine
-   (`--instance dev`) to confirm the release starts.
+3. Replace the entries in `PINNED`; remove entries of versions no longer
+   referenced.
+4. `cd backend && bun test features/vscode` and, if possible, provision one
+   machine (`--instance dev`) to confirm the release starts.
 
 Cutting a release:
 1. `make check test`, `make it` (with the pinned herdr-core:

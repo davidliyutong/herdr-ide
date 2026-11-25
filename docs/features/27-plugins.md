@@ -14,7 +14,8 @@ terminals on narrow windows ([05](05-vscode-panes.md)). Panels stay small
 
 ## Goals / non-goals
 
-- One shape on each side: core (`internal/plugin`), agent
+- One shape on each side: core (a feature, `backend/kernel/feature.ts`,
+  one directory each in `backend/features`), agent
   (`internal/agent/plugin`), web UI (`web/src/plugins`).
 - A switch per plugin, in Settings › Plugins.
 - Non-goal: plugins loaded at runtime or written by third parties. Plugins
@@ -25,46 +26,55 @@ terminals on narrow windows ([05](05-vscode-panes.md)). Panels stay small
 
 ### Core
 
-A plugin (`plugin.Plugin`) has an id and routes, mounted below
-`/api/p/<id>/` (core) or `/api/m/{id}/p/<id>/` (per machine; unknown
-machine → 404).
+A plugin is a feature of the core (`defineFeature`,
+`backend/kernel/feature.ts`): an id, a typed protocol of its machine-side
+actions (`protocol.ts`) and a `setup` that gets a `FeatureContext`, never
+the whole core. Its routes are mounted below `/api/p/<id>/` (core,
+`ctx.api`), `/api/m/{id}/p/<id>/` (per machine, `ctx.machineApi`; unknown
+machine → 404) or a prefix of its own (`ctx.route`, VS Code's).
 
-- **Guards.** A `Mutating` route is refused in read-only mode and audited
-  as `<plugin>[.<event>]` after it returns, with what it acted on
-  (`Call.AuditField`; paths, never contents) and its outcome.
-  `TestMutatingRoutesAreGuarded` walks the plugins' routes with the
-  core's. A disabled plugin's routes answer `404 plugin_disabled`. A GET
-  route may upgrade to a WebSocket (the chat plugin's page connection)
-  behind the same Host and Origin checks.
-- **Optional interfaces.** `Starter` (background work such as a
-  scheduler), `Streamer` (streams agents open towards the core, e.g. the
-  vault's), `MachineForgetter` (called when the user removes a machine,
-  whether the plugin is on or off).
-- **Host** (`plugin.Host`): machines (with `PublishAgent`, a `/ws` agent
-  message for a plugin's pane, the chat's), `Broadcast` (a `/ws` message
-  `plugin {plugin, m, data}`), audit log, read-only mode, settings,
-  logger. `plugin.Request` and `plugin.Open` run a machine-side action;
-  agent error codes reach the UI through `plugin.WriteError` (`offline`
-  409, `transport` 502, `not_found` 404, others 400). Params and results
-  up to 64 MiB pass; above 32 KiB they travel as a body after the header
-  line ([architecture](../architecture.md)). The stream `plugin.Open`
-  returns closes with the caller's context.
-- **Switches.** `plugins.<id>.enabled`, on by default unless
-  `registry.pluginsOff` names the plugin (as it does `vscode`); a plugin
-  with its own setting (`Toggled`) uses that.
+- **Guards.** A route with `ctx.mutating(event)` is refused in read-only
+  mode and audited as `<plugin>[.<event>]` after it answers, with what it
+  acted on (`c.var.audit`; paths, never contents), the path's parameters
+  and its outcome (`status`, and `error`, the code); `ctx.writable` only
+  refuses. Each feature's tests walk its routes (`checkGuarded`,
+  `backend/kernel/testing.ts`). A disabled plugin's routes answer `404
+  plugin_disabled`. A GET route may upgrade to a WebSocket (the chat
+  plugin's page connection) behind the same Host and Origin checks.
+- **Services and streams.** `ctx.service` (background work such as a
+  scheduler, ended by its signal), `ctx.agentStream` (streams agents open
+  towards the core, e.g. the vault's; `plugin_disabled` while off),
+  `ctx.onForget` (called when the user removes a machine, whether the
+  plugin is on or off).
+- **Context** (`FeatureContext`): machines (with `publishAgent`, a `/ws`
+  agent message for a plugin's pane, the chat's), `broadcast` (a `/ws`
+  message `plugin {plugin, m, data}`), the pages on `/ws`, audit log,
+  read-only mode, settings, logger. `ctx.call` and `ctx.open` run a
+  machine-side action, its params and result checked by the protocol's
+  schemas (`backend/kernel/agent.ts`); agent error codes reach the UI as
+  `{error, message}` (`offline` 409, `transport` 502, `not_found` 404,
+  others 400). Params and results up to 64 MiB pass; above 32 KiB they
+  travel as a body after the header line
+  ([architecture](../architecture.md)). The stream `ctx.open` returns
+  closes when the caller's signal ends.
+- **Switches.** `plugins.<id>.enabled`, on by default unless the feature
+  is `defaultOff` (as `vscode` is); a feature with its own setting
+  (`toggle`, `gui.enabled`) uses that, and one that is always on
+  (terminals, transfers) has none.
 - **Browser risk.** A plugin whose content runs on the UI's own origin,
-  where its scripts reach what the page reaches (VS Code), is a
-  `BrowserRisk`. It gets a second switch, `plugins.<id>.browser`, always
+  where its scripts reach what the page reaches (VS Code), has
+  `browserRisk`. It gets a second switch, `plugins.<id>.browser`, always
   off by default; `enabled` then applies to the desktop app only. The
-  core tells the clients apart (`plugin.Client`: the desktop app's
+  core tells the clients apart (the request's `client`: the desktop app's
   launch token, [08](08-web-access-and-security.md)) and applies the
-  requesting client's switch to the plugin's routes (`plugin.EnabledFor`,
-  `withPlugin`). What serves every client (agents' streams, schedulers)
+  requesting client's switch to the plugin's routes (`enableSetting`,
+  `ctx.enabledFor`). What serves every client (agents' streams, schedulers)
   runs while either is on.
-- **Plugin settings.** A settings section with a `Plugin` field
-  (`settings.Section{ID: "usage", Plugin: "usage"}`) is listed under its
-  plugin ([13](13-settings-and-appearance.md));
-  `TestPluginSectionsNameCorePlugins` checks the names.
+- **Plugin settings.** A settings section with a `plugin` field
+  (`{id: 'usage', order: …, plugin: 'usage'}`) is listed under its plugin
+  ([13](13-settings-and-appearance.md));
+  `backend/kernel/config/registry.test.ts` (`plugin sections`) checks the
+  names.
 
 ### Agent
 
@@ -108,8 +118,8 @@ A plugin (`PluginDef`, `web/src/plugins/api.ts`) contributes:
   badge, attention list, sounds, notifications,
   [07](07-agent-native-workflow.md)), with `seen` when the user looked at
   a done pane;
-- **commands** declared in `internal/keybindings/commands.go`, checked
-  before the app's own;
+- **commands** declared in `backend/kernel/config/keybindings/commands.ts`,
+  checked before the app's own;
 - **status bar items**, **palette items** and a `/ws` message handler;
 - **a settings page** (`settings: {section, layout?, extra?, controls?}`):
   its section, an optional custom layout, an `extra` component for actions
@@ -219,16 +229,19 @@ panels into panes.
 
 ## Testing
 
-- `internal/server/plugins_test.go`: routes, switches and defaults,
-  agents' streams, audit outcomes, VS Code off ending its work, the
-  per-client switch (`TestCodeRoutesFollowTheirClientsSwitch`);
-  `TestMutatingRoutesAreGuarded` includes a fake plugin.
-- `internal/server/plugins_unix_test.go`: large params and results,
-  `plugin.Open` closing with the caller.
+- `backend/kernel/core.test.ts`: routes and switches (`the switch of a
+  feature reaches its routes only`, `routes of features do not overlap`,
+  `browserRisk`, `enabledFor`), agents' streams (`dispatched by op`),
+  audit outcomes and read-only (`mutating routes`);
+  `backend/features/vscode/core.test.ts`: VS Code off ending its work, the
+  per-client switch (`routes follow their client's switch`).
+- `backend/kernel/agent.test.ts`: large params and results (`inline and
+  as bodies`), the agent's codes (`agent errors`), `open` closing with
+  the caller (`open and stream`).
 - `internal/agent/plugin/plugin_test.go`, `internal/agent/plugins_test.go`,
   `internal/agentproto/proto_test.go`: replies, codes, bodies,
   `UntilClosed`, panics.
-- `internal/registry/registry_test.go`: `TestPluginSectionsNameCorePlugins`.
+- `backend/kernel/config/registry.test.ts`: `plugin sections`.
 - Web: `plugins.test.ts`, `viewStatus.test.tsx`, `notifyViews.test.ts`,
   `attention.test.tsx`, `headerActions.test.ts`, `panelPanes.test.ts`,
   `vscodeRisk.test.ts`,

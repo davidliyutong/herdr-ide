@@ -61,13 +61,13 @@ reference documentation.
 ## Adding a locale
 
 1. Add it to the `appearance.language` values
-   (`internal/uisettings/uisettings.go`) and run `make tokens`.
+   (`backend/kernel/config/ui/ui.ts`) and run `make tokens`.
 2. Add `web/src/i18n/<locale>.ts` typed as `Messages` and register it in
    `i18n/index.ts` (`dicts`, `locales`, detection).
 3. Add `package.nls.<locale>.json` and `l10n/bundle.l10n.<locale>.json` to
    the extension.
 4. Add the language to the loading page's table in
-   `internal/server/codeserver.go`.
+   `backend/features/vscode/loading.ts`.
 
 ## Alternatives considered
 
@@ -84,7 +84,7 @@ reference documentation.
 - `web/src/__tests__/settings.test.ts`: every key the core's registry
   needs.
 - `desktop/src/menu.test.ts`: menu titles follow the language.
-- `scripts/check.sh`: generated key lists current (`scripts/registry
-  -check`), README sections aligned.
+- `scripts/check.sh`: generated key lists current
+  (`backend/kernel/config/registry.ts --check`), README sections aligned.
 
 Both languages were checked in Chrome.

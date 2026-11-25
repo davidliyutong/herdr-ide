@@ -133,8 +133,10 @@ its semantics (a close is a half-close; window, keepalive and backlog as
 `agentproto.YamuxConfig`), and agentproto, herdr-core's protocol and the
 chat host's protocol keep their wire forms, so a TypeScript core serves Go
 machine builds and the other way round. The stages: shared libraries;
-the core in TypeScript with the Go machine builds; the desktop app's core
-in process; the machine side in TypeScript; the Go program removed.
+the core in TypeScript with the Go machine builds, which then becomes the
+product's core, the Go core removed (the Go program is the machine build
+only); the desktop app's core in process; the machine side in TypeScript;
+the Go program removed.
 
 ### What changes on the wire
 
@@ -167,12 +169,18 @@ Other differences a user or an operator can see:
 ### Building and testing the core
 
 `backend/scripts/build.ts` packs the payloads (the web UI, the machine
-builds, herdr-core, the VS Code extension) into one tar archive and
-compiles `backend/hosts/bun/main.ts` with it embedded (`bun build
---compile`); the core reads it with `Bun.Archive`, keeping the UI's files
-in memory and reading a machine build when a machine needs one.
-`E2E_CORE=ts scripts/e2e.sh` runs the end-to-end tests against that
-executable, with the Go machine builds while machines run them.
+builds, herdr-core, the video encoder, the VS Code extension) into one tar
+archive and compiles `backend/hosts/bun/main.ts` with it embedded (`bun
+build --compile`, a Bun target per platform: x64 Linux and Windows as
+baseline builds); the core reads it with `Bun.Archive`, keeping the UI's
+files in memory and reading a machine build when a machine needs one.
+`scripts/build.sh` stages the payloads in `dist/payload` and builds the
+core of each platform; `scripts/e2e.sh` runs the end-to-end tests against
+that executable, with the Go machine builds while machines run them. The
+checks that read the Go core read the TypeScript one now: the flags and
+routes `docs/reference.md` must list come from the core composed as
+`serve` composes it (`backend/scripts/reference.ts`), the registry from
+`backend/kernel/config/registry.ts`.
 
 ### Claude Code
 
@@ -239,8 +247,9 @@ it (SECURITY.md's residual risk of the loopback port goes). The vault:
   cross-origin, user presence and verification, a growing counter, PRF
   required, bounded inputs).
 
-These go into SECURITY.md with the stage that makes the TypeScript core
-the one that ships.
+SECURITY.md has the vault's since the TypeScript core is the one that
+ships; the desktop's goes in with the stage that runs its core in
+process.
 
 ## Testing
 

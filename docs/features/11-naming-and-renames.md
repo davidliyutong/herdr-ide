@@ -24,6 +24,8 @@ executable, `HC_*` variables, state directory).
 - **Definitions**:
   - Go: `internal/brand/brand.go` (`Name`, `Slug`, `Domain`, `EnvPrefix`,
     `DataDir(instance)`, `AgentDir`, `BridgeExtID`, …);
+  - core: `backend/shared/lib/brand.ts` (`NAME`, `SLUG`, `DOMAIN`,
+    `ENV_PREFIX`, `dataDir(instance)`, …);
   - web UI: `web/src/brand.ts` (`APP_NAME`, `APP_SLUG`, `APP_DOMAIN`,
     namespaced `storage`).
 
@@ -37,7 +39,8 @@ executable, `HC_*` variables, state directory).
   Display name and slug are separate, so the visible name can change
   without touching identifiers.
 - **Consistency**: `internal/brand/brand_test.go` checks that the
-  TypeScript copies and the extension's `package.json` agree with Go.
+  TypeScript copies and the extension's `package.json` agree with Go,
+  `backend/shared/lib/brand.test.ts` the core's.
   `scripts/check.sh` fails on string literals with the slug in Go and
   TypeScript outside these files. Build scripts, the Makefile, Vite, the
   PWA manifest, the desktop launcher and electron-builder derive names from

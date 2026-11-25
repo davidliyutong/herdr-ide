@@ -73,7 +73,7 @@ core by the integration tests):
 
 Goals: a terminal core per machine owned by veldr's instance, sharing
 nothing with a herdr-core the user runs; its executable delivered through
-the agent and verified; a Go client whose backpressure reaches the slowest
+the agent and verified; a client whose backpressure reaches the slowest
 hop.
 
 Non-goals: emulating terminals (the browser does,
@@ -84,30 +84,32 @@ running the core's agent on Windows.
 
 ## Design
 
-**Client** (`internal/hc`). `Dial` says hello on any byte stream, checks
-the generation and switches to frames. One goroutine reads frames; a reply
-that opens a channel registers it before the next frame is read, because
-the core sends the channel's first frames right behind the reply. `Call`
-honors its context and sends `$/cancelRequest`.
+**Clients** (`backend/shared/proto/hc` in the core, `internal/hc` in the
+agent). Each says hello on any byte stream, checks the generation and
+switches to frames. One reader takes the frames; a reply that opens a
+channel registers it before the next frame is read, because the core
+sends the channel's first frames right behind the reply. A call given up
+(its signal, Go's context) sends `$/cancelRequest`.
 
-`Stream.Ack` returns credit only when the caller has passed bytes on, so a
-slow browser slows the core instead of filling memory along the way. A
-channel buffers at most twice the credit window; a core exceeding its
-credit ends the connection. `Events.Recv` joins lines across frames and
-returns their credit itself.
+A stream's `ack` returns credit only when the caller has passed bytes on,
+so a slow browser slows the core instead of filling memory along the way.
+A channel buffers at most twice the credit window; a core exceeding its
+credit ends the connection. An event subscription's `recv` joins lines
+across frames and returns their credit itself.
 
-**Delivery** (`internal/hcdist`, `scripts/fetch-hc`, `internal/embedded`).
+**Delivery** (`internal/hcdist`, `scripts/fetch-hc`,
+`backend/kernel/payloads.ts`).
 `internal/hcdist` pins the version and the SHA-256 of the four release
 archives (Linux and macOS, amd64 and arm64). `scripts/fetch-hc`, run by
 `scripts/build.sh`, downloads and verifies each archive, takes only the
 regular `herdr-core` file at the archive root (at most 64 MiB; never the
 copy inside the macOS app bundle, links or duplicates), and writes it
-gzip-compressed to `internal/embedded/hc/hc-<os>-<arch>.gz`, with the
-release's licenses under `dist/hc/licenses/`. The executable is never run
-during a build. `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes
-one verified executable for the integration tests (`HC_TEST_BIN`).
-`embedded.HC` returns the compressed executable and the digest of the
-uncompressed one.
+gzip-compressed to `dist/payload/hc/hc-<os>-<arch>.gz`, which the core's
+executable embeds, with the release's licenses under `dist/hc/licenses/`.
+The executable is never run during a build. `go run ./scripts/fetch-hc
+-exe <file> <os>/<arch>` writes one verified executable for the
+integration tests (`HC_TEST_BIN`). The core's `hc(os, arch)` returns the
+compressed executable and the digest of the uncompressed one.
 
 **Agent** (`internal/agent/hc.go`). The session is
 `veldr[-<instance>]-<host id>`, so hosts sharing a home keep their
@@ -161,14 +163,11 @@ the variables by which Claude Code and Codex mark a session's child
 processes (`agentSessionVars`): a Claude Code started under them would take
 itself for a child session and save no transcript
 ([35](35-agent-native-view.md)). Their configuration variables
-(`CLAUDE_CONFIG_DIR`, `ANTHROPIC_*`, `CODEX_HOME`, `OPENAI_*`, …) stay. Where
-herdr-core runs the terminal core as the core's child, the local machine's
-programs inherit its core dump limit of 0
-([30](30-variable-vault.md#security)).
+(`CLAUDE_CONFIG_DIR`, `ANTHROPIC_*`, `CODEX_HOME`, `OPENAI_*`, …) stay.
 
 New terminals of an ssh machine get `SSH_CONNECTION` and `SSH_CLIENT` of
-the agent's ssh session (`internal/server/sshenv.go`), because a core
-started by systemd has not inherited them and programs use them to know
+the agent's ssh session (`backend/features/terminals/sshenv.ts`), because
+a core started by systemd has not inherited them and programs use them to know
 the user's clipboard and browser are elsewhere (Codex then copies via OSC
 52 and logs in with a device code). Only well-formed values are passed, a
 client's own value wins, the local machine gets none, and
@@ -191,8 +190,9 @@ client's own value wins, the local machine gets none, and
 ## Failure modes
 
 - **Archive missing or digest mismatch** → the build fails.
-- **Plain `go build` without `fetch-hc`** → `embedded.HC` returns an error
-  naming the platform.
+- **A core built without `fetch-hc`'s payload** (or run from its sources
+  before `dist/payload` holds it) → `hc(os, arch)` fails naming the
+  platform, and the machine's terminal core is `not_bundled`.
 - **Not installed** → `start`/`stop` answer `not_installed`.
 - **Damaged upload or executable changed after install** → `bad_digest`;
   the next attempt reinstalls this build's executable.
@@ -214,13 +214,14 @@ build's digest before every start. See [SECURITY.md](../../SECURITY.md).
 
 - `internal/hcdist/release_test.go`: archive extraction against malformed,
   oversized and linked members.
-- `internal/embedded/embedded_test.go`: digest and damaged streams.
-- `internal/hc/hc_test.go`: a scripted core — framing, hello, out-of-order
-  replies, cancellation, credit violations, events across frames.
+- `internal/hc/hc_test.go` and `backend/shared/proto/hc/hc.test.ts`: a
+  scripted core — framing, hello, out-of-order replies, cancellation,
+  credit violations, events across frames.
 - `internal/agent/hc_test.go`: install, digest checks before start and
   restart, socket mode, session names, failure codes.
-- `internal/server/term_test.go` (`TestSSHEnv`,
-  `TestTermRunGetsTheSSHSession`) and `internal/agent/procutil_test.go`
+- `backend/features/terminals/units.test.ts` (`sshEnv`, `the local
+  machine gets no ssh session`), `terminals.test.ts` (`terminal.run gets
+  the ssh session`) and `internal/agent/procutil_test.go`
   (`TestCleanEnv`, `TestCleanEnvAgentSessionMarkers`): terminal
   environment.
 - `internal/agent/hidden_test.go`: hidden helpers' flags, a taken name, no

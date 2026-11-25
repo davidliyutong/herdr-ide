@@ -94,7 +94,7 @@ searches run at once per machine; a fifth waits up to 3 s, then fails with
 process group is killed then, at the time limit and once enough matches
 were read.
 
-### Core side (`internal/plugins/search`)
+### Core side (`backend/features/search`)
 
 `POST /api/m/{id}/p/search/search` takes the parameters as JSON (at most
 16 KiB), checks them as the agent does, and answers the agent's result. It
@@ -197,9 +197,9 @@ links and opens files without blocking. See [SECURITY.md](../../SECURITY.md).
   (text, bytes, non-match messages, broken and over-long lines, UTF-16
   columns); previews; globs; finding code-server's ripgrep; its
   environment.
-- `internal/plugins/search/search_test.go`: the route (not mutating),
-  parameter checks, an offline machine; `internal/server/server_test.go`
-  `TestMutatingRoutesAreGuarded` lists it as allowed in read-only mode.
+- `backend/features/search/search.test.ts`: the route (not mutating;
+  `checkGuarded` lists it as allowed in read-only mode), parameter checks,
+  an offline machine, the timeout.
 - `web/src/__tests__/search.test.ts`: the rows of a result, the params
   sent, the panel searching the focused terminal's folder after the pause
   with the matches marked, a new search aborting the one in flight, a

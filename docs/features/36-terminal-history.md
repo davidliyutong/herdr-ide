@@ -93,7 +93,7 @@ after its last renewal.
 The agent clamps what the core asks to these bounds
 (`agentproto.History*`).
 
-### The scheduler (`internal/plugins/history`)
+### The scheduler (`backend/features/history/scheduler.ts`)
 
 A machine keeps snapshots while `history.capture` (off by default, per
 machine; `--history-capture`) and the plugin are on. The core asks for a
@@ -233,8 +233,8 @@ refused read-only and audited. See [SECURITY.md](../../SECURITY.md)
 - `integration_test.go` (`TestIntegrationCapture`, `make it`): a real
   herdr-core; the stored bytes start with CAN, hold no titles or
   `ESC[?9001`, and carry exactly the history asked for.
-- `internal/plugins/history/history_test.go`: route guards, scheduling,
-  clears (`TestSchedulerClearsWhenTurnedOff`), `TestAdoptRoute`;
+- `backend/features/history/history.test.ts`: route guards, scheduling,
+  clears (`clears when turned off`), the adopt route (`adopt`);
   `internal/agentproto/history_test.go`.
 - `web/src/__tests__/history.test.ts` (choice, follower, schedule,
   adoption, retries), `historySettings.test.tsx`, `termPane.test.ts`

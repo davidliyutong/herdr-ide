@@ -29,16 +29,19 @@ Release archives (`dist/release/`) are for Linux and macOS on amd64 and
 arm64 and include the licenses. A Windows x64 core ships only inside the
 [desktop app](#desktop-app) and reaches SSH machines only.
 
-What the core embeds:
+The core is one executable built with Bun from `backend/` (about 145–175 MB
+per platform: the Bun runtime and what it embeds). What the core embeds:
 
-- The web UI, the machine builds of the agent and the VS Code bridge.
+- The web UI, the machine builds of the agent (the Go program `cmd/veldr`
+  for Linux and macOS on amd64 and arm64) and the VS Code bridge.
 - herdr-core 0.1.21 for Linux and macOS on amd64 and arm64 (about 12 MB),
   the terminal core installed on machines
   ([21](features/21-terminal-core.md)). `scripts/build.sh` runs
   `scripts/fetch-hc`, which downloads the archives from `releases.herdr.dev`
   (or reuses `dist/hc/`) and verifies them against the digests pinned in
-  `internal/hcdist`; the build fails otherwise. A plain `go build` has no
-  herdr-core unless `go run ./scripts/fetch-hc <os>/<arch>` ran first.
+  `internal/hcdist`; the build fails otherwise. `scripts/build.sh` stages
+  everything the core embeds in `dist/payload` first; a core run from the
+  sources (`make dev-core`) reads it there.
 - The video encoder for program windows on Linux machines
   ([14](features/14-gui-windows.md)), when `scripts/build-ffmpeg.sh`
   (Docker) built it into `dist/ffmpeg/`. Releases require it
@@ -130,7 +133,7 @@ keep their grant across updates.
 Finder launches put `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`
 and system paths on the core's PATH. Shell startup files are not run.
 
-To build on a Mac (Go, Node.js 22.12+, pnpm):
+To build on a Mac (Go, Bun, Node.js 22.12+, pnpm):
 
 ```bash
 make desktop-app                        # host-architecture .app in dist/desktop/mac-arm64/ or mac/
@@ -174,7 +177,7 @@ ssh-add                  # adds ~/.ssh/id_* to the agent
 Then **Retry** the machine. Notifications come from the installed app only
 (its Start menu shortcut carries the app id), not from `win-unpacked/`.
 
-To build: install Go, Node.js 22.12+, pnpm and Git for Windows, and run
+To build: install Go, Bun, Node.js 22.12+, pnpm and Git for Windows, and run
 `scripts/desktop.sh app` or `scripts/desktop.sh dist` in Git Bash.
 
 ### Linux
@@ -351,7 +354,7 @@ Lookup order: `--seed-dir` directories, the cache, then (unless
 `--offline`) `--code-server-url` / `--extension-url`, which can point at a
 mirror. Verification:
 
-- Default versions have SHA-256 digests compiled into the binary.
+- Default versions have SHA-256 digests compiled into the core.
 - Other versions are checked against a `<file>.sha256` beside the file
   (`fetch-assets` writes it).
 - A mismatching seed is rejected, never replaced.
@@ -363,8 +366,10 @@ mirror. Verification:
 Bundles are for your own installations: Git Graph's license restricts
 redistribution, so do not publish bundles containing it.
 
-Building needs Go modules, npm packages and the pinned herdr-core archives
-(verified archives in `dist/hc/` are reused).
+Building needs Go modules, npm packages, the Bun runtimes of the target
+platforms (`bun build --compile` downloads one for another platform) and
+the pinned herdr-core archives (verified archives in `dist/hc/` are
+reused).
 
 ## Remote resources
 
@@ -418,7 +423,7 @@ host's key and `<run>` the namespace's runtime directory on the host
 | Agents of chats (`claude`, `codex app-server`, `kimi acp`, `grok agent … stdio`) | A chat's prompt, with the PATH of the user's login shell (`$SHELL -l -i -c env`, at most every 6 h). | Own process group under the chat host. Ended idle after `chat.idleStopMinutes` (30), the idlest beyond `chat.maxLive` (8), on close, archive, delete or handoff, and with the host: input closed, SIGTERM after 2 s, SIGKILL later. Their own session files are theirs and never removed. |
 | Short agent processes of a chat host | Listing a directory's sessions; importing a session (Codex without a live app-server, ACP agents). | ≤ 4 at once per host, each within 60 s (2 min for an ACP load). |
 | Connections to a chat host | Page subscriptions, chat requests and the core's watch, as streams of op `plugin` to the host's socket. | ≤ 128 per machine, ≤ 32 subscriptions per page; the host serves ≤ 256 and drops one 8192 events or 16 MiB behind. The watch lets a host go after 2 min unused. Nothing on TCP. |
-| The vault's key in the core's memory (core host) | An unlock. | A memguard Enclave in locked memory until the vault locks; needs `ulimit -l` (`RLIMIT_MEMLOCK`), else unlocks answer `503 memory`. The full binary sets `RLIMIT_CORE` to 0 for itself and its children on Linux and macOS ([30](features/30-variable-vault.md)). |
+| The vault's key in the core's memory (core host) | An unlock. | A non-extractable WebCrypto key until the vault locks, which drops it; it never lies in the core's memory as bytes, and Argon2id's output only until it is imported, then wiped ([30](features/30-variable-vault.md)). |
 | Secure Enclave helper (desktop app, macOS) | One process per question (availability, a new key, a Touch ID unlock). | Answers one line and exits; killed after 2 min or 64 KiB of output. Keeps nothing. |
 
 ### Files
@@ -523,6 +528,6 @@ unless they use the same instance. Give each its own `--instance` (state in
 For development:
 
 ```bash
-make dev-core     # go run ./cmd/veldr --instance dev --local-only --listen 127.0.0.1:7790 --agent-dir dist/agents
+make dev-core     # bun backend/hosts/bun/main.ts --instance dev --local-only --listen 127.0.0.1:7790 --agent-dir dist/agents --web-dir web/dist
 make dev-web      # Vite on top of it
 ```

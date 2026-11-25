@@ -224,7 +224,8 @@ OpenCode recorded; otherwise the tokens count without a price.
 
 ### Core
 
-`internal/plugins/usage` is a `plugin.Starter` that checks every 10 s
+`backend/features/usage` runs a scheduler (a service of the feature,
+`usage.ts`) that checks every 10 s
 whether a poll is due by `usage.refresh`: `manual`, a fixed interval, or
 `adaptive` (default). Adaptive uses `usage.refreshOpen` (5 min) while a
 panel is visible, `usage.refreshWorking` (10 min) while a coding agent
@@ -444,10 +445,11 @@ databases are parsed with bounded, read-only, lock-free code.
 - One session: `internal/usage/session_test.go` (same numbers as the spend,
   no content read `TestSessionCostReadsNoContent`, subagents, reading on,
   bounds), `internal/agent/plugin/usage/session_test.go`,
-  `internal/plugins/usage/session_test.go` (`TestSessionParams`,
-  `TestSessionBusy`), `web/src/__tests__/usageSession.test.tsx` (the item,
-  its card and the reads' schedule).
-- `internal/plugins/usage/usage_test.go`, `alerts_test.go`: cadence,
+  `backend/features/usage/core.test.ts` (`a session’s params`, `a machine
+  busy reading sessions`), `web/src/__tests__/usageSession.test.tsx` (the
+  item, its card and the reads' schedule).
+- `backend/features/usage/usage.test.ts`, `alerts.test.ts`,
+  `store.test.ts`: cadence,
   dedupe across machines, best answer, `Retry-After`, refresh gap, history,
   status pages, cost cache and `ETag`s, no Kimi renewal from a read-only
   core; each alert at most once per period under jitter and drift, kept
@@ -458,5 +460,5 @@ databases are parsed with bounded, read-only, lock-free code.
   browser, the status bar item and its card, a window's spend and its
   estimate of the whole, the breakdown by model; `usageSession.test.tsx`:
   the status bar item following the focused agent's service and model.
-- `internal/server`: `TestMutatingRoutesAreGuarded` covers the plugin's
-  routes.
+- `backend/features/usage/core.test.ts` (`guards`) walks the plugin's
+  routes with `checkGuarded`.

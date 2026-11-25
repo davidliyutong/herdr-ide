@@ -35,8 +35,8 @@ cannot show them.
 
 ### Forwards
 
-`internal/plugins/browser` (core), `internal/agent/plugin/browser`
-(machine).
+`backend/features/browser` (core: `forwards.ts`),
+`internal/agent/plugin/browser` (machine).
 
 - **Machine.** The action `dial {port}` connects the stream to the port on
   `127.0.0.1` (else `::1`) and copies both ways. Loopback only: the core
@@ -50,9 +50,10 @@ cannot show them.
   otherwise a system-chosen port, which the pane shows.
 - **Both loopback names.** A browser may try `127.0.0.1` or `::1` first
   for "localhost", so a forward takes its port on both
-  (`internal/loopback`). If the `::1` side is held by another program the
-  port is not used, since a browser could reach that program instead. Only
-  a host without IPv6 loopback listens on `127.0.0.1` alone.
+  (`backend/shared/host/loopback.ts`). If the `::1` side is held by
+  another program the port is not used, since a browser could reach that
+  program instead. Only a host without IPv6 loopback listens on
+  `127.0.0.1` alone.
 - **Lifetime.** A forward ends when stopped (`DELETE …/forwards/{port}`),
   its machine is removed, the core stops, the plugin is turned off, or it
   is unused for `browser.forwardIdle` minutes (30; 0 = until stopped). Use
@@ -62,7 +63,7 @@ cannot show them.
   with back-off; any other listener failure ends the forward and is
   logged.
 - **Same host only.** Forwards serve clients on the core's own host
-  (`plugin.Call.SameHost`: loopback peer and Host, no proxy); otherwise
+  (the request's `sameHost`: loopback peer and Host, no proxy); otherwise
   `403 forward_local_only` and the list says `available: false`. The
   local machine needs no forward.
 
@@ -245,16 +246,18 @@ never a page of a pane ([SECURITY.md](../../SECURITY.md)).
 
 ## Testing
 
-- `internal/plugins/browser/browser_test.go` (a real agent in process):
-  bytes over both loopback addresses, reuse, listing, stopping, refusals,
-  idle expiry and what counts as use, connection and forward bounds,
-  listener failures, port choice. `settings_test.go`: the links setting,
-  its default and values it refuses.
-- `internal/loopback`: the other address taken, held, absent.
+- `backend/features/browser/browser.test.ts` (a fake of the agent's
+  `dial` that connects to this host's loopback): bytes over both loopback
+  addresses, reuse, listing, stopping, refusals, idle expiry and what
+  counts as use, connection and forward bounds, listener failures, port
+  choice, the guards; `settings`: the links setting, its default and
+  values it refuses.
+- `backend/shared/host/loopback.test.ts`: the other address taken, held,
+  absent.
 - `internal/agent/plugin/browser`: `dial` both ways and its refusals,
   listening ports (`listening_linux_test.go`).
-- `internal/server/server_test.go`: `TestGuard` (other loopback origins
-  refused), `TestCSPOnAppShell` (frames by Host and client).
+- `backend/kernel/http/http.test.ts`: `Host and Origin` (other loopback
+  origins refused), `frames` (frames by Host and client).
 - `web/src/__tests__/browser*.test.ts(x)`: address parsing, the core's
   address refused, frame layer, forwards made only for granted ports,
   popups, links by machine, host, client and setting, document links

@@ -48,9 +48,11 @@ a node reachable without ssh.
 | `chat-host` | The chat host, which the node starts as a hidden terminal of the instance's terminal core ([37](37-agent-chats.md)). |
 | `serve` | The UI: HTTP and WebSocket front, plugins' core sides, the files of the UI's host. Also on Windows. |
 
-A machine needs only what it runs: the UI's host the full build, other
-machines the machine build (tag `machine`: no `serve`, no web UI, no
-payloads), which the UI uploads as before ([02](02-multi-machine-transport.md)).
+`serve` is the core's executable (TypeScript, `backend/hosts/bun`), which
+passes `node` on to the machine build it carries; `node`, `node dial` and
+`chat-host` are the machine build's (`cmd/veldr`: no `serve`, no web UI,
+no payloads), which the UI installs on its own machine and uploads to
+others as before ([02](02-multi-machine-transport.md)).
 `internal/agent/node.go` is the node, `cmd/veldr/node_unix.go` its
 commands.
 
@@ -94,7 +96,9 @@ restart, and on macOS terminals keep the privacy grants of that executable
 ### The UI
 
 - **Its own machine.** It connects to `node.sock`, starting the node from
-  its own executable when none answers. There is no in-process agent.
+  the machine build it installed for its platform when none answers
+  (`backend/kernel/machines/transport/local.ts`). There is no in-process
+  agent.
 - **Other machines.** `ssh … -- <agent> node dial`: the session is the
   node's, over ssh's standard input and output as before, with the
   ControlMaster of [02](02-multi-machine-transport.md).

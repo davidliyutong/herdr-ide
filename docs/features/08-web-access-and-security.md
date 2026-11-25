@@ -28,7 +28,7 @@ on `127.0.0.1:7781` ([16](16-desktop-packaging.md)). Flags are in
 
 ### Guardrails
 
-`internal/server/security.go`, `server.go`, in request order:
+`backend/kernel/http/guard.ts`, `app.ts`, in request order:
 
 1. **Security headers** on every response: `nosniff`,
    `Referrer-Policy: same-origin` (so same-origin POSTs keep their Origin),
@@ -45,16 +45,17 @@ on `127.0.0.1:7781` ([16](16-desktop-packaging.md)). Flags are in
 4. **Read-only mode** (`--read-only`): terminals are observed only (no input,
    size or focus), writing terminal-protocol calls are refused and no
    terminal core is installed or started ([22](22-terminal-protocol.md)).
-   Every mutating endpoint answers `403` (`writable` in
-   `internal/server/server.go`). Viewing and downloading files, cancelling
+   Every mutating endpoint answers `403` (`writable` and `mutating` in
+   `backend/kernel/http/app.ts`). Viewing and downloading files, cancelling
    one's own download, and stopping code-server (which only releases it)
-   stay allowed. `TestMutatingRoutesAreGuarded` walks the route table, so a
-   mutating route added without `writable` fails the tests.
-5. **Terminal protocol allowlist** (`termReadMethods`, `termWriteMethods` in
-   `internal/server/term.go`): only methods about terminals and documents,
-   never `machine.*`, `file.*`, `server.*` or a call with `on`. Refusals are
-   audited (`denied.term`). An allowlist means new core methods are closed
-   by default.
+   stay allowed. Each feature's tests walk its routes (`checkGuarded` in
+   `backend/kernel/testing.ts`), so a mutating route added without
+   `writable` or `mutating` fails them.
+5. **Terminal protocol allowlist** (`READ_METHODS`, `WRITE_METHODS` in
+   `backend/features/terminals/allowlist.ts`): only methods about terminals
+   and documents, never `machine.*`, `file.*`, `server.*` or a call with
+   `on`. Refusals are audited (`denied.term`). An allowlist means new core
+   methods are closed by default.
 6. **CSP** on every page the core serves, including the app shell for
    client-side routes: `script-src 'self' 'wasm-unsafe-eval'` (for the
    terminal emulator's WebAssembly), `frame-ancestors 'self'`, …. An unknown
@@ -66,7 +67,8 @@ on `127.0.0.1:7781` ([16](16-desktop-packaging.md)). Flags are in
 
 ### VS Code on the UI's origin
 
-`internal/server/client.go`. code-server is proxied below `/m/{id}/code/`
+`backend/hosts/bun/parent.ts` (`desktopClient`),
+`backend/features/vscode/core.ts`. code-server is proxied below `/m/{id}/code/`
 on the UI's own origin, so any script in it (an extension, a webview) can do
 what the page can, on every machine. VS Code is therefore off by default,
 with one switch per kind of client ([05](05-vscode-panes.md)):
@@ -88,7 +90,7 @@ applies (`client`).
 
 ### Startup checks
 
-`cmd/veldr`:
+`backend/hosts/bun/serve.ts`:
 
 - A non-loopback `--listen` is refused unless a proxy secret is configured
   or `--insecure-listen` is given.
@@ -130,19 +132,27 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
 
 ## Testing
 
-- `internal/server/server_test.go`: `TestGuard`, `TestProxySecret`,
-  `TestCSPOnAppShell`, `TestMutatingRoutesAreGuarded`,
-  `TestReadOnlyRetryKeepsTheSession`, `TestCodeServerPortProxyRefused`.
-- `internal/server/plugins_test.go`, `client_test.go`: per-client VS Code
-  switches and the desktop token (`TestCodeRoutesFollowTheirClientsSwitch`,
-  `TestClientReported`, `TestDesktopCookieNotForwarded`,
-  `TestBridgeMessagesFollowTheClientsSwitch`, `TestVSCodeOffEndsItsWork`);
-  `cmd/veldr/parent_test.go` (`TestReadHello`).
-- `internal/server/term_test.go`: allowlist and audit (`TestTermProtocol`),
-  read-only terminals (`TestTermReadOnly`, `TestTermWithoutCore`).
-- `internal/server/settings_test.go` (`TestSettingsReadOnly`),
-  `internal/server/machines_test.go` (`TestHCEndpointsGuard`,
-  `TestSSHLoginNeedsAControlDir`).
-- `internal/transport`: `TestCheckPrivateDir`,
-  `TestSSHArgsWithoutControlDir`; `internal/agent/agent_test.go`:
-  `TestHelloAndPrivateRunDir`, `TestDialRestriction`.
+- `backend/kernel/http/http.test.ts`: `guard` (`Host and Origin`,
+  `refusals`, `proxy secret`), `CSP` (`appCSP`, `frames`).
+- Every feature's `routes that change state are guarded` (or `mutating
+  routes are guarded`, `guards`) with `checkGuarded`; read-only retries
+  keep the session: `backend/features/machines/core.test.ts` (`retry`);
+  the refused port proxy: `backend/features/vscode/proxy.test.ts` (`the
+  port proxy is refused`).
+- Per-client VS Code switches and the desktop token:
+  `backend/kernel/core.test.ts` (`browserRisk`),
+  `backend/features/vscode/core.test.ts` (`routes follow their client's
+  switch`, `a switch turned off ends its work`), `proxy.test.ts` (`the
+  desktop app cookie`), `bridge.test.ts` (`messages follow each client's
+  switch; the pages' theme`), `backend/kernel/config/routes.test.ts`
+  (`GET /api/settings` reports the `client`).
+- `backend/features/terminals/terminals.test.ts`: allowlist and audit
+  (`subscribe, calls, streams, credit, a lost core`), read-only terminals
+  (`read-only clients observe`, `without a terminal core`), the terminal
+  core's endpoints (`routes that change state are guarded`).
+- `backend/kernel/config/routes.test.ts` (`read-only`),
+  `backend/features/machines/core.test.ts` (`needs a control directory`).
+- `backend/kernel/machines/transport/transport.test.ts`: `a private
+  directory only`, `args without a control directory`;
+  `internal/agent/agent_test.go`: `TestHelloAndPrivateRunDir`,
+  `TestDialRestriction`.

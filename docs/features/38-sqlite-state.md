@@ -11,8 +11,8 @@ history ([36](36-terminal-history.md)), the vault's access log
 ([29](29-ai-usage.md)), each with its own rules for partial writes,
 rotation and two writers.
 
-Constraints: the core builds for Linux, macOS and Windows and the machines'
-build for Linux and macOS, all without cgo; the files hold names,
+Constraints: the core builds for Linux, macOS and Windows (with Bun) and
+the machines' build for Linux and macOS without cgo; the files hold names,
 directories and terminal output, so they are the user's alone; a home may
 be shared by several hosts over NFS, where SQLite's write-ahead log works
 for one host only; a downgrade must not destroy what a newer version wrote.
@@ -31,10 +31,15 @@ between processes of different roles; replication.
 
 ## Design
 
-### Opening (`internal/store`)
+### Opening (`internal/store`, `backend/shared/store`)
 
-The driver is `modernc.org/sqlite` (SQLite compiled to Go, no cgo, about
-4.7 MB a binary). `store.Open(path, Options{Migrations})`:
+The machine build (the agent, the chat host) opens its databases with
+`internal/store`, whose driver is `modernc.org/sqlite` (SQLite compiled to
+Go, no cgo, about 4.7 MB a binary); the core with `backend/shared/store`,
+on `node:sqlite` (`DatabaseSync`, which Bun and Electron's Node both have;
+its calls are synchronous, so a statement waiting for another process's
+lock blocks the thread). Both follow the same rules;
+`store.Open(path, Options{Migrations})` (`open(path, {migrations})`):
 
 - **Private.** Directory 0700 and file 0600, both the user's and not links;
   SQLite's `-wal`, `-shm` and `-journal` files must not be links either
@@ -135,13 +140,15 @@ in [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- `internal/store`: `store_test.go` (migrations, pragmas, newer databases,
-  permissions, links), `shared_test.go` (pools, per-feature migration,
-  `Durable`, `Reclaim`), `host_test.go`/`host_unix_test.go`
-  (names, pruning); `internal/hostid` (`TestID`, `TestMachineID`).
+- `internal/store` and `backend/shared/store`: `store_test.go` and
+  `store.test.ts` (migrations, pragmas, newer databases, permissions,
+  links), `shared_test.go` and `shared.test.ts` (pools, per-feature
+  migration, `Durable`, `Reclaim`), `host_test.go`/`host_unix_test.go`
+  and `host.test.ts` (names, pruning); `internal/hostid` and
+  `backend/shared/host/hostid.test.ts` (`TestID`, `TestMachineID`).
 - Feature tests for newer versions and per-host files:
   `internal/agent/plugin/history/history_test.go`,
-  `internal/plugins/vault/accesslog_test.go`,
-  `internal/plugins/usage/history_test.go`,
+  `backend/features/vault/accesslog.test.ts`,
+  `backend/features/usage/store.test.ts`,
   `internal/usage/cost_cache_test.go`, `internal/chathost`
   (`TestOtherHostsJournalsGo`, `TestLogFile`).

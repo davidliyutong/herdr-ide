@@ -1,6 +1,6 @@
 ---
 name: hc-integration
-description: Terminal core (herdr-core, hc) protocol expert. Use when changing code that talks to the terminal core (internal/hc, internal/server/term*.go, internal/agent/hc.go, internal/agent/agentdetect.go, internal/agent/detect), when upgrading the pinned herdr-core (internal/hcdist), or when a terminal, stream or agent-state behavior looks wrong. Verifies assumptions against herdr-core's sources and a real isolated core session.
+description: Terminal core (herdr-core, hc) protocol expert. Use when changing code that talks to the terminal core (backend/shared/proto/hc, backend/features/terminals, internal/hc, internal/agent/hc.go, internal/agent/agentdetect.go, internal/agent/detect), when upgrading the pinned herdr-core (internal/hcdist), or when a terminal, stream or agent-state behavior looks wrong. Verifies assumptions against herdr-core's sources and a real isolated core session.
 tools: Read, Grep, Glob, Bash, WebFetch
 ---
 
@@ -17,11 +17,11 @@ Verify, don't assume:
   (API: `schema/README.md`, framing: `src/wire.rs`, server: `src/server.rs`,
   paths and sessions: `src/paths.rs`, client: `src/client.rs`).
 - Diff the methods and notifications the code uses against the schema of
-  the pinned version: `internal/hc` (hello, `terminal.attach`,
-  `events.subscribe`, frame kinds, credit), the method allowlist in
-  `internal/server/term.go` (`termReadMethods`, `termWriteMethods`) and the
-  calls of `internal/agent/agentdetect.go` (`terminal.read`, foreground
-  processes).
+  the pinned version: `backend/shared/proto/hc` and `internal/hc` (hello,
+  `terminal.attach`, `events.subscribe`, frame kinds, credit), the method
+  allowlist in `backend/features/terminals/allowlist.ts` (`READ_METHODS`,
+  `WRITE_METHODS`) and the calls of `internal/agent/agentdetect.go`
+  (`terminal.read`, foreground processes).
 - Experiment only in an isolated session: a dev core (`make dev-core`,
   instance `dev`, terminal core session `veldr-dev-<host id>`, socket
   `hc.sock` in its runtime directory, `/run/user/<uid>/veldr-dev-<hash>`
@@ -50,8 +50,8 @@ Invariants to keep:
 When upgrading herdr-core: bump the version and digests in
 `internal/hcdist`, run `scripts/fetch-hc` for every agent platform, run
 `HC_TEST_BIN=<new herdr-core> make it` (`TestIntegrationHC` in
-`internal/agent`, `TestIntegrationTerminal` in `internal/hc`, the
-`internal/server` integration tests), compare the schema and the hello's
+`internal/agent`, `TestIntegrationTerminal` in `internal/hc`, the core's
+`backend/features/terminals/integration.test.ts`), compare the schema and the hello's
 features, and update the facts in features 21, 22 and 25 with the verified
 version.
 

@@ -34,7 +34,7 @@ titles, `l10n/bundle.l10n.<locale>.json` for `vscode.l10n.t` strings (the key
 is the English text).
 
 Server: never add prose to responses; add a code and translate it in the UI
-(and in the loading-page table in `internal/server/codeserver.go`).
+(and in the loading-page table in `backend/features/vscode/loading.ts`).
 
 Style for Simplified Chinese: concise UI wording, keep product and technical
 names (VS Code, pane, workspace, tab, agent) in English as the existing

@@ -6,15 +6,15 @@ Chinese (中文也可以). Participation is governed by the
 
 ## Setup
 
-Requirements: Go (see `go.mod`), Node.js 22.12+ and pnpm (and, on
-Windows, Git for Windows for its bash). The build downloads the pinned
-herdr-core, the terminal core the agents install on machines, into
-`dist/hc/` and embeds it.
+Requirements: Bun 1.4.5 (the core), Go (see `go.mod`; the machine
+builds), Node.js 22.12+ and pnpm (and, on Windows, Git for Windows for its
+bash). The build downloads the pinned herdr-core, the terminal core the
+agents install on machines, into `dist/payload/hc/` and embeds it.
 
 ```bash
-make deps            # pnpm install for web/, the extension, desktop/ (with Electron's binary) and e2e/
-make build           # web UI, extension, machine builds, core; release archives
-make test            # Go, web and desktop unit tests
+make deps            # pnpm install for web/, the extension, desktop/ (with Electron's binary), e2e/ and backend/
+make build           # web UI, extension, machine builds, core (Bun); release archives
+make test            # Go, core, web and desktop unit tests
 make check           # formatting, vet, typecheck, import cycles of the web UI, brand/doc consistency
 ```
 
@@ -27,9 +27,16 @@ make dev-core        # core on 127.0.0.1:7790: --instance dev --local-only
 make dev-web         # Vite on http://localhost:5173, proxied to the dev core (DEV_LISTEN)
 ```
 
+`make dev-core` builds this host's machine build into `dist/agents/` and
+runs the core from its sources (`bun backend/hosts/bun/main.ts`), which
+reads herdr-core and the other payloads from `dist/payload/` (staged by
+`make build`; `go run ./scripts/fetch-hc -out dist/payload/hc <os>/<arch>`
+fetches herdr-core alone).
+
 `make it` runs the integration tests against a real herdr-core in the
 isolated sessions `veldr-it` and `veldr-it-<host id>` (the
-agent's) with temporary state:
+agent's), and the core's terminals test on the instance `ts-term`, with
+temporary state:
 `HC_TEST_BIN=<path to herdr-core> make it` (without it, `hc` on `PATH`;
 without either the tests are skipped).
 `go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned,
@@ -94,15 +101,17 @@ workspaces can live in the ignored `.worktrees/` directory.
   cross-compiled release archives and Windows core, and a `desktop` job on
   Linux, macOS and Windows: the Go tests (on macOS and Windows), the web
   and desktop tests and the packaged Electron app
-  (`scripts/desktop.sh app`). POSIX-only Go tests skip on Windows.
-- New Go dependencies: run `scripts/notices.sh` and commit
-  `THIRD_PARTY_NOTICES.md` (checked by CI); make sure the license is
-  compatible with MIT.
-- Add or update tests with behavior changes. Go tests live next to the code;
+  (`scripts/desktop.sh app`), and the core's tests on macOS. POSIX-only
+  Go tests skip on Windows.
+- New Go dependencies of the machine build or npm packages of the core:
+  run `scripts/notices.sh` and commit `THIRD_PARTY_NOTICES.md` (checked by
+  CI); make sure the license is compatible with MIT.
+- Add or update tests with behavior changes. Go tests live next to the
+  code, the core's as `<name>.test.ts` beside its modules in `backend/`;
   web tests in `web/src/__tests__`, desktop tests in `desktop/src/*.test.ts`.
-  Vectors the web tests run, and Go's tests where the rule is in Go too
-  (keys, ssh targets), live in `spec/vectors/` (`make check` fails when
-  a vector file is run by no web test).
+  Vectors the web tests run, and the core's and Go's tests where the rule
+  is theirs too (keys, ssh targets, transcripts), live in `spec/vectors/`
+  (`make check` fails when a vector file is run by no web test).
 - Update the docs in the same PR: flags, endpoints and files in
   [docs/reference.md](docs/reference.md) (CI checks every flag and route is
   listed; `make tokens` regenerates its tables of settings and commands),
@@ -118,8 +127,9 @@ workspaces can live in the ignored `.worktrees/` directory.
 ## Conventions
 
 - **Names:** never hardcode the product name. Use `internal/brand` in Go,
-  `web/src/brand.ts` in the UI and `src/brand.ts` in the extension
-  (`scripts/check.sh` enforces this). Renames go through `scripts/rename.sh`.
+  `backend/shared/lib/brand.ts` in the core, `web/src/brand.ts` in the UI
+  and `src/brand.ts` in the extension (`scripts/check.sh` enforces this).
+  Renames go through `scripts/rename.sh`.
 - **Text:** user-visible strings go through i18n — `t('key')` with the key in
   `web/src/i18n/en.ts` and a translation in `zh-CN.ts` (a plugin's in its
   `web/src/plugins/<id>/i18n/`); extension strings in
@@ -130,10 +140,11 @@ workspaces can live in the ignored `.worktrees/` directory.
   `docs/` (English).
 - **Protocols:** core and agent always ship together; extend
   `internal/agentproto` by adding fields or ops, never by changing meanings.
-- **Security:** read [SECURITY.md](SECURITY.md) before touching
-  `internal/server` guards, the agent's file or socket handling, or anything
-  that downloads or executes.
-- **Formatting:** `gofmt`; Prettier for TypeScript (`pnpm -C web format`).
+- **Security:** read [SECURITY.md](SECURITY.md) before touching the
+  core's guards (`backend/kernel/http/guard.ts`), the agent's file or
+  socket handling, or anything that downloads or executes.
+- **Formatting:** `gofmt`; Prettier for TypeScript (`pnpm -C web format`,
+  `pnpm -C backend format`).
 
 ## Project layout
 

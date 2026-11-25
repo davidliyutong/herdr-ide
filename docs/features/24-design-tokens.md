@@ -7,7 +7,7 @@ neutral greys, one accent color for focus, selection and what asks for the
 user, color otherwise only for state, dense rows and toolbars of fixed
 heights, in a light and a dark theme with a color theme of the user's
 choice. The same values are needed in the chrome's CSS, in the terminals'
-default colors (settings of the core, in Go) and in the desktop window's
+default colors (settings of the core) and in the desktop window's
 background before the page paints. Copied into each place, they drift.
 
 ## Goals / non-goals
@@ -46,16 +46,18 @@ white stay); user-defined themes; the colors programs draw with in panes
   scale).
 
 **Generator: `scripts/tokens`** (Go, standard library). `make tokens`
-writes two checked-in files, so no build needs to run it:
+writes one checked-in file, so no build needs to run it:
 
 - `web/src/tokens.css`: `--ds-*` custom properties on `:root` (dark) and
   `:root[data-theme='light']`; each non-default color theme under
   `:root[data-accent='<id>']`, so light/dark and color theme combine.
   Sizes and font sizes are in `rem`, so the UI font size setting (the root
   font size) scales them.
-- `internal/uisettings/tokens.go`: the terminal palettes as defaults of
-  the `terminal.colors.*` settings, and the theme ids as the values of
-  `appearance.colorTheme`.
+
+The core reads `tokens.json` itself (`backend/kernel/config/ui/tokens.ts`,
+bundled into its executable): the terminal palettes as defaults of the
+`terminal.colors.*` settings, and the theme ids as the values of
+`appearance.colorTheme`.
 
 Output is deterministic. The generator rejects malformed tokens (wrong
 color form, missing theme value, wrong palette length, unknown fields)
@@ -93,8 +95,8 @@ its build bundles.
 
 | Alternative | Why not |
 | --- | --- |
-| Style Dictionary or another token toolchain | A Node dependency for two small outputs, one of them Go. |
-| Generating at build time | Vite and `go build` would each need a step first; checked-in files plus a staleness check keep builds unchanged. |
+| Style Dictionary or another token toolchain | A Node dependency for one small output; the core reads the JSON itself. |
+| Generating at build time | Vite would need a step first; a checked-in file plus a staleness check keeps builds unchanged. |
 | Reading `tokens.json` at run time | Colors would arrive after the first paint and CSS could not use them. |
 | Using `--ds-*` in every rule | Thousands of lines changed for no visible difference. |
 | A second theme switch (class or media query) | Two mechanisms can disagree; `data-theme` already follows the setting. |
@@ -116,10 +118,11 @@ its build bundles.
 
 ## Testing
 
-- `scripts/tokens/main_test.go`: parsing, generated CSS and Go,
-  determinism, rejected tokens, `-check`, and that the repository's files
-  are current.
-- `internal/uisettings`: the color theme setting offers the tokens' themes.
+- `scripts/tokens/main_test.go`: parsing, generated CSS, determinism,
+  rejected tokens, `-check`, and that the repository's file is current.
+- `backend/kernel/config/ui/ui.test.ts`: the color theme setting offers
+  the tokens' themes (`color themes`), the core's terminal defaults are
+  `tokens.css`'s (`tokens as tokens.css has them`).
 - `web/src/__tests__/tokens.test.ts`: terminal defaults equal the tokens,
   theme contrast, `data-accent`, size scaling; `termOptions.test.ts` and
   `fileIcons.test.ts` contrast.

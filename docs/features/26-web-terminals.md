@@ -249,5 +249,5 @@ size belongs to no client. See [SECURITY.md](../../SECURITY.md).
   vim, resizing, splits, find, copy, WebGL and Canvas 2D, and a
   200 000-line flood; Claude Code's size and scroll position kept across
   unmounting.
-- The core's side: `internal/server/term_test.go`
+- The core's side: `backend/features/terminals/terminals.test.ts`
   ([22](22-terminal-protocol.md)).

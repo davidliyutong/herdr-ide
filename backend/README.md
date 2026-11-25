@@ -2,11 +2,12 @@
 
 The core and the machine agent in TypeScript. Bun runs it on machines and
 as the command line, built into one executable; the desktop app runs the
-core inside Electron, whose runtime is Node. It replaces the Go program
-(`cmd/veldr`, `internal/`) in stages
-([42](../docs/features/42-typescript-backend.md)): it speaks the same wire
-protocols, so either side runs with the other's build meanwhile. It is not
-a translation of the Go packages: their layout is not kept.
+core inside Electron, whose runtime is Node. It replaces the Go program in
+stages ([42](../docs/features/42-typescript-backend.md)): the core is this
+one, and machines run the Go machine build (`cmd/veldr`, `internal/`)
+until the machine side here replaces it; both speak the same wire
+protocols. It is not a translation of the Go packages: their layout is not
+kept.
 
 ## Layers
 

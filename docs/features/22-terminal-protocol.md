@@ -20,13 +20,14 @@ Non-goals: emulating terminals in the core; a layout model in the core
 
 ## Design
 
-**Endpoint** (`internal/server/term_client.go`). `GET /api/v1/term` is a
-WebSocket behind the usual request guards. Text frames are JSON; binary
-frames are `[stream u32 LE][kind u8][payload]` with herdr-core's kinds (0
-data, 3 resize, 6 automatic input). The message table is in
+**Endpoint** (`backend/features/terminals/client.ts`, `messages.ts`).
+`GET /api/v1/term` is a WebSocket behind the usual request guards. Text
+frames are JSON; binary frames are `[stream u32 LE][kind u8][payload]`
+with herdr-core's kinds (0 data, 3 resize, 6 automatic input). The
+message table is in
 [architecture](../architecture.md#terminal-clients--core-protocol-apiv1term).
 
-**Backends** (`term_backend.go`). `sub {m}` subscribes to machine `m`; the
+**Backends** (`backend.ts`). `sub {m}` subscribes to machine `m`; the
 first subscriber starts the machine's backend:
 
 1. Ask the agent for the terminal core's status. Upload this build's
@@ -119,7 +120,7 @@ bytes.
   reason, or `disconnected`.
 
 **The last viewer's stream** (`joined`, `left`, `unpark` in
-`term_backend.go`; `termClient.release`). herdr-core sets a terminal's
+`backend.ts`; `release` in `client.ts`). herdr-core sets a terminal's
 size only through streams. If the last viewer detached, the terminal
 jumped to the headless size (200x120) and back at the next attach, so
 full-screen programs (Claude Code, Codex) laid out twice, lost their
@@ -250,18 +251,19 @@ history and makes every attach an observer. See the terminal clients row in
 
 ## Testing
 
-- `internal/server/term_test.go`, with a scripted core behind a real
-  agent: lifecycle, snapshots and events, allowed and refused calls with
-  audit entries, credit capping, display facts, detected agents,
-  read-only, and `TestTermKeepsTheLastViewer`; `term_hidden_test.go`
-  hidden and other machines' terminals (also before their label and after
-  a `missed`); `term_readlines_test.go` a read-only `terminal.read`;
-  `term_session_test.go` the agent session in records and events.
+- `backend/features/terminals/terminals.test.ts`, with a scripted core
+  behind a simulated agent (`testing.ts`): lifecycle, snapshots and
+  events, allowed and refused calls with audit entries, credit capping,
+  display facts, detected agents, read-only, and `the last viewer`;
+  `hidden.test.ts` hidden and other machines' terminals (also before their
+  label and after a `missed`); `units.test.ts` (`terminal.read`) a
+  read-only `terminal.read`; `sessions.test.ts` the agent session in
+  records and events.
 - `web/src/__tests__/term.test.ts`: the TypeScript client against a
   scripted socket and every layout vector; `terms.test.ts` the UI's model;
   `restore.test.ts` restoring after a core restart; `agentLeaves.test.ts`
   with `spec/vectors/layout/agent-leaves.json` a leaf's `session` and
   `before`.
-- `make it`: `TestIntegrationTerm`, `TestIntegrationDetect`,
-  `TestIntegrationTermShells`, `TestIntegrationTermHidden` against a real
-  herdr-core.
+- `make it`: `backend/features/terminals/integration.test.ts` (`a shell,
+  typed into and read, watched, killed`, `agent detection`, `shells`,
+  `hidden terminals`) against a real herdr-core.

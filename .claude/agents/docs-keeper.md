@@ -11,11 +11,11 @@ You keep this repository's documentation accurate. Edit only Markdown files
 Where things belong:
 - flags, shortcuts, environment variables, endpoints, files →
   `docs/reference.md` (single source; `scripts/check.sh` fails on
-  undocumented flags — get the list from `go run ./cmd/veldr serve -h`
-  and `fetch-assets -h` — and on routes of `internal/server/server.go`
-  missing there; the tables of settings and commands with their default
-  keys are generated between markers by `scripts/registry`, so run
-  `make tokens` instead of editing them);
+  undocumented flags and on routes of the core missing there — get the
+  list from `cd backend && bun scripts/reference.ts --list`; the tables
+  of settings and commands with their default keys are generated between
+  markers by `backend/kernel/config/registry.ts`, so run `make tokens`
+  instead of editing them);
 - components and protocols → `docs/architecture.md`;
 - operations (proxies, air-gap, resources, services) → `docs/deployment.md`;
 - reasoning per feature → `docs/features/NN-*.md` (sections: Context,

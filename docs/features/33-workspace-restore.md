@@ -115,7 +115,7 @@ typing.
 
 | Option | Why not |
 | --- | --- |
-| Restoring in the core (Go) | The layout document belongs to the clients ([22](22-terminal-protocol.md)); the core passes it on unread. |
+| Restoring in the core | The layout document belongs to the clients ([22](22-terminal-protocol.md)); the core passes it on unread. |
 | Storing the command in the leaf | Any writing client writes the document; a command taken from it would be typed into another page's shell. |
 | Starting the agent as the terminal's program | The pane would close when the agent exits; typed into a shell, it behaves as if the user started it. |
 | Only the directory's latest conversation | Two agents of one kind in one directory continued the same conversation. |

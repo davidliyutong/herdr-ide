@@ -84,8 +84,8 @@ line carries the last session found as `session` and `session_source`. A
 guess (the directory's newest transcript) is never taken while another
 terminal runs the same kind of agent in that directory.
 
-**In the core** (`internal/server/term_events.go`). The backend merges the
-agents into records as `agent` and `agent_status` and sends `agent`
+**In the core** (`backend/features/terminals/agents.ts`). The backend
+merges the agents into records as `agent` and `agent_status` and sends `agent`
 events; `/ws` clients get `agent {m, data, sound}`
 ([07](07-agent-native-workflow.md)). A client's `focus` on the terminal
 marks `done` seen (`idle`). The core accepts a session only as a
@@ -157,11 +157,13 @@ leaves the machine through this path. See [SECURITY.md](../../SECURITY.md).
   (`TestDetectSkipsHelperTerminals`), the resolution schedule, process
   changes, peers, no session files read without the header, many
   terminals at once.
-- `internal/server/term_test.go`: `TestTermAgents`,
-  `TestTermSeenTurnOutlivesTheCore`; `term_session_test.go`: sessions in
-  records and events, the header following the plugin, a session ending
-  (`TestTermAgentSessionEnds`), no double notification after a switch
-  (`TestTermRedetected`, `TestTermSwitchNotifiesOnce`).
-- `TestIntegrationDetect` (`make it`): a fake `claude` in a real
-  herdr-core followed through to `/api/v1/term` and `/ws`.
+- `backend/features/terminals/terminals.test.ts`: `agents` (`records,
+  events and /ws`, `a seen turn outlives the core`); `sessions.test.ts`:
+  sessions in records and events (`agent sessions`), the header following
+  the plugin (`sessions from the machine`), a session ending (`a session
+  ends`), no double notification after a switch (`detected again after a
+  switch`, `a switch notifies once`).
+- `backend/features/terminals/integration.test.ts` (`agent detection`,
+  `make it`): a fake `claude` in a real herdr-core followed through to
+  `/api/v1/term` and `/ws`.
 - `web/src/__tests__/terms.test.ts`, `sound.test.ts`.

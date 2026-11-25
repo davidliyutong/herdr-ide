@@ -244,7 +244,8 @@ skipped. The history keeps the last 100 steps, in the page only.
 
 ### Keybindings
 
-(`internal/keybindings`, `web/src/keymap.ts`, `web/src/commands.ts`;
+(`backend/kernel/config/keybindings`, `web/src/keymap.ts`,
+`web/src/commands.ts`;
 settings in [13](13-settings-and-appearance.md); the full table in
 [reference](../reference.md#keyboard-shortcuts))
 
@@ -384,8 +385,8 @@ settings in [13](13-settings-and-appearance.md); the full table in
 
 ## Testing
 
-- `internal/keybindings/keybindings_test.go`: key syntax, per-platform
-  defaults, user rules and problems, renamed commands, conflicts, reload.
+- `backend/kernel/config/keybindings/keybindings.test.ts`: key syntax,
+  per-platform defaults, user rules and problems, conflicts, reload.
 - `spec/vectors/layout` (run by `web/src/__tests__/term.test.ts`):
   layout operations, VS Code and preview panes, version 1 and malformed
   documents, workspace names; `pinned.json` and `tabs-block.json` for

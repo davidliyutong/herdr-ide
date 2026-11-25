@@ -35,7 +35,7 @@ the trash.
 
 Plugin `files`, on by default: a right-sidebar panel (**Show Explorer**,
 `view.panel.files`) and the pane kind `editor`. Code:
-`web/src/plugins/files`, `internal/plugins/files` (core),
+`web/src/plugins/files`, `backend/features/files` (core),
 `internal/agent/plugin/files` (machine). Settings (`files.showHidden`,
 `files.exclude`, `files.sortOrder`, `files.followFocus`,
 `files.confirmTrash`) are listed in [reference.md](../reference.md).
@@ -318,10 +318,11 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
   case, dead mounts), `save_test.go` (in-place saves keeping inode, links
   and mode; FIFOs refused; links swapped in; `partial_write`;
   `PruneStaged`), `upload_test.go`, `remove_test.go`, `reveal_test.go`.
-- `internal/plugins/files/`: routes, audit records, settings,
-  `TestRevealGate`; `internal/server` `TestMutatingRoutesAreGuarded`,
-  `list_test.go` (large listings), `download_test.go`;
-  `internal/agent/serve_test.go` `TestServeWaitsForRequestsToClean`.
+- `backend/features/files/`: `explorer.test.ts` (routes, audit records,
+  `reveal gate`, `the routes that change things are guarded`),
+  `settings.test.ts`, `transfers.test.ts` (`list`: large listings;
+  downloads); `internal/agent/serve_test.go`
+  `TestServeWaitsForRequestsToClean`.
 - `web/src/__tests__/`: `files.test.ts` (rows, keys, menus, polling,
   settings, decorations), `filesUpload.test.ts`, `filesEditor.test.ts`
   (versions, conflicts, line endings, reloads), `filesGone.test.ts`,

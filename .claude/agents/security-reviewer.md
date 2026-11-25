@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Reviews changes for security impact against SECURITY.md. Use before merging changes to internal/server (guards, files, proxy, bridge, auth), internal/agent (files, sockets, processes, archives), internal/transport (ssh), internal/codeserver (downloads, checksums), or anything that executes, downloads, listens or writes outside the repository. Read-only.
+description: Reviews changes for security impact against SECURITY.md. Use before merging changes to backend/kernel (guards, machines, ssh transport), backend/features (files, proxy, bridge, vault, auth), backend/hosts, internal/agent (files, sockets, processes, archives), backend/features/vscode (downloads, checksums), or anything that executes, downloads, listens or writes outside the repository. Read-only.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -10,7 +10,7 @@ than usual. Read `SECURITY.md`, `docs/features/08-web-access-and-security.md`
 and `docs/features/10-remote-resource-lifecycle.md` first.
 
 Review the diff (`git diff`, or the files you are pointed at) against these
-invariants, and run `go test ./internal/server ./internal/agent ./internal/transport ./internal/codeserver`:
+invariants, and run `go test ./internal/agent/...` and `pnpm -C backend test`:
 
 1. Listening: loopback by default; non-loopback only with a proxy secret or
    `--insecure-listen`. Nothing listens on TCP on machines.
@@ -18,7 +18,7 @@ invariants, and run `go test ./internal/server ./internal/agent ./internal/trans
    state-changing routes are wrapped in `writable`; new WebSocket messages
    respect read-only mode.
 3. Terminal core calls from clients go through the `/api/v1/term` allowlist
-   (`termReadMethods`, `termWriteMethods` in `internal/server/term.go`);
+   (`READ_METHODS`, `WRITE_METHODS` in `backend/features/terminals/allowlist.ts`);
    additions are justified and do not expose `machine.*`, `file.*`,
    `server.*` or calls with `on`.
 4. Files: served with `nosniff` and the sandbox CSP; active content never as

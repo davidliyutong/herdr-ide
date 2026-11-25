@@ -32,7 +32,7 @@ VS Code leaves.
 ### A plugin with a switch per kind of client
 
 VS Code is the plugin `vscode` ([27](27-plugins.md); `web/src/plugins/vscode`,
-`internal/plugins/vscode`). Its windows are served on the UI's own origin,
+`backend/features/vscode`). Its windows are served on the UI's own origin,
 so any script in them (an extension, a webview) can do what the page can:
 type into every machine's terminals, read and change files, use the
 unlocked vault. VS Code is therefore off by default, with one switch per
@@ -69,7 +69,8 @@ that raced the switch outlives it.
 
 ### Provisioning
 
-`internal/codeserver`, agent `codeserver.go`. The `codeServer.install`
+`backend/features/vscode/provision.ts` and `artifacts.ts`, agent
+`codeserver.go`. The `codeServer.install`
 setting (global, per machine, or `--code-server-install`) picks how a
 machine gets code-server:
 
@@ -97,11 +98,12 @@ itself after an hour unused (`--idle-timeout-seconds`).
 
 ### Proxy
 
-`internal/server/codeserver.go`. `/m/<machine>/code/…` is reverse-proxied,
-WebSockets included, to the agent's `cs.sock` through a yamux stream; the
-prefix is stripped and the Host header kept (code-server compares Origin
-with Host). While code-server is being prepared, the pane shows a page that
-polls `/api/m/<machine>/code/status` and shows the phase or the error.
+`backend/features/vscode/proxy.ts`, `relay.ts`. `/m/<machine>/code/…` is
+reverse-proxied, WebSockets included, to the agent's `cs.sock` through a
+yamux stream; the prefix is stripped and the Host header kept
+(code-server compares Origin with Host). While code-server is being
+prepared, the pane shows a page (`loading.ts`) that polls
+`/api/m/<machine>/code/status` and shows the phase or the error.
 
 ### VS Code panes
 
@@ -175,7 +177,7 @@ core share them.
 
 ### Bridge
 
-`extensions/veldr-bridge`, `internal/server/bridge.go`.
+`extensions/veldr-bridge`, `backend/features/vscode/bridge.ts`.
 
 The extension runs in code-server's extension host on the machine and
 connects to `$VELDR_BRIDGE_SOCKET`, which the agent tunnels to the core.
@@ -275,24 +277,25 @@ every deployment.
 
 ## Testing
 
-- Switches: `internal/server/plugins_test.go`
-  (`TestCodeRoutesFollowTheirClientsSwitch`, `TestVSCodeOffEndsItsWork`,
-  `TestVSCodeWorkTakenOnlyWhileOn`, `TestVSCodeSettingOfEarlierVersions`),
-  `internal/server/client_test.go` (client detection, cookie and header
-  filtering, bridge messages per switch), `web/src/__tests__/vscodeRisk.test.ts`,
+- Switches: `backend/features/vscode/core.test.ts` (`routes follow their
+  client's switch`, `a switch turned off ends its work`, `preparations end
+  with the last switch`), `backend/kernel/core.test.ts` (`browserRisk`,
+  `enabledFor`: `plugins.vscode.enabled` is the desktop app's switch only),
+  `backend/features/vscode/proxy.test.ts` (the desktop app's cookie, header
+  filtering), `bridge.test.ts` (bridge messages per switch),
+  `web/src/__tests__/vscodeRisk.test.ts`,
   `web/src/__tests__/vscodeWorkers.test.ts`.
-- Provisioning: `internal/codeserver/artifacts_test.go`,
-  `internal/codeserver/manager_test.go`, `internal/agent/codeserver_test.go`
+- Provisioning: `backend/features/vscode/artifacts.test.ts`,
+  `provision.test.ts`, `internal/agent/codeserver_test.go`
   (existing binary, verified downloads, start flags, replacing a broken
   listener).
 - Bridge socket ownership between agents: `internal/agent/vault_test.go`
   (`TestSocketsFollowTheNewestAgent`).
 - Bridge routing, idle tracking, theme, refused port proxy, Send to Agent,
-  close/leave and downloads: `internal/server/server_test.go`
-  (`TestBridgePick`, `TestBridgeTargets`, `TestCodeServerIdleTracking`,
-  `TestBridgeTheme`, `TestCodeServerPortProxyRefused`,
-  `TestBridgeSendToAgent`), `internal/server/download_test.go`
-  (`TestBridgeDownload`, `TestBridgeClose`).
+  close/leave and downloads: `backend/features/vscode/bridge.test.ts`
+  (`pick`, `targets`, `theme`, `send to agent, focus`, `close, leave,
+  download`), `proxy.test.ts` (`idle tracking`, `the port proxy is
+  refused`), `core.test.ts` (`idle code-servers are released`).
 - Layout: `spec/vectors/layout/views.json`.
 - UI: `web/src/__tests__/codePanes.test.ts` (entry points, reuse, windows'
   lifetime and placement, command targeting, Send to Agent),

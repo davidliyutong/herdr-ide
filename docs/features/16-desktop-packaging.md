@@ -2,7 +2,7 @@
 
 ## Context
 
-The browser UI and the Go core already contain the application's features.
+The browser UI and the core already contain the application's features.
 Desktop users also want an app they install with their system's installer
 and start from the Dock, the Start menu or the launcher, with a core of its
 own and no terminal to keep open. The Electron shell is the browser UI as
@@ -90,7 +90,8 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
 
 ### The owned core
 
-`desktop/src/core.ts`, `desktop/src/main.ts`, `cmd/veldr/parent*.go`.
+`desktop/src/core.ts`, `desktop/src/main.ts`,
+`backend/hosts/bun/parent.ts`, `serve.ts`.
 
 - The shell starts one child core with `--parent-stdio`. The core reads a
   hello (one JSON line) on stdin, writes a JSON readiness line on stdout,
@@ -358,8 +359,6 @@ See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
 
 ## Testing
 
-- `cmd/veldr/parent_test.go`: the hello, readiness, cancellation on
-  pipe EOF, surviving broken pipes.
 - `desktop/src/*.test.ts` (fake Electron and Node children, no network):
   `platform`, `core` (token, cookie, stop by closing stdin, kill after
   deadline, spawn and readiness failures), `folders`, `follow`, `menu`
@@ -369,11 +368,12 @@ See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
   `verify`, `windowsHello`, `enclave`, `relay`, `unlockStore`, `keychain`.
 - `web/src/__tests__/`: `quitGuard`, `desktop` (menu commands),
   `zoom`, `drop` (dropped and opened folders), `fullDiskAccess`.
-- `internal/agent/privacy_test.go`, `privacy_op_test.go` and the server
-  tests: the probes, the op and the endpoint; `TestIntegrationHC` runs the
-  probe through a real herdr-core.
-- CI's `desktop` job runs the Go, web and desktop tests and
-  `scripts/desktop.sh app` on Ubuntu, macOS and Windows.
+- `internal/agent/privacy_test.go`, `privacy_op_test.go` and
+  `backend/features/terminals/terminals.test.ts` (`the terminal core’s
+  lifecycle from the UI`): the probes, the op and the endpoint;
+  `TestIntegrationHC` runs the probe through a real herdr-core.
+- CI's `desktop` job runs the Go, web and desktop tests (the core's on
+  macOS) and `scripts/desktop.sh app` on Ubuntu, macOS and Windows.
 - Packaged smoke tests launch the executable with `VELDR_DESKTOP_DEV`
   and their own `--user-data-dir`; the macOS app and the linux-arm64 deb
   (in a Debian 13 container under Xvfb) were run this way.

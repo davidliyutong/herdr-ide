@@ -71,11 +71,11 @@ three actions of the agent's `plugin` op:
   `STOP`, `CONT`) with `syscall.Kill`, refusing `pid <= 1` and the agent's
   own pid.
 
-### Core side (`internal/plugins/monitor`)
+### Core side (`backend/features/monitor`)
 
 Routes below `/api/m/{id}/p/monitor/`: `GET metrics`, `GET processes`,
 `POST signal` (mutating, audited with `pid` and `signal`). Settings
-(`settings.go`): `monitor.refreshSeconds` (2, 1–30), `monitor.statusBar`,
+(`settings.ts`): `monitor.refreshSeconds` (2, 1–30), `monitor.statusBar`,
 `monitor.confirmKill`. Command: `view.panel.monitor`.
 
 ### Web UI (`web/src/plugins/monitor`)
@@ -130,8 +130,8 @@ and process reads never go through a shell (commands are run directly). See [SEC
   trees in a temporary directory (labels, thresholds, duplicate chips,
   stopped fans, error values, the fallback, the bound), the 1 s budget
   against a hung scan, the macOS battery's `ioreg` output.
-- `internal/plugins/monitor/monitor_test.go`: routes, mutating/audit flags,
-  `invalid_pid`.
+- `backend/features/monitor/monitor.test.ts`: routes, mutating/audit flags,
+  `invalid_pid` (`signal params`).
 - `web/src/__tests__/monitor.test.ts`: formatting, tree building and
   sorting, temperature levels and the sensors section, search, the status item, the ⌘+hover overlay, Task Manager
   interactions.

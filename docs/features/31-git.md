@@ -36,7 +36,7 @@ management, blame, line history.
 **Plugin** `git`, on by default (`plugins.git.enabled`): a right-sidebar
 panel (**Show Source Control**, `view.panel.git`, Ctrl+Shift+G in the
 desktop app), the pane kinds `graph` and `diff`, and **Show Git Graph**
-(`git.graph`). Code: `web/src/plugins/git`, `internal/plugins/git` (core),
+(`git.graph`). Code: `web/src/plugins/git`, `backend/features/git` (core),
 `internal/agent/plugin/git` (machine).
 
 ### Machine side
@@ -236,7 +236,7 @@ does.
 
 ### Settings and colors
 
-Settings › Plugins › Git (`internal/plugins/git/settings.go`):
+Settings › Plugins › Git (`backend/features/git/settings.ts`):
 `git.mixedLineEndings`, `git.changesView`, `git.untrackedChanges`,
 `git.autoFetch`, `git.confirmSync`, `git.graphPageSize`. See
 [reference.md](../reference.md) for values.
@@ -323,9 +323,9 @@ terminal; the plugin adds a way to reach it from the browser:
   `auth_required`), timeouts, output limits and `busy` with a fake git,
   literal paths with hooks, reads with a monitor and textconv configured,
   ignored paths.
-- `internal/agent/plugins_git_test.go`, `internal/plugins/git/git_test.go`:
-  routes, audit records, settings; `TestMutatingRoutesAreGuarded`
-  (`internal/server`).
+- `backend/features/git/git.test.ts`: routes, audit records (`change
+  audit`), settings, the guards (`checkGuarded`), and that the machine
+  build has the same actions.
 - `spec/vectors/git/range-patches.json`: range patch vectors, run by
   `web/src/__tests__/gitPatch.test.ts` and applied with git by the Go test.
 - Web: `gitGraph.test.ts` (lanes, rows, pages), `gitPanel.test.ts`,
