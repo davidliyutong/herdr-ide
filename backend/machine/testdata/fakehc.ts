@@ -21,6 +21,9 @@ export class FakeCore {
   exec: unknown = { code: 0 };
   /** Overrides an answer: an error kind for a method. */
   fail = new Map<string, string>();
+  /** terminal.kill removes the terminal and answers not_found, as
+   * herdr-core does for one run with rm. */
+  killRemoves = false;
   private next = 1;
   private server?: Server;
 
@@ -90,7 +93,8 @@ export class FakeCore {
             break;
           }
           this.terminals.delete(t.address);
-          send({ result: {} });
+          if (this.killRemoves) err('not_found');
+          else send({ result: {} });
           break;
         }
         case 'machine.exec':

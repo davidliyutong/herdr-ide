@@ -170,7 +170,9 @@ async function killNamed(conn: Conn, name: string, argv: string[], kill: boolean
   try {
     await conn.call('terminal.kill', { terminal: rec.address }, { signal });
   } catch (e) {
-    throw new Error(`terminal core: kill ${rec.address}: ${(e as Error).message}`);
+    // A helper runs with rm: its record goes as soon as its program ended,
+    // which the kill's own answer may already find (not_found).
+    if (!(e instanceof HCError && e.kind === 'not_found')) throw new Error(`terminal core: kill ${rec.address}: ${(e as Error).message}`);
   }
   while (await liveTerminal(conn, name, signal)) {
     if (signal.aborted) throw new Error(`terminal core: ${name} did not end`);

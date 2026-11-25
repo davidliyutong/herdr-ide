@@ -68,7 +68,9 @@ test('the name is the lock: the helper holding it is success; a user terminal ho
   expect(helper.name).toBe(chatHostFallbackName(1));
   expect(core.terminals.get('u1')).toBeDefined();
 
-  // Kill finds the helper under its fallback name, never the user's.
+  // Kill finds the helper under its fallback name, never the user's; a
+  // helper's record removed by the kill itself is its end.
+  core.killRemoves = true;
   expect(await killHidden(CHAT_HOST_NAME, argv, false, o)).toBe(true);
   expect(await killHidden(CHAT_HOST_NAME, argv, true, o)).toBe(true);
   expect(core.terminals.has(helper.address)).toBe(false);

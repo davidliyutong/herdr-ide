@@ -118,5 +118,17 @@ cloud images do) and an ssh server.
 - `payloads/bun-probe`: whether the Bun runtime and the system calls the
   machine agent makes through `bun:ffi` work on the machine (peer
   credentials, flock, fcntl locks, SQLite locking, openat2, renameat2,
-  process groups, PTYs). `fetch-runtimes.sh` downloads the runtimes into
-  `rt/` (pinned digests) before a run.
+  process groups, PTYs). `fetch-runtimes.sh [DIR]` downloads the runtimes
+  into `rt/` (or `DIR`, pinned digests) before a run.
+- `payloads/machine-node`: the TypeScript machine side driven as a core
+  drives it over ssh (`node dial`, yamux on its standard input and output):
+  the node answers, the terminal core it installs and starts runs a
+  terminal, a file is written and read back, links are refused where they
+  must be (by the system calls and by the files feature), peer credentials
+  name the user, `node stop --terminal-core` ends it all. `build.sh` (on a
+  computer with the repository) bundles `machine.js` and `driver.js` and
+  fetches herdr-core and the runtimes; `build.sh --no-rt` leaves the
+  runtimes to `../bun-probe/fetch-runtimes.sh payloads/machine-node/rt` on
+  the KVM host (`RUNTIMES="bun-linux-x64-baseline
+  bun-linux-x64-musl-baseline"`). A machine the core would refuse (musl
+  without libstdc++ and libgcc, no SSE4.2) passes as refused.

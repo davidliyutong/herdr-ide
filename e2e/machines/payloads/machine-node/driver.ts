@@ -42,7 +42,10 @@ const step = async (what: string, f: () => Promise<void> | void) => {
 };
 
 const bundle = join(dir, 'machine.js');
-const machine = (args: string[]) => [process.execPath, ...RUNTIME_FLAGS, bundle, ...args];
+// MACHINE_EXE runs another machine build instead (the Go program, to tell
+// what the machine does from what the TypeScript side does).
+const machine = (args: string[]) =>
+  process.env.MACHINE_EXE ? [process.env.MACHINE_EXE, ...args] : [process.execPath, ...RUNTIME_FLAGS, bundle, ...args];
 
 // The node, through node dial, as ssh runs it.
 const [exe, ...args] = machine(['node', 'dial', '--instance', instance, '--client', 'matrix-driver']);
@@ -53,6 +56,7 @@ const m = machineOf(session);
 await step('hello', async () => {
   const rep = await session.request({ op: Op.Hello }, { timeoutMs: 60_000 });
   check(rep.ok && rep.info?.home === home && rep.info?.os === 'linux', `node answers: ${JSON.stringify(rep.info)}`);
+  console.log(`INFO the machine build: ${process.env.MACHINE_EXE ?? bundle}`);
 });
 
 await step('a terminal of its terminal core', async () => {
