@@ -159,6 +159,8 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+packageExtensionsChecksum: sha256-YoM8W/8BXc5gd2/ej7gBDg/b9jqOmg3Bqzib4RFuePY=
+
 importers:
 
   .:
@@ -206,6 +208,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.322
+        version: 0.3.322(zod@4.6.7)
       '@types/bun':
         specifier: 1.4.5
         version: 1.4.5
@@ -237,6 +242,19 @@ packages:
       zod: ^3.25.76 || ^4.0.0
     peerDependenciesMeta:
       '@modelcontextprotocol/server':
+        optional: true
+
+  '@anthropic-ai/claude-agent-sdk@0.3.322':
+    resolution: {integrity: sha512-r88ij7R3SPV2j3BtFuavgrbWZNE8SVVS42AOQ1KxlS+QnSwNNnUhmVXV3Es2dniZySBYX8ENebL43ffhiB0azw==}
+    engines: {node: '>=18.14.0'}
+    peerDependencies:
+      '@anthropic-ai/sdk': '>=0.93.0'
+      '@modelcontextprotocol/sdk': ^1.29.0
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      '@anthropic-ai/sdk':
+        optional: true
+      '@modelcontextprotocol/sdk':
         optional: true
 
   '@hexagon/base64@1.1.28':
@@ -640,6 +658,9 @@ packages:
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
+ignoredOptionalDependencies:
+  - '@anthropic-ai/claude-agent-sdk-*'
+
 snapshots:
 
   '@agentclientprotocol/sdk@2.6.0(@modelcontextprotocol/server@2.4.0)(zod@4.6.7)':
@@ -647,6 +668,10 @@ snapshots:
       zod: 4.6.7
     optionalDependencies:
       '@modelcontextprotocol/server': 2.4.0
+
+  '@anthropic-ai/claude-agent-sdk@0.3.322(zod@4.6.7)':
+    dependencies:
+      zod: 4.6.7
 
   '@hexagon/base64@1.1.28': {}
 
