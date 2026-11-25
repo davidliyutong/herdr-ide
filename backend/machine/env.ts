@@ -14,7 +14,7 @@ import { ENV_PREFIX } from '#shared/lib/brand.ts';
  * these agents through other variables of the same prefixes
  * (CLAUDE_CONFIG_DIR, ANTHROPIC_*, CODEX_HOME, OPENAI_*), which the programs
  * in the terminals need. */
-const AGENT_SESSION_VARS = new Set([
+export const AGENT_SESSION_VARS: ReadonlySet<string> = new Set([
   'CLAUDECODE',
   'CLAUDE_CODE_CHILD_SESSION',
   'CLAUDE_CODE_CHILD_NOTES_DIR',

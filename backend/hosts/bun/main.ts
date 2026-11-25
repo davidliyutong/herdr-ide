@@ -16,6 +16,7 @@ import { installLocal } from '#kernel/machines/transport/local.ts';
 import { fetchAssets } from '#features/vscode/fetchassets.ts';
 import { nodeCommand } from '#hosts/machine/cli.ts';
 import { mcpCommand } from '#hosts/machine/mcp.ts';
+import { chatHostCommand } from '#hosts/machine/chathost.ts';
 import { dropForeignRuntimeVars } from '#machine/self.ts';
 import { isMcpLink } from '#machine/vault.ts';
 import { openPayloads } from './payloads.ts';
@@ -40,6 +41,8 @@ async function main(argv: string[]): Promise<void> {
       return;
     case 'mcp':
       process.exit(await mcpCommand(process.argv0, argv));
+    case 'chat-host':
+      process.exit(await chatHostCommand(argv));
     case 'fetch-assets':
       process.exit(await fetchAssets(argv, { logger: stderrLogger(`${CORE_BIN}: `) }));
     case 'node': {

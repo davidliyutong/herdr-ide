@@ -1,9 +1,11 @@
-// The machine sides of the features this build serves. The features whose
-// machine side is not here yet (chat, gui) are refused as an unknown plugin
-// is (machine/agent.ts).
+// The machine sides of the features this build serves, and the chat host's
+// adapters. The features whose machine side is not here yet (gui) are
+// refused as an unknown plugin is (machine/agent.ts).
 import type { MachineSide } from '#machine/feature.ts';
 import { agentsMachine } from '#features/agents/machine.ts';
 import { browserMachine } from '#features/browser/machine.ts';
+import { chatMachine } from '#features/chat/machine.ts';
+import type { Adapters } from '#features/chat/machine/adapter.ts';
 import { filesMachine } from '#features/files/machine.ts';
 import { gitMachine } from '#features/git/machine.ts';
 import { historyMachine } from '#features/history/machine.ts';
@@ -23,5 +25,14 @@ export function machineFeatures(): MachineSide[] {
     agentsMachine(),
     usageMachine(),
     vscodeMachine(),
+    chatMachine(),
   ] as MachineSide[];
+}
+
+/** The chat host's adapters, by the names of the kinds' chat specs
+ * (#shared/agents/kinds.ts ADAPTERS). Claude Code's and Codex's are not
+ * ported yet: the host refuses a chat of those kinds as one of a kind
+ * without a chat (unsupported, "this host has no adapter …"). */
+export function chatAdapters(): Adapters {
+  return {};
 }
