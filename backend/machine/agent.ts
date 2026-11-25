@@ -4,6 +4,7 @@
 // (node.ts) runs one agent and hands it every client that connects.
 import { hostname, userInfo } from 'node:os';
 import { posix } from 'node:path';
+import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Dirs } from '#shared/host/hostdirs.ts';
 import { Fail } from '#shared/lib/fail.ts';
@@ -99,6 +100,8 @@ export interface AgentOptions {
   socketWatchMs?: number;
   /** The file system calls of the fs ops (tests replace them). */
   fs?: Partial<FsCalls>;
+  /** Reads a connection's peer credentials (tests give another). */
+  peerCred?: (c: Socket) => { pid: number; uid: number };
 }
 
 export class Agent {
@@ -133,7 +136,7 @@ export class Agent {
         extra: [...this.features.values()].flatMap((f) => (f.served.housekeep ? [f.served.housekeep.bind(f.served)] : [])),
       }),
     );
-    this.spawn(serveVault(this, { signal, everyMs: o.socketWatchMs }));
+    this.spawn(serveVault(this, { signal, everyMs: o.socketWatchMs, peerCred: o.peerCred }));
   }
 
   private spawn(p: Promise<unknown>): void {

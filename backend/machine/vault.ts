@@ -46,7 +46,10 @@ export function processChain(pid: number): VaultProcess[] {
 
 /** Serves vault.sock until signal ends; the newest agent of the instance
  * serves it (sockets.ts). */
-export function serveVault(agent: Agent, o: { signal: AbortSignal; everyMs?: number }): Promise<void> {
+export function serveVault(
+  agent: Agent,
+  o: { signal: AbortSignal; everyMs?: number; peerCred?: (c: Socket) => { pid: number; uid: number } },
+): Promise<void> {
   let active = 0;
   const waiting: Array<() => void> = [];
   const slot = async () => {
@@ -68,7 +71,7 @@ export function serveVault(agent: Agent, o: { signal: AbortSignal; everyMs?: num
       c.on('error', () => {});
       let cred: { pid: number; uid: number };
       try {
-        cred = peerCred(socketFd(c));
+        cred = (o.peerCred ?? ((s: Socket) => peerCred(socketFd(s))))(c);
       } catch (e) {
         agent.logger(`vault: refused a connection (${(e as Error).message})`);
         c.destroy();

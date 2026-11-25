@@ -227,17 +227,38 @@ build (`~/.<slug>/agent/<version>/machine.js`, the version of the bundle
 and the runtime); a launcher script beside it (`<slug>`) runs one with the
 other without reading a `.env` file or `bunfig.toml` of the working
 directory and without installing anything (`--no-env-file --no-install
---config=/dev/null`, `BUN_OPTIONS` and `BUN_INSPECT*` unset), so command
-lines (`node dial`, `node stop`) stay as they are. An ssh upload
-decompresses each file beside its place, the machine computes its SHA-256
-(`sha256sum`, `shasum` or `openssl`) and the core checks it before the file
-is renamed into place; the local install checks them in process. The core
+--config=/dev/null`, `BUN_OPTIONS` and `BUN_INSPECT*` unset,
+`BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`), so command lines (`node dial`,
+`node stop`) stay as they are. An ssh upload decompresses each file beside
+its place; the script computes its SHA-256 on the machine (`sha256sum`,
+`shasum` or `openssl`), renames the file into place only when it is the
+one the core sent, else removes it and fails, and prints it, which the core
+checks again once the script ran; an upload the connection drops removes
+its file (`trap`), and the nodes' housekeeping what a killed shell left,
+after an hour. The local install checks the files in process. The core
 embeds the runtimes of linux x64 (baseline), linux arm64, darwin x64 and
 darwin arm64; the musl runtimes are fetched by the core when a machine
-needs one and the build carries none, checked against pinned digests and
-cached on the core's host (they need `libstdc++` and `libgcc`, which the
-probe reports when missing). Runtimes unused for 14 days are removed, as
-builds are: the nodes touch the directories of theirs.
+needs one and the build carries none, cached on the core's host (they need
+`libstdc++` and `libgcc`, which the probe reports when missing). Both the
+archives and the executables in them are pinned by SHA-256: a build embeds
+only the pinned executables, and a core uses a runtime of its payloads or
+its cache only when it is one. Which C library a machine has is what glibc
+answers (`getconf GNU_LIBC_VERSION`, `ldd --version`), musl's loader in
+`/lib` only without it (a glibc system with musl's package has one); in
+the node, the C library it calls is the one its process has mapped.
+Runtimes unused for 14 days are removed, as builds are: the nodes touch
+the directories of theirs.
+
+The node serves every core on one thread: what a user or a mount controls
+is not waited for on it. The core's file ops, git's reads of a repository,
+the node's check of its bundle and housekeeping are asynchronous (a call
+that does not return holds a thread of the runtime's pool and its own
+request), and a file is opened to be read with `O_NONBLOCK` and read only
+when it is a regular file, so a FIFO swapped in waits for no writer. The
+files feature's changes and saves go through `bun:ffi`, which is
+synchronous: each opens without blocking on a FIFO, but a change on a
+mount that stopped answering stalls the node until it answers; and the
+node needs its data directory (its log, the terminal history's database).
 
 Which machine build a core deploys is a choice of its build
 (`backend/scripts/build.ts --machine go|ts`, `scripts/runtimes.ts` fetching

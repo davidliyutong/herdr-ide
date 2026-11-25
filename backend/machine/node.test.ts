@@ -148,3 +148,32 @@ test('a build is newer by its version when both are known, else by when it was w
   expect(newer(dev1, dev2)).toBe(false);
   expect(newer(a, a)).toBe(false);
 });
+
+describe('peers', () => {
+  test('a connection whose peer is another user, or whose credentials cannot be read, is refused before anything is read', () =>
+    withHome(async () => {
+      for (const peerCred of [
+        () => ({ pid: 1234, uid: process.getuid!() + 1 }),
+        () => {
+          throw new Error('getsockopt failed');
+        },
+      ]) {
+        const logs: string[] = [];
+        const ac = new AbortController();
+        const done = runNode({
+          instance: '',
+          logger: (l) => logs.push(l),
+          features: [],
+          timing: FAST,
+          me: build('aaaa', 1),
+          signal: ac.signal,
+          peerCred,
+        });
+        await until(() => existsSync(sock()), 'the node to listen');
+        await expect(dialNodeSocket(sock(), { op: NodeOp.Serve }, 2000)).rejects.toThrow();
+        expect(logs.some((l) => l.startsWith('refused a connection'))).toBe(true);
+        ac.abort();
+        await done;
+      }
+    }));
+});

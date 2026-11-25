@@ -47,8 +47,34 @@ const common = {
 
 const linuxOnly = {
   __errno_location: { args: [], returns: FFIType.ptr },
-  syscall: { args: [FFIType.i64, FFIType.i64, FFIType.i64, FFIType.i64, FFIType.i64, FFIType.i64], returns: FFIType.i64 },
 } as const;
+
+/** syscall(2) for each call it makes, typed: pointers as FFIType.ptr (the
+ * call holds the buffer it is given), integers as i64 (the registers of a
+ * long), the result as i64_fast (a number: nothing is allocated, so
+ * nothing runs between a failing call and errno's read). */
+const SYSCALLS = {
+  /** openat2(dirfd, path, how, size) */
+  openat2: [FFIType.i64, FFIType.i64, FFIType.ptr, FFIType.ptr, FFIType.i64],
+  /** openat(dirfd, path, flags, mode) */
+  openat: [FFIType.i64, FFIType.i64, FFIType.ptr, FFIType.i64, FFIType.i64],
+  /** renameat2(olddirfd, old, newdirfd, new, flags) */
+  renameat2: [FFIType.i64, FFIType.i64, FFIType.ptr, FFIType.i64, FFIType.ptr, FFIType.i64],
+} as const;
+
+type Syscalls = { [K in keyof typeof SYSCALLS]: (...args: unknown[]) => number };
+let syscalls: Syscalls | undefined;
+
+/** The typed syscall(2) bindings (Linux). */
+export function sys(): Syscalls {
+  if (!syscalls) {
+    const path = libcPath();
+    const bind = (args: readonly FFIType[]) =>
+      dlopen(path, { syscall: { args: [...args], returns: FFIType.i64_fast } }).symbols.syscall as unknown as (...a: unknown[]) => number;
+    syscalls = { openat2: bind(SYSCALLS.openat2), openat: bind(SYSCALLS.openat), renameat2: bind(SYSCALLS.renameat2) };
+  }
+  return syscalls;
+}
 
 const darwinOnly = {
   __error: { args: [], returns: FFIType.ptr },
@@ -71,7 +97,9 @@ export function libc(): Lib {
   return lib;
 }
 
-/** The calling thread's errno, read right after the call that failed. */
+/** The calling thread's errno, read right after the call that failed: the
+ * failing calls return numbers (i32, i64_fast), so no allocation, and so
+ * no collection or other libc call, comes between. */
 export function errno(): number {
   const l = libc();
   const p = linux ? l.__errno_location() : l.__error();

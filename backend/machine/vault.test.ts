@@ -113,6 +113,25 @@ describe('the vault socket', () => {
     await until(() => inode(sockOf(r!)) !== null && inode(sockOf(r!)) !== taken, 'the first agent to serve it again');
   });
 
+  test('a connection whose peer is another user, or whose credentials cannot be read, is refused', async () => {
+    for (const peerCred of [
+      () => ({ pid: 1234, uid: process.getuid!() + 1 }),
+      () => {
+        throw new Error('getsockopt failed');
+      },
+    ]) {
+      const logs: string[] = [];
+      r = await rig({ peerCred, logger: (l) => logs.push(l) });
+      const seen = core(r.session, () => ({ ok: true, values: { A: '1' } }));
+      await until(() => existsSync(sockOf(r!)), 'the vault socket');
+      await expect(ask(sockOf(r), { tool: 'get', names: ['A'] })).rejects.toThrow();
+      expect(seen.filter((h) => h.op === Op.Vault)).toEqual([]);
+      expect(logs.some((l) => l.startsWith('vault: refused a connection'))).toBe(true);
+      await r.close();
+      r = undefined;
+    }
+  });
+
   test('the chain stops at init', () => {
     const chain = processChain(process.pid);
     expect(chain[0].pid).toBe(process.pid);

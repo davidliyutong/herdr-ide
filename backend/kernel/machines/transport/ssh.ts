@@ -251,13 +251,18 @@ class LineLogger {
 /** The script that writes a file of a build from standard input
  * (gzip-compressed) into dir under name, after the machine computed its
  * SHA-256 and found the one expected; it prints what it computed. */
-function uploadScript(dir: string, name: string, digest: string): string {
+export function uploadScript(dir: string, name: string, digest: string): string {
   const sum = `s=$({ sha256sum "$t" 2>/dev/null || shasum -a 256 "$t" 2>/dev/null || openssl dgst -sha256 -r "$t"; } | cut -d' ' -f1)`;
   return (
-    `umask 077; d="${dir}"; t="$d/.upload.$$"; mkdir -p "$d" && gunzip -c > "$t" && ${sum} && echo "@sha256=$s" && ` +
-    `[ "$s" = "${digest}" ] && chmod 700 "$t" && mv -f "$t" "$d/${name}" || { echo "sha256 \${s:-unknown}, expected ${digest}" >&2; rm -f "$t"; exit 3; }`
+    `umask 077; d="${dir}"; t="$d/.upload.$$"; ${cleanup('"$t" "$d/.launcher.$$"')}; mkdir -p "$d" && gunzip -c > "$t" && ${sum} && echo "@sha256=$s" && ` +
+    `[ "$s" = "${digest}" ] && chmod 700 "$t" && mv -f "$t" "$d/${name}" || { rm -f "$t"; echo "sha256 \${s:-unknown}, expected ${digest}" >&2; exit 3; }`
   );
 }
+
+/** Removes files when the script ends, also when the connection went away
+ * (ssh's hangup, a write to a closed pipe); what is left anyway (a killed
+ * shell) the nodes' housekeeping removes after an hour. */
+const cleanup = (files: string) => `trap 'rm -f ${files}' EXIT; trap 'exit 1' HUP INT TERM PIPE`;
 
 /** Builds and runtimes used by other cores are kept until unused for 14
  * days (running nodes touch their directories). */
@@ -313,7 +318,7 @@ async function installGo(
   if (out.trim() !== 'present') {
     o.logger(`ssh ${o.target}: uploading agent ${b.version} (${platform.os}/${platform.arch}, ${b.bin.length} bytes)`);
     const script =
-      `umask 077; mkdir -p "${dir}" && cat > "${dir}/.upload.$$" && chmod 700 "${dir}/.upload.$$" && mv -f "${dir}/.upload.$$" "${remotePath}"` +
+      `umask 077; ${cleanup(`"${dir}/.upload.$$"`)}; mkdir -p "${dir}" && cat > "${dir}/.upload.$$" && chmod 700 "${dir}/.upload.$$" && mv -f "${dir}/.upload.$$" "${remotePath}"` +
       `; ${PRUNE}`;
     try {
       await run(o, script, { stdin: b.bin, timeoutMs: 5 * 60_000, signal });

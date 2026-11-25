@@ -3,8 +3,7 @@
 // replacing, removing relative to a directory, and taking a file's lock.
 import { closeSync, constants, lstatSync, openSync, readdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { ptr } from 'bun:ffi';
-import { E, SysError, cstr, darwin, errno, libc, linux } from './libc.ts';
+import { E, SysError, cstr, darwin, errno, libc, linux, sys } from './libc.ts';
 
 const AT_FDCWD = -100;
 /** unlinkat's flag for a directory. */
@@ -23,13 +22,11 @@ const NR =
       ? { openat: 56n, openat2: 437n, renameat2: 276n }
       : null;
 
-function sys(name: keyof NonNullable<typeof NR>, ...args: bigint[]): bigint {
+/** The system call's number on this architecture (ENOSYS without one). */
+function nr(name: keyof NonNullable<typeof NR>): bigint {
   if (!NR) throw new SysError(E('ENOSYS'), name);
-  while (args.length < 5) args.push(0n);
-  return libc().syscall(NR[name], args[0], args[1], args[2], args[3], args[4]) as bigint;
+  return NR[name];
 }
-
-const addr = (b: Buffer): bigint => BigInt(ptr(b));
 
 /** Whether openNoLinks refuses links in every directory of a path on this
  * machine; false once the system lacked the means (Linux before 5.6, a
@@ -61,8 +58,8 @@ export function openNoLinks(path: string, flags: number, mode = 0o666): number {
   how.writeBigUInt64LE(BigInt(RESOLVE_NO_SYMLINKS), 16);
   const p = cstr(path);
   for (;;) {
-    const fd = sys('openat2', BigInt(AT_FDCWD), addr(p), addr(how), 24n);
-    if (fd >= 0n) return Number(fd);
+    const fd = sys().openat2(nr('openat2'), AT_FDCWD, p, how, 24);
+    if (fd >= 0) return fd;
     const e = errno();
     if (e === E('EINTR')) continue;
     if (e === E('ENOSYS') || e === E('EPERM')) {
@@ -85,8 +82,8 @@ export function openDirAt(dir: number, dirPath: string, name: string): number {
   if (!linux) return openNoLinks(join(dirPath, name), flags);
   const p = cstr(name);
   for (;;) {
-    const fd = sys('openat', BigInt(dir), addr(p), BigInt(flags | O_CLOEXEC), 0n);
-    if (fd >= 0n) return Number(fd);
+    const fd = sys().openat(nr('openat'), dir, p, flags | O_CLOEXEC, 0);
+    if (fd >= 0) return fd;
     const e = errno();
     if (e !== E('EINTR')) throw new SysError(e, 'openat', join(dirPath, name));
   }
@@ -122,7 +119,7 @@ export function renameNoReplace(from: string, to: string): void {
   const b = cstr(to);
   let e: number;
   if (linux) {
-    if (sys('renameat2', BigInt(AT_FDCWD), addr(a), BigInt(AT_FDCWD), addr(b), 1n) === 0n) return;
+    if (sys().renameat2(nr('renameat2'), AT_FDCWD, a, AT_FDCWD, b, 1) === 0) return;
     e = errno();
     if (e !== E('EINVAL') && e !== E('ENOSYS') && e !== E('ENOTSUP') && e !== E('EOPNOTSUPP')) throw new SysError(e, 'rename', to);
   } else if (darwin) {

@@ -64,6 +64,8 @@ export interface NodeOptions {
   me?: NodeInfo;
   /** The file this build runs from; the node retires once it is gone. */
   build?: string;
+  /** Reads a connection's peer credentials (tests give another). */
+  peerCred?: (c: Socket) => { pid: number; uid: number };
 }
 
 /** Serves the instance's node until it has had no client for idleMs, a
@@ -154,7 +156,7 @@ export async function runNode(o: NodeOptions): Promise<void> {
     try {
       let uid = -1;
       try {
-        uid = peerCred(socketFd(c)).uid;
+        uid = (o.peerCred ?? ((s: Socket) => peerCred(socketFd(s))))(c).uid;
       } catch (e) {
         log(`refused a connection (${(e as Error).message})`);
         return;
@@ -213,7 +215,7 @@ export async function runNode(o: NodeOptions): Promise<void> {
     // node taking leave left for this one.
     ({ server, ino } = await listenUnix(sock, accept));
     log(`serving ${sock} (build ${me.build}, version ${me.version}, pid ${me.pid ?? process.pid})`);
-    agent = new Agent({ instance: o.instance, dirs, logger: log, features: o.features });
+    agent = new Agent({ instance: o.instance, dirs, logger: log, features: o.features, peerCred: o.peerCred });
     idleFrom();
     const build = o.build;
     // The check is asynchronous, and one that has not returned (a home that

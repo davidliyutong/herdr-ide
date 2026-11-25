@@ -9,6 +9,9 @@ test('the machine bundle carries the machine side only', async () => {
   // No module Bun would resolve at run time (a package left external).
   expect(js).not.toMatch(/\brequire\(["'](?!node:|bun:)[^"']+["']\)/);
   expect(js.length).toBeLessThan(8 << 20);
+  // Bun runs a file marked // @bun as it is: no transpiling, so nothing
+  // goes to its transpiler cache.
+  expect(js.startsWith('// @bun')).toBe(true);
 });
 
 test('what a bundle may not include', () => {

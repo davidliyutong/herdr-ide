@@ -45,12 +45,27 @@ export interface Rig {
 
 /** An agent for the default instance on a new home, with a session. */
 export async function rig(
-  o: { features?: MachineSide[]; logger?: Logger; client?: string; sshConn?: string; fs?: Partial<FsCalls> } = {},
+  o: {
+    features?: MachineSide[];
+    logger?: Logger;
+    client?: string;
+    sshConn?: string;
+    fs?: Partial<FsCalls>;
+    peerCred?: (c: import('node:net').Socket) => { pid: number; uid: number };
+  } = {},
 ): Promise<Rig> {
   const h = tempHome();
   const dirs = dirsOf(`${h.home}/${DATA_DIR_NAME}`);
   makeDirs(dirs);
-  const agent = new Agent({ instance: '', dirs, logger: o.logger ?? discard, features: o.features ?? [], socketWatchMs: 50, fs: o.fs });
+  const agent = new Agent({
+    instance: '',
+    dirs,
+    logger: o.logger ?? discard,
+    features: o.features ?? [],
+    socketWatchMs: 50,
+    fs: o.fs,
+    peerCred: o.peerCred,
+  });
   const sessions: Session[] = [];
   const connect = (client = o.client ?? 'core-1', sshConn = o.sshConn ?? '') => {
     const [a, b] = duplexPair();

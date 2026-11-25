@@ -75,6 +75,8 @@ export function launcher(b: TSBuild): string {
     'd=${0%/*}',
     // What would make the runtime run other code or take other flags.
     'unset BUN_OPTIONS BUN_INSPECT BUN_INSPECT_CONNECT_TO BUN_INSPECT_NOTIFY BUN_INSPECT_PRELOAD',
+    // A bundle is not transpiled again, so nothing is cached; nor ever.
+    'export BUN_RUNTIME_TRANSPILER_CACHE_PATH=0',
     `exec "$d/../../runtime/${runtimeDirName(b.runtime.digest)}/bun" ${RUNTIME_FLAGS.join(' ')} "$d/${BUNDLE_FILE}" "$@"`,
     '',
   ].join('\n');
