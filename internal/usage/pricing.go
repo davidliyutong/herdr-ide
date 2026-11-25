@@ -1,7 +1,6 @@
 package usage
 
 import (
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"veldr/spec/pricing"
 )
 
 // Tier is a price tier ($ per million tokens) for prompts shorter than
@@ -28,17 +29,18 @@ type ModelPrice struct {
 	Tiers  []Tier `json:"tiers"`
 }
 
-// PriceTable is pricing.json: the API prices the cost scanner applies,
-// ported from the user's ai-usage skill, and the hours of a week and of a
-// month for the weekly and monthly equivalents.
+// PriceTable is spec/pricing/pricing.json: the API prices the cost
+// scanner applies, ported from the user's ai-usage skill, and the hours of
+// a week and of a month for the weekly and monthly equivalents.
 type PriceTable struct {
 	WeekHours  float64                          `json:"weekHours"`
 	MonthHours float64                          `json:"monthHours"`
 	Providers  map[string]map[string]ModelPrice `json:"providers"`
 }
 
-//go:embed pricing.json
-var pricingJSON []byte
+// pricingJSON is the price table (spec/pricing, which the TypeScript side
+// reads too).
+var pricingJSON = pricing.JSON
 
 // Pricing is the embedded price table.
 var Pricing = func() PriceTable {

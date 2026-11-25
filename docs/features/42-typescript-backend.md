@@ -193,11 +193,30 @@ Linux and macOS:
   the desktop app's core runs: backend/README.md).
 
 It serves the machine sides of the terminals (the terminal core and hidden
-terminals), files, git, search, monitor, history and browser features.
-The ops and plugins of the features it does not serve yet (agents and
-detection, usage, chat, gui, vscode: `code-server`, `gui`, `detect`) are
-refused as an unknown plugin is (`unknown_plugin`); the core treats them
-as a machine without that feature.
+terminals), files, git, search, monitor, history, browser and AI usage
+features. The ops and plugins of the features it does not serve yet
+(agents and detection, chat, gui, vscode: `code-server`, `gui`, `detect`)
+are refused as an unknown plugin is (`unknown_plugin`); the core treats
+them as a machine without that feature. AI usage's `session` action finds
+a session's transcripts with the agents feature's locator, which the host
+gives it: until that feature is here, every session is `not_found`
+([29](29-ai-usage.md#one-sessions-usage)).
+
+AI usage on the machine side ([29](29-ai-usage.md)) keeps the Go agent's
+answers, files, lock protocol and cost cache (the same tables and
+entries, so a node of either build reads the other's), and is restructured
+rather than translated: the providers in `machine/limits.ts`, Kimi Code's
+renewal in `kimi.ts`, Antigravity in `antigravity.ts`, the scan and its
+cache in `scan.ts` and `cache.ts`, the logs' parsers in `parsers.ts`.
+Where the runtime has what the Go program wrote itself, it is used:
+SQLite (`node:sqlite`) reads OpenCode's and Antigravity's databases in
+place of the Go agent's reader of the file format, and `fetch` asks the
+providers through the environment's proxy. The price table is
+`spec/pricing/pricing.json`, which both builds and the core read. A cost
+scan runs on the node's thread in slices (chunks of a log read with
+`fs/promises`, a database 256 rows at a time, the summing yielding every
+8 ms) rather than in a Worker, which would need its own entrypoint in the
+compiled executable and its own copy of the cache.
 
 System calls Node lacks go through `bun:ffi` to libc (`machine/sys`): peer
 credentials of unix sockets (`SO_PEERCRED`; `LOCAL_PEERCRED`,

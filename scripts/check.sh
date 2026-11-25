@@ -29,7 +29,7 @@ slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
 module=$(sed -n 's/^module //p' go.mod)
 
 echo "==> gofmt / go vet"
-unformatted=$(gofmt -l cmd internal scripts e2e backend/shared/proto/testdata)
+unformatted=$(gofmt -l cmd internal scripts e2e spec backend/shared/proto/testdata)
 if [[ -n "$unformatted" ]]; then echo "gofmt needed:"; echo "$unformatted"; fail=1; fi
 go vet ./... || fail=1
 go vet -tags integration ./... || fail=1

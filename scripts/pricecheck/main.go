@@ -1,4 +1,4 @@
-// Compare the AI usage plugin's price table (internal/usage/pricing.json)
+// Compare the AI usage plugin's price table (spec/pricing/pricing.json)
 // with LiteLLM's public one, which follows the providers' price pages, for
 // a release (RELEASING.md): the table's models whose prices differ there,
 // and the models of the families the table prices that it does not know.
@@ -264,7 +264,7 @@ func main() {
 		fmt.Println("missing:", l)
 	}
 	if len(r.Differ)+len(r.Missing) > 0 {
-		fmt.Println("Check each against the provider's price page, then edit internal/usage/pricing.json.")
+		fmt.Println("Check each against the provider's price page, then edit spec/pricing/pricing.json.")
 		os.Exit(1)
 	}
 	fmt.Println("pricing.json agrees with LiteLLM's table.")

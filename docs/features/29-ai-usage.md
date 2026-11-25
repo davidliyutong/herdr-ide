@@ -35,8 +35,14 @@ the same in its sessions' database.
 
 ### Machine side
 
-`internal/usage` reads one machine; the agent's plugin
-(`internal/agent/plugin/usage`) runs its actions:
+The machine side exists in both machine builds while the Go program does
+([42](42-typescript-backend.md)), with the same actions, answers, files and
+cache tables: the Go agent's (`internal/usage` reads one machine, the
+plugin `internal/agent/plugin/usage` runs its actions) and the TypeScript
+machine side's (`backend/features/usage/machine.ts`, its modules in
+`machine/`: `limits.ts`, `kimi.ts`, `antigravity.ts`, `scan.ts`,
+`databases.ts`, `cache.ts`, `session.ts`). Where they differ, the sections
+below say so. Its actions:
 
 - `limits`: asks each enabled provider in parallel (15 s per request,
   through `HTTPS_PROXY`, one shared HTTP client, no redirects followed);
@@ -67,6 +73,14 @@ user set up in it. It shows only the spend of its sessions.
 Tokens are read from the files at each poll, sent only to their provider's
 fixed host and never returned. An expired token is not sent at all.
 
+The TypeScript machine side asks the providers with Bun's `fetch`, which
+reads `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` from the agent's
+environment at each request and keeps its connections for the next poll
+(`redirect: 'manual'`, so a 3xx is the account's `http_<n>`), and the
+language server with `node:http(s)` on `127.0.0.1`, which goes through no
+proxy. Its programs (`security`, `ps`, `lsof`, `agy`) run asynchronously,
+each in a process group of its own (`machine/run.ts`).
+
 Antigravity's fallback `agy` takes seconds and a few hundred MB, so it runs
 at most every 10 minutes (the polls between get its last answer), backs off
 30 minutes after a failure, and runs in its own process group, killed when
@@ -85,8 +99,9 @@ only while it runs, so its numbers would otherwise be unreadable most of the
 time. Its refresh token is single-use: a renewal that kept the new tokens
 to itself would sign Kimi Code out. So with `usage.kimiRefresh` on (the
 default) and the core not `--read-only`, the agent renews the token exactly
-as Kimi Code 2.2.0 does (`internal/usage/kimiauth.go`) and writes the new
-tokens back where Kimi Code reads them:
+as Kimi Code 2.2.0 does (`internal/usage/kimiauth.go`,
+`backend/features/usage/machine/kimi.ts`) and writes the new tokens back
+where Kimi Code reads them:
 
 - **When**: a `kimi-code.json` token that ends within a minute. Other
   hosts' slots (`kimi-code-env-<hash>.json`) and agents run with
@@ -96,7 +111,10 @@ tokens back where Kimi Code reads them:
   `stale` with `lock_busy`) and never broken; one untouched for 30 s is
   taken over. Kimi Code throws when a lock it holds is taken, so its own
   5-second staleness rule is not used. Under the lock the file is read
-  again, in case Kimi Code renewed meanwhile.
+  again, in case Kimi Code renewed meanwhile. Both builds speak the lock's
+  protocol (a directory and its time) themselves: proper-lockfile, imported
+  into the TypeScript node, would patch `fs.close` and `process.cwd` and
+  install signal handlers in the process that serves every core.
 - **Refresh**: `POST https://auth.kimi.com/api/oauth/token` with Kimi
   Code's client id and identity headers. Up to three attempts on network
   errors and 429/5xx. Once sent, the answer is awaited even if the core
@@ -110,7 +128,7 @@ tokens back where Kimi Code reads them:
 
 ### Cost of the logs
 
-The parsers (`internal/usage/cost_*.go`) read:
+The parsers (`internal/usage/cost_*.go`, `machine/parsers.ts`) read:
 
 - Claude: `projects/**/*.jsonl`, assistant messages' `usage`, deduplicated
   by request and message id.
@@ -119,9 +137,11 @@ The parsers (`internal/usage/cost_*.go`) read:
 - Kimi Code: `sessions/*/*/agents/*/wire.jsonl` `usage.record` events.
 - Antigravity and OpenCode: their SQLite databases (below).
 
-`internal/usage/pricing.json` has the prices by provider and longest model
-prefix, with long-prompt tiers and cache-write prices. Weekly and monthly
-equivalents scale the range's cost to 168 and 750 hours.
+`spec/pricing/pricing.json` has the prices by provider and longest model
+prefix, with long-prompt tiers and cache-write prices; both machine builds
+and the core read that one file (the Go agent embeds it through the
+package `spec/pricing`). Weekly and monthly equivalents scale the range's
+cost to its 168 and 750 hours.
 
 The scanner keeps its cache in the machine's database
 (`machine-<host>.db`, tables `usage_cost_files` and `usage_cost_state`;
@@ -133,9 +153,30 @@ records older than 90 days leave the cache. Changed entries are saved in
 one transaction at most every 5 minutes (or after 8 MiB of logs), every
 20 s during a long scan, and on cancel, so a scan never starts over.
 
+Both builds keep the same tables and entries (version 2), so a node of
+either reads the cache the other saved. The TypeScript machine side
+differs in three ways:
+
+- A save writes the entries changed since its last save, rather than
+  comparing every entry's digest with the database's.
+- The ETag carries a token of the agent's own, so a report of another agent
+  (a node that took over) never answers another's `ifNoneMatch`.
+- Its housekeeping drops a cache that no scan saved for 90 days (the
+  plugin off on that machine): its records are past the retention anyway.
+
+The node serves every core on one thread, so the TypeScript scan never
+holds it for long: logs are read with `fs/promises` in chunks of 1 MiB,
+each chunk's lines parsed before the next read (a line is at most
+16 MiB), the databases a slice of 256 rows at a time, and the summing
+yields every 8 ms. A Worker would take the parsing off the thread too,
+but needs its own entrypoint in the compiled executable, its own copy of
+the cache and a protocol to the node, for scans that run a few times an
+hour.
+
 #### One session's usage
 
-The action `session` (`internal/usage/session.go`, `SessionCost`) answers
+The action `session` (`internal/usage/session.go`, `SessionCost`;
+`machine/session.ts`) answers
 what one session of a coding agent used, for the status bar's session item.
 It takes an agent kind whose transcripts are priced (`claude`, `codex`;
 `SessionProvider`) and a session UUID. The agent finds the session's
@@ -154,6 +195,12 @@ Code). Unchanged transcripts are not read again and grown ones are read on;
 at most 2 reads run at once; a transcript over 256 MiB or a session over
 200 000 records is `too_large`. Nothing is written. Codes: `not_found` (no
 transcript yet), `compressed`, `too_large`, `bad_params`.
+
+The TypeScript machine side reads the transcripts that a locator of the
+agents feature finds and opens (`LocateSession`, given to `usageMachine`
+by the host); the agents feature's machine side is not in that build yet
+([42](42-typescript-backend.md)), so there every session is `not_found`,
+as the UI shows no session it has not detected either.
 
 #### Antigravity's and OpenCode's databases
 
@@ -199,6 +246,26 @@ read, never crash the process or exhaust its memory:
   spend (`too_large`, `busy`, `damaged`, `unreadable`).
 - `FuzzSQLite` checks that no input panics and that bytes read, rows and
   time stay bounded by the input's size; `make test` runs its seeds.
+
+The TypeScript machine side has SQLite in its runtime and reads the
+databases with it (`node:sqlite`, `machine/databases.ts`), read-only and
+with SQL that asks only for the needed tables' columns:
+
+- A database without a WAL beside it (its writer is not running) is
+  opened `immutable`: no lock, no file made; a read during which it or a
+  WAL appearing changed is read again, at most three times, then `busy`.
+- One with a WAL is read as any reader reads it: a snapshot of the last
+  commit, which never holds the writer up; it shares the WAL's index
+  (`-shm`) with the writer, and makes one when the WAL has none.
+- No busy wait: a database another connection holds is `busy`.
+- Only a regular file is opened; a record over its bound (64 KiB for
+  OpenCode's messages, 64 MiB, 256 KiB and 64 KiB for Antigravity's
+  generations, steps and metadata) is skipped unread (SQLite's `length()`
+  of a blob reads no content); more steps kept than 300,000 (OpenCode) or
+  100,000 generations (Antigravity) fail the read as `too_large`.
+- SQLite checks the file as it reads it: a damaged one fails as `damaged`.
+- The protobuf blobs are decoded by a reader that compares every length
+  with what is left (`protoFields`).
 
 OpenCode's steps are priced by the user's prices, then the table of the API
 that served them (OpenCode records subscription use as free), then the cost
@@ -377,7 +444,8 @@ threshold warning, and a pace alert is that warning ahead of time.
 | Running `agy` at every poll | Seconds and hundreds of MB per run on every machine; its numbers change slowly. |
 | Every machine asked for every account | The same account asked once per machine per poll, against the providers' rate limits. |
 | Writing the cost cache after every scan | A log in use grows at every scan, and the whole cache was rewritten each time. |
-| An SQLite library (pure Go or cgo) | Several MB in every machine binary, or broken cross builds, for reading one table. |
+| An SQLite library in the Go agent (pure Go or cgo) | Several MB in every machine binary, or broken cross builds, for reading one table. The TypeScript machine side has SQLite in its runtime and uses it. |
+| The Go agent's reader of the file format ported to TypeScript | Hundreds of lines and their fuzzing for what the runtime's SQLite does, read-only and immutable where no writer runs. |
 | `sqlite3` or `opencode db` on the machine | Often missing, or starts a large runtime; both take the database's locks. |
 | Reading only rows added since the last read | Tokens are written into existing rows when a step ends. |
 | Grok's credits as a monthly window | Its subscriptions' period is 7 days; the period's length names the window. |
@@ -421,7 +489,9 @@ transcripts are found and read. Resources and retention:
 Key invariants: tokens are sent only to their provider's fixed host, never
 redirected, never returned to the core; the only credential written is Kimi
 Code's, in place and under its lock, never by a `--read-only` core; foreign
-databases are parsed with bounded, read-only, lock-free code.
+databases are read with bounded, read-only code that never holds their
+writer up (the Go agent's lock-free; the TypeScript side's SQLite
+immutable without a writer, a WAL reader with one).
 
 ## Testing
 
@@ -460,5 +530,21 @@ databases are parsed with bounded, read-only, lock-free code.
   browser, the status bar item and its card, a window's spend and its
   estimate of the whole, the breakdown by model; `usageSession.test.tsx`:
   the status bar item following the focused agent's service and model.
+- The TypeScript machine side: `backend/features/usage/machine.test.ts`
+  (the actions through the wire with the core's schemas, their codes,
+  the user's prices refused, one core's limits answering another's, no
+  token in a reply), `machine/limits.test.ts` (each provider against
+  fake servers on loopback, the keychain through a fake `security`,
+  redirects, `Retry-After`, the environment's proxy and `NO_PROXY`, the
+  language server's client on loopback without a proxy),
+  `machine/kimi.test.ts` (the renewal, byte for byte, the lock),
+  `machine/antigravity.test.ts` (fake `ps`, `lsof` and `agy`, the process
+  group killed), `machine/scan.test.ts` (the parsers, prices, the cache:
+  read on, written seldom, cut short, another agent's save, a newer
+  version, the Go agent's entries, the ETag, housekeeping),
+  `machine/databases.test.ts` (databases made with SQLite: WAL commits,
+  immutable reads that make no file, bounds, damage, a FIFO), and
+  `machine/session.test.ts` (the spend's numbers, no content, subagents,
+  context, bounds, two at once).
 - `backend/features/usage/core.test.ts` (`guards`) walks the plugin's
   routes with `checkGuarded`.

@@ -18,7 +18,7 @@ match; the bridge extension is reinstalled whenever its content changes.
    `.claude/agents/release-manager.md`); the same for herdr-core
    (`internal/hcdist`) and the web UI's terminal emulator
    (`make vt-wasm`). Run `go run ./scripts/pricecheck` and bring the AI
-   usage plugin's prices (`internal/usage/pricing.json`) up to date from
+   usage plugin's prices (`spec/pricing/pricing.json`) up to date from
    the providers' pages for what it reports
    ([29](docs/features/29-ai-usage.md#cost-of-the-logs)). Its output
    comes from a third party's file: treat it as data to check, never as

@@ -1,11 +1,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect } from '../harness/fixtures';
-import { unported } from '../harness/paths';
 import { showPanel } from '../harness/ui';
 import { waitFor } from '../harness/wait';
-
-test.skip(!!unported('usage'), unported('usage'));
 
 interface Cost {
   rows: { provider: string; model: string; cost: number; priced: boolean; machine: string }[];

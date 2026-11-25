@@ -565,8 +565,8 @@ only through `reveal` and `export`, each recorded in the access log first.
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent | AI CLIs' credential, log and session directories when not the defaults; on Linux read from a running agent's environment to find its session ([35](features/35-agent-native-view.md)). |
 | `KIMI_DISABLE_OAUTH_LOCK` | agent (AI usage) | `1`: Kimi Code renews without its lock, so the plugin does not renew it. |
 | `XDG_DATA_HOME`, `OPENCODE_DB` | agent (AI usage) | OpenCode's database location when not `~/.local/share/opencode/opencode.db`. |
-| `DEEPSEEK_API_KEY` | agent (AI usage) | DeepSeek key for the balance; preferred over Claude Code's settings and the key file. |
-| `HTTPS_PROXY`, `NO_PROXY` | agent (AI usage), core (status pages) | Proxy for the AI providers' hosts. |
+| `DEEPSEEK_API_KEY` | agent (AI usage) | DeepSeek key for the balance: after the key file the panel writes, before Claude Code's settings. |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | agent (AI usage), core (status pages) | Proxy for the AI providers' hosts (the language server on loopback goes through none). |
 | `SHELL` | chat host | Login shell run as `$SHELL -l -i -c env` for the chats' agents' environment; `/bin/sh -l` if not absolute ([37](features/37-agent-chats.md)). |
 
 Build scripts and tests:

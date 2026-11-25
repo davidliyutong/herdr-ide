@@ -8,7 +8,8 @@ one; machines run the Go machine build (`cmd/veldr`, `internal/`) by
 default, or the machine side here (`machine/`, `hosts/machine`, the
 features' `machine.ts`) in a core built to deploy it
 (`scripts/build.ts --machine ts`), which serves the features whose machine
-side is here (terminals, files, git, search, monitor, history, browser).
+side is here (terminals, files, git, search, monitor, history, browser,
+AI usage).
 Both speak the same wire protocols, and a node of either takes over from
 the other. It is not a translation of the Go packages: their layout is not
 kept.

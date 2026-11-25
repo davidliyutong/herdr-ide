@@ -73,7 +73,7 @@ func parseKimiLine(proj string, line []byte, ent *fileEntry) {
 }
 
 // kimiModelName normalizes Kimi Code's logged model identifiers to canonical
-// names matching pricing.json: "kimi-code/k3.1-pro" -> "kimi-k3.1-pro",
+// names matching spec/pricing/pricing.json: "kimi-code/k3.1-pro" -> "kimi-k3.1-pro",
 // "kimi-code/k3" -> "kimi-k3", "kimi-code/kimi-for-coding" -> "kimi-for-coding".
 func kimiModelName(m string) string {
 	m = strings.TrimSpace(m)

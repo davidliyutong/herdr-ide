@@ -68,7 +68,7 @@ export const paths = {
 
 /** The features whose machine side the TypeScript build does not serve
  * yet (it refuses them as an unknown plugin). */
-const UNPORTED = ['chat', 'agents', 'usage', 'gui', 'vscode'] as const;
+const UNPORTED = ['chat', 'agents', 'gui', 'vscode'] as const;
 
 /** Why a test of feature does not run in this run ("" when it does): the
  * TypeScript machine side does not serve it yet. */

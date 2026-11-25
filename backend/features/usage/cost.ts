@@ -9,6 +9,7 @@
 // disabled or offline machine's last report stays in the total until the
 // machine is removed.
 import { createHash } from 'node:crypto';
+import pricing from '../../../spec/pricing/pricing.json' with { type: 'json' };
 import { formatRFC3339, parseRFC3339 } from '#shared/lib/gotime.ts';
 import { Fail } from '#kernel/fail.ts';
 import { costReport, COST_MS, type CostParams, type CostReport, type CostRow, type CostSlot } from './protocol.ts';
@@ -24,9 +25,10 @@ const MACHINE_COST_KEEP = 64;
  * window, in seconds. */
 const RECENT_SPAN = 8 * 86_400;
 /** The hours of a week and of a month the weekly and monthly equivalents
- * scale the range's cost to (internal/usage/pricing.json). */
-export const WEEK_HOURS = 168;
-export const MONTH_HOURS = 750;
+ * scale the range's cost to: the price table's, which the machines price
+ * the logs with. */
+export const WEEK_HOURS: number = pricing.weekHours;
+export const MONTH_HOURS: number = pricing.monthHours;
 
 /** How a machine's scan went. */
 export interface MachineCost {
