@@ -8,13 +8,9 @@
  * U+0085). */
 const SPACE = '[\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
 const TRIM = new RegExp(`^${SPACE}+|${SPACE}+$`, 'g');
-const TRIM_END = new RegExp(`${SPACE}+$`);
 
 /** Go's strings.TrimSpace. */
 export const trimSpace = (s: string): string => s.replace(TRIM, '');
-
-/** Go's strings.TrimRightFunc(s, unicode.IsSpace). */
-export const trimSpaceEnd = (s: string): string => s.replace(TRIM_END, '');
 
 /** Go's strings.ToLower: each character's simple lower case, never the
  * context of the ones around it (JavaScript lowers a final sigma to ς and
