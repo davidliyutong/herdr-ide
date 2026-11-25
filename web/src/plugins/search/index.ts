@@ -2,7 +2,7 @@
 // right sidebar that searches the contents of the files below a folder of
 // the shown machine, as VS Code's search view, and opens a match at its
 // line. The core's side is backend/features/search, the machine's
-// internal/agent/plugin/search.
+// backend/features/search/machine.ts.
 import { TextSearch } from 'lucide-react';
 import type { PluginDef } from '../api';
 import { SearchPanel } from './SearchPanel';

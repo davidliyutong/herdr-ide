@@ -1,5 +1,5 @@
 // An agent for the tests that serves the file ops from the real file
-// system as the Go agent does (internal/agent/fs.go, archive.go): fs.stat,
+// system as the Go agent does: fs.stat,
 // fs.list, fs.read, fs.write (into a private file renamed once the end
 // marker came) and fs.archive, whose "archive" is each file's name and
 // bytes in a line (the core passes the chunks on unread). The files

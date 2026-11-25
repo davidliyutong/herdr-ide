@@ -1,6 +1,6 @@
-// The browser pane's actions on a machine (docs/features/32-browser-and-ports.md),
-// as the Go agent serves them while machines run the Go machine build
-// (internal/agent/plugin/browser). Nothing listens on the machine: the core
+// The browser pane's actions on a machine
+// (docs/features/32-browser-and-ports.md), as the machine side serves them
+// (features/browser/machine). Nothing listens on the machine: the core
 // opens a stream per connection of a forward.
 import { z } from 'zod';
 import { defineProtocol } from '#shared/proto/protocol.ts';

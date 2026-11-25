@@ -4,9 +4,9 @@
 // continue a directory's latest conversation and resume a session by its
 // id, the parser of its session transcripts, and how the chat host runs it
 // headless (its chat spec). It is data only and runs on every system the
-// core runs on. Mirrors internal/agentkinds while the Go program exists.
+// core runs on.
 //
-// The ids are the detector's (internal/agent/detect manifests), which the
+// The ids are the detector's (features/agents/machine/detect/manifests), which the
 // settings' list of agents names too; the registry's JSON
 // (spec/generated/registry.json, key "agents") is what the web UI reads
 // (web/src/conversation/kinds.ts). A kind's JSON carries only its chat's

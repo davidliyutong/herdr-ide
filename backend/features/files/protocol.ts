@@ -1,12 +1,12 @@
-// The file explorer's actions on a machine (docs/features/28-file-explorer.md),
-// as the Go agent serves them while machines run the Go machine build
-// (internal/agent/plugin/files): the changes the explorer makes, the stat
-// of the directories it shows, saving an editor's text, uploads into its
-// folders and showing a path in the system's file manager. The agent
-// expands every path (~, relative to home) and refuses the root, the home
-// directory and what holds it, and its own data directory; it answers
-// failures with codes the UI translates (not_found, exists, denied,
-// refused, conflict, partial_write, …).
+// The file explorer's actions on a machine
+// (docs/features/28-file-explorer.md), as the machine side serves them
+// (features/files/machine): the changes the explorer makes, the stat of the
+// directories it shows, saving an editor's text, uploads into its folders
+// and showing a path in the system's file manager. The agent expands every
+// path (~, relative to home) and refuses the root, the home directory and
+// what holds it, and its own data directory; it answers failures with codes
+// the UI translates (not_found, exists, denied, refused, conflict,
+// partial_write, …).
 //
 // write and upload stream: the reply has no result; the core then sends
 // the body as ChunkWriter chunks with their end marker, and the agent

@@ -22,8 +22,8 @@ test('TestID', () => {
   expect(hostid.validKey(hostid.key())).toBe(true);
 });
 
-// The keys and ids are Go's (vectors printed by internal/hostid's KeyOf and
-// IDOf): files the Go program named are found again.
+// The keys and ids are Go's (vectors printed by the Go program's KeyOf and
+// IDOf, which earlier releases ran): files the Go program named are found again.
 test('the hashes are Go’s', () => {
   expect(hostid.keyOf('node01', 'id-1')).toBe('node01-2024ba5b');
   expect(hostid.idOf('node01', ' id-1\n')).toBe('565c11db');

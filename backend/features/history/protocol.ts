@@ -1,9 +1,8 @@
-// The terminal history feature's actions on a machine, as the Go agent
-// serves them while machines run the Go machine build
-// (internal/agent/plugin/history, agentproto's History*): snapshots of the
-// terminals' output, with their styles, that the machine keeps on its own
-// disk while the core asks it to capture. A terminal's snapshot has a
-// current generation and at most one previous one: the current one of the
+// The terminal history feature's actions on a machine, as the machine side
+// serves them (features/history/machine, agentproto's History*): snapshots
+// of the terminals' output, with their styles, that the machine keeps on
+// its own disk while the core asks it to capture. A terminal's snapshot has
+// a current generation and at most one previous one: the current one of the
 // program that ran before. The machine clamps what it is asked to its hard
 // limits (HistoryLimits) and answers fixed wordings with its codes (busy,
 // not_found, not_running, io, …).

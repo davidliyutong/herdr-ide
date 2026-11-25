@@ -1,7 +1,6 @@
-// The AI usage feature's actions on a machine, as the Go agent serves them
-// while machines run the Go machine build (internal/agent/plugin/usage over
-// internal/usage): the machine reads the subscriptions its CLIs are signed
-// in to and its logs' cost, and answers with numbers only.
+// The AI usage feature's actions on a machine, as the machine side serves
+// them (features/usage/machine): the machine reads the subscriptions its
+// CLIs are signed in to and its logs' cost, and answers with numbers only.
 //
 //   - limits: the accounts with their windows, credits and balances; the
 //     accounts named in skip / skipLocal are answered skipped, unasked;

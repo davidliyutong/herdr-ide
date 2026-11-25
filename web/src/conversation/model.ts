@@ -2,9 +2,9 @@
 // where it comes from (source.ts): the events of a session as an event log
 // (each with its place, seq, and its type, t), their updates under the
 // member names of the Agent Client Protocol's (ACP v1) session/update, and
-// the state they reduce to. A transcript read on a machine (internal/
-// agentproto TranscriptEvent) gives the types update, user, turn and
-// notice; the others are the chat host's (internal/chatproto Event, relayed
+// the state they reduce to. A transcript read on a machine (agentproto's
+// TranscriptEvent) gives the types update, user, turn and
+// notice; the others are the chat host's (chatproto's Event, relayed
 // by the chat plugin, plugins/chat/protocol.ts): permissions and questions
 // the user answers, queued messages, the chat's state and what it states
 // (info: its configuration, commands, usage and capabilities), live
@@ -366,7 +366,7 @@ export interface ReattachEvent {
 }
 export type SourceEvent = ChatEvent | ResetEvent | ReattachEvent;
 
-// ---- the chat host's limits and names (internal/chatproto, chatadapter;
+// ---- the chat host's limits and names (backend/shared/proto/chatproto, the adapters;
 // plugins/chat/protocol.ts states them for the plugin) ----
 
 /** The most content a prompt carries: the JSON of its blocks, in bytes. */

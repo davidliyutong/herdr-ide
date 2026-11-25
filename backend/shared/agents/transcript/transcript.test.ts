@@ -1,8 +1,10 @@
 // Claude Code's transcripts read into events: the shared vectors
-// (spec/vectors/transcript, which the Go agent's parser and the web UI's
-// tests run too), and the bounds of a read on hostile lines.
+// (spec/vectors/transcript, which the web UI's tests run too), and the
+// bounds of a read on hostile lines. UPDATE_TESTDATA=1 rewrites a vector's
+// expected events, unknown count and title after a deliberate change of
+// the mapping (review the diff).
 import { describe, expect, test } from 'bun:test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SLUG } from '#shared/lib/brand.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
@@ -63,6 +65,18 @@ async function readAll(data: Uint8Array, lim: Limits = {}): Promise<{ events: Tr
 
 const plain = (evs: TranscriptEvent[]) => evs.map(({ at: _, ...rest }) => JSON.parse(JSON.stringify(rest)));
 
+/** v with the keys of its objects in order, as the vectors have them. */
+const sortKeys = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(sortKeys)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]),
+        )
+      : v;
+
 describe('vectors', () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith('.json'));
   test('are there', () => expect(files.length).toBeGreaterThanOrEqual(5));
@@ -72,6 +86,19 @@ describe('vectors', () => {
       expect(v.note).not.toBe('');
       expect(v.kind).toBe('claude');
       const got = await readAll(content(v.lines));
+      if (process.env.UPDATE_TESTDATA === '1') {
+        const { note, kind, lines } = v;
+        const out = {
+          note,
+          kind,
+          lines,
+          unknown: got.unknown,
+          ...(got.title ? { title: got.title } : {}),
+          events: sortKeys(plain(got.events)),
+        };
+        writeFileSync(join(DIR, file), JSON.stringify(out, null, 2) + '\n');
+        return;
+      }
       expect(plain(got.events)).toEqual(v.events);
       expect([got.unknown, got.title]).toEqual([v.unknown, v.title ?? '']);
       // No base64 of an image is forwarded.

@@ -1,7 +1,7 @@
 // Names the host a process runs on, for files that must be kept per host
 // although the directory holding them may be on a home that several hosts
 // share (NFS): databases, logs, executables, runtime directories and the
-// terminal core's session (internal/hostid while the Go program exists:
+// terminal core's session (as the Go program of earlier releases named it:
 // both must name a host alike, or the one would not find the other's
 // files).
 import { execFileSync } from 'node:child_process';

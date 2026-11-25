@@ -1,11 +1,11 @@
 // The Git feature's actions on a machine (docs/features/31-git.md), as the
-// Go agent serves them while machines run the Go machine build
-// (internal/agent/plugin/git): the state of a repository (its branch,
-// status, history, refs, the contents of files at a revision) and the
-// changes the panel and the graph make. Every action takes the same
-// parameters (params), each reading its own members; the agent checks
-// them (bad_params, bad_ref, not_a_repo) and runs git with an argument
-// vector of its own, under its own timeouts (reads 15 s, changes 120 s).
+// machine side serves them (features/git/machine): the state of a
+// repository (its branch, status, history, refs, the contents of files at a
+// revision) and the changes the panel and the graph make. Every action
+// takes the same parameters (params), each reading its own members; the
+// agent checks them (bad_params, bad_ref, not_a_repo) and runs git with an
+// argument vector of its own, under its own timeouts (reads 15 s, changes
+// 120 s).
 //
 // The core passes results on to the page as the agent wrote them, so the
 // results are loose objects: they are typed, and a member a later agent

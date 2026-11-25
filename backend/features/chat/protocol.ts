@@ -1,10 +1,10 @@
-// The chat feature's action on a machine (docs/features/37-agent-chats.md), as the
-// Go agent serves it while machines run the Go machine build
-// (internal/agent/plugin/chat): open gives a stream to the machine's chat
-// host (a hidden terminal of the machine's terminal core, which the machine
-// side starts, replaces when it is of another build, and never lets the
-// core name). After the reply the stream carries the chat host's protocol
-// (#shared/proto/chatproto) as it is, the host's Hello first.
+// The chat feature's action on a machine (docs/features/37-agent-chats.md),
+// as the machine side serves it (features/chat/machine): open gives a
+// stream to the machine's chat host (a hidden terminal of the machine's
+// terminal core, which the machine side starts, replaces when it is of
+// another build, and never lets the core name). After the reply the stream
+// carries the chat host's protocol (#shared/proto/chatproto) as it is, the
+// host's Hello first.
 import { z } from 'zod';
 import { defineProtocol } from '#shared/proto/protocol.ts';
 
@@ -22,7 +22,7 @@ export const chatProtocol = defineProtocol('chat', {
    * Claude Code's chats (claudesdk.ts): whether the pinned version is
    * installed; given url, a machine without it downloads the pinned tarball
    * from there itself (curl or wget), fetched saying it did, error saying
-   * why it could not. The Go machine build, whose chat host speaks Claude
+   * why it could not. The Go machine build of earlier releases, whose chat host spoke Claude
    * Code's protocol itself, serves neither this nor sdkUpload (bad_params,
    * an unknown action). */
   sdk: {

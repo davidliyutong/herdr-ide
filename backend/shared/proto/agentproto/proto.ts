@@ -1,5 +1,5 @@
 // The stream protocol between the core and a machine's agent over a yamux
-// session (internal/agentproto while the Go program exists).
+// session.
 //
 // Every yamux stream starts with one JSON header line written by the
 // opener, answered by one JSON reply line. After a successful reply the

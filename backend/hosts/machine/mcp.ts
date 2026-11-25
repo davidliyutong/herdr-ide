@@ -1,5 +1,5 @@
-// The mcp command of the command line (hosts/bun/main.ts), as the Go build
-// has it (internal/vaultmcp Main), with the same flags and exit statuses:
+// The mcp command of the command line (hosts/bun/main.ts), as the Go build of
+// earlier releases had it, with the same flags and exit statuses:
 //
 //	<slug> mcp [--instance NAME] [--socket PATH]
 //

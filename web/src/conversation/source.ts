@@ -1,6 +1,6 @@
 // Where a chat's events come from and where the user's commands go, as the
 // conversation view sees it: a chat that a machine's chat host runs
-// (internal/chatproto), relayed by the chat plugin, whose ChatSource
+// (backend/shared/proto/chatproto), relayed by the chat plugin, whose ChatSource
 // implements this interface. The view (its reducer, model.ts, and its
 // components) knows only this interface.
 import type { ContentBlock, SourceEvent } from './model';

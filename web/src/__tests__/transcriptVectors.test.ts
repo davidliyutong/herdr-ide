@@ -1,7 +1,7 @@
 // The shared transcript vectors (spec/vectors/transcript): the events a
 // machine makes of Claude Code's transcripts, which the machine builds'
 // parsers produce from the same lines in their tests
-// (internal/agent/transcript, backend/shared/agents/transcript), hold to
+// (backend/shared/agents/transcript), hold to
 // the conversation model's types, and reduce.
 import { describe, expect, it } from 'vitest';
 import { APP_SLUG } from '../brand';

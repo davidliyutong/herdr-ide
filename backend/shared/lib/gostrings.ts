@@ -1,5 +1,5 @@
 // Go's string functions where JavaScript's differ, for code that must
-// read text as the Go program read it while both exist (the detector's
+// read text as the Go program read it (the detector's
 // rules, the transcripts' events): which characters are space, and lower
 // case one character at a time.
 

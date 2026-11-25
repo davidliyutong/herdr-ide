@@ -3,7 +3,7 @@
 // its input, output, cache read and cache write prices in USD per million
 // tokens) and an example in each empty field, in place of the text the
 // setting stores ("model input cached output [cache write]" a line each,
-// internal/usage ParsePrices). A row is saved when it is complete and
+// backend/features/usage/settings.ts parsePrices). A row is saved when it is complete and
 // valid (on Enter or when the focus leaves it); a row that is not says
 // why below it and is not saved. Cache read left empty costs the input
 // price (no discount); cache write left empty costs the input price, as
@@ -15,7 +15,7 @@ import { t, type MessageKey } from '../../i18n';
 import type { SettingControlProps } from '../api';
 import { useUsage } from './state';
 
-/** At most this many prices (internal/usage MaxOwnPrices). */
+/** At most this many prices (MAX_OWN_PRICES of backend/features/usage/machine/pricing.ts). */
 export const MAX_PRICES = 50;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/;
 

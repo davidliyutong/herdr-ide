@@ -1,6 +1,6 @@
 // run_with_env's commands (the vault's MCP server, mcp.ts): `sh -c` with the
 // values in the command's environment, its output captured within a
-// bound and every value in it replaced with ***, as internal/vaultmcp runs
+// bound and every value in it replaced with ***, as the Go build's vault MCP server ran
 // them.
 //
 // A command runs in a process group (a session) of its own, which is killed

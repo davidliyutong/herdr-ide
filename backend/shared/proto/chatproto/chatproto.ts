@@ -1,6 +1,5 @@
-// The protocol of the chat host's unix socket (internal/chatproto while the
-// Go program exists): JSON lines, one JSON object per line, UTF-8, at most
-// MAX_LINE bytes each.
+// The protocol of the chat host's unix socket: JSON lines, one JSON object
+// per line, UTF-8, at most MAX_LINE bytes each.
 //
 // The chat host is the long-lived process of a machine that runs coding
 // agents headless, each through its adapter (Claude Code's SDK protocol,

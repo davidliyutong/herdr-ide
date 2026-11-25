@@ -4,8 +4,8 @@
 // per line). It asks the core for variables through the agent's
 // <run>/vault.sock, which relays each connection to the core (op vault,
 // #machine/vault.ts); the core decides what the machine may read
-// (docs/features/30-variable-vault.md). The Go build's server
-// (internal/vaultmcp) answers the same.
+// (docs/features/30-variable-vault.md). The Go build of earlier releases
+// answered the same.
 //
 // The protocol is the official MCP TypeScript SDK's
 // (@modelcontextprotocol/server): its stdio transport, the handshake and

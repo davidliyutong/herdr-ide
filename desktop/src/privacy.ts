@@ -15,7 +15,7 @@ export const FULL_DISK_ACCESS_URL = 'x-apple.systempreferences:com.apple.prefere
 
 /** The terminal core's executable of an instance on this computer: the
  * agent's ~/.<slug>[-<instance>]/hosts/<host>/hc/herdr-core
- * (internal/brand.DataDir, internal/hostdirs, internal/agent/hc.go), of
+ * (backend/shared/lib/brand.ts dataDir, shared/host/hostdirs.ts, machine/hc.ts), of
  * this host's directory: the most recently changed of the instance's
  * hosts' (a renamed Mac has another host directory); '' for none. macOS
  * gives the programs of its terminals what this file was granted. */

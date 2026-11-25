@@ -1,6 +1,5 @@
-// A framed connection to a herdr-core (internal/hc while the Go program
-// exists). Calls run side by side; streams and event subscriptions share
-// the connection and end with it.
+// A framed connection to a herdr-core. Calls run side by side; streams and
+// event subscriptions share the connection and end with it.
 import type { Duplex } from 'node:stream';
 import { EOFError, Reader } from '#shared/lib/streamio.ts';
 import {

@@ -1,6 +1,6 @@
 // The Git plugin's requests to the core (backend/features/git): reads are
 // GETs with their parameters in the query, changes POSTs with a JSON body.
-// The types are those of the machine side (internal/agent/plugin/git).
+// The types are those of the machine side (backend/features/git/protocol.ts).
 import { answer, failureOf, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
 
 export interface RepoInfo {
@@ -211,6 +211,6 @@ export const gitApi = {
   tags: (m: string, repo: string) => get<Tag[]>(m, 'tags', { repo }),
   stashes: (m: string, repo: string) => get<Stash[]>(m, 'stashes', { repo }),
   watch: (m: string, repo: string) => get<Watch>(m, 'watch', { repo }),
-  /** A change (internal/agent/plugin/git's Params). */
+  /** A change (Params of backend/features/git/protocol.ts). */
   run: (m: string, repo: string, action: string, params: Record<string, unknown> = {}) => post(m, action, { ...params, repo }),
 };

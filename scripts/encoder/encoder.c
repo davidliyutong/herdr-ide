@@ -1,5 +1,5 @@
 // encoder turns raw frames of a program window into a video stream, for the
-// agent (internal/agent/guivideo.go). It is built with the ffmpeg libraries
+// machine side (backend/features/gui/machine/video.ts). It is built with the ffmpeg libraries
 // by scripts/build-ffmpeg.sh and pushed to machines by the core.
 //
 //   encoder -w W -h H -kinds avc1,vp8 [-quality Q]

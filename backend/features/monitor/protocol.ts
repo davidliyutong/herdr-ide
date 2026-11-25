@@ -1,11 +1,10 @@
 // The System Monitor & Task Manager's actions on a machine
-// (docs/features/34-system-monitor.md), as the Go agent serves them while
-// machines run the Go machine build (internal/agent/plugin/monitor): live
-// metrics, a snapshot of the processes, and a signal from an allowlist to
-// one of the user's processes. The core passes results on to the page as
-// the agent wrote them, so they are loose objects: typed, and a member a
-// later agent adds still reaches the page. A Go slice without omitempty
-// may be null.
+// (docs/features/34-system-monitor.md), as the machine side serves them
+// (features/monitor/machine): live metrics, a snapshot of the processes,
+// and a signal from an allowlist to one of the user's processes. The core
+// passes results on to the page as the agent wrote them, so they are loose
+// objects: typed, and a member a later agent adds still reaches the page. A
+// Go slice without omitempty may be null.
 import { z } from 'zod';
 import { defineProtocol } from '#shared/proto/protocol.ts';
 

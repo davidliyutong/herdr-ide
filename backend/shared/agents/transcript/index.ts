@@ -4,8 +4,7 @@
 // the user's prompts, turns and notices (docs/features/35). Each line maps
 // on its own (claudeFrame); eachClaude reads a file's lines forward. The
 // chat host's imports and its Claude Code adapter read them; the shared
-// vectors (spec/vectors/transcript) say what they give, for the Go agent's
-// parser too while it exists.
+// vectors (spec/vectors/transcript) say what they give.
 //
 // Every read is bounded: the text of an event, the output of a tool call,
 // the length of a line (longer ones are skipped with a notice), the events

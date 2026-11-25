@@ -4,7 +4,7 @@
 //
 //	HC_TEST_BIN=/path/to/herdr-core bun test features/agents/integration.test.ts
 //
-// (`go run ./scripts/fetch-hc -exe <file> <os>/<arch>` fetches the pinned
+// (`bun backend/scripts/fetch-hc.ts --exe <file> <os>/<arch>` fetches the pinned
 // one.) Without HC_TEST_BIN it skips.
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';

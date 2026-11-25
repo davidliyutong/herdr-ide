@@ -1,7 +1,7 @@
 // The chat plugin's protocol as the page sees it: the chat host's types
-// (internal/chatproto), which the core relays, and the page's WebSocket
-// GET /api/p/chat/ws (backend/features/chat). Each mirrors its Go
-// type's JSON. What comes from a machine is not trusted to have these
+// (backend/shared/proto/chatproto), which the core relays, and the page's WebSocket
+// GET /api/p/chat/ws (backend/features/chat). Each mirrors the JSON of its
+// type there. What comes from a machine is not trusted to have these
 // shapes: readers check the type of every member they keep and pass over
 // members and values this version does not know.
 import type { ChatError, ChatEvent, ContentBlock, Cost, Question } from '../../conversation/model';

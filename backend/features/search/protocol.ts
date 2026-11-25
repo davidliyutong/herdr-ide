@@ -1,11 +1,11 @@
-// Project Search's action on a machine (docs/features/41-project-search.md),
-// as the Go agent serves it while machines run the Go machine build
-// (internal/agent/plugin/search): a search of the contents of the files
-// below a directory, with ripgrep when the machine has it and a walker of
-// the agent's own otherwise. The agent stops a search after 30 s and
-// answers what it found; it runs at most 4 at once (busy). The core
-// passes the result on to the page as the agent wrote it: a loose object,
-// typed, whose members a later agent adds still reach the page.
+// Project Search's action on a machine
+// (docs/features/41-project-search.md), as the machine side serves it
+// (features/search/machine): a search of the contents of the files below a
+// directory, with ripgrep when the machine has it and a walker of the
+// agent's own otherwise. The agent stops a search after 30 s and answers
+// what it found; it runs at most 4 at once (busy). The core passes the
+// result on to the page as the agent wrote it: a loose object, typed, whose
+// members a later agent adds still reach the page.
 import { z } from 'zod';
 import { defineProtocol } from '#shared/proto/protocol.ts';
 

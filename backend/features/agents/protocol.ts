@@ -1,9 +1,8 @@
-// The agents feature's action on a machine, as the Go agent serves it
-// while machines run the Go machine build (internal/agent/plugin/agents):
-// whether a coding agent's session is one to resume in a directory. The
-// machine looks for the session's transcript in the agent's session
-// directories (by kind and id, never by a path the core names) and
-// compares the directory it ran in with cwd.
+// The agents feature's action on a machine, as the machine side serves it
+// (features/agents/machine): whether a coding agent's session is one to
+// resume in a directory. The machine looks for the session's transcript in
+// the agent's session directories (by kind and id, never by a path the core
+// names) and compares the directory it ran in with cwd.
 import { z } from 'zod';
 import { defineProtocol } from '#shared/proto/protocol.ts';
 

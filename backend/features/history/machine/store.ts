@@ -2,7 +2,7 @@
 // data directory, named after the host: hostFile), table
 // history_snapshots: a row per generation of a terminal (prev 0 for the
 // current one, 1 for the previous one) with what describes it and its
-// bytes, as the Go agent (internal/agent/plugin/history) keeps them: a Go
+// bytes, as the Go agent keeps them: a Go
 // node and a TypeScript node of the same instance read and write the same
 // rows. Every change is a transaction of its own, so readers (list, read)
 // take no lock and see each generation whole; a written generation is on
