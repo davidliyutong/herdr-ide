@@ -88,6 +88,8 @@ export const RELEASE_PATH = 'machine/release.json';
 /** The SHA-256 of the herdr-core executables of the build's machine
  * platforms (os-arch), which its executables carry. */
 export const HC_PATH = 'machine/hc.json';
+/** The build's SHA256SUMS, when it carries it (scripts/build.sh RELEASE_SUMS). */
+export const SUMS_PATH = 'machine/SHA256SUMS';
 /** The own platform's executable, gzip-compressed, which the desktop app
  * carries (the command line is its own). */
 export const ownExecutablePath = (key: string): string => `machine/${bareName(key)}.gz`;
@@ -147,8 +149,10 @@ export function payloads(o: {
       let own: OwnExecutable | null = null;
       if (key && o.ownFd !== undefined) own = ownFile(key, o.ownFd);
       else if (key && (await o.files.get(ownExecutablePath(key)))) own = ownGz(key, () => o.files.get(ownExecutablePath(key)));
+      const sums = await o.files.get(SUMS_PATH);
       return new Release({
         version: r.version,
+        ...(sums ? { sums: Buffer.from(sums).toString('utf8') } : {}),
         ...(r.release ? { url: r.release } : {}),
         ...(o.agentDir ? { dir: o.agentDir } : {}),
         cacheDir: o.machineCache ?? join(userHomeDir(), DATA_DIR_NAME, 'cache', 'machine'),

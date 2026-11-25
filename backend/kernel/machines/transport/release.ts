@@ -247,6 +247,9 @@ export interface ReleaseOptions {
   url?: string;
   /** The operator's directory (--agent-dir). */
   dir?: string;
+  /** The build's own SHA256SUMS, carried by a desktop app built from a
+   * release's executables without its URL (scripts/build.sh RELEASE_SUMS). */
+  sums?: string;
   /** The core host's cache of manifests and archives. */
   cacheDir: string;
   own?: OwnExecutable | null;
@@ -315,6 +318,10 @@ export class Release {
         return null;
       }
     };
+    if (this.o.sums) {
+      const m = await parse(this.o.sums, `this build's ${SUMS}`, `this build's ${SUMS}`);
+      if (m) return m;
+    }
     if (this.o.dir) {
       const p = join(this.o.dir, SUMS);
       if (await exists(p)) {

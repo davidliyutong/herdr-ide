@@ -87,7 +87,16 @@ module.exports = {
     {
       from: '../dist/payload',
       to: 'payload',
-      filter: ['agents/*.gz', 'hc/*.gz', 'machine/release.json', 'machine/hc.json', 'machine/*.gz', 'encoder/*.gz', 'ext/*.vsix'],
+      filter: [
+        'agents/*.gz',
+        'hc/*.gz',
+        'machine/release.json',
+        'machine/hc.json',
+        'machine/SHA256SUMS',
+        'machine/*.gz',
+        'encoder/*.gz',
+        'ext/*.vsix',
+      ],
     },
     { from: '../web/dist', to: 'web' },
   ],

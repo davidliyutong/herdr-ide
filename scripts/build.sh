@@ -26,7 +26,10 @@
 # executable). For the desktop app (PAYLOAD_ONLY=1), dist/payload carries
 # the build's release record and the executable of PAYLOAD_MACHINES (its
 # own platform, as <os>-<arch>; none for Windows), taken from EXECUTABLES
-# (a directory with <slug>-<platform>, the release's) or built here.
+# (a directory with <slug>-<platform>, the release's) or built here, and
+# with RELEASE_SUMS the SHA256SUMS of those executables (an app of a
+# local cross build: TARGETS=... scripts/build.sh, then
+# EXECUTABLES=dist RELEASE_SUMS=dist/release/SHA256SUMS).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -142,6 +145,14 @@ if [[ -n "${PAYLOAD_ONLY:-}" ]]; then
       [[ -n "${EXECUTABLES:-}" ]] && exe="$EXECUTABLES/${SLUG}-$key"
       gzip -9 -n -c "$exe" > "$PAYLOAD/machine/${SLUG}-$key.gz"
       echo "==> the $key executable for the desktop app ($(du -h "$exe" | cut -f1))"
+    fi
+    # RELEASE_SUMS: the SHA256SUMS of the executables of EXECUTABLES (a
+    # cross build's dist/release/SHA256SUMS), for an app of no release:
+    # it then knows every platform's build, and uses it on the machines
+    # that have it already.
+    if [[ -n "${RELEASE_SUMS:-}" ]]; then
+      cp "$RELEASE_SUMS" "$PAYLOAD/machine/SHA256SUMS"
+      echo "==> $RELEASE_SUMS carried"
     fi
     rm -rf dist/payload-build
   fi

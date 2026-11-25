@@ -152,6 +152,15 @@ describe('the manifest', () => {
     expect((await rel.digests(KEY)).source).toBe(join(dir, SUMS));
   });
 
+  test("the build's own (a desktop app built from a release's executables without its URL): every platform's digests, if it names this core's executable", async () => {
+    const mine = new Release({ version: 'v1', sums: sums({ ownExe: sha256(OWN_EXE) }), cacheDir: temp(), own: ownOther() });
+    expect(await mine.digests(KEY)).toEqual({ exe: sha256(EXE), archive: sha256(ARCHIVE), source: "this build's SHA256SUMS" });
+    const other = new Release({ version: 'v1', sums: sums({ ownExe: 'e'.repeat(64) }), cacheDir: temp(), own: ownOther() });
+    const e = await other.digests(KEY).catch((x) => x as Error);
+    expect(deployCode(e)).toBe('build_unavailable');
+    expect((e as Error).message).toContain('of another build');
+  });
+
   test("one of another build is refused: it must name this core's own executable by its digest", async () => {
     const dir = temp();
     writeFileSync(join(dir, SUMS), sums({ ownExe: 'e'.repeat(64) }));
