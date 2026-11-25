@@ -51,7 +51,10 @@ chats, agent detection, the browser pane. Its directory holds
   runs once per agent and returns the handlers, which keep what the
   feature shares between requests (a limit on searches at once), and the
   ops of the agent protocol it serves besides (`ops`: the agents feature's
-  `detect`);
+  `detect`), what it ends with the agent (`close`) and hands to a node
+  that takes over (`handOver`); it sees the agent's sessions
+  (`env.sessions()`, an action's own `ctx.session`: their pipes per
+  socket, a stream towards their core);
   params come checked by the protocol's schemas, a `Fail` thrown is the
   refusal's code, an action that does not stream ends with the core's
   interest (`ctx.signal`); its own modules in `machine/`. Exported as a

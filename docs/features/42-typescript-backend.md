@@ -173,8 +173,9 @@ Linux and macOS:
   `stop` and `takeover`, the idle end, the drain once taken over, its
   retirement once its executable is gone), its clients (`dial.ts`: `node dial`,
   `node stop`), the agent its sessions share (`agent.ts`: a yamux server
-  per session, the core's ops `hello`, `fs.*`, `fs.archive`, `dial-unix`,
-  `hc`, `hc-api`, `privacy` and `plugin`), the dispatch of `plugin` to the
+  per session, the core's ops `hello`, `fs.*`, `fs.archive`, `dial-unix`
+  (each session's pipes counted per socket), `hc`, `hc-api`, `privacy` and
+  `plugin`), the dispatch of `plugin` to the
   features' machine sides (`dispatch.ts`, `feature.ts`), the terminal core
   (`hc.ts`), hidden terminals (`hidden.ts`), housekeeping, the vault's
   socket, the coding agents' sessions, which the agents feature, AI usage
@@ -188,7 +189,12 @@ Linux and macOS:
   stream ends when the core closes its stream. A feature may serve ops of
   the agent protocol besides (`Served.ops`: the agents feature's `detect`,
   which the core opens as an op of its own); an op no feature serves is
-  refused as an unknown plugin.
+  refused as an unknown plugin. A feature sees the agent's sessions
+  (`env.sessions()`, and an action's own as `ctx.session`: its core, its
+  open pipes to each socket and when it last opened one, a stream towards
+  its core), ends what it owns when the agent ends (`Served.close`, once
+  the sessions' requests were waited for) and hands it to the node that
+  took over (`Served.handOver`).
 - `backend/hosts/machine`: the machine side's commands (`cli.ts`: `node`,
   `node dial`, `node stop [--terminal-core]`, with the Go build's flags),
   which the one command line (`backend/hosts/bun/main.ts`) runs, and the

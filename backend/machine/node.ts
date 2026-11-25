@@ -204,7 +204,7 @@ export async function runNode(o: NodeOptions): Promise<void> {
   const takenOver = (next: NodeInfo) => {
     log(`taken over by build ${next.build} (version ${next.version}, pid ${next.pid ?? 0}); draining`);
     leave(false);
-    agent?.drain();
+    agent?.drain(next);
     // Ends once its clients left: the one that asked is one of them.
     draining = true;
     setTimeout(stop, t.drainMaxMs).unref();

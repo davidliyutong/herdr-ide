@@ -10,11 +10,21 @@ import type { Dirs } from '#shared/host/hostdirs.ts';
 import { Fail } from '#shared/lib/fail.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { Reader } from '#shared/lib/streamio.ts';
-import { Op, VERSION, readLine, writeLine, yamuxConfig, type Header, type Info, type Reply } from '#shared/proto/agentproto/index.ts';
+import {
+  Op,
+  VERSION,
+  readLine,
+  writeLine,
+  yamuxConfig,
+  type Header,
+  type Info,
+  type NodeInfo,
+  type Reply,
+} from '#shared/proto/agentproto/index.ts';
 import { Session as Yamux, closeStream, type Stream } from '#shared/proto/yamux.ts';
 import { servePlugin, type Running } from './dispatch.ts';
 import { cleanEnv } from './env.ts';
-import type { ActionContext, MachineEnv, MachineSide, OpHandler } from './feature.ts';
+import type { ActionContext, MachineEnv, MachineSession, MachineSide, OpHandler } from './feature.ts';
 import { FS_CALLS, serveArchive, serveFS, type FsCalls } from './fsops.ts';
 import { TerminalCore } from './hc.ts';
 import { serveHC, pipeUnix } from './hcop.ts';
@@ -47,7 +57,7 @@ export const unknownPlugin = (id: string): Reply => ({
 });
 
 /** One core's session of the agent. */
-export class AgentSession {
+export class AgentSession implements MachineSession {
   readonly id: number;
   /** Names the core (its process), the same for its sessions after
    * reconnects. */
@@ -56,6 +66,8 @@ export class AgentSession {
    * local machine. */
   readonly sshConn: string;
   readonly ys: Yamux;
+  /** Its pipes to unix sockets (dial-unix), by path. */
+  private readonly pipes = new Map<string, { open: number; last: number }>();
 
   constructor(id: number, ys: Yamux, client: string, sshConn: string) {
     this.id = id;
@@ -66,6 +78,25 @@ export class AgentSession {
 
   get live(): boolean {
     return !this.ys.closed;
+  }
+
+  dialed(path: string): { open: number; last: number } {
+    const p = this.pipes.get(path);
+    return p ? { ...p } : { open: 0, last: 0 };
+  }
+
+  /** Counts a pipe to path opened; the function returned counts it closed. */
+  piped(path: string): () => void {
+    const p = this.pipes.get(path) ?? { open: 0, last: 0 };
+    p.open++;
+    p.last = performance.now();
+    this.pipes.set(path, p);
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      p.open--;
+    };
   }
 
   /** Opens a stream towards the core with header h and reads its reply
@@ -153,11 +184,18 @@ export class Agent {
     this.running.add(q);
   }
 
-  /** Ends what the agent runs, waiting at most DRAIN_MS. */
+  /** Ends what the agent runs, waiting at most DRAIN_MS, then what its
+   * features own (Served.close). */
   async close(): Promise<void> {
     this.stop.abort();
     for (const s of this.sessions) s.ys.close();
     await Promise.race([Promise.allSettled([...this.running]), new Promise((r) => setTimeout(r, DRAIN_MS))]);
+    for (const [id, f] of this.features)
+      try {
+        await f.served.close?.();
+      } catch (e) {
+        this.logger(`${id}: close: ${(e as Error).message}`);
+      }
   }
 
   get signal(): AbortSignal {
@@ -195,6 +233,7 @@ export class Agent {
       hcSocket: this.hc.socket,
       runHidden: (name, argv, signal) => runHidden(name, argv, hidden(signal)),
       killHidden: (name, argv, kill, signal) => killHidden(name, argv, kill, hidden(signal)),
+      sessions: () => this.liveSessions(),
       signal: this.stop.signal,
     };
   }
@@ -259,8 +298,16 @@ export class Agent {
   }
 
   /** Tells the cores of the agent's sessions that the node next serves the
-   * instance now (op node.drain). */
-  drain(): void {
+   * instance now (op node.drain), after giving it what the features run
+   * for the instance (Served.handOver). */
+  drain(next?: NodeInfo): void {
+    if (next)
+      for (const [id, f] of this.features)
+        try {
+          f.served.handOver?.(next);
+        } catch (e) {
+          this.logger(`${id}: hand over: ${(e as Error).message}`);
+        }
     for (const s of this.liveSessions())
       void s
         .ask({ op: Op.NodeDrain }, 15_000)
@@ -270,7 +317,7 @@ export class Agent {
 
   private ctx(s: AgentSession, signal: AbortSignal): ActionContext {
     const { signal: _, ...env } = this.env();
-    return { ...env, client: s.client, signal };
+    return { ...env, client: s.client, session: s, signal };
   }
 
   private async handle(s: AgentSession, stream: Stream, ended: AbortSignal): Promise<void> {
@@ -313,7 +360,7 @@ export class Agent {
           break;
         case Op.DialUnix:
           close = false;
-          await this.dialUnix(conn, h);
+          await this.dialUnix(s, conn, h);
           break;
         case Op.HC:
           await serveHC(conn, h, this.hc, signal);
@@ -351,8 +398,10 @@ export class Agent {
   }
 
   /** dial-unix: pipes a socket below the run directory (a bare name is one
-   * in it). */
-  private async dialUnix(conn: Conn, h: Header): Promise<void> {
+   * in it), counted for the session while it lasts (MachineSession.dialed:
+   * VS Code's code-server is kept for the sessions that show it, and its
+   * bridge leads to the one that opened it last). */
+  private async dialUnix(s: AgentSession, conn: Conn, h: Header): Promise<void> {
     let path = h.path ?? '';
     try {
       if (path !== '' && !path.includes('/')) path = posix.join(this.dirs.run, path);
@@ -364,7 +413,7 @@ export class Agent {
       closeStream(conn.stream);
       return;
     }
-    await pipeUnix(conn, path);
+    await pipeUnix(conn, path, () => s.piped(path));
   }
 }
 

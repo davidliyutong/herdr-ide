@@ -88,8 +88,10 @@ export function dialSocket(path: string, timeoutMs = 5000): Promise<Socket> {
 }
 
 /** Pipes conn's stream (after its header) to the unix socket at path: the
- * reply, then bytes both ways until either side ends, when both are closed. */
-export async function pipeUnix(conn: Conn, path: string): Promise<void> {
+ * reply, then bytes both ways until either side ends, when both are closed
+ * and the promise resolves. opened runs once the pipe is open, and what it
+ * returns once it ended. */
+export async function pipeUnix(conn: Conn, path: string, opened?: () => () => void): Promise<void> {
   const st = conn.stream;
   let c: Socket;
   try {
@@ -108,7 +110,12 @@ export async function pipeUnix(conn: Conn, path: string): Promise<void> {
     closeStream(st);
     return;
   }
-  pipe(conn, c);
+  const ended = opened?.();
+  try {
+    await pipe(conn, c);
+  } finally {
+    ended?.();
+  }
 }
 
 /** Copies both ways and closes both ends once either side ends. */

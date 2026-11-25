@@ -8,10 +8,28 @@
 import type { z } from 'zod';
 import type { Reader } from '#shared/lib/streamio.ts';
 import type { Logger } from '#shared/lib/log.ts';
-import type { Header } from '#shared/proto/agentproto/index.ts';
+import type { Header, NodeInfo, Reply } from '#shared/proto/agentproto/index.ts';
 import type { Action, Protocol } from '#shared/proto/protocol.ts';
 import type { Stream } from '#shared/proto/yamux.ts';
 import type { Conn } from './stream.ts';
+
+/** One core's session of the agent, as the machine sides of features see
+ * it. */
+export interface MachineSession {
+  /** Numbers the agent's sessions in the order they came. */
+  readonly id: number;
+  /** Names the core (its process), the same for its sessions after
+   * reconnects; "" when unknown. */
+  readonly client: string;
+  readonly live: boolean;
+  /** The session's pipes to the unix socket at path (op dial-unix): how
+   * many are open, and when it last opened one (performance.now(); 0 for
+   * never). */
+  dialed(path: string): { open: number; last: number };
+  /** Opens a stream towards the core with header h and reads its reply
+   * within timeoutMs; the stream and its reader after the reply. */
+  ask(h: Header, timeoutMs: number, signal?: AbortSignal): Promise<{ conn: Conn; reply: Reply }>;
+}
 
 /** What the agent gives the machine sides of features. */
 export interface MachineEnv {
@@ -39,6 +57,8 @@ export interface MachineEnv {
   runHidden(name: string, argv: string[], signal?: AbortSignal): Promise<void>;
   /** Ends a helper's terminal that holds name (hidden.ts killHidden). */
   killHidden(name: string, argv: string[], kill: boolean, signal?: AbortSignal): Promise<boolean>;
+  /** The agent's live sessions, oldest first. */
+  sessions(): MachineSession[];
   /** Ends with the agent. */
   readonly signal: AbortSignal;
 }
@@ -49,6 +69,8 @@ export interface ActionContext extends Omit<MachineEnv, 'signal'> {
    * node serves share work that concerns the machine and tell each other
    * apart by it. */
   readonly client: string;
+  /** The session of the core that asked. */
+  readonly session: MachineSession;
   /** Ends with the agent, with the session, and for an action that does not
    * stream when the core closes the stream (it gave up on the action). */
   readonly signal: AbortSignal;
@@ -88,6 +110,12 @@ export interface Served<P extends Protocol = Protocol> {
   readonly ops?: Readonly<Record<string, OpHandler>>;
   /** Its own retention rules, run with the agent's housekeeping. */
   housekeep?(now: Date): void | Promise<void>;
+  /** Runs when the node gives way to the node next (a newer build took it
+   * over): what the feature runs for the instance becomes that node's. */
+  handOver?(next: NodeInfo): void;
+  /** Runs when the agent ends, once its signal ended and its sessions'
+   * requests were waited for: ends what the feature started and owns. */
+  close?(): void | Promise<void>;
 }
 
 export interface MachineSide<P extends Protocol = Protocol> {

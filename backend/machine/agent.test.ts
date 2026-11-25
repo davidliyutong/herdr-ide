@@ -125,6 +125,60 @@ describe('file operations', () => {
   });
 });
 
+describe('what features see of the sessions', () => {
+  // A feature's op learns its session; the agent's sessions count their
+  // pipes to each socket (VS Code keeps code-server for the cores that
+  // show it); the node's hand-over and the agent's end reach the features.
+  test('sessions, their pipes, the hand-over and the end', async () => {
+    const seen: Array<{ id: number; client: string; sessions: number[] }> = [];
+    const events: string[] = [];
+    const side = defineMachine(defineProtocol('s', {}), () => ({
+      actions: {},
+      ops: {
+        [Op.GUI]: async (conn, _h, ctx) => {
+          seen.push({ id: ctx.session.id, client: ctx.session.client, sessions: ctx.sessions().map((s) => s.id) });
+          await writeLine(conn.stream, { ok: true });
+        },
+      },
+      handOver: (next) => void events.push(`hand over to ${next.pid}`),
+      close: async () => {
+        await new Promise((res) => setTimeout(res, 10));
+        events.push('closed');
+      },
+    }));
+    r = await rig({ features: [side], client: 'core-1' });
+    const second = r.connect('core-2');
+    await r.session.request({ op: Op.GUI });
+    await second.request({ op: Op.GUI });
+    expect(seen).toEqual([
+      { id: 1, client: 'core-1', sessions: [1, 2] },
+      { id: 2, client: 'core-2', sessions: [1, 2] },
+    ]);
+
+    const sock = join(r.dirs.run, 'p.sock');
+    const srv = createServer((c) => c.on('error', () => {}));
+    await new Promise<void>((res) => srv.listen(sock, res));
+    try {
+      const [one, two] = r.agent.liveSessions();
+      expect(one.dialed(sock)).toEqual({ open: 0, last: 0 });
+      const { conn } = await second.open({ op: Op.DialUnix, path: 'p.sock' });
+      await until(() => two.dialed(sock).open === 1, 'the pipe to count');
+      expect(two.dialed(sock).last).toBeGreaterThan(0);
+      expect(one.dialed(sock).open).toBe(0);
+      conn.stream.destroy();
+      await until(() => two.dialed(sock).open === 0, 'the pipe to end');
+      expect(two.dialed(sock).last).toBeGreaterThan(0);
+    } finally {
+      srv.close();
+    }
+
+    r.agent.drain({ build: 'b', version: 'v', exe_time: 0, pid: 4321 });
+    expect(events).toEqual(['hand over to 4321']);
+    await r.agent.close();
+    expect(events).toEqual(['hand over to 4321', 'closed']);
+  });
+});
+
 describe('ops this build does not serve', () => {
   test('are refused as an unknown plugin is; an unknown op fails', async () => {
     r = await rig();
