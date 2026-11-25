@@ -184,7 +184,8 @@ jobs:
       - run: make deps
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      # The Windows core goes into the desktop installer only (no archive).
+      # The Windows core is built to check that it compiles; no archive
+      # ships it (the desktop app runs the core in process).
       - run: scripts/build.sh
         env:
           TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64

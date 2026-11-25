@@ -12,7 +12,7 @@ packaged=
 for p in $TARGETS; do
   case "$p" in
     linux/amd64|linux/arm64|darwin/amd64|darwin/arm64) ;;
-    # The Windows core ships in the desktop installer (scripts/desktop.sh).
+    # No Windows archive: there the core runs inside the desktop app.
     windows/amd64) continue ;;
     *) echo "unsupported release platform: $p" >&2; exit 1 ;;
   esac

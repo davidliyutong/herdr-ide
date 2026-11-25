@@ -6,8 +6,8 @@
 # stages them all (gzip) in dist/payload, then builds the core in
 # TypeScript (backend/, bun backend/scripts/build.ts: one executable with
 # the payloads embedded) for TARGETS (default: host platform), packaged
-# with its license notices (a Windows core, which goes into the desktop
-# installer only, gets no archive). Names come from internal/brand.
+# with its license notices (a Windows core gets no archive: the desktop app
+# runs the core in process). Names come from internal/brand.
 #
 #   scripts/build.sh                       # host archive in dist/release/
 #   TARGETS="linux/amd64 darwin/arm64" scripts/build.sh

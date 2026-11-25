@@ -26,8 +26,8 @@ browsers keep no WebAuthn credential for an IP address
 ([30](features/30-variable-vault.md)).
 
 Release archives (`dist/release/`) are for Linux and macOS on amd64 and
-arm64 and include the licenses. A Windows x64 core ships only inside the
-[desktop app](#desktop-app) and reaches SSH machines only.
+arm64 and include the licenses. On Windows the core runs only inside the
+[desktop app](#desktop-app), in process, and reaches SSH machines only.
 
 The core is one executable built with Bun from `backend/` (about 145–175 MB
 per platform: the Bun runtime and what it embeds). What the core embeds:

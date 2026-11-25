@@ -109,6 +109,13 @@ module.exports = {
     for (const file of needed) {
       if (!existsSync(join(__dirname, file))) throw new Error(`Missing ${file}; build it with scripts/desktop.sh`);
     }
+    // Linux: node-pty was built by pnpm install for this machine; refuse an
+    // app for another architecture than the library's (ELF e_machine).
+    if (context.electronPlatformName === 'linux') {
+      const machine = readFileSync(join(__dirname, ptyBinary('linux'))).readUInt16LE(18);
+      if (machine !== { x64: 62, arm64: 183 }[arch])
+        throw new Error(`node-pty is built for another architecture than ${arch}; package on ${arch}`);
+    }
     // node-pty spawns through this helper on macOS; build.mjs makes it
     // executable.
     if (context.electronPlatformName === 'darwin') {
