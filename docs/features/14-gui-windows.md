@@ -561,7 +561,10 @@ See [SECURITY.md](../../SECURITY.md).
   `make gui-helper`): its JPEG byte for byte the Go agent's
   (`src/testdata`, written by `gen.go` from `internal/jpegstrip`), PNG
   decoding to its pixels, every malformed message of the node refused,
-  the compositor's protocol, errors and bounds, NVIDIA's layouts.
+  the compositor's protocol, errors and bounds, NVIDIA's layouts, system
+  calls' errors (Linux). All of them also pass built for Linux and run in
+  Alpine containers on arm64 and x86-64 (`zig test -target
+  <arch>-linux-musl src/main.zig --test-no-exec`, the binary run there).
 - `backend/features/gui/integration.test.ts` (`make it`, Linux with Xvfb;
   `scripts/gui-it.sh` runs it in Docker): the helper against a real Xvfb
   through the node, as `TestGUIWindows` (and on the GPU display where the
