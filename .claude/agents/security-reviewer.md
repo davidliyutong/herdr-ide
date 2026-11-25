@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Reviews changes for security impact against SECURITY.md. Use before merging changes to backend/kernel (guards, machines, ssh transport), backend/features (files, proxy, bridge, vault, auth), backend/hosts, internal/agent (files, sockets, processes, archives), backend/features/vscode (downloads, checksums), or anything that executes, downloads, listens or writes outside the repository. Read-only.
+description: Reviews changes for security impact against SECURITY.md. Use only when a code review is asked for, or before merging a branch with changes to backend/kernel (guards, machines, ssh transport), backend/features (files, proxy, bridge, vault, auth), backend/hosts, internal/agent (files, sockets, processes, archives), backend/features/vscode (downloads, checksums), or anything that executes, downloads, listens or writes outside the repository; not after every change. Read-only.
 tools: Read, Grep, Glob, Bash
 ---
 

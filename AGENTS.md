@@ -55,7 +55,29 @@ takes over from the other.
 | Isolated desktop development | `make dev-desktop` |
 | Run for development: the core from its sources (`bun`, instance `dev`, this host's machine build in `dist/agents`, the payloads of `dist/payload`) and Vite | `make dev-core` and `make dev-web` |
 
-Run `make check test` before finishing a change.
+## Tests: fast and slow, by area
+
+Tests are grouped by area: the core's beside its sources
+(`backend/features/<feature>`, `backend/kernel/<part>`, `backend/machine`,
+`backend/shared/<part>`), the Go packages by package, the web UI's by
+file name in `web/src/__tests__`, the desktop shell's in `desktop/src`.
+
+- **A small change** (one feature, one module): run `make check` and the
+  tests of the areas it touches only, e.g. `cd backend && bun test
+  features/git`, `go test ./internal/agent/plugin/git`, `pnpm -C web test
+  -- git`. Do not run the whole suite after each edit.
+- **Fast tests** (`make test`): every area, without the slow tests. Run
+  them before merging a branch or opening a pull request, and after a
+  change that crosses areas (a protocol, a shared module).
+- **Slow tests**: the core's tests marked `slow`
+  (`backend/shared/testdata/slow.ts`: they wait on real time, programs
+  or compiles; `make test-slow`), `make it`, `make e2e` and the machine
+  matrix. They cost minutes and load the machine: run one only when the
+  change touches what it covers (one file: `SLOW_TESTS=1 bun test
+  <file>`, `make e2e E2E_ARGS='tests/<spec>'`), the whole set before a
+  release. CI runs the slow tests of the core.
+- Never add load (stress tools, busy loops) to the user's machine to
+  provoke a failure.
 
 ## Rules
 
@@ -127,7 +149,7 @@ playbooks):
 | Role | Use it when |
 | --- | --- |
 | `hc-integration` | Changing anything that talks to the terminal core (herdr-core), or upgrading it. |
-| `security-reviewer` | Before merging changes to guards, files, sockets, processes, ssh or downloads. |
+| `security-reviewer` | Only when a code review is asked for, or before merging a branch that changes guards, files, sockets, processes, ssh or downloads; not after every change. |
 | `docs-keeper` | After changing flags, shortcuts, protocols, layout on disk or features. |
 | `i18n-translator` | After adding or changing user-visible text, or to add a locale. |
 | `release-manager` | Cutting a release (it writes `CHANGELOG.md`) or bumping pinned code-server/extension versions. |
