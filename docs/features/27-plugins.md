@@ -3,8 +3,8 @@
 ## Context
 
 Many features are self-contained: a panel, a kind of pane, a few commands,
-routes in the core and work on machines. Wiring each by hand into the app
-shell, status bar, keymap, the core's routes and the agent's dispatch made
+routes in the hub and work on machines. Wiring each by hand into the app
+shell, status bar, keymap, the hub's routes and the agent's dispatch made
 every feature touch the same files and left no way to turn one off.
 Plugins give such features one shape on each side.
 
@@ -14,22 +14,22 @@ terminals on narrow windows ([05](05-vscode-panes.md)). Panels stay small
 
 ## Goals / non-goals
 
-- One shape on each side: core (a feature, `backend/kernel/feature.ts`,
+- One shape on each side: hub (a feature, `backend/kernel/feature.ts`,
   one directory each in `backend/features`), machine side (the feature's
   `machine.ts`), web UI (`web/src/plugins`).
 - A switch per plugin, in Settings › Plugins.
 - Non-goal: plugins loaded at runtime or written by third parties. Plugins
   are compiled in and pass the same guards as any route; foreign code
-  would need a trust boundary the core does not have.
+  would need a trust boundary the hub does not have.
 
 ## Design
 
-### Core
+### Hub
 
-A plugin is a feature of the core (`defineFeature`,
+A plugin is a feature of the hub (`defineFeature`,
 `backend/kernel/feature.ts`): an id, a typed protocol of its machine-side
 actions (`protocol.ts`) and a `setup` that gets a `FeatureContext`, never
-the whole core. Its routes are mounted below `/api/p/<id>/` (core,
+the whole hub. Its routes are mounted below `/api/p/<id>/` (hub,
 `ctx.api`), `/api/m/{id}/p/<id>/` (per machine, `ctx.machineApi`; unknown
 machine → 404) or a prefix of its own (`ctx.route`, VS Code's).
 
@@ -43,7 +43,7 @@ machine → 404) or a prefix of its own (`ctx.route`, VS Code's).
   plugin's page connection) behind the same Host and Origin checks.
 - **Services and streams.** `ctx.service` (background work such as a
   scheduler, ended by its signal), `ctx.agentStream` (streams agents open
-  towards the core, e.g. the vault's; `plugin_disabled` while off),
+  towards the hub, e.g. the vault's; `plugin_disabled` while off),
   `ctx.onForget` (called when the user removes a machine, whether the
   plugin is on or off).
 - **Context** (`FeatureContext`): machines (with `publishAgent`, a `/ws`
@@ -65,7 +65,7 @@ machine → 404) or a prefix of its own (`ctx.route`, VS Code's).
   where its scripts reach what the page reaches (VS Code), has
   `browserRisk`. It gets a second switch, `plugins.<id>.browser`, always
   off by default; `enabled` then applies to the desktop app only. The
-  core tells the clients apart (the request's `client`: the desktop app's
+  hub tells the clients apart (the request's `client`: the desktop app's
   launch token, [08](08-web-access-and-security.md)) and applies the
   requesting client's switch to the plugin's routes (`enableSetting`,
   `ctx.enabledFor`). What serves every client (agents' streams, schedulers)
@@ -80,7 +80,7 @@ machine → 404) or a prefix of its own (`ctx.route`, VS Code's).
 
 The op `plugin` (`Header.Plugin`, `Action`, `Params`) runs the handler
 registered with `plugin.Register`. It answers once (`plugin.Reply`) or
-streams JSON lines after its reply until the core closes the stream
+streams JSON lines after its reply until the hub closes the stream
 (`plugin.UntilClosed`). Failures carry a code
 (`plugin.Errorf`); unknown plugin → `unknown_plugin`. A panicking handler
 fails its action with `failed` and is logged; the agent goes on. Handlers
@@ -88,7 +88,7 @@ get the agent's directories and environment (`plugin.Env`), including
 running helpers as hidden terminals of the terminal core (`RunHidden`,
 `KillHidden`, [21](21-terminal-core.md)).
 
-Actions run with the agent's context; when the core gives up, the action's
+Actions run with the agent's context; when the hub gives up, the action's
 stream closes. An action that reads nothing more from the stream can opt
 in to `plugin.UntilClosed`, a context that ends when the stream closes,
 and stop (file copies and removals, usage scans, code-server downloads,
@@ -196,7 +196,7 @@ panels into panes.
 | --- | --- | --- |
 | `transfers` | always on | Uploads and downloads trays ([06](06-quick-look-and-files.md)). |
 | `gui` | `gui.enabled` (per machine) | Program windows' tray and palette items ([14](14-gui-windows.md)). |
-| `vscode` | `plugins.vscode.enabled` (desktop app), `plugins.vscode.browser` (browsers, after accepting the risk); both off by default | VS Code panes and their commands ([05](05-vscode-panes.md)). Its routes are the core's own (`/api/m/{id}/code/*`, `/m/{id}/code/`, `/api/m/{id}/bridge`) and answer `plugin_disabled` to a client whose switch is off (stopping code-server excepted). Turning a switch off closes that client's proxied connections; once both are off, a code-server preparation under way ends. |
+| `vscode` | `plugins.vscode.enabled` (desktop app), `plugins.vscode.browser` (browsers, after accepting the risk); both off by default | VS Code panes and their commands ([05](05-vscode-panes.md)). Its routes are the hub's own (`/api/m/{id}/code/*`, `/m/{id}/code/`, `/api/m/{id}/bridge`) and answer `plugin_disabled` to a client whose switch is off (stopping code-server excepted). Turning a switch off closes that client's proxied connections; once both are off, a code-server preparation under way ends. |
 | `files` | `plugins.files.enabled` | File explorer panel and editor pane ([28](28-file-explorer.md)). |
 | `vault` | `plugins.vault.enabled` | Variable vault panel, approvals, the op `vault` and the `mcp` command ([30](30-variable-vault.md)). |
 | `usage` | `plugins.usage.enabled` | AI usage panel, status items (tightest window, the focused agent's session) and scheduler ([29](29-ai-usage.md)). |
@@ -204,7 +204,7 @@ panels into panes.
 | `monitor` | `plugins.monitor.enabled` | Resource dashboard and Task Manager ([34](34-system-monitor.md)). |
 | `search` | `plugins.search.enabled` | The Search panel: text in the files of a folder on the machine, opening at the match in VS Code or the file explorer's editor ([41](41-project-search.md)). |
 | `agents` | `plugins.agents.enabled` | Sessions of detected coding agents, the route confirming one before a restore resumes it, and **Continue in Chat** on a terminal whose agent quit ([35](35-agent-native-view.md)). |
-| `chat` | `plugins.chat.enabled` (and `chat.*`, per machine) | Chats run by each machine's chat host: chat pane, Chats panel, new-tab items, `chat.new`, the `chat.usage` status item, pane statuses, the core's WebSocket ([37](37-agent-chats.md)). |
+| `chat` | `plugins.chat.enabled` (and `chat.*`, per machine) | Chats run by each machine's chat host: chat pane, Chats panel, new-tab items, `chat.new`, the `chat.usage` status item, pane statuses, the hub's WebSocket ([37](37-agent-chats.md)). |
 | `history` | `plugins.history.enabled` (and `history.capture`, off by default, per machine) | Snapshots of terminals' output on each machine, shown above the new shell of a terminal whose program was replaced ([36](36-terminal-history.md)). |
 
 ## Alternatives considered
@@ -224,7 +224,7 @@ panels into panes.
   its place and unsaved text.
 - **Handler panics on a machine** → `failed`; the agent goes on.
 - **Component throws** → error with Try Again in its place.
-- **Core gives up on an action** → its stream closes; `UntilClosed`
+- **Hub gives up on an action** → its stream closes; `UntilClosed`
   actions stop.
 
 ## Testing
@@ -240,7 +240,7 @@ panels into panes.
   the caller (`open and stream`).
 - `backend/machine/agent.test.ts` (`the plugin op`): params and results
   inline or as bodies, refusals with codes, a throwing handler, actions
-  ended by the core.
+  ended by the hub.
 - `backend/hosts/bun/registry.test.ts`: `plugin sections`, the features'
   switches in their order.
 - Web: `plugins.test.ts`, `viewStatus.test.tsx`, `notifyViews.test.ts`,

@@ -2,18 +2,18 @@
 
 Single source for commands, flags, settings, keyboard shortcuts, endpoints,
 environment variables and on-disk layout. `scripts/check.sh` fails when a
-flag or a route of the core is missing here
+flag or a route of the hub is missing here
 (`backend/scripts/reference.ts`); both READMEs link to this page instead of
 repeating it.
 
 ## Commands
 
-On Linux and macOS the core's executable is the machine build of its own
+On Linux and macOS the hub's executable is the machine build of its own
 platform too ([42](features/42-typescript-backend.md)): besides `serve`,
 `fetch-assets` and `version` it runs the machine's commands (`node`, `mcp`,
 `chat-host`), and each machine runs its platform's from
 `~/.veldr/agent/<build>/veldr`, downloaded from the release or uploaded by
-the core. On Linux machines the GUI helper it carries (`veldr-gui`,
+the hub. On Linux machines the GUI helper it carries (`veldr-gui`,
 [14](features/14-gui-windows.md)) has the display's commands.
 
 | Command | Description |
@@ -22,13 +22,13 @@ the core. On Linux machines the GUI helper it carries (`veldr-gui`,
 | `veldr fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
 | `veldr mcp [--instance NAME] [--socket PATH]` | The variable vault's MCP server on stdio for coding agents' CLIs; asks the instance's agent through `vault.sock`, exits when stdin closes or on SIGTERM/SIGINT/SIGHUP, killing the commands it runs first ([30](features/30-variable-vault.md)). Exit 2: bad command line; 1: no home directory, or a line over 4 MiB. Served by every executable. |
 | `veldr version` | Print the version. |
-| `veldr node [--instance NAME] [--takeover]` | The machine's node: serves the core's protocol on `<run>/node.sock` (the namespace's runtime directory on this host, see [files](#files-and-directories)) to any number of cores; started by them, ends 15 s after its last client; `--takeover` takes the socket from the running node, which drains ([39](features/39-nodes.md)). Linux and macOS. |
-| `veldr node dial [--instance NAME] [--client ID]` | Pipes stdio to the node, starting one (or one that takes over from an older build's) when none answers; what a core runs over ssh, `--client` naming the core. |
+| `veldr node [--instance NAME] [--takeover]` | The machine's node: serves the hub's protocol on `<run>/node.sock` (the namespace's runtime directory on this host, see [files](#files-and-directories)) to any number of hubs; started by them, ends 15 s after its last client; `--takeover` takes the socket from the running node, which drains ([39](features/39-nodes.md)). Linux and macOS. |
+| `veldr node dial [--instance NAME] [--client ID]` | Pipes stdio to the node, starting one (or one that takes over from an older build's) when none answers; what a hub runs over ssh, `--client` naming the hub. |
 | `veldr node stop [--instance NAME] [--terminal-core]` | Asks the instance's nodes to stop; `--terminal-core` also stops the instance's terminal core on this host when one answers on its socket, ending its terminals. |
-| `~/.veldr[-<instance>]/bin/veldr-mcp` | The MCP server on a machine: a shell script running `veldr-mcp-$(uname -s)-$(uname -m)` beside it, a link to the installed machine build of that platform (the core's executable, started by that name as `mcp`); takes no arguments and asks the agent of its data directory on this host. |
+| `~/.veldr[-<instance>]/bin/veldr-mcp` | The MCP server on a machine: a shell script running `veldr-mcp-$(uname -s)-$(uname -m)` beside it, a link to the installed machine build of that platform (the hub's executable, started by that name as `mcp`); takes no arguments and asks the agent of its data directory on this host. |
 | `veldr-gui gui-keep --socket S --pid P --xauth F --hc-socket H --lock L --display D` | The GUI helper's display keeper: holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
 | `veldr-gui gui-wl --device NODE [--nvidia]` | The GUI helper's compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
-| `veldr chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS; with the ACP, Codex and Claude Code adapters, Claude Code's on Anthropic's Agent SDK, which the core has the machine fetch before such a chat starts (a chat whose agent starts without it fails `sdk_unavailable`, [42](features/42-typescript-backend.md#claude-code)). |
+| `veldr chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS; with the ACP, Codex and Claude Code adapters, Claude Code's on Anthropic's Agent SDK, which the hub has the machine fetch before such a chat starts (a chat whose agent starts without it fails `sdk_unavailable`, [42](features/42-typescript-backend.md#claude-code)). |
 
 ## `serve` flags
 
@@ -54,9 +54,9 @@ and file change the value at runtime.
 | --- | --- | --- |
 | `--local-only` | `false` | Do not connect the stored SSH machines (`--ssh` targets still are). |
 | `--machine` | – | Connect only these machines, by id, label or ssh target (repeatable). |
-| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored (repeatable). At most 255 bytes, not starting with `-`, without whitespace, control characters or ``! " $ & ' ( ) * ; < > ? \ ` { \| }``; the core refuses to start otherwise. |
-| `--instance` | – | State instance: this core's files (`settings-<instance>.json` and the rest of the configuration directory) and, unless `--node-instance` says otherwise, `~/.veldr-<instance>` on machines, with its own node, sockets, terminal core session `veldr-<instance>-<host id>` and code-server. |
-| `--node-instance` | `--instance` | The namespace on machines: their `~/.veldr[-<instance>]` and terminal core session, shared with every core of the same namespace; empty (`--node-instance=`) is the default one, which the desktop app uses ([39](features/39-nodes.md)). |
+| `--ssh` | – | Extra ssh target (`~/.ssh/config` alias or `user@host`) for this run, not stored (repeatable). At most 255 bytes, not starting with `-`, without whitespace, control characters or ``! " $ & ' ( ) * ; < > ? \ ` { \| }``; the hub refuses to start otherwise. |
+| `--instance` | – | State instance: this hub's files (`settings-<instance>.json` and the rest of the configuration directory) and, unless `--node-instance` says otherwise, `~/.veldr-<instance>` on machines, with its own node, sockets, terminal core session `veldr-<instance>-<host id>` and code-server. |
+| `--node-instance` | `--instance` | The namespace on machines: their `~/.veldr[-<instance>]` and terminal core session, shared with every hub of the same namespace; empty (`--node-instance=`) is the default one, which the desktop app uses ([39](features/39-nodes.md)). |
 
 ### code-server
 
@@ -64,12 +64,12 @@ and file change the value at runtime.
 | --- | --- | --- |
 | `--code-server-version` | `4.144.0` | code-server release for machines; default versions have pinned SHA-256 digests. |
 | `--code-server-idle` | `20m` | Stop a machine's code-server after this long without VS Code connections; `0` keeps it while the agent lives. |
-| `--code-server-url` | GitHub releases | Download URL template (`{version}`, `{asset}`, `{file}`); point it at a mirror. An `http` or `https` URL without user information, query or fragment: machines get it on their command line (`--code-server-install=download`), so the core refuses to start with credentials in it; serve a mirror that needs credentials through a `--seed-dir`. |
+| `--code-server-url` | GitHub releases | Download URL template (`{version}`, `{asset}`, `{file}`); point it at a mirror. An `http` or `https` URL without user information, query or fragment: machines get it on their command line (`--code-server-install=download`), so the hub refuses to start with credentials in it; serve a mirror that needs credentials through a `--seed-dir`. |
 | `--extension-url` | Open VSX | Extension URL template (`{publisher}`, `{name}`, `{version}`, `{file}`). |
 | `--seed-dir` | – | Directory of pre-downloaded tarballs and VSIXs (from `fetch-assets`), and of Anthropic's Agent SDK tarball (`claude-agent-sdk-0.3.322.tgz`, for Claude Code's chats on machines), searched before the cache (repeatable). |
 | `--offline` | `false` | Never download; artifacts come from `--seed-dir` or the cache. Machines are not asked to download the Agent SDK either. |
-| `--npm-registry` | `https://registry.npmjs.org` | npm registry or mirror from which the core and the machines download Anthropic's Agent SDK when a Claude Code chat on a machine needs it; the tarball is checked against the pinned integrity whatever its source ([42](features/42-typescript-backend.md#claude-code)). An `http` or `https` URL without user information, query or fragment: machines get it on their command line, so the core refuses to start with credentials in it; put the tarball of a mirror that needs credentials into a `--seed-dir`. |
-| `--code-server-install` | `push` | `push` (the core uploads), `download` (the machine fetches with curl or wget, same digest; off with `--offline`) or `existing`; the last two fall back to `push`. Setting `codeServer.install`. |
+| `--npm-registry` | `https://registry.npmjs.org` | npm registry or mirror from which the hub and the machines download Anthropic's Agent SDK when a Claude Code chat on a machine needs it; the tarball is checked against the pinned integrity whatever its source ([42](features/42-typescript-backend.md#claude-code)). An `http` or `https` URL without user information, query or fragment: machines get it on their command line, so the hub refuses to start with credentials in it; put the tarball of a mirror that needs credentials into a `--seed-dir`. |
+| `--code-server-install` | `push` | `push` (the hub uploads), `download` (the machine fetches with curl or wget, same digest; off with `--offline`) or `existing`; the last two fall back to `push`. Setting `codeServer.install`. |
 | `--code-server-path` | – | code-server on machines for `existing`; empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/snap/bin`. Setting `codeServer.path`. |
 
 code-server settings apply from the next code-server start on each machine.
@@ -98,7 +98,7 @@ remote machine.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--agent-dir` | – | Directory of machine builds, the core's first source of them: the release's `SHA256SUMS` with the archives (`veldr-<os>-<arch>[-musl].tar.gz`) or the executables in them (`veldr-<os>-<arch>[-musl]`), each checked against that `SHA256SUMS`, which must name the core's own executable (offline sites, [deployment](deployment.md#air-gapped-networks)). |
+| `--agent-dir` | – | Directory of machine builds, the hub's first source of them: the release's `SHA256SUMS` with the archives (`veldr-<os>-<arch>[-musl].tar.gz`) or the executables in them (`veldr-<os>-<arch>[-musl]`), each checked against that `SHA256SUMS`, which must name the hub's own executable (offline sites, [deployment](deployment.md#air-gapped-networks)). |
 | `--ext-dir` | – | Directory containing `veldr-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
 | `--parent-stdio` | `false` | Launcher lifecycle (the end-to-end tests): write `{"event":"ready","url":"…"}` to stdout after binding, clean up when stdin closes (what stdin carries is not read). Does not change HTTP guards; every client is a browser. |
@@ -111,10 +111,10 @@ selects the code-server builds; `--code-server-version`, `--code-server-url`,
 
 ## Settings
 
-Every setting is defined in the core (`backend/kernel/config` and the
+Every setting is defined in the hub (`backend/kernel/config` and the
 features' `settings`) and shown in the settings dialog
 ([13](features/13-settings-and-appearance.md)). Values live in
-`settings[-<instance>].json` on the core host, which can be edited by hand
+`settings[-<instance>].json` on the hub host, which can be edited by hand
 (reread within two seconds). A setting with a scope can have a value per
 machine under `"[machine:<id>]"`. The table is generated by
 `backend/scripts/registry.ts` (`make tokens`; `make check` fails when
@@ -260,7 +260,7 @@ UI's origin, so its extensions can do whatever the page can; setting
 ## Keyboard shortcuts
 
 Keys come from `backend/kernel/config/keybindings` and can be changed in **Settings →
-Keyboard Shortcuts** or in `keybindings[-<instance>].json` on the core host
+Keyboard Shortcuts** or in `keybindings[-<instance>].json` on the hub host
 ([04](features/04-layout-and-keyboard.md)):
 
 - A rule is `{"key", "command", "when"}`; `"command": "-<id>"` removes a
@@ -398,10 +398,10 @@ a pane header, tab, workspace or machine for its commands.
 Every endpoint passes the same guards (Host, Origin, proxy secret,
 [SECURITY.md](../SECURITY.md)); those marked *writes* are refused with
 `--read-only`. Messages are in [architecture](architecture.md); `{id}` is a
-machine's id. `make check` fails when a route of the core is missing here
+machine's id. `make check` fails when a route of the hub is missing here
 (`backend/scripts/reference.ts`).
 
-### Core
+### Hub
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
@@ -413,7 +413,7 @@ machine's id. `make check` fails when a route of the core is missing here
 | `DELETE /api/settings` | writes | Removes one value. |
 | `GET /api/keybindings` | – | Commands, default keys per platform, user rules, bindings in effect, conflicts. |
 | `PUT /api/keybindings` | writes | Replaces the user's rules. |
-| `GET /api/perf` | – | The core process's own use: `{"cpu_ms", "memory", "goroutines" (the event loop's active resources), "uptime_ms", "cpus"}` ([13](features/13-settings-and-appearance.md)). |
+| `GET /api/perf` | – | The hub process's own use: `{"cpu_ms", "memory", "goroutines" (the event loop's active resources), "uptime_ms", "cpus"}` ([13](features/13-settings-and-appearance.md)). |
 | `/` | – | The web UI (`/licenses.md`: its bundle's notices); other paths get the app shell, except unknown `/api/…` paths (404). |
 
 ### Machines
@@ -423,14 +423,14 @@ machine's id. `make check` fails when a route of the core is missing here
 | `GET /api/machines` | – | Every machine's state, agent info and terminal core state; never-connected machines carry `code` `invalid_target` or `local_unsupported`, machines whose build could not be deployed `failure` (`platform_unsupported`, `cpu_unsupported`, `libs_missing`, `build_unavailable`) with `error`. |
 | `POST /api/machines` | writes | Adds and stores an SSH machine (`{"target", "label"}`). |
 | `PUT /api/machines/order` | writes | Stores the machines' order (`{"order": [ids]}`, each once). |
-| `GET /api/ssh/hosts` | writes | Host aliases of the core host's ssh configuration not yet machines (`[{"alias", "hostname"?, "user"?}]`) ([02](features/02-multi-machine-transport.md)). |
+| `GET /api/ssh/hosts` | writes | Host aliases of the hub host's ssh configuration not yet machines (`[{"alias", "hostname"?, "user"?}]`) ([02](features/02-multi-machine-transport.md)). |
 | `DELETE /api/m/{id}` | writes | Removes a stored machine. |
 | `PUT /api/m/{id}/label` | writes | Renames a machine. |
 | `PUT /api/m/{id}/enabled` | writes | Enables or disables a machine. |
 | `GET /api/m/{id}/auth` | writes | Interactive ssh login (WebSocket, `?cols=&rows=`); `501 ssh_login_unsupported` on Windows. |
 | `GET /api/m/{id}/hc` | – | Terminal core: installed, running, version. |
 | `POST /api/m/{id}/hc/{action}` | writes | `start`, `stop` or `restart` the terminal core. |
-| `GET /api/m/{id}/privacy` | – | macOS Full Disk Access of the agent (`files`) and the terminal core (`terminals`): `granted`, `denied` or `unknown`; `hc` is the core's executable. Starts no terminal core. |
+| `GET /api/m/{id}/privacy` | – | macOS Full Disk Access of the agent (`files`) and the terminal core (`terminals`): `granted`, `denied` or `unknown`; `hc` is the terminal core's executable. Starts no terminal core. |
 
 ### Files
 
@@ -448,7 +448,7 @@ machine's id. `make check` fails when a route of the core is missing here
 | `GET /api/m/{id}/code/status` | – | Whether code-server is installed and runs. The VS Code routes answer `404 plugin_disabled` while VS Code is off for the client kind. |
 | `POST /api/m/{id}/code/start` | writes | Installs and starts code-server. |
 | `POST /api/m/{id}/code/stop` | – | Releases code-server (allowed read-only). |
-| `/m/{id}/code/` | writes | code-server behind the core's proxy (`/m/{id}/code` redirects here). |
+| `/m/{id}/code/` | writes | code-server behind the hub's proxy (`/m/{id}/code` redirects here). |
 | `POST /api/m/{id}/bridge` | writes | A command for a VS Code window (open, diff, Git Graph); the reply names the window that took it ([05](features/05-vscode-panes.md)). |
 | `GET /api/gui` | – | Program windows of every machine. |
 | `POST /api/m/{id}/gui/enable` | writes | Gives open terminals the display (`{"terminals": [...]}`, empty for all). |
@@ -468,12 +468,12 @@ changes are audited as `<plugin>.<action>` with their outcome
 | `POST /api/m/{id}/p/files/{action}` | writes | `mkdir` (`"unique"`), `mkdirs`, `create`, `rename`, `move`, `copy`, `trash`, `remove`; never replaces existing names. |
 | `POST /api/m/{id}/p/files/write` | writes | Saves the body (≤ 8 MiB) to `?path=` if it still has `&mtime=&size=` (`&new=1`, `&force=1`); else `409 conflict`. |
 | `POST /api/m/{id}/p/files/upload` | writes | Writes the body (≤ 4 GiB) to `?path=` under a free name, or over it with `&replace=1`. |
-| `GET /api/m/{id}/p/files/reveal` | – | `{"available"}`: whether Reveal in Finder is offered (the core's own machine, a client on the core host). |
-| `POST /api/m/{id}/p/files/reveal` | writes | Shows `{"path"}` in the core host's file manager. |
+| `GET /api/m/{id}/p/files/reveal` | – | `{"available"}`: whether Reveal in Finder is offered (the hub's own machine, a client on the hub host). |
+| `POST /api/m/{id}/p/files/reveal` | writes | Shows `{"path"}` in the hub host's file manager. |
 | `GET /api/m/{id}/p/git/{read}` | – | Git reads ([31](features/31-git.md)): `repo`, `status`, `log`, `show`, `blob`, `branches`, `tags`, `stashes`, `diffStat`, `watch`. |
 | `POST /api/m/{id}/p/git/{change}` | writes | Git changes (JSON ≤ 5 MiB): `stage`, `unstage`, `applyPatch`, `discard`, `commit`, `checkout`, `branchCreate`, `branchDelete`, `branchRename`, `merge`, `rebase`, `abort`, `continue`, `cherryPick`, `revert`, `reset`, `tagCreate`, `tagDelete`, `stashPush`, `stashApply`, `stashPop`, `stashDrop`, `fetch`, `pull`, `push`. |
 | `GET /api/p/browser/forwards` | – | Port forwards and whether this client can use them ([32](features/32-browser-and-ports.md)). |
-| `POST /api/m/{id}/p/browser/forwards` | writes | Makes or reuses the forward of `{"port"}`; core-host clients only, at most 32. |
+| `POST /api/m/{id}/p/browser/forwards` | writes | Makes or reuses the forward of `{"port"}`; hub-host clients only, at most 32. |
 | `DELETE /api/m/{id}/p/browser/forwards/{port}` | writes | Stops a forward and its connections. |
 | `GET /api/m/{id}/p/browser/listening` | – | TCP ports the user's programs listen on. |
 | `GET /api/m/{id}/p/monitor/metrics` | – | Live CPU, memory, GPU, network and disk figures ([34](features/34-system-monitor.md)). |
@@ -495,7 +495,7 @@ changes are audited as `<plugin>.<action>` with their outcome
 
 The chat plugin ([37](features/37-agent-chats.md)). GETs never start a
 machine's chat host and answer `409 not_running` without one; changes start
-it, except on a read-only core, which refuses them.
+it, except on a read-only hub, which refuses them.
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
@@ -517,7 +517,7 @@ it, except on a read-only core, which refuses them.
 | `POST /api/m/{id}/p/chat/host/stop` | writes | Stops the chat host; `409 busy` while a chat works. |
 | `GET /api/p/chat/hosts` | – | Every machine's chat host and its active sessions, starting none. |
 | `GET /api/p/chat/states` | – | Every machine's chat states as last read, with revisions continued on `/ws`. |
-| `GET /api/p/chat/ws` | – | The chat WebSocket, one per page ([architecture](architecture.md#chats-backendsharedprotochatproto-backendfeatureschat)): subscriptions (≤ 32, 16 per machine) and commands; read-only cores refuse commands. |
+| `GET /api/p/chat/ws` | – | The chat WebSocket, one per page ([architecture](architecture.md#chats-backendsharedprotochatproto-backendfeatureschat)): subscriptions (≤ 32, 16 per machine) and commands; read-only hubs refuse commands. |
 
 ### Variable vault
 
@@ -556,27 +556,27 @@ only through `reveal` and `export`, each recorded in the access log first.
 | Variable | Where | Description |
 | --- | --- | --- |
 | `VELDR_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
-| `VELDR_HUB` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets `DEV_LISTEN`'s). |
+| `VELDR_HUB` | `pnpm -C web dev` | Hub URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets `DEV_LISTEN`'s). |
 | `VELDR_DESKTOP_DEV` | Electron | Isolated development instance: `1` for `dev`, or a name (lowercase letters, digits, dashes, ≤ 32, not `desktop`). Local-only, own Electron profile and lock. Always on for unpackaged Electron. |
 | `VELDR_DESKTOP_NO_OPEN` | Electron, development instances | Full Disk Access buttons print `no-open: …` to stderr instead of opening anything. |
-| `VELDR_DESKTOP_PAYLOAD` | Electron, development instances | A directory laid out as `dist/payload` (machine builds, herdr-core, encoders, the extension) for the core instead of the repository's (the desktop smoke test's). |
+| `VELDR_DESKTOP_PAYLOAD` | Electron, development instances | A directory laid out as `dist/payload` (machine builds, herdr-core, encoders, the extension) for the hub instead of the repository's (the desktop smoke test's). |
 | `VELDR_AGENT_DIR` | Electron, development instances; `veldr node` | Machine builds searched first, as `--agent-dir`. |
 | `VELDR_SEED_DIR` | Electron, development instances | A directory of code-server releases and extensions, as `--seed-dir`. |
 | `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and single-instance lock, for smoke tests beside another copy. |
-| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux; agent | Configuration (default `~/.config`) and cache (default `~/.cache`) directories; on a machine also where herdr-core's `config.toml` is read for `restore_screen`. |
+| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | hub on Linux; agent | Configuration (default `~/.config`) and cache (default `~/.cache`) directories; on a machine also where herdr-core's `config.toml` is read for `restore_screen`. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent | AI CLIs' credential, log and session directories when not the defaults; on Linux read from a running agent's environment to find its session ([35](features/35-agent-native-view.md)). |
 | `KIMI_DISABLE_OAUTH_LOCK` | agent (AI usage) | `1`: Kimi Code renews without its lock, so the plugin does not renew it. |
 | `XDG_DATA_HOME`, `OPENCODE_DB` | agent (AI usage) | OpenCode's database location when not `~/.local/share/opencode/opencode.db`. |
 | `DEEPSEEK_API_KEY` | agent (AI usage) | DeepSeek key for the balance: after the key file the panel writes, before Claude Code's settings. |
-| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | agent (AI usage), core (status pages) | Proxy for the AI providers' hosts (the language server on loopback goes through none). |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | agent (AI usage), hub (status pages) | Proxy for the AI providers' hosts (the language server on loopback goes through none). |
 | `SHELL` | chat host | Login shell run as `$SHELL -l -i -c env` for the chats' agents' environment; `/bin/sh -l` if not absolute ([37](features/37-agent-chats.md)). |
 
 Build scripts and tests:
 
 | Variable | Where | Description |
 | --- | --- | --- |
-| `TARGETS` | `scripts/build.sh` | Core platforms (default the host's), e.g. `"linux/amd64 darwin/arm64"`, also `linux/amd64-musl` and `linux/arm64-musl`; `windows/amd64` builds only `dist/veldr-windows-amd64.exe`. |
-| `RELEASE_URL` | `scripts/build.sh` | The release's download URL, from which machines get their platform's archive (none for a build of no release, whose machines get theirs from `--agent-dir` or the core's own executable). |
+| `TARGETS` | `scripts/build.sh` | Hub platforms (default the host's), e.g. `"linux/amd64 darwin/arm64"`, also `linux/amd64-musl` and `linux/arm64-musl`; `windows/amd64` builds only `dist/veldr-windows-amd64.exe`. |
+| `RELEASE_URL` | `scripts/build.sh` | The release's download URL, from which machines get their platform's archive (none for a build of no release, whose machines get theirs from `--agent-dir` or the hub's own executable). |
 | `HC_PLATFORMS` | `scripts/build.sh` | herdr-core platforms fetched (`backend/scripts/fetch-hc.ts`) whose digests the executables record (default all four). |
 | `SKIP_WEB`, `SKIP_EXT` | `scripts/build.sh` | `1` reuses `web/dist` or the built bridge extension. |
 | `REQUIRE_ENCODER` | `scripts/build.sh` | `1` fails when the Linux video encoder is missing. |
@@ -591,9 +591,9 @@ Build scripts and tests:
 | `CSC_NAME` | `scripts/desktop.sh` on macOS | Developer ID identity in the keychain, instead of `CSC_LINK`. |
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | `scripts/desktop.sh` on macOS | Notarize with this Apple ID. |
 | `ELECTRON_SKIP_BINARY_DOWNLOAD` | `make deps` | `1` skips Electron's binary (enough for checks and tests). |
-| `DEV_LISTEN` | `make dev-hub`, `make dev-web` | Development core address (default `127.0.0.1:7790`). |
+| `DEV_LISTEN` | `make dev-hub`, `make dev-web` | Development hub address (default `127.0.0.1:7790`). |
 | `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
-| `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the core and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
+| `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the hub and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
 | `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |
 | `GUI_TEST_XCLIENT` | `bun test features/gui/integration.test.ts` (`make it`, `scripts/gui-it.sh`) | The X program of the program windows' integration test (e2e/fakes/xclient.ts compiled for the machine); without it the test compiles one with bun build --compile. |
 
@@ -611,7 +611,7 @@ else `<data>/run-<host id>`. Retention is summarized in
 
 | Path | Content | Lifetime |
 | --- | --- | --- |
-| `~/.veldr/agent/<build>/veldr` | The machine build: the executable (from its release archive, downloaded by the machine or uploaded by the core), accepted only with the SHA-256 its release's `SHA256SUMS` names | Unused 14 days. |
+| `~/.veldr/agent/<build>/veldr` | The machine build: the executable (from its release archive, downloaded by the machine or uploaded by the hub), accepted only with the SHA-256 its release's `SHA256SUMS` names | Unused 14 days. |
 | `~/.veldr/code-server/<version>-<os>-<arch>/` | code-server releases (shared by instances and by hosts of one platform) | Unused 14 days. |
 | `~/.veldr/hosts/<host>/xvfb/<version>/` | Xvfb unpacked in user space (shared by this host's instances) | Unused 14 days, when another is unpacked. |
 | `~/.veldr/video/<sha256 prefix>/encoder` | Video encoder (shared), run only while its digest matches | Unused 14 days, when another is installed; unfinished after 1 h. |
@@ -633,7 +633,7 @@ else `<data>/run-<host id>`. Retention is summarized in
 | `<data>/chat-<host>.db` (0600, with `-wal`, `-shm`) | The chat host's journal ([37](features/37-agent-chats.md)): chats, their events, trusted folders, settings; never secret answers or agents' stderr | Within `chat.maxChatMB`, `chat.maxTotalMB`, `chat.maxChats`, `chat.retentionDays`. Agents' own session files are never touched. Another host's unopened for 30 days is removed. |
 | `<data>/chat-host-<host>.log`, `chat-host.old-<host>.log` (0600) | Chat host log (no prompts or answers) | Rotated at 1 MiB; another host's removed after 30 days unwritten. |
 
-On the core host, in the user configuration directory
+On the hub host, in the user configuration directory
 (`~/Library/Application Support/veldr/` on macOS,
 `$XDG_CONFIG_HOME/veldr/` on Linux, `%AppData%\veldr\` on Windows;
 0700 with 0600 files on Linux and macOS, replaced atomically, kept until
@@ -643,21 +643,21 @@ removed):
 | --- | --- |
 | `settings[-<instance>].json` | Settings; hand-editable, reread within two seconds, unknown entries kept. |
 | `keybindings[-<instance>].json` | Keybinding rules; hand-editable. |
-| `machines[-<instance>].json` | `{"version": 1, "machines": [{id, label, kind, target, enabled}], "order": [ids]}`: SSH machines, the local machine once changed, and the order. Written by the core from the first change; unknown fields kept. |
+| `machines[-<instance>].json` | `{"version": 1, "machines": [{id, label, kind, target, enabled}], "order": [ids]}`: SSH machines, the local machine once changed, and the order. Written by the hub from the first change; unknown fields kept. |
 | `vault[-<instance>].json` | Variable vault, values encrypted under a key derived from the passphrase ([30](features/30-variable-vault.md)). |
 | `hub[-<instance>]-<host>[-<id>].db` (with `-wal`, `-shm`) | The hub's SQLite database ([38](features/38-sqlite-state.md)): the vault's access log (last 1000 releases, 500 other records; never values) and the AI usage history (30 days of windows' use, alert periods). Earlier releases named it `core[-<instance>]-<host>[-<id>].db`; the hub removes this host's of its instance when it starts, without reading it. |
 
-Also on the core host: ssh control sockets in `/tmp/veldr-<uid>/s`
+Also on the hub host: ssh control sockets in `/tmp/veldr-<uid>/s`
 (`s-<instance>` for another instance, `h-<hash>` for one longer than
 16 characters; Linux and macOS; owned by you, 0700), and code-server downloads with
 `.sha256` sidecars in the user cache directory
 (`~/Library/Caches/veldr/code-server`, `~/.cache/veldr/code-server`,
-`%LocalAppData%\veldr\code-server`), and what the core
+`%LocalAppData%\veldr\code-server`), and what the hub
 fetched from its release (`~/.veldr/cache/machine/`: `SHA256SUMS-<version>`
 and the archives machines needed, `veldr-<platform>-<digest>.tar.gz`,
 checked when read, removed unused for 14 days).
 
-A release directory holds the core, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
+A release directory holds the hub, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
 `licenses.md` and `licenses/` (`herdr-core/`, `herdr-detect/`, `encoder/`).
 These are not copied to SSH machines.
 
@@ -665,7 +665,7 @@ In the browser, `localStorage` under `veldr.*` holds only that
 browser's state: the sidebar's state and width (`sidebarOpen`,
 `sidebarWidth`), the selected machine (`machine`), and the last 50 uploads
 and downloads (`uploads`, `downloads`; names and paths, no contents).
-Settings and layouts are the core's.
+Settings and layouts are the hub's.
 
 Desktop artifacts in `dist/desktop/` (`make desktop-app` unpacked,
 `make desktop-dist` installers):
@@ -678,14 +678,14 @@ Desktop artifacts in `dist/desktop/` (`make desktop-app` unpacked,
   `veldr-<version>-linux-x86_64.AppImage`, `-linux-arm64.AppImage`,
   `-linux-amd64.deb`, `-linux-arm64.deb`
 
-The core is `bin/veldr` (`.exe` on Windows) in the app's resources.
+The hub is `bin/veldr` (`.exe` on Windows) in the app's resources.
 Shell code builds into `desktop/dist/`; `make clean` removes the outputs.
 Icon sources are in `desktop/assets/` (`make desktop-icons` regenerates
 them on macOS). Electron's profile is `veldr-desktop` (`-dev`, or
 `--user-data-dir`) in the system's application data directory and survives
 uninstalling; on macOS `veldr-desktop-keychain.json` beside it records
 which build owns the safeStorage keychain item
-([30](features/30-variable-vault.md)). The desktop core uses
+([30](features/30-variable-vault.md)). The desktop hub uses
 `settings-desktop.json` and, on machines, the default `~/.veldr/`. No desktop log files
-are kept: the last 16 KiB of the core's stderr stay in memory for error
+are kept: the last 16 KiB of the hub's stderr stay in memory for error
 dialogs.

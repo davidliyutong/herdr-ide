@@ -71,7 +71,7 @@ three actions of the agent's `plugin` op:
   `STOP`, `CONT`) with `syscall.Kill`, refusing `pid <= 1` and the agent's
   own pid.
 
-### Core side (`backend/features/monitor`)
+### Hub side (`backend/features/monitor`)
 
 Routes below `/api/m/{id}/p/monitor/`: `GET metrics`, `GET processes`,
 `POST signal` (mutating, audited with `pid` and `signal`). Settings
@@ -117,7 +117,7 @@ Routes below `/api/m/{id}/p/monitor/`: `GET metrics`, `GET processes`,
 ## Security
 
 `POST /api/m/{id}/p/monitor/signal` is a mutating route: refused in
-`--read-only`, behind the core's Host/Origin and proxy-secret guards,
+`--read-only`, behind the hub's Host/Origin and proxy-secret guards,
 audited as `monitor.signal` with `pid` and `signal`. The agent allows only
 six signals, uses no shell, and refuses `pid <= 1` and its own pid. Metric
 and process reads never go through a shell (commands are run directly). See [SECURITY.md](../../SECURITY.md).

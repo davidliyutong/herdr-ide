@@ -11,7 +11,7 @@ history ([36](36-terminal-history.md)), the vault's access log
 ([29](29-ai-usage.md)), each with its own rules for partial writes,
 rotation and two writers.
 
-Constraints: the core builds for Linux, macOS and Windows (with Bun) and
+Constraints: the hub builds for Linux, macOS and Windows (with Bun) and
 the machines' build for Linux and macOS without a compiled addon; the files hold names,
 directories and terminal output, so they are the user's alone; a home may
 be shared by several hosts over NFS, where SQLite's write-ahead log works
@@ -33,7 +33,7 @@ between processes of different roles; replication.
 
 ### Opening (`backend/shared/store`)
 
-The core and the machine side (the agent, the chat host) open their
+The hub and the machine side (the agent, the chat host) open their
 databases with `backend/shared/store`, on `node:sqlite` (`DatabaseSync`,
 which Bun and Electron's Node both have; its calls are synchronous, so a
 statement waiting for another process's lock blocks the thread). Databases
@@ -58,7 +58,7 @@ history's snapshots. `DB.reclaim` returns free pages once they are at least
 
 ### Shared databases
 
-The core's and a machine's database hold several features of one owner.
+The hub's and a machine's database hold several features of one owner.
 `openShared(path)` hands out handles of one connection pool per file
 and process (reopened when the file was replaced). Each feature brings its
 own prefixed tables to its own version with `DB.migrate(feature, steps)`,
@@ -74,11 +74,11 @@ managers); `open` alone refuses links.
 
 | Database | Owner | Where | Holds |
 | --- | --- | --- | --- |
-| `hub[-<instance>]-<host>[-<id>].db` | the core | beside its settings file ([reference](../reference.md#files-and-directories)) | the vault's access log, the AI usage history |
+| `hub[-<instance>]-<host>[-<id>].db` | the hub | beside its settings file ([reference](../reference.md#files-and-directories)) | the vault's access log, the AI usage history |
 | `machine-<host>[-<id>].db` | the machine's agent | the instance's data directory on the machine (`~/.veldr[-<instance>]/`) | terminal history snapshots and their writers' lease, the AI usage cost cache |
 | `chat-<host>[-<id>].db` | the chat host | the same data directory | chats, events, trusted folders, the host's settings ([37](37-agent-chats.md)); opened with `open`, not shared |
 
-The core keeps its database open while it runs (none without a settings
+The hub keeps its database open while it runs (none without a settings
 file). No two processes of different roles write one database; two agents
 of one instance share the machine's, and the history's writers take turns
 through its lease.
@@ -100,7 +100,7 @@ databases unused for 30 days (use is the file's modification time, which
 `open` refreshes hourly). A file of no host's name is not its business and
 stays. It removes only under SQLite's writer lock taken without waiting, only this
 user's regular files, never files this process holds, and nothing on
-Windows; the core skips other instances' files.
+Windows; the hub skips other instances' files.
 
 Releases before the core was renamed the hub named the hub's database
 `core[-<instance>]-<host>[-<id>].db`. Its records (the vault's access log,
@@ -119,7 +119,7 @@ so `core-<host>.db` of the default instance never takes
 | --- | --- |
 | A native SQLite module (better-sqlite3 and the like) | A compiled addon per platform, which `bun build --compile` and Electron would each need; `node:sqlite` is built into both. |
 | One database per feature | More files to keep private, prune and open; prefixes and per-feature versions keep features apart. |
-| One database for core and machines | Different processes and hosts; WAL works for one host. |
+| One database for hub and machines | Different processes and hosts; WAL works for one host. |
 | A directory per host | Same isolation, one more directory to keep private and prune. |
 | The host's short name | Equal names in two domains, or clones, would share a file. |
 | Rollback journal on shared homes | Readers would wait for writers that write often. |

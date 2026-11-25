@@ -84,7 +84,7 @@ running the core's agent on Windows.
 
 ## Design
 
-**Client** (`backend/shared/proto/hc`, in the core and on the machine).
+**Client** (`backend/shared/proto/hc`, in the hub and on the machine).
 It says hello on any byte stream, checks the generation and
 switches to frames. One reader takes the frames; a reply that opens a
 channel registers it before the next frame is read, because the core
@@ -191,7 +191,7 @@ client's own value wins, the local machine gets none, and
 ## Failure modes
 
 - **Archive missing or digest mismatch** → the build fails.
-- **A core built without `fetch-hc`'s payload** (or run from its sources
+- **A hub built without `fetch-hc`'s payload** (or run from its sources
   before `dist/payload` holds it) → `hc(os, arch)` fails naming the
   platform, and the machine's terminal core is `not_bundled`.
 - **Not installed** → `start`/`stop` answer `not_installed`.

@@ -6,7 +6,7 @@ Chinese (中文也可以). Participation is governed by the
 
 ## Setup
 
-Requirements: Bun 1.4.5 (the core, its machine side and the build's
+Requirements: Bun 1.4.5 (the hub, its machine side and the build's
 tools in `backend/scripts`), Node.js 22.12+ and pnpm (and, on Windows, Git
 for Windows for its bash). The build downloads the pinned herdr-core, the
 terminal core the agents install on machines, into `dist/machines-hc/`
@@ -14,32 +14,32 @@ and embeds it.
 
 ```bash
 make deps            # pnpm install for web/, the extension, desktop/ (with Electron's binary), e2e/ and backend/
-make build           # web UI, extension, each platform's executable (core and machine side, Bun); release archives
-make test            # core, web and desktop unit tests
-make test-slow       # the core's tests that wait on real time (CI runs them too)
+make build           # web UI, extension, each platform's executable (hub and machine side, Bun); release archives
+make test            # hub, web and desktop unit tests
+make test-slow       # the hub's tests that wait on real time (CI runs them too)
 make check           # formatting, vet, typecheck, import cycles of the web UI, brand/doc consistency
 ```
 
 Day-to-day development, without touching the state or the terminals of your
-daily veldr (the dev core's terminal core is the session
+daily veldr (the dev hub's terminal core is the session
 `veldr-dev-<host id>`, `<host id>` a hash of the machine id):
 
 ```bash
-make dev-hub        # core on 127.0.0.1:7790: --instance dev --local-only
-make dev-web         # Vite on http://localhost:5173, proxied to the dev core (DEV_LISTEN)
+make dev-hub         # hub on 127.0.0.1:7790: --instance dev --local-only
+make dev-web         # Vite on http://localhost:5173, proxied to the dev hub (DEV_LISTEN)
 ```
 
 `make dev-hub` fetches this host's herdr-core once into
 `dist/machines-hc/`, builds this host's executable into `dist/dev/` and
 stages it in `dist/payload/` (`machine/veldr-<os>-<arch>.gz` with the
-build's record, as the desktop app carries it), then runs the core from
+build's record, as the desktop app carries it), then runs the hub from
 its sources (`bun backend/hosts/bun/main.ts`, without `--agent-dir`),
 which reads its payloads there (the VS Code extension too, once
 `make build` staged it).
 
 `make it` runs the integration tests against a real herdr-core in the
 isolated sessions `veldr-it` and `veldr-it-<host id>` (the
-agent's), and the core's terminals test on the instance `ts-term`, with
+agent's), and the hub's terminals test on the instance `ts-term`, with
 temporary state:
 `HC_TEST_BIN=<path to herdr-core> make it` (without it, `hc` on `PATH`;
 without either the tests are skipped).
@@ -48,9 +48,9 @@ verified executable for one platform to `<file>`, as CI does.
 
 `make e2e` runs the end-to-end tests (`e2e/`, Playwright with Chromium;
 not part of `make test`): `scripts/e2e.sh` builds the web UI, this
-platform's core with the pinned herdr-core and the fake coding agent
+platform's hub with the pinned herdr-core and the fake coding agent
 (`e2e/fakes/acp.ts`, a scripted ACP agent installed as `kimi`, compiled by Bun) into
-`dist/e2e/`, then each test starts a core of its own with a temporary
+`dist/e2e/`, then each test starts a hub of its own with a temporary
 home under `/tmp/hie-*`, an instance `e2e-<random>`, a free loopback port,
 `--local-only` and no network, and stops its terminal core through that
 instance's API at the end. `make e2e E2E_ARGS='tests/chat.spec.ts'` runs
@@ -66,10 +66,10 @@ The fixtures are built from parts a new kind of test reuses:
 - `harness/home.ts`: an isolated home (instance name, settings, an
   environment built from scratch, offline) and its cleanup, also of the
   homes of a run that was killed;
-- `harness/instance.ts`: the command line's core on such a home (the
+- `harness/instance.ts`: the command line's hub on such a home (the
   `instance` fixture);
 - `harness/desktop.ts`: the desktop app on such a home with its own
-  Chromium profile and the mock keychain, its core reached through the
+  Chromium profile and the mock keychain, its hub reached through the
   app's window (the `desktop` fixture, `test.use({ desktopOptions })`);
 - `harness/sshd.ts`: an SSH machine in a Docker container (the `sshd`
   fixture);
@@ -94,7 +94,7 @@ with the new executable before distributing a release.
 
 The desktop app builds on the system it is for. `make dev-desktop` builds
 and launches Electron with the embedded UI, the same isolated session and
-instance `dev` (its core runs inside the app); stop other dev cores first. On Windows that
+instance `dev` (its hub runs inside the app); stop other dev hubs first. On Windows that
 run connects no machine (it is local-only, and the local machine has no
 agent there). `make desktop-app` builds the unpacked app and
 `make desktop-dist` the installers: the DMG and zip on macOS, the NSIS
@@ -115,18 +115,18 @@ workspaces can live in the ignored `.worktrees/` directory.
   the web UI import each other in a cycle: `web/scripts/cycles.mjs`
   counts the imports that exist at run time, so move what both sides
   need into a module below them); CI
-  (`.github/workflows/ci.yml`) runs the same on Linux, with the core's
+  (`.github/workflows/ci.yml`) runs the same on Linux, with the hub's
   slow tests, plus `make it` against the pinned herdr-core, the
-  cross-compiled release archives and Windows core, and a `desktop` job on
+  cross-compiled release archives and Windows hub, and a `desktop` job on
   Linux, macOS and Windows: the web and desktop tests and the packaged
-  Electron app (`scripts/desktop.sh app`), and the core's tests on macOS.
-- New npm packages of the core:
+  Electron app (`scripts/desktop.sh app`), and the hub's tests on macOS.
+- New npm packages of the hub:
   run `scripts/notices.sh` and commit `THIRD_PARTY_NOTICES.md` (checked by
   CI); make sure the license is compatible with MIT.
-- Add or update tests with behavior changes. The core's live as
+- Add or update tests with behavior changes. The hub's live as
   `<name>.test.ts` beside its modules in `backend/`;
   web tests in `web/src/__tests__`, desktop tests in `desktop/src/*.test.ts`.
-  Vectors the web tests run, and the core's tests where the rule
+  Vectors the web tests run, and the hub's tests where the rule
   is theirs too (keys, ssh targets, transcripts), live in `spec/vectors/`
   (`make check` fails when a vector file is run by no web test).
 - Update the docs in the same PR: flags, endpoints and files in
@@ -144,7 +144,7 @@ workspaces can live in the ignored `.worktrees/` directory.
 ## Conventions
 
 - **Names:** never hardcode the product name. Use
-  `backend/shared/lib/brand.ts` in the core, `web/src/brand.ts` in the UI
+  `backend/shared/lib/brand.ts` in the hub, `web/src/brand.ts` in the UI
   and `src/brand.ts` in the extension (`scripts/check.sh` enforces this).
   Renames go through `scripts/rename.sh`.
 - **Text:** user-visible strings go through i18n — `t('key')` with the key in
@@ -155,10 +155,10 @@ workspaces can live in the ignored `.worktrees/` directory.
 - **READMEs:** `README.md` (English) is canonical; keep `README.zh-CN.md` in
   step (same sections, checked by CI). Reference material lives once in
   `docs/` (English).
-- **Protocols:** core and agent always ship together; extend
+- **Protocols:** hub and agent always ship together; extend
   `backend/shared/proto/agentproto` by adding fields or ops, never by changing meanings.
 - **Security:** read [SECURITY.md](SECURITY.md) before touching the
-  core's guards (`backend/kernel/http/guard.ts`), the agent's file or
+  hub's guards (`backend/kernel/http/guard.ts`), the agent's file or
   socket handling, or anything that downloads or executes.
 - **Formatting:** Prettier for TypeScript (`pnpm -C web format`,
   `pnpm -C backend format`).

@@ -31,7 +31,7 @@ methods.
 ## Design
 
 One X display per instance and machine; the agent is its window manager
-and captures each top-level window separately; the core routes the frames
+and captures each top-level window separately; the hub routes the frames
 to browser windows and their input back.
 
 The machine side is `backend/features/gui/machine.ts` and `machine/` with
@@ -75,9 +75,9 @@ files, number and cookie, starting and stopping Xvfb and Xwayland
 with `socketpair(2)` through `bun:ffi`), fetching Xvfb, the GPUs
 (`machine/gpu.ts`), gpupick (`machine/pick.ts`), the encoder's install and
 its probe (`machine/video.ts`), and everything that decides what is sent
-(`machine/wm.ts`, `flow.ts`): the cores attached and their roles, the
+(`machine/wm.ts`, `flow.ts`): the hubs attached and their roles, the
 flow, which areas go as JPEG, PNG or video and when, the stats, the
-routing of frames to each core's queue. Pixels never cross the node's
+routing of frames to each hub's queue. Pixels never cross the node's
 thread: the helper reads them from shared memory, encodes them and writes
 the encoder's input itself; the node moves encoded frames (and handles a
 frame's bytes once, from the helper's pipe to the attach stream).
@@ -137,13 +137,13 @@ Agent: `backend/features/gui/machine/display.ts`.
 - **Lifetime.** The server runs with `-nolisten tcp`, a 2560×1440 screen, in
   its own session (it survives the agent and ssh), and with `-terminate 60`:
   it exits a minute after its last client left. Its clients are the
-  programs, the agent's window manager while the core is connected, and the
+  programs, the agent's window manager while the hub is connected, and the
   display keeper. The display thus lives as long as terminals that have its
   `DISPLAY` may start programs.
 - **Keeper** (the helper's `keep.zig`): the GUI helper run as
   `gui-keep`, one per instance whichever build started it (its lock file). It holds a connection to the display while
   the instance's terminal core (`hc.sock`) runs, follows a terminal core
-  restarted within a short grace period, and exits once none runs. The core
+  restarted within a short grace period, and exits once none runs. The hub
   asks for one (action `keep`) when the display is ready and whenever the
   terminal core becomes reachable again; never in read-only mode.
 - **Changing kind.** A display of another kind than wanted (after a setting
@@ -195,7 +195,7 @@ Agent: `backend/features/gui/machine/gpu.ts`, `pick.ts`; library
   glibc 2.17 (`scripts/build-gpupick.sh` into `scripts/gpupick/bin`; builds
   and digests committed and checked by `make check`). The machine build
   for Linux carries its architecture's as `gpupick.so` and writes it to
-  `~/.veldr/gpupick/<sha256 prefix>/` (0600) when the core asks (action
+  `~/.veldr/gpupick/<sha256 prefix>/` (0600) when the hub asks (action
   `pick`, never in read-only mode), after checking the dynamic loader takes
   it (a `noexec` home would make every program complain). Machines with
   fewer than two NVIDIA GPUs get nothing.
@@ -206,7 +206,7 @@ Agent: `backend/features/gui/machine/gpu.ts`, `pick.ts`; library
 `backend/features/terminals/backend.ts`, `shells.ts`.
 
 - **New terminals.** When the GUI is on for a machine and its display is
-  ready, the core adds `DISPLAY` and `XAUTHORITY` to the `env` of the
+  ready, the hub adds `DISPLAY` and `XAUTHORITY` to the `env` of the
   terminal core's `terminal.run` ([22](22-terminal-protocol.md)). They
   replace a client's own values, so a client cannot point terminals at
   another display; a malformed `env` is refused. The audit log records them.
@@ -288,13 +288,13 @@ Setting `gui.video`, on by default. The node's `machine/wm.ts`,
   side are never video.
 - **Kinds.** Browsers name what they decode in the WebSocket's `?video=`:
   `avc1` (H.264) and `vp8`, probed with WebCodecs, only in a secure context.
-  The core passes the kinds every viewer decodes, H.264 first.
+  The hub passes the kinds every viewer decodes, H.264 first.
 - **Encoder.** A small program on ffmpeg's libraries (LGPL build with
   libvpx, libva and libdrm; static except glibc 2.28; linux/amd64 and
-  arm64) that the core embeds and pushes to each Linux machine:
+  arm64) that the hub embeds and pushes to each Linux machine:
   `~/.veldr/video/<sha256 prefix>/encoder`, verified by digest. Release
   builds embed it (`scripts/build-ffmpeg.sh`, [deployment](../deployment.md));
-  a build without it sends pictures. A core carries only its own
+  a build without it sends pictures. A hub carries only its own
   platform's encoder; for another machine it asks for the machine build's
   own (action `video` without a digest), which the machine build installs
   from its copy (a node of the Go program of earlier releases answers
@@ -311,7 +311,7 @@ Setting `gui.video`, on by default. The node's `machine/wm.ts`,
   of the kinds viewers share starts a new stream; a viewer can ask for a key
   frame.
 - **Routing.** A viewer that missed a frame (behind, or joined mid-stream)
-  gets nothing until the next key frame, which the core requests for it.
+  gets nothing until the next key frame, which the hub requests for it.
 - **Browser.** One `VideoDecoder` per window (`optimizeForLatency`), frames
   and pictures decoded in arrival order; a decoding error resets the decoder
   and asks for a key frame.
@@ -323,29 +323,29 @@ Setting `gui.video`, on by default. The node's `machine/wm.ts`,
 
 `backend/features/gui/manager.ts`, `display.ts`, `router.ts`.
 
-- The core prepares a machine's display once per connection (status,
+- The hub prepares a machine's display once per connection (status,
   install, start, attach), keeps one attach stream per machine, and retries
   failures with a backoff (5 s doubling to 5 minutes). A change of the GUI
   setting or a reconnect starts over. Every `/ws` client gets `gui` messages
   with each machine's phase (`installing`, `starting`, `ready`, `error`,
   `unavailable`, `disconnected`, …) and windows.
-- **Several cores** ([39](39-nodes.md)). Every core a machine's node
+- **Several hubs** ([39](39-nodes.md)). Every hub a machine's node
   serves attaches to the one window manager
   and gets every window. One controls them, the others view:
   - input, focus and closing come from the controller only; a viewer's
     browser windows show **View only** with **Take Control**, which takes
-    it at once (command `control`), the other core then viewing; the
-    agent tells each core its role (event `role`), the core its browsers
+    it at once (command `control`), the other hub then viewing; the
+    agent tells each hub its role (event `role`), the hub its browsers
     and the machine's state (`view_only`);
-  - the controller gone, the core attached longest takes control; the
-    same core's new attach after a reconnect replaces its old one with its
+  - the controller gone, the hub attached longest takes control; the
+    same hub's new attach after a reconnect replaces its old one with its
     role;
   - a window's flow is paced by the controller while it watches the
-    window, else by the core attached longest that does; another core's
+    window, else by the hub attached longest that does; another hub's
     frames go through a queue of its own (256 messages), and one that is
     full misses them and gets the whole window (a key frame for video)
     once it has room, so a slow viewer never slows the controller;
-  - a core that starts watching a window sent as video ends its stream, so
+  - a hub that starts watching a window sent as video ends its stream, so
     the next one starts for every watcher; the video codecs are those all
     watchers decode.
 - A machine disabled, removed or disconnected is shown as `disconnected`
@@ -353,10 +353,10 @@ Setting `gui.video`, on by default. The node's `machine/wm.ts`,
 - **Viewers.** Frames go to every browser window showing the window. The
   fastest viewer's acknowledgements pace the agent; a viewer that falls
   behind skips frames and then gets the whole window again; a frame no
-  viewer got is acknowledged by the core. Commands to the agent are built by
-  the core from a viewer's message, never forwarded as is, and refreshes are
+  viewer got is acknowledged by the hub. Commands to the agent are built by
+  the hub from a viewer's message, never forwarded as is, and refreshes are
   rate-limited.
-- **Read-only mode.** The core attaches only to a display already running
+- **Read-only mode.** The hub attaches only to a display already running
   (`not_running` otherwise); nothing is installed or started. Installs and
   starts are audited.
 
@@ -436,7 +436,7 @@ section and as flags ([reference](../reference.md#program-windows),
 | Typing the export into every pane | Would land in agents' prompts and editors. |
 | The machine side's X client in JavaScript (the `x11` npm package, or one of our own) | `x11` is unmaintained since 2019 and has neither MIT-SHM nor X-Resource; capturing and encoding at frame rate on the node's one thread would hold back every terminal of the machine. The helper is the X client; the node decides. |
 | libjpeg-turbo in the helper | Its SIMD on x86-64 is NASM assembly, which zig cannot assemble; without it the gain over the port of Go's encoder (the same bytes, row groups on every core) is small, for a CMake project to build per architecture and a library to track. |
-| The flow and the routing in the helper too | The decisions the tests reason about would move to a third language, and a core's queue is the node's: the helper cannot see it. The helper reports damage and does what a batch says; the node assigns the frames' numbers, so a core that missed frames gets the whole window from the next number on without a marker from the helper. |
+| The flow and the routing in the helper too | The decisions the tests reason about would move to a third language, and a hub's queue is the node's: the helper cannot see it. The helper reports damage and does what a batch says; the node assigns the frames' numbers, so a hub that missed frames gets the whole window from the next number on without a marker from the helper. |
 | The node writing frames to the encoder | About 400 MB/s of raw pixels for a 1706×960 window at 60 fps through the node's thread. |
 | The keeper in TypeScript (the executable run as `gui-keep`) | A Bun runtime idles at 30–40 MB for as long as the terminal core runs; the helper's keeper at a few hundred kB. |
 | The helper built by every build | CI and contributors have no zig: its executables are committed with the digests of their sources and of themselves, which `make check` verifies, as with gpupick and the terminal emulator's module. |
@@ -473,7 +473,7 @@ section and as flags ([reference](../reference.md#program-windows),
 - **gpupick cannot be preloaded** (`noexec` home, non-glibc) → logged;
   panes get the display without it. Programs of another word size or setuid
   ones see every GPU.
-- **Another window manager on the display** (two cores of one instance) →
+- **Another window manager on the display** (two hubs of one instance) →
   attach fails; the phase shows the error.
 - **Slow connection** → the flow budget skips frames; pictures lag but stay
   consistent, video keeps its frame rate at lower bandwidth.
@@ -486,7 +486,7 @@ section and as flags ([reference](../reference.md#program-windows),
   build carries no GUI helper for the machine"; panes still get the
   display.
 - **The GUI helper ends** (the display went away, a protocol violation,
-  the node not reading) → the cores' attach streams end and they attach
+  the node not reading) → the hubs' attach streams end and they attach
   again, starting a new window manager; programs and windows stay.
 - **Keeper not running** → the display ends a minute after its last client;
   the next connection starts it again, on the same number if still free.
@@ -504,7 +504,7 @@ section and as flags ([reference](../reference.md#program-windows),
 - Window contents and input travel the same guarded paths as terminals
   (same origin, Host/Origin checks, proxy secret). In read-only mode nothing
   is installed or started, input is not sent and closing is refused.
-- Commands to the agent are built by the core, never forwarded from the
+- Commands to the agent are built by the hub, never forwarded from the
   browser; a client cannot override the display variables.
 - The GPU display's compositor listens nowhere and opens no file, talks to
   Xwayland over a close-on-exec socket pair, and bounds what its one client
@@ -512,7 +512,7 @@ section and as flags ([reference](../reference.md#program-windows),
 - gpupick is off by default, written from the machine build's own copy into a
   directory only the user can write, and only restricts what a program sees.
 - Xvfb packages are verified by apt; the video encoder runs only as pushed
-  by the core or as the build carries it, verified by its SHA-256.
+  by the hub or as the build carries it, verified by its SHA-256.
 - The GUI helper runs only as the build carries it
   (its SHA-256 checked before each start, in a 0700 directory), with the
   agent's environment; it checks every message of the node, the X
@@ -524,7 +524,7 @@ See [SECURITY.md](../../SECURITY.md).
 ## Testing
 
 - The machine side (`backend/features/gui/machine.test.ts`,
-  `machine/wm.test.ts`, `machine/display.test.ts`): two cores through the
+  `machine/wm.test.ts`, `machine/display.test.ts`): two hubs through the
   wire with a fake helper (control, viewing, input from the controller
   only, a command of the wrong shape dropped, a display that ends, a
   helper that does not start), the encoder's install held to its digest;
@@ -595,7 +595,7 @@ driver sharing its buffers with the display) and `vkcube` presented from
 its Vulkan device (each GPU is listed twice there: two NVIDIA ICDs are
 registered); the encoder ran NVENC on that card (`CUDA_VISIBLE_DEVICES`
 naming it) at 57–61 fps for the 640×360 window, then VP8 at 50 fps; and
-gpupick, with the environment the core gives a pane and
+gpupick, with the environment the hub gives a pane and
 `CUDA_VISIBLE_DEVICES=1`, left a program that card's device node alone
 (the others refused, `nvidia-smi -L` listing it alone,
 `CUDA_VISIBLE_DEVICES` rewritten to 0).

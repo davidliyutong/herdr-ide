@@ -13,7 +13,7 @@ do happen must be verifiable.
 Goals:
 
 - machines never need to download;
-- the core host can work fully offline from a prepared bundle;
+- the hub host can work fully offline from a prepared bundle;
 - internal mirrors are supported;
 - every artifact is verified.
 
@@ -26,7 +26,7 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
 [deployment](../deployment.md#air-gapped-networks); flags in
 [reference](../reference.md#fetch-assets-flags).
 
-- **Embedded in the core binary**: the web UI, the machine build of its
+- **Embedded in the hub binary**: the web UI, the machine build of its
   own platform (the executable is that build too,
   [42](42-typescript-backend.md#the-machine-side)) with that platform's
   herdr-core (pinned in `backend/scripts/hcdist.ts`, archives checked
@@ -37,26 +37,26 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
   platform's herdr-core, so the terminal core needs no bundle
   ([21](21-terminal-core.md)). The agent checks the digest of every
   herdr-core and encoder it receives.
-- **Machine builds of other platforms** come from the core's release,
+- **Machine builds of other platforms** come from the hub's release,
   checked against its `SHA256SUMS`: the machine downloads its platform's
-  archive when it can, else the core uploads it from `--agent-dir` (an
+  archive when it can, else the hub uploads it from `--agent-dir` (an
   offline site's copy of the release), its cache or its own download
   ([42](42-typescript-backend.md#the-machine-side),
   [deployment](../deployment.md#air-gapped-networks)).
-- **Resolved on the core host** (`backend/features/vscode/artifacts.ts`):
+- **Resolved on the hub host** (`backend/features/vscode/artifacts.ts`):
   code-server tarballs and extension VSIXs, in this order:
   1. `--seed-dir` directories (repeatable);
   2. the download cache;
   3. a download from the `--code-server-url` / `--extension-url` templates
      (which may name a mirror), unless `--offline`.
 - **Pushed through the agent** to machines as a chunked upload with the
-  digest the core verified it by, unpacked by the agent (no `tar` needed on
+  digest the hub verified it by, unpacked by the agent (no `tar` needed on
   the machine: node-tar, after the digest is checked). With
   `--code-server-install=download` machines fetch the tarball themselves
-  and verify it against the core's digest; `--offline` turns this off, and a
+  and verify it against the hub's digest; `--offline` turns this off, and a
   machine that cannot download gets the upload.
 - **Fetched by machines**: their machine build (above) and the Agent SDK of
-  Claude Code's chats when they can, which the core uploads otherwise
+  Claude Code's chats when they can, which the hub uploads otherwise
   ([42](42-typescript-backend.md#claude-code)), and Xvfb, on Linux machines
   that have none, with `apt-get download xvfb` from the machine's own
   package sources, which apt verifies ([14](14-gui-windows.md)).
@@ -75,7 +75,7 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
 | Option | Why not |
 | --- | --- |
 | Machines download code-server and extensions themselves | Fails on offline machines; no central verification. |
-| Bundle code-server in the core binary | ~200 MB per platform; versions tied to veldr releases. |
+| Bundle code-server in the hub binary | ~200 MB per platform; versions tied to veldr releases. |
 | Trust HTTPS only | A compromised mirror or release would be installed on every machine. |
 
 ## Failure modes
@@ -130,14 +130,14 @@ A release carries the licenses of embedded components:
   command`).
 - `backend/features/vscode/machine.test.ts` (`releases`, `archives that
   would leave the release`, `downloads made by the machine`): an upload and
-  a machine's own download checked against the core's digest before anything is
-  unpacked, archives refused, bounds; `provision.test.ts`: the core sends
+  a machine's own download checked against the hub's digest before anything is
+  unpacked, archives refused, bounds; `provision.test.ts`: the hub sends
   the digest of what it uploads.
 - `backend/scripts/fetch-hc.test.ts`, `backend/machine/agent.test.ts`:
   pinned herdr-core archives and the executables a machine receives.
 - `backend/kernel/machines/transport/release.test.ts`: the release's
   manifest (the operator's directory first, one of another build refused,
   fetched through the machine when the release is unreachable) and what
-  the core uploads, each checked against it.
+  the hub uploads, each checked against it.
 - `backend/features/gui/machine.test.ts` (`the encoder is installed only
   as its digest says`): a wrong digest installs nothing.

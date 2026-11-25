@@ -10,7 +10,7 @@ proxy is off on purpose ([05](05-vscode-panes.md)): it would serve the
 machine's services on the UI's origin, where their scripts could type into
 every terminal.
 
-The agent already carries streams between the core and a machine, so a
+The agent already carries streams between the hub and a machine, so a
 forward needs nothing new on the machine.
 
 ## Goals / non-goals
@@ -19,13 +19,13 @@ Goals:
 
 - A **browser pane**: a tab showing a web page, with address field, back,
   forward and reload.
-- **Port forwards**: a machine's loopback port reachable on the core
+- **Port forwards**: a machine's loopback port reachable on the hub
   host's loopback, made when the user opens it and ended when unused.
 - `localhost` links in terminals and documents open where they work; links
   to other computers open in the user's own browser.
 - A menu of tab kinds at the tab bar's new-tab button.
 
-Non-goals: forwards for clients not on the core's host (behind a reverse
+Non-goals: forwards for clients not on the hub's host (behind a reverse
 proxy their `localhost` is another computer); forwarding to hosts other
 than the machine's loopback; a full browser (bookmarks, history,
 extensions, downloads); arbitrary sites in a browser client, where a frame
@@ -35,16 +35,16 @@ cannot show them.
 
 ### Forwards
 
-`backend/features/browser` (core: `forwards.ts`),
+`backend/features/browser` (hub: `forwards.ts`),
 `backend/features/browser/machine.ts` (machine).
 
 - **Machine.** The action `dial {port}` connects the stream to the port on
-  `127.0.0.1` (else `::1`) and copies both ways. Loopback only: the core
+  `127.0.0.1` (else `::1`) and copies both ways. Loopback only: the hub
   reaches what a program of the machine could, not the machine's network.
   `listening` lists the user's listening TCP ports with program names
   (Linux `/proc/net/tcp*`, macOS `lsof`; at most 200).
-- **Core.** `POST /api/m/{id}/p/browser/forwards {port}` listens on the
-  core host's loopback and carries each connection over its own stream
+- **Hub.** `POST /api/m/{id}/p/browser/forwards {port}` listens on the
+  hub host's loopback and carries each connection over its own stream
   (at most 128 per forward, 32 forwards). It takes the same port number
   when free and above 1023, since some dev servers check the Host's port;
   otherwise a system-chosen port, which the pane shows.
@@ -55,14 +55,14 @@ cannot show them.
   program instead. Only a host without IPv6 loopback listens on
   `127.0.0.1` alone.
 - **Lifetime.** A forward ends when stopped (`DELETE …/forwards/{port}`),
-  its machine is removed, the core stops, the plugin is turned off, or it
+  its machine is removed, the hub stops, the plugin is turned off, or it
   is unused for `browser.forwardIdle` minutes (30; 0 = until stopped). Use
   means an accepted connection, bytes carried, or a client asking for it
   again. An idle open connection is not use, so no program can hold a way
   into the machine open indefinitely. Temporary accept errors are retried
   with back-off; any other listener failure ends the forward and is
   logged.
-- **Same host only.** Forwards serve clients on the core's own host
+- **Same host only.** Forwards serve clients on the hub's own host
   (the request's `sameHost`: loopback peer and Host, no proxy); otherwise
   `403 forward_local_only` and the list says `available: false`. The
   local machine needs no forward.
@@ -71,7 +71,7 @@ cannot show them.
 
 A forwarded service is another site than the UI and must stay one.
 
-- Its own port gives it its own origin. The core's guard accepts a
+- Its own port gives it its own origin. The hub's guard accepts a
   loopback `Origin` only when it is the request's own
   ([08](08-web-access-and-security.md)), so a forwarded page cannot open
   the UI's WebSockets or call its API.
@@ -85,10 +85,10 @@ A forwarded service is another site than the UI and must stay one.
   frames of the *other* loopback name only, so a framed page cannot
   navigate itself to the UI's host name on another port and share its
   cookies. A UI on any other host gets no foreign frames.
-- The core's own address is never a page for a pane: it is refused when
+- The hub's own address is never a page for a pane: it is refused when
   typed (`parseAddress`), as a link target (`web/src/lib/webUrl.ts`) and
   for desktop guests (`desktop/src/policy.ts`). In a remote machine's pane
-  a port with the core's number is the machine's port, shown through a
+  a port with the hub's number is the machine's port, shown through a
   forward.
 
 ### The pane
@@ -124,7 +124,7 @@ the layout's own machine.
   window only, partition `persist:browser` (own cookies and storage, no
   permissions but full screen), `http(s)` without credentials, guest
   preferences forced (no preload, no Node, sandboxed, context isolated).
-  Navigation stays in the pane and never reaches the core's address. A
+  Navigation stays in the pane and never reaches the hub's address. A
   window the page opens becomes a new browser tab (at most three per ten
   seconds, as Electron has no popup blocker) that grants no forward: an
   address on an existing forward's local port binds to that forward,
@@ -160,7 +160,7 @@ click on a web link in a preview pane follow `browser.openLinks`:
 
 Where a pane cannot show the address (plugin off, forwards unavailable,
 UI on another host) the link opens outside. Only absolute `http(s)://`
-URLs (and `mailto:`, outside) open, never the core's own address, and
+URLs (and `mailto:`, outside) open, never the hub's own address, and
 without a referrer.
 
 A terminal link's click is a request for its port, since its tooltip names
@@ -189,7 +189,7 @@ Code**, **Browser**).
 | Option | Why not |
 | --- | --- |
 | code-server's port proxy, or a path under the UI's origin | The service's scripts would run with the UI's origin: terminals, files, the vault. |
-| A rewriting HTTP proxy in the core | Absolute paths, WebSockets and dev servers' host checks break under a prefix; a forward carries bytes unchanged. |
+| A rewriting HTTP proxy in the hub | Absolute paths, WebSockets and dev servers' host checks break under a prefix; a forward carries bytes unchanged. |
 | A host name per forward (`3000.m.localhost`) | Needs wildcard names and certificates behind every reverse proxy; Safari does not resolve names below `localhost`. |
 | Forwards for clients behind a reverse proxy | Their `localhost` is another computer; a public port per forward is a listener the deployment does not know. |
 | Framing under the UI's own loopback name | Cookies ignore ports: the UI's cookies would go to the service. |
@@ -200,25 +200,25 @@ Code**, **Browser**).
 | Reusing VS Code's frame layer | It reaches into same-origin frames for focus and the bridge; only placement is shared. |
 | Dialing any host from the machine | The machine would become a way into its network. |
 | Making a forward whenever a pane is shown | Views are layout data any client or page script writes; `window.open('http://localhost:2375/')` would forward into the machine with no click. |
-| Persisting granted ports (layout, storage) | Whatever the page can read back, a page script can write; existing forwards come from the core. |
+| Persisting granted ports (layout, storage) | Whatever the page can read back, a page script can write; existing forwards come from the hub. |
 | Counting an open connection as use | Any program holding one connection would keep a way into the machine open. |
-| Granting the port on a document link click | One click on a disguised link would expose a machine service on the core host's loopback to every local program and web page. |
+| Granting the port on a document link click | One click on a disguised link would expose a machine service on the hub host's loopback to every local program and web page. |
 | Other computers' links in a pane by default | The user's browser holds their sign-ins, proxy and resolver; `all` keeps the option. |
 | Popups of other computers in the system browser | Electron cannot tell whether a window came from a click; a page could open anything in the browser holding the user's sessions. |
 | Chromium's built-in resolver | It may miss names the system resolves via VPNs and DNS tools. |
 
 ## Failure modes
 
-- **Client not on the core's host**: no forwards (`forward_local_only`);
+- **Client not on the hub's host**: no forwards (`forward_local_only`);
   links open outside.
 - **Machine offline**: the forward's connections close; the pane shows
   `offline` with Retry.
 - **Nothing listens on the port**: the connection closes; the frame shows
   the browser's error.
-- **Port taken on the core host**: another local port, named in the chip.
+- **Port taken on the hub host**: another local port, named in the chip.
 - **Site forbids framing** (browser client): the frame stays empty; open
   outside is in the toolbar.
-- **Forward ended** (idle, stopped elsewhere, core restart): a granted port
+- **Forward ended** (idle, stopped elsewhere, hub restart): a granted port
   is remade within 5 minutes; otherwise the page is unloaded and the pane
   asks. Stopped in this page's Ports: unloaded at once.
 - **View names another machine than its layout's**: an error, no request.
@@ -232,8 +232,8 @@ Code**, **Browser**).
 
 ## Security
 
-A forward is a listener on the core host's loopback that leads into a
-machine: while it exists any program or user of the core host can connect
+A forward is a listener on the hub host's loopback that leads into a
+machine: while it exists any program or user of the hub host can connect
 to it, as with `ssh -L`. It is plain TCP on a guessable port without a
 Host check, so any web page in the user's browsers can send it blind
 requests. Hence a forward exists only after the user asked for it in this
@@ -258,12 +258,12 @@ never a page of a pane ([SECURITY.md](../../SECURITY.md)).
   refusals, listening ports.
 - `backend/kernel/http/http.test.ts`: `Host and Origin` (other loopback
   origins refused), `frames` (frames by Host and client).
-- `web/src/__tests__/browser*.test.ts(x)`: address parsing, the core's
+- `web/src/__tests__/browser*.test.ts(x)`: address parsing, the hub's
   address refused, frame layer, forwards made only for granted ports,
   popups, links by machine, host, client and setting, document links
   (`browserDocLinks.test.tsx`), webview failures
   (`browserWebview.test.tsx`), the new-tab menu; `terminalLinks.test.ts`
-  and `markdown.test.tsx` for the core's port refused.
+  and `markdown.test.tsx` for the hub's port refused.
 - `desktop/src/policy.test.ts`: attaches, guest preferences, navigation,
   permissions, popup bound, resolver; `preload.test.ts`: the popup
   channel.

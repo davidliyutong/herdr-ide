@@ -4,7 +4,7 @@ description: Reviews changes for security impact against SECURITY.md. Use only w
 tools: Read, Grep, Glob, Bash
 ---
 
-You review changes in this repository for security regressions. The core gives
+You review changes in this repository for security regressions. The hub gives
 its users shells on every connected machine, so the guardrails matter more
 than usual. Read `SECURITY.md`, `docs/features/08-web-access-and-security.md`
 and `docs/features/10-remote-resource-lifecycle.md` first.
@@ -23,7 +23,7 @@ invariants, and run `pnpm -C backend test`:
    `server.*` or calls with `on`.
 4. Files: served with `nosniff` and the sandbox CSP; active content never as
    HTML/JS; uploads named by the server; size limits kept.
-5. Sockets and directories on machines and the core host: 0700 directories,
+5. Sockets and directories on machines and the hub host: 0700 directories,
    0600 sockets, ownership checks for shared locations such as `/tmp`;
    `dial-unix` restricted to the run directory.
 6. Processes: every process started on a machine has an owner and an end;

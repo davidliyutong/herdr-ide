@@ -36,7 +36,7 @@ management, blame, line history.
 **Plugin** `git`, on by default (`plugins.git.enabled`): a right-sidebar
 panel (**Show Source Control**, `view.panel.git`, Ctrl+Shift+G in the
 desktop app), the pane kinds `graph` and `diff`, and **Show Git Graph**
-(`git.graph`). Code: `web/src/plugins/git`, `backend/features/git` (core),
+(`git.graph`). Code: `web/src/plugins/git`, `backend/features/git` (hub),
 `backend/features/git/machine.ts` (machine).
 
 ### Machine side
@@ -77,7 +77,7 @@ its hooks, credential helpers, worktrees and configuration.
   monitor, the untracked cache and automatic maintenance, and diff with
   `--no-ext-diff --no-textconv`. Clean filters still run when `status`
   compares a changed file, as a shell prompt's `git status` does.
-- **Bounds**: reads 15 s, changes 120 s; then, or when the core closes the
+- **Bounds**: reads 15 s, changes 120 s; then, or when the hub closes the
   request's stream, git's process group is killed. A run whose git exited
   while a background child still holds its output ends 2 s later. At most
   8 runs per machine; another waits up to 3 s, then fails with `busy`.
@@ -119,13 +119,13 @@ A generic "run git with these arguments" route was rejected: options such
 as `--upload-pack`, `-c` or `--exec` run programs. Building the vector on
 the machine keeps what runs in the agent's code.
 
-### Core side
+### Hub side
 
 Reads are `GET /api/m/{id}/p/git/<action>`; changes are
 `POST /api/m/{id}/p/git/<action>` with a JSON body (at most 5 MiB). Changes
 are mutating routes: refused in read-only mode and audited as
 `git.<action>` and `git.<action>.done` with their targets, flags, path
-count and result, never a patch or a message. The core forwards to the
+count and result, never a patch or a message. The hub forwards to the
 agent's `plugin` op.
 
 ### Panel
@@ -264,7 +264,7 @@ Lanes use the chart hues, status letters VS Code's Git decoration colors
 | go-git or libgit2 on machines | Another git with its own gaps (hooks, credential helpers, worktrees, config); the user's git is what their terminals use. |
 | A generic "run git with these arguments" route | Options (`--upload-pack`, `-c`, `--exec`) run programs; argument vectors built on the machine keep what runs in the agent's code. |
 | A watcher on machines pushing changes | Needs an owner, limits and an inotify watch per directory; a few stats per second while shown stop with the view, and terminal events say when to look at once. |
-| Credentials typed into the UI | Secrets would cross the core; the terminal next to the panel is where git can ask. |
+| Credentials typed into the UI | Secrets would cross the hub; the terminal next to the panel is where git can ask. |
 | VS Code's Source Control and Git Graph only | They stay ([05](05-vscode-panes.md)), but code-server is slow and large for a look at a diff. |
 | Lanes computed on the machine | Filters and pages change in the browser; a pure function there is testable with vectors. |
 
@@ -300,7 +300,7 @@ terminal; the plugin adds a way to reach it from the browser:
   (`TestArgvRefusesOptions`).
 - No credential prompts: no terminal, no askpass, `GIT_TERMINAL_PROMPT=0`.
 - Changes are mutating routes: refused in read-only mode, audited without
-  patch or message, behind the core's Origin/Host checks.
+  patch or message, behind the hub's Origin/Host checks.
 - Reads change nothing (`GIT_OPTIONAL_LOCKS=0`) and run no fsmonitor hook,
   textconv driver or maintenance from the repository's configuration;
   clean filters still run, as with a shell prompt's `git status`, also

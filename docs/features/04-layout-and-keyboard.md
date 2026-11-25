@@ -83,7 +83,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   button, so a stray click never unpins.
 - A tab or a workspace can be muted (`tab.mute`, `tab.unmute`,
   `workspace.mute`, `workspace.unmute`; `muted: true` in the layout
-  document, so every page and core of the machine has it): its agents and
+  document, so every page and hub of the machine has it): its agents and
   terminals make no sound and no notification, while their status and the
   badge count still show ([07](07-agent-native-workflow.md)). A muted tab
   and workspace show a crossed-out bell.
@@ -167,7 +167,7 @@ Non-goals: arbitrary docking of panes; floating panes.
   (`web/src/ime.ts`).
 - Pane names are the terminal's `name` label in the terminal core; tab and
   workspace names are in the layout document; machine names are the
-  core's ([02](02-multi-machine-transport.md)). An emptied name falls back
+  hub's ([02](02-multi-machine-transport.md)). An emptied name falls back
   to the default.
 - Read-only mode and zoomed panes have no drag, rename or mutating buttons.
 
@@ -255,8 +255,8 @@ settings in [13](13-settings-and-appearance.md); the full table in
   its terminals and VS Code panes included (for the keys VS Code leaves);
   `editor` is the main window except while a terminal has the keyboard,
   where the key goes to the program. User rules in
-  `keybindings[-<instance>].json` on the core host add and remove keys.
-  Clients follow the core's `keybindings` messages.
+  `keybindings[-<instance>].json` on the hub host add and remove keys.
+  Clients follow the hub's `keybindings` messages.
 - Command handlers are a table by id: a plugin's in its definition
   (`web/src/plugins/api.ts`), the rest in `web/src/commands.ts`.
 - `ctrl+b` (`pane.leave`, `editor`) moves the keyboard from the focused
@@ -358,7 +358,7 @@ settings in [13](13-settings-and-appearance.md); the full table in
 | Prefix chords as defaults (`ctrl+b`, then a key) | Delayed every press; chords stay available to bind. |
 | Browser `Cmd+…` bindings | Browsers do not deliver `Cmd+T`/`Cmd+W` to pages. |
 | The shell matching shortcuts before the page (`before-input-event`) | Two matchers with diverging rules; one matcher in the page runs each key once. |
-| Desktop shortcuts per browser profile | The shell needs them outside the page; the core keeps one set. |
+| Desktop shortcuts per browser profile | The shell needs them outside the page; the hub keeps one set. |
 | `cmd+w` closing the tab | Split-capable terminals close the focused split. |
 | `cmd+w` closing a pinned tab's last pane | Held or repeated `cmd+w` closed pinned tabs by the way; VS Code's pinned editors do not close from the keyboard either. |
 | Keyboard Lock API | Fullscreen-only and Chromium-only. |
@@ -412,4 +412,4 @@ settings in [13](13-settings-and-appearance.md); the full table in
   `desktop/src/follow.test.ts`: following keybindings and settings.
 
 Splits, drags, renames and context menus were also exercised in headless
-Chromium against a dev core, in English and Chinese, light and dark.
+Chromium against a dev hub, in English and Chinese, light and dark.

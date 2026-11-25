@@ -2,16 +2,16 @@
 
 ## Context
 
-The browser UI and the core already contain the application's features.
+The browser UI and the hub already contain the application's features.
 Desktop users also want an app they install with their system's installer
-and start from the Dock, the Start menu or the launcher, with a core of its
+and start from the Dock, the Start menu or the launcher, with a hub of its
 own and no terminal to keep open. The Electron shell is the browser UI as
 such an app on macOS, Windows and Linux. VS Code webviews depend on
 Chromium and a secure loopback origin, so the shell must preserve the
 existing HTTP, WebSocket and service-worker behavior.
 
 The agent relies on POSIX (unix sockets with peer checks, process groups,
-code-server, Xvfb) and runs on Linux and macOS only (a Windows core
+code-server, Xvfb) and runs on Linux and macOS only (a Windows hub
 carries no machine side); this repository pins no Windows herdr-core
 (`backend/scripts/hcdist.ts`). On Windows the app is therefore a client of SSH
 machines only ([02](02-multi-machine-transport.md)).
@@ -23,11 +23,11 @@ Goals:
 - one shell for macOS (arm64, x64), Windows (x64) and Linux (x64, arm64),
   with each system's installers and conventions (menus, quitting, window
   frames, folders opened with the app);
-- a core the app owns and cleans up the same way on all three systems;
+- a hub the app owns and cleans up the same way on all three systems;
 - safe renderer windows;
 - a native menu with the UI's commands and keybindings that never takes a
   key from a terminal;
-- title bar, menu and dialogs following the core's theme and language;
+- title bar, menu and dialogs following the hub's theme and language;
 - on macOS, a way to grant Full Disk Access to every program that needs it;
 - release builds that need no secret, with optional Developer ID signing
   and notarization on macOS;
@@ -48,16 +48,16 @@ any of them: the app id (the product's domain reversed and `desktop`,
 `app.veldr.desktop`; also the Windows AppUserModelID that notifications
 need and the Linux desktop entry's name; the Secure Enclave helper's is
 `app.veldr.desktop.enclave`), the keybinding platform (`mac`,
-`windows` or `linux`), where the core's payloads are, whether closing the last window quits, and
+`windows` or `linux`), where the hub's payloads are, whether closing the last window quits, and
 how a Linux command line names folders.
 
 ### Building
 
-`scripts/desktop.sh` stages what the core carries (`PAYLOAD_ONLY=1
+`scripts/desktop.sh` stages what the hub carries (`PAYLOAD_ONLY=1
 scripts/build.sh`: the web UI, the build's release record and its own
 platform's executable for the local machine (no executable on Windows),
 the encoders,
-the VS Code extension), then builds the shell with the core bundled for its
+the VS Code extension), then builds the shell with the hub bundled for its
 utility process (`desktop/build.mjs`: `dist/hub.mjs` from
 `backend/hosts/electron`), then runs electron-builder
 (`desktop/electron-builder.cjs`).
@@ -66,7 +66,7 @@ copy into `/Applications`) and `dev`. `DESKTOP_OS` packages another
 system's unpacked app to check its packaging; `SKIP_BUILD=1` runs
 electron-builder alone.
 
-- The core's bundle (`dist/hub.mjs`) and node-pty, the native module its
+- The hub's bundle (`dist/hub.mjs`) and node-pty, the native module its
   ssh logins run in (prebuilt for macOS and Windows, built by `pnpm
   install` on Linux; Node-API, so no rebuild for Electron; `build.mjs`
   makes its macOS `spawn-helper` executable, which node-pty 1.1.0's
@@ -77,7 +77,7 @@ electron-builder alone.
   `Contents/Helpers/`, signed with the app ([30](30-variable-vault.md)); a
   build on a Mac without `swiftc` goes on without it, with a warning. The
   `beforePack` hook refuses an app of another architecture than its
-  modules, a missing core bundle, payloads or notices, or a macOS app
+  modules, a missing hub bundle, payloads or notices, or a macOS app
   without the helper.
 - Artifacts (`dist/desktop/<name>-<version>-<os>-<arch>.<ext>`):
   - macOS: DMG and zip; hardened runtime; signed ad hoc unless a
@@ -99,46 +99,46 @@ electron-builder alone.
 Operator details (where the app keeps its files, Gatekeeper, SmartScreen,
 FUSE) are in [deployment](../deployment.md#desktop-app).
 
-### The core in process
+### The hub in process
 
 `desktop/src/hub.ts`, `protocol.ts`, `frames.ts`, `main.ts`,
 `backend/hosts/electron` ([42](42-typescript-backend.md)).
 
-- The core runs in an Electron utility process the main process forks
+- The hub runs in an Electron utility process the main process forks
   (`utilityProcess`), started with a message on its parent port: the
   instance, the node instance, the payloads' directories and the verify
   key of the launch. Nothing listens: the app's windows live in a session
   of their own, which intercepts `https://<slug>.localhost` and hands each
-  request to the core over a MessagePort, with the origin of the page
+  request to the hub over a MessagePort, with the origin of the page
   that made it (Electron's `initiatorOrigin`) as its Origin; requests to
   other hosts go to the network. The origin is a secure context, as code-server and its
   service workers need, and the same at every launch, which keeps what the
   page stores per browser and the permissions granted to it (a page of an
   earlier version, at `http://127.0.0.1:7781`, kept its own).
-- **Channels.** The core's WebSockets are MessagePorts: a frame of the
+- **Channels.** The hub's WebSockets are MessagePorts: a frame of the
   app's origin asks for one (`desktopChannels`, which the preload of every
   app window gives each frame of that origin), the main process checks the
   frame, builds the request's Origin and Host itself and hands one end to
-  the core, the other to the frame. The web UI opens its channels with
+  the hub, the other to the frame. The web UI opens its channels with
   `openChannel` (`web/src/lib/transport.ts`); VS Code's frames get a
   WebSocket that opens one for their own host.
 - **The app's client.** VS Code has one switch for the app and one for
-  browsers ([05](05-vscode-panes.md)), so the core must tell the app's
+  browsers ([05](05-vscode-panes.md)), so the hub must tell the app's
   requests from a browser's. A request is the app's because the main
-  process hands it over (in process, on the core's host); no browser
-  reaches this core, and no cookie or token marks the app's requests.
+  process hands it over (in process, on the hub's host); no browser
+  reaches this hub, and no cookie or token marks the app's requests.
 - The start message also carries the verify key, a per-launch key for the
   variable vault's presence prompts (Touch ID, Windows Hello): the shell
-  signs the core's nonces with it after the prompt, showing text it takes
-  from the core (asked directly, not through a page), never from the
-  page, and seals the vault's unlock material for the core so the page
+  signs the hub's nonces with it after the prompt, showing text it takes
+  from the hub (asked directly, not through a page), never from the
+  page, and seals the vault's unlock material for the hub so the page
   relays it unread (`desktop/src/verify.ts`, `windowsHello.ts`,
   `enclave.ts`, `relay.ts`, `unlockStore.ts`, `keychain.ts`;
   [30](30-variable-vault.md)).
-- **Crashes and stops.** A core that crashes after it served is started
+- **Crashes and stops.** A hub that crashes after it served is started
   again with the windows kept (their channels close and reconnect), at
   most 3 times a minute; then the app reports it and quits. Quitting asks
-  the core to stop: it ends its machines' sessions (up to 15 s); the shell
+  the hub to stop: it ends its machines' sessions (up to 15 s); the shell
   kills only that process if it has not exited 20 s later. On logout or
   shutdown the shell asks and quits without waiting, so it never holds up
   the system; Electron ends its utility processes with it.
@@ -148,7 +148,7 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
   code-server seed of a test run (`VELDR_DESKTOP_PAYLOAD`,
   `VELDR_AGENT_DIR`, `VELDR_SEED_DIR`). Each instance has its own Electron
   profile and single-instance lock.
-- On macOS and Linux the core's PATH gains `~/.local/bin`, Homebrew's and
+- On macOS and Linux the hub's PATH gains `~/.local/bin`, Homebrew's and
   the system directories without running a shell, since launchers load no
   shell startup files.
 - The shell never starts or stops terminal cores; the web UI does
@@ -156,11 +156,11 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
 
 ### Windows, quitting and title bar
 
-- macOS: closing the main window leaves the app in the Dock with its core;
+- macOS: closing the main window leaves the app in the Dock with its hub;
   the Dock icon, a second launch or an opened folder reopens it. Quitting
-  stops the core. Windows and Linux: closing the main window quits; a
+  stops the hub. Windows and Linux: closing the main window quits; a
   second launch focuses it.
-- Quitting closes the main window first and stops the core once it has
+- Quitting closes the main window first and stops the hub once it has
   closed. While panes have unsaved changes, the page asks: it lists the
   files, and offers **Save All**, **Don't Save** and **Cancel**
   (`desktop/src/closeGuard.ts`, `web/src/quitGuard.ts`). A page that does
@@ -172,8 +172,8 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
   `appearance.uiFontSize` and `window.zoom`; native full screen clears the
   inset. Secondary windows, and the main window on Windows and Linux, keep
   the native frame.
-- **Following the core** (`desktop/src/follow.ts`). The shell is a client
-  of its core's event channel (`/ws`) and settings endpoints, reached
+- **Following the hub** (`desktop/src/follow.ts`). The shell is a client
+  of its hub's event channel (`/ws`) and settings endpoints, reached
   directly, reconnecting with backoff. `appearance.theme` becomes `nativeTheme.themeSource`, so
   native chrome follows the UI's theme even when it differs from the
   system's; `appearance.language` is the menu's and dialogs' language.
@@ -210,7 +210,7 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
 
 The main window has a sandboxed preload (`desktop/src/preload.ts`,
 channels in `desktop/src/bridge.ts`) that runs in each of its frames: a
-frame of the app's origin gets its channels to the core
+frame of the app's origin gets its channels to the hub
 (`desktopChannels`), the top frame also one object, `desktopShell`
 (`web/src/shell.ts`). The shell accepts messages only from the top frame
 of the main window on the app's origin, and checks their shape. Program
@@ -229,7 +229,7 @@ windows and VS Code's own windows get the channels only
   dropped on a local pane are pasted as paths
   ([06](06-quick-look-and-files.md)).
 - `metrics` reports the app's Electron processes for the Performance page
-  ([13](13-settings-and-appearance.md)); the core reports itself.
+  ([13](13-settings-and-appearance.md)); the hub reports itself.
 
 **Folders opened with the app** (`desktop/src/folders.ts`). On macOS the
 app declares folders with rank `None`, so the Dock accepts dropped folders
@@ -249,12 +249,12 @@ macOS has no request for Full Disk Access: the user turns it on in System
 Settings. It checks the process it holds responsible, which children
 inherit:
 
-- The core is the app's utility process and code-server the core's
+- The hub is the app's utility process and code-server the hub's
   child, so the file browser and VS Code access files as **the app**.
 - Terminals access them as **herdr-core**: it runs the terminal core as a
   launchd job and its holders disclaim inherited responsibility, so a
   terminal's programs have what
-  `~/.veldr[-<instance>]/hosts/<host>/hc/herdr-core` was granted. Starting the core
+  `~/.veldr[-<instance>]/hosts/<host>/hc/herdr-core` was granted. Starting the terminal core
   as the app's child would not change this.
 
 Both need the grant. The Terminal settings page shows a **Permissions** row
@@ -309,17 +309,17 @@ Developer ID, so its grant survives reinstalls at the same path.
 | --- | --- |
 | Reimplement the UI for desktop | Duplicates terminal rendering, layout and VS Code integration. |
 | Tauri/WKWebView | VS Code webviews require Chromium's service-worker behavior. |
-| The core as a child process on a loopback port | Any process of the host could reach it; the app's requests needed a cookie of the launch to be told apart. |
+| The hub as a child process on a loopback port | Any process of the host could reach it; the app's requests needed a cookie of the launch to be told apart. |
 | A custom scheme for the app's origin | code-server's resources and CacheStorage need https ([42](42-typescript-backend.md)). |
 | A loopback listener for VS Code only | Not needed: its frames' WebSockets are channels too. |
-| Restart the core without a bound | A core that crashes at once would loop; after 3 a minute the app reports it. |
+| Restart the hub without a bound | A hub that crashes at once would loop; after 3 a minute the app reports it. |
 | A local machine on Windows | The agent is POSIX; it would be a port, and no Windows herdr-core is pinned. |
 | WSL built in | A WSL distribution with an ssh server already works as an SSH machine. |
 | The sign-in terminal on Windows | Win32-OpenSSH has no ControlMaster, so a login holds nothing for later connections. |
 | Register menu keys on Windows and Linux | Ctrl+C, Ctrl+M, Ctrl+Q are programs' keys in terminals. |
 | Quit when the main window closes on macOS | Mac apps stay in the Dock until quit. |
 | Only an AppImage on Linux | AppArmor blocks Chromium's sandbox in an AppImage on Ubuntu 24.04+. |
-| `--no-sandbox` | Turns off the renderer sandbox for everything the core serves. |
+| `--no-sandbox` | Turns off the renderer sandbox for everything the hub serves. |
 | Full Disk Access for the app alone, terminal core as its child | herdr-core's holders disclaim responsibility anyway, and terminals must outlive the app. |
 | Check Full Disk Access in the shell's process | Shows only the app's access, not herdr-core's. |
 | Read the privacy database (`TCC.db`) | Needs Full Disk Access itself; private format. |
@@ -327,12 +327,12 @@ Developer ID, so its grant survives reinstalls at the same path.
 
 ## Failure modes
 
-- A core that cannot start (missing payloads, invalid configuration or
+- A hub that cannot start (missing payloads, invalid configuration or
   development instance): startup fails with a localized dialog and a
-  bounded tail of the core's log, after stopping it.
-- The core crashes: it is started again, the windows reconnect; a fourth
+  bounded tail of the hub's log, after stopping it.
+- The hub crashes: it is started again, the windows reconnect; a fourth
   crash within a minute is reported and the app quits. A renderer's exit
-  is reported and the app quits; reopening starts a fresh core.
+  is reported and the app quits; reopening starts a fresh hub.
 - Electron crash: its utility processes end with it; force-killed agents
   are covered by orphan reaping and idle timeouts
   ([10](10-remote-resource-lifecycle.md)).
@@ -357,26 +357,26 @@ Following [Electron's security guidance](https://www.electronjs.org/docs/latest/
 - No Node integration in any renderer; sandboxing, context isolation and
   web security on every system; never `--no-sandbox`.
 - Only the main window has a preload; its bridge accepts messages only from
-  the main window's top frame on the core's origin, checks their shape, and
+  the main window's top frame on the hub's origin, checks their shape, and
   exposes nothing beyond the channels above. A dropped file's path reveals
   only what the user handed over; `metrics` reports kinds and amounts,
   nothing processes hold.
-- Navigation and popups are limited to the exact core origin; external
+- Navigation and popups are limited to the exact hub origin; external
   links accept only credential-free HTTP(S). Browser-pane webviews are
   forced into their own sandboxed partition with no preload
   (`desktop/src/policy.ts`, [32](32-browser-and-ports.md)).
-- Permissions require the frame and its top window to be the core's; only
+- Permissions require the frame and its top window to be the hub's; only
   notifications, clipboard read and sanitized write, the File System Access
   API (VS Code's **Download…**) and local fonts (the font picker) are
   allowed.
-- The shell reads its settings from its core directly, behind the same
+- The shell reads its settings from its hub directly, behind the same
   guards, takes only appearance settings and well-formed bindings, and
-  listens on nothing; neither does the core.
+  listens on nothing; neither does the hub.
 - Full Disk Access requests carry nothing from the page: one fixed System
   Settings URL, the instance's own herdr-core path, the app's own bundle.
   The probes open a folder without reading it.
-- The main process's word identifies the app's windows to the core; no
-  other process of the host reaches the core, which listens on nothing.
+- The main process's word identifies the app's windows to the hub; no
+  other process of the host reaches the hub, which listens on nothing.
 - Release builds get no secret except the macOS Package step's optional
   signing credentials.
 
@@ -385,7 +385,7 @@ See [SECURITY.md](../../SECURITY.md) for the trust boundaries.
 ## Testing
 
 - `desktop/src/*.test.ts` (fake Electron and Node children, no network):
-  `platform`, `core` (the start message, restarts after crashes and their
+  `platform`, `hub` (the start message, restarts after crashes and their
   bound, start failures and timeouts, stop and kill after the deadline, a
   frame's channel request), `hubBridge` (requests, bodies with credit,
   cancels, failures, channels), `protocol`, `frames`, `folders`, `follow`, `menu`
@@ -398,16 +398,16 @@ See [SECURITY.md](../../SECURITY.md) for the trust boundaries.
 - `backend/machine/housekeeping.test.ts` and
   `backend/features/terminals/terminals.test.ts` (`the terminal core’s
   lifecycle from the UI`): the probes, the op and the endpoint.
-- CI's `desktop` job runs the web and desktop tests (the core's on
+- CI's `desktop` job runs the web and desktop tests (the hub's on
   macOS) and `scripts/desktop.sh app` on Ubuntu, macOS and Windows.
 - `e2e/tests/desktop.spec.ts` (`make e2e`, when the desktop's packages
   are installed) launches the unpackaged app with Playwright on an
   isolated instance (`VELDR_DESKTOP_DEV`), profile (`--user-data-dir`),
   home and mock keychain (`e2e/harness/desktop.ts`, the `desktop`
   fixture, which other desktop tests reuse): the UI from the app's
-  origin with no TCP listener of the core, the local machine, a
+  origin with no TCP listener of the hub, the local machine, a
   terminal, an ssh login through node-pty, a download, a restart after
-  the core is killed, and a VS Code window given a code-server release
+  the hub is killed, and a VS Code window given a code-server release
   (`E2E_CODE_SERVER_SEED`; [42](42-typescript-backend.md)).
 - Packaged smoke tests launch the executable with `VELDR_DESKTOP_DEV`
   and their own `--user-data-dir`.

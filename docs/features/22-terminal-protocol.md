@@ -10,12 +10,12 @@ run commands and read files, which clients must not get.
 
 ## Goals / non-goals
 
-Goals: one connection from a client to the core for every machine's
+Goals: one connection from a client to the hub for every machine's
 terminals; herdr-core's records and events passed on unchanged, so clients
 follow its API as it grows; backpressure from the drawing client to the
-program; the core's guards and read-only mode.
+program; the hub's guards and read-only mode.
 
-Non-goals: emulating terminals in the core; a layout model in the core
+Non-goals: emulating terminals in the hub; a layout model in the hub
 (clients share theirs as a herdr-core document, below); replacing `/ws`.
 
 ## Design
@@ -25,20 +25,20 @@ Non-goals: emulating terminals in the core; a layout model in the core
 frames are JSON; binary frames are `[stream u32 LE][kind u8][payload]`
 with herdr-core's kinds (0 data, 3 resize, 6 automatic input). The
 message table is in
-[architecture](../architecture.md#terminal-clients--core-protocol-apiv1term).
+[architecture](../architecture.md#terminal-clients--hub-protocol-apiv1term).
 
 **Backends** (`backend.ts`). `sub {m}` subscribes to machine `m`; the
 first subscriber starts the machine's backend:
 
 1. Ask the agent for the terminal core's status. Upload this build's
-   executable if it differs, start the core if none answers, restart it
-   (programs adopted) if it runs another build. A read-only core does none
+   executable if it differs, start the terminal core if none answers, restart it
+   (programs adopted) if it runs another build. A read-only hub does none
    of this.
-2. Dial the core through the agent (`hc-api`), subscribe to all events and
+2. Dial the terminal core through the agent (`hc-api`), subscribe to all events and
    keep the terminal records.
 3. Send subscribers `backend {state: ready}`, a `snapshot`, then every
    `event`. Snapshot and events go under one lock, so a later subscriber
-   loses or duplicates nothing. Records pass through with fields the core
+   loses or duplicates nothing. Records pass through with fields the hub
    does not know.
 4. Add detected coding agents to the records as `agent` and
    `agent_status` ([25](25-agent-detection.md)) and, while the agents
@@ -51,16 +51,16 @@ first subscriber starts the machine's backend:
 
 A failing backend reports `backend {state: error, code}` and retries with
 backoff from 1 s to 16 s, or at once when its machine connects. 10 s after
-its last subscriber leaves (`termIdle`) it closes its connection; the core
+its last subscriber leaves (`termIdle`) it closes its connection; the terminal core
 and programs keep running. The state is also on `/ws` as the machine's
 `hc {state, code, version}`.
 
 **Lifecycle from the UI.** `POST /api/m/{id}/hc/{start|stop|restart}`
 ([02](02-multi-machine-transport.md)). After a stop the backend reports
-`stopped` instead of starting another core until the user starts it or a
+`stopped` instead of starting another terminal core until the user starts it or a
 backend starts anew.
 
-**Calls.** `call` passes an allowlisted method to the machine's core:
+**Calls.** `call` passes an allowlisted method to the machine's terminal core:
 
 - reading: `terminal.list`, `terminal.get`, `terminal.read`, `doc.get`,
   `templates.list`;
@@ -71,7 +71,7 @@ backend starts anew.
 Anything else, and any call with the parameter `on` (herdr-core's remote
 machine routing), is refused and audited as `denied.term`. `terminal.run`,
 `kill`, `rm`, `interrupt` and `keep` are audited; `terminal.run` with its
-argv, cwd and the variable names (not values) of its `env`. The core adds
+argv, cwd and the variable names (not values) of its `env`. The hub adds
 to `terminal.run`'s `env` the virtual display's variables
 ([14](14-gui-windows.md)) and, on ssh machines, `SSH_CONNECTION`/
 `SSH_CLIENT` ([21](21-terminal-core.md)). A read-only client's
@@ -88,13 +88,13 @@ snapshot, event or `terminal.list` result:
   program can set one); their agents are not detected, and a stream of a
   terminal that becomes hidden is closed;
 - **other machines' terminals** of the terminal core (`machine.add`,
-  addresses like `box/t7`); each machine is reached through its own core.
+  addresses like `box/t7`); each machine is reached through its own terminal core.
 
 A call or attach that names one (as `terminal`, `caller` or `parent`) is
 answered `not_found`, as for a terminal that does not exist, and audited
 as `denied.term` with the reason. Setting the hidden label or taking the
 chat host's name is refused. `labels` must be an object of strings, so
-the core forwards what it checked.
+the hub forwards what it checked.
 
 **Streams.** `attach` opens a herdr-core attach and answers `attached`
 with a stream number; the reply is queued before the stream's first frame.
@@ -102,7 +102,7 @@ Output arrives as binary frames: the first paint, then the program's
 bytes.
 
 - **Credit.** The client sends `ack {s, n}` for bytes it has drawn; the
-  core forwards it as herdr-core credit, capped at what it actually sent.
+  hub forwards it as herdr-core credit, capped at what it actually sent.
   So at most 256 KiB is in flight per terminal, and a client 4 MiB behind
   gets a repaint instead of the backlog.
 - **Input** is kind 0, or kind 6 for answers the client's emulator
@@ -113,7 +113,7 @@ bytes.
   `display` with each attach and `terminal.run`, and `facts` when they
   change.
 - **Observers.** An observing attach (requested, or every attach of a
-  read-only core) receives the grid size as kind 3 frames and sends
+  read-only hub) receives the grid size as kind 3 frames and sends
   nothing: no input, size, focus or facts, and its focus marks no turn
   seen.
 - Messages are at most 16 MiB. `closed` ends a stream with herdr-core's
@@ -127,7 +127,7 @@ full-screen programs (Claude Code, Codex) laid out twice, lost their
 scroll position, and the next first paint showed the wrong layout.
 
 So when a client lets go of the last size-setting stream of a live
-terminal, the core keeps it attached but unread (`parked`):
+terminal, the hub keeps it attached but unread (`parked`):
 
 - it tells herdr-core the viewer lost focus (if it had it) and stops
   forwarding output;
@@ -210,7 +210,7 @@ handlers registered before the first frame), `store.ts` (records from
 snapshots and events), `layout.ts` (the layout as immutable values and
 operations). `web/src/state/terms.ts` reads a machine's layout before
 editing and writes one change at a time with the version last read. It
-starts terminals with `keep: true` and replaces those that ended with the
+starts terminals with `keep: true` and replaces those that ended with the terminal
 core ([33](33-workspace-restore.md)).
 
 ## Alternatives considered
@@ -219,7 +219,7 @@ core ([33](33-workspace-restore.md)).
 | --- | --- |
 | New message types on `/ws` | Shares one send queue and compression with machine, settings and agent messages; busy terminal output would delay them and be compressed needlessly. |
 | Passing herdr-core's protocol through | Clients could call `machine.exec`, `file.*` and `server.stop`, and would need a connection per machine. |
-| Acknowledging herdr-core on read | A slow client's backlog would queue in the core. |
+| Acknowledging herdr-core on read | A slow client's backlog would queue in the hub. |
 | A `terminal.list` snapshot per subscriber | Without a sequence number, events between list and subscription would be lost or doubled. |
 | One backend connection per client | Each would count as a viewer; one per machine keeps event order identical for all clients. |
 | Starting terminal cores when machines connect | Machines nobody uses terminals on would get a long-lived process. |
@@ -261,7 +261,7 @@ history and makes every attach an observer. See the terminal clients row in
   records and events.
 - `web/src/__tests__/term.test.ts`: the TypeScript client against a
   scripted socket and every layout vector; `terms.test.ts` the UI's model;
-  `restore.test.ts` restoring after a core restart; `agentLeaves.test.ts`
+  `restore.test.ts` restoring after a terminal core restart; `agentLeaves.test.ts`
   with `spec/vectors/layout/agent-leaves.json` a leaf's `session` and
   `before`.
 - `make it`: `backend/features/terminals/integration.test.ts` (`a shell,

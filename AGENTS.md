@@ -7,25 +7,25 @@ changes.
 
 ## What this is
 
-The core (`backend/`, TypeScript, built with Bun into one executable per
+The hub (`backend/`, TypeScript, built with Bun into one executable per
 platform; [its README](backend/README.md)) serves a React terminal UI and
 reaches several machines over ssh through a per-machine agent: the machine
 side in TypeScript ([42](docs/features/42-typescript-backend.md):
 `backend/machine`, `backend/hosts/machine` and the features' `machine.ts`),
-its command `node` serving the core's protocol. Each platform's executable
-is the core and that platform's machine side (the machine build); a machine
+its command `node` serving the hub's protocol. Each platform's executable
+is the hub and that platform's machine side (the machine build); a machine
 downloads its platform's release archive from GitHub
 (`<slug>-<platform>.tar.gz`, checked against the release's `SHA256SUMS`), or
-the core uploads it. Every machine's terminals live in a terminal core of
+the hub uploads it. Every machine's terminals live in a terminal core of
 the agent's own (herdr-core, `hc`, in a session apart from the user's); the
 browser emulates them with Ghostty's libghostty-vt as WebAssembly through
-the core's terminal protocol (`/api/v1/term`), and an Electron desktop app
-(`desktop/`) wraps the same UI and a core of its own on macOS, Windows and
-Linux. The agent runs on Linux and macOS only, so a core on Windows reaches
+the hub's terminal protocol (`/api/v1/term`), and an Electron desktop app
+(`desktop/`) wraps the same UI and a hub of its own on macOS, Windows and
+Linux. The agent runs on Linux and macOS only, so a hub on Windows reaches
 SSH machines only. code-server provides VS Code panels. A chat host on each
 machine (the command `chat-host`, a hidden terminal of that terminal core)
 runs coding agents headless for the chat panes, its state in SQLite
-(`backend/shared/store`). The core's executable embeds the UI, its
+(`backend/shared/store`). The hub's executable embeds the UI, its
 platform's herdr-core (with the digests of every platform's) and, on Linux,
 video encoder, and a VS Code extension. Earlier releases had a machine
 side in Go; it was removed, and a node of this build takes over from a Go
@@ -37,26 +37,26 @@ node still running on a machine
 | Task | Command |
 | --- | --- |
 | Install JS deps | `make deps` |
-| Unit tests (the core's `bun test`, web, desktop) | `make test` |
-| The core's tests that wait on real time for what runs in the background (marked `slow`/`slowDescribe` from `backend/shared/testdata/slow.ts`, skipped by `make test`; CI runs them) | `make test-slow` |
-| All checks (tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, the core's flags and routes in `docs/reference.md` (`backend/scripts/reference.ts`), generated tokens and registry, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
+| Unit tests (the hub's `bun test`, web, desktop) | `make test` |
+| The hub's tests that wait on real time for what runs in the background (marked `slow`/`slowDescribe` from `backend/shared/testdata/slow.ts`, skipped by `make test`; CI runs them) | `make test-slow` |
+| All checks (tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, the hub's flags and routes in `docs/reference.md` (`backend/scripts/reference.ts`), generated tokens and registry, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
 | Regenerate the design tokens' CSS after editing `spec/tokens.json` (`backend/scripts/tokens.ts`), and `spec/generated/registry.json` with the settings and commands tables of `docs/reference.md` (`backend/scripts/registry.ts`) after changing settings, commands or agent kinds (`backend/shared/agents`) | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`, into `scripts/gpupick/bin`; zig 0.17) | `make gpupick` |
 | Test and rebuild the GUI helper of Linux machines (`scripts/gui-helper`: the program windows' X client and capture, compositor and keeper of the machine side; zig 0.17) | `make gui-helper` |
 | Program windows' integration test against a real Xvfb in Docker, from any host (`make it` runs it on a Linux host with Xvfb) | `scripts/gui-it.sh` |
-| Integration tests with a real terminal core, the machine side's and the core's terminals (`HC_TEST_BIN=<herdr-core>`; the pinned one: `bun backend/scripts/fetch-hc.ts --exe <file> <os>/<arch>`), and VS Code's machine side with a real code-server release (`E2E_CODE_SERVER_SEED=<dir>` holding `code-server-<version>-<os>-<arch>.tar.gz`; skipped without) | `make it` |
+| Integration tests with a real terminal core, the machine side's and the hub's terminals (`HC_TEST_BIN=<herdr-core>`; the pinned one: `bun backend/scripts/fetch-hc.ts --exe <file> <os>/<arch>`), and VS Code's machine side with a real code-server release (`E2E_CODE_SERVER_SEED=<dir>` holding `code-server-<version>-<os>-<arch>.tar.gz`; skipped without) | `make it` |
 | Old kernels and C libraries: KVM guests from official cloud images and containers of old distributions, a payload run in each (on a Linux host with KVM and Docker; not part of any make target) | `e2e/machines/machines.py run-matrix <script>` ([its README](e2e/machines/README.md)) |
-| End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium, SSH machines in Docker containers (skipped without Docker; `E2E_REQUIRE_DOCKER=1` fails instead), and the desktop app with its core in process (skipped without `desktop`'s packages; `E2E_CODE_SERVER_SEED=<dir with a code-server release>` adds its VS Code window); builds into `dist/e2e` (not part of `make test`); (`SKIP_BUILD=1` reuses the build) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
-| Full build into `dist/`: everything the core embeds staged in `dist/payload` (herdr-core in `dist/machines-hc`), the executable of each `TARGETS` platform, the core and that platform's machine side (`bun backend/scripts/build.ts`), and the release archives; the pinned herdr-core comes from `backend/scripts/fetch-hc.ts` (`backend/scripts/hcdist.ts`) | `make build` (or `scripts/build.sh`) |
+| End-to-end tests: the real hub on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium, SSH machines in Docker containers (skipped without Docker; `E2E_REQUIRE_DOCKER=1` fails instead), and the desktop app with its hub in process (skipped without `desktop`'s packages; `E2E_CODE_SERVER_SEED=<dir with a code-server release>` adds its VS Code window); builds into `dist/e2e` (not part of `make test`); (`SKIP_BUILD=1` reuses the build) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
+| Full build into `dist/`: everything the hub embeds staged in `dist/payload` (herdr-core in `dist/machines-hc`), the executable of each `TARGETS` platform, the hub and that platform's machine side (`bun backend/scripts/build.ts`), and the release archives; the pinned herdr-core comes from `backend/scripts/fetch-hc.ts` (`backend/scripts/hcdist.ts`) | `make build` (or `scripts/build.sh`) |
 | Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
 | macOS: build the `.app` and install it into `/Applications` | `make desktop-install` |
 | Isolated desktop development | `make dev-desktop` |
-| Run for development: the core from its sources (`bun`, instance `dev`, the payloads of `dist/payload`, where it stages this host's executable, built into `dist/dev` with the herdr-core it fetches once into `dist/machines-hc`) and Vite | `make dev-hub` and `make dev-web` |
+| Run for development: the hub from its sources (`bun`, instance `dev`, the payloads of `dist/payload`, where it stages this host's executable, built into `dist/dev` with the herdr-core it fetches once into `dist/machines-hc`) and Vite | `make dev-hub` and `make dev-web` |
 
 ## Tests: fast and slow, by area
 
-Tests are grouped by area: the core's beside its sources
+Tests are grouped by area: the hub's beside its sources
 (`backend/features/<feature>`, `backend/kernel/<part>`, `backend/machine`,
 `backend/shared/<part>`, `backend/scripts`), the web UI's by file name in `web/src/__tests__`, the desktop shell's in `desktop/src`.
 
@@ -66,13 +66,13 @@ Tests are grouped by area: the core's beside its sources
 - **Fast tests** (`make test`): every area, without the slow tests. Run
   them before merging a branch or opening a pull request, and after a
   change that crosses areas (a protocol, a shared module).
-- **Slow tests**: the core's tests marked `slow`
+- **Slow tests**: the hub's tests marked `slow`
   (`backend/shared/testdata/slow.ts`: they wait on real time, programs
   or compiles; `make test-slow`), `make it`, `make e2e` and the machine
   matrix. They cost minutes and load the machine: run one only when the
   change touches what it covers (one file: `SLOW_TESTS=1 bun test
   <file>`, `make e2e E2E_ARGS='tests/<spec>'`), the whole set before a
-  release. CI runs the slow tests of the core.
+  release. CI runs the slow tests of the hub.
 - Never add load (stress tools, busy loops) to the user's machine to
   provoke a failure.
 
@@ -86,10 +86,10 @@ Tests are grouped by area: the core's beside its sources
    (homes in `/tmp/hie-*`, SSH machines in Docker containers labelled
    `veldr.e2e`); the desktop app's instance (`desktop`) and the
    default one are the user's. Stop a terminal core only through its own
-   instance (`POST /api/m/{id}/hc/stop` of the dev core), never the user's,
+   instance (`POST /api/m/{id}/hc/stop` of the dev hub), never the user's,
    and do not attach to the user's terminals.
 2. **No hardcoded product name.** Use
-   `backend/shared/lib/brand.ts` (the core), `APP_NAME`/`APP_SLUG`/
+   `backend/shared/lib/brand.ts` (the hub), `APP_NAME`/`APP_SLUG`/
    `storage` from `web/src/brand.ts`, `src/brand.ts` in the extension.
    `scripts/check.sh` fails otherwise. Renames: `scripts/rename.sh`.
 3. **All UI text through i18n.** Add the key to `web/src/i18n/en.ts` and the
@@ -117,13 +117,13 @@ Tests are grouped by area: the core's beside its sources
    owner and a way to end (agent exit, idle timeout, explicit stop); anything
    written to disk needs a retention rule. Document it in
    `docs/deployment.md#remote-resources`.
-7. **Protocol compatibility.** Core and agent ship together, but extend
+7. **Protocol compatibility.** Hub and agent ship together, but extend
    the agent protocol (`backend/shared/proto/agentproto`) by adding
    fields/ops: nodes of earlier releases, Go ones too, speak it until a
    node of this build takes over. herdr-core's API is external: speak its
    protocol generation (`backend/shared/proto/hc`), honor stream credit, and
    take a `missed` notification as the subscription's new complete state.
-8. **Tests.** The core's beside its sources in `backend/`
+8. **Tests.** The hub's beside its sources in `backend/`
    (`<name>.test.ts`, `bun test`; machine-side tests use a temporary
    `HOME`); web tests in `web/src/__tests__`; the desktop shell's
    beside its sources in `desktop/src`. Don't add tests that need network access or
@@ -188,7 +188,7 @@ playbooks):
   Claude Code's transcripts are mapped to events by
   `backend/shared/agents/transcript` (the chat host's imports and its
   Claude Code adapter), specified by the vectors in
-  `spec/vectors/transcript/`, which the core's and the web tests run;
+  `spec/vectors/transcript/`, which the hub's and the web tests run;
   `UPDATE_TESTDATA=1 bun test shared/agents/transcript` in `backend/`
   rewrites a vector's expected events after a deliberate change of the
   mapping (review the diff). A chat with it (the chat host running it
@@ -222,13 +222,13 @@ playbooks):
 - A terminal the product runs for itself (the chat host) is hidden by its
   reserved name and label together (`agentproto.Hidden`, `hidden` of
   `backend/shared/proto/agentproto`): anything that
-  walks a terminal core's terminals (the core's terminal protocol, agent
+  walks a terminal core's terminals (the hub's terminal protocol, agent
   detection, terminal history) skips it with that function, never by the
   label alone, which any program can set.
 - Never call herdr-core's `terminal.read` with `lines` above 0 for a
-  read-only client or from a background task: with history lines the core
+  read-only client or from a background task: with history lines the terminal core
   scrolls a program on the alternate screen, which every viewer sees.
-- `web/dist` is embedded into the core's executable when it is built
+- `web/dist` is embedded into the hub's executable when it is built
   (`backend/scripts/build.ts --web`); `make build` builds the UI first, and
   `make dev-hub` serves `web/dist` as it is (`--web-dir`).
 - Adding an npm dependency of `backend/` changes
@@ -237,7 +237,7 @@ playbooks):
   `README.zh-CN.md` has one sentence per line, and enumerations in the docs
   that grow with features are lists with one item per line.
 - macOS limits unix socket paths to 104 bytes; keep socket paths short.
-- The core builds for Windows, the agent does not: the core's code runs
+- The hub builds for Windows, the agent does not: the hub's code runs
   in Bun and in Electron's Node (`shared/`, `kernel/` and the features'
   `hub.ts` use Node's modules only, `tsconfig.node.json`; the machine
   side is Bun on Linux and macOS, backend/README.md's rules); POSIX-only
@@ -245,7 +245,7 @@ playbooks):
   `posix` for them. `.gitattributes` keeps LF line endings on Windows checkouts.
 - The binary a machine gets is its platform's executable from the
   release's archive, checked against the release's `SHA256SUMS`: the machine
-  downloads it, else the core uploads it from `--agent-dir`, its cache, its
+  downloads it, else the hub uploads it from `--agent-dir`, its cache, its
   own executable or the release
   (`backend/kernel/machines/transport/release.ts`, `ssh.ts`), checked by its
   SHA-256 on the machine. Its command line is `backend/hosts/bun/main.ts`

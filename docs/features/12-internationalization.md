@@ -25,14 +25,14 @@ reference documentation.
     `Record<MessageKey, string>`, so a missing or extra key fails `tsc`.
   - `t(key, vars)` substitutes `{placeholders}`; a test checks every
     translation uses the same ones.
-  - The locale is the core's `appearance.language` setting (`auto`, `en`,
+  - The locale is the hub's `appearance.language` setting (`auto`, `en`,
     `zh-CN`), shared by every client. `auto` follows
     `navigator.languages`, then English. `<html lang>` follows it.
 - **Plugins** keep their messages in `web/src/plugins/<id>/i18n/`, merged
   into the one table `t` reads, so two plugins never touch a common file.
   A test restricts a plugin's keys to its own namespaces (`<id>.…`,
   `settings.<id>.…`, `command.<id>.…`, `plugins.<id>.…`).
-- **Core-defined settings and commands** are labelled by keys built from
+- **Hub-defined settings and commands** are labelled by keys built from
   their names (`settings.<key>`, `command.<id>`).
   `spec/generated/registry.json` lists them and `settings.test.ts`
   checks the web UI has each; an untranslated one shows its key.
@@ -40,12 +40,12 @@ reference documentation.
   palette, shortcuts page and tooltips all use `command.<id>`). English uses
   Title Case for commands, as VS Code and macOS do. Chinese uses the words
   of Chinese VS Code and Chrome: 工作区 (workspace), 标签页 (tab), 窗格
-  (pane), 智能体 (agent), 分屏, 侧栏, 程序窗口, 服务器 (the core).
+  (pane), 智能体 (agent), 分屏, 侧栏, 程序窗口, 服务器 (the hub).
   herdr-core is the **terminal service** (终端服务), named only in
   troubleshooting, its settings and errors.
 - **Desktop shell**: menu titles, command items and error dialogs come from
   the web UI's dictionaries. The shell reads `appearance.language` itself;
-  `auto`, or a failure before the core answers, follows the system's
+  `auto`, or a failure before the hub answers, follows the system's
   languages.
 - **Server**: sends codes the UI translates (code-server phases, terminal
   core states as `backend.<code>`, machine states, agent statuses, program
@@ -81,7 +81,7 @@ reference documentation.
 - `web/src/__tests__/i18n.test.ts`: locale detection, placeholder
   substitution and parity.
 - `tsc`: key completeness.
-- `web/src/__tests__/settings.test.ts`: every key the core's registry
+- `web/src/__tests__/settings.test.ts`: every key the hub's registry
   needs.
 - `desktop/src/menu.test.ts`: menu titles follow the language.
 - `scripts/check.sh`: generated key lists current

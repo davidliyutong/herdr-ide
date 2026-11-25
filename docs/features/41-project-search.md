@@ -89,17 +89,17 @@ each. A search stops after `maxResults` matches (2000 unless asked, at most
 found with `truncated` and `reason` (`max_results`, `timeout`,
 `max_files`); `engine` says which engine ran (`rg`, `builtin`). At most 4
 searches run at once per machine; a fifth waits up to 3 s, then fails with
-`busy`. The search ends as soon as the core closes the stream
+`busy`. The search ends as soon as the hub closes the stream
 (`plugin.UntilClosed`): ripgrep runs in a session of its own, and its
 process group is killed then, at the time limit and once enough matches
 were read.
 
-### Core side (`backend/features/search`)
+### Hub side (`backend/features/search`)
 
 `POST /api/m/{id}/p/search/search` takes the parameters as JSON (at most
 16 KiB), checks them as the agent does, and answers the agent's result. It
 reads only, so it is not a mutating route: read-only mode searches, and
-nothing is audited. The core waits 45 s (the agent's 30 s and the
+nothing is audited. The hub waits 45 s (the agent's 30 s and the
 transfer); past that the answer is 504 `timeout`. A search the browser
 abandons ends the request, which closes the agent's stream and stops the
 search on the machine.
@@ -150,7 +150,7 @@ away.
   platform, uploads, retention and checksums for a tool many machines
   already have (on `PATH`, or inside code-server). The walker is fast
   enough for the projects a panel searches, and says it is the one running.
-- **Streaming results as they come.** The core's plugin routes answer JSON;
+- **Streaming results as they come.** The hub's plugin routes answer JSON;
   a bounded result of 2000 matches is under 1 MB and arrives within the
   search's time. Streaming would add a protocol for little gain at that
   size.
@@ -176,7 +176,7 @@ away.
 
 ## Security
 
-A search reads files the agent's user can read, as the core's file routes
+A search reads files the agent's user can read, as the hub's file routes
 do; it writes nothing. ripgrep is a program found on the machine: it runs
 without a shell, with an argument vector built by the agent (the query and
 patterns are values after `--` or of `--glob=`, never options), without a

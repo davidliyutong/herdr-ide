@@ -5,10 +5,10 @@
 A machine's work lives on the machine: its terminals in a terminal core
 ([21](21-terminal-core.md)), its layout in that core's documents
 ([22](22-terminal-protocol.md)), its chats in a chat host
-([37](37-agent-chats.md)). What reaches them was tied to one core: an
-agent per core and ssh session, the local machine's agent inside the core's
-process, and the machine's directories named after the core's instance, so
-the desktop app (`desktop`) and a server's core (the default instance)
+([37](37-agent-chats.md)). What reaches them was tied to one hub: an
+agent per hub and ssh session, the local machine's agent inside the hub's
+process, and the machine's directories named after the hub's instance, so
+the desktop app (`desktop`) and a server's hub (the default instance)
 reaching the same machine saw different terminals.
 
 Constraints: terminals and chats must outlive every program that shows
@@ -46,9 +46,9 @@ a node reachable without ssh.
 | `node` | The machine's service: what the agent did, for any number of clients, detached from them. |
 | `node dial` | Pipes its standard input and output to the node's socket, starting the node first when none answers. Run by ssh. |
 | `chat-host` | The chat host, which the node starts as a hidden terminal of the instance's terminal core ([37](37-agent-chats.md)). |
-| `serve` | The UI: HTTP and WebSocket front, plugins' core sides, the files of the UI's host. Also on Windows. |
+| `serve` | The UI: HTTP and WebSocket front, plugins' hub sides, the files of the UI's host. Also on Windows. |
 
-`serve` is the core's executable (TypeScript, `backend/hosts/bun`), which
+`serve` is the hub's executable (TypeScript, `backend/hosts/bun`), which
 is the machine build of its platform too and runs `node`, `node dial` and
 `chat-host` itself ([42](42-typescript-backend.md#the-machine-side));
 the UI installs it on its own machine, and other machines download their
@@ -66,8 +66,8 @@ as from any older build (below).
   another uid (`SO_PEERCRED`, `getpeereid`) is closed. Nothing else is
   listened on.
 - **Hello.** A connection's first line (`agentproto.NodeHello`) says what
-  the client wants (`serve`, `stop`, `takeover`), names its core (a random
-  id per core process, the same across its reconnects) and its build: a
+  the client wants (`serve`, `stop`, `takeover`), names its hub (a random
+  id per hub process, the same across its reconnects) and its build: a
   digest of its executable, its version and when the executable was
   written. The node answers with its own build; with `serve` the
   connection then carries one yamux session speaking the agent protocol
@@ -135,14 +135,14 @@ start on the node and need a UI:
 
 A node's namespace is the machine's data directory and terminal core
 session: `~/.veldr` and `veldr-<host id>` by default
-([40](40-shared-homes.md)). A core's `--instance`
+([40](40-shared-homes.md)). A hub's `--instance`
 names its own files on its host
 ([reference](../reference.md#files-and-directories)) and, unless
 `--node-instance` says otherwise, the namespace on machines too, which
-keeps development and test cores (`dev`, `e2e-<random>`) apart from the
+keeps development and test hubs (`dev`, `e2e-<random>`) apart from the
 user's. The desktop app runs `--instance desktop --node-instance=`: its
 own settings and vault, and the default namespace on every machine, which
-it shares with a server's cores. Earlier desktop builds used the
+it shares with a server's hubs. Earlier desktop builds used the
 namespace `desktop`; it is left as it was, its terminal core running until
 stopped ([deployment](../deployment.md#desktop-app)).
 
@@ -154,18 +154,18 @@ version, else by when their executables were written):
 
 - the node's build or a newer one: the client uses the node; the
   protocol only grows (AGENTS.md rule 7), so a newer node serves an older
-  core;
+  hub;
 - an older node: the client starts `node --takeover` from its own
   executable and connects to that.
 
 The node taking over asks the running one to give way (`takeover`), which
 closes its listener, gives up the lock and hands its code-server over (the
 pid file names the new node), then takes lock and socket. The old node
-tells each of its sessions' cores to move (op `node.drain`, agent to
-core), serves them meanwhile, and ends once they left, at the latest after
+tells each of its sessions' hubs to move (op `node.drain`, agent to
+hub), serves them meanwhile, and ends once they left, at the latest after
 10 minutes, the longest bounded request.
 
-A core told to move connects again, which reaches the new node, and makes
+A hub told to move connects again, which reaches the new node, and makes
 that session the machine's while the machine stays ready; the old session
 ends 2 s later. What used it opens its streams again on the new session as
 after any lost stream, without the machine being shown as disconnected:
@@ -180,7 +180,7 @@ chat works, the terminal core restarts only when asked.
 
 | Alternative | Why not |
 | --- | --- |
-| The local machine's agent in the core's process (before) | The machine's service ended with one UI and could serve no other. |
+| The local machine's agent in the hub's process (before) | The machine's service ended with one UI and could serve no other. |
 | herdr-core linked into `veldr`, run as `veldr hc` | Saves one artifact at the cost of cgo in every Linux and macOS build, a build of another project's sources and its entry point, and terminals' macOS privacy grants moving to an executable that changes with every release. |
 | herdr-core's library called in the node's process | A node panic or upgrade would end every terminal; holders and macOS responsibility need processes of their own. |
 | `ssh -L` forwarding of the node's socket | Many servers disable stream-local forwarding; it cannot start a node. |
@@ -204,7 +204,7 @@ chat works, the terminal core restarts only when asked.
   for the lock and exits; the client uses the node that serves.
 - **Takeover interrupted.** A new node that dies leaves no node on the
   socket; the next client starts one. The old node ends with its clients.
-- **A core that knows no drain notice** (a build before it). It keeps its
+- **A hub that knows no drain notice** (a build before it). It keeps its
   session until the old node ends after 10 minutes, then reconnects.
 - **The user's login session ends.** Where the system ends the session's
   processes (systemd's `KillUserProcesses`), the node ends with it; the
@@ -229,9 +229,9 @@ chat works, the terminal core restarts only when asked.
   (`backend/shared/proto/agentproto/agentproto.test.ts` too).
 - `backend/machine/vault.test.ts`, `backend/features/vscode/machine.test.ts`,
   `backend/features/gui/machine.test.ts`: vault requests asked of every
-  core, code-server kept for another core, bridge connections, a program
-  window viewer that falls behind, two cores on one window manager.
-- End to end (`e2e/tests/nodes.spec.ts`, `gui.spec.ts`): two cores of one
+  hub, code-server kept for another hub, bridge connections, a program
+  window viewer that falls behind, two hubs on one window manager.
+- End to end (`e2e/tests/nodes.spec.ts`, `gui.spec.ts`): two hubs of one
   instance share the local node; a newer build takes the node over while
-  the other core stays ready and its page's terminal works on; two cores
+  the other hub stays ready and its page's terminal works on; two hubs
   show an SSH machine's program window, one in control.

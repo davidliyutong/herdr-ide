@@ -2,13 +2,13 @@
 
 ## Context
 
-The core and the machine agent were one Go program (`cmd/veldr`,
+The hub and the machine agent were one Go program (`cmd/veldr`,
 `internal/`), while the web UI, the desktop shell and the end-to-end tests
 were TypeScript. Three things argued for one language:
 
-- the desktop app ran the Go core as a child process that listened on
-  loopback TCP, so any local process could reach the desktop's core, and
-  the shell talked to its own core over HTTP;
+- the desktop app ran the Go hub as a child process that listened on
+  loopback TCP, so any local process could reach the desktop's hub, and
+  the shell talked to its own hub over HTTP;
 - the chat host drove Claude Code with a hand-written copy of the
   protocol of `@anthropic-ai/claude-agent-sdk`, which Anthropic publishes
   for TypeScript;
@@ -16,8 +16,8 @@ were TypeScript. Three things argued for one language:
   languages.
 
 The backend is now TypeScript under `backend/`, built by Bun into one
-executable per platform that is both the core and that platform's machine
-side, with the behavior the Go program had; the desktop app runs the core
+executable per platform that is both the hub and that platform's machine
+side, with the behavior the Go program had; the desktop app runs the hub
 inside Electron without a TCP listener. This document describes that
 design and why it is so. The Go program was kept as a second machine
 build while the TypeScript one proved itself, then removed; a machine that
@@ -31,7 +31,7 @@ Goals:
 - One executable per platform, built with `bun build --compile`.
 - Behavior as before: the end-to-end tests (`make e2e`), the shared vectors
   (`spec/vectors`) and the ported unit tests are the measure.
-- The desktop app's core runs in an Electron utility process and serves
+- The desktop app's hub runs in an Electron utility process and serves
   its window without listening on TCP.
 - Official SDKs where the Go program reimplemented one: Claude Code through
   `@anthropic-ai/claude-agent-sdk`, ACP through `@agentclientprotocol/sdk`;
@@ -48,11 +48,11 @@ Non-goals:
 ### Layers and features
 
 `backend/` has layers that import only downwards (its README):
-`shared/` (wire protocols, libraries, state), `kernel/` (the core's
+`shared/` (wire protocols, libraries, state), `kernel/` (the hub's
 machinery: routing and guards, channels, machines and their connections,
 settings, events, audit), `machine/` (the node, the dispatch of the agent
 protocol, system calls), `features/` (everything the product does, each a
-directory with its typed protocol, its core side and its machine side) and
+directory with its typed protocol, its hub side and its machine side) and
 `hosts/` (composition roots). It is not a translation of the Go packages:
 the server and the agent are not single packages any more, a feature is
 not spread over four directories, and an agent action is a typed
@@ -64,7 +64,7 @@ handler), zod validates input, jsonc-parser reads and edits the
 hand-edited JSON files (keeping the user's formatting and comments),
 ssh-config reads the OpenSSH configuration, execa runs processes,
 @simplewebauthn/server verifies WebAuthn, yazl writes zip archives,
-node-pty gives the desktop's core a terminal for an ssh login, re2js runs
+node-pty gives the desktop's hub a terminal for an ssh login, re2js runs
 the agent detection rules' regular expressions on machines (below), the
 official MCP SDK (`@modelcontextprotocol/server`) serves the vault's MCP
 server (below). yamux
@@ -72,16 +72,16 @@ is the exception: the maintained implementation (`@chainsafe/libp2p-yamux`)
 is bound to libp2p's stream framework; ours is a few hundred lines over
 Node streams, tested against hashicorp/yamux.
 
-### One core, two hosts
+### One hub, two hosts
 
-`backend/shared` and `backend/kernel`, and the core side of every feature,
-use Node's modules only, so the same core runs under Bun (the command
+`backend/shared` and `backend/kernel`, and the hub side of every feature,
+use Node's modules only, so the same hub runs under Bun (the command
 line) and in Electron's Node (the desktop app); `tsconfig.node.json`
 typechecks them with Node's types only. Requests are handled as
 `Request → Response`; WebSockets are `Channel`s of text and binary
 messages.
 
-Both hosts compose the core alike (`backend/hosts/common/compose.ts`:
+Both hosts compose the hub alike (`backend/hosts/common/compose.ts`:
 the features, the settings and keybindings files, the machines file and
 the machines a run connects, the host's own routes); they differ in how
 requests reach it.
@@ -89,7 +89,7 @@ requests reach it.
 - **Bun** (`backend/hosts/bun`): `Bun.serve`, its WebSocket upgrades
   turned into channels; the guards stay as they are (Host/Origin, proxy
   secret, read-only). Its clients are browsers.
-- **Electron** (`backend/hosts/electron`): the core runs in a
+- **Electron** (`backend/hosts/electron`): the hub runs in a
   `utilityProcess` (a crash leaves the window, heavy work does not block
   it), which the main process (`desktop/src/hub.ts`) forks with the
   app's bundle of it (`dist/hub.mjs`), starts with a message on its parent
@@ -97,12 +97,12 @@ requests reach it.
   payloads are) and restarts after a crash, at most 3 times a minute. The
   app's windows live in a session of their own (`persist:app`), which
   intercepts the origin `https://<slug>.localhost` with
-  `protocol.handle('https')` and hands each request to the core; requests
-  to other hosts pass through. The core's guard allows that origin, and
-  in-process requests are the desktop client on the core's host (`Peer`
+  `protocol.handle('https')` and hands each request to the hub; requests
+  to other hosts pass through. The hub's guard allows that origin, and
+  in-process requests are the desktop client on the hub's host (`Peer`
   without a remote address): the client is the desktop because the main
   process says so, not by a cookie. The main process's own requests (the
-  settings it follows, what a vault nonce is for) go to the core the same
+  settings it follows, what a vault nonce is for) go to the hub the same
   way, without a page.
 
 The bridge (`backend/hosts/electron/bridge.ts`, without imports, which
@@ -112,13 +112,13 @@ both processes and the tests import):
   port with the port, its body and the response's in chunks, each side
   sending at most 8 chunks the other has not taken; a response body that
   breaks off fails the transfer in Chromium, and a cancel aborts the
-  core's request;
+  hub's request;
 - a channel (a WebSocket of a browser) is a MessagePort too: a frame of
   the app's origin asks for one (`desktopChannels.open`, `desktop/src/frames.ts`),
   the main process checks the frame and builds the request's Origin and
-  Host itself, gives the core one end and the frame the other; text and
+  Host itself, gives the hub one end and the frame the other; text and
   binary messages pass as they are, with `open` and `close` frames and the
-  client's `ack` of what it took in, so the core sees what is buffered as
+  client's `ack` of what it took in, so the hub sees what is buffered as
   on a WebSocket;
 - the web UI opens its channels with `openChannel` (`web/src/lib/transport.ts`):
   a WebSocket in a browser, a PortSocket (`web/src/lib/portSocket.ts`)
@@ -145,12 +145,12 @@ intercepted origin in full. Who asked is the request's `initiatorOrigin`,
 set by Electron from the frame or worker that made it ("null" for an
 opaque origin, none for a request the browser started itself): the main
 process puts it in the request's Origin, in place of any header, and the
-core's guard refuses every origin but the app's (SECURITY.md). A
-document the core serves sandboxed (a machine's file opened as a page)
+hub's guard refuses every origin but the app's (SECURITY.md). A
+document the hub serves sandboxed (a machine's file opened as a page)
 is of an opaque origin, so in the app the images it names are refused,
 which a browser loads.
 
-The core's bundle loads at run time Node's own modules and node-pty
+The hub's bundle loads at run time Node's own modules and node-pty
 only: ws's optional native helpers (`bufferutil`, `utf-8-validate`) are
 bundled as modules that fail to load, which ws takes as their absence,
 and `desktop/build.mjs` fails when the bundle would load anything else.
@@ -158,7 +158,7 @@ Electron trims the module search of a file inside the app's resources to
 them, but a module the app does not carry has no reason to be looked
 for.
 
-The app carries what the core carries for machines as resources, laid out
+The app carries what the hub carries for machines as resources, laid out
 as `scripts/build.sh` stages them (`payload/`: the TypeScript machine
 side's digests and its own platform's executable, the video encoders, the
 VS Code extension;
@@ -166,7 +166,7 @@ VS Code extension;
 node-pty 1.1.0 for the ssh login's terminal: a Node-API module, so the
 binary built for Node loads in Electron's utility process without a
 rebuild for Electron; it ships prebuilt for macOS and Windows and is
-built by `pnpm install` on Linux. The app no longer carries the core's
+built by `pnpm install` on Linux. The app no longer carries the hub's
 executable.
 
 ### The machine side
@@ -179,7 +179,7 @@ Linux and macOS:
   `stop` and `takeover`, the idle end, the drain once taken over, its
   retirement once its executable is gone), its clients (`dial.ts`: `node dial`,
   `node stop`), the agent its sessions share (`agent.ts`: a yamux server
-  per session, the core's ops `hello`, `fs.*`, `fs.archive`, `dial-unix`
+  per session, the hub's ops `hello`, `fs.*`, `fs.archive`, `dial-unix`
   (each session's pipes counted per socket), `hc`, `hc-api`, `privacy` and
   `plugin`), the dispatch of `plugin` to the
   features' machine sides (`dispatch.ts`, `feature.ts`), the terminal core
@@ -192,23 +192,23 @@ Linux and macOS:
   feature shares between requests; params are checked by the protocol's
   schemas, a `Fail` thrown is the refusal's code (the error reads
   `code: message`, as the Go agent wrote it), an action that does not
-  stream ends when the core closes its stream. A feature may serve ops of
+  stream ends when the hub closes its stream. A feature may serve ops of
   the agent protocol besides (`Served.ops`: the agents feature's `detect`,
-  which the core opens as an op of its own, VS Code's `code-server`); an
+  which the hub opens as an op of its own, VS Code's `code-server`); an
   op no feature serves is refused as an unknown plugin. A feature sees the
   agent's sessions (`env.sessions()`, and an action's own as
-  `ctx.session`: its core, its open pipes to each socket and when it last
-  opened one, a stream towards its core), ends what it owns when the agent
+  `ctx.session`: its hub, its open pipes to each socket and when it last
+  opened one, a stream towards its hub), ends what it owns when the agent
   ends (`Served.close`, once the sessions' requests were waited for) and
   hands it to the node that took over (`Served.handOver`).
 - `backend/hosts/machine`: the machine side's commands (`cli.ts`: `node`,
   `node dial`, `node stop [--terminal-core]`, with the Go build's flags
   kept),
   which the one command line (`backend/hosts/bun/main.ts`) runs, and the
-  features its node serves (`features.ts`). The executable is the core's
+  features its node serves (`features.ts`). The executable is the hub's
   too; the layers keep apart what runs where (Bun's APIs only on the
   machine side and the command line's host, Node's modules only in what
-  the desktop app's core runs: backend/README.md).
+  the desktop app's hub runs: backend/README.md).
 
 It serves the machine sides of the terminals (the terminal core and hidden
 terminals), files, git, search, monitor, history, browser, AI usage,
@@ -216,7 +216,7 @@ agents (detection and the agents' sessions), VS Code, chat (the chat host,
 the `chat-host` command, below) and program windows (op `gui`) features,
 and the vault's MCP server (the `mcp` command, below). An op or plugin it
 does not serve is refused as an unknown plugin is (`unknown_plugin`); the
-core treats it as a machine without that feature. AI usage's `session`
+hub treats it as a machine without that feature. AI usage's `session`
 action finds a session's transcripts with the coding agents' sessions
 (`backend/machine/agents`), as the Go build's did
 ([29](29-ai-usage.md#one-sessions-usage)).
@@ -230,10 +230,10 @@ node it replaces; it is restructured rather than translated: the releases
 (`machine/release.ts`: receiving, downloading, unpacking, retention), the
 process (`server.ts`), the extensions (`extensions.ts`), the bridge's
 socket (`bridge.ts`, tunnelled to the session that last opened a pipe to
-`cs.sock`, else the newest) and the op (`op.ts`). A release the core
+`cs.sock`, else the newest) and the op (`op.ts`). A release the hub
 uploads or the machine downloads is written to a file beside the releases
-and hashed as it arrives; only one of the digest the core sends is
-unpacked (the core now sends the one it verified the upload by; a core
+and hashed as it arrives; only one of the digest the hub sends is
+unpacked (the hub now sends the one it verified the upload by; a hub
 that sends none, an older one, gets it unpacked unchecked, as the Go
 agent did). Unpacking does not hold the node's thread: the file is read
 in chunks, gunzipped by zlib's stream (its work in the runtime's pool) and
@@ -266,7 +266,7 @@ Where the runtime has what the Go program wrote itself, it is used:
 SQLite (`node:sqlite`) reads OpenCode's and Antigravity's databases in
 place of the Go agent's reader of the file format, and `fetch` asks the
 providers through the environment's proxy. The price table is
-`spec/pricing/pricing.json`, which the machine side and the core read. A cost
+`spec/pricing/pricing.json`, which the machine side and the hub read. A cost
 scan runs on the node's thread in slices (chunks of a log read with
 `fs/promises`, the summing yielding every 8 ms); only SQLite, whose opens
 and reads are synchronous and by name, runs in a worker thread started
@@ -298,7 +298,7 @@ node keeps in TypeScript what decides and what manages processes and
 files: the display's number, cookie and servers (Xwayland's socket pair to
 its compositor made with `socketpair(2)` through `bun:ffi`), Xvfb's fetch,
 the GPUs, gpupick, the encoder's install, and the window manager's
-decisions (the cores and their roles, the flow, pictures or video, the
+decisions (the hubs and their roles, the flow, pictures or video, the
 stats, the routing), speaking to the helper over its stdin and stdout
 (`features/gui/machine/helper.ts`, `proto.zig`); frames cross the node's
 thread once, encoded. A pure-JavaScript X11 client was not used: the
@@ -354,15 +354,15 @@ connection in `locking_mode = EXCLUSIVE` gets its lock without waiting,
 instead of a byte-range lock (`BEGIN EXCLUSIVE` alone takes only the
 write-ahead log's lock and misses an idle reader). SQLite's calls are
 synchronous in both runtimes: a database's busy timeout blocks the thread
-that waits, so the core keeps them short. A new session for a child is
+that waits, so the hub keeps them short. A new session for a child is
 `detached: true`; a group is killed with `process.kill(-pgid)`. Bun's unix
 socket server removes the path it bound when it closes, so the agent binds
 each socket under a temporary name and renames it into place: a server
 that closes never removes the socket another node or agent put at the path
 since.
 
-A core (`backend/scripts/build.ts`) is the machine build itself:
-one executable per platform holds the core (`serve`, the web UI and its
+A hub (`backend/scripts/build.ts`) is the machine build itself:
+one executable per platform holds the hub (`serve`, the web UI and its
 API), the machine side (`node`, `node dial`, `node stop`), that platform's
 herdr-core and, on Linux, its video encoder, besides the VS Code bridge
 (`backend/hosts/bun/main.ts`, one command line; the machine side's commands
@@ -370,9 +370,9 @@ in `backend/hosts/machine/cli.ts`, the features its node serves in
 `backend/hosts/machine/features.ts`). The platforms are linux x64 (a
 baseline build, for processors without AVX2), linux arm64, the same two
 for musl (Alpine), darwin x64 and darwin arm64; a Windows build is the
-core alone (the desktop app's platform, reaching SSH machines only). Users
+hub alone (the desktop app's platform, reaching SSH machines only). Users
 run it as the web UI (`serve`, in a browser) or in the desktop app, whose
-core runs in Electron and which carries its own platform's executable for
+hub runs in Electron and which carries its own platform's executable for
 the local machine. A machine keeps it at `~/.<slug>/agent/<version>/<slug>`
 (the version is the start of the executable's SHA-256) where the Go build
 was, with the same command lines; the local machine gets a copy of
@@ -387,10 +387,10 @@ line's `node` leave out of the environment they start it with, and the
 executable removes from its own at once, so nothing it starts gets them; a
 compiled executable writes no transpiler cache. Its node installs the
 terminal core from the copy it carries (the `hc` op's `install-embedded`),
-when that copy is the one the core's build recorded for the platform
+when that copy is the one the hub's build recorded for the platform
 (`machine/hc.json`: the digests of the herdr-core executables the build
 embeds, from the archives `backend/scripts/fetch-hc.ts` verified against
-the digests pinned in `backend/scripts/hcdist.ts`); the core uploads none
+the digests pinned in `backend/scripts/hcdist.ts`); the hub uploads none
 to it. Sizes with Bun
 1.4.5 and herdr-core 0.1.21, the executable and its release archive:
 
@@ -413,40 +413,40 @@ of the executable in each archive. A machine downloads the archive rather
 than a bare executable: one asset per platform, the licenses of what it
 runs (herdr-core's among them) travel with it, and unpacking one member
 (`gunzip -c | tar -xf - -O <member>`) works with the tar of CentOS 7 and
-BusyBox's alike, after the archive's digest was checked. No core carries
+BusyBox's alike, after the archive's digest was checked. No hub carries
 another platform's executable: each takes the release's manifest and the
 archives from the release (`backend/kernel/machines/transport`,
 `release.ts` and `ssh.ts`).
 
 The manifest is the first of: the operator's directory (`--agent-dir`,
-with the release's `SHA256SUMS`: offline sites); the core host's cache
-(`~/.<slug>/cache/machine/`, per version, a manifest the core fetched); the
-release, fetched by the core over its own HTTPS (Bun's or Node's fetch,
+with the release's `SHA256SUMS`: offline sites); the hub host's cache
+(`~/.<slug>/cache/machine/`, per version, a manifest the hub fetched); the
+release, fetched by the hub over its own HTTPS (Bun's or Node's fetch,
 which verify the certificate, through the proxy of `HTTPS_PROXY`,
 `HTTP_PROXY` and `NO_PROXY`: Bun's fetch reads those itself; the desktop
-app's core, in Node, sets them for its own process with
+app's hub, in Node, sets them for its own process with
 `http.setGlobalProxyFromEnv`, `backend/shared/lib/proxy.ts`, loopback
 always excepted, so no variable reaches the programs it starts, as
 `NODE_USE_ENV_PROXY` would make every Node program of the local machine
 send its requests, loopback's too, to the proxy). When that fetch finds the
 release unreachable (no name, no route, a refused connection, no answer
-within 15 s), the core does not try it again for 10 minutes and fetches the
+within 15 s), the hub does not try it again for 10 minutes and fetches the
 manifest through the machine instead: an ssh stdio forward (`ssh -W
-<host>:443` over the control master; a core without one, on Windows, opens
-a non-interactive connection of its own) carries the core's own TLS
+<host>:443` over the control master; a hub without one, on Windows, opens
+a non-interactive connection of its own) carries the hub's own TLS
 (`tunnel.ts`), which verifies the release's certificate against its host
 name as fetch does, so the machine carries bytes it can neither read nor
-change. A fetch that reached something else (a certificate the core does
+change. A fetch that reached something else (a certificate the hub does
 not trust, an HTTP answer, a manifest it refuses) ends there with
-`build_unavailable` and the reason in the core's log; a machine whose sshd
+`build_unavailable` and the reason in the hub's log; a machine whose sshd
 forbids forwarding (`AllowTcpForwarding no`, common on clusters) fails the
-same way, and its site gives the core a route to the release or uses
-`--agent-dir`. A manifest is this build's only when it names the core's own
+same way, and its site gives the hub a route to the release or uses
+`--agent-dir`. A manifest is this build's only when it names the hub's own
 executable by its digest (its platform's line): one of another release is
 refused (the desktop app on Windows, which has no executable of its own,
 cannot tell, and logs it), and so is one that names a file twice with
-different digests. Without one, a machine of the core's own platform still
-gets the core's own executable: the running program, opened when the core
+different digests. Without one, a machine of the hub's own platform still
+gets the hub's own executable: the running program, opened when the hub
 started (`/proc/self/exe` on Linux), not whatever an upgrade in place put
 at its path since.
 
@@ -455,7 +455,7 @@ A machine that does not hold its build gets it, in this order:
 1. The machine downloads the release's archive itself, with `curl`, else
    `wget`, unless the setting `machines.download` is off for it (or
    `--machine-download=false`) or its download failed within the last day
-   (the core keeps that in memory, per machine, and uploads first
+   (the hub keeps that in memory, per machine, and uploads first
    meanwhile, asking the machine again when it has nothing to upload; only
    the download's own failures count, not the connection's). The tool runs
    without its user's configuration (`curl -q`; an empty `WGETRC`, GNU
@@ -464,54 +464,54 @@ A machine that does not hold its build gets it, in this order:
    (`--proto`, `--proto-redir`), while wget may follow a redirect to http
    (GNU wget's `--https-only` holds in recursive downloads only) and
    BusyBox's may not verify the server's certificate: what either gives is
-   held to the manifest the core verified. The download goes to a file
+   held to the manifest the hub verified. The download goes to a file
    beside its place through `head`, at most 256 MiB, and a watchdog ends it
    after 5 minutes in all, whatever the tool (wget's `-T` bounds each read,
    not the whole). Only an archive of the manifest's SHA-256 is unpacked,
    within 2 minutes.
 2. Else, or when that fails (neither tool, no route to the release, a
-   timeout, an archive that is not the release's), the core uploads it over
+   timeout, an archive that is not the release's), the hub uploads it over
    ssh, taking the first of: the operator's directory (the archive, or the
    executable as `<slug>-<platform>`), its cache, its own executable for a
    machine of its platform, a download of the archive from the release
    (then cached). Each is read and hashed piecewise, bounded, checked
    against the manifest before it is used or cached (a file of the
    directory that is not the build is refused, a cached one removed), and
-   loaded once for the machines of one platform. This is the path of a core
+   loaded once for the machines of one platform. This is the path of a hub
    that reaches the internet for machines that do not.
 
-Both install the same way, the core's local install too (the same script,
-run on the core's host): the archive's SHA-256 checked before it is
+Both install the same way, the hub's local install too (the same script,
+run on the hub's host): the archive's SHA-256 checked before it is
 unpacked, the executable written beside its place, its SHA-256 computed on
 the machine (`sha256sum`, `shasum` or `openssl`), renamed into place only
 when it is the one the manifest names, else removed and failed, and
-printed, which the core checks again. Its files (`.upload.<pid>`, with
+printed, which the hub checks again. Its files (`.upload.<pid>`, with
 `.in`, the archive, and `.rc`, wget's empty configuration) are removed when
 the script ends (`trap`): an upload ends when its input does (the connection went), a
 download within its bounds (sshd sends no hangup to a session without a
 terminal, so a dropped connection does not end it sooner); the nodes'
 housekeeping removes what a killed shell left, after an hour. When none of
 the sources has the build the machine is refused with `build_unavailable`
-and what each source said (naming no path of the core's host, which the
-core logs), which the UI explains; it is dialed again later. A build of no
+and what each source said (naming no path of the hub's host, which the
+hub logs), which the UI explains; it is dialed again later. A build of no
 release (development, the end-to-end tests) has no download URL: its
 machines get their build from `--agent-dir` (with its `SHA256SUMS`) or the
-core's own executable. Which C library a machine has is what glibc answers
+hub's own executable. Which C library a machine has is what glibc answers
 (`getconf GNU_LIBC_VERSION`, `ldd --version`), musl's loader in `/lib` only
 without it (a glibc system with musl's package has one); musl's executable
 needs `libstdc++` and `libgcc`, which the probe reports when missing. Builds
 unused for 14 days are removed (the nodes touch the directories of
-theirs), the core's cache likewise.
+theirs), the hub's cache likewise.
 
 The trust is the release's: a build is as trustworthy as the GitHub
-release and the core's TLS to it. Whoever can replace the release's assets
+release and the hub's TLS to it. Whoever can replace the release's assets
 (a leaked token, say) can replace `SHA256SUMS` too; the checks protect
-against damage and, when the core fetched the manifest, against the
+against damage and, when the hub fetched the manifest, against the
 machine's network path. A signature over `SHA256SUMS` would be an addition
 to this, not a change of it.
 
-The node serves every core on one thread: what a user or a mount controls
-is not waited for on it. The core's file ops, git's reads of a repository,
+The node serves every hub on one thread: what a user or a mount controls
+is not waited for on it. The hub's file ops, git's reads of a repository,
 the reads of the coding agents' sessions and records, the node's check of
 its executable and housekeeping are asynchronous (a call
 that does not return holds a thread of the runtime's pool and its own
@@ -554,7 +554,7 @@ executable and session), so a node of this build takes over from a Go
 node of an earlier release with the terminals kept, which is the upgrade
 path ([below](#the-go-program-and-its-removal)). `scripts/e2e.sh` builds
 the executable for the host and Docker's Linux (glibc and musl) into a
-directory with its `SHA256SUMS`, which the cores take as `--agent-dir`,
+directory with its `SHA256SUMS`, which the hubs take as `--agent-dir`,
 offline, and `tests/nodes.spec.ts` has a newer node take a node over.
 
 ### The chat host
@@ -665,17 +665,17 @@ it ([Claude Code](#claude-code)).
 yamux (`backend/shared/proto/yamux.ts`) speaks hashicorp/yamux's protocol with
 its semantics (a close is a half-close; window, keepalive and backlog as
 the Go program had them), and agentproto, herdr-core's protocol and the
-chat host's protocol kept their wire forms, so a TypeScript core served Go
+chat host's protocol kept their wire forms, so a TypeScript hub served Go
 machine builds and the other way round. That let the rewrite land in
-stages, each one usable: shared libraries; the core in TypeScript with
-the Go machine builds, the Go core removed; the desktop app's core in
+stages, each one usable: shared libraries; the hub in TypeScript with
+the Go machine builds, the Go hub removed; the desktop app's hub in
 process; the machine side in TypeScript, which became the default machine
 build. The Go program (`cmd/veldr`, `internal/`) then stayed a second
 machine build of the build scripts for a while, and was removed with the
 Go tools of the build (the herdr-core fetcher, the design tokens'
 generator, the VSIX normalizer and the price check, now
 `backend/scripts/`). What remains of it is compatibility: a machine whose
-node is the Go program of an earlier release gets this build when a core
+node is the Go program of an earlier release gets this build when a hub
 connects, and its node takes the Go node over (the same node protocol,
 socket and lock, [39](39-nodes.md)), as it would an older build of its own;
 the files a Go node wrote (the terminal history's and chat host's
@@ -683,16 +683,16 @@ databases, AI usage's cost cache, the vault's link) are read as they are.
 
 ### What changes on the wire
 
-Behavior stays; a few answers become uniform where the Go core was not:
+Behavior stays; a few answers become uniform where the Go hub was not:
 
 - every refused request answers JSON `{error, message}` with a code (the Go
-  core answered some with plain text, an unknown machine among them);
+  hub answered some with plain text, an unknown machine among them);
 - read-only mode refuses with the code `read_only` (it was
-  `{"error": "read-only mode"}` on the core's own routes);
+  `{"error": "read-only mode"}` on the hub's own routes);
 - every audit record of a change carries `status` and, when it failed,
   `error` (the code), whichever feature made it.
 
-Where the web UI shows the core's text (the editor's file errors, the
+Where the web UI shows the hub's text (the editor's file errors, the
 upload dialog, VS Code's bridge toasts) the answers keep it as before.
 Other differences a user or an operator can see:
 
@@ -706,21 +706,21 @@ Other differences a user or an operator can see:
 - a streamed download has no `Content-Length` (Bun sends it chunked): the
   downloads panel's progress comes over `/ws` as before, and a download
   that breaks off fails in the browser instead of ending short;
-- the core logs only its own failures (500), not a machine's or a
+- the hub logs only its own failures (500), not a machine's or a
   program's (502, 503, 504).
 
-### Building and testing the core
+### Building and testing the hub
 
 `backend/scripts/build.ts` packs the payloads (the web UI, the release
 record and herdr-core digests, the video encoder, the VS Code extension)
 into one tar archive and compiles `backend/hosts/bun/main.ts` with it embedded (`bun
 build --compile`, a Bun target per platform: x64 Linux and Windows as
-baseline builds); the core reads it with `Bun.Archive`, keeping the UI's
+baseline builds); the hub reads it with `Bun.Archive`, keeping the UI's
 files in memory. `scripts/build.sh` stages the payloads in `dist/payload`
-and builds the core of each platform; `scripts/e2e.sh` runs the
-end-to-end tests against that executable. The checks that read the Go core
+and builds the hub of each platform; `scripts/e2e.sh` runs the
+end-to-end tests against that executable. The checks that read the Go hub
 read the TypeScript one: the flags and routes `docs/reference.md` must
-list come from the core composed as `serve` composes it
+list come from the hub composed as `serve` composes it
 (`backend/scripts/reference.ts`), the registry from the features it
 composes too (`backend/scripts/registry.ts`).
 
@@ -812,17 +812,17 @@ an executable that holds its code.
 `--npm-registry` is an `http` or `https` URL without user information,
 query or fragment, where credentials go: the machines get the tarball's
 URL on their command lines, which every local user there can read, so the
-core refuses to start with one (`hosts/bun/serve.ts`), and so does
+hub refuses to start with one (`hosts/bun/serve.ts`), and so does
 `--code-server-url`; a mirror that needs credentials is served through a
-`--seed-dir`. What the core and the machines say of a URL, in an error a
+`--seed-dir`. What the hub and the machines say of a URL, in an error a
 page gets or in the log, is its origin and path only
 (`shared/lib/urls.ts`).
 
 Before a request that starts a Claude Code chat (a new chat or an import:
 `POST new`; and, without waiting for it, a page's subscription to such a
-chat, whose next prompt may start its agent), the core makes sure the
-machine has it (`features/chat/sdkprovision.ts`; a read-only core asks
-nothing). Once the machine had it, the core asks again on the same agent
+chat, whose next prompt may start its agent), the hub makes sure the
+machine has it (`features/chat/sdkprovision.ts`; a read-only hub asks
+nothing). Once the machine had it, the hub asks again on the same agent
 session after an hour (each ask is a use of the machine's copy, and puts
 back one its retention removed). Once it could not get it, a
 subscription's ask fails with that answer for 5 minutes on the same agent
@@ -835,24 +835,24 @@ where its copy came from (`machine`, `seed`, `cache`, `download`, or
 its URLs by origin and path, cut to 256 bytes:
 
 1. the machine side's action `sdk` says whether the pinned version is
-   installed, and, unless the core is `--offline`, has the machine download
+   installed, and, unless the hub is `--offline`, has the machine download
    it itself from the registry (`curl -q`, else `wget` with an empty
    regular file as its `WGETRC` and GNU wget's `--no-config` when its
    untranslated help names it, at most 32 MiB in 5 minutes;
    `#machine/artifacts.ts`, as code-server's releases come), its answer
    saying whether it did (`fetched`, for the audit record);
-2. a machine that could not gets it from the core (`sdkUpload`, in chunks):
+2. a machine that could not gets it from the hub (`sdkUpload`, in chunks):
    from an operator's directory (`--seed-dir`, as code-server's tarballs),
-   the core's cache (`~/.veldr/cache/npm`, 14 days unused), or the core's
+   the hub's cache (`~/.veldr/cache/npm`, 14 days unused), or the hub's
    own download from the registry through the proxy of its environment,
    then cached. A copy in a directory or the cache is a regular file,
    opened without blocking: another file under its name (a FIFO, a device,
-   a directory) is refused at once, never waited on. The core loads its
+   a directory) is refused at once, never waited on. The hub loads its
    copy once for every machine that waits for it, and drops a load that
    has not settled within the download's bound and a minute, so that the
    next ask loads it anew;
 3. every copy, the machine's download, the operator's and the cached one,
-   the core's download and the upload, is checked against the pinned
+   the hub's download and the upload, is checked against the pinned
    integrity before it is used, cached or unpacked; the machine unpacks
    only `package.json`, `sdk.mjs`, `LICENSE.md` and `README.md`, with
    code-server's refusals (node-tar strict, no absolute path, `..` or link
@@ -867,10 +867,10 @@ compiled executables load modules from the file system), resolving nothing
 but Node's own modules: no import map, plugin or rewriting is needed
 (`installed.test.ts` compiles one that does). A machine that has it not
 and could not get it refuses the chat with `sdk_unavailable`, which the
-core answers `POST new` with, saying what each source said; a chat whose
+hub answers `POST new` with, saying what each source said; a chat whose
 agent starts without it fails with it, and the host goes on. A Go node of
 an earlier release had no `sdk` action (its chat host spoke Claude Code's
-protocol itself): the core leaves such a machine alone, fetching nothing.
+protocol itself): the hub leaves such a machine alone, fetching nothing.
 
 Anthropic's terms govern the user's use of the SDK and of their Claude
 account. A chat runs the user's own `claude`, signed in as the user signed
@@ -887,21 +887,21 @@ it in, as the Go build's chat host did.
   per Bun version, but a machine would run a launcher script that keeps
   the working directory's `.env` and `bunfig.toml` out, the runtimes would
   be pinned and fetched apart, and a node would have two files to check.
-- **A machine executable apart from the core.** A smaller file for
-  machines (about 30 MB less: no web UI, no core), but two programs per
-  platform, and a core cannot carry the digests of executables built from
+- **A machine executable apart from the hub.** A smaller file for
+  machines (about 30 MB less: no web UI, no hub), but two programs per
+  platform, and a hub cannot carry the digests of executables built from
   the same release without building them first. One executable per
   platform is what users run and what machines run, its release archive
   what both download.
-- **Every platform's executable in each core.** About 300 MB more per core
-  (and per desktop app): the release serves them, and a core carries its
+- **Every platform's executable in each hub.** About 300 MB more per hub
+  (and per desktop app): the release serves them, and a hub carries its
   own.
-- **The machine's own download of the manifest.** For a core that cannot
+- **The machine's own download of the manifest.** For a hub that cannot
   reach the release, a manifest the machine downloads could not be told
   from one an attacker on the machine's path gave it (BusyBox's wget may
-  not verify certificates, wget follows redirects to http), and a core that
+  not verify certificates, wget follows redirects to http), and a hub that
   cannot reach the release may be one whose path is being attacked: the
-  core fetches it through the machine with its own TLS instead, or not at
+  hub fetches it through the machine with its own TLS instead, or not at
   all.
 - **A signed manifest.** A signature over `SHA256SUMS` (a release key in a
   secret, its public half in every build) would hold the builds to the
@@ -964,7 +964,7 @@ it in, as the Go build's chat host did.
   validates the recordings in the tests instead.
 - **The sessions' strict opens through FFI on Linux** (`openat2`,
   `openat` relative to a directory). Synchronous on the node's one thread,
-  where a home on a mount that stopped answering would stall every core;
+  where a home on a mount that stopped answering would stall every hub;
   opening in the runtime's pool and checking the descriptor's path in
   `/proc/self/fd` gives the same refusal without waiting on it.
 - **A loopback listener for VS Code only.** Not needed: the tunnel works.
@@ -986,16 +986,16 @@ it in, as the Go build's chat host did.
 - A machine Bun cannot run on: an x86-64 processor without SSE4.2 (Bun
   stops with "this CPU is missing SSE4.2 support"; a VM given QEMU's
   default model qemu64 is one), or musl without `libstdc++` and `libgcc`.
-  The probe reports it and a core that deploys the TypeScript side refuses
+  The probe reports it and a hub that deploys the TypeScript side refuses
   the machine with a code (`cpu_unsupported`, `libs_missing`) in its
   error, as an unknown platform is refused. Kernels and C libraries as old
   as CentOS 7's (3.10, glibc 2.17) run it (Testing).
-- A machine that cannot download its build and a core that has it in
+- A machine that cannot download its build and a hub that has it in
   neither its directory nor its cache and cannot reach the release (an
   offline site without `--agent-dir`): the machine is refused with
   `build_unavailable`, saying what each source said, which the UI
   explains (deployment.md, offline sites).
-- A core that cannot reach its release, for a machine that can: the core
+- A hub that cannot reach its release, for a machine that can: the hub
   fetches the manifest through the machine (`ssh -W`), its TLS its own; a
   machine whose sshd forbids forwarding fails with `build_unavailable`.
 - A kernel without `openat2` (below 5.6) or a container filtering it: a
@@ -1011,8 +1011,8 @@ it in, as the Go build's chat host did.
   test fails at the upgrade; an SDK that hands Claude Code's messages on
   otherwise, or answers its requests otherwise, fails the replays of the
   recordings.
-- A machine without the Agent SDK whose core cannot get it either (no
-  route to the npm registry from the machine or the core, no
+- A machine without the Agent SDK whose hub cannot get it either (no
+  route to the npm registry from the machine or the hub, no
   `--seed-dir` copy, `--offline` without one): a new Claude Code chat is
   refused with `sdk_unavailable`, saying what each source said, which the
   UI explains; a chat whose agent starts without it fails with it. The
@@ -1027,7 +1027,7 @@ it in, as the Go build's chat host did.
 
 ## Security
 
-The desktop's core no longer listens: other local processes cannot reach
+The desktop's hub no longer listens: other local processes cannot reach
 it (SECURITY.md's residual risk of the loopback port goes), and the
 desktop client is the main process's word, not a cookie of the launch: the
 command line's clients are browsers only. The vault:
@@ -1035,7 +1035,7 @@ command line's clients are browsers only. The vault:
 - its master key moves from memguard's locked memory to a non-extractable
   WebCrypto key, which unlock entries open into directly and a lock
   drops: it is not kept from swap by locking, but never leaves native
-  memory as bytes; the core no longer limits its core dumps for it, and
+  memory as bytes; the hub no longer limits its core dumps for it, and
   the answer `503 memory` (memguard failing) goes;
 - Argon2id is `node:crypto`'s (native, off the event loop, in Bun and in
   Electron's Node); its output lies in a buffer only until it is imported
@@ -1059,16 +1059,16 @@ SECURITY.md has both.
   desktop's packages installed it also runs the desktop app's smoke test
   (`e2e/tests/desktop.spec.ts`: Playwright's Electron, the unpackaged app
   on an isolated instance, profile and home, Chromium's mock keychain):
-  the UI loads from the app's origin with no TCP listener of the core
+  the UI loads from the app's origin with no TCP listener of the hub
   (lsof), the local machine gets ready, a terminal runs a command, a file
-  downloads, the core comes back after it is killed with the window and
+  downloads, the hub comes back after it is killed with the window and
   its terminal kept, and, given a code-server release
   (`E2E_CODE_SERVER_SEED`), a VS Code window loads its workbench over
   channels.
 - The bridge: `desktop/src/hubBridge.test.ts` (requests, credit, cancels,
   failures, channels, with worker_threads' MessagePorts),
-  `backend/hosts/electron/host.test.ts` (through a real core),
-  `web/src/__tests__/transport.test.ts` (PortSocket against the core's
+  `backend/hosts/electron/host.test.ts` (through a real hub),
+  `web/src/__tests__/transport.test.ts` (PortSocket against the hub's
   side).
 - Machines: `e2e/machines` boots old kernels in KVM from official cloud
   images and old C libraries in containers, and runs a payload in each
@@ -1096,22 +1096,22 @@ SECURITY.md has both.
   machine build failed there alike, everything else passed.
 - `backend/machine/**/*.test.ts` and the features' `machine*.test.ts` run
   the machine side through the wire with the kernel's own `call` and
-  `open`, so its results are checked by the core's schemas;
+  `open`, so its results are checked by the hub's schemas;
   `backend/kernel/machines/transport/deploy.test.ts` deploys this host's
   TypeScript build as an ssh connection does, through an ssh that runs the
   remote commands locally, from a release on loopback: the manifest
-  fetched by the core and the machine's download checked against it, with
-  curl and with wget alone; the core's upload when the machine has no
+  fetched by the hub and the machine's download checked against it, with
+  curl and with wget alone; the hub's upload when the machine has no
   tool, may not download, its download fails or was tampered with on its
   path; the bounds (a stream without end, a trickle, a gzip bomb); the
   remembered failure and its expiry; the manifest downloaded by the
   machine (an ssh -W stand-in to a TLS server whose certificate a test
-  authority signed) when the release is unreachable from the core, a
-  certificate the core does not trust and an HTTP answer ending there
+  authority signed) when the release is unreachable from the hub, a
+  certificate the hub does not trust and an HTTP answer ending there
   without asking the machine, a machine that does not forward; a manifest
   whose executable is not the archive's (nothing put in place); an offline
   site's directory; no route anywhere (`build_unavailable`); the local
-  install of the core's own executable; and a working directory's `.env`
+  install of the hub's own executable; and a working directory's `.env`
   and `bunfig.toml` and `BUN_OPTIONS` reaching neither `node dial` nor
   the node. `release.test.ts` covers the manifest's sources and the
   refusal of another build's, and the uploads' sources (tampered files of
@@ -1130,12 +1130,12 @@ SECURITY.md has both.
   executable a request names, an upload checked against its digest before
   anything is unpacked, a release without its executable or whose Node
   does not run, the bounds, a machine's download checked (curl or wget on
-  loopback) and ended with the core's interest, archives leaving the
+  loopback) and ended with the hub's interest, archives leaving the
   release refused, code-server's arguments (its socket only, no port
-  proxy), start, stop, release kept for another core's pipe, the node's
+  proxy), start, stop, release kept for another hub's pipe, the node's
   end and a hand-over, an orphan ended and a serving one adopted, a broken
   listener replaced as the socket's peer, extensions and markers, the
-  bridge's socket tunnelled to the right core and taken over by the newest
+  bridge's socket tunnelled to the right hub and taken over by the newest
   agent, the retention, and an unpack that leaves the thread free while
   another session is answered; in `make it`, with
   `E2E_CODE_SERVER_SEED`, a real code-server release uploaded, started on
@@ -1179,9 +1179,9 @@ SECURITY.md has both.
   pinned files unpacked, a tampered tarball and another entry refused
   before anything is put in place, a link leaving the directory, the
   machine's download and a failed one, the retention, the load and an
-  entry changed on disk); the core and the machine through the wire
+  entry changed on disk); the hub and the machine through the wire
   (`sdkprovision.test.ts`: the machine's own download, asked again an
-  hour later, the core's upload from its download and then its cache,
+  hour later, the hub's upload from its download and then its cache,
   offline from `--seed-dir`, every
   wrong copy refused with `sdk_unavailable` saying what each source said,
   a tampered cached copy refused and removed, a FIFO in a `--seed-dir`
@@ -1191,7 +1191,7 @@ SECURITY.md has both.
   alone); the routes (`routes.test.ts`: an `sdk_unavailable` answer and
   its audit record naming URLs by origin and path); a page's
   subscriptions (`page.test.ts`: one ask per agent session, none from a
-  read-only core, a failure not asked again by the next subscription); the
+  read-only hub, a failure not asked again by the next subscription); the
   machine's downloads without the user's `.curlrc` and `.wgetrc`
   (`#machine/artifacts.test.ts`, with the real tools and with stand-ins
   recording what they are given); the pin and the lockfile
@@ -1201,7 +1201,7 @@ SECURITY.md has both.
   running a recording, and loaded by a `bun build --compile` executable
   (`machine/claude/installed.test.ts`).
 - Program windows' machine side: the Go tests' tiles, flow, stats and
-  video decisions ported (`features/gui/machine/wm.test.ts`), two cores
+  video decisions ported (`features/gui/machine/wm.test.ts`), two hubs
   through the wire with a fake GUI helper, the display's files, numbers,
   GPUs and the helper's placement (`machine.test.ts`,
   `machine/display.test.ts`); the helper's own tests (`zig build test`:
@@ -1220,7 +1220,7 @@ SECURITY.md has both.
   and with a fake Codex app-server, `e2e/fakes/codex.ts`, in
   `tests/chat-codex.spec.ts`: a command allowed and rejected, a turn
   stopped, the thread resumed, and none of what the host must never ask
-  Codex for; `tests/gui.spec.ts` has two cores show a program window
+  Codex for; `tests/gui.spec.ts` has two hubs show a program window
   through the GUI helper, one controlling and the other viewing until it
   takes control, on Alpine's Xvfb; given `E2E_CODE_SERVER_SEED`, the
   desktop app's smoke test has its VS Code window installed, started and

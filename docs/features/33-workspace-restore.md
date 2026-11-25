@@ -23,7 +23,7 @@ herdr-core gives the building blocks:
 
 ## Goals / non-goals
 
-Goals: after the core starts again, every workspace and tab is as it was,
+Goals: after the terminal core starts again, every workspace and tab is as it was,
 each terminal a shell in its directory; a resumable agent is back in its
 pane, in its own session when the machine confirms it, else in the
 directory's latest; nothing from the layout document is run as a command;
@@ -52,7 +52,7 @@ Its pane is not closed. A writing page that reads the layout
 (`TermModel.restore`):
 
 1. starts a replacement with `terminal.run`, `keep: true`, in the
-   directory the core recorded for the old terminal;
+   directory the terminal core recorded for the old terminal;
 2. puts the replacement's address in the leaf (`replaceTerminal`: same
    place, splits, focus and `session`) and writes the layout with
    `doc.set` at the version last read;
@@ -88,7 +88,7 @@ from the agent kind registry ([35](35-agent-native-view.md);
   hidden) first asks the machine `GET /api/m/{id}/p/agents/resolve`
   whether the leaf's session exists and ran in the terminal's directory
   (`confirmSession`, at most 3 s). It then takes `resume` out of the leaf
-  and, once the core accepted that layout, types the command with a
+  and, once the terminal core accepted that layout, types the command with a
   return (`TermModel.resumeAgent`): by the session's id when confirmed,
   else the directory's latest. The versioned write ensures one page types
   it, and only while the terminal still runs what it ran when asked (its
@@ -115,7 +115,7 @@ typing.
 
 | Option | Why not |
 | --- | --- |
-| Restoring in the core | The layout document belongs to the clients ([22](22-terminal-protocol.md)); the core passes it on unread. |
+| Restoring in the hub | The layout document belongs to the clients ([22](22-terminal-protocol.md)); the hub passes it on unread. |
 | Storing the command in the leaf | Any writing client writes the document; a command taken from it would be typed into another page's shell. |
 | Starting the agent as the terminal's program | The pane would close when the agent exits; typed into a shell, it behaves as if the user started it. |
 | Only the directory's latest conversation | Two agents of one kind in one directory continued the same conversation. |
@@ -126,7 +126,7 @@ typing.
 
 ## Failure modes
 
-- **No writing page open when the core restarts:** kept terminals have
+- **No writing page open when the terminal core restarts:** kept terminals have
   shells; terminals that ended with the core are replaced when a writing
   page next reads the layout. After 24 h the finished record is gone and
   the pane closes as an ended program's.
@@ -139,7 +139,7 @@ typing.
   continued.
 - **The agent is not on `PATH`, or cannot resume:** the shell or agent
   says so; nothing is retyped.
-- **The agent was quit less than 30 s before the core ended:** it is
+- **The agent was quit less than 30 s before the terminal core ended:** it is
   resumed.
 
 ## Security
@@ -172,6 +172,6 @@ them. See the row for terminals restored from the layout in
 - `terms.test.ts`, `menus.test.ts`, `codePanes.test.ts`,
   `paneHeader.test.ts` pin `keep: true` on `terminal.run`.
 - Checked by hand with real reboots of a Debian 12 VM as an ssh machine of
-  a dev core: layout intact, kept terminals live at their addresses and
+  a dev hub: layout intact, kept terminals live at their addresses and
   directories, the agents' commands typed once, with the page reloaded
   after the reboot and left open across it.

@@ -91,9 +91,9 @@ only picks entries.
 - The agent sends the archive in chunks (`agentproto.ChunkWriter`) and marks
   its end. When the machine's connection drops, yamux ends streams as if
   complete; a stream without the end mark is therefore a truncated archive,
-  and the core aborts the response so the browser reports a failure instead
+  and the hub aborts the response so the browser reports a failure instead
   of saving a broken zip.
-- A download that ends early stops the core reading the agent's stream and
+- A download that ends early stops the hub reading the agent's stream and
   closes it, which ends the agent's walk.
 - The agent follows the named paths when they are symlinks but stores links
   below them as links. It skips sockets, devices, FIFOs and unreadable
@@ -140,26 +140,26 @@ Shared: `web/src/transferList.ts`, `web/src/components/TransferPanel.tsx`,
   Finished ones (newest first, the last 50 kept in `localStorage`: names,
   machines and paths, never contents) show size, time and speed, or the
   error. A finished upload can be previewed; a download can be repeated.
-- Upload progress comes from `XMLHttpRequest`'s upload events. The core
+- Upload progress comes from `XMLHttpRequest`'s upload events. The hub
   streams the body to the agent as it arrives, so bytes sent are close to
   bytes written on the machine.
 - Cancelling an upload aborts its request; the agent then removes the
   temporary file it was writing. Once the body is sent the upload shows as
   saving and can no longer be cancelled, since the file arrives anyway.
-- Browsers tell a page nothing about downloads, so the core reports them.
+- Browsers tell a page nothing about downloads, so the hub reports them.
   The page gives the link a random id (`dl=`) and sends `download.watch
-  {ids}` over `/ws`. The core sends `download {id, state, sent, total?,
+  {ids}` over `/ws`. The hub sends `download {id, state, sent, total?,
   name?, error?}` to that page alone, and answers each watch with what it
-  knows. A page that reconnects asks again; an id the core has forgotten
+  knows. A page that reconnects asks again; an id the hub has forgotten
   (kept 10 minutes after the end) ends as `lost`.
-- Cancelling a download (`download.cancel {id}`) makes the core break the
+- Cancelling a download (`download.cancel {id}`) makes the hub break the
   response off, so the browser fails it instead of saving a partial file.
   A request that arrives after its cancel gets `410 Gone`.
 - Failures carry a code: `not_found`, `unavailable`, `invalid`, `changed`
   (`416` for a resumed download past the file's end) or `interrupted`. Only
   `interrupted` aborts the response; the others are answered with their
   error.
-- A download the core has not seen after 30 s shows as not started:
+- A download the hub has not seen after 30 s shows as not started:
   browsers hold back downloads to one host beyond a few.
 
 ## Alternatives considered
@@ -172,7 +172,7 @@ Shared: `web/src/transferList.ts`, `web/src/components/TransferPanel.tsx`,
 | Client-chosen upload paths | Collisions and path injection; the server owns the name. |
 | Upload to the upload directory, then move | Two steps and a copy across file systems. |
 | `fetch` with a streamed body for upload progress | Needs HTTP/2 and is not in every browser; `fetch` has no upload progress. |
-| Upload progress reported by the core | Duplicates what the browser already knows. |
+| Upload progress reported by the hub | Duplicates what the browser already knows. |
 | Cancelling during saving | The file may already be renamed into place. |
 | Zipping with `zip`/`tar` on the machine | Not installed everywhere, flags differ, a process to own. |
 | Archive to a temporary file, then serve | Disk and retention on the machine; nothing arrives until done. |
@@ -181,15 +181,15 @@ Shared: `web/src/transferList.ts`, `web/src/components/TransferPanel.tsx`,
 | One download per checked file | Browsers prompt for multiple downloads; folders still need an archive. |
 | Download progress by fetching in the page | Holds the whole file in the page's memory. |
 | File System Access API | Chromium only, asks where to save every time. |
-| Progress from the desktop app's download events | Desktop only; the core's count works everywhere and knows why it failed. |
+| Progress from the desktop app's download events | Desktop only; the hub's count works everywhere and knows why it failed. |
 | Download events to every page | Other pages (read-only ones too) would learn names and ids, and could cancel. |
-| Checking the zip's end record in the core | Ties the core to the archive format; the mark says the agent finished. |
+| Checking the zip's end record in the hub | Ties the hub to the archive format; the mark says the agent finished. |
 
 ## Failure modes
 
 - A machine that disconnects mid-download: the archive lacks its end mark,
   the response is aborted, the browser reports a failure.
-- A core restarted or a page away longer than 10 minutes: running downloads
+- A hub restarted or a page away longer than 10 minutes: running downloads
   in the panel end as `lost`.
 - A page reloaded during a download no longer follows it; the browser's own
   download list still does.
@@ -207,7 +207,7 @@ Shared: `web/src/transferList.ts`, `web/src/components/TransferPanel.tsx`,
   the document. Remote images become links, so opening a file does not tell
   a server who reads it.
 - Uploads are limited to 4 GiB and refused in read-only mode. An upload into
-  a pane's directory must name an absolute directory; the core keeps only the
+  a pane's directory must name an absolute directory; the hub keeps only the
   base name and the agent claims it exclusively, so no file is replaced and
   no symlink followed. A cancelled or interrupted upload leaves no partial
   file.

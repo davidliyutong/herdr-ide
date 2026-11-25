@@ -18,7 +18,7 @@ Goals:
   directory, with what VS Code's explorer does: keyboard, filter, hidden
   files, new files and folders, rename, trash, delete, cut/copy/paste,
   drag and drop, copy paths, download, open in a terminal or VS Code, and
-  Reveal in Finder for the core's own computer.
+  Reveal in Finder for the hub's own computer.
 - Uploads of files and folders from the computer, with their structure,
   asking about names taken; rows dragged out of the page download.
 - An editor pane (Monaco; media as Quick Look shows it) with VS Code's
@@ -35,7 +35,7 @@ the trash.
 
 Plugin `files`, on by default: a right-sidebar panel (**Show Explorer**,
 `view.panel.files`) and the pane kind `editor`. Code:
-`web/src/plugins/files`, `backend/features/files` (core),
+`web/src/plugins/files`, `backend/features/files` (hub),
 `backend/features/files/machine.ts` (machine). Settings (`files.showHidden`,
 `files.exclude`, `files.sortOrder`, `files.followFocus`,
 `files.confirmTrash`) are listed in [reference.md](../reference.md).
@@ -111,10 +111,10 @@ Plugin `files`, on by default: a right-sidebar panel (**Show Explorer**,
   upload in the uploads panel. In the desktop app, files of its own machine
   are copied, not uploaded.
 - **Reveal in Finder** (Reveal in File Manager on Linux): only for the
-  core's own machine and only to a page on that computer (the desktop app,
-  or a browser on the core's loopback, the core's `SameHost`). A window on a
+  hub's own machine and only to a page on that computer (the desktop app,
+  or a browser on the hub's loopback, the hub's `SameHost`). A window on a
   remote screen would help nobody. The page asks `GET …/p/files/reveal`;
-  the core checks again on `POST`.
+  the hub checks again on `POST`.
 - **Decorations** (`decorations.ts`): `registerFileDecorations` lets
   another plugin color names and add badges per directory. The panel
   publishes the directories it shows (`useShownDirs`), so the Git plugin
@@ -139,7 +139,7 @@ outcome. The agent's actions:
 | `stat` | Up to 200 paths. At most 8 stats run at once and each answers within 10 s (`busy`/`timeout`), so a dead mount holds few threads. |
 
 Copies and removals stop between entries (and between 1 MiB chunks) once
-the core's request ends; a partial copy is removed.
+the hub's request ends; a partial copy is removed.
 
 **Refused paths.** Paths expand as every agent operation's (`~`, relative
 to home). The agent refuses (`refused`) the root, any directory holding the
@@ -259,7 +259,7 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 | Saving with the agent's `fs.write` | It replaces without looking; a save must not overwrite a change made since loading. |
 | Atomic save (write a temporary file, rename over) | Gives the path another inode: hard links keep the old text, ownership, xattrs, ACLs and macOS tags are lost, `tail -f` and single-file bind mounts lose it, and it needs a writable directory and leaves a temporary file other users could swap. |
 | Rename or write-in-place by case (Vim's `backupcopy=auto`), or a backup before writing | Two code paths and staged files to protect; a backup only helps a failed write, which the editor survives by keeping the text. |
-| Uploading through the core's `/upload` | It cannot replace or make folders and lacks the explorer's guard. |
+| Uploading through the hub's `/upload` | It cannot replace or make folders and lacks the explorer's guard. |
 | Asking about each file of a merged folder; replacing a folder by removing it | Hundreds of questions; removal loses what the upload does not hold. |
 | Deleting without a trash | A mistaken Delete is easy; the trash keeps the file where the system's tools find it. |
 | CodeMirror | The Git plugin's diffs want Monaco's diff editor; one editor for both. |
@@ -303,9 +303,9 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
   files could redirect it ([SECURITY.md](../../SECURITY.md)).
 - Uploads are staged in the agent's `0700` `staging/` directory and pass the
   same guard.
-- Reveal in Finder runs a program on the core's host: only for the core's
+- Reveal in Finder runs a program on the hub's host: only for the hub's
   own machine and a client on that host (`SameHost`), the path as its own
-  argument, never shell text. A browser reaching the core through an ssh
+  argument, never shell text. A browser reaching the hub through an ssh
   forward counts as on the host and opens the window there.
 - Bounds: saves 8 MiB, uploads 4 GiB, path lists 1000, stats 200 paths and 8
   concurrent, reveals 4.

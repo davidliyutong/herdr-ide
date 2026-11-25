@@ -44,7 +44,7 @@ kind of client ([08](08-web-access-and-security.md)):
   explaining the risk, whose **Enable** works only once the risk is
   acknowledged. The setting is the acceptance.
 
-The core tells the desktop app's requests by its launch token
+The hub tells the desktop app's requests by its launch token
 ([16](16-desktop-packaging.md)) and applies the requesting client's switch;
 `GET /api/settings` reports the page's `client` so the UI follows the
 same switch (`enableSetting` in `web/src/plugins/registry.ts`).
@@ -54,7 +54,7 @@ While off for a client:
 - the UI offers no VS Code entry points; a path opened from a terminal
   shows in Quick Look; a VS Code pane in the layout says VS Code is off and
   offers to turn it on;
-- the core refuses code-server's status, start, proxy and bridge commands
+- the hub refuses code-server's status, start, proxy and bridge commands
   with `404 plugin_disabled`, and sends `bridge.*` messages only to pages
   whose switch is on;
 - the page unregisters every service worker of the UI's origin
@@ -77,13 +77,13 @@ releases used. The
 setting (global, per machine, or `--code-server-install`) picks how a
 machine gets code-server:
 
-- `push` (default): the release is resolved on the core host
+- `push` (default): the release is resolved on the hub host
   ([09](09-air-gapped-installs.md)), uploaded through the agent with the
-  digest the core verified it by and unpacked into
+  digest the hub verified it by and unpacked into
   `~/.veldr/code-server/<version>-<os>-<arch>` (shared by instances); the
   machine side checks the digest before it unpacks anything;
 - `download`: the agent fetches the same release with the machine's curl or
-  wget and checks the digest the core sends;
+  wget and checks the digest the hub sends;
 - `existing`: the agent runs a code-server already on the machine
   (`codeServer.path` or `--code-server-path`, else `PATH` and the usual
   locations).
@@ -97,7 +97,7 @@ with an entry that would leave the release (an absolute path, `..`, a
 link pointing out) is refused whole; unpacking it does not hold the node's one
 thread ([42](42-typescript-backend.md#the-machine-side)). Extensions
 (the bridge extension and the defaults, Git Graph) are installed from VSIX
-files uploaded by the core.
+files uploaded by the hub.
 
 code-server listens only on a unix socket (`--socket-mode 600`) with
 `--auth none` (the socket directory is private) and `--disable-proxy`;
@@ -165,7 +165,7 @@ VS Code pane ([04](04-layout-and-keyboard.md)).
 The bridge extension adds two keybindings that hand control back:
 
 - `cmd+w` / `ctrl+w` in a window with no editor open (where VS Code would
-  close its window) runs `closePane`: the core sends `bridge.close` and the
+  close its window) runs `closePane`: the hub sends `bridge.close` and the
   page whose iframe has the keyboard closes that pane (not the only pane
   of a pinned tab). Holding `cmd+w` closes the editors, then the pane.
 - **Give the Keyboard Back** (`ctrl+b` on macOS, `ctrl+alt+shift+b`
@@ -177,24 +177,24 @@ The bridge extension adds two keybindings that hand control back:
 ### Theme
 
 The browser sends its light/dark kind (`{t: "theme", kind}`) on connect and
-on change; the core keeps the last one and sends it to every bridge window
+on change; the hub keeps the last one and sends it to every bridge window
 (`Bridge.setTheme`). The extension switches to the user's preferred
 light or dark VS Code theme unless the current theme already matches.
 VS Code's settings are per instance on the machine, so all browsers of one
-core share them.
+hub share them.
 
 ### Bridge
 
 `extensions/veldr-bridge`, `backend/features/vscode/bridge.ts`.
 
 The extension runs in code-server's extension host on the machine and
-connects to `$VELDR_BRIDGE_SOCKET`, which the agent tunnels to the core.
+connects to `$VELDR_BRIDGE_SOCKET`, which the agent tunnels to the hub.
 It announces its window (a random id), its folders and keyboard focus.
 The extension host cannot see the page's URL, so a page learns which window
 its iframe shows by matching the window that reports focus with the iframe
 that has the keyboard.
 
-The core routes UI commands (`openFile`, `openDiff`, `gitGraph`,
+The hub routes UI commands (`openFile`, `openDiff`, `gitGraph`,
 `openMedia`, `reveal`) to a window chosen in this order:
 
 1. the window the page names;
@@ -249,7 +249,7 @@ files (Chromium on a secure origin only), it works in every browser.
 - **No window for the folder** → the bridge waits, falls back to a window
   containing the folder, then reports an error.
 - **The page does not know a pane's window yet** → the page gives the pane
-  the keyboard and waits briefly for the window to report it, then the core
+  the keyboard and waits briefly for the window to report it, then the hub
   routes by folder.
 - **A window off screen was unmounted** → showing its pane loads it again;
   code-server restores its editors (and restarts if it idled out).
@@ -273,13 +273,13 @@ every deployment.
 - The socket directory is 0700 and the socket 0600; `--auth none` is safe
   only because nothing else can connect.
 - The proxy strips the proxy-secret header and the cookie that marked the
-  desktop app's requests while it ran the core as a child (none is set
+  desktop app's requests while it ran the hub as a child (none is set
   now) and adds `X-Frame-Options: SAMEORIGIN`.
 - From code-server's responses it drops `Service-Worker-Allowed` (which
   would let a worker's scope cover the UI's pages and outlast the switch)
   and any `Set-Cookie` naming that cookie.
 - code-server's port proxy (`/proxy/<port>/`, `/absproxy/<port>/`) is off
-  (`--disable-proxy`) and the core also refuses those paths: it would serve
+  (`--disable-proxy`) and the hub also refuses those paths: it would serve
   any service on the machine, including another user's, on the UI's origin.
   VS Code's "open in browser" links for forwarded ports therefore do not
   work.
@@ -304,13 +304,13 @@ every deployment.
   `backend/features/vscode/machine.test.ts` (existing binary, verified
   downloads, start flags, replacing a broken listener, through the wire
   with a stand-in for code-server, and uploads checked before unpacking,
-  archives leaving the release refused, release kept for another core,
+  archives leaving the release refused, release kept for another hub,
   the node's end, hand-over and orphans, extensions and markers,
   retention, the node's thread kept free) and, in `make it` with
   `E2E_CODE_SERVER_SEED`, `integration.test.ts` (a real release started on
   its socket only).
 - Bridge socket ownership between agents: `machine.test.ts` (`the bridge
-  socket`: the core that last opened
+  socket`: the hub that last opened
   VS Code, the newest agent taking it over).
 - Bridge routing, idle tracking, theme, refused port proxy, Send to Agent,
   close/leave and downloads: `backend/features/vscode/bridge.test.ts`

@@ -58,7 +58,7 @@ Cutting a release:
    `SHA256SUMS` and build provenance over all of them (`RELEASING.md`).
 5. Smoke test the host binary: `version`, start with `--local-only`, open
    the UI; install the desktop app on each system available (DMG, setup,
-   deb or AppImage) and check that it starts its core and shows the
+   deb or AppImage) and check that it starts its hub and shows the
    terminals (on Windows, of an SSH machine).
 
 Report the version, the changes to pinned digests, and the artifact list with

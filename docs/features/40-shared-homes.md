@@ -71,7 +71,7 @@ pointing at that platform's agent build.
 
 **Retention.** The agent touches its host's directory and its build at
 start and every 24 h. Another host's directory unused for 30 days loses
-its files except the terminal core's executable, which a core that ran
+its files except the terminal core's executable, which a terminal core that ran
 without any agent since may still run from; it goes whole after 180
 days.
 
@@ -79,12 +79,12 @@ days.
 
 | Option | Why not |
 | --- | --- |
-| Detecting network filesystems (`statfs`) and separating only there | A probe that fails or changes would move a running core's socket; one layout for every host has nothing to detect. |
+| Detecting network filesystems (`statfs`) and separating only there | A probe that fails or changes would move a running terminal core's socket; one layout for every host has nothing to detect. |
 | `/tmp/<slug>-<uid>` as the runtime directory | `systemd-tmpfiles` and macOS's periodic cleanup remove old files there, a lock among them, which would let two nodes run. |
 | `XDG_RUNTIME_DIR` | Not set for every process that needs the directory (services, ssh commands without PAM); the same path is taken from its fixed place. |
 | Setting `XDG_STATE_HOME` for herdr-core | Its programs would inherit it. |
 | Content-addressed terminal core executables shared by hosts | Which host still runs one is not known on the others; per host costs a few MB each. |
-| The host's name in runtime paths | macOS changes it with the network; the core's socket would be lost while it runs. |
+| The host's name in runtime paths | macOS changes it with the network; the terminal core's socket would be lost while it runs. |
 
 ## Failure modes
 

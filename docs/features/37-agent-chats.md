@@ -21,7 +21,7 @@ Constraints: an agent runs where its files are, as the user, with the
 user's sign-in; nothing listens on TCP on machines; whatever is started
 has an owner and an end, whatever is written a bound
 ([10](10-remote-resource-lifecycle.md)); a session survives the page, the
-core, ssh and the agent going away; the Claude protocol is unspecified
+hub, ssh and the agent going away; the Claude protocol is unspecified
 and Codex's app-server experimental, so both are pinned to recorded
 versions.
 
@@ -34,7 +34,7 @@ machine allows it; compacting, images, `@` files, queued messages;
 usage, context and limits; subagents under the call that started them;
 the same notifications and attention list as agents in terminals
 ([07](07-agent-native-workflow.md)); sessions moved between terminals
-and chats; chats that outlive page, core and terminal core within bounds
+and chats; chats that outlive page, hub and terminal core within bounds
 set per machine.
 
 Non-goals: agents that need a terminal; OpenCode (`opencode acp` listens
@@ -45,7 +45,7 @@ subagents' conversations as chats.
 ## Design
 
 ```
-page (chat pane) ──WebSocket──▶ core (plugin chat) ──yamux──▶ agent (plugin chat, action open)
+page (chat pane) ──WebSocket──▶ hub (plugin chat) ───yamux──▶ agent (plugin chat, action open)
   one per page                   relay, read-only, audit,        │ a stream per connection
                                  watch → /ws and notifications   ▼
                                                              <run>/chat.sock
@@ -79,7 +79,7 @@ is the long-lived
 process that runs the agents and keeps their conversations. It serves
 `chat.sock` (0600) in the run directory (0700) under a lock; a second
 host exits. It runs as a **hidden terminal** of the instance's terminal
-core, so ssh, the agent and the core may come and go while it runs. It
+core, so ssh, the agent and the hub may come and go while it runs. It
 ends after 60 s with no agent and no connection, when asked to make way
 for a newer build (refused while a chat is busy), or with the terminal
 core's stop (agents' process groups get SIGTERM, then SIGKILL); a host
@@ -103,7 +103,7 @@ stored, in the order made ([42](42-typescript-backend.md#the-chat-host)).
 
 ### Starting the host, and handover (`backend/features/chat/machine.ts`)
 
-The machine side has one action, `open`: a stream the core opens, joined
+The machine side has one action, `open`: a stream the hub opens, joined
 to the host's socket. When no host serves, the agent has the terminal
 core run one (`runHidden`, `backend/machine/hidden.ts`) with a minimal environment, named
 `veldr-chat-host` and labeled `veldr.hidden=chat-host`. If a
@@ -116,10 +116,10 @@ replaced.
 A host of an older build (by `git describe`) is asked to make way when
 idle, and the chats resume in its successor. A newer host, one of the
 same commit (dirty builds carry a timestamp but compare by commit) or of
-unknown age is used while it speaks this protocol, so two cores of
+unknown age is used while it speaks this protocol, so two hubs of
 different builds do not keep replacing each other; one that speaks
 another protocol fails the open with `upgrading` (503) until idle. The
-core's watch opens with `start: false` and never starts or replaces a
+hub's watch opens with `start: false` and never starts or replaces a
 host. Other errors: `no_terminal_core` (503), `start_failed`.
 
 ### Hidden terminals
@@ -171,7 +171,7 @@ vocabulary `working`, `blocked`, `done`, `idle`.
   which mode values grant it (for ACP every mode not known to ask); the
   host refuses them (`not_allowed`), starts such chats in `default`, sets
   back an agent that switches itself, and starts with full access off
-  until the core sends the machine's settings. A mode the agent changes
+  until the hub sends the machine's settings. A mode the agent changes
   to itself becomes the chat's mode.
 - **Trusted folders.** An agent loads a project's own settings (hooks,
   MCP servers) only in a folder it trusts itself (Claude Code's
@@ -270,7 +270,7 @@ process runs neither resumed nor imported (`in_terminal`).
   Sessions and imports read `~/.claude/projects`. The SDK is Anthropic's,
   all rights reserved, so no executable carries it: a machine gets the
   pinned npm tarball when a Claude Code chat needs it, downloading it
-  itself or from the core, checked against the pinned integrity, into
+  itself or from the hub, checked against the pinned integrity, into
   `<data>/claude-agent-sdk/<version>`, which the chat host loads; a
   machine that cannot refuses the chat with `sdk_unavailable`
   ([42](42-typescript-backend.md#claude-code)).
@@ -348,15 +348,15 @@ adapter <name>"). The host is given all three: the ACP
 adapter, Codex's and Claude Code's (its Agent SDK fetched on use,
 [42](42-typescript-backend.md#claude-code)).
 
-### The core's plugin (`backend/features/chat`)
+### The hub's plugin (`backend/features/chat`)
 
 **Routes** below `/api/m/{id}/p/chat/` and `/api/p/chat/`
 ([reference](../reference.md#http-and-websocket-endpoints)). A GET never
-starts a host; a read-only core starts nothing, refuses `GET agents` and
+starts a host; a read-only hub starts nothing, refuses `GET agents` and
 lists no sessions (both may run the agents' programs). Every change is
 audited as `chat.<route>`. Before a request that may start an agent the
-core sends the host the machine's settings. A machine has at most 128
-core connections to its host.
+hub sends the host the machine's settings. A machine has at most 128
+hub connections to its host.
 
 **The page's WebSocket** (`wire.ts`, `page.ts`; mirrored by
 `web/src/plugins/chat/protocol.ts`): one per page for every chat (browsers
@@ -365,12 +365,12 @@ connection to the host; commands go on a subscription and get one `ack`
 each (`lost` when the subscription ended first). Flow control bounds
 what waits for a page; a subscription that falls too far behind is
 dropped by the host and reattached, without stalling the page's other
-chats. A read-only core refuses commands and omits agents' stderr.
+chats. A read-only hub refuses commands and omits agents' stderr.
 Commands that change what an agent may do are audited (never a prompt's
 text or an answer's).
 
 **Watch and notifications** (`watch.ts`): while a machine's host is in
-use, the core watches it without starting one, sends the states to pages
+use, the hub watches it without starting one, sends the states to pages
 as the plugin's `/ws` message `states` (with the host's build and
 `outdated`), and publishes an agent event when a chat becomes blocked or
 done. When a machine disconnects its cached states become
@@ -439,8 +439,8 @@ next prompt resumes the session with its context.
 | ACP for every agent | Claude Code and Codex speak it only through third-party adapters, without their permissions, plans, questions, effort, usage and limits. |
 | The Agent SDK in Node as a sidecar | A Node runtime per machine (often offline); the machine side runs on Bun, which loads the SDK itself. |
 | `character-ai/claude-agent-sdk-go` | One-shot `claude --print` without control requests: no permissions, questions, plans, model changes, interrupts or queues. |
-| The host as a child of the agent | It would die with every ssh drop and core restart; as a terminal of the terminal core it lives as the user's programs do. |
-| A socket or port the core reaches directly | Nothing listens on TCP on machines; the agent's stream suffices. |
+| The host as a child of the agent | It would die with every ssh drop and hub restart; as a terminal of the terminal core it lives as the user's programs do. |
+| A socket or port the hub reaches directly | Nothing listens on TCP on machines; the agent's stream suffices. |
 | JSONL files per chat | Bounds and eviction would need their own crash-safe rewriting; SQLite gives transactions ([38](38-sqlite-state.md)). |
 | Storing live increments | Every token in the log; a reattach gets the whole item instead. |
 | OpenCode through ACP | It listens on a TCP port without authentication. |
@@ -462,7 +462,7 @@ next prompt resumes the session with its context.
 - **The journal refuses a write** → the chat fails, without a gap.
 - **Pending permissions when the host ends** → cancelled, the turn ends in
   an error.
-- **Two cores of one instance** → one host serves both; the last
+- **Two hubs of one instance** → one host serves both; the last
   configure's settings apply.
 - **Unused chats** → the watch lets go after 2 minutes, agents stop after
   `chat.idleStopMinutes`, the host exits a minute later.
@@ -472,9 +472,9 @@ next prompt resumes the session with its context.
 Chats run agents as the user on the machine, as terminals do. New is a
 long-lived product process running agents without a terminal. It is
 reached only through the run directory (0700, socket 0600) and the
-agent's stream; pages reach it only through the core's guarded routes
+agent's stream; pages reach it only through the hub's guarded routes
 and WebSocket, whose inputs (kinds, chat ids, clean absolute directories,
-session ids, option values) are checked on the core and again by the
+session ids, option values) are checked on the hub and again by the
 host. What runs is the registry's command; no command line, path or
 variable comes from a client. Full access is off unless the machine
 allows it, also after a restart; project settings load only in trusted
@@ -509,7 +509,7 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
   from a data directory, also by a compiled executable); the Agent SDK's
   way to the machines (`sdkstore.test.ts`,
   `backend/features/chat/sdkprovision.test.ts`: a registry on loopback,
-  tampered tarballs refused, the machine's download, the core's upload,
+  tampered tarballs refused, the machine's download, the hub's upload,
   offline from `--seed-dir`, `sdk_unavailable`, the retention); every
   adapter given to the host and the kinds without a chat
   (`backend/hosts/machine/chathost.test.ts`).

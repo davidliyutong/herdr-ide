@@ -7,10 +7,10 @@ The user's machines are reached over ssh with their own `~/.ssh/config`
 (lab workstations, GPU servers, robots) running Linux or macOS on amd64 or
 arm64, sometimes with old userlands or without internet access.
 
-The core needs many concurrent channels per machine: the terminal core's API
+The hub needs many concurrent channels per machine: the terminal core's API
 and streams ([21](21-terminal-core.md)), agent detection, files, uploads,
 program windows, the code-server proxy and the VS Code extension's bridge.
-The core runs on Linux and macOS and, in the desktop app
+The hub runs on Linux and macOS and, in the desktop app
 ([16](16-desktop-packaging.md)), on Windows, whose OpenSSH has no
 ControlMaster.
 
@@ -25,27 +25,27 @@ Goals:
 - the same code path for the local machine.
 
 Non-goals: managing ssh keys; Windows machines; a local machine on a
-Windows core host; the interactive ssh login from a core on Windows.
+Windows hub host; the interactive ssh login from a hub on Windows.
 
 ## Design
 
 ### Agent
 
 The agent is served by each machine's node, the command `node` of the
-machine build ([39](39-nodes.md)): the core's own executable of the
-machine's platform, the core and the TypeScript machine side
+machine build ([39](39-nodes.md)): the hub's own executable of the
+machine's platform, the hub and the TypeScript machine side
 ([42](42-typescript-backend.md#the-machine-side)), for linux (glibc and
-musl) and darwin × amd64/arm64. The core carries its own platform's; a
-machine gets its platform's from the core's release, checked against the
-release's `SHA256SUMS`: it downloads the archive, else the core uploads it
+musl) and darwin × amd64/arm64. The hub carries its own platform's; a
+machine gets its platform's from the hub's release, checked against the
+release's `SHA256SUMS`: it downloads the archive, else the hub uploads it
 (`backend/kernel/machines/transport/release.ts`). Its version is its
 executable's digest, so a changed build is always installed again and
-core and agent never disagree on the protocol. Machines that still run the
+hub and agent never disagree on the protocol. Machines that still run the
 Go program of earlier releases get this build and its node takes over
 ([39](39-nodes.md)).
 
 The agent runs on Linux and macOS only (unix sockets with peer checks,
-process groups, code-server and Xvfb are POSIX). Core and agent speak the
+process groups, code-server and Xvfb are POSIX). Hub and agent speak the
 protocol of `backend/shared/proto` (agentproto, and yamux with its window,
 keepalive and backlog, [42](42-typescript-backend.md)).
 
@@ -56,7 +56,7 @@ keepalive and backlog, [42](42-typescript-backend.md)).
 1. probe `uname -s`, `uname -m` and `$HOME` through `/bin/sh -c` (works with
    any login shell);
 2. if `~/.veldr/agent/<hash>/veldr` is missing, install it: the machine
-   downloads its platform's archive, else the core uploads it, written to
+   downloads its platform's archive, else the hub uploads it, written to
    a temporary name and renamed atomically once its SHA-256 is the release's
    ([42](42-typescript-backend.md#the-machine-side)); builds unused for 14
    days are removed in the same step;
@@ -68,7 +68,7 @@ keepalive and backlog, [42](42-typescript-backend.md)).
 
 One yamux session per machine carries every stream; each stream starts with
 a JSON header and reply
-([architecture](../architecture.md#core--agent-protocol-backendsharedprotoagentproto)).
+([architecture](../architecture.md#hub--agent-protocol-backendsharedprotoagentproto)).
 This avoids sshd's `MaxSessions` and any dependence on
 `AllowStreamLocalForwarding`. Every ssh command puts `--` before the target.
 
@@ -82,34 +82,34 @@ private control directory `/tmp/veldr-<uid>/s`, one per instance
 The master exists so that an interactive login (password, 2FA, host key)
 done once is reused by the BatchMode connections. The UI's authentication
 terminal (`GET /api/m/{id}/auth`, WebSocket) runs `ssh -t` with
-`BatchMode=no` and the same control path in a PTY on the core host; when it
+`BatchMode=no` and the same control path in a PTY on the hub host; when it
 closes, the machine tries again at once.
 
 On Windows, Win32-OpenSSH cannot share connections, so the control directory
 is empty (`controlDir`): no `Control*` option is passed and every
 connection authenticates by itself. A login typed in a terminal would hold
-nothing for later connections, so the core offers none (`ssh_login: false`
+nothing for later connections, so the hub offers none (`ssh_login: false`
 in `GET /api/config`, `501 ssh_login_unsupported` from the auth endpoint),
 and the UI explains how to set up key authentication instead. SSH machines
-of a core on Windows therefore need a key the ssh agent holds (or one without
+of a hub on Windows therefore need a key the ssh agent holds (or one without
 a passphrase) and an accepted host key.
 
 ### Local machine
 
 `dialNode` (`transport/local.ts`, Linux and macOS) connects to the local
 machine's node through its socket, starting it when none answers from this
-platform's machine build, which the core installs where an upload would
+platform's machine build, which the hub installs where an upload would
 put it (`~/.veldr/agent/<hash>/veldr`): identical protocol, no ssh. The
-core's tests use an agent in memory (`backend/kernel/testing.ts`,
+hub's tests use an agent in memory (`backend/kernel/testing.ts`,
 `backend/machine/testing.ts`).
 
-A core on Windows has no local agent (`LOCAL_SUPPORTED` in
+A hub on Windows has no local agent (`LOCAL_SUPPORTED` in
 `transport/local.ts`): its
 local machine is listed in *error* with `local_unsupported` and never
 dialed. WSL is not built in; a WSL distribution with an ssh server is added
 as an SSH machine.
 
-Paths on machines are POSIX, so the core handles them with `node:path`'s
+Paths on machines are POSIX, so the hub handles them with `node:path`'s
 `posix`, also on Windows.
 
 ### Machine states
@@ -154,13 +154,13 @@ Key rules:
 - The file is read at start and written whole (atomically, 0600) after every
   change; a change that cannot be written is refused.
 - Entries and fields this version does not understand are kept as written.
-- A stored target the core refuses (below) is listed in *error* with
+- A stored target the hub refuses (below) is listed in *error* with
   `invalid_target` and never dialed; it can be renamed or removed.
-- The file is not re-read while the core runs; edit it while it is stopped.
+- The file is not re-read while the hub runs; edit it while it is stopped.
 
 Without the file there are no stored machines yet; nothing is written
 until the first change. A file that is not a machines file (no `version`
-or `machines`) is an error: the core keeps its machines in memory and
+or `machines`) is an error: the hub keeps its machines in memory and
 leaves the file alone.
 
 ### Choosing machines for a run
@@ -175,14 +175,14 @@ leaves the file alone.
 ### Managing machines from the UI
 
 - **Add machine…** (`POST /api/machines {target, label}`). The dialog
-  suggests the Host aliases of the core host's ssh configuration that are
+  suggests the Host aliases of the hub host's ssh configuration that are
   not machines yet (`GET /api/ssh/hosts`,
   `backend/features/machines/sshconfig.ts`). The parser
   follows `Include` and keeps only concrete aliases with their `HostName`
-  and `User`; no other option (keys, proxies, commands) leaves the core.
+  and `User`; no other option (keys, proxies, commands) leaves the hub.
   Reading is bounded in file size, count and include depth. A machine that
   needs a login turns *auth_required* and the page opens the
-  authentication terminal where the core offers one.
+  authentication terminal where the hub offers one.
 - **Ordering** by dragging or **Move Up/Down** (`PUT /api/machines/order`),
   stored as the file's `order`.
 - **Rename** (`PUT /api/m/{id}/label`); labels are unique (`label_taken`)
@@ -215,28 +215,28 @@ aliases, IPv6 literals with zone ids, Unicode names) and refuses:
 This follows OpenSSH's own check of command-line destinations (9.6 and
 later) and adds a few characters ssh passes on. The web UI checks typed
 targets with the same vectors (`spec/vectors/machines/targets.json`).
-A refused target answers `invalid_target`; `--ssh` with one stops the core.
+A refused target answers `invalid_target`; `--ssh` with one stops the hub.
 
 ### The terminal core of each machine
 
 `backend/features/terminals/backend.ts` and `lifecycle.ts`,
 `backend/machine/hc.ts` ([21](21-terminal-core.md)). Connecting a machine
 starts only its agent. When the first client of `/api/v1/term` subscribes
-to a machine's terminals ([22](22-terminal-protocol.md)), the core:
+to a machine's terminals ([22](22-terminal-protocol.md)), the hub:
 
 1. asks the agent for the terminal core's status (op `hc`);
 2. installs this build's herdr-core (`backend/scripts/hcdist.ts`) when the
    installed one differs, from the copy the node's executable carries
    (`hc`'s `install-embedded`); the agent checks the
    digest and swaps it into
-   `~/.veldr[-<instance>]/hosts/<host>/hc/`, and a running core of
+   `~/.veldr[-<instance>]/hosts/<host>/hc/`, and a running terminal core of
    another build is restarted, its successor adopting the programs;
-3. starts a core if none runs (session
+3. starts a terminal core if none runs (session
    `veldr[-<instance>]-<host id>`, detached from the agent so its
    programs outlive it);
 4. connects (op `hc-api`) and subscribes to its events.
 
-A read-only core installs and starts nothing. The connection closes shortly
+A read-only hub installs and starts nothing. The connection closes shortly
 after the last client leaves and is retried with backoff while it fails.
 The machine's state carries `hc {state, code, version}`, and while the
 connection lasts the agent reports coding agents in the terminals
@@ -244,7 +244,7 @@ connection lasts the agent reports coding agents in the terminals
 
 The machine's menu reports (`GET /api/m/{id}/hc`) and starts, restarts or
 stops (`POST /api/m/{id}/hc/{start|stop|restart}`) the terminal core.
-Stop ends every terminal and keeps the core stopped until started again or
+Stop ends every terminal and keeps the terminal core stopped until started again or
 subscribed to anew. Refused read-only, audited
 ([deployment](../deployment.md#remote-resources)).
 
@@ -253,8 +253,8 @@ subscribed to anew. Refused read-only, audited
 `--instance NAME` makes agents use `~/.veldr-NAME` (sockets, uploads,
 the terminal core and its session `veldr-NAME-<host id>`, code-server's
 data) and
-the core its own settings, keybindings and machines files, so a daily and a
-development core can share machines safely. Agent builds, code-server
+the hub its own settings, keybindings and machines files, so a daily and a
+development hub can share machines safely. Agent builds, code-server
 releases, Xvfb packages and video encoders are shared between instances.
 A home several hosts share keeps each host's sockets, executables and
 terminal core apart ([40](40-shared-homes.md)).
@@ -268,8 +268,8 @@ terminal core apart ([40](40-shared-homes.md)).
 | Helper written in Node or Python | Not on every machine; glibc and version constraints. |
 | An ssh library (Node's `ssh2`, Go's `x/crypto/ssh`) instead of OpenSSH | Would not honour the user's ssh config (ProxyJump, Match, agents, certificates). |
 | Ids derived from the target | Ids appear in URLs and settings; random ids keep the target out. |
-| Starting the terminal core when a machine connects | Unused machines would get a process outliving the core; the first subscription starts it. |
-| A core in Go, the language of the agent in earlier releases | The core is TypeScript, one Bun executable per platform ([42](42-typescript-backend.md)): one language with the UI and the desktop shell, and the SDKs the coding agents publish. |
+| Starting the terminal core when a machine connects | Unused machines would get a process outliving the hub; the first subscription starts it. |
+| A hub in Go, the language of the agent in earlier releases | The hub is TypeScript, one Bun executable per platform ([42](42-typescript-backend.md)): one language with the UI and the desktop shell, and the SDKs the coding agents publish. |
 
 ## Failure modes
 
@@ -278,21 +278,21 @@ terminal core apart ([40](40-shared-homes.md)).
   and **Retry**).
 - **Network loss** → yamux keepalive ends the session on both sides; the
   agent exits and releases what it owns
-  ([10](10-remote-resource-lifecycle.md)); the core reconnects. If ssh is
+  ([10](10-remote-resource-lifecycle.md)); the hub reconnects. If ssh is
   still running shortly after yamux gave up, or a probe through the master
   times out, the control master died silently (network change, sleep): the
-  core runs `ssh -O stop` so the next attempt opens a new master instead of
+  hub runs `ssh -O stop` so the next attempt opens a new master instead of
   hanging. A new password or 2FA login is then needed.
 - **Terminal core unreachable** → the machine stays *ready*; its `hc` state
   is `error` with a code (`not_bundled`, `install_failed`, `start_failed`,
-  `connect_failed`, `stopped`, …); the core retries and the menu offers
+  `connect_failed`, `stopped`, …); the hub retries and the menu offers
   start or restart.
 - **Unreachable machine added** → stored, shown in *error* with ssh's
   message, retried with backoff.
-- **Machines file damaged** → logged; the core runs with the local machine
+- **Machines file damaged** → logged; the hub runs with the local machine
   and `--ssh` targets, keeps changes in memory and leaves the file alone.
 - **Refused stored target** → *error* with `invalid_target`, never dialed;
-  rename, remove or fix the file while the core is stopped.
+  rename, remove or fix the file while the hub is stopped.
 - **Writing the file fails** → the change is refused with `save`.
 - **Unsupported platform** → no embedded agent for the `uname` pair; the
   machine shows the error. A machine its build cannot be deployed to
@@ -316,7 +316,7 @@ terminal core apart ([40](40-shared-homes.md)).
   master only while ssh stays up.
 - `backend/kernel/machines/transport/deploy.test.ts`: the machine build
   over ssh (download, upload, bounds, failures) and the local node started
-  from the core's own executable.
+  from the hub's own executable.
 - `backend/kernel/payloads.test.ts`: the release the build records, the
   machine build of each platform from it.
 - `backend/kernel/machines/machines.test.ts`: no file, the file's round
@@ -335,14 +335,14 @@ terminal core apart ([40](40-shared-homes.md)).
   start, stop and restart of the terminal core, its endpoints' guards.
 - Web: `menus.test.ts`, `sidebarMachines.test.ts`, `addMachine.test.ts`,
   `addMachineHosts.test.ts`, `codePanes.test.ts` in `web/src/__tests__`.
-- CI runs the core's tests on Linux and macOS.
+- CI runs the hub's tests on Linux and macOS.
 - `make it` (`backend/machine/integration.test.ts`,
   `backend/features/terminals/integration.test.ts`) with the real
   herdr-core.
 - `make e2e` (`e2e/tests/ssh.spec.ts`, with Docker): a container running
   OpenSSH added from the dialog, its terminal and files, the machine
   dropping and coming back with its terminal core, a chat there, and
-  nothing of the instance left on it once the terminal core and the core
+  nothing of the instance left on it once the terminal core and the hub
   stop.
 
 Verified manually against eight Ubuntu x86_64 hosts and an arm64 Ubuntu VM.

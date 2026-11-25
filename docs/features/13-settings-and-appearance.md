@@ -2,24 +2,24 @@
 
 ## Context
 
-Several clients show one core's machines: the web UI (in browsers and in
+Several clients show one hub's machines: the web UI (in browsers and in
 the desktop app) and the desktop app's shell (its menu and title bar).
 Values kept per client (a browser's `localStorage`, keys in a menu) differ
 per browser and profile, do not reach the other clients, and cannot be read
-by the shell. So settings and keybindings live in the core.
+by the shell. So settings and keybindings live in the hub.
 
 ## Goals / non-goals
 
 Goals:
 
-- one settings system and one keybinding system, with the core as the only
+- one settings system and one keybinding system, with the hub as the only
   source;
-- the settings UI rendered from the core's definitions;
+- the settings UI rendered from the hub's definitions;
 - hand-editable files like VS Code's `settings.json` and `keybindings.json`;
 - a change from any client or from the file reaches every client at once;
 - the command line stays the authority.
 
-Non-goals: per-user settings on a shared core (the core has no users);
+Non-goals: per-user settings on a shared hub (the hub has no users);
 settings per browser; theming terminal applications.
 
 ## Design
@@ -28,7 +28,7 @@ settings per browser; theming terminal applications.
 
 `backend/kernel/config/settings` defines the model (`define.ts`) and the
 store of values (`store.ts`); `hubModules`
-(`backend/kernel/config/registry.ts`) lists the modules the core registers:
+(`backend/kernel/config/registry.ts`) lists the modules the hub registers:
 `config/ui` for the user interfaces, the feature switches (`toggles.ts`)
 and the features' own (program windows', VS Code's, browser, files, git,
 monitor, usage, vault, chat, history; [27](27-plugins.md)). A feature
@@ -46,9 +46,9 @@ UIs list them in.
   group and order, an optional command-line flag and a zod schema that
   validates. Invalid definitions are refused at start.
 - Scope: `app` (one value), `machine` (any machine may have its own value),
-  `remote-machine` (machines other than the core's host).
+  `remote-machine` (machines other than the hub's host).
 - Strings refuse control characters; lists and strings are bounded.
-- Descriptions are not in the core: the UI translates `settings.<key>`,
+- Descriptions are not in the hub: the UI translates `settings.<key>`,
   `settings.<key>.desc`, options, sections and groups.
 - `backend/scripts/registry.ts` (`pnpm -C backend registry`), from the
   features `serve` composes and `backend/kernel/config/registry.ts`,
@@ -57,7 +57,7 @@ UIs list them in.
   needs) and the settings and commands tables of
   [reference](../reference.md#settings). `make tokens` regenerates them;
   `make check` fails when they are stale.
-- The terminal colors' defaults are design tokens, which the core reads
+- The terminal colors' defaults are design tokens, which the hub reads
   from `spec/tokens.json` when it is built
   (`backend/kernel/config/ui/tokens.ts`, [24](24-design-tokens.md)).
 
@@ -67,9 +67,9 @@ Every setting with its type, default, flag and scope is in
 ### File
 
 `settings[-<instance>].json` lives in the user's configuration directory
-on the core host, beside `keybindings[-<instance>].json`
+on the hub host, beside `keybindings[-<instance>].json`
 ([reference](../reference.md#files-and-directories)). The desktop app's
-core is instance `desktop`.
+hub is instance `desktop`.
 
 - Global values are top-level `"key": value` pairs; a machine's own values
   are under `"[machine:<id>]": {…}`.
@@ -84,7 +84,7 @@ core is instance `desktop`.
 - A file that is not JSON is reported (`parse`): the values read before
   stay, and changes are refused (`file`) until it is fixed, so an edit in
   progress is never overwritten.
-- The core polls the file's modification time and size every 2 s; an API
+- The hub polls the file's modification time and size every 2 s; an API
   change first reads a pending hand edit so it is not lost.
 
 ### Layering
@@ -118,7 +118,7 @@ the flag.
 
 `backend/kernel/config/keybindings`.
 
-- **Commands** are registered in the core (`commands.ts`): an id (`tab.new`,
+- **Commands** are registered in the hub (`commands.ts`): an id (`tab.new`,
   `code.open`), a section, a `when` context and default keys per platform.
   Labels are `command.<id>`.
 - **Contexts**: `terminal` (the main window, and VS Code panes for keys VS
@@ -133,7 +133,7 @@ the flag.
   strokes separated by spaces (`ctrl+k c`). Keys are named after the US
   layout's unshifted keys (`?` is `shift+slash`). The first stroke needs
   cmd, ctrl or alt (or is a function key), so a binding never takes a key
-  that types text. The core (`keys.ts`) and the web UI (`web/src/keys.ts`)
+  that types text. The hub (`keys.ts`) and the web UI (`web/src/keys.ts`)
   both run the vectors in `spec/vectors/keys`.
 - **Defaults** are single strokes only: the desktop app's menu keys on
   `mac`, `ctrl+shift` keys on `windows` and `linux`, and in browsers only
@@ -151,7 +151,7 @@ the flag.
   Unknown commands and malformed entries are kept and
   reported. Watching, atomic writes and refusal over a broken file work as
   for settings.
-- **Effective bindings and conflicts** are computed by the core per
+- **Effective bindings and conflicts** are computed by the hub per
   platform, so clients only match keys. A conflict is one key bound to
   commands with overlapping contexts, or a single stroke that also starts
   chords. No platform's defaults conflict (tested); conflicts from user
@@ -167,11 +167,11 @@ the flag.
 
 - The page reads `/api/settings` before rendering (the language must be
   known) and after each reconnect; pushes replace the values. Until the
-  core answers, `registry.json`'s defaults apply. `prefs.ts` is the typed
+  hub answers, `registry.json`'s defaults apply. `prefs.ts` is the typed
   view (`usePrefs`, `getPrefs`); `setPref` saves and shows the value at
   once.
 - Per-browser state (sidebar, selected machine, transfer history) stays
-  in `localStorage`; settings are only the core's.
+  in `localStorage`; settings are only the hub's.
 
 **Settings dialog** (`components/SettingsDialog.tsx`, laid out like VS
 Code's):
@@ -204,7 +204,7 @@ Code's):
   the desktop app on macOS ([16](16-desktop-packaging.md)), and what the
   app uses on **Performance** (below).
 - The header's file button opens `settings.json` (or `keybindings.json`)
-  in a VS Code pane on the core's machine, or copies its path where that
+  in a VS Code pane on the hub's machine, or copies its path where that
   is not possible.
 - Changing a setting re-renders only what changed (focus and scroll
   stay); changing the language reloads the page.
@@ -253,15 +253,15 @@ terminal holds no WebGL context and is not drawn.
 
 - **Desktop app**: a row per Electron process (the bridge's `metrics`,
   [16](16-desktop-packaging.md)) with its processor share and memory, the
-  core's row, and a total.
+  hub's row, and a total.
 - **Browser**: the window's script memory where Chromium tells it, and the
-  core's row. A page cannot learn its own processor or GPU use, which a
+  hub's row. A page cannot learn its own processor or GPU use, which a
   note says; no total.
-- **The core's row** comes from `GET /api/perf` (`sample`): processor
+- **The hub's row** comes from `GET /api/perf` (`sample`): processor
   time since start, resident memory, the resources the process waits on
   (sockets, timers, requests; the field `goroutines`), uptime and
   processors. The client turns two answers into a processor share; none
-  across a core restart. Agents, terminal cores, ssh and the programs in
+  across a hub restart. Agents, terminal cores, ssh and the programs in
   terminals are other processes and not counted.
 - Below the table: terminals shown and kept, the GPU as WebGL names it,
   and how many terminals draw with WebGL or Canvas 2D (`paneUsage` in
@@ -275,11 +275,11 @@ terminal holds no WebGL context and is not drawn.
   `prefers-color-scheme` live. The resolved kind sets `<html data-theme>`
   (the UI's CSS variables come from the design tokens,
   [24](24-design-tokens.md)), the terminals' colors and `theme-color`. It
-  is sent to the core, which switches VS Code ([05](05-vscode-panes.md));
+  is sent to the hub, which switches VS Code ([05](05-vscode-panes.md));
   the desktop shell's title bar follows the setting.
 - **Color theme** (`appearance.colorTheme`): the chrome's accent, one of
   the design tokens' themes (Blue by default). Neutrals are the same in
-  every theme. An unknown id (from a newer core) shows the default.
+  every theme. An unknown id (from a newer hub) shows the default.
 - **Terminal palettes**: the Default scheme is GitHub Dark Default on the
   UI's background, and GitHub Light Default with brighter yellows. Schemes
   and the user's colors replace them. The palette colors only what
@@ -311,9 +311,9 @@ terminal holds no WebGL context and is not drawn.
 | --- | --- |
 | Settings kept per browser (`localStorage`) | Values differ per browser and profile; the desktop shell cannot read a page's storage. |
 | JSON Schema for the definitions | Clients would need a validator plus sections, scopes and platforms; small typed records suffice. |
-| Descriptions in the core's definitions | The UI translates everything else; one place keeps translators' files complete. |
+| Descriptions in the hub's definitions | The UI translates everything else; one place keeps translators' files complete. |
 | A file watcher (`fs.watch`, chokidar) | Loses a file replaced by a rename, or a dependency for two small files; polling every 2 s suffices for hand edits. |
-| Clients working out the effective bindings | A second implementation of rules and conflicts; the core serves them per platform. |
+| Clients working out the effective bindings | A second implementation of rules and conflicts; the hub serves them per platform. |
 | One platform per OS | The desktop app and a browser on the same Mac need different defaults. |
 | A prefix keymap by default (`ctrl+b` then a key, as herdr and tmux) | Makes every press wait; users can bind chords themselves. |
 | Sending a chord's first stroke twice as its control character | Works only for `ctrl`+letter; passing the second press to the key encoder works for any stroke and mode. |
@@ -325,7 +325,7 @@ terminal holds no WebGL context and is not drawn.
 | A per-machine table at the bottom of each page | Far from the settings it changes and limited to bools and options; a machine scope reuses the controls. |
 | Showing every setting's id beside its name | Ids are for the file; they are copied from the menu and found by search. |
 | A comma-separated string for the silent agents | Required knowing ids and syntax; a list of recognized agents says both. |
-| The core answering its processor use as a percentage | Needs per-client state or a timer; cumulative time lets each client diff over its own interval. |
+| The hub answering its processor use as a percentage | Needs per-client state or a timer; cumulative time lets each client diff over its own interval. |
 | A browser page showing its processor and GPU use | Browsers expose neither; the desktop shell asks Electron instead. |
 
 ## Failure modes
@@ -340,7 +340,7 @@ terminal holds no WebGL context and is not drawn.
 - **A client was disconnected while settings changed**: it reads both
   endpoints again on reconnect.
 - **No VS Code window connected**: the theme is sent when one connects.
-- **Two clients choose different themes**: the setting is the core's; the
+- **Two clients choose different themes**: the setting is the hub's; the
   last change wins everywhere.
 - **A program derived its colors from the old theme**: it gets the new
   ones when it asks again or restarts.
@@ -348,9 +348,9 @@ terminal holds no WebGL context and is not drawn.
   1.5 s with fallbacks and switches when the font arrives.
 - **`GET /api/perf` fails**, or the browser has no script memory or WebGL:
   the row or value shows a dash.
-- **A page loaded before the core was replaced** lacks labels for new
+- **A page loaded before the hub was replaced** lacks labels for new
   settings; after a reconnect it compares its entry script with the
-  core's and offers to reload (`web/src/update.ts`).
+  hub's and offers to reload (`web/src/update.ts`).
 
 ## Security
 
@@ -361,7 +361,7 @@ terminal holds no WebGL context and is not drawn.
 - Values are typed and validated; strings refuse every control character
   (C0, DEL, C1), so a value carries no line breaks or escape sequences.
   Machine ids are bounded and refuse brackets and line breaks.
-- `GET /api/perf` returns only amounts and counts of the core's own
+- `GET /api/perf` returns only amounts and counts of the hub's own
   process: no path, name or process id.
 - The desktop bridge's `metrics` answers only the main window's page; the
   preload passes at most 64 processes, short text and numeric amounts.
@@ -383,7 +383,7 @@ See [SECURITY.md](../../SECURITY.md).
   the terminal, key hints).
 - Generated files: `backend/kernel/config/registry.test.ts` (the modules
   and switches in the features' order, the tables, writing and checking),
-  `backend/hosts/bun/registry.test.ts` (the composed core's registry and
+  `backend/hosts/bun/registry.test.ts` (the composed hub's registry and
   tables are the repository's), `backend/scripts/tokens.test.ts`.
 - Web UI: `settings.test.ts`, `settingsDialog.test.ts`,
   `pluginSettings.test.ts`, `keysTable.test.tsx`, `localFonts.test.ts`,
@@ -392,6 +392,6 @@ See [SECURITY.md](../../SECURITY.md).
 - Desktop: `desktop/src/follow.test.ts`, `menu.test.ts`,
   `preload.test.ts` (`metrics`).
 - Usage: `backend/shared/host/perf.test.ts`.
-- Manually: a dev core changed through the API and by editing its file,
+- Manually: a dev hub changed through the API and by editing its file,
   with pushes observed on `/ws`; the dialog used in headless Chromium and
   the desktop app, in English and Chinese, light and dark.

@@ -24,7 +24,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   pane header and back, and stays the program's (tmux) in a terminal. Every key can be rebound or unbound, chords included.
 - **Terminal core included.** herdr-core is installed on a machine the
   first time its terminals are shown; machines need nothing installed and
-  no internet. Programs keep running when the browser or the core stops.
+  no internet. Programs keep running when the browser or the hub stops.
 - **Workspaces come back.** After a machine restarts, its tabs return as
   shells in their directories, and Claude Code and Codex resume the
   session each ran (`claude --resume <id>`, `codex resume <id>`) once the
@@ -53,7 +53,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   secrets) and the machine keeps bounded snapshots of its terminals'
   output; after its terminal core restarts, each terminal shows its old
   output above the new shell ([36](docs/features/36-terminal-history.md)).
-- **VS Code on demand.** code-server per machine, installed from the core
+- **VS Code on demand.** code-server per machine, installed from the hub
   host without internet on the machines, as a pane beside the terminals;
   a `path:line` in a terminal opens there. Off by default, because its
   extensions run with the UI's own origin.
@@ -94,7 +94,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   regular expressions, include and exclude globs; a click opens the match.
   ripgrep where the machine has it, a bounded search of its own otherwise
   ([41](docs/features/41-project-search.md)).
-- **Variable vault.** API keys encrypted under your passphrase on the core's
+- **Variable vault.** API keys encrypted under your passphrase on the hub's
   computer, read by coding agents on every machine through an MCP server;
   each read is allowed per machine or approved by you, with the passphrase
   or Touch ID, Windows Hello or a WebAuthn credential
@@ -106,7 +106,7 @@ workspaces and terminals of every machine in one browser tab, with VS Code
   ([29](docs/features/29-ai-usage.md)).
 - **Settings.** Language (English, Chinese), themes, terminal font and
   colors, notifications and every shortcut, in one searchable dialog laid
-  out as VS Code's. Kept on the core's host in two JSON files you can
+  out as VS Code's. Kept on the hub's host in two JSON files you can
   also edit by hand ([13](docs/features/13-settings-and-appearance.md)).
 
 ## Screenshots
@@ -133,7 +133,7 @@ Requirements:
 
 - an OpenSSH client with working access to the machines you want to use
   (this host needs none);
-- to build: Bun 1.4.5 (the core, its machine side and the build's
+- to build: Bun 1.4.5 (the hub, its machine side and the build's
   tools), Node.js 22.12+ and pnpm (`corepack enable` picks the pinned
   version).
 
@@ -145,7 +145,7 @@ cd dist/packages/veldr-$(scripts/platform.sh)
 
 Or extract the matching archive from `dist/release/` (or GitHub Releases)
 and run `./veldr`. Add SSH machines with **Add machine…** in the
-sidebar. A core from GitHub Releases has each machine download its
+sidebar. A hub from GitHub Releases has each machine download its
 platform's build. One built here serves machines of its own platform
 only, unless you build the others too
 (`TARGETS="linux/amd64 linux/arm64 …" make build`, its own among them)
@@ -157,7 +157,7 @@ the list of shortcuts. All flags are listed in
 
 ## Desktop app
 
-The same UI in an Electron app with a core of its own, which runs inside the
+The same UI in an Electron app with a hub of its own, which runs inside the
 app and listens on no port (instance `desktop`), for macOS, Windows and Linux.
 Download it from GitHub Releases:
 
@@ -206,7 +206,7 @@ terminal. The full list is in
 [docs/reference.md](docs/reference.md#keyboard-shortcuts); change keys
 under **Settings → Keyboard Shortcuts**.
 
-Quitting the app stops its core; the machines' terminals keep running. See
+Quitting the app stops its hub; the machines' terminals keep running. See
 [desktop deployment](docs/deployment.md#desktop-app) for paths, versioning
 and isolated development.
 
@@ -222,8 +222,8 @@ header, a read-only mode and an audit log. See
 
 Machines need no internet access. A machine that has it downloads its
 platform's veldr from the GitHub release, checked against the release's
-`SHA256SUMS`; to one that has not, the core uploads it over ssh, and a
-core host that cannot reach the release fetches `SHA256SUMS` through the
+`SHA256SUMS`; to one that has not, the hub uploads it over ssh, and a
+hub host that cannot reach the release fetches `SHA256SUMS` through the
 machine's ssh connection, with its own TLS end to end. Claude Code's chats
 need Anthropic's Agent SDK, which machines get from the npm registry the
 same way. code-server and extensions are resolved on the host running
@@ -248,7 +248,7 @@ SHA-256 digests. Details in
 ## Development
 
 ```bash
-make dev-hub      # core on :7790 with --instance dev (terminal core session veldr-dev-<host id>)
+make dev-hub       # hub on :7790 with --instance dev (terminal core session veldr-dev-<host id>)
 make dev-web       # UI with hot reload on :5173
 make check test    # before sending a PR
 ```
@@ -265,15 +265,15 @@ Issues and pull requests are welcome, in English or Chinese. Please read
 ## License
 
 [MIT](LICENSE). Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-(the core's Bun runtime and npm packages)
-and `/licenses.md` served by the core (the web UI bundle,
+(the hub's Bun runtime and npm packages)
+and `/licenses.md` served by the hub (the web UI bundle,
 with Ghostty's terminal library (MIT), KaTeX and the JetBrains Mono font).
-The core embeds
+The hub embeds
 [herdr-core](https://github.com/herdrdev/herdr-core) (Apache-2.0) for
 machines; release archives carry its license and notices in
 `licenses/herdr-core/`. The agents carry herdr's agent detection rules
 (Apache-2.0, [licenses/herdr-detect/](licenses/herdr-detect/)), and the
-core the video encoder for Linux machines (FFmpeg, LGPL-2.1, with libvpx,
+hub the video encoder for Linux machines (FFmpeg, LGPL-2.1, with libvpx,
 libva and libdrm; [licenses/encoder/](licenses/encoder/)).
 code-server and Git Graph retain their own licenses and are downloaded at
 runtime. Git Graph restricts derivative distribution and does not clearly

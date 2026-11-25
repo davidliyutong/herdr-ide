@@ -7,13 +7,13 @@ neutral greys, one accent color for focus, selection and what asks for the
 user, color otherwise only for state, dense rows and toolbars of fixed
 heights, in a light and a dark theme with a color theme of the user's
 choice. The same values are needed in the chrome's CSS, in the terminals'
-default colors (settings of the core) and in the desktop window's
+default colors (settings of the hub) and in the desktop window's
 background before the page paints. Copied into each place, they drift.
 
 ## Goals / non-goals
 
 Goals: one file defining colors, color themes, sizes, the type scale and
-terminal palettes; the web UI and the core read it in their own form
+terminal palettes; the web UI and the hub read it in their own form
 without a build step; a stale generated file fails `make check`; every
 chrome element of one kind has one size, and all sizes scale with the UI
 font size.
@@ -54,7 +54,7 @@ writes one checked-in file, so no build needs to run it:
   Sizes and font sizes are in `rem`, so the UI font size setting (the root
   font size) scales them.
 
-The core reads `tokens.json` itself (`backend/kernel/config/ui/tokens.ts`,
+The hub reads `tokens.json` itself (`backend/kernel/config/ui/tokens.ts`,
 bundled into its executable): the terminal palettes as defaults of the
 `terminal.colors.*` settings, and the theme ids as the values of
 `appearance.colorTheme`.
@@ -85,8 +85,8 @@ lists that need sizes in pixels take them from `web/src/lib/sizes.ts`.
   `.switch`, dropdowns (`components/Picker.tsx`) and trees
   (`components/tree`).
 
-**Terminals and first paint.** Terminal colors come from the core's
-settings (from `spec/generated/registry.json` until the core answers).
+**Terminals and first paint.** Terminal colors come from the hub's
+settings (from `spec/generated/registry.json` until the hub answers).
 The page's `theme-color` and manifest background are
 `color.background`; the desktop shell reads it from `tokens.json`, which
 its build bundles.
@@ -95,7 +95,7 @@ its build bundles.
 
 | Alternative | Why not |
 | --- | --- |
-| Style Dictionary or another token toolchain | A Node dependency for one small output; the core reads the JSON itself. |
+| Style Dictionary or another token toolchain | A Node dependency for one small output; the hub reads the JSON itself. |
 | Generating at build time | Vite would need a step first; a checked-in file plus a staleness check keeps builds unchanged. |
 | Reading `tokens.json` at run time | Colors would arrive after the first paint and CSS could not use them. |
 | Using `--ds-*` in every rule | Thousands of lines changed for no visible difference. |
@@ -121,7 +121,7 @@ its build bundles.
 - `backend/scripts/tokens.test.ts`: parsing, generated CSS, determinism,
   rejected tokens, `--check`, and that the repository's file is current.
 - `backend/kernel/config/ui/ui.test.ts`: the color theme setting offers
-  the tokens' themes (`color themes`), the core's terminal defaults are
+  the tokens' themes (`color themes`), the hub's terminal defaults are
   `tokens.css`'s (`tokens as tokens.css has them`).
 - `web/src/__tests__/tokens.test.ts`: terminal defaults equal the tokens,
   theme contrast, `data-accent`, size scaling; `termOptions.test.ts` and

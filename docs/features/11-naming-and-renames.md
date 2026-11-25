@@ -22,7 +22,7 @@ executable, `HC_*` variables, state directory).
 ## Design
 
 - **Definitions**:
-  - core and machine side: `backend/shared/lib/brand.ts` (`NAME`, `SLUG`,
+  - hub and machine side: `backend/shared/lib/brand.ts` (`NAME`, `SLUG`,
     `DOMAIN`, `ENV_PREFIX`, `dataDir(instance)`, `AGENT_DIR`,
     `BRIDGE_EXT_ID`, …);
   - web UI: `web/src/brand.ts` (`APP_NAME`, `APP_SLUG`, `APP_DOMAIN`,
@@ -39,14 +39,14 @@ executable, `HC_*` variables, state directory).
   without touching identifiers.
 - **Consistency**: `backend/shared/lib/brand.test.ts` checks that the web
   UI's and the extension's copies and the extension's `package.json` agree
-  with the core's. `scripts/check.sh` fails on string literals with the
+  with the hub's. `scripts/check.sh` fails on string literals with the
   slug in TypeScript outside these files. Build scripts, the Makefile, Vite, the
   PWA manifest, the desktop launcher and electron-builder derive names from
   them.
 - **Derived at runtime**: the agent's state directory
   (`~/.<slug>[-<instance>]`), the terminal core's session
   (`<slug>[-<instance>]-<host id>`, [21](21-terminal-core.md)), the proxy-secret
-  header, environment variables (`VELDR_*`), the core's configuration
+  header, environment variables (`VELDR_*`), the hub's configuration
   directory and download cache, browser storage keys, the label and name
   that hide the product's own terminals (`<slug>.hidden`,
   `<slug>-chat-host`), the notices' methods (`_<slug>/<name>`), and the
@@ -72,7 +72,7 @@ executable, `HC_*` variables, state directory).
 ## Failure modes
 
 - **VS Code keybindings to the bridge's commands** (`<slug>.sendToAgent`,
-  `<slug>.download`) change with the slug and must be rebound. The core's
+  `<slug>.download`) change with the slug and must be rebound. The hub's
   own command ids carry no product name, so `keybindings[-<instance>].json`
   stays valid.
 

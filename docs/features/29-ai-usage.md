@@ -24,7 +24,7 @@ the same in its sessions' database.
   monthly equivalents; OpenCode as a service with spend and no windows.
 - What the session of the coding agent in the focused pane has used, at API
   prices, with its context.
-- Credentials stay on their machines and are never sent to the core. They
+- Credentials stay on their machines and are never sent to the hub. They
   are read only, except Kimi Code's sign-in, which is renewed in place as
   Kimi Code renews it.
 - Non-goals: importing browser cookies, hooks that run commands, refreshing
@@ -43,10 +43,10 @@ files and cache tables of the Go program of earlier releases
 
 - `limits`: asks each enabled provider in parallel (15 s per request,
   through `HTTPS_PROXY`, one shared HTTP client, no redirects followed);
-  another core's same request through the same node within a minute gets
+  another hub's same request through the same node within a minute gets
   the same answer ([39](39-nodes.md)). It returns a list of accounts with windows, credits, balances and a
   `status`: `ok`, `stale` (expired token, or numbers from a log), `unauth`,
-  `error` (with `code`) or `missing`. Accounts the core names in `skip` /
+  `error` (with `code`) or `missing`. Accounts the hub names in `skip` /
   `skipLocal` are answered `skipped` without a request; a 429 returns
   `rate_limited` with its `Retry-After`.
 - `cost`: the logs' tokens and cost by day, provider, model and project.
@@ -95,7 +95,7 @@ Kimi Code's access token lasts about 15 minutes and Kimi Code renews it
 only while it runs, so its numbers would otherwise be unreadable most of the
 time. Its refresh token is single-use: a renewal that kept the new tokens
 to itself would sign Kimi Code out. So with `usage.kimiRefresh` on (the
-default) and the core not `--read-only`, the agent renews the token exactly
+default) and the hub not `--read-only`, the agent renews the token exactly
 as Kimi Code 2.2.0 does (`backend/features/usage/machine/kimi.ts`) and writes the new tokens back
 where Kimi Code reads them:
 
@@ -110,10 +110,10 @@ where Kimi Code reads them:
   again, in case Kimi Code renewed meanwhile. The lock's protocol (a
   directory and its time) is spoken here: proper-lockfile, imported into
   the node, would patch `fs.close` and `process.cwd` and
-  install signal handlers in the process that serves every core.
+  install signal handlers in the process that serves every hub.
 - **Refresh**: `POST https://auth.kimi.com/api/oauth/token` with Kimi
   Code's client id and identity headers. Up to three attempts on network
-  errors and 429/5xx. Once sent, the answer is awaited even if the core
+  errors and 429/5xx. Once sent, the answer is awaited even if the hub
   stopped waiting, because the old refresh token is then spent.
 - **Write-back**: in Kimi Code's format, keeping the file's other members
   and mode, through a temporary file, fsynced and renamed. Written even if
@@ -135,7 +135,7 @@ The parsers (`machine/parsers.ts`) read:
 
 `spec/pricing/pricing.json` has the prices by provider and longest model
 prefix, with long-prompt tiers and cache-write prices; the machine side
-and the core import that one file. Weekly and monthly equivalents scale the range's
+and the hub import that one file. Weekly and monthly equivalents scale the range's
 cost to its 168 and 750 hours.
 
 The scanner keeps its cache in the machine's database
@@ -159,7 +159,7 @@ machine side does otherwise:
 - Its housekeeping drops a cache that no scan saved for 90 days (the
   plugin off on that machine): its records are past the retention anyway.
 
-The node serves every core on one thread, so the scan never
+The node serves every hub on one thread, so the scan never
 holds it for long: logs are read with `fs/promises` in chunks of 1 MiB,
 each chunk's lines parsed before the next read (a line is at most
 16 MiB), and the summing yields every 8 ms. The databases are read in a
@@ -219,7 +219,7 @@ changed, since a step's tokens are written into an existing row when it
 ends.
 
 The file belongs to another program and is read in the agent (and beside
-the core for the local machine), so a damaged or crafted file must fail the
+the hub for the local machine), so a damaged or crafted file must fail the
 read, never crash the process or exhaust its memory:
 
 The machine side has SQLite in its runtime and reads the databases
@@ -267,11 +267,11 @@ OpenCode recorded; otherwise the tokens count without a price.
   which compares the table with LiteLLM's public price table and lists
   differing, missing and unpriced models. It writes nothing; each finding is
   checked against the provider's page. Only this script uses the network;
-  the core and agents read the embedded table.
+  the hub and agents read the embedded table.
 - `usage.prices` holds the user's prices, one line per model prefix
   (`<model> <input> <cached> <output> [<cache write>]`, USD per million
   tokens). They are sent with each scan, override the table's entry of the
-  same name, and key the core's cost cache. The settings page edits them as
+  same name, and key the hub's cost cache. The settings page edits them as
   a form (`PricesEditor.tsx`): a row per model, saved when complete and
   valid, an invalid row explained and not saved; empty cache prices cost
   the input price. Models the spend found without a price are offered as
@@ -279,7 +279,7 @@ OpenCode recorded; otherwise the tokens count without a price.
 - A model without a price still counts its tokens; the spend names such
   models with a link to `usage.prices`.
 
-### Core
+### Hub
 
 `backend/features/usage` runs a scheduler (a service of the feature,
 `usage.ts`) that checks every 10 s
@@ -303,13 +303,13 @@ does not hide another's numbers. The machines that answered worse are the
 account's `issues`. An answer without numbers keeps the last good ones with
 the new status. Accounts unseen for 7 days are forgotten.
 
-The history (the core's database `hub[-<instance>]-<host>[-<id>].db`, tables
+The history (the hub's database `hub[-<instance>]-<host>[-<id>].db`, tables
 `usage_windows`, `usage_accounts`, `usage_alerts`, `usage_machine_costs`;
 [38](38-sqlite-state.md)) keeps a point per window when the use changed or 15 minutes passed, for 30
 days, plus the last accounts for a restart. A window's pace compares its use
 with the share of its time gone and projects when it runs out.
 
-Every 10 minutes the core reads the status pages of enabled providers
+Every 10 minutes the hub reads the status pages of enabled providers
 (Anthropic's and OpenAI's Statuspage summaries, Google's incident feed);
 x.ai's and DeepSeek's are links.
 
@@ -330,10 +330,10 @@ machine runs one scan at a time; requests for the same range share it.
 `session` action (30 s) with the user's prices. Kind and id are checked
 first (`400 bad_request`), a provider turned off is not read
 (`404 provider_off`), and only the decoded numbers reach the page. At most
-8 run at once per machine (`429 busy`). It only reads, so a read-only core
+8 run at once per machine (`429 busy`). It only reads, so a read-only hub
 answers it and it is not audited.
 
-A core on Windows runs no local agent, so only SSH machines' CLIs are read.
+A hub on Windows runs no local agent, so only SSH machines' CLIs are read.
 
 ### Web UI
 
@@ -400,14 +400,14 @@ from what the chat's agent states through its protocol
 
 ### Alerts
 
-With `usage.alerts` on (the default) the core fires, after a poll, for a
+With `usage.alerts` on (the default) the hub fires, after a poll, for a
 window read in that poll:
 
 - **threshold**: its use reached one of `usage.thresholds`;
 - **pace**: at its pace it runs out before its reset;
 - **reset**: it started over after reaching the first threshold.
 
-Each alert fires at most once per period of its window. The core records
+Each alert fires at most once per period of its window. The hub records
 the period's end per account, window (kind, label, length) and threshold
 with the history, so a restart does not repeat it. A record re-arms only
 when the window really starts over: a reset moving by more than 10 minutes,
@@ -426,7 +426,7 @@ threshold warning, and a pace alert is that warning ahead of time.
 
 | Alternative | Why not |
 | --- | --- |
-| Credentials copied to the core | Tokens would leave their machines; the agents already run where the CLIs do. |
+| Credentials copied to the hub | Tokens would leave their machines; the agents already run where the CLIs do. |
 | Refreshing every CLI's expired OAuth tokens | Writing the CLIs' credential files races the CLIs and can sign them out; running the CLI once renews them. Kimi Code is the exception: its 15-minute token made its numbers unreadable most of the time, and its lock and file format are known. |
 | Renewing Kimi Code's token without writing it back | Its refresh tokens are single-use: Kimi Code would be signed out. |
 | Breaking a Kimi Code lock stale by its own rule (5 s) | Kimi Code throws when a lock it holds changes; a holder whose event loop stalled would fail. |
@@ -439,7 +439,7 @@ threshold warning, and a pace alert is that warning ahead of time.
 | Reading only rows added since the last read | Tokens are written into existing rows when a step ends. |
 | Grok's credits as a monthly window | Its subscriptions' period is 7 days; the period's length names the window. |
 | A chart library | A few SVG paths; no dependency. |
-| Each page deciding alerts from the snapshots it saw | Pages raced, re-fired on jitter and drift, and forgot on reload. The core sees every poll and keeps one record per window and period. |
+| Each page deciding alerts from the snapshots it saw | Pages raced, re-fired on jitter and drift, and forgot on reload. The hub sees every poll and keeps one record per window and period. |
 
 ## Failure modes
 
@@ -476,8 +476,8 @@ transcripts are found and read. Resources and retention:
 [deployment](../deployment.md#remote-resources).
 
 Key invariants: tokens are sent only to their provider's fixed host, never
-redirected, never returned to the core; the only credential written is Kimi
-Code's, in place and under its lock, never by a `--read-only` core; foreign
+redirected, never returned to the hub; the only credential written is Kimi
+Code's, in place and under its lock, never by a `--read-only` hub; foreign
 databases are read with bounded, read-only code that never holds their
 writer up (SQLite immutable without a writer, a WAL reader with one).
 
@@ -491,7 +491,7 @@ writer up (SQLite immutable without a writer, a WAL reader with one).
   `store.test.ts`: cadence,
   dedupe across machines, best answer, `Retry-After`, refresh gap, history,
   status pages, cost cache and `ETag`s, no Kimi renewal from a read-only
-  core; each alert at most once per period under jitter and drift, kept
+  hub; each alert at most once per period under jitter and drift, kept
   across a restart.
 - `backend/scripts/pricecheck.test.ts`: the price comparison.
 - `web/src/__tests__/usage.test.ts`, `usageSettings.test.ts`,
@@ -500,8 +500,8 @@ writer up (SQLite immutable without a writer, a WAL reader with one).
   estimate of the whole, the breakdown by model; `usageSession.test.tsx`:
   the status bar item following the focused agent's service and model.
 - The machine side: `backend/features/usage/machine.test.ts`
-  (the actions through the wire with the core's schemas, their codes,
-  the user's prices refused, one core's limits answering another's, no
+  (the actions through the wire with the hub's schemas, their codes,
+  the user's prices refused, one hub's limits answering another's, no
   token in a reply), `machine/limits.test.ts` (each provider against
   fake servers on loopback, the keychain through a fake `security`,
   redirects, `Retry-After`, the environment's proxy and `NO_PROXY`, the

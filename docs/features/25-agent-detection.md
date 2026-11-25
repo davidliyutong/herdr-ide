@@ -67,20 +67,20 @@ beyond the state.
   gate semantics and refused manifests, which the tests run.
 
 **In the agent** (op `detect`: `backend/features/agents/machine/detect.ts`
-and `detector.ts`, the op a feature's machine side serves). The core
+and `detector.ts`, the op a feature's machine side serves). The hub
 opens the stream while its backend connection for the machine is up
 ([22](22-terminal-protocol.md)), i.e. while some client follows the
 machine. The agent subscribes to the terminal core's events and follows
 each record (foreground process, title, size, status). For an agent
 terminal it attaches as an observer, using output only as a "screen
 changed" signal (bytes acknowledged and dropped), and reads the screen
-with `terminal.read`. It sends the core one line per change, in order,
+with `terminal.read`. It sends the hub one line per change, in order,
 `{terminal, agent, status}`, or `{terminal}` when the agent left. The
 product's hidden terminals (the chat host's, `agentproto.Hidden`,
 [22](22-terminal-protocol.md)) are not watched; the agents a chat host runs
 have no terminal and report through it ([37](37-agent-chats.md)).
 
-**Sessions.** While the agents plugin is on, the core sets
+**Sessions.** While the agents plugin is on, the hub sets
 `Header.Sessions` when it opens the stream, and the agent also finds the
 session each Claude Code or Codex runs (`backend/machine/agents`; how:
 [35](35-agent-native-view.md)). Switching
@@ -93,11 +93,11 @@ line carries the last session found as `session` and `session_source`. A
 guess (the directory's newest transcript) is never taken while another
 terminal runs the same kind of agent in that directory.
 
-**In the core** (`backend/features/terminals/agents.ts`). The backend
+**In the hub** (`backend/features/terminals/agents.ts`). The backend
 merges the agents into records as `agent` and `agent_status` and sends `agent`
 events; `/ws` clients get `agent {m, data, sound}`
 ([07](07-agent-native-workflow.md)). A client's `focus` on the terminal
-marks `done` seen (`idle`). The core accepts a session only as a
+marks `done` seen (`idle`). The hub accepts a session only as a
 lower-case UUID with a known source (`checkSession`), keeps it as
 `agent_session` and `agent_session_source`, and sends both in every
 `agent` event, null when unknown ([22](22-terminal-protocol.md)). A change
@@ -106,8 +106,8 @@ After the stream reopens (plugin switched), a state the clients were
 already told of within 10 s is not notified twice.
 
 A program that reports its own `done` (Codex) keeps reporting it until its
-next turn, so after a core or agent restart a fresh detection would see
-the old turn as new. The core therefore labels a terminal `seen` with the
+next turn, so after a hub or agent restart a fresh detection would see
+the old turn as new. The hub therefore labels a terminal `seen` with the
 record's turn number when its `done` is seen, and a new detection's first
 `done` of that same turn is reported idle. A `done` read from the screen
 is never taken for seen.
@@ -117,7 +117,7 @@ is never taken for seen.
 blocked, done, working, idle (`attentionList` in `web/src/actions.ts`),
 and notifies and plays sounds from `/ws` ([07](07-agent-native-workflow.md)).
 The detected agent, and its session unless guessed, is remembered in
-the layout leaf so `claude` and `codex` can resume after a core restart
+the layout leaf so `claude` and `codex` can resume after a terminal core restart
 ([33](33-workspace-restore.md)); the session also feeds the status bar's
 session usage ([29](29-ai-usage.md)).
 
@@ -125,11 +125,11 @@ session usage ([29](29-ai-usage.md)).
 
 | Option | Why not |
 | --- | --- |
-| Detection in the core | Every screen read would cross ssh; next to the terminal core only state changes travel. |
+| Detection in the hub | Every screen read would cross ssh; next to the terminal core only state changes travel. |
 | Rules of our own | herdr's rules follow each agent's releases; same format and files carry over. |
 | Converting manifests to JSON | Manual conversion at every herdr release. |
 | Polling every agent screen on a timer | Reads idle screens for nothing; the observer attach says when output arrived. |
-| An emulator per terminal in the agent | A second emulator per terminal; `terminal.read` returns the core's own screen. |
+| An emulator per terminal in the agent | A second emulator per terminal; `terminal.read` returns the terminal core's own screen. |
 | Detection in each client | Every client reads every screen and `done` would differ between them. |
 | Marking done seen on attach | Clients attach to every shown pane, including unwatched tabs; focus is what herdr uses. |
 
@@ -140,7 +140,7 @@ session usage ([29](29-ai-usage.md)).
 - **Unknown agent or launcher** → no agent; OSC 7501 still shows.
 - **Agent without a manifest** (herdr follows it through hooks) → named,
   status `unknown`.
-- **Detect stream ends** → the core clears the machine's agents and
+- **Detect stream ends** → the hub clears the machine's agents and
   reopens after 5 s while its connection lasts.
 - **`seen` label cannot be set** → logged; after a restart that `done`
   shows as news once more.
@@ -153,7 +153,7 @@ session usage ([29](29-ai-usage.md)).
 ## Security
 
 The agent reads the user's own terminals' screens, as the user, and sends
-only an agent name and a state word to the core, plus the session's id
+only an agent name and a state word to the hub, plus the session's id
 and source word while the agents plugin is on; no screen text or path
 leaves the machine through this path. See [SECURITY.md](../../SECURITY.md).
 
@@ -168,12 +168,12 @@ leaves the machine through this path. See [SECURITY.md](../../SECURITY.md).
   cases on a fake clock, hidden terminals skipped) and `machine.test.ts` (op `detect` through the
   wire against a fake terminal core: sessions only when asked, the
   terminal core's events in order, the screen read without history lines,
-  the stream ending with the core's close and with the terminal core's
+  the stream ending with the hub's close and with the terminal core's
   silence).
 - `backend/machine/agents/sessions.test.ts`: how a session is found and
   resolved.
 - `backend/features/terminals/terminals.test.ts`: `agents` (`records,
-  events and /ws`, `a seen turn outlives the core`); `sessions.test.ts`:
+  events and /ws`, `a seen turn outlives the hub`); `sessions.test.ts`:
   sessions in records and events (`agent sessions`), the header following
   the plugin (`sessions from the machine`), a session ending (`a session
   ends`), no double notification after a switch (`detected again after a

@@ -115,7 +115,7 @@ and the resolver's maps bounded.
 
 ### The detector's part
 
-With the agents plugin on, the core opens the detect stream
+With the agents plugin on, the hub opens the detect stream
 ([25](25-agent-detection.md)) with `Header.Sessions`; without it the
 agent reads no session file. For each terminal whose agent's
 transcripts are read, a follower resolves after the startup grace, retries
@@ -123,7 +123,7 @@ with back-off while nothing is found, and resolves again when the stamp,
 the foreground pid or its command line changes
 (`followSession` of `backend/features/agents/machine/detector.ts`).
 
-The core accepts only a lower-case UUID with a known source and keeps it
+The hub accepts only a lower-case UUID with a known source and keeps it
 in the terminal record as `agent_session` and `agent_session_source`
 ([22](22-terminal-protocol.md)). The `agent` event always carries both
 (`null` when unknown), so a page loses a session that ended. A change of
@@ -181,9 +181,9 @@ with chats whose agent has quit, opening it as a chat
 (`backend/features/agents`, machine side `machine.ts` there)
 answers `{ok}` when the machine has the session's transcript and it
 records that directory, else a code (`not_found`, `other_cwd`,
-`compressed`, `bad_request`). It is validated on the core and again on
+`compressed`, `bad_request`). It is validated on the hub and again on
 the machine, bounded (15 s, 8 at once per machine, `429 busy`), a read
-allowed on a read-only core, and `404 plugin_disabled` with the plugin
+allowed on a read-only hub, and `404 plugin_disabled` with the plugin
 off. The machine reads only what the transcript says of itself and
 replies with codes, never paths.
 
@@ -213,7 +213,7 @@ live increments that stored events replace ([37](37-agent-chats.md)).
 | --- | --- |
 | A new kind of layout leaf for an agent's terminal | Everything that knows terminal leaves would need a second path, and older clients would show an unknown node. Fields keep the pane a terminal. |
 | Hooks in the agents' configuration | Writes into the user's configuration of each agent; the process, its record and its transcript tell the session without that. |
-| Parsing transcripts in the core or the page | Whole files, mostly program state, would cross the connection; the machine parses them in place within bounds. |
+| Parsing transcripts in the hub or the page | Whole files, mostly program state, would cross the connection; the machine parses them in place within bounds. |
 | A path in the browser's request | A kind and a UUID name only a transcript inside the kind's own root. |
 | Resuming a guessed session, or without the machine's confirmation | A guess may be another terminal's, and every client of the machine writes the layout. |
 
@@ -243,7 +243,7 @@ live increments that stored events replace ([37](37-agent-chats.md)).
 While the plugin is on, a session id and its source word leave the
 machine per agent terminal; a `resolve` returns only a code. No
 conversation is sent. A session is named only by a kind and a UUID,
-checked on the core and the machine; the transcript is found inside the
+checked on the hub and the machine; the transcript is found inside the
 kind's root, opened through no link with the identity it was found with,
 and parsed within bounds. See [SECURITY.md](../../SECURITY.md) (coding
 agents' sessions, agent detection).

@@ -45,7 +45,7 @@ programs (as automatic input), bells, titles, OSC 52 clipboard writes and
 synchronized output (mode 2026, drawn at the latest after 1 s). The
 terminal core answers color, device attribute and size queries itself
 from the pane's display facts ([22](22-terminal-protocol.md)); the
-emulator answers what the core passes on. Each frame reads only changed
+emulator answers what the terminal core passes on. Each frame reads only changed
 rows from the render state.
 
 **Renderer** (`vt/renderer.ts`, `vt/atlas.ts`). `drawRow` (pure) computes
@@ -118,7 +118,7 @@ Focus is reported when asked (mode 1004).
   has about 16). Its cost is the emulator and scrollback (about 11 MB for
   127 columns × 10 000 lines). Returning shows it at once, where it was
   scrolled. Older ones are unmounted and detached.
-- **Size across detach.** Leaving a terminal does not resize it: the core
+- **Size across detach.** Leaving a terminal does not resize it: the hub
   keeps the last viewer's stream attached until the next viewer arrives
   ([22](22-terminal-protocol.md)), so full-screen programs keep their
   layout and the next paint is exact. 10 s after the last page leaves the
@@ -130,7 +130,7 @@ Focus is reported when asked (mode 1004).
   then upward, at most 200 screens) and scrolls there, else to the same
   distance. Nothing is noted at the end or on the alternate screen. At
   most 200 places are kept, in page memory only, each used once.
-- **Focus.** The focused pane has the keyboard; focus goes to the core (it
+- **Focus.** The focused pane has the keyboard; focus goes to the hub (it
   marks a finished agent turn seen, [25](25-agent-detection.md)) and, when
   asked, to the program. A pane that reattaches while focused reports
   focus again once the paint brought mode 1004.
@@ -185,7 +185,7 @@ Focus is reported when asked (mode 1004).
 | A hidden zero-size stream per terminal to hold the size | A zero-size viewer's behavior is not part of herdr-core's API; the departing viewer's own stream is. |
 | Writing the size into herdr-core's `config.toml` | The user's own file, shared with their sessions; veldr never writes it. |
 | Closing the last viewer's stream | The terminal became 200x120 between viewers: full-screen programs laid out twice, lost their scroll position and painted wrongly. |
-| Restoring scroll by row number from the top | The core's history may be cut at the top where the page's was not. |
+| Restoring scroll by row number from the top | The terminal core's history may be cut at the top where the page's was not. |
 | Restoring scroll by distance from the end alone | Output written meanwhile shifts it; the distance is only the search's start and fallback. |
 | Drawing the first paint as it arrives | The history visibly scrolled past before the screen stood. |
 | Every frame extending the first-paint wait | A working agent's spinner kept the pane blank until the deadline. |
@@ -194,10 +194,10 @@ Focus is reported when asked (mode 1004).
 
 ## Failure modes
 
-- **WebAssembly refused** → terminals stay empty; the core's CSP allows
+- **WebAssembly refused** → terminals stay empty; the hub's CSP allows
   `'wasm-unsafe-eval'`.
 - **No WebGL2 or context lost** → Canvas 2D, slower on large busy screens.
-- **Page draws slower than the program writes** → the core pauses at
+- **Page draws slower than the program writes** → the hub pauses at
   256 KiB unacknowledged; 4 MiB behind it sends a fresh paint.
 - **Connection, machine or terminal core lost** → streams end with
   `disconnected`; terminals (shown and kept) reattach with a new paint,
@@ -211,7 +211,7 @@ Focus is reported when asked (mode 1004).
 - **Output pauses mid-paint** (slow link) → what came is drawn, the rest
   as it comes.
 - **Terminal font loads late** → terminals are remeasured and resized.
-- **Emulator and core disagree on a character's width** → the cursor is
+- **Emulator and terminal core disagree on a character's width** → the cursor is
   off on that row until the program redraws.
 - **A program writes the clipboard without user input** → offered, not
   copied.
@@ -226,7 +226,7 @@ Focus is reported when asked (mode 1004).
 ## Security
 
 The UI's CSP allows compiling WebAssembly (`'wasm-unsafe-eval'`), not
-`eval` or inline scripts; the module is served from the core. Programs'
+`eval` or inline scripts; the module is served from the hub. Programs'
 clipboard writes follow the setting above and reads are refused; only
 `http`, `https` and `mailto` hyperlinks open. Scroll-memory rows and
 preludes stay in page memory, neither stored nor sent; a prelude is
@@ -245,9 +245,9 @@ size belongs to no client. See [SECURITY.md](../../SECURITY.md).
 - `termPane.test.ts`: kept panes, preludes (order, grids, hostile output
   reset, answers dropped, input queued) and reattaching to a new program;
   `terminalViewProgram.test.tsx`, `machineSwitch.test.ts`.
-- Manual, in headless Chromium against a dev core: colors, CJK and emoji,
+- Manual, in headless Chromium against a dev hub: colors, CJK and emoji,
   vim, resizing, splits, find, copy, WebGL and Canvas 2D, and a
   200 000-line flood; Claude Code's size and scroll position kept across
   unmounting.
-- The core's side: `backend/features/terminals/terminals.test.ts`
+- The hub's side: `backend/features/terminals/terminals.test.ts`
   ([22](22-terminal-protocol.md)).

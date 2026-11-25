@@ -25,14 +25,14 @@ The machine's agent identifies the coding agent in each terminal and reads
 its state from the screen with herdr's rules: `idle`, `working`, `blocked`,
 `done`, `unknown` ([25](25-agent-detection.md)). A status the program
 reports itself (OSC 7501) counts too. Terminal records carry `agent` and
-`agent_status`; the core sends `agent` messages on `/ws`.
+`agent_status`; the hub sends `agent` messages on `/ws`.
 
 A `done` turn becomes seen (`idle`) when its terminal gets the focus in a
 client: the page reports focus on the terminal's stream
 ([22](22-terminal-protocol.md)).
 
 A chat pane ([37](37-agent-chats.md)) has its chat's status, which the chat
-host computes (`blocked`: a permission, question or plan waits). The core
+host computes (`blocked`: a permission, question or plan waits). The hub
 publishes a chat's change to `blocked` or `done` as an `agent` message with
 `chat` in place of the terminal; the page finds the pane that shows it
 (`ViewStatusDef.paneOf`, [27](27-plugins.md)). Chats count in everything
@@ -53,7 +53,7 @@ seen when its pane is shown and focused while done.
 
 ### Notifications, badge and sounds
 
-`web/src/notify.ts`, `web/src/sound.ts`. Four settings of the core
+`web/src/notify.ts`, `web/src/sound.ts`. Four settings of the hub
 ([13](13-settings-and-appearance.md)); the three switches are on by
 default:
 
@@ -83,7 +83,7 @@ default:
   every retry), and announced every time it would chime on and on.
 
 Only one browser sounds. Each page reports when it is used (`active` on the
-WebSocket, as durations so browser clocks do not matter). The core marks
+WebSocket, as durations so browser clocks do not matter). The hub marks
 `agent` messages with `sound: true` only for the most recently used page,
 which then applies its own settings. Browsers start audio only after a
 gesture, so a page never clicked may stay silent; the desktop app's main

@@ -21,7 +21,7 @@ Non-goals: built-in user accounts, TLS termination, per-user permissions.
 
 One binary serves the UI (embedded `web/dist`), the event channel (`/ws`),
 the terminal protocol (`/api/v1/term`), the HTTP API and the code-server
-proxy. It listens on `127.0.0.1:7780` by default; the desktop app's own core
+proxy. It listens on `127.0.0.1:7780` by default; the desktop app's own hub
 runs inside the app and listens on nothing ([16](16-desktop-packaging.md)). Flags are in
 [reference.md](../reference.md); the threat model is in
 [SECURITY.md](../../SECURITY.md).
@@ -41,7 +41,7 @@ runs inside the app and listens on nothing ([16](16-desktop-packaging.md)). Flag
    `--allowed-origin`'s (against DNS rebinding). The Origin must be an
    `--allowed-origin` or, on loopback, the request's own host and port
    (against cross-site WebSocket hijacking). A page on another loopback port
-   is another site: the core has no login to stop its scripts.
+   is another site: the hub has no login to stop its scripts.
 4. **Read-only mode** (`--read-only`): terminals are observed only (no input,
    size or focus), writing terminal-protocol calls are refused and no
    terminal core is installed or started ([22](22-terminal-protocol.md)).
@@ -54,9 +54,9 @@ runs inside the app and listens on nothing ([16](16-desktop-packaging.md)). Flag
 5. **Terminal protocol allowlist** (`READ_METHODS`, `WRITE_METHODS` in
    `backend/features/terminals/allowlist.ts`): only methods about terminals
    and documents, never `machine.*`, `file.*`, `server.*` or a call with
-   `on`. Refusals are audited (`denied.term`). An allowlist means new core
+   `on`. Refusals are audited (`denied.term`). An allowlist means new hub
    methods are closed by default.
-6. **CSP** on every page the core serves, including the app shell for
+6. **CSP** on every page the hub serves, including the app shell for
    client-side routes: `script-src 'self' 'wasm-unsafe-eval'` (for the
    terminal emulator's WebAssembly), `frame-ancestors 'self'`, …. An unknown
    `/api/…` path is a 404, not the shell.
@@ -77,13 +77,13 @@ with one switch per kind of client ([05](05-vscode-panes.md)):
 - `plugins.vscode.browser` for browsers, turned on only after the user
   ticks that they understand the risk.
 
-The core applies the requesting client's switch to every VS Code route (status,
+The hub applies the requesting client's switch to every VS Code route (status,
 start, proxy, WebSockets, bridge commands) and sends bridge messages only to
 pages whose switch is on.
 
 A request is the desktop app's only when the app's main process hands it
-to the core that runs inside the app ([16](16-desktop-packaging.md)); every
-client of the command line's core is a browser. `GET /api/settings` and `GET /api/config` report which switch
+to the hub that runs inside the app ([16](16-desktop-packaging.md)); every
+client of the command line's hub is a browser. `GET /api/settings` and `GET /api/config` report which switch
 applies (`client`).
 
 ### Startup checks
@@ -92,7 +92,7 @@ applies (`client`).
 
 - A non-loopback `--listen` is refused unless a proxy secret is configured
   or `--insecure-listen` is given.
-- On Linux and macOS the ssh control directory must be private. A core on
+- On Linux and macOS the ssh control directory must be private. A hub on
   Windows keeps none and offers no ssh login
   ([02](02-multi-machine-transport.md)).
 
@@ -106,14 +106,14 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
 
 | Option | Why not |
 | --- | --- |
-| Electron as the only delivery | Excludes other devices; the [desktop shell](16-desktop-packaging.md) wraps the same core. |
+| Electron as the only delivery | Excludes other devices; the [desktop shell](16-desktop-packaging.md) wraps the same hub. |
 | Tauri desktop app | macOS WKWebView lacks service workers for arbitrary origins; VS Code webviews break. |
 | Built-in password login | Proxies do it better (SSO, 2FA, device trust). |
 | Blocklist of terminal core methods | New methods would be exposed by default. |
 | One VS Code switch for every client | A desktop opt-in would enable VS Code in browsers that never accepted the risk. |
 | Detecting the desktop app by `desktopShell` or user agent | Both are claims any page can make; only what the app's main process says works. |
-| A token of the launch in a cookie (as the desktop app had while it ran the core as a child on a loopback port) | A secret a request carries is needed only where browsers reach the same core; the app's core runs in process and no browser reaches it. |
-| Any loopback Origin accepted | Any local program's pages (dev servers, forwarded ports) could open the core's WebSockets. |
+| A token of the launch in a cookie (as the desktop app had while it ran the hub as a child on a loopback port) | A secret a request carries is needed only where browsers reach the same hub; the app's hub runs in process and no browser reaches it. |
+| Any loopback Origin accepted | Any local program's pages (dev servers, forwarded ports) could open the hub's WebSockets. |
 | code-server on an origin of its own | Removes the risk, but every deployment's proxy, certificate and origins would need a second host or port. |
 
 ## Failure modes
@@ -122,7 +122,7 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
   allowed" (fails closed).
 - **Plain HTTP over a LAN address**: terminals work, but VS Code webviews,
   the clipboard and notifications need a secure context; use HTTPS.
-- **The command line's core** (`veldr serve`): every client is a browser,
+- **The command line's hub** (`veldr serve`): every client is a browser,
   so VS Code follows `plugins.vscode.browser`.
 
 ## Testing

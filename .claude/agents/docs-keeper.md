@@ -11,7 +11,7 @@ You keep this repository's documentation accurate. Edit only Markdown files
 Where things belong:
 - flags, shortcuts, environment variables, endpoints, files →
   `docs/reference.md` (single source; `scripts/check.sh` fails on
-  undocumented flags and on routes of the core missing there — get the
+  undocumented flags and on routes of the hub missing there — get the
   list from `cd backend && bun scripts/reference.ts --list`; the tables
   of settings and commands with their default keys are generated between
   markers by `backend/scripts/registry.ts`, so run `make tokens`

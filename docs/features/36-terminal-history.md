@@ -30,7 +30,7 @@ the user turns it on for a machine; hard limits the machine enforces;
 nothing that types into, resizes or redraws a terminal; snapshots removed
 when no longer wanted.
 
-Non-goals: a continuous record of every byte; snapshots while no core is
+Non-goals: a continuous record of every byte; snapshots while no hub is
 connected; the output after the last snapshot; a separate viewer;
 changing herdr-core's configuration.
 
@@ -38,7 +38,7 @@ changing herdr-core's configuration.
 
 ### Capture (`backend/features/history/machine`)
 
-The core asks the machine's agent to `capture {lines, maxTerminals,
+The hub asks the machine's agent to `capture {lines, maxTerminals,
 maxTotalBytes, days}` (within 25 s); the agent snapshots the live
 terminals of its instance's own terminal core, never the user's:
 
@@ -90,17 +90,17 @@ after its last renewal.
 | Days a snapshot is kept | `history.days` | 7 | 1–30 |
 | Seconds between captures | `history.interval` | 30 | 10–600 |
 
-The agent clamps what the core asks to these bounds
+The agent clamps what the hub asks to these bounds
 (`agentproto.History*`).
 
 ### The scheduler (`backend/features/history/scheduler.ts`)
 
 A machine keeps snapshots while `history.capture` (off by default, per
-machine; `--history-capture`) and the plugin are on. The core asks for a
+machine; `--history-capture`) and the plugin are on. The hub asks for a
 capture `history.interval` seconds after the last one ended, one at a
 time per machine. A machine that no longer keeps snapshots is asked to
 clear them, retried with back-off up to an hour and on reconnect; the
-clear is audited as `history.clear`. A `--read-only` core asks its
+clear is audited as `history.clear`. A `--read-only` hub asks its
 machines for nothing.
 
 ### Routes
@@ -116,13 +116,13 @@ machines for nothing.
 - `DELETE /api/m/{id}/p/history[?terminal=]`: removes one terminal's
   snapshots or all; refused read-only, audited.
 - `POST /api/m/{id}/p/history/adopt?from=&to=`: `to` (a terminal in the
-  core's records) gets `from`'s newest generation as its previous one,
+  hub's records) gets `from`'s newest generation as its previous one,
   unless it has a later one; `from`'s snapshots go either way. Nothing
   grows, so the limits hold. Refused read-only, audited as
   `history.adopt`.
 
 Listing and reading prune expired generations first. Addresses are
-checked on the core and on the machine; errors carry codes, never paths.
+checked on the hub and on the machine; errors carry codes, never paths.
 
 ### Showing a snapshot (`web/src/plugins/history`)
 
@@ -159,10 +159,10 @@ The plugin's settings page shows what the machine keeps, whether
 Snapshots go when older than `history.days`, when their terminal ended
 with its program or has been gone for 2 minutes, when adopted, to make
 room, when the machine no longer keeps snapshots, and with **Clear Saved
-Output**. They outlive the setting with a `--read-only` core (they age
+Output**. They outlive the setting with a `--read-only` hub (they age
 out), on a machine no longer connected (until an agent starts there
 again), while a clear keeps failing, and in backups of the agent's data
-directory. Another core of the same instance whose setting is on keeps
+directory. Another hub of the same instance whose setting is on keeps
 writing the same database.
 
 ## Alternatives considered
@@ -173,7 +173,7 @@ writing the same database.
 | `terminal.read` text as the snapshot | No styles, and with history it scrolls alternate-screen programs for every viewer. It serves only to detect a changed screen. |
 | Recording every byte continuously | A stream per terminal at the busiest program's speed and an ever-growing file; a periodic snapshot is what an emulator would rebuild anyway. |
 | A separate viewer of saved output | It would sit apart from the terminal's scrollback, find and selection. |
-| Snapshots kept by the core | Only machines connected while they run, sent at every capture; the machine keeps its own output. |
+| Snapshots kept by the hub | Only machines connected while they run, sent at every capture; the machine keeps its own output. |
 | Snapshots on by default | Terminal output holds secrets; writing it to disk is the user's choice per machine. |
 | Waiting for output to pause after the paint | Made a capture of 20 terminals take seconds. |
 
@@ -189,8 +189,8 @@ writing the same database.
 - **Too many terminals for the time budget** → the rest `timeout`; the
   next capture starts with them.
 - **Another agent of the instance captures** → `busy`; so does another
-  core's capture through the same node that ended less than 10 s ago, so
-  the cores of a machine capture it about once per interval between them
+  hub's capture through the same node that ended less than 10 s ago, so
+  the hubs of a machine capture it about once per interval between them
   ([39](39-nodes.md)).
 - **A snapshot at another grid** → written at its own grid, then resized
   with every line kept; beyond 1000 by 500 or unknown, at the pane's
@@ -208,9 +208,9 @@ writing the same database.
 Terminal output can hold secrets, so nothing is written unless the user
 turns `history.capture` on for a machine. Snapshots stay on that machine
 in the agent's private database within limits the agent enforces; the
-core reads them only for a page that passed its guards, served as bytes
+hub reads them only for a page that passed its guards, served as bytes
 that are never a document of the UI's origin. Capturing never types into,
-resizes or redraws a terminal, and reads only the instance's own core. A
+resizes or redraws a terminal, and reads only the instance's own terminal core. A
 snapshot's bytes are a program's output and are replayed as untrusted:
 nothing the emulator answers reaches the program, titles, clipboard
 writes and bells are dropped, and a complete reset leaves none of their
