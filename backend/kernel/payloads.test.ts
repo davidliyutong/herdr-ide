@@ -65,14 +65,18 @@ test("a machine build's version is derived from its content, so a rebuilt one is
   const one = Buffer.from('machine build one');
   const two = Buffer.from('machine build two');
   const of = (gz: Uint8Array, agentDir?: string) => payloads({ files: mapFiles(new Map([[`agents/${name}.gz`, gz]])), agentDir });
-  const a = await of(gzipSync(one)).agent('linux', 'amd64');
-  expect(a).toEqual({ bin: one, version: sha256(one).slice(0, 16) });
-  expect((await of(gzipSync(one, { level: 1 })).agent('linux', 'amd64')).version).toBe(a.version);
-  expect((await of(gzipSync(two)).agent('linux', 'amd64')).version).not.toBe(a.version);
+  const a = await of(gzipSync(one)).machine({ os: 'linux', arch: 'amd64' });
+  expect(a).toEqual({ kind: 'go', bin: one, version: sha256(one).slice(0, 16) });
+  expect((await of(gzipSync(one, { level: 1 })).machine({ os: 'linux', arch: 'amd64' })).version).toBe(a.version);
+  expect((await of(gzipSync(two)).machine({ os: 'linux', arch: 'amd64' })).version).not.toBe(a.version);
   const dev = temp();
   writeFileSync(join(dev, name), two);
-  expect(await of(gzipSync(one), dev).agent('linux', 'amd64')).toEqual({ bin: two, version: sha256(two).slice(0, 16) });
-  await expect(of(gzipSync(one)).agent('darwin', 'arm64')).rejects.toThrow('not bundled');
+  expect(await of(gzipSync(one), dev).machine({ os: 'linux', arch: 'amd64' })).toEqual({
+    kind: 'go',
+    bin: two,
+    version: sha256(two).slice(0, 16),
+  });
+  await expect(of(gzipSync(one)).machine({ os: 'darwin', arch: 'arm64' })).rejects.toThrow('not bundled');
 });
 
 test('the bridge extension, when the build has it', async () => {
@@ -93,4 +97,35 @@ test('files of a directory, and layered sources', async () => {
   const l = layered(null, first, files, undefined);
   expect(Buffer.from((await l.get('a'))!).toString()).toBe('first');
   expect(await l.get('b')).toBeNull();
+});
+
+// A core that embeds the TypeScript machine side deploys its bundle with
+// the Bun runtime of the machine's platform: embedded for glibc and macOS,
+// fetched (here: cached) for musl; the build's version names both.
+test('the TypeScript machine side: the bundle with the runtime of the platform and C library', async () => {
+  const js = Buffer.from('console.log("machine")');
+  const bun = Buffer.from('a runtime');
+  const files = mapFiles(
+    new Map([
+      ['machine/machine.js', js],
+      ['runtime/bun-linux-amd64.gz', gzipSync(bun)],
+      // A Go build beside it is not the one used.
+      [`agents/${CORE_BIN}-linux-amd64.gz`, gzipSync(Buffer.from('go'))],
+    ]),
+  );
+  const cache = temp();
+  const p = payloads({ files, runtimeCache: cache });
+  const b = await p.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' });
+  if (b.kind !== 'ts') throw new Error('not the TypeScript build');
+  expect(b.bundle).toEqual(js);
+  expect(b.bundleDigest).toBe(sha256(js));
+  expect(b.runtime.digest).toBe(sha256(bun));
+  expect(b.version).toBe(sha256(Buffer.from(`${sha256(js)}\0${sha256(bun)}`)).slice(0, 16));
+  await expect(p.machine({ os: 'darwin', arch: 'arm64' })).rejects.toThrow('no Bun runtime for darwin/arm64');
+  // musl's comes from the cache (else it is downloaded and checked).
+  const musl = Buffer.from('musl runtime');
+  writeFileSync(join(cache, 'bun-linux-x64-musl-baseline-1.4.5.gz'), gzipSync(musl));
+  const m = await p.machine({ os: 'linux', arch: 'amd64', libc: 'musl' });
+  expect(m.kind === 'ts' && m.runtime.digest).toBe(sha256(musl));
+  expect(m.version).not.toBe(b.version);
 });

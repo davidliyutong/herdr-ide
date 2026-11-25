@@ -5,11 +5,14 @@
 // which prints the clicks it gets. Skipped without Docker.
 
 import { test, expect } from '../harness/fixtures';
+import { unported } from '../harness/paths';
 import type { Instance } from '../harness/instance';
 import { ALIAS } from '../harness/sshd';
 import { TermClient } from '../harness/term';
 import { waitFor } from '../harness/wait';
 import type { Browser, Page } from '@playwright/test';
+
+test.skip(!!unported('gui'), unported('gui'));
 
 interface GuiState {
   m: string;

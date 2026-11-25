@@ -2,20 +2,23 @@
 // the node's socket, started from the machine build installed for this
 // platform when none answers, as `node dial` does for a core that comes
 // over ssh. The node is the same program a remote machine runs; the core
-// installs it where an ssh upload would put it (~/<AGENT_DIR>/<version>).
+// installs it where an ssh upload would put it (~/<AGENT_DIR>/<version>,
+// and a TypeScript build's runtime in ~/<RUNTIME_DIR>), each file checked
+// by its digest.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { NodeOp, VERSION, newer, readLine, writeLine, type NodeHello, type NodeInfo, type Reply } from '#shared/proto/agentproto/index.ts';
-import { AGENT_DIR, CORE_BIN } from '#shared/lib/brand.ts';
+import { AGENT_DIR, CORE_BIN, RUNTIME_DIR } from '#shared/lib/brand.ts';
 import { dirsFor, makeDirs } from '#shared/host/hostdirs.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { pairDuplex } from '#shared/proto/yamux.ts';
 import { CLIENT_ID, Session } from './session.ts';
-import type { AgentSource } from './ssh.ts';
+import { BUNDLE_FILE, launcher, nodeBuild, runtimeDirName, type BuildSource, type MachineBuild } from './builds.ts';
 
 /** The agent runs on Linux and macOS; on Windows the core reaches SSH
  * machines only. */
@@ -34,28 +37,61 @@ export function localPlatform(): { os: string; arch: string } {
 
 const nodeSocket = (run: string) => join(run, 'node.sock');
 
+const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
+
+/** Writes b into path (mode 0700) through a temporary file, after checking
+ * its SHA-256 when digest is given. */
+function place(path: string, b: Uint8Array, digest?: string): void {
+  if (digest !== undefined && sha256(b) !== digest) throw new Error(`${path}: sha256 does not match ${digest}`);
+  const tmp = `${path}.upload.${process.pid}`;
+  try {
+    writeFileSync(tmp, b, { mode: 0o700 });
+    chmodSync(tmp, 0o700);
+    renameSync(tmp, path);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
+/** Installs a build where an upload would put it, unless it is there; the
+ * file to run. */
+export function installBuild(b: MachineBuild, home: string): string {
+  const dir = join(home, AGENT_DIR, b.version);
+  const exe = join(dir, CORE_BIN);
+  if (b.kind === 'ts') {
+    // The runtime, once per digest (also when the build is there).
+    const rt = join(home, RUNTIME_DIR, runtimeDirName(b.runtime.digest));
+    if (!existsSync(join(rt, 'bun'))) {
+      mkdirSync(rt, { recursive: true, mode: 0o700 });
+      place(join(rt, 'bun'), gunzipSync(b.runtime.gz), b.runtime.digest);
+    }
+  }
+  if (existsSync(exe)) return exe;
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (b.kind === 'go') place(exe, b.bin);
+  else {
+    place(join(dir, BUNDLE_FILE), b.bundle, b.bundleDigest);
+    place(exe, Buffer.from(launcher(b)));
+  }
+  return exe;
+}
+
 /** Installs the machine build for this platform where an upload would put
  * it, unless it is there; its path and build. */
-export async function installLocal(agents: AgentSource, home: string): Promise<{ exe: string; info: NodeInfo }> {
+export async function installLocal(builds: BuildSource, home: string): Promise<{ exe: string; info: NodeInfo }> {
   const { os, arch } = localPlatform();
-  const { bin, version } = await agents(os, arch);
-  const dir = join(home, AGENT_DIR, version);
-  const exe = join(dir, CORE_BIN);
-  if (!existsSync(exe)) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const tmp = join(dir, `.upload.${process.pid}`);
-    writeFileSync(tmp, bin, { mode: 0o700 });
-    chmodSync(tmp, 0o700);
-    renameSync(tmp, exe);
-  }
+  const b = await builds({ os, arch, ...(os === 'linux' ? { libc: 'glibc' as const } : {}) });
+  const exe = installBuild(b, home);
+  // The node's build file: the executable, or a TypeScript build's bundle.
+  const file = b.kind === 'go' ? exe : join(exe, '..', BUNDLE_FILE);
   return {
     exe,
     info: {
-      build: createHash('sha256').update(bin).digest('hex').slice(0, 12),
+      build: nodeBuild(b),
       version: VERSION,
-      // Unix nanoseconds, as the Go node writes them (precise to about
-      // 256 ns as a double: enough to order two builds).
-      exe_time: Number(statSync(exe, { bigint: true }).mtimeNs),
+      // Unix nanoseconds, as the nodes write them (precise to about 256 ns
+      // as a double: enough to order two builds).
+      exe_time: Number(statSync(file, { bigint: true }).mtimeNs),
       pid: process.pid,
     },
   };
@@ -118,7 +154,7 @@ function startNode(exe: string, instance: string, hostDir: string, takeover: boo
  * none answers, or taking over from an older one. */
 export async function dialNode(opts: {
   instance: string;
-  agents: AgentSource;
+  builds: BuildSource;
   sshConnection?: string;
   logger: Logger;
   signal?: AbortSignal;
@@ -126,7 +162,7 @@ export async function dialNode(opts: {
   if (!LOCAL_SUPPORTED) throw new Error('the local machine needs Linux or macOS');
   const dirs = dirsFor(opts.instance);
   makeDirs(dirs);
-  const { exe, info: me } = await installLocal(opts.agents, dirs.home);
+  const { exe, info: me } = await installLocal(opts.builds, dirs.home);
   const sock = nodeSocket(dirs.run);
   const hello: NodeHello = {
     op: NodeOp.Serve,

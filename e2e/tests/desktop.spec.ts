@@ -13,10 +13,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { APP_PARTITION, ORIGIN, tcpListeners } from '../harness/desktop';
 import { expect, test } from '../harness/fixtures';
+import { unported } from '../harness/paths';
 import { newTerminalTab } from '../harness/ui';
 import { waitFor } from '../harness/wait';
 
-const seed = process.env.E2E_CODE_SERVER_SEED;
+// VS Code's machine side is not the TypeScript machine side's yet.
+const seed = unported('vscode') ? undefined : process.env.E2E_CODE_SERVER_SEED;
 
 // VS Code (off by default) is on when it can be installed.
 test.use({ desktopOptions: { settings: seed ? { 'plugins.vscode.enabled': true } : {}, codeServerSeed: seed } });

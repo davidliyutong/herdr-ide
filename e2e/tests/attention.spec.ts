@@ -2,9 +2,12 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { test, expect } from '../harness/fixtures';
+import { unported } from '../harness/paths';
 import { AGENT, chatPane, log, newChat, send } from '../harness/chat';
 import type { Instance } from '../harness/instance';
 import { newTerminalTab } from '../harness/ui';
+
+test.skip(!!unported('chat'), unported('chat'));
 
 /** A chat in tab 1 whose agent asks for a permission once tab 2, a
  * terminal, is shown: the chat waits while nobody looks at it. */

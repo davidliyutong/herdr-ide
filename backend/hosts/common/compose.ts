@@ -193,18 +193,18 @@ export function composeCore(o: ComposeOptions): Composed {
   const extra = ssh.map((t) => ({ id: t, label: t, target: t, enabled: true }));
   const specs = selectSpecs(loadSpecs(registry.specs(), extra, hostname()), o.localOnly, ssh, o.only ?? []);
 
-  const agents = payloads.agent.bind(payloads);
+  const builds = payloads.machine.bind(payloads);
   const machines = new Machines({
     specs,
     registry,
     logger,
     dial: async (spec, signal) => {
       if (spec.kind === 'local') {
-        const session = await dialNode({ instance: nodeInstance, agents, sshConnection: process.env.SSH_CONNECTION, logger, signal });
+        const session = await dialNode({ instance: nodeInstance, builds, sshConnection: process.env.SSH_CONNECTION, logger, signal });
         return { session, platform: `${process.platform}/${process.arch === 'x64' ? 'amd64' : process.arch}` };
       }
       const { session, platform } = await dialSSH(
-        { target: spec.target ?? '', controlDir, agents, logger, instance: nodeInstance },
+        { target: spec.target ?? '', controlDir, builds, logger, instance: nodeInstance },
         signal,
       );
       return { session, platform: `${platform.os}/${platform.arch}` };

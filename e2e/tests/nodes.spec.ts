@@ -1,21 +1,15 @@
 // Two cores of one instance on one computer: two UIs of the same machines,
 // which reach the local machine through the same node; a newer build's
-// core takes the node over without the other noticing.
+// core takes the node over without the other noticing, also when the newer
+// build is the other machine build (the Go program from the TypeScript
+// machine side, and the other way round: the upgrade path).
 
-import { execFileSync } from 'node:child_process';
 import { test, expect } from '../harness/fixtures';
+import { nodeProcesses as nodes, tsNode, type Instance } from '../harness/instance';
 import { TermClient } from '../harness/term';
 import { newTerminalTab, run, terminalOfPane } from '../harness/ui';
 import { waitFor } from '../harness/wait';
 import { paths } from '../harness/paths';
-
-/** The node processes of the instance: whichever executable runs them
- * (the core's own, or the machine build it installed). */
-function nodes(name: string): string[] {
-  return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
-    .split('\n')
-    .filter((l) => l.includes(`node --instance ${name}`));
-}
 
 test('two cores share the local node: each sees the terminals of the other, and one leaving keeps the other', async ({
   instance,
@@ -44,11 +38,16 @@ test('two cores share the local node: each sees the terminals of the other, and 
   await waitFor(async () => nodes(instance.name).length === 0, { what: 'the node to end', timeout: 30_000 });
 });
 
-test('a newer build takes the node over: the other core moves to it and stays ready, its terminals with it', async ({
-  app,
-  instance,
-  term,
-}) => {
+/** A newer core (exe) of the instance takes its node over: the first core's
+ * machine stays ready all along, both end up on the newer build's node
+ * alone, whose build is ts or not, and the terminals go on. */
+async function takeOver(
+  app: import('@playwright/test').Page,
+  instance: Instance,
+  term: TermClient,
+  exe: string,
+  ts: boolean,
+): Promise<void> {
   // A terminal of the page, typed into after the move.
   await newTerminalTab(app);
   const pane = await terminalOfPane(term, 1);
@@ -65,7 +64,7 @@ test('a newer build takes the node over: the other core moves to it and stays re
       await new Promise((r) => setTimeout(r, 50));
     }
   })();
-  const newer = await instance.second(false, paths.coreNewer);
+  const newer = await instance.second(false, exe);
   try {
     // The newer build's node serves the instance, both cores through it;
     // the old one ends once the first core moved.
@@ -75,6 +74,7 @@ test('a newer build takes the node over: the other core moves to it and stays re
       what: 'the newer node alone to serve the instance',
       timeout: 30_000,
     });
+    expect(tsNode(nodes(instance.name)[0])).toBe(ts);
     watching = false;
     await watch;
     expect([...seen]).toEqual(['ready']);
@@ -93,4 +93,20 @@ test('a newer build takes the node over: the other core moves to it and stays re
     watching = false;
     await newer.stop();
   }
+}
+
+test('a newer build takes the node over: the other core moves to it and stays ready, its terminals with it', async ({
+  app,
+  instance,
+  term,
+}) => {
+  await takeOver(app, instance, term, paths.coreNewer, paths.machine === 'ts');
+});
+
+test(`a newer ${paths.machine === 'ts' ? 'Go' : 'TypeScript'} machine build takes the node over, its terminals with it`, async ({
+  app,
+  instance,
+  term,
+}) => {
+  await takeOver(app, instance, term, paths.otherNewer, paths.machine !== 'ts');
 });

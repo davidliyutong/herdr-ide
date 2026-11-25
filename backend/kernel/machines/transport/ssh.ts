@@ -3,9 +3,11 @@
 // stdio (`node dial`, which starts the node when none answers). ssh is the
 // system's own, with a ControlMaster per instance (controldir.ts).
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { execa } from 'execa';
-import { AGENT_DIR, CORE_BIN, NAME } from '#shared/lib/brand.ts';
+import { AGENT_DIR, CORE_BIN, NAME, RUNTIME_DIR } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
+import { BUNDLE_FILE, launcher, runtimeDirName, type BuildSource, type MachineBuild, type MachineTarget, type TSBuild } from './builds.ts';
 import { CLIENT_ID, Session } from './session.ts';
 
 /** ssh could not authenticate without the user. */
@@ -15,13 +17,10 @@ export class AuthRequiredError extends Error {
   }
 }
 
-/** The machine build for a platform and its version tag. */
-export type AgentSource = (os: string, arch: string) => Promise<{ bin: Buffer; version: string }>;
-
 export interface SSHOptions {
   target: string;
   controlDir: string;
-  agents: AgentSource;
+  builds: BuildSource;
   logger: Logger;
   /** Selects the agent's state directory (brand.dataDir). */
   instance: string;
@@ -32,6 +31,60 @@ export interface Platform {
   os: string;
   arch: string;
   home: string;
+}
+
+/** What the probe found on a machine besides its platform: Linux's C
+ * library, whether musl's has the C++ runtime the Bun runtime needs, and
+ * whether an x86-64 processor has SSE4.2, which the Bun runtime needs. */
+export interface Probe extends Platform {
+  libc?: 'glibc' | 'musl';
+  libs?: boolean;
+  sse42?: boolean;
+}
+
+/** The probe: tagged lines (a login shell may print before them). */
+export const PROBE_SCRIPT = [
+  'echo "@os=$(uname -s)"; echo "@arch=$(uname -m)"; echo "@home=$HOME"',
+  'if [ "$(uname -s)" = Linux ]; then',
+  '  if ls /lib/ld-musl-* >/dev/null 2>&1; then echo @libc=musl; else echo @libc=glibc; fi',
+  '  libs=yes; for f in libstdc++.so.6 libgcc_s.so.1; do found=; for d in /lib /usr/lib /lib64 /usr/lib64 /usr/local/lib; do [ -e "$d/$f" ] && found=1; done; [ -n "$found" ] || libs=no; done; echo "@libs=$libs"',
+  '  if grep -qw sse4_2 /proc/cpuinfo 2>/dev/null; then echo @sse42=yes; else echo @sse42=no; fi',
+  'fi',
+].join('\n');
+
+/** The probe's answer. */
+export function parseProbe(out: string): Probe {
+  const v = new Map<string, string>();
+  for (const line of out.split('\n')) {
+    const m = /^@([a-z0-9]+)=(.*)$/.exec(line.trim());
+    if (m) v.set(m[1], m[2].trim());
+  }
+  if (!v.has('os') || !v.has('arch') || !v.has('home')) throw new Error(`unexpected probe output ${JSON.stringify(out)}`);
+  const p: Probe = { os: v.get('os')!.toLowerCase(), arch: normArch(v.get('arch')!), home: v.get('home')! };
+  const libc = v.get('libc');
+  if (libc === 'glibc' || libc === 'musl') p.libc = libc;
+  if (v.has('libs')) p.libs = v.get('libs') === 'yes';
+  if (v.has('sse42')) p.sse42 = v.get('sse42') === 'yes';
+  return p;
+}
+
+/** A machine this build cannot run on, and why (the code is the
+ * message's start). */
+export class Unsupported extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(`${code}: ${message}`);
+    this.code = code;
+  }
+}
+
+/** Refuses a machine the TypeScript build's runtime does not run on. */
+export function checkRuntimeRuns(p: Probe): void {
+  if (p.os !== 'linux') return;
+  if (p.arch === 'amd64' && p.sse42 === false)
+    throw new Unsupported('cpu_unsupported', 'the processor lacks SSE4.2, which the Bun runtime of the machine build needs');
+  if (p.libc === 'musl' && p.libs === false)
+    throw new Unsupported('libs_missing', "musl's machine build needs libstdc++ and libgcc (Alpine: apk add libstdc++ libgcc)");
 }
 
 /** The options of every ssh invocation for a target. The ControlMaster lets
@@ -184,49 +237,105 @@ class LineLogger {
   }
 }
 
-const AGENT_DIR_REL = AGENT_DIR;
+/** The script that writes a file of a build from standard input
+ * (gzip-compressed) into dir under name, after the machine computed its
+ * SHA-256 and found the one expected; it prints what it computed. */
+function uploadScript(dir: string, name: string, digest: string): string {
+  const sum = `s=$({ sha256sum "$t" 2>/dev/null || shasum -a 256 "$t" 2>/dev/null || openssl dgst -sha256 -r "$t"; } | cut -d' ' -f1)`;
+  return (
+    `umask 077; d="${dir}"; t="$d/.upload.$$"; mkdir -p "$d" && gunzip -c > "$t" && ${sum} && echo "@sha256=$s" && ` +
+    `[ "$s" = "${digest}" ] && chmod 700 "$t" && mv -f "$t" "$d/${name}" || { echo "sha256 \${s:-unknown}, expected ${digest}" >&2; rm -f "$t"; exit 3; }`
+  );
+}
 
-/** Probes the remote platform, uploads the matching agent if missing and
- * reaches the machine's node of that build over ssh stdio. */
+/** Builds and runtimes used by other cores are kept until unused for 14
+ * days (running nodes touch their directories). */
+const PRUNE = `find "$HOME/${AGENT_DIR}" "$HOME/${RUNTIME_DIR}" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null; true`;
+
+/** Uploads what of a TypeScript build the machine lacks: the runtime once
+ * per digest, the bundle and its launcher once per build; each checked by
+ * its SHA-256 on the machine before it is put in place. */
+async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?: AbortSignal): Promise<string> {
+  const rt = `$HOME/${RUNTIME_DIR}/${runtimeDirName(b.runtime.digest)}`;
+  const dir = `$HOME/${AGENT_DIR}/${b.version}`;
+  const there = await run(o, `[ -x "${rt}/bun" ] && echo @runtime; [ -x "${dir}/${CORE_BIN}" ] && echo @build; true`, {
+    timeoutMs: 30_000,
+    signal,
+  });
+  const upload = async (what: string, script: string, gz: Buffer, digest: string) => {
+    o.logger(`ssh ${o.target}: uploading ${what} (${platform.os}/${platform.arch}, ${gz.length} bytes)`);
+    let out: string;
+    try {
+      out = await run(o, script, { stdin: gz, timeoutMs: 10 * 60_000, signal });
+    } catch (e) {
+      throw new Error(`upload ${what}: ${(e as Error).message}`);
+    }
+    // The core checks what the machine computed, too.
+    if (!out.split('\n').includes(`@sha256=${digest}`)) throw new Error(`upload ${what}: the machine did not confirm its sha256`);
+  };
+  if (!/^@runtime$/m.test(there))
+    await upload(
+      `the Bun runtime ${runtimeDirName(b.runtime.digest)}`,
+      uploadScript(rt, 'bun', b.runtime.digest),
+      b.runtime.gz,
+      b.runtime.digest,
+    );
+  if (!/^@build$/m.test(there)) {
+    const script =
+      uploadScript(dir, BUNDLE_FILE, b.bundleDigest) +
+      ` && printf '%s' ${shQuote(launcher(b))} > "$d/.launcher.$$" && chmod 700 "$d/.launcher.$$" && mv -f "$d/.launcher.$$" "$d/${CORE_BIN}"; ${PRUNE}`;
+    await upload(`the machine build ${b.version}`, script, gzipSync(b.bundle), b.bundleDigest);
+  }
+  return `${dir}/${CORE_BIN}`;
+}
+
+/** Uploads a Go build when the machine lacks it. */
+async function installGo(
+  o: SSHOptions,
+  b: Extract<MachineBuild, { kind: 'go' }>,
+  platform: Platform,
+  signal?: AbortSignal,
+): Promise<string> {
+  const dir = `$HOME/${AGENT_DIR}/${b.version}`;
+  const remotePath = `${dir}/${CORE_BIN}`;
+  const out = await run(o, `if [ -x "${remotePath}" ]; then echo present; else echo absent; fi`, { timeoutMs: 30_000, signal });
+  if (out.trim() !== 'present') {
+    o.logger(`ssh ${o.target}: uploading agent ${b.version} (${platform.os}/${platform.arch}, ${b.bin.length} bytes)`);
+    const script =
+      `umask 077; mkdir -p "${dir}" && cat > "${dir}/.upload.$$" && chmod 700 "${dir}/.upload.$$" && mv -f "${dir}/.upload.$$" "${remotePath}"` +
+      `; ${PRUNE}`;
+    try {
+      await run(o, script, { stdin: b.bin, timeoutMs: 5 * 60_000, signal });
+    } catch (e) {
+      throw new Error(`upload agent: ${(e as Error).message}`);
+    }
+  }
+  return remotePath;
+}
+
+/** Probes the remote platform, uploads the matching machine build if
+ * missing and reaches the machine's node of that build over ssh stdio. */
 export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ session: Session; platform: Platform }> {
   let out: string;
   try {
-    out = await run(o, 'uname -s; uname -m; echo "$HOME"', { timeoutMs: 30_000, signal });
+    out = await run(o, PROBE_SCRIPT, { timeoutMs: 30_000, signal });
   } catch (e) {
     // The control master may hold a connection that died without a word;
     // the next attempt should not wait for it again.
     if ((e as { timedOut?: boolean }).timedOut && !signal?.aborted) await stopMaster(o);
     throw e;
   }
-  const lines = out.trim().split('\n');
-  if (lines.length < 3) throw new Error(`unexpected probe output ${JSON.stringify(out)}`);
-  const platform: Platform = {
-    os: lines[lines.length - 3].trim().toLowerCase(),
-    arch: normArch(lines[lines.length - 2]),
-    home: lines[lines.length - 1].trim(),
-  };
-  let agent: { bin: Buffer; version: string };
+  const probe = parseProbe(out);
+  const platform: Platform = { os: probe.os, arch: probe.arch, home: probe.home };
+  const target: MachineTarget = { os: probe.os, arch: probe.arch, ...(probe.libc ? { libc: probe.libc } : {}) };
+  let build: MachineBuild;
   try {
-    agent = await o.agents(platform.os, platform.arch);
+    build = await o.builds(target, signal);
+    if (build.kind === 'ts') checkRuntimeRuns(probe);
   } catch (e) {
     throw Object.assign(new Error(`no agent for ${platform.os}/${platform.arch}: ${(e as Error).message}`), { platform });
   }
-  const dir = `$HOME/${AGENT_DIR_REL}/${agent.version}`;
-  const remotePath = `${dir}/${CORE_BIN}`;
-  out = await run(o, `if [ -x "${remotePath}" ]; then echo present; else echo absent; fi`, { timeoutMs: 30_000, signal });
-  if (out.trim() !== 'present') {
-    o.logger(`ssh ${o.target}: uploading agent ${agent.version} (${platform.os}/${platform.arch}, ${agent.bin.length} bytes)`);
-    const script =
-      `umask 077; mkdir -p "${dir}" && cat > "${dir}/.upload.$$" && chmod 700 "${dir}/.upload.$$" && mv -f "${dir}/.upload.$$" "${remotePath}"` +
-      // Builds used by other cores are kept until unused for 14 days
-      // (running agents touch their directory).
-      `; find "$HOME/${AGENT_DIR_REL}" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null; true`;
-    try {
-      await run(o, script, { stdin: agent.bin, timeoutMs: 5 * 60_000, signal });
-    } catch (e) {
-      throw new Error(`upload agent: ${(e as Error).message}`);
-    }
-  }
+  const remotePath = build.kind === 'go' ? await installGo(o, build, platform, signal) : await installTS(o, build, platform, signal);
 
   const p = execa('ssh', runArgs(o, `exec "${remotePath}" node dial --instance '${o.instance}' --client ${CLIENT_ID}`), {
     ...SSH_OPTIONS,

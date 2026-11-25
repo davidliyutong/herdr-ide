@@ -68,10 +68,10 @@ describe.skipIf(!HC)('a real herdr-core', () => {
     const exe = readFileSync(HC);
     const hc = { gz: gzipSync(exe), digest: createHash('sha256').update(exe).digest('hex') };
     const bin = readFileSync(agentBin);
-    const agents = async () => ({ bin, version: createHash('sha256').update(bin).digest('hex').slice(0, 16) });
+    const builds = async () => ({ kind: 'go' as const, bin, version: createHash('sha256').update(bin).digest('hex').slice(0, 16) });
     machines = testMachines([localSpec()], {
       dial: async (_spec, signal) => ({
-        session: await dialNode({ instance: INSTANCE, agents, logger: discard, signal }),
+        session: await dialNode({ instance: INSTANCE, builds, logger: discard, signal }),
         platform: `${os}/${arch}`,
       }),
     });

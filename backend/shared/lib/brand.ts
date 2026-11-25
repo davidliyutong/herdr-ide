@@ -22,6 +22,10 @@ export const BRIDGE_EXT_ID = `${SLUG}.${BRIDGE_EXT}`;
 export const DATA_DIR_NAME = `.${SLUG}`;
 /** Uploaded agents (shared by instances; one directory per build), relative to $HOME. */
 export const AGENT_DIR = `${DATA_DIR_NAME}/agent`;
+/** Uploaded Bun runtimes of the TypeScript machine build (shared by
+ * instances; one directory per runtime, named by its digest), relative to
+ * $HOME. */
+export const RUNTIME_DIR = `${DATA_DIR_NAME}/runtime`;
 
 /** The name of a product environment variable. */
 export const env = (name: string): string => ENV_PREFIX + name;

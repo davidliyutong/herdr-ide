@@ -34,14 +34,14 @@ test.skipIf(!go || !LOCAL_SUPPORTED)(
     const oldHome = process.env.HOME;
     process.env.HOME = home;
     try {
-      const s = await dialNode({ instance, agents: async () => ({ bin, version }), logger: discard });
+      const s = await dialNode({ instance, builds: async () => ({ kind: 'go' as const, bin, version }), logger: discard });
       exe = join(home, '.' + CORE_BIN, 'agent', version, CORE_BIN);
       const rep = await s.request({ op: Op.Hello });
       expect(rep.ok).toBe(true);
       expect(rep.info?.home).toBe(home);
       expect(rep.info?.os).toBe(process.platform);
       // A second session reaches the same node.
-      const s2 = await dialNode({ instance, agents: async () => ({ bin, version }), logger: discard });
+      const s2 = await dialNode({ instance, builds: async () => ({ kind: 'go' as const, bin, version }), logger: discard });
       expect((await s2.request({ op: Op.Hello })).info?.data_dir).toBe(rep.info?.data_dir);
       const stat = await s2.request({ op: Op.FsStat, path: home });
       expect(stat.stat?.is_dir).toBe(true);

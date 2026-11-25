@@ -3,6 +3,7 @@
 // without Docker (failing instead with E2E_REQUIRE_DOCKER=1).
 
 import { test, expect } from '../harness/fixtures';
+import { unported } from '../harness/paths';
 import { AGENT, chatPane, log, send } from '../harness/chat';
 import type { Instance } from '../harness/instance';
 import { ALIAS, HOME, USER, type SSHMachine } from '../harness/sshd';
@@ -119,6 +120,7 @@ test('an SSH machine that drops shows offline, then comes back with its terminal
 });
 
 test('a chat on an SSH machine shows it offline and goes on, and nothing stays when the core stops', async ({ app, instance, sshd }) => {
+  test.skip(!!unported('chat'), unported('chat'));
   const id = await addMachine(instance);
   await showMachine(app);
   // A chat in a new tab on the machine shown.

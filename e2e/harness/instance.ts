@@ -9,7 +9,7 @@
 // --instance <name>`, and failing the API the terminal core with the
 // instance's own herdr-core executable on the instance's own socket).
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { TestHome } from './home';
 import { paths } from './paths';
@@ -22,7 +22,21 @@ export interface Machine {
   info?: { version: string };
 }
 
+/** The command lines of the instance's node processes (whichever build
+ * runs them: the Go machine build's executable, or the Bun runtime with the
+ * TypeScript machine side's bundle). */
+export function nodeProcesses(name: string): string[] {
+  return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
+    .split('\n')
+    .filter((l) => l.includes(`node --instance ${name}`) && !l.includes(' node dial '));
+}
+
+/** Whether a node's command line is the TypeScript machine side's. */
+export const tsNode = (command: string): boolean => /\/machine\.js node --instance /.test(command);
+
 export class Instance {
+  /** The machine build its core deploys (paths.machine, E2E_MACHINE). */
+  readonly machineBuild = paths.machine;
   readonly name: string;
   readonly home: string;
   /** A directory for the test's files (the workspace the tests open). */
@@ -121,6 +135,10 @@ export class Instance {
       if (got !== v) throw new Error(`setting ${k} is ${JSON.stringify(got)}, not ${JSON.stringify(v)}`);
     }
     await waitFor(async () => (await this.machine()).status === 'ready', { what: 'the local machine to connect', timeout: 20_000 });
+    // The run tests the machine build it says it does.
+    const nodes = nodeProcesses(this.name);
+    if (nodes.length !== 1 || tsNode(nodes[0]) !== (paths.machine === 'ts'))
+      throw new Error(`the local node is not the ${paths.machine} machine build's:\n${nodes.join('\n')}`);
     await this.api('POST', '/api/m/local/hc/start');
     await waitFor(async () => (await this.api<{ running: boolean }>('GET', '/api/m/local/hc')).running, {
       what: 'the terminal core to run',

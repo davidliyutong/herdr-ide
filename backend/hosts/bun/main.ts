@@ -1,6 +1,6 @@
-// The command line: one executable, the core (`serve`, the default) and,
-// while machines run the Go build, the local node's commands passed on to
-// the machine build this executable carries.
+// The command line: one executable, the core (`serve`, the default) and
+// the local node's commands, passed on to the machine build this
+// executable carries (the Go program or the TypeScript machine side).
 import { spawnSync } from 'node:child_process';
 import { CORE_BIN, env } from '#shared/lib/brand.ts';
 import { stderrLogger } from '#shared/lib/log.ts';
@@ -31,7 +31,7 @@ async function main(argv: string[]): Promise<void> {
       const instance = inst >= 0 ? (argv[inst + 1] ?? '') : '';
       const agentDir = process.env[env('AGENT_DIR')] ?? '';
       const payloads = await openPayloads({ agentDir, extDir: '', webDir: '' });
-      const { exe } = await installLocal(payloads.agent.bind(payloads), dirsFor(instance).home);
+      const { exe } = await installLocal(payloads.machine.bind(payloads), dirsFor(instance).home);
       const r = spawnSync(exe, ['node', ...argv], { stdio: 'inherit' });
       process.exit(r.status ?? 1);
     }
