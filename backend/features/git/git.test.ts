@@ -47,7 +47,7 @@ async function withMachine(reply: (action: string, params: Record<string, unknow
   };
   const machines = testMachines([sshSpec('x')], { dial: agentDialer({ serve }) });
   const tc = testHub({ features: [gitFeature()], machines, settings: { ...ON } });
-  stops.push(running(tc.core));
+  stops.push(running(tc.hub));
   await waitFor('x ready', () => machines.get('x')!.ready);
   return { tc, calls };
 }
@@ -59,7 +59,7 @@ test('routes', async () => {
   expect(problems).toEqual([]);
   expect(checked.sort()).toEqual(WRITES.map((w) => `POST /api/m/:id/p/git/${w}`).sort());
   const reads = offlineHub(true)
-    .core.http.app.routes.filter((r) => r.method === 'GET' && r.path.startsWith('/api/m/:id/p/git/'))
+    .hub.http.app.routes.filter((r) => r.method === 'GET' && r.path.startsWith('/api/m/:id/p/git/'))
     .map((r) => r.path.slice('/api/m/:id/p/git/'.length));
   expect([...new Set(reads)].sort()).toEqual([...READS].sort());
   expect(new Set([...READS, ...WRITES]).size).toBe(READS.length + WRITES.length);

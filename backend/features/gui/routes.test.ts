@@ -58,7 +58,7 @@ function guiHub(o: { readOnly?: boolean; machines?: Machines; gui?: GUIOptions }
     });
   };
   const t: TestHub & { mgr: () => NonNullable<ReturnType<typeof gui.manager>>; settings: Record<string, boolean> } = {
-    core,
+    hub: core,
     settings: {},
     audit,
     request,
@@ -143,7 +143,7 @@ describe('routes', () => {
     t.mgr().display(t.machines.get('m1')!);
     const { a, b } = channelPair();
     const got: unknown[] = [];
-    a.adopt((ch) => t.core.pages.connect(ch, { client: 'browser', readOnly: false, who: {} }));
+    a.adopt((ch) => t.hub.pages.connect(ch, { client: 'browser', readOnly: false, who: {} }));
     b.adopt(() => ({ message: (m) => void got.push(JSON.parse(m as string)) }));
     await waitFor('the states', () => got.length > 0);
     expect(got).toEqual([{ t: 'gui', state: { m: 'm1', phase: 'starting', windows: [] } }]);
@@ -157,7 +157,7 @@ describe('browser windows', () => {
     const disp = new FakeDisplay(readOnly ? { running: true, kind: 'xvfb' } : {});
     const machines = testMachines([sshSpec('m1')], { dial: agentDialer({ serve: disp.serve }) });
     const t = guiHub({ readOnly, machines });
-    stops.push(running(t.core));
+    stops.push(running(t.hub));
     const agent = await disp.attached();
     await agent.event({ ev: 'window', window: { id: 7, title: 'plot', w: 640, h: 480 } });
     await waitFor('the window', () => t.mgr().states()[0]?.windows.length === 1);
@@ -270,7 +270,7 @@ describe('enable', () => {
     const sent: string[] = [];
     const shells: Shells = { ...idle(11), send: async (_id, text) => void sent.push(text) };
     const t = guiHub({ machines, gui: { shells: () => shells } });
-    stops.push(running(t.core));
+    stops.push(running(t.hub));
     await disp.attached();
     await waitFor('the display', () => t.mgr().states()[0]?.phase === 'ready');
     const res = await t.request('POST', '/api/m/m1/gui/enable', { origin: 'http://127.0.0.1:7780', body: '{"terminals":["t1"]}' });

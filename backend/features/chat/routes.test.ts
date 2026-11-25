@@ -21,7 +21,7 @@ const kinds = agentkinds.chatKinds().map((k) => k.id);
 describe('routes', () => {
   test('the routes, and the guards of those that change', async () => {
     const r = await start();
-    const routes = r.core.http.app.routes
+    const routes = r.hub.http.app.routes
       .filter((x) => x.path.includes('/p/chat'))
       .map((x) => `${x.method} ${x.path}`)
       .filter((x, i, all) => all.indexOf(x) === i);

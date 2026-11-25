@@ -280,8 +280,8 @@ describe('downloads panel', () => {
   };
 
   test('progress, ends and cancels', async () => {
-    const page = testPage(fc.tc.core);
-    const other = testPage(fc.tc.core);
+    const page = testPage(fc.tc.hub);
+    const other = testPage(fc.tc.hub);
     // The page says it follows id before it downloads; the core has not
     // seen it yet.
     const follow = async (id: string) => {
@@ -372,7 +372,7 @@ describe('downloads panel', () => {
   // One cancelled before its request came is refused, and a download
   // answered with an error says why instead of breaking off.
   test('edges', async () => {
-    const page = testPage(fc.tc.core);
+    const page = testPage(fc.tc.hub);
     // Cancelled while the browser still held it back: done at once, and
     // the request that comes after all is refused.
     page.send({ t: 'download.cancel', id: 'early-001' });
@@ -404,7 +404,7 @@ describe('downloads panel', () => {
     expect((await page.next('left-0001')).state).toBe('unknown');
     const gone = new AbortController();
     gone.abort();
-    await fc.tc.core
+    await fc.tc.hub
       .fetch(
         new Request(`${fc.url}/api/m/local/download?${query({ path: at('proj/a.txt'), dl: 'left-0001' })}`, {
           signal: gone.signal,

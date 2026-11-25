@@ -50,7 +50,7 @@ export function serveParent<P>(parent: Parent<P>, o: ServeOptions<P>): void {
           o.exit(1);
           return;
         }
-        core = composed.core;
+        core = composed.hub;
         parent.postMessage({ t: 'ready' });
         void composed.run(stop.signal).then(
           () => o.exit(0),

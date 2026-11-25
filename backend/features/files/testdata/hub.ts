@@ -43,7 +43,7 @@ export async function filesHub(o: FilesHubOptions = {}): Promise<FilesHub> {
     readOnly: o.readOnly,
     settings: { 'plugins.files.enabled': o.explorer ?? true },
   });
-  const stopHub = running(tc.core);
+  const stopHub = running(tc.hub);
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
@@ -52,7 +52,7 @@ export async function filesHub(o: FilesHubOptions = {}): Promise<FilesHub> {
     maxRequestBodySize: 8 * 2 ** 30,
     // As the Bun host passes them on (hosts/bun/serve.ts).
     fetch: async (req, srv) => {
-      const res = await tc.core.fetch(req, { remote: srv.requestIP(req)?.address, desktop: false });
+      const res = await tc.hub.fetch(req, { remote: srv.requestIP(req)?.address, desktop: false });
       return isBreakable(res) ? abortable(res) : res;
     },
   });

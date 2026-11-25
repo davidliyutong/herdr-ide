@@ -232,7 +232,7 @@ describe('through a core', () => {
   const page = (client: Client, readOnly = false) => {
     const sent: Array<Record<string, unknown>> = [];
     const ch: Channel = { send: (d) => void sent.push(JSON.parse(String(d))), buffered: 0, close() {} };
-    const h = vc.core.pages.connect(ch, { client, readOnly, who: {} });
+    const h = vc.hub.pages.connect(ch, { client, readOnly, who: {} });
     return { sent, send: (m: object) => h.message(JSON.stringify(m)), bridge: () => sent.filter((m) => String(m.t).startsWith('bridge.')) };
   };
 

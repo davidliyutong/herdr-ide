@@ -85,7 +85,7 @@ async function withMachine(reply: (params: Record<string, unknown>) => Reply, o:
   };
   const machines = testMachines([sshSpec('x')], { dial: agentDialer({ serve }) });
   const tc = testHub({ features: [searchFeature(o)], machines, settings: { ...ON } });
-  stops.push(running(tc.core));
+  stops.push(running(tc.hub));
   await waitFor('x ready', () => machines.get('x')!.ready);
   return { tc, calls, closed };
 }

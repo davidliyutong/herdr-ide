@@ -53,7 +53,7 @@ test('routes', async () => {
   const { problems, checked } = await checkGuarded(core(false), core(true), { machine: 'x' });
   expect(problems).toEqual([]);
   expect(checked.sort()).toEqual(['DELETE /api/m/:id/p/history', 'POST /api/m/:id/p/history/adopt']);
-  const gets = core(true).core.http.app.routes.filter((r) => r.method === 'GET' && r.path.startsWith('/api/m/:id/p/history'));
+  const gets = core(true).hub.http.app.routes.filter((r) => r.method === 'GET' && r.path.startsWith('/api/m/:id/p/history'));
   expect([...new Set(gets.map((r) => r.path))].sort()).toEqual(['/api/m/:id/p/history', '/api/m/:id/p/history/read']);
 });
 

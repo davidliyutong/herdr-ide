@@ -56,7 +56,7 @@ async function setup(a: Agents, o: { readOnly?: boolean } = {}) {
     },
   });
   const tc = testHub({ features: [agentsFeature()], machines, readOnly: o.readOnly, settings: { 'plugins.agents.enabled': true } });
-  stops.push(running(tc.core));
+  stops.push(running(tc.hub));
   for (const id of ['box', 'gpu']) await waitFor(`${id} ready`, () => machines.get(id)!.ready);
   return tc;
 }
@@ -67,7 +67,7 @@ afterEach(async () => {
 });
 
 const resolve = async (tc: TestHub, m: string, q: string, signal?: AbortSignal) => {
-  const res = await tc.core.fetch(new Request(`http://127.0.0.1:7780/api/m/${m}/p/agents/resolve?${q}`, { signal }), {
+  const res = await tc.hub.fetch(new Request(`http://127.0.0.1:7780/api/m/${m}/p/agents/resolve?${q}`, { signal }), {
     remote: '127.0.0.1',
     desktop: false,
   });
@@ -94,7 +94,7 @@ test('routes', async () => {
   const { problems, checked } = await checkGuarded(core(false), core(true), { machine: 'local' });
   expect([problems, checked]).toEqual([[], []]);
   const ro = core(true);
-  expect(ro.core.http.app.routes.filter((r) => r.path.includes('/p/agents')).map((r) => `${r.method} ${r.path}`)).toContain(
+  expect(ro.hub.http.app.routes.filter((r) => r.path.includes('/p/agents')).map((r) => `${r.method} ${r.path}`)).toContain(
     'GET /api/m/:id/p/agents/resolve',
   );
   let r = await resolve(ro, 'local', resolveQuery);

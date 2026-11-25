@@ -494,7 +494,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   });
   const ws: object[] = [];
   machines.subscribe({ agent: (ev) => void ws.push(ev.data as object) });
-  const stop = running(tc.core);
+  const stop = running(tc.hub);
   const clients: TestClient[] = [];
   await waitFor('machine x', () => machines.get('x')!.ready);
   return {

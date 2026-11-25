@@ -78,7 +78,7 @@ async function vault(o: VaultOptions = {}, setup = true, specs: Spec[] = [sshSpe
     settings: { 'plugins.vault.enabled': true },
     guard: { allowedOrigins: [ORIGIN] },
   });
-  stops.push(running(t.core));
+  stops.push(running(t.hub));
   await waitFor(specs[0].id, () => machines.get(specs[0].id)!.ready);
   const v: V = {
     t,
@@ -437,7 +437,7 @@ describe("machines' requests", () => {
     expect((await v.call('POST', `/requests/${await firstRequest(v)}`, { answer: 'deny' }, { token: '' })).json).toEqual({ ok: true });
     expect((await other).code).toBe('denied');
     // A removed machine's exemptions go with it.
-    v.t.core.forget('m1');
+    v.t.hub.forget('m1');
     let exempt: unknown[] = [1];
     for (let i = 0; i < 100 && exempt.length; i++) {
       await sleep(5);

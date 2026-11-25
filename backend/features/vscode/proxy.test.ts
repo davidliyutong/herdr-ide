@@ -267,7 +267,7 @@ describe('through a core', () => {
     try {
       // A request that finds no code-server: 502, and the next one prepares
       // it again.
-      vc.core.machines.get('local');
+      vc.hub.machines.get('local');
       let res: Response;
       do res = await vc.request('GET', '/m/local/code/x');
       while (res.status === 200);

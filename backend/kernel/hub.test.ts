@@ -257,7 +257,7 @@ describe('agent streams', () => {
     const dial = agentDialer();
     const machines = testMachines([sshSpec('x')], { dial });
     const t = testHub({ features: [f], machines, settings: { 'plugins.vault.enabled': true } });
-    stops.push(running(t.core.machines));
+    stops.push(running(t.hub.machines));
     await waitFor('ready', () => machines.get('x')!.ready);
     const agent = dial.agents[0];
     const ask = async (op: string) => readLine<Reply>((await agent.open({ op: op as never })).reader);
@@ -300,7 +300,7 @@ describe('the rest of the context', () => {
     const t = testHub({ features: [f], machines: testMachines([localSpec()]) });
     const { a, b } = channelPair();
     const received: Message[] = [];
-    a.adopt((ch) => t.core.pages.connect(ch, { client: 'browser', readOnly: false, who: {} }));
+    a.adopt((ch) => t.hub.pages.connect(ch, { client: 'browser', readOnly: false, who: {} }));
     b.adopt(() => ({ message: (m) => void received.push(m) }));
     ctx.broadcast({ hello: 1 }, 'm1');
     ctx.broadcast('two');
@@ -310,10 +310,10 @@ describe('the rest of the context', () => {
       { t: 'plugin', plugin: 'p', m: '', data: 'two' },
     ]);
     ctx.forget('gone');
-    t.core.forget('gone2');
+    t.hub.forget('gone2');
     expect(forgotten).toEqual(['gone', 'gone2']);
 
-    const stop = running(t.core);
+    const stop = running(t.hub);
     await sleep(10);
     expect(serviceEnded).toBe(false);
     await stop();
@@ -344,7 +344,7 @@ describe('/ws', () => {
     });
     expect(res.status).toBe(200);
     expect(compress).toBe(true);
-    expect(t.core.pages.size).toBe(1);
+    expect(t.hub.pages.size).toBe(1);
     b.send(JSON.stringify({ t: 'ping', rid: 7 }));
     await waitFor('pong', () => got.length > 0);
     expect(got).toEqual([{ t: 'pong', rid: 7 }]);

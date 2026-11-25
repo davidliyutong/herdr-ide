@@ -14,7 +14,7 @@ const UI = files({ 'index.html': '<!doctype html>shell', 'assets/app-1.js': 'js'
 
 function core(f: Files | null) {
   const t = testHub({ features: [] });
-  serveUI(t.core.http.app, f);
+  serveUI(t.hub.http.app, f);
   return t;
 }
 

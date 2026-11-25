@@ -420,7 +420,7 @@ export interface RigOptions {
 }
 
 export interface Rig {
-  core: Hub;
+  hub: Hub;
   host: FakeChatHost;
   board: ChatSwitchboard;
   machines: Machines;
@@ -506,7 +506,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
     });
   };
   const r: Rig = {
-    core,
+    hub: core,
     host,
     board,
     machines,

@@ -84,7 +84,7 @@ describe.skipIf(!HC)('a real herdr-core', () => {
     });
     feature = terminalsFeature({ hc: async () => hc });
     tc = testHub({ features: [feature], machines, settings: { 'terminal.sshEnv': true, 'plugins.agents.enabled': true } });
-    stop = running(tc.core);
+    stop = running(tc.hub);
     await waitFor('the local machine', () => machines.get(M)!.ready, 30_000);
   }, 180_000);
 

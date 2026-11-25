@@ -189,7 +189,7 @@ export async function serve(argv: string[]): Promise<void> {
     audit = auditLog((line) => appendFileSync(path, line));
   }
   const guard = new Guard({ allowedOrigins: f['allowed-origin'], proxySecret: secret, logger });
-  const { core, specs, run } = composeHub({
+  const { hub, specs, run } = composeHub({
     instance,
     nodeInstance,
     features,
@@ -227,7 +227,7 @@ export async function serve(argv: string[]): Promise<void> {
         server.upgrade(req, { data: { open, compress: !!opts?.compress } })
           ? new Response(null, { status: 200 })
           : new Response('upgrade failed', { status: 400 });
-    return core.fetch(req, peer).then((res) => (isBreakable(res) ? abortable(res) : res));
+    return hub.fetch(req, peer).then((res) => (isBreakable(res) ? abortable(res) : res));
   };
   const websocket = {
     open(ws: ServerWebSocket<WSData>) {

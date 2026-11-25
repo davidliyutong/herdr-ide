@@ -507,7 +507,7 @@ describe('pages', () => {
     const connect = () => {
       const { a, b } = channelPair();
       const got: Array<Record<string, unknown>> = [];
-      a.adopt((ch) => t.core.pages.connect(ch, { client: 'browser', readOnly: false, who: {} }));
+      a.adopt((ch) => t.hub.pages.connect(ch, { client: 'browser', readOnly: false, who: {} }));
       b.adopt(() => ({ message: (m) => void got.push(JSON.parse(m as string)) }));
       return { got, send: (m: object) => b.send(JSON.stringify(m)), close: () => b.close() };
     };
@@ -559,7 +559,7 @@ describe('pages', () => {
     };
     const page = (readOnly: boolean) => {
       const { a, b } = channelPair();
-      a.adopt((ch) => t.core.pages.connect(ch, { client: 'browser', readOnly, who: { remote: '10.0.0.1' } }));
+      a.adopt((ch) => t.hub.pages.connect(ch, { client: 'browser', readOnly, who: { remote: '10.0.0.1' } }));
       b.adopt(() => ({ message: () => {} }));
       return (msg: object) => b.send(JSON.stringify(msg));
     };

@@ -69,7 +69,7 @@ function utility() {
     },
     {
       start: (): Composed => ({
-        core: tc.core,
+        hub: tc.hub,
         settings: undefined as never,
         specs: [],
         run: (signal) => (stopped = new Promise((r) => signal.addEventListener('abort', () => r(), { once: true }))),

@@ -152,7 +152,7 @@ export interface ComposeOptions {
 }
 
 export interface Composed {
-  readonly core: Hub;
+  readonly hub: Hub;
   readonly settings: Settings;
   readonly specs: readonly Spec[];
   /** Connects the machines and runs the features' services until signal
@@ -258,7 +258,7 @@ export function composeHub(o: ComposeOptions): Composed {
   });
 
   return {
-    core,
+    hub: core,
     settings,
     specs,
     async run(signal) {

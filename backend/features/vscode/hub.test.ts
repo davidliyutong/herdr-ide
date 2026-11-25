@@ -70,7 +70,7 @@ test('guards', async () => {
   const ro = await newHub({ readOnly: true });
   const asTestHub = (vc: VSCodeHub) =>
     ({
-      core: vc.core,
+      core: vc.hub,
       request: (method: string, path: string, o: { origin?: string; body?: string } = {}) =>
         vc.request(method, path, { body: o.body, headers: o.origin ? { Origin: o.origin } : {} }),
     }) as unknown as TestHub;

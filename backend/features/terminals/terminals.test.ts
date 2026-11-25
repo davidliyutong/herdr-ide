@@ -541,7 +541,7 @@ test('a removed machine’s backend goes', async () => {
   const c = await r.client();
   await c.ready();
   const b = r.backend();
-  r.tc.core.forget('x');
+  r.tc.hub.forget('x');
   expect(r.feature.existing('x')).toBeUndefined();
   // The client no longer follows it: a call is unavailable, a sub starts a
   // new backend.

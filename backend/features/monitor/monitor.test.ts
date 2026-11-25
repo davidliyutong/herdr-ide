@@ -21,7 +21,7 @@ afterEach(async () => {
 test('routes', async () => {
   const { problems, checked } = await checkGuarded(offlineHub(), offlineHub(true), { machine: 'x' });
   expect([problems, checked]).toEqual([[], ['POST /api/m/:id/p/monitor/signal']]);
-  const gets = offlineHub().core.http.app.routes.filter((r) => r.method === 'GET' && r.path.includes('/p/monitor/'));
+  const gets = offlineHub().hub.http.app.routes.filter((r) => r.method === 'GET' && r.path.includes('/p/monitor/'));
   expect([...new Set(gets.map((r) => r.path))].sort()).toEqual(['/api/m/:id/p/monitor/metrics', '/api/m/:id/p/monitor/processes']);
 });
 
@@ -93,7 +93,7 @@ test('through the machine', async () => {
   };
   const machines = testMachines([sshSpec('x')], { dial: agentDialer({ serve }) });
   const tc = testHub({ features: [monitorFeature()], machines, settings: { ...ON } });
-  stops.push(running(tc.core));
+  stops.push(running(tc.hub));
   await waitFor('x ready', () => machines.get('x')!.ready);
 
   let res = await tc.request('GET', '/api/m/x/p/monitor/metrics');

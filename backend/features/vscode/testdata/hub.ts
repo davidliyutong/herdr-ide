@@ -221,7 +221,7 @@ export interface VSCodeHubOptions extends VSCodeOptions {
 }
 
 export interface VSCodeHub {
-  core: Hub;
+  hub: Hub;
   settings: Settings;
   machines: Machines;
   audit: ReturnType<typeof memoryAudit>;
@@ -280,7 +280,7 @@ export async function vscodeHub(o: VSCodeHubOptions = {}): Promise<VSCodeHub> {
     return core.fetch(req, { remote: r.remote ?? '127.0.0.1', desktop: r.desktop ?? false, upgrade: r.upgrade });
   };
   return {
-    core,
+    hub: core,
     settings,
     machines,
     audit,

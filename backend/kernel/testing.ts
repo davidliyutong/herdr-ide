@@ -201,7 +201,7 @@ export interface RequestOptions {
 }
 
 export interface TestHub {
-  readonly core: Hub;
+  readonly hub: Hub;
   readonly settings: Record<string, boolean>;
   readonly audit: ReturnType<typeof memoryAudit>;
   /** Sends a request as a browser on the core's host would. */
@@ -223,7 +223,7 @@ export function testHub(o: TestHubOptions): TestHub {
     features: o.features,
   });
   return {
-    core,
+    hub: core,
     settings,
     audit,
     request(method, path, r = {}) {
@@ -263,7 +263,7 @@ export async function checkGuarded(
   o: { machine: string; writableGET?: readonly string[]; readOnlyAllowed?: readonly string[] },
 ): Promise<{ problems: string[]; checked: string[] }> {
   const problems: string[] = [];
-  const checked = mutatingRoutes(rw.core, o.writableGET);
+  const checked = mutatingRoutes(rw.hub, o.writableGET);
   for (const route of checked) {
     const [m, pattern] = route.split(' ');
     const method = m === 'ALL' ? 'POST' : m;
