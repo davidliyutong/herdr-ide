@@ -405,8 +405,11 @@ shown.
 #### The access log (`accesslog.ts`)
 
 Each MCP request and each value a page takes (reveal, export) is a record
-in the core's database (`core[-<instance>].db`, table `vault_access`;
-[38](38-sqlite-state.md)), read back at start. A record has the time,
+in the core's database (table `vault_access`; [38](38-sqlite-state.md)),
+which is per host: `core[-<instance>]-<host>[-<id>].db`, named for the
+core's host (its name and a hash of its machine id), beside the settings
+file, so cores of the same instance on several hosts sharing a home keep a
+database each. It is read back at start. A record has the time,
 machine (`""` for a page), tool, names, result, the process chain, the
 client, terminal and directory the request named, and a page's address
 and browser; never a value. Reading it needs a session.
