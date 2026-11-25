@@ -73,6 +73,8 @@ test('push: the core uploads the release, the bridge and the extensions once', a
   expect(cs.ready(m)).toBe(true);
   expect(cs.running()).toEqual(['local']);
   expect(agent.uploads.get('install')?.toString()).toBe('release');
+  // The machine checks the upload against the digest the core verified it by.
+  expect(agent.headers.find((h) => h.action === 'install')!.digest).toBe(sha('release'));
   expect(agent.uploads.get(`${BRIDGE_EXT}.vsix`)?.toString()).toBe('bridge vsix');
   expect(agent.uploads.get('pub.ext-1.0.0.vsix')?.toString()).toBe('vsix');
   expect([...agent.markers].sort()).toEqual([`.${BRIDGE_EXT}-${vsixContentHash(bridge)}`, `.${SLUG}-ext-pub.ext-1.0.0`].sort());
@@ -106,8 +108,12 @@ test('existing: the machine own code-server, else a release', async () => {
   expect(actions(own.agent)).toEqual(['status:/opt/cs/bin/code-server', 'start:/opt/cs/bin/code-server']);
 
   const none = await setup({ install: { mode: Install.Existing, bin: 'auto' } });
+  // A seed without a digest is used unverified: the machine checks the
+  // upload against the core's own hash of it.
+  rmSync(join(none.artifacts.seedDirs[0], `${tarballFile('9.9.9', 'linux-amd64')}.sha256`));
   await none.cs.ensure(none.m, AbortSignal.timeout(5000));
   expect(actions(none.agent)).toEqual(['status:auto', 'status', 'install', 'start']);
+  expect(none.agent.headers.find((h) => h.action === 'install')!.digest).toBe(sha('release'));
   expect(none.logs.some((l) => l.includes('installing a release instead'))).toBe(true);
 });
 

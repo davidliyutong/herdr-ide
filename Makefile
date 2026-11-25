@@ -66,6 +66,7 @@ it:
 	cd backend && bun test features/history/integration.test.ts
 	cd backend && bun test features/agents/integration.test.ts
 	cd backend && bun test machine/integration.test.ts
+	cd backend && bun test features/vscode/integration.test.ts
 
 # End-to-end tests: the core of this platform on isolated instances,
 # driven through Chromium, and SSH machines in Docker containers (e2e/,

@@ -19,10 +19,8 @@ import { breakableResponse } from '#kernel/http/breakable.ts';
 import { PROXY_SECRET_HEADER } from '#kernel/http/guard.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import { keepSetCookie, stripDesktopCookie } from './cookies.ts';
+import { CODE_SOCKET } from './protocol.ts';
 import type { Timing } from './timing.ts';
-
-/** code-server's socket, below the agent's run directory. */
-export const CODE_SOCKET = 'cs.sock';
 
 /** Whether path, below /m/<machine>/code and decoded, is one of
  * code-server's port proxy routes, which Express matches without regard

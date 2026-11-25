@@ -13,7 +13,7 @@ import type { Logger } from '#shared/lib/log.ts';
 import { ChunkWriter, Op, readLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import { AgentError, closeStream, type Session } from '#kernel/machines/transport/session.ts';
-import { extensionFile, platformAsset, tarballFile, type Artifacts } from './artifacts.ts';
+import { extensionFile, platformAsset, sha256File, tarballFile, type Artifacts } from './artifacts.ts';
 import { Install } from './settings.ts';
 import type { Timing } from './timing.ts';
 import { vsixContentHash } from './vsix.ts';
@@ -290,10 +290,17 @@ export class CodeServers {
       throw new Error(`code-server ${asset}: ${errorText(e)}`);
     }
     const { size } = await stat(path);
+    // The machine checks the tarball against it before unpacking it: the
+    // digest it was verified against, or (a file used unverified) its own.
+    const digest = (await artifacts.knownDigest(tarballFile(artifacts.version, asset))) || (await sha256File(path));
     this.set(m.id, () => ({ phase: Phase.Upload, detail: artifacts.version, ready: false, total: size }));
     try {
-      await this.upload(m, { op: Op.CodeServer, action: 'install' }, createReadStream(path, { highWaterMark: 256 << 10 }), signal, (done) =>
-        this.set(m.id, (st) => ({ ...st, done })),
+      await this.upload(
+        m,
+        { op: Op.CodeServer, action: 'install', digest },
+        createReadStream(path, { highWaterMark: 256 << 10 }),
+        signal,
+        (done) => this.set(m.id, (st) => ({ ...st, done })),
       );
     } catch (e) {
       signal.throwIfAborted();

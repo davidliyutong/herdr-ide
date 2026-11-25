@@ -38,7 +38,7 @@ export async function writeResult(conn: Conn, v: unknown): Promise<void> {
 
 /** An abort controller that also ends when the core closes conn's stream
  * (reading nothing more of it) or signal ends. */
-function untilClosed(conn: Conn, signal: AbortSignal): AbortController {
+export function untilClosed(conn: Conn, signal: AbortSignal): AbortController {
   const ac = new AbortController();
   const stop = () => ac.abort(new Error('the core closed the stream'));
   if (signal.aborted) stop();

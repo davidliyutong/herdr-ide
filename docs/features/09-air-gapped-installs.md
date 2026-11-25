@@ -39,8 +39,10 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
   2. the download cache;
   3. a download from the `--code-server-url` / `--extension-url` templates
      (which may name a mirror), unless `--offline`.
-- **Pushed through the agent** to machines as a chunked upload, unpacked by
-  the agent in Go (no `tar` needed on the machine). With
+- **Pushed through the agent** to machines as a chunked upload with the
+  digest the core verified it by, unpacked by the agent (no `tar` needed on
+  the machine: Go's archive/tar in the Go machine build, node-tar in the
+  TypeScript one, which checks the digest first). With
   `--code-server-install=download` machines fetch the tarball themselves
   and verify it against the core's digest; `--offline` turns this off, and a
   machine that cannot download gets the upload.
@@ -98,7 +100,8 @@ A release carries the licenses of embedded components:
   and `DEFAULT_EXTENSIONS` (the release role in `.claude/agents/`), and
   herdr-core's together with `hcdist.Version`.
 - Extraction rejects absolute paths, `..` and links leaving the install
-  directory.
+  directory (the TypeScript machine side refuses the whole archive, the Go
+  agent skips the entry).
 - herdr-core's archive must hold the executable as one regular file of
   bounded size.
 
@@ -113,6 +116,11 @@ A release carries the licenses of embedded components:
   command`).
 - `internal/agent/codeserver_test.go` (`TestCodeServerDownload`): a
   machine's own download checked against the core's digest.
+- `backend/features/vscode/machine.test.ts` (`releases`, `archives that
+  would leave the release`, `downloads made by the machine`): an upload and
+  a download checked against the core's digest before anything is
+  unpacked, archives refused, bounds; `provision.test.ts`: the core sends
+  the digest of what it uploads.
 - `internal/hcdist/release_test.go`, `internal/agent/hc_test.go`: pinned
   herdr-core archives and the executables a machine receives.
 - `internal/agent/guivideo_test.go` (`TestInstallVideo`): a wrong digest

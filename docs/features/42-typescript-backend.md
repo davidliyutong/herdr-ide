@@ -188,13 +188,13 @@ Linux and macOS:
   `code: message`, as the Go agent wrote it), an action that does not
   stream ends when the core closes its stream. A feature may serve ops of
   the agent protocol besides (`Served.ops`: the agents feature's `detect`,
-  which the core opens as an op of its own); an op no feature serves is
-  refused as an unknown plugin. A feature sees the agent's sessions
-  (`env.sessions()`, and an action's own as `ctx.session`: its core, its
-  open pipes to each socket and when it last opened one, a stream towards
-  its core), ends what it owns when the agent ends (`Served.close`, once
-  the sessions' requests were waited for) and hands it to the node that
-  took over (`Served.handOver`).
+  which the core opens as an op of its own, VS Code's `code-server`); an
+  op no feature serves is refused as an unknown plugin. A feature sees the
+  agent's sessions (`env.sessions()`, and an action's own as
+  `ctx.session`: its core, its open pipes to each socket and when it last
+  opened one, a stream towards its core), ends what it owns when the agent
+  ends (`Served.close`, once the sessions' requests were waited for) and
+  hands it to the node that took over (`Served.handOver`).
 - `backend/hosts/machine`: the machine side's commands (`cli.ts`: `node`,
   `node dial`, `node stop [--terminal-core]`, with the Go build's flags),
   which the one command line (`backend/hosts/bun/main.ts`) runs, and the
@@ -204,14 +204,49 @@ Linux and macOS:
   the desktop app's core runs: backend/README.md).
 
 It serves the machine sides of the terminals (the terminal core and hidden
-terminals), files, git, search, monitor, history, browser, AI usage and
-agents (detection and the agents' sessions) features. The ops and plugins
-of the features it does not serve yet (chat, gui, vscode: `code-server`,
-`gui`) are refused as an unknown plugin is (`unknown_plugin`); the core
+terminals), files, git, search, monitor, history, browser, AI usage,
+agents (detection and the agents' sessions) and VS Code features. The ops
+and plugins of the features it does not serve yet (chat, gui: `gui`) are
+refused as an unknown plugin is (`unknown_plugin`); the core
 treats them as a machine without that feature. AI usage's `session`
 action finds a session's transcripts with the coding agents' sessions
 (`backend/machine/agents`), as the Go build's does
 ([29](29-ai-usage.md#one-sessions-usage)).
+
+VS Code's machine side ([05](05-vscode-panes.md)) answers op
+`code-server` as the Go agent does, on the same files (the releases in
+`~/.<slug>/code-server/<version>-<os>-<arch>`, the pid file `cs.pid`
+naming the node that owns code-server, `cs.sock`, `bridge.sock`), so
+a node of either build adopts, ends or hands over the other's
+code-server; it is restructured rather than translated: the releases
+(`machine/release.ts`: receiving, downloading, unpacking, retention), the
+process (`server.ts`), the extensions (`extensions.ts`), the bridge's
+socket (`bridge.ts`, tunnelled to the session that last opened a pipe to
+`cs.sock`, else the newest) and the op (`op.ts`). A release the core
+uploads or the machine downloads is written to a file beside the releases
+and hashed as it arrives; only one of the digest the core sends is
+unpacked (the core now sends the one it verified the upload by; a core
+that sends none, an older one, gets it unpacked unchecked, as the Go
+agent did). Unpacking does not hold the node's thread: the file is read
+in chunks, gunzipped by zlib's stream (its work in the runtime's pool) and
+unpacked by node-tar, a mature library (npm's own), which parses headers a
+block at a time and writes with asynchronous calls; unpacking code-server
+4.144.0 (210 MB, 7204 entries, 600 MB unpacked) took 2.5 s and held the
+thread for at most 2 ms at a time, so no worker thread is needed. An
+external `tar` would hold nothing either, but the tars of machines (GNU's,
+BSD's, BusyBox's) differ in what they refuse. Where the Go agent
+skipped an entry of a tarball that would leave the release (an absolute
+path, `..`, a link leaving it), this side refuses the whole archive, an
+entry of another kind too (a FIFO, a device), and with node-tar's strict
+mode an entry written through a link; modes lose setuid, setgid and
+others' write bits as before, and nothing takes the archive's owner or
+times. Besides the Go agent's retention at each install (releases unused
+for 14 days), its housekeeping touches the running code-server's release
+every 24 h and removes the other releases unused for 14 days and what an
+interrupted install left beside them after a day; a download stops past
+1 GiB, an upload too, and an unpack past 4 GiB. curl, wget, the release's
+Node and code-server's extension installer run in sessions of their own,
+killed as a group at their bound.
 
 AI usage on the machine side ([29](29-ai-usage.md)) keeps the Go agent's
 answers, files, lock protocol and cost cache (the same tables and
@@ -712,9 +747,28 @@ SECURITY.md has both.
   Code in a real herdr-core followed through `detect` with its session
   (`features/agents/integration.test.ts`); the transcript vectors and the
   bounds of a read (`backend/shared/agents/transcript`).
+- VS Code's machine side (`features/vscode/machine.test.ts`), through the
+  wire with a stand-in for code-server run by Bun in test releases: the
+  executable a request names, an upload checked against its digest before
+  anything is unpacked, a release without its executable or whose Node
+  does not run, the bounds, a machine's download checked (curl or wget on
+  loopback) and ended with the core's interest, archives leaving the
+  release refused, code-server's arguments (its socket only, no port
+  proxy), start, stop, release kept for another core's pipe, the node's
+  end and a hand-over, an orphan ended and a serving one adopted, a broken
+  listener replaced as the socket's peer, extensions and markers, the
+  bridge's socket tunnelled to the right core and taken over by the newest
+  agent, the retention, and an unpack that leaves the thread free while
+  another session is answered; in `make it`, with
+  `E2E_CODE_SERVER_SEED`, a real code-server release uploaded, started on
+  its socket only (nothing of its process group listening on TCP) and
+  stopped (`features/vscode/integration.test.ts`).
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
   runs the suite against the TypeScript build (23 passed, the specs of
-  chats and program windows skipped with the reason;
+  chats and program windows skipped with the reason; given
+  `E2E_CODE_SERVER_SEED`, the desktop app's smoke test has its VS Code
+  window installed, started and served by the TypeScript machine side,
+  its workbench loaded and the folder listed;
   `tests/attention.spec.ts` has a fake Claude Code in a terminal draw
   attention, its session found and confirmed for a resume), and
   `tests/nodes.spec.ts` has the newer node of the other build take a node

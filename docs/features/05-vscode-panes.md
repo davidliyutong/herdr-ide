@@ -69,14 +69,19 @@ that raced the switch outlives it.
 
 ### Provisioning
 
-`backend/features/vscode/provision.ts` and `artifacts.ts`, agent
-`codeserver.go`. The `codeServer.install`
+`backend/features/vscode/provision.ts` and `artifacts.ts`; the agent's
+side is `internal/agent/codeserver.go` in the Go machine build and
+`backend/features/vscode/machine.ts` (`machine/`) in the TypeScript one,
+which answer op `code-server` alike on the same files. The
+`codeServer.install`
 setting (global, per machine, or `--code-server-install`) picks how a
 machine gets code-server:
 
 - `push` (default): the release is resolved on the core host
-  ([09](09-air-gapped-installs.md)), uploaded through the agent and
-  unpacked into `~/.veldr/code-server/<version>` (shared by instances);
+  ([09](09-air-gapped-installs.md)), uploaded through the agent with the
+  digest the core verified it by and unpacked into
+  `~/.veldr/code-server/<version>-<os>-<arch>` (shared by instances); the
+  TypeScript machine side checks the digest before it unpacks anything;
 - `download`: the agent fetches the same release with the machine's curl or
   wget and checks the digest the core sends;
 - `existing`: the agent runs a code-server already on the machine
@@ -87,7 +92,11 @@ machine gets code-server:
 `download`. A change applies the next time code-server starts.
 
 The bundled Node is run once after unpacking; if it fails (old glibc), the
-error is reported and the rest of the product keeps working. Extensions
+error is reported and the rest of the product keeps working. An archive
+with an entry that would leave the release (an absolute path, `..`, a
+link pointing out) is refused whole by the TypeScript machine side (the Go
+agent skips such entries); unpacking it does not hold the node's one
+thread ([42](42-typescript-backend.md#the-machine-side)). Extensions
 (the bridge extension and the defaults, Git Graph) are installed from VSIX
 files uploaded by the core.
 
@@ -249,6 +258,9 @@ files (Chromium on a secure origin only), it works in every browser.
 - **Two agents of one instance on a machine** (a reconnect while the old
   agent lingers) → the newest takes over the bridge socket; the other takes
   it back once free. The extension reconnects.
+- **An archive that would leave the release** → refused (the TypeScript
+  machine side) or its entries skipped (the Go agent); nothing is written
+  outside the release.
 
 ## Security
 
@@ -290,11 +302,20 @@ every deployment.
   `web/src/__tests__/vscodeRisk.test.ts`,
   `web/src/__tests__/vscodeWorkers.test.ts`.
 - Provisioning: `backend/features/vscode/artifacts.test.ts`,
-  `provision.test.ts`, `internal/agent/codeserver_test.go`
+  `provision.test.ts` (the upload's digest), `internal/agent/codeserver_test.go`
   (existing binary, verified downloads, start flags, replacing a broken
-  listener).
+  listener); the TypeScript machine side's
+  `backend/features/vscode/machine.test.ts` (the same, through the wire
+  with a stand-in for code-server, and uploads checked before unpacking,
+  archives leaving the release refused, release kept for another core,
+  the node's end, hand-over and orphans, extensions and markers,
+  retention, the node's thread kept free) and, in `make it` with
+  `E2E_CODE_SERVER_SEED`, `integration.test.ts` (a real release started on
+  its socket only).
 - Bridge socket ownership between agents: `internal/agent/vault_test.go`
-  (`TestSocketsFollowTheNewestAgent`).
+  (`TestSocketsFollowTheNewestAgent`); the TypeScript side's
+  `machine.test.ts` (`the bridge socket`: the core that last opened
+  VS Code, the newest agent taking it over).
 - Bridge routing, idle tracking, theme, refused port proxy, Send to Agent,
   close/leave and downloads: `backend/features/vscode/bridge.test.ts`
   (`pick`, `targets`, `theme`, `send to agent, focus`, `close, leave,

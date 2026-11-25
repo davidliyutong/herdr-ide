@@ -14,12 +14,12 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { APP_PARTITION, Desktop, desktopUnavailable, ORIGIN, tcpListeners } from '../harness/desktop';
 import { expect, test } from '../harness/fixtures';
-import { unported } from '../harness/paths';
 import { newTerminalTab } from '../harness/ui';
 import { waitFor } from '../harness/wait';
 
-// VS Code's machine side is not the TypeScript machine side's yet.
-const seed = unported('vscode') ? undefined : process.env.E2E_CODE_SERVER_SEED;
+// The code-server release, with which the desktop app opens a VS Code
+// window (either machine build serves it).
+const seed = process.env.E2E_CODE_SERVER_SEED;
 
 // VS Code (off by default) is on when it can be installed.
 test.use({ desktopOptions: { settings: seed ? { 'plugins.vscode.enabled': true } : {}, codeServerSeed: seed } });
@@ -183,9 +183,8 @@ test("behind a proxy, the core downloads through it and its programs get only th
   });
   await new Promise<void>((r) => proxy.listen(0, '127.0.0.1', r));
   const url = `http://127.0.0.1:${(proxy.address() as { port: number }).port}`;
-  const vscode = !unported('vscode');
   const desktop = await Desktop.launch({
-    settings: vscode ? { 'plugins.vscode.enabled': true } : {},
+    settings: { 'plugins.vscode.enabled': true },
     // Both cases: the harness sets both to a proxy that answers nothing.
     env: { HTTPS_PROXY: url, HTTP_PROXY: url, https_proxy: url, http_proxy: url },
   });
@@ -199,21 +198,19 @@ test("behind a proxy, the core downloads through it and its programs get only th
     const env = readFileSync(out, 'utf8');
     expect(env).toContain(`HTTPS_PROXY=${url}`);
     expect(env).not.toContain('NODE_USE_ENV_PROXY');
-    if (vscode) {
-      // code-server is not at hand: the core downloads it, through the proxy.
-      const started = await desktop.api('POST', '/api/m/local/code/start').catch((e: Error) => e.message);
-      try {
-        await waitFor(() => seen.some((s) => /^CONNECT [^ ]+:443$/.test(s)), {
-          what: "the core's download through the proxy",
-          timeout: 60_000,
-        });
-      } catch (e) {
-        const status = await desktop.api('GET', '/api/m/local/code/status').catch((x: Error) => x.message);
-        throw new Error(
-          `${(e as Error).message}\nstart: ${JSON.stringify(started)}\nstatus: ${JSON.stringify(status)}\nproxy: ${JSON.stringify(seen)}\n${desktop.logs()}`,
-        );
-      }
-    } else info.annotations.push({ type: 'skipped', description: "the core's download: VS Code is not served by this machine build" });
+    // code-server is not at hand: the core downloads it, through the proxy.
+    const started = await desktop.api('POST', '/api/m/local/code/start').catch((e: Error) => e.message);
+    try {
+      await waitFor(() => seen.some((s) => /^CONNECT [^ ]+:443$/.test(s)), {
+        what: "the core's download through the proxy",
+        timeout: 60_000,
+      });
+    } catch (e) {
+      const status = await desktop.api('GET', '/api/m/local/code/status').catch((x: Error) => x.message);
+      throw new Error(
+        `${(e as Error).message}\nstart: ${JSON.stringify(started)}\nstatus: ${JSON.stringify(status)}\nproxy: ${JSON.stringify(seen)}\n${desktop.logs()}`,
+      );
+    }
     // Nothing asked the proxy for loopback.
     expect(seen.filter((s) => /127\.0\.0\.1|localhost|\[::1\]/.test(s))).toEqual([]);
   } finally {

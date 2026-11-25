@@ -1,6 +1,6 @@
 // The machine sides of the features this build serves. The features whose
-// machine side is not here yet (chat, gui, vscode) are refused as an
-// unknown plugin is (machine/agent.ts).
+// machine side is not here yet (chat, gui) are refused as an unknown plugin
+// is (machine/agent.ts).
 import type { MachineSide } from '#machine/feature.ts';
 import { agentsMachine } from '#features/agents/machine.ts';
 import { browserMachine } from '#features/browser/machine.ts';
@@ -10,6 +10,7 @@ import { historyMachine } from '#features/history/machine.ts';
 import { monitorMachine } from '#features/monitor/machine.ts';
 import { searchMachine } from '#features/search/machine.ts';
 import { usageMachine } from '#features/usage/machine.ts';
+import { vscodeMachine } from '#features/vscode/machine.ts';
 
 export function machineFeatures(): MachineSide[] {
   return [
@@ -21,5 +22,6 @@ export function machineFeatures(): MachineSide[] {
     historyMachine(),
     agentsMachine(),
     usageMachine(),
+    vscodeMachine(),
   ] as MachineSide[];
 }
