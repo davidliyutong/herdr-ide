@@ -1,10 +1,10 @@
 // Drives the TypeScript machine side on a machine of the matrix as a core
 // does over ssh: `node dial` of the machine executable (MACHINE_EXE: the
-// platform's compiled executable, or the Go machine build), a yamux
-// session over its standard input and output, the agent protocol on it.
-// It checks that the node starts and answers, that the terminal core it
-// installs (from its own embedded copy, checked by its digest; the Go
-// build's uploaded from hc/) and starts runs a terminal, that a file is
+// platform's compiled executable), a yamux session over its standard
+// input and output, the agent protocol on it. It checks that the node
+// starts and answers, that the terminal core it installs (from its own
+// embedded copy, checked by its digest) and starts runs a terminal, that a
+// file is
 // written and read back, and that links are refused where they must be: by
 // the system calls the machine side makes (openat2's RESOLVE_NO_SYMLINKS,
 // falling back on old kernels; O_NOFOLLOW; renameat2 without replacing)
@@ -15,7 +15,6 @@
 import { spawn } from 'node:child_process';
 import { constants, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Reader } from '../../../../backend/shared/lib/streamio.ts';
 import { ChunkWriter, Op, readLine, type Reply } from '../../../../backend/shared/proto/agentproto/index.ts';
 import { Conn as HCConn } from '../../../../backend/shared/proto/hc/index.ts';
 import { closeStream, pairDuplex } from '../../../../backend/shared/proto/yamux.ts';
@@ -28,7 +27,6 @@ import { peerCred, socketFd } from '../../../../backend/machine/sys/proc.ts';
 import { withoutForeignRuntimeVars } from '../../../../backend/shared/lib/bunenv.ts';
 import { dataDir } from '../../../../backend/shared/lib/brand.ts';
 
-const dir = import.meta.dir;
 const home = process.env.HOME!;
 const instance = 'matrix';
 let failed = 0;
@@ -65,24 +63,13 @@ await step('hello', async () => {
 
 await step('a terminal of its terminal core', async () => {
   const st = await session.request({ op: Op.HC, action: 'status' }, { timeoutMs: 30_000 });
-  let digest = st.hc?.embedded ?? '';
-  let installed: Reply;
-  if (digest) {
-    // The executable's own herdr-core, as the core's terminal lifecycle has it installed.
-    installed = await session.request({ op: Op.HC, action: 'install-embedded', digest }, { timeoutMs: 60_000 });
-  } else {
-    const gz = readFileSync(join(dir, 'hc', 'hc-linux-amd64.gz'));
-    digest = readFileSync(join(dir, 'hc', 'herdr-core.sha256'), 'utf8').trim();
-    const { conn } = await session.open({ op: Op.HC, action: 'install', digest });
-    const cw = new ChunkWriter(conn.stream);
-    await cw.write(gz);
-    await cw.finish();
-    installed = await readLine<Reply>(new Reader(conn.reader.release()));
-    closeStream(conn.stream);
-  }
+  const digest = st.hc?.embedded ?? '';
+  check(!!digest, 'the executable embeds herdr-core');
+  // The executable's own herdr-core, as the core's terminal lifecycle has it installed.
+  const installed = await session.request({ op: Op.HC, action: 'install-embedded', digest }, { timeoutMs: 60_000 });
   check(
     installed.ok && installed.hc?.digest === digest,
-    `herdr-core installed ${st.hc?.embedded ? 'from its embedded copy' : 'by upload'}, checked by its digest (${installed.error ?? 'ok'})`,
+    `herdr-core installed from its embedded copy, checked by its digest (${installed.error ?? 'ok'})`,
   );
   const started = await session.request({ op: Op.HC, action: 'start', digest }, { timeoutMs: 60_000 });
   check(!!started.hc?.running, `the terminal core runs (version ${started.hc?.version})`);

@@ -1,41 +1,51 @@
 #!/usr/bin/env bash
 # End-to-end tests (make e2e): builds the web UI, the core of this platform
-# (backend/, bun backend/scripts/build.ts) with the machine build and the
-# pinned herdr-core of this platform embedded (fetched once into dist/hc)
-# and the fake coding agents into dist/e2e, then runs the Playwright suite
-# in e2e/ against isolated instances. Arguments go to Playwright (a file,
-# -g <title>, --headed, --repeat-each 3).
+# (backend/, bun backend/scripts/build.ts: one executable that is the core
+# and the machine side of its platform) with the pinned herdr-core of this
+# platform embedded (bun backend/scripts/fetch-hc.ts) and the fake coding
+# agents (e2e/fakes, compiled by Bun) into dist/e2e, then runs the
+# Playwright suite in e2e/ against isolated instances. Arguments go to
+# Playwright (a file, -g <title>, --headed, --repeat-each 3).
 #
 # With Docker, the SSH machine tests (e2e/tests/ssh.spec.ts) also get the
-# Linux machine build, herdr-core and fake agent of Docker's architecture
-# and the sshd image (e2e/sshd); without it they skip, unless
-# E2E_REQUIRE_DOCKER=1 (CI), which fails instead.
+# machine builds of Docker's Linux, glibc's and musl's (the SSH machine is
+# Alpine), the fake agent and the X program of the program windows
+# (e2e/fakes/xclient.ts) built for it, and the sshd image (e2e/sshd);
+# without it they skip, unless E2E_REQUIRE_DOCKER=1 (CI), which fails
+# instead.
 #
-# Every core is built twice: as the TypeScript build (--machine ts, the
-# product's: one executable that is the core and the machine side of its
-# platform) and deploying the Go machine build. The latter is built
-# for this host and for Docker's Linux, glibc's and musl's, into machines/
-# with their SHA256SUMS, which the cores take as --agent-dir (a build of no
-# release: nothing is downloaded); core-ts is this host's. The suite runs
-# against the TypeScript build; E2E_MACHINE=go runs it against the Go one
-# (e2e/harness/paths.ts), and tests/nodes.spec.ts takes a node of one build
-# over with the other.
+# The machine builds go into machines/ with their SHA256SUMS, which the
+# cores take as --agent-dir (a build of no release: nothing is
+# downloaded); core is this host's. They are built again as another, newer
+# version into machines-newer/ (core-newer), which takes the nodes over
+# from the first (tests/nodes.spec.ts).
 #
 #   SKIP_WEB=1 scripts/e2e.sh       # reuse web/dist
 #   SKIP_BUILD=1 scripts/e2e.sh     # reuse dist/e2e
 #   E2E_DIR=dist/e2e-b scripts/e2e.sh  # build into another directory
 set -euo pipefail
 cd "$(dirname "$0")/.."
+ROOT=$PWD
 
-SLUG=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
+SLUG=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
 OUT=${E2E_DIR:-dist/e2e}
 [[ "$OUT" == /* ]] || OUT="$PWD/$OUT"
 # The harness finds the builds there (e2e/harness/paths.ts).
 export E2E_DIR="$OUT"
-os=$(go env GOOS)
-arch=$(go env GOARCH)
 
-# Docker's architecture as Go names it, empty without a Docker daemon.
+# This host's platform, as the builds name it.
+case "$(uname -s)" in
+  Darwin) os=darwin ;;
+  Linux) os=linux ;;
+  *) echo "no end-to-end tests on $(uname -s)" >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+  x86_64 | amd64) arch=amd64 ;;
+  aarch64 | arm64) arch=arm64 ;;
+  *) echo "no build for $(uname -m)" >&2; exit 1 ;;
+esac
+
+# Docker's architecture, empty without a Docker daemon.
 darch=""
 if command -v docker >/dev/null 2>&1 && darch=$(docker info --format '{{.Architecture}}' 2>/dev/null); then
   case "$darch" in
@@ -51,6 +61,32 @@ if [[ -z "$darch" && -n "${E2E_REQUIRE_DOCKER:-}" ]]; then
   exit 1
 fi
 
+# Bun's compile target of a build key (empty: this host's).
+target_of() {
+  case "$1" in
+    "$os-$arch") echo "" ;;
+    linux-amd64) echo bun-linux-x64-baseline ;;
+    linux-arm64) echo bun-linux-arm64 ;;
+    linux-amd64-musl) echo bun-linux-x64-musl-baseline ;;
+    linux-arm64-musl) echo bun-linux-arm64-musl ;;
+  esac
+}
+
+# Compiles a fake (e2e/fakes/<name>.ts) into one executable for a build
+# key. The compile runs in a directory of its own: Bun leaves a
+# .<hash>.bun-build copy of the executable in its working directory.
+fake() {
+  local name=$1 out=$2 t tmp
+  t=$(target_of "$3")
+  tmp=$(mktemp -d)
+  if ! (cd "$tmp" && bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig ${t:+"--target=$t"} \
+    "$ROOT/e2e/fakes/$name.ts" --outfile "$out" >/dev/null); then
+    rm -rf "$tmp"
+    return 1
+  fi
+  rm -rf "$tmp"
+}
+
 if [[ -z "${SKIP_BUILD:-}" ]]; then
   if [[ -z "${SKIP_WEB:-}" ]]; then
     echo "==> web"
@@ -59,56 +95,33 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   platforms="$os/$arch"
   [[ -n "$darch" && "linux/$darch" != "$platforms" ]] && platforms="$platforms linux/$darch"
   echo "==> herdr-core for $platforms"
-  rm -rf "$OUT/payload" && mkdir -p "$OUT/payload/hc" "$OUT/payload/agents" "$OUT/payload/agents-newer"
+  rm -rf "$OUT/hc" && mkdir -p "$OUT/hc"
   # shellcheck disable=SC2086
-  go run ./scripts/fetch-hc -out "$OUT/payload/hc" $platforms
-  echo "==> machine builds and fake agents"
-  mod=$(sed -n 's/^module //p' go.mod)
+  bun backend/scripts/fetch-hc.ts --out "$OUT/hc" $platforms
+  echo "==> fake agents"
+  rm -rf "$OUT/fakebin" "$OUT"/linux-*
   mkdir -p "$OUT/fakebin"
-  # This host's machine build, which the core runs for the local machine,
-  # and the same code as another, newer version for the newer core.
-  go build -trimpath -o "$OUT/payload/agents/${SLUG}-$os-$arch" "./cmd/${SLUG}"
-  go build -trimpath -ldflags "-X $mod/internal/agentproto.Version=dev-e2e-newer" -o "$OUT/payload/agents-newer/${SLUG}-$os-$arch" "./cmd/${SLUG}"
-  go build -o "$OUT/fakebin/kimi" ./e2e/fakeacp
-  go build -o "$OUT/fakebin/codex" ./e2e/fakecodex
+  fake acp "$OUT/fakebin/kimi" "$os-$arch"
+  fake codex "$OUT/fakebin/codex" "$os-$arch"
   if [[ -n "$darch" ]]; then
-    # The SSH machine's: the machine build the core uploads (--agent-dir)
-    # and the fake agent the harness copies into the container.
-    echo "==> machine build and fake agent for linux/$darch"
-    mkdir -p "$OUT/agents" "$OUT/linux-$darch"
-    CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -trimpath -o "$OUT/agents/${SLUG}-linux-$darch" "./cmd/${SLUG}"
-    CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -o "$OUT/linux-$darch/kimi" ./e2e/fakeacp
-    CGO_ENABLED=0 GOOS=linux GOARCH=$darch go build -o "$OUT/linux-$darch/e2e-xclient" ./e2e/xclient
-    if [[ "linux/$darch" != "$os/$arch" ]]; then
-      cp "$OUT/agents/${SLUG}-linux-$darch" "$OUT/payload/agents/"
-      cp "$OUT/agents/${SLUG}-linux-$darch" "$OUT/payload/agents-newer/"
-    fi
+    # The SSH machine's (Alpine: musl), which the harness copies into its
+    # container.
+    echo "==> fake agent and X program for linux/$darch"
+    mkdir -p "$OUT/linux-$darch"
+    fake acp "$OUT/linux-$darch/kimi" "linux-$darch-musl"
+    fake xclient "$OUT/linux-$darch/e2e-xclient" "linux-$darch-musl"
   fi
-  # The core and a newer build of the same code (another version, written
-  # later), which takes the nodes over from the first (tests/nodes.spec.ts).
-  echo "==> core"
+  echo "==> machine builds"
   (cd backend && pnpm install --frozen-lockfile >/dev/null)
-  common=(--web web/dist --hc "$OUT/payload/hc")
+  common=(--web web/dist --hc "$OUT/hc")
   # The bridge extension when a build staged it (scripts/build.sh).
   [[ -d dist/payload/ext ]] && common+=(--ext dist/payload/ext)
-  bun backend/scripts/build.ts --out "$OUT/core" --machine go --agents "$OUT/payload/agents" "${common[@]}" >/dev/null
-  bun backend/scripts/build.ts --out "$OUT/core-newer" --version dev-e2e-newer --machine go --agents "$OUT/payload/agents-newer" "${common[@]}" >/dev/null
-  echo "==> the TypeScript builds"
-  # This host's, and Docker's Linux, glibc's and musl's (the SSH machine is
-  # Alpine); again as the newer version, whose node the newer core runs.
+  # This host's, and Docker's Linux, glibc's and musl's; again as the newer
+  # version, whose node the newer core runs.
   keys="$os-$arch"
   [[ -n "$darch" && "linux-$darch" != "$keys" ]] && keys="$keys linux-$darch"
   [[ -n "$darch" ]] && keys="$keys linux-$darch-musl"
-  target_of() {
-    case "$1" in
-      "$os-$arch") echo "" ;;
-      linux-amd64) echo bun-linux-x64-baseline ;;
-      linux-arm64) echo bun-linux-arm64 ;;
-      linux-amd64-musl) echo bun-linux-x64-musl-baseline ;;
-      linux-arm64-musl) echo bun-linux-arm64-musl ;;
-    esac
-  }
-  rm -rf "$OUT/machines" "$OUT/machines-newer" "$OUT/payload-ts"
+  rm -rf "$OUT/machines" "$OUT/machines-newer" "$OUT/payload"
   for v in dev dev-e2e-newer; do
     dir="$OUT/machines"
     [[ "$v" == dev ]] || dir="$OUT/machines-newer"
@@ -118,8 +131,8 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
       extra=()
       [[ -n "$t" ]] && extra+=(--target "$t")
       # This host's, as the desktop app carries it.
-      [[ "$k" == "$os-$arch" && "$v" == dev ]] && extra+=(--payload-out "$OUT/payload-ts")
-      bun backend/scripts/build.ts --out "$dir/${SLUG}-$k" --version "$v" --machine ts "${common[@]}" ${extra[@]+"${extra[@]}"} >/dev/null
+      [[ "$k" == "$os-$arch" && "$v" == dev ]] && extra+=(--payload-out "$OUT/payload")
+      bun backend/scripts/build.ts --out "$dir/${SLUG}-$k" --version "$v" "${common[@]}" ${extra[@]+"${extra[@]}"} >/dev/null
     done
     # The manifest of this "release": the executables as an archive would
     # hold them.
@@ -127,9 +140,9 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
       printf '%s  %s\n' "$( { sha256sum "${SLUG}-$k" 2>/dev/null || shasum -a 256 "${SLUG}-$k"; } | cut -d' ' -f1)" "${SLUG}-$k/${SLUG}"
     done > SHA256SUMS)
   done
-  cp "$OUT/machines/${SLUG}-$os-$arch" "$OUT/core-ts"
-  cp "$OUT/machines-newer/${SLUG}-$os-$arch" "$OUT/core-ts-newer"
-  gzip -1 -c "$OUT/machines/${SLUG}-$os-$arch" > "$OUT/payload-ts/machine/${SLUG}-$os-$arch.gz"
+  cp "$OUT/machines/${SLUG}-$os-$arch" "$OUT/core"
+  cp "$OUT/machines-newer/${SLUG}-$os-$arch" "$OUT/core-newer"
+  gzip -1 -c "$OUT/machines/${SLUG}-$os-$arch" > "$OUT/payload/machine/${SLUG}-$os-$arch.gz"
   # The desktop app's smoke test (tests/desktop.spec.ts) runs it unpackaged
   # with the core bundled for its utility process and the payloads above;
   # it skips where the desktop's packages are not installed.

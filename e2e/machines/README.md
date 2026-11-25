@@ -128,17 +128,16 @@ cloud images do) and an ssh server.
   system calls and by the files feature), peer credentials name the user,
   `node stop --terminal-core` ends it all. `build.sh` (on a computer with
   the repository) builds the executables of linux x64 for glibc and musl
-  (`exe/`, `backend/scripts/build.ts --machine ts`) and bundles
+  (`exe/`, `backend/scripts/build.ts`) and bundles
   `driver.js`; `run.sh` runs the driver with the executable of the
   machine's C library acting as Bun (`BUN_BE_BUN=1`, which the node it
-  starts does not get). `build.sh --go` adds the Go machine build, which
-  `run-go.sh` drives instead. A machine the core would refuse (musl
+  starts does not get). A machine the core would refuse (musl
   without libstdc++ and libgcc, no SSE4.2) passes as refused.
 - `payloads/gui`: program windows of the TypeScript build's machine side
   with its GUI helper, driven as a core drives them over ssh: the display
   (the distribution's Xvfb, installed first on a throwaway machine; on
   `host`, fetched by the machine side with `apt-get download` into the
-  run's home), a program's window (`e2e/xclient`) announced with its
+  run's home), a program's window (`e2e/fakes/xclient.ts`) announced with its
   terminal and process, its pixels, clicks, keys and closing, the keeper
   holding the display and leaving with it, the GPU display where the
   machine has Xwayland and a render node, video through the encoder of

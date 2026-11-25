@@ -51,18 +51,14 @@ ENV = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
 
 
 def default_prefix():
-    """The product's slug (backend/shared/lib/brand.ts, else the Go
-    program's internal/brand) plus "-machines"."""
-    root = os.path.join(HERE, '..', '..')
-    for rel, pat in ((('backend', 'shared', 'lib', 'brand.ts'), r"^export const SLUG = '(.*)';$"),
-                     (('internal', 'brand', 'brand.go'), r'^\s*Slug = "(.*)"$')):
-        try:
-            with open(os.path.join(root, *rel)) as f:
-                m = re.search(pat, f.read(), re.M)
-            if m:
-                return m.group(1) + '-machines'
-        except OSError:
-            pass
+    """The product's slug (backend/shared/lib/brand.ts) plus "-machines"."""
+    try:
+        with open(os.path.join(HERE, '..', '..', 'backend', 'shared', 'lib', 'brand.ts')) as f:
+            m = re.search(r"^export const SLUG = '(.*)';$", f.read(), re.M)
+        if m:
+            return m.group(1) + '-machines'
+    except OSError:
+        pass
     return 'machines'
 
 
