@@ -518,6 +518,11 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
   `flow control`), `wire.test.ts`.
 - Hidden terminals: `backend/features/terminals/hidden.test.ts`,
   `TestDetectSkipsHelperTerminals`, `TestHiddenTerminalsNotCaptured`.
+- End to end (`make e2e`, both machine builds): `tests/chat.spec.ts`
+  with a fake ACP agent (`e2e/fakeacp`), `tests/chat-codex.spec.ts` with
+  a fake Codex app-server (`e2e/fakecodex`, which records a thread that
+  is not read-only, a turn without its policies and an approval with an
+  amendment as violations the spec expects none of).
 - Integration (`make it`): `TestIntegrationChatHost`,
   `backend/features/terminals/integration.test.ts` (`hidden terminals`).
 - `web/src/__tests__`: `chat*.test.ts(x)`, `conversation*.test.ts(x)`,

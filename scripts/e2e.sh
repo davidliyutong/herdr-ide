@@ -70,6 +70,7 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   go build -trimpath -o "$OUT/payload/agents/${SLUG}-$os-$arch" "./cmd/${SLUG}"
   go build -trimpath -ldflags "-X $mod/internal/agentproto.Version=dev-e2e-newer" -o "$OUT/payload/agents-newer/${SLUG}-$os-$arch" "./cmd/${SLUG}"
   go build -o "$OUT/fakebin/kimi" ./e2e/fakeacp
+  go build -o "$OUT/fakebin/codex" ./e2e/fakecodex
   if [[ -n "$darch" ]]; then
     # The SSH machine's: the machine build the core uploads (--agent-dir)
     # and the fake agent the harness copies into the container.

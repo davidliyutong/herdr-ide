@@ -1001,13 +1001,17 @@ SECURITY.md has both.
   the GPU display and VA-API video
   ([14](14-gui-windows.md#testing) has the results).
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
-  runs the suite against the TypeScript build (31 passed, none skipped;
-  the chats' specs run with the fake ACP agent, also on an SSH machine;
-  `tests/gui.spec.ts` has two cores show a program window through the GUI
-  helper, one controlling and the other viewing until it takes control,
-  on Alpine's Xvfb; given `E2E_CODE_SERVER_SEED`, the desktop app's smoke
-  test has its VS Code window installed, started and served by the
-  TypeScript machine side, its workbench loaded and the folder listed;
+  runs the suite against the TypeScript build (32 passed, none skipped;
+  the chats' specs run with the fake ACP agent, also on an SSH machine,
+  and with a fake Codex app-server, `e2e/fakecodex`, in
+  `tests/chat-codex.spec.ts`: a command allowed and rejected, a turn
+  stopped, the thread resumed, and none of what the host must never ask
+  Codex for; `tests/gui.spec.ts` has two cores show a program window
+  through the GUI helper, one controlling and the other viewing until it
+  takes control, on Alpine's Xvfb; given `E2E_CODE_SERVER_SEED`, the
+  desktop app's smoke test has its VS Code window installed, started and
+  served by the TypeScript machine side, its workbench loaded and the
+  folder listed;
   `tests/attention.spec.ts` has a fake Claude Code in a terminal draw
   attention, its session found and confirmed for a resume), and
   `tests/nodes.spec.ts` has the newer node of the other build take a node

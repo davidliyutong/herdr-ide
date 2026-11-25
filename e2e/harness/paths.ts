@@ -37,7 +37,8 @@ export const paths = {
   /** The version of the newer build, which its nodes report
    * (scripts/e2e.sh). */
   newerVersion: 'dev-e2e-newer',
-  /** A directory with the fake coding agents (kimi: e2e/fakeacp). */
+  /** A directory with the fake coding agents (kimi: e2e/fakeacp; codex:
+   * e2e/fakecodex). */
   fakeBin: join(dir, 'fakebin'),
   /** The machine builds the core uploads to SSH machines (--agent-dir):
    * the Go builds, or the TypeScript builds of the core's version with their
@@ -66,7 +67,7 @@ export const paths = {
 };
 
 export function checkBuilt() {
-  for (const p of [paths.core, join(paths.fakeBin, 'kimi')]) {
+  for (const p of [paths.core, join(paths.fakeBin, 'kimi'), join(paths.fakeBin, 'codex')]) {
     if (!existsSync(p)) throw new Error(`${p} is missing: run make e2e (scripts/e2e.sh builds it)`);
   }
 }
