@@ -1,9 +1,8 @@
 // The Claude Code adapter's test harness: scripts of the fake program
 // (testdata/fakeclaude.ts) made of the recordings in
-// spec/vectors/chat/claude, a host (a Sink) that records what it gets as the
-// Go adapter's tests record it and answers as the recordings did, and the
-// comparison with the Go adapter's golden files of the same recordings
-// (internal/chatadapter/claude/testdata). Nothing here reads a home
+// spec/vectors/chat/claude, a host (a Sink) that records what it gets and
+// answers as the recordings did, and the comparison with the golden files
+// of the same recordings (testdata/golden). Nothing here reads a home
 // directory but the temporary ones it makes.
 import { afterAll, beforeAll } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -21,8 +20,8 @@ import type { ClaudeSession } from './session.ts';
 
 const REPO = join(import.meta.dir, '..', '..', '..', '..', '..');
 export const VECTORS = join(REPO, 'spec', 'vectors', 'chat', 'claude');
-/** The Go adapter's golden files of the same scenarios. */
-export const GO_GOLDEN = join(REPO, 'internal', 'chatadapter', 'claude', 'testdata');
+/** The golden files of the same scenarios (testdata/golden): what the adapter makes of them. */
+export const GOLDEN = join(import.meta.dir, 'testdata', 'golden');
 const FAKE = join(import.meta.dir, 'testdata', 'fakeclaude.ts');
 
 /** The Agent SDK of the development dependency, as the tests load it (the
@@ -527,9 +526,9 @@ export function goldenOf(r: FakeRun): { events: unknown[]; permissions: unknown[
   };
 }
 
-/** The Go adapter's golden file of a recording, the parts compared. */
+/** The golden file of a recording, the parts compared. */
 export function goGolden(name: string): { events: unknown[]; permissions: unknown[]; questions: unknown[]; chat: unknown; err?: string } {
-  const g = JSON.parse(readFileSync(join(GO_GOLDEN, name.replace(/\.jsonl$/, '') + '.golden.json'), 'utf8')) as Msg;
+  const g = JSON.parse(readFileSync(join(GOLDEN, name.replace(/\.jsonl$/, '') + '.golden.json'), 'utf8')) as Msg;
   return {
     events: (g.events as unknown[] | null) ?? [],
     permissions: (g.permissions as unknown[] | undefined) ?? [],

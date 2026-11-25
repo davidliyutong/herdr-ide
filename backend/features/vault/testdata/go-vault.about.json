@@ -1,5 +1,5 @@
 {
-  "about": "Made by the Go store (internal/vault) at now, for the TypeScript store's tests: its passphrase, values, the WebAuthn credential's private key (PKCS#8) and PRF output, the enclave entry's Secure Enclave key (spec/vectors/vault-unlock), the export file's passphrase.",
+  "about": "Made by the store of the Go program (removed since) at now: vaults it wrote open in the TypeScript store. Its passphrase, values, the WebAuthn credential's private key (PKCS#8) and PRF output, the enclave entry's Secure Enclave key (spec/vectors/vault-unlock), the export file's passphrase.",
   "enclave": {
     "sePriv": "FRwjKjE4P0ZNVFtiaXB3foWMk5qhqK-2vcTL0tng5-4",
     "shellSecret": "KC82PURLUllgZ251fIOKkZifpq20u8LJ0Nfe5ezz-gE"

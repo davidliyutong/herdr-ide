@@ -648,6 +648,6 @@ test("the session's title, its transcript's, is the chat's once a turn ended", a
   expect(r.host.chat.title).toBe('Mine');
 }, 30_000);
 
-test("the default timing is the Go adapter's", () => {
+test('the default timing', () => {
   expect(CLAUDE_TIMING).toEqual({ initialize: 60_000, request: 30_000, grace: 2000, term: 5000, drain: 1000, titles: [0, 5000] });
 });

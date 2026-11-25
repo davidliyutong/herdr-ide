@@ -4,8 +4,7 @@
 // what the schema allows (the client's requests and answers, the
 // app-server's notifications, requests and answers); and so is what the
 // adapter sends (each mode's turns, its threads, its other requests, its
-// answers and refusals), as the Go adapter's TestSchemaPinned checks
-// against spec/codex-app-server/summary.json. The typecheck holds the
+// answers and refusals), against spec/codex-app-server/summary.json. The typecheck holds the
 // adapter's code to the types besides.
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';

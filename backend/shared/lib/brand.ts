@@ -1,7 +1,8 @@
 // The product's names. Every identifier that contains the product name at
 // runtime (binaries, directories, protocol prefixes, storage keys) derives
-// from these constants. Mirrors internal/brand while the Go program exists
-// (brand.test.ts keeps them in sync); scripts/rename.sh renames both.
+// from these constants; web/src/brand.ts and the bridge extension's
+// src/brand.ts copy them (brand.test.ts keeps them in sync), and
+// scripts/rename.sh renames all three.
 
 /** The display name. */
 export const NAME = 'veldr';

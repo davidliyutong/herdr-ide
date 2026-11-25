@@ -1,5 +1,5 @@
 // The mapping of an agent's session updates to chat events, and what a chat
-// states of its agent's session (internal/chatadapter/acp's items_test.go).
+// states of its agent's session.
 import { describe, expect, test } from 'bun:test';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { discard } from '#shared/lib/log.ts';

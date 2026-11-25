@@ -1,2 +1,4 @@
 node_modules
 pnpm-lock.yaml
+features/agents/machine/detect/testdata/
+features/chat/machine/*/testdata/golden/

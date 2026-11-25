@@ -1,30 +1,28 @@
 // herdr's agent detection manifests (herdr v0.9.5, Apache-2.0,
 // licenses/herdr-detect), unchanged, embedded as text in the machine build
-// and parsed once on first use. They are the Go agent's files
-// (internal/agent/detect/manifests) while both builds exist: one copy, read
-// by both.
-import amp from '../../../../../internal/agent/detect/manifests/amp.toml' with { type: 'text' };
-import antigravity from '../../../../../internal/agent/detect/manifests/antigravity.toml' with { type: 'text' };
-import claude from '../../../../../internal/agent/detect/manifests/claude.toml' with { type: 'text' };
-import cline from '../../../../../internal/agent/detect/manifests/cline.toml' with { type: 'text' };
-import codex from '../../../../../internal/agent/detect/manifests/codex.toml' with { type: 'text' };
-import cursor from '../../../../../internal/agent/detect/manifests/cursor.toml' with { type: 'text' };
-import devin from '../../../../../internal/agent/detect/manifests/devin.toml' with { type: 'text' };
-import droid from '../../../../../internal/agent/detect/manifests/droid.toml' with { type: 'text' };
-import gemini from '../../../../../internal/agent/detect/manifests/gemini.toml' with { type: 'text' };
-import githubCopilot from '../../../../../internal/agent/detect/manifests/github-copilot.toml' with { type: 'text' };
-import grok from '../../../../../internal/agent/detect/manifests/grok.toml' with { type: 'text' };
-import hermes from '../../../../../internal/agent/detect/manifests/hermes.toml' with { type: 'text' };
-import kilo from '../../../../../internal/agent/detect/manifests/kilo.toml' with { type: 'text' };
-import kimi from '../../../../../internal/agent/detect/manifests/kimi.toml' with { type: 'text' };
-import kiro from '../../../../../internal/agent/detect/manifests/kiro.toml' with { type: 'text' };
-import letta from '../../../../../internal/agent/detect/manifests/letta.toml' with { type: 'text' };
-import maki from '../../../../../internal/agent/detect/manifests/maki.toml' with { type: 'text' };
-import muse from '../../../../../internal/agent/detect/manifests/muse.toml' with { type: 'text' };
-import opencode from '../../../../../internal/agent/detect/manifests/opencode.toml' with { type: 'text' };
-import pi from '../../../../../internal/agent/detect/manifests/pi.toml' with { type: 'text' };
-import qodercli from '../../../../../internal/agent/detect/manifests/qodercli.toml' with { type: 'text' };
-import qwen from '../../../../../internal/agent/detect/manifests/qwen.toml' with { type: 'text' };
+// and parsed once on first use (./manifests).
+import amp from './manifests/amp.toml' with { type: 'text' };
+import antigravity from './manifests/antigravity.toml' with { type: 'text' };
+import claude from './manifests/claude.toml' with { type: 'text' };
+import cline from './manifests/cline.toml' with { type: 'text' };
+import codex from './manifests/codex.toml' with { type: 'text' };
+import cursor from './manifests/cursor.toml' with { type: 'text' };
+import devin from './manifests/devin.toml' with { type: 'text' };
+import droid from './manifests/droid.toml' with { type: 'text' };
+import gemini from './manifests/gemini.toml' with { type: 'text' };
+import githubCopilot from './manifests/github-copilot.toml' with { type: 'text' };
+import grok from './manifests/grok.toml' with { type: 'text' };
+import hermes from './manifests/hermes.toml' with { type: 'text' };
+import kilo from './manifests/kilo.toml' with { type: 'text' };
+import kimi from './manifests/kimi.toml' with { type: 'text' };
+import kiro from './manifests/kiro.toml' with { type: 'text' };
+import letta from './manifests/letta.toml' with { type: 'text' };
+import maki from './manifests/maki.toml' with { type: 'text' };
+import muse from './manifests/muse.toml' with { type: 'text' };
+import opencode from './manifests/opencode.toml' with { type: 'text' };
+import pi from './manifests/pi.toml' with { type: 'text' };
+import qodercli from './manifests/qodercli.toml' with { type: 'text' };
+import qwen from './manifests/qwen.toml' with { type: 'text' };
 import { parseManifest, type Manifest } from './manifest.ts';
 
 /** The manifests' files, by name. */

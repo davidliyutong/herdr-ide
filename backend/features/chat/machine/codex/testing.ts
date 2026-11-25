@@ -9,9 +9,8 @@
 //
 // The fake app-server (testdata/fakeappserver.ts) playing the recordings of
 // spec/vectors/chat/codex or scripts made here, and a host (a Sink) that
-// records what it gets as the Go adapter's tests record it, so that the
-// TypeScript adapter's events can be compared with the Go adapter's golden
-// files (internal/chatadapter/codex/testdata) of the same recordings.
+// records what it gets, so that the adapter's events can be compared with
+// the golden files (testdata/golden) of the same recordings.
 import { mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -88,8 +87,8 @@ export const resultOf = (union: string, method: string): string => paramsOf(unio
 // ---- the fake app-server and the recording host ----
 
 export const VECTORS = join(REPO_ROOT, 'spec', 'vectors', 'chat', 'codex');
-/** The Go adapter's golden files of the same recordings. */
-export const GO_GOLDEN = join(REPO_ROOT, 'internal', 'chatadapter', 'codex', 'testdata');
+/** The golden files of the same recordings (testdata/golden): what the adapter makes of them. */
+export const GOLDEN = join(import.meta.dir, 'testdata', 'golden');
 const FAKE = join(import.meta.dir, 'testdata', 'fakeappserver.ts');
 
 export const fixture = (name: string): string => join(VECTORS, name);
@@ -97,7 +96,7 @@ export const fixture = (name: string): string => join(VECTORS, name);
  * recordings that lack them. */
 export const HANDSHAKE = fixture('01-handshake.jsonl');
 
-/** The times of the Go adapter's tests: a fake ends at once, or never. */
+/** The fakes' times: a fake ends at once, or never. */
 export const TEST_TIMING: CodexTiming = { start: 10_000, interruptGrace: 200, usageEvery: 0, grace: 1000, term: 500, drain: 100 };
 
 /** A temporary directory, its path without links. */
@@ -236,17 +235,17 @@ export function records(k: TestSink): string[] {
   return lines;
 }
 
-/** The Go adapter's golden lines of a recording, as records makes them. */
+/** The golden lines of a recording, as records makes them. */
 export function goGolden(name: string): string[] {
-  return readFileSync(join(GO_GOLDEN, name + '.golden'), 'utf8')
+  return readFileSync(join(GOLDEN, name + '.golden'), 'utf8')
     .split('\n')
     .filter((l) => l !== '')
     .map((l) => canonical(JSON.parse(l)));
 }
 
-/** The golden files the Go adapter has. */
-export const goGoldens = (): string[] =>
-  readdirSync(GO_GOLDEN)
+/** The golden files (testdata/golden). */
+export const goldens = (): string[] =>
+  readdirSync(GOLDEN)
     .filter((f) => f.endsWith('.golden'))
     .map((f) => f.slice(0, -'.golden'.length));
 

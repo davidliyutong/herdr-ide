@@ -1,18 +1,30 @@
-// The detector's rules, identification and tracker. The cases of
-// internal/agent/detect/testdata are the Go agent's too: both builds read
-// the same manifests and must agree on them.
+// The detector's rules, identification and tracker, against the cases of
+// ./testdata. UPDATE_TESTDATA=1 rewrites testdata/manifests.json, what the
+// manifests parse to, after a deliberate change of them or of the parser
+// (review the diff).
 import { describe, expect, test } from 'bun:test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { all } from '#shared/agents/kinds.ts';
-import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { identify } from './identify.ts';
 import { ManifestError, State, evaluate, parseManifest, re2Spelling, region, validRegion, type GateSpec } from './manifest.ts';
 import { MANIFEST_FILES, manifestFor, manifests } from './manifests.ts';
 import { TRACKER_TIMING, Tracker } from './tracker.ts';
 
-const DIR = join(REPO_ROOT, 'internal/agent/detect');
+const DIR = import.meta.dir;
 const cases = <T>(name: string): T => JSON.parse(readFileSync(join(DIR, 'testdata', name), 'utf8')) as T;
+
+/** v with the keys of its objects in order, as the recorded cases have them. */
+const sortKeys = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(sortKeys)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]),
+        )
+      : v;
 
 /** Lines as herdr-core's terminal.read returns a screen. */
 const screen = (...lines: string[]) => lines.join('\n') + '\n';
@@ -25,7 +37,7 @@ describe('manifests', () => {
     expect(manifests().size).toBe(files.length);
   });
 
-  test('parse as the Go agent parses them (testdata/manifests.json)', () => {
+  test('parse to testdata/manifests.json', () => {
     const gate = (g: GateSpec): Record<string, unknown> => {
       const out: Record<string, unknown> = {};
       for (const k of ['all', 'any', 'not'] as const) if (g[k]?.length) out[k] = g[k]!.map(gate);
@@ -53,6 +65,8 @@ describe('manifests', () => {
         })),
       };
     }
+    if (process.env.UPDATE_TESTDATA === '1')
+      writeFileSync(join(DIR, 'testdata', 'manifests.json'), JSON.stringify(sortKeys(got), null, 1) + '\n');
     expect(got).toEqual(cases('manifests.json'));
   });
 

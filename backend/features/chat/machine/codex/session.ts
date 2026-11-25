@@ -7,8 +7,8 @@
 // the app-server's output, and the session calls the sink synchronously
 // from there, from its methods and from the ends of its calls. What starts
 // or steers a turn, compacts, carries out an approved plan or starts the
-// app-server again holds the session's lock across its calls, as one of
-// them at a time does in the Go adapter.
+// app-server again holds the session's lock across its calls: one of
+// them at a time.
 import { randomBytes } from 'node:crypto';
 import { NAME, SLUG } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';

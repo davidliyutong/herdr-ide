@@ -22,7 +22,7 @@
 // helper of its architecture (gui-helper.gz, from --gui: the committed
 // scripts/gui-helper/bin, checked against its gui-helper.sha256) and the
 // GPU selection library (gpupick.so, from --gpupick:
-// internal/agent/gpupick). --payload-out also writes the payloads as
+// scripts/gpupick/bin). --payload-out also writes the payloads as
 // files, laid out as the desktop app carries them.
 //
 // Every executable is compiled without autoloading a .env or bunfig.toml
@@ -49,7 +49,7 @@ const { values: o } = parseArgs({
     ext: { type: 'string', default: '' },
     encoder: { type: 'string', default: '' },
     gui: { type: 'string', default: join(import.meta.dir, '..', '..', 'scripts', 'gui-helper', 'bin') },
-    gpupick: { type: 'string', default: join(import.meta.dir, '..', '..', 'internal', 'agent', 'gpupick') },
+    gpupick: { type: 'string', default: join(import.meta.dir, '..', '..', 'scripts', 'gpupick', 'bin') },
   },
 });
 if (!o.out) throw new Error('--out is required');

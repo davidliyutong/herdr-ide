@@ -1,8 +1,7 @@
 // The Codex adapter against a fake app-server replaying the recordings of
 // spec/vectors/chat/codex (testdata/fakeappserver.ts), driven as the host
-// drives it: the events compared with the Go adapter's golden files of the
-// same recordings (internal/chatadapter/codex/testdata), so both adapters
-// make the same events of the same Codex; what the adapter asked checked
+// drives it: the events compared with the golden files of the same
+// recordings (testdata/golden); what the adapter asked checked
 // against the policies it keeps and the pinned schema.
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { noticeMethod, Notice } from '#shared/proto/agentproto/index.ts';
@@ -20,7 +19,7 @@ import {
   edited,
   fixture,
   goGolden,
-  goGoldens,
+  goldens,
   invalid,
   policyProblems,
   records,
@@ -59,7 +58,7 @@ async function prompt(s: CodexSession, msg: string, body: string | unknown[]): P
   );
 }
 
-/** Compares the events and the chat with the Go adapter's golden file. */
+/** Compares the events and the chat with the golden file. */
 function golden(name: string, k: TestSink): void {
   const got = records(k);
   const want = goGolden(name);
@@ -338,8 +337,8 @@ describe('the recordings through the Codex adapter', () => {
     expect(policyProblems(f)).toEqual([]);
   });
 
-  test('every golden file of the Go adapter is compared', () => {
+  test('every golden file is compared', () => {
     // The replays above run in this file's order; this one runs last.
-    expect([...compared].sort()).toEqual(goGoldens().sort());
+    expect([...compared].sort()).toEqual(goldens().sort());
   });
 });

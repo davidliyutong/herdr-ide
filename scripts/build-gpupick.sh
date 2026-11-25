@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds gpupick, the library that shows a program of a terminal only the
 # NVIDIA GPUs of its CUDA_VISIBLE_DEVICES (scripts/gpupick/gpupick.c), for
-# the Linux platforms machines have, into internal/agent/gpupick, where the
-# agent embeds it. The libraries are committed with the digests of the
+# the Linux platforms machines have, into scripts/gpupick/bin, where the
+# build of the machine side takes it (backend/scripts/build.ts --gpupick). The libraries are committed with the digests of the
 # source they were built from and of themselves; `scripts/build-gpupick.sh
 # --check` (make check) verifies them.
 #
@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 src=scripts/gpupick/gpupick.c
-dir=internal/agent/gpupick
+dir=scripts/gpupick/bin
 digest=$dir/gpupick.sha256
 
 sum() { shasum -a 256 "$1" | cut -d' ' -f1; }

@@ -27,7 +27,7 @@ function embeddedFile(name: string, gz: boolean): () => Promise<{ bytes: Uint8Ar
 /** The GUI helper (scripts/gui-helper). */
 export const carriedGUIHelper = embeddedFile('gui-helper.gz', true);
 
-/** The GPU selection library (internal/agent/gpupick). */
+/** The GPU selection library (scripts/gpupick/bin). */
 export const carriedGPUPick = embeddedFile('gpupick.so', false);
 
 let encoder: Promise<{ gz: Uint8Array; digest: string } | null> | null = null;

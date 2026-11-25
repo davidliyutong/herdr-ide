@@ -1,7 +1,6 @@
 // The recordings of spec/vectors/chat/claude replayed through the SDK with a
 // fake Claude Code (testdata/fakeclaude.ts): what the host gets equals what
-// the Go adapter's golden files of the same recordings have
-// (internal/chatadapter/claude/testdata), and the adapter wrote what the
+// the golden files of the same recordings have (testdata/golden), and the adapter wrote what the
 // recordings have (the fake checks each line it waits for).
 import { describe, expect, test } from 'bun:test';
 import { readdirSync } from 'node:fs';

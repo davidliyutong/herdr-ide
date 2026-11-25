@@ -1,5 +1,5 @@
-// Product names for the web UI. Mirrors internal/brand (checked by
-// internal/brand/brand_test.go); scripts/rename.sh updates both.
+// Product names for the web UI. Mirrors backend/shared/lib/brand.ts
+// (checked by its brand.test.ts); scripts/rename.sh updates both.
 
 export const APP_NAME = 'veldr';
 export const APP_SLUG = 'veldr';

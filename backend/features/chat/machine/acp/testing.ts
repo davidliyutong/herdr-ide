@@ -1,8 +1,7 @@
 // The ACP adapter's test harness: scripts of the fake agent
 // (testdata/fakeagent.ts) made of the recordings in spec/vectors/chat/acp,
-// and a host (a Sink) that records what it gets as the Go adapter's tests
-// record it, so that the TypeScript adapter's records can be compared with
-// the Go adapter's golden files (internal/chatadapter/acp/testdata) made of
+// and a host (a Sink) that records what it gets, so that the adapter's
+// records can be compared with the golden files (testdata/golden) made of
 // the same recordings.
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,8 +13,8 @@ import type { PermissionAnswer, PermissionRequest, QuestionAnswer, Sink, StartPa
 
 const REPO = join(import.meta.dir, '..', '..', '..', '..', '..');
 const VECTORS = join(REPO, 'spec', 'vectors', 'chat', 'acp');
-/** The Go adapter's golden files of the same scenarios. */
-export const GO_GOLDEN = join(REPO, 'internal', 'chatadapter', 'acp', 'testdata');
+/** The golden files of the same scenarios (testdata/golden): what the adapter makes of them. */
+export const GOLDEN = join(import.meta.dir, 'testdata', 'golden');
 const FAKE = join(import.meta.dir, 'testdata', 'fakeagent.ts');
 
 export type Msg = Record<string, unknown>;
@@ -218,9 +217,9 @@ function normalize(r: Msg): Msg {
   return r;
 }
 
-/** The Go adapter's golden lines of a scenario, normalized as Host.lines. */
+/** The golden lines of a scenario, normalized as Host.lines. */
 export function goGolden(name: string): Msg[] {
-  return readFileSync(join(GO_GOLDEN, name + '.jsonl'), 'utf8')
+  return readFileSync(join(GOLDEN, name + '.jsonl'), 'utf8')
     .split('\n')
     .filter((l) => l !== '')
     .map((l) => normalize(JSON.parse(l) as Msg));

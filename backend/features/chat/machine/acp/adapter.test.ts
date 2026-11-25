@@ -1,8 +1,6 @@
 // The ACP adapter against a fake agent that replays the recordings of
 // spec/vectors/chat/acp (testdata/fakeagent.ts), its records compared with
-// the Go adapter's golden files of the same scenarios
-// (internal/chatadapter/acp/testdata): both adapters make the same events
-// of the same agent.
+// the golden files of the same scenarios (testdata/golden).
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

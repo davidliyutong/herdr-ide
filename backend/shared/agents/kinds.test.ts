@@ -3,16 +3,16 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ADAPTERS, Adapter, PLACEHOLDER, all, byId, chatKinds, chatSpec, validSessionId, type Kind } from './kinds.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
+import { PROVIDERS } from '#features/usage/settings.ts';
 
 const repo = REPO_ROOT;
 const ids = (list: Kind[]) => list.map((k) => k.id);
 const sorted = (list: string[]) => [...list].sort();
 
-// The detector's manifests (internal/agent/detect/manifests), by id: each
-// file's top-level id, read from the data files until the detector is
-// ported.
+// The detector's manifests (features/agents/machine/detect/manifests), by
+// id: each file's top-level id.
 function manifestIds(): string[] {
-  const dir = join(repo, 'internal/agent/detect/manifests');
+  const dir = join(repo, 'backend/features/agents/machine/detect/manifests');
   return readdirSync(dir)
     .filter((f) => f.endsWith('.toml'))
     .map((f) => {
@@ -21,18 +21,6 @@ function manifestIds(): string[] {
       return id;
     })
     .sort();
-}
-
-// The AI usage plugin's providers (internal/usage's Providers, the
-// constants of its "Providers" block), read from the Go source until the
-// plugin is ported.
-function usageProviders(): Record<string, string> {
-  const go = readFileSync(join(repo, 'internal/usage/usage.go'), 'utf8');
-  const block = go.match(/\/\/ Providers, in the order the UIs list them\.\nconst \(([\s\S]*?)\n\)/)?.[1];
-  if (!block) throw new Error('internal/usage: no Providers block');
-  const out: Record<string, string> = {};
-  for (const m of block.matchAll(/^\s*(\w+)\s*=\s*"([^"]+)"/gm)) out[m[1]!] = m[2]!;
-  return out;
 }
 
 // The registry the web UI reads (spec/generated/registry.json).
@@ -50,10 +38,9 @@ test('kinds match the manifests and the settings', () => {
   // (uisettings.Agents); its default is one of them.
   const muted = registry().settings['notifications.mutedAgents'] as string[];
   for (const id of muted) expect(got).toContain(id);
-  const providers = usageProviders();
   for (const k of all()) {
     expect(k.title).not.toBe('');
-    if (k.usageProvider !== undefined) expect(Object.values(providers)).toContain(k.usageProvider);
+    if (k.usageProvider !== undefined) expect<readonly string[]>(PROVIDERS).toContain(k.usageProvider);
     if (k.transcript !== undefined) {
       expect(k.resumeById).toBeDefined();
       expect(k.continueLatest).toBeDefined();
@@ -61,7 +48,7 @@ test('kinds match the manifests and the settings', () => {
     if (k.newSession !== undefined) expect(k.start).toBeDefined();
     for (const tokens of [k.newSession, k.resumeById]) if (tokens) expect(tokens).toContain(PLACEHOLDER);
   }
-  expect(byId('agy')?.usageProvider).toBe(providers.Antigravity!);
+  expect(byId('agy')?.usageProvider).toBe('antigravity');
 });
 
 // The values the web UI had in its own tables before the registry: the

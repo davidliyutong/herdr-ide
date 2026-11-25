@@ -17,7 +17,7 @@
 #      module whose digest scripts/fetch-ghostty-vt.sh recorded
 #   9. every shared test vector (spec/vectors) is run by the web UI's
 #      tests
-#  10. the GPU selection library the agent embeds (internal/agent/gpupick)
+#  10. the GPU selection library the machine side carries (scripts/gpupick/bin)
 #      is the one scripts/build-gpupick.sh built from its source, and the
 #      GUI helper the TypeScript machine build embeds
 #      (scripts/gui-helper/bin) the one scripts/build-gui-helper.sh built

@@ -1,8 +1,7 @@
 // A fake Codex app-server for the adapter's tests, started as
 // [process.execPath, this file]: it plays a recorded conversation
 // (spec/vectors/chat/codex) to whatever client talks to it on its standard
-// input and output, as the Go adapter's fake (internal/chatadapter/codex
-// fake_test.go) does. The client's requests are matched to the recording's
+// input and output. The client's requests are matched to the recording's
 // by method (and their parameters, where several have the method); what
 // the recording's app-server sent after a request is sent again, its
 // answers renumbered to the client's ids. A request of the app-server in

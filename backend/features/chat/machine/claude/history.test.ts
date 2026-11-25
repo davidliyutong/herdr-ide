@@ -1,8 +1,7 @@
 // Claude Code's sessions and their import, from transcripts in temporary
 // homes: the recorded transcript of a headless session
 // (spec/vectors/chat/claude/claude-transcript-headless.jsonl) gives the
-// events of the Go adapter's golden file (internal/chatadapter/claude/
-// testdata/history.golden.json).
+// events of the golden file testdata/golden/history.golden.json.
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,7 +10,7 @@ import { ChatProtoError, Code, EventType, TurnState, type Event } from '#shared/
 import type { HistoryParams, SessionsParams } from '../adapter.ts';
 import { claudeAdapter } from './adapter.ts';
 import { headOf, isChunk } from './items.ts';
-import { GO_GOLDEN, VECTORS, devSdk, isolateHome, tempDir } from './testing.ts';
+import { GOLDEN, VECTORS, devSdk, isolateHome, tempDir } from './testing.ts';
 
 isolateHome();
 
@@ -72,7 +71,7 @@ const transcriptLines = (cwd: string, prompt: string, ...extra: string[]): strin
   ].join('\n') + '\n';
 
 describe('history', () => {
-  test("the recorded transcript is the chat's stored events, as the Go adapter's", async () => {
+  test("the recorded transcript is the chat's stored events, as the golden file has", async () => {
     const { env } = claudeHome();
     const evs = await readHistory(hp(env));
     let starts = 0;
@@ -96,7 +95,7 @@ describe('history', () => {
       }
     }
     expect([starts, ends, open]).toEqual([22, 22, false]);
-    const want = (JSON.parse(readFileSync(join(GO_GOLDEN, 'history.golden.json'), 'utf8')) as { events: Event[] }).events;
+    const want = (JSON.parse(readFileSync(join(GOLDEN, 'history.golden.json'), 'utf8')) as { events: Event[] }).events;
     const got = evs.map((e) => {
       const { at: _, ...rest } = e;
       return JSON.parse(JSON.stringify(rest)) as Event;

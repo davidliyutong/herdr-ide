@@ -1,7 +1,6 @@
 // A fake ACP agent for the adapter's tests, started as
 // [process.execPath, this file] with ACP_FAKE_SCRIPT naming a script: it
-// plays the script and checks what the client sends, as the Go adapter's
-// fake (internal/chatadapter/acp/fake_test.go) does.
+// plays the script and checks what the client sends.
 //
 // A script's line is a message of a recording (spec/vectors/chat/acp: "in"
 // the agent writes it, "out" the client is to send one like it), or a
