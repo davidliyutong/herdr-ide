@@ -1,10 +1,6 @@
 # Feature design documents
 
-One document per feature. Each records why the feature exists, how it works,
-which alternatives were rejected and why, how it fails, and how it is tested.
-[architecture.md](../architecture.md) is the map of components and protocols;
-these documents are the reasoning behind them. Reference material (flags,
-shortcuts, paths) lives in [reference.md](../reference.md).
+One document per feature. Each records why the feature exists, how it works, which alternatives were rejected and why, how it fails, and how it is tested. [architecture.md](../architecture.md) is the map of components and protocols; these documents are the reasoning behind them. Reference material (flags, shortcuts, paths) lives in [reference.md](../reference.md).
 
 | # | Feature | Summary |
 | --- | --- | --- |
@@ -53,18 +49,9 @@ Use the same sections so documents stay comparable:
 3. **Design** – behavior and the important mechanisms, with file pointers.
 4. **Alternatives considered** – each rejected option and the reason.
 5. **Failure modes** – what breaks, how it is detected and recovered.
-6. **Security** – only when the feature affects the threat model in
-   [SECURITY.md](../../SECURITY.md).
+6. **Security** – only when the feature affects the threat model in [SECURITY.md](../../SECURITY.md).
 7. **Testing** – where the behavior is covered.
 
-Keep documents short. State what the feature does for the user, the design
-and its key decisions with their reasons, the invariants that must hold,
-and where the code lives. Leave out what the code and tests already state
-line by line, edge-case enumerations, history and trivia such as exact
-timeouts; link to another document instead of repeating it.
+Keep documents short. State what the feature does for the user, the design and its key decisions with their reasons, the invariants that must hold, and where the code lives. Leave out what the code and tests already state line by line, edge-case enumerations, history and trivia such as exact timeouts; link to another document instead of repeating it.
 
-On `main`, describe the system as it is. Open questions and planned work are
-tracked in the issue tracker, not in these documents. A feature built in
-stages may have its document describe the goal on its branch, which merges
-once the code matches it. Update the document in the same pull request as
-the behavior it describes.
+On `main`, describe the system as it is. Open questions and planned work are tracked in the issue tracker, not in these documents. A feature built in stages may have its document describe the goal on its branch, which merges once the code matches it. Update the document in the same pull request as the behavior it describes.

@@ -1,32 +1,12 @@
 # Chat protocol recordings
 
-Recordings of coding agents driven headless over their own protocols, one
-JSON object per line, for the chat host's adapters (`backend/features/chat/machine`)
-and the web UI's tests. Every line is `{"dir", "t", "msg"}`: `dir` tells
-who wrote it, as each recording's driver saw it (in `claude/`, `out` is
-what the agent wrote and `in` what the client sent; in `codex/` and
-`acp/`, `out` is what the client sent and `in` what the agent wrote); `t`
-is milliseconds since the file's first message; `msg` is the message as it
-went over the wire.
+Recordings of coding agents driven headless over their own protocols, one JSON object per line, for the chat host's adapters (`backend/features/chat/machine`) and the web UI's tests. Every line is `{"dir", "t", "msg"}`: `dir` tells who wrote it, as each recording's driver saw it (in `claude/`, `out` is what the agent wrote and `in` what the client sent; in `codex/` and `acp/`, `out` is what the client sent and `in` what the agent wrote); `t` is milliseconds since the file's first message; `msg` is the message as it went over the wire.
 
-They were recorded on 2026-11-22 against the user's own sign-ins and
-sanitized: the working directory is `/work`, the home directory
-`/home/user`, the account `user@example.com` of `Example Org`; session,
-message, tool call, request and agent ids are stable fake ids per file;
-thinking signatures and base64 longer than 200 characters are
-placeholders; the user's own skills, commands, custom agents and MCP
-servers (their names, tools, commands and addresses) are placeholders
-(`user-skill-N`, `mcp-command-N`, `custom-agent-N`, `mcp__serverN__toolM`,
-`mcp-server-N`, `mcp-server-N__tool-M`) with their descriptions
-replaced. The rest is as the agents sent it.
+They were recorded on 2026-11-22 against the user's own sign-ins and sanitized: the working directory is `/work`, the home directory `/home/user`, the account `user@example.com` of `Example Org`; session, message, tool call, request and agent ids are stable fake ids per file; thinking signatures and base64 longer than 200 characters are placeholders; the user's own skills, commands, custom agents and MCP servers (their names, tools, commands and addresses) are placeholders (`user-skill-N`, `mcp-command-N`, `custom-agent-N`, `mcp__serverN__toolM`, `mcp-server-N`, `mcp-server-N__tool-M`) with their descriptions replaced. The rest is as the agents sent it.
 
 ## `claude/`: Claude Code 2.1.330, SDK protocol
 
-The CLI started as the TypeScript Agent SDK 0.3.323 starts it
-(`--output-format stream-json --verbose --input-format stream-json
---include-partial-messages --permission-prompt-tool stdio`), with
-`--setting-sources=user,project,local` and the model `haiku`
-(`claude-haiku-5-5`; plan mode ran on `claude-sonnet-5-5`).
+The CLI started as the TypeScript Agent SDK 0.3.323 starts it (`--output-format stream-json --verbose --input-format stream-json --include-partial-messages --permission-prompt-tool stdio`), with `--setting-sources=user,project,local` and the model `haiku` (`claude-haiku-5-5`; plan mode ran on `claude-sonnet-5-5`).
 
 | File | Shows |
 | --- | --- |
@@ -51,9 +31,7 @@ The CLI started as the TypeScript Agent SDK 0.3.323 starts it
 
 ## `codex/`: Codex 0.171.0, `codex app-server --listen stdio://`
 
-Protocol v2 with `experimentalApi`, the model `gpt-6-luna`, effort `low`
-unless a file says otherwise. One file per app-server process; a scenario
-in two processes is `.1` and `.2`.
+Protocol v2 with `experimentalApi`, the model `gpt-6-luna`, effort `low` unless a file says otherwise. One file per app-server process; a scenario in two processes is `.1` and `.2`.
 
 | File | Shows |
 | --- | --- |
@@ -77,16 +55,10 @@ in two processes is `.1` and `.2`.
 
 ## `acp/`: Agent Client Protocol v1 over stdio
 
-The client advertised no file system and no terminal
-(`clientCapabilities {fs: {readTextFile: false, writeTextFile: false},
-terminal: false}`). Each agent's directory has the same scenarios.
+The client advertised no file system and no terminal (`clientCapabilities {fs: {readTextFile: false, writeTextFile: false}, terminal: false}`). Each agent's directory has the same scenarios.
 
-- `kimi/`: Kimi Code 2.7.2, `kimi acp`, the model `kimi-code/k3.1-pro`,
-  thinking `max`.
-- `grok/`: Grok 1.0.92, `grok agent --no-leader stdio`, the model
-  `grok-4.7`, effort `high`. The user's configuration approves everything:
-  the `-always-approve` files show that; the others started their session
-  with `_meta: {"yoloMode": false}` (`02-session-new-yolo-off.jsonl`).
+- `kimi/`: Kimi Code 2.7.2, `kimi acp`, the model `kimi-code/k3.1-pro`, thinking `max`.
+- `grok/`: Grok 1.0.92, `grok agent --no-leader stdio`, the model `grok-4.7`, effort `high`. The user's configuration approves everything: the `-always-approve` files show that; the others started their session with `_meta: {"yoloMode": false}` (`02-session-new-yolo-off.jsonl`).
 
 | File | Shows |
 | --- | --- |

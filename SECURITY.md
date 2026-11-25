@@ -1,17 +1,12 @@
 # Security
 
-veldr gives its users interactive shells, file access and code execution
-on every connected machine, with the permissions of the account running it.
-Treat access to it like ssh access to all those machines.
+veldr gives its users interactive shells, file access and code execution on every connected machine, with the permissions of the account running it. Treat access to it like ssh access to all those machines.
 
 ## Threat model
 
-**Trusted:** the user running the hub, the machines it connects to, the
-reverse proxy and whoever it authenticates.
+**Trusted:** the user running the hub, the machines it connects to, the reverse proxy and whoever it authenticates.
 
-**Not trusted:** other local users on the hub host and on the machines,
-other web pages open in the same browser, the network between browser and
-proxy, and output shown in terminals.
+**Not trusted:** other local users on the hub host and on the machines, other web pages open in the same browser, the network between browser and proxy, and output shown in terminals.
 
 ## What the code enforces
 
@@ -107,72 +102,19 @@ proxy, and output shown in terminals.
 | AI usage: OpenCode's and Antigravity's databases | For the spend of OpenCode's sessions (`opencode*.db` in `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`, or `$OPENCODE_DB`) and Antigravity's conversations (`~/.gemini/{antigravity,antigravity-cli,antigravity-ide}/conversations/*.db`), the agent (and so, for the hub's own machine, a process beside the hub) reads them with the runtime's SQLite (`node:sqlite`, `backend/features/usage/machine/databases.ts`), read-only and with SQL that names only those tables' columns (`message` for OpenCode, not `credential` or `account`; `gen_metadata`, `steps` and `trajectory_metadata_blob` for Antigravity), so what is kept of a row is only the model, provider, tokens, recorded cost, request id, time and workspace directory name, never prompts or replies, and nothing else leaves the machine. OpenCode's `auth.json` and `mcp-auth.json` are not read. Records over the bounds are skipped (OpenCode's over 64 KiB; Antigravity's `gen_metadata` rows over 64 MiB, `steps` over 256 KiB and `trajectory_metadata_blob` over 64 KiB), and at most 300,000 steps are kept for OpenCode or 100,000 generations for Antigravity. The database is opened as follows: a database without a write-ahead log beside it is opened `immutable` (no lock, no file made; read again when it changed meanwhile), one with a log as SQLite's readers read it (a snapshot that never holds the writer up; it shares the log's index `-shm` with the writer, and makes one when the log has none), with no busy wait (a locked database is `busy`); in a worker thread (`machine/sqlworker.ts`), so nothing SQLite waits for holds the node; the database and the files SQLite opens beside it (`-wal`, `-shm`, `-journal`) must be regular files of the user and not links, else SQLite opens nothing and the scan skips the database (a FIFO there, as `$OPENCODE_DB` or `XDG_DATA_HOME` pointing into a directory others can write to could let another user plant, would otherwise wait for a writer); one swapped in after that look holds only the worker, which is ended after 30 s per batch of rows, its thread blocked until the open returns; records over the bounds above are skipped unread (`octet_length`, which reads no content; SQLite before 3.43 measures OpenCode's text by reading it), Antigravity's steps are looked up for at most 64 per generation and 100,000 per conversation, and more steps or generations than kept fail the read (`too_large`); SQLite's own checks fail a damaged file (`damaged`), and the protobuf blobs are decoded comparing every length with what is left (`databases.test.ts`). |
 | AI usage: status pages and files | The hub asks `status.claude.com`, `status.openai.com` and Google's incident feed without credentials every 10 min while the plugin is on; failures are silent. The hub's usage history (in its database `hub[-<instance>]-<host>[-<id>].db`, points of 30 days) and each machine's cost cache (in `machine-<host>.db`, 90 days), both 0600, hold numbers, model names (with OpenCode's provider names) and project directory names, no prompts or output. |
 
-Not provided by veldr: user authentication, TLS, rate limiting, per-user
-authorization. Use the reverse proxy for these.
+Not provided by veldr: user authentication, TLS, rate limiting, per-user authorization. Use the reverse proxy for these.
 
-The desktop app's hub listens on nothing: other processes of the host
-cannot reach it, only the app's windows through its main process, whose
-word makes a request the desktop client's (VS Code's switches, the
-vault's desktop proofs). The macOS DMG and zip are signed ad hoc
-unless the release workflow has the Developer ID secrets, in which case
-they are signed with that identity and notarized; the Windows setup and
-the Linux AppImages and deb packages are not signed. Chromium's sandbox
-stays on everywhere: the app never passes `--no-sandbox`, and on Ubuntu
-24.04 and later the deb installs the AppArmor profile it needs there. The
-integrity of release files rests on `SHA256SUMS` and, for a public
-repository, GitHub build-provenance attestations, both covering the
-archives and every installer. Only the final publish job of that workflow
-holds write permissions; the build jobs read the repository. Every action
-of the workflows is pinned by its full commit id (`.github/workflows/`).
+The desktop app's hub listens on nothing: other processes of the host cannot reach it, only the app's windows through its main process, whose word makes a request the desktop client's (VS Code's switches, the vault's desktop proofs). The macOS DMG and zip are signed ad hoc unless the release workflow has the Developer ID secrets, in which case they are signed with that identity and notarized; the Windows setup and the Linux AppImages and deb packages are not signed. Chromium's sandbox stays on everywhere: the app never passes `--no-sandbox`, and on Ubuntu 24.04 and later the deb installs the AppArmor profile it needs there. The integrity of release files rests on `SHA256SUMS` and, for a public repository, GitHub build-provenance attestations, both covering the archives and every installer. Only the final publish job of that workflow holds write permissions; the build jobs read the repository. Every action of the workflows is pinned by its full commit id (`.github/workflows/`).
 
-On macOS the desktop app's vault unlock secret is sealed with Electron's
-safeStorage, whose key is in the login keychain item `<APP_NAME> Safe
-Storage`, trusted by the build that made it alone; a build without a Team
-ID (signed ad hoc or with the user's own certificate) is another identity
-after every rebuild. The shell moves the item to its own build once
-(`desktop/src/keychain.ts`, `keychain.test.ts`): it reads the old password
-with `/usr/bin/security` (a prompt that names `security`), deletes the old
-item, has safeStorage make a new one and seals every instance's secret
-again. The old password stays in the main process's memory until this
-instance's file is written; a failure puts the old item back, trusted by
-the app alone, with the password on `security -i`'s standard input, never
-in an argument. `security` and `codesign` run by absolute path, bounded in
-time and output. Always Allow on that prompt would let any program read
-the old item through `security` until the shell deletes it a moment
-later.
+On macOS the desktop app's vault unlock secret is sealed with Electron's safeStorage, whose key is in the login keychain item `<APP_NAME> Safe Storage`, trusted by the build that made it alone; a build without a Team ID (signed ad hoc or with the user's own certificate) is another identity after every rebuild. The shell moves the item to its own build once (`desktop/src/keychain.ts`, `keychain.test.ts`): it reads the old password with `/usr/bin/security` (a prompt that names `security`), deletes the old item, has safeStorage make a new one and seals every instance's secret again. The old password stays in the main process's memory until this instance's file is written; a failure puts the old item back, trusted by the app alone, with the password on `security -i`'s standard input, never in an argument. `security` and `codesign` run by absolute path, bounded in time and output. Always Allow on that prompt would let any program read the old item through `security` until the shell deletes it a moment later.
 
-Claude Code receives `--allow-dangerously-skip-permissions` only when a
-full-access start or mode change passed the host's existing policy gate.
-A mode change ends the old process before starting its replacement; a new
-chat before its first turn reuses its own session id rather than resuming
-a conversation that has not been saved (`backend/features/chat/machine/claude/session.test.ts`).
-Existing conversations are resumed, and busy turns still refuse the restart
-(`backend/features/chat/machine/claude/session.test.ts`); no agent configuration is written.
+Claude Code receives `--allow-dangerously-skip-permissions` only when a full-access start or mode change passed the host's existing policy gate. A mode change ends the old process before starting its replacement; a new chat before its first turn reuses its own session id rather than resuming a conversation that has not been saved (`backend/features/chat/machine/claude/session.test.ts`). Existing conversations are resumed, and busy turns still refuse the restart (`backend/features/chat/machine/claude/session.test.ts`); no agent configuration is written.
 
-Builds of local changes carry their build time in their version only to
-be told apart: a host of another such build is never asked to make way
-(`backend/features/chat/machine.test.ts`); the page reminds the user to restart it, through
-the existing `POST host/stop` (a mutating, audited route, refused on a
-read-only hub and while a chat works or waits). The terminal core and
-the user's terminals keep running.
+Builds of local changes carry their build time in their version only to be told apart: a host of another such build is never asked to make way (`backend/features/chat/machine.test.ts`); the page reminds the user to restart it, through the existing `POST host/stop` (a mutating, audited route, refused on a read-only hub and while a chat works or waits). The terminal core and the user's terminals keep running.
 
 ## Embedded herdr-core
 
-Each executable carries upstream herdr-core of its platform for the agent
-to install on machines ([21](docs/features/21-terminal-core.md)). The
-build downloads the release archives (`backend/scripts/fetch-hc.ts`) and
-checks them against SHA-256 digests pinned in `backend/scripts/hcdist.ts`;
-it fails on a mismatch. The executable is taken from the same bytes that
-were verified, as the one regular file named `herdr-core` at the archive's
-root (64 MiB at most; a link, a directory or a second entry of that name
-is refused), and is never run during a build
-(`backend/scripts/fetch-hc.test.ts`). The build records the SHA-256 of
-every platform's uncompressed executable (`machine/hc.json`); the hub
-has a machine's node install the copy its build carries only when its
-digest is the one recorded for the platform, and the node accepts only a
-file with that digest (`backend/machine/agent.test.ts`;
-`backend/features/terminals/terminals.test.ts`:
-`installs and starts the build’s terminal core`).
+Each executable carries upstream herdr-core of its platform for the agent to install on machines ([21](docs/features/21-terminal-core.md)). The build downloads the release archives (`backend/scripts/fetch-hc.ts`) and checks them against SHA-256 digests pinned in `backend/scripts/hcdist.ts`; it fails on a mismatch. The executable is taken from the same bytes that were verified, as the one regular file named `herdr-core` at the archive's root (64 MiB at most; a link, a directory or a second entry of that name is refused), and is never run during a build (`backend/scripts/fetch-hc.test.ts`). The build records the SHA-256 of every platform's uncompressed executable (`machine/hc.json`); the hub has a machine's node install the copy its build carries only when its digest is the one recorded for the platform, and the node accepts only a file with that digest (`backend/machine/agent.test.ts`; `backend/features/terminals/terminals.test.ts`: `installs and starts the build’s terminal core`).
 
 ## Supported versions
 
@@ -180,8 +122,4 @@ Security fixes go to the latest release and to `main`.
 
 ## Reporting a vulnerability
 
-Please report privately instead of opening a public issue: use the
-repository host's private vulnerability reporting ("Report a vulnerability"
-under the Security tab) or contact the maintainers. Include the version
-(`veldr version`), configuration flags and steps to reproduce. You will
-get an acknowledgement within a few days.
+Please report privately instead of opening a public issue: use the repository host's private vulnerability reporting ("Report a vulnerability" under the Security tab) or contact the maintainers. Include the version (`veldr version`), configuration flags and steps to reproduce. You will get an acknowledgement within a few days.

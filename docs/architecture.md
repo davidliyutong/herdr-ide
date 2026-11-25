@@ -17,30 +17,11 @@ desktop app (Electron shell) ──MessagePorts, no TCP──▶  ├─ kernel:
                                                                                                     └─ vault.sock ◀── the vault's MCP server (`<slug>-mcp`) ◀──stdio── coding agents' CLIs
 ```
 
-Each machine's agent sessions are served by its node (`veldr node`), a
-process of its own listening on a socket in the instance's runtime
-directory on that host (`backend/shared/host/hostdirs.ts`; a home several hosts share
-keeps each host's sockets, locks and executables apart,
-[40](features/40-shared-homes.md)):
-the hub reaches the local machine's node through that socket, a remote
-machine's over ssh with `node dial`, so both paths run the same code
-([39](features/39-nodes.md)). The agent builds for
-Linux and macOS only. A hub on Windows (the desktop app's) lists its local
-machine with the code `local_unsupported` and reaches SSH machines only
-([02](features/02-multi-machine-transport.md)).
+Each machine's agent sessions are served by its node (`veldr node`), a process of its own listening on a socket in the instance's runtime directory on that host (`backend/shared/host/hostdirs.ts`; a home several hosts share keeps each host's sockets, locks and executables apart, [40](features/40-shared-homes.md)): the hub reaches the local machine's node through that socket, a remote machine's over ssh with `node dial`, so both paths run the same code ([39](features/39-nodes.md)). The agent builds for Linux and macOS only. A hub on Windows (the desktop app's) lists its local machine with the code `local_unsupported` and reaches SSH machines only ([02](features/02-multi-machine-transport.md)).
 
 ## Code map
 
-The hub is TypeScript under `backend/` (its
-[README](../backend/README.md) has the layers and their rules), built with
-Bun into one executable per platform, which is the hub and the
-TypeScript machine side (`backend/machine`, `backend/hosts/machine`, the
-features' `machine.ts`) of its platform (the machine build): machines
-download their platform's from the hub's release, checked against its
-`SHA256SUMS`, or the hub uploads it
-([42](features/42-typescript-backend.md)). Earlier releases' machine
-side was a Go program; a node of this build takes over from a Go node
-still running on a machine.
+The hub is TypeScript under `backend/` (its [README](../backend/README.md) has the layers and their rules), built with Bun into one executable per platform, which is the hub and the TypeScript machine side (`backend/machine`, `backend/hosts/machine`, the features' `machine.ts`) of its platform (the machine build): machines download their platform's from the hub's release, checked against its `SHA256SUMS`, or the hub uploads it ([42](features/42-typescript-backend.md)). Earlier releases' machine side was a Go program; a node of this build takes over from a Go node still running on a machine.
 
 | Directory | Role |
 | --- | --- |
@@ -62,44 +43,17 @@ still running on a machine.
 
 ## Desktop app
 
-The Electron shell (`desktop/src/main.ts`) runs the hub in a utility
-process (`backend/hosts/electron`, bundled as `desktop/dist/hub.mjs`),
-instance `desktop` and the default namespace on machines
-([39](features/39-nodes.md)), and listens on nothing
-([42](features/42-typescript-backend.md)):
+The Electron shell (`desktop/src/main.ts`) runs the hub in a utility process (`backend/hosts/electron`, bundled as `desktop/dist/hub.mjs`), instance `desktop` and the default namespace on machines ([39](features/39-nodes.md)), and listens on nothing ([42](features/42-typescript-backend.md)):
 
-- The hub starts with a message on its parent port: the instance, the
-  payloads' directories (the app's resources) and the verify key, which
-  signs the user's system prompt answers (Touch ID, Windows Hello) for
-  the vault and never leaves the shell's main process otherwise
-  ([30](features/30-variable-vault.md)).
-- The app's windows load `https://<slug>.localhost/`, which their session
-  intercepts: each request goes to the hub over a MessagePort
-  (`backend/hosts/electron/bridge.ts`), its body and the response's in
-  chunks with credit both ways. WebSockets are channels, MessagePorts the
-  main process makes for a frame of that origin (`desktopChannels`; the
-  web UI's `openChannel`, VS Code's frames' WebSocket). Requests in process
-  are the desktop client's; their Origin is the one Electron reports for
-  the frame or worker that made them (`initiatorOrigin`), so the hub's
-  guard refuses a page of another origin in the app's session.
-- A crashed hub is started again with the windows kept (at most 3 times
-  a minute); quitting asks it to stop, and kills it after 20 s.
+- The hub starts with a message on its parent port: the instance, the payloads' directories (the app's resources) and the verify key, which signs the user's system prompt answers (Touch ID, Windows Hello) for the vault and never leaves the shell's main process otherwise ([30](features/30-variable-vault.md)).
+- The app's windows load `https://<slug>.localhost/`, which their session intercepts: each request goes to the hub over a MessagePort (`backend/hosts/electron/bridge.ts`), its body and the response's in chunks with credit both ways. WebSockets are channels, MessagePorts the main process makes for a frame of that origin (`desktopChannels`; the web UI's `openChannel`, VS Code's frames' WebSocket). Requests in process are the desktop client's; their Origin is the one Electron reports for the frame or worker that made them (`initiatorOrigin`), so the hub's guard refuses a page of another origin in the app's session.
+- A crashed hub is started again with the windows kept (at most 3 times a minute); quitting asks it to stop, and kills it after 20 s.
 
-The shell is a client of its hub, reached directly: it follows settings
-and keybindings over `/ws` for the title bar theme, menu language, zoom
-and the menu's keys. The renderer is the web UI, sandboxed, with no Node
-APIs; its preload exposes `desktopShell` to the main window's page and
-`desktopChannels` to each frame of the app's origin. On macOS the menu acts only on keys the page did not
-handle; on Windows and Linux every key goes to the page
-([04](features/04-layout-and-keyboard.md)). Packaging, menus and the
-preload's surface are in [16](features/16-desktop-packaging.md).
+The shell is a client of its hub, reached directly: it follows settings and keybindings over `/ws` for the title bar theme, menu language, zoom and the menu's keys. The renderer is the web UI, sandboxed, with no Node APIs; its preload exposes `desktopShell` to the main window's page and `desktopChannels` to each frame of the app's origin. On macOS the menu acts only on keys the page did not handle; on Windows and Linux every key goes to the page ([04](features/04-layout-and-keyboard.md)). Packaging, menus and the preload's surface are in [16](features/16-desktop-packaging.md).
 
 ## Hub ↔ agent protocol (`backend/shared/proto/agentproto`)
 
-One yamux session per machine over ssh stdio and `node dial`, or the
-local node's socket; the connection's first line, before yamux, is a
-`NodeHello` (`serve` with the ssh session's `SSH_CONNECTION`, or `stop`). Every stream starts with a JSON header line from the opener and a
-JSON reply line; after a successful reply it carries op-specific bytes.
+One yamux session per machine over ssh stdio and `node dial`, or the local node's socket; the connection's first line, before yamux, is a `NodeHello` (`serve` with the ssh session's `SSH_CONNECTION`, or `stop`). Every stream starts with a JSON header line from the opener and a JSON reply line; after a successful reply it carries op-specific bytes.
 
 | Op | Direction | Purpose |
 | --- | --- | --- |
@@ -122,26 +76,15 @@ JSON reply line; after a successful reply it carries op-specific bytes.
 
 Rules:
 
-- Headers and replies are bounded to 1 MiB. Payloads over 32 KiB
-  (`MaxInline`) follow the line with a length field, at most 64 MiB.
-- The hub waits for a reply until the request's deadline, else 60 s
-  (`transport.ReplyTimeout`). A plugin stream stays bound to the caller's
-  context after the reply.
-- yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
-  (`[u32 length][data]…[0]`).
-- Hub and agent come from the same build (the agent is installed by content
-  hash), so there is no version negotiation. Extend by adding fields and
-  ops; never reuse them.
-- The machine side speaks the wire of the Go program of earlier releases:
-  a node of this build takes over from a Go node still running on a
-  machine. It answers an op or plugin it does not serve as an unknown
-  plugin (`unknown_plugin`).
+- Headers and replies are bounded to 1 MiB. Payloads over 32 KiB (`MaxInline`) follow the line with a length field, at most 64 MiB.
+- The hub waits for a reply until the request's deadline, else 60 s (`transport.ReplyTimeout`). A plugin stream stays bound to the caller's context after the reply.
+- yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing (`[u32 length][data]…[0]`).
+- Hub and agent come from the same build (the agent is installed by content hash), so there is no version negotiation. Extend by adding fields and ops; never reuse them.
+- The machine side speaks the wire of the Go program of earlier releases: a node of this build takes over from a Go node still running on a machine. It answers an op or plugin it does not serve as an unknown plugin (`unknown_plugin`).
 
 ## Event channel (`/ws`)
 
-Every client (browser page, desktop page, desktop shell) holds one. Text
-frames are JSON with a `t` field. Terminals have their own protocol
-(below).
+Every client (browser page, desktop page, desktop shell) holds one. Text frames are JSON with a `t` field. Terminals have their own protocol (below).
 
 | Client → hub | Hub → client |
 | --- | --- |
@@ -154,21 +97,13 @@ frames are JSON with a `t` field. Terminals have their own protocol
 | – | `settings {values, problems}`, `keybindings {user, effective, conflicts, problems}` after every change ([13](features/13-settings-and-appearance.md)) |
 | – | `plugin {plugin, m, data}`: a plugin's message, e.g. the vault's approvals or the chats' states ([27](features/27-plugins.md)) |
 
-HTTP endpoints are listed in
-[reference.md](reference.md#http-and-websocket-endpoints). Plugins' routes
-are below `/api/p/<plugin>/` and `/api/m/{id}/p/<plugin>/` and answer
-`404 plugin_disabled` while the plugin is off.
+HTTP endpoints are listed in [reference.md](reference.md#http-and-websocket-endpoints). Plugins' routes are below `/api/p/<plugin>/` and `/api/m/{id}/p/<plugin>/` and answer `404 plugin_disabled` while the plugin is off.
 
-The server never produces user-facing text: it sends codes that the UI
-translates.
+The server never produces user-facing text: it sends codes that the UI translates.
 
 ## Terminal clients ↔ hub protocol (`/api/v1/term`)
 
-Clients that draw terminals themselves use the WebSocket `/api/v1/term`,
-behind the same guards as `/ws`. It reaches each machine's terminal core
-([21](features/21-terminal-core.md)); the protocol and its reasoning are in
-[22](features/22-terminal-protocol.md). Text frames are JSON with a `t`
-field; binary frames are `[stream u32 LE][kind u8][payload]`.
+Clients that draw terminals themselves use the WebSocket `/api/v1/term`, behind the same guards as `/ws`. It reaches each machine's terminal core ([21](features/21-terminal-core.md)); the protocol and its reasoning are in [22](features/22-terminal-protocol.md). Text frames are JSON with a `t` field; binary frames are `[stream u32 LE][kind u8][payload]`.
 
 | Client → hub | Hub → client |
 | --- | --- |
@@ -179,86 +114,35 @@ field; binary frames are `[stream u32 LE][kind u8][payload]`.
 | binary kind 0 (input), kind 6 (automatic answers) | binary kind 0 (output), kind 3 (an observed terminal's new grid) |
 | `ping {rid}` | `pong {rid}` |
 
-`ack` returns stream credit for bytes drawn. When the last client that set
-a live terminal's size leaves, the hub keeps that attachment open so the
-terminal keeps its size instead of herdr-core's headless one.
+`ack` returns stream credit for bytes drawn. When the last client that set a live terminal's size leaves, the hub keeps that attachment open so the terminal keeps its size instead of herdr-core's headless one.
 
-Terminal labels: the UI sets `name` and `closing` (Undo Close,
-[04](features/04-layout-and-keyboard.md)); the hub sets `seen` for an
-acknowledged `done` turn ([25](features/25-agent-detection.md)).
+Terminal labels: the UI sets `name` and `closing` (Undo Close, [04](features/04-layout-and-keyboard.md)); the hub sets `seen` for an acknowledged `done` turn ([25](features/25-agent-detection.md)).
 
-The product's own terminals (the chat host, `agentproto.Hidden`) and other
-machines' terminals are in no snapshot, event or list; a call or attach
-naming one is answered as for a missing terminal and audited as
-`denied.term`.
+The product's own terminals (the chat host, `agentproto.Hidden`) and other machines' terminals are in no snapshot, event or list; a call or attach naming one is answered as for a missing terminal and audited as `denied.term`.
 
 ## Chats (`backend/shared/proto/chatproto`, `backend/features/chat`)
 
-A machine's chat host runs coding agents headless and keeps their
-conversations ([37](features/37-agent-chats.md)). The path from a page:
+A machine's chat host runs coding agents headless and keeps their conversations ([37](features/37-agent-chats.md)). The path from a page:
 
-1. **Page ↔ hub**: one WebSocket per page, `GET /api/p/chat/ws`, JSON
-   frames: `attach`, `detach` and `command` from the page; `attached`,
-   `event`, `detached` and `ack` from the hub, with bounded subscriptions
-   and queues (`backend/features/chat/page.ts`, mirrored by
-   `web/src/plugins/chat/protocol.ts`). Routes below `/api/m/{id}/p/chat/`
-   manage chats ([reference](reference.md#http-and-websocket-endpoints)).
-2. **Hub ↔ agent**: each subscription, request and watch is a `plugin`
-   stream (`chat`, action `open`) that then carries the host's socket. The
-   machine side starts the host as a hidden terminal of the instance's
-   terminal core when none serves, and asks a host of an older build to
-   make way.
-3. **Hub ↔ chat host**: `chatproto` JSON lines on `chat.sock` in the runtime
-   directory: a
-   hello, one request and its response, then for `attach` the chat's stored
-   and live events and for `watch` the chats' states.
-4. **Chat host ↔ agent**: one process per live chat, through its adapter
-   on the agent's standard input and output: Claude Code's stream-json,
-   Codex's app-server JSON-RPC, or ACP.
-   The host (`backend/features/chat/machine/host`, the `chat-host`
-   command of the executable) keeps the chats' journal, its statements run by a worker thread; its adapters
-   implement `backend/features/chat/machine/adapter.ts` (ACP:
-   `machine/acp`, on `@agentclientprotocol/sdk`; Codex's: `machine/codex`,
-   on types generated from its app-server's schema; Claude Code's:
-   `machine/claude`, on `@anthropic-ai/claude-agent-sdk`, which no
-   executable carries: the hub has a machine fetch it into
-   `<data>/claude-agent-sdk/<version>` before a Claude Code chat starts,
-   and the host loads it from there,
-   [42](features/42-typescript-backend.md#claude-code)).
+1. **Page ↔ hub**: one WebSocket per page, `GET /api/p/chat/ws`, JSON frames: `attach`, `detach` and `command` from the page; `attached`, `event`, `detached` and `ack` from the hub, with bounded subscriptions and queues (`backend/features/chat/page.ts`, mirrored by `web/src/plugins/chat/protocol.ts`). Routes below `/api/m/{id}/p/chat/` manage chats ([reference](reference.md#http-and-websocket-endpoints)).
+2. **Hub ↔ agent**: each subscription, request and watch is a `plugin` stream (`chat`, action `open`) that then carries the host's socket. The machine side starts the host as a hidden terminal of the instance's terminal core when none serves, and asks a host of an older build to make way.
+3. **Hub ↔ chat host**: `chatproto` JSON lines on `chat.sock` in the runtime directory: a hello, one request and its response, then for `attach` the chat's stored and live events and for `watch` the chats' states.
+4. **Chat host ↔ agent**: one process per live chat, through its adapter on the agent's standard input and output: Claude Code's stream-json, Codex's app-server JSON-RPC, or ACP. The host (`backend/features/chat/machine/host`, the `chat-host` command of the executable) keeps the chats' journal, its statements run by a worker thread; its adapters implement `backend/features/chat/machine/adapter.ts` (ACP: `machine/acp`, on `@agentclientprotocol/sdk`; Codex's: `machine/codex`, on types generated from its app-server's schema; Claude Code's: `machine/claude`, on `@anthropic-ai/claude-agent-sdk`, which no executable carries: the hub has a machine fetch it into `<data>/claude-agent-sdk/<version>` before a Claude Code chat starts, and the host loads it from there, [42](features/42-typescript-backend.md#claude-code)).
 
 ## code-server lifecycle
 
-`CodeServers.ensure` (hub, `backend/features/vscode/provision.ts`), by
-the `codeServer.install` setting:
+`CodeServers.ensure` (hub, `backend/features/vscode/provision.ts`), by the `codeServer.install` setting:
 
-1. Use an installed code-server, have the machine download the release
-   (checked against the hub's digest), or upload one the hub resolved
-   (seed → cache → download, SHA-256 verified; the TypeScript machine side
-   checks the upload against the same digest before unpacking it). The
-   first two fall back to the last.
+1. Use an installed code-server, have the machine download the release (checked against the hub's digest), or upload one the hub resolved (seed → cache → download, SHA-256 verified; the TypeScript machine side checks the upload against the same digest before unpacking it). The first two fall back to the last.
 2. Install the bridge and default extensions.
 3. Start, reusing a running code-server only if it serves the workbench.
 
-The node owns the process (`cs.pid` in the runtime directory) for every hub it serves, stops it
-on exit, hands it to a node that takes over and reaps orphans. A hub releases it after `--code-server-idle`
-without proxied WebSockets, which stops it unless another hub has a
-connection to it, and stops it when VS Code is switched off for every kind
-of client
-([05](features/05-vscode-panes.md),
-[deployment](deployment.md#remote-resources)).
+The node owns the process (`cs.pid` in the runtime directory) for every hub it serves, stops it on exit, hands it to a node that takes over and reaps orphans. A hub releases it after `--code-server-idle` without proxied WebSockets, which stops it unless another hub has a connection to it, and stops it when VS Code is switched off for every kind of client ([05](features/05-vscode-panes.md), [deployment](deployment.md#remote-resources)).
 
 ## Names and renames
 
-Runtime identifiers derive from `backend/shared/lib/brand.ts`,
-`web/src/brand.ts` and `extensions/veldr-bridge/src/brand.ts`, kept in
-sync by `backend/shared/lib/brand.test.ts`; `scripts/check.sh` rejects hardcoded names.
-`scripts/rename.sh NEW` renames the project; the renamed version starts with
-namespaces of its own ([11](features/11-naming-and-renames.md)).
+Runtime identifiers derive from `backend/shared/lib/brand.ts`, `web/src/brand.ts` and `extensions/veldr-bridge/src/brand.ts`, kept in sync by `backend/shared/lib/brand.test.ts`; `scripts/check.sh` rejects hardcoded names. `scripts/rename.sh NEW` renames the project; the renamed version starts with namespaces of its own ([11](features/11-naming-and-renames.md)).
 
 ## Internationalization
 
-`web/src/i18n/en.ts` defines every key; other locales are typed against it,
-so a missing key fails the build. Plugins keep messages in
-`web/src/plugins/<id>/i18n`. The desktop menu uses the same strings. The VS
-Code extension uses `package.nls*.json` and `l10n/`. Comments, logs and
-protocol messages are English ([12](features/12-internationalization.md)).
+`web/src/i18n/en.ts` defines every key; other locales are typed against it, so a missing key fails the build. Plugins keep messages in `web/src/plugins/<id>/i18n`. The desktop menu uses the same strings. The VS Code extension uses `package.nls*.json` and `l10n/`. Comments, logs and protocol messages are English ([12](features/12-internationalization.md)).

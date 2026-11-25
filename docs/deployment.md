@@ -1,8 +1,6 @@
 # Deployment
 
-veldr runs on one host (your laptop or an always-on machine) and is used
-from browsers or its desktop app. It reaches its machines over ssh; nothing
-listens on the machines.
+veldr runs on one host (your laptop or an always-on machine) and is used from browsers or its desktop app. It reaches its machines over ssh; nothing listens on the machines.
 
 - [Local use](#local-use)
 - [Desktop app](#desktop-app)
@@ -20,64 +18,25 @@ cd dist/packages/veldr-$(scripts/platform.sh)
 ./veldr    # http://127.0.0.1:7780
 ```
 
-The hub listens on `127.0.0.1:7780` and the same port on `::1`. Open it as
-`http://localhost:7780` if you want biometrics for the variable vault:
-browsers keep no WebAuthn credential for an IP address
-([30](features/30-variable-vault.md)).
+The hub listens on `127.0.0.1:7780` and the same port on `::1`. Open it as `http://localhost:7780` if you want biometrics for the variable vault: browsers keep no WebAuthn credential for an IP address ([30](features/30-variable-vault.md)).
 
-Release archives (`dist/release/`) are for Linux (amd64 and arm64, each
-for glibc and for musl) and macOS (amd64 and arm64) and include the
-licenses. On Windows the hub runs only inside the
-[desktop app](#desktop-app), in process, and reaches SSH machines only.
+Release archives (`dist/release/`) are for Linux (amd64 and arm64, each for glibc and for musl) and macOS (amd64 and arm64) and include the licenses. On Windows the hub runs only inside the [desktop app](#desktop-app), in process, and reaches SSH machines only.
 
-The hub is one executable built with Bun from `backend/` (about 110–135
-MiB per platform: the Bun runtime and what it embeds;
-[42](features/42-typescript-backend.md#the-machine-side) has the sizes).
-What the hub embeds:
+The hub is one executable built with Bun from `backend/` (about 110–135 MiB per platform: the Bun runtime and what it embeds; [42](features/42-typescript-backend.md#the-machine-side) has the sizes). What the hub embeds:
 
-- The web UI, the VS Code bridge and the machine side of its own platform:
-  the executable is that platform's machine build too
-  ([42](features/42-typescript-backend.md)), the hub and the machine side
-  (`veldr node`) with its platform's herdr-core and, on Linux, its video
-  encoder, for Linux (amd64, arm64, each for glibc and for musl) and macOS
-  (amd64, arm64); machines of other platforms get theirs from the release
-  ([air-gapped networks](#air-gapped-networks)).
-- herdr-core 0.1.21 (about 12 MB), the terminal core installed on machines
-  ([21](features/21-terminal-core.md)): the executable's own platform's,
-  with the digests of the Linux and macOS ones on amd64 and arm64.
-  `scripts/build.sh` runs `backend/scripts/fetch-hc.ts`, which downloads
-  the archives from `releases.herdr.dev` (or reuses `dist/hc/`) and
-  verifies them against the digests pinned in `backend/scripts/hcdist.ts`;
-  the build fails
-  otherwise. `scripts/build.sh` stages everything the hub embeds in
-  `dist/payload` first (herdr-core in `dist/machines-hc`); a hub run from
-  the sources (`make dev-hub`) reads `dist/payload`, where it stages this
-  host's executable.
-- The video encoder for program windows on Linux machines
-  ([14](features/14-gui-windows.md)), when `scripts/build-ffmpeg.sh`
-  (Docker) built it into `dist/ffmpeg/`. Releases require it
-  (`REQUIRE_ENCODER=1`); without it, windows are sent as pictures.
+- The web UI, the VS Code bridge and the machine side of its own platform: the executable is that platform's machine build too ([42](features/42-typescript-backend.md)), the hub and the machine side (`veldr node`) with its platform's herdr-core and, on Linux, its video encoder, for Linux (amd64, arm64, each for glibc and for musl) and macOS (amd64, arm64); machines of other platforms get theirs from the release ([air-gapped networks](#air-gapped-networks)).
+- herdr-core 0.1.21 (about 12 MB), the terminal core installed on machines ([21](features/21-terminal-core.md)): the executable's own platform's, with the digests of the Linux and macOS ones on amd64 and arm64. `scripts/build.sh` runs `backend/scripts/fetch-hc.ts`, which downloads the archives from `releases.herdr.dev` (or reuses `dist/hc/`) and verifies them against the digests pinned in `backend/scripts/hcdist.ts`; the build fails otherwise. `scripts/build.sh` stages everything the hub embeds in `dist/payload` first (herdr-core in `dist/machines-hc`); a hub run from the sources (`make dev-hub`) reads `dist/payload`, where it stages this host's executable.
+- The video encoder for program windows on Linux machines ([14](features/14-gui-windows.md)), when `scripts/build-ffmpeg.sh` (Docker) built it into `dist/ffmpeg/`. Releases require it (`REQUIRE_ENCODER=1`); without it, windows are sent as pictures.
 
-Nothing needs to be installed on machines beforehand. Add SSH machines with
-**Add machine…** in the sidebar, or for one run with `--ssh`. The machines file is listed
-in [reference](reference.md#files-and-directories).
+Nothing needs to be installed on machines beforehand. Add SSH machines with **Add machine…** in the sidebar, or for one run with `--ssh`. The machines file is listed in [reference](reference.md#files-and-directories).
 
-veldr uses OpenSSH with your `~/.ssh/config` in BatchMode. A machine
-that needs a password, 2FA or a host-key confirmation shows **Sign-in
-required**; **Sign in…** opens a terminal for it, and later connections
-reuse that ssh ControlMaster. Windows' OpenSSH has no ControlMaster, so a
-hub there has no sign-in ([Windows](#windows)).
+veldr uses OpenSSH with your `~/.ssh/config` in BatchMode. A machine that needs a password, 2FA or a host-key confirmation shows **Sign-in required**; **Sign in…** opens a terminal for it, and later connections reuse that ssh ControlMaster. Windows' OpenSSH has no ControlMaster, so a hub there has no sign-in ([Windows](#windows)).
 
-Several browser tabs and the desktop app can show the same machines at
-once. They share each machine's layout
-([04](features/04-layout-and-keyboard.md)); a terminal takes the size of
-the client that used it last.
+Several browser tabs and the desktop app can show the same machines at once. They share each machine's layout ([04](features/04-layout-and-keyboard.md)); a terminal takes the size of the client that used it last.
 
 ## Desktop app
 
-The desktop app is the web UI in an Electron window with a hub of its own,
-for macOS (Apple Silicon and Intel), Windows (x64) and Linux (x64 and arm64)
-([16](features/16-desktop-packaging.md)). Each GitHub release attaches:
+The desktop app is the web UI in an Electron window with a hub of its own, for macOS (Apple Silicon and Intel), Windows (x64) and Linux (x64 and arm64) ([16](features/16-desktop-packaging.md)). Each GitHub release attaches:
 
 | System | Files |
 | --- | --- |
@@ -85,12 +44,7 @@ for macOS (Apple Silicon and Intel), Windows (x64) and Linux (x64 and arm64)
 | Windows | `veldr-<version>-win-x64.exe` (setup) |
 | Linux | `veldr-<version>-linux-amd64.deb`, `-linux-arm64.deb`, `-linux-x86_64.AppImage`, `-linux-arm64.AppImage` |
 
-All are listed in `SHA256SUMS`. Check the digest
-(`shasum -a 256 -c SHA256SUMS --ignore-missing`; on Windows `Get-FileHash`)
-and, for a public repository, the provenance
-(`gh attestation verify <file> --repo <owner>/<repo>`) before the first
-launch. There are no automatic updates; install a newer release over the
-old one.
+All are listed in `SHA256SUMS`. Check the digest (`shasum -a 256 -c SHA256SUMS --ignore-missing`; on Windows `Get-FileHash`) and, for a public repository, the provenance (`gh attestation verify <file> --repo <owner>/<repo>`) before the first launch. There are no automatic updates; install a newer release over the old one.
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
@@ -102,51 +56,27 @@ old one.
 | Closing the main window | app stays in the Dock | quits | quits |
 | Signature | ad hoc, or Developer ID and notarized | none | none |
 
-The app's hub runs inside the app (an Electron utility process) and
-listens on nothing: its windows reach it at `https://veldr.localhost`,
-which only the app serves. It has instance `desktop` for its own
-settings, vault and machines list, separate from the CLI default and
-`dev`; on every machine it uses the default namespace (`~/.veldr`), the
-same terminals and chats as a hub of the default instance
-([39](features/39-nodes.md)):
+The app's hub runs inside the app (an Electron utility process) and listens on nothing: its windows reach it at `https://veldr.localhost`, which only the app serves. It has instance `desktop` for its own settings, vault and machines list, separate from the CLI default and `dev`; on every machine it uses the default namespace (`~/.veldr`), the same terminals and chats as a hub of the default instance ([39](features/39-nodes.md)):
 
-- A hub that crashes is started again with the windows kept; one that
-  keeps crashing (four times a minute) is reported and the app quits.
-- What the page stores per browser (UI preferences, transfer history) was
-  kept for `http://127.0.0.1:7781` by versions that ran the hub on that
-  port; the app starts with it empty once.
+- A hub that crashes is started again with the windows kept; one that keeps crashing (four times a minute) is reported and the app quits.
+- What the page stores per browser (UI preferences, transfer history) was kept for `http://127.0.0.1:7781` by versions that ran the hub on that port; the app starts with it empty once.
 - Opening the app twice focuses the existing window.
 - Quitting stops its hub and agents, not the machines' terminal cores.
-- External HTTP(S) links open in the default browser; other URL schemes
-  are refused.
+- External HTTP(S) links open in the default browser; other URL schemes are refused.
 - ssh is the system's OpenSSH with the user's configuration.
 
 ### macOS
 
-Drag the app from the DMG (or zip) into Applications. A release without the
-Developer ID secrets is signed ad hoc and Gatekeeper refuses its first
-launch. Allow it once: on macOS 14 and earlier Control-click → **Open**; on
-macOS 15 and later **Open Anyway** under System Settings → Privacy &
-Security; or `xattr -dr com.apple.quarantine /Applications/veldr.app`.
-To uninstall, move the app to the Trash (its files stay).
+Drag the app from the DMG (or zip) into Applications. A release without the Developer ID secrets is signed ad hoc and Gatekeeper refuses its first launch. Allow it once: on macOS 14 and earlier Control-click → **Open**; on macOS 15 and later **Open Anyway** under System Settings → Privacy & Security; or `xattr -dr com.apple.quarantine /Applications/veldr.app`. To uninstall, move the app to the Trash (its files stay).
 
-**Full Disk Access.** macOS keeps programs out of other apps' data and asks
-before they open Desktop, Documents, Downloads or external disks. Two
-programs need the grant:
+**Full Disk Access.** macOS keeps programs out of other apps' data and asks before they open Desktop, Documents, Downloads or external disks. Two programs need the grant:
 
 - the app, for the file browser, uploads, downloads and VS Code;
-- herdr-core (`~/.veldr/hosts/<host>/hc/herdr-core`), which macOS holds
-  responsible for the terminals' programs.
+- herdr-core (`~/.veldr/hosts/<host>/hc/herdr-core`), which macOS holds responsible for the terminals' programs.
 
-**Settings → Terminal → Permissions → Full Disk Access** shows both and
-opens System Settings. A grant applies to processes started afterwards:
-quit and reopen the app, restart the terminal service and open new
-terminals. An ad hoc build's grant is for that exact build; after updating
-it, remove the entry and add it again. Developer ID builds and herdr-core
-keep their grant across updates.
+**Settings → Terminal → Permissions → Full Disk Access** shows both and opens System Settings. A grant applies to processes started afterwards: quit and reopen the app, restart the terminal service and open new terminals. An ad hoc build's grant is for that exact build; after updating it, remove the entry and add it again. Developer ID builds and herdr-core keep their grant across updates.
 
-Finder launches put `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`
-and system paths on the hub's PATH. Shell startup files are not run.
+Finder launches put `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and system paths on the hub's PATH. Shell startup files are not run.
 
 To build on a Mac (Bun, Node.js 22.12+, pnpm):
 
@@ -158,28 +88,15 @@ ARCH=arm64 make desktop-dist            # Apple Silicon
 make desktop-install                    # host-architecture .app into /Applications
 ```
 
-Local builds are signed ad hoc. With `CSC_LINK` and `CSC_KEY_PASSWORD` (or
-`CSC_NAME`) they get a Developer ID signature, and with `APPLE_ID`,
-`APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` they are notarized
-([reference](reference.md#environment-variables)).
+Local builds are signed ad hoc. With `CSC_LINK` and `CSC_KEY_PASSWORD` (or `CSC_NAME`) they get a Developer ID signature, and with `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` they are notarized ([reference](reference.md#environment-variables)).
 
-`make desktop-install` copies the build over `/Applications/veldr.app`
-(`INSTALL_DIR` picks another folder). A running copy is quit first and
-reopened after; if it does not quit within 30 s nothing is installed. The
-new copy is assembled beside the old one, so a failure leaves the old app.
+`make desktop-install` copies the build over `/Applications/veldr.app` (`INSTALL_DIR` picks another folder). A running copy is quit first and reopened after; if it does not quit within 30 s nothing is installed. The new copy is assembled beside the old one, so a failure leaves the old app.
 
 ### Windows
 
-The app needs Windows' OpenSSH Client (installed by default on Windows 10
-1809+ and 11). The setup is unsigned: at SmartScreen choose **More info** →
-**Run anyway**. It installs per user, without administrator rights, into
-`%LOCALAPPDATA%\Programs\veldr-desktop\`. Uninstall from Settings →
-Apps (its files stay).
+The app needs Windows' OpenSSH Client (installed by default on Windows 10 1809+ and 11). The setup is unsigned: at SmartScreen choose **More info** → **Run anyway**. It installs per user, without administrator rights, into `%LOCALAPPDATA%\Programs\veldr-desktop\`. Uninstall from Settings → Apps (its files stay).
 
-The app reaches SSH machines only (a WSL distribution running an ssh server
-can be added as one). Windows' ssh has no ControlMaster, so there is no
-**Sign in…**: every connection authenticates in BatchMode. Before adding a
-machine, accept its host key and make the key available:
+The app reaches SSH machines only (a WSL distribution running an ssh server can be added as one). Windows' ssh has no ControlMaster, so there is no **Sign in…**: every connection authenticates in BatchMode. Before adding a machine, accept its host key and make the key available:
 
 ```powershell
 ssh user@host            # once: accept the host key, then exit
@@ -189,11 +106,9 @@ Get-Service ssh-agent | Set-Service -StartupType Automatic; Start-Service ssh-ag
 ssh-add                  # adds ~/.ssh/id_* to the agent
 ```
 
-Then **Retry** the machine. Notifications come from the installed app only
-(its Start menu shortcut carries the app id), not from `win-unpacked/`.
+Then **Retry** the machine. Notifications come from the installed app only (its Start menu shortcut carries the app id), not from `win-unpacked/`.
 
-To build: install Bun, Node.js 22.12+, pnpm and Git for Windows, and run
-`scripts/desktop.sh app` or `scripts/desktop.sh dist` in Git Bash.
+To build: install Bun, Node.js 22.12+, pnpm and Git for Windows, and run `scripts/desktop.sh app` or `scripts/desktop.sh dist` in Git Bash.
 
 ### Linux
 
@@ -201,18 +116,11 @@ To build: install Bun, Node.js 22.12+, pnpm and Git for Windows, and run
 sudo apt install ./veldr-<version>-linux-amd64.deb   # or -linux-arm64.deb
 ```
 
-The deb installs into `/opt/veldr/`, adds the `veldr` command and a
-desktop entry, and recommends `openssh-client`. On Ubuntu 24.04+ it also
-installs the AppArmor profile Chromium's sandbox needs. Uninstall with
-`sudo apt remove veldr-desktop`.
+The deb installs into `/opt/veldr/`, adds the `veldr` command and a desktop entry, and recommends `openssh-client`. On Ubuntu 24.04+ it also installs the AppArmor profile Chromium's sandbox needs. Uninstall with `sudo apt remove veldr-desktop`.
 
-The AppImage runs without installing and needs FUSE 2 (`libfuse2`,
-`libfuse2t64` on Ubuntu 24.04). On Ubuntu 24.04+ AppArmor keeps Chromium's
-sandbox from starting in an AppImage; use the deb there. The app never runs
-with `--no-sandbox`.
+The AppImage runs without installing and needs FUSE 2 (`libfuse2`, `libfuse2t64` on Ubuntu 24.04). On Ubuntu 24.04+ AppArmor keeps Chromium's sandbox from starting in an AppImage; use the deb there. The app never runs with `--no-sandbox`.
 
-Notifications need a notification daemon on the session bus. Launchers put
-`~/.local/bin`, `/usr/local/bin` and system paths on the hub's PATH.
+Notifications need a notification daemon on the session bus. Launchers put `~/.local/bin`, `/usr/local/bin` and system paths on the hub's PATH.
 
 ```bash
 make desktop-app                        # dist/desktop/linux-unpacked/ (x64) or linux-arm64-unpacked/
@@ -232,12 +140,7 @@ ARCH=arm64 make desktop-dist            # arm64 packages, also on an x64 host
 | Local machine's node and its state | `~/.veldr/` | – | `~/.veldr/` |
 | ssh control sockets | `/tmp/veldr-<uid>/s-desktop` | – | `/tmp/veldr-<uid>/s-desktop` |
 
-SSH machines keep their state in their own `~/.veldr/`
-([remote resources](#remote-resources)). Uninstalling removes
-only the app.
-Removing the Electron profile also removes this install's vault unlock key:
-Touch ID or Windows Hello must then be turned on again in the vault's
-Settings.
+SSH machines keep their state in their own `~/.veldr/` ([remote resources](#remote-resources)). Uninstalling removes only the app. Removing the Electron profile also removes this install's vault unlock key: Touch ID or Windows Hello must then be turned on again in the vault's Settings.
 
 ### Development
 
@@ -245,14 +148,9 @@ Settings.
 make dev-desktop
 ```
 
-This runs unpackaged Electron with the UI of `web/dist` (no hot reload)
-and the payloads of `dist/payload`, instance `dev` and local-only
-connections (on Windows it connects no machine). Quit other development
-hubs of the `dev` instance first. `make e2e` runs the desktop smoke test
-(`e2e/tests/desktop.spec.ts`) when the desktop's packages are installed.
+This runs unpackaged Electron with the UI of `web/dist` (no hot reload) and the payloads of `dist/payload`, instance `dev` and local-only connections (on Windows it connects no machine). Quit other development hubs of the `dev` instance first. `make e2e` runs the desktop smoke test (`e2e/tests/desktop.spec.ts`) when the desktop's packages are installed.
 
-For packaged smoke tests, set `VELDR_DESKTOP_DEV`: `1` for the `dev`
-instance, or a name of its own (not `desktop`):
+For packaged smoke tests, set `VELDR_DESKTOP_DEV`: `1` for the `dev` instance, or a name of its own (not `desktop`):
 
 ```bash
 VELDR_DESKTOP_DEV=smoke \
@@ -261,30 +159,15 @@ VELDR_DESKTOP_DEV=smoke \
   dist/desktop/linux-unpacked/veldr --user-data-dir=/tmp/veldr-smoke
 ```
 
-On macOS launch the executable, not `open` (which activates a running
-copy). Development instances are local-only with an Electron profile of
-their own. A named instance leaves state like any instance
-(`settings-smoke.json`, `~/.veldr-smoke/`, terminal core session
-`veldr-smoke`); stop its terminal core (**Stop Terminal Service (Ends All Terminals)…** in
-the machine's menu) before
-removing it.
+On macOS launch the executable, not `open` (which activates a running copy). Development instances are local-only with an Electron profile of their own. A named instance leaves state like any instance (`settings-smoke.json`, `~/.veldr-smoke/`, terminal core session `veldr-smoke`); stop its terminal core (**Stop Terminal Service (Ends All Terminals)…** in the machine's menu) before removing it.
 
-Icon sources are `desktop/assets/icon.svg` and `web/public/icon.svg`. The
-PNG, ICNS and ICO are committed; after editing the sources run
-`make desktop-icons` on macOS (needs `librsvg`).
+Icon sources are `desktop/assets/icon.svg` and `web/public/icon.svg`. The PNG, ICNS and ICO are committed; after editing the sources run `make desktop-icons` on macOS (needs `librsvg`).
 
 ## Remote access through a reverse proxy
 
-The server has no login. Keep it on loopback behind a reverse proxy that
-authenticates users and terminates TLS. Use HTTPS: VS Code webviews, the
-clipboard and notifications need a secure context (only `http://localhost`
-is exempt).
+The server has no login. Keep it on loopback behind a reverse proxy that authenticates users and terminates TLS. Use HTTPS: VS Code webviews, the clipboard and notifications need a secure context (only `http://localhost` is exempt).
 
-VS Code is off for browsers by default. code-server is served on the UI's
-own origin, so its extensions can do whatever the user's page can. Turning
-it on for browsers (`plugins.vscode.browser`, **Settings › Plugins**)
-applies to every browser of the server; the desktop app's switch
-(`plugins.vscode.enabled`) does not affect browsers.
+VS Code is off for browsers by default. code-server is served on the UI's own origin, so its extensions can do whatever the user's page can. Turning it on for browsers (`plugins.vscode.browser`, **Settings › Plugins**) applies to every browser of the server; the desktop app's switch (`plugins.vscode.enabled`) does not affect browsers.
 
 Tell veldr the public origin so its Host/Origin checks accept it:
 
@@ -330,59 +213,20 @@ location / {
 
 ### Guardrails
 
-- **Proxy secret** – `--proxy-secret-file FILE` requires the
-  `X-veldr-Proxy-Secret` header on every request not from a browser on
-  the same host, so only your proxy can talk to the hub. With a secret,
-  `--listen` may use a non-loopback address; without one that needs
-  `--insecure-listen`.
-- **Read-only** – `--read-only` serves a watch-only view: no terminal
-  input, layout changes, uploads or VS Code, and no terminal core is
-  installed or started. Run a second instance with it for screen sharing.
-- **Audit log** – `--audit-log FILE` records connections, mutating terminal
-  hub calls, uploads, VS Code and bridge use, the Agent SDK's installs on
-  machines (`chat.sdk_install`) and refused requests as JSON lines, with
-  the user from `--user-header`.
-- The terminal core's API is reachable only through an allowlist: clients
-  reach terminals and layouts, never the hub's machine, file or server
-  commands.
+- **Proxy secret** – `--proxy-secret-file FILE` requires the `X-veldr-Proxy-Secret` header on every request not from a browser on the same host, so only your proxy can talk to the hub. With a secret, `--listen` may use a non-loopback address; without one that needs `--insecure-listen`.
+- **Read-only** – `--read-only` serves a watch-only view: no terminal input, layout changes, uploads or VS Code, and no terminal core is installed or started. Run a second instance with it for screen sharing.
+- **Audit log** – `--audit-log FILE` records connections, mutating terminal hub calls, uploads, VS Code and bridge use, the Agent SDK's installs on machines (`chat.sdk_install`) and refused requests as JSON lines, with the user from `--user-header`.
+- The terminal core's API is reachable only through an allowlist: clients reach terminals and layouts, never the hub's machine, file or server commands.
 
 See [SECURITY.md](../SECURITY.md) for the threat model.
 
 ## Air-gapped networks
 
-Machines need no internet access: those that have it download their
-build (and the Agent SDK of Claude Code's chats, below) themselves, and the
-hub uploads them to the others; code-server and extensions are resolved
-on the hub host and pushed through the agent. The one exception is the AI
-usage plugin, which asks the providers from the machines
-([29](features/29-ai-usage.md)); offline, it reports the failure.
+Machines need no internet access: those that have it download their build (and the Agent SDK of Claude Code's chats, below) themselves, and the hub uploads them to the others; code-server and extensions are resolved on the hub host and pushed through the agent. The one exception is the AI usage plugin, which asks the providers from the machines ([29](features/29-ai-usage.md)); offline, it reports the failure.
 
-The hub ([42](features/42-typescript-backend.md)) carries no other
-platform's executable. A machine
-that lacks its build first downloads its platform's archive from the
-hub's release itself (`curl` or `wget`; the setting
-`machines.download`, or `--machine-download=false`, turns this off, and a
-machine whose download failed is not asked first again for a day),
-checked against the release's `SHA256SUMS`, which the hub fetches over its
-own HTTPS (through the proxy of `HTTPS_PROXY`, `HTTP_PROXY` and
-`NO_PROXY`). Otherwise the hub uploads it over ssh, from `--agent-dir`,
-its cache (`~/.veldr/cache/machine/`), its own executable (a machine of its
-platform), or a download from the release on the hub host: a hub that
-reaches the internet serves machines that do not. A hub that cannot reach
-the release (no name, no route) fetches `SHA256SUMS` through the machine
-instead, over `ssh -W` with its own TLS end to end; that needs the
-machine's sshd to allow forwarding (`AllowTcpForwarding`). A hub whose
-fetch reaches something it does not trust (a certificate, an HTTP error)
-stops there with `build_unavailable`, and never uses a manifest the machine
-downloaded itself.
+The hub ([42](features/42-typescript-backend.md)) carries no other platform's executable. A machine that lacks its build first downloads its platform's archive from the hub's release itself (`curl` or `wget`; the setting `machines.download`, or `--machine-download=false`, turns this off, and a machine whose download failed is not asked first again for a day), checked against the release's `SHA256SUMS`, which the hub fetches over its own HTTPS (through the proxy of `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`). Otherwise the hub uploads it over ssh, from `--agent-dir`, its cache (`~/.veldr/cache/machine/`), its own executable (a machine of its platform), or a download from the release on the hub host: a hub that reaches the internet serves machines that do not. A hub that cannot reach the release (no name, no route) fetches `SHA256SUMS` through the machine instead, over `ssh -W` with its own TLS end to end; that needs the machine's sshd to allow forwarding (`AllowTcpForwarding`). A hub whose fetch reaches something it does not trust (a certificate, an HTTP error) stops there with `build_unavailable`, and never uses a manifest the machine downloaded itself.
 
-For an offline site, put the release's `SHA256SUMS` and the archives
-(`veldr-<os>-<arch>[-musl].tar.gz`, or the executables in them saved as
-`veldr-<os>-<arch>[-musl]`) of the platforms you need into a directory and
-start the hub with `--agent-dir DIR`: each file is checked against that
-`SHA256SUMS`, which must be the hub's release's (it names the hub's own
-executable by its digest). A machine that gets its build from none of them
-shows `build_unavailable` with what each source said.
+For an offline site, put the release's `SHA256SUMS` and the archives (`veldr-<os>-<arch>[-musl].tar.gz`, or the executables in them saved as `veldr-<os>-<arch>[-musl]`) of the platforms you need into a directory and start the hub with `--agent-dir DIR`: each file is checked against that `SHA256SUMS`, which must be the hub's release's (it names the hub's own executable by its digest). A machine that gets its build from none of them shows `build_unavailable` with what each source said.
 
 When the hub host is offline too, prepare a bundle on a connected machine:
 
@@ -397,62 +241,30 @@ Copy `./bundle` and the full release directory into the network, then run:
 veldr --offline --seed-dir ./bundle
 ```
 
-Lookup order: `--seed-dir` directories, the cache, then (unless
-`--offline`) `--code-server-url` / `--extension-url`, which can point at a
-mirror (`--code-server-url` without user information, query or fragment:
-machines downloading releases get it on their command lines). Verification:
+Lookup order: `--seed-dir` directories, the cache, then (unless `--offline`) `--code-server-url` / `--extension-url`, which can point at a mirror (`--code-server-url` without user information, query or fragment: machines downloading releases get it on their command lines). Verification:
 
 - Default versions have SHA-256 digests compiled into the hub.
-- Other versions are checked against a `<file>.sha256` beside the file
-  (`fetch-assets` writes it).
+- Other versions are checked against a `<file>.sha256` beside the file (`fetch-assets` writes it).
 - A mismatching seed is rejected, never replaced.
-- A seed or cached file with neither a pinned digest nor a sidecar is used
-  unverified, with a logged warning.
-- A download with no known digest is accepted once and its digest recorded
-  (trust on first use), with a warning.
+- A seed or cached file with neither a pinned digest nor a sidecar is used unverified, with a logged warning.
+- A download with no known digest is accepted once and its digest recorded (trust on first use), with a warning.
 
-Bundles are for your own installations: Git Graph's license restricts
-redistribution, so do not publish bundles containing it.
+Bundles are for your own installations: Git Graph's license restricts redistribution, so do not publish bundles containing it.
 
-**Claude Code's chats on machines** run on
-Anthropic's Agent SDK, which no executable or app carries
-([42](features/42-typescript-backend.md#claude-code)). Before such a chat
-starts, a machine that lacks it downloads the npm registry's tarball of
-the pinned version itself (curl or wget; not with `--offline`), else the
-hub uploads it from a `--seed-dir`, its cache (`~/.veldr/cache/npm/`) or
-its own download through `HTTPS_PROXY`. `--npm-registry` names a mirror:
-an `http` or `https` URL without user information, query or fragment, as
-`--code-server-url` is, since the machines get it on their command lines
-(the hub does not start with credentials in either). For a mirror that
-needs credentials, or an offline site, put the tarball into a `--seed-dir`
-directory under its own name (a regular file); on a connected machine:
+**Claude Code's chats on machines** run on Anthropic's Agent SDK, which no executable or app carries ([42](features/42-typescript-backend.md#claude-code)). Before such a chat starts, a machine that lacks it downloads the npm registry's tarball of the pinned version itself (curl or wget; not with `--offline`), else the hub uploads it from a `--seed-dir`, its cache (`~/.veldr/cache/npm/`) or its own download through `HTTPS_PROXY`. `--npm-registry` names a mirror: an `http` or `https` URL without user information, query or fragment, as `--code-server-url` is, since the machines get it on their command lines (the hub does not start with credentials in either). For a mirror that needs credentials, or an offline site, put the tarball into a `--seed-dir` directory under its own name (a regular file); on a connected machine:
 
 ```bash
 curl -fsSLO https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.322.tgz
 # or: npm pack @anthropic-ai/claude-agent-sdk@0.3.322
 ```
 
-Whatever its source, the tarball is checked against the integrity pinned
-in the build (the npm lockfile's `sha512-r88ij7R3…`); another file is
-refused. A machine that gets it from none of them refuses the chat with
-`sdk_unavailable`, saying what each source said. Anthropic's terms govern
-your use of the SDK and of your Claude account; the chats run your own
-`claude` with your own sign-in.
+Whatever its source, the tarball is checked against the integrity pinned in the build (the npm lockfile's `sha512-r88ij7R3…`); another file is refused. A machine that gets it from none of them refuses the chat with `sdk_unavailable`, saying what each source said. Anthropic's terms govern your use of the SDK and of your Claude account; the chats run your own `claude` with your own sign-in.
 
-Building needs npm packages, the Bun runtimes of the target
-platforms (`bun build --compile` downloads one for another platform) and
-the pinned herdr-core archives (verified archives in `dist/hc/` are
-reused); `scripts/build.sh` builds the executables of `TARGETS`
-(`linux/amd64-musl` and `linux/arm64-musl` among them) with `RELEASE_URL`,
-the release's download URL their machines use.
+Building needs npm packages, the Bun runtimes of the target platforms (`bun build --compile` downloads one for another platform) and the pinned herdr-core archives (verified archives in `dist/hc/` are reused); `scripts/build.sh` builds the executables of `TARGETS` (`linux/amd64-musl` and `linux/arm64-musl` among them) with `RELEASE_URL`, the release's download URL their machines use.
 
 ## Remote resources
 
-What veldr starts or writes, and what ends or removes it. Feature
-documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)).
-`<data>` is `~/.veldr[-<instance>]` on the machine, `<host>` the
-host's key and `<run>` the namespace's runtime directory on the host
-([files](reference.md#files-and-directories)).
+What veldr starts or writes, and what ends or removes it. Feature documents give the reasoning ([10](features/10-remote-resource-lifecycle.md)). `<data>` is `~/.veldr[-<instance>]` on the machine, `<host>` the host's key and `<run>` the namespace's runtime directory on the host ([files](reference.md#files-and-directories)).
 
 ### Processes and connections
 
@@ -533,26 +345,9 @@ host's key and `<run>` the namespace's runtime directory on the host
 | Desktop vault unlock key | Enrolling the desktop authenticator. | `vault-unlock.json` in the Electron profile, the macOS keychain item (moved to a rebuilt app after one prompt) or the Windows Hello key `veldr-vault-<install>`; kept until removed by hand. |
 | Electron profile | First desktop launch. | Until removed by hand ([where](#where-the-app-keeps-its-files)); hub stderr is kept in memory only (16 KiB). |
 
-**Home directories several hosts share** (NFS,
-[40](features/40-shared-homes.md)). Each host keeps its own SQLite files
-and chat host log, named `<name>-<host>[-<id>]` by host name and a hash of
-its machine id; another host's are removed after 30 days unopened, only
-under SQLite's writers' lock, so a database in use stays
-([38](features/38-sqlite-state.md)). Sockets, locks and pid files are in
-the host-local runtime directory, the terminal core's session ends in the
-host's id, and the terminal core's executable, code-server's data and
-the logs are in `<data>/hosts/<host>/`. Each agent touches its host's
-directory at start and every 24 h; another host's directory unused for
-30 days loses everything but the terminal core's executable (`hc/`), and
-goes whole after 180 days.
+**Home directories several hosts share** (NFS, [40](features/40-shared-homes.md)). Each host keeps its own SQLite files and chat host log, named `<name>-<host>[-<id>]` by host name and a hash of its machine id; another host's are removed after 30 days unopened, only under SQLite's writers' lock, so a database in use stays ([38](features/38-sqlite-state.md)). Sockets, locks and pid files are in the host-local runtime directory, the terminal core's session ends in the host's id, and the terminal core's executable, code-server's data and the logs are in `<data>/hosts/<host>/`. Each agent touches its host's directory at start and every 24 h; another host's directory unused for 30 days loses everything but the terminal core's executable (`hc/`), and goes whole after 180 days.
 
-How machines get code-server is a setting (`codeServer.install`, per
-machine, or `--code-server-install`): the hub uploads it (default; works
-without internet on the machine), the machine downloads it (needs curl or
-wget and access to `--code-server-url`), or an installed one is used
-(`--code-server-path` or `PATH`). The last two fall back to uploading. A
-change applies the next time code-server starts; **Stop VS Code on
-`<machine>`** in a VS Code pane's menu restarts it now.
+How machines get code-server is a setting (`codeServer.install`, per machine, or `--code-server-install`): the hub uploads it (default; works without internet on the machine), the machine downloads it (needs curl or wget and access to `--code-server-url`), or an installed one is used (`--code-server-path` or `PATH`). The last two fall back to uploading. A change applies the next time code-server starts; **Stop VS Code on `<machine>`** in a VS Code pane's menu restarts it now.
 
 ## Running as a service
 
@@ -590,25 +385,13 @@ KillMode=process
 WantedBy=default.target
 ```
 
-Install the full release directory at that path. The service must run as
-the user who owns the ssh keys. The local terminal core is not part of the
-unit (herdr-core runs it as its own user service), so terminals survive
-restarts. `KillMode=process` stops only the hub, whose agents then end
-their own processes.
+Install the full release directory at that path. The service must run as the user who owns the ssh keys. The local terminal core is not part of the unit (herdr-core runs it as its own user service), so terminals survive restarts. `KillMode=process` stops only the hub, whose agents then end their own processes.
 
 ## Several hubs and development builds
 
-The chat host survives restarting or reinstalling the app; a newer build
-asks an older host to make way only while no chat works or waits. Builds of
-local changes (`-dirty.<time>` versions) are not ordered, so the Chats panel
-reminds you to **Restart Chat Host**; chats resume their sessions in the new
-host.
+The chat host survives restarting or reinstalling the app; a newer build asks an older host to make way only while no chat works or waits. Builds of local changes (`-dirty.<time>` versions) are not ordered, so the Chats panel reminds you to **Restart Chat Host**; chats resume their sessions in the new host.
 
-Two hubs reaching the same machine share only the agent build directory
-unless they use the same instance. Give each its own `--instance` (state in
-`~/.veldr-<instance>`, terminal core session
-`veldr-<instance>-<host id>`).
-For development:
+Two hubs reaching the same machine share only the agent build directory unless they use the same instance. Give each its own `--instance` (state in `~/.veldr-<instance>`, terminal core session `veldr-<instance>-<host id>`). For development:
 
 ```bash
 make dev-hub      # this host's executable staged in dist/payload, then bun backend/hosts/bun/main.ts --instance dev --local-only --listen 127.0.0.1:7790 --web-dir web/dist
