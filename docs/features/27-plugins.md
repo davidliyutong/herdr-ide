@@ -73,7 +73,7 @@ machine → 404) or a prefix of its own (`ctx.route`, VS Code's).
 - **Plugin settings.** A settings section with a `plugin` field
   (`{id: 'usage', order: …, plugin: 'usage'}`) is listed under its plugin
   ([13](13-settings-and-appearance.md));
-  `backend/kernel/config/registry.test.ts` (`plugin sections`) checks the
+  `backend/hosts/bun/registry.test.ts` (`plugin sections`) checks the
   names.
 
 ### Agent
@@ -241,7 +241,8 @@ panels into panes.
 - `internal/agent/plugin/plugin_test.go`, `internal/agent/plugins_test.go`,
   `internal/agentproto/proto_test.go`: replies, codes, bodies,
   `UntilClosed`, panics.
-- `backend/kernel/config/registry.test.ts`: `plugin sections`.
+- `backend/hosts/bun/registry.test.ts`: `plugin sections`, the features'
+  switches in their order.
 - Web: `plugins.test.ts`, `viewStatus.test.tsx`, `notifyViews.test.ts`,
   `attention.test.tsx`, `headerActions.test.ts`, `panelPanes.test.ts`,
   `vscodeRisk.test.ts`,

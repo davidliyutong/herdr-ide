@@ -10,8 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { coreModules } from '#kernel/config/registry.ts';
-import { BROWSER } from '#kernel/config/staged.ts';
-import { Settings, type Module } from '#kernel/config/settings/index.ts';
+import { Settings } from '#kernel/config/settings/index.ts';
 import { createCore } from '#kernel/core.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
@@ -512,15 +511,9 @@ test('guards', async () => {
   expect(checked.sort()).toEqual(['DELETE /api/m/:id/p/browser/forwards/:port', 'POST /api/m/:id/p/browser/forwards']);
 });
 
-const shape = (m: Module) => {
-  const s = new Settings('', { modules: [m] });
-  return { sections: s.sections(), defs: s.definitions(), usage: s.defs().map((d) => [d.key, d.usage]) };
-};
-
 // The links' setting: loopback addresses in a pane by default; anything
 // else is no value of it.
 test('settings', () => {
-  expect(shape(settings)).toEqual(shape(BROWSER));
   const dir = mkdtempSync(join(tmpdir(), 'browser-settings-'));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const load = (content: string) => {

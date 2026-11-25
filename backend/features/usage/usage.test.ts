@@ -3,13 +3,11 @@
 // (ported from the Go core's tests).
 import { afterAll, expect, test } from 'bun:test';
 import { statSync } from 'node:fs';
-import { USAGE } from '#kernel/config/staged.ts';
-import { Settings, type Module } from '#kernel/config/settings/index.ts';
 import { Fail, offline } from '#kernel/fail.ts';
 import { COST_FRESH } from './cost.ts';
 import { pace, windowIDs } from './history.ts';
 import type { CostParams } from './protocol.ts';
-import { parsePrices, PROVIDERS, settings } from './settings.ts';
+import { parsePrices, PROVIDERS } from './settings.ts';
 import { coreDBFile } from './store.ts';
 import { acc, DAY, find, HOUR, MIN, removeTempDirs, report, T0, tempDir, testUsage, win } from './testing.ts';
 import { DEFAULT_CADENCE, interval, MIN_REFRESH_GAP, Usage } from './usage.ts';
@@ -270,13 +268,7 @@ test('the spend at the user’s prices', async () => {
   expect(got).toEqual([undefined, { 'grok-5': { inputMax: null, input: 3, cached: 0.75, output: 9 } }]);
 });
 
-const shape = (m: Module) => {
-  const s = new Settings('', { modules: [m] });
-  return { sections: s.sections(), defs: s.definitions(), usage: s.defs().map((d) => [d.key, d.usage]) };
-};
-
 test('settings', () => {
-  expect(shape(settings)).toEqual(shape(USAGE));
   const t = testUsage();
   expect([t.st.string('usage.refresh'), t.st.get('usage.thresholds')]).toEqual(['adaptive', ['80', '95']]);
   expect(() => t.st.set('usage.thresholds', '', ['80', '101'])).toThrow();

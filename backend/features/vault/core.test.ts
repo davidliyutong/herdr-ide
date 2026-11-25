@@ -8,7 +8,6 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isoCBOR } from '@simplewebauthn/server/helpers';
-import { VAULT } from '#kernel/config/staged.ts';
 import { agentDialer, checkGuarded, running, sleep, sshSpec, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
 import type { Spec } from '#kernel/machines/spec.ts';
 import { openShared } from '#shared/store/index.ts';
@@ -17,7 +16,6 @@ import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { coreDBBeside } from './accesslog.ts';
 import { relayKey } from './desktop.ts';
 import { openExport, sealExport } from './exportfile.ts';
-import { settings } from './settings.ts';
 import { vaultFeature } from './core.ts';
 import type { VaultOptions } from './vault.ts';
 
@@ -327,10 +325,6 @@ describe('the gate', () => {
     const { problems, checked } = await checkGuarded(rw.t, ro, { machine: 'm1' });
     expect(problems).toEqual([]);
     expect(checked.length).toBe(17);
-  });
-
-  test('its settings are the staged ones', () => {
-    expect(JSON.stringify(settings)).toBe(JSON.stringify(VAULT));
   });
 });
 

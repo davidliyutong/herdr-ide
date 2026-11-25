@@ -14,7 +14,7 @@ Where things belong:
   undocumented flags and on routes of the core missing there — get the
   list from `cd backend && bun scripts/reference.ts --list`; the tables
   of settings and commands with their default keys are generated between
-  markers by `backend/kernel/config/registry.ts`, so run `make tokens`
+  markers by `backend/scripts/registry.ts`, so run `make tokens`
   instead of editing them);
 - components and protocols → `docs/architecture.md`;
 - operations (proxies, air-gap, resources, services) → `docs/deployment.md`;

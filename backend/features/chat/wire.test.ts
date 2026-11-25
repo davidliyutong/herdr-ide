@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { CHAT } from '#kernel/config/staged.ts';
 import { auditText, MAX_AUDIT } from './audit.ts';
 import { statusOf } from './errors.ts';
 import { NOT_RUNNING } from './protocol.ts';
@@ -178,16 +177,6 @@ describe('wire', () => {
 });
 
 describe('settings', () => {
-  // The feature's module is the one the registry had for it: the same keys,
-  // sections, orders and defaults.
-  test('the module is the staged one', () => {
-    const defs = (m: typeof settings) => {
-      const s = new Settings('', { modules: [m] });
-      return { sections: s.sections(), defs: s.definitions() };
-    };
-    expect(defs(settings)).toEqual(defs(CHAT as unknown as typeof settings));
-  });
-
   // The settings are the chat host's, with its bounds, per machine; a
   // machine's own values reach its host clamped.
   test('host settings', () => {

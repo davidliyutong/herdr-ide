@@ -14,44 +14,26 @@
 // It also writes the tables of every setting and of every command with its
 // default keys into docs/reference.md, between the markers there.
 //
-//   pnpm registry            writes the files
-//   pnpm registry --check    writes nothing; fails if one is stale
+// The core's input is the features the host composes (registryInput of
+// hosts/bun/serve.ts describedFeatures): scripts/registry.ts writes the
+// files, or with --check only compares them (pnpm registry, make tokens).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { parseArgs } from 'node:util';
 import * as agentkinds from '#shared/agents/kinds.ts';
-import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { COMMANDS, Keybindings, SECTIONS, type Command, type Platform } from './keybindings/index.ts';
 import { Settings, type Def, type Module } from './settings/index.ts';
-import { BROWSER, CHAT, CODE_SERVER, FILES, GIT, GUI, HISTORY, MONITOR, STAGED_FEATURES, USAGE, VAULT } from './staged.ts';
 import { toggles, type Switchable } from './toggles.ts';
 import { UI } from './ui/index.ts';
 
-/** The settings modules of the core: the user interface's, the features'
- * and their switches. A feature's module takes the place of the staged
- * one of its section, so the order of the sections stays as it was. */
-export function coreModules(features: readonly (Switchable & { settings?: Module })[] = []): Module[] {
-  const own = features.flatMap((f) => (f.settings ? [f.settings] : []));
-  const ids = (m: Module) => new Set((m.sections ?? []).map((s) => s.id));
-  const placed = new Set<Module>();
-  const slot = (staged: Module): Module => {
-    const ported = own.find((m) => [...ids(m)].some((id) => ids(staged).has(id)));
-    if (!ported) return staged;
-    placed.add(ported);
-    return ported;
-  };
-  const switches = [
-    ...STAGED_FEATURES.map((s) => features.find((f) => f.id === s.id) ?? s),
-    ...features.filter((f) => !STAGED_FEATURES.some((s) => s.id === f.id)),
-  ];
-  const modules = [
-    UI,
-    slot(CODE_SERVER),
-    slot(GUI),
-    toggles(switches),
-    ...[BROWSER, FILES, GIT, MONITOR, USAGE, VAULT, HISTORY, CHAT].map(slot),
-  ];
-  return [...modules, ...own.filter((m) => !placed.has(m))];
+/** What coreModules reads of a feature (FeatureDef's members). */
+export type FeatureSettings = Switchable & { settings?: Module };
+
+/** The settings modules of the core: the user interface's, the switches
+ * of the features that can be turned off and the features' own modules,
+ * in the order the host composes the features (hosts/bun/serve.ts
+ * coreFeatures), which is the order the UIs list them in. */
+export function coreModules(features: readonly FeatureSettings[]): Module[] {
+  return [UI, toggles(features), ...features.flatMap((f) => (f.settings ? [f.settings] : []))];
 }
 
 export interface RegistryInput {
@@ -60,13 +42,19 @@ export interface RegistryInput {
   agents: readonly agentkinds.Kind[];
 }
 
-const core = (): RegistryInput => ({ modules: coreModules(), commands: COMMANDS, agents: agentkinds.all() });
+/** The registry's input of a core of features: their settings, every
+ * command, every kind of coding agent. */
+export const registryInput = (features: readonly FeatureSettings[]): RegistryInput => ({
+  modules: coreModules(features),
+  commands: COMMANDS,
+  agents: agentkinds.all(),
+});
 
 const sorted = (list: Iterable<string>) => [...new Set(list)].sort();
 
 /** The translation keys of the UI: every section in use, group, setting
  * label and enum option, and every command with its section. */
-export function translationKeys(i: RegistryInput = core()): string[] {
+export function translationKeys(i: RegistryInput): string[] {
   const settings = new Settings('', { modules: i.modules });
   const defs = settings.defs();
   const used = new Set(defs.map((d) => d.section));
@@ -86,7 +74,7 @@ export function translationKeys(i: RegistryInput = core()): string[] {
 }
 
 /** spec/generated/registry.json's content. */
-export function buildRegistry(i: RegistryInput = core()): string {
+export function buildRegistry(i: RegistryInput): string {
   const settings = new Settings('', { modules: i.modules });
   const keys = new Keybindings('', { commands: i.commands });
   const doc = {
@@ -129,7 +117,7 @@ function defaultOf(d: Def): string {
 const SCOPES = { app: '–', machine: 'per machine', 'remote-machine': 'per remote machine' } as const;
 
 /** Every setting, in the order of the settings dialog. */
-export function settingsTable(modules: readonly Module[] = coreModules()): string {
+export function settingsTable(modules: readonly Module[]): string {
   const settings = new Settings('', { modules });
   const order = new Map(settings.sections().map((s) => [s.id, s.order]));
   const defs = [...settings.defs()].sort((a, b) => order.get(a.section)! - order.get(b.section)! || a.order - b.order);
@@ -158,7 +146,7 @@ export function commandsTable(commands: readonly Command[] = COMMANDS): string {
 const markers = (name: string) => [`<!-- make tokens: ${name} -->`, `<!-- end of make tokens: ${name} -->`] as const;
 
 /** doc (docs/reference.md) with each generated table between its markers. */
-export function fillReference(doc: string, i: RegistryInput = core()): string {
+export function fillReference(doc: string, i: RegistryInput): string {
   for (const [name, table] of [
     ['settings', settingsTable(i.modules)],
     ['commands', commandsTable(i.commands)],
@@ -173,8 +161,8 @@ export function fillReference(doc: string, i: RegistryInput = core()): string {
 }
 
 /** Writes (or with check, only compares) the registry and the reference
- * under root; returns the files that were stale. */
-export function updateRegistry(root: string, check = false): string[] {
+ * of i under root; returns the files that were stale. */
+export function updateRegistry(root: string, i: RegistryInput, check = false): string[] {
   const stale: string[] = [];
   const update = (rel: string, want: string) => {
     const path = join(root, rel);
@@ -190,18 +178,7 @@ export function updateRegistry(root: string, check = false): string[] {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, want);
   };
-  update('spec/generated/registry.json', buildRegistry());
-  update('docs/reference.md', fillReference(readFileSync(join(root, 'docs/reference.md'), 'utf8')));
+  update('spec/generated/registry.json', buildRegistry(i));
+  update('docs/reference.md', fillReference(readFileSync(join(root, 'docs/reference.md'), 'utf8'), i));
   return stale;
-}
-
-if (import.meta.main) {
-  const { values: f } = parseArgs({
-    options: { check: { type: 'boolean', default: false }, root: { type: 'string', default: REPO_ROOT } },
-  });
-  const stale = updateRegistry(f.root, f.check);
-  if (f.check && stale.length > 0) {
-    for (const s of stale) console.error(`registry: stale: ${s} (run \`make tokens\`)`);
-    process.exit(1);
-  }
 }

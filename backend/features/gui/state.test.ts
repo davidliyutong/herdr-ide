@@ -2,13 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { GUIDisplay, type GUIStatus } from '#shared/proto/agentproto/index.ts';
 import { discard } from '#shared/lib/log.ts';
 import { noAudit } from '#kernel/audit.ts';
-import { Settings } from '#kernel/config/settings/index.ts';
-import { GUI as STAGED } from '#kernel/config/staged.ts';
 import { sshSpec, localSpec, testMachines } from '#kernel/testing.ts';
 import { decide, exportCommand, typeExport } from './enable.ts';
 import { Manager } from './manager.ts';
 import { afterAttach, plan, retryDelay } from './plan.ts';
-import { settings } from './settings.ts';
 import { Phase, type PhaseName } from './state.ts';
 import { testSettings } from './testing.ts';
 import { DEFAULT_TIMING } from './timing.ts';
@@ -28,16 +25,6 @@ function manager(flags: Record<string, string> = {}, s = testSettings(flags)) {
   };
   return { mgr, ms, settings: s, set, m: (id: string) => ms.get(id)! };
 }
-
-describe('settings', () => {
-  // The registry lists the staged module while features move: the
-  // feature's own must be the same, so that /api/settings does not change.
-  test('the same as the staged module', () => {
-    const defs = (m: typeof settings) => new Settings('', { modules: [m] }).definitions();
-    expect(defs(settings)).toEqual(defs(STAGED));
-    expect(new Settings('', { modules: [settings] }).sections()).toEqual(new Settings('', { modules: [STAGED] }).sections());
-  });
-});
 
 describe('pane environment', () => {
   // Panes get the display, and VirtualGL as configured, only while the

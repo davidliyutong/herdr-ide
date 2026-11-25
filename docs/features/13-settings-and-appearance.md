@@ -28,12 +28,14 @@ settings per browser; theming terminal applications.
 
 `backend/kernel/config/settings` defines the model (`define.ts`) and the
 store of values (`store.ts`); `coreModules`
-(`backend/kernel/config/registry.ts`) lists the modules the core registers
-(`config/ui` for the user interfaces, VS Code's, program windows', the
-feature switches (`toggles.ts`), the features' own (files, browser, git,
-monitor, usage, vault, history, chat; [27](27-plugins.md)). A feature
-brings its module in its definition (`settings`); the modules of features
-that do not yet are in `config/staged.ts`.
+(`backend/kernel/config/registry.ts`) lists the modules the core registers:
+`config/ui` for the user interfaces, the feature switches (`toggles.ts`)
+and the features' own (program windows', VS Code's, browser, files, git,
+monitor, usage, vault, chat, history; [27](27-plugins.md)). A feature
+brings its module in its definition (`settings`); the switches and the
+modules follow the order in which the host composes the features
+(`coreFeatures` in `backend/hosts/bun/serve.ts`), which is the order the
+UIs list them in.
 
 - A module (`defineModule`) brings sections and definitions. A section can be advanced (listed last, under
   **Advanced**) or belong to a plugin.
@@ -48,7 +50,8 @@ that do not yet are in `config/staged.ts`.
 - Strings refuse control characters; lists and strings are bounded.
 - Descriptions are not in the core: the UI translates `settings.<key>`,
   `settings.<key>.desc`, options, sections and groups.
-- `backend/kernel/config/registry.ts` (`pnpm -C backend registry`)
+- `backend/scripts/registry.ts` (`pnpm -C backend registry`), from the
+  features `serve` composes and `backend/kernel/config/registry.ts`,
   writes `spec/generated/registry.json` (defaults,
   commands, each platform's default bindings, the translation keys the UI
   needs) and the settings and commands tables of
@@ -378,8 +381,10 @@ See [SECURITY.md](../../SECURITY.md).
   keys, user rules and chords, conflicts);
   `web/src/__tests__/keys.test.ts` (the same vectors, unbound keys left to
   the terminal, key hints).
-- Generated files: `backend/kernel/config/registry.test.ts`,
-  `scripts/tokens/main_test.go`.
+- Generated files: `backend/kernel/config/registry.test.ts` (the modules
+  and switches in the features' order, the tables, writing and checking),
+  `backend/hosts/bun/registry.test.ts` (the composed core's registry and
+  tables are the repository's), `scripts/tokens/main_test.go`.
 - Web UI: `settings.test.ts`, `settingsDialog.test.ts`,
   `pluginSettings.test.ts`, `keysTable.test.tsx`, `localFonts.test.ts`,
   `theme.test.ts`, `termOptions.test.ts`, `tokens.test.ts`,

@@ -69,7 +69,7 @@ fi
 
 echo "==> design tokens and settings keys"
 go run ./scripts/tokens -check || fail=1
-(cd backend && bun kernel/config/registry.ts --check) || fail=1
+(cd backend && bun scripts/registry.ts --check) || fail=1
 
 echo "==> terminal emulator module"
 scripts/fetch-ghostty-vt.sh --check || fail=1

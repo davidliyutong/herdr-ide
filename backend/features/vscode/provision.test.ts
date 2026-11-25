@@ -8,7 +8,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BRIDGE_EXT, SLUG } from '#shared/lib/brand.ts';
 import { discard } from '#shared/lib/log.ts';
-import { CODE_SERVER } from '#kernel/config/staged.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { agentDialer, localSpec, running, testMachines, waitFor } from '#kernel/testing.ts';
 import { Artifacts, tarballFile } from './artifacts.ts';
@@ -180,10 +179,9 @@ test('forget', async () => {
   expect(cs.running()).toEqual([]);
 });
 
-// The feature's settings are the staged ones, which the registry lists.
+// The feature's settings: how machines get code-server (push by default)
+// and an existing one's path, also per machine.
 test('settings as registered', () => {
-  const strip = (o: unknown) => JSON.parse(JSON.stringify(o, (k, v) => (k === 'schema' || typeof v === 'function' ? undefined : v)));
-  expect(strip(settings)).toEqual(strip(CODE_SERVER));
   const s = new Settings('', { modules: [settings] });
   expect([s.string(INSTALL), s.string(PATH)]).toEqual(['push', '']);
   s.set(PATH, '', '~/bin/code-server');

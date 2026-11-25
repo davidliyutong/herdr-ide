@@ -33,7 +33,7 @@ the same wire protocols from their own code.
 | Install JS deps | `make deps` |
 | Unit tests (the machine build's Go, the core's `bun test`, web, desktop) | `make test` |
 | All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, the core's flags and routes in `docs/reference.md` (`backend/scripts/reference.ts`), generated tokens and registry, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
-| Regenerate the design tokens' CSS after editing `spec/tokens.json`, and `spec/generated/registry.json` with the settings and commands tables of `docs/reference.md` (`backend/kernel/config/registry.ts`) after changing settings, commands or agent kinds (`backend/shared/agents`, `internal/agentkinds`) | `make tokens` |
+| Regenerate the design tokens' CSS after editing `spec/tokens.json`, and `spec/generated/registry.json` with the settings and commands tables of `docs/reference.md` (`backend/scripts/registry.ts`) after changing settings, commands or agent kinds (`backend/shared/agents`, `internal/agentkinds`) | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
 | Integration tests with a real terminal core, the machine build's and the core's terminals (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |

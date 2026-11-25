@@ -17,16 +17,10 @@ import { createCore } from '#kernel/core.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { Machines } from '#kernel/machines/manager.ts';
 import { Registry } from '#kernel/machines/registry.ts';
-import { payloads } from '#kernel/payloads.ts';
 import { FETCH_ASSETS_OPTIONS } from '#features/vscode/fetchassets.ts';
-import { OPTIONS, coreFeatures, hostRoutes } from '#hosts/bun/serve.ts';
+import { OPTIONS, describedFeatures, hostRoutes } from '#hosts/bun/serve.ts';
 
-const features = coreFeatures({
-  payloads: payloads({ files: { get: async () => null }, web: null }),
-  controlDir: '/nonexistent',
-  verifyKey: '',
-  codeServer: { seedDirs: [], offline: false, idle: 0 },
-});
+const features = describedFeatures();
 const modules = coreModules(features);
 const settings = new Settings('', { modules });
 const core = createCore({

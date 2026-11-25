@@ -85,6 +85,6 @@ reference documentation.
   needs.
 - `desktop/src/menu.test.ts`: menu titles follow the language.
 - `scripts/check.sh`: generated key lists current
-  (`backend/kernel/config/registry.ts --check`), README sections aligned.
+  (`backend/scripts/registry.ts --check`), README sections aligned.
 
 Both languages were checked in Chrome.

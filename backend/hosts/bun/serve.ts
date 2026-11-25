@@ -26,7 +26,7 @@ import { Guard, isLoopbackHost } from '#kernel/http/guard.ts';
 import type { Peer } from '#kernel/http/env.ts';
 import { serveUI } from '#kernel/http/static.ts';
 import { isBreakable } from '#kernel/http/breakable.ts';
-import type { Files, Payloads } from '#kernel/payloads.ts';
+import { payloads as payloadsOf, type Files, type Payloads } from '#kernel/payloads.ts';
 import { Machines } from '#kernel/machines/manager.ts';
 import { Registry } from '#kernel/machines/registry.ts';
 import { loadSpecs, validTarget, MAX_TARGET_LEN, type Spec } from '#kernel/machines/spec.ts';
@@ -103,7 +103,9 @@ export interface FeatureInputs {
 }
 
 /** The core's features, as serve runs them (also what
- * scripts/reference.ts lists the routes of). */
+ * scripts/reference.ts lists the routes of and scripts/registry.ts the
+ * settings of), in the order the UIs list their switches and settings
+ * (kernel/config/registry.ts coreModules). */
 export function coreFeatures(o: FeatureInputs): FeatureDef[] {
   const { payloads } = o;
   // Program windows give new terminals their display and follow the
@@ -114,6 +116,7 @@ export function coreFeatures(o: FeatureInputs): FeatureDef[] {
     machinesFeature({ home: () => userHomeDir(), controlDir: o.controlDir, pty: bunPty }),
     terminals,
     gui,
+    ...vscodeFeatures({ ...o.codeServer, bridgeVSIX: () => payloads.bridgeVSIX() }),
     browserFeature(),
     fileTransfersFeature(),
     filesFeature(),
@@ -125,8 +128,20 @@ export function coreFeatures(o: FeatureInputs): FeatureDef[] {
     agentsFeature(),
     chatFeature(),
     historyFeature(),
-    ...vscodeFeatures({ ...o.codeServer, bridgeVSIX: () => payloads.bridgeVSIX() }),
   ];
+}
+
+/** The features with placeholder inputs (no payloads, machines or
+ * launcher): what they define, their settings, switches and routes, for
+ * what describes the core without running it (scripts/registry.ts,
+ * scripts/reference.ts, the registry's tests). */
+export function describedFeatures(): FeatureDef[] {
+  return coreFeatures({
+    payloads: payloadsOf({ files: { get: async () => null }, web: null }),
+    controlDir: '/nonexistent',
+    verifyKey: '',
+    codeServer: { seedDirs: [], offline: false, idle: 0 },
+  });
 }
 
 /** The routes of the host beside the features': settings and

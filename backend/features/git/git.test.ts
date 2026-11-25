@@ -7,8 +7,7 @@ import { join } from 'node:path';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { write } from '#shared/lib/streamio.ts';
 import { MAX_INLINE, Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
-import { GIT } from '#kernel/config/staged.ts';
-import { Settings, type Module } from '#kernel/config/settings/index.ts';
+import { Settings } from '#kernel/config/settings/index.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
 import { auditFields, gitFeature, MAX_BODY, queryParams } from './core.ts';
@@ -243,16 +242,9 @@ test('results', () => {
   expect(gitProtocol.actions.stage.result.parse({})).toEqual({});
 });
 
-const shape = (m: Module) => {
-  const s = new Settings('', { modules: [m] });
-  return { sections: s.sections(), defs: s.definitions(), usage: s.defs().map((d) => [d.key, d.usage]) };
-};
-
-// The settings: as the core registered them before the feature moved,
-// their defaults (what the UI does without them), and values out of their
-// range refused.
+// The settings: their defaults (what the UI does without them), and values
+// out of their range refused.
 test('settings', () => {
-  expect(shape(settings)).toEqual(shape(GIT));
   const st = new Settings('', { modules: [settings] });
   expect(Object.fromEntries(st.defs().map((d) => [d.key, st.get(d.key)]))).toEqual({
     'git.mixedLineEndings': 'keep',

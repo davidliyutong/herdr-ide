@@ -15,8 +15,7 @@ import {
   type Reply,
 } from '#shared/proto/agentproto/index.ts';
 import { coreModules } from '#kernel/config/registry.ts';
-import { HISTORY } from '#kernel/config/staged.ts';
-import { Settings, type Module } from '#kernel/config/settings/index.ts';
+import { Settings } from '#kernel/config/settings/index.ts';
 import { createCore } from '#kernel/core.ts';
 import { enableSetting } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
@@ -58,16 +57,10 @@ test('routes', async () => {
   expect([...new Set(gets.map((r) => r.path))].sort()).toEqual(['/api/m/:id/p/history', '/api/m/:id/p/history/read']);
 });
 
-const shape = (m: Module) => {
-  const s = new Settings('', { modules: [m] });
-  return { sections: s.sections(), defs: s.definitions(), usage: s.defs().map((d) => [d.key, d.usage]) };
-};
-
 // Capturing is off until the user turns it on, also per machine; every
 // limit is bounded by the machine's hard limits, and each can differ per
 // machine.
 test('settings', () => {
-  expect(shape(settings)).toEqual(shape(HISTORY));
   const st = new Settings('', { modules: [settings] });
   expect([st.bool('history.capture'), st.bool('history.capture', 'local')]).toEqual([false, false]);
   const want: Record<string, [number, number, number]> = {

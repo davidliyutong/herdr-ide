@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.bun.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "registry": "bun kernel/config/registry.ts"
+    "registry": "bun scripts/registry.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.5",

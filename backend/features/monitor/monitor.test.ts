@@ -3,8 +3,7 @@
 // to the page; and its settings.
 import { afterEach, expect, test } from 'bun:test';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
-import { MONITOR } from '#kernel/config/staged.ts';
-import { Settings, type Module } from '#kernel/config/settings/index.ts';
+import { Settings } from '#kernel/config/settings/index.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
 import { monitorFeature } from './core.ts';
@@ -111,13 +110,7 @@ test('through the machine', async () => {
   ]);
 });
 
-const shape = (m: Module) => {
-  const s = new Settings('', { modules: [m] });
-  return { sections: s.sections(), defs: s.definitions(), usage: s.defs().map((d) => [d.key, d.usage]) };
-};
-
 test('settings', () => {
-  expect(shape(settings)).toEqual(shape(MONITOR));
   const st = new Settings('', { modules: [settings] });
   expect([st.get('monitor.refreshSeconds'), st.get('monitor.statusBar'), st.get('monitor.confirmKill')]).toEqual([2, true, true]);
   expect(() => st.set('monitor.refreshSeconds', '', 31)).toThrow();

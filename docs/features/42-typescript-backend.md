@@ -180,7 +180,7 @@ that executable, with the Go machine builds while machines run them. The
 checks that read the Go core read the TypeScript one now: the flags and
 routes `docs/reference.md` must list come from the core composed as
 `serve` composes it (`backend/scripts/reference.ts`), the registry from
-`backend/kernel/config/registry.ts`.
+the features it composes too (`backend/scripts/registry.ts`).
 
 ### Claude Code
 
