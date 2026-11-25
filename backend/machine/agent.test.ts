@@ -268,3 +268,13 @@ describe('the terminal core', () => {
     expect(readdirSync(join(r.dirs.host, 'hc')).filter((n) => n.startsWith('.fetch-'))).toEqual([]);
   });
 });
+
+describe('through the core', () => {
+  test("the kernel's call runs an action and checks its result by the protocol", async () => {
+    const { call } = await import('#kernel/agent.ts');
+    const { machineOf } = await import('./testing.ts');
+    const proto = defineProtocol('k', { add: { params: z.object({ a: z.int(), b: z.int() }), result: z.object({ sum: z.int() }) } });
+    r = await rig({ features: [defineMachine(proto, () => ({ actions: { add: (p) => ({ sum: p.a + p.b }) } }))] });
+    expect(await call(machineOf(r.session), proto, 'add', { a: 2, b: 3 })).toEqual({ sum: 5 });
+  });
+});

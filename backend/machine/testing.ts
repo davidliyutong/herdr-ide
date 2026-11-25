@@ -8,6 +8,7 @@ import { dirsOf, makeDirs, type Dirs } from '#shared/host/hostdirs.ts';
 import { DATA_DIR_NAME } from '#shared/lib/brand.ts';
 import { discard, type Logger } from '#shared/lib/log.ts';
 import { Session } from '#kernel/machines/transport/session.ts';
+import type { Machine } from '#kernel/machines/machine.ts';
 import { Agent } from './agent.ts';
 import type { MachineSide } from './feature.ts';
 
@@ -78,3 +79,10 @@ export async function until(cond: () => boolean | Promise<boolean>, what = 'the 
     await new Promise((r) => setTimeout(r, 20));
   }
 }
+
+/** A machine of the kernel whose agent is reached through s: the core's
+ * own call and open (#kernel/agent.ts) run a feature's actions through the
+ * wire, its params and results checked by the protocol's schemas as the
+ * core checks them. */
+export const machineOf = (s: Session): Machine =>
+  ({ open: (h: never, o: never) => s.open(h, o), request: (h: never, o: never) => s.request(h, o) }) as unknown as Machine;
