@@ -1,0 +1,90 @@
+// A feature's machine side: the handlers of its protocol's actions
+// (#shared/proto/protocol.ts), which the agent runs for the plugin op
+// (dispatch.ts). A feature's machine.ts exports one, made with
+// defineMachine: start(env) runs once per agent (a node's sessions share
+// it) and returns the handlers, which keep what the feature shares between
+// its requests (a limit on searches running at once, a capture that one
+// core started and another waits for).
+import type { z } from 'zod';
+import type { Reader } from '#shared/lib/streamio.ts';
+import type { Logger } from '#shared/lib/log.ts';
+import type { Action, Protocol } from '#shared/proto/protocol.ts';
+import type { Stream } from '#shared/proto/yamux.ts';
+
+/** What the agent gives the machine sides of features. */
+export interface MachineEnv {
+  /** The instance (its data directory: ~/<brand.dataDir(instance)>). */
+  readonly instance: string;
+  /** The user's home directory. */
+  readonly home: string;
+  /** The instance's data directory, shared by the hosts that share the home. */
+  readonly base: string;
+  /** This host's own directory of the instance (hostdirs). */
+  readonly host: string;
+  /** This host's private run directory of the instance, 0700. */
+  readonly run: string;
+  readonly logger: Logger;
+  /** p with "~" resolved and made absolute relative to the home directory;
+   * throws Fail bad_params for an empty path. */
+  expand(p: string): string;
+  /** The environment of programs the agent starts (env.ts cleanEnv). */
+  environ(): Record<string, string>;
+  /** The instance's terminal core's socket. */
+  readonly hcSocket: string;
+  /** Runs argv as a terminal of the instance's terminal core that no
+   * client shows (hidden.ts); fails with code no_terminal_core when none
+   * answers. */
+  runHidden(name: string, argv: string[], signal?: AbortSignal): Promise<void>;
+  /** Ends a helper's terminal that holds name (hidden.ts killHidden). */
+  killHidden(name: string, argv: string[], kill: boolean, signal?: AbortSignal): Promise<boolean>;
+  /** Ends with the agent. */
+  readonly signal: AbortSignal;
+}
+
+/** What one action gets besides its params. */
+export interface ActionContext extends Omit<MachineEnv, 'signal'> {
+  /** Names the core that asked (its process; "" when unknown): the cores a
+   * node serves share work that concerns the machine and tell each other
+   * apart by it. */
+  readonly client: string;
+  /** Ends with the agent, with the session, and for an action that does not
+   * stream when the core closes the stream (it gave up on the action). */
+  readonly signal: AbortSignal;
+}
+
+/** The stream of a streaming action, after its params. */
+export interface ActionStream {
+  readonly stream: Stream;
+  /** What follows the header on the stream. */
+  readonly reader: Reader;
+  /** The reply line: ok, with the result when there is one. */
+  reply(result?: unknown): Promise<void>;
+}
+
+type Params<A extends Action> = z.output<A['params']>;
+type Result<A extends Action> = z.input<A['result']>;
+
+/** A handler of one action: the result (what goes on the wire, as the
+ * core's schema reads it), or for a streaming action whatever it writes
+ * after its reply. A Fail it throws is the refusal's code. */
+export type Handler<A extends Action> = A extends { stream: true }
+  ? (params: Params<A>, ctx: ActionContext, s: ActionStream) => Promise<void>
+  : (params: Params<A>, ctx: ActionContext) => Promise<Result<A>> | Result<A>;
+
+export type Handlers<P extends Protocol> = { [K in keyof P['actions']]: Handler<P['actions'][K]> };
+
+/** What a feature's machine side runs for an agent. */
+export interface Served<P extends Protocol = Protocol> {
+  readonly actions: Handlers<P>;
+  /** Its own retention rules, run with the agent's housekeeping. */
+  housekeep?(now: Date): void | Promise<void>;
+}
+
+export interface MachineSide<P extends Protocol = Protocol> {
+  readonly protocol: P;
+  start(env: MachineEnv): Served<P>;
+}
+
+export function defineMachine<P extends Protocol>(protocol: P, start: (env: MachineEnv) => Served<P>): MachineSide<P> {
+  return { protocol, start };
+}

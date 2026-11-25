@@ -19,6 +19,9 @@
 #      tests
 #  10. the GPU selection library the agent embeds (internal/agent/gpupick)
 #      is the one scripts/build-gpupick.sh built from its source
+#  11. Bun's APIs (Bun.*, bun:*) are used only by what runs under Bun alone:
+#      the machine side (backend/machine, hosts/machine, the features'
+#      machine.ts and machine/), the command line (hosts/bun) and tests
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -41,9 +44,23 @@ echo "==> brand literals"
 hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src desktop/src backend --exclude-dir=node_modules 2>/dev/null \
   | grep -vE '(internal/brand/|web/src/brand\.ts|backend/shared/lib/brand\.ts|extensions/[^/]+/src/brand\.ts|_test\.go:|\.test\.ts:|__tests__/|/testdata/|/testing\.ts:)' \
   | grep -vE "\"${module}/" \
-  | grep -vE '^[^:]+:[0-9]+:\s*(//|\*)' || true)
+  | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' || true)
 if [[ -n "$hits" ]]; then
   echo "hardcoded '${slug}' (use internal/brand, backend/shared/lib/brand.ts, web/src/brand.ts or the extension's src/brand.ts):"
+  echo "$hits"
+  fail=1
+fi
+
+echo "==> Bun's APIs only where Bun alone runs"
+# The core's shared code, kernel and features' core sides also run in the
+# desktop app's Electron (Node); tsconfig.node.json typechecks them with
+# Node's types, this catches the rest (the features' other modules).
+hits=$(grep -rnE "\bBun\.[A-Za-z]|from 'bun:|import\('bun:" --include='*.ts' backend/shared backend/kernel backend/features backend/hosts backend/machine --exclude-dir=node_modules 2>/dev/null \
+  | grep -vE '^backend/(machine/|hosts/(bun|machine)/|features/[^/]+/machine(\.ts|/))' \
+  | grep -vE '(\.test\.ts:|/testdata/|/testing\.ts:)' \
+  | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' || true)
+if [[ -n "$hits" ]]; then
+  echo "Bun's APIs outside the machine side, hosts/bun and tests:"
   echo "$hits"
   fail=1
 fi

@@ -548,6 +548,16 @@ export class Session {
   }
 }
 
+/** Closes a stream as Go's Close does: a FIN, and what still arrives is
+ * read and dropped until the other end closes too (a reset, destroy(),
+ * would fail the other end while it still writes). */
+export function closeStream(st: Duplex): void {
+  if (st.destroyed) return;
+  st.end();
+  st.resume();
+  st.on('error', () => {});
+}
+
 /** A duplex over a readable and a writable, e.g. a child's stdout/stdin. */
 export function pairDuplex(readable: NodeJS.ReadableStream, writable: NodeJS.WritableStream): Duplex {
   const d = new Duplex({

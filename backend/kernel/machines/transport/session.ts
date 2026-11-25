@@ -6,7 +6,7 @@ import type { Duplex } from 'node:stream';
 import { MAX_BODY, readBody, readLine, writeLine, type Header, type Reply, type Stat } from '#shared/proto/agentproto/index.ts';
 import { write } from '#shared/lib/streamio.ts';
 import { Reader } from '#shared/lib/streamio.ts';
-import { Session as Yamux, type Stream } from '#shared/proto/yamux.ts';
+import { Session as Yamux, closeStream, type Stream } from '#shared/proto/yamux.ts';
 
 /** Names this core to the nodes it reaches (NodeHello.client): random, the
  * same for all its sessions while the process runs. */
@@ -27,15 +27,7 @@ export interface AgentStream {
   reader: Reader;
 }
 
-/** Closes a stream as Go's Close does: a FIN, and what still arrives is
- * read and dropped until the other end closes too (a reset, destroy(),
- * would fail an agent still writing). */
-export function closeStream(st: Stream): void {
-  if (st.destroyed) return;
-  st.end();
-  st.resume();
-  st.on('error', () => {});
-}
+export { closeStream };
 
 export class AgentError extends Error {
   /** The agent's reply when it refused. */
