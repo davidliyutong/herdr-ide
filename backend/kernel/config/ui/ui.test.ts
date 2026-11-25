@@ -39,7 +39,7 @@ describe('ui settings', () => {
     expect(s.bool('terminal.sshEnv', 'm')).toBe(true);
   });
 
-  // The tokens read from spec/tokens.json are the values scripts/tokens
+  // The tokens read from spec/tokens.json are the values backend/scripts/tokens.ts
   // wrote into the web UI's CSS (web/src/tokens.css): the terminal's colors
   // of the dark (:root) and the light theme, and the color themes, the
   // default first (the only one without a selector of its own).

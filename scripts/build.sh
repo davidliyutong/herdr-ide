@@ -79,7 +79,7 @@ if [[ -z "${SKIP_EXT:-}" && -d "extensions/${SLUG}-bridge" ]]; then
   (cd "extensions/${SLUG}-bridge" && pnpm install --frozen-lockfile >/dev/null && pnpm run build >/dev/null &&
     find . -path ./node_modules -prune -o -type f -exec touch -h -t 198001010000 {} + &&
     pnpm exec vsce package --no-dependencies --allow-missing-repository -o "${SLUG}-bridge.vsix" >/dev/null)
-  go run ./scripts/zipnorm "extensions/${SLUG}-bridge/${SLUG}-bridge.vsix"
+  bun backend/scripts/zipnorm.ts "extensions/${SLUG}-bridge/${SLUG}-bridge.vsix"
   cp "extensions/${SLUG}-bridge/${SLUG}-bridge.vsix" "$PAYLOAD/ext/"
 fi
 
@@ -101,14 +101,14 @@ if [[ "$MACHINE" == go ]]; then
   echo "==> herdr-core for machines"
   rm -f "$PAYLOAD"/hc/*.gz
   # shellcheck disable=SC2086
-  go run ./scripts/fetch-hc -out "$PAYLOAD/hc" $AGENT_PLATFORMS
+  bun backend/scripts/fetch-hc.ts --out "$PAYLOAD/hc" $AGENT_PLATFORMS
 else
   # No Go builds: each executable carries its platform's herdr-core.
   rm -f "$PAYLOAD"/agents/*.gz "$PAYLOAD"/hc/*.gz
   echo "==> herdr-core for the executables"
   mkdir -p dist/machines-hc
   # shellcheck disable=SC2086
-  go run ./scripts/fetch-hc -out dist/machines-hc $AGENT_PLATFORMS
+  bun backend/scripts/fetch-hc.ts --out dist/machines-hc $AGENT_PLATFORMS
 fi
 
 # The encoder Linux machines send program windows as video with, built by

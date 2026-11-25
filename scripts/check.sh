@@ -119,7 +119,7 @@ if awk '/^## \[Unreleased\]/ {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md | grep -
 fi
 
 echo "==> design tokens and settings keys"
-go run ./scripts/tokens -check || fail=1
+bun backend/scripts/tokens.ts --check || fail=1
 (cd backend && bun scripts/registry.ts --check) || fail=1
 
 echo "==> Codex's app-server types"

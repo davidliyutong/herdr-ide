@@ -50,7 +50,7 @@ check:
 # settings and commands (spec/generated) and the tables of settings and
 # commands in docs/reference.md.
 tokens:
-	go run ./scripts/tokens
+	bun backend/scripts/tokens.ts
 	pnpm -C backend registry
 
 # The web UI's terminal emulator, Ghostty's libghostty-vt as WebAssembly
@@ -92,7 +92,7 @@ e2e:
 # herdr-core (fetched once into dist/machines-hc) and staged in
 # dist/payload/machine as the desktop app carries it.
 dev-core:
-	@test -f dist/machines-hc/hc-$(HOST_PLATFORM).gz || go run ./scripts/fetch-hc -out dist/machines-hc $(subst -,/,$(HOST_PLATFORM))
+	@test -f dist/machines-hc/hc-$(HOST_PLATFORM).gz || bun backend/scripts/fetch-hc.ts --out dist/machines-hc $(subst -,/,$(HOST_PLATFORM))
 	bun backend/scripts/build.ts --out dist/dev/$(SLUG)-$(HOST_PLATFORM) --hc dist/machines-hc --payload-out dist/payload
 	gzip -1 -c dist/dev/$(SLUG)-$(HOST_PLATFORM) > dist/payload/machine/$(SLUG)-$(HOST_PLATFORM).gz
 	bun backend/hosts/bun/main.ts --instance dev --local-only --listen $(DEV_LISTEN) --web-dir web/dist

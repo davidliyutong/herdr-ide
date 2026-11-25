@@ -5,7 +5,7 @@ import { accentAttribute, colorThemes, DEFAULT_COLOR_THEME } from '../themes';
 import { sizePx } from '../lib/sizes';
 
 describe('design tokens', () => {
-  // The terminal colors' settings default to the tokens' (scripts/tokens
+  // The terminal colors' settings default to the tokens' (backend/scripts/tokens.ts
   // writes the core's defaults).
   for (const kind of ['dark', 'light'] as const) {
     it(`are the ${kind} terminal colors' defaults`, () => {

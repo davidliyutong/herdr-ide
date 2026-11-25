@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Package each core with its license notices, including those of the
-# herdr-core the core embeds (scripts/fetch-hc), into
+# herdr-core the core embeds (backend/scripts/fetch-hc.ts), into
 # dist/release/<slug>-<platform>.tar.gz, and dist/release/SHA256SUMS: the
 # archives' digests and those of the executables in them
 # (<slug>-<platform>/<slug>), which a core of the TypeScript build checks
@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SLUG=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
-HC_VERSION=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/hcdist/release.go)
+HC_VERSION=$(bun backend/scripts/fetch-hc.ts --version)
 test -n "$HC_VERSION"
 TARGETS=${TARGETS:-"$(go env GOOS)/$(go env GOARCH)"}
 mkdir -p dist/packages dist/release

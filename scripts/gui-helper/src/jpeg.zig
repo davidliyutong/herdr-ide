@@ -2,10 +2,10 @@
 //! section K.3 of the spec), read from 32-bit BGRX rows as X servers hand
 //! them out, with groups of rows entropy-coded at the same time: each group
 //! but the last ends with a restart marker, so the result is one ordinary
-//! JPEG. It is the Go agent's encoder (internal/jpegstrip: Go's image/jpeg
-//! with the colour conversion reading BGRX and the scan split into restart
-//! intervals), ported: for one group the output is byte for byte what
-//! image/jpeg writes, for any number the same pixels.
+//! JPEG. It is Go's image/jpeg encoder ported, with the colour conversion
+//! reading BGRX and the scan split into restart intervals, as the Go
+//! program this project once had encoded windows: for one group the output
+//! is byte for byte what image/jpeg writes, for any number the same pixels.
 //!
 //! Derived from Go's src/image/jpeg (writer.go, dct.go):
 //! Copyright 2011 The Go Authors. All rights reserved. Use of this source
@@ -548,9 +548,9 @@ fn testPicture(gpa: std.mem.Allocator, w: u32, h: u32) ![]u8 {
     return pix;
 }
 
-// The vectors are what the Go agent's jpegstrip writes for the same
-// pixels (testdata/jpeg, written by scripts/gui-helper/testdata/gen.go).
-test "the same bytes as the Go agent's encoder" {
+// The vectors (testdata/jpeg-*.jpg) are what the Go encoder this one was
+// ported from wrote for the same pixels; they are kept as they were made.
+test "the same bytes as the Go encoder" {
     const gpa = testing.allocator;
     inline for (.{ .{ 37, 21, 1, "jpeg-37x21-1.jpg" }, .{ 100, 70, 3, "jpeg-100x70-3.jpg" }, .{ 64, 64, 8, "jpeg-64x64-8.jpg" } }) |c| {
         const pix = try testPicture(gpa, c[0], c[1]);
