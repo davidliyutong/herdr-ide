@@ -149,6 +149,26 @@ test('the core starts with what the main process holds for it, and answers the s
   await host.stop();
 });
 
+test("a window's request reaches the core with the origin of the page that made it as its Origin, in place of its own", async () => {
+  const { s } = spawner(['ready'], async (req) => Response.json({ origin: req.headers.get('origin') }));
+  const host = new CoreHost({ spawner: s, start: START, lost: () => assert.fail('lost') });
+  await host.start();
+  const origin = async (made: string | undefined, header?: string) =>
+    (
+      (await (await host.request(new Request(`${APP_ORIGIN}/api/config`, { headers: header ? { Origin: header } : {} }), made)).json()) as {
+        origin: string | null;
+      }
+    ).origin;
+  assert.equal(await origin(APP_ORIGIN), APP_ORIGIN);
+  // A sandboxed frame's, another site's: the guard refuses them.
+  assert.equal(await origin('null'), 'null');
+  assert.equal(await origin('https://example.com', APP_ORIGIN), 'https://example.com');
+  // One the browser or the shell started carries none.
+  assert.equal(await origin(undefined, 'https://example.com'), null);
+  assert.equal(((await (await host.fetch('/api/config')).json()) as { origin: string | null }).origin, null);
+  await host.stop();
+});
+
 test('a core that cannot start fails the start, and is not started again', async () => {
   const failed = spawner(['failed']);
   const host = new CoreHost({ spawner: failed.s, start: START, lost: () => {} });

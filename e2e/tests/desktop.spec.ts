@@ -11,7 +11,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ORIGIN, tcpListeners } from '../harness/desktop';
+import { APP_PARTITION, ORIGIN, tcpListeners } from '../harness/desktop';
 import { expect, test } from '../harness/fixtures';
 import { newTerminalTab } from '../harness/ui';
 import { waitFor } from '../harness/wait';
@@ -51,6 +51,42 @@ test('the desktop app runs its core in process, without a listener', async ({ de
   await desktop.localReady();
   // The requests of the app's windows are the desktop client's.
   expect((await desktop.api<{ client: string }>('GET', '/api/config')).client).toBe('desktop');
+
+  // A page of another origin in the app's session (a data: URL, whose
+  // origin is opaque, as a sandboxed frame's is; a site's in a VS Code
+  // window is another): the core sees who asked and refuses it, a write as
+  // a read, though a handler's answers are readable to any page.
+  const secret = join(home.work, 'secret.txt');
+  writeFileSync(secret, 'not for other origins\n');
+  const planted = join(home.work, 'planted.txt');
+  const foreign = await desktop.app.evaluate(
+    async ({ BrowserWindow }, [write, read, partition]) => {
+      const w = new BrowserWindow({ show: false, webPreferences: { partition, sandbox: true, contextIsolation: true } });
+      try {
+        await w.loadURL('data:text/html,<!doctype html><title>other</title>');
+        return (await w.webContents.executeJavaScript(`(async () => {
+          const out = {};
+          try { const r = await fetch(${JSON.stringify(write)}, { method: 'POST', mode: 'no-cors', body: 'planted' }); out.write = r.type + ' ' + r.status; } catch (e) { out.write = 'error'; }
+          try { const r = await fetch(${JSON.stringify(read)}); out.read = r.status + ' ' + (await r.text()); } catch (e) { out.read = 'error'; }
+          return out;
+        })()`)) as { write: string; read: string };
+      } finally {
+        w.destroy();
+      }
+    },
+    [
+      `${ORIGIN}/api/m/local/write?${new URLSearchParams({ path: planted, force: '1' })}`,
+      `${ORIGIN}/api/m/local/file?${new URLSearchParams({ path: secret })}`,
+      APP_PARTITION,
+    ] as const,
+  );
+  expect(foreign.read).toMatch(/^403 .*origin_not_allowed/);
+  expect(foreign.read).not.toContain('not for other origins');
+  expect(existsSync(planted), `the write: ${foreign.write}`).toBe(false);
+  // The window's own reads still are.
+  expect(await win.evaluate((u) => fetch(u).then((r) => r.text()), `/api/m/local/file?${new URLSearchParams({ path: secret })}`)).toBe(
+    'not for other origins\n',
+  );
 
   // A terminal runs a command.
   await newTerminalTab(win);

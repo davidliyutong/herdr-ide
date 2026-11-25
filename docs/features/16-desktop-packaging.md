@@ -107,8 +107,9 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
   instance, the node instance, the payloads' directories and the verify
   key of the launch. Nothing listens: the app's windows live in a session
   of their own, which intercepts `https://<slug>.localhost` and hands each
-  request to the core over a MessagePort; requests to other hosts go to
-  the network. The origin is a secure context, as code-server and its
+  request to the core over a MessagePort, with the origin of the page
+  that made it (Electron's `initiatorOrigin`) as its Origin; requests to
+  other hosts go to the network. The origin is a secure context, as code-server and its
   service workers need, and the same at every launch, which keeps what the
   page stores per browser and the permissions granted to it (a page of an
   earlier version, at `http://127.0.0.1:7781`, kept its own).

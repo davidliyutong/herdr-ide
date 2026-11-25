@@ -27,15 +27,26 @@ test("the session's https handler: the app's origin to the core, the rest passed
       return new Response('network');
     },
   };
-  const toCore: string[] = [];
+  const toCore: Array<[string, string | undefined]> = [];
   serveApp(ses, {
-    request: async (req) => {
-      toCore.push(req.url);
+    request: async (req, origin) => {
+      toCore.push([req.url, origin]);
       return new Response('core');
     },
   });
-  assert.equal(await (await handler!(new Request(`${APP_ORIGIN}/index.html`))).text(), 'core');
-  assert.equal(await (await handler!(new Request('https://open-vsx.org/api'))).text(), 'network');
-  assert.deepEqual(toCore, [`${APP_ORIGIN}/index.html`]);
+  // Who made the request is the initiator Electron reports.
+  const made = (url: string, initiatorOrigin?: string) =>
+    Object.assign(new Request(url), initiatorOrigin === undefined ? {} : { initiatorOrigin });
+  assert.equal(await (await handler!(made(`${APP_ORIGIN}/index.html`))).text(), 'core');
+  for (const o of [APP_ORIGIN, 'null', 'https://example.com', 'http://localhost:3000'])
+    assert.equal(await (await handler!(made(`${APP_ORIGIN}/api/config`, o))).text(), 'core');
+  assert.equal(await (await handler!(made('https://open-vsx.org/api', APP_ORIGIN))).text(), 'network');
+  assert.deepEqual(toCore, [
+    [`${APP_ORIGIN}/index.html`, undefined],
+    [`${APP_ORIGIN}/api/config`, APP_ORIGIN],
+    [`${APP_ORIGIN}/api/config`, 'null'],
+    [`${APP_ORIGIN}/api/config`, 'https://example.com'],
+    [`${APP_ORIGIN}/api/config`, 'http://localhost:3000'],
+  ]);
   assert.deepEqual(passed, [['https://open-vsx.org/api', true]]);
 });

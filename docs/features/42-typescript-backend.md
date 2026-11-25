@@ -129,6 +129,28 @@ with a streamed body (an XHR's body reaches a protocol handler whole and
 reports no progress). The handler's responses are not decoded by
 Chromium, so proxied requests ask for `identity`.
 
+What Chromium does for a request over the network it does not do for one
+a handler answers: the handler gets no Origin header (Electron removes an
+`Origin: null` too) and no Fetch Metadata, and the page that asked may
+read the answer, CORS or not; a probe of Electron 45 had a sandboxed
+frame and a frame of another origin read a JSON answer of the
+intercepted origin in full. Who asked is the request's `initiatorOrigin`,
+set by Electron from the frame or worker that made it ("null" for an
+opaque origin, none for a request the browser started itself): the main
+process puts it in the request's Origin, in place of any header, and the
+core's guard refuses every origin but the app's (SECURITY.md). A
+document the core serves sandboxed (a machine's file opened as a page)
+is of an opaque origin, so in the app the images it names are refused,
+which a browser loads.
+
+The core's bundle loads at run time Node's own modules and node-pty
+only: ws's optional native helpers (`bufferutil`, `utf-8-validate`) are
+bundled as modules that fail to load, which ws takes as their absence,
+and `desktop/build.mjs` fails when the bundle would load anything else.
+Electron trims the module search of a file inside the app's resources to
+them, but a module the app does not carry has no reason to be looked
+for.
+
 The app carries what the core carries for machines as resources, laid out
 as `scripts/build.sh` stages them (`payload/`: machine builds, herdr-core,
 the video encoders, the VS Code extension; `web/`: the web UI), and

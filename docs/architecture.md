@@ -92,7 +92,9 @@ instance `desktop` and the default namespace on machines
   chunks with credit both ways. WebSockets are channels, MessagePorts the
   main process makes for a frame of that origin (`desktopChannels`; the
   web UI's `openChannel`, VS Code's frames' WebSocket). Requests in process
-  are the desktop client's.
+  are the desktop client's; their Origin is the one Electron reports for
+  the frame or worker that made them (`initiatorOrigin`), so the core's
+  guard refuses a page of another origin in the app's session.
 - A crashed core is started again with the windows kept (at most 3 times
   a minute); quitting asks it to stop, and kills it after 20 s.
 

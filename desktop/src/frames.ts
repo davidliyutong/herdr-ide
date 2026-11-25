@@ -29,7 +29,9 @@ export const desktopChannels: DesktopChannels = {
   },
 };
 
-/** Sets up a frame at where; false (and nothing) for another origin. */
+/** Sets up a frame at where; false (and nothing) for another origin.
+ * where.origin is the document's origin (self.origin), not its URL's: a
+ * sandboxed document at a URL of the app's is of an opaque origin. */
 export function setUpFrame(where: { origin: string; pathname: string }): boolean {
   if (where.origin !== APP_ORIGIN) return false;
   contextBridge.exposeInMainWorld('desktopChannels', desktopChannels);

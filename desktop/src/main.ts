@@ -320,7 +320,14 @@ function applyBindings(b: Binding[]) {
 function fromMainPage(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   const frame = event.senderFrame;
   return (
-    !!mainWindow && !!frame && event.sender === mainWindow.webContents && frame === event.sender.mainFrame && isInternal(frame.url, origin)
+    !!mainWindow &&
+    !!frame &&
+    event.sender === mainWindow.webContents &&
+    frame === event.sender.mainFrame &&
+    // The document's origin, not only its URL's: a sandboxed document at
+    // a URL of the app's is of an opaque origin.
+    frame.origin === origin &&
+    isInternal(frame.url, origin)
   );
 }
 

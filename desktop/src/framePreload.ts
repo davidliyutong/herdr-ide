@@ -3,4 +3,4 @@
 // core only (frames.ts). The desktopShell bridge is the main window's.
 import { setUpFrame } from './frames';
 
-setUpFrame({ origin: location.origin, pathname: location.pathname });
+setUpFrame({ origin: self.origin, pathname: location.pathname });

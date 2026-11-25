@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { isBuiltin } from 'node:module';
 import { buildHelper, swiftcFound } from './helper/build.mjs';
 
 // node-pty 1.1.0 ships its macOS spawn-helper without the executable bit
@@ -46,7 +47,23 @@ for (const [entry, out] of [
 // The core, for the app's utility process (backend/hosts/electron), with
 // the backend's packages bundled (pnpm -C backend install first); node-pty,
 // a native module, stays a package of the app, loaded when an ssh login
-// needs it. ws's optional native helpers are not there and need not be.
+// needs it. ws's optional native helpers (bufferutil, utf-8-validate) are
+// not shipped: they are bundled as modules that fail to load, which ws
+// takes as their absence, so the core never looks for a module the app
+// does not carry (a search that leaves the app's directory would find one
+// anyone could put there). Nothing but Node's own modules and node-pty is
+// loaded at run time: checked below.
+const SHIPPED = new Set(['node-pty']);
+const notShipped = {
+  name: 'not-shipped',
+  setup(b) {
+    b.onResolve({ filter: /^(bufferutil|utf-8-validate)$/ }, (a) => ({ path: a.path, namespace: 'not-shipped' }));
+    b.onLoad({ filter: /.*/, namespace: 'not-shipped' }, (a) => ({
+      contents: `throw Object.assign(new Error(${JSON.stringify(a.path + ' is not shipped')}), { code: 'MODULE_NOT_FOUND' });`,
+      loader: 'js',
+    }));
+  },
+};
 await build({
   entryPoints: ['../backend/hosts/electron/main.ts'],
   outfile: 'dist/core.mjs',
@@ -57,11 +74,19 @@ await build({
   // ES module builds first: jsonc-parser's main is UMD, which hides its
   // modules from the bundler.
   mainFields: ['module', 'main'],
-  external: ['node-pty', 'bufferutil', 'utf-8-validate'],
+  external: [...SHIPPED],
+  plugins: [notShipped],
   // CommonJS packages in an ES module bundle require what they need.
   banner: { js: "import { createRequire as __coreRequire } from 'node:module'; const require = __coreRequire(import.meta.url);" },
   logLevel: 'warning',
 });
+const loaded = new Set(
+  [...readFileSync('dist/core.mjs', 'utf8').matchAll(/\b(?:require|__require|createRequire\([^()]*\))\(\s*["'`]([^"'`]+)["'`]\s*\)/g)].map(
+    (m) => m[1],
+  ),
+);
+const foreign = [...loaded].filter((m) => !isBuiltin(m) && !SHIPPED.has(m));
+if (foreign.length) throw new Error(`dist/core.mjs loads modules the app does not carry: ${foreign.join(', ')}`);
 
 // macOS: the Secure Enclave helper (helper/build.mjs), which the packaged app
 // carries in Contents/Helpers and the development run finds here. Without

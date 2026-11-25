@@ -2,6 +2,16 @@
 // core (core.ts CoreHost.request), which answers it in process; requests
 // to other addresses (VS Code's extension gallery, say) go to the network
 // as they would without the handler.
+//
+// What Chromium does for a request over the network it does not do for
+// one a handler answers: the handler sees no Origin header (Electron also
+// removes an "Origin: null") and no Sec-Fetch-* headers, and any page may
+// read the answer, CORS or not, a sandboxed frame's or another site's in a
+// VS Code window included. Who asked is the request's initiatorOrigin,
+// which Electron sets from the frame that made it and the page cannot
+// change ("null" for an opaque origin; none for a request the browser
+// started itself, such as the window's first load): the core gets it as
+// the request's Origin, and its guard refuses every origin but the app's.
 import { APP_HOST } from './origin';
 
 /** Whether url is of the app's origin. */
@@ -20,7 +30,13 @@ export interface HandlingSession {
   fetch(req: Request, init: { bypassCustomProtocolHandlers: boolean }): Promise<Response>;
 }
 
-/** Intercepts https in ses: the app's origin goes to core. */
-export function serveApp(ses: HandlingSession, core: { request(req: Request): Promise<Response> }): void {
-  ses.protocol.handle('https', (req) => (forCore(req.url) ? core.request(req) : ses.fetch(req, { bypassCustomProtocolHandlers: true })));
+/** A request as Electron hands it to a protocol handler. */
+export type InterceptedRequest = Request & { initiatorOrigin?: string };
+
+/** Intercepts https in ses: the app's origin goes to core, with the origin
+ * of the page that made the request. */
+export function serveApp(ses: HandlingSession, core: { request(req: Request, origin: string | undefined): Promise<Response> }): void {
+  ses.protocol.handle('https', (req: InterceptedRequest) =>
+    forCore(req.url) ? core.request(req, req.initiatorOrigin) : ses.fetch(req, { bypassCustomProtocolHandlers: true }),
+  );
 }

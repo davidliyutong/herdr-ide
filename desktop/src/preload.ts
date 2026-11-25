@@ -227,5 +227,5 @@ export function desktopShellFor(platform: string): DesktopShell {
 
 // The shell's bridge is the main window's page's, not its frames' (VS
 // Code's among them).
-if (setUpFrame({ origin: location.origin, pathname: location.pathname }) && window.top === window)
+if (setUpFrame({ origin: self.origin, pathname: location.pathname }) && window.top === window)
   contextBridge.exposeInMainWorld('desktopShell', desktopShellFor(process.platform));

@@ -220,8 +220,11 @@ export class CoreHost {
   }
 
   /** A request of the app (a window's, intercepted, or the shell's own):
-   * the core's response, or 503 while it cannot be reached. */
-  async request(req: Request): Promise<Response> {
+   * the core's response, or 503 while it cannot be reached. origin is the
+   * origin of the page that made it (protocol.ts), undefined for one the
+   * browser or the shell started; it is the Origin the core sees, in place
+   * of any the request carries. */
+  async request(req: Request, origin?: string): Promise<Response> {
     let child: CoreChild;
     try {
       child = await this.serving();
@@ -229,7 +232,10 @@ export class CoreHost {
       return Response.json({ error: 'unavailable', message: 'the core is not running' }, { status: 503 });
     }
     const headers: [string, string][] = [];
-    req.headers.forEach((v, k) => headers.push([k, v]));
+    req.headers.forEach((v, k) => {
+      if (k !== 'origin') headers.push([k, v]);
+    });
+    if (origin !== undefined) headers.push(['origin', origin]);
     if (!req.headers.has('host')) headers.push(['host', new URL(req.url).host]);
     const head: RequestHead = { method: req.method, url: req.url, headers, body: req.body !== null };
     const [ours, theirs] = this.o.spawner.pair();

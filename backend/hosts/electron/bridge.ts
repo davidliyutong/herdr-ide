@@ -481,6 +481,12 @@ export const ABNORMAL = 1006;
 
 /** The close code of a channel whose handlers failed in the core. */
 const INTERNAL = 1011;
+/** WebSocket's close code for a message too big to take. */
+export const TOO_BIG = 1009;
+/** The largest message a channel takes from a client, as the command line
+ * takes over a WebSocket (Bun.serve's maxPayloadLength, hosts/bun/serve.ts),
+ * and the most a client may send before the core takes the channel. */
+export const MAX_MESSAGE = 64 << 20;
 
 const isControl = (m: unknown): m is ChannelControl =>
   typeof m === 'object' && m !== null && !ArrayBuffer.isView(m) && !(m instanceof ArrayBuffer);
@@ -520,8 +526,15 @@ export async function serveChannel(
   handle: (req: Request, upgrade: Upgrade) => Promise<Response>,
 ): Promise<void> {
   let open: ((ch: CoreChannel) => CoreChannelHandlers) | undefined;
+  // What the client sends before the core takes the channel, up to
+  // MAX_MESSAGE; more ends the channel once it opens.
   const early: unknown[] = [];
-  let receive: (m: unknown) => void = (m) => early.push(m);
+  let earlyBytes = 0;
+  let receive: (m: unknown) => void = (m) => {
+    if (typeof m === 'string') earlyBytes += m.length;
+    else if (m instanceof ArrayBuffer || ArrayBuffer.isView(m)) earlyBytes += m.byteLength;
+    if (earlyBytes <= MAX_MESSAGE) early.push(m);
+  };
   let gone: () => void = () => {};
   let closedEarly = false;
   port.listen(
@@ -561,7 +574,13 @@ export async function serveChannel(
   const end = (code: number, reason: string) => {
     if (closed) return;
     closed = true;
-    queueMicrotask(() => handlers?.close?.(code, reason));
+    queueMicrotask(() => {
+      try {
+        handlers?.close?.(code, reason);
+      } catch {
+        // The channel is over; what its handler threw ends nothing else.
+      }
+    });
   };
   const ch: CoreChannel = {
     send(data) {
@@ -591,16 +610,25 @@ export async function serveChannel(
       ch.close(INTERNAL, 'internal error');
     }
   };
+  const take = (d: string | Uint8Array) => {
+    if (closed) return;
+    if (channelSize(d) > MAX_MESSAGE) return ch.close(TOO_BIG, 'message too big');
+    safely(() => handlers?.message(d));
+  };
   receive = (m) => {
-    if (typeof m === 'string') return void (closed || safely(() => handlers?.message(m)));
-    if (m instanceof ArrayBuffer || ArrayBuffer.isView(m)) return void (closed || safely(() => handlers?.message(bytes(m))));
+    if (typeof m === 'string') return take(m);
+    if (m instanceof ArrayBuffer || ArrayBuffer.isView(m)) return take(bytes(m));
     if (!isControl(m)) return;
     if (m.t === 'ack') {
       if (Number.isFinite(m.n) && m.n > 0) acked = Math.min(sent, acked + m.n);
       safely(() => handlers?.drain?.());
     } else if (m.t === 'close') {
-      // The client's close: answered, then the client closes the port.
-      if (!closed) port.post({ t: 'close', code: m.code, reason: m.reason } satisfies ChannelControl);
+      // The client's close: answered, then the client closes the port, or
+      // this side once it waited for that.
+      if (!closed) {
+        port.post({ t: 'close', code: m.code, reason: m.reason } satisfies ChannelControl);
+        timer = later(() => port.close(), CLOSE_WAIT_MS);
+      }
       end(typeof m.code === 'number' ? m.code : 1005, typeof m.reason === 'string' ? m.reason : '');
     }
   };
@@ -616,6 +644,7 @@ export async function serveChannel(
   }
   port.post({ t: 'open', protocol: '' } satisfies ChannelControl);
   for (const m of early.splice(0)) receive(m);
+  if (earlyBytes > MAX_MESSAGE) ch.close(TOO_BIG, 'message too big');
   if (closedEarly) gone();
 }
 

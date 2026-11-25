@@ -9,6 +9,8 @@ import { MessageChannel } from 'node:worker_threads';
 import {
   ABNORMAL,
   ACK_BYTES,
+  MAX_MESSAGE,
+  TOO_BIG,
   channelClient,
   nodePort,
   request,
@@ -287,4 +289,72 @@ test("a channel the core cannot take, or whose handler throws, ends as the serve
   throwing.client.send('x');
   await until(() => throwing.ends.length === 1);
   assert.deepEqual(throwing.ends, [[1011, 'internal error']]);
+});
+
+test('a close handler that throws ends its channel only', async () => {
+  let thrown = 0;
+  const onError = () => thrown++;
+  process.on('uncaughtException', onError);
+  try {
+    const c = channel(async (_req, upgrade) =>
+      upgrade(() => ({
+        message: () => {},
+        close: () => {
+          throw new Error('bug');
+        },
+      })),
+    );
+    await until(c.opened);
+    c.client.close(1000, 'leaving');
+    await until(() => c.ends.length === 1);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(thrown, 0);
+    assert.deepEqual(c.ends, [[1000, 'leaving']]);
+  } finally {
+    process.off('uncaughtException', onError);
+  }
+});
+
+test("a client's message above MAX_MESSAGE ends its channel as too big, also before the core took it", async () => {
+  const a = echo();
+  const open = channel(a.behave);
+  await until(open.opened);
+  open.client.send(new Uint8Array(MAX_MESSAGE + 1));
+  await until(() => open.ends.length === 1);
+  assert.deepEqual(open.ends, [[TOO_BIG, 'message too big']]);
+  assert.deepEqual(a.seen.closes, [[TOO_BIG, 'message too big']]);
+
+  // Sent while the core still decides: the channel opens, then ends. The
+  // core decides once both came (its port counts them).
+  const b = echo();
+  const { port1, port2 } = pair();
+  let arrived = 0;
+  const inner = nodePort(port2);
+  const counting: typeof inner = {
+    post: (m) => inner.post(m),
+    close: () => inner.close(),
+    listen: (message, closed) =>
+      inner.listen((m) => {
+        arrived++;
+        message(m);
+      }, closed),
+  };
+  const ends: Array<[number, string]> = [];
+  void serveChannel(counting, { url: 'https://app.localhost/ws', headers: [] }, async (req, upgrade) => {
+    await until(() => arrived === 2, 10_000);
+    return b.behave(req, upgrade);
+  });
+  const early = nodePort(port1);
+  early.listen(
+    (m) => {
+      const c = m as { t?: string; code?: number; reason?: string } | null;
+      if (c?.t === 'close') ends.push([c.code!, c.reason!]);
+    },
+    () => {},
+  );
+  early.post(new Uint8Array(MAX_MESSAGE / 2 + 1));
+  early.post(new Uint8Array(MAX_MESSAGE / 2 + 1));
+  await until(() => ends.length === 1, 10_000);
+  early.close();
+  assert.deepEqual(ends, [[TOO_BIG, 'message too big']]);
 });
