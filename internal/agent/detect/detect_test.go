@@ -1,220 +1,216 @@
 package detect
 
 import (
+	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
+// The cases of testdata/ are shared with the TypeScript machine side
+// (backend/features/agents/machine/detect), which runs them against the
+// same manifests: screens of the agents, identification, regions, the
+// semantics of gates and the parse of every manifest.
+var update = flag.Bool("update", false, "rewrite testdata/manifests.json from the manifests")
+
 // screen joins lines as herdr-core's terminal.read returns a screen.
 func screen(lines ...string) string { return strings.Join(lines, "\n") + "\n" }
 
-// Screens of the agents the UI starts, written after the agents' own
-// interfaces and the manifests' rules, with the state each gives.
-var fixtures = []struct {
-	agent, name string
-	in          Input
-	want        string
-	skip        bool
-}{
-	{"claude", "a turn in progress", Input{Screen: screen(
-		"⏺ Reading the test files…",
-		"",
-		"✻ Thinking… (12s · ↑ 1.2k tokens · esc to interrupt)",
-		"",
-		"──────────────────────────────────────",
-		"❯ ",
-		"──────────────────────────────────────",
-		"  ? for shortcuts",
-	)}, Working, false},
-	{"claude", "the prompt", Input{Screen: screen(
-		"⏺ Done: the tests pass.",
-		"",
-		"──────────────────────────────────────",
-		"❯ ",
-		"──────────────────────────────────────",
-		"  ? for shortcuts",
-	)}, Idle, false},
-	{"claude", "a permission dialog", Input{Screen: screen(
-		" Bash command",
-		"",
-		"   rm -rf build",
-		"   Remove the build directory",
-		"",
-		" Do you want to proceed?",
-		" ❯ 1. Yes",
-		"   2. Yes, and don't ask again for rm commands in /src",
-		"   3. No, and tell Claude what to do differently (esc)",
-	)}, Blocked, false},
-	{"claude", "the transcript viewer", Input{Screen: screen(
-		"⏺ Earlier output",
-		"  Showing detailed transcript · ctrl+o to toggle",
-	)}, Unknown, true},
-	{"claude", "a spinner in the title", Input{Screen: screen("text"), Title: "⠂ Claude Code"}, Working, false},
-	{"codex", "a spinner in the title", Input{Screen: screen("› Explain this"), Title: "⠋ codex"}, Working, false},
-	{"codex", "an approval in the title", Input{Screen: screen("› "), Title: "Action Required"}, Blocked, false},
-	{"codex", "a confirmation on screen", Input{Screen: screen("Allow command?", "  rm -rf build", "Press enter to confirm or esc to cancel")}, Blocked, false},
-	{"codex", "its title at rest", Input{Screen: screen("› "), Title: "codex"}, Idle, false},
-	{"gemini", "working", Input{Screen: screen("⠼ Reading files (esc to cancel, 4s)")}, Working, false},
-	{"gemini", "an edit to allow", Input{Screen: screen("╭──────╮", "│ Apply this change?", "│ ● 1. Yes, allow once", "╰──────╯")}, Blocked, false},
-	{"gemini", "the prompt", Input{Screen: screen(">   Type your message or @path/to/file")}, Idle, false},
-	{"opencode", "working", Input{Screen: screen("  ■■■■⬝⬝⬝⬝  esc to interrupt")}, Working, false},
-	{"opencode", "a permission", Input{Screen: screen("△ Permission required", "  bash: rm -rf build")}, Blocked, false},
-	{"opencode", "the prompt", Input{Screen: screen("  > ", "  enter send")}, Idle, false},
-	{"kimi", "thinking", Input{Screen: screen("⠋ Thinking...")}, Working, false},
-	{"kimi", "a command to approve", Input{Screen: screen("Run this command?", "  ls -la", "▶ Approve once", "  Reject", "↑↓ select · 1/2 choose · ↵ confirm")}, Blocked, false},
-	{"kimi", "the prompt", Input{Screen: screen("✨ ")}, Idle, false},
-	{"grok", "a tool running", Input{Screen: screen("⠋ Reading src/main.rs [stop]")}, Working, false},
-	{"grok", "a permission", Input{Screen: screen("Allow running ls?", "↑↓:select  enter:confirm  ctrl+o:yolo  ctrl+c:cancel")}, Blocked, false},
-	{"grok", "the prompt", Input{Screen: screen("> ", "ctrl+.:shortcuts")}, Idle, false},
-	{"cursor", "working", Input{Screen: screen("⬢ Generating…", "  ctrl+c to stop")}, Working, false},
-	{"cursor", "a command to run", Input{Screen: screen("Run this command?", "  npm test", " → Run (once) (y) (enter)", "   Skip (esc or n)")}, Blocked, false},
-	{"cursor", "the prompt", Input{Screen: screen("→ Plan, search, build anything")}, Idle, false},
-	{"copilot", "working", Input{Screen: screen("◉ Thinking (Esc to cancel)")}, Working, false},
-	{"copilot", "a selection", Input{Screen: screen("Do you want to run this command?", "❯ 1. Yes", "  2. No", "↑↓ to navigate · Enter to select · Esc to cancel")}, Blocked, false},
-	{"copilot", "the prompt", Input{Screen: screen("> Type @ to mention files")}, Idle, false},
-	{"qwen", "working", Input{Screen: screen("⠼ Reticulating splines… (12s · esc to cancel)")}, Working, false},
-	{"qwen", "a tool to confirm", Input{Screen: screen("Shell command execution", "Do you want to proceed?", "● 1. Yes, allow once", "  2. No")}, Blocked, false},
-	{"qwen", "the prompt", Input{Screen: screen(">   Type your message or @path/to/file")}, Idle, false},
-	{"amp", "working", Input{Screen: screen("╰ amp thinking ──────── esc to cancel")}, Working, false},
-	{"amp", "a command to approve", Input{Screen: screen("Run this command?", "  rm -rf build", "Approve  Deny with feedback")}, Blocked, false},
-	{"amp", "its title at rest", Input{Screen: screen("> "), Title: "src - amp - main"}, Idle, false},
+// readCases decodes testdata/name into v.
+func readCases(t *testing.T, name string, v any) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, v); err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
 }
 
+// Screens of the agents the UI starts, written after the agents' own
+// interfaces and the manifests' rules, with the state each gives.
 func TestRulesPerAgent(t *testing.T) {
-	for _, f := range fixtures {
-		m := ManifestFor(f.agent)
+	var cases []struct {
+		Agent, Name string
+		Screen      []string
+		Title, Want string
+		Skip        bool
+	}
+	readCases(t, "screens.json", &cases)
+	if len(cases) < 30 {
+		t.Fatalf("%d screens", len(cases))
+	}
+	for _, c := range cases {
+		m := ManifestFor(c.Agent)
 		if m == nil {
-			t.Fatalf("no manifest for %s", f.agent)
+			t.Fatalf("no manifest for %s", c.Agent)
 		}
-		r := m.Evaluate(f.in)
-		if r.State != f.want || r.Skip != f.skip {
-			t.Errorf("%s, %s: %s (rule %q, skip %v), want %s", f.agent, f.name, r.State, r.Rule, r.Skip, f.want)
+		r := m.Evaluate(Input{Screen: screen(c.Screen...), Title: c.Title})
+		if r.State != c.Want || r.Skip != c.Skip {
+			t.Errorf("%s, %s: %s (rule %q, skip %v), want %s", c.Agent, c.Name, r.State, r.Rule, r.Skip, c.Want)
 		}
 	}
 }
 
 // Gates: contains are case-insensitive, regexes all match, line regexes
 // match a line each; all, any and not nest; the highest priority wins and
-// no match reads idle.
+// no match reads idle. Manifests outside herdr's format or limits fail.
 func TestRuleSemantics(t *testing.T) {
-	m, err := Parse([]byte(`
-id = "test"
-[[rules]]
-id = "low"
-state = "working"
-priority = 10
-contains = ["BUSY"]
-[[rules]]
-id = "high"
-state = "blocked"
-priority = 20
-region = "bottom_non_empty_lines(2)"
-line_regex = ['^\s*\? ']
-any = [{ contains = ["yes"] }, { regex = ['(?i)allow'] }]
-not = [{ contains = ["ignore me"] }]
-[[rules]]
-id = "same"
-state = "idle"
-priority = 20
-contains = ["busy"]
-`))
+	var v struct {
+		Manifest string
+		Cases    []struct{ Screen, Want, Rule string }
+		Bad      []string
+		Good     []string
+	}
+	readCases(t, "rules.json", &v)
+	m, err := Parse([]byte(v.Manifest))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct {
-		screen, want, rule string
-	}{
-		{"busy\n", Idle, "same"}, // equal priority: the first rule that matched ("same" ranks over "low")
-		{"Busy\n? Allow it\n", Blocked, "high"},
-		{"? allow\nlast\n", Idle, "same"}, // not in the bottom two non-empty lines with... (checked below)
-		{"nothing here\n", Idle, ""},
-		{"? yes\nignore me\nbusy\n", Idle, "same"},
-	} {
-		r := m.Evaluate(Input{Screen: c.screen})
-		if c.screen == "? allow\nlast\n" {
-			// The bottom two non-empty lines hold the question: blocked, by
-			// priority over "same", which does not match ("busy" is absent).
-			if r.State != Blocked {
-				t.Errorf("%q: %+v", c.screen, r)
-			}
-			continue
-		}
-		if r.State != c.want || r.Rule != c.rule {
-			t.Errorf("%q: %+v, want %s by %q", c.screen, r, c.want, c.rule)
+	for _, c := range v.Cases {
+		r := m.Evaluate(Input{Screen: c.Screen})
+		if r.State != c.Want || r.Rule != c.Rule {
+			t.Errorf("%q: %+v, want %s by %q", c.Screen, r, c.Want, c.Rule)
 		}
 	}
-	for _, bad := range []string{
-		`id = "x"`,
-		"id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\n",
-		"id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\nregion = \"middle\"\ncontains = [\"a\"]\n",
-		"id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\nregex = ['(']\n",
-		"id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\ncontains = [\"a\"]\nunknown_field = 1\n",
-		"id = \"x\"\n[[rules]]\nid = \"r\"\nstate = \"idle\"\nskip_state_update = true\ncontains = [\"a\"]\n",
-	} {
+	for _, bad := range v.Bad {
 		if _, err := Parse([]byte(bad)); err == nil {
 			t.Errorf("accepted %q", bad)
+		}
+	}
+	for _, good := range v.Good {
+		if _, err := Parse([]byte(good)); err != nil {
+			t.Errorf("refused %q: %v", good, err)
 		}
 	}
 }
 
 // Regions cut the screen as herdr does.
 func TestRegions(t *testing.T) {
-	s := screen("one", "", "two", "──────", "› typed", "• done", "────── title", "box", "──────", "three", "")
-	for spec, want := range map[string]string{
-		"bottom_non_empty_lines(2)":                  "──────\nthree\n\n",
-		"bottom_lines(2)":                            "three\n\n",
-		"top_non_empty_lines(2)":                     "one\n\ntwo\n",
-		"prompt_box_body":                            "box\n",
-		"after_last_horizontal_rule":                 "three\n\n",
-		"last_non_empty_above_prompt_box":            "• done",
-		"after_last_prompt_marker":                   "• done\n────── title\nbox\n──────\nthree\n\n",
-		"whole_recent_without_current_prompt_marker": s, // a block marker follows the prompt
-	} {
-		if got := region(Input{Screen: s}, spec); got != want {
-			t.Errorf("%s: %q, want %q", spec, got, want)
+	var v struct {
+		Cases []struct {
+			Screen, Title, Progress, Region, Want string
+		}
+		Valid, Invalid []string
+		Rewrites       []struct{ In, Want string }
+	}
+	readCases(t, "regions.json", &v)
+	for _, c := range v.Cases {
+		if got := region(Input{Screen: c.Screen, Title: c.Title, Progress: c.Progress}, c.Region); got != c.Want {
+			t.Errorf("%s of %q: %q, want %q", c.Region, c.Screen, got, c.Want)
 		}
 	}
-	if got := region(Input{Screen: "a\n› now\n"}, "before_current_prompt_marker"); got != "a\n" {
-		t.Errorf("before_current_prompt_marker: %q", got)
+	for _, s := range v.Valid {
+		if !validRegion(s) {
+			t.Errorf("%q refused", s)
+		}
 	}
-	if region(Input{Title: "t", Progress: "4;1"}, "osc_progress") != "4;1" || region(Input{Title: "t"}, "osc_title") != "t" {
-		t.Error("OSC regions")
+	for _, s := range v.Invalid {
+		if validRegion(s) {
+			t.Errorf("%q accepted", s)
+		}
 	}
-	in := "[" + `\u2800-\u28FF]\p{Alphabetic}` + `\u{fe0f}\\u`
-	if goRegex(in) != `[\x{2800}-\x{28FF}]\p{L}\x{fe0f}\\u` {
-		t.Errorf("goRegex: %s", goRegex(in))
+	for _, c := range v.Rewrites {
+		if got := goRegex(c.In); got != c.Want {
+			t.Errorf("goRegex(%s): %s, want %s", c.In, got, c.Want)
+		}
 	}
 }
 
 func TestIdentify(t *testing.T) {
-	for _, c := range []struct {
-		name string
-		argv []string
-		want string
-	}{
-		{"claude", []string{"claude"}, "claude"},
-		{"node", []string{"claude", "--resume"}, "claude"},
-		{"codex", []string{"/usr/local/bin/codex"}, "codex"},
-		{"sh", []string{"/bin/sh", "/home/u/bin/claude", "-p", "x"}, "claude"},
-		{"bash", []string{"bash", "-c", "codex"}, ""},
-		{"node", []string{"node", "--require", "x.js", "/usr/lib/node_modules/@qwen-code/qwen-code/dist/index.js"}, "qwen"},
-		{"node", []string{"node", "/opt/node_modules/@moonshot-ai/kimi-code/dist/main.mjs"}, "kimi"},
-		{"node", []string{"node", "-e", "require('codex')"}, ""},
-		{"python3.12", []string{"python3.12", "-m", "hermes"}, ""},
-		{"python3", []string{"python3", "/opt/hermes-agent"}, "hermes"},
-		{"Cursor-Agent.EXE", nil, "cursor"},
-		{"muse-bin-0.1.0-R708.1", nil, "muse"},
-		{"muse-binary", nil, ""},
-		{"zsh", []string{"-zsh"}, ""},
-		{"vim", []string{"vim", "claude"}, ""},
-	} {
-		if got := Identify(c.name, c.argv); got != c.want {
-			t.Errorf("%s %q: %q, want %q", c.name, c.argv, got, c.want)
+	var cases []struct {
+		Name string
+		Argv []string
+		Want string
+	}
+	readCases(t, "identify.json", &cases)
+	for _, c := range cases {
+		if got := Identify(c.Name, c.Argv); got != c.Want {
+			t.Errorf("%s %q: %q, want %q", c.Name, c.Argv, got, c.Want)
 		}
+	}
+}
+
+// gateJSON is a gate as testdata/manifests.json writes it: only what it
+// has, regexes as the manifest spells them.
+func gateJSON(g Gate) map[string]any {
+	out := map[string]any{}
+	for k, list := range map[string][]Gate{"all": g.All, "any": g.Any, "not": g.Not} {
+		if len(list) > 0 {
+			var gs []any
+			for _, x := range list {
+				gs = append(gs, gateJSON(x))
+			}
+			out[k] = gs
+		}
+	}
+	for k, list := range map[string][]string{"contains": g.Contains, "regex": g.Regex, "line_regex": g.LineRegex} {
+		if len(list) > 0 {
+			out[k] = list
+		}
+	}
+	return out
+}
+
+// manifestsJSON is every manifest as parsed, with the defaults applied.
+func manifestsJSON(t *testing.T) []byte {
+	t.Helper()
+	ms, err := Manifests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := map[string]any{}
+	for id, m := range ms {
+		var rules []any
+		for _, r := range m.Rules {
+			rule := gateJSON(r.Gate)
+			rule["id"], rule["state"], rule["priority"], rule["region"] = r.ID, r.State, r.Priority, r.Region
+			for k, v := range map[string]bool{"visible_idle": r.VisibleIdle, "visible_blocker": r.VisibleBlocker, "visible_working": r.VisibleWorking, "skip_state_update": r.SkipStateUpdate} {
+				if v {
+					rule[k] = true
+				}
+			}
+			rules = append(rules, rule)
+		}
+		man := map[string]any{"id": m.ID, "version": m.Version, "min_engine_version": m.MinEngineVersion, "updated_at": m.UpdatedAt, "rules": rules}
+		if len(m.Aliases) > 0 {
+			man["aliases"] = m.Aliases
+		}
+		all[id] = man
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", " ")
+	if err := enc.Encode(all); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+// testdata/manifests.json is what the manifests parse to; the TypeScript
+// side's parser must read the same (go test -update rewrites it after a
+// change of the manifests).
+func TestManifestsParsed(t *testing.T) {
+	got := manifestsJSON(t)
+	if *update {
+		if err := os.WriteFile(filepath.Join("testdata", "manifests.json"), got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "manifests.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Error("testdata/manifests.json is not what the manifests parse to: go test ./internal/agent/detect -run TestManifestsParsed -update")
 	}
 }
 

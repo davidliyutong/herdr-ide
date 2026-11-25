@@ -14,7 +14,7 @@ import { Op, VERSION, readLine, writeLine, yamuxConfig, type Header, type Info, 
 import { Session as Yamux, closeStream, type Stream } from '#shared/proto/yamux.ts';
 import { servePlugin, type Running } from './dispatch.ts';
 import { cleanEnv } from './env.ts';
-import type { ActionContext, MachineEnv, MachineSide } from './feature.ts';
+import type { ActionContext, MachineEnv, MachineSide, OpHandler } from './feature.ts';
 import { FS_CALLS, serveArchive, serveFS, type FsCalls } from './fsops.ts';
 import { TerminalCore } from './hc.ts';
 import { serveHC, pipeUnix } from './hcop.ts';
@@ -30,9 +30,10 @@ const HEADER_MS = 30_000;
  * close for what it runs. */
 export const DRAIN_MS = 5000;
 
-/** The ops of features this machine build does not serve yet: refused as
- * an unknown plugin is. */
-const UNPORTED_OPS = new Map<string, string>([
+/** The ops of features, refused as an unknown plugin is when no feature of
+ * the agent serves them (the build does not, or a test's agent has not
+ * the feature). */
+const FEATURE_OPS = new Map<string, string>([
   [Op.CodeServer, 'vscode'],
   [Op.GUI, 'gui'],
   [Op.Detect, 'agents'],
@@ -112,6 +113,8 @@ export class Agent {
   readonly logger: Logger;
   readonly hc: TerminalCore;
   private readonly features = new Map<string, Running>();
+  /** The ops features serve (Served.ops). */
+  private readonly ops = new Map<string, OpHandler>();
   private readonly stop = new AbortController();
   private readonly running = new Set<Promise<unknown>>();
   private readonly sessions = new Set<AgentSession>();
@@ -126,7 +129,11 @@ export class Agent {
     this.hc = new TerminalCore(o.instance, o.dirs, o.carryHC);
     this.fs = { ...FS_CALLS, ...o.fs };
     const env = this.env();
-    for (const side of o.features) this.features.set(side.protocol.id, { protocol: side.protocol, served: side.start(env) });
+    for (const side of o.features) {
+      const served = side.start(env);
+      this.features.set(side.protocol.id, { protocol: side.protocol, served });
+      for (const [op, handler] of Object.entries(served.ops ?? {})) this.ops.set(op, handler);
+    }
     const signal = this.stop.signal;
     this.spawn(
       housekeep({
@@ -326,9 +333,12 @@ export class Agent {
           close = false;
           await servePlugin(conn, h, this.features, (sig) => this.ctx(s, sig), signal, this.logger);
           break;
-        default:
-          if (UNPORTED_OPS.has(h.op)) await writeLine(stream, unknownPlugin(UNPORTED_OPS.get(h.op)!));
+        default: {
+          const op = this.ops.get(h.op);
+          if (op) await op(conn, h, this.ctx(s, signal));
+          else if (FEATURE_OPS.has(h.op)) await writeLine(stream, unknownPlugin(FEATURE_OPS.get(h.op)!));
           else await fail(`unknown op ${JSON.stringify(h.op)}`);
+        }
       }
     } catch (e) {
       if (!closedErr(e)) this.logger(`op ${h.op}: ${(e as Error).message}`);

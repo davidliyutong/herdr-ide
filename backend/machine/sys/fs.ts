@@ -2,6 +2,7 @@
 // anywhere on it, a directory relative to another, renaming without
 // replacing, removing relative to a directory, and taking a file's lock.
 import { closeSync, constants, lstatSync, openSync, readdirSync, renameSync } from 'node:fs';
+import { open, readlink, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { E, SysError, cstr, darwin, errno, libc, linux, sys } from './libc.ts';
 
@@ -70,6 +71,64 @@ export function openNoLinks(path: string, flags: number, mode = 0o666): number {
       return fd;
     }
     throw new SysError(e, 'openat2', path);
+  }
+}
+
+/** Opens path to read, as openNoLinks refuses a link anywhere on it, but
+ * without waiting on the node's thread (openNoLinks is a system call
+ * through FFI there): macOS opens with O_NOFOLLOW_ANY in the runtime's
+ * pool; Linux, which has no such flag for open(2), opens with flags'
+ * O_NOFOLLOW (the last name) in the pool and takes the descriptor only
+ * when /proc names path for it: a link on the way, followed by the open,
+ * makes another path, and the descriptor is closed with ELOOP before
+ * anything reads it. Without /proc (an unusual mount) only the last name
+ * is refused, as openNoLinks does without openat2. path must be absolute
+ * and clean, as a resolved path is. */
+export async function openNoLinksAsync(path: string, flags: number): Promise<FileHandle> {
+  if (darwin) return open(path, (flags & ~constants.O_NOFOLLOW) | O_NOFOLLOW_ANY);
+  const fh = await open(path, flags);
+  if (!linux) return fh;
+  let real: string;
+  try {
+    real = await readlink(`/proc/self/fd/${fh.fd}`);
+  } catch {
+    // no /proc
+    return fh;
+  }
+  if (real !== path) {
+    await fh.close().catch(() => {});
+    throw new SysError(E('ELOOP'), 'open', path);
+  }
+  return fh;
+}
+
+/** Opens name in the directory open as dir (whose path, with no link on
+ * it, is dirPath) without following a link at name, and without waiting
+ * on the node's thread: Linux opens it relative to the descriptor
+ * (/proc/self/fd/<dir>/name, which resolves in the directory the
+ * descriptor holds, wherever its path now leads); macOS by its path,
+ * refusing a link anywhere on it. */
+export async function openAtAsync(dir: FileHandle, dirPath: string, name: string, flags: number): Promise<FileHandle> {
+  if (name === '' || name === '.' || name === '..' || name.includes('/')) throw new SysError(E('EINVAL'), 'open', name);
+  if (linux) {
+    try {
+      return await open(`/proc/self/fd/${dir.fd}/${name}`, flags | constants.O_NOFOLLOW);
+    } catch (e) {
+      // Without /proc, by the path.
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT' || (await procMissing())) return openNoLinksAsync(join(dirPath, name), flags);
+      throw e;
+    }
+  }
+  return openNoLinksAsync(join(dirPath, name), flags | constants.O_NOFOLLOW);
+}
+
+/** Whether this process has no /proc/self/fd. */
+async function procMissing(): Promise<boolean> {
+  try {
+    await readlink('/proc/self/exe');
+    return false;
+  } catch {
+    return true;
   }
 }
 

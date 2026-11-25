@@ -8,8 +8,10 @@
 import type { z } from 'zod';
 import type { Reader } from '#shared/lib/streamio.ts';
 import type { Logger } from '#shared/lib/log.ts';
+import type { Header } from '#shared/proto/agentproto/index.ts';
 import type { Action, Protocol } from '#shared/proto/protocol.ts';
 import type { Stream } from '#shared/proto/yamux.ts';
+import type { Conn } from './stream.ts';
 
 /** What the agent gives the machine sides of features. */
 export interface MachineEnv {
@@ -73,9 +75,17 @@ export type Handler<A extends Action> = A extends { stream: true }
 
 export type Handlers<P extends Protocol> = { [K in keyof P['actions']]: Handler<P['actions'][K]> };
 
+/** An op of the agent protocol a feature serves besides its actions (the
+ * agents feature's detect, which the core opens as an op of its own): it
+ * gets the stream after the header, writes the reply itself and returns
+ * when it is done with the stream, which the agent then closes. */
+export type OpHandler = (conn: Conn, h: Header, ctx: ActionContext) => Promise<void>;
+
 /** What a feature's machine side runs for an agent. */
 export interface Served<P extends Protocol = Protocol> {
   readonly actions: Handlers<P>;
+  /** Its ops, by name (agentproto's Op). */
+  readonly ops?: Readonly<Record<string, OpHandler>>;
   /** Its own retention rules, run with the agent's housekeeping. */
   housekeep?(now: Date): void | Promise<void>;
 }

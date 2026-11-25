@@ -1,9 +1,10 @@
 // The machine sides of the features this build serves. The features whose
-// machine side is not here yet (agents, chat, gui, vscode) are refused as
-// an unknown plugin is (machine/agent.ts). Usage's session action finds a
+// machine side is not here yet (chat, gui, vscode) are refused as an
+// unknown plugin is (machine/agent.ts). Usage's session action finds a
 // session's transcripts with the agents feature's locator, which this
-// build does not have yet: every session is not_found meanwhile.
+// build does not pass it yet: every session is not_found meanwhile.
 import type { MachineSide } from '#machine/feature.ts';
+import { agentsMachine } from '#features/agents/machine.ts';
 import { browserMachine } from '#features/browser/machine.ts';
 import { filesMachine } from '#features/files/machine.ts';
 import { gitMachine } from '#features/git/machine.ts';
@@ -20,6 +21,7 @@ export function machineFeatures(): MachineSide[] {
     browserMachine(),
     monitorMachine(),
     historyMachine(),
+    agentsMachine(),
     usageMachine(),
   ] as MachineSide[];
 }

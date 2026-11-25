@@ -83,6 +83,39 @@ export function parentOf(pid: number): { ppid: number; name: string } | null {
   return { ppid: Number(f[1]) || 0, name: s.slice(open + 1, end) };
 }
 
+/** When pid started, in ms since the epoch (macOS: kinfo_proc's
+ * p_starttime, a timeval at its start); null when it is gone. */
+export function startOf(pid: number): number | null {
+  const k = kinfo(pid);
+  if (!k) return null;
+  return Number(k.readBigInt64LE(0)) * 1000 + k.readInt32LE(8) / 1000;
+}
+
+/** The processes of process group pgid, at most max (macOS: sysctl
+ * kern.proc.pgrp, no program run); null when the table cannot be read. */
+export function processGroup(pgid: number, max: number): Array<{ pid: number; ppid: number; pgid: number }> | null {
+  // CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid
+  const mib = Buffer.alloc(16);
+  mib.writeInt32LE(1, 0);
+  mib.writeInt32LE(14, 4);
+  mib.writeInt32LE(2, 8);
+  mib.writeInt32LE(pgid, 12);
+  const size = Buffer.alloc(8);
+  // The group may grow between the two calls: room for a few more.
+  if (libc().sysctl(mib, 4, null, size, null, 0n) !== 0) return null;
+  const n = Math.min(Number(size.readBigUInt64LE(0)) / KINFO.size + 8, max);
+  const out = Buffer.alloc(n * KINFO.size);
+  size.writeBigUInt64LE(BigInt(out.length));
+  if (libc().sysctl(mib, 4, out, size, null, 0n) !== 0) return null;
+  const got = Math.floor(Number(size.readBigUInt64LE(0)) / KINFO.size);
+  const procs: Array<{ pid: number; ppid: number; pgid: number }> = [];
+  for (let i = 0; i < got && procs.length < max; i++) {
+    const k = out.subarray(i * KINFO.size, (i + 1) * KINFO.size);
+    procs.push({ pid: k.readInt32LE(KINFO.pid), ppid: k.readInt32LE(KINFO.ppid), pgid: k.readInt32LE(KINFO.pgid) });
+  }
+  return procs;
+}
+
 /** pid's process group on macOS (kinfo_proc's e_pgid), null when gone. */
 export function pgidOf(pid: number): number | null {
   if (!darwin) {
