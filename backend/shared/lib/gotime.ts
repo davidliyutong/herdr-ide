@@ -18,6 +18,41 @@ export function parseRFC3339(s: string): Date | null {
   return Number.isNaN(t) ? null : new Date(t);
 }
 
+/** A duration of ns nanoseconds as Go's time.Duration writes it ("300ms",
+ * "1.5s", "2m0s", "1h0m0s"), for messages both builds word alike. */
+export function formatDuration(ns: number): string {
+  let u = Math.round(Math.abs(ns));
+  const sign = ns < 0 ? '-' : '';
+  // The fraction of v/10**prec without its trailing zeros, and v's whole part.
+  const frac = (v: number, prec: number): [string, number] => {
+    let digits = '';
+    let print = false;
+    for (let i = 0; i < prec; i++) {
+      const d = v % 10;
+      print ||= d !== 0;
+      if (print) digits = String(d) + digits;
+      v = Math.floor(v / 10);
+    }
+    return [print ? '.' + digits : '', v];
+  };
+  if (u === 0) return '0s';
+  if (u < 1e9) {
+    const [unit, prec] = u < 1e3 ? ['ns', 0] : u < 1e6 ? ['µs', 3] : ['ms', 6];
+    const [f, whole] = frac(u, prec);
+    return `${sign}${whole}${f}${unit}`;
+  }
+  const [f, secs] = frac(u, 9);
+  u = secs;
+  let out = `${u % 60}${f}s`;
+  u = Math.floor(u / 60);
+  if (u > 0) {
+    out = `${u % 60}m${out}`;
+    u = Math.floor(u / 60);
+    if (u > 0) out = `${u}h${out}`;
+  }
+  return sign + out;
+}
+
 const UNITS: Record<string, number> = { ns: 1e-6, us: 1e-3, µs: 1e-3, μs: 1e-3, ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
 
 /** Milliseconds of a duration as Go's flags write it (time.ParseDuration:

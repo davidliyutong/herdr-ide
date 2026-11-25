@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
 import { join } from 'node:path';
 import { Reader } from '#shared/lib/streamio.ts';
@@ -9,7 +11,19 @@ import { Agent } from './agent.ts';
 import { discard } from '#shared/lib/log.ts';
 import { inode } from './sockets.ts';
 import { rig, until, type Rig } from './testing.ts';
-import { mergeLists, processChain, vaultRefusal } from './vault.ts';
+import { runDir } from '#shared/host/hostdirs.ts';
+import { dataDir } from '#shared/lib/brand.ts';
+import {
+  MCP_LINK_NAME,
+  MCP_LINK_SCRIPT,
+  isMcpLink,
+  linkMCP,
+  mcpSocketPath,
+  mergeLists,
+  platformLink,
+  processChain,
+  vaultRefusal,
+} from './vault.ts';
 
 let r: Rig | undefined;
 afterEach(async () => {
@@ -137,5 +151,71 @@ describe('the vault socket', () => {
     expect(chain[0].pid).toBe(process.pid);
     expect(chain.every((p) => p.pid > 1)).toBe(true);
     expect(chain.length).toBeLessThanOrEqual(8);
+  });
+});
+
+describe("the MCP command's link", () => {
+  const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), 'mcplink-')));
+  /** A program at dir/name that says its name and arguments. */
+  const programAt = (dir: string, name: string) => {
+    const p = join(dir, name);
+    writeFileSync(p, `#!/bin/sh\necho ${name} "$@"\n`, { mode: 0o700 });
+    return p;
+  };
+  /** The link of this host's system and architecture in dir. */
+  const hostLink = (dir: string) =>
+    join(
+      dir,
+      platformLink(execFileSync('uname', ['-s'], { encoding: 'utf8' }).trim(), execFileSync('uname', ['-m'], { encoding: 'utf8' }).trim()),
+    );
+
+  // TestLinkMCPReplacesTheLink: the stable command is a script running the
+  // link of the host's system and architecture, which points at the
+  // agent's executable.
+  test('the stable command runs the link of this host, which a newer executable replaces', async () => {
+    const t = tmp();
+    try {
+      const dir = join(t, 'bin');
+      await linkMCP(dir, programAt(t, 'old'));
+      const newer = programAt(t, 'new');
+      await linkMCP(dir, newer);
+      expect(readlinkSync(hostLink(dir))).toBe(newer);
+      expect(execFileSync(join(dir, MCP_LINK_NAME), ['a b'], { encoding: 'utf8' })).toBe('new a b\n');
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(await Bun.file(join(dir, MCP_LINK_NAME)).text()).toBe(MCP_LINK_SCRIPT);
+      // A script that changed is written again.
+      writeFileSync(join(dir, MCP_LINK_NAME), '#!/bin/sh\necho other\n');
+      await linkMCP(dir, newer);
+      expect(await Bun.file(join(dir, MCP_LINK_NAME)).text()).toBe(MCP_LINK_SCRIPT);
+    } finally {
+      rmSync(t, { recursive: true, force: true });
+    }
+  });
+
+  test('the agent links its executable when it starts', async () => {
+    const t = tmp();
+    const dirs = { home: t, base: join(t, '.x'), host: join(t, '.x', 'hosts', 'h'), run: join(t, 'run') };
+    const agent = new Agent({ instance: '', dirs, logger: discard, features: [], socketWatchMs: 50, mcpExe: programAt(t, 'agent') });
+    try {
+      await until(() => existsSync(join(dirs.base, 'bin', MCP_LINK_NAME)), 'the MCP command');
+      await until(() => existsSync(hostLink(join(dirs.base, 'bin'))), 'its link');
+      expect(execFileSync(join(dirs.base, 'bin', MCP_LINK_NAME), ['x'], { encoding: 'utf8' })).toBe('agent x\n');
+    } finally {
+      await agent.close();
+      rmSync(t, { recursive: true, force: true });
+    }
+  });
+
+  // TestSocketPath: the data directory holding the command, or the
+  // instance's: its runtime directory on this host.
+  test('the socket of the data directory the link is in, else of the instance', () => {
+    const run = (base: string) => join(runDir(base), 'vault.sock');
+    expect(mcpSocketPath(`/home/u/.x-dev/bin/${MCP_LINK_NAME}`, '/home/u', '')).toBe(run('/home/u/.x-dev'));
+    expect(mcpSocketPath(`/home/u/.x-dev/bin/${platformLink('Linux', 'x86_64')}`, '/home/u', '')).toBe(run('/home/u/.x-dev'));
+    const byInstance = run(join('/home/u', dataDir('dev')));
+    expect(mcpSocketPath(MCP_LINK_NAME, '/home/u', 'dev')).toBe(byInstance);
+    expect(mcpSocketPath('/usr/bin/agent', '/home/u', 'dev')).toBe(byInstance);
+    expect(isMcpLink(`/x/bin/${platformLink('Darwin', 'arm64')}`)).toBe(true);
+    expect(isMcpLink('/x/bin/agent')).toBe(false);
   });
 });

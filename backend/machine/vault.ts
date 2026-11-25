@@ -5,8 +5,18 @@
 // it in the header, as the kernel names it (the request's own claims about
 // its client are not trusted). Values live in the cores' vaults, and the
 // user may answer on any of them.
+//
+// The vault's MCP server (the mcp command) is started by the coding agents'
+// CLIs under a stable path their configurations name, which outlives
+// upgrades: <data dir>/bin/<slug>-mcp, a script running the link of the
+// host's system and architecture beside it, which the agent points at its
+// own executable when it starts (linkMCP), as the Go agent does.
+import { lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { machine, type } from 'node:os';
 import { posix } from 'node:path';
 import type { Socket } from 'node:net';
+import { SLUG, dataDir } from '#shared/lib/brand.ts';
+import { runDir } from '#shared/host/hostdirs.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import {
   MAX_VAULT_PROCESSES,
@@ -215,4 +225,60 @@ export function vaultRefusal(refusals: VaultResponse[]): VaultResponse {
     if (i === 0 || rank(r.code) < rank(best.code)) best = r;
   });
   return best;
+}
+
+/** The stable command's name in <data dir>/bin, which MCP configurations
+ * name. */
+export const MCP_LINK_NAME = `${SLUG}-mcp`;
+
+/** The name of the link to the executable of a system and architecture
+ * (uname -s, uname -m) beside the stable command: a home that hosts of
+ * several architectures share has a link for each. */
+export const platformLink = (system: string, arch: string): string => `${MCP_LINK_NAME}-${system}-${arch}`;
+
+/** The stable command, a POSIX shell script that runs this host's
+ * platformLink; the Go agent writes the same bytes. */
+export const MCP_LINK_SCRIPT = `#!/bin/sh
+# The variable vault's MCP server: the agent of this host's system and
+# architecture, linked beside this script.
+exec "$(dirname "$0")/${MCP_LINK_NAME}-$(uname -s)-$(uname -m)" "$@"
+`;
+
+/** Whether the executable was started by the stable command's name or a
+ * platform's link, which run the mcp command. */
+export function isMcpLink(argv0: string): boolean {
+  const b = posix.basename(argv0);
+  return b === MCP_LINK_NAME || b.startsWith(MCP_LINK_NAME + '-');
+}
+
+/** The vault socket of the agent whose data directory holds the command at
+ * argv0 (started as <data dir>/bin/<slug>-mcp or a platform's link beside
+ * it), else of the instance's data directory in home: in that data
+ * directory's runtime directory on this host (runDir). */
+export function mcpSocketPath(argv0: string, home: string, instance: string): string {
+  if (isMcpLink(argv0) && posix.isAbsolute(argv0) && posix.dirname(argv0) !== '.')
+    return posix.join(runDir(posix.dirname(posix.dirname(argv0))), 'vault.sock');
+  return posix.join(runDir(posix.join(home, dataDir(instance))), 'vault.sock');
+}
+
+/** Makes dir/<slug>-mcp the script that runs this host's platform link
+ * (MCP_LINK_SCRIPT), and that link, beside it, a link to exe; each
+ * replaced atomically (a file beside it renamed into place). */
+export async function linkMCP(dir: string, exe: string): Promise<void> {
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const link = posix.join(dir, platformLink(type(), machine()));
+  const cur = await readlink(link).catch(() => null);
+  if (cur !== exe) {
+    const tmp = link + '.new';
+    await rm(tmp, { force: true });
+    await symlink(exe, tmp);
+    await rename(tmp, link);
+  }
+  const script = posix.join(dir, MCP_LINK_NAME);
+  const st = await lstat(script).catch(() => null);
+  if (st?.isFile() && (await readFile(script, 'utf8').catch(() => '')) === MCP_LINK_SCRIPT) return;
+  const tmp = script + '.new';
+  await rm(tmp, { force: true });
+  await writeFile(tmp, MCP_LINK_SCRIPT, { mode: 0o700, flag: 'wx' });
+  await rename(tmp, script);
 }

@@ -1,5 +1,7 @@
 // The command line: one executable, the core (`serve`, the default) and
-// the machine side's commands (`node`, `node dial`, `node stop`). A build
+// the machine side's commands (`node`, `node dial`, `node stop`, `mcp`, the
+// vault's MCP server, which every build serves, also when started by the
+// name of its link in a data directory's bin, #machine/vault.ts). A build
 // that deploys the TypeScript machine side is that machine build itself,
 // on every platform: its `node` runs here. One that deploys the Go machine
 // build passes `node` on to the Go program it carries, installed as the core
@@ -13,15 +15,21 @@ import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { installLocal } from '#kernel/machines/transport/local.ts';
 import { fetchAssets } from '#features/vscode/fetchassets.ts';
 import { nodeCommand } from '#hosts/machine/cli.ts';
+import { mcpCommand } from '#hosts/machine/mcp.ts';
 import { dropForeignRuntimeVars } from '#machine/self.ts';
+import { isMcpLink } from '#machine/vault.ts';
 import { openPayloads } from './payloads.ts';
 import { serve } from './serve.ts';
 
-const USAGE = `usage: ${CORE_BIN} [serve] [flags] | fetch-assets [flags] DIR | node serve|dial|stop [flags] | version`;
+const USAGE = `usage: ${CORE_BIN} [serve] [flags] | fetch-assets [flags] DIR | node serve|dial|stop [flags] | mcp [flags] | version`;
 
 async function main(argv: string[]): Promise<void> {
   // Nothing this process starts gets them (machine/self.ts).
   dropForeignRuntimeVars();
+  // Started by the stable link <data dir>/bin/<slug>-mcp (or a platform's
+  // link beside it): the vault's MCP server. process.argv0 is the name the
+  // executable was started by; argv[0] of a compiled executable is "bun".
+  if (isMcpLink(process.argv0)) process.exit(await mcpCommand(process.argv0, argv));
   let cmd = 'serve';
   if (argv.length > 0 && !argv[0].startsWith('-')) [cmd, ...argv] = argv;
   switch (cmd) {
@@ -30,6 +38,8 @@ async function main(argv: string[]): Promise<void> {
     case 'version':
       console.log(CORE_BIN, VERSION);
       return;
+    case 'mcp':
+      process.exit(await mcpCommand(process.argv0, argv));
     case 'fetch-assets':
       process.exit(await fetchAssets(argv, { logger: stderrLogger(`${CORE_BIN}: `) }));
     case 'node': {

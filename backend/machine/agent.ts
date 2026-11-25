@@ -2,6 +2,7 @@
 // (its terminal core, its sockets, its features' machine sides), each
 // session serving the streams of one core over yamux (serve). A node
 // (node.ts) runs one agent and hands it every client that connects.
+import { realpath } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
 import { posix } from 'node:path';
 import type { Socket } from 'node:net';
@@ -31,7 +32,7 @@ import { serveHC, pipeUnix } from './hcop.ts';
 import { killHidden, runHidden } from './hidden.ts';
 import { housekeep } from './housekeeping.ts';
 import { privacyStatus } from './privacy.ts';
-import { serveVault } from './vault.ts';
+import { linkMCP, serveVault } from './vault.ts';
 import type { Conn } from './stream.ts';
 
 /** How long a stream's header may take. */
@@ -136,6 +137,10 @@ export interface AgentOptions {
   peerCred?: (c: Socket) => { pid: number; uid: number };
   /** The herdr-core this build carries (tests give one). */
   carryHC?: () => { gz: Buffer; digest: string } | null;
+  /** The executable <data dir>/bin's MCP command runs (linkMCP): this
+   * build's, when it is a compiled executable; none for a run from the
+   * sources, whose entry module is no program. */
+  mcpExe?: string;
 }
 
 export class Agent {
@@ -177,6 +182,17 @@ export class Agent {
       }),
     );
     this.spawn(serveVault(this, { signal, everyMs: o.socketWatchMs, peerCred: o.peerCred }));
+    if (o.mcpExe) this.spawn(this.linkMCP(o.mcpExe));
+  }
+
+  /** Points <data dir>/bin's MCP command at exe (its links resolved), so
+   * that the coding agents' configurations run this build's. */
+  private async linkMCP(exe: string): Promise<void> {
+    try {
+      await linkMCP(posix.join(this.dirs.base, 'bin'), await realpath(exe).catch(() => exe));
+    } catch (e) {
+      this.logger(`vault: ${(e as Error).message}`);
+    }
   }
 
   private spawn(p: Promise<unknown>): void {

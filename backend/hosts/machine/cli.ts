@@ -13,7 +13,7 @@ import { stderrLogger } from '#shared/lib/log.ts';
 import { dialNode, stopNodes } from '#machine/dial.ts';
 import { TerminalCore } from '#machine/hc.ts';
 import { runNode } from '#machine/node.ts';
-import { buildFile } from '#machine/self.ts';
+import { buildFile, compiled } from '#machine/self.ts';
 import { machineFeatures } from './features.ts';
 
 const USAGE = `usage: ${CORE_BIN} node [dial | stop] [--instance NAME] [--client ID] [--takeover] [--terminal-core]\n`;
@@ -64,7 +64,16 @@ export async function nodeCommand(argv: string[]): Promise<number> {
   // A node outlives the ssh session or terminal that started it.
   process.on('SIGHUP', () => {});
   try {
-    await runNode({ instance, logger, features: machineFeatures(), takeover: flags.takeover, signal: ac.signal, build: buildFile() });
+    await runNode({
+      instance,
+      logger,
+      features: machineFeatures(),
+      takeover: flags.takeover,
+      signal: ac.signal,
+      build: buildFile(),
+      // A run from the sources has no program to link the MCP command to.
+      mcpExe: compiled() ? process.execPath : undefined,
+    });
     return 0;
   } catch (e) {
     logger(`exit: ${(e as Error).message}`);

@@ -66,6 +66,8 @@ export interface NodeOptions {
   build?: string;
   /** Reads a connection's peer credentials (tests give another). */
   peerCred?: (c: Socket) => { pid: number; uid: number };
+  /** The executable the vault's MCP command runs (Agent's mcpExe). */
+  mcpExe?: string;
 }
 
 /** Serves the instance's node until it has had no client for idleMs, a
@@ -215,7 +217,7 @@ export async function runNode(o: NodeOptions): Promise<void> {
     // node taking leave left for this one.
     ({ server, ino } = await listenUnix(sock, accept));
     log(`serving ${sock} (build ${me.build}, version ${me.version}, pid ${me.pid ?? process.pid})`);
-    agent = new Agent({ instance: o.instance, dirs, logger: log, features: o.features, peerCred: o.peerCred });
+    agent = new Agent({ instance: o.instance, dirs, logger: log, features: o.features, peerCred: o.peerCred, mcpExe: o.mcpExe });
     idleFrom();
     const build = o.build;
     // The check is asynchronous, and one that has not returned (a home that
