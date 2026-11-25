@@ -640,7 +640,8 @@ describe('reveal', () => {
       // bound busy; a file manager left running holds no place.
       const release = join(t.home, 'release');
       const hang = join(t.home, 'hang');
-      writeFileSync(hang, `#!/bin/sh\nwhile [ ! -e ${release} ]; do sleep 0.02; done\n`, { mode: 0o755 });
+      // It also ends once the home is gone (a test that timed out).
+      writeFileSync(hang, `#!/bin/sh\nwhile [ ! -e ${release} ] && [ -d ${t.home} ]; do sleep 0.02; done\n`, { mode: 0o755 });
       const f3 = await files({ revealCommand: () => [hang], revealWaitMs: 100, maxRevealing: 2 });
       const start = Date.now();
       await f3.act('reveal', { path: '~' });
