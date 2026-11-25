@@ -4,49 +4,23 @@
 // end-to-end tests) owns it: the first line on stdin is its hello, the core
 // answers a ready line on stdout and stops when stdin closes.
 import { appendFileSync, openSync, readFileSync, closeSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { parseArgs } from 'node:util';
 import type { Server, ServerWebSocket } from 'bun';
-import { CORE_BIN, NAME, SLUG, validInstance } from '#shared/lib/brand.ts';
+import { CORE_BIN, NAME, validInstance } from '#shared/lib/brand.ts';
 import { stderrLogger, type Logger } from '#shared/lib/log.ts';
-import { userConfigDir, userHomeDir } from '#shared/host/hostdirs.ts';
 import { other as otherLoopback, inUse } from '#shared/host/loopback.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { parseDuration } from '#shared/lib/gotime.ts';
 import { auditLog, noAudit } from '#kernel/audit.ts';
 import type { Channel, ChannelHandlers, ChannelOpen, Message } from '#kernel/channel.ts';
-import { Keybindings } from '#kernel/config/keybindings/index.ts';
-import { besideSettings, settingsPath } from '#kernel/config/paths.ts';
 import { coreModules } from '#kernel/config/registry.ts';
-import { settingsRoutes } from '#kernel/config/routes.ts';
-import { Settings, settingFlags } from '#kernel/config/settings/index.ts';
-import type { FeatureDef } from '#kernel/feature.ts';
-import { createCore, type Core } from '#kernel/core.ts';
+import { settingFlags } from '#kernel/config/settings/index.ts';
 import { Guard, isLoopbackHost } from '#kernel/http/guard.ts';
 import type { Peer } from '#kernel/http/env.ts';
-import { serveUI } from '#kernel/http/static.ts';
 import { isBreakable } from '#kernel/http/breakable.ts';
-import { payloads as payloadsOf, type Files, type Payloads } from '#kernel/payloads.ts';
-import { Machines } from '#kernel/machines/manager.ts';
-import { Registry } from '#kernel/machines/registry.ts';
-import { loadSpecs, validTarget, MAX_TARGET_LEN, type Spec } from '#kernel/machines/spec.ts';
+import { validTarget, MAX_TARGET_LEN } from '#kernel/machines/spec.ts';
 import { controlDir as makeControlDir } from '#kernel/machines/transport/controldir.ts';
-import { dialNode } from '#kernel/machines/transport/local.ts';
-import { dialSSH } from '#kernel/machines/transport/ssh.ts';
-import { machinesFeature } from '#features/machines/core.ts';
-import { terminalsFeature } from '#features/terminals/core.ts';
-import { guiFeature } from '#features/gui/core.ts';
-import { browserFeature } from '#features/browser/core.ts';
-import { searchFeature } from '#features/search/core.ts';
-import { gitFeature } from '#features/git/core.ts';
-import { monitorFeature } from '#features/monitor/core.ts';
-import { usageFeature } from '#features/usage/core.ts';
-import { vaultFeature } from '#features/vault/core.ts';
-import { agentsFeature } from '#features/agents/core.ts';
-import { historyFeature } from '#features/history/core.ts';
-import { fileTransfersFeature, filesFeature } from '#features/files/core.ts';
-import { chatFeature } from '#features/chat/core.ts';
-import { vscodeFeatures } from '#features/vscode/core.ts';
+import { composeCore, coreFeatures } from '#hosts/common/compose.ts';
 import { readHello, desktopClient } from './parent.ts';
 import { openPayloads } from './payloads.ts';
 import { abortable } from './abortable.ts';
@@ -81,82 +55,6 @@ export const OPTIONS = {
 function fatal(logger: Logger, msg: string): never {
   logger(msg);
   process.exit(1);
-}
-
-/** --local-only and --machine: which machines this run connects. */
-export function selectSpecs(specs: Spec[], localOnly: boolean, extraSSH: readonly string[], only: readonly string[]): Spec[] {
-  return specs.filter((s, i) => {
-    const named = (list: readonly string[]) => list.some((v) => v === s.id || v === s.label || v === s.target);
-    if (localOnly && i !== 0 && !named(extraSSH)) return false;
-    return only.length === 0 || named(only);
-  });
-}
-
-/** What the features take from the command line and the host. */
-export interface FeatureInputs {
-  payloads: Payloads;
-  /** The directory of ssh's control sockets; empty on Windows. */
-  controlDir: string;
-  /** The desktop app's key for its proofs (the launcher's hello). */
-  verifyKey: string;
-  codeServer: Omit<Parameters<typeof vscodeFeatures>[0], 'bridgeVSIX'>;
-}
-
-/** The core's features, as serve runs them (also what
- * scripts/reference.ts lists the routes of and scripts/registry.ts the
- * settings of), in the order the UIs list their switches and settings
- * (kernel/config/registry.ts coreModules). */
-export function coreFeatures(o: FeatureInputs): FeatureDef[] {
-  const { payloads } = o;
-  // Program windows give new terminals their display and follow the
-  // terminal cores; they type into the terminals' shells.
-  const gui = guiFeature({ encoder: (os, arch) => payloads.encoder(os, arch), shells: (m) => terminals.shells(m) });
-  const terminals = terminalsFeature({ hc: (os, arch) => payloads.hc(os, arch), paneEnv: gui.paneEnv, onReady: gui.terminalReady });
-  return [
-    machinesFeature({ home: () => userHomeDir(), controlDir: o.controlDir, pty: bunPty }),
-    terminals,
-    gui,
-    ...vscodeFeatures({ ...o.codeServer, bridgeVSIX: () => payloads.bridgeVSIX() }),
-    browserFeature(),
-    fileTransfersFeature(),
-    filesFeature(),
-    searchFeature(),
-    gitFeature(),
-    monitorFeature(),
-    usageFeature(),
-    vaultFeature({ verifyKey: o.verifyKey }),
-    agentsFeature(),
-    chatFeature(),
-    historyFeature(),
-  ];
-}
-
-/** The features with placeholder inputs (no payloads, machines or
- * launcher): what they define, their settings, switches and routes, for
- * what describes the core without running it (scripts/registry.ts,
- * scripts/reference.ts, the registry's tests). */
-export function describedFeatures(): FeatureDef[] {
-  return coreFeatures({
-    payloads: payloadsOf({ files: { get: async () => null }, web: null }),
-    controlDir: '/nonexistent',
-    verifyKey: '',
-    codeServer: { seedDirs: [], offline: false, idle: 0 },
-  });
-}
-
-/** The routes of the host beside the features': settings and
- * keybindings, the configuration, the web UI. Returns what stops the
- * settings' pushes. */
-export function hostRoutes(
-  core: Core,
-  o: { settings: Settings; keybindings: Keybindings; readOnly: boolean; sshLogin: boolean; web: Files | null },
-): () => void {
-  const stop = settingsRoutes(core.http, { settings: o.settings, keybindings: o.keybindings, pages: core.pages });
-  core.http.app.get('/api/config', (c) =>
-    c.json({ name: NAME, slug: SLUG, version: VERSION, read_only: o.readOnly, ssh_login: o.sshLogin, client: c.var.client }),
-  );
-  serveUI(core.http.app, o.web);
-  return stop;
 }
 
 /** A WebSocket of Bun.serve as a channel. */
@@ -207,7 +105,6 @@ export async function serve(argv: string[]): Promise<void> {
 
   const controlDir = process.platform === 'win32' ? '' : makeControlDir(instance);
   const payloads = await openPayloads({ agentDir: f['agent-dir'], extDir: f['ext-dir'], webDir: f['web-dir'] });
-  const agents = payloads.agent.bind(payloads);
   let codeServerIdle: number;
   try {
     codeServerIdle = parseDuration(f['code-server-idle']);
@@ -218,6 +115,7 @@ export async function serve(argv: string[]): Promise<void> {
     payloads,
     controlDir,
     verifyKey: desktop.verifyKey,
+    pty: bunPty,
     codeServer: {
       version: f['code-server-version'],
       tarballURL: f['code-server-url'],
@@ -228,8 +126,7 @@ export async function serve(argv: string[]): Promise<void> {
     },
   });
 
-  const modules = coreModules(features);
-  const flagDefs = settingFlags(modules);
+  const flagDefs = settingFlags(coreModules(features));
   let flags: Record<string, string | boolean | undefined>;
   try {
     flags = parseArgs({
@@ -241,27 +138,9 @@ export async function serve(argv: string[]): Promise<void> {
   } catch (e) {
     fatal(logger, (e as Error).message);
   }
-  const settingValues = Object.fromEntries(flagDefs.filter((d) => typeof flags[d.name] === 'string').map((d) => [d.name, flags[d.name]]));
-
-  let settingsFile = '';
-  try {
-    settingsFile = settingsPath(userConfigDir(), instance);
-  } catch (e) {
-    logger(`settings are not saved: ${(e as Error).message}`);
-  }
-  const settings = new Settings(settingsFile, { modules, flags: settingValues });
-  const keybindings = new Keybindings(settingsFile && besideSettings(settingsFile, 'keybindings'));
-  try {
-    keybindings.load();
-  } catch (e) {
-    logger(`ignoring keybindings: ${(e as Error).message}`);
-  }
-  try {
-    settings.load();
-  } catch (e) {
-    logger(`ignoring settings: ${(e as Error).message}`);
-  }
-  const machinesFile = settingsFile && besideSettings(settingsFile, 'machines');
+  const settingValues = Object.fromEntries(
+    flagDefs.flatMap((d) => (typeof flags[d.name] === 'string' ? [[d.name, flags[d.name] as string]] : [])),
+  );
 
   let secret = '';
   if (f['proxy-secret-file']) {
@@ -286,38 +165,6 @@ export async function serve(argv: string[]): Promise<void> {
       );
   }
 
-  let registry: Registry;
-  try {
-    registry = machinesFile ? Registry.open(machinesFile) : Registry.memory();
-  } catch (e) {
-    logger(`machines are not stored: ${(e as Error).message}`);
-    registry = Registry.memory();
-  }
-  if (registry.kept() > 0)
-    logger(`${machinesFile}: ${registry.kept()} entries are not machines this version can use; they are kept in the file as they are`);
-  for (const s of registry.specs())
-    if (s.kind === 'ssh' && !validTarget(s.target ?? ''))
-      logger(`machine ${s.id}: its ssh target is refused (invalid_target); it is shown in error and never connected`);
-  const extra = f.ssh.map((t) => ({ id: t, label: t, target: t, enabled: true }));
-  const specs = selectSpecs(loadSpecs(registry.specs(), extra, hostname()), f['local-only'], f.ssh, f.machine);
-
-  const machines = new Machines({
-    specs,
-    registry,
-    logger,
-    dial: async (spec, signal) => {
-      if (spec.kind === 'local') {
-        const session = await dialNode({ instance: nodeInstance, agents, sshConnection: process.env.SSH_CONNECTION, logger, signal });
-        return { session, platform: `${process.platform}/${process.arch === 'x64' ? 'amd64' : process.arch}` };
-      }
-      const { session, platform } = await dialSSH(
-        { target: spec.target ?? '', controlDir, agents, logger, instance: nodeInstance },
-        signal,
-      );
-      return { session, platform: `${platform.os}/${platform.arch}` };
-    },
-  });
-
   let audit = noAudit;
   if (f['audit-log']) {
     closeSync(openSync(f['audit-log'], 'a', 0o600));
@@ -325,22 +172,21 @@ export async function serve(argv: string[]): Promise<void> {
     audit = auditLog((line) => appendFileSync(path, line));
   }
   const guard = new Guard({ allowedOrigins: f['allowed-origin'], proxySecret: secret, logger });
-  const core = createCore({
+  const { core, specs, run } = composeCore({
+    instance,
+    nodeInstance,
+    features,
+    flags: settingValues,
+    payloads,
+    controlDir,
+    localOnly: f['local-only'],
+    ssh: f.ssh,
+    only: f.machine,
     guard,
     audit,
     readOnly: f['read-only'],
     userHeader: f['user-header'],
     logger,
-    machines,
-    settings,
-    features,
-  });
-  const stopSettingsPush = hostRoutes(core, {
-    settings,
-    keybindings,
-    readOnly: f['read-only'],
-    sshLogin: controlDir !== '',
-    web: payloads.web,
   });
 
   const stop = new AbortController();
@@ -352,8 +198,6 @@ export async function serve(argv: string[]): Promise<void> {
       .on('close', () => stop.abort())
       .resume();
   }
-  // Edits of the files by hand apply without a restart.
-  const watching = Promise.all([settings.watch(stop.signal), keybindings.watch(stop.signal)]).catch(() => {});
 
   // Bind before connecting to machines: a failed launch must not start agents.
   const fetch = (req: Request, server: Server<WSData>): Promise<Response> | Response | undefined => {
@@ -409,18 +253,13 @@ export async function serve(argv: string[]): Promise<void> {
   }
   if (o.owned) guard.ownLocalhost(String(server.port));
 
-  const running = core.run(stop.signal);
+  const running = run(stop.signal);
   logger(`${NAME} ${VERSION} listening on http://${address} (${specs.length} machines)${f['read-only'] ? ' (read-only)' : ''}`);
   if (f['parent-stdio']) process.stdout.write(JSON.stringify({ event: 'ready', url: `http://${address}` }) + '\n');
 
   await new Promise<void>((r) => (stop.signal.aborted ? r() : stop.signal.addEventListener('abort', () => r(), { once: true })));
   void server.stop(true);
   void o.other?.stop(true);
-  // Machine sessions end with the signal; wait for them so that the local
-  // agent stops what it started instead of leaving it behind.
-  const late = await Promise.race([running.then(() => false), new Promise<boolean>((r) => setTimeout(() => r(true), 15_000))]);
-  if (late) logger('machines did not disconnect within 15s');
-  await watching;
-  stopSettingsPush();
+  await running;
   process.exit(0);
 }

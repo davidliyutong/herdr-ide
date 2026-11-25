@@ -3,5 +3,5 @@
 export * from './define.ts';
 export * from './store.ts';
 // The name the composition roots know the store by (kernel/core.ts,
-// kernel/feature.ts, hosts/bun/serve.ts).
+// kernel/feature.ts, hosts/common/compose.ts).
 export { Settings as Store } from './store.ts';

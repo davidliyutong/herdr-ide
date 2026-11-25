@@ -22,7 +22,7 @@ const pkgs: Pkg[] = Object.entries(byLicense)
 const out: string[] = [];
 out.push('## The core in TypeScript (backend/)', '');
 out.push(
-  "The core's executable built from backend/ is the Bun runtime (https://github.com/oven-sh/bun, MIT; its LICENSE.md lists the libraries it includes, JavaScriptCore among them, LGPL-2.0) with the core's code and the npm packages below bundled.",
+  "The core's executable built from backend/ is the Bun runtime (https://github.com/oven-sh/bun, MIT; its LICENSE.md lists the libraries it includes, JavaScriptCore among them, LGPL-2.0) with the core's code and the npm packages below bundled. The desktop app runs the same core in Electron, with node-pty (and node-addon-api, which it is built with) beside it in the app.",
 );
 for (const pkg of pkgs) {
   const dir = pkg.paths[0];

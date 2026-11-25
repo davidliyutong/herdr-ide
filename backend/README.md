@@ -13,13 +13,13 @@ kept.
 
 Each layer imports only from the layers above it in this list.
 
-| Directory   | Runs in      | What                                                                                                                                                   |
-| ----------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds (`agents/`) |
-| `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract     |
-| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core           |
-| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                         |
-| `hosts/`    | Bun / Node   | composition roots: `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process                                  |
+| Directory   | Runs in      | What                                                                                                                                                                         |
+| ----------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds (`agents/`)                       |
+| `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                           |
+| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core                                 |
+| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                               |
+| `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process, served over MessagePorts |
 
 `tsconfig.node.json` typechecks what runs in Node with Node's types only,
 so a Bun API there does not compile; `tsconfig.bun.json` typechecks the

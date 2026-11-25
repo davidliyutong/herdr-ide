@@ -15,7 +15,7 @@
 // default keys into docs/reference.md, between the markers there.
 //
 // The core's input is the features the host composes (registryInput of
-// hosts/bun/serve.ts describedFeatures): scripts/registry.ts writes the
+// hosts/common/compose.ts describedFeatures): scripts/registry.ts writes the
 // files, or with --check only compares them (pnpm registry, make tokens).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -30,7 +30,7 @@ export type FeatureSettings = Switchable & { settings?: Module };
 
 /** The settings modules of the core: the user interface's, the switches
  * of the features that can be turned off and the features' own modules,
- * in the order the host composes the features (hosts/bun/serve.ts
+ * in the order the host composes the features (hosts/common/compose.ts
  * coreFeatures), which is the order the UIs list them in. */
 export function coreModules(features: readonly FeatureSettings[]): Module[] {
   return [UI, toggles(features), ...features.flatMap((f) => (f.settings ? [f.settings] : []))];

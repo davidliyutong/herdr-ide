@@ -2,5 +2,5 @@
   // Code run by Bun: the machine side, the command line, and the tests.
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "types": ["bun"] },
-  "include": ["shared", "kernel", "machine", "features", "hosts/bun"]
+  "include": ["shared", "kernel", "machine", "features", "hosts/common", "hosts/bun", "hosts/electron/**/*.test.ts"]
 }

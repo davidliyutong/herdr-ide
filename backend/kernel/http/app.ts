@@ -72,7 +72,8 @@ export class Http {
         return;
       }
       c.set('client', c.env.desktop ? 'desktop' : 'browser');
-      c.set('sameHost', sameHost(facts));
+      // A request in process is the desktop app's window, on this host.
+      c.set('sameHost', c.env.remote === undefined ? c.env.desktop : sameHost(facts));
       c.set('trustedOrigin', o.guard.trustedOrigin(facts));
       c.set('who', who);
       c.set('audit', {});

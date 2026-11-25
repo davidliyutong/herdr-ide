@@ -1,1 +1,3 @@
-allowBuilds: {}
+allowBuilds:
+  # The desktop app builds it (desktop/pnpm-workspace.yaml); here only its types.
+  node-pty: false

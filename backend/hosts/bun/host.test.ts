@@ -5,7 +5,7 @@ import { PassThrough } from 'node:stream';
 import { SLUG } from '#shared/lib/brand.ts';
 import type { Spec } from '#kernel/machines/spec.ts';
 import { DESKTOP_COOKIE, desktopClient, readHello } from './parent.ts';
-import { selectSpecs } from './serve.ts';
+import { selectSpecs } from '#hosts/common/compose.ts';
 
 const TOKEN = 'a'.repeat(43);
 const KEY = 'b'.repeat(43);

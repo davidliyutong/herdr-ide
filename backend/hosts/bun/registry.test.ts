@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { buildRegistry, fillReference, registryInput, translationKeys } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { describedFeatures } from './serve.ts';
+import { describedFeatures } from '#hosts/common/compose.ts';
 
 const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), 'utf8');
 const input = registryInput(describedFeatures());

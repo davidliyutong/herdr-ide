@@ -1,7 +1,7 @@
 // Checks that docs/reference.md documents every flag of the command line
 // (serve's, the settings' flags among them, and fetch-assets') and every
 // HTTP route of the core, composed as `serve` composes it
-// (hosts/bun/serve.ts) with placeholder inputs; run by scripts/check.sh.
+// (hosts/common/compose.ts) with placeholder inputs; run by scripts/check.sh.
 //
 //   bun scripts/reference.ts            fails, listing what is missing
 //   bun scripts/reference.ts --list     prints the flags and routes
@@ -18,7 +18,8 @@ import { Guard } from '#kernel/http/guard.ts';
 import { Machines } from '#kernel/machines/manager.ts';
 import { Registry } from '#kernel/machines/registry.ts';
 import { FETCH_ASSETS_OPTIONS } from '#features/vscode/fetchassets.ts';
-import { OPTIONS, describedFeatures, hostRoutes } from '#hosts/bun/serve.ts';
+import { describedFeatures, hostRoutes } from '#hosts/common/compose.ts';
+import { OPTIONS } from '#hosts/bun/serve.ts';
 
 const features = describedFeatures();
 const modules = coreModules(features);

@@ -15,10 +15,12 @@ export type Client = 'desktop' | 'browser';
 /** What the host knows of a request's connection. */
 export interface Peer {
   /** The connection's remote address (an IP); undefined for a request that
-   * did not come over a network (the desktop app's windows, in process). */
+   * did not come over a network (the desktop app's windows, in process:
+   * a client on the core's own host). */
   remote?: string;
   /** The request comes from the desktop app's windows: the host vouches
-   * for it (its main process; on the command line, the cookie of the
+   * for it (the app's main process, which hands the core in process the
+   * requests of its windows; on the command line, the cookie of the
    * launch the desktop app set). */
   desktop: boolean;
   /** Present on a WebSocket upgrade: adopts the connection as a channel
