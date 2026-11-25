@@ -1,4 +1,5 @@
 import { decodeFrame, encodeFrame, frameGrid, FRAME_AUTOMATIC, FRAME_DATA, TermError } from './protocol';
+import { openChannel } from '../lib/transport';
 
 /** What a stream delivers to the pane that attached it, in the order the core sent it. */
 export interface StreamHandler {
@@ -70,8 +71,7 @@ export class TermConnection {
 
   /** A connection to the core that served the page. */
   static toCore(): TermConnection {
-    const url = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/v1/term`;
-    return new TermConnection(() => new WebSocket(url()) as unknown as Socket);
+    return new TermConnection(() => openChannel('/api/v1/term') as unknown as Socket);
   }
 
   get connected(): boolean {

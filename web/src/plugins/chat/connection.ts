@@ -28,6 +28,7 @@ import {
   type Command,
   type Event,
 } from './protocol';
+import { openChannel } from '../../lib/transport';
 
 /** The part of WebSocket the connection uses, so tests can supply their own. */
 export interface Socket {
@@ -145,8 +146,7 @@ export class ChatConnection {
 
   /** A connection to the core that served the page. */
   static toCore(): ChatConnection {
-    const url = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${WS_PATH}`;
-    return new ChatConnection(() => new WebSocket(url()) as unknown as Socket);
+    return new ChatConnection(() => openChannel(WS_PATH) as unknown as Socket);
   }
 
   get connected(): boolean {

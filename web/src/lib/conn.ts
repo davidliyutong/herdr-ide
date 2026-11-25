@@ -5,6 +5,7 @@
 import type { AgentStatusEvent, MachineState } from './machine';
 import type { GuiState } from '../gui/state';
 import type { DownloadEvent } from '../download';
+import { openChannel } from './transport';
 
 type Listener = {
   onMachines(list: MachineState[]): void;
@@ -54,9 +55,8 @@ class Conn {
   }
 
   private connect() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     // The event channel; the page's terminals have their own (term/connection.ts).
-    const ws = new WebSocket(`${proto}//${location.host}/ws`);
+    const ws = openChannel('/ws');
     this.ws = ws;
     ws.onopen = () => {
       this.connected = true;

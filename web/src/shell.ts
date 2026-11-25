@@ -1,5 +1,6 @@
 // The desktop app's bridge (desktop/src/preload.ts), present only in its
-// main window; in a browser there is none. Kept without imports so any
+// main window, and its channels to the core, in each of its frames; in a
+// browser there is neither. Kept without imports so any
 // module can ask early whether it runs in the desktop app. The preload
 // implements this interface.
 
@@ -167,3 +168,19 @@ export interface DesktopTitlebar {
 }
 
 export const desktopShell: DesktopShell | undefined = (globalThis as { desktopShell?: DesktopShell }).desktopShell;
+
+/** The desktop app's channels to its core (desktop/src/frames.ts), present
+ * as desktopChannels in every frame of the app's origin in the desktop
+ * app, whose core does not listen: what a WebSocket to the core is in a
+ * browser (lib/transport.ts). */
+export interface DesktopChannels {
+  /** Asks for a channel to the core at path (with its query) offering the
+   * WebSocket subprotocols; returns its id. Its MessagePort arrives as a
+   * message to this window from its own origin, {[CHANNEL_PORT]: id} with
+   * the port; the bridge's frames on it are
+   * backend/hosts/electron/bridge.ts's. */
+  open(path: string, protocols: string[]): string;
+}
+
+/** The member of the window message that carries a channel's port. */
+export const CHANNEL_PORT = 'desktopChannelPort';

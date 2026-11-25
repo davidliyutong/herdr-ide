@@ -15,6 +15,7 @@ import { xKeycode } from './keycodes';
 import type { GuiWindow } from './state';
 import { FrameStats, type StatsView } from './stats';
 import { videoCodecs, VideoStream, type VideoConfig } from './video';
+import { openChannel } from '../lib/transport';
 
 interface Layer {
   id: number;
@@ -114,11 +115,10 @@ export class GuiSession {
   }
 
   private async connect() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const codecs = await videoCodecs();
     if (this.disposed) return;
     const query = codecs.length ? `?video=${codecs.join(',')}` : '';
-    const ws = new WebSocket(`${proto}//${location.host}/m/${encodeURIComponent(this.m)}/gui/${this.id}/ws${query}`);
+    const ws = openChannel(`/m/${encodeURIComponent(this.m)}/gui/${this.id}/ws${query}`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
