@@ -58,9 +58,10 @@ if [[ "$mode" == install && "$os" != mac ]]; then
   exit 2
 fi
 export DESKTOP_ARCH
-# With MACHINE=ts (scripts/build.sh), the app carries the TypeScript machine
-# executable of its own platform only (none on Windows, where no machine
-# side runs); machines get theirs from the release.
+# With MACHINE=ts (scripts/build.sh), the app carries its own platform's
+# executable of the TypeScript build, for the local machine (none on
+# Windows, where no machine side runs); other machines get theirs from the
+# release.
 case "$os" in
   mac) PAYLOAD_MACHINES="darwin-${DESKTOP_ARCH/x64/amd64}" ;;
   linux) PAYLOAD_MACHINES="linux-${DESKTOP_ARCH/x64/amd64}" ;;

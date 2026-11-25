@@ -54,25 +54,26 @@ match; the bridge extension is reinstalled whenever its content changes.
    when the notary secrets are set too; without it it is signed ad hoc.
    The Windows and Linux packages are not signed. Every action the
    workflows use is pinned by its commit (with the version in a comment).
-   With the repository variable `MACHINE` set to `ts` the cores and the
-   apps deploy the TypeScript machine side instead of the Go machine
-   build ([42](docs/features/42-typescript-backend.md)): the `machines`
-   job first compiles its executable for every machine platform (linux
-   x64 and arm64, each for glibc and musl, darwin x64 and arm64), each
-   with its platform's herdr-core, once; every core and app of the
-   release embeds their SHA-256 and the release's download URL
+   With the repository variable `MACHINE` set to `ts` the archives hold
+   the TypeScript build instead ([42](docs/features/42-typescript-backend.md)):
+   one executable per platform that is the core and the machine side, for
+   linux x64 and arm64, each for glibc and musl, and darwin x64 and arm64,
+   each with its platform's herdr-core and the release's download URL
    (`$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/<tag>`, from
-   the workflow's context, not from the code) and carries only its own
-   platform's executable, and the release publishes them as
-   `veldr-machine-<os>-<arch>[-musl].gz`, which machines download.
-   The workflow then writes `SHA256SUMS` over the archives, installers and
-   machine executables (`*.tar.gz`, `*.dmg`, `*.zip`, `*.exe`,
-   `*.AppImage`, `*.deb`, `*-machine-*.gz`), attests
+   the workflow's context, not from the code); machines download their
+   platform's archive from the release. Each desktop app carries its own
+   platform's executable, taken from the `archives` job's archive (so that
+   `SHA256SUMS` names it).
+   The workflow then writes `SHA256SUMS` over the archives and installers
+   (`*.tar.gz`, `*.dmg`, `*.zip`, `*.exe`, `*.AppImage`, `*.deb`) and
+   the executables in the archives (`<slug>-<platform>/<slug>`, the lines
+   the TypeScript build's cores check their machines' builds against, and
+   their own version by), attests
    build provenance for them (only while the repository is public: GitHub
    stores no attestations for private repositories outside Enterprise
    Cloud) and creates the GitHub release with the changelog section as
    notes. Nothing is published unless every build succeeds.
-7. Smoke test a downloaded archive: `sha256sum -c SHA256SUMS`, `version`,
+7. Smoke test a downloaded archive: `sha256sum -c --ignore-missing SHA256SUMS` (it names the installers and the executables inside the archives too), `version`,
    then start with `--local-only` and open the UI. Install the desktop app
    on each system ([deployment](docs/deployment.md#desktop-app)) and check
    that it starts its core and loads the UI: on a Mac from the DMG
@@ -81,8 +82,8 @@ match; the bridge extension is reinstalled whenever its content changes.
    deb (and the AppImage where FUSE 2 is installed).
 
 Builds are reproducible for a given commit and toolchain (fixed timestamps in
-gzip and the VSIX, `-trimpath` for the machine builds; the TypeScript
-machine executables for the same output directory), so a local
+gzip and the VSIX, `-trimpath` for the machine builds; the executables
+for the same output path), so a local
 `VERSION=vX.Y.Z TARGETS="…" scripts/build.sh` can be compared with the
 release.
 

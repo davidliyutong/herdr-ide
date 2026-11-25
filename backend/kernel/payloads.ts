@@ -12,15 +12,15 @@ import { BRIDGE_EXT, CORE_BIN, DATA_DIR_NAME } from '#shared/lib/brand.ts';
 import { userHomeDir } from '#shared/host/hostdirs.ts';
 import { DeployCode, Unsupported } from './machines/transport/errors.ts';
 import {
-  machineAsset,
+  bareName,
+  MACHINE_TARGETS,
   machineKey,
-  tsBuild,
   type BuildSource,
   type GoBuild,
-  type Manifest,
   type MachineBuild,
+  type TSBuild,
 } from './machines/transport/builds.ts';
-import { resolveMachine } from './machines/transport/sources.ts';
+import { ownFile, ownGz, Release, type OwnExecutable } from './machines/transport/release.ts';
 
 /** Files by their path relative to a root ("index.html",
  * "assets/x.js"). */
@@ -33,10 +33,15 @@ export interface Payloads {
   readonly web: Files | null;
   /** The machine build for a machine: the Go program for its platform
    * (Go's os/arch names), or, in a core built to deploy the TypeScript
-   * machine side, its compiled executable for the machine's platform and C
-   * library. Which one is a choice of the core's build
-   * (backend/scripts/build.ts --machine). */
+   * machine side, that program for the machine's platform and C library.
+   * Which one is a choice of the core's build (backend/scripts/build.ts
+   * --machine). */
   machine: BuildSource;
+  /** Whether this build deploys the TypeScript machine side (and is it). */
+  deploysTS(): Promise<boolean>;
+  /** The SHA-256 of the herdr-core a TypeScript build carries for a
+   * platform, as the build recorded it (null when it did not). */
+  embeddedHC(os: string, arch: string): Promise<string | null>;
   /** herdr-core for a platform, gzip-compressed, and the SHA-256 of the
    * executable, which the agent's install checks. */
   hc(os: string, arch: string): Promise<{ gz: Buffer; digest: string }>;
@@ -76,20 +81,32 @@ export function layered(...sources: Array<Files | null | undefined>): Files {
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 
-/** The digests of the TypeScript machine executables of this build, and
- * the core's own platform's executable (gzip-compressed). */
-export const MANIFEST_PATH = 'machine/manifest.json';
-export const ownMachinePath = (key: string): string => `machine/${machineAsset(key)}.gz`;
+/** What a build that deploys the TypeScript machine side records: its
+ * version, its release's download URL (none for a build of no release),
+ * its own platform (MACHINE_TARGETS; "" for Windows). */
+export const RELEASE_PATH = 'machine/release.json';
+/** The SHA-256 of the herdr-core executables of the build's machine
+ * platforms (os-arch), which its executables carry. */
+export const HC_PATH = 'machine/hc.json';
+/** The own platform's executable, gzip-compressed, which the desktop app
+ * carries (the command line is its own). */
+export const ownExecutablePath = (key: string): string => `machine/${bareName(key)}.gz`;
+
+interface ReleaseInfo {
+  version: string;
+  release?: string;
+  key?: string;
+}
 
 /** Payloads laid out as the build writes them: agents/<bin>-<os>-<arch>.gz
- * (the Go machine builds) or machine/manifest.json and the core's own
- * platform's machine executable machine/<bin>-machine-<key>.gz (the
- * TypeScript machine side: every other platform's comes from the release,
- * checked against the manifest's digests), hc/hc-<os>-<arch>.gz,
+ * (the Go machine builds) and hc/hc-<os>-<arch>.gz, or machine/release.json
+ * and machine/hc.json (a build that deploys the TypeScript machine side:
+ * each machine gets its platform's from the release, release.ts),
  * encoder/encoder-<os>-<arch>.gz, ext/<bridge>.vsix and web/…; agentDir
  * (--agent-dir) holds machine builds searched first: uncompressed Go
- * builds, or TypeScript ones as the release names them (offline sites,
- * development). Results are cached. */
+ * builds, or the TypeScript builds' archives or executables with their
+ * SHA256SUMS (offline sites, development). own is the running executable
+ * (the command line's, compiled). Results are cached. */
 export function payloads(o: {
   files: Files;
   web?: Files | null;
@@ -99,6 +116,8 @@ export function payloads(o: {
   machineCache?: string;
   /** Where what a machine build's sources refused is logged. */
   logger?: (line: string) => void;
+  /** The running executable (a compiled command line). */
+  ownFile?: string;
 }): Payloads {
   const agents = new Map<string, Promise<GoBuild>>();
   const gzs = new Map<string, Promise<{ gz: Buffer; digest: string }>>();
@@ -117,14 +136,26 @@ export function payloads(o: {
       if (!gz) throw new Error(`no ${what} in this build`);
       return { gz: Buffer.from(gz), digest: sha256(gunzipSync(gz)) };
     });
-  let manifest: Promise<Manifest | null> | undefined;
-  const tsManifest = () => {
-    manifest ??= o.files.get(MANIFEST_PATH).then((b) => (b ? (JSON.parse(Buffer.from(b).toString('utf8')) as Manifest) : null));
-    return manifest;
-  };
-  // One resolve per platform at a time and after: N machines of one
-  // platform load its executable once (a failure is tried again).
-  const loads = new Map<string, Promise<Buffer>>();
+  const json = <T>(path: string) => o.files.get(path).then((b) => (b ? (JSON.parse(Buffer.from(b).toString('utf8')) as T) : null));
+  let info: Promise<ReleaseInfo | null> | undefined;
+  const releaseInfo = () => (info ??= json<ReleaseInfo>(RELEASE_PATH));
+  let hcs: Promise<Record<string, string> | null> | undefined;
+  let release: Promise<Release> | undefined;
+  const tsRelease = (r: ReleaseInfo) =>
+    (release ??= (async () => {
+      const key = r.key ?? '';
+      let own: OwnExecutable | null = null;
+      if (key && o.ownFile) own = ownFile(key, o.ownFile);
+      else if (key && (await o.files.get(ownExecutablePath(key)))) own = ownGz(key, () => o.files.get(ownExecutablePath(key)));
+      return new Release({
+        version: r.version,
+        ...(r.release ? { url: r.release } : {}),
+        ...(o.agentDir ? { dir: o.agentDir } : {}),
+        cacheDir: o.machineCache ?? join(userHomeDir(), DATA_DIR_NAME, 'cache', 'machine'),
+        own,
+        ...(o.logger ? { logger: o.logger } : {}),
+      });
+    })());
   const goBuild = (os: string, arch: string) =>
     cached(agents, `${os}-${arch}`, async () => {
       const name = `${CORE_BIN}-${os}-${arch}`;
@@ -139,22 +170,25 @@ export function payloads(o: {
   return {
     web: o.web === undefined ? null : o.web,
     async machine(t): Promise<MachineBuild> {
-      const m = await tsManifest();
-      if (!m) return goBuild(t.os, t.arch);
+      const r = await releaseInfo();
+      if (!r) return goBuild(t.os, t.arch);
       const key = machineKey(t);
-      // Shared by the machines that wait for it: no machine's signal ends it.
-      const b = tsBuild(m, key, () =>
-        cached(loads, key, () =>
-          resolveMachine(b!, {
-            dir: o.agentDir || undefined,
-            cacheDir: o.machineCache ?? join(userHomeDir(), DATA_DIR_NAME, 'cache', 'machine'),
-            own: () => o.files.get(ownMachinePath(key)),
-            ...(o.logger ? { logger: o.logger } : {}),
-          }),
-        ),
-      );
-      if (!b) throw new Unsupported(DeployCode.PlatformUnsupported, `this build has no machine executable for ${key}`);
+      if (!MACHINE_TARGETS[key]) throw new Unsupported(DeployCode.PlatformUnsupported, `no machine build for ${key}`);
+      const rel = await tsRelease(r);
+      const url = rel.url(`${bareName(key)}.tar.gz`);
+      const b: TSBuild = {
+        kind: 'ts',
+        key,
+        ...(url ? { url } : {}),
+        digests: (x) => rel.digests(key, x),
+        load: (d) => rel.load(key, d),
+      };
       return b;
+    },
+    deploysTS: async () => (await releaseInfo()) !== null,
+    async embeddedHC(os, arch) {
+      hcs ??= json<Record<string, string>>(HC_PATH);
+      return (await hcs)?.[`${os}-${arch}`] ?? null;
     },
     hc: (os, arch) => gzEntry(`hc/hc-${os}-${arch}.gz`, `herdr-core for ${os}-${arch}`),
     encoder: (os, arch) => gzEntry(`encoder/encoder-${os}-${arch}.gz`, `video encoder for ${os}-${arch}`),

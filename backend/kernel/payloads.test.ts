@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { BRIDGE_EXT, CORE_BIN } from '#shared/lib/brand.ts';
+import type { GoBuild } from './machines/transport/builds.ts';
 import { dirFiles, layered, payloads, type Files } from './payloads.ts';
 
 const dirs: string[] = [];
@@ -67,8 +68,9 @@ test("a machine build's version is derived from its content, so a rebuilt one is
   const of = (gz: Uint8Array, agentDir?: string) => payloads({ files: mapFiles(new Map([[`agents/${name}.gz`, gz]])), agentDir });
   const a = await of(gzipSync(one)).machine({ os: 'linux', arch: 'amd64' });
   expect(a).toEqual({ kind: 'go', bin: one, version: sha256(one).slice(0, 16) });
-  expect((await of(gzipSync(one, { level: 1 })).machine({ os: 'linux', arch: 'amd64' })).version).toBe(a.version);
-  expect((await of(gzipSync(two)).machine({ os: 'linux', arch: 'amd64' })).version).not.toBe(a.version);
+  const go = async (gz: Uint8Array) => ((await of(gz).machine({ os: 'linux', arch: 'amd64' })) as GoBuild).version;
+  expect(await go(gzipSync(one, { level: 1 }))).toBe((a as GoBuild).version);
+  expect(await go(gzipSync(two))).not.toBe((a as GoBuild).version);
   const dev = temp();
   writeFileSync(join(dev, name), two);
   expect(await of(gzipSync(one), dev).machine({ os: 'linux', arch: 'amd64' })).toEqual({
@@ -99,46 +101,34 @@ test('files of a directory, and layered sources', async () => {
   expect(await l.get('b')).toBeNull();
 });
 
-// A core that deploys the TypeScript machine side carries the digests of
-// every platform's executable and its own platform's executable: a
-// machine's build names the release's asset, and is loaded (the core's own
-// copy here) only for a machine that cannot get it itself.
-test('the TypeScript machine side: every platform by its digests, the own executable carried', async () => {
+// A core that deploys the TypeScript machine side is that build: it
+// records its version, platform and release, and the herdr-core digests of
+// its release; a machine's build comes from the release (release.ts), the
+// desktop app's own platform's from its resources.
+test('the TypeScript machine side: the release recorded, the own executable carried, every platform from the release', async () => {
   const own = Buffer.from('#!/bin/sh\necho own\n');
-  const ownGz = gzipSync(own);
-  const manifest = {
-    version: 'v1.2.3',
-    release: 'https://releases.example/download/v1.2.3',
-    machines: {
-      'linux-amd64': { sha256: sha256(own), gz: sha256(ownGz), size: ownGz.length },
-      'linux-amd64-musl': { sha256: 'a'.repeat(64), gz: 'b'.repeat(64), size: 1 },
-    },
-  };
   const files = mapFiles(
     new Map([
-      ['machine/manifest.json', Buffer.from(JSON.stringify(manifest))],
-      [`machine/${CORE_BIN}-machine-linux-amd64.gz`, ownGz],
+      [
+        'machine/release.json',
+        Buffer.from(JSON.stringify({ version: 'v1.2.3', key: 'linux-amd64', release: 'https://releases.example/download/v1.2.3' })),
+      ],
+      ['machine/hc.json', Buffer.from(JSON.stringify({ 'linux-amd64': 'c'.repeat(64) }))],
+      [`machine/${CORE_BIN}-linux-amd64.gz`, gzipSync(own)],
       // A Go build beside it is not the one used.
       [`agents/${CORE_BIN}-linux-amd64.gz`, gzipSync(Buffer.from('go'))],
     ]),
   );
-  // How often the core's own copy is read.
-  let reads = 0;
-  const counting = { get: (path: string) => (path.endsWith('-machine-linux-amd64.gz') && reads++, files.get(path)) };
-  const p = payloads({ files: counting, machineCache: temp() });
+  const p = payloads({ files, machineCache: temp() });
+  expect(await p.deploysTS()).toBe(true);
+  expect(await p.embeddedHC('linux', 'amd64')).toBe('c'.repeat(64));
+  expect(await p.embeddedHC('linux', 'arm64')).toBeNull();
   const b = await p.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' });
   if (b.kind !== 'ts') throw new Error('not the TypeScript build');
-  expect(b.digest).toBe(sha256(own));
-  expect(b.version).toBe(sha256(own).slice(0, 16));
-  expect(b.url).toBe(`https://releases.example/download/v1.2.3/${CORE_BIN}-machine-linux-amd64.gz`);
-  // Machines of one platform deployed at once: one load, shared, and
-  // kept for the next.
-  const again = await p.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' });
-  const loads = await Promise.all([b.load(), b.load(), again.kind === 'ts' ? again.load() : null]);
-  for (const l of loads) expect(l).toEqual(ownGz);
-  expect(await b.load()).toEqual(ownGz);
-  expect(reads).toBe(1);
+  expect(b.url).toBe(`https://releases.example/download/v1.2.3/${CORE_BIN}-linux-amd64.tar.gz`);
   const m = await p.machine({ os: 'linux', arch: 'amd64', libc: 'musl' });
-  expect(m.kind === 'ts' && m.key).toBe('linux-amd64-musl');
+  expect(m.kind === 'ts' && m.url).toBe(`https://releases.example/download/v1.2.3/${CORE_BIN}-linux-amd64-musl.tar.gz`);
   await expect(p.machine({ os: 'linux', arch: 'riscv64' })).rejects.toThrow(/^platform_unsupported/);
+  // The Go build's core.
+  expect(await payloads({ files: mapFiles(new Map()) }).deploysTS()).toBe(false);
 });

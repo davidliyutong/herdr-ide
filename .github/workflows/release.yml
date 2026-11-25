@@ -10,10 +10,11 @@ permissions:
 
 env:
   # The machine build the cores deploy: go (the default), or ts, the
-  # TypeScript machine side (the repository variable MACHINE; scripts/build.sh).
+  # TypeScript build, whose executable is the core and the machine side of
+  # its platform (the repository variable MACHINE; scripts/build.sh).
   MACHINE: ${{ vars.MACHINE || 'go' }}
-  # Where this release serves its assets: machines download their
-  # TypeScript machine executable from there.
+  # Where this release serves its assets: machines of the TypeScript build
+  # download their platform's archive and the core SHA256SUMS from there.
   RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
 
 jobs:
@@ -22,40 +23,12 @@ jobs:
     with:
       cache: false
 
-  # The TypeScript machine side's executables (MACHINE=ts), built once, Bun
-  # compiling every platform's here, each with its platform's herdr-core:
-  # the release's assets, whose digests every core and desktop app of the
-  # release embeds.
-  machines:
-    if: ${{ vars.MACHINE == 'ts' }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          package_json_file: backend/package.json
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.5
-      - name: Build
-        run: |
-          (cd backend && pnpm install --frozen-lockfile)
-          go run ./scripts/fetch-hc -out dist/machines-hc linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
-          bun backend/scripts/machines.ts --out dist/machines --version "$GITHUB_REF_NAME" --hc dist/machines-hc
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: machines
-          path: dist/machines
-          if-no-files-found: error
-
+  # The cores (the TypeScript build: every machine platform's executable,
+  # musl's too), packaged with their licenses; SHA256SUMS of the archives
+  # and the executables in them.
   archives:
     runs-on: ubuntu-24.04
-    needs: [encoder, machines]
-    # machines is skipped for the Go machine build.
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
+    needs: encoder
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,18 +61,12 @@ jobs:
           path: dist/ffmpeg
       - name: Place the video encoders
         run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: ${{ env.MACHINE == 'ts' }}
-        with:
-          name: machines
-          path: dist/machines
       - name: Build
         run: scripts/build.sh
         env:
           VERSION: ${{ github.ref_name }}
-          TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+          TARGETS: ${{ env.MACHINE == 'ts' && 'linux/amd64 linux/arm64 linux/amd64-musl linux/arm64-musl darwin/amd64 darwin/arm64' || 'linux/amd64 linux/arm64 darwin/amd64 darwin/arm64' }}
           REQUIRE_ENCODER: 1
-          MACHINES: ${{ env.MACHINE == 'ts' && 'dist/machines' || '' }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: archives
@@ -114,9 +81,10 @@ jobs:
   # Package step, which runs electron-builder alone, gets the optional macOS
   # Developer ID certificate and notarization credentials (ad hoc without
   # them; Windows and Linux are not signed).
+  # With MACHINE=ts each app carries its own platform's executable from
+  # the archives (the release's, so that the manifest names it).
   desktop:
-    needs: [encoder, machines]
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
+    needs: [encoder, archives]
     strategy:
       fail-fast: false
       matrix:
@@ -160,14 +128,22 @@ jobs:
       - name: Place the video encoders
         run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: ${{ env.MACHINE == 'ts' }}
+        if: ${{ env.MACHINE == 'ts' && matrix.platform != 'win' }}
         with:
-          name: machines
-          path: dist/machines
+          name: archives
+          path: dist/archives
+      - name: The app's own executable
+        if: ${{ env.MACHINE == 'ts' && matrix.platform != 'win' }}
+        run: |
+          slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
+          os=${{ matrix.platform == 'mac' && 'darwin' || 'linux' }}
+          key=$os-${ARCH/x64/amd64}
+          mkdir -p dist/executables
+          tar -xzf "dist/archives/$slug-$key.tar.gz" -O "$slug-$key/$slug" > "dist/executables/$slug-$key"
       - run: scripts/desktop.sh build
         env:
           REQUIRE_ENCODER: 1
-          MACHINES: ${{ env.MACHINE == 'ts' && 'dist/machines' || '' }}
+          EXECUTABLES: ${{ env.MACHINE == 'ts' && 'dist/executables' || '' }}
       - name: Package
         run: scripts/desktop.sh dist
         env:
@@ -190,8 +166,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-24.04
-    needs: [archives, desktop, machines]
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
+    needs: [archives, desktop]
     permissions:
       contents: write
       id-token: write
@@ -202,14 +177,23 @@ jobs:
         with:
           path: dist/release
           merge-multiple: true
-      # The release's files: the archives, the installers and, with
-      # MACHINE=ts, the machine executables (<slug>-machine-<platform>.gz).
+      # The release's files, the archives and the installers, and the
+      # executables in the archives (<slug>-<platform>/<slug>, which the
+      # TypeScript build's cores check their machines' builds against).
       - name: Checksums
         run: |
+          slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
           cd dist/release
           shopt -s nullglob
-          ls *.tar.gz *.dmg *.zip *.exe *.AppImage *.deb *-machine-*.gz > ../assets
-          shasum -a 256 $(cat ../assets) > SHA256SUMS && cat SHA256SUMS
+          ls *.tar.gz *.dmg *.zip *.exe *.AppImage *.deb > ../assets
+          {
+            shasum -a 256 $(cat ../assets)
+            for a in *.tar.gz; do
+              n=${a%.tar.gz}
+              echo "$(tar -xzf "$a" -O "$n/$slug" | shasum -a 256 | cut -d' ' -f1)  $n/$slug"
+            done
+          } > SHA256SUMS
+          cat SHA256SUMS
       # GitHub stores attestations for public repositories (private ones need
       # GitHub Enterprise Cloud); a private repository releases without
       # provenance.

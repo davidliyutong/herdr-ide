@@ -44,5 +44,12 @@ export async function openPayloads(o: {
   const staged = Bun.isStandaloneExecutable ? null : dirFiles(fileURLToPath(new URL('../../../dist/payload/', import.meta.url)));
   const files = layered(ext, e?.files ?? staged);
   const web = o.webDir ? dirFiles(o.webDir) : (e?.web ?? null);
-  return payloads({ files, web, agentDir: o.agentDir || undefined, ...(o.logger ? { logger: o.logger } : {}) });
+  return payloads({
+    files,
+    web,
+    agentDir: o.agentDir || undefined,
+    ...(o.logger ? { logger: o.logger } : {}),
+    // The running executable is the machine build of its platform.
+    ...(Bun.isStandaloneExecutable ? { ownFile: process.execPath } : {}),
+  });
 }

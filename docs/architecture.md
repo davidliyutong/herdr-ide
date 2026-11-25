@@ -35,23 +35,24 @@ The core is TypeScript under `backend/` (its
 [README](../backend/README.md) has the layers and their rules), built with
 Bun into one executable per platform; machines run the Go program
 `cmd/veldr` (the machine build), which the core embeds and uploads, or, in
-a core built to deploy it (`backend/scripts/build.ts --machine ts`), the
-TypeScript machine side (`backend/machine`, `backend/hosts/machine`, the
-features' `machine.ts`) compiled by Bun into one executable per platform,
-which machines download from the core's release or the core uploads
+the TypeScript build (`backend/scripts/build.ts --machine ts`), that same
+executable, which is the core and the TypeScript machine side
+(`backend/machine`, `backend/hosts/machine`, the features' `machine.ts`)
+of its platform: machines download their platform's from the core's
+release, checked against its `SHA256SUMS`, or the core uploads it
 ([42](features/42-typescript-backend.md)).
 
 | Directory | Role |
 | --- | --- |
 | `backend/shared` | What the core and the machine side share: wire protocols (`proto/`: agentproto, yamux, herdr-core's, the chat host's), libraries (`lib/`: brand names, logging, Go-compatible times), SQLite state (`store/`), the host's directories, ids, loopback and file rules (`host/`), the coding agents' kinds (`agents/`). |
-| `backend/kernel` | The core's machinery: HTTP routing and guards (`http/`: Host/Origin, proxy secret, CSP), `Fail` codes and audit, channels and the pages on `/ws`, machines and their connections (`machines/`: the registry `machines[-<instance>].json`, the connection state machine, the ssh target rule, the transports to the local node and over ssh, the machine builds they install, `transport/builds.ts`, and where a core takes a TypeScript machine executable from, `transport/sources.ts`), settings and keybindings (`config/`: typed settings, the hand-editable files, the registry written to `spec/generated/registry.json` and `docs/reference.md`, [13](features/13-settings-and-appearance.md)), typed agent actions, the payloads it carries for machines (`payloads.ts`). |
+| `backend/kernel` | The core's machinery: HTTP routing and guards (`http/`: Host/Origin, proxy secret, CSP), `Fail` codes and audit, channels and the pages on `/ws`, machines and their connections (`machines/`: the registry `machines[-<instance>].json`, the connection state machine, the ssh target rule, the transports to the local node and over ssh, the machine builds they install, `transport/builds.ts`, and the TypeScript build's release, its `SHA256SUMS` and archives, `transport/release.ts`), settings and keybindings (`config/`: typed settings, the hand-editable files, the registry written to `spec/generated/registry.json` and `docs/reference.md`, [13](features/13-settings-and-appearance.md)), typed agent actions, the payloads it carries for machines (`payloads.ts`). |
 | `backend/machine` | The TypeScript machine side's machinery (Bun, Linux and macOS): the node and its clients (`node.ts`, `dial.ts`), the agent its sessions share and the core's ops (`agent.ts`, `fsops.ts`, `hcop.ts`), the dispatch of the `plugin` op to the features' machine sides (`dispatch.ts`, `feature.ts`: `defineMachine`), the terminal core (`hc.ts`), hidden terminals, housekeeping, the vault's socket, system calls through `bun:ffi` (`sys/`). |
 | `backend/features/<id>` | Everything the product does, one directory per feature: its typed protocol (`protocol.ts`), its core side (`core.ts`: routes, channels, services, settings), its machine side in TypeScript (`machine.ts` and `machine/`, for files, git, search, monitor, browser and history) and, while machines run the Go build, the tests of the wire it shares with it ([27](features/27-plugins.md)): `machines`, `terminals` ([22](features/22-terminal-protocol.md)), `files` ([28](features/28-file-explorer.md)), `git` ([31](features/31-git.md)), `search` ([41](features/41-project-search.md)), `monitor` ([34](features/34-system-monitor.md)), `browser` ([32](features/32-browser-and-ports.md)), `agents` ([33](features/33-workspace-restore.md)), `history` ([36](features/36-terminal-history.md)), `chat` ([37](features/37-agent-chats.md)), `usage` ([29](features/29-ai-usage.md)), `vault` ([30](features/30-variable-vault.md)), `gui` ([14](features/14-gui-windows.md)), `vscode` ([05](features/05-vscode-panes.md), [09](features/09-air-gapped-installs.md)). |
-| `backend/hosts/bun` | The command line (`main.ts`: `serve`, `fetch-assets`, `version`, `node` passed on to the machine build) and `serve` on `Bun.serve` (`serve.ts`), the payloads embedded in the executable (`payloads.ts`). |
+| `backend/hosts/bun` | The command line (`main.ts`: `serve`, `fetch-assets`, `version`, `node`: run here in the TypeScript build, passed on to the Go machine build otherwise) and `serve` on `Bun.serve` (`serve.ts`), the payloads embedded in the executable (`payloads.ts`). |
 | `backend/hosts/common` | What both hosts compose (`compose.ts`): the features, settings and keybindings, the machines, the host's routes. |
-| `backend/hosts/machine` | The TypeScript machine build: its command line (`main.ts`: `node`, `node dial`, `node stop`, `version`, with the Go build's flags), the features it serves (`features.ts`), its bundle (`bundle.ts`, which carries no part of the core). |
+| `backend/hosts/machine` | The TypeScript machine side's commands (`cli.ts`: `node`, `node dial`, `node stop`, with the Go build's flags), which the command line runs, and the features its node serves (`features.ts`). |
 | `backend/hosts/electron` | The core in the desktop app's utility process (`main.ts`, `serve.ts`, `start.ts`), its bridge to the main process over MessagePorts (`bridge.ts`), node-pty's terminals (`pty.ts`). |
-| `backend/scripts` | The executable's build (`build.ts`, `--machine go\|ts` choosing the machine build it embeds), the TypeScript machine side's executables of every platform (`machines.ts`), the reference check (`reference.ts`), the npm packages' notices. |
+| `backend/scripts` | The executable's build (`build.ts`, `--machine go\|ts`: the core that embeds the Go machine builds, or the TypeScript build), the reference check (`reference.ts`), the npm packages' notices. |
 | `cmd/veldr` | The machine build: `node` (`node`, `node dial`, `node stop`), `gui-keep`, `gui-wl`, `chat-host`, `mcp` and `version` (`machine_unix.go`, `node_unix.go`, `chathost_unix.go`). |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/hostid` | The host's key (name and a hash of its machine id) and id (the hash alone), for files and sessions kept per host ([40](features/40-shared-homes.md)). |
@@ -77,7 +78,7 @@ which machines download from the core's release or the core uploads
 | `extensions/veldr-bridge` | VS Code extension installed into code-server. |
 | `scripts` | Build (`build.sh`: payloads staged in `dist/payload`, the core of each platform), packaging, checks, pinned downloads and the design tokens' generator (`tokens`). |
 | `spec` | Design tokens (`tokens.json`, [24](features/24-design-tokens.md)), `generated/registry.json`, the pinned Codex app-server schema, and shared test vectors and recordings (`vectors/`) run by Go, core and web tests. |
-| `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`; `E2E_MACHINE=ts` runs them against a core that deploys the TypeScript machine side), `machines`, old kernels and C libraries in KVM and containers with payloads run in each (`payloads/machine-node`: the TypeScript machine side), `fakeacp`, a scripted offline ACP agent installed as `kimi`, `xclient`, an X program that reports its input for the program window tests, and `sshd`, the image of the SSH machines the tests run in Docker (with Xvfb). |
+| `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`; `E2E_MACHINE=ts` runs them against the TypeScript build), `machines`, old kernels and C libraries in KVM and containers with payloads run in each (`payloads/machine-node`: the TypeScript machine side), `fakeacp`, a scripted offline ACP agent installed as `kimi`, `xclient`, an X program that reports its input for the program window tests, and `sshd`, the image of the SSH machines the tests run in Docker (with Xvfb). |
 
 ## Desktop app
 
@@ -129,7 +130,7 @@ JSON reply line; after a successful reply it carries op-specific bytes.
 | `fs.archive` | core → agent | A zip of `Paths`, streamed. |
 | `dial-unix` | core → agent | Raw pipe to a socket in the agent's run directory. |
 | `code-server` | core → agent | `status`, `install`, `download`, `start`, `stop`, `release` (stops it unless another core's session has a connection to it), `install-ext`, `marker`. |
-| `hc` | core → agent | Terminal core `status`, `install` (digest-checked), `install-embedded` (the herdr-core the machine build carries, whose digest `status` reports as `embedded`: the TypeScript machine executable's), `start`, `restart`, `stop` of the agent's instance. |
+| `hc` | core → agent | Terminal core `status`, `install` (digest-checked), `install-embedded` (the herdr-core the machine build carries, whose digest `status` reports as `embedded`: the TypeScript build's, which the core holds to the digest its build recorded), `start`, `restart`, `stop` of the agent's instance. |
 | `hc-api` | core → agent | Raw pipe to the terminal core's API socket; starts nothing. |
 | `detect` | core → agent | Stream of `DetectEvent {terminal, agent, status}` lines, with the agent's `session` when asked ([25](features/25-agent-detection.md)). |
 | `privacy` | core → agent | macOS Full Disk Access of the agent and the terminal core. |

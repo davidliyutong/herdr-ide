@@ -16,17 +16,17 @@
 #                                          # (the desktop app carries them and
 #                                          # runs the core in Electron)
 #
-# MACHINE=ts builds cores that deploy the TypeScript machine side instead
-# of the Go program (docs/features/42-typescript-backend.md): its
-# executable for every machine platform (backend/scripts/machines.ts, each
-# with its platform's herdr-core) into dist/machines, unless MACHINES names
-# a directory that has them (the release workflow builds them once), and
-# their release assets into dist/release; each core embeds their digests
-# with RELEASE_URL, where the release serves them (none: machines get
-# them from the core's --agent-dir or the core's own copy), and its own
-# platform's executable only. PAYLOAD_MACHINES names the platforms whose
-# executables dist/payload carries (default: this host's; the desktop app's
-# own, none for Windows).
+# MACHINE=ts builds the TypeScript build instead of a core that deploys
+# the Go program (docs/features/42-typescript-backend.md): each target's
+# executable is the core and the machine side of its platform, with its
+# platform's herdr-core (TARGETS may name linux/amd64-musl and
+# linux/arm64-musl too), and RELEASE_URL, the release's download URL from
+# which machines get their platform's archive (none for a build of no
+# release: machines get theirs from the core's --agent-dir or its own
+# executable). For the desktop app (PAYLOAD_ONLY=1), dist/payload carries
+# the build's release record and the executable of PAYLOAD_MACHINES (its
+# own platform, as <os>-<arch>; none for Windows), taken from EXECUTABLES
+# (a directory with <slug>-<platform>, the release's) or built here.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -56,6 +56,8 @@ bun_target() {
     linux/arm64) echo bun-linux-arm64 ;;
     darwin/amd64) echo bun-darwin-x64 ;;
     darwin/arm64) echo bun-darwin-arm64 ;;
+    linux/amd64-musl) echo bun-linux-x64-musl-baseline ;;
+    linux/arm64-musl) echo bun-linux-arm64-musl ;;
     windows/amd64) echo bun-windows-x64-baseline ;;
     *) echo "unsupported core platform: $1" >&2; return 1 ;;
   esac
@@ -98,32 +100,12 @@ if [[ "$MACHINE" == go ]]; then
   # shellcheck disable=SC2086
   go run ./scripts/fetch-hc -out "$PAYLOAD/hc" $AGENT_PLATFORMS
 else
-  # No Go builds and no herdr-core of their own: each machine executable
-  # carries its platform's.
+  # No Go builds: each executable carries its platform's herdr-core.
   rm -f "$PAYLOAD"/agents/*.gz "$PAYLOAD"/hc/*.gz
-  (cd backend && pnpm install --frozen-lockfile >/dev/null)
-  # herdr-core of every platform, which the executables embed (and its
-  # license notices, which the packages carry).
-  echo "==> herdr-core for the machine executables"
+  echo "==> herdr-core for the executables"
   mkdir -p dist/machines-hc
   # shellcheck disable=SC2086
   go run ./scripts/fetch-hc -out dist/machines-hc $AGENT_PLATFORMS
-  if [[ -z "${MACHINES:-}" ]]; then
-    MACHINES=dist/machines
-    echo "==> machine executables"
-    rm -rf "$MACHINES"
-    bun backend/scripts/machines.ts --out "$MACHINES" --version "$VERSION" --hc dist/machines-hc | sed 's/^/    /'
-  fi
-  # The release's assets, which machines download.
-  mkdir -p dist/release
-  cp "$MACHINES"/"${SLUG}"-machine-*.gz dist/release/
-  # What the desktop app carries: the digests and its own platform's.
-  mkdir -p "$PAYLOAD/machine"
-  bun -e 'const [f, out, url] = process.argv.slice(1); const m = JSON.parse(await Bun.file(f).text()); if (url) m.release = url; await Bun.write(out, JSON.stringify(m));' \
-    "$MACHINES/manifest.json" "$PAYLOAD/machine/manifest.json" "$RELEASE_URL"
-  for key in ${PAYLOAD_MACHINES-"$(go env GOOS)-$(go env GOARCH)"}; do
-    cp "$MACHINES/${SLUG}-machine-$key.gz" "$PAYLOAD/machine/"
-  done
 fi
 
 # The encoder Linux machines send program windows as video with, built by
@@ -143,7 +125,28 @@ for plat in linux-amd64 linux-arm64; do
   fi
 done
 
-[[ -n "${PAYLOAD_ONLY:-}" ]] && exit 0
+if [[ -n "${PAYLOAD_ONLY:-}" ]]; then
+  if [[ "$MACHINE" == ts ]]; then
+    # The desktop app's: the build's record (release, herdr-core digests)
+    # and its own platform's executable, gzip-compressed.
+    (cd backend && pnpm install --frozen-lockfile >/dev/null)
+    key=${PAYLOAD_MACHINES-"$(go env GOOS)-$(go env GOARCH)"}
+    target=bun-windows-x64-baseline
+    [[ -n "$key" ]] && target=$(bun_target "${key%%-*}/${key#*-}")
+    mkdir -p dist/payload-build
+    bun backend/scripts/build.ts --out "dist/payload-build/${SLUG}-${key:-windows}" --target "$target" --version "$VERSION" \
+      --machine ts --hc dist/machines-hc --ext "$PAYLOAD/ext" --encoder "$PAYLOAD/encoder" --release-url "$RELEASE_URL" \
+      --payload-out "$PAYLOAD" >/dev/null
+    if [[ -n "$key" ]]; then
+      exe="dist/payload-build/${SLUG}-$key"
+      [[ -n "${EXECUTABLES:-}" ]] && exe="$EXECUTABLES/${SLUG}-$key"
+      gzip -9 -n -c "$exe" > "$PAYLOAD/machine/${SLUG}-$key.gz"
+      echo "==> the $key executable for the desktop app ($(du -h "$exe" | cut -f1))"
+    fi
+    rm -rf dist/payload-build
+  fi
+  exit 0
+fi
 
 echo "==> ${SLUG}"
 (cd backend && pnpm install --frozen-lockfile >/dev/null)
@@ -155,7 +158,7 @@ for p in $TARGETS; do
   if [[ "$MACHINE" == go ]]; then
     machine=(--agents "$PAYLOAD/agents" --hc "$PAYLOAD/hc")
   else
-    machine=(--machine ts --machines "$MACHINES" --release-url "$RELEASE_URL")
+    machine=(--machine ts --hc dist/machines-hc --release-url "$RELEASE_URL")
   fi
   bun backend/scripts/build.ts --out "$out" --target "$(bun_target "$p")" --version "$VERSION" \
     --web web/dist "${machine[@]}" --ext "$PAYLOAD/ext" --encoder "$PAYLOAD/encoder" >/dev/null
@@ -163,4 +166,4 @@ for p in $TARGETS; do
 done
 
 echo "==> release packages"
-TARGETS="$TARGETS" scripts/package.sh
+TARGETS="$TARGETS" MACHINE="$MACHINE" scripts/package.sh

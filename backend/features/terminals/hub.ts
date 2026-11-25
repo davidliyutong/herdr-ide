@@ -17,6 +17,7 @@ export interface HubDeps {
   audit: Audit;
   readOnly: boolean;
   hc?: HCSource;
+  embeddedHC?: (os: string, arch: string) => Promise<string | null>;
   paneEnv: (m: Machine) => Record<string, string> | undefined;
   sshEnv: (m: Machine) => Record<string, string> | null;
   sessions: () => boolean;

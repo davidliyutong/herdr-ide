@@ -1,16 +1,15 @@
-// The machine builds the core deploys: the Go program, or the TypeScript
-// machine side compiled by Bun into one executable per platform (the
-// runtime, the machine side and its platform's herdr-core in one file;
-// hosts/machine/compile.ts). A machine keeps either under its home, shared
-// by instances:
+// The machine builds the core deploys: the Go program, or, in a core built
+// to deploy it (backend/scripts/build.ts --machine ts), the TypeScript
+// machine side, which is the core's own program: one executable per
+// platform holds the core, the machine side and that platform's herdr-core.
+// A release publishes each platform's as an archive
+// (<bin>-<platform>.tar.gz, the executable at <bin>-<platform>/<bin>) and
+// their SHA-256 in SHA256SUMS (release.ts). A machine keeps either build
+// under its home, shared by instances:
 //
 //   ~/<AGENT_DIR>/<version>/<bin>      the executable, version a digest of it
 //
 // so the command lines (`node dial`, `node stop`) are the same for both.
-// A core that deploys the TypeScript side knows every platform's executable
-// of its build by its SHA-256 (a manifest built into the core) and carries
-// only its own platform's; a machine gets its build from the release, from
-// the core's directory or cache, or from the core's own copy (sources.ts).
 import { createHash } from 'node:crypto';
 import { CORE_BIN } from '#shared/lib/brand.ts';
 
@@ -29,25 +28,43 @@ export interface GoBuild {
   version: string;
 }
 
-/** The TypeScript machine executable of a platform. */
+/** The digests of a TypeScript build for a platform. */
+export interface TSDigests {
+  /** The SHA-256 of the executable. */
+  exe: string;
+  /** The SHA-256 of the release's archive, when the manifest has it: then
+   * a machine can download it. */
+  archive?: string;
+  /** The manifest came from the machine's own download, the core having
+   * none: it tells a damaged download, not one changed on the machine's
+   * path. */
+  integrityOnly?: boolean;
+  /** Where the digests came from, for the logs. */
+  source: string;
+}
+
+/** What the core uploads: the release's archive, or the executable
+ * gzip-compressed (the core's own). */
+export interface TSPayload {
+  kind: 'archive' | 'gz';
+  bytes: Buffer;
+}
+
+/** A TypeScript build for a machine's platform. */
 export interface TSBuild {
   kind: 'ts';
   /** The platform (MACHINE_KEYS). */
   key: string;
-  /** The SHA-256 of the executable. */
-  digest: string;
-  /** The SHA-256 of its release asset, the executable gzip-compressed. */
-  gzDigest: string;
-  /** The asset's size in bytes. */
-  gzSize: number;
-  /** A digest of the executable: its directory on machines. */
-  version: string;
-  /** Where the release serves it; absent for a build of no release. */
+  /** The release's archive of the platform; absent for a build of no
+   * release (development, the end-to-end tests). */
   url?: string;
-  /** The executable gzip-compressed, from the core's sources, checked;
-   * fails with Unsupported build_unavailable. Only for a machine that
-   * cannot get it itself. */
-  load(signal?: AbortSignal): Promise<Buffer>;
+  /** The digests, from the release's manifest (or the core's own
+   * executable); viaHost downloads a URL on the machine, for a core that
+   * cannot reach the release. Fails with Unsupported build_unavailable. */
+  digests(o?: { signal?: AbortSignal; viaHost?: (url: string) => Promise<string> }): Promise<TSDigests>;
+  /** What the core uploads when the machine cannot download it, checked
+   * against d; fails with Unsupported build_unavailable. */
+  load(d: TSDigests, signal?: AbortSignal): Promise<TSPayload>;
 }
 
 export type MachineBuild = GoBuild | TSBuild;
@@ -55,9 +72,9 @@ export type MachineBuild = GoBuild | TSBuild;
 /** The machine build for a machine. */
 export type BuildSource = (t: MachineTarget, signal?: AbortSignal) => Promise<MachineBuild>;
 
-/** The platforms of the TypeScript machine executables and Bun's compile
- * target of each: x64 Linux as baseline builds (processors without AVX2),
- * musl's for Alpine. */
+/** The platforms of the TypeScript executables and Bun's compile target of
+ * each: x64 Linux as baseline builds (processors without AVX2), musl's for
+ * Alpine. */
 export const MACHINE_TARGETS: Readonly<Record<string, string>> = {
   'linux-amd64': 'bun-linux-x64-baseline',
   'linux-arm64': 'bun-linux-arm64',
@@ -72,38 +89,21 @@ export const MACHINE_KEYS = Object.keys(MACHINE_TARGETS);
 /** The platform key of a machine: <os>-<arch>[-musl]. */
 export const machineKey = (t: MachineTarget): string => `${t.os}-${t.arch}${t.os === 'linux' && t.libc === 'musl' ? '-musl' : ''}`;
 
-/** The name of a platform's executable in a release (with .gz) and in a
- * directory of builds: <bin>-machine-<key>. */
-export const machineAsset = (key: string): string => `${CORE_BIN}-machine-${key}`;
-
-/** The digests of the machine executables of a core's build, built into
- * the core (backend/scripts/machines.ts writes it, build.ts embeds it). */
-export interface Manifest {
-  /** The build's version. */
-  version: string;
-  /** The release's download URL of the assets (…/releases/download/<tag>);
-   * absent for a build of no release (development, the end-to-end tests). */
-  release?: string;
-  machines: Record<string, { sha256: string; gz: string; size: number }>;
+/** The platform key of a Bun compile target ("" for Windows or none). */
+export function keyOfTarget(target: string): string {
+  return Object.entries(MACHINE_TARGETS).find(([, t]) => t === target || t === `${target}-baseline`)?.[0] ?? '';
 }
 
-/** The TS build of key in manifest. */
-export function tsBuild(m: Manifest, key: string, load: TSBuild['load']): TSBuild | null {
-  const e = m.machines[key];
-  if (!e) return null;
-  return {
-    kind: 'ts',
-    key,
-    digest: e.sha256,
-    gzDigest: e.gz,
-    gzSize: e.size,
-    version: e.sha256.slice(0, 16),
-    ...(m.release ? { url: `${m.release.replace(/\/$/, '')}/${machineAsset(key)}.gz` } : {}),
-    load,
-  };
-}
+/** A platform's release archive, and the executable in it. */
+export const archiveName = (key: string): string => `${CORE_BIN}-${key}.tar.gz`;
+export const archiveMember = (key: string): string => `${CORE_BIN}-${key}/${CORE_BIN}`;
+/** A platform's executable in a directory of builds (--agent-dir). */
+export const bareName = (key: string): string => `${CORE_BIN}-${key}`;
+
+/** The directory of a TypeScript build on a machine. */
+export const tsVersion = (exe: string): string => exe.slice(0, 16);
 
 /** The build a node of b tells its clients (NodeInfo.build): the start of
  * the digest of its executable, as the node computes it from the file. */
-export const nodeBuild = (b: MachineBuild): string =>
-  b.kind === 'ts' ? b.digest.slice(0, 12) : createHash('sha256').update(b.bin).digest('hex').slice(0, 12);
+export const nodeBuild = (b: GoBuild | { exe: string }): string =>
+  'exe' in b ? b.exe.slice(0, 12) : createHash('sha256').update(b.bin).digest('hex').slice(0, 12);

@@ -1,24 +1,25 @@
-// The machine build's command line: what the core deploys to every machine
-// (compiled by Bun into one executable per platform, compile.ts) and runs
-// there. Its commands are the Go machine build's (cmd/<slug>), with the
-// same flags:
+// The machine side's commands of the command line (hosts/bun/main.ts): the
+// node of a machine and its clients, as the Go machine build has them
+// (cmd/<slug>), with the same flags:
 //
 //	<slug> node [dial | stop] [--instance NAME] [--client ID] [--takeover] [--terminal-core]
-//	<slug> version
+//
+// A machine runs them from the executable the core deployed
+// (~/.<slug>/agent/<version>/<slug>), the same program as the core's.
 import { parseArgs } from 'node:util';
 import { CORE_BIN } from '#shared/lib/brand.ts';
 import { dirsFor } from '#shared/host/hostdirs.ts';
 import { stderrLogger } from '#shared/lib/log.ts';
-import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { dialNode, stopNodes } from '#machine/dial.ts';
 import { TerminalCore } from '#machine/hc.ts';
 import { runNode } from '#machine/node.ts';
-import { buildFile, dropForeignRuntimeVars } from '#machine/self.ts';
+import { buildFile } from '#machine/self.ts';
 import { machineFeatures } from './features.ts';
 
-const USAGE = `usage: ${CORE_BIN} node [dial | stop] [--instance NAME] | version\n`;
+const USAGE = `usage: ${CORE_BIN} node [dial | stop] [--instance NAME] [--client ID] [--takeover] [--terminal-core]\n`;
 
-async function nodeCommand(argv: string[]): Promise<number> {
+/** `node [dial | stop] …`: argv after `node`; the exit status. */
+export async function nodeCommand(argv: string[]): Promise<number> {
   let sub = '';
   if (argv[0] === 'dial' || argv[0] === 'stop') [sub, ...argv] = argv;
   let flags;
@@ -99,26 +100,3 @@ async function dial(instance: string, client: string, logger: ReturnType<typeof 
   conn.destroy();
   return 0;
 }
-
-async function main(argv: string[]): Promise<number> {
-  // Nothing this process starts gets them (self.ts).
-  dropForeignRuntimeVars();
-  const [cmd, ...rest] = argv;
-  switch (cmd) {
-    case 'node':
-      return nodeCommand(rest);
-    case 'version':
-      process.stdout.write(`${CORE_BIN} ${VERSION}\n`);
-      return 0;
-  }
-  process.stderr.write(USAGE);
-  return 2;
-}
-
-main(process.argv.slice(2)).then(
-  (code) => process.exit(code),
-  (e) => {
-    stderrLogger(`${CORE_BIN}: `)((e as Error).stack ?? String(e));
-    process.exit(1);
-  },
-);

@@ -1,10 +1,15 @@
-// The TypeScript machine executable deployed as an ssh connection deploys
-// it, through an ssh that runs the remote commands here (homes of the
-// test's own): the probe, the machine's own download of its build from the
-// release (a server on loopback), the core's upload when the machine has
-// no curl or wget, may not download, or got something else, each checked
-// by its SHA-256 on the machine, and the node of that build, reached with
-// node dial. The executable is this host's, compiled from the sources.
+// The TypeScript build deployed as an ssh connection deploys it, through an
+// ssh that runs the remote commands here (homes of the test's own): the
+// probe; the release's manifest (SHA256SUMS), which the core fetches (or
+// the machine, when only it reaches the release); the machine's own
+// download of the release's archive, checked against the manifest before
+// it is unpacked, bounded in size and time, with curl or wget alone; the
+// core's upload when the machine cannot (no tool, not allowed, a failed or
+// tampered download), from the release, the operator's directory or the
+// core's own executable, checked again on the machine; the node of that
+// build, reached with node dial; what the node's environment gets. The
+// release is a server on loopback; the executable is this host's, built
+// from the sources with --machine ts.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -28,9 +33,10 @@ import { dirsFor } from '#shared/host/hostdirs.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { ChunkWriter, Op, readLine, type Reply } from '#shared/proto/agentproto/index.ts';
 import { closeStream } from '#shared/proto/yamux.ts';
-import { compileMachine } from '#hosts/machine/compile.ts';
-import { machineAsset, type TSBuild } from './builds.ts';
+import { archiveMember, archiveName, bareName, tsVersion, type TSBuild } from './builds.ts';
+import { deployCode } from './errors.ts';
 import { dialNode } from './local.ts';
+import { ownFile, Release, SUMS, type ReleaseOptions } from './release.ts';
 import type { Session } from './session.ts';
 import {
   DownloadFailures,
@@ -49,25 +55,75 @@ const work = realpathSync(mkdtempSync('/tmp/hdp-'));
 const instance = 'dev';
 const saved = { HOME: process.env.HOME, PATH: process.env.PATH, BUN_OPTIONS: process.env.BUN_OPTIONS };
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
+let exePath = '';
 let exe: Buffer = Buffer.alloc(0);
-let gz: Buffer = Buffer.alloc(0);
-let release: Server | undefined;
+let archive: Buffer = Buffer.alloc(0);
+let goodSums = '';
 let releaseURL = '';
-/** What the release serves (tests swap it): bytes, a stream that does not
- * end, or one that trickles a byte every 500 ms. */
-let served: Buffer | 'flood' | 'trickle' = Buffer.alloc(0);
+let release: Server | undefined;
 const homes: string[] = [];
+
+/** What the release serves, to the machine (curl, wget) and to the core
+ * (its fetch) apart: bytes, 404, a stream that does not end, or one that
+ * trickles a byte every 500 ms. */
+type Body = Buffer | string | 404 | 'flood' | 'trickle';
+const serve: { hostArchive: Body; coreArchive: Body; hostSums: Body; coreSums: Body } = {
+  hostArchive: 404,
+  coreArchive: 404,
+  hostSums: 404,
+  coreSums: 404,
+};
+function reset() {
+  Object.assign(serve, { hostArchive: archive, coreArchive: archive, hostSums: goodSums, coreSums: goodSums });
+}
+
+/** The release's archive of the platform's executable. */
+function archiveOf(bytes: Buffer): Buffer {
+  const d = mkdtempSync(join(work, 'a-'));
+  mkdirSync(join(d, bareName(key)));
+  writeFileSync(join(d, archiveMember(key)), bytes, { mode: 0o755 });
+  const r = spawnSync('tar', ['-czf', '-', '-C', d, bareName(key)], { maxBuffer: 1 << 28 });
+  if (r.status !== 0) throw new Error(`tar: ${r.stderr}`);
+  return r.stdout;
+}
+const sumsOf = (o: { exe: string; archive: string }) => `${o.archive}  ${archiveName(key)}\n${o.exe}  ${archiveMember(key)}\n`;
 
 beforeAll(async () => {
   if (!supported) return;
-  const out = join(work, 'machine');
-  await compileMachine({ version: 'test-deploy', outfile: out });
-  exe = readFileSync(out);
-  gz = gzipSync(exe, { level: 1 });
-  served = gz;
+  exePath = join(work, bareName(key));
+  const p = Bun.spawnSync(
+    [
+      process.execPath,
+      join(import.meta.dir, '..', '..', '..', 'scripts', 'build.ts'),
+      '--out',
+      exePath,
+      '--machine',
+      'ts',
+      '--version',
+      'test-deploy',
+    ],
+    { stdout: 'pipe', stderr: 'pipe' },
+  );
+  if (p.exitCode !== 0) throw new Error(`build: ${p.stderr.toString()}`);
+  exe = readFileSync(exePath);
+  archive = archiveOf(exe);
+  goodSums = sumsOf({ exe: sha256(exe), archive: sha256(archive) });
+  reset();
   release = createServer((req, res) => {
-    if (req.url !== `/v1/${machineAsset(key)}.gz`) return void res.writeHead(404).end();
-    if (served === 'flood') {
+    const host = /^(curl|wget)/i.test(req.headers['user-agent'] ?? '');
+    const name = (req.url ?? '').replace(/^\/v1\//, '');
+    const body: Body =
+      name === SUMS
+        ? host
+          ? serve.hostSums
+          : serve.coreSums
+        : name === archiveName(key)
+          ? host
+            ? serve.hostArchive
+            : serve.coreArchive
+          : 404;
+    if (body === 404) return void res.writeHead(404).end();
+    if (body === 'flood') {
       res.writeHead(200);
       const chunk = Buffer.alloc(1 << 16);
       const pump = () => {
@@ -76,15 +132,15 @@ beforeAll(async () => {
       res.on('drain', pump);
       return pump();
     }
-    if (served === 'trickle') {
-      res.writeHead(200, { 'content-length': gz.length });
+    if (body === 'trickle') {
+      res.writeHead(200, { 'content-length': archive.length });
       const t = setInterval(() => res.write(Buffer.from([0x1f])), 500);
       return void res.on('close', () => clearInterval(t));
     }
-    res.writeHead(200, { 'content-length': served.length }).end(served);
+    res.writeHead(200, { 'content-length': Buffer.byteLength(body) }).end(body);
   });
   await new Promise<void>((r) => release!.listen(0, '127.0.0.1', r));
-  releaseURL = `http://127.0.0.1:${(release.address() as { port: number }).port}/v1/${machineAsset(key)}.gz`;
+  releaseURL = `http://127.0.0.1:${(release.address() as { port: number }).port}/v1`;
 }, 120_000);
 
 afterAll(async () => {
@@ -120,6 +176,7 @@ function tools(extra: Record<string, string> = {}): string {
     'cat',
     'gunzip',
     'gzip',
+    'tar',
     'mkdir',
     'chmod',
     'mv',
@@ -186,31 +243,41 @@ async function nodeEnvironment(session: Session): Promise<string> {
   return readFileSync(join(dirsFor(instance).host, 'hc', 'env.txt'), 'utf8');
 }
 
-/** The build of this host's executable; loads counts the core's loads. */
-function build(o: { url?: string; digest?: string } = {}): TSBuild & { loads: number } {
-  const digest = o.digest ?? sha256(exe);
+/** The build of this host's platform from a release of the test's own
+ * (a new core: nothing remembered); loads counts the core's uploads. */
+function build(o: Partial<ReleaseOptions> = {}): TSBuild & { loads: number; logs: string[] } {
+  const logs: string[] = [];
+  const rel = new Release({
+    version: 'test-deploy',
+    url: releaseURL,
+    cacheDir: mkdtempSync(join(work, 'cache-')),
+    logger: (l) => logs.push(l),
+    ...o,
+  });
+  const url = rel.url(archiveName(key));
   const b = {
     kind: 'ts' as const,
     key,
-    digest,
-    gzDigest: sha256(gz),
-    gzSize: gz.length,
-    version: digest.slice(0, 16),
-    ...(o.url ? { url: o.url } : {}),
+    ...(url ? { url } : {}),
     loads: 0,
-    load: async () => (b.loads++, gz),
+    logs,
+    digests: (x: Parameters<TSBuild['digests']>[0]) => rel.digests(key, x),
+    load: (d: Parameters<TSBuild['load']>[0]) => (b.loads++, rel.load(key, d)),
   };
   return b;
 }
 
-const options = (b: TSBuild, logs: string[], o: Partial<SSHOptions> = {}): SSHOptions => ({
+const options = (b: TSBuild & { logs: string[] }, o: Partial<SSHOptions> = {}): SSHOptions => ({
   target: 'box',
   controlDir: '',
   builds: async () => b,
-  logger: (l) => logs.push(l),
+  logger: (l) => b.logs.push(l),
   instance,
   ...o,
 });
+
+const installed = (home: string) => join(home, AGENT_DIR, tsVersion(sha256(exe)));
+const saw = (b: { logs: string[] }, s: string) => b.logs.some((l) => l.includes(s));
 
 test('the probe reports the C library, its C++ runtime and SSE4.2; a machine Bun cannot run on is refused', () => {
   const p = parseProbe(
@@ -228,76 +295,68 @@ test('the probe reports the C library, its C++ runtime and SSE4.2; a machine Bun
   expect(here.os).toBe(process.platform);
 });
 
-describe.skipIf(!supported)('the machine executable over ssh', () => {
-  test('the machine downloads its build from the release itself, checked; the core uploads nothing; its node answers', async () => {
+describe.skipIf(!supported)('the TypeScript build over ssh', () => {
+  test("the core fetches the manifest, the machine downloads the release's archive and checks it; nothing is uploaded; its node answers", async () => {
+    reset();
     const home = machine();
-    const logs: string[] = [];
-    const b = build({ url: releaseURL });
-    const { session } = await dialSSH(options(b, logs));
+    const b = build();
+    const { session } = await dialSSH(options(b));
     try {
       const hello = await session.request({ op: Op.Hello });
       expect(hello.info?.home).toBe(home);
       expect(hello.info?.version).toBe('test-deploy');
       expect(b.loads).toBe(0);
-      expect(logs.some((l) => l.includes('downloads its build'))).toBe(true);
-      expect(logs.some((l) => l.includes('uploading'))).toBe(false);
-      expect(readFileSync(join(home, AGENT_DIR, b.version, CORE_BIN)).equals(exe)).toBe(true);
+      expect(saw(b, 'downloads its build')).toBe(true);
+      expect(saw(b, 'integrity only')).toBe(false);
+      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+      expect(readdirSync(installed(home))).toEqual([CORE_BIN]);
     } finally {
       session.close();
     }
     // Again: nothing is fetched or uploaded.
-    const again = await dialSSH(options(b, logs));
+    const again = await dialSSH(options(b));
     expect((await again.session.request({ op: Op.Hello })).ok).toBe(true);
     again.session.close();
-    expect(logs.filter((l) => l.includes('downloads its build'))).toHaveLength(1);
+    expect(b.logs.filter((l) => l.includes('downloads its build'))).toHaveLength(1);
   }, 60_000);
 
-  test('a machine without curl or wget, one that may not download, and a download that is not the build: the core uploads it', async () => {
-    // A PATH of the tools a machine has, without curl and wget.
+  test("without curl or wget, not allowed to download, a failed download and one tampered on the machine's path: the core uploads the release's archive, checked on the machine", async () => {
     const none = tools();
-    for (const [why, path, url, served2, download] of [
-      ['no curl or wget', none, releaseURL, gz, true],
-      ['may not download', undefined, releaseURL, gz, false],
-      ['a download that fails', undefined, `${releaseURL}.missing`, gz, true],
-      ['not the build', undefined, releaseURL, gzipSync(Buffer.from('another build')), true],
+    for (const [why, path, hostArchive, download] of [
+      ['no curl or wget', none, archive, true],
+      ['may not download', undefined, archive, false],
+      ['a download that fails', undefined, 404, true],
+      ["tampered on the machine's path", undefined, archiveOf(Buffer.from('another build')), true],
     ] as const) {
+      reset();
+      serve.hostArchive = hostArchive;
       const home = machine(path);
-      served = served2 as Buffer;
-      const logs: string[] = [];
-      const b = build({ url });
-      const { session } = await dialSSH(options(b, logs, { machineDownload: download }));
+      const b = build();
+      const { session } = await dialSSH(options(b, { machineDownload: download }));
       try {
         expect((await session.request({ op: Op.Hello })).ok).toBe(true);
-        expect(b.loads).toBe(1);
-        expect(
-          logs.some((l) => l.includes('uploading the machine build')),
-          why,
-        ).toBe(true);
-        expect(
-          logs.some((l) => l.includes('downloads its build')),
-          why,
-        ).toBe(download);
-        expect(readFileSync(join(home, AGENT_DIR, b.version, CORE_BIN)).equals(exe)).toBe(true);
-        expect(readdirSync(join(home, AGENT_DIR, b.version))).toEqual([CORE_BIN]);
+        expect(b.loads, why).toBe(1);
+        expect(saw(b, 'the release archive'), why).toBe(true);
+        expect(saw(b, 'downloads its build'), why).toBe(download);
+        expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+        expect(readdirSync(installed(home))).toEqual([CORE_BIN]);
       } finally {
         session.close();
       }
     }
-    served = gz;
-  }, 120_000);
+  }, 180_000);
 
   test.skipIf(!WGET)(
     'a machine with wget alone downloads its build with it',
     async () => {
+      reset();
       const home = machine(tools({ wget: WGET! }));
-      served = gz;
-      const logs: string[] = [];
-      const b = build({ url: releaseURL });
-      const { session } = await dialSSH(options(b, logs));
+      const b = build();
+      const { session } = await dialSSH(options(b));
       try {
         expect((await session.request({ op: Op.Hello })).ok).toBe(true);
-        expect(b.loads, logs.join('\n')).toBe(0);
-        expect(readFileSync(join(home, AGENT_DIR, b.version, CORE_BIN)).equals(exe)).toBe(true);
+        expect(b.loads, b.logs.join('\n')).toBe(0);
+        expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
       } finally {
         session.close();
       }
@@ -305,7 +364,7 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
     60_000,
   );
 
-  test("the machine's download is bounded: a stream that does not end stops at the asset's size, a trickle at the time limit (curl, and wget alone), and a gzip bomb is never decompressed", async () => {
+  test("the machine's download is bounded: a stream that does not end stops at the cap, a trickle at the time limit (curl, and wget alone), and a gzip bomb is never unpacked", async () => {
     // gunzip as the machine has it, writing down each call.
     const calls = join(work, 'gunzip-calls');
     const spy = join(work, 'gunzip-spy');
@@ -314,54 +373,48 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
       `#!/bin/sh\necho "$*" >> '${calls}'\nexec ${existsSync('/usr/bin/gunzip') ? '/usr/bin/gunzip' : '/bin/gunzip'} "$@"\n`,
       { mode: 0o755 },
     );
-    // 200 MB of zeros, compressed, padded to the asset's size: only its
-    // digest tells it from the asset.
-    const bomb = Buffer.concat([gzipSync(Buffer.alloc(200 << 20), { level: 9 })]);
-    const padded = Buffer.concat([bomb, Buffer.alloc(gz.length - bomb.length)]);
-    setMachineDownloadLimit(3);
+    const bomb = gzipSync(Buffer.alloc(200 << 20), { level: 9 });
+    setMachineDownloadLimit(3, archive.length * 2);
     try {
       for (const [why, path, body] of [
         ['a stream that does not end (curl)', undefined, 'flood'],
         ['a trickle (curl)', undefined, 'trickle'],
         ...(WGET ? ([['a trickle (wget alone)', tools({ wget: WGET }), 'trickle']] as const) : []),
-        ['a gzip bomb', tools({ curl: '/usr/bin/curl', gunzip: spy }), padded],
+        ['a gzip bomb', tools({ curl: '/usr/bin/curl', gunzip: spy }), bomb],
       ] as const) {
+        reset();
+        serve.hostArchive = body;
         rmSync(calls, { force: true });
         const home = machine(path);
-        served = body;
-        const logs: string[] = [];
-        const b = build({ url: releaseURL });
+        const b = build();
         const t0 = Date.now();
-        const { session } = await dialSSH(options(b, logs));
+        const { session } = await dialSSH(options(b));
         session.close();
         expect(Date.now() - t0, why).toBeLessThan(20_000);
-        expect(
-          logs.some((l) => l.includes('could not download')),
-          why,
-        ).toBe(true);
+        expect(saw(b, 'could not download'), why).toBe(true);
         expect(b.loads, why).toBe(1);
-        expect(readdirSync(join(home, AGENT_DIR, b.version)), why).toEqual([CORE_BIN]);
-        // Only the upload decompressed anything (from its standard input).
-        if (body === padded) expect(readFileSync(calls, 'utf8').trim().split('\n')).toEqual(['-c']);
+        expect(readdirSync(installed(home)), why).toEqual([CORE_BIN]);
+        // Only the upload's archive was unpacked (after its digest).
+        if (body === bomb) expect(readFileSync(calls, 'utf8').trim().split('\n'), why).toHaveLength(1);
       }
     } finally {
       setMachineDownloadLimit(300);
-      served = gz;
+      reset();
     }
   }, 120_000);
 
   test("a machine whose own download failed gets the core's upload at once for a day, then downloads again", async () => {
+    reset();
     let now = 0;
     const failures = new DownloadFailures(24 * 60 * 60_000, () => now);
     const none = tools();
     const deploy = async (path?: string) => {
       machine(path);
-      const logs: string[] = [];
-      const { session } = await dialSSH(options(build({ url: releaseURL }), logs, { downloadFailures: failures }));
+      const b = build();
+      const { session } = await dialSSH(options(b, { downloadFailures: failures }));
       session.close();
-      return logs.some((l) => l.includes('downloads its build'));
+      return saw(b, 'downloads its build');
     };
-    served = gz;
     expect(await deploy(none)).toBe(true);
     // Within the day: no attempt, even where it would work now.
     now += 60_000;
@@ -372,10 +425,76 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
     expect(failures.recent('box')).toBe(false);
   }, 120_000);
 
+  test('when only the machine reaches the release, it downloads the manifest too: the deployment is integrity only, which the core logs', async () => {
+    reset();
+    serve.coreSums = 404;
+    serve.coreArchive = 404;
+    const home = machine();
+    const b = build();
+    const { session } = await dialSSH(options(b));
+    try {
+      expect((await session.request({ op: Op.Hello })).ok).toBe(true);
+      expect(saw(b, 'the machine downloads')).toBe(true);
+      expect(saw(b, 'integrity only')).toBe(true);
+      expect(b.loads).toBe(0);
+      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+    } finally {
+      session.close();
+      reset();
+    }
+  }, 60_000);
+
+  test('a manifest whose executable is not the one in the archive: neither the download nor the upload puts anything in place', async () => {
+    reset();
+    serve.coreSums = serve.hostSums = sumsOf({ exe: 'f'.repeat(64), archive: sha256(archive) });
+    const home = machine();
+    const b = build();
+    const e = await dialSSH(options(b)).then(
+      () => new Error('dialed'),
+      (x: unknown) => x as Error,
+    );
+    expect(e.message).toMatch(/upload the machine build/);
+    expect(readdirSync(join(home, AGENT_DIR, 'f'.repeat(16)))).toEqual([]);
+    reset();
+  }, 60_000);
+
+  test("an offline site: the operator's directory with the release's SHA256SUMS and archive, uploaded from there", async () => {
+    reset();
+    const dir = mkdtempSync(join(work, 'dir-'));
+    writeFileSync(join(dir, SUMS), goodSums);
+    writeFileSync(join(dir, archiveName(key)), archive);
+    const home = machine(tools());
+    const b = build({ url: undefined, dir });
+    const { session } = await dialSSH(options(b));
+    try {
+      expect((await session.request({ op: Op.Hello })).ok).toBe(true);
+      expect(b.loads).toBe(1);
+      expect(saw(b, 'the release archive')).toBe(true);
+      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+    } finally {
+      session.close();
+    }
+  }, 60_000);
+
+  test('no route anywhere: the deployment ends with build_unavailable, saying what was tried, and the core logs it', async () => {
+    reset();
+    machine(tools());
+    const b = build({ url: 'http://127.0.0.1:9/v1' });
+    const e = await dialSSH(options(b)).then(
+      () => new Error('dialed'),
+      (x: unknown) => x as Error & { code?: string },
+    );
+    expect(deployCode(e)).toBe('build_unavailable');
+    expect(e.message).toContain('the core could not download');
+    expect(e.message).toContain('the machine could not download');
+    expect(saw(b, 'the core could not download')).toBe(true);
+  }, 60_000);
+
   test("a deployment failure keeps its code through the dial's error", async () => {
     machine();
     const { Unsupported } = await import('./errors.ts');
-    const o = options(build(), []);
+    const b = build();
+    const o = options(b);
     o.builds = async () => {
       throw new Unsupported('platform_unsupported', 'no machine build for this platform');
     };
@@ -385,24 +504,10 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
     )) as Error & { code?: string };
     expect(e.code).toBe('platform_unsupported');
     expect(e.message).toContain('no agent for');
-    // Nothing has the build.
-    const unusable = { ...build(), load: async () => Promise.reject(new Unsupported('build_unavailable', 'nothing has it')) };
-    const u = (await dialSSH(options(unusable, [], { machineDownload: false })).then(
-      () => new Error('dialed'),
-      (x: unknown) => x,
-    )) as Error & { code?: string };
-    expect(u.code).toBe('build_unavailable');
-  }, 60_000);
-
-  test('a build whose digest is not the one the machine computes is put in place by neither the download nor the upload', async () => {
-    const home = machine();
-    const b = build({ url: releaseURL, digest: 'f'.repeat(64) });
-    await expect(dialSSH(options(b, []))).rejects.toThrow(/upload the machine build/);
-    expect(existsSync(join(home, AGENT_DIR, b.version, CORE_BIN))).toBe(false);
-    expect(readdirSync(join(home, AGENT_DIR, b.version))).toEqual([]);
   }, 60_000);
 
   test("a working directory's .env and bunfig.toml, and BUN_OPTIONS, reach neither node dial nor the node it starts", async () => {
+    reset();
     const home = machine();
     // What would run code in a Bun executable, or change its environment:
     // in the directory node dial runs in and the node starts in (home).
@@ -412,8 +517,7 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
     writeFileSync(join(home, '.env'), 'EVIL_DOTENV=1\n');
     const preloads = () => readdirSync(home).filter((n) => n.startsWith('preloaded-'));
     // The control: the executable honours BUN_OPTIONS when it is given.
-    writeFileSync(join(work, 'machine.copy'), exe, { mode: 0o755 });
-    spawnSync(join(work, 'machine.copy'), ['version'], {
+    spawnSync(exePath, ['version'], {
       cwd: home,
       env: { PATH: '/usr/bin:/bin', HOME: home, BUN_OPTIONS: `--preload=${join(home, 'evil.js')}` },
     });
@@ -421,7 +525,7 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
     for (const f of preloads()) rmSync(join(home, f));
 
     process.env.BUN_OPTIONS = `--preload=${join(home, 'evil.js')}`;
-    const { session } = await dialSSH(options(build({ url: releaseURL }), []));
+    const { session } = await dialSSH(options(build()));
     try {
       expect((await session.request({ op: Op.Hello })).ok).toBe(true);
       const env = await nodeEnvironment(session);
@@ -434,7 +538,7 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
     }
   }, 60_000);
 
-  test("the local machine's node gets none of BUN_OPTIONS, BUN_BE_BUN and BUN_INSPECT* of the core's environment", async () => {
+  test("the local machine gets the core's own executable, and its node none of BUN_OPTIONS, BUN_BE_BUN and BUN_INSPECT* of the core's environment", async () => {
     const home = machine();
     const marker = join(home, 'preloaded');
     writeFileSync(join(home, 'evil.js'), `require('fs').writeFileSync(${JSON.stringify(marker)} + '-' + process.pid, '')`);
@@ -446,8 +550,11 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
     Object.assign(process.env, vars);
     let session: Awaited<ReturnType<typeof dialNode>> | undefined;
     try {
-      session = await dialNode({ instance, builds: async () => build(), logger: () => {} });
+      // A build of no release, offline: its own executable is the build.
+      const b = build({ url: undefined, own: ownFile(key, exePath) });
+      session = await dialNode({ instance, builds: async () => b, logger: () => {} });
       expect((await session.request({ op: Op.Hello })).info?.home).toBe(home);
+      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
       const env = await nodeEnvironment(session);
       for (const k of Object.keys(vars)) expect(env).not.toContain(`${k}=`);
       expect(readdirSync(home).filter((n) => n.startsWith('preloaded-'))).toEqual([]);
@@ -457,9 +564,9 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
     }
   }, 60_000);
 
-  test('an upload that breaks off (the connection hung up) leaves no partial file', async () => {
+  test('an upload that breaks off (the connection went) leaves no partial file', async () => {
     const dir = join(work, 'interrupted');
-    const sh = spawn('/bin/sh', ['-c', installScript(dir, CORE_BIN, 'f'.repeat(64))], {
+    const sh = spawn('/bin/sh', ['-c', installScript({ dir, name: CORE_BIN, exe: 'f'.repeat(64) })], {
       detached: true,
       stdio: ['pipe', 'ignore', 'ignore'],
     });
@@ -467,7 +574,8 @@ describe.skipIf(!supported)('the machine executable over ssh', () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(readdirSync(dir).filter((n) => n.startsWith('.upload.'))).toHaveLength(1);
     const exited = new Promise((r) => sh.once('exit', r));
-    process.kill(-sh.pid!, 'SIGHUP');
+    // The input ends, as when the connection goes.
+    sh.stdin!.end();
     await exited;
     expect(readdirSync(dir)).toEqual([]);
   });

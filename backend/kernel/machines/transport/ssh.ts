@@ -7,7 +7,8 @@ import { execa } from 'execa';
 import { AGENT_DIR, CORE_BIN, NAME } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { FOREIGN_RUNTIME_VARS } from '#shared/lib/bunenv.ts';
-import type { BuildSource, MachineBuild, MachineTarget, TSBuild } from './builds.ts';
+import { archiveMember, tsVersion, type BuildSource, type MachineBuild, type MachineTarget, type TSBuild } from './builds.ts';
+import { MAX_ARCHIVE, MAX_EXECUTABLE, MAX_SUMS } from './release.ts';
 import { deployCode } from './errors.ts';
 import { CLIENT_ID, Session } from './session.ts';
 
@@ -285,14 +286,14 @@ class LineLogger {
   }
 }
 
-/** At most this many bytes of an executable are written (they are about
- * 110 MB). */
-export const MAX_EXECUTABLE = 512 << 20;
-/** How long a machine's own download may take in all, in seconds. */
+/** How long a machine's own download may take in all, in seconds, and how
+ * many bytes of the archive it writes at most. */
 export let machineDownloadLimitS = 300;
-/** Tests: another limit. */
-export function setMachineDownloadLimit(s: number): void {
+let machineDownloadCap = MAX_ARCHIVE;
+/** Tests: other limits. */
+export function setMachineDownloadLimit(s: number, cap = MAX_ARCHIVE): void {
   machineDownloadLimitS = s;
+  machineDownloadCap = cap;
 }
 
 /** Removes files when the script ends, also when the connection went away
@@ -305,89 +306,117 @@ const cleanup = (files: string, extra = '') => `trap 'rm -f ${files}${extra}' EX
  * has. */
 const SUM = `sum() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1" 2>/dev/null || openssl dgst -sha256 -r "$1"; } | cut -d' ' -f1; }`;
 
-/** Decompresses "$t.gz" or standard input (src) into "$t", at most
- * MAX_EXECUTABLE bytes, and puts it in place as dir/name only when its
- * SHA-256 is digest (else it fails with status 3); prints the digest,
- * which the core checks again. */
-const placeExecutable = (src: string, dir: string, name: string, digest: string) =>
-  `gunzip -c ${src} | head -c ${MAX_EXECUTABLE + 1} > "$t" && s=$(sum "$t") && echo "@sha256=$s" && ` +
-  `[ "$s" = "${digest}" ] && chmod 700 "$t" && mv -f "$t" "${dir}/${name}" || { rm -f "$t"; echo "sha256 \${s:-unknown}, expected ${digest}" >&2; exit 3; }`;
-
-/** The script that installs the executable the core uploads (gzip on
- * standard input) as dir/name: decompressed beside its place, put there
- * only when the SHA-256 the machine computes is digest. Its file is
- * removed when the script ends, also on an end of input or a closed pipe;
- * what a killed shell leaves, the nodes' housekeeping removes after an
- * hour. */
-export function installScript(dir: string, name: string, digest: string): string {
-  return `umask 077; d="${dir}"; t="$d/.upload.$$"; ${cleanup('"$t"')}; ${SUM}; mkdir -p "$d" || exit 3; ${placeExecutable('', '$d', name, digest)}`;
-}
-
-/** The script with which a machine downloads the release's asset (url,
- * gzip-compressed, of gz.size bytes and SHA-256 gz.digest) and installs
- * the executable in it as dir/name (installScript). The download goes to
- * a file beside its place, at most gz.size + 1 bytes (head), through curl,
- * else wget (status 4 when the machine has neither), each without its
- * user's configuration (curl -q; an empty WGETRC, GNU wget's --no-config
- * where it has it), over the URL's scheme
- * only (curl --proto, GNU wget --https-only where it has it), one try and
- * few redirects, 10 s to connect; a watchdog ends it after limitS seconds
- * in all, whatever the tool (wget's -T bounds one read, not the whole).
- * Only a file of the asset's size and digest is decompressed. */
-export function downloadScript(o: {
-  dir: string;
-  name: string;
-  url: string;
-  gz: { digest: string; size: number };
-  digest: string;
-  limitS?: number;
-}): string {
-  const limit = o.limitS ?? machineDownloadLimitS;
-  const scheme = new URL(o.url).protocol.replace(/:$/, '');
-  if (scheme !== 'https' && scheme !== 'http') throw new Error(`not a download URL: ${o.url}`);
-  const url = shQuote(o.url);
-  const cap = o.gz.size + 1;
+/** The lines that download url into "$t.in": at most cap bytes (head), with
+ * curl, else wget (status 4 with neither), each without its user's
+ * configuration (curl -q; an empty WGETRC, GNU wget's --no-config where it
+ * has it), over the URL's scheme only (curl --proto, GNU wget's
+ * --https-only where it has it), one try, few redirects, 10 s to connect;
+ * a watchdog ends it after limitS seconds in all, whatever the tool (wget's
+ * -T bounds one read only). It runs with "$t", "$t.in", "$t.rc" and w set
+ * (downloadPrelude). */
+function fetchInto(url: string, cap: number, limitS: number): string[] {
+  const scheme = new URL(url).protocol.replace(/:$/, '');
+  if (scheme !== 'https' && scheme !== 'http') throw new Error(`not a download URL: ${url}`);
   return [
-    `umask 077; d="${o.dir}"; t="$d/.upload.$$"; w=; ${cleanup('"$t" "$t.gz" "$t.rc"', '; [ -z "$w" ] || kill $w 2>/dev/null')}; ${SUM}; mkdir -p "$d" || exit 3`,
-    // The tool, and its arguments.
-    `if command -v curl >/dev/null 2>&1; then set -- curl -q -fsSL --proto =${scheme} --proto-redir =${scheme} --max-filesize ${o.gz.size} --max-redirs 5 --connect-timeout 10 --max-time ${limit}`,
+    `if command -v curl >/dev/null 2>&1; then set -- curl -q -fsSL --proto =${scheme} --proto-redir =${scheme} --max-filesize ${cap} --max-redirs 5 --connect-timeout 10 --max-time ${limitS}`,
     `elif command -v wget >/dev/null 2>&1; then set -- wget -q -T 10 -O -; if wget --version 2>/dev/null | grep -q 'GNU Wget'; then set -- "$@" -t 1 --max-redirect=5; wget --help 2>&1 | grep -q -- --no-config && set -- "$@" --no-config; ${scheme === 'https' ? `wget --help 2>&1 | grep -q -- --https-only && set -- "$@" --https-only; ` : ''}fi`,
     `else echo "no curl or wget" >&2; exit 4; fi`,
     // The download, bounded by size (head) and by time (the watchdog ends
     // head, after which the tool's next write fails; wget's -T and curl's
     // --max-time end a silent one).
-    // An empty startup file in place of the user's .wgetrc (GNU wget wants
-    // a regular file there).
-    `: > "$t.rc"; WGETRC="$t.rc" "$@" ${url} | head -c ${cap} > "$t.gz" & p=$!`,
-    `( i=0; while [ $i -lt ${limit} ]; do sleep 1; kill -0 $p 2>/dev/null || exit 0; i=$((i+1)); done; echo "the download took more than ${limit} s" >&2; kill $p 2>/dev/null ) & w=$!`,
+    `: > "$t.rc"; WGETRC="$t.rc" "$@" ${shQuote(url)} | head -c ${cap + 1} > "$t.in" & p=$!`,
+    `( i=0; while [ $i -lt ${limitS} ]; do sleep 1; kill -0 $p 2>/dev/null || exit 0; i=$((i+1)); done; echo "the download took more than ${limitS} s" >&2; kill $p 2>/dev/null ) & w=$!`,
     `wait $p; kill $w 2>/dev/null; w=`,
-    `n=$(wc -c < "$t.gz" | tr -d ' '); [ "$n" = ${o.gz.size} ] || { echo "the download has $n bytes, the asset ${o.gz.size}" >&2; exit 3; }`,
-    `s=$(sum "$t.gz"); [ "$s" = "${o.gz.digest}" ] || { echo "the download's sha256 $s is not the asset's ${o.gz.digest}" >&2; exit 3; }`,
-    placeExecutable('"$t.gz"', '$d', o.name, o.digest),
-  ].join('\n');
+    `n=$(wc -c < "$t.in" | tr -d ' '); [ "$n" -le ${cap} ] || { echo "${url} is larger than ${cap} bytes" >&2; exit 3; }`,
+  ];
+}
+
+/** The script's first line: its temporary files in dir, removed when it
+ * ends, and sum. */
+const prelude = (dir: string) =>
+  `umask 077; d="${dir}"; t="$d/.upload.$$"; w=; ${cleanup('"$t" "$t.in" "$t.rc"', '; [ -z "$w" ] || kill $w 2>/dev/null')}; ${SUM}; mkdir -p "$d" || exit 3`;
+
+/** The script that installs a TypeScript build as dir/name from the
+ * release's archive (archive: its SHA-256 and the executable's path in it)
+ * or the executable gzip-compressed, read from standard input (the core's
+ * upload) or downloaded from url by the machine itself (fetchInto). An
+ * archive is unpacked only when its SHA-256 is the manifest's; the
+ * executable is put in place only when its SHA-256, computed on the
+ * machine, is exe (else it is removed and the script fails with status 3);
+ * the script prints it, which the core checks again. Its files are removed
+ * when it ends (an upload ends with its input); what a killed shell
+ * leaves, the nodes' housekeeping removes after an hour. */
+export function installScript(o: {
+  dir: string;
+  name: string;
+  exe: string;
+  archive?: { digest: string; member: string };
+  url?: string;
+  limitS?: number;
+}): string {
+  const lines = [prelude(o.dir)];
+  if (o.url) lines.push(...fetchInto(o.url, machineDownloadCap, o.limitS ?? machineDownloadLimitS));
+  else
+    lines.push(
+      `head -c ${MAX_ARCHIVE + 1} > "$t.in"; n=$(wc -c < "$t.in" | tr -d ' '); [ "$n" -le ${MAX_ARCHIVE} ] || { echo "more than ${MAX_ARCHIVE} bytes" >&2; exit 3; }`,
+    );
+  if (o.archive)
+    lines.push(
+      `s=$(sum "$t.in"); [ "$s" = "${o.archive.digest}" ] || { echo "the archive's sha256 $s is not the release's ${o.archive.digest}" >&2; exit 3; }`,
+      `gunzip -c "$t.in" | tar -xf - -O ${shQuote(o.archive.member)} | head -c ${MAX_EXECUTABLE + 1} > "$t"`,
+    );
+  else lines.push(`gunzip -c "$t.in" | head -c ${MAX_EXECUTABLE + 1} > "$t"`);
+  lines.push(
+    `s=$(sum "$t") && echo "@sha256=$s" && [ "$s" = "${o.exe}" ] && chmod 700 "$t" && mv -f "$t" "$d/${o.name}" || { echo "sha256 \${s:-unknown}, expected ${o.exe}" >&2; exit 3; }`,
+  );
+  return lines.join('\n');
+}
+
+/** The script with which a machine downloads a small file (the release's
+ * manifest) and prints it, bounded as the archive's download is. */
+export function fetchTextScript(url: string, cap = MAX_SUMS, limitS = 60): string {
+  return [prelude('$HOME'), ...fetchInto(url, cap, limitS), `cat "$t.in"`].join('\n');
 }
 
 /** Builds used by other cores are kept until unused for 14 days (running
  * nodes touch their directories). */
 const PRUNE = `find "$HOME/${AGENT_DIR}" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null; true`;
 
-/** What a TypeScript machine executable's install does when the machine
- * lacks it: the machine downloads the release's asset itself when it may
- * (machineDownload) and the build has a release, else, or when that fails,
- * the core uploads it from its sources (sources.ts); both check its
- * SHA-256 on the machine before it is put in place. */
+/** What a TypeScript build's install does when the machine lacks it: the
+ * digests from the release's manifest (release.ts; the machine downloads
+ * the manifest when only it can); the machine downloads the release's
+ * archive itself when it may (machineDownload, no failure within the last
+ * day) and the build has a release; else, or when that fails, the core
+ * uploads the archive or its own executable (release.ts). Each is checked
+ * on the machine before it is put in place (installScript). */
 async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?: AbortSignal): Promise<string> {
-  const dir = `$HOME/${AGENT_DIR}/${b.version}`;
+  const mayDownload = o.machineDownload !== false && !o.downloadFailures?.recent(o.target);
+  const viaHost = mayDownload
+    ? async (url: string) => {
+        o.logger(`ssh ${o.target}: the core cannot reach the release; the machine downloads ${url}`);
+        return run(o, fetchTextScript(url), { timeoutMs: 120_000, signal });
+      }
+    : undefined;
+  const d = await b.digests({ ...(signal ? { signal } : {}), ...(viaHost ? { viaHost } : {}) });
+  if (d.integrityOnly)
+    o.logger(
+      `ssh ${o.target}: integrity only: the build is checked against the ${'SHA256SUMS'} the machine downloaded, which tells a damaged download, not one changed on the machine's path`,
+    );
+  const version = tsVersion(d.exe);
+  const dir = `$HOME/${AGENT_DIR}/${version}`;
   const there = await run(o, `[ -x "${dir}/${CORE_BIN}" ] && echo @build; true`, { timeoutMs: 30_000, signal });
   if (/^@build$/m.test(there)) return `${dir}/${CORE_BIN}`;
-  const confirmed = (out: string) => out.split('\n').includes(`@sha256=${b.digest}`);
-  if (b.url && o.machineDownload !== false && o.downloadFailures?.recent(o.target))
+  const confirmed = (out: string) => out.split('\n').includes(`@sha256=${d.exe}`);
+  const archive = d.archive ? { digest: d.archive, member: archiveMember(b.key) } : undefined;
+  if (b.url && archive && o.machineDownload !== false && o.downloadFailures?.recent(o.target))
     o.logger(`ssh ${o.target}: the machine's own download failed within the last day; the core uploads its build`);
-  else if (b.url && o.machineDownload !== false) {
-    o.logger(`ssh ${o.target}: the machine downloads its build ${b.version} (${platform.os}/${platform.arch}) from ${b.url}`);
+  else if (b.url && archive && o.machineDownload !== false) {
+    o.logger(`ssh ${o.target}: the machine downloads its build ${version} (${platform.os}/${platform.arch}) from ${b.url}`);
     try {
-      const script = downloadScript({ dir, name: CORE_BIN, url: b.url, gz: { digest: b.gzDigest, size: b.gzSize }, digest: b.digest });
-      const out = await run(o, `${script}\n${PRUNE}`, { timeoutMs: (machineDownloadLimitS + 60) * 1000, signal });
+      const out = await run(o, `${installScript({ dir, name: CORE_BIN, exe: d.exe, archive, url: b.url })}\n${PRUNE}`, {
+        timeoutMs: (machineDownloadLimitS + 60) * 1000,
+        signal,
+      });
       // The core checks what the machine computed, too.
       if (confirmed(out)) {
         o.downloadFailures?.success(o.target);
@@ -401,15 +430,25 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
       o.logger(`ssh ${o.target}: the machine could not download its build (${(e as Error).message.trim()}); the core uploads it`);
     }
   }
-  const gz = await b.load(signal);
-  o.logger(`ssh ${o.target}: uploading the machine build ${b.version} (${platform.os}/${platform.arch}, ${gz.length} bytes)`);
+  const p = await b.load(d, signal);
+  o.logger(
+    `ssh ${o.target}: uploading the machine build ${version} (${platform.os}/${platform.arch}, ${p.kind === 'archive' ? 'the release archive' : 'the executable'}, ${p.bytes.length} bytes)`,
+  );
   let out: string;
   try {
-    out = await run(o, installScript(dir, CORE_BIN, b.digest) + `; ${PRUNE}`, { stdin: gz, timeoutMs: 10 * 60_000, signal });
+    out = await run(
+      o,
+      `${installScript({ dir, name: CORE_BIN, exe: d.exe, ...(p.kind === 'archive' && archive ? { archive } : {}) })}\n${PRUNE}`,
+      {
+        stdin: p.bytes,
+        timeoutMs: 10 * 60_000,
+        signal,
+      },
+    );
   } catch (e) {
-    throw new Error(`upload the machine build ${b.version}: ${(e as Error).message}`);
+    throw new Error(`upload the machine build ${version}: ${(e as Error).message}`);
   }
-  if (!confirmed(out)) throw new Error(`upload the machine build ${b.version}: the machine did not confirm its sha256`);
+  if (!confirmed(out)) throw new Error(`upload the machine build ${version}: the machine did not confirm its sha256`);
   return `${dir}/${CORE_BIN}`;
 }
 

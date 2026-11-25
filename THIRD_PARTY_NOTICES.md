@@ -777,7 +777,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## The core in TypeScript (backend/)
 
-The core's executable built from backend/ is the Bun runtime (https://github.com/oven-sh/bun, MIT; its LICENSE.md lists the libraries it includes, JavaScriptCore among them, LGPL-2.0) with the core's code and the npm packages below bundled. The desktop app runs the same core in Electron, with node-pty (and node-addon-api, which it is built with) beside it in the app. The TypeScript machine side's executables (backend/hosts/machine/compile.ts, one per machine platform) are the same Bun runtime with the machine side's code, the npm packages below that it uses, and their platform's herdr-core (Apache-2.0; its license and notices are in licenses/herdr-core/ of a release archive).
+The core's executable built from backend/ is the Bun runtime (https://github.com/oven-sh/bun, MIT; its LICENSE.md lists the libraries it includes, JavaScriptCore among them, LGPL-2.0) with the core's code and the npm packages below bundled. The desktop app runs the same core in Electron, with node-pty (and node-addon-api, which it is built with) beside it in the app. In the TypeScript build (backend/scripts/build.ts --machine ts) the same executable is also the machine side of its platform and carries that platform's herdr-core (Apache-2.0; its license and notices are in licenses/herdr-core/ of the release archive).
 
 ### @hexagon/base64 1.1.28 (MIT)
 

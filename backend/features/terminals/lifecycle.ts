@@ -17,6 +17,10 @@ export type HCSource = (os: string, arch: string) => Promise<{ gz: Uint8Array; d
 export interface LifecycleDeps {
   readOnly: boolean;
   hc?: HCSource;
+  /** The SHA-256 of the herdr-core a machine build of the core's release
+   * carries for a platform (Payloads.embeddedHC); null when the build did
+   * not record it. */
+  embeddedHC?: (os: string, arch: string) => Promise<string | null>;
   logger: Logger;
   audit: Audit;
 }
@@ -87,7 +91,13 @@ export async function ensure(m: Machine, o: EnsureOptions, d: LifecycleDeps): Pr
   if (st.embedded) {
     // The machine build carries its platform's herdr-core (the TypeScript
     // machine executable, verified by its digest when it was installed):
-    // that one runs, installed from the machine's own copy.
+    // that one runs, installed from the machine's own copy, when it is the
+    // one the core's release recorded for the platform.
+    const expected = await d.embeddedHC?.(info.os, info.arch);
+    if (expected && expected !== st.embedded) {
+      d.logger(`term ${o.id}: the machine build carries herdr-core ${st.embedded}, not the release's ${expected}`);
+      return Code.Install;
+    }
     digest = st.embedded;
   } else if (d.hc)
     try {

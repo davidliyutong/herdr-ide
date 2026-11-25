@@ -11,7 +11,9 @@ repeating it.
 The core's executable has `serve`, `fetch-assets`, `version` and `node`,
 which it passes on to the machine build of its own host; the other
 commands are the machine build's, the program the core uploads to each
-machine (`~/.veldr/agent/<build>/veldr`).
+machine (`~/.veldr/agent/<build>/veldr`). The TypeScript build
+(`MACHINE=ts`, [42](features/42-typescript-backend.md)) is that machine
+build itself: its `node` commands run in it.
 
 | Command | Description |
 | --- | --- |
@@ -94,7 +96,7 @@ remote machine.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--agent-dir` | – | Directory of machine builds searched before the embedded ones: uncompressed `veldr-<os>-<arch>` Go builds (`go build ./cmd/veldr`), or, for a core that deploys the TypeScript machine side, its executables as its release names them (`veldr-machine-<os>-<arch>[-musl].gz`, or uncompressed without `.gz`), each checked against the digests built into the core (offline sites, [deployment](deployment.md#air-gapped-networks)). |
+| `--agent-dir` | – | Directory of machine builds searched before the embedded ones: uncompressed `veldr-<os>-<arch>` Go builds (`go build ./cmd/veldr`), or, for the TypeScript build, its release's `SHA256SUMS` with the archives (`veldr-<os>-<arch>[-musl].tar.gz`) or the executables in them (`veldr-<os>-<arch>[-musl]`), each checked against that `SHA256SUMS`, which must name the core's own executable (offline sites, [deployment](deployment.md#air-gapped-networks)). |
 | `--ext-dir` | – | Directory containing `veldr-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
 | `--parent-stdio` | `false` | Launcher lifecycle (the end-to-end tests): write `{"event":"ready","url":"…"}` to stdout after binding, clean up when stdin closes (what stdin carries is not read). Does not change HTTP guards; every client is a browser. |
@@ -590,7 +592,7 @@ Build scripts and tests:
 | `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
 | `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the core and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
 | `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |
-| `E2E_MACHINE` | `make e2e` | `ts` runs the tests against the core that deploys the TypeScript machine side (`dist/e2e/core-ts`); the specs of the features it does not serve yet skip with the reason. Default `go`. |
+| `E2E_MACHINE` | `make e2e` | `ts` runs the tests against the TypeScript build (`dist/e2e/core-ts`, its machines' builds and `SHA256SUMS` in `dist/e2e/machines`); the specs of the features it does not serve yet skip with the reason. Default `go`. |
 | `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets program-window tests fetch Xvfb. |
 
 ## Files and directories
@@ -607,7 +609,7 @@ else `<data>/run-<host id>`. Retention is summarized in
 
 | Path | Content | Lifetime |
 | --- | --- | --- |
-| `~/.veldr/agent/<build>/veldr` | The machine build: the Go executable, or the TypeScript machine side's executable (downloaded by the machine from the core's release or uploaded by the core), accepted only with its SHA-256 | Unused 14 days. |
+| `~/.veldr/agent/<build>/veldr` | The machine build: the Go executable, or the TypeScript build's executable (from its release archive, downloaded by the machine or uploaded by the core), accepted only with the SHA-256 its release's `SHA256SUMS` names | Unused 14 days. |
 | `~/.veldr/code-server/<version>-<os>-<arch>/` | code-server releases (shared by instances and by hosts of one platform) | Unused 14 days. |
 | `~/.veldr/hosts/<host>/xvfb/<version>/` | Xvfb unpacked in user space (shared by this host's instances) | Unused 14 days, when another is unpacked. |
 | `~/.veldr/video/<sha256 prefix>/encoder` | Video encoder (shared), run only while its digest matches | Unused 14 days, when another is installed; unfinished after 1 h. |
@@ -647,10 +649,10 @@ Also on the core host: ssh control sockets in `/tmp/veldr-<uid>/s`
 16 characters; Linux and macOS; owned by you, 0700), and code-server downloads with
 `.sha256` sidecars in the user cache directory
 (`~/Library/Caches/veldr/code-server`, `~/.cache/veldr/code-server`,
-`%LocalAppData%\veldr\code-server`), and the TypeScript machine
-executables a core downloaded from its release
-(`~/.veldr/cache/machine/veldr-machine-<platform>-<digest>.gz`, checked
-when read, removed unused for 14 days).
+`%LocalAppData%\veldr\code-server`), and what the TypeScript build
+fetched from its release (`~/.veldr/cache/machine/`: `SHA256SUMS-<version>`
+and the archives machines needed, `veldr-<platform>-<digest>.tar.gz`,
+checked when read, removed unused for 14 days).
 
 A release directory holds the core, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
 `licenses.md` and `licenses/` (`herdr-core/`, `herdr-detect/`, `encoder/`).

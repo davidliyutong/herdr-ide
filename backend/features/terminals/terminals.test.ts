@@ -223,6 +223,28 @@ test('a machine build that carries herdr-core installs and runs its own', async 
   expect(r.sim.actions).toEqual(['status', 'install-embedded', 'restart']);
 });
 
+// The core's release recorded which herdr-core each platform's build
+// carries: a machine build that carries another is not run.
+test('a machine build whose herdr-core the release did not record is refused', async () => {
+  const r = await start({
+    sim: (s) => ((s.digest = ''), (s.embedded = 'e'.repeat(64)), (s.running = false)),
+    options: { embeddedHC: async () => 'f'.repeat(64) },
+  });
+  const c = await r.client();
+  c.send({ t: 'sub', m: 'x' });
+  let m;
+  while ((m = await c.until('backend')).state !== 'error');
+  expect(m.code).toBe('install_failed');
+  expect(r.sim.actions).not.toContain('install-embedded');
+  // The recorded one runs.
+  const ok = await start({
+    sim: (s) => ((s.digest = ''), (s.embedded = 'e'.repeat(64)), (s.running = false)),
+    options: { embeddedHC: async () => 'e'.repeat(64) },
+  });
+  await (await ok.client()).ready();
+  expect(ok.sim.actions).toContain('install-embedded');
+});
+
 // The terminal core is stopped, started and restarted from the UI. A
 // stopped core stays stopped while a client is subscribed (code stopped)
 // until it is started again; the machine's state shows the backend's, and

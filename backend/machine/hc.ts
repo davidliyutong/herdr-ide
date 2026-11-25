@@ -302,8 +302,9 @@ export class TerminalCore {
   }
 }
 
-/** The herdr-core embedded in this executable (hosts/machine/compile.ts):
- * null in a run from the sources. */
+/** The herdr-core embedded in this executable (herdr-core.gz,
+ * backend/scripts/build.ts --machine ts): null in a run from the sources or
+ * a build without it. */
 async function carriedHC(): Promise<{ gz: Buffer; digest: string } | null> {
   if (!Bun.isStandaloneExecutable) return null;
   const f = Bun.embeddedFiles.find((b) => (b as File).name === 'herdr-core.gz') as File | undefined;

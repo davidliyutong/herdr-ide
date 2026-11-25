@@ -6,11 +6,9 @@
 // a TypeScript build's executable from the core's own copy, checked by its
 // digest.
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
-import { gunzipSync } from 'node:zlib';
 import { NodeOp, VERSION, newer, readLine, writeLine, type NodeHello, type NodeInfo, type Reply } from '#shared/proto/agentproto/index.ts';
 import { AGENT_DIR, CORE_BIN } from '#shared/lib/brand.ts';
 import { dirsFor, makeDirs } from '#shared/host/hostdirs.ts';
@@ -19,7 +17,8 @@ import type { Logger } from '#shared/lib/log.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { pairDuplex } from '#shared/proto/yamux.ts';
 import { CLIENT_ID, Session } from './session.ts';
-import { nodeBuild, type BuildSource, type MachineBuild } from './builds.ts';
+import { archiveMember, nodeBuild, tsVersion, type BuildSource, type MachineBuild } from './builds.ts';
+import { installScript } from './ssh.ts';
 
 /** The agent runs on Linux and macOS; on Windows the core reaches SSH
  * machines only. */
@@ -38,12 +37,8 @@ export function localPlatform(): { os: string; arch: string } {
 
 const nodeSocket = (run: string) => join(run, 'node.sock');
 
-const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
-
-/** Writes b into path (mode 0700) through a temporary file, after checking
- * its SHA-256 when digest is given. */
-function place(path: string, b: Uint8Array, digest?: string): void {
-  if (digest !== undefined && sha256(b) !== digest) throw new Error(`${path}: sha256 does not match ${digest}`);
+/** Writes b into path (mode 0700) through a temporary file. */
+function place(path: string, b: Uint8Array): void {
   const tmp = `${path}.upload.${process.pid}`;
   try {
     writeFileSync(tmp, b, { mode: 0o700 });
@@ -55,29 +50,64 @@ function place(path: string, b: Uint8Array, digest?: string): void {
 }
 
 /** Installs a build where an upload would put it, unless it is there; the
- * file to run. A TypeScript build's executable comes from the core's
- * sources (its own copy, for its own platform), checked by its digest. */
-export async function installBuild(b: MachineBuild, home: string, signal?: AbortSignal): Promise<string> {
-  const dir = join(home, AGENT_DIR, b.version);
+ * file to run and the node build it is. A TypeScript build is installed by
+ * the script an ssh upload runs (checked by its digest), from what the core
+ * has (its own executable, for its own platform). */
+export async function installBuild(b: MachineBuild, home: string, signal?: AbortSignal): Promise<{ exe: string; build: string }> {
+  if (b.kind === 'go') {
+    const dir = join(home, AGENT_DIR, b.version);
+    const exe = join(dir, CORE_BIN);
+    if (!existsSync(exe)) {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      place(exe, b.bin);
+    }
+    return { exe, build: nodeBuild(b) };
+  }
+  const d = await b.digests(signal ? { signal } : {});
+  const dir = join(home, AGENT_DIR, tsVersion(d.exe));
   const exe = join(dir, CORE_BIN);
-  if (existsSync(exe)) return exe;
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  if (b.kind === 'go') place(exe, b.bin);
-  else place(exe, gunzipSync(await b.load(signal)), b.digest);
-  return exe;
+  if (!existsSync(exe)) {
+    const p = await b.load(d, signal);
+    const script = installScript({
+      dir: '$D',
+      name: CORE_BIN,
+      exe: d.exe,
+      ...(p.kind === 'archive' && d.archive ? { archive: { digest: d.archive, member: archiveMember(b.key) } } : {}),
+    });
+    const sh = spawn('/bin/sh', ['-c', script], {
+      env: { ...withoutForeignRuntimeVars(process.env), D: dir },
+      stdio: ['pipe', 'ignore', 'pipe'],
+    });
+    let err = '';
+    sh.stderr!.setEncoding('utf8').on('data', (c: string) => (err = (err + c).slice(-4096)));
+    sh.stdin!.on('error', () => {});
+    sh.stdin!.end(p.bytes);
+    const code = await new Promise<number | null>((resolve, reject) => sh.once('error', reject).once('close', resolve));
+    if (code !== 0) throw new Error(`install the machine build: ${err.trim() || `status ${code}`}`);
+  }
+  return { exe, build: nodeBuild(d) };
+}
+
+/** This machine's C library (Linux): the one this process runs on. */
+function localLibc(): 'glibc' | 'musl' {
+  try {
+    return readFileSync('/proc/self/maps', 'utf8').includes('/ld-musl-') ? 'musl' : 'glibc';
+  } catch {
+    return 'glibc';
+  }
 }
 
 /** Installs the machine build for this platform where an upload would put
  * it, unless it is there; its path and build. */
 export async function installLocal(builds: BuildSource, home: string, signal?: AbortSignal): Promise<{ exe: string; info: NodeInfo }> {
   const { os, arch } = localPlatform();
-  const b = await builds({ os, arch, ...(os === 'linux' ? { libc: 'glibc' as const } : {}) });
-  const exe = await installBuild(b, home, signal);
+  const b = await builds({ os, arch, ...(os === 'linux' ? { libc: localLibc() } : {}) });
+  const { exe, build } = await installBuild(b, home, signal);
   const file = exe;
   return {
     exe,
     info: {
-      build: nodeBuild(b),
+      build,
       version: VERSION,
       // Unix nanoseconds, as the nodes write them (precise to about 256 ns
       // as a double: enough to order two builds).

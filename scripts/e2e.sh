@@ -12,12 +12,14 @@
 # E2E_REQUIRE_DOCKER=1 (CI), which fails instead.
 #
 # Every core is built twice: deploying the Go machine build (the product's
-# default) and the TypeScript machine side (core-ts: the machine
-# executables of this host and of Docker's Linux, glibc's and musl's, in
-# machines/, which a build of no release takes from --agent-dir; nothing is
-# downloaded). The suite runs against the first; E2E_MACHINE=ts runs it
-# against the second (e2e/harness/paths.ts), and tests/nodes.spec.ts takes
-# a node of one build over with the other.
+# default) and as the TypeScript build (--machine ts: one executable that
+# is the core and the machine side of its platform). The latter is built
+# for this host and for Docker's Linux, glibc's and musl's, into machines/
+# with their SHA256SUMS, which the cores take as --agent-dir (a build of no
+# release: nothing is downloaded); core-ts is this host's. The suite runs
+# against the first; E2E_MACHINE=ts runs it against the second
+# (e2e/harness/paths.ts), and tests/nodes.spec.ts takes a node of one build
+# over with the other.
 #
 #   SKIP_WEB=1 scripts/e2e.sh       # reuse web/dist
 #   SKIP_BUILD=1 scripts/e2e.sh     # reuse dist/e2e
@@ -90,20 +92,43 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   [[ -d dist/payload/ext ]] && common+=(--ext dist/payload/ext)
   bun backend/scripts/build.ts --out "$OUT/core" --agents "$OUT/payload/agents" "${common[@]}" >/dev/null
   bun backend/scripts/build.ts --out "$OUT/core-newer" --version dev-e2e-newer --agents "$OUT/payload/agents-newer" "${common[@]}" >/dev/null
-  echo "==> TypeScript machine executables and the cores that deploy them"
+  echo "==> the TypeScript builds"
   # This host's, and Docker's Linux, glibc's and musl's (the SSH machine is
-  # Alpine), each with its herdr-core; again as the newer version, whose
-  # node the newer core runs.
+  # Alpine); again as the newer version, whose node the newer core runs.
   keys="$os-$arch"
   [[ -n "$darch" && "linux-$darch" != "$keys" ]] && keys="$keys linux-$darch"
   [[ -n "$darch" ]] && keys="$keys linux-$darch-musl"
+  target_of() {
+    case "$1" in
+      "$os-$arch") echo "" ;;
+      linux-amd64) echo bun-linux-x64-baseline ;;
+      linux-arm64) echo bun-linux-arm64 ;;
+      linux-amd64-musl) echo bun-linux-x64-musl-baseline ;;
+      linux-arm64-musl) echo bun-linux-arm64-musl ;;
+    esac
+  }
   rm -rf "$OUT/machines" "$OUT/machines-newer" "$OUT/payload-ts"
-  # shellcheck disable=SC2086
-  bun backend/scripts/machines.ts --out "$OUT/machines" --version dev --hc "$OUT/payload/hc" $keys >/dev/null
-  # shellcheck disable=SC2086
-  bun backend/scripts/machines.ts --out "$OUT/machines-newer" --version dev-e2e-newer --hc "$OUT/payload/hc" $keys >/dev/null
-  bun backend/scripts/build.ts --out "$OUT/core-ts" --machine ts --machines "$OUT/machines" --payload-out "$OUT/payload-ts" "${common[@]}" >/dev/null
-  bun backend/scripts/build.ts --out "$OUT/core-ts-newer" --version dev-e2e-newer --machine ts --machines "$OUT/machines-newer" "${common[@]}" >/dev/null
+  for v in dev dev-e2e-newer; do
+    dir="$OUT/machines"
+    [[ "$v" == dev ]] || dir="$OUT/machines-newer"
+    mkdir -p "$dir"
+    for k in $keys; do
+      t=$(target_of "$k")
+      extra=()
+      [[ -n "$t" ]] && extra+=(--target "$t")
+      # This host's, as the desktop app carries it.
+      [[ "$k" == "$os-$arch" && "$v" == dev ]] && extra+=(--payload-out "$OUT/payload-ts")
+      bun backend/scripts/build.ts --out "$dir/${SLUG}-$k" --version "$v" --machine ts "${common[@]}" ${extra[@]+"${extra[@]}"} >/dev/null
+    done
+    # The manifest of this "release": the executables as an archive would
+    # hold them.
+    (cd "$dir" && for k in $keys; do
+      printf '%s  %s\n' "$( { sha256sum "${SLUG}-$k" 2>/dev/null || shasum -a 256 "${SLUG}-$k"; } | cut -d' ' -f1)" "${SLUG}-$k/${SLUG}"
+    done > SHA256SUMS)
+  done
+  cp "$OUT/machines/${SLUG}-$os-$arch" "$OUT/core-ts"
+  cp "$OUT/machines-newer/${SLUG}-$os-$arch" "$OUT/core-ts-newer"
+  gzip -1 -c "$OUT/machines/${SLUG}-$os-$arch" > "$OUT/payload-ts/machine/${SLUG}-$os-$arch.gz"
   # The desktop app's smoke test (tests/desktop.spec.ts) runs it unpackaged
   # with the core bundled for its utility process and the payloads above;
   # it skips where the desktop's packages are not installed.

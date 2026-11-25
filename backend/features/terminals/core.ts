@@ -23,6 +23,10 @@ export interface TerminalsOptions {
    * when the build has none for the platform, the core installs nothing
    * and uses the terminal core the machine has. */
   hc?: HCSource;
+  /** The herdr-core digests a TypeScript build recorded
+   * (Payloads.embeddedHC): a machine build that carries another is not
+   * run. */
+  embeddedHC?: (os: string, arch: string) => Promise<string | null>;
   /** The variables of a machine's virtual display that new terminals get
    * (program windows, feature 14); none by default. */
   paneEnv?: (m: Machine) => Record<string, string> | undefined;
@@ -78,6 +82,7 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
         audit: ctx.audit,
         readOnly: ctx.readOnly,
         hc: o.hc,
+        ...(o.embeddedHC ? { embeddedHC: o.embeddedHC } : {}),
         paneEnv: o.paneEnv ?? (() => undefined),
         // SSH_CONNECTION and SSH_CLIENT as the ssh session of the agent of
         // an ssh machine has them (sshenv.ts).

@@ -1,14 +1,15 @@
 // This process's build, named by a digest of its file, as nodes and their
 // clients tell it each other (agentproto.NodeInfo); and the command that
-// runs it again. A machine runs the machine side as one executable compiled
-// with Bun (hosts/machine/compile.ts): the build is that file. A run from
-// the sources (tests, development) is the entry module run by bun.
+// runs it again. A machine runs the machine side as the executable compiled
+// with Bun (backend/scripts/build.ts --machine ts, the core and the machine
+// side in one file): the build is that file. A run from the sources (tests,
+// development) is the entry module run by bun.
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { FOREIGN_RUNTIME_VARS } from '#shared/lib/bunenv.ts';
 import { VERSION, type NodeInfo } from '#shared/proto/agentproto/index.ts';
 
-/** Whether this process is the compiled machine executable. */
+/** Whether this process is a compiled executable. */
 export const compiled = (): boolean => Bun.isStandaloneExecutable;
 
 /** The file of this build: the executable, or the entry module of a run

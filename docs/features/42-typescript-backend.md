@@ -184,12 +184,13 @@ Linux and macOS:
   schemas, a `Fail` thrown is the refusal's code (the error reads
   `code: message`, as the Go agent wrote it), an action that does not
   stream ends when the core closes its stream.
-- `backend/hosts/machine`: the command line (`main.ts`: `node`,
-  `node dial`, `node stop [--terminal-core]` and `version`, with the Go
-  build's flags), the features it serves (`features.ts`), the bundle
-  (`bundle.ts`), which may not include the core, its hosts, a feature's
-  core side or tests (its test fails otherwise), and its compilation into
-  the executable of a platform (`compile.ts`).
+- `backend/hosts/machine`: the machine side's commands (`cli.ts`: `node`,
+  `node dial`, `node stop [--terminal-core]`, with the Go build's flags),
+  which the one command line (`backend/hosts/bun/main.ts`) runs, and the
+  features its node serves (`features.ts`). The executable is the core's
+  too; the layers keep apart what runs where (Bun's APIs only on the
+  machine side and the command line's host, Node's modules only in what
+  the desktop app's core runs: backend/README.md).
 
 It serves the machine sides of the terminals (the terminal core and hidden
 terminals), files, git, search, monitor, history and browser features.
@@ -223,96 +224,139 @@ each socket under a temporary name and renames it into place: a server
 that closes never removes the socket another node or agent put at the path
 since.
 
-A machine gets one file: the machine side compiled by Bun into one
-executable for its platform (`bun build --compile`,
-`backend/hosts/machine/compile.ts`), the runtime, the machine side and the
-platform's herdr-core in it, kept at `~/.<slug>/agent/<version>/<slug>`
+A core built to deploy the TypeScript machine side
+(`backend/scripts/build.ts --machine ts`) is that machine build itself:
+one executable per platform holds the core (`serve`, the web UI and its
+API), the machine side (`node`, `node dial`, `node stop`), that platform's
+herdr-core and, on Linux, its video encoder, besides the VS Code bridge
+(`backend/hosts/bun/main.ts`, one command line; the machine side's commands
+in `backend/hosts/machine/cli.ts`, the features its node serves in
+`backend/hosts/machine/features.ts`). The platforms are linux x64 (a
+baseline build, for processors without AVX2), linux arm64, the same two
+for musl (Alpine), darwin x64 and darwin arm64; a Windows build is the
+core alone (the desktop app's platform, reaching SSH machines only). Users
+run it as the web UI (`serve`, in a browser) or in the desktop app, whose
+core runs in Electron and which carries its own platform's executable for
+the local machine. A machine keeps it at `~/.<slug>/agent/<version>/<slug>`
 (the version is the start of the executable's SHA-256) as the Go build is,
-so command lines (`node dial`, `node stop`) are the same for both. There is
-one per platform: linux x64 (a baseline build, for processors without
-AVX2), linux arm64, the same two for musl (Alpine), darwin x64 and darwin
-arm64. The executable is compiled without loading a `.env` file or
-`bunfig.toml` (`--no-compile-autoload-dotenv`,
-`--no-compile-autoload-bunfig`) and installs nothing; what Bun reads from
-the environment besides, `BUN_OPTIONS` (whose `--preload` it honours),
-`BUN_BE_BUN` (which makes it Bun's command line) and `BUN_INSPECT*`, the
-deployment's command line unsets before it runs the executable, the local
-transport leaves out of the node's environment, and the node removes from
-its own at once, so nothing it starts gets them; a compiled executable
-writes no transpiler cache. The node installs the terminal core from the
-copy it carries, checked by its digest (the `hc` op's `install-embedded`;
-the core uploads none to it), so a machine needs no other upload. Sizes
-with Bun 1.4.5 and herdr-core 0.1.21, uncompressed and gzip-compressed:
+so command lines are the same for both; the local machine gets a copy of
+the running executable (the desktop app's from its resources). The
+executable is compiled without loading a `.env` file or `bunfig.toml`
+(`--no-compile-autoload-dotenv`, `--no-compile-autoload-bunfig`) and
+installs nothing; what Bun reads from the environment besides,
+`BUN_OPTIONS` (whose `--preload` it honours), `BUN_BE_BUN` (which makes it
+Bun's command line) and `BUN_INSPECT*`, the deployment's command line
+unsets before it runs the executable, the local transport and the command
+line's `node` leave out of the environment they start it with, and the
+executable removes from its own at once, so nothing it starts gets them; a
+compiled executable writes no transpiler cache. Its node installs the
+terminal core from the copy it carries (the `hc` op's `install-embedded`),
+when that copy is the one the core's build recorded for the platform
+(`machine/hc.json`: the digests of the herdr-core executables the build
+embeds, from the archives `scripts/fetch-hc` verified against the digests
+pinned in `internal/hcdist`); the core uploads none to it. Sizes with Bun
+1.4.5 and herdr-core 0.1.21, the executable and its release archive:
 
-| Platform | Executable | Compressed |
+| Platform | Executable | Archive |
 | --- | --- | --- |
-| linux x64 | 108.0 MiB | 51.9 MiB |
-| linux arm64 | 107.9 MiB | 51.4 MiB |
-| linux x64 musl | 101.9 MiB | 49.0 MiB |
-| linux arm64 musl | 100.6 MiB | 48.4 MiB |
-| darwin x64 | 97.2 MiB | 44.1 MiB |
-| darwin arm64 | 88.4 MiB | 40.9 MiB |
+| linux x64 | 130.8 MiB | 58.3 MiB |
+| linux arm64 | 130.7 MiB | 58.0 MiB |
+| linux x64 musl | 124.7 MiB | 55.4 MiB |
+| linux arm64 musl | 123.4 MiB | 54.9 MiB |
+| darwin x64 | 120.0 MiB | 50.6 MiB |
+| darwin arm64 | 111.3 MiB | 47.5 MiB |
 
-A core does not carry them all: a release publishes them as its assets
-(`<slug>-machine-<os>-<arch>[-musl].gz`), and each core of the release has
-their SHA-256 built in (`machine/manifest.json` of its payloads: the
-executable's and the asset's, with the release's download URL) and
-carries only its own platform's executable (a Windows core none; the
-desktop app its own platform's). A machine that does not hold the
-executable gets it, in this order (`backend/kernel/machines/transport`,
-`ssh.ts` and `sources.ts`):
+(without the video encoder, about 2 MB more on Linux; the web UI is about
+20 MB of each)
 
-1. The machine downloads the release's asset itself, with `curl`, else
+A release publishes each platform's archive (`<slug>-<platform>.tar.gz`,
+the executable at `<slug>-<platform>/<slug>` with the licenses beside it,
+what users download too) and `SHA256SUMS`, the digests of every asset and
+of the executable in each archive. A machine downloads the archive rather
+than a bare executable: one asset per platform, the licenses of what it
+runs (herdr-core's among them) travel with it, and unpacking one member
+(`gunzip -c | tar -xf - -O <member>`) works with the tar of CentOS 7 and
+BusyBox's alike, after the archive's digest was checked. No core carries
+another platform's executable: each takes the release's manifest and the
+archives from the release (`backend/kernel/machines/transport`,
+`release.ts` and `ssh.ts`).
+
+The manifest is the first of: the operator's directory (`--agent-dir`,
+with the release's `SHA256SUMS`: offline sites); the core host's cache
+(`~/.<slug>/cache/machine/`, per version, a manifest the core fetched); the
+release, fetched by the core over its own HTTPS (Bun's or Node's fetch,
+which verify the certificate, through the proxy of `HTTPS_PROXY`,
+`HTTP_PROXY` and `NO_PROXY`: Bun's fetch reads those itself; the desktop
+app's core, in Node, sets them for its own process with
+`http.setGlobalProxyFromEnv`, `backend/shared/lib/proxy.ts`, loopback
+always excepted, so no variable reaches the programs it starts, as
+`NODE_USE_ENV_PROXY` would make every Node program of the local machine
+send its requests, loopback's too, to the proxy); a core whose fetch failed
+does not try again for 10 minutes. When only the machine reaches the
+release, the machine downloads `SHA256SUMS` alongside the archive and
+prints it back: that tells a damaged download, not one changed on the
+machine's path, and the core says so in its log (integrity only). A
+manifest is this build's only when it names the core's own executable by
+its digest (its platform's line): one of another release is refused (the
+desktop app on Windows, which has no executable of its own, cannot tell,
+and logs it). Without one, a machine of the core's own platform still gets
+the core's own executable.
+
+A machine that does not hold its build gets it, in this order:
+
+1. The machine downloads the release's archive itself, with `curl`, else
    `wget`, unless the setting `machines.download` is off for it (or
    `--machine-download=false`) or its download failed within the last day
-   (the core keeps that in memory, per machine). The tool runs without its
-   user's configuration (`curl -q`; an empty `WGETRC`, GNU wget's
-   `--no-config` where it has it), over the URL's scheme only (`curl
-   --proto`, GNU wget's `--https-only` where it has it), with one try, few
-   redirects and 10 s to connect; the download goes to a file beside its
-   place through `head`, so no more than the asset's size is written, and
-   a watchdog ends it after 5 minutes in all, whatever the tool (wget's
-   `-T` bounds each read, not the whole). Only a file of the asset's size
-   and SHA-256 is decompressed. BusyBox's wget may not verify the
-   server's certificate: the digests still hold the file to the build.
-2. Else, or when that fails (neither tool, no route to the release, an
-   asset that is not the executable), the core uploads it over ssh. It
-   takes the executable from the first of: the operator's directory
-   (`--agent-dir`, the asset as the release names it or uncompressed),
-   its cache (`~/.<slug>/cache/machine/`), its own copy, a download from
-   the release, which goes through the proxy of `HTTPS_PROXY`,
-   `HTTP_PROXY` and `NO_PROXY` and is cached. Bun's fetch reads those
-   itself; the desktop app's core, in Node, sets them for its own process
-   with `http.setGlobalProxyFromEnv` (`backend/shared/lib/proxy.ts`,
-   loopback always excepted), so no variable reaches the programs it
-   starts (`NODE_USE_ENV_PROXY` would make every Node program of the local
-   machine send its requests, loopback's too, to the proxy). Each source
-   is read and hashed piecewise, no more than the asset's size, and
-   checked against the digests built into the core before it is used or
-   cached: a file of the directory that is not the build is refused, a
-   cached one removed. Machines of one platform share one load.
+   (the core keeps that in memory, per machine, and goes straight to the
+   upload meanwhile). The tool runs without its user's configuration
+   (`curl -q`; an empty `WGETRC`, GNU wget's `--no-config` where it has
+   it), over the URL's scheme only (`curl --proto`, GNU wget's
+   `--https-only` where it has it), with one try, few redirects and 10 s to
+   connect; the download goes to a file beside its place through `head`,
+   at most 256 MiB, and a watchdog ends it after 5 minutes in all, whatever
+   the tool (wget's `-T` bounds each read, not the whole). Only an archive
+   of the manifest's SHA-256 is unpacked. BusyBox's wget may not verify the
+   server's certificate: the manifest the core fetched still holds the
+   archive to the release.
+2. Else, or when that fails (neither tool, no route to the release, a
+   timeout, an archive that is not the release's), the core uploads it over
+   ssh, taking the first of: the operator's directory (the archive, or the
+   executable as `<slug>-<platform>`), its cache, its own executable for a
+   machine of its platform, a download of the archive from the release
+   (then cached). Each is read and hashed piecewise, bounded, checked
+   against the manifest before it is used or cached (a file of the
+   directory that is not the build is refused, a cached one removed), and
+   loaded once for the machines of one platform. This is the path of a core
+   that reaches the internet for machines that do not.
 
-Both install the same way: the gzip-compressed executable decompressed
-beside its place, its SHA-256 computed on the machine (`sha256sum`,
-`shasum` or `openssl`), renamed into place only when it is the one the
-core names, else removed and failed, and printed, which the core checks
-again once the script ran. Its files are removed when the script ends
-(`trap`): an upload ends when its input does (the connection went), a
+Both install the same way, the core's local install too (the same script,
+run on the core's host): the archive's SHA-256 checked before it is
+unpacked, the executable written beside its place, its SHA-256 computed on
+the machine (`sha256sum`, `shasum` or `openssl`), renamed into place only
+when it is the one the manifest names, else removed and failed, and
+printed, which the core checks again. Its files are removed when the script
+ends (`trap`): an upload ends when its input does (the connection went), a
 download within its bounds (sshd sends no hangup to a session without a
 terminal, so a dropped connection does not end it sooner); the nodes'
-housekeeping removes what a killed shell left, after an hour. The local
-install checks it in process. When none of the sources has it the machine
-is refused with `build_unavailable` and what each source said (naming no
-path of the core's host, which the core logs), which the UI explains; it
-is dialed again later. A build of
-no release (development, the end-to-end tests) has no download URL: its
-machines get their executable from `--agent-dir` or the core's own copy.
-Which C library a machine has is what glibc answers (`getconf
-GNU_LIBC_VERSION`, `ldd --version`), musl's loader in `/lib` only without
-it (a glibc system with musl's package has one); musl's executable needs
-`libstdc++` and `libgcc`, which the probe reports when missing. Builds
+housekeeping removes what a killed shell left, after an hour. When none of
+the sources has the build the machine is refused with `build_unavailable`
+and what each source said (naming no path of the core's host, which the
+core logs), which the UI explains; it is dialed again later. A build of no
+release (development, the end-to-end tests) has no download URL: its
+machines get their build from `--agent-dir` (with its `SHA256SUMS`) or the
+core's own executable. Which C library a machine has is what glibc answers
+(`getconf GNU_LIBC_VERSION`, `ldd --version`), musl's loader in `/lib` only
+without it (a glibc system with musl's package has one); musl's executable
+needs `libstdc++` and `libgcc`, which the probe reports when missing. Builds
 unused for 14 days are removed (the nodes touch the directories of
 theirs), the core's cache likewise.
+
+The trust is the release's: a build is as trustworthy as the GitHub
+release and the core's TLS to it. Whoever can replace the release's assets
+(a leaked token, say) can replace `SHA256SUMS` too; the checks protect
+against damage and, when the core fetched the manifest, against the
+machine's network path. A signature over `SHA256SUMS` would be an addition
+to this, not a change of it.
 
 The node serves every core on one thread: what a user or a mount controls
 is not waited for on it. The core's file ops, git's reads of a repository,
@@ -326,20 +370,19 @@ mount that stopped answering stalls the node until it answers; and the
 node needs its data directory (its log, the terminal history's database).
 
 Which machine build a core deploys is a choice of its build
-(`backend/scripts/build.ts --machine go|ts`, `scripts/build.sh MACHINE=ts`,
-`backend/scripts/machines.ts` compiling the executables; the release
-workflow's repository variable `MACHINE`), not a flag of the product: the
-product's builds deploy the Go machine build until the TypeScript side
-serves every feature. Both speak the same protocols on the same sockets,
-locks and files (the terminal history's database, the terminal core's
-executable and session), so a node of either build takes over from the
-other with the terminals kept, which is the upgrade path.
-`scripts/e2e.sh` builds the cores of both, and the TypeScript executables
-of the host and of Docker's Linux (glibc and musl) into a directory the
-cores take as `--agent-dir`, offline; `E2E_MACHINE=ts` runs the end-to-end
-tests against the cores that deploy the TypeScript side, the specs of the
-features it does not serve yet skipped with the reason, and
-`tests/nodes.spec.ts` has a newer node of the other build take a node
+(`backend/scripts/build.ts --machine go|ts`, `scripts/build.sh MACHINE=ts`;
+the release workflow's repository variable `MACHINE`), not a flag of the
+product: the product's builds deploy the Go machine build until the
+TypeScript side serves every feature. Both speak the same protocols on the
+same sockets, locks and files (the terminal history's database, the
+terminal core's executable and session), so a node of either build takes
+over from the other with the terminals kept, which is the upgrade path.
+`scripts/e2e.sh` builds the cores of both, the TypeScript build for the
+host and Docker's Linux (glibc and musl) into a directory with its
+`SHA256SUMS`, which the cores take as `--agent-dir`, offline;
+`E2E_MACHINE=ts` runs the end-to-end tests against the TypeScript build,
+the specs of the features it does not serve yet skipped with the reason,
+and `tests/nodes.spec.ts` has a newer node of the other build take a node
 over.
 
 ### Wire compatibility while both exist
@@ -420,20 +463,31 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 ## Alternatives considered
 
 - **Keep the machine side in Go.** Smaller uploads (a Go build is 16 MB,
-  6.5 MB compressed; a machine executable 88–108 MB, 41–52 MB
-  compressed), but the chat host and its adapters would stay in Go and
-  the types twice.
+  6.5 MB compressed; the TypeScript build is 111–131 MiB, 48–58 MiB as
+  its archive), but the chat host and its adapters would stay in Go and the
+  types twice.
 - **The Bun runtime and a bundle of the machine side, apart.** An update
   would upload the bundle only (a few hundred kilobytes), the runtime once
   per Bun version, but a machine would run a launcher script that keeps
   the working directory's `.env` and `bunfig.toml` out, the runtimes would
   be pinned and fetched apart, and a node would have two files to check.
-  One executable per platform is one file, one digest and one install,
-  and the machines download it from the release, sparing the core's
-  upload.
-- **Every platform's executable in each core.** About 280 MB more per core
+- **A machine executable apart from the core.** A smaller file for
+  machines (about 30 MB less: no web UI, no core), but two programs per
+  platform, and a core cannot carry the digests of executables built from
+  the same release without building them first. One executable per
+  platform is what users run and what machines run, its release archive
+  what both download.
+- **Every platform's executable in each core.** About 300 MB more per core
   (and per desktop app): the release serves them, and a core carries its
   own.
+- **A signed manifest.** A signature over `SHA256SUMS` (a release key in a
+  secret, its public half in every build) would hold the builds to the
+  key rather than to the GitHub release; it means a key for the
+  maintainers to keep, and nothing in the checks changes when it is
+  added later.
+- **Bare executables as release assets.** One more 55 MB file per platform
+  beside the archive users download, without the licenses of what it
+  holds.
 - **A loopback listener for VS Code only.** Not needed: the tunnel works.
 - **A custom scheme for the desktop's origin.** Breaks code-server's
   resources and CacheStorage.
@@ -449,11 +503,14 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
   the machine with a code (`cpu_unsupported`, `libs_missing`) in its
   error, as an unknown platform is refused. Kernels and C libraries as old
   as CentOS 7's (3.10, glibc 2.17) run it (Testing).
-- A machine that cannot download its executable and a core that has it
-  in neither its directory nor its cache and cannot reach the release (an
+- A machine that cannot download its build and a core that has it in
+  neither its directory nor its cache and cannot reach the release (an
   offline site without `--agent-dir`): the machine is refused with
-  `build_unavailable`, which the UI explains (deployment.md, offline
-  sites).
+  `build_unavailable`, saying what each source said, which the UI
+  explains (deployment.md, offline sites).
+- A machine that reaches the release when its core does not: its build is
+  checked against the manifest it downloaded itself, integrity only (the
+  core's log says so).
 - A kernel without `openat2` (below 5.6) or a container filtering it: a
   link swapped into a directory of a path the agent resolved is followed,
   only the last name is refused (`O_NOFOLLOW`), as with the Go build.
@@ -517,7 +574,7 @@ SECURITY.md has both.
   agent falls back; `renameat2` works on CentOS 7's 3.10, which has it
   backported (upstream it needs 3.15).
 - The TypeScript machine side on the same machines
-  (`payloads/machine-node`: the compiled executable of the machine's C
+  (`payloads/machine-node`: the TypeScript build's executable of the machine's C
   library, its node reached with `node dial` as ssh reaches it, a
   terminal of the terminal core it installs from its own copy and starts, a
   file written and read back, links refused by the system calls and the
@@ -534,17 +591,24 @@ SECURITY.md has both.
   the machine side through the wire with the kernel's own `call` and
   `open`, so its results are checked by the core's schemas;
   `backend/kernel/machines/transport/deploy.test.ts` deploys this host's
-  compiled executable as an ssh connection does, through an ssh that runs
-  the remote commands locally: the machine's own download from a server
-  on loopback, the core's upload when the machine has no `curl` or `wget`,
-  may not download or got something else, a digest that is not the
-  executable's put in place by neither, and a working directory's `.env`
+  TypeScript build as an ssh connection does, through an ssh that runs the
+  remote commands locally, from a release on loopback: the manifest
+  fetched by the core and the machine's download checked against it, with
+  curl and with wget alone; the core's upload when the machine has no
+  tool, may not download, its download fails or was tampered with on its
+  path; the bounds (a stream without end, a trickle, a gzip bomb); the
+  remembered failure and its expiry; the manifest downloaded by the
+  machine when only it reaches the release (integrity only); a manifest
+  whose executable is not the archive's (nothing put in place); an offline
+  site's directory; no route anywhere (`build_unavailable`); the local
+  install of the core's own executable; and a working directory's `.env`
   and `bunfig.toml` and `BUN_OPTIONS` reaching neither `node dial` nor
-  the node; `sources.test.ts` the core's sources (a tampered file of the
-  directory or the cache refused, a download through a proxy checked and
-  cached).
+  the node. `release.test.ts` covers the manifest's sources and the
+  refusal of another build's, and the uploads' sources (tampered files of
+  the directory or the cache refused, a download through a proxy checked
+  and cached, one load for the machines of a platform).
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
-  runs the suite against the one deploying the TypeScript side (19 passed,
+  runs the suite against the TypeScript build (20 passed,
   the specs of chats, attention, program windows and AI usage skipped with
   the reason), and `tests/nodes.spec.ts` has the newer node of the other
   build take a node over in both runs.

@@ -87,7 +87,7 @@ module.exports = {
     {
       from: '../dist/payload',
       to: 'payload',
-      filter: ['agents/*.gz', 'hc/*.gz', 'machine/manifest.json', 'machine/*.gz', 'encoder/*.gz', 'ext/*.vsix'],
+      filter: ['agents/*.gz', 'hc/*.gz', 'machine/release.json', 'machine/hc.json', 'machine/*.gz', 'encoder/*.gz', 'ext/*.vsix'],
     },
     { from: '../web/dist', to: 'web' },
   ],
@@ -104,9 +104,9 @@ module.exports = {
       'dist/frames.cjs',
       ptyBinary(context.electronPlatformName),
       '../web/dist/index.html',
-      // The Go machine builds and herdr-core, or the TypeScript machine
-      // side's digests (scripts/build.sh MACHINE=ts).
-      ...(existsSync(join(__dirname, '../dist/payload/machine/manifest.json'))
+      // The Go machine builds and herdr-core, or the TypeScript build's
+      // record (scripts/build.sh MACHINE=ts).
+      ...(existsSync(join(__dirname, '../dist/payload/machine/release.json'))
         ? []
         : [`../dist/payload/agents/${slug}-linux-amd64.gz`, '../dist/payload/hc/hc-linux-amd64.gz']),
       '../dist/hc/licenses/LICENSE',

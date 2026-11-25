@@ -1,6 +1,6 @@
 #!/bin/sh
-# Runs the TypeScript machine side on this machine: the driver (driver.js,
-# built with build.sh) with the machine executable of this machine's C
+# Runs the TypeScript build's machine side on this machine: the driver (driver.js,
+# built with build.sh) with the executable of this machine's C
 # library (exe/: musl's on musl, glibc's elsewhere) acting as Bun
 # (BUN_BE_BUN=1), which drives that executable's node as a core does
 # (MACHINE_EXE names another build: run-go.sh). The run has a home of its
@@ -13,7 +13,7 @@ getconf GNU_LIBC_VERSION >/dev/null 2>&1 || { ls /lib/ld-musl-* >/dev/null 2>&1 
 echo "machine ${MACHINE_NAME:-?} kernel $(uname -r) libc $libc"
 suffix=
 [ $libc = musl ] && suffix=-musl
-own=$(ls exe/*-machine-linux-amd64$suffix 2>/dev/null | head -1)
+own=$(ls exe/*-linux-amd64$suffix 2>/dev/null | head -1)
 [ -x "$own" ] || { echo "FAIL no machine executable for linux-amd64$suffix in exe/ (build.sh)"; exit 1; }
 # What the core's probe refuses (kernel/machines/transport/ssh.ts
 # checkRuntimeRuns): musl without libstdc++ and libgcc, an x86-64 processor
