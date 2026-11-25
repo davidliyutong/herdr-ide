@@ -11,7 +11,16 @@ import { gunzipSync } from 'node:zlib';
 import { BRIDGE_EXT, CORE_BIN, DATA_DIR_NAME } from '#shared/lib/brand.ts';
 import { userHomeDir } from '#shared/host/hostdirs.ts';
 import { BUNDLE_FILE, tsBuild, type BuildSource, type GoBuild, type MachineBuild } from './machines/transport/builds.ts';
-import { EMBEDDED_RUNTIMES, cachedRuntime, runtimeFile, runtimeKey, runtimeOf, type Runtime } from './machines/transport/runtimes.ts';
+import {
+  EMBEDDED_RUNTIMES,
+  RUNTIME_PINS,
+  cachedRuntime,
+  checkPinned,
+  runtimeFile,
+  runtimeKey,
+  runtimeOf,
+  type Runtime,
+} from './machines/transport/runtimes.ts';
 
 /** Files by their path relative to a root ("index.html",
  * "assets/x.js"). */
@@ -78,7 +87,16 @@ export const BUNDLE_PATH = `machine/${BUNDLE_FILE}`;
  * (--agent-dir) holds uncompressed Go machine builds searched first
  * (development); runtimeCache keeps the runtimes fetched when a machine
  * needs one the core does not embed (musl's). Results are cached. */
-export function payloads(o: { files: Files; web?: Files | null; agentDir?: string; runtimeCache?: string }): Payloads {
+export function payloads(o: {
+  files: Files;
+  web?: Files | null;
+  agentDir?: string;
+  runtimeCache?: string;
+  /** The runtimes' pinned digests, and how one not embedded is fetched
+   * (tests give their own). */
+  runtimePins?: Readonly<Record<string, string>>;
+  downloadRuntime?: (key: string, signal?: AbortSignal) => Promise<Buffer>;
+}): Payloads {
   const agents = new Map<string, Promise<GoBuild>>();
   const gzs = new Map<string, Promise<{ gz: Buffer; digest: string }>>();
   const runtimes = new Map<string, Promise<Runtime>>();
@@ -118,9 +136,18 @@ export function payloads(o: { files: Files; web?: Files | null; agentDir?: strin
       // The build's own (a build may carry more than EMBEDDED_RUNTIMES:
       // the end-to-end tests' carries musl's for Docker's Alpine).
       const gz = await o.files.get(runtimeFile(key));
-      if (gz) return runtimeOf(Buffer.from(gz));
+      if (gz) {
+        // Only the pinned executable, whatever the build was given.
+        const rt = runtimeOf(Buffer.from(gz));
+        checkPinned(key, rt.digest, o.runtimePins ?? RUNTIME_PINS);
+        return rt;
+      }
       if ((EMBEDDED_RUNTIMES as readonly string[]).includes(key)) throw new Error(`no Bun runtime for ${key} in this build`);
-      return cachedRuntime(key, o.runtimeCache ?? join(userHomeDir(), DATA_DIR_NAME, 'cache'), signal);
+      return cachedRuntime(key, o.runtimeCache ?? join(userHomeDir(), DATA_DIR_NAME, 'cache'), {
+        signal,
+        download: o.downloadRuntime,
+        pins: o.runtimePins,
+      });
     });
   return {
     web: o.web === undefined ? null : o.web,

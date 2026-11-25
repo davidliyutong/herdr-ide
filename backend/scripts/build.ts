@@ -18,7 +18,9 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
-import { gzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { checkPinned, keyOfFile } from '../kernel/machines/transport/runtimes.ts';
 import { buildBundle } from '../hosts/machine/bundle.ts';
 
 const { values: o } = parseArgs({
@@ -50,8 +52,14 @@ if (o.machine === 'ts') {
   // The machine side: its bundle, built for this version, and the runtimes.
   const { js } = await buildBundle(o.version);
   entries['machine/machine.js'] = Buffer.from(js);
-  for (const name of readdirSync(o.runtimes))
-    if (/^bun-[a-z-]+-[a-z0-9]+\.gz$/.test(name)) entries[`runtime/${name}`] = readFileSync(join(o.runtimes, name));
+  for (const name of readdirSync(o.runtimes)) {
+    const key = keyOfFile(name);
+    if (!key) continue;
+    // Only the pinned executables (kernel/machines/transport/runtimes.ts).
+    const gz = readFileSync(join(o.runtimes, name));
+    checkPinned(key, createHash('sha256').update(gunzipSync(gz)).digest('hex'));
+    entries[`runtime/${name}`] = gz;
+  }
 } else if (o.agents)
   for (const name of readdirSync(o.agents)) {
     const b = readFileSync(join(o.agents, name));

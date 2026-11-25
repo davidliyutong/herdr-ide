@@ -4,10 +4,10 @@
 // from its content, so a rebuilt one is uploaded again.
 import { afterAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { BRIDGE_EXT, CORE_BIN } from '#shared/lib/brand.ts';
 import { dirFiles, layered, payloads, type Files } from './payloads.ts';
 
@@ -114,7 +114,10 @@ test('the TypeScript machine side: the bundle with the runtime of the platform a
     ]),
   );
   const cache = temp();
-  const p = payloads({ files, runtimeCache: cache });
+  const musl = Buffer.from('musl runtime');
+  let downloads = 0;
+  const pins = { 'linux/amd64': sha256(bun), 'linux-musl/amd64': sha256(musl) };
+  const p = payloads({ files, runtimeCache: cache, runtimePins: pins, downloadRuntime: async () => (downloads++, musl) });
   const b = await p.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' });
   if (b.kind !== 'ts') throw new Error('not the TypeScript build');
   expect(b.bundle).toEqual(js);
@@ -122,10 +125,30 @@ test('the TypeScript machine side: the bundle with the runtime of the platform a
   expect(b.runtime.digest).toBe(sha256(bun));
   expect(b.version).toBe(sha256(Buffer.from(`${sha256(js)}\0${sha256(bun)}`)).slice(0, 16));
   await expect(p.machine({ os: 'darwin', arch: 'arm64' })).rejects.toThrow('no Bun runtime for darwin/arm64');
-  // musl's comes from the cache (else it is downloaded and checked).
-  const musl = Buffer.from('musl runtime');
-  writeFileSync(join(cache, 'bun-linux-x64-musl-baseline-1.4.5.gz'), gzipSync(musl));
+  // musl's comes from the cache when it is the pinned one; a tampered one
+  // is refused and fetched again.
+  const cached = join(cache, 'bun-linux-x64-musl-baseline-1.4.5.gz');
+  writeFileSync(cached, gzipSync(Buffer.from('tampered')));
   const m = await p.machine({ os: 'linux', arch: 'amd64', libc: 'musl' });
   expect(m.kind === 'ts' && m.runtime.digest).toBe(sha256(musl));
   expect(m.version).not.toBe(b.version);
+  expect(downloads).toBe(1);
+  expect(gunzipSync(readFileSync(cached))).toEqual(musl);
+  // Cached now: not fetched again.
+  const again = payloads({ files, runtimeCache: cache, runtimePins: pins, downloadRuntime: async () => (downloads++, musl) });
+  await again.machine({ os: 'linux', arch: 'amd64', libc: 'musl' });
+  expect(downloads).toBe(1);
+  // A build's runtime that is not the pinned one is refused.
+  const other = payloads({ files, runtimeCache: cache, runtimePins: { ...pins, 'linux/amd64': 'f'.repeat(64) } });
+  await expect(other.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' })).rejects.toThrow(/not the pinned/);
+});
+
+test('the pinned runtimes: every embedded platform and musl, archive and executable', async () => {
+  const { RUNTIMES, keyOfFile, runtimeFile } = await import('./machines/transport/runtimes.ts');
+  for (const [key, a] of Object.entries(RUNTIMES)) {
+    expect(a.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(a.bun).toMatch(/^[0-9a-f]{64}$/);
+    expect(keyOfFile(runtimeFile(key).slice('runtime/'.length))).toBe(key);
+  }
+  expect(keyOfFile('bun-linux-amd64.gz.tmp')).toBeNull();
 });
