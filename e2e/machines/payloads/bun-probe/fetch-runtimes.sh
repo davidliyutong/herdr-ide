@@ -1,8 +1,12 @@
 #!/bin/sh
-# Downloads the Bun runtimes the probe runs into rt/<name>/bun, verified
-# against the release's SHASUMS256.txt and the digests pinned here.
+# Downloads the Bun runtimes the probe runs into rt/<name>/bun beside this
+# script (fetch-runtimes.sh DIR: into DIR/<name>/bun), verified against the
+# release's SHASUMS256.txt and the digests pinned here.
 set -eu
-cd "$(dirname "$0")"
+here=$(cd "$(dirname "$0")" && pwd)
+out=${1:-$here/rt}
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
 v=${BUN_VERSION:-1.4.5}
 base=https://github.com/oven-sh/bun/releases/download/bun-v$v
 pinned() { # bun 1.4.5
@@ -12,12 +16,12 @@ pinned() { # bun 1.4.5
   bun-linux-x64-musl-baseline) echo 96fb94108eed872ff623ed39007d6b5699a83a5d0086fcfba84921c18145e3e6 ;;
   esac
 }
-mkdir -p rt/dl
-curl -fsSL -o rt/dl/SHASUMS256.txt "$base/SHASUMS256.txt"
+mkdir -p "$out/dl"
+curl -fsSL -o "$out/dl/SHASUMS256.txt" "$base/SHASUMS256.txt"
 for z in ${RUNTIMES:-bun-linux-x64-baseline bun-linux-x64 bun-linux-x64-musl-baseline}; do
-  curl -fsSL -o "rt/dl/$z.zip" "$base/$z.zip"
-  got=$(sha256sum "rt/dl/$z.zip" | cut -d' ' -f1)
-  listed=$(grep "  $z.zip\$" rt/dl/SHASUMS256.txt | cut -d' ' -f1)
+  curl -fsSL -o "$out/dl/$z.zip" "$base/$z.zip"
+  got=$(sha256sum "$out/dl/$z.zip" | cut -d' ' -f1)
+  listed=$(grep "  $z.zip\$" "$out/dl/SHASUMS256.txt" | cut -d' ' -f1)
   want=$listed
   [ "$v" = 1.4.5 ] && want=$(pinned "$z")
   if [ "$got" != "$listed" ] || [ "$got" != "$want" ]; then
@@ -25,7 +29,7 @@ for z in ${RUNTIMES:-bun-linux-x64-baseline bun-linux-x64 bun-linux-x64-musl-bas
     exit 1
   fi
   echo "$z.zip: sha256 $got verified"
-  rm -rf "rt/$z"
-  unzip -q -o "rt/dl/$z.zip" -d rt/
+  rm -rf "${out:?}/$z"
+  unzip -q -o "$out/dl/$z.zip" -d "$out/"
 done
-rm -rf rt/dl
+rm -rf "$out/dl"
