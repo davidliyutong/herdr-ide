@@ -64,7 +64,15 @@ async function main(): Promise<void> {
   const logFile = process.env.FAKE_CLAUDE_LOG ?? '';
   const record = (r: Msg) => appendFileSync(logFile, JSON.stringify(r) + '\n', { mode: 0o600 });
   const env: Record<string, string> = {};
-  for (const k of ['CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SDK_READS_SESSION_STATE', 'CLAUDE_AGENT_SDK_VERSION', 'NODE_OPTIONS', 'KEEP_ME'])
+  for (const k of [
+    'CLAUDE_CODE_ENTRYPOINT',
+    'CLAUDE_CODE_SDK_READS_SESSION_STATE',
+    'CLAUDE_AGENT_SDK_VERSION',
+    'NODE_OPTIONS',
+    'DEBUG',
+    'DEBUG_CLAUDE_AGENT_SDK',
+    'KEEP_ME',
+  ])
     if (process.env[k] !== undefined) env[k] = process.env[k]!;
   record({ argv: args, env, pid: process.pid });
   if (sc.noConversation)

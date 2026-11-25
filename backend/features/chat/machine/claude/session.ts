@@ -322,12 +322,17 @@ export class ClaudeSession implements Session {
   /** The program's environment: the host's, with the SDK's variables (which
    * the SDK sets, NODE_OPTIONS dropped) and the entry point the product's
    * name: Claude Code hides the SDK's own entry points' sessions from the
-   * terminal's /resume, and a chat may go on in a terminal. */
+   * terminal's /resume, and a chat may go on in a terminal. DEBUG and
+   * DEBUG_CLAUDE_AGENT_SDK go too: the SDK drops DEBUG only when the other
+   * is not set, and sets DEBUG=1 for the program when it is, which would
+   * have the program write its debug log of the chat. */
   private env(): Record<string, string> {
     const env = { ...this.p.env };
     delete env.CLAUDE_AGENT_SDK_VERSION;
     delete env.CLAUDE_CODE_SDK_READS_SESSION_STATE;
     delete env.NODE_OPTIONS;
+    delete env.DEBUG;
+    delete env.DEBUG_CLAUDE_AGENT_SDK;
     env.CLAUDE_CODE_ENTRYPOINT = SLUG;
     return env;
   }

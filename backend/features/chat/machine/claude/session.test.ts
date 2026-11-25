@@ -270,6 +270,19 @@ describe('the program', () => {
     );
   }, 30_000);
 
+  // The SDK drops DEBUG only when DEBUG_CLAUDE_AGENT_SDK is not set, and
+  // sets DEBUG=1 for the program when it is: the adapter hands it neither.
+  test('the program runs without DEBUG, whatever the host has', async () => {
+    const { r, s } = await started(initLines(), {
+      edit: (p) => Object.assign(p.env, { DEBUG: '*', DEBUG_CLAUDE_AGENT_SDK: '1' }),
+    });
+    await r.until(s, -1);
+    const env = r.records()[0]!.env as Record<string, string>;
+    expect(env).not.toHaveProperty('DEBUG');
+    expect(env).not.toHaveProperty('DEBUG_CLAUDE_AGENT_SDK');
+    expect(env.KEEP_ME).toBe('1');
+  }, 30_000);
+
   test("the host's own environment keeps what the SDK sets in it for the program", async () => {
     const before = process.env.CLAUDE_AGENT_SDK_VERSION;
     const { r, s } = await started(initLines());

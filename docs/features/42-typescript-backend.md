@@ -740,11 +740,13 @@ adapter gives it:
   for full access, which starts the program again on the same session;
 - the host's environment for the program with
   `CLAUDE_CODE_ENTRYPOINT=<slug>`, so the sessions show in the terminal's
-  `/resume` (the SDK adds `CLAUDE_AGENT_SDK_VERSION` and
-  `CLAUDE_CODE_SDK_READS_SESSION_STATE` and drops `NODE_OPTIONS` and
-  `DEBUG`; it also sets `CLAUDE_AGENT_SDK_VERSION` in the host's own
-  environment, which the host gives every agent's login shell, so the
-  adapter puts that back);
+  `/resume`, and without `DEBUG` and `DEBUG_CLAUDE_AGENT_SDK`: the SDK
+  drops `DEBUG` only when the other is not set and sets `DEBUG=1` when it
+  is, which would start Claude Code in its debug mode (the SDK adds
+  `CLAUDE_AGENT_SDK_VERSION` and `CLAUDE_CODE_SDK_READS_SESSION_STATE` and
+  drops `NODE_OPTIONS`; it also sets `CLAUDE_AGENT_SDK_VERSION` in the
+  host's own environment, which the host gives every agent's login shell,
+  so the adapter puts that back);
 - `spawnClaudeCodeProcess` (`sdk.ts`, `AgentSpawn`): the program runs
   through the host's `AgentProcesses` (a process group of its own, the end
   of its standard error kept, ended gracefully, what it left in its group
@@ -1154,8 +1156,9 @@ SECURITY.md has both.
   of its own: the program's end with its group, lines and messages passed
   over, the timeouts, the start's options and refusals, full access by a
   restart (also closed during it), the requests not served, prompts the
-  host recorded or not, trust, another Claude Code's session, titles
-  (`session.test.ts`); imports and sessions from transcripts, the
+  host recorded or not, trust, another Claude Code's session, titles,
+  the program's environment without `DEBUG` (`session.test.ts`);
+  imports and sessions from transcripts, the
   recorded one giving the Go golden file's events (`history.test.ts`);
   the SDK's seam: its version, `cancelAsyncMessage` on a real `Query`,
   the framing, the prompts, the program as the SDK sees it
