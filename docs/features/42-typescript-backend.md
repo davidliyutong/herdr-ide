@@ -2,23 +2,26 @@
 
 ## Context
 
-The core and the machine agent are one Go program (`cmd/veldr`,
-`internal/`). The web UI, the desktop shell and the end-to-end tests are
-TypeScript. Three things argue for one language:
+The core and the machine agent were one Go program (`cmd/veldr`,
+`internal/`), while the web UI, the desktop shell and the end-to-end tests
+were TypeScript. Three things argued for one language:
 
-- the desktop app runs the Go core as a child process that listens on
-  loopback TCP, so any local process can reach the desktop's core, and the
-  shell talks to its own core over HTTP;
-- the chat host drives Claude Code with a hand-written copy of the
+- the desktop app ran the Go core as a child process that listened on
+  loopback TCP, so any local process could reach the desktop's core, and
+  the shell talked to its own core over HTTP;
+- the chat host drove Claude Code with a hand-written copy of the
   protocol of `@anthropic-ai/claude-agent-sdk`, which Anthropic publishes
   for TypeScript;
-- protocol types (agentproto, chatproto, settings) exist in both
+- protocol types (agentproto, chatproto, settings) existed in both
   languages.
 
-This document describes the goal of a rewrite in stages on the `dev`
-branch: the backend in TypeScript under `backend/`, run by Bun as one
-executable, with unchanged behavior, and the desktop app running the core
-inside Electron without a TCP listener.
+The backend is now TypeScript under `backend/`, built by Bun into one
+executable per platform that is both the core and that platform's machine
+side, with the behavior the Go program had; the desktop app runs the core
+inside Electron without a TCP listener. This document describes that
+design and why it is so. The Go program remains the other machine build
+(`MACHINE=go`): both speak the same wire protocols, and a node of either
+takes over from the other.
 
 ## Goals / non-goals
 
@@ -35,7 +38,7 @@ Goals:
 
 Non-goals:
 
-- New features while the rewrite runs.
+- New features in the rewrite: it kept the Go program's behavior.
 - The Linux GUI windows' X client, capture and encoding in TypeScript: they
   are a native helper (below).
 
@@ -670,12 +673,11 @@ yamux (`backend/shared/proto/yamux.ts`) speaks hashicorp/yamux's protocol with
 its semantics (a close is a half-close; window, keepalive and backlog as
 `agentproto.YamuxConfig`), and agentproto, herdr-core's protocol and the
 chat host's protocol keep their wire forms, so a TypeScript core serves Go
-machine builds and the other way round. The stages: shared libraries;
-the core in TypeScript with the Go machine builds, which then becomes the
-product's core, the Go core removed (the Go program is the machine build
-only); the desktop app's core in process; the machine side in
-TypeScript, then the product's default machine build (`MACHINE=go` builds
-the Go one); the Go program removed.
+machine builds and the other way round. That let the rewrite land in
+stages, each one usable: shared libraries; the core in TypeScript with
+the Go machine builds, the Go core removed; the desktop app's core in
+process; the machine side in TypeScript, which became the default machine
+build. The Go program is now the machine build of `MACHINE=go` only.
 
 ### What changes on the wire
 
@@ -1054,7 +1056,8 @@ SECURITY.md has both.
   package; `spec/vectors` run by both.
 - While both exist, yamux is tested against hashicorp/yamux
   (`backend/shared/proto/testdata/yamuxpeer`).
-- `make e2e` unchanged, against each stage's executable; with the
+- `make e2e`, against the TypeScript build (`E2E_MACHINE=go`: the core
+  that deploys the Go machine build); with the
   desktop's packages installed it also runs the desktop app's smoke test
   (`e2e/tests/desktop.spec.ts`: Playwright's Electron, the unpackaged app
   on an isolated instance, profile and home, Chromium's mock keychain):
