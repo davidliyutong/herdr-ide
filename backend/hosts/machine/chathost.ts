@@ -64,7 +64,7 @@ export async function chatHostCommand(argv: string[]): Promise<number> {
       base,
       run,
       logger,
-      adapters: chatAdapters(),
+      adapters: chatAdapters({ base }),
       spec: chatSpec,
       client: { name: SLUG, version: VERSION },
       signals: (on) => {

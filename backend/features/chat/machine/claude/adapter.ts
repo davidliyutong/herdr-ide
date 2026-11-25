@@ -1,5 +1,6 @@
 // The chat host's adapter of Claude Code (the kinds whose chat spec names
-// the adapter claude), on Anthropic's Agent SDK: each session is a query()
+// the adapter claude), on Anthropic's Agent SDK, which it loads at run time
+// from the machine's data directory (load.ts): each session is a query()
 // of the user's own claude (pathToClaudeCodeExecutable, the host's command)
 // with the SDK's arguments, started through the host's AgentProcesses
 // (session.ts, sdk.ts). Sessions and imports read Claude Code's
@@ -15,11 +16,15 @@ import type { Adapter, HistoryParams, Session, SessionsParams, Sink, StartParams
 import { EFFORTS, EFFORT_DEFAULT, MODEL_ID } from './config.ts';
 import { badRequest } from './content.ts';
 import { historyOf, sessionsOf } from './history.ts';
+import type { SdkSource } from './load.ts';
 import { CLAUDE_TIMING, ClaudeSession, type ClaudeTiming } from './session.ts';
 
 export { CLAUDE_TIMING, type ClaudeTiming } from './session.ts';
 
 export interface ClaudeAdapterOptions {
+  /** Where the Agent SDK comes from: the machine's data directory
+   * (load.ts installedSdk); tests give the development dependency. */
+  sdk: SdkSource;
   timing?: Partial<ClaudeTiming>;
   /** The most sessions a page of sessions lists (tests make pages short). */
   sessionsPage?: number;
@@ -30,7 +35,7 @@ export interface ClaudeAdapterOptions {
 const resolverOf = (env: Record<string, string>): Resolver => new Resolver({ home: env.HOME ?? '', getenv: (k) => env[k] });
 
 /** Claude Code's adapter. */
-export function claudeAdapter(o: ClaudeAdapterOptions = {}): Adapter {
+export function claudeAdapter(o: ClaudeAdapterOptions): Adapter {
   const t: ClaudeTiming = { ...CLAUDE_TIMING, ...o.timing };
   const page = o.sessionsPage ?? 50;
   /** The programs this adapter runs: their records of the sessions they run
@@ -62,7 +67,10 @@ export function claudeAdapter(o: ClaudeAdapterOptions = {}): Adapter {
         const e = await inTerminal(p.env, p.resume, signal);
         if (e) throw new ChatProtoError(e);
       }
-      const s = new ClaudeSession({ ...p, logger: p.logger ?? discard }, sink, id, t, own);
+      // The SDK is loaded once a chat needs it, and the host goes on without
+      // it (sdk_unavailable for the chat).
+      const sdk = await o.sdk.load();
+      const s = new ClaudeSession({ ...p, logger: p.logger ?? discard }, sink, id, t, own, sdk);
       await s.begin(signal);
       return s;
     },

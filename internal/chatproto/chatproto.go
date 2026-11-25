@@ -960,6 +960,11 @@ const (
 	// CodeUnsafeFolder: OpTrust of a directory that may not be trusted (see
 	// OpTrust).
 	CodeUnsafeFolder = "unsafe_folder"
+	// CodeSdkUnavailable: the agent's adapter runs on a library the machine
+	// does not have and could not get (the TypeScript build's Claude Code
+	// adapter, on Anthropic's Agent SDK fetched on use); this build's hosts
+	// do not send it.
+	CodeSdkUnavailable = "sdk_unavailable"
 )
 
 // Error is why a request, a command, a turn or a chat failed. Message is

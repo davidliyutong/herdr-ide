@@ -151,6 +151,7 @@ describe('wire', () => {
       chat.Code.Sleeping,
       chat.Code.NotAllowed,
       chat.Code.UnsafeFolder,
+      chat.Code.SdkUnavailable,
     ]);
     expect(list('MACHINE_CODES')).toEqual([NOT_RUNNING, 'upgrading', 'no_terminal_core', 'start_failed', 'transport']);
     expect(list('CORE_CODES')).toEqual([

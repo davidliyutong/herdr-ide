@@ -11,7 +11,7 @@ import { ChatProtoError, Code, EventType, TurnState, type Event } from '#shared/
 import type { HistoryParams, SessionsParams } from '../adapter.ts';
 import { claudeAdapter } from './adapter.ts';
 import { headOf, isChunk } from './items.ts';
-import { GO_GOLDEN, VECTORS, isolateHome, tempDir } from './testing.ts';
+import { GO_GOLDEN, VECTORS, devSdk, isolateHome, tempDir } from './testing.ts';
 
 isolateHome();
 
@@ -42,7 +42,7 @@ const hp = (env: Record<string, string>, o: Partial<HistoryParams> = {}): Histor
 
 async function readHistory(p: HistoryParams): Promise<Event[]> {
   const evs: Event[] = [];
-  await claudeAdapter().history(
+  await claudeAdapter({ sdk: devSdk }).history(
     p,
     (ev) => {
       expect(ev.seq).toBeUndefined();
@@ -201,7 +201,7 @@ describe('sessions', () => {
       cursor: '',
       ...o,
     });
-    const { sessions, next } = await claudeAdapter().sessions(sp(), sig());
+    const { sessions, next } = await claudeAdapter({ sdk: devSdk }).sessions(sp(), sig());
     expect(next).toBe('');
     expect(sessions.map((s) => s.sessionId.slice(-1))).toEqual(['2', '3', '1']);
     expect(sessions.map((s) => s.title)).toEqual(['My name', 'first prompt', '回复问候语']);
@@ -213,7 +213,7 @@ describe('sessions', () => {
     // A page at a time.
     const paged: string[] = [];
     let cursor = '';
-    const one = claudeAdapter({ sessionsPage: 1 });
+    const one = claudeAdapter({ sdk: devSdk, sessionsPage: 1 });
     for (let i = 0; i < 5; i++) {
       const page = await one.sessions(sp({ cursor }), sig());
       paged.push(...page.sessions.map((s) => s.sessionId.slice(-1)));
@@ -221,9 +221,9 @@ describe('sessions', () => {
       cursor = page.next;
     }
     expect(paged).toEqual(['2', '3', '1']);
-    expect(await codeOf(claudeAdapter().sessions(sp({ cursor: 'x' }), sig()))).toBe(Code.BadRequest);
-    expect(await codeOf(claudeAdapter().sessions(sp({ cwd: 'relative' }), sig()))).toBe(Code.BadRequest);
-    expect((await claudeAdapter().sessions(sp({ cwd: '/nowhere' }), sig())).sessions).toEqual([]);
+    expect(await codeOf(claudeAdapter({ sdk: devSdk }).sessions(sp({ cursor: 'x' }), sig()))).toBe(Code.BadRequest);
+    expect(await codeOf(claudeAdapter({ sdk: devSdk }).sessions(sp({ cwd: 'relative' }), sig()))).toBe(Code.BadRequest);
+    expect((await claudeAdapter({ sdk: devSdk }).sessions(sp({ cwd: '/nowhere' }), sig())).sessions).toEqual([]);
   });
 
   test("a long directory's transcripts are in the directories that start with the first 200 characters of its escaped name", async () => {
@@ -232,7 +232,7 @@ describe('sessions', () => {
     const dir = join(home, '.claude', 'projects', claudeEscape(long).slice(0, CLAUDE_MAX_NAME) + '-h4sh');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '00000000-0000-4000-8000-000000000007.jsonl'), transcriptLines(long, 'long'));
-    const { sessions } = await claudeAdapter().sessions(
+    const { sessions } = await claudeAdapter({ sdk: devSdk }).sessions(
       { kind: 'claude', argv: [], env, cwd: long, procs: null as never, logger: () => {}, cursor: '' },
       sig(),
     );

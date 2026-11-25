@@ -51,6 +51,10 @@ export interface FeatureInputs {
   /** A terminal on the core's host, for an interactive ssh login. */
   pty?: SpawnPty;
   codeServer: Omit<Parameters<typeof vscodeFeatures>[0], 'bridgeVSIX'>;
+  /** Where machines get Anthropic's Agent SDK for Claude Code's chats:
+   * the operator's directories (--seed-dir, as code-server's), offline, the
+   * npm registry (--npm-registry). */
+  chatSdk?: { seedDirs?: readonly string[]; offline?: boolean; registry?: string };
 }
 
 /** The core's features, as both hosts run them (also what
@@ -82,7 +86,7 @@ export function coreFeatures(o: FeatureInputs): FeatureDef[] {
     usageFeature(),
     vaultFeature({ verifyKey: o.verifyKey }),
     agentsFeature(),
-    chatFeature(),
+    chatFeature({ sdk: o.chatSdk }),
     historyFeature(),
   ];
 }

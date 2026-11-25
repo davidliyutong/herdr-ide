@@ -76,6 +76,8 @@ export const zhCN: Record<keyof typeof en, string> = {
   'chat.reason.busy': '智能体正在工作；请等它这一轮结束，或停止它',
   'chat.reason.in_terminal': '这个会话正在一个终端中运行',
   'chat.reason.unsafe_folder': '这个文件夹不能被信任',
+  'chat.reason.sdk_unavailable':
+    '机器无法获取 Claude Code 对话所需的 Anthropic Agent SDK：请让机器或应用的服务器能访问 npm 注册表，或把 SDK 的压缩包放入服务器的 --seed-dir',
   'chat.reason.unknown_chat': '这个对话已不存在',
   'chat.reason.not_found': '机器上没有这个智能体或会话',
   'chat.reason.too_many': '机器保留的对话数已达设置的上限',

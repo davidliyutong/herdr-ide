@@ -11,12 +11,16 @@
 // the feature is on and the host is in use (watch.ts); the routes
 // (routes.ts) and the pages (page.ts) reach the hosts through the hub
 // (hub.ts).
+import { join } from 'node:path';
+import { DATA_DIR_NAME } from '#shared/lib/brand.ts';
+import { userHomeDir } from '#shared/host/hostdirs.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { open } from '#kernel/agent.ts';
 import { defineFeature, type FeatureDef } from '#kernel/feature.ts';
 import { offline } from '#kernel/fail.ts';
 import type { Opener } from './hostconn.ts';
 import { ChatHub } from './hub.ts';
+import { SdkProvision, type SdkProvisionOptions } from './sdkprovision.ts';
 import { chatProtocol } from './protocol.ts';
 import { routes } from './routes.ts';
 import { settings } from './settings.ts';
@@ -32,6 +36,10 @@ export interface ChatOptions {
   now?: () => number;
   /** This core's build, whose chat host a machine's is compared to. */
   version?: () => string;
+  /** How machines get Anthropic's Agent SDK for Claude Code's chats
+   * (sdkprovision.ts): the operator's directories, offline, the registry,
+   * the cache (~/.<slug>/cache/npm by default). */
+  sdk?: Partial<SdkProvisionOptions>;
 }
 
 export interface ChatFeature extends FeatureDef {
@@ -63,6 +71,11 @@ export function chatFeature(o: ChatOptions = {}): ChatFeature {
             return (await open(mc, chatProtocol, 'open', start ? {} : { start: false }, { signal })).conn;
           }),
         version: o.version ?? (() => VERSION),
+        sdk: new SdkProvision({
+          cacheDir: join(userHomeDir(), DATA_DIR_NAME, 'cache', 'npm'),
+          ...o.sdk,
+          logger: ctx.logger,
+        }),
         now: o.now ?? Date.now,
         timing,
         limits: { ...DEFAULT_LIMITS, ...o.limits },
@@ -70,7 +83,10 @@ export function chatFeature(o: ChatOptions = {}): ChatFeature {
       hub = h;
       routes(ctx, h, timing);
       ctx.service('watch', (signal) => h.run(signal));
-      ctx.onForget((m) => h.forget(m));
+      ctx.onForget((m) => {
+        h.forget(m);
+        h.o.sdk.forget(m);
+      });
     },
   });
   return Object.assign(def, { hub: () => hub });

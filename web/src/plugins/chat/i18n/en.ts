@@ -79,6 +79,8 @@ export const en = {
   'chat.reason.busy': 'the agent is working; wait for its turn to end, or stop it',
   'chat.reason.in_terminal': 'the session runs in a terminal',
   'chat.reason.unsafe_folder': 'the folder may not be trusted',
+  'chat.reason.sdk_unavailable':
+    'the machine could not get Anthropic’s Agent SDK, which Claude Code chats need: let the machine or the app’s server reach the npm registry, or put the SDK’s tarball into a --seed-dir of the server',
   'chat.reason.unknown_chat': 'the chat is no longer there',
   'chat.reason.not_found': 'the machine has no such agent or session',
   'chat.reason.too_many': 'the machine keeps as many chats as its settings allow',

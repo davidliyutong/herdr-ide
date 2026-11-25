@@ -1,6 +1,7 @@
-// The seam to Anthropic's Agent SDK (@anthropic-ai/claude-agent-sdk,
-// pinned): what the adapter gives query() beyond its options, and what it
-// uses of the SDK that the SDK's types do not declare.
+// The seam to Anthropic's Agent SDK (@anthropic-ai/claude-agent-sdk, the
+// version machines fetch, ../../claudesdk.ts): what the adapter gives
+// query() beyond its options, and what it uses of the SDK that the SDK's
+// types do not declare.
 //
 // The SDK speaks Claude Code's protocol: it writes the command line and the
 // environment, frames the lines, pairs control requests with their answers,
@@ -25,10 +26,11 @@ import { Readable, Writable } from 'node:stream';
 import type { Query, SDKUserMessage, SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { ChatProtoError, Code, MAX_LINE } from '#shared/proto/chatproto/index.ts';
 import type { AgentProcess, AgentProcesses, StopTiming } from '../agentproc.ts';
+import { CLAUDE_SDK } from '../../claudesdk.ts';
 
-/** The version of the SDK the adapter is built and tested with (the
- * dependency is pinned to it). */
-export const SDK_VERSION = '0.3.322';
+/** The version of the SDK the adapter is built and tested with: the one
+ * machines fetch (../../claudesdk.ts), the development dependency's. */
+export const SDK_VERSION = CLAUDE_SDK.version;
 
 /** The longest session_state_changed line looked into. */
 const STATE_LINE = 4 << 10;

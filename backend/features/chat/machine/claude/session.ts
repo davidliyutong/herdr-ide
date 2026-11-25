@@ -16,7 +16,7 @@
 // imports use), a subagent's messages events with its parent, system and
 // result messages turns, notices and the chat's usage.
 import { randomUUID } from 'node:crypto';
-import { query, type Options, type PermissionResult, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, PermissionResult, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { SLUG } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { Notice, Transcript, noticeMethod } from '#shared/proto/agentproto/index.ts';
@@ -45,6 +45,7 @@ import { titleOf } from './history.ts';
 import { eventOf, frameOf, headOf, isChunk, isObj, itemOf, live, num, ownMeta, str, toolCallUpdate, withMeta, type Obj } from './items.ts';
 import { DENY_UNASKED, decide } from './permissions.ts';
 import { AgentSpawn, Prompts, cancelAsyncMessage, spawner } from './sdk.ts';
+import type { SdkModule } from './load.ts';
 import { trustedByClaude } from './trust.ts';
 
 /** A session's times, in milliseconds; shorter in tests. */
@@ -203,6 +204,8 @@ export class ClaudeSession implements Session {
   /** The pids of the programs the adapter runs (its inTerminal passes over
    * their records). */
   private readonly own: Set<number>;
+  /** The Agent SDK, loaded at run time (load.ts). */
+  private readonly sdk: SdkModule;
 
   /** The run now; restarting: it is being replaced, which restartAbort
    * calls off. */
@@ -251,8 +254,9 @@ export class ClaudeSession implements Session {
   private usage: chat.Usage = { used: 0, size: 0 };
   private readonly seen = new Set<string>();
 
-  constructor(p: StartParams, sink: Sink, id: string, t: ClaudeTiming, own: Set<number>) {
+  constructor(p: StartParams, sink: Sink, id: string, t: ClaudeTiming, own: Set<number>, sdk: SdkModule) {
     this.p = p;
+    this.sdk = sdk;
     this.own = own;
     this.sink = sink;
     this.id = id;
@@ -376,7 +380,7 @@ export class ClaudeSession implements Session {
     // host gives the login shell whose environment every agent gets.
     const own = process.env[SDK_VARIABLE];
     try {
-      run.q = query({ prompt: run.prompts, options: this.options(run, resume, full) });
+      run.q = this.sdk.query({ prompt: run.prompts, options: this.options(run, resume, full) });
     } catch (e) {
       throw perr(Code.StartFailed, 'claude: ' + messageOf(e));
     } finally {

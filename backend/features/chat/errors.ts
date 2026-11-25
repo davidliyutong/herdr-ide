@@ -68,8 +68,9 @@ export function statusOf(code: string): number {
       return 504;
     case 'upgrading':
     case 'no_terminal_core':
-      // The machine's host makes way for another build, or its terminal
-      // core does not run: later.
+    case Code.SdkUnavailable:
+      // The machine's host makes way for another build, its terminal core
+      // does not run, or it has no Agent SDK and could not get it: later.
       return 503;
   }
   // The agent or the machine failed: start_failed, protocol, ended,

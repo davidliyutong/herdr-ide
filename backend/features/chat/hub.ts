@@ -13,7 +13,9 @@ import type { Audit, Who } from '#kernel/audit.ts';
 import type { ChannelHandlers, Channel } from '#kernel/channel.ts';
 import type { Change, Store } from '#kernel/config/settings/index.ts';
 import type { AgentEvent, Machines } from '#kernel/machines/manager.ts';
+import { Adapter, chatSpec } from '#shared/agents/kinds.ts';
 import { Configurer } from './configure.ts';
+import type { SdkProvision } from './sdkprovision.ts';
 import { HostLink, readError, type HostConn, type Opener, type Response } from './hostconn.ts';
 import { ChatPage } from './page.ts';
 import { hostSettings } from './settings.ts';
@@ -33,6 +35,8 @@ export interface HubOptions {
   publishAgent: (ev: AgentEvent) => void;
   open: Opener;
   version: () => string;
+  /** Anthropic's Agent SDK on the machines, for Claude Code's chats. */
+  sdk: SdkProvision;
   now: () => number;
   timing: Timing;
   limits: Limits;
@@ -105,6 +109,17 @@ export class ChatHub {
     this.watch.used(m);
     if (o.agent) await this.config.ensure(m, c, o.signal);
     return c;
+  }
+
+  /** Makes sure machine m can run a chat of kind: Claude Code's chats run on
+   * Anthropic's Agent SDK, which the machine gets before one starts
+   * (sdkprovision.ts). A read-only core installs nothing. Fails with
+   * sdk_unavailable when the machine could not get it. */
+  async ensureSdk(m: string, kind: string, signal: AbortSignal): Promise<void> {
+    if (this.o.readOnly || chatSpec(kind)?.adapter !== Adapter.Claude) return;
+    const mc = this.o.machines.get(m);
+    if (!mc?.connected) return;
+    await this.o.sdk.ensure(mc, signal);
   }
 
   /** Sends one request to machine m's chat host and returns its answer. */

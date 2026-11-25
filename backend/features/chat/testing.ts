@@ -4,6 +4,9 @@
 // what it gets; a page's WebSocket over a channel pair whose page can stop
 // taking messages; and a core with machines gpu (connected) and box
 // (disabled) that runs them.
+import { mkdtempSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { discard } from '#shared/lib/log.ts';
 import { write, type Reader } from '#shared/lib/streamio.ts';
 import { Op, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
@@ -64,6 +67,12 @@ export class FakeChatHost {
   dropAfterMs = 0;
   /** Fails every open with that code. */
   openErr = '';
+  /** What the machine answers of Anthropic's Agent SDK (action sdk): the
+   * TypeScript build with it installed, without it (and without a way to
+   * download it), or the Go build (no such action); the urls asked to
+   * download from. */
+  sdk: 'installed' | 'missing' | 'go' = 'installed';
+  readonly sdkAsks: Array<string | undefined> = [];
   /** The start flags of the opens; every request; every command. */
   readonly opens: boolean[] = [];
   readonly requests: chat.Request[] = [];
@@ -91,6 +100,11 @@ export class FakeChatHost {
       conn.reader.release().resume();
       closeStream(conn.stream);
     };
+    if (h.op === Op.Plugin && h.plugin === 'chat' && h.action === 'sdk') {
+      this.sdkAsks.push((h.params as { url?: string } | undefined)?.url);
+      if (this.sdk === 'go') return reply({ ok: false, code: 'bad_params', error: 'chat: unknown action "sdk"' });
+      return reply({ ok: true, plugin: this.sdk === 'installed' ? { installed: true } : { installed: false, error: 'no route' } });
+    }
     if (h.op !== Op.Plugin || h.plugin !== 'chat' || h.action !== 'open') return reply({ ok: false, error: 'unsupported op' });
     const start = (h.params as { start?: boolean } | undefined)?.start !== false;
     this.opens.push(start);
@@ -433,6 +447,8 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   const machines = testMachines([sshSpec('gpu'), sshSpec('box', 'box', 'box', false)], { dial });
   let offset = 0;
   const feature: ChatFeature = chatFeature({
+    // Never the registry: the tests are offline, the cache a temporary one.
+    sdk: { offline: true, cacheDir: realpathSync(mkdtempSync(join(tmpdir(), 'chat-sdk-'))) },
     timing: { ...FAST, ...o.timing },
     limits: o.limits,
     now: () => Date.now() + offset,

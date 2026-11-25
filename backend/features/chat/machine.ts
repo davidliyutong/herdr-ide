@@ -26,8 +26,11 @@ import { Reader, write } from '#shared/lib/streamio.ts';
 import { CHAT_HOST_NAME, VERSION, olderVersion } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { closeStream } from '#shared/proto/yamux.ts';
+import { ChunkReader, writeLine } from '#shared/proto/agentproto/index.ts';
 import { defineMachine, type ActionStream } from '#machine/feature.ts';
 import { selfCommand } from '#machine/self.ts';
+import type { NpmTarball } from './claudesdk.ts';
+import { SdkStore } from './machine/sdkstore.ts';
 import { NOT_RUNNING, chatProtocol } from './protocol.ts';
 
 /** The codes of an open that made no connection. */
@@ -92,6 +95,10 @@ export interface ChatMachineOptions {
   command?: () => string[];
   /** This build's version (VERSION). */
   version?: string;
+  /** The Agent SDK's pinned tarball (tests pin their own), and how long the
+   * machine's download of it may take. */
+  sdkPin?: NpmTarball;
+  sdkDownloadMs?: number;
 }
 
 /** A connection to a chat host that said who it is. */
@@ -243,6 +250,9 @@ export function chatMachine(o: ChatMachineOptions = {}) {
   const version = () => o.version ?? VERSION;
   return defineMachine(chatProtocol, (env) => {
     const path = posix.join(env.run, chat.SOCKET_NAME);
+    // Anthropic's Agent SDK in the instance's data directory, which this
+    // build's chat host loads for Claude Code's chats.
+    const sdk = new SdkStore({ base: env.base, logger: env.logger, pin: o.sdkPin, downloadMs: o.sdkDownloadMs });
     // Held while a host is started or replaced: the streams the core opens
     // at the same time find the host the first of them started, instead
     // of each asking the terminal core for one. One start at a time.
@@ -429,7 +439,37 @@ export function chatMachine(o: ChatMachineOptions = {}) {
           }
           await relay(s, h, ctx.signal);
         },
+        // Whether the Agent SDK is installed; with url, the machine's own
+        // download of it, checked as an upload is.
+        sdk: async (p, ctx) => {
+          if (await sdk.installed()) return { installed: true };
+          if (!p.url) return { installed: false };
+          try {
+            await sdk.fetch(p.url, { env: ctx.environ(), signal: ctx.signal });
+            return { installed: true };
+          } catch (e) {
+            if (e instanceof Fail) throw e;
+            return { installed: false, error: (e as Error).message };
+          }
+        },
+        // The tarball in chunks after the reply, installed, then a second
+        // line. An upload that failed before its end is read on and dropped,
+        // so that the core, which reads that line after its last chunk, gets
+        // it.
+        sdkUpload: async (_p, _ctx, s) => {
+          await s.reply();
+          let out: { ok: boolean; error?: string } = { ok: true };
+          try {
+            await sdk.receive(new ChunkReader(s.reader));
+          } catch (e) {
+            out = { ok: false, error: (e as Error).message };
+            s.reader.release().resume();
+          }
+          await writeLine(s.stream, out);
+        },
       },
+      // A version of the Agent SDK unused for 14 days goes.
+      housekeep: (now) => sdk.prune(now),
     };
   });
 }

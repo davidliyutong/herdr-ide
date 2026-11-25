@@ -64,6 +64,8 @@ function ownKey(target: string): string {
 }
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
+/** A string of the Agent SDK's code (sdk.mjs), in no source of ours. */
+const SDK_MARKER = 'CLAUDE_SDK_CAN_USE_TOOL' + '_SHADOWED';
 const entries: Record<string, Uint8Array> = {};
 /** Files embedded beside the payload archive (Bun.embeddedFiles). */
 const extra: Record<string, Uint8Array> = {};
@@ -152,6 +154,14 @@ try {
   args.push(join(import.meta.dir, '..', 'hosts', 'bun', 'main.ts'), ...files, '--outfile', o.out);
   const p = Bun.spawnSync([process.execPath, ...args], { stdout: 'inherit', stderr: 'inherit' });
   if (p.exitCode !== 0) process.exit(p.exitCode ?? 1);
+  // Anthropic's Agent SDK is fetched by the machines that use it, never
+  // shipped (features/chat/claudesdk.ts): an executable with its code in it
+  // is not one to release.
+  if (readFileSync(o.out).includes(SDK_MARKER)) {
+    rmSync(o.out, { force: true });
+    console.error(`${o.out}: it holds @anthropic-ai/claude-agent-sdk's code (a value import of it outside the tests?); removed`);
+    process.exit(1);
+  }
   console.log(`${o.out}: ${Object.keys(entries).length} payload files`);
 } finally {
   rmSync(stage, { recursive: true, force: true });

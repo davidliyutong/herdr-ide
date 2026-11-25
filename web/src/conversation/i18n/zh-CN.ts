@@ -50,6 +50,8 @@ export const zhCN: Record<keyof typeof en, string> = {
   'conversation.error.offline': '机器未连接。',
   'conversation.error.unsafe_folder': '无法信任这个文件夹：它是你的主目录或其上级目录，或其他人可以修改它。',
   'conversation.error.not_allowed': '此机器的对话不允许完全访问（设置「允许完全访问」）。',
+  'conversation.error.sdk_unavailable':
+    '{agent} 依赖 Anthropic 的 Agent SDK，但机器无法获取它：请让机器或应用的服务器能访问 npm 注册表，或把 SDK 的压缩包放入服务器的 --seed-dir。',
   'conversation.error.lost': '与对话的连接中断了：操作可能已经完成。如果没有，请重试。',
   'conversation.error.not_attached': '此对话没有在这个窗口中打开。',
   'conversation.error.plugin_disabled': '智能体对话已被关闭。',

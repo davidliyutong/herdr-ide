@@ -15,6 +15,7 @@ import { AgentProcesses } from '../agentproc.ts';
 import { planOption, OPTION_ALLOW_ONCE, OPTION_ALLOW_SESSION, OPTION_REJECT_ONCE } from '../adapter.ts';
 import type { PermissionAnswer, PermissionRequest, QuestionAnswer, QuestionRequest, Session, Sink, StartParams } from '../adapter.ts';
 import { claudeAdapter, type ClaudeAdapterOptions } from './adapter.ts';
+import type { SdkModule, SdkSource } from './load.ts';
 import { chatMode, OPTION_EFFORT, OPTION_MODE, OPTION_MODEL } from './config.ts';
 import type { ClaudeSession } from './session.ts';
 
@@ -23,6 +24,10 @@ export const VECTORS = join(REPO, 'spec', 'vectors', 'chat', 'claude');
 /** The Go adapter's golden files of the same scenarios. */
 export const GO_GOLDEN = join(REPO, 'internal', 'chatadapter', 'claude', 'testdata');
 const FAKE = join(import.meta.dir, 'testdata', 'fakeclaude.ts');
+
+/** The Agent SDK of the development dependency, as the tests load it (the
+ * product loads the one a machine installed: load.ts). */
+export const devSdk: SdkSource = { load: () => import('@anthropic-ai/claude-agent-sdk') as Promise<SdkModule> };
 
 /** The session id the replays run with. */
 export const TEST_SESSION = '11111111-1111-4111-8111-111111111111';
@@ -476,7 +481,11 @@ export async function act(s: Session, l: ScriptLine, uuids: Map<string, string>)
 
 /** Runs a recording through the adapter and the fake, and returns what the
  * host got. */
-export async function replay(name: string, edit?: (p: StartParams) => void, o?: ClaudeAdapterOptions): Promise<{ r: FakeRun; s: Session }> {
+export async function replay(
+  name: string,
+  edit?: (p: StartParams) => void,
+  o?: Partial<ClaudeAdapterOptions>,
+): Promise<{ r: FakeRun; s: Session }> {
   const lines = fixture(name);
   const cans = canned();
   delete cans.initialize;
@@ -485,7 +494,7 @@ export async function replay(name: string, edit?: (p: StartParams) => void, o?: 
   r.host.answersOf(lines);
   const p = r.params();
   edit?.(p);
-  const s = await claudeAdapter({ timing: { titles: [] }, ...o }).start(p, r.host, AbortSignal.timeout(60_000));
+  const s = await claudeAdapter({ sdk: devSdk, timing: { titles: [] }, ...o }).start(p, r.host, AbortSignal.timeout(60_000));
   const uuids = new Map<string, string>();
   for (;;) {
     const sig = await r.signal();

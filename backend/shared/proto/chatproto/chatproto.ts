@@ -945,6 +945,10 @@ export const Code = {
   NotAllowed: 'not_allowed',
   /** Op.Trust of a directory that may not be trusted (see Op.Trust). */
   UnsafeFolder: 'unsafe_folder',
+  /** The agent's adapter runs on a library the machine does not have and
+   * could not get (the TypeScript build's Claude Code adapter: Anthropic's
+   * Agent SDK, fetched on use). */
+  SdkUnavailable: 'sdk_unavailable',
 } as const;
 
 /** Why a request, a command, a turn or a chat failed (the Go package's

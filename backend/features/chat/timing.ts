@@ -10,6 +10,10 @@ export interface Timing {
   shortMs: number;
   /** Bounds listing an agent's sessions, which may run the agent. */
   sessionsMs: number;
+  /** Bounds getting Anthropic's Agent SDK to a machine before a Claude
+   * Code chat starts: the machine's download, else the core's and its
+   * upload. */
+  sdkMs: number;
   /** Bounds a handoff, from the open to the command's answer. */
   handoffMs: number;
   /** Bounds a subscription's attach until the host's answer. */
@@ -38,6 +42,7 @@ export const DEFAULT_TIMING: Timing = {
   writeMs: 30_000,
   shortMs: 45_000,
   sessionsMs: 120_000,
+  sdkMs: 10 * 60_000,
   handoffMs: 60_000,
   attachMs: 45_000,
   overviewMs: 5000,

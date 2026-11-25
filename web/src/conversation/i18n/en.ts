@@ -54,6 +54,8 @@ export const en = {
   'conversation.error.offline': 'The machine is not connected.',
   'conversation.error.unsafe_folder': 'This folder cannot be trusted: it is your home folder or one above it, or others may change it.',
   'conversation.error.not_allowed': 'Full access is turned off for this machine’s chats (the setting “Allow full access”).',
+  'conversation.error.sdk_unavailable':
+    '{agent} runs on Anthropic’s Agent SDK, which the machine could not get: let the machine or the app’s server reach the npm registry, or put the SDK’s tarball into a --seed-dir of the server.',
   'conversation.error.lost': 'The connection to the chat broke: it may have been done. Try again if not.',
   'conversation.error.not_attached': 'The chat is not open in this window.',
   'conversation.error.plugin_disabled': 'Agent chats were turned off.',

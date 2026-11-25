@@ -16,7 +16,7 @@ import { claudeAdapter } from './adapter.ts';
 import { OPTION_EFFORT, OPTION_MODE, OPTION_MODEL } from './config.ts';
 import { SDK_VERSION } from './sdk.ts';
 import { CLAUDE_TIMING, type ClaudeSession, type ClaudeTiming } from './session.ts';
-import { FakeRun, TEST_SESSION, canned, isolateHome, tempDir, type Msg, type Script, type ScriptLine } from './testing.ts';
+import { FakeRun, TEST_SESSION, canned, devSdk, isolateHome, tempDir, type Msg, type Script, type ScriptLine } from './testing.ts';
 
 isolateHome();
 
@@ -65,7 +65,7 @@ async function start(lines: ScriptLine[], o: StartOpts = {}): Promise<{ r: FakeR
   const p = r.params();
   o.edit?.(p, r);
   try {
-    const s = (await claudeAdapter({ timing: { titles: [], ...o.timing } }).start(p, r.host, sig(30_000))) as ClaudeSession;
+    const s = (await claudeAdapter({ sdk: devSdk, timing: { titles: [], ...o.timing } }).start(p, r.host, sig(30_000))) as ClaudeSession;
     sessions.push(s);
     return { r, s };
   } catch (e) {
@@ -574,7 +574,7 @@ describe('another Claude Code', () => {
       writeFileSync(join(dir, `${child.pid}.json`), JSON.stringify({ pid: child.pid, sessionId: id, cwd: '/w', startedAt }), {
         mode: 0o600,
       });
-      const a = claudeAdapter();
+      const a = claudeAdapter({ sdk: devSdk });
       const hp = { kind: 'claude', argv: [], env, cwd: home, procs: null as never, logger: () => {}, sessionId: id, after: '' };
       expect((await a.inTerminal!(hp, sig()))?.code).toBe(Code.InTerminal);
       expect(await a.inTerminal!({ ...hp, sessionId: '33333333-3333-4333-8333-333333333333' }, sig())).toBeNull();
@@ -589,7 +589,7 @@ describe('another Claude Code', () => {
   }, 30_000);
 
   test("the adapter's own program's record is no other Claude Code's", async () => {
-    const a = claudeAdapter({ timing: { titles: [] } });
+    const a = claudeAdapter({ sdk: devSdk, timing: { titles: [] } });
     const r = new FakeRun(script(initLines()));
     runs.push(r);
     const p = r.params();

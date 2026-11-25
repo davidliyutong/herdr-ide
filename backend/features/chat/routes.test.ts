@@ -228,6 +228,34 @@ describe('routes', () => {
   // The host's refusals keep their codes, with a status that fits; a host
   // of another protocol and a machine that is not connected are errors of
   // their own.
+  test("a Claude Code chat waits for the machine's Agent SDK; one the machine cannot get is sdk_unavailable", async () => {
+    const r = await start();
+    const m = (p: string) => `/api/m/gpu/p/chat/${p}`;
+    // Installed: the chat starts; another kind never asks.
+    expect((await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}'))[0]).toBe(200);
+    expect(r.host.sdkAsks).toEqual([undefined]);
+    expect((await r.call('POST', m('new'), '{"kind":"kimi","cwd":"/w"}'))[0]).toBe(200);
+    expect(r.host.sdkAsks).toHaveLength(1);
+    // Asked once per agent session.
+    expect((await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}'))[0]).toBe(200);
+    expect(r.host.sdkAsks).toHaveLength(1);
+    // A machine of the Go build needs none.
+    r.hub.o.sdk.forget('gpu');
+    r.host.sdk = 'go';
+    expect((await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}'))[0]).toBe(200);
+    // Without it, and with the core offline and no operator's copy, the
+    // chat is refused and the host never asked.
+    r.hub.o.sdk.forget('gpu');
+    r.host.sdk = 'missing';
+    const news = r.host.requests.filter((q) => q.op === chat.Op.New).length;
+    const [status, body] = await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}');
+    expect(status).toBe(503);
+    expect(body.error).toBe(chat.Code.SdkUnavailable);
+    expect(String(body.message)).toContain('the core is offline');
+    expect(String(body.message)).toContain('--seed-dir');
+    expect(r.host.requests.filter((q) => q.op === chat.Op.New)).toHaveLength(news);
+  });
+
   test('errors', async () => {
     const r = await start();
     const f = r.host;

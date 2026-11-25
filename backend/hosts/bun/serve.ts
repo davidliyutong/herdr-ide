@@ -50,6 +50,7 @@ export const OPTIONS = {
   'extension-url': { type: 'string' },
   'seed-dir': { type: 'string', multiple: true, default: [] as string[] },
   offline: { type: 'boolean', default: false },
+  'npm-registry': { type: 'string', default: '' },
 } as const;
 
 function fatal(logger: Logger, msg: string): never {
@@ -88,6 +89,8 @@ export async function serve(argv: string[]): Promise<void> {
   if (!validInstance(instance)) fatal(logger, '--instance must be lowercase letters, digits and dashes');
   const nodeInstance = f['node-instance'] ?? instance;
   if (!validInstance(nodeInstance)) fatal(logger, '--node-instance must be lowercase letters, digits and dashes');
+  if (f['npm-registry'] !== '' && !/^https?:\/\/[^/\s]+/.test(f['npm-registry']))
+    fatal(logger, '--npm-registry must be an http or https URL');
   for (const t of f.ssh)
     if (!validTarget(t))
       fatal(
@@ -117,6 +120,7 @@ export async function serve(argv: string[]): Promise<void> {
       offline: f.offline,
       idle: codeServerIdle,
     },
+    chatSdk: { seedDirs: f['seed-dir'], offline: f.offline, registry: f['npm-registry'] },
   });
 
   const flagDefs = settingFlags(coreModules(features));

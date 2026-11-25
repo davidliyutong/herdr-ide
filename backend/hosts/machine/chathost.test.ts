@@ -1,7 +1,7 @@
 import { afterEach, expect, setDefaultTimeout, test } from 'bun:test';
 import { chatSpec } from '#shared/agents/kinds.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
-import { TestHost } from '#features/chat/machine/host/testing.ts';
+import { TestHost, eventually } from '#features/chat/machine/host/testing.ts';
 import { chatHostCommand } from './chathost.ts';
 import { chatAdapters } from './features.ts';
 
@@ -14,34 +14,42 @@ afterEach(async () => {
   h = null;
 });
 
-test('the kinds whose adapter is not ported are refused as kinds without a chat, the host goes on', async () => {
+test('the host has every adapter; a kind without a chat is refused, the host goes on', async () => {
   h = new TestHost();
-  h.o = { ...h.o, adapters: chatAdapters(), spec: chatSpec };
+  h.o = { ...h.o, adapters: chatAdapters({ base: h.base }), spec: chatSpec };
   await h.serve();
-  const agents = await h.request({ op: chat.Op.Agents, kinds: ['claude', 'opencode'] });
+  // Every adapter is there: Claude Code's, Codex's and the ACP kinds'
+  // (their programs are not installed here; the test host looks in the
+  // system's PATH only).
+  const agents = await h.request({ op: chat.Op.Agents, kinds: ['claude', 'codex', 'kimi', 'opencode'] });
   expect(agents.agents).toEqual([
-    { kind: 'claude', available: false, reason: 'unsupported' },
+    { kind: 'claude', available: false, reason: 'not_found' },
+    { kind: 'codex', available: false, reason: 'not_found' },
+    { kind: 'kimi', available: false, reason: 'not_found' },
     { kind: 'opencode', available: false, reason: 'unsupported' },
   ]);
-  for (const kind of ['claude']) {
-    expect((await h.request({ op: chat.Op.New, kind, cwd: h.cwd })).error).toEqual({
-      code: 'unsupported',
-      message: `this host has no adapter ${kind}`,
-    });
-    expect((await h.request({ op: chat.Op.Sessions, kind, cwd: h.cwd })).error?.code).toBe('unsupported');
-    expect((await h.request({ op: chat.Op.New, kind, cwd: h.cwd, resume: 'abc', import: true })).error?.code).toBe('unsupported');
-  }
   expect((await h.request({ op: chat.Op.New, kind: 'opencode', cwd: h.cwd })).error).toEqual({
     code: 'unsupported',
     message: 'the kind has no chat',
   });
+  // Claude Code's sessions are its transcripts (none in the test's home).
+  expect((await h.request({ op: chat.Op.Sessions, kind: 'claude', cwd: h.cwd })).sessions ?? []).toEqual([]);
   expect((await h.request({ op: chat.Op.Chats })).chats).toEqual([]);
-  // The ACP kinds and Codex have their adapter (their programs are not
-  // installed here).
-  expect((await h.request({ op: chat.Op.Agents, kinds: ['kimi', 'codex'] })).agents).toEqual([
-    { kind: 'kimi', available: false, reason: 'not_found' },
-    { kind: 'codex', available: false, reason: 'not_found' },
-  ]);
+});
+
+test('a Claude Code chat on a machine without the Agent SDK fails with sdk_unavailable, before anything runs; the host goes on', async () => {
+  h = new TestHost();
+  // A program for the kind that is there, which nothing runs: the SDK is
+  // loaded first, from the host's data directory, where none was installed.
+  const spec = (id: string) => (id === 'claude' ? { ...chatSpec('claude')!, argv: ['/bin/sh', '-c', 'exit 3'] } : chatSpec(id));
+  h.o = { ...h.o, adapters: chatAdapters({ base: h.base }), spec };
+  await h.serve();
+  const res = await h.request({ op: chat.Op.New, kind: 'claude', cwd: h.cwd });
+  const id = res.chat!.id;
+  await eventually('failed', () => h!.chat(id).r.chat.state === chat.State.Failed);
+  expect(h.chat(id).r.chat.error?.code).toBe(chat.Code.SdkUnavailable);
+  expect(h.chat(id).r.chat.error?.message).toContain('@anthropic-ai/claude-agent-sdk 0.3.322 is not on this machine');
+  expect((await h.request({ op: chat.Op.Chats })).chats?.map((c) => c.id)).toEqual([id]);
 });
 
 test('chat-host: a wrong command line is status 2', async () => {

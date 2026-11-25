@@ -354,7 +354,9 @@ export type ServerMessage =
  * that needs the agent of a chat that has none (a prompt starts it);
  * not_allowed, full access while the machine's chat.allowFullAccess is
  * off; unsafe_folder, a folder that may not be trusted (the home
- * directory or one above it, one others may write). */
+ * directory or one above it, one others may write); sdk_unavailable, a
+ * Claude Code chat on a machine that has not got Anthropic's Agent SDK and
+ * could not get it (from npm, or the server's --seed-dir). */
 export const HOST_CODES = [
   'bad_request',
   'unknown_chat',
@@ -373,6 +375,7 @@ export const HOST_CODES = [
   'sleeping',
   'not_allowed',
   'unsafe_folder',
+  'sdk_unavailable',
 ] as const;
 
 /** The machine's codes of reaching its chat host (its agent's open

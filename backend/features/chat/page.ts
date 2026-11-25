@@ -499,6 +499,14 @@ export class Sub {
       } finally {
         clearTimeout(timer);
       }
+      // A prompt may resume a Claude Code chat's agent, which runs on
+      // Anthropic's Agent SDK: the machine gets it meanwhile when it lacks
+      // it (a chat of another build's host, a version gone unused).
+      const kind = (res.chat as { kind?: unknown } | undefined)?.kind;
+      if (typeof kind === 'string')
+        hub.ensureSdk(this.m, kind, AbortSignal.any([signal, AbortSignal.timeout(pg.d.timing.sdkMs)])).catch((e: unknown) => {
+          if (!signal.aborted) pg.d.hub.o.logger(`chat: the Agent SDK on ${this.m}: ${asChatError(e).message}`);
+        });
       const it = res.chat && readOnly ? chat.redactedChat(res.chat as unknown as chat.Chat) : (res.chat ?? undefined);
       if (!this.gone) pg.enqueue(attached(this.id, it, res.first ?? 0), this);
       void this.write();

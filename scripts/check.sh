@@ -28,6 +28,8 @@
 #  12. the types of Codex's app-server the chat host's Codex adapter
 #      speaks are those its pinned schema makes (spec/codex-app-server,
 #      backend/scripts/codex-schema.ts)
+#  13. Anthropic's Agent SDK is imported for its types only outside the
+#      tests, and is no production dependency: no executable carries it
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -68,6 +70,25 @@ hits=$(grep -rnE "\bBun\.[A-Za-z]|from 'bun:|import\('bun:" --include='*.ts' bac
 if [[ -n "$hits" ]]; then
   echo "Bun's APIs outside the machine side, hosts/bun and tests:"
   echo "$hits"
+  fail=1
+fi
+
+echo "==> Anthropic's Agent SDK in no executable"
+# The chat host loads it from the machine's data directory at run time
+# (backend/features/chat/claudesdk.ts); the product's code takes only its
+# types, so that no build bundles it (scripts/build.ts refuses one that
+# does). Tests use the development dependency.
+hits=$(grep -rnE "(from|import\(|require\()[[:space:]]*['\"]@anthropic-ai/claude-agent-sdk(/[^'\"]*)?['\"]" --include='*.ts' --include='*.tsx' --include='*.mjs' backend/shared backend/kernel backend/features backend/hosts backend/machine backend/scripts web/src desktop/src --exclude-dir=node_modules 2>/dev/null \
+  | grep -vE '(\.test\.ts:|/testdata/|/testing\.ts:)' \
+  | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' \
+  | grep -vE "import type (\{[^}]*\}|\* as [A-Za-z_]+) from '@anthropic-ai/claude-agent-sdk';" || true)
+if [[ -n "$hits" ]]; then
+  echo "@anthropic-ai/claude-agent-sdk imported outside the tests other than for its types:"
+  echo "$hits"
+  fail=1
+fi
+if grep -qE '"@anthropic-ai/claude-agent-sdk"' <(sed -n '/"dependencies"/,/}/p' backend/package.json); then
+  echo "@anthropic-ai/claude-agent-sdk is in backend/package.json's dependencies: it is a development dependency only"
   fail=1
 fi
 

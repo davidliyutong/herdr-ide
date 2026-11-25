@@ -39,6 +39,7 @@ export function startCore(s: CoreStart, o: { logger: Logger; pty?: SpawnPty }): 
     verifyKey: s.verifyKey,
     pty: o.pty,
     codeServer: { seedDirs: s.seedDirs ?? [], offline: false, idle: 20 * 60_000 },
+    chatSdk: { seedDirs: s.seedDirs ?? [] },
   });
   return composeCore({
     instance: s.instance,
