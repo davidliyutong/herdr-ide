@@ -43,6 +43,8 @@ takes over from the other.
 | Regenerate the design tokens' CSS after editing `spec/tokens.json`, and `spec/generated/registry.json` with the settings and commands tables of `docs/reference.md` (`backend/scripts/registry.ts`) after changing settings, commands or agent kinds (`backend/shared/agents`, `internal/agentkinds`) | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
+| Test and rebuild the GUI helper of Linux machines (`scripts/gui-helper`: the program windows' X client and capture, compositor and keeper of the TypeScript machine build; zig 0.17) | `make gui-helper` |
+| Program windows' integration test against a real Xvfb in Docker, from any host (`make it` runs it on a Linux host with Xvfb) | `scripts/gui-it.sh` |
 | Integration tests with a real terminal core, the machine build's and the core's terminals (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`), and VS Code's TypeScript machine side with a real code-server release (`E2E_CODE_SERVER_SEED=<dir>` holding `code-server-<version>-<os>-<arch>.tar.gz`; skipped without) | `make it` |
 | Old kernels and C libraries: KVM guests from official cloud images and containers of old distributions, a payload run in each (on a Linux host with KVM and Docker; not part of any make target) | `e2e/machines/machines.py run-matrix <script>` ([its README](e2e/machines/README.md)) |
 | End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium, SSH machines in Docker containers (skipped without Docker; `E2E_REQUIRE_DOCKER=1` fails instead), and the desktop app with its core in process (skipped without `desktop`'s packages; `E2E_CODE_SERVER_SEED=<dir with a code-server release>` adds its VS Code window); builds into `dist/e2e` (not part of `make test`); `E2E_MACHINE=ts` runs them against the core that deploys the TypeScript machine side (`SKIP_BUILD=1` reuses the build) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
@@ -143,6 +145,13 @@ playbooks):
   `scripts/gpupick/gpupick.c` with recorded digests, of the source too:
   after changing the source run `make gpupick` (zig 0.17) and commit the
   libraries with it. Its tests run on Linux only (`TestGPUPick`).
+- `scripts/gui-helper/bin/*` are build artifacts of
+  `scripts/gui-helper` with recorded digests, of the sources too: after
+  changing a source run `make gui-helper` (zig 0.17), which runs its tests,
+  and commit the executables with it. Its messages with the node are
+  `src/proto.zig` and `backend/features/gui/machine/helper.ts`, changed
+  together; its JPEG must stay the Go agent's bytes (`src/testdata`,
+  written by `gen.go`).
 - yamux streams cannot be half-closed: use `ChunkWriter` (agentproto, in
   both languages) for uploads that expect a reply.
 - A coding agent kind is a row of `backend/shared/agents/kinds.ts` and of

@@ -31,11 +31,18 @@ mods=$(for os in linux darwin; do GOOS=$os go list -deps -f '{{with .Module}}{{.
   echo "The core also embeds the unmodified herdr-core executables for Linux and macOS machines (https://github.com/herdrdev/herdr-core, Apache-2.0); release archives carry their license and dependency notices in licenses/herdr-core/."
   echo "The agents embedded in the core carry herdr's agent detection rules (herdr v0.9.5, https://github.com/herdrdev/herdr, Apache-2.0), unchanged; see licenses/herdr-detect/."
   echo "The core also embeds a video encoder for Linux machines, built from FFmpeg (LGPL-2.1-or-later), libvpx, libva, libdrm and nv-codec-headers; see licenses/encoder/ for their licenses and sources."
+  echo "The TypeScript machine build for Linux carries the GUI helper (scripts/gui-helper), a static executable built with Zig that includes parts of Zig's standard library (MIT, below) and Go's image/jpeg encoder ported (BSD-3-Clause, below)."
   echo
-  echo "## Go (image/jpeg, adapted in internal/jpegstrip)"
+  echo "## Go (image/jpeg, adapted in internal/jpegstrip and scripts/gui-helper)"
   echo
   echo '```text'
   cat licenses/go/LICENSE
+  echo '```'
+  echo
+  echo "## Zig standard library (in the GUI helper, scripts/gui-helper)"
+  echo
+  echo '```text'
+  cat licenses/zig/LICENSE
   echo '```'
   for m in $mods; do
     dir=$(go list -m -f '{{.Dir}}' "$m")

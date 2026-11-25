@@ -36,8 +36,8 @@ Goals:
 Non-goals:
 
 - New features while the rewrite runs.
-- The Linux GUI windows' capture in TypeScript: it becomes a native helper
-  (Zig/C, like the video encoder), driven over stdio by the agent.
+- The Linux GUI windows' X client, capture and encoding in TypeScript: they
+  are a native helper (below).
 
 ## Design
 
@@ -207,12 +207,11 @@ Linux and macOS:
 
 It serves the machine sides of the terminals (the terminal core and hidden
 terminals), files, git, search, monitor, history, browser, AI usage,
-agents (detection and the agents' sessions), VS Code and chat (the chat
-host, the `chat-host` command, below) features, and the vault's MCP server
-(the `mcp` command, below). The ops and plugins of the features it does
-not serve yet (gui: `gui`) are refused as an unknown plugin is
-(`unknown_plugin`); the core
-treats them as a machine without that feature. AI usage's `session`
+agents (detection and the agents' sessions), VS Code, chat (the chat host,
+the `chat-host` command, below) and program windows (op `gui`) features,
+and the vault's MCP server (the `mcp` command, below). An op or plugin it
+does not serve is refused as an unknown plugin is (`unknown_plugin`); the
+core treats it as a machine without that feature. AI usage's `session`
 action finds a session's transcripts with the coding agents' sessions
 (`backend/machine/agents`), as the Go build's does
 ([29](29-ai-usage.md#one-sessions-usage)).
@@ -269,6 +268,36 @@ and reads are synchronous and by name, runs in a worker thread started
 from a Blob (no entrypoint of its own in the compiled executable), so
 that a FIFO swapped in at a database's name or a mount that stopped
 answering holds the worker, never the node.
+
+Program windows ([14](14-gui-windows.md)) on Linux machines are split
+between the node and a native helper. The helper (`scripts/gui-helper`,
+Zig 0.17, `make gui-helper`) is what must not run on the node's thread or
+cannot be written with Bun's APIs: the X client that manages the display
+and captures its windows (MIT-SHM, damage, XTEST), the encoding of
+pictures (JPEG, the Go agent's encoder ported byte for byte; PNG) and of
+video (it owns the windows' encoder processes and writes them raw
+frames, about 400 MB/s for a large window at 60 fps), the GPU display's
+Wayland compositor (descriptors passed with `SCM_RIGHTS`, which Bun's
+sockets do not receive) and the display keeper (a process that lives as
+long as the terminal core, at a few hundred kB rather than a Bun runtime's
+30–40 MB). It is one static executable per architecture without a C
+library (raw system calls, so CentOS 7's glibc 2.17 and Alpine's musl
+alike), about 470 kB for x86-64 and 360 kB for arm64, carried by the
+Linux machine builds gzip-compressed beside the payload and placed in
+`<data>/gui/<sha256 prefix>/` (0700), checked by its digest before each
+start. Its executables are committed with the digests of their sources and
+of themselves, which `make check` verifies, since CI and contributors have
+no zig (as gpupick's libraries and the terminal emulator's module). The
+node keeps in TypeScript what decides and what manages processes and
+files: the display's number, cookie and servers (Xwayland's socket pair to
+its compositor made with `socketpair(2)` through `bun:ffi`), Xvfb's fetch,
+the GPUs, gpupick, the encoder's install, and the window manager's
+decisions (the cores and their roles, the flow, pictures or video, the
+stats, the routing), speaking to the helper over its stdin and stdout
+(`features/gui/machine/helper.ts`, `proto.zig`); frames cross the node's
+thread once, encoded. A pure-JavaScript X11 client was not used: the
+`x11` package is unmaintained since 2019 and has neither MIT-SHM nor
+X-Resource, and the capture would be on the node's thread anyway.
 
 Agent detection ([25](25-agent-detection.md)) reads herdr's manifests,
 the Go build's files (`internal/agent/detect/manifests`), embedded as text
@@ -729,7 +758,15 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 - **A custom scheme for the desktop's origin.** Breaks code-server's
   resources and CacheStorage.
 - **The GUI capture in TypeScript.** An X11 window manager, a Wayland
-  compositor, shared memory and JPEG at frame rate are native work.
+  compositor, shared memory and JPEG at frame rate are native work: the
+  GUI helper does them, the node decides (above; [14](14-gui-windows.md)
+  has the split's alternatives).
+- **The GUI helper built by every build.** CI and contributors have no
+  zig; its static executables are small and change rarely, so they are
+  committed with their digests, which `make check` verifies.
+- **The GUI helper linked against libjpeg-turbo.** Its x86-64 SIMD is NASM
+  assembly, which zig cannot assemble; the port of the Go agent's encoder,
+  coding row groups on every core, gives the Go agent's bytes.
 
 ## Failure modes
 

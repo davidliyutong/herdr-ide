@@ -134,3 +134,15 @@ cloud images do) and an ssh server.
   starts does not get). `build.sh --go` adds the Go machine build, which
   `run-go.sh` drives instead. A machine the core would refuse (musl
   without libstdc++ and libgcc, no SSE4.2) passes as refused.
+- `payloads/gui`: program windows of the TypeScript build's machine side
+  with its GUI helper, driven as a core drives them over ssh: the display
+  (the distribution's Xvfb, installed first on a throwaway machine; on
+  `host`, fetched by the machine side with `apt-get download` into the
+  run's home), a program's window (`e2e/xclient`) announced with its
+  terminal and process, its pixels, clicks, keys and closing, the keeper
+  holding the display and leaving with it, the GPU display where the
+  machine has Xwayland and a render node, video through the encoder of
+  `scripts/build-ffmpeg.sh` when `build.sh` finds it (H.264, then VP8),
+  and gpupick's install. `build.sh` builds the executables of linux x64
+  for glibc and musl, the X program and the driver; `run.sh` runs the
+  driver with the executable of the machine's C library acting as Bun.

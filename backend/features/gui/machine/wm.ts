@@ -347,6 +347,8 @@ export class WindowManager {
   /** The helper captures through shared memory. */
   shm = false;
   private streamSeq = 0;
+  /** The encoder the helper was told to start streams with. */
+  private encoder = '';
   private ended_ = false;
   private readonly endWaiters: Array<() => void> = [];
   private readonly now: () => number;
@@ -831,6 +833,12 @@ export class WindowManager {
       return { window: j.window, drawable: j.layer, x: j.r.x, y: j.r.y, w: j.r.w, h: j.r.h, seq: j.seq, enc };
     });
     const done = new Promise<void>((resolve) => (this.batch = { jobs, next: 0, costs: [], done: resolve }));
+    // A stream starts with the encoder the machine has now.
+    const bin = this.o.tools?.().bin ?? '';
+    if (bin && bin !== this.encoder && toHelper.some((j) => j.kinds?.length)) {
+      this.encoder = bin;
+      this.send(message(In.Encoder, Buffer.from(bin)));
+    }
     this.send(message(In.Capture, encodeJobs(toHelper)));
     await done;
     const costs = this.batch?.costs ?? [];

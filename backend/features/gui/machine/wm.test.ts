@@ -3,7 +3,7 @@
 // the stats of a watched window, when a window becomes video and goes back
 // to pictures.
 import { describe, expect, test } from 'bun:test';
-import { Enc } from './helper.ts';
+import { Enc, In, Out } from './helper.ts';
 import { MIN_BUDGET, RTT_PROBE, TILE, Flow, tiles } from './flow.ts';
 import {
   Client,
@@ -310,4 +310,20 @@ test('video decision', () => {
   moving();
   tick();
   expect(m.fallback).toBe('unavailable');
+});
+
+// The helper starts a window's stream with the encoder it was told of.
+test('the helper learns the encoder before a stream starts', async () => {
+  const { wm, m, sent } = wmWith(640, 480, { tools: () => ({ bin: '/enc/encoder', kinds: ['vp8'] }) });
+  wm.clients.push(testClient().c);
+  m.codecs = ['vp8'];
+  m.motion = 0xfff;
+  m.dirty = m.all();
+  const jobs = wm.collect(1000);
+  expect(jobs[0].video).toBe(true);
+  const batch = (wm as unknown as { sendBatch(j: Capture[]): Promise<void> }).sendBatch(jobs);
+  wm.onHelper({ t: Out.BatchDone });
+  await batch;
+  expect(sent.map((b) => b[4])).toEqual([In.Encoder, In.Capture]);
+  expect(sent[0].subarray(5).toString()).toBe('/enc/encoder');
 });

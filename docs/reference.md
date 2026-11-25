@@ -594,6 +594,7 @@ Build scripts and tests:
 | `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |
 | `E2E_MACHINE` | `make e2e` | `ts` runs the tests against the TypeScript build (`dist/e2e/core-ts`, its machines' builds and `SHA256SUMS` in `dist/e2e/machines`); the specs of the features it does not serve yet skip with the reason. Default `go`. |
 | `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets program-window tests fetch Xvfb. |
+| `GUI_TEST_XCLIENT` | `bun test features/gui/integration.test.ts` (`make it`, `scripts/gui-it.sh`) | The X program of the program windows' integration test (e2e/xclient built for the machine); without it the test builds one with go. |
 
 ## Files and directories
 
@@ -614,6 +615,7 @@ else `<data>/run-<host id>`. Retention is summarized in
 | `~/.veldr/hosts/<host>/xvfb/<version>/` | Xvfb unpacked in user space (shared by this host's instances) | Unused 14 days, when another is unpacked. |
 | `~/.veldr/video/<sha256 prefix>/encoder` | Video encoder (shared), run only while its digest matches | Unused 14 days, when another is installed; unfinished after 1 h. |
 | `~/.veldr/gpupick/<sha256 prefix>/gpupick.so` | GPU selection library (0600, shared) | Unused 14 days, when another is installed. |
+| `<data>/gui/<sha256 prefix>/veldr-gui` (0700 directory) | The GUI helper of the TypeScript machine build (window manager and capture, compositor, keeper), run only while its digest is the build's | Another build's unused 14 days; unfinished after 1 h. |
 | `<data>/hosts/<host>/` (0700) | This host's own files of the namespace (below) | Touched at each agent start and every 24 h; another host's unused 30 days loses all but `hc/`, and goes whole after 180 days. |
 | `<data>/hosts/<host>/hc/herdr-core` (0700 directory) | Terminal core executable, accepted only with its SHA-256 | Replaced by the next build. |
 | `~/.local/state/herdr-core/veldr[-<instance>]-<host id>/` (`$XDG_STATE_HOME`) | herdr-core's own state (records, saved screens, logs) | Until the user removes it. |
