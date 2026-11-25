@@ -30,6 +30,7 @@
     "#hosts/*": "./hosts/*"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "2.6.0",
     "@modelcontextprotocol/server": "2.4.0",
     "@simplewebauthn/server": "14.1.0",
     "execa": "10.2.1",
