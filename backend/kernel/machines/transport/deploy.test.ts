@@ -12,7 +12,7 @@
 // core's own executable, checked again on the machine; the node of that
 // build, reached with node dial; what the node's environment gets. The
 // release is a server on loopback; the executable is this host's, built
-// from the sources with --machine ts.
+// from the sources.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';

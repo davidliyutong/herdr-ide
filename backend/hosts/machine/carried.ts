@@ -1,5 +1,5 @@
 // What the machine build carries for its own platform besides herdr-core
-// (backend/scripts/build.ts --machine ts): the GUI helper and the GPU
+// (backend/scripts/build.ts): the GUI helper and the GPU
 // selection library as files beside the payload archive, the video
 // encoder inside it. Null in a run from the sources or a build without
 // them.

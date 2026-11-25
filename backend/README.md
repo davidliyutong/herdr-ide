@@ -2,21 +2,19 @@
 
 The core and the machine agent in TypeScript. Bun runs it on machines and
 as the command line, built into one executable; the desktop app runs the
-core inside Electron, whose runtime is Node. It replaces the Go program in
-stages ([42](../docs/features/42-typescript-backend.md)): the core is this
-one, and machines run the machine side here (`machine/`, `hosts/machine`,
-the features' `machine.ts`) by default (`scripts/build.ts --machine ts`),
-or the Go machine build (`cmd/veldr`, `internal/`) in a core built to
-deploy it (`--machine go`); the machine side here serves every feature
+core inside Electron, whose runtime is Node. It replaced the Go program of
+earlier releases ([42](../docs/features/42-typescript-backend.md)):
+machines run the machine side here (`machine/`, `hosts/machine`, the
+features' `machine.ts`), which serves every feature
 (terminals, files, git, search, monitor, history, browser,
 agents, AI usage, VS Code, chats: the chat host, `chat-host`, with its
 adapters' interface, the ACP adapter, Codex's and Claude Code's, on
 Anthropic's Agent SDK, which machines fetch on use and no executable
 carries, program windows with the native GUI helper of `scripts/gui-helper`)
 and the vault's MCP server (`mcp`, which every executable serves).
-Both speak the same wire protocols, and a node of either takes over from
-the other. It is not a translation of the Go packages: their layout is not
-kept.
+It speaks the Go program's wire protocols, and a node of this build takes
+over from a Go node still running on a machine. It is not a translation
+of the Go packages: their layout was not kept.
 
 ## Layers
 
@@ -126,8 +124,8 @@ hook. The host composes them; features do not import each other.
 - System calls Node lacks go through `machine/sys` (`bun:ffi`), never a
   variadic C function (on macOS/arm64 their arguments go on the stack);
   on Linux, `syscall(2)` with integer arguments only.
-- JSON on the wire keeps its member names. A Go field with `omitempty` is
-  an optional field, left out when empty; times are written with
+- JSON on the wire keeps its member names. A field the Go program wrote
+  with `omitempty` is an optional field, left out when empty; times are written with
   `formatRFC3339` (`#shared/lib/gotime.ts`); bytes are base64.
 - Streams: read headers with `Reader` (`#shared/lib/streamio.ts`) and hand
   the rest on with `release()`. Do not leave a `for await` loop over a
@@ -136,7 +134,7 @@ hook. The host composes them; features do not import each other.
 - Product names come from `#shared/lib/brand.ts`; comments, logs and
   identifiers are English; the server returns codes, not prose.
 - Tests are `<name>.test.ts` beside the code (`bun:test`); vectors in
-  `spec/vectors/` are read by both languages while both exist.
+  `spec/vectors/` are read by the web UI's tests too.
 
 ## Commands
 
@@ -145,17 +143,15 @@ hook. The host composes them; features do not import each other.
 
 `bun scripts/build.ts --out FILE --web ../web/dist --hc DIR --ext DIR
 --encoder DIR [--release-url URL] [--target bun-linux-x64-baseline]
-[--version V]` builds the core's executable, the TypeScript build: the
-core and the machine side of its platform (`hosts/machine/cli.ts`'s `node`
+[--version V]` builds the core's executable: the core and the machine side of its platform (`hosts/machine/cli.ts`'s `node`
 commands), with that platform's herdr-core of `--hc` embedded and the
 digests of all of them recorded, and the release's download URL from which
 machines get their platform's archive
-(`kernel/machines/transport/release.ts`); with `--machine go --agents DIR`
-it is instead a core that embeds the Go machine builds of `--agents` and
-herdr-core of `--hc` for every platform. `scripts/build.sh` (`make build`)
+(`kernel/machines/transport/release.ts`). `--hc` holds the pinned
+herdr-core of each platform (`scripts/fetch-hc.ts`, `scripts/hcdist.ts`).
+`scripts/build.sh` (`make build`)
 runs it for each platform with everything it embeds staged in
 `dist/payload`, and `scripts/e2e.sh` (`make e2e`) runs the end-to-end
-tests against it (the TypeScript build; `E2E_MACHINE=go`, the core
-deploying the Go machine builds). `make dev-core` builds this host's
+tests against it. `make dev-core` builds this host's
 executable, stages it in `dist/payload` and runs the core from its sources
 (`bun hosts/bun/main.ts`), which reads the payloads from `dist/payload`.

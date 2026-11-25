@@ -10,8 +10,9 @@
 // socket over (NodeOp.Takeover): the old node gives up socket and lock,
 // tells its sessions' cores to move (Op.NodeDrain), and ends once they
 // left, at the latest after DRAIN_MAX_MS. A client of an older build uses
-// the node as it is: the protocol only grows. Go and TypeScript builds of
-// the machine side speak the same, so either takes over from the other.
+// the node as it is: the protocol only grows. The Go machine side of
+// earlier releases speaks the same, so a node of this build takes over from
+// one of those.
 import { closeSync, openSync, rmSync } from 'node:fs';
 import { access } from 'node:fs/promises';
 import type { Server, Socket } from 'node:net';

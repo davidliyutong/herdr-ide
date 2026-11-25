@@ -76,7 +76,7 @@ module.exports = {
     desktopName: `${slug}.desktop`,
   },
   extraResources: [
-    // Written by scripts/fetch-hc from the herdr-core release the core embeds.
+    // Written by backend/scripts/fetch-hc.ts from the herdr-core release the core embeds.
     { from: '../dist/hc/licenses', to: 'licenses/herdr-core' },
     { from: '../licenses/herdr-detect', to: 'licenses/herdr-detect' },
     { from: '../licenses/encoder', to: 'licenses/encoder' },
@@ -113,11 +113,8 @@ module.exports = {
       'dist/frames.cjs',
       ptyBinary(context.electronPlatformName),
       '../web/dist/index.html',
-      // The Go machine builds and herdr-core, or the TypeScript build's
-      // record (scripts/build.sh MACHINE=ts).
-      ...(existsSync(join(__dirname, '../dist/payload/machine/release.json'))
-        ? []
-        : [`../dist/payload/agents/${slug}-linux-amd64.gz`, '../dist/payload/hc/hc-linux-amd64.gz']),
+      // The build's record (scripts/build.sh PAYLOAD_ONLY=1).
+      '../dist/payload/machine/release.json',
       '../dist/hc/licenses/LICENSE',
       '../web/dist/licenses.md',
     ];
