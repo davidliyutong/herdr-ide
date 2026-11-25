@@ -211,6 +211,23 @@ describe('two cores of one display', () => {
     }
   });
 
+  test('cores attaching at once share one window manager', async () => {
+    const fake = fakeHelper();
+    let started = 0;
+    const r = await guiRig({
+      startWM: () => {
+        started++;
+        setTimeout(() => fake.emit(Out.Ready, Buffer.from([0, 0, 10, 0, 6])), 50);
+        return fake.proc;
+      },
+    });
+    const cores = await Promise.all([attach(r), attach(r, r.connect('core-2'))]);
+    const roles = () => cores.map((c) => c.events.find((e) => e.ev === 'role'));
+    await until(() => roles().every(Boolean), 'both roles');
+    expect(roles().filter((e) => e!.control)).toHaveLength(1);
+    expect(started).toBe(1);
+  });
+
   test('a display that ends ends the streams', async () => {
     const fake = fakeHelper();
     const r = await guiRig({

@@ -284,6 +284,10 @@ pub fn spawn(argv: [*:null]const ?[*:0]const u8, envp: [*:null]const ?[*:0]const
         // The child: only system calls until exec.
         _ = linux.syscall2(sc(.setpgid), 0, 0);
         _ = linux.syscall5(sc(.prctl), 1, SIGKILL, 0, 0, 0); // PR_SET_PDEATHSIG
+        // SIGPIPE as programs expect it (an ignored signal stays ignored
+        // across exec).
+        var dfl: extern struct { handler: usize, flags: usize, restorer: usize, mask: u64 } = .{ .handler = 0, .flags = 0, .restorer = 0, .mask = 0 };
+        _ = linux.syscall4(sc(.rt_sigaction), SIGPIPE, @intFromPtr(&dfl), 0, 8);
         for (fds, 0..) |fd, i| {
             var src = fd;
             if (src < 0) {

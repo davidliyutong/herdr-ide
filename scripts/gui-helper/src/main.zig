@@ -155,7 +155,9 @@ fn windowManager(a: Args, envp: [*:null]const ?[*:0]const u8) !void {
             .{ .fd = 1, .events = if (out.pending() > 0) sys.POLL.OUT else 0, .revents = 0 },
             .{ .fd = cap.efd, .events = sys.POLL.IN, .revents = 0 },
         };
-        _ = try sys.poll(&fds, -1);
+        // Events read while waiting for a reply (a capture, a window's
+        // properties) are handled without waiting for more to arrive.
+        _ = try sys.poll(&fds, if (x.hasEvents()) 0 else -1);
         if (fds[0].revents != 0) x.drain() catch |e| {
             if (e == error.Closed) {
                 wmod.log("gui-wm: the display ended", .{});

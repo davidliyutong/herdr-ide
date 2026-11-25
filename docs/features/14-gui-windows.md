@@ -583,3 +583,22 @@ and 58 as H.264 (58 also on a 10 Mbit/s link with 50 ms added); Isaac Sim
 24–33 fps on Xvfb, 79–84 on the GPU display, 17–26 with gpupick on another
 GPU; `glxgears` 5500–7000 fps on the GPU display. Not run: Mesa GPUs under
 Xwayland, linux/arm64, Xwayland 24.1 or newer.
+
+The TypeScript machine side with the GUI helper, on the machines of
+`e2e/machines` (`payloads/gui`: a program's window announced with its
+terminal and process, its pixels, clicks, keys and closing, the keeper
+holding the display and leaving with it, gpupick's install): CentOS 7's
+VM (kernel 3.10, glibc 2.17; its Xvfb 1.20 has no `-terminate` delay),
+Ubuntu 18.04's (4.15), containers of CentOS 7 and Alpine 3.20 (musl), an
+Ubuntu 24.04 host (kernel 7.0) without Xvfb, which the machine side
+fetched with `apt-get download`, and a workstation with an RTX 5090 on
+Xvfb (its GPU, busy with other work, was not used). On the Ubuntu host
+(AMD Radeon 780M) the GPU display came up (Xwayland 23.2, the helper's
+compositor with `wl_drm`, DRI3) and a 640×360 window that changes every
+frame went as H.264 through VA-API at 54–62 fps, then as VP8 at 61 fps
+when the viewers decoded only that. The encoder (glibc 2.28) makes no
+kind on CentOS 7 or musl, as with the Go agent. The helper's JPEG of a
+1706×960 picture takes 16 ms on one core of an Apple M4 (the Go agent's
+encoder 47 ms; both code row groups on every core). Not run with the
+TypeScript build: NVIDIA's GPU display, NVENC and gpupick on a machine
+with several NVIDIA GPUs.

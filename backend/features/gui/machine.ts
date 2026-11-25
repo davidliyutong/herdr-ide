@@ -116,6 +116,7 @@ export class GUI {
   private readonly helper: HelperFile;
   private running: Running | null = null;
   private keepTimer: ReturnType<typeof setTimeout> | null = null;
+  private wmChain: Promise<unknown> = Promise.resolve();
 
   private readonly env: MachineEnv;
   private readonly o: GUIMachineOptions;
@@ -273,7 +274,15 @@ export class GUI {
 
   /** The display's running window manager, starting one; it ends when its
    * last client leaves or the display goes away. */
-  private async windowManager(n: number): Promise<WindowManager> {
+  private windowManager(n: number): Promise<WindowManager> {
+    // One at a time: attaches that come together share the one started.
+    const run = () => this.startWindowManager(n);
+    const p = this.wmChain.then(run, run);
+    this.wmChain = p.catch(() => {});
+    return p;
+  }
+
+  private async startWindowManager(n: number): Promise<WindowManager> {
     const r = this.running;
     if (r && !r.wm.ended) {
       await r.ready;

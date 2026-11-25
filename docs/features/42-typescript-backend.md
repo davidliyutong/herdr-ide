@@ -282,7 +282,8 @@ sockets do not receive) and the display keeper (a process that lives as
 long as the terminal core, at a few hundred kB rather than a Bun runtime's
 30–40 MB). It is one static executable per architecture without a C
 library (raw system calls, so CentOS 7's glibc 2.17 and Alpine's musl
-alike), about 470 kB for x86-64 and 360 kB for arm64, carried by the
+alike), 473 kB for x86-64 and 362 kB for arm64 (180 and 170 kB
+gzip-compressed), carried by the
 Linux machine builds gzip-compressed beside the payload and placed in
 `<data>/gui/<sha256 prefix>/` (0700), checked by its digest before each
 start. Its executables are committed with the digests of their sources and
@@ -396,8 +397,8 @@ pinned in `internal/hcdist`); the core uploads none to it. Sizes with Bun
 | darwin x64 | 120.0 MiB | 50.6 MiB |
 | darwin arm64 | 111.3 MiB | 47.5 MiB |
 
-(without the video encoder, about 2 MB more on Linux; the web UI is about
-20 MB of each)
+(without the video encoder, about 2 MB more on Linux, nor the GUI helper
+and gpupick, 0.2 MB more; the web UI is about 20 MB of each)
 
 A release publishes each platform's archive (`<slug>-<platform>.tar.gz`,
 the executable at `<slug>-<platform>/<slug>` with the licenses beside it,
@@ -921,13 +922,26 @@ SECURITY.md has both.
   protocols, a stuck one), the agents' processes, and the ACP adapter
   against a fake agent replaying `spec/vectors/chat/acp`, its events
   compared with the Go adapter's of the same scenarios.
+- Program windows' machine side: the Go tests' tiles, flow, stats and
+  video decisions ported (`features/gui/machine/wm.test.ts`), two cores
+  through the wire with a fake GUI helper, the display's files, numbers,
+  GPUs and the helper's placement (`machine.test.ts`,
+  `machine/display.test.ts`); the helper's own tests (`zig build test`:
+  its JPEG byte for byte the Go agent's, every malformed message refused,
+  the compositor's protocol and bounds); against a real Xvfb in `make it`
+  or Docker (`scripts/gui-it.sh`); and on the machines of `e2e/machines`
+  (`payloads/gui`): CentOS 7's VM (3.10, glibc 2.17), Ubuntu 18.04's,
+  containers of CentOS 7 and Alpine (musl), and Ubuntu 24.04 hosts with
+  the GPU display and VA-API video
+  ([14](14-gui-windows.md#testing) has the results).
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
-  runs the suite against the TypeScript build (30 passed, the specs of
-  program windows skipped with the reason; the chats' specs run with the
-  fake ACP agent, also on an SSH machine; given `E2E_CODE_SERVER_SEED`,
-  the desktop app's smoke test has its VS Code window installed, started
-  and served by the TypeScript machine side, its workbench loaded and the
-  folder listed;
+  runs the suite against the TypeScript build (31 passed, none skipped;
+  the chats' specs run with the fake ACP agent, also on an SSH machine;
+  `tests/gui.spec.ts` has two cores show a program window through the GUI
+  helper, one controlling and the other viewing until it takes control,
+  on Alpine's Xvfb; given `E2E_CODE_SERVER_SEED`, the desktop app's smoke
+  test has its VS Code window installed, started and served by the
+  TypeScript machine side, its workbench loaded and the folder listed;
   `tests/attention.spec.ts` has a fake Claude Code in a terminal draw
   attention, its session found and confirmed for a resume), and
   `tests/nodes.spec.ts` has the newer node of the other build take a node

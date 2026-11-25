@@ -280,7 +280,7 @@ async function video(): Promise<void> {
   }
 }
 if (process.env.ENCODER && existsSync(process.env.ENCODER) && !noGPU) await step('video', video);
-else console.log('INFO no encoder given (ENCODER): video not tried');
+else console.log('INFO video not tried (no encoder in ENCODER, or GUI_MATRIX_NO_GPU)');
 
 // The GPU selection library, written from the copy the build carries and
 // checked by the loader.

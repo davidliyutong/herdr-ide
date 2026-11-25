@@ -37,6 +37,8 @@ fn paeth(a: u8, b: u8, c: u8) u8 {
 /// Filters row cur (previous row prev, bpp bytes per pixel) into the five
 /// candidates and returns the index of the one to use.
 fn filterRow(cand: *[5][]u8, cur: []const u8, prev: []const u8, bpp: usize) usize {
+    // Every byte of a frame, on rows sized by encode: no checks per byte.
+    @setRuntimeSafety(false);
     var best: usize = 0;
     var best_sum: u64 = std.math.maxInt(u64);
     for (0..5) |f| {

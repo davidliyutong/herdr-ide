@@ -161,6 +161,9 @@ pub const Picture = struct {
     /// Entropy-codes MCU rows [from, to) as one restart interval: DC
     /// predictions start from zero and the last byte is padded with ones.
     pub fn scan(p: *const Picture, quant: *const Quant, from: u32, to: u32, cols: u32, out: *std.ArrayList(u8), gpa: std.mem.Allocator) !void {
+        // The hot loop of every frame, on inputs checked once (encode, the
+        // capture's jobs): no checks per value.
+        @setRuntimeSafety(false);
         var e: Bits = .{ .quant = quant, .out = out, .gpa = gpa };
         var b: Block = undefined;
         var cb: [4]Block = undefined;
@@ -185,10 +188,14 @@ pub const Picture = struct {
                 prev_cr = try e.writeBlock(&b, 1, prev_cr);
             }
         }
+        try out.ensureUnusedCapacity(gpa, 8);
         try e.emit(0x7f, 7);
     }
 
     fn toYCbCr(p: *const Picture, x: u32, y: u32, yb: *Block, cbb: *Block, crb: *Block) void {
+        // The hot loop of every frame, on inputs checked once (encode, the
+        // capture's jobs): no checks per value.
+        @setRuntimeSafety(false);
         const xmax = p.w - 1;
         const ymax = p.h - 1;
         for (0..8) |j| {
@@ -206,6 +213,9 @@ pub const Picture = struct {
 
 /// Go's color.RGBToYCbCr.
 fn rgbToYCbCr(r: u8, g: u8, b: u8) [3]i32 {
+    // The hot loop of every frame, on inputs checked once (encode, the
+    // capture's jobs): no checks per value.
+    @setRuntimeSafety(false);
     const r1: i32 = r;
     const g1: i32 = g;
     const b1: i32 = b;
@@ -218,6 +228,9 @@ fn rgbToYCbCr(r: u8, g: u8, b: u8) [3]i32 {
 }
 
 fn scale(dst: *Block, src: *const [4]Block) void {
+    // The hot loop of every frame, on inputs checked once (encode, the
+    // capture's jobs): no checks per value.
+    @setRuntimeSafety(false);
     for (0..4) |i| {
         const off = (i & 2) << 4 | (i & 1) << 2;
         for (0..4) |y| for (0..4) |x| {
@@ -241,14 +254,18 @@ const Bits = struct {
     nbits: u32 = 0,
 
     fn emit(e: *Bits, bits_in: u32, nbits_in: u32) !void {
+        // The hot loop of every frame, on inputs checked once (encode, the
+        // capture's jobs): no checks per value.
+        @setRuntimeSafety(false);
         const nbits = nbits_in + e.nbits;
         var bits = bits_in << @intCast(32 - nbits);
         bits |= e.bits;
         var n = nbits;
         while (n >= 8) {
             const b: u8 = @truncate(bits >> 24);
-            try e.out.append(e.gpa, b);
-            if (b == 0xff) try e.out.append(e.gpa, 0);
+            // Room was made for the block (writeBlock).
+            e.out.appendAssumeCapacity(b);
+            if (b == 0xff) e.out.appendAssumeCapacity(0);
             bits <<= 8;
             n -= 8;
         }
@@ -262,6 +279,9 @@ const Bits = struct {
     }
 
     fn emitHuffRLE(e: *Bits, h: usize, run: i32, value: i32) !void {
+        // The hot loop of every frame, on inputs checked once (encode, the
+        // capture's jobs): no checks per value.
+        @setRuntimeSafety(false);
         var a = value;
         var b = value;
         if (a < 0) {
@@ -274,6 +294,12 @@ const Bits = struct {
     }
 
     fn writeBlock(e: *Bits, b: *Block, q: usize, prev_dc: i32) !i32 {
+        // The hot loop of every frame, on inputs checked once (encode, the
+        // capture's jobs): no checks per value.
+        @setRuntimeSafety(false);
+        // A block codes to at most 64 codes of 27 bits, each byte of them
+        // stuffed: 432 bytes.
+        try e.out.ensureUnusedCapacity(e.gpa, 512);
         fdct(b);
         const dc = div(b[0], 8 * @as(i32, e.quant[q][0]));
         try e.emitHuffRLE(2 * q, 0, dc - prev_dc);
@@ -316,6 +342,9 @@ inline fn box(x0: i32, x1: i32, kcos: i32, ksin: i32) [2]i32 {
 }
 
 pub fn fdct(b: *Block) void {
+    // The hot loop of every frame, on inputs checked once (encode, the
+    // capture's jobs): no checks per value.
+    @setRuntimeSafety(false);
     // Columns: inputs UQ8.0, outputs Q10.18.
     for (0..8) |i| {
         var x0 = b[0 * 8 + i];
