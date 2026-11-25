@@ -3,7 +3,7 @@
 // headers, expired tokens never sent, refusals, Retry-After, redirects not
 // followed, the proxy of the environment, no token in a reply, skipped
 // accounts unasked.
-import { afterAll, afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { appendFileSync, rmSync, statSync, utimesSync } from 'node:fs';
 import * as net from 'node:net';
 import { join } from 'node:path';
@@ -12,6 +12,10 @@ import { hashId, type Account, type UsageEnv } from './env.ts';
 import { localPost, retryAfter } from './http.ts';
 import { isDeepSeekURL, limits, parseGrokBilling, setDeepseekKey, BadKey } from './limits.ts';
 import { parseKimiUsage } from './kimi.ts';
+
+// Fake programs may start slowly on a loaded machine (a new script is
+// assessed on its first run on macOS).
+setDefaultTimeout(60_000);
 
 const apis: FakeAPI[] = [];
 const fakeAPI = () => {

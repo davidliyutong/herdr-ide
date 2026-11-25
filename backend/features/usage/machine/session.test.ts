@@ -309,13 +309,13 @@ describe('one session', () => {
     write(cp, line('m1', 1, 5));
     expect((await cost('claude', byName(cp))).requests).toBe(1);
     appendFileSync(cp, line('m2', 2, 7));
+    const t = new Date(Date.now() + 60_000);
+    utimesSync(cp, t, t);
     expect(await cost('claude', byName(cp))).toMatchObject({ requests: 2, output: 12 });
     // The same size and time: the last read, not the file.
-    const st = statSync(cp);
-    writeFileSync(cp, ' '.repeat(st.size));
-    utimesSync(cp, st.atime, st.mtime);
-    const t = st.mtimeMs;
-    if (statSync(cp).mtimeMs === t) expect(await cost('claude', byName(cp))).toMatchObject({ requests: 2, output: 12 });
+    writeFileSync(cp, ' '.repeat(statSync(cp).size));
+    utimesSync(cp, t, t);
+    expect(await cost('claude', byName(cp))).toMatchObject({ requests: 2, output: 12 });
   });
 
   test('records past the retention leave the numbers', async () => {

@@ -131,7 +131,9 @@ export function testEnv(home: string, o: Partial<UsageEnv> & { api?: FakeAPI } =
     urls: api
       ? api.urls()
       : { ...DEFAULT_URLS, ...Object.fromEntries(Object.keys(DEFAULT_URLS).map((k) => [k, 'http://127.0.0.1:1/none'])) },
-    t: { ...USAGE_TIMING, kimiLockWaitMs: 300, kimiLockRetryMs: 50, kimiBackoffMs: 0 },
+    // Fake programs may start slowly on a loaded machine (a new script is
+    // assessed on its first run on macOS): their limits are generous.
+    t: { ...USAGE_TIMING, kimiLockWaitMs: 300, kimiLockRetryMs: 50, kimiBackoffMs: 0, keychainMs: 30_000, psMs: 30_000, agyMs: 30_000 },
     programs: {
       ...DEFAULT_PROGRAMS,
       security: join(home, 'no-security'),

@@ -2,7 +2,7 @@
 // (fake ps and lsof), asked on loopback only, remembered while it answers;
 // agy as the fallback, at most every agyEveryMs, backed off after a
 // failure, its account from its log, its process group killed.
-import { afterAll, afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { FakeAPI, TEST_NOW, removeHomes, script, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
@@ -10,6 +10,10 @@ import { hashId, type Account, type UsageEnv } from './env.ts';
 import { parseAgy, parsePS, procPorts } from './antigravity.ts';
 import { limits } from './limits.ts';
 import { run } from './run.ts';
+
+// Fake programs may start slowly on a loaded machine (a new script is
+// assessed on its first run on macOS).
+setDefaultTimeout(60_000);
 
 const apis: FakeAPI[] = [];
 afterEach(() => {

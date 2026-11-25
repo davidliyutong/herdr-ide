@@ -627,7 +627,7 @@ SECURITY.md has both.
   the directory or the cache refused, a download through a proxy checked
   and cached, one load for the machines of a platform).
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
-  runs the suite against the TypeScript build (20 passed,
-  the specs of chats, attention, program windows and AI usage skipped with
+  runs the suite against the TypeScript build (21 passed,
+  the specs of chats, attention and program windows skipped with
   the reason), and `tests/nodes.spec.ts` has the newer node of the other
   build take a node over in both runs.
