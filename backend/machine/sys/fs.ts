@@ -45,7 +45,9 @@ export const linkGuard = { refusedEverywhere: linux || darwin };
 export function openNoLinks(path: string, flags: number, mode = 0o666): number {
   if (darwin) {
     try {
-      return openSync(path, flags | O_NOFOLLOW_ANY, mode);
+      // O_NOFOLLOW_ANY covers the last name too; macOS refuses it with
+      // O_NOFOLLOW (EINVAL).
+      return openSync(path, (flags & ~constants.O_NOFOLLOW) | O_NOFOLLOW_ANY, mode);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EINVAL') throw e;
       linkGuard.refusedEverywhere = false;
