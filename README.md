@@ -61,7 +61,7 @@ cd dist/packages/veldr-$(scripts/platform.sh)
 ./veldr
 ```
 
-Or extract the matching archive from `dist/release/` (or GitHub Releases) and run `./veldr`. Add SSH machines with **Add machine…** in the sidebar. A hub from GitHub Releases has each machine download its platform's build. One built here serves machines of its own platform only, unless you build the others too (`TARGETS="linux/amd64 linux/arm64 …" make build`, its own among them) and start it with `--agent-dir dist/release`.
+Or extract the matching archive from `dist/release/` (or GitHub Releases) and run `./veldr`. Add SSH machines with **Add Machine…** in the sidebar. A hub from GitHub Releases has each machine download its platform's build. One built here serves machines of its own platform only, unless you build the others too (`TARGETS="linux/amd64 linux/arm64 …" make build`, its own among them) and start it with `--agent-dir dist/release`.
 
 Open <http://127.0.0.1:7780>. The status bar opens the command palette and the list of shortcuts. All flags are listed in [docs/reference.md](docs/reference.md).
 

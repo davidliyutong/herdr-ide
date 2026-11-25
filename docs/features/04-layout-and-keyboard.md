@@ -184,7 +184,7 @@ Non-goals: arbitrary docking of panes; floating panes.
 
 ## Failure modes
 
-- **The keybindings file has errors** → a file that is not a JSON array keeps the previous rules (`parse`); bad entries and unknown commands are skipped (`invalid`, `unknown`). The **Keyboard shortcuts** page shows problems and conflicts ([13](13-settings-and-appearance.md)).
+- **The keybindings file has errors** → a file that is not a JSON array keeps the previous rules (`parse`); bad entries and unknown commands are skipped (`invalid`, `unknown`). The **Keyboard Shortcuts** page shows problems and conflicts ([13](13-settings-and-appearance.md)).
 - **A focused pane closes** → the focus moves to its sibling.
 - **Two clients edit the layout at once** → the second write is refused as a version conflict; its client reads the newer layout, which wins.
 - **The terminal core is not ready** (installing, starting, failed) → the workspace area and the sidebar say so; the machine's menu starts it again.

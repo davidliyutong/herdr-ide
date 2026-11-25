@@ -27,9 +27,7 @@ A plugin is a feature of the hub (`defineFeature`, `backend/kernel/feature.ts`):
 
 ### Agent
 
-The op `plugin` (`Header.Plugin`, `Action`, `Params`) runs the handler registered with `plugin.Register`. It answers once (`plugin.Reply`) or streams JSON lines after its reply until the hub closes the stream (`plugin.UntilClosed`). Failures carry a code (`plugin.Errorf`); unknown plugin → `unknown_plugin`. A panicking handler fails its action with `failed` and is logged; the agent goes on. Handlers get the agent's directories and environment (`plugin.Env`), including running helpers as hidden terminals of the terminal core (`RunHidden`, `KillHidden`, [21](21-terminal-core.md)).
-
-Actions run with the agent's context; when the hub gives up, the action's stream closes. An action that reads nothing more from the stream can opt in to `plugin.UntilClosed`, a context that ends when the stream closes, and stop (file copies and removals, usage scans, code-server downloads, Git's processes). It is opt-in because an action that reads the stream cannot also wait on it.
+The op `plugin` (`Header.Plugin`, `Action`, `Params`) dispatches through `servePlugin` (`backend/machine/dispatch.ts`) to the feature's machine side defined with `defineMachine(protocol, start)` (`backend/machine/feature.ts`, registered in `backend/hosts/machine/features.ts`). Handlers are typed by the feature's `protocol.ts` schemas; non-streaming actions return a result directly (with `ctx.signal` aborted via `untilClosed` when the hub closes the stream, ending file copies and removals, usage scans, code-server downloads, searches and Git runs), while streaming actions receive `ActionStream` (`stream`, `reader`, `reply`) so they can read the stream directly. A thrown `Fail` returns its error code; any other thrown error fails the action with `failed` and is logged while the agent goes on; unknown plugin → `unknown_plugin`. Handlers receive `ActionContext` (`MachineEnv` plus `client`, `session` and `signal`) with directories, environment (`environ`), path expansion (`expand`) and hidden terminals of the terminal core (`runHidden`, `killHidden`, [21](21-terminal-core.md)).
 
 There is no generic exec: each action has its own arguments, so what runs on machines stays in the agent's code.
 
@@ -99,9 +97,9 @@ A plugin's messages live in `web/src/plugins/<id>/i18n/` ([12](12-internationali
 - **Older agent during an upgrade** → `unknown_plugin`, shown in the UI.
 - **Machine offline** → `offline` (409).
 - **Plugin turned off with its pane open** → the pane says so and keeps its place and unsaved text.
-- **Handler panics on a machine** → `failed`; the agent goes on.
+- **Handler throws on a machine** → `failed` (or the `Fail`'s code); the agent goes on.
 - **Component throws** → error with Try Again in its place.
-- **Hub gives up on an action** → its stream closes; `UntilClosed` actions stop.
+- **Hub gives up on an action** → its stream closes; non-streaming actions abort through `ctx.signal` and stop.
 
 ## Testing
 

@@ -98,7 +98,7 @@ Without the file there are no stored machines yet; nothing is written until the 
 
 ### Managing machines from the UI
 
-- **Add machine…** (`POST /api/machines {target, label}`). The dialog suggests the Host aliases of the hub host's ssh configuration that are not machines yet (`GET /api/ssh/hosts`, `backend/features/machines/sshconfig.ts`). The parser follows `Include` and keeps only concrete aliases with their `HostName` and `User`; no other option (keys, proxies, commands) leaves the hub. Reading is bounded in file size, count and include depth. A machine that needs a login turns *auth_required* and the page opens the authentication terminal where the hub offers one.
+- **Add Machine…** (`POST /api/machines {target, label}`). The dialog suggests the Host aliases of the hub host's ssh configuration that are not machines yet (`GET /api/ssh/hosts`, `backend/features/machines/sshconfig.ts`). The parser follows `Include` and keeps only concrete aliases with their `HostName` and `User`; no other option (keys, proxies, commands) leaves the hub. Reading is bounded in file size, count and include depth. A machine that needs a login turns *auth_required* and the page opens the authentication terminal where the hub offers one.
 - **Ordering** by dragging or **Move Up/Down** (`PUT /api/machines/order`), stored as the file's `order`.
 - **Rename** (`PUT /api/m/{id}/label`); labels are unique (`label_taken`) because `--machine` selects by label.
 - **Remove** (`DELETE /api/m/{id}`) deletes the record and ends the session. Nothing on the machine is removed; its terminal core keeps running. The local machine cannot be removed.

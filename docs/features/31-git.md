@@ -144,7 +144,7 @@ Lanes use the chart hues, status letters VS Code's Git decoration colors (`--ds-
 
 git runs with the user's permissions in their repositories, as in a terminal; the plugin adds a way to reach it from the browser:
 
-- Fixed argument vectors per action, no shell, no option from the request; literal paths after `--`; revisions, names and remotes checked (`TestArgvRefusesOptions`).
+- Fixed argument vectors per action, no shell, no option from the request; literal paths after `--`; revisions, names and remotes checked (`backend/features/git/machine/check.test.ts`).
 - No credential prompts: no terminal, no askpass, `GIT_TERMINAL_PROMPT=0`.
 - Changes are mutating routes: refused in read-only mode, audited without patch or message, behind the hub's Origin/Host checks.
 - Reads change nothing (`GIT_OPTIONAL_LOCKS=0`) and run no fsmonitor hook, textconv driver or maintenance from the repository's configuration; clean filters still run, as with a shell prompt's `git status`, also for a read-only viewer.

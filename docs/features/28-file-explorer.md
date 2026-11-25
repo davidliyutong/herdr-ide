@@ -49,7 +49,7 @@ Every change is a plugin route, refused in read-only mode (the UI offers none th
 | `rename`, `move` | Never replace (`renameat2`/`RENAME_NOREPLACE` on Linux, `renamex_np`/`RENAME_EXCL` on macOS, a check first elsewhere). Across file systems: copy, then remove the original. |
 | `copy` | Files with modes, folders with contents, links as links; taken names become `name copy.ext`. Never into itself, also through a link. |
 | `trash` | macOS `~/.Trash`; elsewhere the freedesktop.org trash, or the top-of-mount trash for another file system. A mount's trash is used only if it is the user's own, not a link and closed to others (as gio checks). Otherwise `trash_unavailable`, and the panel offers to delete for good. |
-| `remove` | Deletes for good without following links (as `os.RemoveAll`). |
+| `remove` | Deletes for good without following links (`removeTree` in `machine/tree.ts`, opening each directory relative to its parent). |
 | `write` | An editor's save, below. |
 | `upload` | Up to 4 GiB, received in full into the agent's private `staging/` directory, then written under a free name, or in place with `replace`. A cut-short upload leaves nothing at the path. |
 | `reveal` | `/usr/bin/open -R <path>` on macOS; `xdg-open <folder>/` elsewhere, found in fixed system directories, never `PATH`. No shell, standard streams on `/dev/null`, answers within 10 s, at most 4 waited for. |
@@ -57,7 +57,7 @@ Every change is a plugin route, refused in read-only mode (the UI offers none th
 
 Copies and removals stop between entries (and between 1 MiB chunks) once the hub's request ends; a partial copy is removed.
 
-**Refused paths.** Paths expand as every agent operation's (`~`, relative to home). The agent refuses (`refused`) the root, any directory holding the home directory, the home directory itself, and its own data directory (`~/.<slug>[-<instance>]`) with everything in it. It compares by name and by file identity (`os.SameFile`) after following links in the path's directories, so a home reached through a link or another letter case on a case-insensitive volume is refused too. Lists of paths hold at most 1000.
+**Refused paths.** Paths expand as every agent operation's (`~`, relative to home). The agent refuses (`refused`) the root, any directory holding the home directory, the home directory itself, and its own data directory (`~/.<slug>[-<instance>]`) with everything in it. It compares by name and by file identity (device and inode, `machine/guard.ts`) after following links in the path's directories, so a home reached through a link or another letter case on a case-insensitive volume is refused too. Lists of paths hold at most 1000.
 
 ### Editor pane
 
