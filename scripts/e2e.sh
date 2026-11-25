@@ -12,11 +12,12 @@
 # E2E_REQUIRE_DOCKER=1 (CI), which fails instead.
 #
 # Every core is built twice: deploying the Go machine build (the product's
-# default) and the TypeScript machine side (core-ts, with the Bun runtimes
-# of this host and of Docker's Linux, which scripts/runtimes.ts fetches
-# once into dist/bun-dl). The suite runs against the first;
-# E2E_MACHINE=ts runs it against the second (e2e/harness/paths.ts), and
-# tests/nodes.spec.ts takes a node of one build over with the other.
+# default) and the TypeScript machine side (core-ts: the machine
+# executables of this host and of Docker's Linux, glibc's and musl's, in
+# machines/, which a build of no release takes from --agent-dir; nothing is
+# downloaded). The suite runs against the first; E2E_MACHINE=ts runs it
+# against the second (e2e/harness/paths.ts), and tests/nodes.spec.ts takes
+# a node of one build over with the other.
 #
 #   SKIP_WEB=1 scripts/e2e.sh       # reuse web/dist
 #   SKIP_BUILD=1 scripts/e2e.sh     # reuse dist/e2e
@@ -89,17 +90,20 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   [[ -d dist/payload/ext ]] && common+=(--ext dist/payload/ext)
   bun backend/scripts/build.ts --out "$OUT/core" --agents "$OUT/payload/agents" "${common[@]}" >/dev/null
   bun backend/scripts/build.ts --out "$OUT/core-newer" --version dev-e2e-newer --agents "$OUT/payload/agents-newer" "${common[@]}" >/dev/null
-  echo "==> Bun runtimes and the cores with the TypeScript machine side"
+  echo "==> TypeScript machine executables and the cores that deploy them"
   # This host's, and Docker's Linux, glibc's and musl's (the SSH machine is
-  # Alpine): the core embeds them, and fetches none during the tests.
-  runtimes="$os/$arch"
-  [[ -n "$darch" && "linux/$darch" != "$runtimes" ]] && runtimes="$runtimes linux/$darch"
-  [[ -n "$darch" ]] && runtimes="$runtimes linux-musl/$darch"
-  rm -rf "$OUT/runtime" "$OUT/payload-ts"
+  # Alpine), each with its herdr-core; again as the newer version, whose
+  # node the newer core runs.
+  keys="$os-$arch"
+  [[ -n "$darch" && "linux-$darch" != "$keys" ]] && keys="$keys linux-$darch"
+  [[ -n "$darch" ]] && keys="$keys linux-$darch-musl"
+  rm -rf "$OUT/machines" "$OUT/machines-newer" "$OUT/payload-ts"
   # shellcheck disable=SC2086
-  bun backend/scripts/runtimes.ts --out "$OUT/runtime" --cache dist/bun-dl $runtimes >/dev/null
-  bun backend/scripts/build.ts --out "$OUT/core-ts" --machine ts --runtimes "$OUT/runtime" --payload-out "$OUT/payload-ts" "${common[@]}" >/dev/null
-  bun backend/scripts/build.ts --out "$OUT/core-ts-newer" --version dev-e2e-newer --machine ts --runtimes "$OUT/runtime" "${common[@]}" >/dev/null
+  bun backend/scripts/machines.ts --out "$OUT/machines" --version dev --hc "$OUT/payload/hc" $keys >/dev/null
+  # shellcheck disable=SC2086
+  bun backend/scripts/machines.ts --out "$OUT/machines-newer" --version dev-e2e-newer --hc "$OUT/payload/hc" $keys >/dev/null
+  bun backend/scripts/build.ts --out "$OUT/core-ts" --machine ts --machines "$OUT/machines" --payload-out "$OUT/payload-ts" "${common[@]}" >/dev/null
+  bun backend/scripts/build.ts --out "$OUT/core-ts-newer" --version dev-e2e-newer --machine ts --machines "$OUT/machines-newer" "${common[@]}" >/dev/null
   # The desktop app's smoke test (tests/desktop.spec.ts) runs it unpackaged
   # with the core bundled for its utility process and the payloads above;
   # it skips where the desktop's packages are not installed.

@@ -54,8 +54,20 @@ match; the bridge extension is reinstalled whenever its content changes.
    when the notary secrets are set too; without it it is signed ad hoc.
    The Windows and Linux packages are not signed. Every action the
    workflows use is pinned by its commit (with the version in a comment).
-   The workflow then writes `SHA256SUMS` over the archives and installers
-   (`*.tar.gz`, `*.dmg`, `*.zip`, `*.exe`, `*.AppImage`, `*.deb`), attests
+   With the repository variable `MACHINE` set to `ts` the cores and the
+   apps deploy the TypeScript machine side instead of the Go machine
+   build ([42](docs/features/42-typescript-backend.md)): the `machines`
+   job first compiles its executable for every machine platform (linux
+   x64 and arm64, each for glibc and musl, darwin x64 and arm64), each
+   with its platform's herdr-core, once; every core and app of the
+   release embeds their SHA-256 and the release's download URL
+   (`$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/<tag>`, from
+   the workflow's context, not from the code) and carries only its own
+   platform's executable, and the release publishes them as
+   `veldr-machine-<os>-<arch>[-musl].gz`, which machines download.
+   The workflow then writes `SHA256SUMS` over the archives, installers and
+   machine executables (`*.tar.gz`, `*.dmg`, `*.zip`, `*.exe`,
+   `*.AppImage`, `*.deb`, `*-machine-*.gz`), attests
    build provenance for them (only while the repository is public: GitHub
    stores no attestations for private repositories outside Enterprise
    Cloud) and creates the GitHub release with the changelog section as
@@ -69,7 +81,8 @@ match; the bridge extension is reinstalled whenever its content changes.
    deb (and the AppImage where FUSE 2 is installed).
 
 Builds are reproducible for a given commit and toolchain (fixed timestamps in
-gzip and the VSIX, `-trimpath` for the machine builds), so a local
+gzip and the VSIX, `-trimpath` for the machine builds; the TypeScript
+machine executables for the same output directory), so a local
 `VERSION=vX.Y.Z TARGETS="…" scripts/build.sh` can be compared with the
 release.
 

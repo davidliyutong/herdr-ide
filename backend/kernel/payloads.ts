@@ -10,17 +10,17 @@ import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { BRIDGE_EXT, CORE_BIN, DATA_DIR_NAME } from '#shared/lib/brand.ts';
 import { userHomeDir } from '#shared/host/hostdirs.ts';
-import { BUNDLE_FILE, tsBuild, type BuildSource, type GoBuild, type MachineBuild } from './machines/transport/builds.ts';
+import { DeployCode, Unsupported } from './machines/transport/errors.ts';
 import {
-  EMBEDDED_RUNTIMES,
-  RUNTIME_PINS,
-  cachedRuntime,
-  checkPinned,
-  runtimeFile,
-  runtimeKey,
-  runtimeOf,
-  type Runtime,
-} from './machines/transport/runtimes.ts';
+  machineAsset,
+  machineKey,
+  tsBuild,
+  type BuildSource,
+  type GoBuild,
+  type Manifest,
+  type MachineBuild,
+} from './machines/transport/builds.ts';
+import { resolveMachine } from './machines/transport/sources.ts';
 
 /** Files by their path relative to a root ("index.html",
  * "assets/x.js"). */
@@ -32,8 +32,8 @@ export interface Payloads {
   /** The web UI's built files; null when this build has none. */
   readonly web: Files | null;
   /** The machine build for a machine: the Go program for its platform
-   * (Go's os/arch names), or, in a core that embeds the TypeScript machine
-   * side, its bundle and the Bun runtime of the machine's platform and C
+   * (Go's os/arch names), or, in a core built to deploy the TypeScript
+   * machine side, its compiled executable for the machine's platform and C
    * library. Which one is a choice of the core's build
    * (backend/scripts/build.ts --machine). */
   machine: BuildSource;
@@ -76,30 +76,30 @@ export function layered(...sources: Array<Files | null | undefined>): Files {
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 
-/** The bundle of the TypeScript machine side in a payload. */
-export const BUNDLE_PATH = `machine/${BUNDLE_FILE}`;
+/** The digests of the TypeScript machine executables of this build, and
+ * the core's own platform's executable (gzip-compressed). */
+export const MANIFEST_PATH = 'machine/manifest.json';
+export const ownMachinePath = (key: string): string => `machine/${machineAsset(key)}.gz`;
 
 /** Payloads laid out as the build writes them: agents/<bin>-<os>-<arch>.gz
- * (the Go machine builds) or machine/machine.js and
- * runtime/bun-<os>-<arch>.gz (the TypeScript machine side and the Bun
- * runtimes it embeds), hc/hc-<os>-<arch>.gz,
+ * (the Go machine builds) or machine/manifest.json and the core's own
+ * platform's machine executable machine/<bin>-machine-<key>.gz (the
+ * TypeScript machine side: every other platform's comes from the release,
+ * checked against the manifest's digests), hc/hc-<os>-<arch>.gz,
  * encoder/encoder-<os>-<arch>.gz, ext/<bridge>.vsix and web/…; agentDir
- * (--agent-dir) holds uncompressed Go machine builds searched first
- * (development); runtimeCache keeps the runtimes fetched when a machine
- * needs one the core does not embed (musl's). Results are cached. */
+ * (--agent-dir) holds machine builds searched first: uncompressed Go
+ * builds, or TypeScript ones as the release names them (offline sites,
+ * development). Results are cached. */
 export function payloads(o: {
   files: Files;
   web?: Files | null;
   agentDir?: string;
-  runtimeCache?: string;
-  /** The runtimes' pinned digests, and how one not embedded is fetched
-   * (tests give their own). */
-  runtimePins?: Readonly<Record<string, string>>;
-  downloadRuntime?: (key: string, signal?: AbortSignal) => Promise<Buffer>;
+  /** The cache of machine executables the core downloaded (default
+   * ~/<DATA_DIR_NAME>/cache/machine). */
+  machineCache?: string;
 }): Payloads {
   const agents = new Map<string, Promise<GoBuild>>();
   const gzs = new Map<string, Promise<{ gz: Buffer; digest: string }>>();
-  const runtimes = new Map<string, Promise<Runtime>>();
   const cached = <T>(m: Map<string, Promise<T>>, key: string, f: () => Promise<T>): Promise<T> => {
     let p = m.get(key);
     if (!p) {
@@ -115,10 +115,10 @@ export function payloads(o: {
       if (!gz) throw new Error(`no ${what} in this build`);
       return { gz: Buffer.from(gz), digest: sha256(gunzipSync(gz)) };
     });
-  let bundle: Promise<Buffer | null> | undefined;
-  const tsBundle = () => {
-    bundle ??= o.files.get(BUNDLE_PATH).then((b) => (b ? Buffer.from(b) : null));
-    return bundle;
+  let manifest: Promise<Manifest | null> | undefined;
+  const tsManifest = () => {
+    manifest ??= o.files.get(MANIFEST_PATH).then((b) => (b ? (JSON.parse(Buffer.from(b).toString('utf8')) as Manifest) : null));
+    return manifest;
   };
   const goBuild = (os: string, arch: string) =>
     cached(agents, `${os}-${arch}`, async () => {
@@ -131,30 +131,22 @@ export function payloads(o: {
       }
       return { kind: 'go' as const, bin: Buffer.from(bin), version: sha256(bin).slice(0, 16) };
     });
-  const runtime = (key: string, signal?: AbortSignal) =>
-    cached(runtimes, key, async () => {
-      // The build's own (a build may carry more than EMBEDDED_RUNTIMES:
-      // the end-to-end tests' carries musl's for Docker's Alpine).
-      const gz = await o.files.get(runtimeFile(key));
-      if (gz) {
-        // Only the pinned executable, whatever the build was given.
-        const rt = runtimeOf(Buffer.from(gz));
-        checkPinned(key, rt.digest, o.runtimePins ?? RUNTIME_PINS);
-        return rt;
-      }
-      if ((EMBEDDED_RUNTIMES as readonly string[]).includes(key)) throw new Error(`no Bun runtime for ${key} in this build`);
-      return cachedRuntime(key, o.runtimeCache ?? join(userHomeDir(), DATA_DIR_NAME, 'cache'), {
-        signal,
-        download: o.downloadRuntime,
-        pins: o.runtimePins,
-      });
-    });
   return {
     web: o.web === undefined ? null : o.web,
-    async machine(t, signal): Promise<MachineBuild> {
-      const js = await tsBundle();
-      if (!js) return goBuild(t.os, t.arch);
-      return tsBuild(js, await runtime(runtimeKey(t.os, t.arch, t.libc), signal));
+    async machine(t): Promise<MachineBuild> {
+      const m = await tsManifest();
+      if (!m) return goBuild(t.os, t.arch);
+      const key = machineKey(t);
+      const b = tsBuild(m, key, (signal) =>
+        resolveMachine(b!, {
+          dir: o.agentDir || undefined,
+          cacheDir: o.machineCache ?? join(userHomeDir(), DATA_DIR_NAME, 'cache', 'machine'),
+          own: () => o.files.get(ownMachinePath(key)),
+          signal,
+        }),
+      );
+      if (!b) throw new Unsupported(DeployCode.PlatformUnsupported, `this build has no machine executable for ${key}`);
+      return b;
     },
     hc: (os, arch) => gzEntry(`hc/hc-${os}-${arch}.gz`, `herdr-core for ${os}-${arch}`),
     encoder: (os, arch) => gzEntry(`encoder/encoder-${os}-${arch}.gz`, `video encoder for ${os}-${arch}`),

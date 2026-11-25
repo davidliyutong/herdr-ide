@@ -17,13 +17,13 @@ kept.
 
 Each layer imports only from the layers above it in this list.
 
-| Directory   | Runs in      | What                                                                                                                                                                                                                                                              |
-| ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds (`agents/`)                                                                                                            |
-| `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                                                                                                                |
-| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core                                                                                                                      |
-| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                                                                                                                    |
-| `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process, served over MessagePorts; `machine/` the machine build (its command line, the features it serves, its bundle) |
+| Directory   | Runs in      | What                                                                                                                                                                                                                                                                                                         |
+| ----------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds (`agents/`)                                                                                                                                                       |
+| `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                                                                                                                                                           |
+| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core                                                                                                                                                                 |
+| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                                                                                                                                                               |
+| `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process, served over MessagePorts; `machine/` the machine build (its command line, the features it serves, its bundle, compiled into one executable per platform) |
 
 `tsconfig.node.json` typechecks what runs in Node with Node's types only,
 so a Bun API there does not compile; `tsconfig.bun.json` typechecks the
@@ -113,8 +113,9 @@ hook. The host composes them; features do not import each other.
   `node:sqlite`, `node:crypto`); `Bun.*` and `bun:*` only in `machine/`,
   `hosts/bun/`, `hosts/machine/`, the features' `machine.ts` and
   `machine/`, and tests (`scripts/check.sh` fails otherwise).
-- The machine bundle carries the machine side only: no `kernel/`, no
-  core host, no feature's `core.ts` (`hosts/machine/bundle.test.ts`).
+- The machine bundle, and so the machine executable compiled from it,
+  carries the machine side only: no `kernel/`, no core host, no feature's
+  `core.ts` (`hosts/machine/bundle.test.ts`).
 - System calls Node lacks go through `machine/sys` (`bun:ffi`), never a
   variadic C function (on macOS/arm64 their arguments go on the stack);
   on Linux, `syscall(2)` with integer arguments only.
@@ -137,10 +138,12 @@ hook. The host composes them; features do not import each other.
 
 `bun scripts/build.ts --out FILE --web ../web/dist --agents DIR --hc DIR
 --ext DIR --encoder DIR [--target bun-linux-x64-baseline] [--version V]`
-builds the core's executable; with `--machine ts --runtimes DIR` it embeds
-the machine side here (its bundle, built for the version) and the Bun
-runtimes of `DIR` (`bun scripts/runtimes.ts --out DIR [os/arch…]` fetches
-the pinned ones) instead of the Go machine builds; `scripts/build.sh` (`make build`) runs it for
+builds the core's executable; with `--machine ts --machines DIR
+[--release-url URL]` it embeds, instead of the Go machine builds and
+herdr-core, the digests of the machine side's executables of `DIR` (`bun
+scripts/machines.ts --out DIR --version V --hc DIR [platform…]` compiles
+them, one per platform with its herdr-core, `hosts/machine/compile.ts`)
+and the core's own platform's executable; `scripts/build.sh` (`make build`) runs it for
 each platform with everything it embeds staged in `dist/payload`, and
 `scripts/e2e.sh` (`make e2e`) runs the end-to-end tests against it (the
 core deploying the Go machine builds; `E2E_MACHINE=ts`, the one deploying

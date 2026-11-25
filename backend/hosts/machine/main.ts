@@ -1,5 +1,5 @@
-// The machine build's command line: what the core uploads to every machine
-// (the Bun runtime and this bundle, run by a launcher script) and runs
+// The machine build's command line: what the core deploys to every machine
+// (compiled by Bun into one executable per platform, compile.ts) and runs
 // there. Its commands are the Go machine build's (cmd/<slug>), with the
 // same flags:
 //

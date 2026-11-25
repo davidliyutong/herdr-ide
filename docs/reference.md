@@ -94,7 +94,7 @@ remote machine.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--agent-dir` | – | Directory of uncompressed `veldr-<os>-<arch>` machine builds (`go build ./cmd/veldr`) used instead of the embedded ones. |
+| `--agent-dir` | – | Directory of machine builds searched before the embedded ones: uncompressed `veldr-<os>-<arch>` Go builds (`go build ./cmd/veldr`), or, for a core that deploys the TypeScript machine side, its executables as its release names them (`veldr-machine-<os>-<arch>[-musl].gz`, or uncompressed without `.gz`), each checked against the digests built into the core (offline sites, [deployment](deployment.md#air-gapped-networks)). |
 | `--ext-dir` | – | Directory containing `veldr-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
 | `--parent-stdio` | `false` | Launcher lifecycle (the end-to-end tests): write `{"event":"ready","url":"…"}` to stdout after binding, clean up when stdin closes (what stdin carries is not read). Does not change HTTP guards; every client is a browser. |
@@ -234,6 +234,7 @@ it is stale).
 | `chat.maxTotalMB` | integer, 64–2048 | `512` | – | per machine |
 | `chat.maxChatMB` | integer, 8–256 | `64` | – | per machine |
 | `performance.keptTerminals` | integer, 0–64 | `12` | – | – |
+| `machines.download` | `true`, `false` | `true` | `--machine-download` | per machine |
 
 <!-- end of make tokens: settings -->
 
@@ -415,7 +416,7 @@ machine's id. `make check` fails when a route of the core is missing here
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
-| `GET /api/machines` | – | Every machine's state, agent info and terminal core state; never-connected machines carry `code` `invalid_target` or `local_unsupported`. |
+| `GET /api/machines` | – | Every machine's state, agent info and terminal core state; never-connected machines carry `code` `invalid_target` or `local_unsupported`, machines whose build could not be deployed `failure` (`platform_unsupported`, `cpu_unsupported`, `libs_missing`, `build_unavailable`) with `error`. |
 | `POST /api/machines` | writes | Adds and stores an SSH machine (`{"target", "label"}`). |
 | `PUT /api/machines/order` | writes | Stores the machines' order (`{"order": [ids]}`, each once). |
 | `GET /api/ssh/hosts` | writes | Host aliases of the core host's ssh configuration not yet machines (`[{"alias", "hostname"?, "user"?}]`) ([02](features/02-multi-machine-transport.md)). |
@@ -555,7 +556,7 @@ only through `reveal` and `export`, each recorded in the access log first.
 | `VELDR_DESKTOP_DEV` | Electron | Isolated development instance: `1` for `dev`, or a name (lowercase letters, digits, dashes, ≤ 32, not `desktop`). Local-only, own Electron profile and lock. Always on for unpackaged Electron. |
 | `VELDR_DESKTOP_NO_OPEN` | Electron, development instances | Full Disk Access buttons print `no-open: …` to stderr instead of opening anything. |
 | `VELDR_DESKTOP_PAYLOAD` | Electron, development instances | A directory laid out as `dist/payload` (machine builds, herdr-core, encoders, the extension) for the core instead of the repository's (the desktop smoke test's). |
-| `VELDR_AGENT_DIR` | Electron, development instances; `veldr node` | Uncompressed machine builds searched first, as `--agent-dir`. |
+| `VELDR_AGENT_DIR` | Electron, development instances; `veldr node` | Machine builds searched first, as `--agent-dir`. |
 | `VELDR_SEED_DIR` | Electron, development instances | A directory of code-server releases and extensions, as `--seed-dir`. |
 | `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and single-instance lock, for smoke tests beside another copy. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux; agent | Configuration (default `~/.config`) and cache (default `~/.cache`) directories; on a machine also where herdr-core's `config.toml` is read for `restore_screen`. |
@@ -606,8 +607,7 @@ else `<data>/run-<host id>`. Retention is summarized in
 
 | Path | Content | Lifetime |
 | --- | --- | --- |
-| `~/.veldr/agent/<build>/` | Uploaded machine build: the Go executable, or the TypeScript machine side's `machine.js` and its launcher `veldr` | Unused 14 days. |
-| `~/.veldr/runtime/bun-<digest>/bun` | The Bun runtime the TypeScript machine side runs on (shared by instances and builds), accepted only with its SHA-256 | Unused 14 days. |
+| `~/.veldr/agent/<build>/veldr` | The machine build: the Go executable, or the TypeScript machine side's executable (downloaded by the machine from the core's release or uploaded by the core), accepted only with its SHA-256 | Unused 14 days. |
 | `~/.veldr/code-server/<version>-<os>-<arch>/` | code-server releases (shared by instances and by hosts of one platform) | Unused 14 days. |
 | `~/.veldr/hosts/<host>/xvfb/<version>/` | Xvfb unpacked in user space (shared by this host's instances) | Unused 14 days, when another is unpacked. |
 | `~/.veldr/video/<sha256 prefix>/encoder` | Video encoder (shared), run only while its digest matches | Unused 14 days, when another is installed; unfinished after 1 h. |
@@ -647,7 +647,10 @@ Also on the core host: ssh control sockets in `/tmp/veldr-<uid>/s`
 16 characters; Linux and macOS; owned by you, 0700), and code-server downloads with
 `.sha256` sidecars in the user cache directory
 (`~/Library/Caches/veldr/code-server`, `~/.cache/veldr/code-server`,
-`%LocalAppData%\veldr\code-server`).
+`%LocalAppData%\veldr\code-server`), and the TypeScript machine
+executables a core downloaded from its release
+(`~/.veldr/cache/machine/veldr-machine-<platform>-<digest>.gz`, checked
+when read, removed unused for 14 days).
 
 A release directory holds the core, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
 `licenses.md` and `licenses/` (`herdr-core/`, `herdr-detect/`, `encoder/`).

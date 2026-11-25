@@ -41,6 +41,10 @@ export interface State extends Spec {
   code?: string;
   /** What ssh or the agent said when a connection failed. */
   error?: string;
+  /** Why the machine build could not be deployed (transport/errors.ts
+   * DeployCode: platform_unsupported, cpu_unsupported, libs_missing,
+   * build_unavailable), with error; the machine is dialed again. */
+  failure?: string;
   platform?: string;
   info?: Info;
   hc?: HCState;

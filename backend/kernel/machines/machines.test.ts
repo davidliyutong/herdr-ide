@@ -275,6 +275,33 @@ describe('machines', () => {
     await done;
   });
 
+  // A machine whose build cannot be deployed shows the failure's code
+  // (which the UI explains) beside the message, and is dialed again.
+  test('a deployment failure carries its code', async () => {
+    const { Unsupported } = await import('./transport/errors.ts');
+    let dials = 0;
+    const m = new Machine(sshSpec('x'), {
+      dial: async () => {
+        dials++;
+        throw new Unsupported('build_unavailable', 'no machine build for linux-amd64');
+      },
+      logger: () => {},
+      publish: () => {},
+      streams: () => undefined,
+      localSupported: true,
+      timing: { backoffMinMs: 10_000 },
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('the error', () => m.state().status === 'error');
+    expect(m.state().failure).toBe('build_unavailable');
+    expect(m.state().code).toBeUndefined();
+    m.wake();
+    await waitFor('the second dial', () => dials === 2);
+    ac.abort();
+    await done;
+  });
+
   // A machine is ready once its agent answers, quietly.
   test('ready when the agent answers', async () => {
     const logs: string[] = [];

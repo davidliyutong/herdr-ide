@@ -84,7 +84,11 @@ module.exports = {
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     { from: '../web/dist/licenses.md', to: 'licenses.md' },
     // What the core carries (src/platform.ts coreResources).
-    { from: '../dist/payload', to: 'payload', filter: ['agents/*.gz', 'hc/*.gz', 'encoder/*.gz', 'ext/*.vsix'] },
+    {
+      from: '../dist/payload',
+      to: 'payload',
+      filter: ['agents/*.gz', 'hc/*.gz', 'machine/manifest.json', 'machine/*.gz', 'encoder/*.gz', 'ext/*.vsix'],
+    },
     { from: '../web/dist', to: 'web' },
   ],
   // node-pty is installed for DESKTOP_ARCH; refuse to put it into an
@@ -100,8 +104,11 @@ module.exports = {
       'dist/frames.cjs',
       ptyBinary(context.electronPlatformName),
       '../web/dist/index.html',
-      `../dist/payload/agents/${slug}-linux-amd64.gz`,
-      '../dist/payload/hc/hc-linux-amd64.gz',
+      // The Go machine builds and herdr-core, or the TypeScript machine
+      // side's digests (scripts/build.sh MACHINE=ts).
+      ...(existsSync(join(__dirname, '../dist/payload/machine/manifest.json'))
+        ? []
+        : [`../dist/payload/agents/${slug}-linux-amd64.gz`, '../dist/payload/hc/hc-linux-amd64.gz']),
       '../dist/hc/licenses/LICENSE',
       '../web/dist/licenses.md',
     ];

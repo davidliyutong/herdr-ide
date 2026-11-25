@@ -2,9 +2,9 @@
 // the node's socket, started from the machine build installed for this
 // platform when none answers, as `node dial` does for a core that comes
 // over ssh. The node is the same program a remote machine runs; the core
-// installs it where an ssh upload would put it (~/<AGENT_DIR>/<version>,
-// and a TypeScript build's runtime in ~/<RUNTIME_DIR>), each file checked
-// by its digest.
+// installs it where an ssh upload would put it (~/<AGENT_DIR>/<version>),
+// a TypeScript build's executable from the core's own copy, checked by its
+// digest.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -12,13 +12,14 @@ import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { NodeOp, VERSION, newer, readLine, writeLine, type NodeHello, type NodeInfo, type Reply } from '#shared/proto/agentproto/index.ts';
-import { AGENT_DIR, CORE_BIN, RUNTIME_DIR } from '#shared/lib/brand.ts';
+import { AGENT_DIR, CORE_BIN } from '#shared/lib/brand.ts';
 import { dirsFor, makeDirs } from '#shared/host/hostdirs.ts';
+import { withoutForeignRuntimeVars } from '#shared/lib/bunenv.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { pairDuplex } from '#shared/proto/yamux.ts';
 import { CLIENT_ID, Session } from './session.ts';
-import { BUNDLE_FILE, launcher, nodeBuild, runtimeDirName, type BuildSource, type MachineBuild } from './builds.ts';
+import { nodeBuild, type BuildSource, type MachineBuild } from './builds.ts';
 
 /** The agent runs on Linux and macOS; on Windows the core reaches SSH
  * machines only. */
@@ -54,36 +55,25 @@ function place(path: string, b: Uint8Array, digest?: string): void {
 }
 
 /** Installs a build where an upload would put it, unless it is there; the
- * file to run. */
-export function installBuild(b: MachineBuild, home: string): string {
+ * file to run. A TypeScript build's executable comes from the core's
+ * sources (its own copy, for its own platform), checked by its digest. */
+export async function installBuild(b: MachineBuild, home: string, signal?: AbortSignal): Promise<string> {
   const dir = join(home, AGENT_DIR, b.version);
   const exe = join(dir, CORE_BIN);
-  if (b.kind === 'ts') {
-    // The runtime, once per digest (also when the build is there).
-    const rt = join(home, RUNTIME_DIR, runtimeDirName(b.runtime.digest));
-    if (!existsSync(join(rt, 'bun'))) {
-      mkdirSync(rt, { recursive: true, mode: 0o700 });
-      place(join(rt, 'bun'), gunzipSync(b.runtime.gz), b.runtime.digest);
-    }
-  }
   if (existsSync(exe)) return exe;
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   if (b.kind === 'go') place(exe, b.bin);
-  else {
-    place(join(dir, BUNDLE_FILE), b.bundle, b.bundleDigest);
-    place(exe, Buffer.from(launcher(b)));
-  }
+  else place(exe, gunzipSync(await b.load(signal)), b.digest);
   return exe;
 }
 
 /** Installs the machine build for this platform where an upload would put
  * it, unless it is there; its path and build. */
-export async function installLocal(builds: BuildSource, home: string): Promise<{ exe: string; info: NodeInfo }> {
+export async function installLocal(builds: BuildSource, home: string, signal?: AbortSignal): Promise<{ exe: string; info: NodeInfo }> {
   const { os, arch } = localPlatform();
   const b = await builds({ os, arch, ...(os === 'linux' ? { libc: 'glibc' as const } : {}) });
-  const exe = installBuild(b, home);
-  // The node's build file: the executable, or a TypeScript build's bundle.
-  const file = b.kind === 'go' ? exe : join(exe, '..', BUNDLE_FILE);
+  const exe = await installBuild(b, home, signal);
+  const file = exe;
   return {
     exe,
     info: {
@@ -142,7 +132,8 @@ function startNode(exe: string, instance: string, hostDir: string, takeover: boo
   const fd = openSync(log, 'a', 0o600);
   try {
     const args = ['node', '--instance', instance, ...(takeover ? ['--takeover'] : [])];
-    const p = spawn(exe, args, { detached: true, stdio: ['ignore', fd, fd] });
+    // Nothing that would make the executable run other code (bunenv.ts).
+    const p = spawn(exe, args, { detached: true, stdio: ['ignore', fd, fd], env: withoutForeignRuntimeVars(process.env) });
     p.on('error', () => {});
     p.unref();
   } finally {
@@ -162,7 +153,7 @@ export async function dialNode(opts: {
   if (!LOCAL_SUPPORTED) throw new Error('the local machine needs Linux or macOS');
   const dirs = dirsFor(opts.instance);
   makeDirs(dirs);
-  const { exe, info: me } = await installLocal(opts.builds, dirs.home);
+  const { exe, info: me } = await installLocal(opts.builds, dirs.home, opts.signal);
   const sock = nodeSocket(dirs.run);
   const hello: NodeHello = {
     op: NodeOp.Serve,

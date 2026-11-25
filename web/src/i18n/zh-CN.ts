@@ -206,6 +206,13 @@ export const zhCN: Messages = {
     '它的 ssh 目标被拒绝（以“-”开头，或含空白、控制字符或 $ ; | 等 shell 字符），因此不会连接。可以重命名或移除它，或在机器列表文件中改正目标后重启。',
   'machine.code.local_unsupported':
     '本机需要 Linux 或 macOS：在 Windows 上，本机的终端、文件和 VS Code 都不可用。请添加 SSH 机器（Linux 或 macOS）在上面工作；运行 ssh 服务的 WSL 发行版也可以。',
+  'machine.failure.platform_unsupported':
+    '没有适用于这台机器的系统和处理器的机器端构建：机器端运行在 Linux 和 macOS 上，支持 x86-64 和 arm64。',
+  'machine.failure.cpu_unsupported':
+    '这台机器的处理器缺少机器端构建所需的 SSE4.2（使用 QEMU 默认处理器型号的虚拟机就是这样：请改用宿主机的处理器型号）。',
+  'machine.failure.libs_missing': 'musl 版的机器端构建需要这台机器上有 libstdc++ 和 libgcc。在 Alpine 上：apk add libstdc++ libgcc。',
+  'machine.failure.build_unavailable':
+    '无法获得机器端构建：机器无法从发布页下载它，这台电脑的机器端构建目录（--agent-dir）和缓存中也没有，且无法下载。请把发布页中适用于这台机器的机器端构建放入该目录，或让这台电脑或机器能访问发布页。',
   'machine.gone': '这台机器已不在列表中。',
   'machine.localOnly': '本机不能这样修改。',
   'machine.notSaved': '无法保存机器列表文件。',
@@ -683,6 +690,10 @@ export const zhCN: Messages = {
   'command.find.next': '查找下一个',
   'command.find.previous': '查找上一个',
   'settings.section.performance': '性能',
+  'settings.section.machines': '机器',
+  'settings.machines.download': '机器自行下载构建',
+  'settings.machines.download.desc':
+    '缺少当前版本机器端构建的机器自行从发布页下载（按摘要校验），省下这台电脑的上传。关闭时，或机器无法下载时，由这台电脑通过 ssh 上传。',
   'settings.performance.keptTerminals': '后台保留的终端数',
   'settings.performance.keptTerminals.desc': '切走后仍保持连接的终端数量，切回时立即显示并停在原来的位置。每个都占用内存；0 表示不保留。',
   'perf.usage': '当前占用',

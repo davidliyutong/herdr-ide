@@ -25,6 +25,7 @@ import { Registry } from '#kernel/machines/registry.ts';
 import { loadSpecs, validTarget, type Spec } from '#kernel/machines/spec.ts';
 import { dialNode } from '#kernel/machines/transport/local.ts';
 import { dialSSH } from '#kernel/machines/transport/ssh.ts';
+import { DOWNLOAD } from '#features/machines/settings.ts';
 import { machinesFeature } from '#features/machines/core.ts';
 import { terminalsFeature } from '#features/terminals/core.ts';
 import { guiFeature } from '#features/gui/core.ts';
@@ -204,7 +205,14 @@ export function composeCore(o: ComposeOptions): Composed {
         return { session, platform: `${process.platform}/${process.arch === 'x64' ? 'amd64' : process.arch}` };
       }
       const { session, platform } = await dialSSH(
-        { target: spec.target ?? '', controlDir, builds, logger, instance: nodeInstance },
+        {
+          target: spec.target ?? '',
+          controlDir,
+          builds,
+          logger,
+          instance: nodeInstance,
+          machineDownload: settings.bool(DOWNLOAD, spec.id),
+        },
         signal,
       );
       return { session, platform: `${platform.os}/${platform.arch}` };

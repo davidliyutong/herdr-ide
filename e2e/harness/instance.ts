@@ -9,6 +9,7 @@
 // --instance <name>`, and failing the API the terminal core with the
 // instance's own herdr-core executable on the instance's own socket).
 
+import { readFileSync } from 'node:fs';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { TestHome } from './home';
@@ -23,8 +24,8 @@ export interface Machine {
 }
 
 /** The command lines of the instance's node processes (whichever build
- * runs them: the Go machine build's executable, or the Bun runtime with the
- * TypeScript machine side's bundle). */
+ * runs them: the Go machine build, or the TypeScript machine side's
+ * executable). */
 export function nodeProcesses(name: string): string[] {
   return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
     .split('\n')
@@ -32,7 +33,13 @@ export function nodeProcesses(name: string): string[] {
 }
 
 /** Whether a node's command line is the TypeScript machine side's. */
-export const tsNode = (command: string): boolean => /\/machine\.js node --instance /.test(command);
+export function tsNode(command: string): boolean {
+  // Both run as <home>/<AGENT_DIR>/<version>/<bin>: the executable tells,
+  // Bun's compiled executables carrying their file system's root.
+  const exe = /^\s*\d+\s+(\S+) node --instance /.exec(command)?.[1];
+  if (!exe) throw new Error(`not a node's command line: ${command}`);
+  return readFileSync(exe).includes('/$bunfs/root/');
+}
 
 export class Instance {
   /** The machine build its core deploys (paths.machine, E2E_MACHINE). */
@@ -96,7 +103,7 @@ export class Instance {
     // --local-only leaves out stored machines only: the SSH machines a
     // test adds while the core runs connect. --agent-dir holds the Linux
     // machine build they get (scripts/e2e.sh).
-    const args = ['--instance', this.name, '--listen', '127.0.0.1:0', '--parent-stdio', '--agent-dir', paths.agents];
+    const args = ['--instance', this.name, '--listen', '127.0.0.1:0', '--parent-stdio', '--agent-dir', paths.agentsOf(exe)];
     if (!stored) args.push('--local-only');
     const proc = spawn(exe, args, {
       cwd: this.home,

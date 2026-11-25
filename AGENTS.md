@@ -25,8 +25,9 @@ and herdr-core for 4 platforms, the video encoder of Linux machines and a
 VS Code extension. The machine side moves to TypeScript too
 ([42](docs/features/42-typescript-backend.md)): `backend/machine`,
 `backend/hosts/machine` and the features' `machine.ts` serve terminals,
-files, git, search, monitor, history and the browser pane, deployed with
-the Bun runtime by a core built with `--machine ts`; the product's builds
+files, git, search, monitor, history and the browser pane, compiled by
+Bun into one executable per platform and deployed by a core built with
+`--machine ts` (`scripts/build.sh MACHINE=ts`); the product's builds
 deploy the Go machine build until the TypeScript side serves every
 feature. Both builds speak the same wire protocols, and a node of either
 takes over from the other.
@@ -199,10 +200,14 @@ playbooks):
 - The binary a machine gets is `cmd/veldr` (`go build ./cmd/veldr`, with
   `-X …/internal/agentproto.Version` for releases); the core finds it by
   platform in its payloads (`backend/kernel/payloads.ts`) or in
-  `--agent-dir`. A core built with `--machine ts` uploads the TypeScript
-  machine side's bundle and the Bun runtime of the machine's platform
-  instead (`backend/kernel/machines/transport/builds.ts`), each checked by
-  its SHA-256 on the machine.
+  `--agent-dir`. A core built with `--machine ts` deploys the TypeScript
+  machine side's executable of the machine's platform instead
+  (`backend/scripts/machines.ts` compiles them; the core knows them by the
+  digests built into it and carries only its own platform's): the machine
+  downloads it from the release, else the core uploads it from
+  `--agent-dir`, its cache, its own copy or the release
+  (`backend/kernel/machines/transport/sources.ts`), checked by its SHA-256
+  on the machine.
 - Bun's unix socket server removes the path it bound when it closes: the
   machine side binds every socket under a temporary name and renames it
   into place (`backend/machine/sockets.ts` `listenUnix`); use it, or a

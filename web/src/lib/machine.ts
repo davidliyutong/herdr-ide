@@ -41,6 +41,10 @@ export interface MachineState {
    * (Windows). */
   code?: string;
   error?: string;
+  /** Why the machine build could not be deployed (platform_unsupported,
+   * cpu_unsupported, libs_missing, build_unavailable); the core tries
+   * again. */
+  failure?: string;
   platform?: string;
   info?: AgentInfo;
   hc?: MachineHC;
@@ -135,5 +139,11 @@ export function aggregate(list: Array<AgentStatus | undefined>): AgentStatus | u
  * the code. */
 export function codeText(code: string): string {
   const k = `machine.code.${code}`;
+  return hasMessage(k) ? t(k as MessageKey) : code;
+}
+
+/** What to do about a deployment failure (MachineState.failure). */
+export function failureText(code: string): string {
+  const k = `machine.failure.${code}`;
   return hasMessage(k) ? t(k as MessageKey) : code;
 }

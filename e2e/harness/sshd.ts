@@ -50,7 +50,7 @@ function probe(): { arch?: string; reason?: string } {
   if (info.status !== 0) return { reason: 'Docker is not available (SSH machine tests need it)' };
   const arch = { x86_64: 'amd64', amd64: 'amd64', aarch64: 'arm64', arm64: 'arm64' }[info.stdout.trim()];
   if (!arch) return { reason: `no machine build for Docker's architecture ${info.stdout.trim()}` };
-  for (const f of [join(paths.agents, `${paths.slug}-linux-${arch}`), paths.linuxFake(arch), paths.linuxXClient(arch)]) {
+  for (const f of [paths.sshMachineBuild(arch), paths.linuxFake(arch), paths.linuxXClient(arch)]) {
     if (!existsSync(f)) return { reason: `${f} is missing: run make e2e with Docker running` };
   }
   if (spawnSync('docker', ['image', 'inspect', IMAGE], { stdio: 'ignore' }).status !== 0) {

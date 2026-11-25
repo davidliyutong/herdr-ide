@@ -20,7 +20,7 @@ import { hasMessage, t } from '../i18n';
 import { openMenu, type MenuEntry } from '../contextMenu';
 import { actions } from '../actions';
 import { isMac, useKeys } from '../keybindings';
-import { codeText, type MachineState } from '../lib/machine';
+import { codeText, failureText, type MachineState } from '../lib/machine';
 import { conn } from '../lib/conn';
 import {
   resetSetting,
@@ -1061,6 +1061,7 @@ function MachinePage({ m, readOnly }: { m: MachineState; readOnly: boolean }) {
           )}
         </div>
         {m.code && <div className="setting-desc">{codeText(m.code)}</div>}
+        {m.failure && <div className="setting-desc">{failureText(m.failure)}</div>}
       </div>
       {!m.code && (
         <>

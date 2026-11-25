@@ -152,8 +152,10 @@ them, but a module the app does not carry has no reason to be looked
 for.
 
 The app carries what the core carries for machines as resources, laid out
-as `scripts/build.sh` stages them (`payload/`: machine builds, herdr-core,
-the video encoders, the VS Code extension; `web/`: the web UI), and
+as `scripts/build.sh` stages them (`payload/`: machine builds and
+herdr-core, or the TypeScript machine side's digests and its own
+platform's executable, the video encoders, the VS Code extension; `web/`:
+the web UI), and
 node-pty 1.1.0 for the ssh login's terminal: a Node-API module, so the
 binary built for Node loads in Electron's utility process without a
 rebuild for Electron; it ships prebuilt for macOS and Windows and is
@@ -168,7 +170,7 @@ Linux and macOS:
 - `backend/machine`: the node (`node.ts`: one per instance per host,
   `run/node.lock` taken with `flock`, `node.sock`, the hello of `serve`,
   `stop` and `takeover`, the idle end, the drain once taken over, its
-  retirement once its bundle is gone), its clients (`dial.ts`: `node dial`,
+  retirement once its executable is gone), its clients (`dial.ts`: `node dial`,
   `node stop`), the agent its sessions share (`agent.ts`: a yamux server
   per session, the core's ops `hello`, `fs.*`, `fs.archive`, `dial-unix`,
   `hc`, `hc-api`, `privacy` and `plugin`), the dispatch of `plugin` to the
@@ -184,9 +186,10 @@ Linux and macOS:
   stream ends when the core closes its stream.
 - `backend/hosts/machine`: the command line (`main.ts`: `node`,
   `node dial`, `node stop [--terminal-core]` and `version`, with the Go
-  build's flags), the features it serves (`features.ts`) and the bundle
+  build's flags), the features it serves (`features.ts`), the bundle
   (`bundle.ts`), which may not include the core, its hosts, a feature's
-  core side or tests (its test fails otherwise).
+  core side or tests (its test fails otherwise), and its compilation into
+  the executable of a platform (`compile.ts`).
 
 It serves the machine sides of the terminals (the terminal core and hidden
 terminals), files, git, search, monitor, history and browser features.
@@ -220,38 +223,81 @@ each socket under a temporary name and renames it into place: a server
 that closes never removes the socket another node or agent put at the path
 since.
 
-A machine gets two files: the Bun runtime, kept by its digest under the
-home's data directory (`~/.<slug>/runtime/bun-<digest>/bun`) and uploaded
-once, and the bundle of the machine side, a few hundred kilobytes per
-build (`~/.<slug>/agent/<version>/machine.js`, the version of the bundle
-and the runtime); a launcher script beside it (`<slug>`) runs one with the
-other without reading a `.env` file or `bunfig.toml` of the working
-directory and without installing anything (`--no-env-file --no-install
---config=/dev/null`, `BUN_OPTIONS` and `BUN_INSPECT*` unset,
-`BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`), so command lines (`node dial`,
-`node stop`) stay as they are. An ssh upload decompresses each file beside
-its place; the script computes its SHA-256 on the machine (`sha256sum`,
-`shasum` or `openssl`), renames the file into place only when it is the
-one the core sent, else removes it and fails, and prints it, which the core
-checks again once the script ran; an upload the connection drops removes
-its file (`trap`), and the nodes' housekeeping what a killed shell left,
-after an hour. The local install checks the files in process. The core
-embeds the runtimes of linux x64 (baseline), linux arm64, darwin x64 and
-darwin arm64; the musl runtimes are fetched by the core when a machine
-needs one and the build carries none, cached on the core's host (they need
-`libstdc++` and `libgcc`, which the probe reports when missing). Both the
-archives and the executables in them are pinned by SHA-256: a build embeds
-only the pinned executables, and a core uses a runtime of its payloads or
-its cache only when it is one. Which C library a machine has is what glibc
-answers (`getconf GNU_LIBC_VERSION`, `ldd --version`), musl's loader in
-`/lib` only without it (a glibc system with musl's package has one); in
-the node, the C library it calls is the one its process has mapped.
-Runtimes unused for 14 days are removed, as builds are: the nodes touch
-the directories of theirs.
+A machine gets one file: the machine side compiled by Bun into one
+executable for its platform (`bun build --compile`,
+`backend/hosts/machine/compile.ts`), the runtime, the machine side and the
+platform's herdr-core in it, kept at `~/.<slug>/agent/<version>/<slug>`
+(the version is the start of the executable's SHA-256) as the Go build is,
+so command lines (`node dial`, `node stop`) are the same for both. There is
+one per platform: linux x64 (a baseline build, for processors without
+AVX2), linux arm64, the same two for musl (Alpine), darwin x64 and darwin
+arm64. The executable is compiled without loading a `.env` file or
+`bunfig.toml` (`--no-compile-autoload-dotenv`,
+`--no-compile-autoload-bunfig`) and installs nothing; what Bun reads from
+the environment besides, `BUN_OPTIONS` (whose `--preload` it honours),
+`BUN_BE_BUN` (which makes it Bun's command line) and `BUN_INSPECT*`, the
+deployment's command line unsets before it runs the executable, the local
+transport leaves out of the node's environment, and the node removes from
+its own at once, so nothing it starts gets them; a compiled executable
+writes no transpiler cache. The node installs the terminal core from the
+copy it carries, checked by its digest (the `hc` op's `install-embedded`;
+the core uploads none to it), so a machine needs no other upload. Sizes
+with Bun 1.4.5 and herdr-core 0.1.21, uncompressed and gzip-compressed:
+
+| Platform | Executable | Compressed |
+| --- | --- | --- |
+| linux x64 | 108.0 MiB | 51.9 MiB |
+| linux arm64 | 107.9 MiB | 51.4 MiB |
+| linux x64 musl | 101.9 MiB | 49.0 MiB |
+| linux arm64 musl | 100.6 MiB | 48.4 MiB |
+| darwin x64 | 97.2 MiB | 44.1 MiB |
+| darwin arm64 | 88.4 MiB | 40.9 MiB |
+
+A core does not carry them all: a release publishes them as its assets
+(`<slug>-machine-<os>-<arch>[-musl].gz`), and each core of the release has
+their SHA-256 built in (`machine/manifest.json` of its payloads: the
+executable's and the asset's, with the release's download URL) and
+carries only its own platform's executable (a Windows core none; the
+desktop app its own platform's). A machine that does not hold the
+executable gets it, in this order (`backend/kernel/machines/transport`,
+`ssh.ts` and `sources.ts`):
+
+1. The machine downloads the release's asset itself, with `curl` or
+   `wget` (10 s to connect, 5 minutes in all), unless the setting
+   `machines.download` is off for it (or `--machine-download=false`).
+2. Else, or when that fails (neither tool, no route to the release, an
+   asset that is not the executable), the core uploads it over ssh. It
+   takes the executable from the first of: the operator's directory
+   (`--agent-dir`, the asset as the release names it or uncompressed),
+   its cache (`~/.<slug>/cache/machine/`), its own copy, a download from
+   the release, which goes through the proxy of `HTTPS_PROXY`,
+   `HTTP_PROXY` and `NO_PROXY` (Bun's fetch reads them; the desktop app
+   starts its core with `NODE_USE_ENV_PROXY=1`, without which Node's
+   fetch ignores them) and is cached. Each is checked against the digests
+   built into the core before it is used or cached: a file of the
+   directory that is not the build is refused, a cached one removed.
+
+Both install the same way: the gzip-compressed executable decompressed
+beside its place, its SHA-256 computed on the machine (`sha256sum`,
+`shasum` or `openssl`), renamed into place only when it is the one the
+core names, else removed and failed, and printed, which the core checks
+again once the script ran; an install the connection drops removes its
+file (`trap`), and the nodes' housekeeping what a killed shell left, after
+an hour. The local install checks it in process. When none of the sources
+has it the machine is refused with `build_unavailable` and what each
+source said, which the UI explains; it is dialed again later. A build of
+no release (development, the end-to-end tests) has no download URL: its
+machines get their executable from `--agent-dir` or the core's own copy.
+Which C library a machine has is what glibc answers (`getconf
+GNU_LIBC_VERSION`, `ldd --version`), musl's loader in `/lib` only without
+it (a glibc system with musl's package has one); musl's executable needs
+`libstdc++` and `libgcc`, which the probe reports when missing. Builds
+unused for 14 days are removed (the nodes touch the directories of
+theirs), the core's cache likewise.
 
 The node serves every core on one thread: what a user or a mount controls
 is not waited for on it. The core's file ops, git's reads of a repository,
-the node's check of its bundle and housekeeping are asynchronous (a call
+the node's check of its executable and housekeeping are asynchronous (a call
 that does not return holds a thread of the runtime's pool and its own
 request), and a file is opened to be read with `O_NONBLOCK` and read only
 when it is a regular file, so a FIFO swapped in waits for no writer. The
@@ -261,17 +307,21 @@ mount that stopped answering stalls the node until it answers; and the
 node needs its data directory (its log, the terminal history's database).
 
 Which machine build a core deploys is a choice of its build
-(`backend/scripts/build.ts --machine go|ts`, `scripts/runtimes.ts` fetching
-the runtimes), not a flag of the product: the product's builds deploy the
-Go machine build until the TypeScript side serves every feature. Both
-speak the same protocols on the same sockets, locks and files (the
-terminal history's database, the terminal core's executable and session),
-so a node of either build takes over from the other with the terminals
-kept, which is the upgrade path. `scripts/e2e.sh` builds the cores of both;
-`E2E_MACHINE=ts` runs the end-to-end tests against the one that deploys
-the TypeScript side, the specs of the features it does not serve yet
-skipped with the reason, and `tests/nodes.spec.ts` has a newer node of the
-other build take a node over.
+(`backend/scripts/build.ts --machine go|ts`, `scripts/build.sh MACHINE=ts`,
+`backend/scripts/machines.ts` compiling the executables; the release
+workflow's repository variable `MACHINE`), not a flag of the product: the
+product's builds deploy the Go machine build until the TypeScript side
+serves every feature. Both speak the same protocols on the same sockets,
+locks and files (the terminal history's database, the terminal core's
+executable and session), so a node of either build takes over from the
+other with the terminals kept, which is the upgrade path.
+`scripts/e2e.sh` builds the cores of both, and the TypeScript executables
+of the host and of Docker's Linux (glibc and musl) into a directory the
+cores take as `--agent-dir`, offline; `E2E_MACHINE=ts` runs the end-to-end
+tests against the cores that deploy the TypeScript side, the specs of the
+features it does not serve yet skipped with the reason, and
+`tests/nodes.spec.ts` has a newer node of the other build take a node
+over.
 
 ### Wire compatibility while both exist
 
@@ -351,9 +401,20 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 ## Alternatives considered
 
 - **Keep the machine side in Go.** Smaller uploads (a Go build is 16 MB,
-  6.5 MB compressed; a Bun runtime 89–107 MB, about 40 MB with zstd), but
-  the chat host and its adapters would stay in Go and the types twice.
-  The runtime uploaded once per Bun version keeps updates small.
+  6.5 MB compressed; a machine executable 88–108 MB, 41–52 MB
+  compressed), but the chat host and its adapters would stay in Go and
+  the types twice.
+- **The Bun runtime and a bundle of the machine side, apart.** An update
+  would upload the bundle only (a few hundred kilobytes), the runtime once
+  per Bun version, but a machine would run a launcher script that keeps
+  the working directory's `.env` and `bunfig.toml` out, the runtimes would
+  be pinned and fetched apart, and a node would have two files to check.
+  One executable per platform is one file, one digest and one install,
+  and the machines download it from the release, sparing the core's
+  upload.
+- **Every platform's executable in each core.** About 280 MB more per core
+  (and per desktop app): the release serves them, and a core carries its
+  own.
 - **A loopback listener for VS Code only.** Not needed: the tunnel works.
 - **A custom scheme for the desktop's origin.** Breaks code-server's
   resources and CacheStorage.
@@ -369,9 +430,11 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
   the machine with a code (`cpu_unsupported`, `libs_missing`) in its
   error, as an unknown platform is refused. Kernels and C libraries as old
   as CentOS 7's (3.10, glibc 2.17) run it (Testing).
-- A Bun runtime missing on the core's host for a platform (a musl machine
-  without network on the core's host, and a build that carries none for
-  it): the machine is refused with the download's error.
+- A machine that cannot download its executable and a core that has it
+  in neither its directory nor its cache and cannot reach the release (an
+  offline site without `--agent-dir`): the machine is refused with
+  `build_unavailable`, which the UI explains (deployment.md, offline
+  sites).
 - A kernel without `openat2` (below 5.6) or a container filtering it: a
   link swapped into a directory of a path the agent resolved is followed,
   only the last name is refused (`O_NOFOLLOW`), as with the Go build.
@@ -435,8 +498,9 @@ SECURITY.md has both.
   agent falls back; `renameat2` works on CentOS 7's 3.10, which has it
   backported (upstream it needs 3.15).
 - The TypeScript machine side on the same machines
-  (`payloads/machine-node`: its node reached with `node dial` as ssh
-  reaches it, a terminal of the terminal core it installs and starts, a
+  (`payloads/machine-node`: the compiled executable of the machine's C
+  library, its node reached with `node dial` as ssh reaches it, a
+  terminal of the terminal core it installs from its own copy and starts, a
   file written and read back, links refused by the system calls and the
   files feature, peer credentials, `node stop --terminal-core`): all passed
   on CentOS 7 (3.10, glibc 2.17; also without AVX, `openat2` absent and
@@ -450,8 +514,16 @@ SECURITY.md has both.
 - `backend/machine/**/*.test.ts` and the features' `machine*.test.ts` run
   the machine side through the wire with the kernel's own `call` and
   `open`, so its results are checked by the core's schemas;
-  `backend/kernel/machines/transport/deploy.test.ts` deploys it as an ssh
-  upload does, through an ssh that runs the remote commands locally.
+  `backend/kernel/machines/transport/deploy.test.ts` deploys this host's
+  compiled executable as an ssh connection does, through an ssh that runs
+  the remote commands locally: the machine's own download from a server
+  on loopback, the core's upload when the machine has no `curl` or `wget`,
+  may not download or got something else, a digest that is not the
+  executable's put in place by neither, and a working directory's `.env`
+  and `bunfig.toml` and `BUN_OPTIONS` reaching neither `node dial` nor
+  the node; `sources.test.ts` the core's sources (a tampered file of the
+  directory or the cache refused, a download through a proxy checked and
+  cached).
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
   runs the suite against the one deploying the TypeScript side (19 passed,
   the specs of chats, attention, program windows and AI usage skipped with

@@ -213,6 +213,14 @@ export const en = {
     'Its ssh target is refused (it starts with “-” or holds whitespace, control characters or shell characters such as $ ; |), so it is never connected. Rename or remove it, or correct the target in the machines file and restart.',
   'machine.code.local_unsupported':
     'The local machine needs Linux or macOS: on Windows its terminals, files and VS Code are not available. Add SSH machines (Linux or macOS) to work on them; a WSL distribution running an ssh server is one.',
+  'machine.failure.platform_unsupported':
+    'There is no machine build for this machine’s system and processor: the machine side runs on Linux and macOS, on x86-64 and arm64.',
+  'machine.failure.cpu_unsupported':
+    'This machine’s processor lacks SSE4.2, which the machine build needs (a virtual machine given QEMU’s default processor model is one: give it the host’s).',
+  'machine.failure.libs_missing':
+    'The machine build for musl needs libstdc++ and libgcc on this machine. On Alpine: apk add libstdc++ libgcc.',
+  'machine.failure.build_unavailable':
+    'The machine build could not be had: the machine could not download it from the release, and this computer has it neither in its machine build directory (--agent-dir) nor in its cache, nor could download it. Put the release’s machine build for this machine into that directory, or let this computer or the machine reach the release.',
   'machine.gone': 'the machine is no longer there.',
   'machine.localOnly': 'the local machine cannot be changed this way.',
   'machine.notSaved': 'the machines file could not be saved.',
@@ -702,6 +710,10 @@ export const en = {
   'command.find.next': 'Find Next',
   'command.find.previous': 'Find Previous',
   'settings.section.performance': 'Performance',
+  'settings.section.machines': 'Machines',
+  'settings.machines.download': 'Machines download their build',
+  'settings.machines.download.desc':
+    'A machine that lacks the machine build of this version downloads it from the release itself (checked by its digest), sparing this computer’s upload. Off, or when it cannot, this computer uploads it over ssh.',
   'settings.performance.keptTerminals': 'Terminals kept in the background',
   'settings.performance.keptTerminals.desc':
     'Terminals that stay connected after you switch away, so they come back at once where you left them. Each takes memory; 0 keeps none.',

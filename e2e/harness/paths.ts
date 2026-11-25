@@ -40,8 +40,22 @@ export const paths = {
   newerVersion: 'dev-e2e-newer',
   /** A directory with the fake coding agents (kimi: e2e/fakeacp). */
   fakeBin: join(dir, 'fakebin'),
-  /** The machine builds the core uploads to SSH machines (--agent-dir). */
-  agents: join(dir, 'agents'),
+  /** The machine builds the core uploads to SSH machines (--agent-dir):
+   * the Go builds, or the TypeScript machine executables of the core's
+   * version (agentsOf: those of each core). */
+  agents: join(dir, ts ? 'machines' : 'agents'),
+  /** The machine build directory of a core: the TypeScript machine
+   * executables are of a version, the newer core's its own. */
+  agentsOf: (exe: string): string =>
+    exe === join(dir, 'core-ts')
+      ? join(dir, 'machines')
+      : exe === join(dir, 'core-ts-newer')
+        ? join(dir, 'machines-newer')
+        : join(dir, 'agents'),
+  /** The machine build an SSH machine of Docker's architecture gets: the Go
+   * build, or the TypeScript executable for musl (the image is Alpine). */
+  sshMachineBuild: (arch: string): string =>
+    ts ? join(dir, 'machines', `${slug}-machine-linux-${arch}-musl.gz`) : join(dir, 'agents', `${slug}-linux-${arch}`),
   /** What the core embeds, staged as the desktop app carries it in its
    * resources (harness/desktop.ts). */
   payload: join(dir, ts ? 'payload-ts' : 'payload'),

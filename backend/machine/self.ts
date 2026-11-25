@@ -5,6 +5,7 @@
 // the sources (tests, development) is the entry module run by bun.
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
+import { FOREIGN_RUNTIME_VARS } from '#shared/lib/bunenv.ts';
 import { VERSION, type NodeInfo } from '#shared/proto/agentproto/index.ts';
 
 /** Whether this process is the compiled machine executable. */
@@ -33,26 +34,12 @@ export function selfInfo(): NodeInfo {
  * its own arguments), or bun with its flags and the entry module. */
 export const selfCommand = (): string[] => (compiled() ? [process.execPath] : [process.execPath, ...process.execArgv, buildFile()]);
 
-/** What makes a compiled Bun executable run other code or be another
- * program: its own runtime flags (BUN_OPTIONS, which it honours as bun
- * does), its debugger (BUN_INSPECT*), and BUN_BE_BUN, which turns it into
- * the bun command. The machine executable takes none of them: the core
- * starts it without them (the ssh command, the local spawn), and it
- * removes them from its own environment at once, so the processes it
- * starts (another node, the terminal core, helpers) never get them. A
- * compiled executable reads no .env and no bunfig.toml (compiled without
- * their autoloading), ignores NODE_OPTIONS and transpiles nothing at run
- * time, so it writes no transpiler cache. */
-export const FOREIGN_RUNTIME_VARS = [
-  'BUN_OPTIONS',
-  'BUN_BE_BUN',
-  'BUN_INSPECT',
-  'BUN_INSPECT_CONNECT_TO',
-  'BUN_INSPECT_NOTIFY',
-  'BUN_INSPECT_PRELOAD',
-] as const;
-
-/** Removes FOREIGN_RUNTIME_VARS from env. */
+/** Removes the variables that would make a compiled Bun executable run
+ * other code or be another program (#shared/lib/bunenv.ts) from env: the
+ * processes this one starts (another node, the terminal core, helpers)
+ * never get them. A compiled executable reads no .env and no bunfig.toml
+ * (compiled without their autoloading), ignores NODE_OPTIONS and
+ * transpiles nothing at run time, so it writes no transpiler cache. */
 export function dropForeignRuntimeVars(env: NodeJS.ProcessEnv = process.env): void {
   for (const k of FOREIGN_RUNTIME_VARS) delete env[k];
 }

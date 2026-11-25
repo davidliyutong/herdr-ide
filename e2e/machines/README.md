@@ -120,15 +120,17 @@ cloud images do) and an ssh server.
   credentials, flock, fcntl locks, SQLite locking, openat2, renameat2,
   process groups, PTYs). `fetch-runtimes.sh [DIR]` downloads the runtimes
   into `rt/` (or `DIR`, pinned digests) before a run.
-- `payloads/machine-node`: the TypeScript machine side driven as a core
-  drives it over ssh (`node dial`, yamux on its standard input and output):
-  the node answers, the terminal core it installs and starts runs a
-  terminal, a file is written and read back, links are refused where they
-  must be (by the system calls and by the files feature), peer credentials
-  name the user, `node stop --terminal-core` ends it all. `build.sh` (on a
-  computer with the repository) bundles `machine.js` and `driver.js` and
-  fetches herdr-core and the runtimes; `build.sh --no-rt` leaves the
-  runtimes to `../bun-probe/fetch-runtimes.sh payloads/machine-node/rt` on
-  the KVM host (`RUNTIMES="bun-linux-x64-baseline
-  bun-linux-x64-musl-baseline"`). A machine the core would refuse (musl
-  without libstdc++ and libgcc, no SSE4.2) passes as refused.
+- `payloads/machine-node`: the TypeScript machine side's compiled
+  executable driven as a core drives it over ssh (`node dial`, yamux on
+  its standard input and output): the node answers, the terminal core it
+  installs from its own copy and starts runs a terminal, a file is written
+  and read back, links are refused where they must be (by the system calls
+  and by the files feature), peer credentials name the user, `node stop
+  --terminal-core` ends it all. `build.sh` (on a computer with the
+  repository) compiles the executables of linux x64 for glibc and musl
+  (`exe/`) and bundles `driver.js`; `run.sh` runs the driver with the
+  executable of the machine's C library acting as Bun (`BUN_BE_BUN=1`,
+  which the node it starts does not get). `build.sh --go` adds the Go
+  machine build, which `run-go.sh` drives instead. A machine the core
+  would refuse (musl without libstdc++ and libgcc, no SSE4.2) passes as
+  refused.

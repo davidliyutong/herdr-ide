@@ -58,6 +58,15 @@ if [[ "$mode" == install && "$os" != mac ]]; then
   exit 2
 fi
 export DESKTOP_ARCH
+# With MACHINE=ts (scripts/build.sh), the app carries the TypeScript machine
+# executable of its own platform only (none on Windows, where no machine
+# side runs); machines get theirs from the release.
+case "$os" in
+  mac) PAYLOAD_MACHINES="darwin-${DESKTOP_ARCH/x64/amd64}" ;;
+  linux) PAYLOAD_MACHINES="linux-${DESKTOP_ARCH/x64/amd64}" ;;
+  win) PAYLOAD_MACHINES="" ;;
+esac
+export PAYLOAD_MACHINES
 INSTALL_DIR=${INSTALL_DIR:-/Applications}
 if [[ "$mode" == install && ! ( -d "$INSTALL_DIR" && -w "$INSTALL_DIR" ) ]]; then
   echo "$INSTALL_DIR is not a writable directory." >&2

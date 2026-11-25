@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { sample } from '#shared/host/perf.ts';
 import { defineFeature } from '#kernel/feature.ts';
+import { settings } from './settings.ts';
 import { Fail } from '#kernel/fail.ts';
 import { jsonBody } from '#kernel/http/app.ts';
 import { CloseCode } from '#kernel/channel.ts';
@@ -75,6 +76,7 @@ export const machinesFeature = (o: MachinesFeatureOptions) =>
     id: 'machines',
     toggle: false,
     audit: 'machine',
+    settings,
     setup(ctx) {
       const { machines, pages } = ctx;
       const broadcastList = () => pages.broadcast({ t: 'machines', list: machines.states() });

@@ -288,7 +288,11 @@ terminal core apart ([40](40-shared-homes.md)).
   rename, remove or fix the file while the core is stopped.
 - **Writing the file fails** → the change is refused with `save`.
 - **Unsupported platform** → no embedded agent for the `uname` pair; the
-  machine shows the error.
+  machine shows the error. A machine its build cannot be deployed to
+  carries the failure's code as `failure` beside the error
+  (`platform_unsupported`, `cpu_unsupported`, `libs_missing`,
+  `build_unavailable`: [42](42-typescript-backend.md)), which the UI
+  explains; it is dialed again with backoff.
 - **Hijacked control directory** → refused unless it is a real directory
   owned by the user with no group/other access
   ([08](08-web-access-and-security.md)).

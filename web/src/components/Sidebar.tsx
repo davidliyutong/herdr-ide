@@ -14,7 +14,7 @@ import {
   workspaceStatus,
   workspaceTitle,
 } from '../actions';
-import { codeText, shortPath, type MachineState } from '../lib/machine';
+import { codeText, failureText, shortPath, type MachineState } from '../lib/machine';
 import { useViewStatusOf } from '../plugins/registry';
 import { StatusDot, statusLabel } from './StatusDot';
 import { t, type MessageKey } from '../i18n';
@@ -386,7 +386,7 @@ function Inbox() {
 
 /** Why a machine is not connected, as its tooltip says it. */
 function machineProblem(m: MachineState): string {
-  return [m.code && codeText(m.code), m.error].filter(Boolean).join('\n');
+  return [m.code && codeText(m.code), m.failure && failureText(m.failure), m.error].filter(Boolean).join('\n');
 }
 
 function MachineItem({ m }: { m: MachineState }) {
@@ -499,6 +499,7 @@ function MachineItem({ m }: { m: MachineState }) {
             <div className={`machine-status ms-${m.status}`}>
               {t(`machine.${m.status}` as MessageKey)}
               {m.code && <div className="small">{codeText(m.code)}</div>}
+              {m.failure && <div className="small">{failureText(m.failure)}</div>}
               {m.error && <div className="small ellipsis2">{m.error}</div>}
               {m.status === 'disabled' && !readOnly && (
                 <div className="row">

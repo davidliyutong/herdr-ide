@@ -1,14 +1,15 @@
 // Bounds the disk the agent uses on a machine (AGENTS.md rule 6,
 // docs/deployment.md#remote-resources): old uploads go, other hosts'
 // directories unused for long go, installs that did not finish go, and
-// this agent's build, its runtime and this host's directories are touched,
+// this agent's build and this host's directories are touched,
 // so that other cores' and hosts' cleanups keep them (an upload removes
-// builds and runtimes unused for 14 days, transport/ssh.ts). Every call is
+// builds unused for 14 days, transport/ssh.ts). Every call is
 // asynchronous: the node's thread never waits for the file system. A link
 // is never followed: what it names is not this data directory's.
 import * as fsp from 'node:fs/promises';
 import { posix } from 'node:path';
-import { AGENT_DIR, DATA_DIR_NAME, RUNTIME_DIR } from '#shared/lib/brand.ts';
+import { AGENT_DIR, DATA_DIR_NAME } from '#shared/lib/brand.ts';
+import { buildFile } from './self.ts';
 import { HOSTS_DIR } from '#shared/host/hostdirs.ts';
 import type { Logger } from '#shared/lib/log.ts';
 
@@ -21,15 +22,15 @@ export const UPLOAD_RETENTION_MS = 7 * DAY;
  * directory goes after HOST_EXE_RETENTION_MS. */
 export const HOST_RETENTION_MS = 30 * DAY;
 export const HOST_EXE_RETENTION_MS = 180 * DAY;
-/** A build's or runtime's file an install left behind (the core's upload
- * or local install was interrupted) goes after this long. */
+/** A build's file an install left behind (the core's upload, the machine's
+ * download or the local install was interrupted) goes after this long. */
 export const STAGING_RETENTION_MS = 60 * 60_000;
 /** How often a running agent applies its rules: a node runs for weeks. */
 export const HOUSEKEEP_MS = DAY;
 
-/** The temporary files of an install: the ssh upload's .upload.<pid> and
- * .launcher.<pid>, the local install's <name>.upload.<pid>. */
-const STAGED = /^\.(upload|launcher)\.\d+$|\.upload\.\d+$/;
+/** The temporary files of an install: the ssh upload's or the machine's
+ * own download's .upload.<pid>, the local install's <name>.upload.<pid>. */
+const STAGED = /^\.upload\.\d+$|\.upload\.\d+$/;
 
 const touch = async (p: string, now: Date) => {
   try {
@@ -39,17 +40,12 @@ const touch = async (p: string, now: Date) => {
   }
 };
 
-/** The directories this build runs from, which housekeeping touches: the
- * build's directory under the agents' directory (<home>/<AGENT_DIR>/<v>)
- * and the runtime's (<home>/<DATA_DIR>/runtime/<digest>), when it runs
- * from them. */
-export function ownDirs(bundle = Bun.main, runtime = process.execPath): string[] {
-  const out: string[] = [];
-  const build = posix.dirname(bundle);
-  if (posix.basename(posix.dirname(build)) === 'agent') out.push(build);
-  const rt = posix.dirname(runtime);
-  if (posix.basename(posix.dirname(rt)) === 'runtime') out.push(rt);
-  return out;
+/** The directory this build runs from, which housekeeping touches: the
+ * build's directory under the agents' directory (<home>/<AGENT_DIR>/<v>),
+ * when it runs from one. */
+export function ownDirs(file = buildFile()): string[] {
+  const build = posix.dirname(file);
+  return posix.basename(posix.dirname(build)) === 'agent' ? [build] : [];
 }
 
 /** The entries of dir, none when it cannot be read. */
@@ -72,7 +68,7 @@ export async function housekeepOnce(base: string, host: string, logger: Logger, 
   await pruneOlder(posix.join(base, 'uploads'), now.getTime() - UPLOAD_RETENTION_MS, logger);
   await pruneOlder(posix.join(host, 'cs-data', 'logs'), now.getTime() - UPLOAD_RETENTION_MS, logger);
   await pruneHosts(posix.join(base, HOSTS_DIR), posix.basename(host), now, logger);
-  await pruneStaged([posix.join(home, AGENT_DIR), posix.join(home, RUNTIME_DIR)], now.getTime() - STAGING_RETENTION_MS, logger);
+  await pruneStaged([posix.join(home, AGENT_DIR)], now.getTime() - STAGING_RETENTION_MS, logger);
 }
 
 /** Other hosts' directories in dir; mine is this host's. An entry that is

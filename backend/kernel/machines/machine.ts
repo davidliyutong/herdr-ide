@@ -6,6 +6,7 @@ import { Reader } from '#shared/lib/streamio.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { offline } from '../fail.ts';
 import { AuthRequiredError } from './transport/ssh.ts';
+import { deployCode } from './transport/errors.ts';
 import { closeStream, type AgentStream, type Session } from './transport/session.ts';
 import { Unusable, validTarget, type HCState, type Spec, type State, type Status } from './spec.ts';
 
@@ -176,6 +177,10 @@ export class Machine {
       st.status = status;
       if (err === undefined) delete st.error;
       else st.error = errorText(err);
+      // Why the machine build could not be deployed, which the UI explains.
+      const failure = err === undefined ? undefined : deployCode(err);
+      if (failure) st.failure = failure;
+      else delete st.failure;
     });
   }
 
@@ -379,6 +384,7 @@ export class Machine {
       if (!st.platform) delete st.platform;
       st.status = 'ready';
       delete st.error;
+      delete st.failure;
     });
   }
 

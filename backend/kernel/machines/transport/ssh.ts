@@ -3,11 +3,12 @@
 // stdio (`node dial`, which starts the node when none answers). ssh is the
 // system's own, with a ControlMaster per instance (controldir.ts).
 import { join } from 'node:path';
-import { gzipSync } from 'node:zlib';
 import { execa } from 'execa';
-import { AGENT_DIR, CORE_BIN, NAME, RUNTIME_DIR } from '#shared/lib/brand.ts';
+import { AGENT_DIR, CORE_BIN, NAME } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
-import { BUNDLE_FILE, launcher, runtimeDirName, type BuildSource, type MachineBuild, type MachineTarget, type TSBuild } from './builds.ts';
+import { FOREIGN_RUNTIME_VARS } from '#shared/lib/bunenv.ts';
+import type { BuildSource, MachineBuild, MachineTarget, TSBuild } from './builds.ts';
+import { deployCode } from './errors.ts';
 import { CLIENT_ID, Session } from './session.ts';
 
 /** ssh could not authenticate without the user. */
@@ -24,6 +25,9 @@ export interface SSHOptions {
   logger: Logger;
   /** Selects the agent's state directory (brand.dataDir). */
   instance: string;
+  /** false: the machine does not download its build from the release
+   * itself (the setting machines.download); the core uploads it. */
+  machineDownload?: boolean;
 }
 
 /** The remote OS/arch reported by uname, and $HOME. */
@@ -248,60 +252,69 @@ class LineLogger {
   }
 }
 
-/** The script that writes a file of a build from standard input
- * (gzip-compressed) into dir under name, after the machine computed its
- * SHA-256 and found the one expected; it prints what it computed. */
-export function uploadScript(dir: string, name: string, digest: string): string {
+/** The script that installs the executable as dir/name: from the
+ * gzip-compressed data the command gives (standard input, or what fetch
+ * downloads), decompressed beside its place, put there only when the SHA-256
+ * the machine computes is digest (else removed, failing with status 3); it
+ * prints that digest, which the core checks again. The file is removed
+ * also when the connection goes (hangup, a closed pipe); what a killed
+ * shell leaves, the nodes' housekeeping removes after an hour. */
+export function installScript(dir: string, name: string, digest: string, fetch = 'cat'): string {
   const sum = `s=$({ sha256sum "$t" 2>/dev/null || shasum -a 256 "$t" 2>/dev/null || openssl dgst -sha256 -r "$t"; } | cut -d' ' -f1)`;
   return (
-    `umask 077; d="${dir}"; t="$d/.upload.$$"; ${cleanup('"$t" "$d/.launcher.$$"')}; mkdir -p "$d" && gunzip -c > "$t" && ${sum} && echo "@sha256=$s" && ` +
+    `umask 077; d="${dir}"; t="$d/.upload.$$"; ${cleanup('"$t"')}; mkdir -p "$d" && ${fetch} | gunzip -c > "$t" && ${sum} && echo "@sha256=$s" && ` +
     `[ "$s" = "${digest}" ] && chmod 700 "$t" && mv -f "$t" "$d/${name}" || { rm -f "$t"; echo "sha256 \${s:-unknown}, expected ${digest}" >&2; exit 3; }`
   );
 }
 
 /** Removes files when the script ends, also when the connection went away
- * (ssh's hangup, a write to a closed pipe); what is left anyway (a killed
- * shell) the nodes' housekeeping removes after an hour. */
+ * (ssh's hangup, a write to a closed pipe). */
 const cleanup = (files: string) => `trap 'rm -f ${files}' EXIT; trap 'exit 1' HUP INT TERM PIPE`;
 
-/** Builds and runtimes used by other cores are kept until unused for 14
- * days (running nodes touch their directories). */
-const PRUNE = `find "$HOME/${AGENT_DIR}" "$HOME/${RUNTIME_DIR}" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null; true`;
+/** How a machine downloads url to standard output: curl, else wget (exit 4
+ * when it has neither), each bounded: 10 s to connect, 5 minutes in all. */
+export const machineFetch = (url: string): string =>
+  `{ if command -v curl >/dev/null 2>&1; then curl -fsSL --connect-timeout 10 --max-time 300 ${shQuote(url)}; ` +
+  `elif command -v wget >/dev/null 2>&1; then wget -q -T 10 -O - ${shQuote(url)}; else echo "no curl or wget" >&2; exit 4; fi; }`;
 
-/** Uploads what of a TypeScript build the machine lacks: the runtime once
- * per digest, the bundle and its launcher once per build; each checked by
- * its SHA-256 on the machine before it is put in place. */
+/** Builds used by other cores are kept until unused for 14 days (running
+ * nodes touch their directories). */
+const PRUNE = `find "$HOME/${AGENT_DIR}" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null; true`;
+
+/** What a TypeScript machine executable's install does when the machine
+ * lacks it: the machine downloads the release's asset itself when it may
+ * (machineDownload) and the build has a release, else, or when that fails,
+ * the core uploads it from its sources (sources.ts); both check its
+ * SHA-256 on the machine before it is put in place. */
 async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?: AbortSignal): Promise<string> {
-  const rt = `$HOME/${RUNTIME_DIR}/${runtimeDirName(b.runtime.digest)}`;
   const dir = `$HOME/${AGENT_DIR}/${b.version}`;
-  const there = await run(o, `[ -x "${rt}/bun" ] && echo @runtime; [ -x "${dir}/${CORE_BIN}" ] && echo @build; true`, {
-    timeoutMs: 30_000,
-    signal,
-  });
-  const upload = async (what: string, script: string, gz: Buffer, digest: string) => {
-    o.logger(`ssh ${o.target}: uploading ${what} (${platform.os}/${platform.arch}, ${gz.length} bytes)`);
-    let out: string;
+  const there = await run(o, `[ -x "${dir}/${CORE_BIN}" ] && echo @build; true`, { timeoutMs: 30_000, signal });
+  if (/^@build$/m.test(there)) return `${dir}/${CORE_BIN}`;
+  const confirmed = (out: string) => out.split('\n').includes(`@sha256=${b.digest}`);
+  if (b.url && o.machineDownload !== false) {
+    o.logger(`ssh ${o.target}: the machine downloads its build ${b.version} (${platform.os}/${platform.arch}) from ${b.url}`);
     try {
-      out = await run(o, script, { stdin: gz, timeoutMs: 10 * 60_000, signal });
+      const out = await run(o, installScript(dir, CORE_BIN, b.digest, machineFetch(b.url)) + `; ${PRUNE}`, {
+        timeoutMs: 6 * 60_000,
+        signal,
+      });
+      // The core checks what the machine computed, too.
+      if (confirmed(out)) return `${dir}/${CORE_BIN}`;
+      o.logger(`ssh ${o.target}: the machine did not confirm its build's sha256; the core uploads it`);
     } catch (e) {
-      throw new Error(`upload ${what}: ${(e as Error).message}`);
+      if (signal?.aborted) throw e;
+      o.logger(`ssh ${o.target}: the machine could not download its build (${(e as Error).message.trim()}); the core uploads it`);
     }
-    // The core checks what the machine computed, too.
-    if (!out.split('\n').includes(`@sha256=${digest}`)) throw new Error(`upload ${what}: the machine did not confirm its sha256`);
-  };
-  if (!/^@runtime$/m.test(there))
-    await upload(
-      `the Bun runtime ${runtimeDirName(b.runtime.digest)}`,
-      uploadScript(rt, 'bun', b.runtime.digest),
-      b.runtime.gz,
-      b.runtime.digest,
-    );
-  if (!/^@build$/m.test(there)) {
-    const script =
-      uploadScript(dir, BUNDLE_FILE, b.bundleDigest) +
-      ` && printf '%s' ${shQuote(launcher(b))} > "$d/.launcher.$$" && chmod 700 "$d/.launcher.$$" && mv -f "$d/.launcher.$$" "$d/${CORE_BIN}"; ${PRUNE}`;
-    await upload(`the machine build ${b.version}`, script, gzipSync(b.bundle), b.bundleDigest);
   }
+  const gz = await b.load(signal);
+  o.logger(`ssh ${o.target}: uploading the machine build ${b.version} (${platform.os}/${platform.arch}, ${gz.length} bytes)`);
+  let out: string;
+  try {
+    out = await run(o, installScript(dir, CORE_BIN, b.digest) + `; ${PRUNE}`, { stdin: gz, timeoutMs: 10 * 60_000, signal });
+  } catch (e) {
+    throw new Error(`upload the machine build ${b.version}: ${(e as Error).message}`);
+  }
+  if (!confirmed(out)) throw new Error(`upload the machine build ${b.version}: the machine did not confirm its sha256`);
   return `${dir}/${CORE_BIN}`;
 }
 
@@ -349,18 +362,27 @@ export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ se
     build = await o.builds(target, signal);
     if (build.kind === 'ts') checkRuntimeRuns(probe);
   } catch (e) {
-    throw Object.assign(new Error(`no agent for ${platform.os}/${platform.arch}: ${(e as Error).message}`), { platform });
+    // The failure's code stays with it (State.failure).
+    const code = deployCode(e);
+    throw Object.assign(new Error(`no agent for ${platform.os}/${platform.arch}: ${(e as Error).message}`), {
+      platform,
+      ...(code ? { code } : {}),
+    });
   }
   const remotePath = build.kind === 'go' ? await installGo(o, build, platform, signal) : await installTS(o, build, platform, signal);
 
-  const p = execa('ssh', runArgs(o, `exec "${remotePath}" node dial --instance '${o.instance}' --client ${CLIENT_ID}`), {
-    ...SSH_OPTIONS,
-    buffer: false,
-    encoding: 'buffer',
-    // Closing asks ssh to end (SIGINT); a stuck one is killed 3 s later.
-    killSignal: 'SIGINT',
-    forceKillAfterDelay: 3000,
-  });
+  const p = execa(
+    'ssh',
+    runArgs(o, `unset ${FOREIGN_RUNTIME_VARS.join(' ')}; exec "${remotePath}" node dial --instance '${o.instance}' --client ${CLIENT_ID}`),
+    {
+      ...SSH_OPTIONS,
+      buffer: false,
+      encoding: 'buffer',
+      // Closing asks ssh to end (SIGINT); a stuck one is killed 3 s later.
+      killSignal: 'SIGINT',
+      forceKillAfterDelay: 3000,
+    },
+  );
   const stderr = new LineLogger(o.logger, `ssh ${o.target}: `);
   p.stderr.setEncoding('utf8').on('data', (c: string) => stderr.write(c));
   const exited = p.then((r) => r.exitCode ?? null);

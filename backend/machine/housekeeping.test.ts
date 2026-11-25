@@ -20,25 +20,22 @@ const age = (p: string, ms: number) => {
 };
 
 describe('housekeeping', () => {
-  test('old uploads go; this build, its runtime and this host are touched', async () => {
+  test('old uploads go; this build and this host are touched', async () => {
     const base = join(h.home, '.x');
     const host = join(base, 'hosts', 'me');
     mkdirSync(join(base, 'uploads', 'old'), { recursive: true });
     mkdirSync(join(base, 'uploads', 'new'), { recursive: true });
     mkdirSync(host, { recursive: true });
     const build = join(h.home, '.x', 'agent', 'v1');
-    const rt = join(h.home, '.x', 'runtime', 'abc');
     mkdirSync(build, { recursive: true });
-    mkdirSync(rt, { recursive: true });
     age(join(base, 'uploads', 'old'), 8 * DAY);
     age(build, 10 * DAY);
-    age(rt, 10 * DAY);
     age(host, 10 * DAY);
-    await housekeepOnce(base, host, discard, new Date(), ownDirs(join(build, 'machine.js'), join(rt, 'bun')));
+    await housekeepOnce(base, host, discard, new Date(), ownDirs(join(build, 'veldr')));
     expect(existsSync(join(base, 'uploads', 'old'))).toBe(false);
     expect(existsSync(join(base, 'uploads', 'new'))).toBe(true);
-    for (const d of [build, rt, host]) expect(Date.now() - statSync(d).mtimeMs).toBeLessThan(DAY);
-    expect(ownDirs('/home/u/src/machine/main.ts', '/usr/bin/bun')).toEqual([]);
+    for (const d of [build, host]) expect(Date.now() - statSync(d).mtimeMs).toBeLessThan(DAY);
+    expect(ownDirs('/home/u/src/machine/main.ts')).toEqual([]);
   });
 
   test("other hosts' files go after 30 days unused, but their terminal core's executable until 180", async () => {
@@ -80,18 +77,17 @@ describe('housekeeping follows no link', () => {
     expect(existsSync(join(outside, 'keep', 'f'))).toBe(true);
   });
 
-  test('what an interrupted install left in a build or runtime directory goes after an hour', async () => {
+  test('what an interrupted install left in a build directory goes after an hour', async () => {
     const agents = join(h.home, 'a', 'agent');
     const v = join(agents, 'v1');
     mkdirSync(v, { recursive: true });
-    for (const f of ['.upload.123', '.launcher.123', 'machine.js.upload.77', 'machine.js', '.upload.new']) writeFileSync(join(v, f), '');
+    for (const f of ['.upload.123', 'veldr.upload.77', 'veldr', '.upload.new']) writeFileSync(join(v, f), '');
     writeFileSync(join(v, '.upload.456'), '');
-    for (const f of ['.upload.123', '.launcher.123', 'machine.js.upload.77', 'machine.js', '.upload.new']) age(join(v, f), 2 * 60 * 60_000);
-    await pruneStaged([agents, join(h.home, 'a', 'runtime')], Date.now() - 60 * 60_000, discard);
+    for (const f of ['.upload.123', 'veldr.upload.77', 'veldr', '.upload.new']) age(join(v, f), 2 * 60 * 60_000);
+    await pruneStaged([agents], Date.now() - 60 * 60_000, discard);
     expect(existsSync(join(v, '.upload.123'))).toBe(false);
-    expect(existsSync(join(v, '.launcher.123'))).toBe(false);
-    expect(existsSync(join(v, 'machine.js.upload.77'))).toBe(false);
-    expect(existsSync(join(v, 'machine.js'))).toBe(true);
+    expect(existsSync(join(v, 'veldr.upload.77'))).toBe(false);
+    expect(existsSync(join(v, 'veldr'))).toBe(true);
     expect(existsSync(join(v, '.upload.new'))).toBe(true);
     expect(existsSync(join(v, '.upload.456'))).toBe(true); // recent: an upload running
   });

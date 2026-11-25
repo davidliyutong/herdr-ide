@@ -4,10 +4,10 @@
 // from its content, so a rebuilt one is uploaded again.
 import { afterAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gunzipSync, gzipSync } from 'node:zlib';
+import { gzipSync } from 'node:zlib';
 import { BRIDGE_EXT, CORE_BIN } from '#shared/lib/brand.ts';
 import { dirFiles, layered, payloads, type Files } from './payloads.ts';
 
@@ -99,56 +99,37 @@ test('files of a directory, and layered sources', async () => {
   expect(await l.get('b')).toBeNull();
 });
 
-// A core that embeds the TypeScript machine side deploys its bundle with
-// the Bun runtime of the machine's platform: embedded for glibc and macOS,
-// fetched (here: cached) for musl; the build's version names both.
-test('the TypeScript machine side: the bundle with the runtime of the platform and C library', async () => {
-  const js = Buffer.from('console.log("machine")');
-  const bun = Buffer.from('a runtime');
+// A core that deploys the TypeScript machine side carries the digests of
+// every platform's executable and its own platform's executable: a
+// machine's build names the release's asset, and is loaded (the core's own
+// copy here) only for a machine that cannot get it itself.
+test('the TypeScript machine side: every platform by its digests, the own executable carried', async () => {
+  const own = Buffer.from('#!/bin/sh\necho own\n');
+  const ownGz = gzipSync(own);
+  const manifest = {
+    version: 'v1.2.3',
+    release: 'https://releases.example/download/v1.2.3',
+    machines: {
+      'linux-amd64': { sha256: sha256(own), gz: sha256(ownGz), size: ownGz.length },
+      'linux-amd64-musl': { sha256: 'a'.repeat(64), gz: 'b'.repeat(64), size: 1 },
+    },
+  };
   const files = mapFiles(
     new Map([
-      ['machine/machine.js', js],
-      ['runtime/bun-linux-amd64.gz', gzipSync(bun)],
+      ['machine/manifest.json', Buffer.from(JSON.stringify(manifest))],
+      [`machine/${CORE_BIN}-machine-linux-amd64.gz`, ownGz],
       // A Go build beside it is not the one used.
       [`agents/${CORE_BIN}-linux-amd64.gz`, gzipSync(Buffer.from('go'))],
     ]),
   );
-  const cache = temp();
-  const musl = Buffer.from('musl runtime');
-  let downloads = 0;
-  const pins = { 'linux/amd64': sha256(bun), 'linux-musl/amd64': sha256(musl) };
-  const p = payloads({ files, runtimeCache: cache, runtimePins: pins, downloadRuntime: async () => (downloads++, musl) });
+  const p = payloads({ files, machineCache: temp() });
   const b = await p.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' });
   if (b.kind !== 'ts') throw new Error('not the TypeScript build');
-  expect(b.bundle).toEqual(js);
-  expect(b.bundleDigest).toBe(sha256(js));
-  expect(b.runtime.digest).toBe(sha256(bun));
-  expect(b.version).toBe(sha256(Buffer.from(`${sha256(js)}\0${sha256(bun)}`)).slice(0, 16));
-  await expect(p.machine({ os: 'darwin', arch: 'arm64' })).rejects.toThrow('no Bun runtime for darwin/arm64');
-  // musl's comes from the cache when it is the pinned one; a tampered one
-  // is refused and fetched again.
-  const cached = join(cache, 'bun-linux-x64-musl-baseline-1.4.5.gz');
-  writeFileSync(cached, gzipSync(Buffer.from('tampered')));
+  expect(b.digest).toBe(sha256(own));
+  expect(b.version).toBe(sha256(own).slice(0, 16));
+  expect(b.url).toBe(`https://releases.example/download/v1.2.3/${CORE_BIN}-machine-linux-amd64.gz`);
+  expect(await b.load()).toEqual(ownGz);
   const m = await p.machine({ os: 'linux', arch: 'amd64', libc: 'musl' });
-  expect(m.kind === 'ts' && m.runtime.digest).toBe(sha256(musl));
-  expect(m.version).not.toBe(b.version);
-  expect(downloads).toBe(1);
-  expect(gunzipSync(readFileSync(cached))).toEqual(musl);
-  // Cached now: not fetched again.
-  const again = payloads({ files, runtimeCache: cache, runtimePins: pins, downloadRuntime: async () => (downloads++, musl) });
-  await again.machine({ os: 'linux', arch: 'amd64', libc: 'musl' });
-  expect(downloads).toBe(1);
-  // A build's runtime that is not the pinned one is refused.
-  const other = payloads({ files, runtimeCache: cache, runtimePins: { ...pins, 'linux/amd64': 'f'.repeat(64) } });
-  await expect(other.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' })).rejects.toThrow(/not the pinned/);
-});
-
-test('the pinned runtimes: every embedded platform and musl, archive and executable', async () => {
-  const { RUNTIMES, keyOfFile, runtimeFile } = await import('./machines/transport/runtimes.ts');
-  for (const [key, a] of Object.entries(RUNTIMES)) {
-    expect(a.sha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(a.bun).toMatch(/^[0-9a-f]{64}$/);
-    expect(keyOfFile(runtimeFile(key).slice('runtime/'.length))).toBe(key);
-  }
-  expect(keyOfFile('bun-linux-amd64.gz.tmp')).toBeNull();
+  expect(m.kind === 'ts' && m.key).toBe('linux-amd64-musl');
+  await expect(p.machine({ os: 'linux', arch: 'riscv64' })).rejects.toThrow(/^platform_unsupported/);
 });

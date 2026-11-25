@@ -88,7 +88,7 @@ export class Desktop {
           [`${PREFIX}DESKTOP_DEV`]: home.name,
           [`${PREFIX}DESKTOP_NO_OPEN`]: '1',
           [`${PREFIX}DESKTOP_PAYLOAD`]: paths.payload,
-          [`${PREFIX}AGENT_DIR`]: join(paths.payload, 'agents'),
+          [`${PREFIX}AGENT_DIR`]: paths.machine === 'ts' ? paths.agents : join(paths.payload, 'agents'),
           [`${PREFIX}SEED_DIR`]: o.codeServerSeed,
           DISPLAY: process.env.DISPLAY,
           WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,

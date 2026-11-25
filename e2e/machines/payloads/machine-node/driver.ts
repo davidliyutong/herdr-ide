@@ -1,14 +1,17 @@
 // Drives the TypeScript machine side on a machine of the matrix as a core
-// does over ssh: `node dial` of the machine bundle (machine.js) with the
-// Bun runtime running this driver, a yamux session over its standard input
-// and output, the agent protocol on it. It checks that the node starts and
-// answers, that the terminal core it installs and starts runs a terminal,
-// that a file is written and read back, and that links are refused where
-// they must be: by the system calls the machine side makes (openat2's
-// RESOLVE_NO_SYMLINKS, falling back on old kernels; O_NOFOLLOW; renameat2
-// without replacing) and by the files feature (a path through a link into
-// the data directory refused, a link removed rather than followed).
-// build.sh bundles it into driver.js; run.sh runs it with each runtime.
+// does over ssh: `node dial` of the machine executable (MACHINE_EXE: the
+// platform's compiled executable, or the Go machine build), a yamux
+// session over its standard input and output, the agent protocol on it.
+// It checks that the node starts and answers, that the terminal core it
+// installs (from its own embedded copy, checked by its digest; the Go
+// build's uploaded from hc/) and starts runs a terminal, that a file is
+// written and read back, and that links are refused where they must be: by
+// the system calls the machine side makes (openat2's RESOLVE_NO_SYMLINKS,
+// falling back on old kernels; O_NOFOLLOW; renameat2 without replacing)
+// and by the files feature (a path through a link into the data directory
+// refused, a link removed rather than followed). build.sh bundles it into
+// driver.js; run.sh runs it with the machine executable acting as Bun
+// (BUN_BE_BUN=1), which the node does not get, as over ssh.
 import { spawn } from 'node:child_process';
 import { constants, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,7 +25,7 @@ import { filesProtocol } from '../../../../backend/features/files/protocol.ts';
 import { machineOf } from '../../../../backend/machine/testing.ts';
 import { linkGuard, openNoLinks, renameNoReplace } from '../../../../backend/machine/sys/fs.ts';
 import { peerCred, socketFd } from '../../../../backend/machine/sys/proc.ts';
-import { RUNTIME_FLAGS } from '../../../../backend/kernel/machines/transport/builds.ts';
+import { withoutForeignRuntimeVars } from '../../../../backend/shared/lib/bunenv.ts';
 import { dataDir } from '../../../../backend/shared/lib/brand.ts';
 
 const dir = import.meta.dir;
@@ -41,34 +44,46 @@ const step = async (what: string, f: () => Promise<void> | void) => {
   }
 };
 
-const bundle = join(dir, 'machine.js');
-// MACHINE_EXE runs another machine build instead (the Go program, to tell
-// what the machine does from what the TypeScript side does).
-const machine = (args: string[]) =>
-  process.env.MACHINE_EXE ? [process.env.MACHINE_EXE, ...args] : [process.execPath, ...RUNTIME_FLAGS, bundle, ...args];
+const exe = process.env.MACHINE_EXE;
+if (!exe) throw new Error('MACHINE_EXE names the machine build (run.sh)');
+const machine = (args: string[]) => [exe, ...args];
+// What the deployment's command line leaves out (ssh.ts): nothing that
+// makes the executable run other code, BUN_BE_BUN this driver runs with
+// among it.
+const env = withoutForeignRuntimeVars({ ...process.env, HOME: home });
 
 // The node, through node dial, as ssh runs it.
-const [exe, ...args] = machine(['node', 'dial', '--instance', instance, '--client', 'matrix-driver']);
-const dial = spawn(exe, args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, HOME: home } });
+const dial = spawn(exe, ['node', 'dial', '--instance', instance, '--client', 'matrix-driver'], { stdio: ['pipe', 'pipe', 'inherit'], env });
 const session = new Session(pairDuplex(dial.stdout!, dial.stdin!), () => dial.kill());
 const m = machineOf(session);
 
 await step('hello', async () => {
   const rep = await session.request({ op: Op.Hello }, { timeoutMs: 60_000 });
   check(rep.ok && rep.info?.home === home && rep.info?.os === 'linux', `node answers: ${JSON.stringify(rep.info)}`);
-  console.log(`INFO the machine build: ${process.env.MACHINE_EXE ?? bundle}`);
+  console.log(`INFO the machine build: ${exe}`);
 });
 
 await step('a terminal of its terminal core', async () => {
-  const gz = readFileSync(join(dir, 'hc', 'herdr-core.gz'));
-  const digest = readFileSync(join(dir, 'hc', 'herdr-core.sha256'), 'utf8').trim();
-  const { conn } = await session.open({ op: Op.HC, action: 'install', digest });
-  const cw = new ChunkWriter(conn.stream);
-  await cw.write(gz);
-  await cw.finish();
-  const installed = await readLine<Reply>(new Reader(conn.reader.release()));
-  closeStream(conn.stream);
-  check(installed.ok && installed.hc?.digest === digest, `herdr-core installed, checked by its digest (${installed.error ?? 'ok'})`);
+  const st = await session.request({ op: Op.HC, action: 'status' }, { timeoutMs: 30_000 });
+  let digest = st.hc?.embedded ?? '';
+  let installed: Reply;
+  if (digest) {
+    // The executable's own herdr-core, as the core's terminal lifecycle has it installed.
+    installed = await session.request({ op: Op.HC, action: 'install-embedded', digest }, { timeoutMs: 60_000 });
+  } else {
+    const gz = readFileSync(join(dir, 'hc', 'hc-linux-amd64.gz'));
+    digest = readFileSync(join(dir, 'hc', 'herdr-core.sha256'), 'utf8').trim();
+    const { conn } = await session.open({ op: Op.HC, action: 'install', digest });
+    const cw = new ChunkWriter(conn.stream);
+    await cw.write(gz);
+    await cw.finish();
+    installed = await readLine<Reply>(new Reader(conn.reader.release()));
+    closeStream(conn.stream);
+  }
+  check(
+    installed.ok && installed.hc?.digest === digest,
+    `herdr-core installed ${st.hc?.embedded ? 'from its embedded copy' : 'by upload'}, checked by its digest (${installed.error ?? 'ok'})`,
+  );
   const started = await session.request({ op: Op.HC, action: 'start', digest }, { timeoutMs: 60_000 });
   check(!!started.hc?.running, `the terminal core runs (version ${started.hc?.version})`);
   const api = await session.open({ op: Op.HCAPI });
@@ -171,7 +186,7 @@ await step('peer credentials', async () => {
 
 // The node and its terminal core end through the instance's own command.
 session.close();
-const stop = Bun.spawnSync(machine(['node', 'stop', '--instance', instance, '--terminal-core']), { env: { ...process.env, HOME: home } });
+const stop = Bun.spawnSync(machine(['node', 'stop', '--instance', instance, '--terminal-core']), { env });
 check(stop.exitCode === 0, `node stop --terminal-core: ${stop.stdout.toString().trim().replaceAll('\n', '; ')}`);
 
 console.log(failed ? `${failed} FAILED` : 'ALL PASS');

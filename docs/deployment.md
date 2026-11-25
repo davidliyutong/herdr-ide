@@ -33,7 +33,12 @@ The core is one executable built with Bun from `backend/` (about 145–175 MB
 per platform: the Bun runtime and what it embeds). What the core embeds:
 
 - The web UI, the machine builds of the agent (the Go program `cmd/veldr`
-  for Linux and macOS on amd64 and arm64) and the VS Code bridge.
+  for Linux and macOS on amd64 and arm64) and the VS Code bridge. A core
+  built with `MACHINE=ts` carries instead the SHA-256 of every platform's
+  TypeScript machine executable of its release and its own platform's
+  executable, and no herdr-core (each executable carries its platform's);
+  machines get the others from the release
+  ([air-gapped networks](#air-gapped-networks)).
 - herdr-core 0.1.21 for Linux and macOS on amd64 and arm64 (about 12 MB),
   the terminal core installed on machines
   ([21](features/21-terminal-core.md)). `scripts/build.sh` runs
@@ -343,6 +348,22 @@ resolved on the core host and pushed through the agent. The one exception
 is the AI usage plugin, which asks the providers from the machines
 ([29](features/29-ai-usage.md)); offline, it reports the failure.
 
+A core that deploys the TypeScript machine side (built with
+`MACHINE=ts`, [42](features/42-typescript-backend.md)) carries only its
+own platform's machine executable. A machine of another platform first
+tries to download its executable from the core's release itself (`curl` or
+`wget`; the setting `machines.download`, or `--machine-download=false`,
+turns this off), then gets it from the core over ssh: from the directory
+of `--agent-dir`, the core's cache (`~/.veldr/cache/machine/`), the core's
+own copy, or a download from the release on the core host, through the
+proxy of `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. For an offline site,
+put the release's machine executables (`veldr-machine-<os>-<arch>[-musl].gz`
+as published, or uncompressed under the same name without `.gz`) of the
+platforms you need into a directory and start the core with `--agent-dir
+DIR`: each file is checked against the digests built into the core, and a
+file of another release is refused. A machine that gets its executable
+from none of them shows `build_unavailable` with what each source said.
+
 When the core host is offline too, prepare a bundle on a connected machine:
 
 ```bash
@@ -375,12 +396,9 @@ redistribution, so do not publish bundles containing it.
 Building needs Go modules, npm packages, the Bun runtimes of the target
 platforms (`bun build --compile` downloads one for another platform) and
 the pinned herdr-core archives (verified archives in `dist/hc/` are
-reused); a core that deploys the TypeScript machine side also embeds the
-pinned Bun runtimes of linux (x64 baseline, arm64) and darwin machines
-(`backend/scripts/runtimes.ts`). Such a core fetches the runtime of a musl
-machine (Alpine) on its own host when one connects, unless its build
-carries it: offline, that machine is refused until the runtime is in
-`~/.veldr/cache/` of the core's host.
+reused); `MACHINE=ts` compiles the TypeScript machine side for every
+machine platform too (`backend/scripts/machines.ts`, into `dist/machines`
+and the release's assets in `dist/release`).
 
 ## Remote resources
 
@@ -394,7 +412,7 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Started | Ends |
 | --- | --- | --- |
-| Node (`veldr node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace and host (`<run>/node.lock`), in a session of its own. The TypeScript machine side's node is the Bun runtime running its bundle (`bun … machine.js node`), with the same lifetime; either build takes over from the other. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/hosts/<host>/node.log` (1 MiB, one old file). |
+| Node (`veldr node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace and host (`<run>/node.lock`), in a session of its own. The TypeScript machine side's node is its executable (`~/.veldr/agent/<build>/veldr node`) as the Go build's is, with the same lifetime; either build takes over from the other. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/hosts/<host>/node.log` (1 MiB, one old file). |
 | Agent session | One per core and machine while connected, served by the node. | With its ssh session or socket connection; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`). | A record in the machines file; **Remove machine…** deletes it and ends the session. The machine's terminal core and terminals keep running. |
 | ssh ControlMaster | Per machine, on Linux and macOS cores. | 10 min unused or 1 min without server answers; a core that finds it dead sends `ssh -O stop`. |
@@ -441,9 +459,8 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Written | Removed |
 | --- | --- | --- |
-| Agent builds (`~/.veldr/agent/`) | On connect, by content hash: the Go executable, or the TypeScript machine side's bundle (`machine.js`) and the launcher that runs it with its runtime, by the hash of both; a bundle is put in place only when the SHA-256 the machine computed is the one expected, which the core checks again. | Unused for 14 days (a running node touches its build's directory every 24 h). A partial upload is removed when its connection drops, or by a node's housekeeping after 1 h. |
-| Bun runtimes (`~/.veldr/runtime/bun-<digest>/bun`, TypeScript machine side, 90–110 MB each) | On connect, once per runtime: uploaded compressed (40–50 MB), checked by its SHA-256 on the machine before it is put in place. | Unused for 14 days (a running node touches its runtime's directory every 24 h); removed by the next upload to the machine. A partial upload is removed when its connection drops, or by a node's housekeeping after 1 h. |
-| Bun runtimes for musl (`~/.veldr/cache/bun-*-<version>.gz`, core host) | Downloaded from Bun's releases and checked against the pinned digests (archive and executable) when a musl machine needs one the core's build does not carry. | When a runtime of another Bun version is fetched; one that is not the pinned executable when it is read. |
+| Agent builds (`~/.veldr/agent/`) | On connect, by content hash: the Go executable, or the TypeScript machine side's executable (88–108 MB; downloaded by the machine from the core's release, or uploaded compressed, 41–52 MB); either is put in place only when the SHA-256 the machine computed is the one expected, which the core checks again. | Unused for 14 days (a running node touches its build's directory every 24 h). A partial download or upload is removed when its connection drops, or by a node's housekeeping after 1 h. |
+| Machine executables (`~/.veldr/cache/machine/veldr-machine-<platform>-<digest>.gz`, core host) | Downloaded from the core's release when a machine needs one the core neither has in `--agent-dir` nor carries, checked against the digests built into the core first. | Unused for 14 days (touched on use); one that is not the build when it is read. |
 | herdr-core executable (`<data>/hosts/<host>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
 | herdr-core state (`~/.local/state/herdr-core/veldr[-<instance>]-<host id>/`) | By herdr-core. | Kept until the user removes it. |
 | code-server versions (`~/.veldr/code-server/<version>-<os>-<arch>/`) | Install. | Unused for 14 days. |
