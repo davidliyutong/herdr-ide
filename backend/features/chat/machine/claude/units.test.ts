@@ -9,8 +9,10 @@ import { ChatProtoError, Code } from '#shared/proto/chatproto/index.ts';
 import { chatMode, claudeMode, cut } from './config.ts';
 import { claudeContent } from './content.ts';
 import { permissionKind, sessionRules } from './permissions.ts';
-import { tempDir } from './testing.ts';
+import { isolateHome, tempDir } from './testing.ts';
 import { MAX_GLOBAL_CONFIG, trustedByClaude } from './trust.ts';
+
+isolateHome();
 
 const codeOf = (f: () => unknown): string => {
   try {

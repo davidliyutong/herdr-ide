@@ -10,6 +10,9 @@ import { query, type Query, type SDKUserMessage, type SpawnedProcess } from '@an
 import { ChatProtoError, Code } from '#shared/proto/chatproto/index.ts';
 import { AgentProcesses } from '../agentproc.ts';
 import { AgentSpawn, Lines, Prompts, SDK_VERSION, cancelAsyncMessage, unhide } from './sdk.ts';
+import { isolateHome } from './testing.ts';
+
+isolateHome();
 
 test('the SDK is the version the adapter is built with', () => {
   const pkg = JSON.parse(

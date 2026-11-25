@@ -16,7 +16,9 @@ import { claudeAdapter } from './adapter.ts';
 import { OPTION_EFFORT, OPTION_MODE, OPTION_MODEL } from './config.ts';
 import { SDK_VERSION } from './sdk.ts';
 import { CLAUDE_TIMING, type ClaudeSession, type ClaudeTiming } from './session.ts';
-import { FakeRun, TEST_SESSION, canned, tempDir, type Msg, type Script, type ScriptLine } from './testing.ts';
+import { FakeRun, TEST_SESSION, canned, isolateHome, tempDir, type Msg, type Script, type ScriptLine } from './testing.ts';
+
+isolateHome();
 
 const inL = (msg: Msg): ScriptLine => ({ dir: 'in', msg });
 const outL = (msg: Msg): ScriptLine => ({ dir: 'out', msg });

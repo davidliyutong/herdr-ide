@@ -11,7 +11,9 @@ import { ChatProtoError, Code, EventType, TurnState, type Event } from '#shared/
 import type { HistoryParams, SessionsParams } from '../adapter.ts';
 import { claudeAdapter } from './adapter.ts';
 import { headOf, isChunk } from './items.ts';
-import { GO_GOLDEN, VECTORS, tempDir } from './testing.ts';
+import { GO_GOLDEN, VECTORS, isolateHome, tempDir } from './testing.ts';
+
+isolateHome();
 
 /** The session of the recorded transcript. */
 const HEADLESS = '00000000-0000-4000-8000-000000000001';

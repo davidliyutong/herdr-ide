@@ -5,6 +5,7 @@
 // comparison with the Go adapter's golden files of the same recordings
 // (internal/chatadapter/claude/testdata). Nothing here reads a home
 // directory but the temporary ones it makes.
+import { afterAll, beforeAll } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -53,6 +54,22 @@ export interface Script {
 /** A temporary directory without links in its path, short (unix socket
  * paths are short on macOS). */
 export const tempDir = (prefix: string): string => realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+
+/** Gives the test process a temporary home while a test file runs: the SDK
+ * runs in it, and nothing of it may read the user's own ~/.claude. */
+export function isolateHome(): void {
+  const saved = { HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR };
+  beforeAll(() => {
+    const home = tempDir('chome');
+    process.env.HOME = home;
+    process.env.CLAUDE_CONFIG_DIR = join(home, '.claude');
+  });
+  afterAll(() => {
+    for (const [k, v] of Object.entries(saved))
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+  });
+}
 
 export function fixture(name: string): FixtureLine[] {
   return readFileSync(join(VECTORS, name), 'utf8')

@@ -8,7 +8,9 @@ import { readdirSync } from 'node:fs';
 import { SLUG } from '#shared/lib/brand.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { SDK_VERSION } from './sdk.ts';
-import { TEST_SESSION, VECTORS, goGolden, goldenOf, replay } from './testing.ts';
+import { TEST_SESSION, VECTORS, goGolden, goldenOf, isolateHome, replay } from './testing.ts';
+
+isolateHome();
 
 const files = readdirSync(VECTORS)
   .filter((f) => /^claude-\d.*\.jsonl$/.test(f))
