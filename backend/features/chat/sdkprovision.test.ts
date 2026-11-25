@@ -6,7 +6,7 @@
 // pinned integrity; sdk_unavailable saying what each source said; a machine
 // build without the action (the Go build's) left alone.
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { defineProtocol } from '#shared/proto/protocol.ts';
@@ -18,7 +18,7 @@ import { sdkDir, type NpmTarball } from './claudesdk.ts';
 import { chatMachine } from './machine.ts';
 import { tempDir } from './machine/claude/testing.ts';
 import { fakeSdk, fakeRegistry, type FakeSdk } from './machine/sdktesting.ts';
-import { SdkProvision } from './sdkprovision.ts';
+import { SDK_RECHECK_MS, SdkProvision } from './sdkprovision.ts';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
@@ -42,7 +42,13 @@ const machine = (s: Session, id: string): Machine =>
  * nothing, or other bytes under its name), an operator's directory with
  * seed in it. */
 async function setup(
-  o: { refuse?: (ua: string) => boolean; offline?: boolean; seed?: Buffer; serve?: 'pinned' | 'nothing' | Buffer } = {},
+  o: {
+    refuse?: (ua: string) => boolean;
+    offline?: boolean;
+    seed?: Buffer;
+    serve?: 'pinned' | 'nothing' | Buffer;
+    now?: () => number;
+  } = {},
 ) {
   const dir = tempDir('sdkp-');
   const f = await fakeSdk(dir);
@@ -60,6 +66,7 @@ async function setup(
     cacheDir: join(dir, 'cache'),
     offline: o.offline ?? false,
     logger: (l) => logs.push(l),
+    now: o.now,
   });
   return { dir, f, reg, p, logs, seedDir };
 }
@@ -78,15 +85,22 @@ const failure = async (p: Promise<unknown>): Promise<{ code: string; message: st
 };
 
 describe('the Agent SDK on a machine', () => {
-  test('the machine downloads it itself; the core fetches nothing, and asks no more on that session', async () => {
-    const { f, reg, p } = await setup();
+  test('the machine downloads it itself; the core fetches nothing, and asks no more on that session for an hour', async () => {
+    let now = Date.now();
+    const { f, reg, p } = await setup({ now: () => now });
     const { m, base } = await tsMachine(f.pin);
     await p.ensure(m, sig());
     expect(installed(base, f)).toBe(true);
     expect(reg.hits.length).toBe(1);
     expect(isCurl(reg.hits[0]!)).toBe(true);
+    rmSync(sdkDir(base, f.pin), { recursive: true });
     await p.ensure(m, sig());
     expect(reg.hits.length).toBe(1);
+    // An hour later the machine is asked again, and installs what went.
+    now += SDK_RECHECK_MS;
+    await p.ensure(m, sig());
+    expect(installed(base, f)).toBe(true);
+    expect(reg.hits.length).toBe(2);
   });
 
   test('a machine that cannot download it gets it from the core, which downloads it once and keeps it', async () => {

@@ -801,7 +801,9 @@ an executable that holds its code.
 Before a request that starts a Claude Code chat (a new chat or an import:
 `POST new`; and, without waiting for it, a page's subscription to such a
 chat, whose next prompt may start its agent), the core makes sure the
-machine has it (`features/chat/sdkprovision.ts`), once per agent session:
+machine has it (`features/chat/sdkprovision.ts`), at most once an hour
+for an agent session (each ask is a use of the machine's copy, and puts
+back one its retention removed):
 
 1. the machine side's action `sdk` says whether the pinned version is
    installed, and, unless the core is `--offline`, has the machine download
@@ -1138,8 +1140,9 @@ SECURITY.md has both.
   before anything is put in place, a link leaving the directory, the
   machine's download and a failed one, the retention, the load and an
   entry changed on disk); the core and the machine through the wire
-  (`sdkprovision.test.ts`: the machine's own download, the core's upload
-  from its download and then its cache, offline from `--seed-dir`, every
+  (`sdkprovision.test.ts`: the machine's own download, asked again an
+  hour later, the core's upload from its download and then its cache,
+  offline from `--seed-dir`, every
   wrong copy refused with `sdk_unavailable` saying what each source said,
   a machine of the Go build left alone); the routes (`routes.test.ts`); the
   host (`hosts/machine/chathost.test.ts`: `sdk_unavailable` before

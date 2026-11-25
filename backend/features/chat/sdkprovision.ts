@@ -46,7 +46,14 @@ export interface SdkProvisionOptions {
   downloadMs?: number;
   machineMs?: number;
   uploadMs?: number;
+  /** The clock (tests move it). */
+  now?: () => number;
 }
+
+/** How long a machine's word that it has the SDK holds on the same agent
+ * session: asked again after that, it keeps its copy in use (the machine's
+ * retention counts from the last use) or installs it again if it went. */
+export const SDK_RECHECK_MS = 60 * 60_000;
 
 /** The core's refusal of a Claude Code chat the machine cannot run. */
 export const sdkUnavailable = (message: string): Fail => new Fail(chat.Code.SdkUnavailable, 503, message);
@@ -76,6 +83,8 @@ interface MachineState {
   /** The agent session the SDK was found installed on (or found needless
    * on: a Go build's); null until then. */
   session: object | null;
+  /** When it was. */
+  at: number;
   lock: Promise<void>;
 }
 
@@ -97,7 +106,7 @@ export class SdkProvision {
 
   private state(id: string): MachineState {
     let s = this.states.get(id);
-    if (!s) this.states.set(id, (s = { session: null, lock: Promise.resolve() }));
+    if (!s) this.states.set(id, (s = { session: null, at: 0, lock: Promise.resolve() }));
     return s;
   }
 
@@ -107,8 +116,9 @@ export class SdkProvision {
   }
 
   /** Makes sure machine m's chat host can load the SDK, unless it did on
-   * the machine's current agent session already; callers wait for each
-   * other. Fails with sdk_unavailable and what each source said. */
+   * the machine's current agent session within SDK_RECHECK_MS; callers
+   * wait for each other. Fails with sdk_unavailable and what each source
+   * said. */
   async ensure(m: Machine, signal: AbortSignal): Promise<void> {
     const s = this.state(m.id);
     const before = s.lock;
@@ -116,10 +126,12 @@ export class SdkProvision {
     s.lock = new Promise((r) => (release = r));
     await before;
     try {
+      const now = this.o.now ?? Date.now;
       const sess = m.connected ? m.live() : null;
-      if (sess && s.session === sess) return;
+      if (sess && s.session === sess && now() - s.at < SDK_RECHECK_MS) return;
       await this.install(m, signal);
       s.session = sess;
+      s.at = now();
     } finally {
       release();
     }
