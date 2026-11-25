@@ -12,7 +12,8 @@
 // left, at the latest after DRAIN_MAX_MS. A client of an older build uses
 // the node as it is: the protocol only grows. Go and TypeScript builds of
 // the machine side speak the same, so either takes over from the other.
-import { closeSync, existsSync, openSync, rmSync } from 'node:fs';
+import { closeSync, openSync, rmSync } from 'node:fs';
+import { access } from 'node:fs/promises';
 import type { Server, Socket } from 'node:net';
 import { posix } from 'node:path';
 import { dirsFor, makeDirs } from '#shared/host/hostdirs.ts';
@@ -215,16 +216,27 @@ export async function runNode(o: NodeOptions): Promise<void> {
     agent = new Agent({ instance: o.instance, dirs, logger: log, features: o.features });
     idleFrom();
     const build = o.build;
+    // The check is asynchronous, and one that has not returned (a home that
+    // stopped answering) is not stacked: the node's thread never waits.
+    let checking = false;
     const retire = build
       ? setInterval(() => {
-          if (!existsSync(build)) {
-            // A build removed (a development build, an uninstalled one):
-            // a node started from another file takes the new clients.
-            log(`${build} is gone; taking no new client`);
-            leave(true);
-            if (clients === 0) stop();
-            else draining = true;
-          }
+          if (checking || gone) return;
+          checking = true;
+          access(build)
+            .then(
+              () => {},
+              (e: NodeJS.ErrnoException) => {
+                if (e.code !== 'ENOENT' || gone) return;
+                // A build removed (a development build, an uninstalled one):
+                // a node started from another file takes the new clients.
+                log(`${build} is gone; taking no new client`);
+                leave(true);
+                if (clients === 0) stop();
+                else draining = true;
+              },
+            )
+            .finally(() => (checking = false));
         }, t.buildCheckMs)
       : undefined;
     await new Promise<void>((r) => (stopped.signal.aborted ? r() : stopped.signal.addEventListener('abort', () => r(), { once: true })));

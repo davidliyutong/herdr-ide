@@ -25,7 +25,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const byPath = (st: { files: Array<{ path: string }> }) => Object.fromEntries(st.files.map((f) => [f.path, f])) as Record<string, any>;
 
 /** The runs a change would make, without running it. */
-function runsFor(rig: GitRig, dir: string, action: Write, p: Params) {
+async function runsFor(rig: GitRig, dir: string, action: Write, p: Params) {
   const ctx = {
     run: (d: string, read: boolean, rn: import('./machine/run.ts').Run) => {
       // The checks' runs of git (rev-parse, show-ref, remote) go to real git.
@@ -37,7 +37,7 @@ function runsFor(rig: GitRig, dir: string, action: Write, p: Params) {
     },
     expand: (p: string) => p,
   };
-  return runsOf(openRepo(ctx, dir, false), action, p);
+  return runsOf(await openRepo(ctx, dir, false), action, p);
 }
 
 describe('the checks', () => {

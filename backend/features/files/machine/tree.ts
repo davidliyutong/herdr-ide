@@ -23,8 +23,11 @@ const yieldEvery = (n: number) => (n % 256 === 0 ? new Promise((r) => setImmedia
  * signal between chunks. */
 export async function copyFile(signal: AbortSignal, src: string, dst: string, mode: number): Promise<void> {
   check(signal);
-  const input = await open(src, 'r');
+  // Not waiting on a FIFO swapped in for the file, and only a regular file
+  // is copied (sockets, devices and pipes are left out).
+  const input = await open(src, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY);
   try {
+    if (!(await input.stat()).isFile()) throw Object.assign(new Error(`${src} is not a regular file`), { code: 'EINVAL' });
     const output = await open(dst, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, mode);
     try {
       const buf = Buffer.allocUnsafe(1 << 20);

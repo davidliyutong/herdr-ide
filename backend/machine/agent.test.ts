@@ -278,3 +278,39 @@ describe('through the core', () => {
     expect(await call(machineOf(r.session), proto, 'add', { a: 2, b: 3 })).toEqual({ sum: 5 });
   });
 });
+
+describe('one thread for every core', () => {
+  test('fs.read of a FIFO fails at once, and another session is answered meanwhile', async () => {
+    r = await rig();
+    const fifo = join(r.home, 'fifo');
+    Bun.spawnSync(['mkfifo', fifo]);
+    const other = r.connect('core-2');
+    const started = Date.now();
+    const read = await refusalOf(r.session.request({ op: Op.FsRead, path: fifo }, { timeoutMs: 5000 }));
+    expect(read.error).toContain('not a regular file');
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect((await other.request({ op: Op.Hello }, { timeoutMs: 2000 })).ok).toBe(true);
+    // An archive that meets a FIFO leaves it out without waiting for it.
+    const dir = join(r.home, 'with-fifo');
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'a.txt'), 'a');
+    Bun.spawnSync(['mkfifo', join(dir, 'p')]);
+    const { conn } = await r.session.open({ op: Op.FsArchive, paths: [dir] }, { timeoutMs: 5000 });
+    let n = 0;
+    for (let b = await conn.reader.chunk(); b; b = await conn.reader.chunk()) n += b.length;
+    expect(n).toBeGreaterThan(0);
+  });
+
+  test('a stat that does not return (a mount that stopped answering) holds its own request only', async () => {
+    let stuck = 0;
+    r = await rig({ fs: { lstat: () => (stuck++, new Promise(() => {})) } });
+    const other = r.connect('core-2');
+    const pending = r.session.request({ op: Op.FsStat, path: '~' }, { timeoutMs: 60_000 });
+    pending.catch(() => {});
+    await until(() => stuck === 1, 'the stat to start');
+    const t0 = Date.now();
+    expect((await other.request({ op: Op.Hello }, { timeoutMs: 2000 })).ok).toBe(true);
+    expect((await r.session.request({ op: Op.Hello }, { timeoutMs: 2000 })).ok).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+});

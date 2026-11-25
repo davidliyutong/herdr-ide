@@ -1,12 +1,12 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lutimesSync, mkdirSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Access } from '#shared/proto/agentproto/index.ts';
 import { dirsOf } from '#shared/host/hostdirs.ts';
 import { discard } from '#shared/lib/log.ts';
 import { cleanEnv, hiddenEnv } from './env.ts';
 import { TerminalCore } from './hc.ts';
-import { housekeepOnce, ownDirs, pruneHosts } from './housekeeping.ts';
+import { housekeepOnce, ownDirs, pruneHosts, pruneOlder, pruneStaged } from './housekeeping.ts';
 import { FDA_SCRIPT, accessOf, filesAccess, privacyStatus, terminalsAccess } from './privacy.ts';
 import { FakeCore } from './testdata/fakehc.ts';
 import { tempHome } from './testing.ts';
@@ -20,7 +20,7 @@ const age = (p: string, ms: number) => {
 };
 
 describe('housekeeping', () => {
-  test('old uploads go; this build, its runtime and this host are touched', () => {
+  test('old uploads go; this build, its runtime and this host are touched', async () => {
     const base = join(h.home, '.x');
     const host = join(base, 'hosts', 'me');
     mkdirSync(join(base, 'uploads', 'old'), { recursive: true });
@@ -34,27 +34,66 @@ describe('housekeeping', () => {
     age(build, 10 * DAY);
     age(rt, 10 * DAY);
     age(host, 10 * DAY);
-    housekeepOnce(base, host, discard, new Date(), ownDirs(join(build, 'machine.js'), join(rt, 'bun')));
+    await housekeepOnce(base, host, discard, new Date(), ownDirs(join(build, 'machine.js'), join(rt, 'bun')));
     expect(existsSync(join(base, 'uploads', 'old'))).toBe(false);
     expect(existsSync(join(base, 'uploads', 'new'))).toBe(true);
     for (const d of [build, rt, host]) expect(Date.now() - statSync(d).mtimeMs).toBeLessThan(DAY);
     expect(ownDirs('/home/u/src/machine/main.ts', '/usr/bin/bun')).toEqual([]);
   });
 
-  test("other hosts' files go after 30 days unused, but their terminal core's executable until 180", () => {
+  test("other hosts' files go after 30 days unused, but their terminal core's executable until 180", async () => {
     const dir = join(h.home, 'hosts');
     for (const name of ['me', 'idle', 'gone', 'recent']) mkdirSync(join(dir, name, 'hc'), { recursive: true });
     for (const name of ['idle', 'gone']) writeFileSync(join(dir, name, 'node.log'), '');
     age(join(dir, 'idle'), 40 * DAY);
     age(join(dir, 'gone'), 200 * DAY);
     age(join(dir, 'me'), 400 * DAY);
-    pruneHosts(dir, 'me', new Date(), discard);
+    await pruneHosts(dir, 'me', new Date(), discard);
     expect(existsSync(join(dir, 'idle', 'hc'))).toBe(true);
     expect(existsSync(join(dir, 'idle', 'node.log'))).toBe(false);
     expect(Date.now() - statSync(join(dir, 'idle')).mtimeMs).toBeGreaterThan(39 * DAY);
     expect(existsSync(join(dir, 'gone'))).toBe(false);
     expect(existsSync(join(dir, 'me'))).toBe(true);
     expect(existsSync(join(dir, 'recent'))).toBe(true);
+  });
+});
+
+describe('housekeeping follows no link', () => {
+  test('an old directory a link in hosts/ names keeps its files; an old link in uploads/ goes, its target stays', async () => {
+    const outside = join(h.home, 'outside');
+    mkdirSync(join(outside, 'keep'), { recursive: true });
+    writeFileSync(join(outside, 'keep', 'f'), 'mine');
+    // Between 30 and 180 days: the age at which a host directory's files go.
+    age(outside, 40 * DAY);
+    const dir = join(h.home, 'linked-hosts');
+    mkdirSync(dir);
+    symlinkSync(outside, join(dir, 'planted'));
+    lutimesSync(join(dir, 'planted'), new Date(Date.now() - 400 * DAY), new Date(Date.now() - 400 * DAY));
+    await pruneHosts(dir, 'me', new Date(), discard);
+    expect(existsSync(join(outside, 'keep', 'f'))).toBe(true);
+    const uploads = join(h.home, 'uploads-links');
+    mkdirSync(uploads);
+    symlinkSync(outside, join(uploads, 'l'));
+    lutimesSync(join(uploads, 'l'), new Date(Date.now() - 9 * DAY), new Date(Date.now() - 9 * DAY));
+    await pruneOlder(uploads, Date.now() - 7 * DAY, discard);
+    expect(existsSync(join(uploads, 'l'))).toBe(false);
+    expect(existsSync(join(outside, 'keep', 'f'))).toBe(true);
+  });
+
+  test('what an interrupted install left in a build or runtime directory goes after an hour', async () => {
+    const agents = join(h.home, 'a', 'agent');
+    const v = join(agents, 'v1');
+    mkdirSync(v, { recursive: true });
+    for (const f of ['.upload.123', '.launcher.123', 'machine.js.upload.77', 'machine.js', '.upload.new']) writeFileSync(join(v, f), '');
+    writeFileSync(join(v, '.upload.456'), '');
+    for (const f of ['.upload.123', '.launcher.123', 'machine.js.upload.77', 'machine.js', '.upload.new']) age(join(v, f), 2 * 60 * 60_000);
+    await pruneStaged([agents, join(h.home, 'a', 'runtime')], Date.now() - 60 * 60_000, discard);
+    expect(existsSync(join(v, '.upload.123'))).toBe(false);
+    expect(existsSync(join(v, '.launcher.123'))).toBe(false);
+    expect(existsSync(join(v, 'machine.js.upload.77'))).toBe(false);
+    expect(existsSync(join(v, 'machine.js'))).toBe(true);
+    expect(existsSync(join(v, '.upload.new'))).toBe(true);
+    expect(existsSync(join(v, '.upload.456'))).toBe(true); // recent: an upload running
   });
 });
 

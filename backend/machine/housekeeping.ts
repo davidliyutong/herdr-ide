@@ -1,12 +1,14 @@
 // Bounds the disk the agent uses on a machine (AGENTS.md rule 6,
 // docs/deployment.md#remote-resources): old uploads go, other hosts'
-// directories unused for long go, and this agent's build, its runtime and
-// this host's directories are touched, so that other cores' and hosts'
-// cleanups keep them (an upload removes builds and runtimes unused for 14
-// days, transport/ssh.ts).
-import { readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
+// directories unused for long go, installs that did not finish go, and
+// this agent's build, its runtime and this host's directories are touched,
+// so that other cores' and hosts' cleanups keep them (an upload removes
+// builds and runtimes unused for 14 days, transport/ssh.ts). Every call is
+// asynchronous: the node's thread never waits for the file system. A link
+// is never followed: what it names is not this data directory's.
+import * as fsp from 'node:fs/promises';
 import { posix } from 'node:path';
-import { DATA_DIR_NAME } from '#shared/lib/brand.ts';
+import { AGENT_DIR, DATA_DIR_NAME, RUNTIME_DIR } from '#shared/lib/brand.ts';
 import { HOSTS_DIR } from '#shared/host/hostdirs.ts';
 import type { Logger } from '#shared/lib/log.ts';
 
@@ -19,12 +21,19 @@ export const UPLOAD_RETENTION_MS = 7 * DAY;
  * directory goes after HOST_EXE_RETENTION_MS. */
 export const HOST_RETENTION_MS = 30 * DAY;
 export const HOST_EXE_RETENTION_MS = 180 * DAY;
+/** A build's or runtime's file an install left behind (the core's upload
+ * or local install was interrupted) goes after this long. */
+export const STAGING_RETENTION_MS = 60 * 60_000;
 /** How often a running agent applies its rules: a node runs for weeks. */
 export const HOUSEKEEP_MS = DAY;
 
-const touch = (p: string, now: Date) => {
+/** The temporary files of an install: the ssh upload's .upload.<pid> and
+ * .launcher.<pid>, the local install's <name>.upload.<pid>. */
+const STAGED = /^\.(upload|launcher)\.\d+$|\.upload\.\d+$/;
+
+const touch = async (p: string, now: Date) => {
   try {
-    utimesSync(p, now, now);
+    await fsp.utimes(p, now, now);
   } catch {
     // not there
   }
@@ -43,32 +52,38 @@ export function ownDirs(bundle = Bun.main, runtime = process.execPath): string[]
   return out;
 }
 
-/** Applies the retention rules once. */
-export function housekeepOnce(base: string, host: string, logger: Logger, now = new Date(), own = ownDirs()): void {
-  for (const d of own) touch(d, now);
-  touch(host, now);
-  // The Xvfb packages' host directory (the default instance's).
-  const xvfb = posix.join(posix.dirname(base), DATA_DIR_NAME, HOSTS_DIR, posix.basename(host));
-  if (xvfb !== host) touch(xvfb, now);
-  pruneOlder(posix.join(base, 'uploads'), now.getTime() - UPLOAD_RETENTION_MS, logger);
-  pruneOlder(posix.join(host, 'cs-data', 'logs'), now.getTime() - UPLOAD_RETENTION_MS, logger);
-  pruneHosts(posix.join(base, HOSTS_DIR), posix.basename(host), now, logger);
+/** The entries of dir, none when it cannot be read. */
+async function entries(dir: string): Promise<string[]> {
+  try {
+    return await fsp.readdir(dir);
+  } catch {
+    return [];
+  }
 }
 
-/** Other hosts' directories in dir; mine is this host's. */
-export function pruneHosts(dir: string, mine: string, now: Date, logger: Logger): void {
-  let names: string[];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return;
-  }
-  for (const name of names) {
+/** Applies the retention rules once. */
+export async function housekeepOnce(base: string, host: string, logger: Logger, now = new Date(), own = ownDirs()): Promise<void> {
+  for (const d of own) await touch(d, now);
+  await touch(host, now);
+  // The Xvfb packages' host directory (the default instance's).
+  const home = posix.dirname(base);
+  const xvfb = posix.join(home, DATA_DIR_NAME, HOSTS_DIR, posix.basename(host));
+  if (xvfb !== host) await touch(xvfb, now);
+  await pruneOlder(posix.join(base, 'uploads'), now.getTime() - UPLOAD_RETENTION_MS, logger);
+  await pruneOlder(posix.join(host, 'cs-data', 'logs'), now.getTime() - UPLOAD_RETENTION_MS, logger);
+  await pruneHosts(posix.join(base, HOSTS_DIR), posix.basename(host), now, logger);
+  await pruneStaged([posix.join(home, AGENT_DIR), posix.join(home, RUNTIME_DIR)], now.getTime() - STAGING_RETENTION_MS, logger);
+}
+
+/** Other hosts' directories in dir; mine is this host's. An entry that is
+ * not a directory itself (a link to one) is left alone. */
+export async function pruneHosts(dir: string, mine: string, now: Date, logger: Logger): Promise<void> {
+  for (const name of await entries(dir)) {
     if (name === mine) continue;
     const p = posix.join(dir, name);
     let st;
     try {
-      st = statSync(p);
+      st = await fsp.lstat(p);
     } catch {
       continue;
     }
@@ -77,52 +92,61 @@ export function pruneHosts(dir: string, mine: string, now: Date, logger: Logger)
     if (age < HOST_RETENTION_MS) continue;
     if (age >= HOST_EXE_RETENTION_MS) {
       try {
-        rmSync(p, { recursive: true, force: true });
+        await fsp.rm(p, { recursive: true, force: true });
       } catch (e) {
         logger(`prune host ${name}: ${(e as Error).message}`);
       }
       continue;
     }
-    let files: string[] = [];
-    try {
-      files = readdirSync(p);
-    } catch {
-      // unreadable
-    }
-    for (const f of files) {
+    for (const f of await entries(p)) {
       if (f === 'hc') continue;
       try {
-        rmSync(posix.join(p, f), { recursive: true, force: true });
+        await fsp.rm(posix.join(p, f), { recursive: true, force: true });
       } catch (e) {
         logger(`prune host ${name}: ${(e as Error).message}`);
       }
     }
     // Removing changed the directory's time: keep its age.
     try {
-      utimesSync(p, st.atime, st.mtime);
+      await fsp.utimes(p, st.atime, st.mtime);
     } catch {
       // gone
     }
   }
 }
 
-/** Removes the direct children of dir not modified since cutoff (ms). */
-export function pruneOlder(dir: string, cutoff: number, logger: Logger): void {
-  let names: string[];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return;
-  }
-  for (const name of names) {
+/** Removes the direct children of dir not modified since cutoff (ms), by
+ * their own time (a link's, not its target's). */
+export async function pruneOlder(dir: string, cutoff: number, logger: Logger): Promise<void> {
+  for (const name of await entries(dir)) {
     const p = posix.join(dir, name);
     try {
-      if (statSync(p).mtimeMs > cutoff) continue;
-      rmSync(p, { recursive: true, force: true });
+      if ((await fsp.lstat(p)).mtimeMs > cutoff) continue;
+      await fsp.rm(p, { recursive: true, force: true });
     } catch (e) {
       logger(`prune ${name}: ${(e as Error).message}`);
     }
   }
+}
+
+/** Removes what interrupted installs left in the builds' and runtimes'
+ * directories (dirs: their parents) before cutoff (ms). */
+export async function pruneStaged(dirs: string[], cutoff: number, logger: Logger): Promise<void> {
+  for (const parent of dirs)
+    for (const d of await entries(parent)) {
+      const dir = posix.join(parent, d);
+      for (const name of await entries(dir)) {
+        if (!STAGED.test(name)) continue;
+        const p = posix.join(dir, name);
+        try {
+          const st = await fsp.lstat(p);
+          if (!st.isFile() || st.mtimeMs > cutoff) continue;
+          await fsp.rm(p, { force: true });
+        } catch (e) {
+          logger(`prune ${name}: ${(e as Error).message}`);
+        }
+      }
+    }
 }
 
 /** Runs housekeeping now and every everyMs until signal ends, with the
@@ -137,7 +161,7 @@ export async function housekeep(o: {
 }): Promise<void> {
   while (!o.signal.aborted) {
     const now = new Date();
-    housekeepOnce(o.base, o.host, o.logger, now);
+    await housekeepOnce(o.base, o.host, o.logger, now);
     for (const f of o.extra ?? [])
       try {
         await f(now);
@@ -145,6 +169,8 @@ export async function housekeep(o: {
         o.logger(`housekeeping: ${(e as Error).message}`);
       }
     await new Promise<void>((r) => {
+      // Ended while the rules ran: no wait.
+      if (o.signal.aborted) return r();
       const t = setTimeout(done, o.everyMs ?? HOUSEKEEP_MS);
       function done() {
         clearTimeout(t);

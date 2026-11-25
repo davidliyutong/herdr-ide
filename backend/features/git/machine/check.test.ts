@@ -223,11 +223,11 @@ describe('the status', () => {
   });
 });
 
-test('the top level as the directory spells it', () => {
+test('the top level as the directory spells it', async () => {
   for (const [dir, top, prefix, want] of [
     ['/a/b/c', '/x/b', 'c/', '/x/b'],
     ['/a/b/c', '/a/b', 'c/', '/a/b'],
     ['/a/b/c', '/x', 'b/c/', '/x'],
   ])
-    expect(logical(dir, top, prefix)).toBe(want);
+    expect(await logical(dir, top, prefix)).toBe(want);
 });

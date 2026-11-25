@@ -6,7 +6,8 @@
 // core passes on to the page: a member Go wrote with omitempty is left out
 // when empty, a list it always wrote is a list.
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readlinkSync, readSync, realpathSync, statSync } from 'node:fs';
+import { constants } from 'node:fs';
+import { lstat, open, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { isUtf8 } from 'node:buffer';
 import { posix } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
@@ -66,13 +67,13 @@ export async function toplevel(ctx: GitContext, dir: string): Promise<string> {
   const res = await ctx.run(dir, true, { args: ['rev-parse', '--show-toplevel', '--show-prefix'], ok: [128] });
   if (res.code !== 0) return '';
   const lines = text(res.out).split('\n');
-  return logical(dir, lines[0], lines[1] ?? '');
+  return await logical(dir, lines[0], lines[1] ?? '');
 }
 
 /** The top level top as dir spells it: dir without prefix (its path below
  * the top level, as git gave it) when that is the same directory as top;
  * else top. */
-export function logical(dir: string, top: string, prefix: string): string {
+export async function logical(dir: string, top: string, prefix: string): Promise<string> {
   let cand = posix.normalize(dir);
   prefix = prefix.replace(/\/$/, '');
   if (prefix !== '') {
@@ -82,7 +83,7 @@ export function logical(dir: string, top: string, prefix: string): string {
   }
   if (cand === top) return top;
   try {
-    return realpathSync(cand) === realpathSync(top) ? cand : top;
+    return (await realpath(cand)) === (await realpath(top)) ? cand : top;
   } catch {
     return top;
   }
@@ -99,7 +100,7 @@ export async function repoInfo(ctx: GitContext, dir: string | undefined): Promis
   }
   let isDir = false;
   try {
-    isDir = statSync(abs).isDirectory();
+    isDir = (await stat(abs)).isDirectory();
   } catch {
     // not there
   }
@@ -121,7 +122,7 @@ export async function repoInfo(ctx: GitContext, dir: string | undefined): Promis
     up = posix.dirname(outer);
   }
   info.parents = parents;
-  info.nested = nestedRepos(info.root as string);
+  info.nested = await nestedRepos(info.root as string);
   return omitEmpty(info, ['parents', 'nested']);
 }
 
@@ -172,7 +173,7 @@ async function infoOf(r: Repo): Promise<Obj> {
       upstream,
       ahead: ahead || 0,
       behind: behind || 0,
-      state: progress(gitDir),
+      state: await progress(gitDir),
       remotes,
       remoteUrls,
     },
@@ -184,14 +185,14 @@ async function infoOf(r: Repo): Promise<Obj> {
  * files), found breadth first within bounds and never through a link, so
  * deep or huge trees and link loops neither hang the search nor leave
  * root; in lexical order. */
-export function nestedRepos(root: string): string[] {
+export async function nestedRepos(root: string): Promise<string[]> {
   const out = new Set<string>();
   const add = (p: string) => {
     if (out.size < MAX_NESTED_REPOS) out.add(p);
   };
-  for (const p of gitmodulesPaths(root)) {
+  for (const p of await gitmodulesPaths(root)) {
     const cand = posix.join(root, p);
-    if (noLinkOnPath(root, p) && isGitRoot(cand)) add(cand);
+    if ((await noLinkOnPath(root, p)) && (await isGitRoot(cand))) add(cand);
   }
   const queue: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }];
   let scanned = 0;
@@ -199,7 +200,7 @@ export function nestedRepos(root: string): string[] {
     const cur = queue.shift()!;
     let entries;
     try {
-      entries = readdirSync(cur.dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      entries = (await readdir(cur.dir, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     } catch {
       continue;
     }
@@ -209,7 +210,7 @@ export function nestedRepos(root: string): string[] {
       if (e.name === '.git' || e.name === 'node_modules') continue;
       scanned++;
       const sub = posix.join(cur.dir, e.name);
-      if (isGitRoot(sub)) add(sub);
+      if (await isGitRoot(sub)) add(sub);
       if (cur.depth + 1 < MAX_NESTED_DEPTH) queue.push({ dir: sub, depth: cur.depth + 1 });
     }
   }
@@ -218,14 +219,14 @@ export function nestedRepos(root: string): string[] {
 
 /** The submodules' paths of root/.gitmodules, read without following a
  * link or running git. */
-function gitmodulesPaths(root: string): string[] {
+async function gitmodulesPaths(root: string): Promise<string[]> {
   const gm = posix.join(root, '.gitmodules');
   try {
-    if (!lstatSync(gm).isFile()) return [];
+    if (!(await lstat(gm)).isFile()) return [];
   } catch {
     return [];
   }
-  const b = readSmall(gm, 256 << 10);
+  const b = await readSmall(gm, 256 << 10);
   if (!b) return [];
   const paths: string[] = [];
   for (let line of text(b).split('\n')) {
@@ -251,12 +252,12 @@ function gitmodulesPaths(root: string): string[] {
 }
 
 /** Whether every element of rel below root is a directory, none a link. */
-function noLinkOnPath(root: string, rel: string): boolean {
+async function noLinkOnPath(root: string, rel: string): Promise<boolean> {
   let cur = root;
   for (const part of rel.split('/')) {
     cur = posix.join(cur, part);
     try {
-      const st = lstatSync(cur);
+      const st = await lstat(cur);
       if (st.isSymbolicLink() || !st.isDirectory()) return false;
     } catch {
       return false;
@@ -267,19 +268,19 @@ function noLinkOnPath(root: string, rel: string): boolean {
 
 /** Whether dir has a .git directory, not a link, with HEAD, or a gitdir
  * file naming a git directory with HEAD. */
-function isGitRoot(dir: string): boolean {
+async function isGitRoot(dir: string): Promise<boolean> {
   const dot = posix.join(dir, '.git');
   let st;
   try {
-    st = lstatSync(dot);
+    st = await lstat(dot);
   } catch {
     return false;
   }
   if (st.isSymbolicLink()) return false;
-  const exists = (p: string, follow: boolean) => {
+  const exists = async (p: string, follow: boolean) => {
     try {
-      if (follow) statSync(p);
-      else lstatSync(p);
+      if (follow) await stat(p);
+      else await lstat(p);
       return true;
     } catch {
       return false;
@@ -287,8 +288,8 @@ function isGitRoot(dir: string): boolean {
   };
   if (st.isDirectory()) return exists(posix.join(dot, 'HEAD'), false);
   if (!st.isFile()) return false;
-  const { gitDir } = gitDirs(dir);
-  return gitDir !== '' && exists(posix.join(gitDir, 'HEAD'), true);
+  const { gitDir } = await gitDirs(dir);
+  return gitDir !== '' && (await exists(posix.join(gitDir, 'HEAD'), true));
 }
 
 // ---- status ----
@@ -328,19 +329,19 @@ export async function status(r: Repo, state: GitState): Promise<Obj> {
   }
   const { st, whole } = parseStatus(res.out, res.cut);
   if (!whole) throw new Fail('too_large', 400, `git status printed more than ${MAX_OUTPUT} bytes`);
-  const { gitDir } = gitDirs(r.root);
-  if (gitDir !== '') st.state = progress(gitDir);
-  stamp(r.root, st.files as Obj[]);
+  const { gitDir } = await gitDirs(r.root);
+  if (gitDir !== '') st.state = await progress(gitDir);
+  await stamp(r.root, st.files as Obj[]);
   return omitEmpty(st, ['branch', 'head', 'upstream', 'state', 'truncated', 'ignored', 'ignoredTruncated']);
 }
 
 /** Gives the files whose working tree side differs from the index the
  * modification time and size of that side (no contents are read). */
-function stamp(root: string, files: Obj[]): void {
+async function stamp(root: string, files: Obj[]): Promise<void> {
   for (const f of files) {
     if (f.y === '.' || f.y === 'D') continue;
     try {
-      const st = lstatSync(posix.join(root, (f.path as string).replace(/\/$/, '')));
+      const st = await lstat(posix.join(root, (f.path as string).replace(/\/$/, '')));
       f.mtime = millis(st.mtimeMs);
       f.size = st.isDirectory() ? 0 : st.size;
     } catch {
@@ -649,7 +650,7 @@ export async function readBlob(r: Repo, p: BlobParams): Promise<Obj> {
   let obj: string;
   switch (p.source ?? '') {
     case 'worktree':
-      return worktreeBlob(r.root, rel);
+      return await worktreeBlob(r.root, rel);
     case 'index':
       obj = `:0:${rel}`;
       break;
@@ -677,12 +678,12 @@ export async function readBlob(r: Repo, p: BlobParams): Promise<Obj> {
  * "/" does not make the rest of the machine a part of it. The file is
  * opened without following a link put there meanwhile, without blocking on
  * a FIFO, and read up to MAX_BLOB. */
-function worktreeBlob(top: string, rel: string): Obj {
+async function worktreeBlob(top: string, rel: string): Promise<Obj> {
   let root: string;
   let dir: string;
   try {
-    root = realpathSync(top);
-    dir = realpathSync(posix.dirname(posix.join(top, rel)));
+    root = await realpath(top);
+    dir = await realpath(posix.dirname(posix.join(top, rel)));
   } catch {
     return blob({});
   }
@@ -690,30 +691,30 @@ function worktreeBlob(top: string, rel: string): Obj {
   const full = posix.join(dir, posix.basename(rel));
   let st;
   try {
-    st = lstatSync(full);
+    st = await lstat(full);
   } catch {
     return blob({});
   }
   if (st.isDirectory()) return blob({});
   if (st.isSymbolicLink()) {
     try {
-      const target = readlinkSync(full);
+      const target = await readlink(full);
       return blobOf(Buffer.from(target), Buffer.byteLength(target), millis(st.mtimeMs));
     } catch {
       return blob({});
     }
   }
   if (!st.isFile()) return blob({});
-  let fd: number;
+  let fh: import('node:fs/promises').FileHandle;
   try {
-    fd = openSync(full, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    fh = await open(full, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | constants.O_NOCTTY);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ELOOP') return blob({});
     throw new Fail('denied', 403, (e as Error).message);
   }
   try {
-    const fst = fstatSync(fd);
+    const fst = await fh.stat();
     if (!fst.isFile()) return blob({});
     const mtime = millis(fst.mtimeMs);
     if (fst.size > MAX_BLOB) return blob({ exists: true, tooLarge: true, size: fst.size, mtime });
@@ -723,7 +724,7 @@ function worktreeBlob(top: string, rel: string): Obj {
     try {
       for (let k = 1; k > 0 && n <= MAX_BLOB;) {
         const chunk = Buffer.allocUnsafe(Math.min(256 << 10, MAX_BLOB + 1 - n));
-        k = readSync(fd, chunk, 0, chunk.length, null);
+        k = (await fh.read(chunk, 0, chunk.length, null)).bytesRead;
         if (k > 0) parts.push(chunk.subarray(0, k));
         n += k;
       }
@@ -733,7 +734,7 @@ function worktreeBlob(top: string, rel: string): Obj {
     if (n > MAX_BLOB) return blob({ exists: true, tooLarge: true, size: n, mtime });
     return blobOf(Buffer.concat(parts, n), n, mtime);
   } finally {
-    closeSync(fd);
+    await fh.close();
   }
 }
 
@@ -847,56 +848,56 @@ export async function diffStat(r: Repo): Promise<Obj> {
  * reads the status again when it changed. refs changes only with HEAD, the
  * refs (also in reftable) and the stashes: what the history shows; config
  * with the configuration (remotes). */
-export function watch(root: string): Obj {
-  const { gitDir, common } = gitDirs(root);
+export async function watch(root: string): Promise<Obj> {
+  const { gitDir, common } = await gitDirs(root);
   if (gitDir === '') throw new Fail('not_a_repo', 400, `${root} has no git directory`);
   type Hash = ReturnType<typeof createHash>;
-  const add = (h: Hash, p: string) => {
+  const add = async (h: Hash, p: string) => {
     try {
-      const st = statSync(p, { bigint: true });
+      const st = await stat(p, { bigint: true });
       h.update(`${p} ${st.mtimeNs} ${st.size}\n`);
     } catch {
       h.update(`${p} -\n`);
     }
   };
   const refsHash = createHash('sha256');
-  for (const name of ['HEAD', 'logs/HEAD']) add(refsHash, posix.join(gitDir, name));
-  for (const name of ['packed-refs', 'logs/refs/stash']) add(refsHash, posix.join(common, name));
+  for (const name of ['HEAD', 'logs/HEAD']) await add(refsHash, posix.join(gitDir, name));
+  for (const name of ['packed-refs', 'logs/refs/stash']) await add(refsHash, posix.join(common, name));
   // Refs in reftable: every update writes a table and names it in
   // tables.list.
   for (const d of gitDir === common ? [gitDir] : [gitDir, common]) {
-    const b = readSmall(posix.join(d, 'reftable', 'tables.list'), 64 << 10);
+    const b = await readSmall(posix.join(d, 'reftable', 'tables.list'), 64 << 10);
     if (b) refsHash.update(`${d} ${createHash('sha256').update(b).digest('hex')}\n`);
   }
   let n = 0;
-  const walk = (p: string): boolean => {
+  const walk = async (p: string): Promise<boolean> => {
     if (++n > MAX_WATCHED) return false;
-    add(refsHash, p);
+    await add(refsHash, p);
     let names: string[];
     try {
-      if (!lstatSync(p).isDirectory()) return true;
-      names = readdirSync(p).sort();
+      if (!(await lstat(p)).isDirectory()) return true;
+      names = (await readdir(p)).sort();
     } catch {
       return true;
     }
-    for (const name of names) if (!walk(posix.join(p, name))) return false;
+    for (const name of names) if (!(await walk(posix.join(p, name)))) return false;
     return true;
   };
   try {
-    lstatSync(posix.join(common, 'refs'));
-    walk(posix.join(common, 'refs'));
+    await lstat(posix.join(common, 'refs'));
+    await walk(posix.join(common, 'refs'));
   } catch {
     // no refs directory (reftable)
   }
   const refsSum = refsHash.digest();
   const configHash = createHash('sha256');
-  add(configHash, posix.join(common, 'config'));
-  add(configHash, posix.join(gitDir, 'config.worktree'));
+  await add(configHash, posix.join(common, 'config'));
+  await add(configHash, posix.join(gitDir, 'config.worktree'));
   const configSum = configHash.digest();
   const all = createHash('sha256').update(refsSum).update(configSum);
   for (const name of ['index', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply'])
-    add(all, posix.join(gitDir, name));
-  add(all, posix.join(common, 'FETCH_HEAD'));
+    await add(all, posix.join(gitDir, name));
+  await add(all, posix.join(common, 'FETCH_HEAD'));
   const hex12 = (b: Buffer) => b.subarray(0, 12).toString('hex');
   return { token: hex12(all.digest()), refs: hex12(refsSum), config: hex12(configSum) };
 }

@@ -11,6 +11,7 @@ import { Session } from '#kernel/machines/transport/session.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import { Agent } from './agent.ts';
 import type { MachineSide } from './feature.ts';
+import type { FsCalls } from './fsops.ts';
 
 /** A temporary home directory, removed by its remove(). */
 export function tempHome(): { home: string; remove(): void } {
@@ -43,11 +44,13 @@ export interface Rig {
 }
 
 /** An agent for the default instance on a new home, with a session. */
-export async function rig(o: { features?: MachineSide[]; logger?: Logger; client?: string; sshConn?: string } = {}): Promise<Rig> {
+export async function rig(
+  o: { features?: MachineSide[]; logger?: Logger; client?: string; sshConn?: string; fs?: Partial<FsCalls> } = {},
+): Promise<Rig> {
   const h = tempHome();
   const dirs = dirsOf(`${h.home}/${DATA_DIR_NAME}`);
   makeDirs(dirs);
-  const agent = new Agent({ instance: '', dirs, logger: o.logger ?? discard, features: o.features ?? [], socketWatchMs: 50 });
+  const agent = new Agent({ instance: '', dirs, logger: o.logger ?? discard, features: o.features ?? [], socketWatchMs: 50, fs: o.fs });
   const sessions: Session[] = [];
   const connect = (client = o.client ?? 'core-1', sshConn = o.sshConn ?? '') => {
     const [a, b] = duplexPair();

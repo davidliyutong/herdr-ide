@@ -14,7 +14,7 @@ import { Session as Yamux, closeStream, type Stream } from '#shared/proto/yamux.
 import { servePlugin, type Running } from './dispatch.ts';
 import { cleanEnv } from './env.ts';
 import type { ActionContext, MachineEnv, MachineSide } from './feature.ts';
-import { serveArchive, serveFS } from './fsops.ts';
+import { FS_CALLS, serveArchive, serveFS, type FsCalls } from './fsops.ts';
 import { TerminalCore } from './hc.ts';
 import { serveHC, pipeUnix } from './hcop.ts';
 import { killHidden, runHidden } from './hidden.ts';
@@ -97,6 +97,8 @@ export interface AgentOptions {
   housekeepMs?: number;
   /** How often its sockets are checked (sockets.ts). */
   socketWatchMs?: number;
+  /** The file system calls of the fs ops (tests replace them). */
+  fs?: Partial<FsCalls>;
 }
 
 export class Agent {
@@ -110,12 +112,14 @@ export class Agent {
   private readonly sessions = new Set<AgentSession>();
   private seq = 0;
   private privacyOp: Promise<unknown> = Promise.resolve();
+  private readonly fs: FsCalls;
 
   constructor(o: AgentOptions) {
     this.instance = o.instance;
     this.dirs = o.dirs;
     this.logger = o.logger;
     this.hc = new TerminalCore(o.instance, o.dirs);
+    this.fs = { ...FS_CALLS, ...o.fs };
     const env = this.env();
     for (const side of o.features) this.features.set(side.protocol.id, { protocol: side.protocol, served: side.start(env) });
     const signal = this.stop.signal;
@@ -289,7 +293,7 @@ export class Agent {
             await fail(e);
             break;
           }
-          await serveFS(conn, h, path);
+          await serveFS(conn, h, path, this.fs);
           break;
         }
         case Op.FsArchive:

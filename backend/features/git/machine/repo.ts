@@ -1,7 +1,8 @@
 // A repository the Git feature's actions run in: its top level, how git
 // runs there, and the checks of revisions, ref names and remotes that need
 // the repository.
-import { closeSync, constants, fstatSync, openSync, readSync, statSync } from 'node:fs';
+import { constants } from 'node:fs';
+import { open, stat, type FileHandle } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
 import { HEX_REV, REMOTE_NAME, badParams, badRef, plainName } from './check.ts';
@@ -102,7 +103,7 @@ export class Repo {
 
 /** The repository whose top level is dir (not any directory of one: the
  * actions' paths are relative to the top level). */
-export function openRepo(ctx: GitContext, dir: string | undefined, read: boolean): Repo {
+export async function openRepo(ctx: GitContext, dir: string | undefined, read: boolean): Promise<Repo> {
   if (!dir || dir.includes('\0')) throw badParams('no repository');
   let abs: string;
   try {
@@ -112,7 +113,7 @@ export function openRepo(ctx: GitContext, dir: string | undefined, read: boolean
   }
   let ok = false;
   try {
-    const st = statSync(posix.join(abs, '.git'));
+    const st = await stat(posix.join(abs, '.git'));
     ok = st.isDirectory() || st.isFile();
   } catch {
     // not there
@@ -123,23 +124,23 @@ export function openRepo(ctx: GitContext, dir: string | undefined, read: boolean
 
 /** A regular file, at most limit bytes of it, opened without blocking on a
  * FIFO; null when it is not one. */
-export function readSmall(p: string, limit: number): Buffer | null {
-  let fd: number;
+export async function readSmall(p: string, limit: number): Promise<Buffer | null> {
+  let fh: FileHandle;
   try {
-    fd = openSync(p, constants.O_RDONLY | constants.O_NONBLOCK);
+    fh = await open(p, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY);
   } catch {
     return null;
   }
   try {
-    if (!fstatSync(fd).isFile()) return null;
+    if (!(await fh.stat()).isFile()) return null;
     const buf = Buffer.alloc(limit);
     let n = 0;
-    for (let r; n < limit && (r = readSync(fd, buf, n, limit - n, null)) > 0;) n += r;
+    for (let r; n < limit && (r = (await fh.read(buf, n, limit - n, null)).bytesRead) > 0;) n += r;
     return buf.subarray(0, n);
   } catch {
     return null;
   } finally {
-    closeSync(fd);
+    await fh.close();
   }
 }
 
@@ -147,12 +148,12 @@ export function readSmall(p: string, limit: number): Buffer | null {
  * running git: .git is the directory, or a file "gitdir: <dir>" (a linked
  * worktree, a submodule) whose directory may name the common one in its
  * file commondir. Empty when root has none. */
-export function gitDirs(root: string): { gitDir: string; common: string } {
+export async function gitDirs(root: string): Promise<{ gitDir: string; common: string }> {
   const dot = posix.join(root, '.git');
   let gitDir = dot;
   try {
-    if (!statSync(dot).isDirectory()) {
-      const b = readSmall(dot, 64 << 10);
+    if (!(await stat(dot)).isDirectory()) {
+      const b = await readSmall(dot, 64 << 10);
       if (!b) return { gitDir: '', common: '' };
       const line = text(b).split('\n')[0].trim();
       if (!line.startsWith('gitdir:')) return { gitDir: '', common: '' };
@@ -164,7 +165,7 @@ export function gitDirs(root: string): { gitDir: string; common: string } {
     return { gitDir: '', common: '' };
   }
   let common = gitDir;
-  const c = readSmall(posix.join(gitDir, 'commondir'), 64 << 10);
+  const c = await readSmall(posix.join(gitDir, 'commondir'), 64 << 10);
   if (c) {
     let d = text(c).trim();
     if (!d.startsWith('/')) d = posix.join(gitDir, d);
@@ -175,19 +176,19 @@ export function gitDirs(root: string): { gitDir: string; common: string } {
 
 /** The operation in progress in a git directory: merge, rebase, cherryPick
  * or revert, "" for none. */
-export function progress(gitDir: string): string {
+export async function progress(gitDir: string): Promise<string> {
   if (gitDir === '') return '';
-  const has = (name: string) => {
+  const has = async (name: string) => {
     try {
-      statSync(posix.join(gitDir, name));
+      await stat(posix.join(gitDir, name));
       return true;
     } catch {
       return false;
     }
   };
-  if (has('rebase-merge') || has('rebase-apply')) return 'rebase';
-  if (has('MERGE_HEAD')) return 'merge';
-  if (has('CHERRY_PICK_HEAD')) return 'cherryPick';
-  if (has('REVERT_HEAD')) return 'revert';
+  if ((await has('rebase-merge')) || (await has('rebase-apply'))) return 'rebase';
+  if (await has('MERGE_HEAD')) return 'merge';
+  if (await has('CHERRY_PICK_HEAD')) return 'cherryPick';
+  if (await has('REVERT_HEAD')) return 'revert';
   return '';
 }

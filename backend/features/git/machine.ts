@@ -53,9 +53,9 @@ export function gitMachine(o: GitMachineOptions = {}) {
       repo: (p, ctx) => repoInfo(contextOf(ctx), p.path),
     };
     for (const action of READS)
-      if (action !== 'repo') actions[action] = (p, ctx) => reads[action](openRepo(contextOf(ctx), p.repo, true), p);
+      if (action !== 'repo') actions[action] = async (p, ctx) => reads[action](await openRepo(contextOf(ctx), p.repo, true), p);
     for (const action of WRITES)
-      actions[action] = (p, ctx) => change(openRepo(contextOf(ctx), p.repo, false), action as Write, p, timing.changeMs);
+      actions[action] = async (p, ctx) => change(await openRepo(contextOf(ctx), p.repo, false), action as Write, p, timing.changeMs);
     return { actions: actions as unknown as Handlers<typeof gitProtocol> };
   });
 }

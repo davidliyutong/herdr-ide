@@ -3,25 +3,15 @@
 // directory's entries, a range of a file's bytes, an upload written whole
 // beside its target and renamed over it, and paths as one zip archive
 // (docs/features/06-quick-look-and-files.md).
+//
+// The node serves every core on one thread, so nothing here waits for the
+// file system on it: every call is asynchronous (a call that does not
+// return, on a mount that stopped answering, holds a thread of the pool,
+// not the node), and a file is opened to be read without blocking on a
+// FIFO (O_NONBLOCK) and read only when it is a regular file.
 import { randomBytes } from 'node:crypto';
-import {
-  chmodSync,
-  closeSync,
-  createReadStream,
-  fstatSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readlinkSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeSync,
-  type Dirent,
-  type Stats,
-} from 'node:fs';
+import { constants, type Dirent, type Stats } from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import { posix } from 'node:path';
 import { PassThrough, type Readable } from 'node:stream';
 import { ZipFile } from 'yazl';
@@ -36,6 +26,17 @@ const { basename, dirname, extname, join } = posix;
 const MAX_LIST = 20000;
 /** Bounds the paths of one archive. */
 const MAX_ARCHIVE_PATHS = 1000;
+/** How a file to read is opened: never blocking on a FIFO, never a
+ * terminal's controlling one. */
+export const READ_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY;
+
+/** The file system calls of these ops (tests replace them). */
+export interface FsCalls {
+  stat(p: string): Promise<Stats>;
+  lstat(p: string): Promise<Stats>;
+}
+
+export const FS_CALLS: FsCalls = { stat: (p) => fsp.stat(p), lstat: (p) => fsp.lstat(p) };
 
 const errCode = (e: unknown): string | undefined => (e as NodeJS.ErrnoException)?.code;
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -63,21 +64,36 @@ function failFS(e: unknown): Reply {
 
 const fail = (e: unknown): Reply => ({ ok: false, error: message(e) });
 
+/** Opens a regular file to read it: a FIFO, a device or a socket at the
+ * path is refused (the open itself does not wait for a FIFO's writer). */
+export async function openRegular(path: string): Promise<{ fh: fsp.FileHandle; fi: Stats }> {
+  const fh = await fsp.open(path, READ_FLAGS);
+  try {
+    const fi = await fh.stat();
+    if (fi.isDirectory()) throw new Error(`${path} is a directory`);
+    if (!fi.isFile()) throw new Error(`${path} is not a regular file`);
+    return { fh, fi };
+  } catch (e) {
+    await fh.close();
+    throw e;
+  }
+}
+
 /** Serves fs.stat, fs.list, fs.read and fs.write for path (expanded). */
-export async function serveFS(conn: Conn, h: Header, path: string): Promise<void> {
+export async function serveFS(conn: Conn, h: Header, path: string, fs: FsCalls = FS_CALLS): Promise<void> {
   const st = conn.stream;
   switch (h.op) {
     case 'fs.stat': {
       let lfi: Stats;
       try {
-        lfi = lstatSync(path);
+        lfi = await fs.lstat(path);
       } catch (e) {
         return writeLine(st, failFS(e));
       }
       let fi = lfi;
       if (lfi.isSymbolicLink()) {
         try {
-          fi = statSync(path);
+          fi = await fs.stat(path);
         } catch {
           // a dangling link: its own state
         }
@@ -87,7 +103,7 @@ export async function serveFS(conn: Conn, h: Header, path: string): Promise<void
     case 'fs.list': {
       let ents: Dirent[];
       try {
-        ents = readdirSync(path, { withFileTypes: true });
+        ents = await fsp.readdir(path, { withFileTypes: true });
       } catch (e) {
         return writeLine(st, fail(e));
       }
@@ -96,10 +112,10 @@ export async function serveFS(conn: Conn, h: Header, path: string): Promise<void
         const full = join(path, e.name);
         let fi: Stats;
         try {
-          fi = statSync(full);
+          fi = await fs.stat(full);
         } catch {
           try {
-            fi = lstatSync(full);
+            fi = await fs.lstat(full);
           } catch {
             continue;
           }
@@ -118,16 +134,15 @@ export async function serveFS(conn: Conn, h: Header, path: string): Promise<void
       return write(st, b);
     }
     case 'fs.read': {
-      let fd: number;
+      let f: { fh: fsp.FileHandle; fi: Stats };
       try {
-        fd = openSync(path, 'r');
+        f = await openRegular(path);
       } catch (e) {
         return writeLine(st, fail(e));
       }
+      const { fh, fi } = f;
       let owned = true;
       try {
-        const fi = fstatSync(fd);
-        if (fi.isDirectory()) return await writeLine(st, fail(`${path} is a directory`));
         const offset = h.offset ?? 0;
         if (offset < 0 || offset > fi.size) return await writeLine(st, fail('offset out of range'));
         let length = h.length ?? 0;
@@ -135,9 +150,9 @@ export async function serveFS(conn: Conn, h: Header, path: string): Promise<void
         await writeLine(st, { ok: true, stat: statOf(path, fi, false) });
         if (length === 0) return;
         owned = false;
-        await copyOut(createReadStream('', { fd, start: offset, end: offset + length - 1, highWaterMark: 256 << 10 }), st);
+        await copyOut(fh.createReadStream({ start: offset, end: offset + length - 1, highWaterMark: 256 << 10 }), st);
       } finally {
-        if (owned) closeSync(fd);
+        if (owned) await fh.close();
       }
       return;
     }
@@ -164,15 +179,15 @@ async function writeUpload(conn: Conn, h: Header, path: string): Promise<void> {
   const dir = dirname(path);
   if (h.mkdirs) {
     try {
-      mkdirSync(dir, { recursive: true, mode: 0o755 });
+      await fsp.mkdir(dir, { recursive: true, mode: 0o755 });
     } catch (e) {
       return writeLine(st, fail(e));
     }
   }
   const tmp = join(dir, `.${SLUG}-upload-${randomBytes(6).toString('hex')}`);
-  let fd: number;
+  let fh: fsp.FileHandle;
   try {
-    fd = openSync(tmp, 'wx', 0o600);
+    fh = await fsp.open(tmp, 'wx', 0o600);
   } catch (e) {
     return writeLine(st, fail(e));
   }
@@ -181,43 +196,43 @@ async function writeUpload(conn: Conn, h: Header, path: string): Promise<void> {
     try {
       await writeLine(st, { ok: true });
     } catch (e) {
-      closeSync(fd);
+      await fh.close();
       throw e;
     }
     let err: unknown;
     try {
-      for await (const b of new ChunkReader(conn.reader)) for (let off = 0; off < b.length;) off += writeSync(fd, b, off);
+      for await (const b of new ChunkReader(conn.reader)) await fh.write(b);
     } catch (e) {
       err = e;
     } finally {
-      closeSync(fd);
+      await fh.close();
     }
     let target = path;
     try {
       if (err) throw err;
-      chmodSync(tmp, h.args?.[0] === 'exec' ? 0o755 : 0o644);
-      if (h.unique) target = freeName(path);
-      renameSync(tmp, target);
+      await fsp.chmod(tmp, h.args?.[0] === 'exec' ? 0o755 : 0o644);
+      if (h.unique) target = await freeName(path);
+      await fsp.rename(tmp, target);
       done = true;
     } catch (e) {
       return writeLine(st, fail(e));
     }
     let fi: Stats;
     try {
-      fi = statSync(target);
+      fi = await fsp.stat(target);
     } catch (e) {
       return writeLine(st, fail(e));
     }
     return writeLine(st, { ok: true, stat: statOf(target, fi, false) });
   } finally {
-    if (!done) rmSync(tmp, { force: true });
+    if (!done) await fsp.rm(tmp, { force: true });
   }
 }
 
 /** Claims path, or the first free name with -1, -2… before its extension,
  * by creating it exclusively (a link there counts as taken); the upload is
  * then renamed over the empty file it claimed. */
-export function freeName(path: string): string {
+export async function freeName(path: string): Promise<string> {
   const dir = dirname(path);
   const base = basename(path);
   let ext = extname(base);
@@ -226,7 +241,7 @@ export function freeName(path: string): string {
   for (let i = 0; i < 1000; i++) {
     const p = i === 0 ? path : join(dir, `${stem}-${i}${ext}`);
     try {
-      closeSync(openSync(p, 'wx', 0o644));
+      await (await fsp.open(p, 'wx', 0o644)).close();
       return p;
     } catch (e) {
       if (errCode(e) !== 'EEXIST') throw e;
@@ -268,7 +283,7 @@ export async function serveArchive(conn: Conn, h: Header, expand: (p: string) =>
   for (const p of paths) {
     try {
       const full = expand(p);
-      statSync(full);
+      await fsp.stat(full);
       roots.push(full);
     } catch (e) {
       return writeLine(st, fail(e));
@@ -306,18 +321,18 @@ export async function serveArchive(conn: Conn, h: Header, expand: (p: string) =>
 async function addTree(zip: ZipFile, root: string, name: string, stopped: () => boolean): Promise<void> {
   let walkRoot = root;
   try {
-    walkRoot = realpathSync(root);
+    walkRoot = await fsp.realpath(root);
   } catch {
     // as named
   }
-  const visit = async (p: string, entry: string, fi: Stats, n: number): Promise<void> => {
+  const visit = async (p: string, entry: string, fi: Stats): Promise<void> => {
     if (stopped()) return;
     const mtime = fi.mtime;
     if (fi.isDirectory()) {
       zip.addEmptyDirectory(entry + '/', { mtime, mode: fi.mode });
       let names: string[];
       try {
-        names = readdirSync(p).sort();
+        names = (await fsp.readdir(p)).sort();
       } catch {
         return; // unreadable: left out
       }
@@ -325,18 +340,16 @@ async function addTree(zip: ZipFile, root: string, name: string, stopped: () => 
         const cp = join(p, c);
         let cfi: Stats;
         try {
-          cfi = lstatSync(cp);
+          cfi = await fsp.lstat(cp);
         } catch {
           continue;
         }
-        await visit(cp, `${entry}/${c}`, cfi, n + 1);
-        // Let the archive go out while a large tree is walked.
-        if ((n + 1) % 256 === 0) await new Promise((r) => setImmediate(r));
+        await visit(cp, `${entry}/${c}`, cfi);
       }
     } else if (fi.isSymbolicLink()) {
       let target: string;
       try {
-        target = readlinkSync(p);
+        target = await fsp.readlink(p);
       } catch {
         return;
       }
@@ -347,19 +360,25 @@ async function addTree(zip: ZipFile, root: string, name: string, stopped: () => 
   };
   let fi: Stats;
   try {
-    fi = lstatSync(walkRoot);
+    fi = await fsp.lstat(walkRoot);
   } catch {
     return;
   }
-  await visit(walkRoot, name, fi, 0);
+  await visit(walkRoot, name, fi);
 }
 
-/** A file's bytes; one that cannot be read ends early instead of failing
- * the archive (the entry is cut short). */
+/** A file's bytes; one that cannot be read, or is no longer a regular file
+ * (a FIFO swapped in), ends early instead of failing the archive (the
+ * entry is cut short). */
 function readQuietly(p: string): Readable {
   const out = new PassThrough();
-  const r = createReadStream(p, { highWaterMark: 256 << 10 });
-  r.on('error', () => out.end());
-  r.pipe(out);
+  openRegular(p).then(
+    ({ fh }) => {
+      const r = fh.createReadStream({ highWaterMark: 256 << 10 });
+      r.on('error', () => out.end());
+      r.pipe(out);
+    },
+    () => out.end(),
+  );
   return out;
 }
