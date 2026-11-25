@@ -77,7 +77,7 @@ await build({
   external: [...SHIPPED],
   plugins: [notShipped],
   // CommonJS packages in an ES module bundle require what they need.
-  banner: { js: "import { createRequire as __coreRequire } from 'node:module'; const require = __coreRequire(import.meta.url);" },
+  banner: { js: "import { createRequire as __hubRequire } from 'node:module'; const require = __hubRequire(import.meta.url);" },
   logLevel: 'warning',
 });
 const loaded = new Set(

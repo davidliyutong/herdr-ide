@@ -2,11 +2,11 @@
 // chatproto ChatError ({code, message}) and the routes' callers as the
 // same code with an HTTP status: the chat host's codes (chatproto's Code),
 // the machine's (offline, transport, not_running, upgrading,
-// no_terminal_core, start_failed), and the core's own (wire.ts CoreCode).
+// no_terminal_core, start_failed), and the core's own (wire.ts HubCode).
 import { Fail } from '#kernel/fail.ts';
 import { ChatProtoError, Code, type ChatError } from '#shared/proto/chatproto/index.ts';
 import { NOT_RUNNING } from './protocol.ts';
-import { CoreCode } from './wire.ts';
+import { HubCode } from './wire.ts';
 
 export const chatError = (code: string, message: string): ChatProtoError => new ChatProtoError({ code, message });
 
@@ -19,7 +19,7 @@ export const protocolError = (message: string): ChatProtoError => chatError(Code
 export const isTimeout = (e: unknown): boolean => typeof e === 'object' && e !== null && (e as Error).name === 'TimeoutError';
 
 /** The time limit's error, as the page reads it. */
-export const TIMEOUT: ChatError = { code: CoreCode.Timeout, message: 'the machine did not answer in time' };
+export const TIMEOUT: ChatError = { code: HubCode.Timeout, message: 'the machine did not answer in time' };
 
 /** e as the protocol's error: a ChatProtoError's, a Fail's code (the
  * machine's), timeout for a time limit, failed for anything else. */
@@ -52,19 +52,19 @@ export function statusOf(code: string): number {
     case Code.InTerminal:
     case Code.HandedOff:
     case Code.Sleeping:
-    case CoreCode.Offline:
+    case HubCode.Offline:
     case NOT_RUNNING:
       return 409;
     case Code.TooLarge:
       return 413;
-    case CoreCode.ReadOnly:
+    case HubCode.ReadOnly:
     case Code.NotAllowed:
     case Code.UnsafeFolder:
       return 403;
     case Code.Unsupported:
     case Code.AuthRequired:
       return 422;
-    case CoreCode.Timeout:
+    case HubCode.Timeout:
       return 504;
     case 'upgrading':
     case 'no_terminal_core':

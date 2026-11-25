@@ -4,8 +4,8 @@
 import type { Channel } from '#kernel/channel.ts';
 import { isBreakable } from '#kernel/http/breakable.ts';
 import { abortable } from '#hosts/bun/abortable.ts';
-import type { Core } from '#kernel/hub.ts';
-import { agentDialer, localSpec, running, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
+import type { Hub } from '#kernel/hub.ts';
+import { agentDialer, localSpec, running, testHub, testMachines, waitFor, type TestHub } from '#kernel/testing.ts';
 import type { Spec } from '#kernel/machines/spec.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
 import type { Info } from '#shared/proto/agentproto/index.ts';
@@ -13,7 +13,7 @@ import { fileTransfersFeature, filesFeature } from '../hub.ts';
 import { Downloads, type DownloadEvent } from '../downloads.ts';
 import { fsAgent, type PluginHandler } from './agent.ts';
 
-export interface FilesCoreOptions {
+export interface FilesHubOptions {
   plugin?: PluginHandler;
   readOnly?: boolean;
   specs?: Spec[];
@@ -23,8 +23,8 @@ export interface FilesCoreOptions {
   explorer?: boolean;
 }
 
-export interface FilesCore {
-  tc: TestCore;
+export interface FilesHub {
+  tc: TestHub;
   machines: Machines;
   dial: ReturnType<typeof agentDialer>;
   downloads: Downloads;
@@ -33,17 +33,17 @@ export interface FilesCore {
   stop(): Promise<void>;
 }
 
-export async function filesCore(o: FilesCoreOptions = {}): Promise<FilesCore> {
+export async function filesHub(o: FilesHubOptions = {}): Promise<FilesHub> {
   const downloads = new Downloads({ everyMs: 0 });
   const dial = agentDialer({ serve: fsAgent(o.plugin), ...(o.info ? { info: o.info } : {}) });
   const machines = testMachines(o.specs ?? [localSpec()], { dial });
-  const tc = testCore({
+  const tc = testHub({
     features: [fileTransfersFeature({ downloads }), filesFeature({ platform: o.platform ?? 'linux' })],
     machines,
     readOnly: o.readOnly,
     settings: { 'plugins.files.enabled': o.explorer ?? true },
   });
-  const stopCore = running(tc.core);
+  const stopHub = running(tc.core);
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
@@ -65,13 +65,13 @@ export async function filesCore(o: FilesCoreOptions = {}): Promise<FilesCore> {
     url: `http://127.0.0.1:${server.port}`,
     async stop() {
       await server.stop(true);
-      await stopCore();
+      await stopHub();
     },
   };
 }
 
 /** A page connected to a core's /ws: what it was sent, and its messages. */
-export function testPage(core: Core) {
+export function testPage(core: Hub) {
   const sent: Array<Record<string, unknown>> = [];
   const ch: Channel = {
     send: (d) => void sent.push(JSON.parse(String(d))),

@@ -70,7 +70,7 @@ export class TermConnection {
   constructor(private readonly open: () => Socket) {}
 
   /** A connection to the core that served the page. */
-  static toCore(): TermConnection {
+  static toHub(): TermConnection {
     return new TermConnection(() => openChannel('/api/v1/term') as unknown as Socket);
   }
 

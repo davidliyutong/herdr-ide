@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm, stat, utimes } from 'node:fs/promises';
 import { posix } from 'node:path';
-import { CORE_BIN } from '#shared/lib/brand.ts';
+import { HUB_BIN } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { Reader, write } from '#shared/lib/streamio.ts';
 
@@ -295,7 +295,7 @@ export class HelperFile {
     const c = await this.carried();
     if (!c) throw new Error('this build carries no GUI helper for the machine');
     const dir = posix.join(helperRoot(this.base), c.digest.slice(0, 16));
-    const p = posix.join(dir, `${CORE_BIN}-gui`);
+    const p = posix.join(dir, `${HUB_BIN}-gui`);
     if (await this.ok(p, c.digest)) {
       const now = new Date();
       await utimes(dir, now, now).catch(() => {}); // in use
@@ -328,7 +328,7 @@ export class HelperFile {
     await chmod(root, 0o700);
     const tmp = await mkdtemp(posix.join(root, '.fetch-'));
     try {
-      const staged = posix.join(tmp, `${CORE_BIN}-gui`);
+      const staged = posix.join(tmp, `${HUB_BIN}-gui`);
       const f = await open(staged, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o700);
       try {
         await f.writeFile(c.bytes);

@@ -11,13 +11,13 @@
 // the commands it runs killed first. Status 2: a wrong command line; 1: no
 // home directory, or a line longer than the server takes.
 import { parseArgs } from 'node:util';
-import { CORE_BIN, validInstance } from '#shared/lib/brand.ts';
+import { HUB_BIN, validInstance } from '#shared/lib/brand.ts';
 import { userHomeDir } from '#shared/host/hostdirs.ts';
 import { parentOf } from '#machine/sys/proc.ts';
 import { mcpSocketPath } from '#machine/vault.ts';
 import { dialSocket, serveMcp } from '#features/vault/machine/mcp.ts';
 
-const USAGE = `usage: ${CORE_BIN} mcp [--instance NAME] [--socket PATH]
+const USAGE = `usage: ${HUB_BIN} mcp [--instance NAME] [--socket PATH]
 
 The variable vault's MCP server (stdio), for coding agents' CLIs.
 

@@ -7,7 +7,7 @@ import { coreModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { enableSetting } from '#kernel/feature.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
-import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
+import { agentDialer, checkGuarded, running, sshSpec, testHub, testMachines, waitFor, type TestHub } from '#kernel/testing.ts';
 import { agentsFeature, goQuery, MAX_CWD, MAX_RESOLVING } from './hub.ts';
 import { agentsProtocol, RESOLVE_MS } from './protocol.ts';
 
@@ -55,7 +55,7 @@ async function setup(a: Agents, o: { readOnly?: boolean } = {}) {
       return d(spec, new AbortController().signal);
     },
   });
-  const tc = testCore({ features: [agentsFeature()], machines, readOnly: o.readOnly, settings: { 'plugins.agents.enabled': true } });
+  const tc = testHub({ features: [agentsFeature()], machines, readOnly: o.readOnly, settings: { 'plugins.agents.enabled': true } });
   stops.push(running(tc.core));
   for (const id of ['box', 'gpu']) await waitFor(`${id} ready`, () => machines.get(id)!.ready);
   return tc;
@@ -66,7 +66,7 @@ afterEach(async () => {
   for (const s of stops.splice(0)) await s();
 });
 
-const resolve = async (tc: TestCore, m: string, q: string, signal?: AbortSignal) => {
+const resolve = async (tc: TestHub, m: string, q: string, signal?: AbortSignal) => {
   const res = await tc.core.fetch(new Request(`http://127.0.0.1:7780/api/m/${m}/p/agents/resolve?${q}`, { signal }), {
     remote: '127.0.0.1',
     desktop: false,
@@ -90,7 +90,7 @@ test('switch', () => {
 // The route is a machine's read: answered in read-only mode, not audited,
 // and 404 plugin_disabled while the feature is off.
 test('routes', async () => {
-  const core = (readOnly: boolean) => testCore({ features: [agentsFeature()], readOnly, settings: { 'plugins.agents.enabled': true } });
+  const core = (readOnly: boolean) => testHub({ features: [agentsFeature()], readOnly, settings: { 'plugins.agents.enabled': true } });
   const { problems, checked } = await checkGuarded(core(false), core(true), { machine: 'local' });
   expect([problems, checked]).toEqual([[], []]);
   const ro = core(true);

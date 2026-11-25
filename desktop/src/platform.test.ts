@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { APP_DOMAIN } from '../../web/src/brand';
-import { APP_ID, coreResources, reverseDomain, foldersOf, keyPlatform, quitsWithLastWindow } from './platform';
+import { APP_ID, hubResources, reverseDomain, foldersOf, keyPlatform, quitsWithLastWindow } from './platform';
 
 test('the keybindings, the last window and the app id by platform', () => {
   assert.equal(keyPlatform('darwin'), 'mac');
@@ -18,11 +18,11 @@ test('the keybindings, the last window and the app id by platform', () => {
 });
 
 test("the core's payloads are the app's resources, or scripts/build.sh's and the web UI's build in development", () => {
-  assert.deepEqual(coreResources('/App/Resources', '/repo'), {
+  assert.deepEqual(hubResources('/App/Resources', '/repo'), {
     payload: join('/App/Resources', 'payload'),
     web: join('/App/Resources', 'web'),
   });
-  assert.deepEqual(coreResources(undefined, '/repo'), { payload: join('/repo', 'dist', 'payload'), web: join('/repo', 'web', 'dist') });
+  assert.deepEqual(hubResources(undefined, '/repo'), { payload: join('/repo', 'dist', 'payload'), web: join('/repo', 'web', 'dist') });
 });
 
 test(

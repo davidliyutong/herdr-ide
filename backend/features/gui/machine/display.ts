@@ -26,7 +26,7 @@ import { closeSync, constants, openSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, open, readdir, readFile, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
 import { posix } from 'node:path';
-import { CORE_BIN, DATA_DIR_NAME } from '#shared/lib/brand.ts';
+import { HUB_BIN, DATA_DIR_NAME } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { HOSTS_DIR } from '#shared/host/hostdirs.ts';
 import { GUIDisplay, type GUIProc, type GUIStatus } from '#shared/proto/agentproto/index.ts';
@@ -206,7 +206,7 @@ export async function ownClient(pid: number): Promise<boolean> {
   } catch {
     return false;
   }
-  if (argv.length < 2 || !posix.basename(argv[0]).startsWith(CORE_BIN)) return false;
+  if (argv.length < 2 || !posix.basename(argv[0]).startsWith(HUB_BIN)) return false;
   return ['gui-keep', 'gui-wm', 'gui-probe', 'agent', 'node'].includes(argv[1]);
 }
 

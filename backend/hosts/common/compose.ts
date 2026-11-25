@@ -15,7 +15,7 @@ import { coreModules } from '#kernel/config/registry.ts';
 import { settingsRoutes } from '#kernel/config/routes.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import type { FeatureDef } from '#kernel/feature.ts';
-import { createCore, type Core } from '#kernel/hub.ts';
+import { createHub, type Hub } from '#kernel/hub.ts';
 import type { Guard } from '#kernel/http/guard.ts';
 import { serveUI } from '#kernel/http/static.ts';
 import { payloads as payloadsOf, type Files, type Payloads } from '#kernel/payloads.ts';
@@ -61,7 +61,7 @@ export interface FeatureInputs {
  * scripts/reference.ts lists the routes of and scripts/registry.ts the
  * settings of), in the order the UIs list their switches and settings
  * (kernel/config/registry.ts coreModules). */
-export function coreFeatures(o: FeatureInputs): FeatureDef[] {
+export function hubFeatures(o: FeatureInputs): FeatureDef[] {
   const { payloads } = o;
   // Program windows give new terminals their display and follow the
   // terminal cores; they type into the terminals' shells.
@@ -95,7 +95,7 @@ export function coreFeatures(o: FeatureInputs): FeatureDef[] {
  * what describes the core without running it (scripts/registry.ts,
  * scripts/reference.ts, the registry's tests). */
 export function describedFeatures(): FeatureDef[] {
-  return coreFeatures({
+  return hubFeatures({
     payloads: payloadsOf({ files: { get: async () => null }, web: null }),
     controlDir: '/nonexistent',
     verifyKey: '',
@@ -107,7 +107,7 @@ export function describedFeatures(): FeatureDef[] {
  * keybindings, the configuration, the web UI. Returns what stops the
  * settings' pushes. */
 export function hostRoutes(
-  core: Core,
+  core: Hub,
   o: { settings: Settings; keybindings: Keybindings; readOnly: boolean; sshLogin: boolean; web: Files | null },
 ): () => void {
   const stop = settingsRoutes(core.http, { settings: o.settings, keybindings: o.keybindings, pages: core.pages });
@@ -151,7 +151,7 @@ export interface ComposeOptions {
 }
 
 export interface Composed {
-  readonly core: Core;
+  readonly core: Hub;
   readonly settings: Settings;
   readonly specs: readonly Spec[];
   /** Connects the machines and runs the features' services until signal
@@ -163,7 +163,7 @@ export interface Composed {
 /** The core with its settings, keybindings and machines, not running yet:
  * a host binds what it serves on first, so that a failed launch starts no
  * agent. */
-export function composeCore(o: ComposeOptions): Composed {
+export function composeHub(o: ComposeOptions): Composed {
   const { logger, instance, nodeInstance, payloads, controlDir } = o;
   const modules = coreModules(o.features);
   let settingsFile = '';
@@ -229,7 +229,7 @@ export function composeCore(o: ComposeOptions): Composed {
     },
   });
 
-  const core = createCore({
+  const core = createHub({
     guard: o.guard,
     audit: o.audit,
     readOnly: o.readOnly,

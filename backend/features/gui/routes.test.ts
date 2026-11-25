@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { discard } from '#shared/lib/log.ts';
 import { channelPair, CloseCode, type ChannelOpen, type Message } from '#kernel/channel.ts';
-import { createCore } from '#kernel/hub.ts';
+import { createHub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { serveUI } from '#kernel/http/static.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
@@ -16,7 +16,7 @@ import {
   testMachines,
   waitFor,
   type RequestOptions,
-  type TestCore,
+  type TestHub,
 } from '#kernel/testing.ts';
 import { terminalsFeature } from '#features/terminals/hub.ts';
 import { guiFeature, type GUIOptions } from './hub.ts';
@@ -30,13 +30,13 @@ afterEach(async () => {
 
 /** A core with program windows (and terminals, wired as the host does)
  * over machines (local and m1 by default, not connected). */
-function guiCore(o: { readOnly?: boolean; machines?: Machines; gui?: GUIOptions } = {}) {
+function guiHub(o: { readOnly?: boolean; machines?: Machines; gui?: GUIOptions } = {}) {
   const audit = memoryAudit();
   const settings = testSettings();
   const gui = guiFeature({ timing: { interruptPauseMs: 1, closeGraceMs: 30 }, ...o.gui });
   const terminals = terminalsFeature({ paneEnv: gui.paneEnv, onReady: gui.terminalReady });
   const machines = o.machines ?? testMachines([localSpec(), sshSpec('m1')]);
-  const core = createCore({
+  const core = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: o.readOnly ?? false,
@@ -57,7 +57,7 @@ function guiCore(o: { readOnly?: boolean; machines?: Machines; gui?: GUIOptions 
       upgrade: r.upgrade,
     });
   };
-  const t: TestCore & { mgr: () => NonNullable<ReturnType<typeof gui.manager>>; settings: Record<string, boolean> } = {
+  const t: TestHub & { mgr: () => NonNullable<ReturnType<typeof gui.manager>>; settings: Record<string, boolean> } = {
     core,
     settings: {},
     audit,
@@ -68,7 +68,7 @@ function guiCore(o: { readOnly?: boolean; machines?: Machines; gui?: GUIOptions 
 }
 
 /** Opens a browser window's WebSocket: what it gets, and how it closed. */
-async function openWindow(t: ReturnType<typeof guiCore>, path: string) {
+async function openWindow(t: ReturnType<typeof guiHub>, path: string) {
   const { a, b } = channelPair();
   const got: Message[] = [];
   let closed: [number, string] | undefined;
@@ -91,7 +91,7 @@ describe('routes', () => {
   // (sandboxed frames, data: pages) and other sites are refused. It is
   // audited, and refused in read-only mode.
   test('close', async () => {
-    const t = guiCore();
+    const t = guiHub();
     for (const [origin, status] of [
       ['null', 403],
       ['https://evil.example', 403],
@@ -104,13 +104,13 @@ describe('routes', () => {
     expect((await t.request('POST', '/m/nope/gui/7/close')).status).toBe(404);
     const bad = await t.request('POST', '/m/m1/gui/4294967296/close');
     expect([bad.status, ((await bad.json()) as { error: string }).error]).toEqual([400, 'bad_window']);
-    const ro = guiCore({ readOnly: true });
+    const ro = guiHub({ readOnly: true });
     const res = await ro.request('POST', '/m/m1/gui/7/close', { origin: 'http://127.0.0.1:7780' });
     expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([403, 'read_only']);
   });
 
   test('states', async () => {
-    const t = guiCore();
+    const t = guiHub();
     const res = await t.request('GET', '/api/gui');
     expect([res.status, await res.text()]).toEqual([200, '[]']);
     t.mgr().display(t.machines.get('m1')!);
@@ -120,7 +120,7 @@ describe('routes', () => {
   // A program window's page is the app shell, with its policy, whatever
   // the machine.
   test('page', async () => {
-    const t = guiCore();
+    const t = guiHub();
     const res = await t.request('GET', '/m/x/gui/1', { host: 'localhost:7780' });
     expect([res.status, await res.text()]).toEqual([200, '<html></html>']);
     const csp = res.headers.get('Content-Security-Policy') ?? '';
@@ -132,14 +132,14 @@ describe('routes', () => {
   // The routes that change something are refused from other sites and in
   // read-only mode.
   test('guards', async () => {
-    const { problems, checked } = await checkGuarded(guiCore(), guiCore({ readOnly: true }), { machine: 'm1' });
+    const { problems, checked } = await checkGuarded(guiHub(), guiHub({ readOnly: true }), { machine: 'm1' });
     expect(problems).toEqual([]);
     expect(checked).toEqual(expect.arrayContaining(['POST /m/:id/gui/:win/close', 'POST /api/m/:id/gui/enable']));
   });
 
   // Each page starts from every machine's state.
   test('pages', async () => {
-    const t = guiCore();
+    const t = guiHub();
     t.mgr().display(t.machines.get('m1')!);
     const { a, b } = channelPair();
     const got: unknown[] = [];
@@ -156,7 +156,7 @@ describe('browser windows', () => {
     // Read-only mode attaches only to a display that runs.
     const disp = new FakeDisplay(readOnly ? { running: true, kind: 'xvfb' } : {});
     const machines = testMachines([sshSpec('m1')], { dial: agentDialer({ serve: disp.serve }) });
-    const t = guiCore({ readOnly, machines });
+    const t = guiHub({ readOnly, machines });
     stops.push(running(t.core));
     const agent = await disp.attached();
     await agent.event({ ev: 'window', window: { id: 7, title: 'plot', w: 640, h: 480 } });
@@ -165,7 +165,7 @@ describe('browser windows', () => {
   }
 
   test('a window that does not exist', async () => {
-    const t = guiCore();
+    const t = guiHub();
     const w = await openWindow(t, '/m/m1/gui/7/ws');
     expect(w.res.status).toBe(200);
     expect(w.events()).toEqual([{ ev: 'gone', id: 7 }]);
@@ -247,7 +247,7 @@ describe('enable', () => {
     let shells: Shells | undefined;
     const disp = new FakeDisplay();
     const machines = testMachines([sshSpec('m1')], { dial: agentDialer({ serve: disp.serve }) });
-    const t = guiCore({ machines, gui: { shells: () => shells } });
+    const t = guiHub({ machines, gui: { shells: () => shells } });
     const post = async (body?: string) => {
       const res = await t.request('POST', '/api/m/m1/gui/enable', { origin: 'http://127.0.0.1:7780', body });
       return [res.status, ((await res.json()) as { error: string }).error];
@@ -269,7 +269,7 @@ describe('enable', () => {
     const machines = testMachines([sshSpec('m1')], { dial: agentDialer({ serve: disp.serve }) });
     const sent: string[] = [];
     const shells: Shells = { ...idle(11), send: async (_id, text) => void sent.push(text) };
-    const t = guiCore({ machines, gui: { shells: () => shells } });
+    const t = guiHub({ machines, gui: { shells: () => shells } });
     stops.push(running(t.core));
     await disp.attached();
     await waitFor('the display', () => t.mgr().states()[0]?.phase === 'ready');

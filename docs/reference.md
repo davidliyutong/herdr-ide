@@ -556,7 +556,7 @@ only through `reveal` and `export`, each recorded in the access log first.
 | Variable | Where | Description |
 | --- | --- | --- |
 | `VELDR_BRIDGE_SOCKET` | set by the agent for code-server | Socket of the VS Code bridge extension. |
-| `VELDR_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets `DEV_LISTEN`'s). |
+| `VELDR_HUB` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets `DEV_LISTEN`'s). |
 | `VELDR_DESKTOP_DEV` | Electron | Isolated development instance: `1` for `dev`, or a name (lowercase letters, digits, dashes, ≤ 32, not `desktop`). Local-only, own Electron profile and lock. Always on for unpackaged Electron. |
 | `VELDR_DESKTOP_NO_OPEN` | Electron, development instances | Full Disk Access buttons print `no-open: …` to stderr instead of opening anything. |
 | `VELDR_DESKTOP_PAYLOAD` | Electron, development instances | A directory laid out as `dist/payload` (machine builds, herdr-core, encoders, the extension) for the core instead of the repository's (the desktop smoke test's). |
@@ -591,7 +591,7 @@ Build scripts and tests:
 | `CSC_NAME` | `scripts/desktop.sh` on macOS | Developer ID identity in the keychain, instead of `CSC_LINK`. |
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | `scripts/desktop.sh` on macOS | Notarize with this Apple ID. |
 | `ELECTRON_SKIP_BINARY_DOWNLOAD` | `make deps` | `1` skips Electron's binary (enough for checks and tests). |
-| `DEV_LISTEN` | `make dev-core`, `make dev-web` | Development core address (default `127.0.0.1:7790`). |
+| `DEV_LISTEN` | `make dev-hub`, `make dev-web` | Development core address (default `127.0.0.1:7790`). |
 | `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
 | `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the core and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
 | `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |

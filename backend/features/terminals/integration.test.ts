@@ -16,7 +16,7 @@ import { discard } from '#shared/lib/log.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { dialNode, localPlatform } from '#kernel/machines/transport/local.ts';
 import { bareName, machineKey, type MachineBuild } from '#kernel/machines/transport/builds.ts';
-import { localSpec, running, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
+import { localSpec, running, testHub, testMachines, waitFor, type TestHub } from '#kernel/testing.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
 import { terminalsFeature, type TerminalsFeature } from './hub.ts';
 import { FrameKind } from './messages.ts';
@@ -30,7 +30,7 @@ describe.skipIf(!HC)('a real herdr-core', () => {
   let home = '';
   let agentBin = '';
   const saved: Record<string, string | undefined> = {};
-  let tc: TestCore;
+  let tc: TestHub;
   let feature: TerminalsFeature;
   let machines: Machines;
   let stop: () => Promise<void>;
@@ -83,7 +83,7 @@ describe.skipIf(!HC)('a real herdr-core', () => {
       }),
     });
     feature = terminalsFeature({ hc: async () => hc });
-    tc = testCore({ features: [feature], machines, settings: { 'terminal.sshEnv': true, 'plugins.agents.enabled': true } });
+    tc = testHub({ features: [feature], machines, settings: { 'terminal.sshEnv': true, 'plugins.agents.enabled': true } });
     stop = running(tc.core);
     await waitFor('the local machine', () => machines.get(M)!.ready, 30_000);
   }, 180_000);

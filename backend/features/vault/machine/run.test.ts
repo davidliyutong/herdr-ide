@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mask, maskOutput, runWithEnv, withCore } from './run.ts';
+import { mask, maskOutput, runWithEnv, withHub } from './run.ts';
 import { survivors } from './testdata/procs.ts';
 
 describe('run_with_env', () => {
@@ -43,16 +43,16 @@ describe('run_with_env', () => {
     expect(ran.out).toBe('exit status: 0\none\ntwo\nthree\n');
   });
 
-  // TestRunLimitsFromTheCore (the runner's side): the core's timeouts, in
+  // TestRunLimitsFromTheHub (the runner's side): the core's timeouts, in
   // seconds, become the runner's; without them the runner's own hold.
   test("the core's limits replace the runner's", () => {
-    expect(withCore({}, { timeout: 1, max_timeout: 2, max_output: 50 })).toEqual({
+    expect(withHub({}, { timeout: 1, max_timeout: 2, max_output: 50 })).toEqual({
       maxOutput: 50,
       defaultTimeoutMs: 1000,
       maxTimeoutMs: 2000,
     });
-    expect(withCore({ maxOutput: 7 }, undefined)).toEqual({ maxOutput: 7 });
-    expect(withCore({ maxOutput: 7 }, { timeout: 0, max_timeout: 0, max_output: 0 })).toEqual({ maxOutput: 7 });
+    expect(withHub({ maxOutput: 7 }, undefined)).toEqual({ maxOutput: 7 });
+    expect(withHub({ maxOutput: 7 }, { timeout: 0, max_timeout: 0, max_output: 0 })).toEqual({ maxOutput: 7 });
   });
 
   // TestMaskAtTheCut: masking shrinks the text, so the beginning of a

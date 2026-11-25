@@ -14,7 +14,7 @@ import {
   attached,
   clientMessage,
   commandLine,
-  CoreCode,
+  HubCode,
   detached,
   eventPrefix,
   MAX_CLIENT_MESSAGE,
@@ -33,11 +33,11 @@ describe('wire', () => {
     expect(eventPrefix('s1') + '{"seq":3,"t":"turn","state":"start"}}').toBe(
       '{"t":"event","sub":"s1","ev":{"seq":3,"t":"turn","state":"start"}}',
     );
-    expect(detached('s1', { code: CoreCode.Offline, message: 'm' })).toBe(
+    expect(detached('s1', { code: HubCode.Offline, message: 'm' })).toBe(
       '{"t":"detached","sub":"s1","error":{"code":"offline","message":"m"}}',
     );
     expect(ack('k1')).toBe('{"t":"ack","id":"k1"}');
-    expect(ack('k1', { code: CoreCode.ReadOnly, message: 'm' })).toBe('{"t":"ack","id":"k1","error":{"code":"read_only","message":"m"}}');
+    expect(ack('k1', { code: HubCode.ReadOnly, message: 'm' })).toBe('{"t":"ack","id":"k1","error":{"code":"read_only","message":"m"}}');
     const st = stateOf({
       id: 'c1',
       kind: 'claude',
@@ -154,15 +154,15 @@ describe('wire', () => {
       chat.Code.SdkUnavailable,
     ]);
     expect(list('MACHINE_CODES')).toEqual([NOT_RUNNING, 'upgrading', 'no_terminal_core', 'start_failed', 'transport']);
-    expect(list('CORE_CODES')).toEqual([
-      CoreCode.ReadOnly,
-      CoreCode.Offline,
-      CoreCode.UnknownSub,
-      CoreCode.TooMany,
-      CoreCode.NotAttached,
-      CoreCode.Lost,
-      CoreCode.PluginDisabled,
-      CoreCode.Timeout,
+    expect(list('HUB_CODES')).toEqual([
+      HubCode.ReadOnly,
+      HubCode.Offline,
+      HubCode.UnknownSub,
+      HubCode.TooMany,
+      HubCode.NotAttached,
+      HubCode.Lost,
+      HubCode.PluginDisabled,
+      HubCode.Timeout,
     ]);
     for (const want of [
       'export const MAX_STDERR = 2 << 10;',

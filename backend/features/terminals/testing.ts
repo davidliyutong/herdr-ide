@@ -14,7 +14,7 @@ import { pairDuplex } from '#shared/proto/yamux.ts';
 import { channelPair, type Channel } from '#kernel/channel.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
-import { agentDialer, running, sshSpec, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
+import { agentDialer, running, sshSpec, testHub, testMachines, waitFor, type TestHub } from '#kernel/testing.ts';
 import type { Backend } from './backend.ts';
 import { terminalsFeature, type TerminalsFeature, type TerminalsOptions } from './hub.ts';
 import type { Timing } from './timing.ts';
@@ -341,7 +341,7 @@ export class TestClient {
   ended = false;
   private ch!: Channel;
 
-  static async open(tc: TestCore): Promise<TestClient> {
+  static async open(tc: TestHub): Promise<TestClient> {
     const c = new TestClient();
     const { a, b } = channelPair();
     const res = await tc.request('GET', '/api/v1/term', {
@@ -468,7 +468,7 @@ export interface RigOptions {
 }
 
 export interface Rig {
-  tc: TestCore;
+  tc: TestHub;
   feature: TerminalsFeature;
   sim: AgentSim;
   machines: Machines;
@@ -486,7 +486,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   const dial = agentDialer({ ssh: o.ssh, serve: (h, conn) => sim.serve(h, conn) });
   const machines = testMachines([sshSpec('x')], { dial });
   const feature = terminalsFeature({ ...o.options, timing: { ...FAST, ...o.options?.timing } });
-  const tc = testCore({
+  const tc = testHub({
     features: [feature],
     machines,
     readOnly: o.readOnly,

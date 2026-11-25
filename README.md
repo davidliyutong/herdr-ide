@@ -248,7 +248,7 @@ SHA-256 digests. Details in
 ## Development
 
 ```bash
-make dev-core      # core on :7790 with --instance dev (terminal core session veldr-dev-<host id>)
+make dev-hub      # core on :7790 with --instance dev (terminal core session veldr-dev-<host id>)
 make dev-web       # UI with hot reload on :5173
 make check test    # before sending a PR
 ```

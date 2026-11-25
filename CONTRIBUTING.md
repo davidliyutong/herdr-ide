@@ -25,11 +25,11 @@ daily veldr (the dev core's terminal core is the session
 `veldr-dev-<host id>`, `<host id>` a hash of the machine id):
 
 ```bash
-make dev-core        # core on 127.0.0.1:7790: --instance dev --local-only
+make dev-hub        # core on 127.0.0.1:7790: --instance dev --local-only
 make dev-web         # Vite on http://localhost:5173, proxied to the dev core (DEV_LISTEN)
 ```
 
-`make dev-core` fetches this host's herdr-core once into
+`make dev-hub` fetches this host's herdr-core once into
 `dist/machines-hc/`, builds this host's executable into `dist/dev/` and
 stages it in `dist/payload/` (`machine/veldr-<os>-<arch>.gz` with the
 build's record, as the desktop app carries it), then runs the core from

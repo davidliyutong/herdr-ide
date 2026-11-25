@@ -1,5 +1,5 @@
 // The app's origin in the app's session: each request to it goes to the
-// core (hub.ts CoreHost.request), which answers it in process; requests
+// core (hub.ts HubHost.request), which answers it in process; requests
 // to other addresses (VS Code's extension gallery, say) go to the network
 // as they would without the handler.
 //
@@ -15,7 +15,7 @@
 import { APP_HOST } from './origin';
 
 /** Whether url is of the app's origin. */
-export function forCore(url: string): boolean {
+export function forHub(url: string): boolean {
   try {
     const u = new URL(url);
     return u.protocol === 'https:' && u.host === APP_HOST;
@@ -37,6 +37,6 @@ export type InterceptedRequest = Request & { initiatorOrigin?: string };
  * of the page that made the request. */
 export function serveApp(ses: HandlingSession, core: { request(req: Request, origin: string | undefined): Promise<Response> }): void {
   ses.protocol.handle('https', (req: InterceptedRequest) =>
-    forCore(req.url) ? core.request(req, req.initiatorOrigin) : ses.fetch(req, { bypassCustomProtocolHandlers: true }),
+    forHub(req.url) ? core.request(req, req.initiatorOrigin) : ses.fetch(req, { bypassCustomProtocolHandlers: true }),
   );
 }

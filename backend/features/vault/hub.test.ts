@@ -8,12 +8,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isoCBOR } from '@simplewebauthn/server/helpers';
-import { agentDialer, checkGuarded, running, sleep, sshSpec, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
+import { agentDialer, checkGuarded, running, sleep, sshSpec, testHub, testMachines, waitFor, type TestHub } from '#kernel/testing.ts';
 import type { Spec } from '#kernel/machines/spec.ts';
 import { openShared } from '#shared/store/index.ts';
 import { readLine, type VaultResponse } from '#shared/proto/agentproto/index.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
-import { coreDBBeside } from './accesslog.ts';
+import { hubDBBeside } from './accesslog.ts';
 import { relayKey } from './desktop.ts';
 import { openExport, sealExport } from './exportfile.ts';
 import { vaultFeature } from './hub.ts';
@@ -46,7 +46,7 @@ afterEach(async () => {
 });
 
 interface V {
-  t: TestCore;
+  t: TestHub;
   dir: string;
   /** The feature's options: a test changes autoLockMs as a user would the
    * setting it stands in for. */
@@ -72,7 +72,7 @@ async function vault(o: VaultOptions = {}, setup = true, specs: Spec[] = [sshSpe
   const dial = agentDialer();
   const machines = testMachines(specs, { dial });
   const opts: VaultOptions = { path: join(dir, 'vault.json'), store: { kdf: FAST }, approvalTimeoutMs: 2000, ...o };
-  const t = testCore({
+  const t = testHub({
     features: [vaultFeature(opts)],
     machines,
     settings: { 'plugins.vault.enabled': true },
@@ -317,7 +317,7 @@ describe('the gate', () => {
 
   test('routes that change state are guarded', async () => {
     const rw = await vault();
-    const ro = testCore({
+    const ro = testHub({
       features: [vaultFeature({ path: join(rw.dir, 'ro.json') })],
       readOnly: true,
       settings: { 'plugins.vault.enabled': true },
@@ -387,7 +387,7 @@ describe("machines' requests", () => {
     expect((await v.ask({ tool: 'get', names: ['GH'] })).ok).toBe(true);
     // A newer core migrated the log's tables: this one reads them and does
     // not write.
-    const db = openShared(coreDBBeside(join(v.dir, 'vault.json')));
+    const db = openShared(hubDBBeside(join(v.dir, 'vault.json')));
     db.run('UPDATE store_features SET version = 9 WHERE feature = ?', 'vault');
     db.close();
     const t = await vault({ path: join(v.dir, 'vault.json') }, false);
@@ -406,7 +406,7 @@ describe("machines' requests", () => {
     const v = await vault();
     await v.call('PUT', '/vars/GH', { value: 's3cret', machines: ['m1'] });
     expect((await v.ask({ tool: 'get', names: ['GH'] })).ok).toBe(true);
-    const db = openShared(coreDBBeside(join(v.dir, 'vault.json')));
+    const db = openShared(hubDBBeside(join(v.dir, 'vault.json')));
     db.run(`CREATE TRIGGER disk_fails AFTER INSERT ON vault_access BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`);
     db.close();
     const got = await v.ask({ tool: 'get', names: ['GH'] });

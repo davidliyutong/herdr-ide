@@ -31,7 +31,7 @@ export type FeatureSettings = Switchable & { settings?: Module };
 /** The settings modules of the core: the user interface's, the switches
  * of the features that can be turned off and the features' own modules,
  * in the order the host composes the features (hosts/common/compose.ts
- * coreFeatures), which is the order the UIs list them in. */
+ * hubFeatures), which is the order the UIs list them in. */
 export function coreModules(features: readonly FeatureSettings[]): Module[] {
   return [UI, toggles(features), ...features.flatMap((f) => (f.settings ? [f.settings] : []))];
 }

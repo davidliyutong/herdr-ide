@@ -30,7 +30,7 @@ export function keyPlatform(p: Platform): 'mac' | 'windows' | 'linux' {
  * scripts/build.sh stages it: machine builds, herdr-core, the video
  * encoders, the VS Code extension; web/ the web UI), or in the repository
  * for unpackaged development (dist/payload, web/dist). */
-export function coreResources(resources: string | undefined, repo: string): { payload: string; web: string } {
+export function hubResources(resources: string | undefined, repo: string): { payload: string; web: string } {
   if (resources) return { payload: join(resources, 'payload'), web: join(resources, 'web') };
   return { payload: join(repo, 'dist', 'payload'), web: join(repo, 'web', 'dist') };
 }

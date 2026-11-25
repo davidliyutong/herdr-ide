@@ -10,7 +10,7 @@ import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync } f
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { NodeOp, VERSION, newer, readLine, writeLine, type NodeHello, type NodeInfo, type Reply } from '#shared/proto/agentproto/index.ts';
-import { AGENT_DIR, CORE_BIN } from '#shared/lib/brand.ts';
+import { AGENT_DIR, HUB_BIN } from '#shared/lib/brand.ts';
 import { dirsFor, makeDirs } from '#shared/host/hostdirs.ts';
 import { withoutForeignRuntimeVars } from '#shared/lib/bunenv.ts';
 import type { Logger } from '#shared/lib/log.ts';
@@ -44,12 +44,12 @@ const nodeSocket = (run: string) => join(run, 'node.sock');
 export async function installBuild(b: MachineBuild, home: string, signal?: AbortSignal): Promise<{ exe: string; build: string }> {
   const d = await b.digests(signal ? { signal } : {});
   const dir = join(home, AGENT_DIR, tsVersion(d.exe));
-  const exe = join(dir, CORE_BIN);
+  const exe = join(dir, HUB_BIN);
   if (!existsSync(exe)) {
     const p = await b.load(d, signal);
     const script = installScript({
       dir: '$D',
-      name: CORE_BIN,
+      name: HUB_BIN,
       exe: d.exe,
       ...(p.kind === 'archive' && d.archive ? { archive: { digest: d.archive, member: archiveMember(b.key) } } : {}),
     });

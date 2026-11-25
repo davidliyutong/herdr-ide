@@ -4,14 +4,14 @@
 // runs with --offline --seed-dir DIR (docs/features/09).
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { CORE_BIN } from '#shared/lib/brand.ts';
+import { HUB_BIN } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { ALL_ASSETS, Artifacts, DEFAULT_EXTENSION_URL, DEFAULT_TARBALL_URL, DEFAULT_VERSION } from './artifacts.ts';
 
-const USAGE = `usage: ${CORE_BIN} fetch-assets [flags] DIR
+const USAGE = `usage: ${HUB_BIN} fetch-assets [flags] DIR
 
 Downloads and verifies everything machines need, for carrying into an
-air-gapped network. Then run: ${CORE_BIN} --offline --seed-dir DIR
+air-gapped network. Then run: ${HUB_BIN} --offline --seed-dir DIR
 
   --platforms LIST             code-server builds (default ${ALL_ASSETS.join(',')})
   --code-server-version V      code-server release (default ${DEFAULT_VERSION})

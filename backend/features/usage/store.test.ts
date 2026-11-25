@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { discard } from '#shared/lib/log.ts';
 import { openShared } from '#shared/store/index.ts';
 import { History, type Kept } from './history.ts';
-import { coreDBFile, keptJSON, Store } from './store.ts';
+import { hubDBFile, keptJSON, Store } from './store.ts';
 import { acc, removeTempDirs, T0, tempDir, testUsage, win } from './testing.ts';
 
 afterAll(removeTempDirs);
@@ -40,7 +40,7 @@ const seedAccount = (): Kept => ({
   notBefore: 0,
 });
 
-const dbOf = (dir: string) => coreDBFile(join(dir, 'settings-dev.json'));
+const dbOf = (dir: string) => hubDBFile(join(dir, 'settings-dev.json'));
 
 /** The rows of the history's tables in dir's core database. */
 function rowsIn(dir: string): [number, number, number] {
@@ -59,8 +59,8 @@ test('the rows are Go’s', () => {
     '{"provider":"claude","id":"acc-1","status":"ok","windows":[{"kind":"weekly","usedPct":15,"resetsAt":1800259200,"windowSec":604800,"id":""}],' +
       '"key":"claude:acc-1","machines":["local"],"fetchedAt":1800000000,"seenAt":1800000000}',
   );
-  expect(coreDBFile('')).toBe('');
-  expect(coreDBFile('/x/settings-dev.json')).toMatch(/^\/x\/core-dev-.+\.db$/);
+  expect(hubDBFile('')).toBe('');
+  expect(hubDBFile('/x/settings-dev.json')).toMatch(/^\/x\/core-dev-.+\.db$/);
 });
 
 // A save before the history was read back (the read failed) does not

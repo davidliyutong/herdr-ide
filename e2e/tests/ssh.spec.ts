@@ -161,7 +161,7 @@ test('a chat on an SSH machine shows it offline and goes on, and nothing stays w
     what: 'the terminal core, the chat host and the agent to end on the machine',
     timeout: 45_000,
   });
-  await instance.stopCore();
+  await instance.stopHub();
   await waitFor(async () => (await pidOf(sshd, /node dial/)).length === 0, { what: 'node dial to end on the machine', timeout: 30_000 });
   await waitFor(async () => (await pidOf(sshd, mine)).length === 0, { what: 'the node to end on the machine', timeout: 45_000 });
 });

@@ -39,7 +39,7 @@ test('the desktop app runs its core in process, without a listener', async ({ de
   // Nothing of the core listens on TCP; nor any of the app's processes
   // but the main one, where only the debugging ports Playwright drives it
   // through are (loopback).
-  const core = await desktop.corePid();
+  const core = await desktop.hubPid();
   expect(tcpListeners(core)).toEqual([]);
   for (const p of await desktop.processes()) {
     const lines = tcpListeners(p.pid);
@@ -126,7 +126,7 @@ test('the desktop app runs its core in process, without a listener', async ({ de
 
   // The core crashes: it comes back, the window stays and reconnects.
   process.kill(core, 'SIGKILL');
-  const again = await desktop.corePid(core);
+  const again = await desktop.hubPid(core);
   expect(tcpListeners(again)).toEqual([]);
   await waitFor(async () => (await desktop.localStatus()) === 'ready', { what: 'the local machine again', timeout: 60_000 });
   // The page's terminal channel came back: the same terminal runs another.

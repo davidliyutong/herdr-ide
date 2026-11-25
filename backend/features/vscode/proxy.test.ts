@@ -6,7 +6,7 @@ import { SLUG } from '#shared/lib/brand.ts';
 import { sleep, waitFor } from '#kernel/testing.ts';
 import { DESKTOP_COOKIE, keepSetCookie, stripDesktopCookie } from './cookies.ts';
 import { belowCode, portProxyPath, requestHeaders, responseHeaders } from './proxy.ts';
-import { vscodeCore, type VSCodeCore } from './testdata/hub.ts';
+import { vscodeHub, type VSCodeHub } from './testdata/hub.ts';
 import { Activity } from './work.ts';
 
 const PROXY_SECRET = 'X-veldr-Proxy-Secret';
@@ -128,7 +128,7 @@ test('idle tracking', () => {
 });
 
 /** Waits until code-server is ready on the core's local machine. */
-async function ready(vc: VSCodeCore, machine = 'local'): Promise<void> {
+async function ready(vc: VSCodeHub, machine = 'local'): Promise<void> {
   const res = await vc.request('POST', `/api/m/${machine}/code/start`);
   expect(res.status).toBe(202);
   for (let i = 0; i < 400; i++) {
@@ -141,9 +141,9 @@ async function ready(vc: VSCodeCore, machine = 'local'): Promise<void> {
 }
 
 describe('through a core', () => {
-  let vc: VSCodeCore;
+  let vc: VSCodeHub;
   beforeAll(async () => {
-    vc = await vscodeCore();
+    vc = await vscodeHub();
   });
   afterAll(() => vc.stop());
   afterEach(() => void (vc.cs.requests.length = 0));

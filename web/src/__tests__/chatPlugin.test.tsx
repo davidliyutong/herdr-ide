@@ -27,7 +27,7 @@ import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
 import { FakeCore, settle } from './fakeTerms';
-import { FakeChatCore } from './chatFake';
+import { FakeChatHub } from './chatFake';
 
 const A = 'c00000000000000a1';
 const B = 'c00000000000000b2';
@@ -60,7 +60,7 @@ type Call = { url: string; method: string; body?: unknown };
 let calls: Call[];
 let answers: Record<string, () => Response>;
 let core: FakeCore;
-let chats: FakeChatCore;
+let chats: FakeChatHub;
 
 function routeOf(url: string, method: string) {
   const u = new URL(url, 'http://x');
@@ -84,7 +84,7 @@ beforeEach(async () => {
   useSettings.setState({ values: {} });
   resetChats();
   resetSeen();
-  chats = new FakeChatCore();
+  chats = new FakeChatHub();
   chats.auto = true;
   chats.install();
   core = new FakeCore();

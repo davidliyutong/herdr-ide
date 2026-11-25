@@ -7,10 +7,10 @@ import { discard } from '#shared/lib/log.ts';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { coreModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { createCore } from '#kernel/hub.ts';
+import { createHub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
-import { agentDialer, checkGuarded, memoryAudit, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
+import { agentDialer, checkGuarded, memoryAudit, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { MAX_SESSION_READS, sessionProvider, usageFeature } from './hub.ts';
 
 const SESSION = 'e6cdc860-1055-488f-9ed2-8b8019061bb9';
@@ -23,7 +23,7 @@ afterEach(async () => {
 
 test('guards', async () => {
   const core = (readOnly: boolean) =>
-    testCore({
+    testHub({
       features: [usageFeature()],
       machines: testMachines([sshSpec('x', 'x', 'x', false)]),
       readOnly,
@@ -51,7 +51,7 @@ type Answer = (action: string, params: Record<string, unknown>) => Reply | Promi
 
 /** A core with the feature whose machines box and gpu answer with answer
  * (far is off); every call is recorded. */
-async function withCore(answer: Answer, readOnly = false) {
+async function withHub(answer: Answer, readOnly = false) {
   const calls: Array<[string, Record<string, unknown>]> = [];
   const serve = async (h: Header, conn: AgentStream) => {
     try {
@@ -67,7 +67,7 @@ async function withCore(answer: Answer, readOnly = false) {
   const machines = testMachines([sshSpec('box'), sshSpec('gpu'), sshSpec('far', 'far', 'far', false)], { dial: agentDialer({ serve }) });
   const st = new Settings('', { modules: coreModules([usageFeature()]) });
   const audit = memoryAudit();
-  const core = createCore({
+  const core = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly,
@@ -116,7 +116,7 @@ const answers: Answer = (action) => {
 // The scheduler polls the machines once they connect; the snapshot and the
 // spend answer 304 to their ETags.
 test('snapshot and spend', async () => {
-  const { request, of } = await withCore(answers);
+  const { request, of } = await withHub(answers);
   await waitFor('a poll', () => of('limits').length >= 2);
   // The second machine is told to skip the account the first read.
   expect(of('limits')[1]).toMatchObject({ skip: ['claude:acc-1'] });
@@ -140,7 +140,7 @@ test('snapshot and spend', async () => {
 });
 
 test('refresh and the DeepSeek key', async () => {
-  const { request, of, audit } = await withCore(answers);
+  const { request, of, audit } = await withHub(answers);
   let res = await request('POST', '/api/p/usage/refresh');
   const r = (await res.json()) as { queued: boolean; at: number };
   expect([res.status, r.queued, typeof r.at]).toEqual([202, true, 'number']);
@@ -154,12 +154,12 @@ test('refresh and the DeepSeek key', async () => {
   expect(audit.records().map((a) => a.event)).toEqual(['usage.refresh', 'usage.deepseek_key', 'usage.deepseek_key']);
 });
 
-const session = (request: Awaited<ReturnType<typeof withCore>>['request'], kind: string, id: string, m = 'box') =>
+const session = (request: Awaited<ReturnType<typeof withHub>>['request'], kind: string, id: string, m = 'box') =>
   request('GET', `/api/m/${m}/p/usage/session?${new URLSearchParams({ kind, session: id })}`);
 
 test('a session’s numbers', async () => {
   const marker = 'MARKER-a71d';
-  const { request, of, st } = await withCore((action, p) =>
+  const { request, of, st } = await withHub((action, p) =>
     action === 'session'
       ? {
           ok: true,
@@ -200,7 +200,7 @@ test('a session’s numbers', async () => {
 
 // Only a kind whose sessions are priced and a session id reach the machine.
 test('a session’s params', async () => {
-  const { request, of } = await withCore(answers, true);
+  const { request, of } = await withHub(answers, true);
   for (const [kind, id] of [
     ['', SESSION],
     ['nope', SESSION],
@@ -228,7 +228,7 @@ test('a session’s params', async () => {
 });
 
 test('a session of a provider turned off', async () => {
-  const { request, of, st } = await withCore(answers);
+  const { request, of, st } = await withHub(answers);
   st.set('usage.providers.claude', '', false);
   const res = await session(request, 'claude', SESSION);
   expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([404, 'provider_off']);
@@ -238,7 +238,7 @@ test('a session of a provider turned off', async () => {
 
 test('a session’s failures', async () => {
   let fail: Reply = { ok: false };
-  const { request } = await withCore((action, p) => (action === 'session' ? fail : answers(action, p)));
+  const { request } = await withHub((action, p) => (action === 'session' ? fail : answers(action, p)));
   for (const [code, status] of [
     ['not_found', 404],
     ['too_large', 400],
@@ -258,7 +258,7 @@ test('a session’s failures', async () => {
 test('a machine busy reading sessions', async () => {
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
-  const { request, of } = await withCore(async (action, p) => {
+  const { request, of } = await withHub(async (action, p) => {
     if (action !== 'session') return answers(action, p);
     if (of('session').length <= MAX_SESSION_READS) await gate;
     return usageOf();

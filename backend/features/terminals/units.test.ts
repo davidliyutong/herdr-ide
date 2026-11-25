@@ -36,11 +36,11 @@ test('sshEnv', () => {
 
 test('the local machine gets no ssh session', async () => {
   const { terminalsFeature } = await import('./hub.ts');
-  const { testCore, testMachines, localSpec, agentDialer, running, waitFor } = await import('#kernel/testing.ts');
+  const { testHub, testMachines, localSpec, agentDialer, running, waitFor } = await import('#kernel/testing.ts');
   const { AgentSim } = await import('./testing.ts');
   const sim = new AgentSim();
   const machines = testMachines([localSpec()], { dial: agentDialer({ ssh: '10.0.0.2 1 10.0.0.9 22', serve: (h, c) => sim.serve(h, c) }) });
-  const tc = testCore({ features: [terminalsFeature()], machines, settings: { 'terminal.sshEnv': true } });
+  const tc = testHub({ features: [terminalsFeature()], machines, settings: { 'terminal.sshEnv': true } });
   const stop = running(tc.core);
   try {
     await waitFor('ready', () => machines.get('local')!.ready);

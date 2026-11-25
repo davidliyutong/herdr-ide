@@ -22,7 +22,7 @@ import {
 } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { posix } from 'node:path';
-import { CORE_BIN } from '#shared/lib/brand.ts';
+import { HUB_BIN } from '#shared/lib/brand.ts';
 import { Display, FIRST_DISPLAY, VERSION_RETENTION_MS, parseXauth, rootOnly } from './display.ts';
 import { gpuNode, nvidiaGPUs, type GPUPaths } from './gpu.ts';
 import { HelperFile, JOB_LEN, STAGING_RETENTION_MS, decode, encodeJobs, helperRoot, Out, pruneHelpers } from './helper.ts';
@@ -291,7 +291,7 @@ describe('the GUI helper', () => {
     const base = tmp();
     const f = new HelperFile(base, async () => ({ bytes, digest }));
     const p = await f.path();
-    expect(p).toBe(posix.join(helperRoot(base), digest.slice(0, 16), `${CORE_BIN}-gui`));
+    expect(p).toBe(posix.join(helperRoot(base), digest.slice(0, 16), `${HUB_BIN}-gui`));
     expect(statSync(p).mode & 0o777).toBe(0o700);
     expect(statSync(helperRoot(base)).mode & 0o777).toBe(0o700);
     expect(readFileSync(p)).toEqual(bytes);

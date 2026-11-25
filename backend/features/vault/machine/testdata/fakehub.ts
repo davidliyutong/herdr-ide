@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { Reader, writeLine } from '#shared/lib/streamio.ts';
 import type { VaultRequest, VaultResponse } from '#shared/proto/agentproto/index.ts';
 
-export interface FakeCore {
+export interface FakeHub {
   path: string;
   seen: VaultRequest[];
   /** Connections that left before an answer, which the core takes as a
@@ -17,10 +17,10 @@ export interface FakeCore {
   close(): void;
 }
 
-export async function fakeCore(answer: (req: VaultRequest) => VaultResponse | null): Promise<FakeCore> {
+export async function fakeHub(answer: (req: VaultRequest) => VaultResponse | null): Promise<FakeHub> {
   const dir = mkdtempSync(join(tmpdir(), 'vc-'));
   const path = join(dir, 'vault.sock');
-  const core: FakeCore = { path, seen: [], left: 0, close: () => {} };
+  const core: FakeHub = { path, seen: [], left: 0, close: () => {} };
   const server: Server = createServer((c: Socket) => {
     c.on('error', () => {});
     void (async () => {

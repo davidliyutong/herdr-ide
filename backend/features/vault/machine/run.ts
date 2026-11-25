@@ -40,7 +40,7 @@ export interface RunLimits {
 
 /** limits bounded as the core says (the vault's settings, in seconds and
  * bytes); what the core leaves out (an older core, or none) keeps them. */
-export function withCore(limits: RunLimits, run: VaultRun | undefined): RunLimits {
+export function withHub(limits: RunLimits, run: VaultRun | undefined): RunLimits {
   if (!run) return limits;
   const out = { ...limits };
   if (run.timeout > 0) out.defaultTimeoutMs = run.timeout * 1000;

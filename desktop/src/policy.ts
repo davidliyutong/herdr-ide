@@ -88,7 +88,7 @@ export const hostResolver: ConfigureHostResolverOptions = { enableBuiltInResolve
  * is taken for another page by mistake. A guest's session does not
  * intercept the app's origin, so such an address never reaches the core:
  * a page there would be another program's passing for the app. */
-function leadsToCore(url: string, origin: string): boolean {
+function leadsToHub(url: string, origin: string): boolean {
   try {
     return new URL(url).hostname.toLowerCase() === new URL(origin).hostname.toLowerCase();
   } catch {
@@ -100,7 +100,7 @@ function leadsToCore(url: string, origin: string): boolean {
  * and never the app's own host (origin's), which is no page for a pane: a
  * page shown in one must not put the UI there or open it as a tab. */
 export function guestMayNavigate(url: string, origin: string): boolean {
-  return isExternal(url) && !leadsToCore(url, origin);
+  return isExternal(url) && !leadsToHub(url, origin);
 }
 
 /** Decides a webview's attach (will-attach-webview): false cancels it. An

@@ -34,7 +34,7 @@ and the features' own (program windows', VS Code's, browser, files, git,
 monitor, usage, vault, chat, history; [27](27-plugins.md)). A feature
 brings its module in its definition (`settings`); the switches and the
 modules follow the order in which the host composes the features
-(`coreFeatures` in `backend/hosts/bun/serve.ts`), which is the order the
+(`hubFeatures` in `backend/hosts/bun/serve.ts`), which is the order the
 UIs list them in.
 
 - A module (`defineModule`) brings sections and definitions. A section can be advanced (listed last, under

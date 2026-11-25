@@ -4,7 +4,7 @@
 // name of its link in a data directory's bin, #machine/vault.ts). The
 // executable is the machine build itself, on every platform: its `node`
 // runs here.
-import { CORE_BIN } from '#shared/lib/brand.ts';
+import { HUB_BIN } from '#shared/lib/brand.ts';
 import { stderrLogger } from '#shared/lib/log.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { fetchAssets } from '#features/vscode/fetchassets.ts';
@@ -15,7 +15,7 @@ import { dropForeignRuntimeVars } from '#machine/self.ts';
 import { isMcpLink } from '#machine/vault.ts';
 import { serve } from './serve.ts';
 
-const USAGE = `usage: ${CORE_BIN} [serve] [flags] | fetch-assets [flags] DIR | node serve|dial|stop [flags] | mcp [flags] | version`;
+const USAGE = `usage: ${HUB_BIN} [serve] [flags] | fetch-assets [flags] DIR | node serve|dial|stop [flags] | mcp [flags] | version`;
 
 async function main(argv: string[]): Promise<void> {
   // Nothing this process starts gets them (machine/self.ts).
@@ -30,14 +30,14 @@ async function main(argv: string[]): Promise<void> {
     case 'serve':
       return serve(argv);
     case 'version':
-      console.log(CORE_BIN, VERSION);
+      console.log(HUB_BIN, VERSION);
       return;
     case 'mcp':
       process.exit(await mcpCommand(process.argv0, argv));
     case 'chat-host':
       process.exit(await chatHostCommand(argv));
     case 'fetch-assets':
-      process.exit(await fetchAssets(argv, { logger: stderrLogger(`${CORE_BIN}: `) }));
+      process.exit(await fetchAssets(argv, { logger: stderrLogger(`${HUB_BIN}: `) }));
     case 'node':
       process.exit(await nodeCommand(argv));
   }
@@ -46,6 +46,6 @@ async function main(argv: string[]): Promise<void> {
 }
 
 void main(process.argv.slice(2)).catch((e) => {
-  stderrLogger(`${CORE_BIN}: `)((e as Error).stack ?? String(e));
+  stderrLogger(`${HUB_BIN}: `)((e as Error).stack ?? String(e));
   process.exit(1);
 });

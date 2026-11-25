@@ -39,7 +39,7 @@ export function Performance() {
     };
   }, []);
   if (!usage) return null;
-  const { page, core, coreCpu, processes } = usage;
+  const { page, core, hubCpu, processes } = usage;
   const gpu = gpuName();
   const none = '–';
   // Electron counts the processes together; the GPU's is the app's use of it.
@@ -72,13 +72,13 @@ export function Performance() {
           )}
           <tr data-kind="core">
             <th scope="row">{t('perf.process.core')}</th>
-            <td>{coreCpu !== undefined ? percent(coreCpu) : none}</td>
+            <td>{hubCpu !== undefined ? percent(hubCpu) : none}</td>
             <td>{core ? megabytes(core.memory) : none}</td>
           </tr>
           {total && (
             <tr className="perf-total">
               <th scope="row">{t('perf.total')}</th>
-              <td>{percent(total.cpu + (coreCpu ?? 0))}</td>
+              <td>{percent(total.cpu + (hubCpu ?? 0))}</td>
               <td>{megabytes(total.memory + (core?.memory ?? 0))}</td>
             </tr>
           )}

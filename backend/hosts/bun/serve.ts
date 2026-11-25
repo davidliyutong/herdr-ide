@@ -7,7 +7,7 @@
 import { appendFileSync, openSync, readFileSync, closeSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import type { Server, ServerWebSocket } from 'bun';
-import { CORE_BIN, NAME, validInstance } from '#shared/lib/brand.ts';
+import { HUB_BIN, NAME, validInstance } from '#shared/lib/brand.ts';
 import { stderrLogger, type Logger } from '#shared/lib/log.ts';
 import { other as otherLoopback, inUse } from '#shared/host/loopback.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
@@ -22,7 +22,7 @@ import type { Peer } from '#kernel/http/env.ts';
 import { isBreakable } from '#kernel/http/breakable.ts';
 import { validTarget, MAX_TARGET_LEN } from '#kernel/machines/spec.ts';
 import { controlDir as makeControlDir } from '#kernel/machines/transport/controldir.ts';
-import { composeCore, coreFeatures } from '#hosts/common/compose.ts';
+import { composeHub, hubFeatures } from '#hosts/common/compose.ts';
 import { openPayloads } from './payloads.ts';
 import { abortable } from './abortable.ts';
 import { bunPty } from './pty.ts';
@@ -95,7 +95,7 @@ function wsChannel(ws: ServerWebSocket<WSData>): Channel {
 }
 
 export async function serve(argv: string[]): Promise<void> {
-  const logger = stderrLogger(`${CORE_BIN}: `);
+  const logger = stderrLogger(`${HUB_BIN}: `);
   // The settings' flags depend on the features, which depend on the
   // instance: a first pass reads the command line's own flags, the second
   // checks every flag, the settings' too.
@@ -126,7 +126,7 @@ export async function serve(argv: string[]): Promise<void> {
   } catch (e) {
     fatal(logger, `--code-server-idle: ${(e as Error).message}`);
   }
-  const features = coreFeatures({
+  const features = hubFeatures({
     payloads,
     controlDir,
     // The desktop app's proofs are its own core's (hosts/electron).
@@ -189,7 +189,7 @@ export async function serve(argv: string[]): Promise<void> {
     audit = auditLog((line) => appendFileSync(path, line));
   }
   const guard = new Guard({ allowedOrigins: f['allowed-origin'], proxySecret: secret, logger });
-  const { core, specs, run } = composeCore({
+  const { core, specs, run } = composeHub({
     instance,
     nodeInstance,
     features,

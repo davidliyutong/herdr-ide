@@ -94,7 +94,7 @@ function once(fn: () => void): () => void {
 
 /** What the core of the desktop app is started with: what the command
  * line's core gets as flags, and what the app holds for it. */
-export interface CoreStart {
+export interface HubStart {
   /** The core's instance (`desktop`, or a development one). */
   instance: string;
   /** The instance of the machines' nodes. */
@@ -120,11 +120,11 @@ export interface CoreStart {
 
 /** The main process's messages on the parent port; request and channel
  * carry their port. */
-export type ToCore =
-  { t: 'start'; start: CoreStart } | { t: 'request'; head: RequestHead } | { t: 'channel'; head: ChannelHead } | { t: 'stop' };
+export type ToHub =
+  { t: 'start'; start: HubStart } | { t: 'request'; head: RequestHead } | { t: 'channel'; head: ChannelHead } | { t: 'stop' };
 
 /** The utility process's: started, or why not. */
-export type FromCore = { t: 'ready' } | { t: 'failed'; message: string };
+export type FromHub = { t: 'ready' } | { t: 'failed'; message: string };
 
 // ---- requests
 
@@ -495,14 +495,14 @@ const isControl = (m: unknown): m is ChannelControl =>
 export const channelSize = (d: string | Uint8Array | ArrayBuffer): number => (typeof d === 'string' ? d.length : d.byteLength);
 
 /** A channel as the core's kernel takes it (kernel/channel.ts Channel). */
-export interface CoreChannel {
+export interface HubChannel {
   send(data: string | Uint8Array): void;
   readonly buffered: number;
   close(code?: number, reason?: string): void;
 }
 
 /** What the core does with a channel (kernel/channel.ts ChannelHandlers). */
-export interface CoreChannelHandlers {
+export interface HubChannelHandlers {
   message(data: string | Uint8Array): void;
   close?(code: number, reason: string): void;
   drain?(): void;
@@ -510,7 +510,7 @@ export interface CoreChannelHandlers {
 
 /** How a host upgrades a request to a channel (kernel/http/env.ts
  * Peer.upgrade). */
-export type Upgrade = (open: (ch: CoreChannel) => CoreChannelHandlers, opts?: { compress?: boolean }) => Response;
+export type Upgrade = (open: (ch: HubChannel) => HubChannelHandlers, opts?: { compress?: boolean }) => Response;
 
 /** How long a side that closed waits for the other's close before it
  * closes the port itself. */
@@ -525,7 +525,7 @@ export async function serveChannel(
   head: ChannelHead,
   handle: (req: Request, upgrade: Upgrade) => Promise<Response>,
 ): Promise<void> {
-  let open: ((ch: CoreChannel) => CoreChannelHandlers) | undefined;
+  let open: ((ch: HubChannel) => HubChannelHandlers) | undefined;
   // What the client sends before the core takes the channel, up to
   // MAX_MESSAGE; more ends the channel once it opens.
   const early: unknown[] = [];
@@ -570,7 +570,7 @@ export async function serveChannel(
   let acked = 0;
   let closed = false;
   let timer: Timer;
-  let handlers: CoreChannelHandlers | undefined;
+  let handlers: HubChannelHandlers | undefined;
   const end = (code: number, reason: string) => {
     if (closed) return;
     closed = true;
@@ -582,7 +582,7 @@ export async function serveChannel(
       }
     });
   };
-  const ch: CoreChannel = {
+  const ch: HubChannel = {
     send(data) {
       if (closed) return;
       sent += channelSize(data);

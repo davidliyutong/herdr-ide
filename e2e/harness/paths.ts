@@ -21,7 +21,7 @@ export const paths = {
   core: join(dir, 'core'),
   /** The same core built again as another, newer build: it takes the
    * nodes over from the first. */
-  coreNewer: join(dir, 'core-newer'),
+  hubNewer: join(dir, 'core-newer'),
   /** The version of the newer build, which its nodes report
    * (scripts/e2e.sh). */
   newerVersion: 'dev-e2e-newer',

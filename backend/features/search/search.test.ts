@@ -4,13 +4,13 @@
 import { afterEach, expect, test } from 'bun:test';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
-import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
+import { agentDialer, checkGuarded, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { MAX_BODY, problem, searchFeature, type SearchOptions } from './hub.ts';
 import { MAX_GLOBS, MAX_QUERY } from './protocol.ts';
 
 const ON = { 'plugins.search.enabled': true };
-const offlineCore = (readOnly = false) =>
-  testCore({ features: [searchFeature()], machines: testMachines([sshSpec('far', 'far', 'far', false)]), readOnly, settings: { ...ON } });
+const offlineHub = (readOnly = false) =>
+  testHub({ features: [searchFeature()], machines: testMachines([sshSpec('far', 'far', 'far', false)]), readOnly, settings: { ...ON } });
 
 const stops: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -21,12 +21,12 @@ const errorOf = async (res: Response) => [res.status, ((await res.json()) as { e
 
 // One route, a machine's, that only reads: read-only mode searches too.
 test('routes', async () => {
-  const { problems, checked } = await checkGuarded(offlineCore(), offlineCore(true), {
+  const { problems, checked } = await checkGuarded(offlineHub(), offlineHub(true), {
     machine: 'far',
     readOnlyAllowed: ['POST /api/m/:id/p/search/search'],
   });
   expect([problems, checked]).toEqual([[], ['POST /api/m/:id/p/search/search']]);
-  const ro = offlineCore(true);
+  const ro = offlineHub(true);
   expect(await errorOf(await ro.request('POST', '/api/m/far/p/search/search', { body: '{"dir":"~","query":"a"}' }))).toEqual([
     409,
     'offline',
@@ -35,7 +35,7 @@ test('routes', async () => {
 });
 
 test('params', async () => {
-  const tc = offlineCore();
+  const tc = offlineHub();
   for (const body of [
     '',
     'not json',
@@ -84,7 +84,7 @@ async function withMachine(reply: (params: Record<string, unknown>) => Reply, o:
     }
   };
   const machines = testMachines([sshSpec('x')], { dial: agentDialer({ serve }) });
-  const tc = testCore({ features: [searchFeature(o)], machines, settings: { ...ON } });
+  const tc = testHub({ features: [searchFeature(o)], machines, settings: { ...ON } });
   stops.push(running(tc.core));
   await waitFor('x ready', () => machines.get('x')!.ready);
   return { tc, calls, closed };

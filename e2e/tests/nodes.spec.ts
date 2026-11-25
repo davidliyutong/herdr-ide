@@ -23,7 +23,7 @@ test('two cores share the local node: each sees the terminals of the other, and 
     await other.waitScreen(rec.address, /shared-42/);
 
     // The first core gone, the second keeps its session to the node.
-    await instance.stopCore(false);
+    await instance.stopHub(false);
     await new Promise((r) => setTimeout(r, 2_000));
     expect((await second.machine()).status).toBe('ready');
     expect((await other.live()).map((t) => t.address)).toContain(rec.address);
@@ -91,5 +91,5 @@ test('a newer build takes the node over: the other core moves to it and stays re
   instance,
   term,
 }) => {
-  await takeOver(app, instance, term, paths.coreNewer);
+  await takeOver(app, instance, term, paths.hubNewer);
 });

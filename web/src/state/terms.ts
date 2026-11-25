@@ -678,7 +678,7 @@ function sameRecords(a: Record<string, TerminalRecord>, b: Record<string, Termin
 }
 
 /** The page's model, on the core that served it. */
-export let terms = new TermModel(TermConnection.toCore());
+export let terms = new TermModel(TermConnection.toHub());
 
 /** Replaces the page's model (tests). */
 export function setTermModel(model: TermModel) {

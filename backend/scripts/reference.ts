@@ -13,7 +13,7 @@ import { noAudit } from '#kernel/audit.ts';
 import { Keybindings } from '#kernel/config/keybindings/index.ts';
 import { coreModules } from '#kernel/config/registry.ts';
 import { Settings, settingFlags } from '#kernel/config/settings/index.ts';
-import { createCore } from '#kernel/hub.ts';
+import { createHub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { Machines } from '#kernel/machines/manager.ts';
 import { Registry } from '#kernel/machines/registry.ts';
@@ -24,7 +24,7 @@ import { OPTIONS } from '#hosts/bun/serve.ts';
 const features = describedFeatures();
 const modules = coreModules(features);
 const settings = new Settings('', { modules });
-const core = createCore({
+const core = createHub({
   guard: new Guard({ allowedOrigins: [], proxySecret: '', logger: discard }),
   audit: noAudit,
   readOnly: false,

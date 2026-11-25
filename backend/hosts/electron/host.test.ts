@@ -9,9 +9,9 @@ import { SLUG } from '#shared/lib/brand.ts';
 import { defineFeature } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import { breakableResponse } from '#kernel/http/breakable.ts';
-import { testCore, waitFor } from '#kernel/testing.ts';
+import { testHub, waitFor } from '#kernel/testing.ts';
 import type { Composed } from '#hosts/common/compose.ts';
-import { ABNORMAL, channelClient, nodePort, request, type CoreStart, type FromCore, type RequestHead } from './bridge.ts';
+import { ABNORMAL, channelClient, nodePort, request, type HubStart, type FromHub, type RequestHead } from './bridge.ts';
 import { serveParent } from './serve.ts';
 import { startProblem } from './start.ts';
 
@@ -57,8 +57,8 @@ const closed: Array<[number, string]> = [];
 /** A utility process in this one: serveParent on one end of a channel,
  * the main process's side on the other. */
 function utility() {
-  const tc = testCore({ features: [probe], guard: { allowedOrigins: [ORIGIN] } });
-  const replies: FromCore[] = [];
+  const tc = testHub({ features: [probe], guard: { allowedOrigins: [ORIGIN] } });
+  const replies: FromHub[] = [];
   const exits: number[] = [];
   let stopped: Promise<void> | undefined;
   const listeners: Array<(e: { data: unknown; ports: readonly MessagePort[] }) => void> = [];
@@ -263,7 +263,7 @@ describe('channels of the app', () => {
 });
 
 describe('start', () => {
-  const good: CoreStart = {
+  const good: HubStart = {
     instance: 'desktop',
     nodeInstance: '',
     localOnly: false,

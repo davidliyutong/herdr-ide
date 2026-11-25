@@ -145,7 +145,7 @@ export class ChatConnection {
   constructor(private readonly open: () => Socket) {}
 
   /** A connection to the core that served the page. */
-  static toCore(): ChatConnection {
+  static toHub(): ChatConnection {
     return new ChatConnection(() => openChannel(WS_PATH) as unknown as Socket);
   }
 
@@ -386,7 +386,7 @@ let shared: ChatConnection | undefined;
 
 /** The page's connection, made at its first use. */
 export function chatConnection(): ChatConnection {
-  shared ??= ChatConnection.toCore();
+  shared ??= ChatConnection.toHub();
   return shared;
 }
 

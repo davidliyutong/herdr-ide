@@ -51,7 +51,7 @@ What the core embeds:
   the build fails
   otherwise. `scripts/build.sh` stages everything the core embeds in
   `dist/payload` first (herdr-core in `dist/machines-hc`); a core run from
-  the sources (`make dev-core`) reads `dist/payload`, where it stages this
+  the sources (`make dev-hub`) reads `dist/payload`, where it stages this
   host's executable.
 - The video encoder for program windows on Linux machines
   ([14](features/14-gui-windows.md)), when `scripts/build-ffmpeg.sh`
@@ -610,6 +610,6 @@ unless they use the same instance. Give each its own `--instance` (state in
 For development:
 
 ```bash
-make dev-core     # this host's executable staged in dist/payload, then bun backend/hosts/bun/main.ts --instance dev --local-only --listen 127.0.0.1:7790 --web-dir web/dist
+make dev-hub     # this host's executable staged in dist/payload, then bun backend/hosts/bun/main.ts --instance dev --local-only --listen 127.0.0.1:7790 --web-dir web/dist
 make dev-web      # Vite on top of it
 ```

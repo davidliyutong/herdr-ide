@@ -10,7 +10,7 @@ import { Op, readLine, writeLine, type Header, type Info, type Reply } from '#sh
 import { Session as Yamux, type Stream } from '#shared/proto/yamux.ts';
 import { auditLog } from './audit.ts';
 import type { Store as Settings } from './config/settings/index.ts';
-import { createCore, type Core } from './hub.ts';
+import { createHub, type Hub } from './hub.ts';
 import type { FeatureDef } from './feature.ts';
 import type { Peer } from './http/env.ts';
 import { Guard, type GuardOptions } from './http/guard.ts';
@@ -179,7 +179,7 @@ export function testMachines(
   });
 }
 
-export interface TestCoreOptions {
+export interface TestHubOptions {
   features: readonly FeatureDef[];
   machines?: Machines;
   readOnly?: boolean;
@@ -200,8 +200,8 @@ export interface RequestOptions {
   upgrade?: Peer['upgrade'];
 }
 
-export interface TestCore {
-  readonly core: Core;
+export interface TestHub {
+  readonly core: Hub;
   readonly settings: Record<string, boolean>;
   readonly audit: ReturnType<typeof memoryAudit>;
   /** Sends a request as a browser on the core's host would. */
@@ -210,10 +210,10 @@ export interface TestCore {
 
 /** A core of features over machines that do not connect (the local
  * machine only by default). */
-export function testCore(o: TestCoreOptions): TestCore {
+export function testHub(o: TestHubOptions): TestHub {
   const audit = memoryAudit();
   const settings = o.settings ?? {};
-  const core = createCore({
+  const core = createHub({
     guard: new Guard(o.guard),
     audit: audit.audit,
     readOnly: o.readOnly ?? false,
@@ -241,7 +241,7 @@ export function testCore(o: TestCoreOptions): TestCore {
  * whose method is not GET or HEAD, and the GETs writableGET names (they
  * start something, or hand out what only a client that may change things
  * needs). The guard of every request (ALL /*) is not one. */
-export function mutatingRoutes(core: Core, writableGET: readonly string[] = []): string[] {
+export function mutatingRoutes(core: Hub, writableGET: readonly string[] = []): string[] {
   const out = new Set<string>();
   for (const r of core.http.app.routes) {
     if (r.method === 'ALL' && r.path === '/*') continue;
@@ -258,8 +258,8 @@ export function mutatingRoutes(core: Core, writableGET: readonly string[] = []):
  * filled in with machine, a machine both cores have. Returns what is
  * wrong, and the routes checked. */
 export async function checkGuarded(
-  rw: TestCore,
-  ro: TestCore,
+  rw: TestHub,
+  ro: TestHub,
   o: { machine: string; writableGET?: readonly string[]; readOnlyAllowed?: readonly string[] },
 ): Promise<{ problems: string[]; checked: string[] }> {
   const problems: string[] = [];

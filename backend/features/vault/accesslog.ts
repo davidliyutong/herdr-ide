@@ -101,7 +101,7 @@ const MIGRATIONS = [
  * beside settings[-<instance>].json, whose database is
  * core[-<instance>]-<host>[-<id>].db, named for this host (hostFile). ""
  * for "". */
-export function coreDBBeside(vaultFile: string): string {
+export function hubDBBeside(vaultFile: string): string {
   if (!vaultFile) return '';
   const name = basename(vaultFile).replace('vault', 'core');
   return hostFile(dirname(vaultFile), name.slice(0, name.length - extname(name).length) + '.db');

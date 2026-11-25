@@ -77,7 +77,7 @@ hook. The host composes them; features do not import each other.
 
 ## The kernel
 
-- `hub.ts` — `createCore` sets the features up and gives the host
+- `hub.ts` — `createHub` sets the features up and gives the host
   `fetch(Request, Peer) → Response` and `run(signal)`. A feature's routes
   are registered one by one behind its switch (404 `plugin_disabled` while
   it is off for the requesting client) and, under `:id`, the machine's
@@ -152,6 +152,6 @@ herdr-core of each platform (`scripts/fetch-hc.ts`, `scripts/hcdist.ts`).
 `scripts/build.sh` (`make build`)
 runs it for each platform with everything it embeds staged in
 `dist/payload`, and `scripts/e2e.sh` (`make e2e`) runs the end-to-end
-tests against it. `make dev-core` builds this host's
+tests against it. `make dev-hub` builds this host's
 executable, stages it in `dist/payload` and runs the core from its sources
 (`bun hosts/bun/main.ts`), which reads the payloads from `dist/payload`.

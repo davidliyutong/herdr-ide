@@ -4,19 +4,19 @@
 // (the app quits; Electron ends its utility processes with it). Nothing
 // here listens: the app's windows reach the core only through its main
 // process.
-import type { Core } from '#kernel/hub.ts';
+import type { Hub } from '#kernel/hub.ts';
 import type { Composed } from '#hosts/common/compose.ts';
-import { serveChannel, serveRequest, type CoreStart, type FromCore, type Port, type ToCore } from './bridge.ts';
+import { serveChannel, serveRequest, type HubStart, type FromHub, type Port, type ToHub } from './bridge.ts';
 
 /** What the parent port gives: a message's data and the ports sent
  * with it (Electron's process.parentPort, a test's stand-in). */
 export interface Parent<P> {
   on(event: 'message', fn: (e: { data: unknown; ports: readonly P[] }) => void): unknown;
-  postMessage(m: FromCore): void;
+  postMessage(m: FromHub): void;
 }
 
 export interface ServeOptions<P> {
-  start(s: CoreStart): Composed;
+  start(s: HubStart): Composed;
   /** The bridge's view of a port the main process sent. */
   port(p: P): Port;
   logger: (line: string) => void;
@@ -24,11 +24,11 @@ export interface ServeOptions<P> {
   exit(code: number): void;
 }
 
-const isToCore = (m: unknown): m is ToCore => typeof m === 'object' && m !== null && typeof (m as { t?: unknown }).t === 'string';
+const isToHub = (m: unknown): m is ToHub => typeof m === 'object' && m !== null && typeof (m as { t?: unknown }).t === 'string';
 
 /** Serves the main process on parent; the core it starts ends with stop. */
 export function serveParent<P>(parent: Parent<P>, o: ServeOptions<P>): void {
-  let core: Core | undefined;
+  let core: Hub | undefined;
   const stop = new AbortController();
   // Requests of the app's windows: the main process vouches that they are
   // its windows' (the client is the desktop app's); none came over a
@@ -37,7 +37,7 @@ export function serveParent<P>(parent: Parent<P>, o: ServeOptions<P>): void {
     core ? core.fetch(req, { desktop: true }) : Promise.resolve(Response.json({ error: 'starting' }, { status: 503 }));
   parent.on('message', (e) => {
     const m = e.data;
-    if (!isToCore(m)) return;
+    if (!isToHub(m)) return;
     const port = e.ports[0];
     switch (m.t) {
       case 'start': {

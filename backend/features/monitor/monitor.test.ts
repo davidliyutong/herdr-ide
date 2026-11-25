@@ -5,13 +5,13 @@ import { afterEach, expect, test } from 'bun:test';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
-import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
+import { agentDialer, checkGuarded, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { monitorFeature } from './hub.ts';
 import { settings } from './settings.ts';
 
 const ON = { 'plugins.monitor.enabled': true };
-const offlineCore = (readOnly = false) =>
-  testCore({ features: [monitorFeature()], machines: testMachines([sshSpec('x', 'x', 'x', false)]), readOnly, settings: { ...ON } });
+const offlineHub = (readOnly = false) =>
+  testHub({ features: [monitorFeature()], machines: testMachines([sshSpec('x', 'x', 'x', false)]), readOnly, settings: { ...ON } });
 
 const stops: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -19,16 +19,16 @@ afterEach(async () => {
 });
 
 test('routes', async () => {
-  const { problems, checked } = await checkGuarded(offlineCore(), offlineCore(true), { machine: 'x' });
+  const { problems, checked } = await checkGuarded(offlineHub(), offlineHub(true), { machine: 'x' });
   expect([problems, checked]).toEqual([[], ['POST /api/m/:id/p/monitor/signal']]);
-  const gets = offlineCore().core.http.app.routes.filter((r) => r.method === 'GET' && r.path.includes('/p/monitor/'));
+  const gets = offlineHub().core.http.app.routes.filter((r) => r.method === 'GET' && r.path.includes('/p/monitor/'));
   expect([...new Set(gets.map((r) => r.path))].sort()).toEqual(['/api/m/:id/p/monitor/metrics', '/api/m/:id/p/monitor/processes']);
 });
 
 // A signal names a process above 1 (invalid_pid before the machine is
 // asked), TERM when it names no signal; its record holds both.
 test('signal params', async () => {
-  const tc = offlineCore();
+  const tc = offlineHub();
   const res = await tc.request('POST', '/api/m/x/p/monitor/signal', { body: '{"pid":1,"signal":"term"}' });
   expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([400, 'invalid_pid']);
   expect(tc.audit.records().at(-1)).toMatchObject({
@@ -92,7 +92,7 @@ test('through the machine', async () => {
     }
   };
   const machines = testMachines([sshSpec('x')], { dial: agentDialer({ serve }) });
-  const tc = testCore({ features: [monitorFeature()], machines, settings: { ...ON } });
+  const tc = testHub({ features: [monitorFeature()], machines, settings: { ...ON } });
   stops.push(running(tc.core));
   await waitFor('x ready', () => machines.get('x')!.ready);
 

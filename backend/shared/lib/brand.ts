@@ -14,7 +14,7 @@ export const DOMAIN = 'veldr.app';
 export const ENV_PREFIX = 'VELDR_';
 
 /** The binary: the core and, on machines, the agent it starts. */
-export const CORE_BIN = SLUG;
+export const HUB_BIN = SLUG;
 /** The VS Code bridge extension's name; its publisher is SLUG. */
 export const BRIDGE_EXT = `${SLUG}-bridge`;
 /** The extension's identifier (publisher.name) in code-server. */

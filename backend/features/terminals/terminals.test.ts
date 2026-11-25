@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { checkGuarded, testCore, testMachines, sshSpec, waitFor, sleep } from '#kernel/testing.ts';
+import { checkGuarded, testHub, testMachines, sshSpec, waitFor, sleep } from '#kernel/testing.ts';
 import { terminalsFeature } from './hub.ts';
 import { FrameKind } from './messages.ts';
 import { shells } from './shells.ts';
@@ -285,8 +285,8 @@ test('the terminal core’s lifecycle from the UI', async () => {
 
 test('routes that change state are guarded', async () => {
   const machines = () => testMachines([sshSpec('x')]);
-  const rw = testCore({ features: [terminalsFeature()], machines: machines() });
-  const ro = testCore({ features: [terminalsFeature()], machines: machines(), readOnly: true });
+  const rw = testHub({ features: [terminalsFeature()], machines: machines() });
+  const ro = testHub({ features: [terminalsFeature()], machines: machines(), readOnly: true });
   const { problems, checked } = await checkGuarded(rw, ro, { machine: 'x' });
   expect(problems).toEqual([]);
   expect(checked).toEqual(['POST /api/m/:id/hc/:action']);

@@ -699,7 +699,7 @@ describe('extensions', () => {
 
 describe('the bridge socket', () => {
   /** The bridge streams a core's session gets, answered and echoed. */
-  function bridgeCore(s: Session, ok = true) {
+  function bridgeHub(s: Session, ok = true) {
     const seen: Header[] = [];
     void (async () => {
       for (;;) {
@@ -735,9 +735,9 @@ describe('the bridge socket', () => {
     const l = layout(rr);
     await until(() => existsSync(l.bridge), 'the bridge socket');
     expect(statSync(l.bridge).mode & 0o777).toBe(0o600);
-    const one = bridgeCore(rr.session);
+    const one = bridgeHub(rr.session);
     const second = rr.connect('core-2');
-    const two = bridgeCore(second);
+    const two = bridgeHub(second);
     await until(() => rr.agent.liveSessions().length === 2, 'both sessions');
     // Nobody opened VS Code: the newest session.
     expect(await window(l.bridge, { type: 'hello', id: 'w1' })).toEqual({ echo: { type: 'hello', id: 'w1' } });
@@ -761,7 +761,7 @@ describe('the bridge socket', () => {
     const rr = await newRig();
     const l = layout(rr);
     await until(() => existsSync(l.bridge), 'the bridge socket');
-    const seen = bridgeCore(rr.session, false);
+    const seen = bridgeHub(rr.session, false);
     const c = connect(l.bridge);
     await new Promise((res) => c.once('connect', res));
     await new Promise((res) => setTimeout(res, 200));

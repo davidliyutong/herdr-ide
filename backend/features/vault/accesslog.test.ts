@@ -3,14 +3,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openShared } from '#shared/store/index.ts';
-import { AccessLog, coreDBBeside, noisy, released, type Access } from './accesslog.ts';
+import { AccessLog, hubDBBeside, noisy, released, type Access } from './accesslog.ts';
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 const dbOf = () => {
   const d = mkdtempSync(join(tmpdir(), 'tw-vault-'));
   dirs.push(d);
-  return coreDBBeside(join(d, 'vault-dev.json'));
+  return hubDBBeside(join(d, 'vault-dev.json'));
 };
 const rec = (result: string, names = ['A']): Omit<Access, 'id'> => ({
   time: new Date().toISOString(),
@@ -22,8 +22,8 @@ const rec = (result: string, names = ['A']): Omit<Access, 'id'> => ({
 const add = (l: AccessLog, r: Omit<Access, 'id'>) => l.add(r, noisy(r.result), released(r.result));
 
 test("the core's database beside the vault's file, per host", () => {
-  expect(coreDBBeside('/c/vault-dev.json')).toMatch(/^\/c\/core-dev-.+\.db$/);
-  expect(coreDBBeside('')).toBe('');
+  expect(hubDBBeside('/c/vault-dev.json')).toMatch(/^\/c\/core-dev-.+\.db$/);
+  expect(hubDBBeside('')).toBe('');
 });
 
 test('records survive a restart; releases are never merged, repeated refusals are', () => {

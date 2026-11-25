@@ -33,7 +33,7 @@ import { createServer, type Server } from 'node:http';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { AGENT_DIR, CORE_BIN } from '#shared/lib/brand.ts';
+import { AGENT_DIR, HUB_BIN } from '#shared/lib/brand.ts';
 import { dirsFor } from '#shared/host/hostdirs.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { ChunkWriter, Op, readLine, type Reply } from '#shared/proto/agentproto/index.ts';
@@ -73,14 +73,14 @@ const homes: string[] = [];
  * (its fetch) apart: bytes, 404, a stream that does not end, or one that
  * trickles a byte every 500 ms. */
 type Body = Buffer | string | 404 | 'flood' | 'trickle';
-const serve: { hostArchive: Body; coreArchive: Body; hostSums: Body; coreSums: Body } = {
+const serve: { hostArchive: Body; hubArchive: Body; hostSums: Body; hubSums: Body } = {
   hostArchive: 404,
-  coreArchive: 404,
+  hubArchive: 404,
   hostSums: 404,
-  coreSums: 404,
+  hubSums: 404,
 };
 function reset() {
-  Object.assign(serve, { hostArchive: archive, coreArchive: archive, hostSums: goodSums, coreSums: goodSums });
+  Object.assign(serve, { hostArchive: archive, hubArchive: archive, hostSums: goodSums, hubSums: goodSums });
 }
 
 /** The release's archive of the platform's executable. */
@@ -113,11 +113,11 @@ beforeAll(async () => {
       name === SUMS
         ? host
           ? serve.hostSums
-          : serve.coreSums
+          : serve.hubSums
         : name === archiveName(key)
           ? host
             ? serve.hostArchive
-            : serve.coreArchive
+            : serve.hubArchive
           : 404;
     if (body === 404) return void res.writeHead(404).end();
     if (body === 'flood') {
@@ -158,7 +158,7 @@ afterAll(async () => {
       (existsSync(join(h, AGENT_DIR)) ? readdirSync(join(h, AGENT_DIR)) : []).map(
         (v) =>
           new Promise((r) =>
-            spawn(join(h, AGENT_DIR, v, CORE_BIN), ['node', 'stop', '--instance', instance], {
+            spawn(join(h, AGENT_DIR, v, HUB_BIN), ['node', 'stop', '--instance', instance], {
               env: { PATH: '/usr/bin:/bin', HOME: h },
               stdio: 'ignore',
             })
@@ -341,8 +341,8 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       expect(hello.info?.version).toBe('test-deploy');
       expect(b.loads).toBe(0);
       expect(saw(b, 'downloads its build')).toBe(true);
-      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
-      expect(readdirSync(installed(home))).toEqual([CORE_BIN]);
+      expect(readFileSync(join(installed(home), HUB_BIN)).equals(exe)).toBe(true);
+      expect(readdirSync(installed(home))).toEqual([HUB_BIN]);
     } finally {
       session.close();
     }
@@ -371,8 +371,8 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
         expect(b.loads, why).toBe(1);
         expect(saw(b, 'the release archive'), why).toBe(true);
         expect(saw(b, 'downloads its build'), why).toBe(download);
-        expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
-        expect(readdirSync(installed(home))).toEqual([CORE_BIN]);
+        expect(readFileSync(join(installed(home), HUB_BIN)).equals(exe)).toBe(true);
+        expect(readdirSync(installed(home))).toEqual([HUB_BIN]);
       } finally {
         session.close();
       }
@@ -389,7 +389,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       try {
         expect((await session.request({ op: Op.Hello })).ok).toBe(true);
         expect(b.loads, b.logs.join('\n')).toBe(0);
-        expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+        expect(readFileSync(join(installed(home), HUB_BIN)).equals(exe)).toBe(true);
       } finally {
         session.close();
       }
@@ -426,7 +426,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
         expect(Date.now() - t0, why).toBeLessThan(20_000);
         expect(saw(b, 'could not download'), why).toBe(true);
         expect(b.loads, why).toBe(1);
-        expect(readdirSync(installed(home)), why).toEqual([CORE_BIN]);
+        expect(readdirSync(installed(home)), why).toEqual([HUB_BIN]);
         // Only the upload's archive was unpacked (after its digest).
         if (body === bomb) expect(readFileSync(calls, 'utf8').trim().split('\n'), why).toHaveLength(1);
       }
@@ -472,7 +472,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       expect(saw(b, 'the core could not download')).toBe(true);
       // The machine cannot resolve the release either: the core uploads its own.
       expect(b.loads).toBe(1);
-      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+      expect(readFileSync(join(installed(home), HUB_BIN)).equals(exe)).toBe(true);
     } finally {
       session.close();
       rmSync(TUNNEL, { force: true });
@@ -481,7 +481,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
 
   test('a certificate the core does not trust, or an HTTP answer, on its own fetch: build_unavailable, and the machine is not asked for the manifest', async () => {
     reset();
-    serve.coreSums = 404;
+    serve.hubSums = 404;
     writeFileSync(TUNNEL, String(tlsPort));
     for (const url of [`https://127.0.0.1:${tlsPort}/v1`, releaseURL]) {
       rmSync(`${TUNNEL}.log`, { force: true });
@@ -516,7 +516,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
 
   test('a machine whose download failed lately is asked again when the core has nothing to upload', async () => {
     reset();
-    serve.coreArchive = 404;
+    serve.hubArchive = 404;
     const failures = new DownloadFailures();
     failures.failure('box');
     const home = machine();
@@ -526,7 +526,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       expect((await session.request({ op: Op.Hello })).ok).toBe(true);
       expect(saw(b, 'failed within the last day')).toBe(true);
       expect(saw(b, 'downloads its build')).toBe(true);
-      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+      expect(readFileSync(join(installed(home), HUB_BIN)).equals(exe)).toBe(true);
       expect(failures.recent('box')).toBe(false);
     } finally {
       session.close();
@@ -536,7 +536,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
 
   test('a manifest whose executable is not the one in the archive: neither the download nor the upload puts anything in place', async () => {
     reset();
-    serve.coreSums = serve.hostSums = sumsOf({ exe: 'f'.repeat(64), archive: sha256(archive) });
+    serve.hubSums = serve.hostSums = sumsOf({ exe: 'f'.repeat(64), archive: sha256(archive) });
     const home = machine();
     const b = build();
     const e = await dialSSH(options(b)).then(
@@ -560,7 +560,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       expect((await session.request({ op: Op.Hello })).ok).toBe(true);
       expect(b.loads).toBe(1);
       expect(saw(b, 'the release archive')).toBe(true);
-      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+      expect(readFileSync(join(installed(home), HUB_BIN)).equals(exe)).toBe(true);
     } finally {
       session.close();
     }
@@ -650,7 +650,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       const b = build({ url: undefined, own: ownFile(key, openSync(exePath, 'r')) });
       session = await dialNode({ instance, builds: async () => b, logger: () => {} });
       expect((await session.request({ op: Op.Hello })).info?.home).toBe(home);
-      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+      expect(readFileSync(join(installed(home), HUB_BIN)).equals(exe)).toBe(true);
       const env = await nodeEnvironment(session);
       for (const k of Object.keys(vars)) expect(env).not.toContain(`${k}=`);
       expect(readdirSync(home).filter((n) => n.startsWith('preloaded-'))).toEqual([]);
@@ -662,7 +662,7 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
 
   test('an upload that breaks off (the connection went) leaves no partial file', async () => {
     const dir = join(work, 'interrupted');
-    const sh = spawn('/bin/sh', ['-c', installScript({ dir, name: CORE_BIN, exe: 'f'.repeat(64) })], {
+    const sh = spawn('/bin/sh', ['-c', installScript({ dir, name: HUB_BIN, exe: 'f'.repeat(64) })], {
       detached: true,
       stdio: ['pipe', 'ignore', 'ignore'],
     });

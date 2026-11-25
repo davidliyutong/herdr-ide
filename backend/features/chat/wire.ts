@@ -26,7 +26,7 @@ import { z } from 'zod';
 import * as chat from '#shared/proto/chatproto/index.ts';
 
 /** The core's error codes, besides chatproto's and the machine's. */
-export const CoreCode = {
+export const HubCode = {
   /** The core is read-only; commands are refused. */
   ReadOnly: 'read_only',
   /** The chat's machine is not connected. */

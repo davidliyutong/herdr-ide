@@ -8,7 +8,7 @@ import { COST_FRESH } from './cost.ts';
 import { pace, windowIDs } from './history.ts';
 import type { CostParams } from './protocol.ts';
 import { parsePrices, PROVIDERS } from './settings.ts';
-import { coreDBFile } from './store.ts';
+import { hubDBFile } from './store.ts';
 import { acc, DAY, find, HOUR, MIN, removeTempDirs, report, T0, tempDir, testUsage, win } from './testing.ts';
 import { DEFAULT_CADENCE, interval, MIN_REFRESH_GAP, Usage } from './usage.ts';
 
@@ -155,7 +155,7 @@ test('history', async () => {
     pct += 5;
   }
   // Kept in the core's database beside the settings file.
-  const st = statSync(coreDBFile(t.st.path));
+  const st = statSync(hubDBFile(t.st.path));
   if (process.platform !== 'win32') expect(st.mode & 0o777).toBe(0o600);
   const w = t.snap().accounts[0]!.windows[0]!;
   const pts = t.u.history.windows.get('claude:acc-1')!.get(w.id)!;

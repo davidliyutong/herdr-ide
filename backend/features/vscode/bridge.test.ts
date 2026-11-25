@@ -9,7 +9,7 @@ import type { Client } from '#kernel/http/env.ts';
 import type { AgentStream } from '#kernel/machines/transport/session.ts';
 import { sleep, waitFor } from '#kernel/testing.ts';
 import { Bridge, type BridgeEvent, type Target } from './bridge.ts';
-import { vscodeCore, type VSCodeCore } from './testdata/hub.ts';
+import { vscodeHub, type VSCodeHub } from './testdata/hub.ts';
 import { DEFAULT_TIMING } from './timing.ts';
 
 const timing = { ...DEFAULT_TIMING, bridgeGraceMs: 100, bridgeWindowMs: 600, bridgePollMs: 20, bridgeAckMs: 300 };
@@ -222,9 +222,9 @@ test('close, leave, download', async () => {
 });
 
 describe('through a core', () => {
-  let vc: VSCodeCore;
+  let vc: VSCodeHub;
   beforeAll(async () => {
-    vc = await vscodeCore({ desktopOn: false, browserOn: false });
+    vc = await vscodeHub({ desktopOn: false, browserOn: false });
   });
   afterAll(() => vc.stop());
 

@@ -11,10 +11,10 @@ import { join } from 'node:path';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { coreModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { createCore } from '#kernel/hub.ts';
+import { createHub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
-import { agentDialer, checkGuarded, localSpec, memoryAudit, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
+import { agentDialer, checkGuarded, localSpec, memoryAudit, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { browserFeature, type BrowserOptions } from './hub.ts';
 import { Forwards, listenLoopback, MAX_FORWARDS, temporary } from './forwards.ts';
 import { DEFAULT_IDLE, settings } from './settings.ts';
@@ -81,7 +81,7 @@ async function setup(o: BrowserOptions & { run?: boolean; listening?: () => Repl
   const st = new Settings('', { modules: coreModules([feature]) });
   const audit = memoryAudit();
   const logs: string[] = [];
-  const core = createCore({
+  const core = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: false,
@@ -500,7 +500,7 @@ test('listening', async () => {
 // read-only mode; the reads are not.
 test('guards', async () => {
   const core = (readOnly: boolean) =>
-    testCore({
+    testHub({
       features: [browserFeature()],
       machines: testMachines([sshSpec('x', 'x', 'x', false)]),
       readOnly,

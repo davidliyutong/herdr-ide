@@ -3,7 +3,7 @@
 import { describe, expect, test } from 'bun:test';
 import { SLUG } from '#shared/lib/brand.ts';
 import type { Files } from '../payloads.ts';
-import { testCore } from '../testing.ts';
+import { testHub } from '../testing.ts';
 import { appCSP } from './guard.ts';
 import { cleanPath, serveUI } from './static.ts';
 
@@ -13,7 +13,7 @@ const files = (m: Record<string, string>): Files => ({
 const UI = files({ 'index.html': '<!doctype html>shell', 'assets/app-1.js': 'js', 'icon.svg': '<svg/>' });
 
 function core(f: Files | null) {
-  const t = testCore({ features: [] });
+  const t = testHub({ features: [] });
   serveUI(t.core.http.app, f);
   return t;
 }

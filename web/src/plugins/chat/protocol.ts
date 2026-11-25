@@ -392,7 +392,7 @@ export const MACHINE_CODES = ['not_running', 'upgrading', 'no_terminal_core', 's
  * ended while the machine stays (attach again; a command not answered may
  * have been carried out); plugin_disabled, the plugin was turned off;
  * timeout, the machine did not answer in time. */
-export const CORE_CODES = [
+export const HUB_CODES = [
   'read_only',
   'offline',
   'unknown_sub',
@@ -406,7 +406,7 @@ export const CORE_CODES = [
 /** Every code of an error the page may receive: the host's, the
  * machine's, the core's, and network when the page did not reach the
  * core. */
-export const ERROR_CODES = [...new Set<string>([...HOST_CODES, ...MACHINE_CODES, ...CORE_CODES, 'network'])];
+export const ERROR_CODES = [...new Set<string>([...HOST_CODES, ...MACHINE_CODES, ...HUB_CODES, 'network'])];
 
 /** The chat plugin's message on the core's event channel for a machine:
  * every chat of it (full), or those that changed (one that is no more in

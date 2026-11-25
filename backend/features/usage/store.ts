@@ -39,7 +39,7 @@ const MIGRATIONS = [
 /** The core's database beside settingsFile (settings-dev.json →
  * core-dev-<host>.db); "" for a core without a settings file, which keeps
  * no state. */
-export function coreDBFile(settingsFile: string): string {
+export function hubDBFile(settingsFile: string): string {
   if (!settingsFile) return '';
   const name = basename(settingsFile).replace('settings', 'core');
   return hostFile(dirname(settingsFile), name.slice(0, name.length - extname(name).length) + '.db');

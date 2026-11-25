@@ -15,10 +15,10 @@ import {
   running,
   sleep,
   sshSpec,
-  testCore,
+  testHub,
   testMachines,
   waitFor,
-  type TestCore,
+  type TestHub,
 } from '#kernel/testing.ts';
 import { machinesFeature, targetHost, type MachinesFeatureOptions } from './hub.ts';
 
@@ -38,7 +38,7 @@ function fixture(o: Partial<MachinesFeatureOptions> = {}) {
   const forgotten: string[] = [];
   const forgetter = defineFeature({ id: 'forget', toggle: false, setup: (ctx) => ctx.onForget((id) => void forgotten.push(id)) });
   const opts: MachinesFeatureOptions = { home: () => '', controlDir: '', ...o };
-  const core = (readOnly = false) => testCore({ features: [machinesFeature(opts), forgetter], machines, readOnly });
+  const core = (readOnly = false) => testHub({ features: [machinesFeature(opts), forgetter], machines, readOnly });
   const rw = core();
   return {
     path,
@@ -228,7 +228,7 @@ describe('machines API', () => {
       },
     });
     const spawned: string[][] = [];
-    const t = testCore({ features: [machinesFeature({ home: () => '', controlDir: '/tmp/ctl', pty: fakePty(spawned).spawn })], machines });
+    const t = testHub({ features: [machinesFeature({ home: () => '', controlDir: '/tmp/ctl', pty: fakePty(spawned).spawn })], machines });
     const list = (await (await t.request('GET', '/api/machines')).json()) as State[];
     const { updated_at, ...bad } = list.find((s) => s.id === 'bad')!;
     expect(typeof updated_at).toBe('number');
@@ -306,8 +306,8 @@ describe('machines API', () => {
 // read-only mode. A route added without mutating or writable fails here.
 test('mutating routes are guarded', async () => {
   const machines = testMachines([localSpec(), sshSpec('x')]);
-  const make = (readOnly: boolean): TestCore =>
-    testCore({
+  const make = (readOnly: boolean): TestHub =>
+    testHub({
       features: [machinesFeature({ home: () => '', controlDir: '/tmp/ctl' })],
       machines,
       readOnly,
@@ -350,7 +350,7 @@ Host EXTRA2 other
   );
   let current = mkdtempSync(join(tmpdir(), 'home-'));
   const f = fixture({ home: () => current });
-  const get = (t: TestCore, origin?: string) => t.request('GET', '/api/ssh/hosts', { origin });
+  const get = (t: TestHub, origin?: string) => t.request('GET', '/api/ssh/hosts', { origin });
   let res = await get(f.rw);
   expect([res.status, await res.text()]).toEqual([200, '[]']);
   current = home;
@@ -426,11 +426,11 @@ describe('ssh login', () => {
       [{ controlDir: '/tmp/ctl' }, 501, 'ssh_login_unsupported'],
       [{ controlDir: '', pty: fakePty().spawn }, 501, 'ssh_login_unsupported'],
     ] as const) {
-      const t = testCore({ features: [machinesFeature({ home: () => '', ...o })], machines });
+      const t = testHub({ features: [machinesFeature({ home: () => '', ...o })], machines });
       const res = await t.request('GET', '/api/m/gpu/auth', { upgrade });
       expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([status, code]);
     }
-    const t = testCore({
+    const t = testHub({
       features: [machinesFeature({ home: () => '', controlDir: '/tmp/ctl', pty: fakePty().spawn })],
       machines: testMachines([localSpec(), sshSpec('gpu')]),
     });
@@ -449,7 +449,7 @@ describe('ssh login', () => {
     const sizes: Array<{ cols: number; rows: number }> = [];
     const pty = fakePty(spawned, sizes);
     const machines = testMachines([sshSpec('gpu', 'u@gpu')]);
-    const t = testCore({
+    const t = testHub({
       features: [machinesFeature({ home: () => '', controlDir: '/tmp/ctl', pty: pty.spawn, ptyDrainMs: 300 })],
       machines,
     });
@@ -503,7 +503,7 @@ describe('pages', () => {
   // agents' events; the event that sounds goes to the page used last.
   test('machine messages', async () => {
     const machines = testMachines([localSpec(), sshSpec('gpu')]);
-    const t = testCore({ features: [machinesFeature({ home: () => '', controlDir: '' })], machines });
+    const t = testHub({ features: [machinesFeature({ home: () => '', controlDir: '' })], machines });
     const connect = () => {
       const { a, b } = channelPair();
       const got: Array<Record<string, unknown>> = [];
@@ -546,7 +546,7 @@ describe('pages', () => {
   test('retry', async () => {
     const dial = agentDialer();
     const machines = testMachines([sshSpec('x')], { dial });
-    const t = testCore({ features: [machinesFeature({ home: () => '', controlDir: '' })], machines });
+    const t = testHub({ features: [machinesFeature({ home: () => '', controlDir: '' })], machines });
     stops.push(running(machines));
     const m = machines.get('x')!;
     await waitFor('ready', () => m.ready);

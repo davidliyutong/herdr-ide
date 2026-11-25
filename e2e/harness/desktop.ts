@@ -200,7 +200,7 @@ export class Desktop {
 
   /** The core's utility process; waits for one other than not (the one
    * that crashed). */
-  corePid(not?: number): Promise<number> {
+  hubPid(not?: number): Promise<number> {
     return waitFor(
       async () => {
         const pid = (await this.processes()).find((p) => p.type === 'Utility' && / core$/.test(p.name))?.pid;

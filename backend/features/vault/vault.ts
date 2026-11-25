@@ -29,7 +29,7 @@ import {
   type VaultResponse,
   type VaultRun,
 } from '#shared/proto/agentproto/index.ts';
-import { AccessLog, coreDBBeside, noisy, released, Result, type Access, type AccessLogOptions } from './accesslog.ts';
+import { AccessLog, hubDBBeside, noisy, released, Result, type Access, type AccessLogOptions } from './accesslog.ts';
 import { b64url, isCode, Mutex, unb64, unb64url, VaultError } from './crypto.ts';
 import { desktopOf, proofMessage, relayAD, type Desktop } from './desktop.ts';
 import { Gate, since, type Nonce, type Purpose, type Stamp } from './gate.ts';
@@ -216,7 +216,7 @@ export class Vault {
   }
 
   accessLog(): AccessLog {
-    this.#alog ??= new AccessLog({ db: coreDBBeside(this.path()), logger: this.ctx.logger, ...this.o.accessLog });
+    this.#alog ??= new AccessLog({ db: hubDBBeside(this.path()), logger: this.ctx.logger, ...this.o.accessLog });
     return this.#alog;
   }
 

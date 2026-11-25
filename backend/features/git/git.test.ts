@@ -6,14 +6,14 @@ import { write } from '#shared/lib/streamio.ts';
 import { MAX_INLINE, Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
-import { agentDialer, checkGuarded, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
+import { agentDialer, checkGuarded, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { auditFields, gitFeature, MAX_BODY, queryParams } from './hub.ts';
 import { gitProtocol, READ_MS, READS, WRITE_MS, WRITES } from './protocol.ts';
 import { settings } from './settings.ts';
 
 const ON = { 'plugins.git.enabled': true };
-const offlineCore = (readOnly = false) =>
-  testCore({ features: [gitFeature()], machines: testMachines([sshSpec('x', 'x', 'x', false)]), readOnly, settings: { ...ON } });
+const offlineHub = (readOnly = false) =>
+  testHub({ features: [gitFeature()], machines: testMachines([sshSpec('x', 'x', 'x', false)]), readOnly, settings: { ...ON } });
 
 const stops: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -46,7 +46,7 @@ async function withMachine(reply: (action: string, params: Record<string, unknow
     }
   };
   const machines = testMachines([sshSpec('x')], { dial: agentDialer({ serve }) });
-  const tc = testCore({ features: [gitFeature()], machines, settings: { ...ON } });
+  const tc = testHub({ features: [gitFeature()], machines, settings: { ...ON } });
   stops.push(running(tc.core));
   await waitFor('x ready', () => machines.get('x')!.ready);
   return { tc, calls };
@@ -55,10 +55,10 @@ async function withMachine(reply: (action: string, params: Record<string, unknow
 // Reads are GETs, not guarded; every change is a POST, refused to other
 // sites and in read-only mode.
 test('routes', async () => {
-  const { problems, checked } = await checkGuarded(offlineCore(), offlineCore(true), { machine: 'x' });
+  const { problems, checked } = await checkGuarded(offlineHub(), offlineHub(true), { machine: 'x' });
   expect(problems).toEqual([]);
   expect(checked.sort()).toEqual(WRITES.map((w) => `POST /api/m/:id/p/git/${w}`).sort());
-  const reads = offlineCore(true)
+  const reads = offlineHub(true)
     .core.http.app.routes.filter((r) => r.method === 'GET' && r.path.startsWith('/api/m/:id/p/git/'))
     .map((r) => r.path.slice('/api/m/:id/p/git/'.length));
   expect([...new Set(reads)].sort()).toEqual([...READS].sort());
@@ -71,7 +71,7 @@ test('routes', async () => {
 // A change's audit record names what it acted on and how it ended, never
 // its patch or message, and paths only by their number.
 test('change audit', async () => {
-  const tc = offlineCore();
+  const tc = offlineHub();
   const body = {
     repo: '/home/u/r',
     name: 'topic',

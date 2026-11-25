@@ -53,15 +53,15 @@ export interface Follower {
   settings(s: ShellSettings): void;
 }
 
-/** What followCore uses of the core (hub.ts CoreHost; stand-ins in
+/** What followHub uses of the core (hub.ts HubHost; stand-ins in
  * tests). */
-export interface CoreLink {
+export interface HubLink {
   fetch(path: string): Promise<{ ok: boolean; json(): Promise<unknown> }>;
   channel(path: string, on: { open(): void; message(data: string | Uint8Array): void; close(): void }): { close(): void };
 }
 
 /** Follows the core; returns a function that stops it. */
-export function followCore(core: CoreLink, platform: string, on: Follower): () => void {
+export function followHub(core: HubLink, platform: string, on: Follower): () => void {
   let stopped = false;
   let channel: { close(): void } | undefined;
   let delay = 500;

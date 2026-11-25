@@ -220,7 +220,7 @@ async function gone(pid: number, ms: number, t: ChatMachineTiming, signal: Abort
  * host's connection, and closes both once either side ends. */
 function relay(s: ActionStream, h: HostConn, signal: AbortSignal): Promise<void> {
   const st = s.stream;
-  const fromCore = s.reader.release();
+  const fromHub = s.reader.release();
   const fromHost = h.reader.release();
   return new Promise((resolve) => {
     let done = false;
@@ -228,7 +228,7 @@ function relay(s: ActionStream, h: HostConn, signal: AbortSignal): Promise<void>
       if (done) return;
       done = true;
       signal.removeEventListener('abort', end);
-      fromCore.unpipe(h.sock);
+      fromHub.unpipe(h.sock);
       fromHost.unpipe(st);
       h.sock.destroy();
       closeStream(st);
@@ -237,9 +237,9 @@ function relay(s: ActionStream, h: HostConn, signal: AbortSignal): Promise<void>
     signal.addEventListener('abort', end, { once: true });
     h.sock.on('error', end).on('end', end).on('close', end);
     fromHost.on('error', end).on('end', end);
-    fromCore.on('error', end).on('end', end);
+    fromHub.on('error', end).on('end', end);
     st.on('close', end);
-    fromCore.pipe(h.sock, { end: false });
+    fromHub.pipe(h.sock, { end: false });
     fromHost.pipe(st, { end: false });
     if (signal.aborted) end();
   });

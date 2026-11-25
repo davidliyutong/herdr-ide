@@ -25,7 +25,7 @@ import {
   clientMessage,
   COMMAND_OPS,
   commandLine,
-  CoreCode,
+  HubCode,
   detached,
   eventPrefix,
   MAX_CLIENT_MESSAGE,
@@ -268,7 +268,7 @@ export class ChatPage {
     for (const s of this.subs.values()) if (s.m === m.m) perMachine++;
     if (this.subs.size >= MAX_SUBS || perMachine >= MAX_SUBS_PER_MACHINE) {
       old?.abort();
-      return refuse(CoreCode.TooMany, 'the page has as many subscriptions as it may');
+      return refuse(HubCode.TooMany, 'the page has as many subscriptions as it may');
     }
     const s = new Sub(this, m.sub, m.m, m.chat, m.from);
     this.subs.set(m.sub, s);
@@ -280,7 +280,7 @@ export class ChatPage {
   private detach(id: string): void {
     const s = this.subs.get(id);
     if (!s) {
-      if (pageID(id)) this.send(detached(id, { code: CoreCode.UnknownSub, message: 'no such subscription' }));
+      if (pageID(id)) this.send(detached(id, { code: HubCode.UnknownSub, message: 'no such subscription' }));
       return;
     }
     s.gone = true;
@@ -297,7 +297,7 @@ export class ChatPage {
       return this.ack(m.id, { code: chat.Code.BadRequest, message: 'a command names a machine and a chat' });
     let rec = auditOf(m.m, m.chat, cmd);
     if (this.d.board.readOnly) {
-      const e = { code: CoreCode.ReadOnly, message: 'read-only mode' };
+      const e = { code: HubCode.ReadOnly, message: 'read-only mode' };
       rec ??= { event: `chat.${cmd.op}`, fields: { plugin: 'chat', machine: m.m, chat: m.chat } };
       this.audit(rec, e);
       return this.ack(m.id, e);
@@ -308,7 +308,7 @@ export class ChatPage {
         s = c;
         break;
       }
-    if (!s) return this.ack(m.id, { code: CoreCode.NotAttached, message: 'the page has no subscription to the chat' });
+    if (!s) return this.ack(m.id, { code: HubCode.NotAttached, message: 'the page has no subscription to the chat' });
     const e = s.submit(m.id, cmd, rec);
     if (e) {
       this.audit(rec, e);
@@ -401,7 +401,7 @@ export class Sub {
   /** Queues a command for the host under an id of the core's; an error
    * refuses it at once. */
   submit(id: string, cmd: PageCommand, rec: AuditRecord | undefined): chat.ChatError | undefined {
-    if (this.ended) return { code: CoreCode.NotAttached, message: 'the subscription ended' };
+    if (this.ended) return { code: HubCode.NotAttached, message: 'the subscription ended' };
     if (this.pending.size >= this.page.d.limits.maxPending)
       return { code: chat.Code.Busy, message: 'too many commands wait for their answer' };
     const core = `k${++this.next}`;
@@ -450,10 +450,10 @@ export class Sub {
     const gone = this.gone;
     if (!gone && pg.subs.get(this.id) === this) pg.subs.delete(this.id);
     e ??= pg.d.board.isReady(this.m)
-      ? { code: CoreCode.Lost, message: 'the connection to the chat host ended' }
-      : { code: CoreCode.Offline, message: 'machine not connected' };
+      ? { code: HubCode.Lost, message: 'the connection to the chat host ended' }
+      : { code: HubCode.Offline, message: 'machine not connected' };
     if (!gone) pg.send(detached(this.id, e));
-    const ackErr = gone ? { code: CoreCode.NotAttached, message: 'the page detached the subscription' } : e;
+    const ackErr = gone ? { code: HubCode.NotAttached, message: 'the page detached the subscription' } : e;
     for (const c of pending.values()) {
       pg.audit(c.rec, ackErr);
       pg.ack(c.id, ackErr);

@@ -29,7 +29,7 @@ import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
 import { FakeCore, settle } from './fakeTerms';
-import { FakeChatCore } from './chatFake';
+import { FakeChatHub } from './chatFake';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -59,7 +59,7 @@ const view = (chat: string, extra: Record<string, unknown> = {}): L.PluginView =
   ...extra,
 });
 
-let chats: FakeChatCore;
+let chats: FakeChatHub;
 let core: FakeCore;
 let host: HTMLDivElement;
 let root: Root;
@@ -82,7 +82,7 @@ beforeEach(async () => {
   definePlugins([chatPlugin]);
   useSettings.setState({ values: {} });
   resetChats();
-  chats = new FakeChatCore();
+  chats = new FakeChatHub();
   chats.auto = true;
   chats.install();
   core = new FakeCore();

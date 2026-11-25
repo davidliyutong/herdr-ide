@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bindingsOf, followCore, settingsOf, type CoreLink, type ShellSettings } from './follow';
+import { bindingsOf, followHub, settingsOf, type HubLink, type ShellSettings } from './follow';
 import type { Binding } from './menu';
 
 test('the bindings of the platform, well-formed ones only', () => {
@@ -41,11 +41,11 @@ test('the theme, language, zoom and UI font size settings, defaults for anything
 });
 
 /** A stand-in for the core: its event channel and its API. */
-function fakeCore(replies: Record<string, unknown>) {
-  type On = Parameters<CoreLink['channel']>[1];
+function fakeHub(replies: Record<string, unknown>) {
+  type On = Parameters<HubLink['channel']>[1];
   const sockets: Array<{ path: string; on: On; closed: boolean; push(m: unknown): void }> = [];
   const fetched: string[] = [];
-  const core: CoreLink = {
+  const core: HubLink = {
     channel(path, on) {
       const s = {
         path,
@@ -67,12 +67,12 @@ function fakeCore(replies: Record<string, unknown>) {
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 test('reads the state once the channel is open, then follows its messages', async () => {
-  const { core, sockets, fetched } = fakeCore({
+  const { core, sockets, fetched } = fakeHub({
     '/api/settings': { values: { 'appearance.theme': { value: 'dark' } } },
     '/api/keybindings': { commands: [], effective: { mac: [{ key: 'cmd+t', command: 'tab.new', when: 'terminal' }] } },
   });
   const got: { bindings: Binding[][]; settings: ShellSettings[] } = { bindings: [], settings: [] };
-  const stop = followCore(core, 'mac', { bindings: (b) => got.bindings.push(b), settings: (s) => got.settings.push(s) });
+  const stop = followHub(core, 'mac', { bindings: (b) => got.bindings.push(b), settings: (s) => got.settings.push(s) });
   assert.equal(sockets[0].path, '/ws');
   assert.deepEqual(fetched, []);
   sockets[0].on.open();
@@ -99,8 +99,8 @@ test('reads the state once the channel is open, then follows its messages', asyn
 });
 
 test('opens the channel again when it drops', async () => {
-  const { core, sockets } = fakeCore({});
-  const stop = followCore(core, 'mac', { bindings: () => {}, settings: () => {} });
+  const { core, sockets } = fakeHub({});
+  const stop = followHub(core, 'mac', { bindings: () => {}, settings: () => {} });
   sockets[0].on.close();
   await new Promise((r) => setTimeout(r, 600));
   assert.equal(sockets.length, 2);

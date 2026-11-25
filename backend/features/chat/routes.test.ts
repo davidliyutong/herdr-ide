@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as agentkinds from '#shared/agents/kinds.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
-import { checkGuarded, type TestCore } from '#kernel/testing.ts';
+import { checkGuarded, type TestHub } from '#kernel/testing.ts';
 import { hostSettings } from './settings.ts';
 import { rig, testChat, type Rig, type RigOptions } from './testing.ts';
 
@@ -47,7 +47,7 @@ describe('routes', () => {
       'POST /api/m/:id/p/chat/host/stop',
     ]);
     const ro = await start({ readOnly: true });
-    const { problems, checked } = await checkGuarded(r as unknown as TestCore, ro as unknown as TestCore, { machine: 'gpu' });
+    const { problems, checked } = await checkGuarded(r as unknown as TestHub, ro as unknown as TestHub, { machine: 'gpu' });
     expect(problems).toEqual([]);
     expect(checked.length).toBe(13);
     // Off, every route answers plugin_disabled.

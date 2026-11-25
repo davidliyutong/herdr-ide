@@ -4,15 +4,15 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { connect } from 'node:net';
 import { ChunkReader, writeLine, type Reply } from '#shared/proto/agentproto/index.ts';
-import { checkGuarded, localSpec, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
+import { checkGuarded, localSpec, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { auditTargets, conflictOf, fileTransfersFeature, filesFeature, uploadParams, writeParams } from './hub.ts';
 import { MAX_STAT, MAX_UPLOAD, MAX_WRITE } from './protocol.ts';
 import type { PluginHandler } from './testdata/agent.ts';
-import { filesCore, type FilesCore } from './testdata/hub.ts';
+import { filesHub, type FilesHub } from './testdata/hub.ts';
 
 const ON = { 'plugins.files.enabled': true };
 const core = (o: { readOnly?: boolean; platform?: string } = {}) =>
-  testCore({
+  testHub({
     features: [fileTransfersFeature(), filesFeature({ platform: o.platform ?? 'linux' })],
     machines: testMachines([localSpec('here', false), sshSpec('far', 'far', 'far', false)]),
     readOnly: o.readOnly,
@@ -148,9 +148,9 @@ describe('through the machine', () => {
     if (path === '/missing') return reply({ ok: false, code: 'not_found', error: 'not_found: /missing' });
     return reply({ ok: true, plugin: { paths: [path || String(params.dir)] } });
   };
-  let fc: FilesCore;
+  let fc: FilesHub;
   beforeAll(async () => {
-    fc = await filesCore({ plugin });
+    fc = await filesHub({ plugin });
   });
   afterAll(() => fc.stop());
   const post = (action: string, body: RequestInit['body'], query = '') =>
@@ -263,7 +263,7 @@ describe('through the machine', () => {
   });
 
   test('read-only mode refuses changes and polls', async () => {
-    const ro = await filesCore({ plugin, readOnly: true });
+    const ro = await filesHub({ plugin, readOnly: true });
     try {
       let res = await fetch(`${ro.url}/api/m/local/p/files/write?path=/f&new=1`, { method: 'POST', body: 'x' });
       expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([403, 'read_only']);

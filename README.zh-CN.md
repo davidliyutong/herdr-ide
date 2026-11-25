@@ -167,7 +167,7 @@ code-server 和扩展在运行 veldr 的主机上准备好，再推送到各台�
 ## 开发
 
 ```bash
-make dev-core      # 在 :7790 以 --instance dev 运行 core（终端核心 session 为 veldr-dev-<主机 id>）
+make dev-hub      # 在 :7790 以 --instance dev 运行 core（终端核心 session 为 veldr-dev-<主机 id>）
 make dev-web       # 前端热更新，端口 5173
 make check test    # 提交 PR 之前运行
 ```

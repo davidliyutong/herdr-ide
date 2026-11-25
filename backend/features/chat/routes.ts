@@ -57,7 +57,7 @@ import { badRequest, failOf, protocolError } from './errors.ts';
 import type { ChatSwitchboard } from './switchboard.ts';
 import { overviews } from './overview.ts';
 import type { Timing } from './timing.ts';
-import { CoreCode } from './wire.ts';
+import { HubCode } from './wire.ts';
 
 /** The longest body of POST new. */
 const MAX_BODY = 64 << 10;
@@ -154,7 +154,7 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
   };
   api.get('/agents', async (c) => {
     // The host asks the agents' programs: nothing a reader starts.
-    if (ctx.readOnly) throw new Fail(CoreCode.ReadOnly, 403, 'read-only mode');
+    if (ctx.readOnly) throw new Fail(HubCode.ReadOnly, 403, 'read-only mode');
     return agents(c, false);
   });
   api.post('/agents', ctx.mutating('agents'), (c) => agents(c, true));

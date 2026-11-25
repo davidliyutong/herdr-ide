@@ -15,7 +15,7 @@ import type { Stream } from '#shared/proto/yamux.ts';
 import { channelPair, type Channel, type ChannelHandlers, type Message } from '#kernel/channel.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { toggles } from '#kernel/config/toggles.ts';
-import { createCore, type Core } from '#kernel/hub.ts';
+import { createHub, type Hub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
@@ -420,7 +420,7 @@ export interface RigOptions {
 }
 
 export interface Rig {
-  core: Core;
+  core: Hub;
   host: FakeChatHost;
   board: ChatSwitchboard;
   machines: Machines;
@@ -434,7 +434,7 @@ export interface Rig {
   request(
     method: string,
     path: string,
-    o?: { body?: string; origin?: string; upgrade?: Parameters<Core['fetch']>[1]['upgrade'] },
+    o?: { body?: string; origin?: string; upgrade?: Parameters<Hub['fetch']>[1]['upgrade'] },
   ): Promise<Response>;
   /** Calls a route: its status and its answer. */
   call(method: string, path: string, body?: string): Promise<[number, Record<string, unknown>]>;
@@ -467,7 +467,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   });
   const store = new Settings('', { modules: [chatSettings, toggles([feature])] });
   const audit = memoryAudit();
-  const core = createCore({
+  const core = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: o.readOnly ?? false,

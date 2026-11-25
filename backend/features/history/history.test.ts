@@ -16,12 +16,12 @@ import {
 } from '#shared/proto/agentproto/index.ts';
 import { coreModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { createCore } from '#kernel/hub.ts';
+import { createHub } from '#kernel/hub.ts';
 import { enableSetting } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
-import { agentDialer, checkGuarded, memoryAudit, running, sshSpec, testCore, testMachines, waitFor } from '#kernel/testing.ts';
+import { agentDialer, checkGuarded, memoryAudit, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { historyFeature, type HistoryOptions } from './hub.ts';
 import { Scheduler, TIMING } from './scheduler.ts';
 import { LIMITS, settings } from './settings.ts';
@@ -44,7 +44,7 @@ test('feature', () => {
 // something: guarded (refused in read-only mode, audited).
 test('routes', async () => {
   const core = (readOnly: boolean) =>
-    testCore({
+    testHub({
       features: [historyFeature()],
       machines: testMachines([sshSpec('x', 'x', 'x', false)]),
       readOnly,
@@ -365,7 +365,7 @@ async function withMachine(
   const audit = memoryAudit();
   // A real settings store: the scheduler reads numbers; capturing stays
   // off, and the read-only core's scheduler asks nothing.
-  const core = createCore({
+  const core = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: false,

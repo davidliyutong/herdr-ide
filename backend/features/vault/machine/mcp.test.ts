@@ -7,7 +7,7 @@ import { Reader } from '#shared/lib/streamio.ts';
 import type { VaultRequest, VaultResponse } from '#shared/proto/agentproto/index.ts';
 import { MAX_LINE, dialSocket, serveMcp, type McpOptions } from './mcp.ts';
 import { survivors } from './testdata/procs.ts';
-import { fakeCore, type FakeCore } from './testdata/fakehub.ts';
+import { fakeHub, type FakeHub } from './testdata/fakehub.ts';
 
 type Msg = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -57,7 +57,7 @@ class Client {
   }
 }
 
-let cores: FakeCore[] = [];
+let cores: FakeHub[] = [];
 let clients: Client[] = [];
 afterEach(async () => {
   for (const c of clients) {
@@ -69,8 +69,8 @@ afterEach(async () => {
   clients = [];
 });
 
-async function core(answer: (req: VaultRequest) => VaultResponse | null): Promise<FakeCore> {
-  const c = await fakeCore(answer);
+async function core(answer: (req: VaultRequest) => VaultResponse | null): Promise<FakeHub> {
+  const c = await fakeHub(answer);
   cores.push(c);
   return c;
 }
@@ -192,7 +192,7 @@ describe('the MCP server', () => {
     expect(t.text.startsWith('unavailable')).toBe(true);
   });
 
-  // TestRunLimitsFromTheCore
+  // TestRunLimitsFromTheHub
   test("the core's limits bound run_with_env's command", async () => {
     const fc = await core(() => ({ ok: true, values: { K: 'v' }, run: { timeout: 1, max_timeout: 2, max_output: 50 } }));
     const c = client({ dial: dialSocket(fc.path) });
@@ -208,7 +208,7 @@ describe('the MCP server', () => {
     expect(t.text).toContain('timed out after 2s');
   });
 
-  // TestCancelledRequestLeavesTheCore: a call the client cancels while it
+  // TestCancelledRequestLeavesTheHub: a call the client cancels while it
   // waits for the user's approval ends: its request to the core goes away
   // (the core takes it as a denial) and it gets no response.
   test('a cancelled call leaves the core and gets no response', async () => {

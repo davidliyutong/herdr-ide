@@ -3,13 +3,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { APP_HOST, APP_ORIGIN } from './origin';
-import { forCore, serveApp, type HandlingSession } from './protocol';
+import { forHub, serveApp, type HandlingSession } from './protocol';
 
 test("only the app's origin is the core's", () => {
   for (const url of [`${APP_ORIGIN}/`, `${APP_ORIGIN}/api/m/local/files?x=1`, `https://${APP_HOST.toUpperCase()}/x`])
-    assert.ok(forCore(url), url);
+    assert.ok(forHub(url), url);
   for (const url of [`http://${APP_HOST}/`, `https://${APP_HOST}:8443/`, `https://x.${APP_HOST}/`, 'https://example.com/', 'nope'])
-    assert.equal(forCore(url), false, url);
+    assert.equal(forHub(url), false, url);
 });
 
 test("the session's https handler: the app's origin to the core, the rest passed through", async () => {
@@ -27,10 +27,10 @@ test("the session's https handler: the app's origin to the core, the rest passed
       return new Response('network');
     },
   };
-  const toCore: Array<[string, string | undefined]> = [];
+  const toHub: Array<[string, string | undefined]> = [];
   serveApp(ses, {
     request: async (req, origin) => {
-      toCore.push([req.url, origin]);
+      toHub.push([req.url, origin]);
       return new Response('core');
     },
   });
@@ -41,7 +41,7 @@ test("the session's https handler: the app's origin to the core, the rest passed
   for (const o of [APP_ORIGIN, 'null', 'https://example.com', 'http://localhost:3000'])
     assert.equal(await (await handler!(made(`${APP_ORIGIN}/api/config`, o))).text(), 'core');
   assert.equal(await (await handler!(made('https://open-vsx.org/api', APP_ORIGIN))).text(), 'network');
-  assert.deepEqual(toCore, [
+  assert.deepEqual(toHub, [
     [`${APP_ORIGIN}/index.html`, undefined],
     [`${APP_ORIGIN}/api/config`, APP_ORIGIN],
     [`${APP_ORIGIN}/api/config`, 'null'],

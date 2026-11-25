@@ -17,7 +17,7 @@ import type { Machines } from './machines/manager.ts';
 import { closeStream, type AgentStream } from './machines/transport/session.ts';
 import { Pages } from './pages.ts';
 
-export interface CoreOptions {
+export interface HubOptions {
   guard: Guard;
   audit: Audit;
   readOnly: boolean;
@@ -29,7 +29,7 @@ export interface CoreOptions {
   features: readonly FeatureDef[];
 }
 
-export interface Core {
+export interface Hub {
   readonly http: Http;
   readonly pages: Pages;
   readonly machines: Machines;
@@ -74,7 +74,7 @@ function checkOverlaps(mounts: ReadonlyArray<{ feature: FeatureDef; prefix: stri
         );
 }
 
-export function createCore(o: CoreOptions): Core {
+export function createHub(o: HubOptions): Hub {
   const http = new Http({
     guard: o.guard,
     audit: o.audit,

@@ -14,7 +14,7 @@ import { ChunkReader, Op, writeLine, type Header, type Reply } from '#shared/pro
 import { channelPair, type Channel, type Message } from '#kernel/channel.ts';
 import { coreModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
-import { createCore, type Core } from '#kernel/hub.ts';
+import { createHub, type Hub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
 import type { Peer } from '#kernel/http/env.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
@@ -211,7 +211,7 @@ export function codeServerAgent(st: AgentState) {
   };
 }
 
-export interface VSCodeCoreOptions extends VSCodeOptions {
+export interface VSCodeHubOptions extends VSCodeOptions {
   readOnly?: boolean;
   specs?: Spec[];
   /** The switches: plugins.vscode.enabled (desktop) and .browser. */
@@ -220,8 +220,8 @@ export interface VSCodeCoreOptions extends VSCodeOptions {
   agent?: AgentState;
 }
 
-export interface VSCodeCore {
-  core: Core;
+export interface VSCodeHub {
+  core: Hub;
   settings: Settings;
   machines: Machines;
   audit: ReturnType<typeof memoryAudit>;
@@ -249,7 +249,7 @@ export interface VSCodeCore {
   stop(): Promise<void>;
 }
 
-export async function vscodeCore(o: VSCodeCoreOptions = {}): Promise<VSCodeCore> {
+export async function vscodeHub(o: VSCodeHubOptions = {}): Promise<VSCodeHub> {
   const dir = mkdtempSync(join(tmpdir(), 'vsc-'));
   const cs = fakeCodeServer(dir);
   const agent = o.agent ?? { ...agentState(cs.path), installed: true };
@@ -262,7 +262,7 @@ export async function vscodeCore(o: VSCodeCoreOptions = {}): Promise<VSCodeCore>
   settings.set('plugins.vscode.enabled', '', o.desktopOn ?? true);
   settings.set('plugins.vscode.browser', '', o.browserOn ?? true);
   const audit = memoryAudit();
-  const core = createCore({
+  const core = createHub({
     guard: new Guard(),
     audit: audit.audit,
     readOnly: o.readOnly ?? false,
@@ -271,9 +271,9 @@ export async function vscodeCore(o: VSCodeCoreOptions = {}): Promise<VSCodeCore>
     settings,
     features,
   });
-  const stopCore = running(core);
+  const stopHub = running(core);
   for (const m of machines.list()) if (m.state().enabled) await waitFor(`${m.id} ready`, () => m.ready);
-  const request: VSCodeCore['request'] = (method, path, r = {}) => {
+  const request: VSCodeHub['request'] = (method, path, r = {}) => {
     const headers = new Headers(r.headers);
     headers.set('Host', '127.0.0.1:7780');
     const req = new Request(`http://127.0.0.1:7780${path}`, { method, headers, body: r.body, signal: r.signal });
@@ -321,7 +321,7 @@ export async function vscodeCore(o: VSCodeCoreOptions = {}): Promise<VSCodeCore>
       return { res, ch, got, closed: () => closed };
     },
     async stop() {
-      await stopCore();
+      await stopHub();
       cs.stop();
       rmSync(dir, { recursive: true, force: true });
     },

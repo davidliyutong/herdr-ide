@@ -22,7 +22,7 @@ Verify, don't assume:
   allowlist in `backend/features/terminals/allowlist.ts` (`READ_METHODS`,
   `WRITE_METHODS`) and the calls of `backend/features/agents/machine/detect.ts`
   (`terminal.read`, foreground processes).
-- Experiment only in an isolated session: a dev core (`make dev-core`,
+- Experiment only in an isolated session: a dev core (`make dev-hub`,
   instance `dev`, terminal core session `veldr-dev-<host id>`, socket
   `hc.sock` in its runtime directory, `/run/user/<uid>/veldr-dev-<hash>`
   or `~/.veldr-dev/run-<host id>`) or the integration tests' sessions

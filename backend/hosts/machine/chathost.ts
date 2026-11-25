@@ -16,14 +16,14 @@
 // starts it as a hidden terminal of the instance's terminal core
 // (features/chat/machine.ts).
 import { parseArgs } from 'node:util';
-import { CORE_BIN, SLUG } from '#shared/lib/brand.ts';
+import { HUB_BIN, SLUG } from '#shared/lib/brand.ts';
 import { chatSpec } from '#shared/agents/kinds.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { RunningError, serveHost } from '#features/chat/machine/host/host.ts';
 import { LogFile, teeLogger } from '#features/chat/machine/host/log.ts';
 import { chatAdapters } from './features.ts';
 
-const USAGE = `usage: ${CORE_BIN} chat-host --base DIR --run DIR\n`;
+const USAGE = `usage: ${HUB_BIN} chat-host --base DIR --run DIR\n`;
 
 /** The signals the terminal core ends a terminal's program with. */
 const SIGNALS = ['SIGHUP', 'SIGTERM', 'SIGINT'] as const;
@@ -56,7 +56,7 @@ export async function chatHostCommand(argv: string[]): Promise<number> {
   } catch (e) {
     logErr = e as Error;
   }
-  const logger = teeLogger(`${CORE_BIN} chat-host: `, (t) => process.stderr.write(t), ...(log ? [(t: string) => log.write(t)] : []));
+  const logger = teeLogger(`${HUB_BIN} chat-host: `, (t) => process.stderr.write(t), ...(log ? [(t: string) => log.write(t)] : []));
   if (logErr) logger(`no log file: ${logErr.message}`);
   let code = 0;
   try {

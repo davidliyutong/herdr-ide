@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { BRIDGE_EXT, CORE_BIN } from '#shared/lib/brand.ts';
+import { BRIDGE_EXT, HUB_BIN } from '#shared/lib/brand.ts';
 import { dirFiles, layered, payloads, type Files } from './payloads.ts';
 
 const dirs: string[] = [];
@@ -89,7 +89,7 @@ test('the machine side: the release recorded, the own executable carried, every 
         Buffer.from(JSON.stringify({ version: 'v1.2.3', key: 'linux-amd64', release: 'https://releases.example/download/v1.2.3' })),
       ],
       ['machine/hc.json', Buffer.from(JSON.stringify({ 'linux-amd64': 'c'.repeat(64) }))],
-      [`machine/${CORE_BIN}-linux-amd64.gz`, gzipSync(own)],
+      [`machine/${HUB_BIN}-linux-amd64.gz`, gzipSync(own)],
     ]),
   );
   const p = payloads({ files, machineCache: temp() });
@@ -97,9 +97,9 @@ test('the machine side: the release recorded, the own executable carried, every 
   expect(await p.embeddedHC('linux', 'arm64')).toBeNull();
   const b = await p.machine({ os: 'linux', arch: 'amd64', libc: 'glibc' });
   if (b.kind !== 'ts') throw new Error('not the TypeScript build');
-  expect(b.url).toBe(`https://releases.example/download/v1.2.3/${CORE_BIN}-linux-amd64.tar.gz`);
+  expect(b.url).toBe(`https://releases.example/download/v1.2.3/${HUB_BIN}-linux-amd64.tar.gz`);
   const m = await p.machine({ os: 'linux', arch: 'amd64', libc: 'musl' });
-  expect(m.kind === 'ts' && m.url).toBe(`https://releases.example/download/v1.2.3/${CORE_BIN}-linux-amd64-musl.tar.gz`);
+  expect(m.kind === 'ts' && m.url).toBe(`https://releases.example/download/v1.2.3/${HUB_BIN}-linux-amd64-musl.tar.gz`);
   await expect(p.machine({ os: 'linux', arch: 'riscv64' })).rejects.toThrow(/^platform_unsupported/);
   // A build that records no release has no machine build to give.
   await expect(payloads({ files: mapFiles(new Map()) }).machine({ os: 'linux', arch: 'amd64' })).rejects.toThrow(/^build_unavailable/);

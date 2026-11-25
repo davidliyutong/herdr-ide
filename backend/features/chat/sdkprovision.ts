@@ -134,7 +134,7 @@ export async function readRegular(p: string, max: number): Promise<Buffer | null
 }
 
 /** The core's tarball and where it came from. */
-interface CoreTarball {
+interface HubTarball {
   bytes: Buffer;
   source: Exclude<SdkSource, 'machine' | 'none'>;
 }
@@ -169,7 +169,7 @@ export class SdkProvision {
   /** The core's tarball, loaded once for every machine that waits for it;
    * a failure is tried again, and a load that does not settle within
    * loadMs is dropped. */
-  private load: Promise<CoreTarball> | null = null;
+  private load: Promise<HubTarball> | null = null;
 
   constructor(o: SdkProvisionOptions) {
     this.o = o;
@@ -258,7 +258,7 @@ export class SdkProvision {
         ? 'the core is offline: the machine did not download it'
         : `the machine could not download it: ${redactURLs(res.error ?? 'no reason')}`,
     );
-    let tarball: CoreTarball;
+    let tarball: HubTarball;
     try {
       tarball = await this.tarball(reasons, signal);
     } catch (e) {
@@ -298,12 +298,12 @@ export class SdkProvision {
 
   /** The tarball as the core has it: from a seed directory, its cache or
    * its own download, checked against the pinned integrity. */
-  tarball(reasons: string[] = [], signal?: AbortSignal): Promise<CoreTarball> {
+  tarball(reasons: string[] = [], signal?: AbortSignal): Promise<HubTarball> {
     if (!this.load) {
       // Shared: no one machine's signal ends it, its own bound does.
       const p = this.resolve(reasons);
       const ms = this.o.loadMs ?? (this.o.downloadMs ?? DOWNLOAD_MS) + 60_000;
-      const bounded = new Promise<CoreTarball>((resolve, reject) => {
+      const bounded = new Promise<HubTarball>((resolve, reject) => {
         const timer = setTimeout(
           () => reject(new NoTarball(`the core's own copy was not ready within ${Math.round(ms / 1000)} s`, 'none')),
           ms,
@@ -323,7 +323,7 @@ export class SdkProvision {
     ]);
   }
 
-  private async resolve(reasons: string[]): Promise<CoreTarball> {
+  private async resolve(reasons: string[]): Promise<HubTarball> {
     const t = this.pin;
     const check = (b: Buffer) => {
       const why = integrityRefusal(t, sha512(b));

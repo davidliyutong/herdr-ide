@@ -4,16 +4,16 @@
 import { afterEach, expect, test } from 'bun:test';
 import { Reader } from '#shared/lib/streamio.ts';
 import { Op } from '#shared/proto/agentproto/index.ts';
-import { checkGuarded, sleep, waitFor, type TestCore } from '#kernel/testing.ts';
+import { checkGuarded, sleep, waitFor, type TestHub } from '#kernel/testing.ts';
 import { INSTALL, PATH } from './settings.ts';
-import { vscodeCore, type VSCodeCore, type VSCodeCoreOptions } from './testdata/hub.ts';
+import { vscodeHub, type VSCodeHub, type VSCodeHubOptions } from './testdata/hub.ts';
 
-const cores: VSCodeCore[] = [];
+const cores: VSCodeHub[] = [];
 afterEach(async () => {
   for (const c of cores.splice(0)) await c.stop();
 });
-const newCore = async (o: VSCodeCoreOptions = {}) => {
-  const vc = await vscodeCore(o);
+const newHub = async (o: VSCodeHubOptions = {}) => {
+  const vc = await vscodeHub(o);
   cores.push(vc);
   return vc;
 };
@@ -21,7 +21,7 @@ const newCore = async (o: VSCodeCoreOptions = {}) => {
 const errorOf = async (res: Response) => ((await res.clone().json()) as { error: string }).error;
 
 /** Waits until code-server is ready on the local machine for a client. */
-async function ready(vc: VSCodeCore, desktop = false): Promise<void> {
+async function ready(vc: VSCodeHub, desktop = false): Promise<void> {
   expect((await vc.request('POST', '/api/m/local/code/start', { desktop })).status).toBe(202);
   await waitFor('ready', () => vc.agent.headers.some((h) => h.action === 'start'));
   for (let i = 0; i < 400; i++) {
@@ -35,7 +35,7 @@ async function ready(vc: VSCodeCore, desktop = false): Promise<void> {
 // VS Code's routes answer plugin_disabled to a client whose switch is off;
 // stopping code-server never does.
 test("routes follow their client's switch", async () => {
-  const vc = await newCore({ desktopOn: false, browserOn: false });
+  const vc = await newHub({ desktopOn: false, browserOn: false });
   const paths: Array<[string, string]> = [
     ['GET', '/api/m/nope/code/status'],
     ['POST', '/api/m/nope/code/start'],
@@ -66,15 +66,15 @@ test("routes follow their client's switch", async () => {
 // that changes something but stopping code-server (it frees resources)
 // and the redirect to the proxy.
 test('guards', async () => {
-  const rw = await newCore();
-  const ro = await newCore({ readOnly: true });
-  const asTestCore = (vc: VSCodeCore) =>
+  const rw = await newHub();
+  const ro = await newHub({ readOnly: true });
+  const asTestHub = (vc: VSCodeHub) =>
     ({
       core: vc.core,
       request: (method: string, path: string, o: { origin?: string; body?: string } = {}) =>
         vc.request(method, path, { body: o.body, headers: o.origin ? { Origin: o.origin } : {} }),
-    }) as unknown as TestCore;
-  const { problems, checked } = await checkGuarded(asTestCore(rw), asTestCore(ro), {
+    }) as unknown as TestHub;
+  const { problems, checked } = await checkGuarded(asTestHub(rw), asTestHub(ro), {
     machine: 'local',
     readOnlyAllowed: ['POST /api/m/:id/code/stop', 'ALL /m/:id/code'],
   });
@@ -97,7 +97,7 @@ test('guards', async () => {
 // Turning a client's switch off ends its WebSockets and requests; the
 // other client's stay.
 test('a switch turned off ends its work', async () => {
-  const vc = await newCore();
+  const vc = await newHub();
   await ready(vc);
   const browser = await vc.websocket('/m/local/code/stable');
   const desktop = await vc.websocket('/m/local/code/stable', { desktop: true });
@@ -120,7 +120,7 @@ test('a switch turned off ends its work', async () => {
 // A proxied request and a bridge command in flight follow their client's
 // switch too: turned off, both end at once, the other client's go on.
 test('a switch turned off ends its requests and bridge commands in flight', async () => {
-  const vc = await newCore();
+  const vc = await newHub();
   await ready(vc);
   const w = await vc.agents[0].open({ op: Op.Bridge });
   const r = new Reader(w.stream);
@@ -147,7 +147,7 @@ test('a switch turned off ends its requests and bridge commands in flight', asyn
 // Off for every client, preparing code-server ends; off for one, it goes
 // on.
 test('preparations end with the last switch', async () => {
-  const vc = await newCore();
+  const vc = await newHub();
   let release!: () => void;
   vc.agent.hold = new Promise<void>((r) => (release = r));
   expect((await vc.request('POST', '/api/m/local/code/start')).status).toBe(202);
@@ -172,7 +172,7 @@ test('preparations end with the last switch', async () => {
 });
 
 test('the install mode is the machine setting', async () => {
-  const vc = await newCore();
+  const vc = await newHub();
   vc.agent.existing = true;
   vc.settings.set(INSTALL, 'local', 'existing');
   await ready(vc);
@@ -188,7 +188,7 @@ test('the install mode is the machine setting', async () => {
 });
 
 test('bridge commands', async () => {
-  const vc = await newCore({ timing: { bridgeWindowMs: 500, bridgeGraceMs: 50, bridgePollMs: 10 } });
+  const vc = await newHub({ timing: { bridgeWindowMs: 500, bridgeGraceMs: 50, bridgePollMs: 10 } });
   // No window: code-server is prepared, then the command fails with the
   // text the UI shows.
   const none = await vc.request('POST', '/api/m/local/bridge', { body: JSON.stringify({ cmd: 'gitGraph', repo: '/srv', folder: '/srv' }) });
@@ -220,7 +220,7 @@ test('bridge commands', async () => {
 // A code-server without connections or requests for --code-server-idle
 // is released; an open WebSocket keeps it.
 test('idle code-servers are released', async () => {
-  const vc = await newCore({ idle: 150, timing: { idleCheckMs: 30 } });
+  const vc = await newHub({ idle: 150, timing: { idleCheckMs: 30 } });
   await ready(vc);
   const ws = await vc.websocket('/m/local/code/stable');
   await sleep(400);
@@ -235,7 +235,7 @@ test('idle code-servers are released', async () => {
 // The browsers' WebSocket channel holds code-server back while it is
 // behind: code-server's stream is not read until the channel drains.
 test('backpressure', async () => {
-  const vc = await newCore();
+  const vc = await newHub();
   await ready(vc);
   // Behind until drained once.
   let behind = true;

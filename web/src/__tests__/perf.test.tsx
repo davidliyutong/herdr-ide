@@ -46,13 +46,13 @@ describe('performance', () => {
   it('turns two samples of the core into its share of a processor, not across a restart', async () => {
     const first = await sample();
     expect(first.core?.memory).toBe(64 * 1024 * 1024);
-    expect(first.coreCpu).toBeUndefined();
+    expect(first.hubCpu).toBeUndefined();
     answer = core(1500, 12_000);
     const second = await sample({ ...first, at: performance.now() - 2000 });
-    expect(Math.round(second.coreCpu!)).toBe(25);
+    expect(Math.round(second.hubCpu!)).toBe(25);
     // The core started again: its counters did, too.
     answer = core(20, 300);
-    expect((await sample(second)).coreCpu).toBeUndefined();
+    expect((await sample(second)).hubCpu).toBeUndefined();
     // An answer that is not a usage is none.
     answer = { cpu_ms: 'much' };
     expect((await sample()).core).toBeUndefined();

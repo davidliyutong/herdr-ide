@@ -5,7 +5,7 @@ import { channelPair, type Message } from './channel.ts';
 import { defineFeature, type FeatureContext } from './feature.ts';
 import { Fail } from './fail.ts';
 import { jsonBody } from './http/app.ts';
-import { agentDialer, localSpec, running, sleep, sshSpec, testCore, testMachines, waitFor } from './testing.ts';
+import { agentDialer, localSpec, running, sleep, sshSpec, testHub, testMachines, waitFor } from './testing.ts';
 
 const stops: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -34,7 +34,7 @@ describe('features', () => {
   // other features under the same prefix are not affected. A feature that
   // is always on has no switch.
   test('the switch of a feature reaches its routes only', async () => {
-    const t = testCore({
+    const t = testHub({
       features: [apiFeature('a'), apiFeature('b', { toggle: false }), apiFeature('c'), apiFeature('d', { toggle: 'custom.d' })],
       settings: { 'plugins.a.enabled': false, 'plugins.c.enabled': true, 'custom.d': true },
     });
@@ -94,7 +94,7 @@ describe('features', () => {
     ];
     for (const [, setup, want] of cases) {
       const a = defineFeature({ id: 'a', setup });
-      expect(() => testCore({ features: [a, b] })).toThrow(want);
+      expect(() => testHub({ features: [a, b] })).toThrow(want);
     }
     // Other methods, other paths and the features' own prefixes are fine.
     const seen: string[] = [];
@@ -110,7 +110,7 @@ describe('features', () => {
         ctx.api.get('/x', (c) => c.text('x'));
       },
     });
-    const t = testCore({ features: [a, b], settings: { 'plugins.a.enabled': false } });
+    const t = testHub({ features: [a, b], settings: { 'plugins.a.enabled': false } });
     expect((await t.request('GET', '/api/b')).status).toBe(200);
     expect((await t.request('GET', '/api/p/a/x')).status).toBe(404);
     t.settings['plugins.a.enabled'] = true;
@@ -122,7 +122,7 @@ describe('features', () => {
   // A feature whose content runs on the UI's origin has a switch of its own
   // for browsers; the desktop app's windows use its toggle.
   test('browserRisk', async () => {
-    const t = testCore({
+    const t = testHub({
       features: [apiFeature('vs', { browserRisk: true })],
       settings: { 'plugins.vs.enabled': true, 'plugins.vs.browser': false },
     });
@@ -136,7 +136,7 @@ describe('features', () => {
 
   test('enabledFor', () => {
     let ctx!: FeatureContext;
-    const t = testCore({
+    const t = testHub({
       features: [defineFeature({ id: 'vs', browserRisk: true, setup: (c) => void (ctx = c) })],
       settings: { 'plugins.vs.enabled': true },
     });
@@ -148,7 +148,7 @@ describe('features', () => {
   // Two features may not serve the same agent op.
   test('agent ops are served once', () => {
     const f = (id: string) => defineFeature({ id, setup: (ctx) => ctx.agentStream('x.op', () => {}) });
-    expect(() => testCore({ features: [f('a'), f('b')] })).toThrow('agent op x.op is served by a already');
+    expect(() => testHub({ features: [f('a'), f('b')] })).toThrow('agent op x.op is served by a already');
   });
 });
 
@@ -179,7 +179,7 @@ describe('mutating routes', () => {
     });
 
   test('audit records', async () => {
-    const t = testCore({ features: [feature({ audit: 'stuff' })], settings: { 'plugins.thing.enabled': true } });
+    const t = testHub({ features: [feature({ audit: 'stuff' })], settings: { 'plugins.thing.enabled': true } });
     const put = (v: string) => t.request('PUT', '/api/m/local/things/n1', { body: v });
     expect((await put('{"v":1}')).status).toBe(200);
     expect((await put('{"v":0}')).status).toBe(200);
@@ -209,7 +209,7 @@ describe('mutating routes', () => {
   // A feature that is always on has no plugin field; its id is the prefix
   // without an audit prefix of its own.
   test('a feature that is always on', async () => {
-    const t = testCore({ features: [feature({ toggle: false })] });
+    const t = testHub({ features: [feature({ toggle: false })] });
     expect((await t.request('PUT', '/api/m/local/things/n1', { body: '{"v":1}' })).status).toBe(200);
     const { time: _, ...rec } = t.audit.records()[0];
     expect(rec).toEqual({ remote: '127.0.0.1', event: 'thing.put', machine: 'local', name: 'n1', v: 1, status: 200 });
@@ -218,7 +218,7 @@ describe('mutating routes', () => {
   // In read-only mode both refuse, before the body is read, and nothing is
   // audited.
   test('read-only', async () => {
-    const t = testCore({ features: [feature({})], settings: { 'plugins.thing.enabled': true }, readOnly: true });
+    const t = testHub({ features: [feature({})], settings: { 'plugins.thing.enabled': true }, readOnly: true });
     expect(await json(await t.request('PUT', '/api/m/local/things/n1', { body: '{' }))).toEqual([
       403,
       { error: 'read_only', message: 'read-only mode' },
@@ -229,7 +229,7 @@ describe('mutating routes', () => {
 
   // Who did it: the proxy's X-Forwarded-For and the user a proxy names.
   test('who', async () => {
-    const t = testCore({ features: [feature({ toggle: false })] });
+    const t = testHub({ features: [feature({ toggle: false })] });
     await t.request('PUT', '/api/m/local/things/n1', {
       body: '{"v":1}',
       headers: { 'X-Forwarded-For': '10.1.1.1', 'Remote-User': 'ann' },
@@ -256,7 +256,7 @@ describe('agent streams', () => {
     });
     const dial = agentDialer();
     const machines = testMachines([sshSpec('x')], { dial });
-    const t = testCore({ features: [f], machines, settings: { 'plugins.vault.enabled': true } });
+    const t = testHub({ features: [f], machines, settings: { 'plugins.vault.enabled': true } });
     stops.push(running(t.core.machines));
     await waitFor('ready', () => machines.get('x')!.ready);
     const agent = dial.agents[0];
@@ -297,7 +297,7 @@ describe('the rest of the context', () => {
         });
       },
     });
-    const t = testCore({ features: [f], machines: testMachines([localSpec()]) });
+    const t = testHub({ features: [f], machines: testMachines([localSpec()]) });
     const { a, b } = channelPair();
     const received: Message[] = [];
     a.adopt((ch) => t.core.pages.connect(ch, { client: 'browser', readOnly: false, who: {} }));
@@ -323,13 +323,13 @@ describe('the rest of the context', () => {
 
 describe('/ws', () => {
   test('needs an upgrade', async () => {
-    const t = testCore({ features: [] });
+    const t = testHub({ features: [] });
     const res = await t.request('GET', '/ws');
     expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([426, 'upgrade_required']);
   });
 
   test('adopts the channel as a page, compressed, with the client and read-only mode', async () => {
-    const t = testCore({ features: [], readOnly: true });
+    const t = testHub({ features: [], readOnly: true });
     const { a, b } = channelPair();
     const got: unknown[] = [];
     b.adopt(() => ({ message: (m) => void got.push(JSON.parse(m as string)) }));

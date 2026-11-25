@@ -107,7 +107,7 @@ test('two cores show a program window: one controls it, the other views it until
     expect(await clicks()).toBe(2);
 
     // The controller's core gone, the first core controls again.
-    await second.stopCore(false);
+    await second.stopHub(false);
     await expect(banner(a)).toHaveCount(0, { timeout: 30_000 });
     await click(a);
     await waitFor(async () => (await clicks()) === 3, { what: 'the click after the controller left' });

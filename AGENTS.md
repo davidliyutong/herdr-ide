@@ -52,7 +52,7 @@ node still running on a machine
 | Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
 | macOS: build the `.app` and install it into `/Applications` | `make desktop-install` |
 | Isolated desktop development | `make dev-desktop` |
-| Run for development: the core from its sources (`bun`, instance `dev`, the payloads of `dist/payload`, where it stages this host's executable, built into `dist/dev` with the herdr-core it fetches once into `dist/machines-hc`) and Vite | `make dev-core` and `make dev-web` |
+| Run for development: the core from its sources (`bun`, instance `dev`, the payloads of `dist/payload`, where it stages this host's executable, built into `dist/dev` with the herdr-core it fetches once into `dist/machines-hc`) and Vite | `make dev-hub` and `make dev-web` |
 
 ## Tests: fast and slow, by area
 
@@ -230,7 +230,7 @@ playbooks):
   scrolls a program on the alternate screen, which every viewer sees.
 - `web/dist` is embedded into the core's executable when it is built
   (`backend/scripts/build.ts --web`); `make build` builds the UI first, and
-  `make dev-core` serves `web/dist` as it is (`--web-dir`).
+  `make dev-hub` serves `web/dist` as it is (`--web-dir`).
 - Adding an npm dependency of `backend/` changes
   `THIRD_PARTY_NOTICES.md`; run `scripts/notices.sh`.
 - Files many changes touch are laid out so that parallel branches merge:

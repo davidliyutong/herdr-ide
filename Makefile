@@ -6,7 +6,7 @@ SLUG := $(shell sed -n "s/^export const SLUG = '\(.*\)';$$/\1/p" backend/shared/
 HOST_PLATFORM := $(shell scripts/platform.sh)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test test-slow check tokens vt-wasm gpupick gui-helper it e2e dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test test-slow check tokens vt-wasm gpupick gui-helper it e2e dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
@@ -88,14 +88,14 @@ e2e:
 # this host's TypeScript executable, built into dist/dev with the pinned
 # herdr-core (fetched once into dist/machines-hc) and staged in
 # dist/payload/machine as the desktop app carries it.
-dev-core:
+dev-hub:
 	@test -f dist/machines-hc/hc-$(HOST_PLATFORM).gz || bun backend/scripts/fetch-hc.ts --out dist/machines-hc $(subst -,/,$(HOST_PLATFORM))
 	bun backend/scripts/build.ts --out dist/dev/$(SLUG)-$(HOST_PLATFORM) --hc dist/machines-hc --payload-out dist/payload
 	gzip -1 -c dist/dev/$(SLUG)-$(HOST_PLATFORM) > dist/payload/machine/$(SLUG)-$(HOST_PLATFORM).gz
 	bun backend/hosts/bun/main.ts --instance dev --local-only --listen $(DEV_LISTEN) --web-dir web/dist
 
 dev-web:
-	$(shell echo $(SLUG) | tr 'a-z-' 'A-Z_')_CORE=http://$(DEV_LISTEN) pnpm -C web dev
+	$(shell echo $(SLUG) | tr 'a-z-' 'A-Z_')_HUB=http://$(DEV_LISTEN) pnpm -C web dev
 
 desktop-app:
 	scripts/desktop.sh app

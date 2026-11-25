@@ -11,10 +11,10 @@ import { sleep, TEST_INFO, waitFor } from '#kernel/testing.ts';
 import { offline } from '#kernel/fail.ts';
 import { statStatus } from './hub.ts';
 import { serveFile, TransferFail } from './serve.ts';
-import { filesCore, testPage, type FilesCore } from './testdata/hub.ts';
+import { filesHub, testPage, type FilesHub } from './testdata/hub.ts';
 
 let dir: string;
-let fc: FilesCore;
+let fc: FilesHub;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'files-transfers-'));
@@ -29,7 +29,7 @@ beforeAll(async () => {
   writeFileSync(join(dir, 'bigdir', 'big.bin'), '');
   truncateSync(join(dir, 'bigdir', 'big.bin'), 64 << 20);
   mkdirSync(join(dir, 'uploads'));
-  fc = await filesCore({ info: { ...TEST_INFO, upload_dir: join(dir, 'uploads') } });
+  fc = await filesHub({ info: { ...TEST_INFO, upload_dir: join(dir, 'uploads') } });
 });
 
 afterAll(async () => {
@@ -116,7 +116,7 @@ describe('download', () => {
   });
 
   test('read-only mode downloads, as it shows files', async () => {
-    const ro = await filesCore({ readOnly: true });
+    const ro = await filesHub({ readOnly: true });
     try {
       const res = await fetch(`${ro.url}/api/m/local/download?${query({ path: at('proj/a.txt') })}`);
       expect([res.status, await res.text()]).toEqual([200, 'alpha']);
@@ -257,7 +257,7 @@ describe('upload', () => {
   });
 
   test('refused in read-only mode', async () => {
-    const ro = await filesCore({ readOnly: true });
+    const ro = await filesHub({ readOnly: true });
     try {
       const res = await fetch(`${ro.url}/api/m/local/upload?${query({ name: 'x', dir: at('up') })}`, { method: 'POST', body: 'x' });
       expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([403, 'read_only']);

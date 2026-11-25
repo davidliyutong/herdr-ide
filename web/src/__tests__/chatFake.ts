@@ -12,7 +12,7 @@ export class FakeChatSocket implements Socket {
   onmessage: ((ev: { data: unknown }) => void) | null = null;
   closed = false;
 
-  constructor(private readonly core: FakeChatCore) {}
+  constructor(private readonly core: FakeChatHub) {}
 
   send(data: string) {
     this.core.received(this, JSON.parse(data));
@@ -27,7 +27,7 @@ export class FakeChatSocket implements Socket {
   }
 }
 
-export class FakeChatCore {
+export class FakeChatHub {
   readonly sockets: FakeChatSocket[] = [];
   /** Every message of the page, in order. */
   readonly sent: Array<Record<string, unknown>> = [];

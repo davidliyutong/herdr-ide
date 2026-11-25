@@ -16,11 +16,11 @@ import {
   type ChannelClient,
   type ChannelControl,
   type ChannelHead,
-  type CoreStart,
-  type FromCore,
+  type HubStart,
+  type FromHub,
   type Port,
   type RequestHead,
-  type ToCore,
+  type ToHub,
 } from '../../backend/hosts/electron/bridge';
 import { APP_SLUG } from '../../web/src/brand';
 import type { MessageKey } from '../../web/src/i18n/en';
@@ -43,7 +43,7 @@ export class DesktopError extends Error {
 /** The instance of a run: `desktop`, or in development `dev` or the one
  * <prefix>DESKTOP_DEV names (`1` is `dev`), so that a smoke test can run
  * beside a development instance in use; never `desktop` itself. */
-export function coreInstance(dev: boolean, devValue: string | undefined): string {
+export function hubInstance(dev: boolean, devValue: string | undefined): string {
   if (!dev) return 'desktop';
   if (!devValue || devValue === '1') return 'dev';
   if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(devValue) || devValue === 'desktop') throw new DesktopError('desktop.badInstance', devValue);
@@ -66,7 +66,7 @@ export function verifyKey(random: (n: number) => Buffer = randomBytes): string {
   return random(32).toString('hex');
 }
 
-export function coreEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform): NodeJS.ProcessEnv {
+export function hubEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform): NodeJS.ProcessEnv {
   // The core takes the user's proxy (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) for
   // its own fetch itself (backend/shared/lib/proxy.ts): nothing is added
   // here that the programs it starts would inherit.
@@ -90,8 +90,8 @@ export function coreEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform
 }
 
 /** The utility process as the host uses it (Electron's UtilityProcess). */
-export interface CoreChild {
-  postMessage(message: ToCore, transfer?: unknown[]): void;
+export interface HubChild {
+  postMessage(message: ToHub, transfer?: unknown[]): void;
   on(event: 'message', fn: (message: unknown) => void): unknown;
   on(event: 'exit', fn: (code: number) => void): unknown;
   kill(): boolean;
@@ -99,17 +99,17 @@ export interface CoreChild {
 }
 
 /** What the host needs of Electron (a test gives worker_threads'). */
-export interface CoreSpawner {
-  fork(): CoreChild;
+export interface HubSpawner {
+  fork(): HubChild;
   /** A new MessageChannel: the ends as they are sent, and the bridge's
    * view of one. */
   pair(): [unknown, unknown];
   port(end: unknown): Port;
 }
 
-export interface CoreHostOptions {
-  spawner: CoreSpawner;
-  start: CoreStart;
+export interface HubHostOptions {
+  spawner: HubSpawner;
+  start: HubStart;
   /** The core keeps crashing: it is not started again. */
   lost(error: DesktopError): void;
   /** How long a start may take. */
@@ -122,14 +122,14 @@ export interface CoreHostOptions {
   now?: () => number;
 }
 
-const isFromCore = (m: unknown): m is FromCore => typeof m === 'object' && m !== null && typeof (m as { t?: unknown }).t === 'string';
+const isFromHub = (m: unknown): m is FromHub => typeof m === 'object' && m !== null && typeof (m as { t?: unknown }).t === 'string';
 
 /** The core in its utility process. */
-export class CoreHost {
-  private child?: CoreChild;
+export class HubHost {
+  private child?: HubChild;
   /** The processes that exited. */
-  private readonly ended = new WeakSet<CoreChild>();
-  private ready: Promise<void> = Promise.reject(new DesktopError('desktop.coreExited'));
+  private readonly ended = new WeakSet<HubChild>();
+  private ready: Promise<void> = Promise.reject(new DesktopError('desktop.hubExited'));
   private started = false;
   private stopping = false;
   private gone = false;
@@ -137,7 +137,7 @@ export class CoreHost {
   private crashes: number[] = [];
   private stderr = '';
 
-  constructor(private readonly o: CoreHostOptions) {
+  constructor(private readonly o: HubHostOptions) {
     this.ready.catch(() => {});
   }
 
@@ -164,20 +164,20 @@ export class CoreHost {
     });
     const ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new DesktopError('desktop.coreTimeout'));
+        reject(new DesktopError('desktop.hubTimeout'));
         // Its exit restarts it, or fails the first start.
         child.kill();
       }, this.o.startMs ?? 30_000);
       child.on('message', (m) => {
-        if (!isFromCore(m)) return;
+        if (!isFromHub(m)) return;
         clearTimeout(timer);
         if (m.t === 'ready') resolve();
-        else if (m.t === 'failed') reject(new DesktopError('desktop.coreFailed', m.message));
+        else if (m.t === 'failed') reject(new DesktopError('desktop.hubFailed', m.message));
       });
       child.on('exit', (code) => {
         this.ended.add(child);
         clearTimeout(timer);
-        reject(new DesktopError('desktop.coreExited', String(code)));
+        reject(new DesktopError('desktop.hubExited', String(code)));
         this.exited(child, code);
       });
     });
@@ -189,7 +189,7 @@ export class CoreHost {
 
   /** A crash after the core served: started again, unless it crashed
    * maxRestarts times within the window. */
-  private exited(child: CoreChild, code: number): void {
+  private exited(child: HubChild, code: number): void {
     if (child !== this.child || this.stopping || !this.started) return;
     const now = (this.o.now ?? Date.now)();
     const window = this.o.restartWindowMs ?? 60_000;
@@ -198,7 +198,7 @@ export class CoreHost {
     if (this.crashes.length > (this.o.maxRestarts ?? 3)) {
       this.gone = true;
       this.child = undefined;
-      this.o.lost(new DesktopError('desktop.coreLost', String(code)));
+      this.o.lost(new DesktopError('desktop.hubLost', String(code)));
       return;
     }
     this.o.log?.(`core exited (${code}); starting it again\n`);
@@ -206,10 +206,10 @@ export class CoreHost {
   }
 
   /** Waits until the core serves (also through a restart). */
-  private async serving(): Promise<CoreChild> {
+  private async serving(): Promise<HubChild> {
     const deadline = (this.o.now ?? Date.now)() + (this.o.startMs ?? 30_000) * 2;
     for (;;) {
-      if (this.stopping || this.gone) throw new DesktopError('desktop.coreLost');
+      if (this.stopping || this.gone) throw new DesktopError('desktop.hubLost');
       const r = this.ready;
       try {
         await r;
@@ -228,7 +228,7 @@ export class CoreHost {
    * browser or the shell started; it is the Origin the core sees, in place
    * of any the request carries. */
   async request(req: Request, origin?: string): Promise<Response> {
-    let child: CoreChild;
+    let child: HubChild;
     try {
       child = await this.serving();
     } catch {
@@ -258,7 +258,7 @@ export class CoreHost {
   /** Hands the core one end of a channel (the other is a frame's): once it
    * serves, or the end is told the channel failed. */
   async connect(head: ChannelHead, end: unknown): Promise<void> {
-    let child: CoreChild;
+    let child: HubChild;
     try {
       child = await this.serving();
     } catch {

@@ -17,7 +17,7 @@ import {
   serveChannel,
   serveRequest,
   WINDOW,
-  type CoreChannel,
+  type HubChannel,
   type RequestHead,
   type Upgrade,
 } from '../../backend/hosts/electron/bridge';
@@ -202,7 +202,7 @@ function channel(behave: (req: Request, upgrade: Upgrade) => Promise<Response>) 
 
 /** A core whose channel echoes and records. */
 function echo() {
-  const seen = { ch: undefined as CoreChannel | undefined, closes: [] as Array<[number, string]>, drains: 0, origin: '' };
+  const seen = { ch: undefined as HubChannel | undefined, closes: [] as Array<[number, string]>, drains: 0, origin: '' };
   const behave = async (req: Request, upgrade: Upgrade) => {
     seen.origin = req.headers.get('origin') ?? '';
     return upgrade((ch) => {

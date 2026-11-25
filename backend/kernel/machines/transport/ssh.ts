@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { Duplex, PassThrough } from 'node:stream';
 import { execa } from 'execa';
-import { AGENT_DIR, CORE_BIN, NAME } from '#shared/lib/brand.ts';
+import { AGENT_DIR, HUB_BIN, NAME } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { UNSET_FOREIGN_RUNTIME_VARS } from '#shared/lib/bunenv.ts';
 import {
@@ -446,8 +446,8 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
   const d = await b.digests({ ...(signal ? { signal } : {}), ...(allowed ? { tunnel: sshTunnel(o) } : {}) });
   const version = tsVersion(d.exe);
   const dir = `$HOME/${AGENT_DIR}/${version}`;
-  const there = await run(o, `[ -x "${dir}/${CORE_BIN}" ] && echo @build; true`, { timeoutMs: 30_000, signal });
-  if (/^@build$/m.test(there)) return `${dir}/${CORE_BIN}`;
+  const there = await run(o, `[ -x "${dir}/${HUB_BIN}" ] && echo @build; true`, { timeoutMs: 30_000, signal });
+  if (/^@build$/m.test(there)) return `${dir}/${HUB_BIN}`;
   const confirmed = (out: string) => out.split('\n').includes(`@sha256=${d.exe}`);
   const archive = d.archive ? { digest: d.archive, member: archiveMember(b.key) } : undefined;
   const canDownload = !!(b.url && archive && allowed);
@@ -456,7 +456,7 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
     o.logger(`ssh ${o.target}: the machine downloads its build ${version} (${platform.os}/${platform.arch}) from ${b.url}`);
     let out: string;
     try {
-      out = await run(o, `${installScript({ dir, name: CORE_BIN, exe: d.exe, archive: archive!, url: b.url! })}\n${PRUNE}`, {
+      out = await run(o, `${installScript({ dir, name: HUB_BIN, exe: d.exe, archive: archive!, url: b.url! })}\n${PRUNE}`, {
         timeoutMs: (machineDownloadLimitS + UNPACK_LIMIT_S + 60) * 1000,
         signal,
       });
@@ -478,14 +478,14 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
     return false;
   };
   const remembered = canDownload && !!o.downloadFailures?.recent(o.target);
-  if (canDownload && !remembered && (await download())) return `${dir}/${CORE_BIN}`;
+  if (canDownload && !remembered && (await download())) return `${dir}/${HUB_BIN}`;
   if (remembered) o.logger(`ssh ${o.target}: the machine's own download failed within the last day; the core uploads its build`);
   let p: TSPayload;
   try {
     p = await b.load(d, signal);
   } catch (e) {
     // Nothing to upload: the machine is asked again after all.
-    if (remembered && deployCode(e) === DeployCode.BuildUnavailable && (await download())) return `${dir}/${CORE_BIN}`;
+    if (remembered && deployCode(e) === DeployCode.BuildUnavailable && (await download())) return `${dir}/${HUB_BIN}`;
     throw e;
   }
   o.logger(
@@ -495,7 +495,7 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
   try {
     out = await run(
       o,
-      `${installScript({ dir, name: CORE_BIN, exe: d.exe, ...(p.kind === 'archive' && archive ? { archive } : {}) })}\n${PRUNE}`,
+      `${installScript({ dir, name: HUB_BIN, exe: d.exe, ...(p.kind === 'archive' && archive ? { archive } : {}) })}\n${PRUNE}`,
       {
         stdin: p.bytes,
         timeoutMs: 10 * 60_000,
@@ -506,7 +506,7 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
     throw new Error(`upload the machine build ${version}: ${(e as Error).message}`);
   }
   if (!confirmed(out)) throw new Error(`upload the machine build ${version}: the machine did not confirm its sha256`);
-  return `${dir}/${CORE_BIN}`;
+  return `${dir}/${HUB_BIN}`;
 }
 
 /** Probes the remote platform, uploads the matching machine build if

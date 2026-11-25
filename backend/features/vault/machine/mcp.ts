@@ -23,7 +23,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { NAME, SLUG } from '#shared/lib/brand.ts';
 import { Reader, writeLine } from '#shared/lib/streamio.ts';
 import { VERSION, VaultTool, type VaultRequest, type VaultResponse } from '#shared/proto/agentproto/index.ts';
-import { runWithEnv, withCore, type RunLimits } from './run.ts';
+import { runWithEnv, withHub, type RunLimits } from './run.ts';
 
 /** The server's name in MCP (serverInfo) and the name the setup guide gives
  * it in the CLIs' configurations. */
@@ -180,7 +180,7 @@ export async function callTool(o: McpOptions, name: string, args: unknown, signa
         const cwd = (a.cwd as string | undefined) ?? '';
         const resp = await ask(o, { tool: VaultTool.Env, names: names as string[], cwd }, signal);
         const ran = await runWithEnv(a.command, resp.values ?? {}, cwd, ((a.timeout as number | undefined) ?? 0) * 1000, {
-          limits: withCore(o.limits ?? {}, resp.run),
+          limits: withHub(o.limits ?? {}, resp.run),
           signal,
           waitDelayMs: o.waitDelayMs,
         });

@@ -6,7 +6,7 @@
 // streams with fetch.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ACK_BYTES, ABNORMAL, serveChannel, type CoreChannel, type Port, type Upgrade } from '../../../backend/hosts/electron/bridge';
+import { ACK_BYTES, ABNORMAL, serveChannel, type HubChannel, type Port, type Upgrade } from '../../../backend/hosts/electron/bridge';
 import { CHANNEL_PORT } from '../shell';
 import { installPortSocket } from '../lib/portSocket';
 
@@ -55,7 +55,7 @@ function desktop(behave: Behavior) {
 
 /** A core that echoes on its channel and records what it sees. */
 function echoing() {
-  const seen = { closes: [] as Array<[number, string]>, channel: undefined as CoreChannel | undefined, messages: [] as unknown[] };
+  const seen = { closes: [] as Array<[number, string]>, channel: undefined as HubChannel | undefined, messages: [] as unknown[] };
   const behave: Behavior = async (req, upgrade) => {
     if (new URL(req.url).pathname === '/nothing') return Response.json({ error: 'not_found' }, { status: 404 });
     return upgrade((ch) => {

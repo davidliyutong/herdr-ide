@@ -83,7 +83,7 @@ module.exports = {
     { from: '../LICENSE', to: 'LICENSE' },
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     { from: '../web/dist/licenses.md', to: 'licenses.md' },
-    // What the core carries (src/platform.ts coreResources).
+    // What the core carries (src/platform.ts hubResources).
     {
       from: '../dist/payload',
       to: 'payload',

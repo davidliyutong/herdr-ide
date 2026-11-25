@@ -16,15 +16,15 @@ import { liveKey, resetChats, useChats } from '../plugins/chat/state';
 import { MAX_CLIENT_MESSAGE, MAX_SUBS, MAX_SUBS_PER_MACHINE } from '../plugins/chat/protocol';
 import type { ChatEvent, SourceEvent } from '../conversation/model';
 import { useStore } from '../state/store';
-import { FakeChatCore } from './chatFake';
+import { FakeChatHub } from './chatFake';
 
 const A = 'c0000000000000001';
 const B = 'c0000000000000002';
 const chatId = (n: number) => `c${n.toString(16).padStart(16, '0')}`;
 
-let core: FakeChatCore;
+let core: FakeChatHub;
 beforeEach(() => {
-  core = new FakeChatCore();
+  core = new FakeChatHub();
   core.install();
   useStore.getState().setReadOnly(false);
   resetChats();

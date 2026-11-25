@@ -2,7 +2,7 @@
 // in the executable at build time (`bun build --compile … payload.tar`,
 // found among Bun.embeddedFiles), laid out as payloads() reads it; the
 // development flags --agent-dir, --ext-dir and --web-dir come first. A
-// development run from the sources (`make dev-core`) has no archive and
+// development run from the sources (`make dev-hub`) has no archive and
 // reads what scripts/build.sh staged in the repository's dist/payload.
 import { openSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

@@ -31,24 +31,24 @@ import { channels } from './bridge';
 import { closeGuard, isCloseAnswer, parseUnsaved, type CloseGuard } from './closeGuard';
 import {
   channelHead,
-  CoreHost,
-  coreEnv,
-  coreInstance,
+  HubHost,
+  hubEnv,
+  hubInstance,
   DesktopError,
   ENV_PREFIX,
   isChannelId,
   nodeInstance,
   verifyKey,
-  type CoreChild,
-  type CoreSpawner,
+  type HubChild,
+  type HubSpawner,
 } from './hub';
 import { enclaveFor, helperPath, helperRunner, runBounded } from './enclave';
 import { FolderQueue } from './folders';
-import { followCore, type ShellSettings } from './follow';
+import { followHub, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
 import { createNotifications } from './notifications';
 import { APP_ORIGIN } from './origin';
-import { APP_ID, coreResources, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
+import { APP_ID, hubResources, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
 import {
   allowGuestPermission,
   allowPermission,
@@ -82,7 +82,7 @@ const dev = !app.isPackaged || !!devValue;
 // The core's instance; a name refused is reported once the app is ready.
 let instance: string | DesktopError;
 try {
-  instance = coreInstance(dev, devValue);
+  instance = hubInstance(dev, devValue);
 } catch (error) {
   instance = error as DesktopError;
 }
@@ -98,7 +98,7 @@ if (!app.commandLine.hasSwitch('user-data-dir')) {
 const leadingArgs = process.defaultApp ? 2 : 1;
 
 // The core, once the app is ready (hub.ts).
-let core: CoreHost | undefined;
+let core: HubHost | undefined;
 let mainWindow: BrowserWindow | undefined;
 // The main window's page asks about unsaved changes before it closes.
 let guard: CloseGuard | undefined;
@@ -665,29 +665,29 @@ if (!app.requestSingleInstanceLock()) {
       // message, and to nothing else.
       const key = verifyKey();
       const home = app.getPath('home');
-      const resources = coreResources(app.isPackaged ? process.resourcesPath : undefined, join(app.getAppPath(), '..'));
+      const resources = hubResources(app.isPackaged ? process.resourcesPath : undefined, join(app.getAppPath(), '..'));
       // Development only: the payloads, machine builds and code-server
       // seed of a test run (the desktop smoke test).
       const devPath = (name: string) => (dev ? process.env[`${ENV_PREFIX}${name}`] || undefined : undefined);
       const seed = devPath('SEED_DIR');
-      const spawner: CoreSpawner = {
+      const spawner: HubSpawner = {
         fork: () =>
           utilityProcess.fork(join(__dirname, 'core.mjs'), [], {
             serviceName: `${APP_NAME} core`,
             stdio: ['ignore', 'ignore', 'pipe'],
-            env: coreEnv(process.env, home, platform),
+            env: hubEnv(process.env, home, platform),
             cwd: home,
             // macOS: node-pty's native library, which library validation
             // would refuse in an app signed ad hoc (no team).
             allowLoadingUnsignedLibraries: platform === 'darwin',
-          }) as unknown as CoreChild,
+          }) as unknown as HubChild,
         pair: () => {
           const { port1, port2 } = new MessageChannelMain();
           return [port1, port2];
         },
         port: (end) => electronPort(end as ElectronPort),
       };
-      const host = new CoreHost({
+      const host = new HubHost({
         spawner,
         start: {
           instance,
@@ -740,7 +740,7 @@ if (!app.requestSingleInstanceLock()) {
       const guests = session.fromPartition(BROWSER_PARTITION);
       guests.setPermissionRequestHandler((_contents, permission, callback) => callback(allowGuestPermission(permission)));
       guests.setPermissionCheckHandler((_contents, permission) => allowGuestPermission(permission));
-      stopFollowing = followCore(host, keys, { bindings: applyBindings, settings: applySettings });
+      stopFollowing = followHub(host, keys, { bindings: applyBindings, settings: applySettings });
       createWindow();
     })
     .catch(fail);

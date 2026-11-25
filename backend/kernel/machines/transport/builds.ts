@@ -10,7 +10,7 @@
 //
 // where the Go program of earlier releases kept its own: a node of this
 // build takes over from one of those (docs/features/42-typescript-backend.md).
-import { CORE_BIN } from '#shared/lib/brand.ts';
+import { HUB_BIN } from '#shared/lib/brand.ts';
 import type { OpenStream } from './tunnel.ts';
 
 /** A machine as the probe found it. */
@@ -86,10 +86,10 @@ export function keyOfTarget(target: string): string {
 }
 
 /** A platform's release archive, and the executable in it. */
-export const archiveName = (key: string): string => `${CORE_BIN}-${key}.tar.gz`;
-export const archiveMember = (key: string): string => `${CORE_BIN}-${key}/${CORE_BIN}`;
+export const archiveName = (key: string): string => `${HUB_BIN}-${key}.tar.gz`;
+export const archiveMember = (key: string): string => `${HUB_BIN}-${key}/${HUB_BIN}`;
 /** A platform's executable in a directory of builds (--agent-dir). */
-export const bareName = (key: string): string => `${CORE_BIN}-${key}`;
+export const bareName = (key: string): string => `${HUB_BIN}-${key}`;
 
 /** The directory of a TypeScript build on a machine. */
 export const tsVersion = (exe: string): string => exe.slice(0, 16);

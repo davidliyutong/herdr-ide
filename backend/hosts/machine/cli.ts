@@ -7,7 +7,7 @@
 // A machine runs them from the executable the core deployed
 // (~/.<slug>/agent/<version>/<slug>), the same program as the core's.
 import { parseArgs } from 'node:util';
-import { CORE_BIN } from '#shared/lib/brand.ts';
+import { HUB_BIN } from '#shared/lib/brand.ts';
 import { dirsFor } from '#shared/host/hostdirs.ts';
 import { stderrLogger } from '#shared/lib/log.ts';
 import { dialNode, stopNodes } from '#machine/dial.ts';
@@ -16,7 +16,7 @@ import { runNode } from '#machine/node.ts';
 import { buildFile, compiled } from '#machine/self.ts';
 import { machineFeatures } from './features.ts';
 
-const USAGE = `usage: ${CORE_BIN} node [dial | stop] [--instance NAME] [--client ID] [--takeover] [--terminal-core]\n`;
+const USAGE = `usage: ${HUB_BIN} node [dial | stop] [--instance NAME] [--client ID] [--takeover] [--terminal-core]\n`;
 
 /** `node [dial | stop] …`: argv after `node`; the exit status. */
 export async function nodeCommand(argv: string[]): Promise<number> {
@@ -40,7 +40,7 @@ export async function nodeCommand(argv: string[]): Promise<number> {
     return 2;
   }
   const instance = flags.instance ?? '';
-  const logger = stderrLogger(`${CORE_BIN} node: `);
+  const logger = stderrLogger(`${HUB_BIN} node: `);
   switch (sub) {
     case 'dial':
       return dial(instance, flags.client ?? '', logger);

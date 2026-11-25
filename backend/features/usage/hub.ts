@@ -27,7 +27,7 @@ import { readBody } from '#kernel/http/app.ts';
 import type { Ctx } from '#kernel/http/env.ts';
 import { usageProtocol } from './protocol.ts';
 import { settings } from './settings.ts';
-import { coreDBFile, Store } from './store.ts';
+import { hubDBFile, Store } from './store.ts';
 import { Usage, type UsageDeps } from './usage.ts';
 
 /** The session reads a machine serves at once: each holds a stream of its
@@ -74,7 +74,7 @@ export const usageFeature = (o: UsageOptions = {}) =>
         enabled: () => ctx.enabledFor('desktop') || ctx.enabledFor('browser'),
         broadcast: (s) => ctx.broadcast(s),
         log: ctx.logger,
-        store: new Store(coreDBFile(ctx.settings.path), ctx.logger),
+        store: new Store(hubDBFile(ctx.settings.path), ctx.logger),
         now: o.now,
         tickMs: o.tickMs,
         status: o.status,

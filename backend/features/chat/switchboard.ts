@@ -21,7 +21,7 @@ import { ChatPage } from './page.ts';
 import { hostSettings } from './settings.ts';
 import type { Limits, Timing } from './timing.ts';
 import { Watcher } from './watch.ts';
-import { CoreCode, type StatesData } from './wire.ts';
+import { HubCode, type StatesData } from './wire.ts';
 
 export interface SwitchboardOptions {
   machines: Machines;
@@ -80,7 +80,7 @@ export class ChatSwitchboard {
       enabled: o.enabled,
       broadcast: o.broadcast,
       publishAgent: o.publishAgent,
-      turnedOff: () => this.closePages(CoreCode.PluginDisabled),
+      turnedOff: () => this.closePages(HubCode.PluginDisabled),
       version: o.version,
       now: o.now,
       logger: o.logger,

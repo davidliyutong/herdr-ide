@@ -177,17 +177,17 @@ export class Instance {
 
   private async stopOnce() {
     if (this.shares) {
-      await this.stopCore(false);
+      await this.stopHub(false);
       return;
     }
-    await this.stopCore();
+    await this.stopHub();
     await this.h.remove();
   }
 
   /** Stops the local terminal core (unless terminalCore is false) and the
    * core, keeping the home directory (what a test checks after the core is
    * gone). */
-  async stopCore(terminalCore = true) {
+  async stopHub(terminalCore = true) {
     if (terminalCore && this.baseURL && this.proc?.exitCode === null) {
       try {
         await this.api('POST', '/api/m/local/hc/stop');

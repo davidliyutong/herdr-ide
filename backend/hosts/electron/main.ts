@@ -2,15 +2,15 @@
 // utilityProcess, which the app's main process forks and restarts after a
 // crash): the core of the app, served to the main process over
 // MessagePorts (serve.ts), without a listener.
-import { CORE_BIN } from '#shared/lib/brand.ts';
+import { HUB_BIN } from '#shared/lib/brand.ts';
 import { stderrLogger } from '#shared/lib/log.ts';
 import { useEnvProxy } from '#shared/lib/proxy.ts';
 import { electronPort, type ElectronPort } from './bridge.ts';
 import { nodePty } from './pty.ts';
 import { serveParent, type Parent } from './serve.ts';
-import { startCore } from './start.ts';
+import { startHub } from './start.ts';
 
-const logger = stderrLogger(`${CORE_BIN}: `);
+const logger = stderrLogger(`${HUB_BIN}: `);
 // The core's downloads through the user's proxy, in this process only.
 if (useEnvProxy()) logger('fetch goes through the proxy of HTTPS_PROXY and HTTP_PROXY (NO_PROXY and loopback excepted)');
 const parent = (process as unknown as { parentPort?: Parent<ElectronPort> }).parentPort;
@@ -19,7 +19,7 @@ if (!parent) {
   process.exit(2);
 }
 serveParent(parent, {
-  start: (s) => startCore(s, { logger, pty: nodePty }),
+  start: (s) => startHub(s, { logger, pty: nodePty }),
   port: electronPort,
   logger,
   exit: (code) => process.exit(code),

@@ -8,7 +8,7 @@ import { discard } from '#shared/lib/log.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { account, costReport, window, type Account, type CostParams, type CostReport, type LimitsParams } from './protocol.ts';
 import { settings } from './settings.ts';
-import { coreDBFile, Store } from './store.ts';
+import { hubDBFile, Store } from './store.ts';
 import { Usage, type Snapshot } from './usage.ts';
 
 const dirs: string[] = [];
@@ -81,7 +81,7 @@ export function testUsage(o: { ready?: string[]; dir?: string; known?: string[];
     enabled: () => true,
     broadcast: (s) => void sent.push(s),
     log: discard,
-    store: new Store(coreDBFile(st.path), discard),
+    store: new Store(hubDBFile(st.path), discard),
     now: () => clock.now,
     status: (url) => f.status(url),
   });
