@@ -61,7 +61,9 @@ hand-edited JSON files (keeping the user's formatting and comments),
 ssh-config reads the OpenSSH configuration, execa runs processes,
 @simplewebauthn/server verifies WebAuthn, yazl writes zip archives,
 node-pty gives the desktop's core a terminal for an ssh login, re2js runs
-the agent detection rules' regular expressions on machines (below). yamux
+the agent detection rules' regular expressions on machines (below), the
+official MCP SDK (`@modelcontextprotocol/server`) serves the vault's MCP
+server (below). yamux
 is the exception: the maintained implementation (`@chainsafe/libp2p-yamux`)
 is bound to libp2p's stream framework; ours is a few hundred lines over
 Node streams, tested against hashicorp/yamux.
@@ -205,9 +207,10 @@ Linux and macOS:
 
 It serves the machine sides of the terminals (the terminal core and hidden
 terminals), files, git, search, monitor, history, browser, AI usage,
-agents (detection and the agents' sessions) and VS Code features. The ops
-and plugins of the features it does not serve yet (chat, gui: `gui`) are
-refused as an unknown plugin is (`unknown_plugin`); the core
+agents (detection and the agents' sessions) and VS Code features, and the
+vault's MCP server (the `mcp` command, below). The ops and plugins of the
+features it does not serve yet (chat, gui: `gui`) are refused as an
+unknown plugin is (`unknown_plugin`); the core
 treats them as a machine without that feature. AI usage's `session`
 action finds a session's transcripts with the coding agents' sessions
 (`backend/machine/agents`), as the Go build's does
@@ -480,6 +483,33 @@ files feature's changes and saves go through `bun:ffi`, which is
 synchronous: each opens without blocking on a FIFO, but a change on a
 mount that stopped answering stalls the node until it answers; and the
 node needs its data directory (its log, the terminal history's database).
+
+The vault's MCP server ([30](30-variable-vault.md#machines)) is the
+`mcp` command of every TypeScript executable (`backend/hosts/machine/mcp.ts`,
+the server and its runner in `backend/features/vault/machine/`), also when
+the executable is started by the name of its link in a data directory's
+`bin` (`process.argv0`, which a compiled executable has as exec gave it;
+its `argv[0]` is `bun`); the node points that link at its own executable
+when it starts, as the Go agent does (`linkMCP`, `backend/machine/vault.ts`:
+the same script, byte for byte, so a node of either build leaves the
+other's in place). The protocol is the official MCP SDK's
+(`@modelcontextprotocol/server` 2.4.0, Apache-2.0, pinned; it depends on
+zod and its own core package only, and bundles ajv for the JSON Schema
+validation it offers, which THIRD_PARTY_NOTICES.md names): its stdio
+transport, the handshake and version negotiation, ping, "method not
+found", and `notifications/cancelled`, which aborts the call's signal and
+leaves the call unanswered. The tools are handlers of its low-level
+`Server` rather than its `McpServer`, whose zod schemas would change the
+tools' definitions and turn wrong arguments into a tool's error text; the
+Go server's definitions and refusals (-32602) are kept. A command runs as
+the Go server runs it (`sh -c`, a session of its own, the watcher on fd 3
+that kills the group once the server's end of the pipe closes, the output
+captured 64 KiB beyond its bound and masked by bytes); Node's spawn cannot
+ask for Linux's `Pdeathsig`, which the Go server adds, so the watcher alone
+ends a command of a server killed outright. What a client sees differently:
+a line that is no JSON gets no parse error, calls still running when stdin
+closes are not answered, and the newer revisions 2025-11-25 and 2024-10-07
+negotiate too.
 
 Which machine build a core deploys is a choice of its build
 (`backend/scripts/build.ts --machine go|ts`, `scripts/build.sh MACHINE=ts`;

@@ -9,7 +9,8 @@ default, or the machine side here (`machine/`, `hosts/machine`, the
 features' `machine.ts`) in a core built to deploy it
 (`scripts/build.ts --machine ts`), which serves the features whose machine
 side is here (terminals, files, git, search, monitor, history, browser,
-agents, AI usage, VS Code).
+agents, AI usage, VS Code) and the vault's MCP server (`mcp`, which every
+executable serves).
 Both speak the same wire protocols, and a node of either takes over from
 the other. It is not a translation of the Go packages: their layout is not
 kept.
@@ -18,13 +19,13 @@ kept.
 
 Each layer imports only from the layers above it in this list.
 
-| Directory   | Runs in      | What                                                                                                                                                                                                                                                                                                           |
-| ----------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds and Claude Code's transcripts (`agents/`)                                                                                                                           |
-| `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                                                                                                                                                             |
-| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core, the coding agents' sessions (`agents/`)                                                                                                                          |
-| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                                                                                                                                                                 |
-| `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process, served over MessagePorts; `machine/` the machine side's commands (`cli.ts`: `node`, run by `bun/main.ts`) and the features its node serves (`features.ts`) |
+| Directory   | Runs in      | What                                                                                                                                                                                                                                                                                                                            |
+| ----------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds and Claude Code's transcripts (`agents/`)                                                                                                                                            |
+| `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                                                                                                                                                                              |
+| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core, the coding agents' sessions (`agents/`)                                                                                                                                           |
+| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                                                                                                                                                                                  |
+| `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process, served over MessagePorts; `machine/` the machine side's commands (`cli.ts`: `node`; `mcp.ts`: `mcp`; run by `bun/main.ts`) and the features its node serves (`features.ts`) |
 
 `tsconfig.node.json` typechecks what runs in Node with Node's types only,
 so a Bun API there does not compile; `tsconfig.bun.json` typechecks the
