@@ -6,7 +6,7 @@ SLUG := $(shell sed -n "s/^export const SLUG = '\(.*\)';$$/\1/p" backend/shared/
 HOST_PLATFORM := $(shell scripts/platform.sh)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test test-slow check tokens vt-wasm gpupick gui-helper it e2e dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test test-extended check tokens vt-wasm gpupick gui-helper it e2e dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
@@ -26,10 +26,13 @@ test:
 	pnpm -C web test
 	pnpm -C desktop test
 
-# The hub's tests that wait on real time (backend/shared/testdata/slow.ts),
-# which make test skips.
-test-slow:
-	cd backend && SLOW_TESTS=1 bun test
+# The extended tests of every suite (backend/shared/testdata/extended.ts,
+# web/src/__tests__/extended.ts, desktop/src/extended.ts), which make test
+# skips: those that wait on real time, programs, compiles or large inputs.
+test-extended:
+	cd backend && EXTENDED_TESTS=1 bun test
+	EXTENDED_TESTS=1 pnpm -C web test
+	EXTENDED_TESTS=1 pnpm -C desktop test
 
 check:
 	scripts/check.sh

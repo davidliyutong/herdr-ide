@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
-import { slow } from '#shared/testdata/slow.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { Pick } from './pick.ts';
 
 const arch = process.arch === 'x64' ? 'amd64' : process.arch;
@@ -27,7 +27,7 @@ const SCRIPT = `r=$( (: < /dev/nvidia0) 2>&1 ); case "$r" in *"not permitted"*) 
 echo "$CUDA_VISIBLE_DEVICES|$GPUPICK_KEEP|$__GLX_VENDOR_LIBRARY_NAME|$r"`;
 
 // It runs programs with the library preloaded.
-(supported ? slow : test.skip)(
+(supported ? extended : test.skip)(
   'gpupick: installed, and a program sees the GPUs of its CUDA_VISIBLE_DEVICES',
   async () => {
     const home = mkdtempSync(join(tmpdir(), 'pick-'));

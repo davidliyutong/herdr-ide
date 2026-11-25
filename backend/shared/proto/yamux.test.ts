@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { INITIAL_WINDOW, Session, Stream } from './yamux.ts';
 import { Reader } from '#shared/lib/streamio.ts';
-import { slow } from '#shared/testdata/slow.ts';
+import { extended } from '#shared/testdata/extended.ts';
 
 // xorshift32: a pattern both ends compute.
 function* pattern(n: number, seed: number, size = 64 * 1024): Generator<Buffer> {
@@ -166,7 +166,7 @@ describe('TypeScript to TypeScript', () => {
   }, 10_000);
 
   // Some 150 MiB of patterns made and digested byte by byte.
-  slow(
+  extended(
     'echo, half-close, source',
     async () => {
       const [client, server] = await pair();
@@ -177,7 +177,7 @@ describe('TypeScript to TypeScript', () => {
     60_000,
   );
 
-  slow('a sender stops at the window until the reader reads', async () => {
+  extended('a sender stops at the window until the reader reads', async () => {
     const [client, server] = await pair();
     const s = await client.open();
     const accepted = await server.accept();

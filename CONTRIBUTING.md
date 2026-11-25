@@ -10,7 +10,7 @@ Requirements: Bun 1.4.5 (the hub, its machine side and the build's tools in `bac
 make deps            # pnpm install for web/, the extension, desktop/ (with Electron's binary), e2e/ and backend/
 make build           # web UI, extension, each platform's executable (hub and machine side, Bun); release archives
 make test            # hub, web and desktop unit tests
-make test-slow       # the hub's tests that wait on real time (CI runs them too)
+make test-extended   # every suite's extended tests: real time, programs, compiles (CI runs them too)
 make check           # formatting, vet, typecheck, import cycles of the web UI, brand/doc consistency
 ```
 

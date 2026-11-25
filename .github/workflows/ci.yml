@@ -39,12 +39,16 @@ jobs:
       # Types, formatting, brand, flags, endpoints, notices, generated
       # files, the terminal emulator's digest and the shared test vectors.
       - run: make check
-      # With the tests that wait on real time (make test-slow).
+      # Standard and extended tests (make test-extended).
       - run: pnpm -C backend test
         env:
-          SLOW_TESTS: 1
+          EXTENDED_TESTS: 1
       - run: pnpm -C web test
+        env:
+          EXTENDED_TESTS: 1
       - run: pnpm -C desktop test
+        env:
+          EXTENDED_TESTS: 1
 
   # The integration tests against a real terminal core: the pinned
   # herdr-core of backend/scripts/hcdist.ts, fetched and verified as the
@@ -139,10 +143,14 @@ jobs:
       - if: runner.os == 'macOS'
         run: pnpm -C backend install --frozen-lockfile && pnpm -C backend test
         env:
-          SLOW_TESTS: 1
+          EXTENDED_TESTS: 1
       - if: runner.os != 'Linux'
         run: pnpm -C web install --frozen-lockfile && pnpm -C web test
+        env:
+          EXTENDED_TESTS: 1
       - run: pnpm -C desktop install --frozen-lockfile && pnpm -C desktop test
+        env:
+          EXTENDED_TESTS: 1
       - run: scripts/desktop.sh app
 
   cross-compile:

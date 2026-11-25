@@ -23,7 +23,7 @@ import { duplexPair } from 'node:stream';
 import { join } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
 import { dirsOf, makeDirs } from '#shared/host/hostdirs.ts';
-import { slow } from '#shared/testdata/slow.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { discard } from '#shared/lib/log.ts';
 import { ChunkWriter, readLine, type Reply } from '#shared/proto/agentproto/index.ts';
 import { closeStream } from '#shared/proto/yamux.ts';
@@ -614,7 +614,7 @@ describe('uploads', () => {
 // The fake file managers are scripts the tests write, which macOS
 // assesses on their first run.
 describe('reveal', () => {
-  slow(
+  extended(
     'runs the file manager with the path, a folder or a file, and nothing for a path not there',
     async () => {
       const t = tempHome();
@@ -654,7 +654,7 @@ describe('reveal', () => {
     30_000,
   );
 
-  slow(
+  extended(
     'a failing command, a missing one, and more at once than allowed',
     async () => {
       const t = tempHome();

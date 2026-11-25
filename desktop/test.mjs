@@ -28,9 +28,12 @@ const tests = [
   'verify',
   'windowsHello',
 ];
+// One group at a time: pnpm test -- hub runs the files whose name holds hub.
+const filter = process.argv.slice(2);
+const selected = filter.length ? tests.filter((name) => filter.some((f) => name.includes(f))) : tests;
 try {
   await build({
-    entryPoints: tests.map((name) => `src/${name}.test.ts`),
+    entryPoints: selected.map((name) => `src/${name}.test.ts`),
     outdir: dir,
     bundle: true,
     // The preload's test runs it against a stand-in for Electron.
@@ -39,7 +42,7 @@ try {
     format: 'cjs',
     outExtension: { '.js': '.cjs' },
   });
-  const result = spawnSync(process.execPath, ['--test', ...tests.map((name) => join(dir, `${name}.test.cjs`))], { stdio: 'inherit' });
+  const result = spawnSync(process.execPath, ['--test', ...selected.map((name) => join(dir, `${name}.test.cjs`))], { stdio: 'inherit' });
   process.exitCode = result.status ?? 1;
 } finally {
   await rm(dir, { recursive: true, force: true });

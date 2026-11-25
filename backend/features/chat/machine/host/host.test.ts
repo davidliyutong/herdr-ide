@@ -7,7 +7,7 @@ import * as chat from '#shared/proto/chatproto/index.ts';
 import { hostFile, open } from '#shared/store/index.ts';
 import { DB_NAME, MIGRATIONS } from './journal.ts';
 import { Client, FAKE_KIND, TestHost, eventually, startHost, text } from './testing.ts';
-import { slow } from '#shared/testdata/slow.ts';
+import { extended } from '#shared/testdata/extended.ts';
 
 setDefaultTimeout(30_000);
 
@@ -656,7 +656,7 @@ describe('the chat host', () => {
   });
 
   // The worker is held as long as a statement of 30 million rows takes.
-  slow("a journal that waits holds the chats' stored events, not the host", async () => {
+  extended("a journal that waits holds the chats' stored events, not the host", async () => {
     const h = await host();
     const { chat: c, s } = await h.newChat();
     const a = await h.attach(c.id);

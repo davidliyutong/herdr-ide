@@ -13,7 +13,7 @@ import { Fail } from '#shared/lib/fail.ts';
 import { machineOf, rig, type Rig } from '#machine/testing.ts';
 import { monitorMachine, type MonitorOptions } from './machine.ts';
 import { monitorProtocol } from './protocol.ts';
-import { slow } from '#shared/testdata/slow.ts';
+import { extended } from '#shared/testdata/extended.ts';
 
 let r: Rig | undefined;
 afterEach(async () => {
@@ -66,7 +66,7 @@ const refusal = async (p: Promise<unknown>) => {
 
 describe('on this machine', () => {
   // It runs this machine's ps, top, sysctl… each bounded by cmdTimeoutMs.
-  slow(
+  extended(
     'metrics and processes as the hub reads them; the second sample has rates',
     async () => {
       const a = await start();

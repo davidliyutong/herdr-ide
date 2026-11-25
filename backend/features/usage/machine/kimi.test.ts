@@ -7,7 +7,7 @@
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, rmdirSync, statSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
-import { slow } from '#shared/testdata/slow.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { FakeAPI, jwt, removeHomes, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
 import type { Account, UsageEnv } from './env.ts';
 import { KIMI_CLIENT_ID, KIMI_CLI_VERSION, kimiHeaders, kimiVersion, lockKimi, rewrite } from './kimi.ts';
@@ -244,7 +244,7 @@ describe('the CLI’s lock', () => {
     expect(f.asked).toBe(1);
   });
 
-  slow('kept fresh while held, and not removed once another took it over', async () => {
+  extended('kept fresh while held, and not removed once another took it over', async () => {
     const home = tempHome();
     const e = testEnv(home);
     e.t = { ...e.t, kimiLockUpdateMs: 50 };
