@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { APP_DOMAIN, APP_SLUG } from '../../web/src/brand';
-import { APP_ID, coreBinary, reverseDomain, foldersOf, keyPlatform, quitsWithLastWindow } from './platform';
+import { APP_DOMAIN } from '../../web/src/brand';
+import { APP_ID, coreResources, reverseDomain, foldersOf, keyPlatform, quitsWithLastWindow } from './platform';
 
 test('the keybindings, the last window and the app id by platform', () => {
   assert.equal(keyPlatform('darwin'), 'mac');
@@ -17,12 +17,12 @@ test('the keybindings, the last window and the app id by platform', () => {
   assert.equal(APP_ID, `${reverseDomain(APP_DOMAIN)}.desktop`);
 });
 
-test("the core is the app's resource, or scripts/build.sh's in development", () => {
-  assert.equal(coreBinary('darwin', 'arm64', '/App/Resources', '/repo'), join('/App/Resources', 'bin', APP_SLUG));
-  assert.equal(coreBinary('win32', 'x64', 'C:/App/resources', '/repo'), join('C:/App/resources', 'bin', `${APP_SLUG}.exe`));
-  assert.equal(coreBinary('linux', 'x64', undefined, '/repo'), join('/repo', 'dist', `${APP_SLUG}-linux-amd64`));
-  assert.equal(coreBinary('win32', 'x64', undefined, '/repo'), join('/repo', 'dist', `${APP_SLUG}-windows-amd64.exe`));
-  assert.equal(coreBinary('darwin', 'arm64', undefined, '/repo'), join('/repo', 'dist', `${APP_SLUG}-darwin-arm64`));
+test("the core's payloads are the app's resources, or scripts/build.sh's and the web UI's build in development", () => {
+  assert.deepEqual(coreResources('/App/Resources', '/repo'), {
+    payload: join('/App/Resources', 'payload'),
+    web: join('/App/Resources', 'web'),
+  });
+  assert.deepEqual(coreResources(undefined, '/repo'), { payload: join('/repo', 'dist', 'payload'), web: join('/repo', 'web', 'dist') });
 });
 
 test(

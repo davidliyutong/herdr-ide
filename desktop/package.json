@@ -13,6 +13,9 @@
     "format": "prettier --write src build.mjs test.mjs electron-builder.cjs helper/build.mjs",
     "format:check": "prettier --check src build.mjs test.mjs electron-builder.cjs helper/build.mjs"
   },
+  "dependencies": {
+    "node-pty": "1.1.0"
+  },
   "devDependencies": {
     "@types/node": "26.6.6",
     "electron": "45.2.1",

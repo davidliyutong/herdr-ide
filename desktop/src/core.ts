@@ -1,14 +1,36 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+// The app's core runs in an Electron utility process
+// (backend/hosts/electron), which the main process starts, restarts when
+// it crashes (the windows stay) and stops when the app quits. Nothing
+// listens: the main process hands the core the requests of the app's
+// windows, which it intercepts at the app's origin (protocol.ts), and the
+// channels (WebSockets) it brokers between a frame and the core, over the
+// bridge of backend/hosts/electron/bridge.ts. The client is the desktop
+// app because the main process says so; the verify key of the system's
+// prompts goes to the core in its start message only.
 import { randomBytes } from 'node:crypto';
 import { posix } from 'node:path';
+import {
+  ABNORMAL,
+  channelClient,
+  request,
+  type ChannelClient,
+  type ChannelControl,
+  type ChannelHead,
+  type CoreStart,
+  type FromCore,
+  type Port,
+  type RequestHead,
+  type ToCore,
+} from '../../backend/hosts/electron/bridge';
 import { APP_SLUG } from '../../web/src/brand';
 import type { MessageKey } from '../../web/src/i18n/en';
+import { APP_HOST, APP_ORIGIN } from './origin';
 import type { Platform } from './platform';
 
 export const ENV_PREFIX = APP_SLUG.toUpperCase().replaceAll('-', '_') + '_';
 
 // A failure the launcher explains in the UI language; detail is technical
-// (an exit code, a port) and shown as is.
+// (an exit code, the core's message) and shown as is.
 export class DesktopError extends Error {
   constructor(
     readonly key: MessageKey,
@@ -16,11 +38,6 @@ export class DesktopError extends Error {
   ) {
     super(detail ? `${key} (${detail})` : key);
   }
-}
-
-export function corePort(port: string): number {
-  if (!/^\d+$/.test(port) || Number(port) > 65535) throw new DesktopError('desktop.badPort', port);
-  return Number(port);
 }
 
 /** The instance of a run: `desktop`, or in development `dev` or the one
@@ -41,70 +58,12 @@ export function nodeInstance(instance: string): string {
   return instance === 'desktop' ? '' : instance;
 }
 
-export function coreArgs(instance: string, port: number): string[] {
-  return [
-    'serve',
-    '--parent-stdio',
-    '--listen',
-    `127.0.0.1:${port}`,
-    '--instance',
-    instance,
-    `--node-instance=${nodeInstance(instance)}`,
-    ...(instance === 'desktop' ? [] : ['--local-only']),
-  ];
-}
-
-// The desktop app's token of a launch tells the core which requests are
-// its windows' (backend/hosts/bun/parent.ts): VS Code has a switch for the
-// desktop app and one for browsers, and the core applies the requesting
-// client's. The token goes to the core on stdin, the first line of
-// --parent-stdio (never in its environment, which terminals, agents and
-// code-server inherit), and to the app's own session as a cookie for the
-// core's origin, which every request of its windows then carries.
-
-/** The cookie's name; the core's DesktopCookie. */
-export const DESKTOP_COOKIE = `${APP_SLUG}-desktop`;
-
-/** A new token: 32 random bytes as hex, for one launch. */
-export function desktopToken(random: (n: number) => Buffer = randomBytes): string {
-  return random(32).toString('hex');
-}
-
 /** A new key for the system's prompts (verify.ts): 32 random bytes as hex,
- * for one launch. Unlike the token it is sent to the core only in the
- * hello and kept in the main process: never in a cookie, an environment
- * variable, an argument or a log. */
+ * for one launch (the core's restarts keep it). It goes to the core in the
+ * start message and is kept in the main process: never in a cookie, an
+ * environment variable, an argument or a log. */
 export function verifyKey(random: (n: number) => Buffer = randomBytes): string {
   return random(32).toString('hex');
-}
-
-/** The launcher's hello, the first line the core reads on stdin. */
-export function coreHello(token: string, verifyKey = ''): string {
-  return (
-    JSON.stringify({
-      ...(token && { desktop_token: token }),
-      ...(verifyKey && { verify_key: verifyKey }),
-    }) + '\n'
-  );
-}
-
-/** What Electron's cookies.set gets for the token: the core's origin only
- * (host-only: no domain; the whole site: path /), HttpOnly so that no
- * script of the page or of VS Code reads it, SameSite=Strict, and a
- * session cookie (no expiry), gone when the app quits. */
-export function desktopCookie(origin: string, token: string) {
-  const url = new URL(origin);
-  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.origin !== origin)
-    throw new DesktopError('desktop.coreBadReady', origin);
-  return {
-    url: `${origin}/`,
-    name: DESKTOP_COOKIE,
-    value: token,
-    path: '/',
-    secure: false,
-    httpOnly: true,
-    sameSite: 'strict' as const,
-  };
 }
 
 export function coreEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform): NodeJS.ProcessEnv {
@@ -127,117 +86,255 @@ export function coreEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform
   return { ...env, PATH: paths.filter(Boolean).join(posix.delimiter) };
 }
 
-export class CoreProcess {
-  private child?: ChildProcessWithoutNullStreams;
-  private stopped?: Promise<void>;
+/** The utility process as the host uses it (Electron's UtilityProcess). */
+export interface CoreChild {
+  postMessage(message: ToCore, transfer?: unknown[]): void;
+  on(event: 'message', fn: (message: unknown) => void): unknown;
+  on(event: 'exit', fn: (code: number) => void): unknown;
+  kill(): boolean;
+  readonly stderr: NodeJS.ReadableStream | null;
+}
+
+/** What the host needs of Electron (a test gives worker_threads'). */
+export interface CoreSpawner {
+  fork(): CoreChild;
+  /** A new MessageChannel: the ends as they are sent, and the bridge's
+   * view of one. */
+  pair(): [unknown, unknown];
+  port(end: unknown): Port;
+}
+
+export interface CoreHostOptions {
+  spawner: CoreSpawner;
+  start: CoreStart;
+  /** The core keeps crashing: it is not started again. */
+  lost(error: DesktopError): void;
+  /** How long a start may take. */
+  startMs?: number;
+  /** How many restarts within restartWindowMs before giving up. */
+  maxRestarts?: number;
+  restartWindowMs?: number;
+  /** Writes the core's log (the app's standard error). */
+  log?: (chunk: string) => void;
+  now?: () => number;
+}
+
+const isFromCore = (m: unknown): m is FromCore => typeof m === 'object' && m !== null && typeof (m as { t?: unknown }).t === 'string';
+
+/** The core in its utility process. */
+export class CoreHost {
+  private child?: CoreChild;
+  /** The processes that exited. */
+  private readonly ended = new WeakSet<CoreChild>();
+  private ready: Promise<void> = Promise.reject(new DesktopError('desktop.coreExited'));
+  private started = false;
   private stopping = false;
+  private gone = false;
+  private stopped?: Promise<void>;
+  private crashes: number[] = [];
   private stderr = '';
 
+  constructor(private readonly o: CoreHostOptions) {
+    this.ready.catch(() => {});
+  }
+
+  /** The end of the core's log, for the failure dialog. */
   get diagnostics(): string {
     return this.stderr;
   }
 
-  // port is the one passed in --listen; 0 accepts the port the core chose.
-  // token and verifyKey are the desktop app's of this launch, sent in the
-  // hello.
-  async start(
-    binary: string,
-    args: string[],
-    port: number,
-    env: NodeJS.ProcessEnv,
-    cwd: string,
-    onExit: () => void,
-    token = '',
-    verifyKey = '',
-  ): Promise<string> {
-    // windowsHide: the core is a console program, which would get a window.
-    const child = spawn(binary, args, { env, cwd, stdio: 'pipe', shell: false, windowsHide: true });
-    this.child = child;
-    child.stdin.on('error', () => {});
-    // The core reads the hello before it serves; stdin stays open (its
-    // end stops the core).
-    child.stdin.write(coreHello(token, verifyKey));
-    child.stderr.on('data', (data: Buffer) => {
-      this.stderr = (this.stderr + data.toString()).slice(-16_384);
-      process.stderr.write(data);
-    });
-    return new Promise((resolve, reject) => {
-      let ready = false;
-      let buffer = '';
-      const timer = setTimeout(() => reject(new DesktopError('desktop.coreTimeout')), 30_000);
-      const fail = (error: Error) => {
-        clearTimeout(timer);
-        reject(error);
-      };
-      // Permanent: an 'error' without a listener (e.g. a failed kill during
-      // stop) would crash the Electron main process.
-      child.on('error', (error) => {
-        if (ready) console.error(error);
-        else fail(error);
-      });
-      child.once('exit', (code, signal) => {
-        clearTimeout(timer);
-        if (!ready) reject(new DesktopError('desktop.coreExited', String(code ?? signal)));
-        else if (!this.stopping) onExit();
-      });
-      child.stdout.on('data', (data: Buffer) => {
-        if (ready) return;
-        buffer += data.toString();
-        if (buffer.length > 4096) {
-          fail(new DesktopError('desktop.coreBadReady'));
-          return;
-        }
-        const newline = buffer.indexOf('\n');
-        if (newline < 0) return;
-        let url: URL;
-        let event: unknown;
-        try {
-          const message = JSON.parse(buffer.slice(0, newline));
-          event = message.event;
-          url = new URL(message.url);
-        } catch {
-          fail(new DesktopError('desktop.coreBadReady'));
-          return;
-        }
-        if (
-          event !== 'ready' ||
-          url.protocol !== 'http:' ||
-          url.hostname !== '127.0.0.1' ||
-          url.username ||
-          url.password ||
-          url.pathname !== '/' ||
-          url.search ||
-          url.hash ||
-          (port !== 0 && Number(url.port || '80') !== port)
-        ) {
-          fail(new DesktopError('desktop.coreBadReady', url.origin));
-          return;
-        }
-        ready = true;
-        clearTimeout(timer);
-        resolve(url.origin);
-      });
+  /** Starts the core; resolves once it serves, rejects when it could not
+   * start (then it is not started again). */
+  start(): Promise<void> {
+    return this.launch().then(() => {
+      this.started = true;
     });
   }
 
-  /** Stops the core by closing its stdin (--parent-stdio), which works on
-   * every platform: Windows has no signal a process can clean up after
-   * (Node's kill terminates it there). The core allows 3 s for HTTP and 15 s
-   * for agents; only this owned child is killed if it has not ended within
-   * deadline ms, never the terminal cores. */
+  private launch(): Promise<void> {
+    const child = this.o.spawner.fork();
+    this.child = child;
+    child.stderr?.on('data', (data: Buffer | string) => {
+      const text = data.toString();
+      this.stderr = (this.stderr + text).slice(-16_384);
+      this.o.log?.(text);
+    });
+    const ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new DesktopError('desktop.coreTimeout'));
+        // Its exit restarts it, or fails the first start.
+        child.kill();
+      }, this.o.startMs ?? 30_000);
+      child.on('message', (m) => {
+        if (!isFromCore(m)) return;
+        clearTimeout(timer);
+        if (m.t === 'ready') resolve();
+        else if (m.t === 'failed') reject(new DesktopError('desktop.coreFailed', m.message));
+      });
+      child.on('exit', (code) => {
+        this.ended.add(child);
+        clearTimeout(timer);
+        reject(new DesktopError('desktop.coreExited', String(code)));
+        this.exited(child, code);
+      });
+    });
+    ready.catch(() => {});
+    this.ready = ready;
+    child.postMessage({ t: 'start', start: this.o.start });
+    return ready;
+  }
+
+  /** A crash after the core served: started again, unless it crashed
+   * maxRestarts times within the window. */
+  private exited(child: CoreChild, code: number): void {
+    if (child !== this.child || this.stopping || !this.started) return;
+    const now = (this.o.now ?? Date.now)();
+    const window = this.o.restartWindowMs ?? 60_000;
+    this.crashes = this.crashes.filter((t) => now - t < window);
+    this.crashes.push(now);
+    if (this.crashes.length > (this.o.maxRestarts ?? 3)) {
+      this.gone = true;
+      this.child = undefined;
+      this.o.lost(new DesktopError('desktop.coreLost', String(code)));
+      return;
+    }
+    this.o.log?.(`core exited (${code}); starting it again\n`);
+    void this.launch().catch(() => {});
+  }
+
+  /** Waits until the core serves (also through a restart). */
+  private async serving(): Promise<CoreChild> {
+    const deadline = (this.o.now ?? Date.now)() + (this.o.startMs ?? 30_000) * 2;
+    for (;;) {
+      if (this.stopping || this.gone) throw new DesktopError('desktop.coreLost');
+      const r = this.ready;
+      try {
+        await r;
+        if (this.child) return this.child;
+      } catch (e) {
+        if (this.ready === r && (this.o.now ?? Date.now)() > deadline) throw e;
+        // A restart is on its way: wait for it.
+        if (this.ready === r) await new Promise((ok) => setTimeout(ok, 50));
+      }
+    }
+  }
+
+  /** A request of the app (a window's, intercepted, or the shell's own):
+   * the core's response, or 503 while it cannot be reached. */
+  async request(req: Request): Promise<Response> {
+    let child: CoreChild;
+    try {
+      child = await this.serving();
+    } catch {
+      return Response.json({ error: 'unavailable', message: 'the core is not running' }, { status: 503 });
+    }
+    const headers: [string, string][] = [];
+    req.headers.forEach((v, k) => headers.push([k, v]));
+    if (!req.headers.has('host')) headers.push(['host', new URL(req.url).host]);
+    const head: RequestHead = { method: req.method, url: req.url, headers, body: req.body !== null };
+    const [ours, theirs] = this.o.spawner.pair();
+    try {
+      child.postMessage({ t: 'request', head }, [theirs]);
+      return await request(this.o.spawner.port(ours), head, req.body, req.signal);
+    } catch {
+      return Response.json({ error: 'unavailable', message: 'the core went away' }, { status: 502 });
+    }
+  }
+
+  /** The shell's own request of the core at path. */
+  fetch(path: string, init?: RequestInit): Promise<Response> {
+    return this.request(new Request(new URL(path, APP_ORIGIN), init));
+  }
+
+  /** Hands the core one end of a channel (the other is a frame's): once it
+   * serves, or the end is told the channel failed. */
+  async connect(head: ChannelHead, end: unknown): Promise<void> {
+    let child: CoreChild;
+    try {
+      child = await this.serving();
+    } catch {
+      const port = this.o.spawner.port(end);
+      port.post({ t: 'close', code: ABNORMAL, reason: 'the core is not running' } satisfies ChannelControl);
+      return;
+    }
+    try {
+      child.postMessage({ t: 'channel', head }, [end]);
+    } catch {
+      this.o.spawner.port(end).post({ t: 'close', code: ABNORMAL, reason: 'the core is not running' } satisfies ChannelControl);
+    }
+  }
+
+  /** The shell's own channel to the core at path. */
+  channel(path: string, on: Parameters<typeof channelClient>[1]): ChannelClient {
+    const [ours, theirs] = this.o.spawner.pair();
+    const client = channelClient(this.o.spawner.port(ours), on);
+    void this.connect(
+      {
+        url: new URL(path, APP_ORIGIN).href,
+        headers: [
+          ['host', APP_HOST],
+          ['upgrade', 'websocket'],
+          ['connection', 'Upgrade'],
+        ],
+      },
+      theirs,
+    );
+    return client;
+  }
+
+  /** Stops the core: it ends its machines' sessions (up to 15 s); only
+   * this owned process is killed if it has not ended within deadline ms,
+   * never the terminal cores. */
   stop(deadline = 20_000): Promise<void> {
     if (this.stopped) return this.stopped;
     this.stopping = true;
     const child = this.child;
-    if (!child || child.exitCode !== null || child.signalCode !== null || !child.pid) return Promise.resolve();
-    this.stopped = new Promise((resolve) => {
-      const force = setTimeout(() => child.kill('SIGKILL'), deadline);
-      child.once('exit', () => {
+    if (!child || this.ended.has(child)) return Promise.resolve();
+    this.stopped = new Promise<void>((resolve) => {
+      const force = setTimeout(() => child.kill(), deadline);
+      child.on('exit', () => {
         clearTimeout(force);
         resolve();
       });
-      child.stdin.end();
+      try {
+        child.postMessage({ t: 'stop' });
+      } catch {
+        child.kill();
+      }
     });
     return this.stopped;
   }
 }
+
+/** Why a frame's request for a channel is refused, or its head: the frame
+ * of the app's origin asks for a path of it, with WebSocket subprotocols.
+ * The main process builds the head from what it knows of the frame (its
+ * origin), not from what the page says. */
+export function channelHead(frameOrigin: string | undefined, path: unknown, protocols: unknown): ChannelHead | undefined {
+  if (frameOrigin !== APP_ORIGIN) return undefined;
+  if (typeof path !== 'string' || path.length > 8192 || !path.startsWith('/') || path.startsWith('//')) return undefined;
+  let url: URL;
+  try {
+    url = new URL(path, APP_ORIGIN);
+  } catch {
+    return undefined;
+  }
+  if (url.origin !== APP_ORIGIN) return undefined;
+  if (
+    !Array.isArray(protocols) ||
+    protocols.length > 16 ||
+    !protocols.every((p) => typeof p === 'string' && /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(p))
+  )
+    return undefined;
+  const headers: [string, string][] = [
+    ['host', APP_HOST],
+    ['origin', APP_ORIGIN],
+    ['upgrade', 'websocket'],
+    ['connection', 'Upgrade'],
+  ];
+  if (protocols.length) headers.push(['sec-websocket-protocol', protocols.join(', ')]);
+  return { url: url.href, headers };
+}
+
+/** A channel's id as the preload makes it. */
+export const isChannelId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(v);

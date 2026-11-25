@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import './fakeWindow';
 import type { DesktopShell, OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
 import { answers, exposed, invoked, onDisk, receive, sent } from './fakeElectron';
@@ -20,8 +21,8 @@ const common = [
   'verifyUser',
 ];
 
-test('the page gets only the desktopShell bridge, with these functions', () => {
-  assert.deepEqual(Object.keys(exposed), ['desktopShell']);
+test('the page gets its channels and the desktopShell bridge, with these functions', () => {
+  assert.deepEqual(Object.keys(exposed), ['desktopChannels', 'desktopShell']);
   assert.deepEqual(Object.keys(shell).sort(), process.platform === 'darwin' ? [...common, 'privacy', 'titlebar'].sort() : common);
   for (const platform of ['win32', 'linux']) assert.deepEqual(Object.keys(desktopShellFor(platform)).sort(), common);
 });

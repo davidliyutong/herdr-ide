@@ -4,6 +4,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  MessageChannelMain,
   nativeTheme,
   Notification,
   powerMonitor,
@@ -11,6 +12,7 @@ import {
   session,
   shell,
   systemPreferences,
+  utilityProcess,
   type BaseWindow,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
@@ -18,6 +20,7 @@ import {
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { ABNORMAL, electronPort, type ChannelControl, type ElectronPort } from '../../backend/hosts/electron/bridge';
 import registry from '../../spec/generated/registry.json';
 import tokens from '../../spec/tokens.json';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
@@ -27,27 +30,30 @@ import type { OpenedFolders } from '../../web/src/shell';
 import { channels } from './bridge';
 import { closeGuard, isCloseAnswer, parseUnsaved, type CloseGuard } from './closeGuard';
 import {
-  CoreProcess,
-  coreArgs,
+  channelHead,
+  CoreHost,
   coreEnv,
   coreInstance,
-  corePort,
   DesktopError,
-  desktopCookie,
-  desktopToken,
   ENV_PREFIX,
+  isChannelId,
   nodeInstance,
   verifyKey,
+  type CoreChild,
+  type CoreSpawner,
 } from './core';
 import { enclaveFor, helperPath, helperRunner, runBounded } from './enclave';
 import { FolderQueue } from './folders';
 import { followCore, type ShellSettings } from './follow';
 import { menuCommands, menuTemplate, parseDisabled, type Binding } from './menu';
 import { createNotifications } from './notifications';
-import { APP_ID, coreBinary, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
+import { APP_ORIGIN } from './origin';
+import { APP_ID, coreResources, foldersOf, keyPlatform, quitsWithLastWindow, type Platform } from './platform';
 import {
   allowGuestPermission,
   allowPermission,
+  APP_PARTITION,
+  appWindowPreferences,
   BROWSER_PARTITION,
   guestMayNavigate,
   guestPreferences,
@@ -56,8 +62,8 @@ import {
   isInternal,
   mainWindowPreferences,
   popupGate,
-  webPreferences,
 } from './policy';
+import { serveApp } from './protocol';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
 import { macTrafficLightPosition, windowFrameOptions } from './titlebar';
 import { codeIdentity, instanceFiles, KEYCHAIN_RECORD, keychainMigration, runTool, safeStorageItem, securityKeychain } from './keychain';
@@ -91,11 +97,15 @@ if (!app.commandLine.hasSwitch('user-data-dir')) {
 // app's directory when Electron runs it unpackaged.
 const leadingArgs = process.defaultApp ? 2 : 1;
 
-const core = new CoreProcess();
+// The core, once the app is ready (core.ts).
+let core: CoreHost | undefined;
 let mainWindow: BrowserWindow | undefined;
 // The main window's page asks about unsaved changes before it closes.
 let guard: CloseGuard | undefined;
-let origin = '';
+// The origin of the app's pages, which only its session serves.
+const origin = APP_ORIGIN;
+// The core served once: windows may open.
+let serving = false;
 let quitting = false;
 // Quit was chosen while the main window was open: it closes first.
 let quitAfterClose = false;
@@ -162,13 +172,13 @@ async function fail(error: unknown) {
   console.error(error);
   // Stop before showing a modal dialog, including after a startup timeout.
   stopFollowing();
-  await core.stop();
+  await core?.stop();
   if (quitting) return;
   await dialog.showMessageBox({
     type: 'error',
     title: APP_NAME,
     message: t('desktop.failed'),
-    detail: `${t('desktop.failureHelp')}\n\n${describe(error)}\n${core.diagnostics}`,
+    detail: `${t('desktop.failureHelp')}\n\n${describe(error)}\n${core?.diagnostics ?? ''}`,
     buttons: [t('desktop.quit')],
   });
   app.quit();
@@ -223,8 +233,10 @@ app.on('web-contents-created', (_event, contents) => {
     if (isMainFrame && !isInternal(url, origin)) event.preventDefault();
   });
   contents.setWindowOpenHandler(({ url }) => {
+    // The app's other windows (program windows, VS Code's own): its
+    // session, and the channels to the core in each frame.
     if (isInternal(url, origin)) {
-      return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { ...webPreferences } } };
+      return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: appWindowPreferences(join(__dirname, 'frames.cjs')) } };
     }
     openExternal(url);
     return { action: 'deny' };
@@ -235,7 +247,7 @@ app.on('web-contents-created', (_event, contents) => {
  * running, opens it again. */
 function showMain() {
   if (!mainWindow) {
-    if (origin && !quitting) createWindow();
+    if (serving && !quitting) createWindow();
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -414,14 +426,27 @@ const runPowerShell: RunPowerShell = (script, env) =>
     maxOutput: 64 * 1024,
   });
 
-/** What the core says a nonce of the vault's proofs is for. */
+/** What the core says a nonce of the vault's proofs is for: asked of the
+ * core directly, as the desktop client. */
 async function proofPurpose(nonce: string): Promise<unknown> {
-  const res = await session.defaultSession.fetch(`${origin}/api/p/vault/proof/${encodeURIComponent(nonce)}`, {
-    credentials: 'include',
-    signal: AbortSignal.timeout(5000),
-  });
+  if (!core) return undefined;
+  const res = await core.fetch(`/api/p/vault/proof/${encodeURIComponent(nonce)}`, { signal: AbortSignal.timeout(5000) });
   return res.ok ? await res.json() : undefined;
 }
+
+// A channel to the core for a frame of the app's origin (frames.ts): the
+// main process checks the frame and builds the request from what it knows
+// of it, hands one end to the core and the other to the frame. A request
+// it refuses gets a channel that is closed at once.
+ipcMain.on(channels.openChannel, (event, id: unknown, path: unknown, protocols: unknown) => {
+  const frame = event.senderFrame;
+  if (!frame || !isChannelId(id)) return;
+  const head = channelHead(frame.origin, path, protocols);
+  const { port1, port2 } = new MessageChannelMain();
+  if (head && core) void core.connect(head, port1);
+  else electronPort(port1).post({ t: 'close', code: ABNORMAL, reason: 'refused' } satisfies ChannelControl);
+  frame.postMessage(channels.channelPort, id, [port2]);
+});
 
 /** The page's background (color.background in spec/tokens.json), shown before it paints. */
 function windowBackground(): string {
@@ -441,7 +466,7 @@ function createWindow() {
     // Linux takes the window's icon from the window (macOS and Windows from
     // the application).
     ...(platform === 'linux' && { icon: join(app.getAppPath(), 'assets', 'icon.png') }),
-    webPreferences: { ...mainWindowPreferences, preload: join(__dirname, 'preload.cjs') },
+    webPreferences: mainWindowPreferences(join(__dirname, 'preload.cjs')),
   });
   mainWindow = win;
   const g = closeGuard({
@@ -533,7 +558,7 @@ function createWindow() {
     // Program windows do not keep the app open.
     if (quitAfterClose || quitsWithLastWindow(platform)) app.quit();
   });
-  void win.loadURL(origin).catch(fail);
+  void win.loadURL(`${origin}/`).catch(fail);
 }
 
 app.on('before-quit', (event) => {
@@ -553,11 +578,11 @@ app.on('before-quit', (event) => {
   if (systemShutdown) {
     // Delaying a logout, restart or shutdown would cancel it. Stop the core
     // and let it clean up on its own.
-    void core.stop();
+    void core?.stop();
     return;
   }
   event.preventDefault();
-  void core.stop().then(() => {
+  void (core?.stop() ?? Promise.resolve()).then(() => {
     stopped = true;
     app.quit();
   });
@@ -629,25 +654,55 @@ if (!app.requestSingleInstanceLock()) {
       // Windows and Linux show these in About (macOS reads its bundle).
       app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: app.getVersion() });
       buildMenu();
-      const port = corePort(process.env[`${ENV_PREFIX}DESKTOP_PORT`] || (dev ? '7791' : '7781'));
-      const binary = coreBinary(platform, process.arch, app.isPackaged ? process.resourcesPath : undefined, join(app.getAppPath(), '..'));
-      // The token of this launch: on the core's stdin, and in this
-      // session's cookie for the core's origin before the page loads, so
-      // the core tells the app's windows from browsers (core.ts).
-      const token = desktopToken();
-      // The key of the system's prompts: to the core in the hello, and to
-      // nothing else.
+      // The key of the system's prompts: to the core in its start
+      // message, and to nothing else.
       const key = verifyKey();
-      origin = await core.start(
-        binary,
-        coreArgs(instance, port),
-        port,
-        coreEnv(process.env, app.getPath('home'), platform),
-        app.getPath('home'),
-        () => void fail(new DesktopError('desktop.coreLost')),
-        token,
-        key,
-      );
+      const home = app.getPath('home');
+      const resources = coreResources(app.isPackaged ? process.resourcesPath : undefined, join(app.getAppPath(), '..'));
+      // Development only: the payloads, machine builds and code-server
+      // seed of a test run (the desktop smoke test).
+      const devPath = (name: string) => (dev ? process.env[`${ENV_PREFIX}${name}`] || undefined : undefined);
+      const seed = devPath('SEED_DIR');
+      const spawner: CoreSpawner = {
+        fork: () =>
+          utilityProcess.fork(join(__dirname, 'core.mjs'), [], {
+            serviceName: `${APP_NAME} core`,
+            stdio: ['ignore', 'ignore', 'pipe'],
+            env: coreEnv(process.env, home, platform),
+            cwd: home,
+            // macOS: node-pty's native library, which library validation
+            // would refuse in an app signed ad hoc (no team).
+            allowLoadingUnsignedLibraries: platform === 'darwin',
+          }) as unknown as CoreChild,
+        pair: () => {
+          const { port1, port2 } = new MessageChannelMain();
+          return [port1, port2];
+        },
+        port: (end) => electronPort(end as ElectronPort),
+      };
+      const host = new CoreHost({
+        spawner,
+        start: {
+          instance,
+          nodeInstance: nodeInstance(instance),
+          localOnly: instance !== 'desktop',
+          origin,
+          verifyKey: key,
+          payload: devPath('DESKTOP_PAYLOAD') ?? resources.payload,
+          web: resources.web,
+          agentDir: devPath('AGENT_DIR'),
+          seedDirs: seed ? [seed] : undefined,
+        },
+        lost: (error) => void fail(error),
+        log: (text) => process.stderr.write(text),
+      });
+      core = host;
+      // The app's windows live in a session of their own, where the app's
+      // origin is the core's: the handler is there before a page loads.
+      const ses = session.fromPartition(APP_PARTITION);
+      serveApp(ses, host);
+      await host.start();
+      serving = true;
       if (quitting) return;
       verify = verifier(key, {
         platform,
@@ -665,8 +720,6 @@ if (!app.requestSingleInstanceLock()) {
         ...(platform === 'win32' && { helloKeys: helloKeysFor(runPowerShell) }),
         unlockStore: unlockStore(app.getPath('userData'), safeStorage, { prepare: keychainStep() }),
       });
-      const ses = session.defaultSession;
-      await ses.cookies.set(desktopCookie(origin, token));
       ses.setPermissionRequestHandler((contents, permission, callback, details) => {
         callback(allowPermission(permission, details.requestingUrl, contents.getURL(), origin));
       });
@@ -674,14 +727,13 @@ if (!app.requestSingleInstanceLock()) {
         return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
       });
       // The browser panes' guests live in their own partition, so they share
-      // nothing with the app. The desktop cookie above is set in the default
-      // session only: that separation keeps a guest from being taken for the
-      // app by the core. A guest gets no permission but full screen; downloads
-      // keep Electron's save dialog (no will-download handler saves by itself).
+      // nothing with the app, and the app's origin is not the core's there.
+      // A guest gets no permission but full screen; downloads keep
+      // Electron's save dialog (no will-download handler saves by itself).
       const guests = session.fromPartition(BROWSER_PARTITION);
       guests.setPermissionRequestHandler((_contents, permission, callback) => callback(allowGuestPermission(permission)));
       guests.setPermissionCheckHandler((_contents, permission) => allowGuestPermission(permission));
-      stopFollowing = followCore(origin, keys, { bindings: applyBindings, settings: applySettings });
+      stopFollowing = followCore(host, keys, { bindings: applyBindings, settings: applySettings });
       createWindow();
     })
     .catch(fail);

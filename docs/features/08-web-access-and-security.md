@@ -22,7 +22,7 @@ Non-goals: built-in user accounts, TLS termination, per-user permissions.
 One binary serves the UI (embedded `web/dist`), the event channel (`/ws`),
 the terminal protocol (`/api/v1/term`), the HTTP API and the code-server
 proxy. It listens on `127.0.0.1:7780` by default; the desktop app's own core
-on `127.0.0.1:7781` ([16](16-desktop-packaging.md)). Flags are in
+runs inside the app and listens on nothing ([16](16-desktop-packaging.md)). Flags are in
 [reference.md](../reference.md); the threat model is in
 [SECURITY.md](../../SECURITY.md).
 
@@ -67,8 +67,7 @@ on `127.0.0.1:7781` ([16](16-desktop-packaging.md)). Flags are in
 
 ### VS Code on the UI's origin
 
-`backend/hosts/bun/parent.ts` (`desktopClient`),
-`backend/features/vscode/core.ts`. code-server is proxied below `/m/{id}/code/`
+`backend/hosts/electron/serve.ts`, `backend/features/vscode/core.ts`. code-server is proxied below `/m/{id}/code/`
 on the UI's own origin, so any script in it (an extension, a webview) can do
 what the page can, on every machine. VS Code is therefore off by default,
 with one switch per kind of client ([05](05-vscode-panes.md)):
@@ -81,11 +80,9 @@ The core applies the requesting client's switch to every VS Code route (status,
 start, proxy, WebSockets, bridge commands) and sends bridge messages only to
 pages whose switch is on.
 
-A request is the desktop app's only when it carries the token of the app's
-launch: 32 random bytes the app hands its core on stdin and sets as an
-HttpOnly, SameSite=Strict, host-only cookie in its own Electron session,
-compared in constant time ([16](16-desktop-packaging.md)). Anything else is
-a browser. `GET /api/settings` and `GET /api/config` report which switch
+A request is the desktop app's only when the app's main process hands it
+to the core that runs inside the app ([16](16-desktop-packaging.md)); every
+client of the command line's core is a browser. `GET /api/settings` and `GET /api/config` report which switch
 applies (`client`).
 
 ### Startup checks
@@ -113,9 +110,8 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
 | Built-in password login | Proxies do it better (SSO, 2FA, device trust). |
 | Blocklist of terminal core methods | New methods would be exposed by default. |
 | One VS Code switch for every client | A desktop opt-in would enable VS Code in browsers that never accepted the risk. |
-| Detecting the desktop app by `desktopShell` or user agent | Both are claims any page can make; only a secret the browser never sees works. |
-| Desktop token in the core's environment | Inherited by child processes and visible in `/proc/<pid>/environ`; stdin is inherited by nothing. |
-| A header added by the desktop app (`webRequest`) | Every request through the main process; service workers and WebSockets unreliable. A session cookie is sent by Chromium itself. |
+| Detecting the desktop app by `desktopShell` or user agent | Both are claims any page can make; only what the app's main process says works. |
+| A token of the launch in a cookie (as the desktop app had while it ran the core as a child on a loopback port) | A secret a request carries is needed only where browsers reach the same core; the app's core runs in process and no browser reaches it. |
 | Any loopback Origin accepted | Any local program's pages (dev servers, forwarded ports) could open the core's WebSockets. |
 | code-server on an origin of its own | Removes the risk, but every deployment's proxy, certificate and origins would need a second host or port. |
 
@@ -125,10 +121,8 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
   allowed" (fails closed).
 - **Plain HTTP over a LAN address**: terminals work, but VS Code webviews,
   the clipboard and notifications need a secure context; use HTTPS.
-- **A core the desktop app did not start** (`veldr serve`): there is no
-  desktop token, so every client is a browser and VS Code follows
-  `plugins.vscode.browser`. A desktop app whose cookie could not be set
-  reports a startup failure rather than run as a browser.
+- **The command line's core** (`veldr serve`): every client is a browser,
+  so VS Code follows `plugins.vscode.browser`.
 
 ## Testing
 

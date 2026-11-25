@@ -92,7 +92,7 @@ SSH 机器用侧栏的「添加机器…」添加。
 
 ## 桌面应用
 
-同一套界面也提供 Electron 桌面应用，自带一个 core（`http://127.0.0.1:7781`，instance 为 `desktop`），支持 macOS、Windows 和 Linux。
+同一套界面也提供 Electron 桌面应用，自带一个 core（在应用内运行，不监听任何端口，instance 为 `desktop`），支持 macOS、Windows 和 Linux。
 可从 GitHub Releases 下载：
 
 | | macOS | Windows | Linux |

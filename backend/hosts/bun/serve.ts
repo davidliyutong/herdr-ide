@@ -1,8 +1,9 @@
 // `serve`: the core on the command line. It listens on loopback (or behind
 // an authenticating proxy with its secret), connects to the machines and
-// serves the web UI. With --parent-stdio a launcher (the desktop app, the
-// end-to-end tests) owns it: the first line on stdin is its hello, the core
-// answers a ready line on stdout and stops when stdin closes.
+// serves the web UI to browsers. With --parent-stdio a launcher (the
+// end-to-end tests) owns it: the core answers a ready line on stdout and
+// stops when stdin closes. The desktop app runs the core in process
+// instead (hosts/electron).
 import { appendFileSync, openSync, readFileSync, closeSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import type { Server, ServerWebSocket } from 'bun';
@@ -21,7 +22,6 @@ import { isBreakable } from '#kernel/http/breakable.ts';
 import { validTarget, MAX_TARGET_LEN } from '#kernel/machines/spec.ts';
 import { controlDir as makeControlDir } from '#kernel/machines/transport/controldir.ts';
 import { composeCore, coreFeatures } from '#hosts/common/compose.ts';
-import { readHello, desktopClient } from './parent.ts';
 import { openPayloads } from './payloads.ts';
 import { abortable } from './abortable.ts';
 import { bunPty } from './pty.ts';
@@ -82,16 +82,8 @@ export async function serve(argv: string[]): Promise<void> {
     values: ReturnType<typeof parseArgs<{ options: typeof OPTIONS }>>['values'];
   };
 
-  let desktop = { token: '', verifyKey: '' };
-  if (f['parent-stdio']) {
-    // A launcher that is gone makes writes fail instead of killing us.
-    process.on('SIGPIPE', () => {});
-    try {
-      desktop = await readHello(process.stdin);
-    } catch (e) {
-      fatal(logger, `--parent-stdio: ${(e as Error).message}`);
-    }
-  }
+  // A launcher that is gone makes writes fail instead of killing us.
+  if (f['parent-stdio']) process.on('SIGPIPE', () => {});
   const instance = f.instance;
   if (!validInstance(instance)) fatal(logger, '--instance must be lowercase letters, digits and dashes');
   const nodeInstance = f['node-instance'] ?? instance;
@@ -114,7 +106,8 @@ export async function serve(argv: string[]): Promise<void> {
   const features = coreFeatures({
     payloads,
     controlDir,
-    verifyKey: desktop.verifyKey,
+    // The desktop app's proofs are its own core's (hosts/electron).
+    verifyKey: '',
     pty: bunPty,
     codeServer: {
       version: f['code-server-version'],
@@ -202,7 +195,9 @@ export async function serve(argv: string[]): Promise<void> {
   // Bind before connecting to machines: a failed launch must not start agents.
   const fetch = (req: Request, server: Server<WSData>): Promise<Response> | Response | undefined => {
     const remote = server.requestIP(req)?.address;
-    const peer: Peer = { remote, desktop: desktopClient(req.headers, desktop.token) };
+    // Every client of the command line's core is a browser: the desktop
+    // app runs its own core in process (hosts/electron).
+    const peer: Peer = { remote, desktop: false };
     if (req.headers.get('Upgrade')?.toLowerCase() === 'websocket')
       peer.upgrade = (open, opts) =>
         server.upgrade(req, { data: { open, compress: !!opts?.compress } })

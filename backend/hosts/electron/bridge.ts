@@ -437,14 +437,13 @@ export async function serveRequest(port: Port, head: RequestHead, handle: (req: 
     void res.body?.cancel().catch(() => {});
     return;
   }
+  // Set-Cookie lines go one by one (Headers.forEach joins them in some
+  // runtimes).
   const headers: [string, string][] = [];
-  res.headers.forEach((v, k) => headers.push([k, v]));
-  // Headers.forEach joins Set-Cookie lines; they go one by one.
-  const cookies = res.headers.getSetCookie?.() ?? [];
-  if (cookies.length > 1) {
-    const i = headers.findIndex(([k]) => k === 'set-cookie');
-    headers.splice(i, 1, ...cookies.map((c): [string, string] => ['set-cookie', c]));
-  }
+  res.headers.forEach((v, k) => {
+    if (k !== 'set-cookie') headers.push([k, v]);
+  });
+  for (const c of res.headers.getSetCookie()) headers.push(['set-cookie', c]);
   port.post({ t: 'head', head: { status: res.status, statusText: res.statusText, headers } } satisfies Frame);
   if (!res.body || head.method === 'HEAD' || NULL_BODY.has(res.status)) {
     void res.body?.cancel().catch(() => {});
@@ -479,6 +478,9 @@ export const ACK_BYTES = 64 << 10;
 /** A close code for a channel the core refused or lost, as a browser
  * reports a failed WebSocket. */
 export const ABNORMAL = 1006;
+
+/** The close code of a channel whose handlers failed in the core. */
+const INTERNAL = 1011;
 
 const isControl = (m: unknown): m is ChannelControl =>
   typeof m === 'object' && m !== null && !ArrayBuffer.isView(m) && !(m instanceof ArrayBuffer);
@@ -581,20 +583,37 @@ export async function serveChannel(
     clearTimeout(timer);
     end(ABNORMAL, '');
   };
+  // What the core's handlers throw ends their channel, not the process.
+  const safely = (fn: () => void) => {
+    try {
+      fn();
+    } catch {
+      ch.close(INTERNAL, 'internal error');
+    }
+  };
   receive = (m) => {
-    if (typeof m === 'string') return void (closed || handlers?.message(m));
-    if (m instanceof ArrayBuffer || ArrayBuffer.isView(m)) return void (closed || handlers?.message(bytes(m)));
+    if (typeof m === 'string') return void (closed || safely(() => handlers?.message(m)));
+    if (m instanceof ArrayBuffer || ArrayBuffer.isView(m)) return void (closed || safely(() => handlers?.message(bytes(m))));
     if (!isControl(m)) return;
     if (m.t === 'ack') {
       if (Number.isFinite(m.n) && m.n > 0) acked = Math.min(sent, acked + m.n);
-      handlers?.drain?.();
+      safely(() => handlers?.drain?.());
     } else if (m.t === 'close') {
       // The client's close: answered, then the client closes the port.
       if (!closed) port.post({ t: 'close', code: m.code, reason: m.reason } satisfies ChannelControl);
       end(typeof m.code === 'number' ? m.code : 1005, typeof m.reason === 'string' ? m.reason : '');
     }
   };
-  handlers = open(ch);
+  try {
+    handlers = open(ch);
+  } catch (e) {
+    // The core could not take the channel (a program it starts failed):
+    // the client sees it end as a server's failure.
+    closed = true;
+    port.post({ t: 'close', code: INTERNAL, reason: message(e).slice(0, 120) } satisfies ChannelControl);
+    later(() => port.close(), CLOSE_WAIT_MS);
+    return;
+  }
   port.post({ t: 'open', protocol: '' } satisfies ChannelControl);
   for (const m of early.splice(0)) receive(m);
   if (closedEarly) gone();

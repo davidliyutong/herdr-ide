@@ -91,15 +91,19 @@ old one.
 | Closing the main window | app stays in the Dock | quits | quits |
 | Signature | ad hoc, or Developer ID and notarized | none | none |
 
-The app's core listens on `127.0.0.1:7781` with instance `desktop` for its
-own settings, vault and machines list, separate from the CLI default and
+The app's core runs inside the app (an Electron utility process) and
+listens on nothing: its windows reach it at `https://veldr.localhost`,
+which only the app serves. It has instance `desktop` for its own
+settings, vault and machines list, separate from the CLI default and
 `dev`; on every machine it uses the default namespace (`~/.veldr`), the
 same terminals and chats as a core of the default instance
 ([39](features/39-nodes.md)):
 
-- `VELDR_DESKTOP_PORT` overrides the port, which also changes the
-  browser storage origin. An occupied port fails visibly; the app never
-  attaches to an existing listener.
+- A core that crashes is started again with the windows kept; one that
+  keeps crashing (four times a minute) is reported and the app quits.
+- What the page stores per browser (UI preferences, transfer history) was
+  kept for `http://127.0.0.1:7781` by versions that ran the core on that
+  port; the app starts with it empty once.
 - Opening the app twice focuses the existing window.
 - Quitting stops its core and agents, not the machines' terminal cores.
 - External HTTP(S) links open in the default browser; other URL schemes
@@ -230,17 +234,19 @@ Settings.
 make dev-desktop
 ```
 
-This runs unpackaged Electron with the embedded UI (no hot reload), port
-7791, instance `dev` and local-only connections (on Windows it connects no
-machine). Quit other development cores of the `dev` instance first.
+This runs unpackaged Electron with the UI of `web/dist` (no hot reload)
+and the payloads of `dist/payload`, instance `dev` and local-only
+connections (on Windows it connects no machine). Quit other development
+cores of the `dev` instance first. `make e2e` runs the desktop smoke test
+(`e2e/tests/desktop.spec.ts`) when the desktop's packages are installed.
 
 For packaged smoke tests, set `VELDR_DESKTOP_DEV`: `1` for the `dev`
-instance, or a name of its own (not `desktop`) with port `0`:
+instance, or a name of its own (not `desktop`):
 
 ```bash
-VELDR_DESKTOP_DEV=smoke VELDR_DESKTOP_PORT=0 \
+VELDR_DESKTOP_DEV=smoke \
   dist/desktop/mac-arm64/veldr.app/Contents/MacOS/veldr --user-data-dir="$TMPDIR/veldr-smoke"
-VELDR_DESKTOP_DEV=smoke VELDR_DESKTOP_PORT=0 \
+VELDR_DESKTOP_DEV=smoke \
   dist/desktop/linux-unpacked/veldr --user-data-dir=/tmp/veldr-smoke
 ```
 

@@ -12,6 +12,9 @@
 #   scripts/build.sh                       # host archive in dist/release/
 #   TARGETS="linux/amd64 darwin/arm64" scripts/build.sh
 #   SKIP_WEB=1 scripts/build.sh            # reuse web/dist
+#   PAYLOAD_ONLY=1 scripts/build.sh        # the web UI and dist/payload only
+#                                          # (the desktop app carries them and
+#                                          # runs the core in Electron)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -94,6 +97,8 @@ for plat in linux-amd64 linux-arm64; do
     echo "==> no video encoder for $plat (scripts/build-ffmpeg.sh): its machines get pictures"
   fi
 done
+
+[[ -n "${PAYLOAD_ONLY:-}" ]] && exit 0
 
 echo "==> ${SLUG}"
 (cd backend && pnpm install --frozen-lockfile >/dev/null)

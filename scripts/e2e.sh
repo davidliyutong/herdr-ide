@@ -82,6 +82,13 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   [[ -d dist/payload/ext ]] && common+=(--ext dist/payload/ext)
   bun backend/scripts/build.ts --out "$OUT/core" --agents "$OUT/payload/agents" "${common[@]}" >/dev/null
   bun backend/scripts/build.ts --out "$OUT/core-newer" --version dev-e2e-newer --agents "$OUT/payload/agents-newer" "${common[@]}" >/dev/null
+  # The desktop app's smoke test (tests/desktop.spec.ts) runs it unpackaged
+  # with the core bundled for its utility process and the payloads above;
+  # it skips where the desktop's packages are not installed.
+  if [[ -d desktop/node_modules/electron ]]; then
+    echo "==> desktop app"
+    pnpm -C desktop build >/dev/null
+  fi
 fi
 
 if [[ -n "$darch" ]]; then

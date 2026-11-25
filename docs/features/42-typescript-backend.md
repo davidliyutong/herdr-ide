@@ -74,29 +74,69 @@ typechecks them with Node's types only. Requests are handled as
 `Request → Response`; WebSockets are `Channel`s of text and binary
 messages.
 
+Both hosts compose the core alike (`backend/hosts/common/compose.ts`:
+the features, the settings and keybindings files, the machines file and
+the machines a run connects, the host's own routes); they differ in how
+requests reach it.
+
 - **Bun** (`backend/hosts/bun`): `Bun.serve`, its WebSocket upgrades
   turned into channels; the guards stay as they are (Host/Origin, proxy
-  secret, read-only).
+  secret, read-only). Its clients are browsers.
 - **Electron** (`backend/hosts/electron`): the core runs in a
   `utilityProcess` (a crash leaves the window, heavy work does not block
-  it). The window's partition intercepts the origin
-  `https://<slug>.localhost` with `protocol.handle('https')` and hands each
-  request to the utility process over a `MessageChannelMain`, bodies
-  streamed in chunks with credit both ways; requests to other hosts pass
-  through. WebSockets are MessagePorts the main process brokers
-  (`desktopShell.openChannel`). The client is the desktop because the main
-  process says so, not by a cookie.
+  it), which the main process (`desktop/src/core.ts`) forks with the
+  app's bundle of it (`dist/core.mjs`), starts with a message on its parent
+  port (instance, node instance, the verify key of the launch, where the
+  payloads are) and restarts after a crash, at most 3 times a minute. The
+  app's windows live in a session of their own (`persist:app`), which
+  intercepts the origin `https://<slug>.localhost` with
+  `protocol.handle('https')` and hands each request to the core; requests
+  to other hosts pass through. The core's guard allows that origin, and
+  in-process requests are the desktop client on the core's host (`Peer`
+  without a remote address): the client is the desktop because the main
+  process says so, not by a cookie. The main process's own requests (the
+  settings it follows, what a vault nonce is for) go to the core the same
+  way, without a page.
+
+The bridge (`backend/hosts/electron/bridge.ts`, without imports, which
+both processes and the tests import):
+
+- a request has a MessagePort of its own; its head goes on the parent
+  port with the port, its body and the response's in chunks, each side
+  sending at most 8 chunks the other has not taken; a response body that
+  breaks off fails the transfer in Chromium, and a cancel aborts the
+  core's request;
+- a channel (a WebSocket of a browser) is a MessagePort too: a frame of
+  the app's origin asks for one (`desktopChannels.open`, `desktop/src/frames.ts`),
+  the main process checks the frame and builds the request's Origin and
+  Host itself, gives the core one end and the frame the other; text and
+  binary messages pass as they are, with `open` and `close` frames and the
+  client's `ack` of what it took in, so the core sees what is buffered as
+  on a WebSocket;
+- the web UI opens its channels with `openChannel` (`web/src/lib/transport.ts`):
+  a WebSocket in a browser, a PortSocket (`web/src/lib/portSocket.ts`)
+  over such a port in the app.
 
 The intercepted `https:` origin rather than a custom scheme: code-server
 builds its resource URLs from the page's scheme, and on a custom one its
-own CSP refuses them (no grammars, icons or themes); CacheStorage and
-cookies need it too. code-server's frames get a WebSocket that tunnels
-over a MessagePort, installed into their main world by the preload
-(`contextBridge.executeInMainWorld`), so VS Code needs no listener either.
-Uploads from the desktop use `fetch` with a streamed body (an XHR's body is
-buffered and reports no progress through a protocol handler). The
-handler's responses are not decoded by Chromium, so proxied requests ask
-for `identity`.
+own CSP refuses them (no grammars, icons or themes); CacheStorage needs a
+secure context too. The handler's responses set no cookies in Chromium,
+and the app needs none. code-server's frames get a WebSocket that opens a
+channel for their own host, installed into their main world by the
+preload (`contextBridge.executeInMainWorld` of the same PortSocket), so
+VS Code needs no listener either. Uploads from the desktop use `fetch`
+with a streamed body (an XHR's body reaches a protocol handler whole and
+reports no progress). The handler's responses are not decoded by
+Chromium, so proxied requests ask for `identity`.
+
+The app carries what the core carries for machines as resources, laid out
+as `scripts/build.sh` stages them (`payload/`: machine builds, herdr-core,
+the video encoders, the VS Code extension; `web/`: the web UI), and
+node-pty 1.1.0 for the ssh login's terminal: a Node-API module, so the
+binary built for Node loads in Electron's utility process without a
+rebuild for Electron; it ships prebuilt for macOS and Windows and is
+built by `pnpm install` on Linux. The app no longer carries the core's
+executable.
 
 ### The machine side
 
@@ -229,7 +269,9 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 ## Security
 
 The desktop's core no longer listens: other local processes cannot reach
-it (SECURITY.md's residual risk of the loopback port goes). The vault:
+it (SECURITY.md's residual risk of the loopback port goes), and the
+desktop client is the main process's word, not a cookie of the launch: the
+command line's clients are browsers only. The vault:
 
 - its master key moves from memguard's locked memory to a non-extractable
   WebCrypto key, which unlock entries open into directly and a lock
@@ -247,9 +289,7 @@ it (SECURITY.md's residual risk of the loopback port goes). The vault:
   cross-origin, user presence and verification, a growing counter, PRF
   required, bounded inputs).
 
-SECURITY.md has the vault's since the TypeScript core is the one that
-ships; the desktop's goes in with the stage that runs its core in
-process.
+SECURITY.md has both.
 
 ## Testing
 
@@ -257,8 +297,21 @@ process.
   package; `spec/vectors` run by both.
 - While both exist, yamux is tested against hashicorp/yamux
   (`backend/shared/proto/testdata/yamuxpeer`).
-- `make e2e` unchanged, against each stage's executable; a Playwright
-  smoke test of the desktop app.
+- `make e2e` unchanged, against each stage's executable; with the
+  desktop's packages installed it also runs the desktop app's smoke test
+  (`e2e/tests/desktop.spec.ts`: Playwright's Electron, the unpackaged app
+  on an isolated instance, profile and home, Chromium's mock keychain):
+  the UI loads from the app's origin with no TCP listener of the core
+  (lsof), the local machine gets ready, a terminal runs a command, a file
+  downloads, the core comes back after it is killed with the window and
+  its terminal kept, and, given a code-server release
+  (`E2E_CODE_SERVER_SEED`), a VS Code window loads its workbench over
+  channels.
+- The bridge: `desktop/src/coreBridge.test.ts` (requests, credit, cancels,
+  failures, channels, with worker_threads' MessagePorts),
+  `backend/hosts/electron/host.test.ts` (through a real core),
+  `web/src/__tests__/transport.test.ts` (PortSocket against the core's
+  side).
 - Machines: `e2e/machines` boots old kernels in KVM from official cloud
   images and old C libraries in containers, and runs a payload in each
   (its README). With the Bun runtime 1.4.5 and every system call above

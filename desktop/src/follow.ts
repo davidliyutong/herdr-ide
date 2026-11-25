@@ -1,8 +1,10 @@
 // What the shell takes from its core: the keybindings in effect on its
-// platform (for the menu), the theme, the language and the zoom. It is a client of the event channel like the page: once /ws is
-// open it reads GET /api/keybindings and GET /api/settings, then applies the
-// "keybindings" and "settings" messages the core sends after every change.
-// The core is the shell's own child; the channel is opened again if it drops.
+// platform (for the menu), the theme, the language and the zoom. It is a
+// client of the event channel like the page: once /ws is open it reads GET
+// /api/keybindings and GET /api/settings, then applies the "keybindings" and
+// "settings" messages the core sends after every change. The core is the
+// shell's own utility process, reached directly (core.ts), not over a
+// network; the channel is opened again if it drops (the core restarted).
 
 import type { Binding } from './menu';
 
@@ -51,27 +53,22 @@ export interface Follower {
   settings(s: ShellSettings): void;
 }
 
-/** What followCore uses of the platform (stand-ins in tests). */
-export interface Net {
-  WebSocket: new (url: string) => {
-    onopen: (() => void) | null;
-    onmessage: ((ev: { data: unknown }) => void) | null;
-    onclose: (() => void) | null;
-    onerror: (() => void) | null;
-    close(): void;
-  };
-  fetch: (url: URL) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
+/** What followCore uses of the core (core.ts CoreHost; stand-ins in
+ * tests). */
+export interface CoreLink {
+  fetch(path: string): Promise<{ ok: boolean; json(): Promise<unknown> }>;
+  channel(path: string, on: { open(): void; message(data: string | Uint8Array): void; close(): void }): { close(): void };
 }
 
-/** Follows the core at origin; returns a function that stops it. */
-export function followCore(origin: string, platform: string, on: Follower, net: Net = globalThis as unknown as Net): () => void {
+/** Follows the core; returns a function that stops it. */
+export function followCore(core: CoreLink, platform: string, on: Follower): () => void {
   let stopped = false;
-  let socket: InstanceType<Net['WebSocket']> | undefined;
+  let channel: { close(): void } | undefined;
   let delay = 500;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const read = async (path: string, apply: (reply: unknown) => void) => {
     try {
-      const r = await net.fetch(new URL(path, origin));
+      const r = await core.fetch(path);
       if (r.ok && !stopped) apply(await r.json());
     } catch (error) {
       console.error(error);
@@ -86,34 +83,34 @@ export function followCore(origin: string, platform: string, on: Follower, net: 
     if (s) on.settings(s);
   };
   const connect = () => {
-    const ws = new net.WebSocket(new URL('/ws', origin).href.replace(/^http/, 'ws'));
-    socket = ws;
-    ws.onopen = () => {
-      delay = 500;
-      void read('/api/settings', values);
-      void read('/api/keybindings', keys);
-    };
-    ws.onmessage = (ev) => {
-      let m: { t?: unknown };
-      try {
-        m = JSON.parse(String(ev.data));
-      } catch {
-        return;
-      }
-      if (m?.t === 'keybindings') keys(m);
-      else if (m?.t === 'settings') values(m);
-    };
-    ws.onerror = () => {};
-    ws.onclose = () => {
-      if (stopped) return;
-      timer = setTimeout(connect, delay);
-      delay = Math.min(delay * 2, 8000);
-    };
+    channel = core.channel('/ws', {
+      open() {
+        delay = 500;
+        void read('/api/settings', values);
+        void read('/api/keybindings', keys);
+      },
+      message(data) {
+        if (typeof data !== 'string') return;
+        let m: { t?: unknown };
+        try {
+          m = JSON.parse(data);
+        } catch {
+          return;
+        }
+        if (m?.t === 'keybindings') keys(m);
+        else if (m?.t === 'settings') values(m);
+      },
+      close() {
+        if (stopped) return;
+        timer = setTimeout(connect, delay);
+        delay = Math.min(delay * 2, 8000);
+      },
+    });
   };
   connect();
   return () => {
     stopped = true;
     clearTimeout(timer);
-    socket?.close();
+    channel?.close();
   };
 }

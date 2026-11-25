@@ -1,5 +1,7 @@
-// Preload of the main window (sandboxed, context-isolated). It gives the page
-// a narrow bridge and nothing else: the commands of the menu items chosen,
+// Preload of the main window (sandboxed, context-isolated), in each of its
+// frames. Every frame of the app's origin gets its channels to the core
+// (frames.ts); the top frame's page also gets a narrow bridge and nothing
+// else: the commands of the menu items chosen,
 // where a file the user dropped is on disk, which folders were opened with
 // the app, (from the page) which commands' menu items to disable, how many
 // panes have unsaved changes and its answer when the window closes with
@@ -11,6 +13,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { DesktopEnroll, DesktopShell, DesktopUnlock, NotificationTarget, OpenedFolders, ProcessUsage } from '../../web/src/shell';
 import { channels } from './bridge';
+import { setUpFrame } from './frames';
 import { parseNotificationOptions, parseNotificationTarget, sanitizeTag } from './notifications';
 import { MAC_TITLEBAR_INSET, MAC_TITLEBAR_MIN_HEIGHT, MAC_TITLEBAR_TOP_SPACE } from './titlebar';
 
@@ -222,4 +225,7 @@ export function desktopShellFor(platform: string): DesktopShell {
   };
 }
 
-contextBridge.exposeInMainWorld('desktopShell', desktopShellFor(process.platform));
+// The shell's bridge is the main window's page's, not its frames' (VS
+// Code's among them).
+if (setUpFrame({ origin: location.origin, pathname: location.pathname }) && window.top === window)
+  contextBridge.exposeInMainWorld('desktopShell', desktopShellFor(process.platform));

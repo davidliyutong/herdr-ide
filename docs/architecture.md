@@ -1,8 +1,8 @@
 # Architecture
 
 ```
-browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (TypeScript on Bun, `veldr`)
-desktop app (Electron shell)                            ├─ kernel: guards, event channel, machines (registry + connection state machine)
+browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (TypeScript on Bun, `veldr`; in the desktop app, its utility process)
+desktop app (Electron shell) ──MessagePorts, no TCP──▶  ├─ kernel: guards, event channel, machines (registry + connection state machine)
                                                         ├─ settings, keybindings (files on the core host)
                                                         ├─ features: terminals, files, VS Code proxy and bridge hub, program windows, plugins
                                                         └─ one ssh session per machine ──yamux──▶ agent (Go machine build, served by `veldr node`)
@@ -42,7 +42,9 @@ Bun into one executable per platform; machines run the Go program
 | `backend/shared` | What the core and the machine side share: wire protocols (`proto/`: agentproto, yamux, herdr-core's, the chat host's), libraries (`lib/`: brand names, logging, Go-compatible times), SQLite state (`store/`), the host's directories, ids, loopback and file rules (`host/`), the coding agents' kinds (`agents/`). |
 | `backend/kernel` | The core's machinery: HTTP routing and guards (`http/`: Host/Origin, proxy secret, CSP), `Fail` codes and audit, channels and the pages on `/ws`, machines and their connections (`machines/`: the registry `machines[-<instance>].json`, the connection state machine, the ssh target rule, the transports to the local node and over ssh), settings and keybindings (`config/`: typed settings, the hand-editable files, the registry written to `spec/generated/registry.json` and `docs/reference.md`, [13](features/13-settings-and-appearance.md)), typed agent actions, the payloads it carries for machines (`payloads.ts`). |
 | `backend/features/<id>` | Everything the product does, one directory per feature: its typed protocol (`protocol.ts`), its core side (`core.ts`: routes, channels, services, settings) and, while machines run the Go build, the tests of the wire it shares with it ([27](features/27-plugins.md)): `machines`, `terminals` ([22](features/22-terminal-protocol.md)), `files` ([28](features/28-file-explorer.md)), `git` ([31](features/31-git.md)), `search` ([41](features/41-project-search.md)), `monitor` ([34](features/34-system-monitor.md)), `browser` ([32](features/32-browser-and-ports.md)), `agents` ([33](features/33-workspace-restore.md)), `history` ([36](features/36-terminal-history.md)), `chat` ([37](features/37-agent-chats.md)), `usage` ([29](features/29-ai-usage.md)), `vault` ([30](features/30-variable-vault.md)), `gui` ([14](features/14-gui-windows.md)), `vscode` ([05](features/05-vscode-panes.md), [09](features/09-air-gapped-installs.md)). |
-| `backend/hosts/bun` | The command line (`main.ts`: `serve`, `fetch-assets`, `version`, `node` passed on to the machine build) and `serve` on `Bun.serve` (`serve.ts`), the launcher's hello (`parent.ts`), the payloads embedded in the executable (`payloads.ts`). |
+| `backend/hosts/bun` | The command line (`main.ts`: `serve`, `fetch-assets`, `version`, `node` passed on to the machine build) and `serve` on `Bun.serve` (`serve.ts`), the payloads embedded in the executable (`payloads.ts`). |
+| `backend/hosts/common` | What both hosts compose (`compose.ts`): the features, settings and keybindings, the machines, the host's routes. |
+| `backend/hosts/electron` | The core in the desktop app's utility process (`main.ts`, `serve.ts`, `start.ts`), its bridge to the main process over MessagePorts (`bridge.ts`), node-pty's terminals (`pty.ts`). |
 | `backend/scripts` | The executable's build (`build.ts`), the reference check (`reference.ts`), the npm packages' notices. |
 | `cmd/veldr` | The machine build: `node` (`node`, `node dial`, `node stop`), `gui-keep`, `gui-wl`, `chat-host`, `mcp` and `version` (`machine_unix.go`, `node_unix.go`, `chathost_unix.go`). |
 | `internal/brand` | Product names; the only place they are defined in Go. |
@@ -71,26 +73,34 @@ Bun into one executable per platform; machines run the Go program
 | `spec` | Design tokens (`tokens.json`, [24](features/24-design-tokens.md)), `generated/registry.json`, the pinned Codex app-server schema, and shared test vectors and recordings (`vectors/`) run by Go, core and web tests. |
 | `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`), `fakeacp`, a scripted offline ACP agent installed as `kimi`, `xclient`, an X program that reports its input for the program window tests, and `sshd`, the image of the SSH machines the tests run in Docker (with Xvfb). |
 
-## Desktop launcher
+## Desktop app
 
-The Electron shell (`desktop/src/main.ts`) runs the bundled core with
-`--parent-stdio`, loopback port 7781, instance `desktop` and the default
-namespace on machines (`--node-instance=`, [39](features/39-nodes.md)):
+The Electron shell (`desktop/src/main.ts`) runs the core in a utility
+process (`backend/hosts/electron`, bundled as `desktop/dist/core.mjs`),
+instance `desktop` and the default namespace on machines
+([39](features/39-nodes.md)), and listens on nothing
+([42](features/42-typescript-backend.md)):
 
-- The shell's first stdin line is its hello, `{ "desktop_token", "verify_key" }`.
-  The token is also set as an HttpOnly cookie, so the core can tell the
-  app's windows from browsers. The key signs the user's system prompt
-  answers (Touch ID, Windows Hello) for the vault and never leaves the
-  shell's main process ([30](features/30-variable-vault.md)).
-- The core writes one `{ "event": "ready", "url" }` line to stdout once it
-  listens; stderr carries logs. The shell loads only that URL.
-- Closing stdin stops the core on every system (no signals); a core still
-  running after 20 s is killed.
+- The core starts with a message on its parent port: the instance, the
+  payloads' directories (the app's resources) and the verify key, which
+  signs the user's system prompt answers (Touch ID, Windows Hello) for
+  the vault and never leaves the shell's main process otherwise
+  ([30](features/30-variable-vault.md)).
+- The app's windows load `https://<slug>.localhost/`, which their session
+  intercepts: each request goes to the core over a MessagePort
+  (`backend/hosts/electron/bridge.ts`), its body and the response's in
+  chunks with credit both ways. WebSockets are channels, MessagePorts the
+  main process makes for a frame of that origin (`desktopChannels`; the
+  web UI's `openChannel`, VS Code's frames' WebSocket). Requests in process
+  are the desktop client's.
+- A crashed core is started again with the windows kept (at most 3 times
+  a minute); quitting asks it to stop, and kills it after 20 s.
 
-The shell is a client of its core: it follows settings and keybindings over
-`/ws` for the title bar theme, menu language, zoom and the menu's keys. The
-renderer is the web UI, sandboxed, with no Node APIs; its preload exposes
-only `desktopShell`. On macOS the menu acts only on keys the page did not
+The shell is a client of its core, reached directly: it follows settings
+and keybindings over `/ws` for the title bar theme, menu language, zoom
+and the menu's keys. The renderer is the web UI, sandboxed, with no Node
+APIs; its preload exposes `desktopShell` to the main window's page and
+`desktopChannels` to each frame of the app's origin. On macOS the menu acts only on keys the page did not
 handle; on Windows and Linux every key goes to the page
 ([04](features/04-layout-and-keyboard.md)). Packaging, menus and the
 preload's surface are in [16](features/16-desktop-packaging.md).

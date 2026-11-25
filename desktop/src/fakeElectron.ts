@@ -8,18 +8,24 @@ export const sent: Array<{ channel: string; value: unknown }> = [];
 /** Files the stand-in treats as on disk, with their paths. */
 export const onDisk = new Map<unknown, string>();
 
+/** What the preload ran in the page's main world. */
+export const executed: Array<{ func: unknown; args?: unknown[] }> = [];
+
 export const contextBridge = {
   exposeInMainWorld(key: string, api: unknown) {
     exposed[key] = api;
+  },
+  executeInMainWorld(script: { func: unknown; args?: unknown[] }) {
+    executed.push(script);
   },
 };
 
 type Listener = (event: unknown, value: unknown) => void;
 const listeners = new Map<string, Set<Listener>>();
 
-/** Delivers value on channel as the main process would. */
-export function receive(channel: string, value: unknown) {
-  for (const l of listeners.get(channel) ?? []) l({}, value);
+/** Delivers value on channel as the main process would, with ports. */
+export function receive(channel: string, value: unknown, ports: unknown[] = []) {
+  for (const l of listeners.get(channel) ?? []) l({ ports }, value);
 }
 
 /** What the stand-in's invoke got, and the answers it gives by channel (an

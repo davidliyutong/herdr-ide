@@ -48,15 +48,26 @@ export const webPreferences = {
   allowRunningInsecureContent: false,
 };
 
+/** The session partition of the app's own windows, where the app's origin
+ * is intercepted (protocol.ts); the browser panes' guests have theirs. */
+export const APP_PARTITION = 'persist:app';
+
+/** A window of the app: its session, and its preload in each of its frames
+ * (nodeIntegrationInSubFrames runs the preload in subframes; with the
+ * sandbox it gives them no Node), which gives the frames of the app's
+ * origin their channels to the core (frames.ts), VS Code's frames
+ * included. */
+export function appWindowPreferences(preload: string) {
+  return { ...webPreferences, nodeIntegrationInSubFrames: true, partition: APP_PARTITION, preload };
+}
+
 // The main window may play notification sounds before the first click
 // (after a restart, for example); other windows keep the default policy.
 // It alone may hold <webview> tags: the browser panes show any web page in
 // them (guestPreferences decides each attach).
-export const mainWindowPreferences = {
-  ...webPreferences,
-  autoplayPolicy: 'no-user-gesture-required' as const,
-  webviewTag: true,
-};
+export function mainWindowPreferences(preload: string) {
+  return { ...appWindowPreferences(preload), autoplayPolicy: 'no-user-gesture-required' as const, webviewTag: true };
+}
 
 /** The session partition of the browser panes' webviews; its cookies,
  * storage and permissions are apart from the app's own. */
@@ -72,41 +83,22 @@ export const BROWSER_PARTITION = 'persist:browser';
  * Electron's default on Windows and Linux. DNS over HTTPS keeps its default. */
 export const hostResolver: ConfigureHostResolverOptions = { enableBuiltInResolver: false };
 
-/** Whether a URL's host name is one of a computer's own loopback, as the
- * core's guard reads a Host: `localhost` and the names below it, an address
- * of 127.0.0.0/8, `[::1]`, and such an IPv4 address written as an IPv6 one
- * (the same rule as web/src/lib/webUrl.ts). */
-function isLoopbackName(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  return (
-    h === 'localhost' ||
-    h.endsWith('.localhost') ||
-    /^127(?:\.\d{1,3}){3}$/.test(h) ||
-    h === '[::1]' ||
-    /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(h)
-  );
-}
-
-const portOf = (u: URL): string => u.port || (u.protocol === 'https:' ? '443' : '80');
-
-/** Whether url leads to the core, whose origin is given: any loopback host
- * with the core's port, under either scheme. The core answers under every
- * name of its computer's loopback, so the UI is one more web page to a
- * guest that names it otherwise; an origin that does not read counts as
- * the core's, so that nothing is taken for another page by mistake. */
+/** Whether url names the app's own host (origin's), under any scheme and
+ * port; an origin that does not read counts as the app's, so that nothing
+ * is taken for another page by mistake. A guest's session does not
+ * intercept the app's origin, so such an address never reaches the core:
+ * a page there would be another program's passing for the app. */
 function leadsToCore(url: string, origin: string): boolean {
   try {
-    const u = new URL(url);
-    const core = new URL(origin);
-    return isLoopbackName(u.hostname) && portOf(u) === portOf(core);
+    return new URL(url).hostname.toLowerCase() === new URL(origin).hostname.toLowerCase();
   } catch {
     return true;
   }
 }
 
 /** Addresses a webview may load or follow: http(s) without credentials,
- * and never the core's own (origin), which is no page for a pane: a page
- * shown in one must not put the UI there or open it as a tab. */
+ * and never the app's own host (origin's), which is no page for a pane: a
+ * page shown in one must not put the UI there or open it as a tab. */
 export function guestMayNavigate(url: string, origin: string): boolean {
   return isExternal(url) && !leadsToCore(url, origin);
 }

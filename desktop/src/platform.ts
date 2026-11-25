@@ -4,7 +4,7 @@
 import { statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { APP_DOMAIN, APP_SLUG } from '../../web/src/brand';
+import { APP_DOMAIN } from '../../web/src/brand';
 import type { OpenedFolders } from '../../web/src/shell';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
@@ -26,13 +26,13 @@ export function keyPlatform(p: Platform): 'mac' | 'windows' | 'linux' {
   return p === 'darwin' ? 'mac' : p === 'win32' ? 'windows' : 'linux';
 }
 
-/** The core's executable: in the app's resources, or the one scripts/build.sh
- * wrote into dist/ for unpackaged development (Go's names). */
-export function coreBinary(p: Platform, arch: string, resources: string | undefined, repo: string): string {
-  const exe = p === 'win32' ? '.exe' : '';
-  if (resources) return join(resources, 'bin', APP_SLUG + exe);
-  const goos = p === 'win32' ? 'windows' : p;
-  return join(repo, 'dist', `${APP_SLUG}-${goos}-${arch === 'x64' ? 'amd64' : arch}${exe}`);
+/** Where the core's payloads are: in the app's resources (payload/ as
+ * scripts/build.sh stages it: machine builds, herdr-core, the video
+ * encoders, the VS Code extension; web/ the web UI), or in the repository
+ * for unpackaged development (dist/payload, web/dist). */
+export function coreResources(resources: string | undefined, repo: string): { payload: string; web: string } {
+  if (resources) return { payload: join(resources, 'payload'), web: join(resources, 'web') };
+  return { payload: join(repo, 'dist', 'payload'), web: join(repo, 'web', 'dist') };
 }
 
 /** Whether closing the main window quits: everywhere but macOS, where the

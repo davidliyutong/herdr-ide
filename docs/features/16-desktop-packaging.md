@@ -48,26 +48,35 @@ any of them: the app id (the product's domain reversed and `desktop`,
 `app.veldr.desktop`; also the Windows AppUserModelID that notifications
 need and the Linux desktop entry's name; the Secure Enclave helper's is
 `app.veldr.desktop.enclave`), the keybinding platform (`mac`,
-`windows` or `linux`), the core binary's path, whether closing the last window quits, and
+`windows` or `linux`), where the core's payloads are, whether closing the last window quits, and
 how a Linux command line names folders.
 
 ### Building
 
-`scripts/desktop.sh` builds the core for the target (`scripts/build.sh`),
-then the shell, then runs electron-builder (`desktop/electron-builder.cjs`).
+`scripts/desktop.sh` stages what the core carries (`PAYLOAD_ONLY=1
+scripts/build.sh`: the web UI, machine builds, herdr-core, the encoders,
+the VS Code extension), then builds the shell with the core bundled for its
+utility process (`desktop/build.mjs`: `dist/core.mjs` from
+`backend/hosts/electron`), then runs electron-builder
+(`desktop/electron-builder.cjs`).
 Modes: `build`, `app` (unpacked), `dist` (installers), `install` (macOS:
 copy into `/Applications`) and `dev`. `DESKTOP_OS` packages another
 system's unpacked app to check its packaging; `SKIP_BUILD=1` runs
 electron-builder alone.
 
-- The core is an executable resource outside ASAR (`bin/<slug>[.exe]`),
-  with the notices laid out as in the release archives. On macOS the
+- The core's bundle (`dist/core.mjs`) and node-pty, the native module its
+  ssh logins run in (prebuilt for macOS and Windows, built by `pnpm
+  install` on Linux; Node-API, so no rebuild for Electron; `build.mjs`
+  makes its macOS `spawn-helper` executable, which node-pty 1.1.0's
+  package is not), are unpacked from ASAR; the payloads are resources (`payload/`, `web/`), with the
+  notices laid out as in the release archives. On macOS the
   vault's Secure Enclave helper (`desktop/helper/Enclave.swift`, built
   universal with `swiftc`) is an app bundle of its own in
   `Contents/Helpers/`, signed with the app ([30](30-variable-vault.md)); a
   build on a Mac without `swiftc` goes on without it, with a warning. The
-  `beforePack` hook refuses a core of another architecture, missing
-  notices, or a macOS app without the helper.
+  `beforePack` hook refuses an app of another architecture than its
+  modules, a missing core bundle, payloads or notices, or a macOS app
+  without the helper.
 - Artifacts (`dist/desktop/<name>-<version>-<os>-<arch>.<ext>`):
   - macOS: DMG and zip; hardened runtime; signed ad hoc unless a
     certificate is given, then Developer ID, and notarized when Apple
@@ -88,43 +97,54 @@ electron-builder alone.
 Operator details (where the app keeps its files, Gatekeeper, SmartScreen,
 FUSE) are in [deployment](../deployment.md#desktop-app).
 
-### The owned core
+### The core in process
 
-`desktop/src/core.ts`, `desktop/src/main.ts`,
-`backend/hosts/bun/parent.ts`, `serve.ts`.
+`desktop/src/core.ts`, `protocol.ts`, `frames.ts`, `main.ts`,
+`backend/hosts/electron` ([42](42-typescript-backend.md)).
 
-- The shell starts one child core with `--parent-stdio`. The core reads a
-  hello (one JSON line) on stdin, writes a JSON readiness line on stdout,
-  and stops when stdin closes. A dedicated JSON line, not log parsing,
-  signals readiness. The core ignores SIGPIPE so a crashed launcher's pipes
-  cannot kill it before cleanup.
-- **Stopping closes stdin on every system**, because Windows has no signal
-  a process can clean up after. The shell kills the child only if it has
-  not exited 20 s later. On logout or shutdown the shell closes stdin and
-  quits without waiting, so it never holds up the system.
-- **The app's token.** VS Code has one switch for the app and one for
+- The core runs in an Electron utility process the main process forks
+  (`utilityProcess`), started with a message on its parent port: the
+  instance, the node instance, the payloads' directories and the verify
+  key of the launch. Nothing listens: the app's windows live in a session
+  of their own, which intercepts `https://<slug>.localhost` and hands each
+  request to the core over a MessagePort; requests to other hosts go to
+  the network. The origin is a secure context, as code-server and its
+  service workers need, and the same at every launch, which keeps what the
+  page stores per browser and the permissions granted to it (a page of an
+  earlier version, at `http://127.0.0.1:7781`, kept its own).
+- **Channels.** The core's WebSockets are MessagePorts: a frame of the
+  app's origin asks for one (`desktopChannels`, which the preload of every
+  app window gives each frame of that origin), the main process checks the
+  frame, builds the request's Origin and Host itself and hands one end to
+  the core, the other to the frame. The web UI opens its channels with
+  `openChannel` (`web/src/lib/transport.ts`); VS Code's frames get a
+  WebSocket that opens one for their own host.
+- **The app's client.** VS Code has one switch for the app and one for
   browsers ([05](05-vscode-panes.md)), so the core must tell the app's
-  requests from a browser's on the same computer. Each launch makes a
-  random token, sends it in the hello, and sets it as a host-only,
-  HttpOnly, SameSite=Strict session cookie for the core's origin before
-  the window loads. Chromium then sends it with every request of the app's
-  windows, VS Code's frames and WebSockets included; the core compares it
-  in constant time ([08](08-web-access-and-security.md)). The token is
-  never in the core's environment, which terminals and code-server
-  inherit.
-- The hello also carries `verify_key`, a per-launch key for the variable
-  vault's presence prompts (Touch ID, Windows Hello): the shell signs the
-  core's nonces with it after the prompt, showing text it takes from the
-  core, never from the page, and seals the vault's unlock material for the
-  core so the page relays it unread (`desktop/src/verify.ts`,
-  `windowsHello.ts`, `enclave.ts`, `relay.ts`, `unlockStore.ts`,
-  `keychain.ts`; [30](30-variable-vault.md)).
-- Production uses port 7781 and instance `desktop`; a stable origin keeps
-  what the page stores per browser and the permissions granted to it.
-  `VELDR_DESKTOP_PORT` overrides the port. Development uses port 7791
-  and instance `dev`, or the instance `VELDR_DESKTOP_DEV` names (never
-  `desktop`); unpackaged runs are always development. Each instance has its
-  own Electron profile and single-instance lock.
+  requests from a browser's. A request is the app's because the main
+  process hands it over (in process, on the core's host); no browser
+  reaches this core, and no cookie or token marks the app's requests.
+- The start message also carries the verify key, a per-launch key for the
+  variable vault's presence prompts (Touch ID, Windows Hello): the shell
+  signs the core's nonces with it after the prompt, showing text it takes
+  from the core (asked directly, not through a page), never from the
+  page, and seals the vault's unlock material for the core so the page
+  relays it unread (`desktop/src/verify.ts`, `windowsHello.ts`,
+  `enclave.ts`, `relay.ts`, `unlockStore.ts`, `keychain.ts`;
+  [30](30-variable-vault.md)).
+- **Crashes and stops.** A core that crashes after it served is started
+  again with the windows kept (their channels close and reconnect), at
+  most 3 times a minute; then the app reports it and quits. Quitting asks
+  the core to stop: it ends its machines' sessions (up to 15 s); the shell
+  kills only that process if it has not exited 20 s later. On logout or
+  shutdown the shell asks and quits without waiting, so it never holds up
+  the system; Electron ends its utility processes with it.
+- Production uses instance `desktop`. Development uses instance `dev`, or
+  the instance `VELDR_DESKTOP_DEV` names (never `desktop`); unpackaged runs
+  are always development, and may take the payloads, machine builds and a
+  code-server seed of a test run (`VELDR_DESKTOP_PAYLOAD`,
+  `VELDR_AGENT_DIR`, `VELDR_SEED_DIR`). Each instance has its own Electron
+  profile and single-instance lock.
 - On macOS and Linux the core's PATH gains `~/.local/bin`, Homebrew's and
   the system directories without running a shell, since launchers load no
   shell startup files.
@@ -150,8 +170,8 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
   inset. Secondary windows, and the main window on Windows and Linux, keep
   the native frame.
 - **Following the core** (`desktop/src/follow.ts`). The shell is a client
-  of its core's event channel (`/ws`) and settings endpoints, reconnecting
-  with backoff. `appearance.theme` becomes `nativeTheme.themeSource`, so
+  of its core's event channel (`/ws`) and settings endpoints, reached
+  directly, reconnecting with backoff. `appearance.theme` becomes `nativeTheme.themeSource`, so
   native chrome follows the UI's theme even when it differs from the
   system's; `appearance.language` is the menu's and dialogs' language.
 - **Zoom.** `window.zoom` (percent) is the zoom of the app's windows, like
@@ -186,10 +206,13 @@ FUSE) are in [deployment](../deployment.md#desktop-app).
 ### The page's bridge
 
 The main window has a sandboxed preload (`desktop/src/preload.ts`,
-channels in `desktop/src/bridge.ts`) exposing one object, `desktopShell`
+channels in `desktop/src/bridge.ts`) that runs in each of its frames: a
+frame of the app's origin gets its channels to the core
+(`desktopChannels`), the top frame also one object, `desktopShell`
 (`web/src/shell.ts`). The shell accepts messages only from the top frame
-of the main window on the core's origin, and checks their shape. Program
-windows and browser-pane webviews have no preload.
+of the main window on the app's origin, and checks their shape. Program
+windows and VS Code's own windows get the channels only
+(`desktop/src/framePreload.ts`); browser-pane webviews have no preload.
 
 - Shell to page: menu commands, folders opened with the app, the
   unsaved-changes question, native full-screen state, clicked
@@ -223,8 +246,8 @@ macOS has no request for Full Disk Access: the user turns it on in System
 Settings. It checks the process it holds responsible, which children
 inherit:
 
-- The core is the app's child and code-server the core's, so the file
-  browser and VS Code access files as **the app**.
+- The core is the app's utility process and code-server the core's
+  child, so the file browser and VS Code access files as **the app**.
 - Terminals access them as **herdr-core**: it runs the terminal core as a
   launchd job and its holders disclaim inherited responsibility, so a
   terminal's programs have what
@@ -283,11 +306,10 @@ Developer ID, so its grant survives reinstalls at the same path.
 | --- | --- |
 | Reimplement the UI for desktop | Duplicates terminal rendering, layout and VS Code integration. |
 | Tauri/WKWebView | VS Code webviews require Chromium's service-worker behavior. |
-| Attach to an existing server on a well-known port | Cannot prove ownership; might attach to another instance. |
-| Always choose a random port | Per-origin storage and permissions would be lost at every launch. |
-| Parse the human log for readiness | Log wording is not a protocol. |
-| Kill the child only on normal quit | Leaves agents behind after a launcher crash; pipe EOF covers both. |
-| Stop the core with SIGTERM | Windows has no signal a process can clean up after. |
+| The core as a child process on a loopback port | Any process of the host could reach it; the app's requests needed a cookie of the launch to be told apart. |
+| A custom scheme for the app's origin | code-server's resources and CacheStorage need https ([42](42-typescript-backend.md)). |
+| A loopback listener for VS Code only | Not needed: its frames' WebSockets are channels too. |
+| Restart the core without a bound | A core that crashes at once would loop; after 3 a minute the app reports it. |
 | A local machine on Windows | The agent is POSIX; it would be a port, and no Windows herdr-core is pinned. |
 | WSL built in | A WSL distribution with an ssh server already works as an SSH machine. |
 | The sign-in terminal on Windows | Win32-OpenSSH has no ControlMaster, so a login holds nothing for later connections. |
@@ -302,12 +324,13 @@ Developer ID, so its grant survives reinstalls at the same path.
 
 ## Failure modes
 
-- Missing core, occupied port, invalid configuration or development
-  instance: startup fails with a localized dialog and a bounded stderr
-  tail, after stopping the child.
-- Unexpected core or renderer exit: the error is reported and the app
-  quits; reopening starts a fresh core. No unattended restart loop.
-- Electron crash: the pipe closes and the core cancels; force-killed agents
+- A core that cannot start (missing payloads, invalid configuration or
+  development instance): startup fails with a localized dialog and a
+  bounded tail of the core's log, after stopping it.
+- The core crashes: it is started again, the windows reconnect; a fourth
+  crash within a minute is reported and the app quits. A renderer's exit
+  is reported and the app quits; reopening starts a fresh core.
+- Electron crash: its utility processes end with it; force-killed agents
   are covered by orphan reaping and idle timeouts
   ([10](10-remote-resource-lifecycle.md)).
 - Local terminal core fails to start: the web UI shows the error and offers
@@ -343,25 +366,26 @@ Following [Electron's security guidance](https://www.electronjs.org/docs/latest/
   notifications, clipboard read and sanitized write, the File System Access
   API (VS Code's **Download…**) and local fonts (the font picker) are
   allowed.
-- The shell reads its settings over loopback like any client, behind the
-  same guards, takes only appearance settings and well-formed bindings,
-  and listens on nothing.
+- The shell reads its settings from its core directly, behind the same
+  guards, takes only appearance settings and well-formed bindings, and
+  listens on nothing; neither does the core.
 - Full Disk Access requests carry nothing from the page: one fixed System
   Settings URL, the instance's own herdr-core path, the app's own bundle.
   The probes open a folder without reading it.
-- The launch token identifies the app's windows to the core; it is not
-  authentication against other local processes, which reach the loopback
-  core anyway.
+- The main process's word identifies the app's windows to the core; no
+  other process of the host reaches the core, which listens on nothing.
 - Release builds get no secret except the macOS Package step's optional
   signing credentials.
 
-See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
+See [SECURITY.md](../../SECURITY.md) for the trust boundaries.
 
 ## Testing
 
 - `desktop/src/*.test.ts` (fake Electron and Node children, no network):
-  `platform`, `core` (token, cookie, stop by closing stdin, kill after
-  deadline, spawn and readiness failures), `folders`, `follow`, `menu`
+  `platform`, `core` (the start message, restarts after crashes and their
+  bound, start failures and timeouts, stop and kill after the deadline, a
+  frame's channel request), `coreBridge` (requests, bodies with credit,
+  cancels, failures, channels), `protocol`, `frames`, `folders`, `follow`, `menu`
   (items, accelerators, per-system menus, no keys registered on Windows and
   Linux), `policy`, `privacy`, `preload`, `closeGuard`, `titlebar`,
   `notifications` (validation, bounds, tag deduplication, click targets),
@@ -374,6 +398,12 @@ See [SECURITY.md](../../SECURITY.md) for the local HTTP trust boundary.
   `TestIntegrationHC` runs the probe through a real herdr-core.
 - CI's `desktop` job runs the Go, web and desktop tests (the core's on
   macOS) and `scripts/desktop.sh app` on Ubuntu, macOS and Windows.
+- `e2e/tests/desktop.spec.ts` (`make e2e`, when the desktop's packages
+  are installed) launches the unpackaged app with Playwright on an
+  isolated instance (`VELDR_DESKTOP_DEV`), profile (`--user-data-dir`),
+  home and mock keychain: the UI from the app's origin with no TCP
+  listener of the core, the local machine, a terminal, a download, a
+  restart after the core is killed, and a VS Code window given a
+  code-server release ([42](42-typescript-backend.md)).
 - Packaged smoke tests launch the executable with `VELDR_DESKTOP_DEV`
-  and their own `--user-data-dir`; the macOS app and the linux-arm64 deb
-  (in a Debian 13 container under Xvfb) were run this way.
+  and their own `--user-data-dir`.

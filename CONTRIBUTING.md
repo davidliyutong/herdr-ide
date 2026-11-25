@@ -74,7 +74,7 @@ with the new executable before distributing a release.
 
 The desktop app builds on the system it is for. `make dev-desktop` builds
 and launches Electron with the embedded UI, the same isolated session and
-instance `dev` (port 7791); stop other dev cores first. On Windows that
+instance `dev` (its core runs inside the app); stop other dev cores first. On Windows that
 run connects no machine (it is local-only, and the local machine has no
 agent there). `make desktop-app` builds the unpacked app and
 `make desktop-dist` the installers: the DMG and zip on macOS, the NSIS

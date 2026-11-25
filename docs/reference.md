@@ -97,7 +97,7 @@ remote machine.
 | `--agent-dir` | – | Directory of uncompressed `veldr-<os>-<arch>` machine builds (`go build ./cmd/veldr`) used instead of the embedded ones. |
 | `--ext-dir` | – | Directory containing `veldr-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
-| `--parent-stdio` | `false` | Launcher lifecycle (Electron): read a hello line on stdin (`{"desktop_token":"…"}`, the token the app's windows carry in the cookie `veldr-desktop`, or `{}`; missing or malformed stops the core), write `{"event":"ready","url":"…"}` to stdout after binding, clean up when stdin closes. Does not change HTTP guards. |
+| `--parent-stdio` | `false` | Launcher lifecycle (the end-to-end tests): write `{"event":"ready","url":"…"}` to stdout after binding, clean up when stdin closes (what stdin carries is not read). Does not change HTTP guards; every client is a browser. |
 
 ## `fetch-assets` flags
 
@@ -554,7 +554,9 @@ only through `reveal` and `export`, each recorded in the access log first.
 | `VELDR_CORE` | `pnpm -C web dev` | Core URL the Vite dev server proxies to (default `http://127.0.0.1:7780`; `make dev-web` sets `DEV_LISTEN`'s). |
 | `VELDR_DESKTOP_DEV` | Electron | Isolated development instance: `1` for `dev`, or a name (lowercase letters, digits, dashes, ≤ 32, not `desktop`). Local-only, own Electron profile and lock. Always on for unpackaged Electron. |
 | `VELDR_DESKTOP_NO_OPEN` | Electron, development instances | Full Disk Access buttons print `no-open: …` to stderr instead of opening anything. |
-| `VELDR_DESKTOP_PORT` | Electron | Loopback port (default `7781`, development `7791`); `0` is ephemeral. Changing it changes the browser storage origin. |
+| `VELDR_DESKTOP_PAYLOAD` | Electron, development instances | A directory laid out as `dist/payload` (machine builds, herdr-core, encoders, the extension) for the core instead of the repository's (the desktop smoke test's). |
+| `VELDR_AGENT_DIR` | Electron, development instances; `veldr node` | Uncompressed machine builds searched first, as `--agent-dir`. |
+| `VELDR_SEED_DIR` | Electron, development instances | A directory of code-server releases and extensions, as `--seed-dir`. |
 | `--user-data-dir=<dir>` | Electron command line | Replaces the Electron profile and single-instance lock, for smoke tests beside another copy. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | core on Linux; agent | Configuration (default `~/.config`) and cache (default `~/.cache`) directories; on a machine also where herdr-core's `config.toml` is read for `restore_screen`. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, `KIMI_CODE_HOME` | agent | AI CLIs' credential, log and session directories when not the defaults; on Linux read from a running agent's environment to find its session ([35](features/35-agent-native-view.md)). |

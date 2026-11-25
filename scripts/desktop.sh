@@ -6,7 +6,9 @@
 # semver, optionally with the release tag's leading v (dropped for the app
 # metadata).
 #
-#   build    the core for the app's platform, the web UI and the shell
+#   build    the web UI, the payloads the core carries (machine builds,
+#            herdr-core, encoders, the VS Code extension) and the shell with
+#            the core bundled for its utility process
 #   app      build, then the unpacked app in dist/desktop/<os>[-<arch>][-unpacked]/
 #   dist     build, then the installers: macOS DMG and zip, Windows NSIS
 #            setup, Linux AppImage and deb
@@ -31,15 +33,12 @@ case "$(uname -s)" in
 esac
 os=${DESKTOP_OS:-$host}
 case "$os" in
-  mac) goos=darwin ;;
-  win) goos=windows ;;
-  linux) goos=linux ;;
+  mac|win|linux) ;;
   *) echo "DESKTOP_OS must be mac, win or linux" >&2; exit 2 ;;
 esac
 DESKTOP_ARCH=${ARCH:-$(node -p process.arch)}
 case "$DESKTOP_ARCH" in
-  arm64) go_arch=arm64 ;;
-  x64) go_arch=amd64 ;;
+  arm64|x64) ;;
   *) echo "ARCH must be arm64 or x64" >&2; exit 2 ;;
 esac
 if [[ "$os" == win && "$DESKTOP_ARCH" != x64 ]]; then
@@ -69,7 +68,8 @@ fi
 
 if [[ -z "${SKIP_BUILD:-}" ]]; then
   pnpm -C desktop install --frozen-lockfile
-  TARGETS="$goos/$go_arch" scripts/build.sh
+  pnpm -C backend install --frozen-lockfile
+  PAYLOAD_ONLY=1 scripts/build.sh
   pnpm -C desktop build
 fi
 

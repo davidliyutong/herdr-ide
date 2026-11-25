@@ -262,11 +262,12 @@ every deployment.
 
 - The socket directory is 0700 and the socket 0600; `--auth none` is safe
   only because nothing else can connect.
-- The proxy strips the proxy-secret header and the desktop app's cookie and
-  adds `X-Frame-Options: SAMEORIGIN`.
+- The proxy strips the proxy-secret header and the cookie that marked the
+  desktop app's requests while it ran the core as a child (none is set
+  now) and adds `X-Frame-Options: SAMEORIGIN`.
 - From code-server's responses it drops `Service-Worker-Allowed` (which
   would let a worker's scope cover the UI's pages and outlast the switch)
-  and any `Set-Cookie` naming the desktop app's cookie.
+  and any `Set-Cookie` naming that cookie.
 - code-server's port proxy (`/proxy/<port>/`, `/absproxy/<port>/`) is off
   (`--disable-proxy`) and the core also refuses those paths: it would serve
   any service on the machine, including another user's, on the UI's origin.

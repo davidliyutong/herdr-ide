@@ -19,9 +19,9 @@ export interface Peer {
    * a client on the core's own host). */
   remote?: string;
   /** The request comes from the desktop app's windows: the host vouches
-   * for it (the app's main process, which hands the core in process the
-   * requests of its windows; on the command line, the cookie of the
-   * launch the desktop app set). */
+   * for it: the app's main process, which hands the core in process the
+   * requests of its windows (hosts/electron). The command line's clients
+   * are browsers. */
   desktop: boolean;
   /** Present on a WebSocket upgrade: adopts the connection as a channel
    * and gives the answer the host expects. compress asks for messages

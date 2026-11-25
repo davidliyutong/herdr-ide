@@ -2,3 +2,6 @@ allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
+  # The core's terminal for an ssh login: prebuilt for macOS and Windows,
+  # built on Linux (Node-API, so the build loads in Electron too).
+  node-pty: true

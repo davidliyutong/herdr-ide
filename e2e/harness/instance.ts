@@ -146,7 +146,6 @@ export class Instance {
     this.proc = proc;
     this.exited = new Promise((resolve) => proc.once('exit', () => resolve()));
     createInterface({ input: proc.stderr! }).on('line', (l) => this.log.push(l));
-    proc.stdin!.write('{}\n');
     const url = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('the core did not get ready:\n' + this.logs())), 20_000);
       createInterface({ input: proc.stdout! }).on('line', (l) => {
@@ -301,7 +300,7 @@ export function sweepLeftovers() {
 
 /** The instance's ssh control directory (transport.ControlDir; e2e
  * instance names are short enough to be used as they are). */
-function controlDir(name: string): string {
+export function controlDir(name: string): string {
   return join('/tmp', `${paths.slug}-${process.getuid?.() ?? 0}`, `s-${name}`);
 }
 

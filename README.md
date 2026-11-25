@@ -153,8 +153,8 @@ the list of shortcuts. All flags are listed in
 
 ## Desktop app
 
-The same UI in an Electron app with a core of its own
-(`http://127.0.0.1:7781`, instance `desktop`), for macOS, Windows and Linux.
+The same UI in an Electron app with a core of its own, which runs inside the
+app and listens on no port (instance `desktop`), for macOS, Windows and Linux.
 Download it from GitHub Releases:
 
 | | macOS | Windows | Linux |

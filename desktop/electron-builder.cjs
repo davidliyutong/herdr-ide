@@ -1,5 +1,5 @@
 const { execFileSync } = require('node:child_process');
-const { existsSync, readFileSync } = require('node:fs');
+const { existsSync, readFileSync, statSync } = require('node:fs');
 const { join } = require('node:path');
 const { Arch } = require('electron-builder');
 
@@ -16,13 +16,13 @@ const name = brand('APP_NAME');
 const appId = `${brand('APP_DOMAIN').split('.').reverse().join('.')}.desktop`;
 const arch = process.env.DESKTOP_ARCH || process.arch;
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported architecture: ${arch}`);
-const goArch = arch === 'x64' ? 'amd64' : 'arm64';
-// The core scripts/build.sh built for a platform (Go's names), placed at
-// bin/<slug> in the app's resources, outside ASAR.
-const goos = { darwin: 'darwin', linux: 'linux', win32: 'windows' };
-const exe = (platform) => (platform === 'win32' ? '.exe' : '');
-const coreOf = (platform) => `../dist/${slug}-${goos[platform]}-${goArch}${exe(platform)}`;
-const core = (platform) => [{ from: coreOf(platform), to: `bin/${slug}${exe(platform)}` }];
+// The core runs in the app's utility process (dist/core.mjs, bundled by
+// build.mjs), with node-pty beside it, a native module: prebuilt for macOS
+// and Windows, built for this machine on Linux by pnpm install. The
+// payloads it carries for machines and the web UI are resources:
+// scripts/build.sh staged them in dist/payload (PAYLOAD_ONLY=1).
+const ptyBinary = (platform) =>
+  platform === 'linux' ? 'node_modules/node-pty/build/Release/pty.node' : `node_modules/node-pty/prebuilds/${platform}-${arch}/pty.node`;
 // macOS: the Secure Enclave helper, a universal app bundle helper/build.mjs
 // made in dist/helper, placed in the app's Contents/Helpers (src/enclave.ts
 // helperPath), where signing the app signs it with the hardened runtime.
@@ -53,7 +53,19 @@ module.exports = {
   productName: name,
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
   directories: { output: '../dist/desktop' },
-  files: ['dist/main.cjs', 'dist/preload.cjs', 'assets/icon.png', 'package.json'],
+  files: [
+    'dist/main.cjs',
+    'dist/preload.cjs',
+    'dist/frames.cjs',
+    'dist/core.mjs',
+    'assets/icon.png',
+    'package.json',
+    // node-pty's sources and the libraries it is built from.
+    '!node_modules/node-pty/{deps,third_party,src,scripts}{,/**}',
+  ],
+  // The utility process's entry and node-pty (its library, and the helper
+  // it spawns on macOS) as files, outside the archive.
+  asarUnpack: ['dist/core.mjs', 'node_modules/node-pty/**'],
   extraMetadata: {
     name: `${slug}-desktop`,
     // Release tags (vX.Y.Z) stay as is in the core; app metadata takes semver.
@@ -71,19 +83,37 @@ module.exports = {
     { from: '../LICENSE', to: 'LICENSE' },
     { from: '../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
     { from: '../web/dist/licenses.md', to: 'licenses.md' },
+    // What the core carries (src/platform.ts coreResources).
+    { from: '../dist/payload', to: 'payload', filter: ['agents/*.gz', 'hc/*.gz', 'encoder/*.gz', 'ext/*.vsix'] },
+    { from: '../web/dist', to: 'web' },
   ],
-  // The core is built for DESKTOP_ARCH and the platform being packaged;
-  // refuse to put it into an Electron app for another architecture (e.g. a
-  // manual --x64 run) or package without it.
+  // node-pty is installed for DESKTOP_ARCH; refuse to put it into an
+  // Electron app for another architecture (e.g. a manual --x64 run) or to
+  // package without the core and what it carries.
   beforePack: async (context) => {
     const packing = Arch[context.arch];
     if (packing !== arch) {
-      throw new Error(`Packaging ${packing} with ${goArch} binaries; set DESKTOP_ARCH=${packing} (scripts/desktop.sh does)`);
+      throw new Error(`Packaging ${packing} with ${arch} modules; set DESKTOP_ARCH=${packing} (scripts/desktop.sh does)`);
     }
-    const needed = [coreOf(context.electronPlatformName), '../dist/hc/licenses/LICENSE', '../web/dist/licenses.md'];
+    const needed = [
+      'dist/core.mjs',
+      'dist/frames.cjs',
+      ptyBinary(context.electronPlatformName),
+      '../web/dist/index.html',
+      `../dist/payload/agents/${slug}-linux-amd64.gz`,
+      '../dist/payload/hc/hc-linux-amd64.gz',
+      '../dist/hc/licenses/LICENSE',
+      '../web/dist/licenses.md',
+    ];
     if (context.electronPlatformName === 'darwin' && withHelper) needed.push(`${helperOf}/Contents/MacOS/${name} Enclave`);
     for (const file of needed) {
       if (!existsSync(join(__dirname, file))) throw new Error(`Missing ${file}; build it with scripts/desktop.sh`);
+    }
+    // node-pty spawns through this helper on macOS; build.mjs makes it
+    // executable.
+    if (context.electronPlatformName === 'darwin') {
+      const helper = join(__dirname, `node_modules/node-pty/prebuilds/darwin-${arch}/spawn-helper`);
+      if (!(statSync(helper).mode & 0o111)) throw new Error(`${helper} is not executable; run pnpm -C desktop build`);
     }
   },
   asar: true,
@@ -95,7 +125,6 @@ module.exports = {
     identity: developerId ? undefined : '-',
     notarize: developerId && !!process.env.APPLE_ID,
     hardenedRuntime: true,
-    extraResources: core('darwin'),
     extraFiles: withHelper ? [{ from: helperOf, to: `Helpers/${helper}` }] : [],
     // Folders dropped on the Dock icon become workspaces (src/folders.ts). Rank
     // None: the app accepts dropped folders but never becomes their opener.
@@ -116,7 +145,6 @@ module.exports = {
   win: {
     icon: 'assets/icon.ico',
     target: ['nsis'],
-    extraResources: core('win32'),
   },
   // Linux takes its icon sizes (16 to 1024 px) from the ICNS.
   linux: {
@@ -128,7 +156,6 @@ module.exports = {
     // Offered in file managers' Open With for folders, which become
     // workspaces on the local machine (src/platform.ts foldersOf).
     mimeTypes: ['inode/directory'],
-    extraResources: core('linux'),
   },
   deb: {
     // electron-builder's defaults and ALSA, which Electron links and a
