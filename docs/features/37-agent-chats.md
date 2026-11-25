@@ -73,8 +73,9 @@ command is looked up on the machine in the login shell's PATH.
 ### The chat host (`internal/chathost`, `backend/features/chat/machine/host`)
 
 `chat-host --base <data dir> --run <run dir>` (the namespace's runtime
-directory on the host, [40](40-shared-homes.md); machine build,
-`cmd/veldr/chathost_unix.go`; Linux and macOS only) is the long-lived
+directory on the host, [40](40-shared-homes.md); the Go machine build's
+`cmd/veldr/chathost_unix.go`, the TypeScript one's below; Linux and macOS
+only) is the long-lived
 process that runs the agents and keeps their conversations. It serves
 `chat.sock` (0600) in the run directory (0700) under a lock; a second
 host exits. It runs as a **hidden terminal** of the instance's terminal

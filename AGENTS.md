@@ -9,36 +9,36 @@ changes.
 
 The core (`backend/`, TypeScript, built with Bun into one executable per
 platform; [its README](backend/README.md)) serves a React terminal UI and
-reaches several machines over ssh through a per-machine agent: the Go
-program `cmd/veldr` (the machine build), which the core embeds and uploads,
-its command `node` serving the core's protocol. Every machine's terminals live in a terminal core of the agent's own
-(herdr-core, `hc`, in a session apart from the user's); the browser emulates
-them with Ghostty's libghostty-vt as WebAssembly through the core's terminal
-protocol (`/api/v1/term`), and an Electron desktop app (`desktop/`) wraps the
-same UI and a core of its own on macOS, Windows and Linux. The agent runs on
-Linux and macOS only, so a core on Windows reaches SSH machines only.
-code-server provides VS Code panels. A chat host on each machine (the
-command `chat-host`, a hidden terminal of that terminal core) runs coding
-agents headless for the chat panes, its state in SQLite
-(`internal/store`). The core's executable embeds the UI, the machine builds
-and herdr-core for 4 platforms, the video encoder of Linux machines and a
-VS Code extension. The machine side moves to TypeScript too
-([42](docs/features/42-typescript-backend.md)): `backend/machine`,
-`backend/hosts/machine` and the features' `machine.ts` serve terminals,
-files, git, search, monitor, history and the browser pane; in the
-TypeScript build (`--machine ts`, `scripts/build.sh MACHINE=ts`) one
-executable per platform is the core and that machine side, its release
-archive what machines download; the product's builds
-deploy the Go machine build until the TypeScript side serves every
-feature. Both builds speak the same wire protocols, and a node of either
-takes over from the other.
+reaches several machines over ssh through a per-machine agent: the machine
+side in TypeScript ([42](docs/features/42-typescript-backend.md):
+`backend/machine`, `backend/hosts/machine` and the features' `machine.ts`),
+its command `node` serving the core's protocol. Each platform's executable
+is the core and that platform's machine side (the machine build); a machine
+downloads its platform's release archive from GitHub
+(`<slug>-<platform>.tar.gz`, checked against the release's `SHA256SUMS`), or
+the core uploads it. Every machine's terminals live in a terminal core of
+the agent's own (herdr-core, `hc`, in a session apart from the user's); the
+browser emulates them with Ghostty's libghostty-vt as WebAssembly through
+the core's terminal protocol (`/api/v1/term`), and an Electron desktop app
+(`desktop/`) wraps the same UI and a core of its own on macOS, Windows and
+Linux. The agent runs on Linux and macOS only, so a core on Windows reaches
+SSH machines only. code-server provides VS Code panels. A chat host on each
+machine (the command `chat-host`, a hidden terminal of that terminal core)
+runs coding agents headless for the chat panes, its state in SQLite
+(`backend/shared/store`). The core's executable embeds the UI, its
+platform's herdr-core (with the digests of every platform's) and, on Linux,
+video encoder, and a VS Code extension. The Go program `cmd/veldr`
+(`internal/`) is the other machine build: `scripts/build.sh MACHINE=go`
+(`--machine go`) builds cores that embed it and herdr-core for 4 platforms
+and upload them. Both builds speak the same wire protocols, and a node of
+either takes over from the other.
 
 ## Commands
 
 | Task | Command |
 | --- | --- |
 | Install JS deps | `make deps` |
-| Unit tests (the machine build's Go, the core's `bun test`, web, desktop) | `make test` |
+| Unit tests (Go, the core's `bun test`, web, desktop) | `make test` |
 | The core's tests that wait on real time for what runs in the background (marked `slow`/`slowDescribe` from `backend/shared/testdata/slow.ts`, skipped by `make test`; CI runs them) | `make test-slow` |
 | All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, the core's flags and routes in `docs/reference.md` (`backend/scripts/reference.ts`), generated tokens and registry, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
 | Regenerate the design tokens' CSS after editing `spec/tokens.json`, and `spec/generated/registry.json` with the settings and commands tables of `docs/reference.md` (`backend/scripts/registry.ts`) after changing settings, commands or agent kinds (`backend/shared/agents`, `internal/agentkinds`) | `make tokens` |
@@ -46,14 +46,14 @@ takes over from the other.
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
 | Test and rebuild the GUI helper of Linux machines (`scripts/gui-helper`: the program windows' X client and capture, compositor and keeper of the TypeScript machine build; zig 0.17) | `make gui-helper` |
 | Program windows' integration test against a real Xvfb in Docker, from any host (`make it` runs it on a Linux host with Xvfb) | `scripts/gui-it.sh` |
-| Integration tests with a real terminal core, the machine build's and the core's terminals (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`), and VS Code's TypeScript machine side with a real code-server release (`E2E_CODE_SERVER_SEED=<dir>` holding `code-server-<version>-<os>-<arch>.tar.gz`; skipped without) | `make it` |
+| Integration tests with a real terminal core, the Go machine build's and the core's terminals (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`), and VS Code's TypeScript machine side with a real code-server release (`E2E_CODE_SERVER_SEED=<dir>` holding `code-server-<version>-<os>-<arch>.tar.gz`; skipped without) | `make it` |
 | Old kernels and C libraries: KVM guests from official cloud images and containers of old distributions, a payload run in each (on a Linux host with KVM and Docker; not part of any make target) | `e2e/machines/machines.py run-matrix <script>` ([its README](e2e/machines/README.md)) |
-| End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium, SSH machines in Docker containers (skipped without Docker; `E2E_REQUIRE_DOCKER=1` fails instead), and the desktop app with its core in process (skipped without `desktop`'s packages; `E2E_CODE_SERVER_SEED=<dir with a code-server release>` adds its VS Code window); builds into `dist/e2e` (not part of `make test`); `E2E_MACHINE=ts` runs them against the core that deploys the TypeScript machine side (`SKIP_BUILD=1` reuses the build) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
-| Full build into `dist/`: the machine builds (Go), everything the core embeds staged in `dist/payload`, the core of each `TARGETS` platform (`bun backend/scripts/build.ts`) and the release archives | `make build` (or `scripts/build.sh`) |
+| End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium, SSH machines in Docker containers (skipped without Docker; `E2E_REQUIRE_DOCKER=1` fails instead), and the desktop app with its core in process (skipped without `desktop`'s packages; `E2E_CODE_SERVER_SEED=<dir with a code-server release>` adds its VS Code window); builds into `dist/e2e` (not part of `make test`); they run against the TypeScript build, `E2E_MACHINE=go` against the core that deploys the Go machine build (`SKIP_BUILD=1` reuses the build) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
+| Full build into `dist/`: everything the core embeds staged in `dist/payload` (herdr-core in `dist/machines-hc`), the executable of each `TARGETS` platform, the core and that platform's machine side (`bun backend/scripts/build.ts`), and the release archives; `MACHINE=go` builds the Go machine builds and cores that embed them instead | `make build` (or `scripts/build.sh`) |
 | Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
 | macOS: build the `.app` and install it into `/Applications` | `make desktop-install` |
 | Isolated desktop development | `make dev-desktop` |
-| Run for development: the core from its sources (`bun`, instance `dev`, this host's machine build in `dist/agents`, the payloads of `dist/payload`) and Vite | `make dev-core` and `make dev-web` |
+| Run for development: the core from its sources (`bun`, instance `dev`, the payloads of `dist/payload`, where it stages this host's executable, built into `dist/dev` with the herdr-core it fetches once into `dist/machines-hc`) and Vite | `make dev-core` and `make dev-web` |
 
 ## Tests: fast and slow, by area
 
@@ -231,7 +231,7 @@ playbooks):
 - `web/dist` is embedded into the core's executable when it is built
   (`backend/scripts/build.ts --web`); `make build` builds the UI first, and
   `make dev-core` serves `web/dist` as it is (`--web-dir`).
-- Adding a Go dependency of the machine build or an npm dependency of
+- Adding a dependency of the Go machine build or an npm dependency of
   `backend/` changes `THIRD_PARTY_NOTICES.md`; run `scripts/notices.sh`.
 - Files many changes touch are laid out so that parallel branches merge:
   `README.zh-CN.md` has one sentence per line, and enumerations in the docs
@@ -245,18 +245,19 @@ playbooks):
   POSIX-only tests skip on Windows. Paths on machines are POSIX: use
   package `path`, not `filepath`, for them in Go, `node:path`'s `posix` in
   TypeScript. `.gitattributes` keeps LF line endings on Windows checkouts.
-- The binary a machine gets is `cmd/veldr` (`go build ./cmd/veldr`, with
-  `-X …/internal/agentproto.Version` for releases); the core finds it by
-  platform in its payloads (`backend/kernel/payloads.ts`) or in
-  `--agent-dir`. The TypeScript build (`--machine ts`) deploys its own
-  program instead, the machine's platform's executable from the release's
+- The binary a machine gets is the TypeScript build's (`--machine ts`, the
+  default): the machine's platform's executable from the release's
   archive, checked against the release's `SHA256SUMS`: the machine
   downloads it, else the core uploads it from `--agent-dir`, its cache, its
   own executable or the release
   (`backend/kernel/machines/transport/release.ts`, `ssh.ts`), checked by its
   SHA-256 on the machine. Its command line is `backend/hosts/bun/main.ts`
   (`node` from `backend/hosts/machine/cli.ts`; the node's features in
-  `backend/hosts/machine/features.ts`).
+  `backend/hosts/machine/features.ts`). A core built with `MACHINE=go`
+  (`--machine go`) deploys `cmd/veldr` instead (`go build ./cmd/veldr`,
+  with `-X …/internal/agentproto.Version` for releases), which it finds by
+  platform in its payloads (`backend/kernel/payloads.ts`) or in
+  `--agent-dir`.
 - Bun's unix socket server removes the path it bound when it closes: the
   machine side binds every socket under a temporary name and renames it
   into place (`backend/machine/sockets.ts` `listenUnix`); use it, or a

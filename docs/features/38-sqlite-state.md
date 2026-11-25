@@ -33,9 +33,10 @@ between processes of different roles; replication.
 
 ### Opening (`internal/store`, `backend/shared/store`)
 
-The machine build (the agent, the chat host) opens its databases with
+The Go machine build (the agent, the chat host) opens its databases with
 `internal/store`, whose driver is `modernc.org/sqlite` (SQLite compiled to
-Go, no cgo, about 4.7 MB a binary); the core with `backend/shared/store`,
+Go, no cgo, about 4.7 MB a binary); the core and the TypeScript machine
+side with `backend/shared/store`,
 on `node:sqlite` (`DatabaseSync`, which Bun and Electron's Node both have;
 its calls are synchronous, so a statement waiting for another process's
 lock blocks the thread). Both follow the same rules;

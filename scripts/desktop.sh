@@ -58,8 +58,8 @@ if [[ "$mode" == install && "$os" != mac ]]; then
   exit 2
 fi
 export DESKTOP_ARCH
-# With MACHINE=ts (scripts/build.sh), the app carries its own platform's
-# executable of the TypeScript build, for the local machine (none on
+# The app carries its own platform's executable of the TypeScript build
+# (scripts/build.sh; not with MACHINE=go), for the local machine (none on
 # Windows, where no machine side runs); other machines get theirs from the
 # release.
 case "$os" in

@@ -4,11 +4,11 @@ The core and the machine agent in TypeScript. Bun runs it on machines and
 as the command line, built into one executable; the desktop app runs the
 core inside Electron, whose runtime is Node. It replaces the Go program in
 stages ([42](../docs/features/42-typescript-backend.md)): the core is this
-one; machines run the Go machine build (`cmd/veldr`, `internal/`) by
-default, or the machine side here (`machine/`, `hosts/machine`, the
-features' `machine.ts`) in a core built to deploy it
-(`scripts/build.ts --machine ts`), which serves the features whose machine
-side is here (terminals, files, git, search, monitor, history, browser,
+one, and machines run the machine side here (`machine/`, `hosts/machine`,
+the features' `machine.ts`) by default (`scripts/build.ts --machine ts`),
+or the Go machine build (`cmd/veldr`, `internal/`) in a core built to
+deploy it (`--machine go`); the machine side here serves every feature
+(terminals, files, git, search, monitor, history, browser,
 agents, AI usage, VS Code, chats: the chat host, `chat-host`, with its
 adapters' interface, the ACP adapter, Codex's and Claude Code's, on
 Anthropic's Agent SDK, which machines fetch on use and no executable
@@ -143,17 +143,19 @@ hook. The host composes them; features do not import each other.
 `pnpm test` (`bun test`), `pnpm typecheck`, `pnpm format`; `make test` and
 `make check` run them with the rest of the repository.
 
-`bun scripts/build.ts --out FILE --web ../web/dist --agents DIR --hc DIR
---ext DIR --encoder DIR [--target bun-linux-x64-baseline] [--version V]`
-builds the core's executable; with `--machine ts [--release-url URL]` it
-is the TypeScript build instead: the core and the machine side of its
-platform (`hosts/machine/cli.ts`'s `node` commands), with that platform's
-herdr-core of `--hc` embedded and the digests of all of them recorded, and
-the release's download URL from which machines get their platform's
-archive (`kernel/machines/transport/release.ts`); `scripts/build.sh` (`make build`) runs it for
-each platform with everything it embeds staged in `dist/payload`, and
-`scripts/e2e.sh` (`make e2e`) runs the end-to-end tests against it (the
-core deploying the Go machine builds; `E2E_MACHINE=ts`, the one deploying
-the machine side here). `make dev-core` runs the
-core from its sources (`bun hosts/bun/main.ts`), which reads the payloads
-from `dist/payload`.
+`bun scripts/build.ts --out FILE --web ../web/dist --hc DIR --ext DIR
+--encoder DIR [--release-url URL] [--target bun-linux-x64-baseline]
+[--version V]` builds the core's executable, the TypeScript build: the
+core and the machine side of its platform (`hosts/machine/cli.ts`'s `node`
+commands), with that platform's herdr-core of `--hc` embedded and the
+digests of all of them recorded, and the release's download URL from which
+machines get their platform's archive
+(`kernel/machines/transport/release.ts`); with `--machine go --agents DIR`
+it is instead a core that embeds the Go machine builds of `--agents` and
+herdr-core of `--hc` for every platform. `scripts/build.sh` (`make build`)
+runs it for each platform with everything it embeds staged in
+`dist/payload`, and `scripts/e2e.sh` (`make e2e`) runs the end-to-end
+tests against it (the TypeScript build; `E2E_MACHINE=go`, the core
+deploying the Go machine builds). `make dev-core` builds this host's
+executable, stages it in `dist/payload` and runs the core from its sources
+(`bun hosts/bun/main.ts`), which reads the payloads from `dist/payload`.

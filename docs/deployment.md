@@ -25,29 +25,36 @@ The core listens on `127.0.0.1:7780` and the same port on `::1`. Open it as
 browsers keep no WebAuthn credential for an IP address
 ([30](features/30-variable-vault.md)).
 
-Release archives (`dist/release/`) are for Linux and macOS on amd64 and
-arm64 and include the licenses. On Windows the core runs only inside the
+Release archives (`dist/release/`) are for Linux (amd64 and arm64, each
+for glibc and for musl) and macOS (amd64 and arm64) and include the
+licenses. On Windows the core runs only inside the
 [desktop app](#desktop-app), in process, and reaches SSH machines only.
 
-The core is one executable built with Bun from `backend/` (about 145–175 MB
-per platform: the Bun runtime and what it embeds). What the core embeds:
+The core is one executable built with Bun from `backend/` (about 110–135
+MiB per platform: the Bun runtime and what it embeds;
+[42](features/42-typescript-backend.md#the-machine-side) has the sizes).
+What the core embeds:
 
-- The web UI, the machine builds of the agent (the Go program `cmd/veldr`
-  for Linux and macOS on amd64 and arm64) and the VS Code bridge. The
-  TypeScript build (`MACHINE=ts`, [42](features/42-typescript-backend.md))
-  is instead the machine build of its own platform too: one executable with
-  the core, the machine side (`veldr node`), its platform's herdr-core and,
-  on Linux, its video encoder, for Linux (amd64, arm64, each for glibc and
-  for musl) and macOS (amd64, arm64); machines of other platforms get
-  theirs from the release ([air-gapped networks](#air-gapped-networks)).
-- herdr-core 0.1.21 for Linux and macOS on amd64 and arm64 (about 12 MB),
-  the terminal core installed on machines
-  ([21](features/21-terminal-core.md)). `scripts/build.sh` runs
-  `scripts/fetch-hc`, which downloads the archives from `releases.herdr.dev`
-  (or reuses `dist/hc/`) and verifies them against the digests pinned in
-  `internal/hcdist`; the build fails otherwise. `scripts/build.sh` stages
-  everything the core embeds in `dist/payload` first; a core run from the
-  sources (`make dev-core`) reads it there.
+- The web UI, the VS Code bridge and the machine side of its own platform:
+  the executable is that platform's machine build too
+  ([42](features/42-typescript-backend.md)), the core and the machine side
+  (`veldr node`) with its platform's herdr-core and, on Linux, its video
+  encoder, for Linux (amd64, arm64, each for glibc and for musl) and macOS
+  (amd64, arm64); machines of other platforms get theirs from the release
+  ([air-gapped networks](#air-gapped-networks)). A core built with
+  `MACHINE=go` embeds instead the Go program `cmd/veldr` for Linux and
+  macOS on amd64 and arm64, with herdr-core for each and both Linux video
+  encoders.
+- herdr-core 0.1.21 (about 12 MB), the terminal core installed on machines
+  ([21](features/21-terminal-core.md)): the executable's own platform's,
+  with the digests of the Linux and macOS ones on amd64 and arm64.
+  `scripts/build.sh` runs `scripts/fetch-hc`, which downloads the archives
+  from `releases.herdr.dev` (or reuses `dist/hc/`) and verifies them
+  against the digests pinned in `internal/hcdist`; the build fails
+  otherwise. `scripts/build.sh` stages everything the core embeds in
+  `dist/payload` first (herdr-core in `dist/machines-hc`); a core run from
+  the sources (`make dev-core`) reads `dist/payload`, where it stages this
+  host's executable.
 - The video encoder for program windows on Linux machines
   ([14](features/14-gui-windows.md)), when `scripts/build-ffmpeg.sh`
   (Docker) built it into `dist/ffmpeg/`. Releases require it
@@ -345,15 +352,18 @@ See [SECURITY.md](../SECURITY.md) for the threat model.
 
 ## Air-gapped networks
 
-Machines never need internet access: code-server and extensions are
-resolved on the core host and pushed through the agent. The one exception
-is the AI usage plugin, which asks the providers from the machines
+Machines need no internet access: those that have it download their
+build (and the Agent SDK of Claude Code's chats, below) themselves, and the
+core uploads them to the others; code-server and extensions are resolved
+on the core host and pushed through the agent. The one exception is the AI
+usage plugin, which asks the providers from the machines
 ([29](features/29-ai-usage.md)); offline, it reports the failure.
 
-The TypeScript build (`MACHINE=ts`,
-[42](features/42-typescript-backend.md)) carries no other platform's
-executable. A machine that lacks its build first downloads its platform's
-archive from the core's release itself (`curl` or `wget`; the setting
+The core ([42](features/42-typescript-backend.md)) carries no other
+platform's executable (a core built with `MACHINE=go` embeds the Go
+machine builds of all four platforms instead and uploads them). A machine
+that lacks its build first downloads its platform's archive from the
+core's release itself (`curl` or `wget`; the setting
 `machines.download`, or `--machine-download=false`, turns this off, and a
 machine whose download failed is not asked first again for a day),
 checked against the release's `SHA256SUMS`, which the core fetches over its
@@ -435,9 +445,10 @@ your use of the SDK and of your Claude account; the chats run your own
 Building needs Go modules, npm packages, the Bun runtimes of the target
 platforms (`bun build --compile` downloads one for another platform) and
 the pinned herdr-core archives (verified archives in `dist/hc/` are
-reused); `MACHINE=ts` builds the TypeScript build for `TARGETS`
+reused); `scripts/build.sh` builds the executables of `TARGETS`
 (`linux/amd64-musl` and `linux/arm64-musl` among them) with `RELEASE_URL`,
-the release's download URL its machines use.
+the release's download URL their machines use, and with `MACHINE=go` the
+cores that embed the Go machine builds instead.
 
 ## Remote resources
 
@@ -603,6 +614,6 @@ unless they use the same instance. Give each its own `--instance` (state in
 For development:
 
 ```bash
-make dev-core     # bun backend/hosts/bun/main.ts --instance dev --local-only --listen 127.0.0.1:7790 --agent-dir dist/agents --web-dir web/dist
+make dev-core     # this host's executable staged in dist/payload, then bun backend/hosts/bun/main.ts --instance dev --local-only --listen 127.0.0.1:7790 --web-dir web/dist
 make dev-web      # Vite on top of it
 ```

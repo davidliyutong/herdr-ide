@@ -155,10 +155,10 @@ them, but a module the app does not carry has no reason to be looked
 for.
 
 The app carries what the core carries for machines as resources, laid out
-as `scripts/build.sh` stages them (`payload/`: machine builds and
-herdr-core, or the TypeScript machine side's digests and its own
-platform's executable, the video encoders, the VS Code extension; `web/`:
-the web UI), and
+as `scripts/build.sh` stages them (`payload/`: the TypeScript machine
+side's digests and its own platform's executable, or, with `MACHINE=go`,
+machine builds and herdr-core, the video encoders, the VS Code extension;
+`web/`: the web UI), and
 node-pty 1.1.0 for the ssh login's terminal: a Node-API module, so the
 binary built for Node loads in Electron's utility process without a
 rebuild for Electron; it ships prebuilt for macOS and Windows and is
@@ -544,19 +544,20 @@ closes are not answered, and the newer revisions 2025-11-25 and 2024-10-07
 negotiate too.
 
 Which machine build a core deploys is a choice of its build
-(`backend/scripts/build.ts --machine go|ts`, `scripts/build.sh MACHINE=ts`;
+(`backend/scripts/build.ts --machine ts|go`, `scripts/build.sh MACHINE=go`;
 the release workflow's repository variable `MACHINE`), not a flag of the
-product: the product's builds deploy the Go machine build until the
-TypeScript side serves every feature. Both speak the same protocols on the
-same sockets, locks and files (the terminal history's database, the
-terminal core's executable and session), so a node of either build takes
+product: the TypeScript side serves every feature, and the product's builds
+deploy it (`ts`, the default); `go` builds a core that embeds and uploads
+the Go machine builds. Both speak the same protocols on the same sockets,
+locks and files (the terminal history's database, the terminal core's
+executable and session), so a node of either build takes
 over from the other with the terminals kept, which is the upgrade path.
 `scripts/e2e.sh` builds the cores of both, the TypeScript build for the
 host and Docker's Linux (glibc and musl) into a directory with its
-`SHA256SUMS`, which the cores take as `--agent-dir`, offline;
-`E2E_MACHINE=ts` runs the end-to-end tests against the TypeScript build,
-and `tests/nodes.spec.ts` has a newer node of the other build take a node
-over.
+`SHA256SUMS`, which the cores take as `--agent-dir`, offline; the
+end-to-end tests run against the TypeScript build, `E2E_MACHINE=go`
+against the Go one, and `tests/nodes.spec.ts` has a newer node of the
+other build take a node over.
 
 ### The chat host
 
@@ -672,8 +673,9 @@ chat host's protocol keep their wire forms, so a TypeScript core serves Go
 machine builds and the other way round. The stages: shared libraries;
 the core in TypeScript with the Go machine builds, which then becomes the
 product's core, the Go core removed (the Go program is the machine build
-only); the desktop app's core in process; the machine side in TypeScript;
-the Go program removed.
+only); the desktop app's core in process; the machine side in
+TypeScript, then the product's default machine build (`MACHINE=go` builds
+the Go one); the Go program removed.
 
 ### What changes on the wire
 
@@ -713,11 +715,12 @@ baseline builds); the core reads it with `Bun.Archive`, keeping the UI's
 files in memory and reading a machine build when a machine needs one.
 `scripts/build.sh` stages the payloads in `dist/payload` and builds the
 core of each platform; `scripts/e2e.sh` runs the end-to-end tests against
-that executable, with the Go machine builds while machines run them. The
-checks that read the Go core read the TypeScript one now: the flags and
-routes `docs/reference.md` must list come from the core composed as
-`serve` composes it (`backend/scripts/reference.ts`), the registry from
-the features it composes too (`backend/scripts/registry.ts`).
+that executable, the TypeScript build, and with `E2E_MACHINE=go` against
+the core with the Go machine builds. The checks that read the Go core
+read the TypeScript one now: the flags and routes `docs/reference.md` must
+list come from the core composed as `serve` composes it
+(`backend/scripts/reference.ts`), the registry from the features it
+composes too (`backend/scripts/registry.ts`).
 
 ### Claude Code
 
@@ -1208,8 +1211,9 @@ SECURITY.md has both.
   the GPU display and VA-API video, and a server of four NVIDIA GPUs with
   the GPU display on one of them, NVENC and gpupick
   ([14](14-gui-windows.md#testing) has the results).
-- `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
-  runs the suite against the TypeScript build (32 passed, none skipped;
+- `make e2e` builds the cores of both machine builds (`E2E_MACHINE=go`
+  runs the suite against the Go one) and runs the suite against the
+  TypeScript build (32 passed, none skipped;
   the chats' specs run with the fake ACP agent, also on an SSH machine,
   and with a fake Codex app-server, `e2e/fakecodex`, in
   `tests/chat-codex.spec.ts`: a command allowed and rejected, a turn

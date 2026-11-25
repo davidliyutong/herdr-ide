@@ -5,7 +5,7 @@ browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (TypeScript
 desktop app (Electron shell) ──MessagePorts, no TCP──▶  ├─ kernel: guards, event channel, machines (registry + connection state machine)
                                                         ├─ settings, keybindings (files on the core host)
                                                         ├─ features: terminals, files, VS Code proxy and bridge hub, program windows, plugins
-                                                        └─ one ssh session per machine ──yamux──▶ agent (Go machine build or TypeScript machine side, served by `veldr node`)
+                                                        └─ one ssh session per machine ──yamux──▶ agent (TypeScript machine side, or the Go machine build, served by `veldr node`)
                                                                                                     ├─ herdr-core in a session of its own (raw pipe to its API socket)
                                                                                                     ├─ agent detection in its terminals, with the agents' sessions
                                                                                                     ├─ files (stat/list/range read/upload/zip)
@@ -33,26 +33,26 @@ machine with the code `local_unsupported` and reaches SSH machines only
 
 The core is TypeScript under `backend/` (its
 [README](../backend/README.md) has the layers and their rules), built with
-Bun into one executable per platform; machines run the Go program
-`cmd/veldr` (the machine build), which the core embeds and uploads, or, in
-the TypeScript build (`backend/scripts/build.ts --machine ts`), that same
-executable, which is the core and the TypeScript machine side
-(`backend/machine`, `backend/hosts/machine`, the features' `machine.ts`)
-of its platform: machines download their platform's from the core's
-release, checked against its `SHA256SUMS`, or the core uploads it
-([42](features/42-typescript-backend.md)).
+Bun into one executable per platform, which is the core and the
+TypeScript machine side (`backend/machine`, `backend/hosts/machine`, the
+features' `machine.ts`) of its platform (the machine build): machines
+download their platform's from the core's release, checked against its
+`SHA256SUMS`, or the core uploads it
+([42](features/42-typescript-backend.md)). A core built with
+`backend/scripts/build.ts --machine go` (`scripts/build.sh MACHINE=go`)
+deploys the Go program `cmd/veldr` instead, which it embeds and uploads.
 
 | Directory | Role |
 | --- | --- |
 | `backend/shared` | What the core and the machine side share: wire protocols (`proto/`: agentproto, yamux, herdr-core's, the chat host's), libraries (`lib/`: brand names, logging, Go-compatible times and strings), SQLite state (`store/`), the host's directories, ids, loopback and file rules (`host/`), the coding agents' kinds and Claude Code's transcripts mapped to ACP-shaped events (`agents/`, `agents/transcript/`, [35](features/35-agent-native-view.md)). |
 | `backend/kernel` | The core's machinery: HTTP routing and guards (`http/`: Host/Origin, proxy secret, CSP), `Fail` codes and audit, channels and the pages on `/ws`, machines and their connections (`machines/`: the registry `machines[-<instance>].json`, the connection state machine, the ssh target rule, the transports to the local node and over ssh, the machine builds they install, `transport/builds.ts`, and the TypeScript build's release, its `SHA256SUMS` and archives, `transport/release.ts`), settings and keybindings (`config/`: typed settings, the hand-editable files, the registry written to `spec/generated/registry.json` and `docs/reference.md`, [13](features/13-settings-and-appearance.md)), typed agent actions, the payloads it carries for machines (`payloads.ts`). |
 | `backend/machine` | The TypeScript machine side's machinery (Bun, Linux and macOS): the node and its clients (`node.ts`, `dial.ts`), the agent its sessions share and the core's ops (`agent.ts`, `fsops.ts`, `hcop.ts`), the dispatch of the `plugin` op, and of the ops a feature serves itself (`detect`, `code-server`), to the features' machine sides (`dispatch.ts`, `feature.ts`: `defineMachine`, and what they see of the sessions: their pipes per socket, streams towards their cores), the terminal core (`hc.ts`), hidden terminals, housekeeping, the vault's socket and the MCP command's link in `<data>/bin` (`vault.ts`), the coding agents' sessions and their files, which several features read (`agents/`, [35](features/35-agent-native-view.md)), system calls through `bun:ffi` (`sys/`). |
-| `backend/features/<id>` | Everything the product does, one directory per feature: its typed protocol (`protocol.ts`), its core side (`core.ts`: routes, channels, services, settings), its machine side in TypeScript (`machine.ts` and `machine/`, for files, git, search, monitor, browser, history, usage, agents: detection, [25](features/25-agent-detection.md), vscode: code-server and the bridge's socket, chat: the chat host, its adapter interface, the ACP adapter, Codex's and Claude Code's, [37](features/37-agent-chats.md), and program windows with the GUI helper, `scripts/gui-helper`, [14](features/14-gui-windows.md)) and, while machines run the Go build, the tests of the wire it shares with it ([27](features/27-plugins.md)): `machines`, `terminals` ([22](features/22-terminal-protocol.md)), `files` ([28](features/28-file-explorer.md)), `git` ([31](features/31-git.md)), `search` ([41](features/41-project-search.md)), `monitor` ([34](features/34-system-monitor.md)), `browser` ([32](features/32-browser-and-ports.md)), `agents` ([33](features/33-workspace-restore.md)), `history` ([36](features/36-terminal-history.md)), `chat` ([37](features/37-agent-chats.md)), `usage` ([29](features/29-ai-usage.md)), `vault` ([30](features/30-variable-vault.md)), `gui` ([14](features/14-gui-windows.md)), `vscode` ([05](features/05-vscode-panes.md), [09](features/09-air-gapped-installs.md)). |
-| `backend/hosts/bun` | The command line (`main.ts`: `serve`, `fetch-assets`, `version`, `node`: run here in the TypeScript build, passed on to the Go machine build otherwise) and `serve` on `Bun.serve` (`serve.ts`), the payloads embedded in the executable (`payloads.ts`). |
+| `backend/features/<id>` | Everything the product does, one directory per feature: its typed protocol (`protocol.ts`), its core side (`core.ts`: routes, channels, services, settings), its machine side in TypeScript (`machine.ts` and `machine/`, for files, git, search, monitor, browser, history, usage, agents: detection, [25](features/25-agent-detection.md), vscode: code-server and the bridge's socket, chat: the chat host, its adapter interface, the ACP adapter, Codex's and Claude Code's, [37](features/37-agent-chats.md), and program windows with the GUI helper, `scripts/gui-helper`, [14](features/14-gui-windows.md)) and, while the Go machine build exists, the tests of the wire it shares with it ([27](features/27-plugins.md)): `machines`, `terminals` ([22](features/22-terminal-protocol.md)), `files` ([28](features/28-file-explorer.md)), `git` ([31](features/31-git.md)), `search` ([41](features/41-project-search.md)), `monitor` ([34](features/34-system-monitor.md)), `browser` ([32](features/32-browser-and-ports.md)), `agents` ([33](features/33-workspace-restore.md)), `history` ([36](features/36-terminal-history.md)), `chat` ([37](features/37-agent-chats.md)), `usage` ([29](features/29-ai-usage.md)), `vault` ([30](features/30-variable-vault.md)), `gui` ([14](features/14-gui-windows.md)), `vscode` ([05](features/05-vscode-panes.md), [09](features/09-air-gapped-installs.md)). |
+| `backend/hosts/bun` | The command line (`main.ts`: `serve`, `fetch-assets`, `version`, `node`: run here in the TypeScript build, passed on to the Go machine build in a core built with `--machine go`) and `serve` on `Bun.serve` (`serve.ts`), the payloads embedded in the executable (`payloads.ts`). |
 | `backend/hosts/common` | What both hosts compose (`compose.ts`): the features, settings and keybindings, the machines, the host's routes. |
 | `backend/hosts/machine` | The TypeScript machine side's commands (`cli.ts`: `node`, `node dial`, `node stop`; `mcp.ts`: `mcp`, the vault's MCP server, whose server and runner are `backend/features/vault/machine/`; `chathost.ts`: `chat-host`, the chat host, `backend/features/chat/machine/host`; with the Go build's flags), which the command line runs, and the features its node serves and the chat host's adapters (`features.ts`). |
 | `backend/hosts/electron` | The core in the desktop app's utility process (`main.ts`, `serve.ts`, `start.ts`), its bridge to the main process over MessagePorts (`bridge.ts`), node-pty's terminals (`pty.ts`). |
-| `backend/scripts` | The executable's build (`build.ts`, `--machine go\|ts`: the core that embeds the Go machine builds, or the TypeScript build), the reference check (`reference.ts`), the npm packages' notices, the types of Codex's app-server generated from its schema (`codex-schema.ts`, `spec/codex-app-server`). |
+| `backend/scripts` | The executable's build (`build.ts`, `--machine ts\|go`: the TypeScript build, the default, or the core that embeds the Go machine builds), the reference check (`reference.ts`), the npm packages' notices, the types of Codex's app-server generated from its schema (`codex-schema.ts`, `spec/codex-app-server`). |
 | `cmd/veldr` | The machine build: `node` (`node`, `node dial`, `node stop`), `gui-keep`, `gui-wl`, `chat-host`, `mcp` and `version` (`machine_unix.go`, `node_unix.go`, `chathost_unix.go`). |
 | `internal/brand` | Product names; the only place they are defined in Go. |
 | `internal/hostid` | The host's key (name and a hash of its machine id) and id (the hash alone), for files and sessions kept per host ([40](features/40-shared-homes.md)). |
@@ -78,7 +78,7 @@ release, checked against its `SHA256SUMS`, or the core uploads it
 | `extensions/veldr-bridge` | VS Code extension installed into code-server. |
 | `scripts` | Build (`build.sh`: payloads staged in `dist/payload`, the core of each platform), packaging, checks, pinned downloads and the design tokens' generator (`tokens`); the native code machines run besides the machine build: the video encoder (`encoder`), gpupick (`gpupick`) and the GUI helper of the TypeScript machine build (`gui-helper`, Zig: the program windows' X client and capture, the GPU display's compositor, the display keeper; [14](features/14-gui-windows.md)). |
 | `spec` | Design tokens (`tokens.json`, [24](features/24-design-tokens.md)), `generated/registry.json`, the pinned Codex app-server schema, and shared test vectors and recordings (`vectors/`) run by Go, core and web tests. |
-| `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`; `E2E_MACHINE=ts` runs them against the TypeScript build), `machines`, old kernels and C libraries in KVM and containers with payloads run in each (`payloads/machine-node`: the TypeScript machine side), `fakeacp`, a scripted offline ACP agent installed as `kimi`, `xclient`, an X program that reports its input for the program window tests, and `sshd`, the image of the SSH machines the tests run in Docker (with Xvfb). |
+| `e2e` | End-to-end tests (`make e2e`): Playwright specs against the real core, each on an isolated instance (`harness`; they run against the TypeScript build, `E2E_MACHINE=go` against the core that deploys the Go machine build), `machines`, old kernels and C libraries in KVM and containers with payloads run in each (`payloads/machine-node`: the TypeScript machine side), `fakeacp`, a scripted offline ACP agent installed as `kimi`, `xclient`, an X program that reports its input for the program window tests, and `sshd`, the image of the SSH machines the tests run in Docker (with Xvfb). |
 
 ## Desktop app
 
@@ -149,7 +149,7 @@ Rules:
   context after the reply.
 - yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing
   (`[u32 length][data]…[0]`).
-- Core and agent come from the same build (the agent is uploaded by content
+- Core and agent come from the same build (the agent is installed by content
   hash), so there is no version negotiation. Extend by adding fields and
   ops; never reuse them.
 - The Go machine build and the TypeScript machine side speak the same wire:

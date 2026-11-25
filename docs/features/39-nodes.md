@@ -49,11 +49,16 @@ a node reachable without ssh.
 | `serve` | The UI: HTTP and WebSocket front, plugins' core sides, the files of the UI's host. Also on Windows. |
 
 `serve` is the core's executable (TypeScript, `backend/hosts/bun`), which
-passes `node` on to the machine build it carries; `node`, `node dial` and
-`chat-host` are the machine build's (`cmd/veldr`: no `serve`, no web UI,
-no payloads), which the UI installs on its own machine and uploads to
-others as before ([02](02-multi-machine-transport.md)).
-`internal/agent/node.go` is the node, `cmd/veldr/node_unix.go` its
+is the machine build of its platform too and runs `node`, `node dial` and
+`chat-host` itself ([42](42-typescript-backend.md#the-machine-side));
+the UI installs it on its own machine, and other machines download their
+platform's from the release or get it uploaded
+([02](02-multi-machine-transport.md)). `backend/machine/node.ts` is the
+node, `backend/hosts/machine/cli.ts` its commands (`chathost.ts` the chat
+host's). A core built with `MACHINE=go` passes `node` on to the Go machine
+build it carries (`cmd/veldr`: no `serve`, no web UI, no payloads), which
+it installs on its own machine and uploads to others;
+`internal/agent/node.go` is that node, `cmd/veldr/node_unix.go` its
 commands.
 
 ### The node

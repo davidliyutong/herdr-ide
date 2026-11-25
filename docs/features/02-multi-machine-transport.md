@@ -32,15 +32,22 @@ Windows core host; the interactive ssh login from a core on Windows.
 ### Agent
 
 The agent is served by each machine's node, the command `node` of the
-machine build (`cmd/veldr`, [39](39-nodes.md)). The
-core carries it for machines: a static Go binary (`CGO_ENABLED=0`) for
-linux/darwin × amd64/arm64, embedded gzipped in the core's executable
-(`backend/kernel/payloads.ts`). Its version is its content hash,
-so a changed build is always re-uploaded and core and agent never disagree
-on the protocol.
+machine build ([39](39-nodes.md)): the core's own executable of the
+machine's platform, the core and the TypeScript machine side
+([42](42-typescript-backend.md#the-machine-side)), for linux (glibc and
+musl) and darwin × amd64/arm64. The core carries its own platform's; a
+machine gets its platform's from the core's release, checked against the
+release's `SHA256SUMS`: it downloads the archive, else the core uploads it
+(`backend/kernel/machines/transport/release.ts`). A core built with
+`MACHINE=go` carries the Go program `cmd/veldr` instead: a static Go
+binary (`CGO_ENABLED=0`) for linux/darwin × amd64/arm64, embedded gzipped
+in the core's executable (`backend/kernel/payloads.ts`). Its version is
+its content hash, so a changed build is always installed again and core
+and agent never disagree on the protocol.
 
-The agent is `//go:build unix` (unix sockets with peer checks, process
-groups, code-server and Xvfb are POSIX). The core speaks the same
+The agent runs on Linux and macOS only, the Go one `//go:build unix`
+(unix sockets with peer checks, process groups, code-server and Xvfb are
+POSIX). The core speaks the same
 protocol in TypeScript (`backend/shared/proto`: agentproto, and yamux with
 the window, keepalive and backlog of `agentproto.YamuxConfig`,
 [42](42-typescript-backend.md)).
@@ -51,9 +58,12 @@ the window, keepalive and backlog of `agentproto.YamuxConfig`,
 
 1. probe `uname -s`, `uname -m` and `$HOME` through `/bin/sh -c` (works with
    any login shell);
-2. if `~/.veldr/agent/<hash>/veldr` is missing, upload it with
-   `cat >` to a temporary name and rename it atomically; builds unused for
-   14 days are removed in the same step;
+2. if `~/.veldr/agent/<hash>/veldr` is missing, install it: the machine
+   downloads its platform's archive, else the core uploads it (the Go
+   build with `cat >`), written to a temporary name and renamed
+   atomically, the TypeScript build's once its SHA-256 is the release's
+   ([42](42-typescript-backend.md#the-machine-side)); builds unused for 14
+   days are removed in the same step;
 3. `exec` it with `node dial --instance NAME` and speak yamux over the ssh
    session's stdin/stdout: `node dial` pipes them to the socket of the
    machine's node, which it starts when none answers (or one that takes
@@ -220,8 +230,10 @@ starts only its agent. When the first client of `/api/v1/term` subscribes
 to a machine's terminals ([22](22-terminal-protocol.md)), the core:
 
 1. asks the agent for the terminal core's status (op `hc`);
-2. uploads this build's herdr-core (`internal/hcdist`) when the installed
-   one differs; the agent checks the digest and swaps it into
+2. installs this build's herdr-core (`internal/hcdist`) when the installed
+   one differs, from the copy the node's executable carries (`hc`'s
+   `install-embedded`; a Go build's is uploaded); the agent checks the
+   digest and swaps it into
    `~/.veldr[-<instance>]/hosts/<host>/hc/`, and a running core of
    another build is restarted, its successor adopting the programs;
 3. starts a core if none runs (session

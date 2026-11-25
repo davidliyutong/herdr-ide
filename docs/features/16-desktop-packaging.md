@@ -54,7 +54,9 @@ how a Linux command line names folders.
 ### Building
 
 `scripts/desktop.sh` stages what the core carries (`PAYLOAD_ONLY=1
-scripts/build.sh`: the web UI, machine builds, herdr-core, the encoders,
+scripts/build.sh`: the web UI, the build's release record and its own
+platform's executable for the local machine (no executable on Windows;
+with `MACHINE=go`, the machine builds and herdr-core instead), the encoders,
 the VS Code extension), then builds the shell with the core bundled for its
 utility process (`desktop/build.mjs`: `dist/core.mjs` from
 `backend/hosts/electron`), then runs electron-builder

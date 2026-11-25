@@ -8,12 +8,15 @@ repeating it.
 
 ## Commands
 
-The core's executable has `serve`, `fetch-assets`, `version` and `node`,
-which it passes on to the machine build of its own host; the other
-commands are the machine build's, the program the core uploads to each
-machine (`~/.veldr/agent/<build>/veldr`). The TypeScript build
-(`MACHINE=ts`, [42](features/42-typescript-backend.md)) is that machine
-build itself: its `node` commands run in it.
+On Linux and macOS the core's executable is the machine build of its own
+platform too ([42](features/42-typescript-backend.md)): besides `serve`,
+`fetch-assets` and `version` it runs the machine's commands (`node`, `mcp`,
+`chat-host`), and each machine runs its platform's from
+`~/.veldr/agent/<build>/veldr`, downloaded from the release or uploaded by
+the core. A core built with
+`MACHINE=go` passes `node` on to the Go machine build of its own host
+instead, the program it uploads to each machine, which has the machine's
+commands and `gui-keep` and `gui-wl` besides.
 
 | Command | Description |
 | --- | --- |
@@ -24,7 +27,7 @@ build itself: its `node` commands run in it.
 | `veldr node [--instance NAME] [--takeover]` | The machine's node: serves the core's protocol on `<run>/node.sock` (the namespace's runtime directory on this host, see [files](#files-and-directories)) to any number of cores; started by them, ends 15 s after its last client; `--takeover` takes the socket from the running node, which drains ([39](features/39-nodes.md)). Linux and macOS. |
 | `veldr node dial [--instance NAME] [--client ID]` | Pipes stdio to the node, starting one (or one that takes over from an older build's) when none answers; what a core runs over ssh, `--client` naming the core. |
 | `veldr node stop [--instance NAME] [--terminal-core]` | Asks the instance's nodes to stop; `--terminal-core` also stops the instance's terminal core on this host when one answers on its socket, ending its terminals. |
-| `~/.veldr[-<instance>]/bin/veldr-mcp` | The MCP server on a machine: a shell script running `veldr-mcp-$(uname -s)-$(uname -m)` beside it, a link to the uploaded machine build of that platform (the Go build has `mcp`, `node`, `gui-keep`, `gui-wl`, `chat-host` and `version`; the TypeScript build is the core's executable, started by that name as `mcp`); takes no arguments and asks the agent of its data directory on this host. |
+| `~/.veldr[-<instance>]/bin/veldr-mcp` | The MCP server on a machine: a shell script running `veldr-mcp-$(uname -s)-$(uname -m)` beside it, a link to the installed machine build of that platform (the Go build has `mcp`, `node`, `gui-keep`, `gui-wl`, `chat-host` and `version`; the TypeScript build is the core's executable, started by that name as `mcp`); takes no arguments and asks the agent of its data directory on this host. |
 | `veldr gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
 | `veldr gui-wl --device NODE [--nvidia]` | Compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
 | `veldr chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS; both machine builds have it, the TypeScript build's with the ACP, Codex and Claude Code adapters, Claude Code's on Anthropic's Agent SDK, which the core has the machine fetch before such a chat starts (a chat whose agent starts without it fails `sdk_unavailable`, [42](features/42-typescript-backend.md#claude-code)). |
@@ -97,7 +100,7 @@ remote machine.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--agent-dir` | – | Directory of machine builds searched before the embedded ones: uncompressed `veldr-<os>-<arch>` Go builds (`go build ./cmd/veldr`), or, for the TypeScript build, its release's `SHA256SUMS` with the archives (`veldr-<os>-<arch>[-musl].tar.gz`) or the executables in them (`veldr-<os>-<arch>[-musl]`), each checked against that `SHA256SUMS`, which must name the core's own executable (offline sites, [deployment](deployment.md#air-gapped-networks)). |
+| `--agent-dir` | – | Directory of machine builds, the core's first source of them: the release's `SHA256SUMS` with the archives (`veldr-<os>-<arch>[-musl].tar.gz`) or the executables in them (`veldr-<os>-<arch>[-musl]`), each checked against that `SHA256SUMS`, which must name the core's own executable (offline sites, [deployment](deployment.md#air-gapped-networks)); for a core built with `MACHINE=go`, uncompressed `veldr-<os>-<arch>` Go builds (`go build ./cmd/veldr`). |
 | `--ext-dir` | – | Directory containing `veldr-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
 | `--parent-stdio` | `false` | Launcher lifecycle (the end-to-end tests): write `{"event":"ready","url":"…"}` to stdout after binding, clean up when stdin closes (what stdin carries is not read). Does not change HTTP guards; every client is a browser. |
@@ -574,8 +577,10 @@ Build scripts and tests:
 
 | Variable | Where | Description |
 | --- | --- | --- |
-| `TARGETS` | `scripts/build.sh` | Core platforms (default the host's), e.g. `"linux/amd64 darwin/arm64"`; `windows/amd64` builds only `dist/veldr-windows-amd64.exe`. |
-| `AGENT_PLATFORMS` | `scripts/build.sh` | Agent and herdr-core platforms to embed (default all four). |
+| `TARGETS` | `scripts/build.sh` | Core platforms (default the host's), e.g. `"linux/amd64 darwin/arm64"`, also `linux/amd64-musl` and `linux/arm64-musl` (not with `MACHINE=go`); `windows/amd64` builds only `dist/veldr-windows-amd64.exe`. |
+| `MACHINE` | `scripts/build.sh`; the release workflow's repository variable | `ts` (default): each `TARGETS` platform's executable is the core and that platform's machine side; `go`: cores that embed and upload the Go machine builds ([42](features/42-typescript-backend.md)). |
+| `RELEASE_URL` | `scripts/build.sh` | The release's download URL, from which machines get their platform's archive (unused with `MACHINE=go`; none for a build of no release, whose machines get theirs from `--agent-dir` or the core's own executable). |
+| `AGENT_PLATFORMS` | `scripts/build.sh` | herdr-core platforms whose digests the executables record, and with `MACHINE=go` the agent and herdr-core platforms to embed (default all four). |
 | `SKIP_WEB`, `SKIP_EXT` | `scripts/build.sh` | `1` reuses `web/dist` or the built bridge extension. |
 | `REQUIRE_ENCODER` | `scripts/build.sh` | `1` fails when the Linux video encoder is missing. |
 | `VERSION` | `scripts/build.sh`, `scripts/desktop.sh` | Reported version (default `git describe`); desktop metadata takes a semver and drops a leading `v`. |
@@ -593,7 +598,7 @@ Build scripts and tests:
 | `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
 | `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the core and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
 | `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |
-| `E2E_MACHINE` | `make e2e` | `ts` runs the tests against the TypeScript build (`dist/e2e/core-ts`, its machines' builds and `SHA256SUMS` in `dist/e2e/machines`). Default `go`. |
+| `E2E_MACHINE` | `make e2e` | `go` runs the tests against the core that deploys the Go machine build (`dist/e2e/core`, the Go builds in `dist/e2e/agents`). Default `ts`: the TypeScript build (`dist/e2e/core-ts`, its machines' builds and `SHA256SUMS` in `dist/e2e/machines`). |
 | `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets program-window tests fetch Xvfb. |
 | `GUI_TEST_XCLIENT` | `bun test features/gui/integration.test.ts` (`make it`, `scripts/gui-it.sh`) | The X program of the program windows' integration test (e2e/xclient built for the machine); without it the test builds one with go. |
 

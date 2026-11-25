@@ -104,8 +104,11 @@ archives (Linux and macOS, amd64 and arm64). `scripts/fetch-hc`, run by
 `scripts/build.sh`, downloads and verifies each archive, takes only the
 regular `herdr-core` file at the archive root (at most 64 MiB; never the
 copy inside the macOS app bundle, links or duplicates), and writes it
-gzip-compressed to `dist/payload/hc/hc-<os>-<arch>.gz`, which the core's
-executable embeds, with the release's licenses under `dist/hc/licenses/`.
+gzip-compressed as `hc-<os>-<arch>.gz` into `dist/machines-hc/`, of which
+each executable embeds its own platform's and records the digests of all
+([42](42-typescript-backend.md#the-machine-side)), or, for a core built
+with `MACHINE=go`, into `dist/payload/hc/`, all of which it embeds; the
+release's licenses go under `dist/hc/licenses/`.
 The executable is never run during a build. `go run ./scripts/fetch-hc
 -exe <file> <os>/<arch>` writes one verified executable for the
 integration tests (`HC_TEST_BIN`). The core's `hc(os, arch)` returns the

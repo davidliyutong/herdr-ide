@@ -133,9 +133,9 @@ Requirements:
 
 - an OpenSSH client with working access to the machines you want to use
   (this host needs none);
-- to build: Bun 1.4.5 (the core), Go (version in `go.mod`; the machine
-  builds), Node.js 22.12+ and pnpm (`corepack enable` picks the pinned
-  version).
+- to build: Bun 1.4.5 (the core and its machine side), Go (version in
+  `go.mod`; the build's tools and the Go machine build), Node.js 22.12+
+  and pnpm (`corepack enable` picks the pinned version).
 
 ```bash
 make deps && make build
@@ -145,7 +145,11 @@ cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
 
 Or extract the matching archive from `dist/release/` (or GitHub Releases)
 and run `./veldr`. Add SSH machines with **Add machine…** in the
-sidebar.
+sidebar. A core from GitHub Releases has each machine download its
+platform's build. One built here serves machines of its own platform
+only, unless you build the others too
+(`TARGETS="linux/amd64 linux/arm64 …" make build`, its own among them)
+and start it with `--agent-dir dist/release`.
 
 Open <http://127.0.0.1:7780>. The status bar opens the command palette and
 the list of shortcuts. All flags are listed in
@@ -216,12 +220,21 @@ header, a read-only mode and an audit log. See
 
 ## Air-gapped networks
 
-Machines never download anything (the AI usage plugin asks the AI
+Machines need no internet access. A machine that has it downloads its
+platform's veldr from the GitHub release, checked against the release's
+`SHA256SUMS`; to one that has not, the core uploads it over ssh, and a
+core host that cannot reach the release fetches `SHA256SUMS` through the
+machine's ssh connection, with its own TLS end to end. Claude Code's chats
+need Anthropic's Agent SDK, which machines get from the npm registry the
+same way. code-server and extensions are resolved on the host running
+veldr and pushed to the machines (the AI usage plugin asks the AI
 providers' hosts from the machines whose CLIs are signed in to them; it
-fails quietly without internet). If the host running veldr is offline
-too, run `veldr fetch-assets DIR` on a connected machine, carry `DIR` over
-and start with `--offline --seed-dir DIR`. Downloads are verified against
-pinned SHA-256 digests. Details in
+fails quietly without internet). If the host running veldr is offline too,
+run `veldr fetch-assets DIR` on a connected machine, carry `DIR` over and
+start with `--offline --seed-dir DIR`; for machines of another platform
+than that host's, add `--agent-dir` with a directory holding the release's
+`SHA256SUMS` and their archives. Downloads are verified against pinned
+SHA-256 digests. Details in
 [docs/deployment.md](docs/deployment.md#air-gapped-networks).
 
 ## Documentation

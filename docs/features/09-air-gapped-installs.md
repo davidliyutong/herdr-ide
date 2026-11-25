@@ -4,9 +4,9 @@
 
 Lab and robot machines often have no internet access, and some deployments
 have none at all. Everything veldr installs on machines (agent,
-terminal core, code-server, extensions, video encoder) must reach them
-without the machines downloading anything, and downloads that do happen
-must be verifiable.
+terminal core, code-server, extensions, video encoder) must be able to
+reach them without the machines downloading anything, and downloads that
+do happen must be verifiable.
 
 ## Goals / non-goals
 
@@ -26,13 +26,24 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
 [deployment](../deployment.md#air-gapped-networks); flags in
 [reference](../reference.md#fetch-assets-flags).
 
-- **Embedded in the core binary**: the web UI, the machine builds for four
-  platforms, herdr-core for the same platforms (pinned in `internal/hcdist`,
-  archives checked against its digests when the build fetches them,
-  `scripts/fetch-hc`), the video encoder for program windows when the build
-  has one ([14](14-gui-windows.md)) and the bridge extension. The terminal
-  core therefore needs no bundle ([21](21-terminal-core.md)). The agent
-  checks the digest of every herdr-core and encoder it receives.
+- **Embedded in the core binary**: the web UI, the machine build of its
+  own platform (the executable is that build too,
+  [42](42-typescript-backend.md#the-machine-side)) with that platform's
+  herdr-core (pinned in `internal/hcdist`, archives checked against its
+  digests when the build fetches them, `scripts/fetch-hc`; the executable
+  records every platform's digest), the video encoder for program windows
+  when the build has one ([14](14-gui-windows.md)) and the bridge
+  extension; a core built with `MACHINE=go` embeds the Go machine builds
+  and herdr-core for four platforms instead. Each executable carries its
+  platform's herdr-core, so the terminal core needs no bundle
+  ([21](21-terminal-core.md)). The agent checks the digest of every
+  herdr-core and encoder it receives.
+- **Machine builds of other platforms** come from the core's release,
+  checked against its `SHA256SUMS`: the machine downloads its platform's
+  archive when it can, else the core uploads it from `--agent-dir` (an
+  offline site's copy of the release), its cache or its own download
+  ([42](42-typescript-backend.md#the-machine-side),
+  [deployment](../deployment.md#air-gapped-networks)).
 - **Resolved on the core host** (`backend/features/vscode/artifacts.ts`):
   code-server tarballs and extension VSIXs, in this order:
   1. `--seed-dir` directories (repeatable);
@@ -46,9 +57,11 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
   `--code-server-install=download` machines fetch the tarball themselves
   and verify it against the core's digest; `--offline` turns this off, and a
   machine that cannot download gets the upload.
-- **Fetched by machines**: only Xvfb, on Linux machines that have none, with
-  `apt-get download xvfb` from the machine's own package sources, which apt
-  verifies ([14](14-gui-windows.md)).
+- **Fetched by machines**: their machine build (above) and the Agent SDK of
+  Claude Code's chats when they can, which the core uploads otherwise
+  ([42](42-typescript-backend.md#claude-code)), and Xvfb, on Linux machines
+  that have none, with `apt-get download xvfb` from the machine's own
+  package sources, which apt verifies ([14](14-gui-windows.md)).
 - **Verification**: default versions have SHA-256 digests compiled in;
   other files are checked against a `<file>.sha256` sidecar
   (`fetch-assets` writes them).
@@ -74,6 +87,10 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
 - **Digest mismatch** → refused with both digests in the error.
 - **Platform without a code-server build** → reported; terminals and
   previews keep working.
+- **No source has a machine's build** (no download, no `--agent-dir`, an
+  unreachable release) → the machine shows `build_unavailable` with what
+  each source said, and is dialed again later
+  ([42](42-typescript-backend.md#the-machine-side)).
 - **A build without herdr-core for a machine's platform** → the terminal
   backend reports `not_bundled` ([02](02-multi-machine-transport.md)); the
   rest keeps working.
@@ -123,5 +140,9 @@ A release carries the licenses of embedded components:
   the digest of what it uploads.
 - `internal/hcdist/release_test.go`, `internal/agent/hc_test.go`: pinned
   herdr-core archives and the executables a machine receives.
+- `backend/kernel/machines/transport/release.test.ts`: the release's
+  manifest (the operator's directory first, one of another build refused,
+  fetched through the machine when the release is unreachable) and what
+  the core uploads, each checked against it.
 - `internal/agent/guivideo_test.go` (`TestInstallVideo`): a wrong digest
   installs nothing.

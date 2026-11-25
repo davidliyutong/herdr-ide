@@ -75,7 +75,7 @@
 需要：
 
 - 能正常连到要使用的机器的 OpenSSH 客户端（只用本机时不需要）；
-- 构建需要：Bun 1.4.5（核心程序）、Go（版本见 `go.mod`，用于各机器的程序）、Node.js 22.12+ 和 pnpm（`corepack enable` 会使用固定的版本）。
+- 构建需要：Bun 1.4.5（核心程序及其机器端）、Go（版本见 `go.mod`，用于构建工具和 Go 版的机器程序）、Node.js 22.12+ 和 pnpm（`corepack enable` 会使用固定的版本）。
 
 ```bash
 make deps && make build
@@ -85,6 +85,8 @@ cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
 
 也可以解压 `dist/release/` 或 GitHub Releases 中对应平台的压缩包，运行 `./veldr`。
 SSH 机器用侧栏的「添加机器…」添加。
+从 GitHub Releases 下载的 core 会让每台机器自行下载对应平台的程序。
+自己构建的 core 只能服务与它平台相同的机器；要服务其他平台的机器，请连同本机平台一起构建（`TARGETS="linux/amd64 linux/arm64 …" make build`），再用 `--agent-dir dist/release` 启动。
 
 打开 <http://127.0.0.1:7780>。
 状态栏可以打开命令面板和快捷键列表。
@@ -138,12 +140,18 @@ veldr 本身不带登录：让它只监听 `127.0.0.1`，前面放一个负责�
 
 ## 离线（air-gap）环境
 
-各台机器永远不需要下载任何东西。
+各台机器不需要能联网。
+能联网的机器会自己从 GitHub Releases 下载对应平台的 veldr，并用该版本的 `SHA256SUMS` 校验。
+不能联网的机器则由 core 通过 ssh 把它上传过去。
+如果运行 veldr 的主机访问不到 GitHub Releases，它会经由该机器的 ssh 连接获取 `SHA256SUMS`，全程使用 core 自己的 TLS。
+Claude Code 的智能体对话需要 Anthropic 的 Agent SDK，各台机器以同样的方式从 npm 仓库获取。
+code-server 和扩展在运行 veldr 的主机上准备好，再推送到各台机器。
 （AI 用量插件会从已登录 CLI 的机器上访问各 AI 服务商的主机；没有网络时它会静默失败。）
 如果运行 veldr 的主机也不能联网：
 1. 在一台能联网的机器上运行 `veldr fetch-assets DIR`；
 2. 把 `DIR` 拷进内网；
-3. 用 `--offline --seed-dir DIR` 启动。
+3. 用 `--offline --seed-dir DIR` 启动；
+4. 若有机器的平台与该主机不同，把该版本的 `SHA256SUMS` 和这些平台的压缩包放进一个目录，再用 `--agent-dir` 指向它。
 
 所有下载都会用写死在代码里的 SHA-256 校验。
 详见 [docs/deployment.md](docs/deployment.md#air-gapped-networks)。

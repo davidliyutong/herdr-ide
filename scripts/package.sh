@@ -19,7 +19,7 @@ packaged=
 for p in $TARGETS; do
   case "$p" in
     linux/amd64|linux/arm64|darwin/amd64|darwin/arm64) ;;
-    linux/amd64-musl|linux/arm64-musl) [[ "${MACHINE:-go}" == ts ]] || { echo "$p is a platform of the TypeScript build (MACHINE=ts)" >&2; exit 1; } ;;
+    linux/amd64-musl|linux/arm64-musl) [[ "${MACHINE:-ts}" == ts ]] || { echo "$p is a platform of the TypeScript build (MACHINE=ts)" >&2; exit 1; } ;;
     # No Windows archive: there the core runs inside the desktop app.
     windows/amd64) continue ;;
     *) echo "unsupported release platform: $p" >&2; exit 1 ;;
@@ -44,7 +44,7 @@ $SLUG release for $p
 Start the Web IDE:
   ./$SLUG
 
-$SLUG contains the unmodified herdr-core $HC_VERSION executable$([[ "${MACHINE:-go}" == ts ]] && echo " of its
+$SLUG contains the unmodified herdr-core $HC_VERSION executable$([[ "${MACHINE:-ts}" == ts ]] && echo " of its
 platform" || echo "s for Linux
 and macOS machines")
 (https://github.com/herdrdev/herdr-core, Apache-2.0).

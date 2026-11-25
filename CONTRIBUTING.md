@@ -6,14 +6,16 @@ Chinese (中文也可以). Participation is governed by the
 
 ## Setup
 
-Requirements: Bun 1.4.5 (the core), Go (see `go.mod`; the machine
-builds), Node.js 22.12+ and pnpm (and, on Windows, Git for Windows for its
-bash). The build downloads the pinned herdr-core, the terminal core the
-agents install on machines, into `dist/payload/hc/` and embeds it.
+Requirements: Bun 1.4.5 (the core and its machine side), Go (see
+`go.mod`; the build's tools such as `scripts/fetch-hc`, the Go machine
+build and its tests), Node.js 22.12+ and pnpm (and, on Windows, Git for
+Windows for its bash). The build downloads the pinned herdr-core, the
+terminal core the agents install on machines, into `dist/machines-hc/`
+(`dist/payload/hc/` with `MACHINE=go`) and embeds it.
 
 ```bash
 make deps            # pnpm install for web/, the extension, desktop/ (with Electron's binary), e2e/ and backend/
-make build           # web UI, extension, machine builds, core (Bun); release archives
+make build           # web UI, extension, each platform's executable (core and machine side, Bun); release archives
 make test            # Go, core, web and desktop unit tests
 make test-slow       # the core's tests that wait on real time (CI runs them too)
 make check           # formatting, vet, typecheck, import cycles of the web UI, brand/doc consistency
@@ -28,11 +30,13 @@ make dev-core        # core on 127.0.0.1:7790: --instance dev --local-only
 make dev-web         # Vite on http://localhost:5173, proxied to the dev core (DEV_LISTEN)
 ```
 
-`make dev-core` builds this host's machine build into `dist/agents/` and
-runs the core from its sources (`bun backend/hosts/bun/main.ts`), which
-reads herdr-core and the other payloads from `dist/payload/` (staged by
-`make build`; `go run ./scripts/fetch-hc -out dist/payload/hc <os>/<arch>`
-fetches herdr-core alone).
+`make dev-core` fetches this host's herdr-core once into
+`dist/machines-hc/`, builds this host's executable into `dist/dev/` and
+stages it in `dist/payload/` (`machine/veldr-<os>-<arch>.gz` with the
+build's record, as the desktop app carries it), then runs the core from
+its sources (`bun backend/hosts/bun/main.ts`, without `--agent-dir`),
+which reads its payloads there (the VS Code extension too, once
+`make build` staged it).
 
 `make it` runs the integration tests against a real herdr-core in the
 isolated sessions `veldr-it` and `veldr-it-<host id>` (the
@@ -82,8 +86,8 @@ removes it at the end; a run removes the labelled containers of runs that
 died. `scripts/e2e.sh` builds the Linux machine build and fake agent of
 Docker's architecture and the image (cached). Without Docker these tests
 skip; `E2E_REQUIRE_DOCKER=1` (CI) makes them fail instead.
-`E2E_MACHINE=ts` runs the suite against the core that deploys the
-TypeScript machine side (`harness/paths.ts`).
+The suite runs against the TypeScript build; `E2E_MACHINE=go` runs it
+against the core that deploys the Go machine build (`harness/paths.ts`).
 
 Release archives are in `dist/release/`; the unpacked directories are in
 `dist/packages/`. herdr-core upgrades change the version and the four
@@ -122,7 +126,7 @@ workspaces can live in the ignored `.worktrees/` directory.
   and desktop tests and the packaged Electron app
   (`scripts/desktop.sh app`), and the core's tests on macOS. POSIX-only
   Go tests skip on Windows.
-- New Go dependencies of the machine build or npm packages of the core:
+- New dependencies of the Go machine build or npm packages of the core:
   run `scripts/notices.sh` and commit `THIRD_PARTY_NOTICES.md` (checked by
   CI); make sure the license is compatible with MIT.
 - Add or update tests with behavior changes. Go tests live next to the
