@@ -39,7 +39,7 @@ Turning a switch off also ends running work: the client kind's proxied requests 
 
 ### Provisioning
 
-`backend/features/vscode/provision.ts` and `artifacts.ts`; the agent's side is `backend/features/vscode/machine.ts` (`machine/`), which answers op `code-server` on the same files the Go machine build of earlier releases used. The `codeServer.install` setting (global, per machine, or `--code-server-install`) picks how a machine gets code-server:
+`backend/features/vscode/provision.ts` and `artifacts.ts`; the agent's side is `backend/features/vscode/machine.ts` (`machine/`), which answers op `code-server`. The `codeServer.install` setting (global, per machine, or `--code-server-install`) picks how a machine gets code-server:
 
 - `push` (default): the release is resolved on the hub host ([09](09-air-gapped-installs.md)), uploaded through the agent with the digest the hub verified it by and unpacked into `~/.veldr/code-server/<version>-<os>-<arch>` (shared by instances); the machine side checks the digest before it unpacks anything;
 - `download`: the agent fetches the same release with the machine's curl or wget and checks the digest the hub sends;

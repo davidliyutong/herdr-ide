@@ -22,7 +22,7 @@ Non-goals: managing ssh keys; Windows machines; a local machine on a Windows hub
 
 ### Agent
 
-The agent is served by each machine's node, the command `node` of the machine build ([39](39-nodes.md)): the hub's own executable of the machine's platform, the hub and the TypeScript machine side ([42](42-typescript-backend.md#the-machine-side)), for linux (glibc and musl) and darwin × amd64/arm64. The hub carries its own platform's; a machine gets its platform's from the hub's release, checked against the release's `SHA256SUMS`: it downloads the archive, else the hub uploads it (`backend/kernel/machines/transport/release.ts`). Its version is its executable's digest, so a changed build is always installed again and hub and agent never disagree on the protocol. Machines that still run the Go program of earlier releases get this build and its node takes over ([39](39-nodes.md)).
+The agent is served by each machine's node, the command `node` of the machine build ([39](39-nodes.md)): the hub's own executable of the machine's platform, the hub and the TypeScript machine side ([42](42-typescript-backend.md#the-machine-side)), for linux (glibc and musl) and darwin × amd64/arm64. The hub carries its own platform's; a machine gets its platform's from the hub's release, checked against the release's `SHA256SUMS`: it downloads the archive, else the hub uploads it (`backend/kernel/machines/transport/release.ts`). Its version is its executable's digest, so a changed build is always installed again and hub and agent never disagree on the protocol. Machines running an earlier release's node get this build and its node takes over ([39](39-nodes.md)).
 
 The agent runs on Linux and macOS only (unix sockets with peer checks, process groups, code-server and Xvfb are POSIX). Hub and agent speak the protocol of `backend/shared/proto` (agentproto, and yamux with its window, keepalive and backlog, [42](42-typescript-backend.md)).
 
@@ -144,7 +144,7 @@ The machine's menu reports (`GET /api/m/{id}/hc`) and starts, restarts or stops 
 | An ssh library (Node's `ssh2`, Go's `x/crypto/ssh`) instead of OpenSSH | Would not honour the user's ssh config (ProxyJump, Match, agents, certificates). |
 | Ids derived from the target | Ids appear in URLs and settings; random ids keep the target out. |
 | Starting the terminal core when a machine connects | Unused machines would get a process outliving the hub; the first subscription starts it. |
-| A hub in Go, the language of the agent in earlier releases | The hub is TypeScript, one Bun executable per platform ([42](42-typescript-backend.md)): one language with the UI and the desktop shell, and the SDKs the coding agents publish. |
+| A hub in Go | The hub is TypeScript, one Bun executable per platform ([42](42-typescript-backend.md)): one language with the UI and the desktop shell, and the SDKs the coding agents publish. |
 
 ## Failure modes
 

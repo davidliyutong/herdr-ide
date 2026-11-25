@@ -30,7 +30,7 @@ Non-goals: a node on Windows (no herdr-core); sharing a UI's settings, keybindin
 | `chat-host` | The chat host, which the node starts as a hidden terminal of the instance's terminal core ([37](37-agent-chats.md)). |
 | `serve` | The UI: HTTP and WebSocket front, plugins' hub sides, the files of the UI's host. Also on Windows. |
 
-`serve` is the hub's executable (TypeScript, `backend/hosts/bun`), which is the machine build of its platform too and runs `node`, `node dial` and `chat-host` itself ([42](42-typescript-backend.md#the-machine-side)); the UI installs it on its own machine, and other machines download their platform's from the release or get it uploaded ([02](02-multi-machine-transport.md)). `backend/machine/node.ts` is the node, `backend/hosts/machine/cli.ts` its commands (`chathost.ts` the chat host's). The Go program of earlier releases served the same node protocol on the same socket, so a node of this build takes over from one of those as from any older build (below).
+`serve` is the hub's executable (TypeScript, `backend/hosts/bun`), which is the machine build of its platform too and runs `node`, `node dial` and `chat-host` itself ([42](42-typescript-backend.md#the-machine-side)); the UI installs it on its own machine, and other machines download their platform's from the release or get it uploaded ([02](02-multi-machine-transport.md)). `backend/machine/node.ts` is the node, `backend/hosts/machine/cli.ts` its commands (`chathost.ts` the chat host's). A node of this build takes over from any older build's node on the same socket and protocol (below).
 
 ### The node
 

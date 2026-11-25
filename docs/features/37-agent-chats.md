@@ -45,7 +45,7 @@ A kind of `backend/shared/agents/kinds.ts` has a chat when its row has a `chat` 
 
 The terminal core does not read shell startup files, where agents' programs are usually put on the PATH. So the host takes the environment of an interactive login shell (`$SHELL -l -i -c env`, 10 s, 1 MiB), cached 6 hours or until a startup file changes. Agents get it without the host terminal's, ssh's and other agent sessions' variables, with `PWD` the chat's directory; `HC_SESSION`, `HC_SOCKET` and `HC_SCOPE` stay so the terminal core's crash sweep finds them. The host logs to `chat-host-<host>.log` (0600, rotated at 1 MiB once).
 
-The host keeps the socket, lock, wire, journal tables and log of the Go program of earlier releases, so it takes over from a host of that program with its chats. Its journal's statements run in a worker thread, and a chat's events reach its clients once they are stored, in the order made ([42](42-typescript-backend.md#the-chat-host)).
+The host shares the same socket, lock, wire protocol, journal tables and log across releases, so a newer build takes over from an earlier host with its chats. Its journal's statements run in a worker thread, and a chat's events reach its clients once they are stored, in the order made ([42](42-typescript-backend.md#the-chat-host)).
 
 ### Starting the host, and handover (`backend/features/chat/machine.ts`)
 
@@ -124,7 +124,7 @@ The host owns chats, logs, clients, bounds and process decisions; an adapter own
   (`default` is `untrusted` because under `on-request` the model refuses to write instead of asking.) Approvals never map to the amendments Codex saves. A command still running 2 s after an interrupt has the app-server restarted. Close closes stdin before SIGTERM: Codex killed outright leaves its shell snapshots. Its framing is its own (no `jsonrpc` member, as Codex writes it; a line over 16 MiB passed over), every message handed on in the order of the app-server's output. What it keeps of the tool calls that started and did not complete and of the subagents' threads is bounded (4096 each, the oldest going: such a call is then not marked cancelled at its turn's end, and such a thread is its own parent).
 - **ACP** (`acp/`, on `@agentclientprotocol/sdk`): Kimi Code and Grok. No file system or terminal capability is offered: every request of the agent but a permission is answered "method not found". One turn per prompt; prompts during a turn wait in the adapter (at most 16); permissions offer the agent's `allow_once` and `reject_once` options only, at most 64 waiting. Sessions and imports run a short agent process (`session/list`, `session/load`, whose replay is lossy). An ACP agent cannot tell that a terminal runs a session.
 
-Each adapter's tests replay `spec/vectors/chat/<adapter>` through a fake agent (Claude Code's through the SDK) and compare what the host gets with the golden files of the same recordings (`testdata/golden` beside the adapter's tests: the events the Go program of earlier releases made of them, kept and edited by hand after a deliberate change of the mapping).
+Each adapter's tests replay `spec/vectors/chat/<adapter>` through a fake agent (Claude Code's through the SDK) and compare what the host gets with the golden files of the same recordings (`testdata/golden` beside the adapter's tests, edited by hand after a deliberate change of the mapping).
 
 The seam is `backend/features/chat/machine/adapter.ts`, whose comment states the same rules for one thread:
 
@@ -166,7 +166,7 @@ A terminal core stop ends the host and its agents. The next use starts a host th
 
 | Option | Why not |
 | --- | --- |
-| The conversation drawn over the agent's terminal (the earlier version of 35) | Input pasted into a program, confirmation a turn late, permissions only in the terminal, no streaming. |
+| The conversation drawn over the agent's terminal | Input pasted into a program, confirmation a turn late, permissions only in the terminal, no streaming. |
 | ACP for every agent | Claude Code and Codex speak it only through third-party adapters, without their permissions, plans, questions, effort, usage and limits. |
 | The Agent SDK in Node as a sidecar | A Node runtime per machine (often offline); the machine side runs on Bun, which loads the SDK itself. |
 | `character-ai/claude-agent-sdk-go` | One-shot `claude --print` without control requests: no permissions, questions, plans, model changes, interrupts or queues. |

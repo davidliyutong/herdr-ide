@@ -16,7 +16,7 @@ Non-goals: the files the user edits (settings, keybindings, machines), the vault
 
 ### Opening (`backend/shared/store`)
 
-The hub and the machine side (the agent, the chat host) open their databases with `backend/shared/store`, on `node:sqlite` (`DatabaseSync`, which Bun and Electron's Node both have; its calls are synchronous, so a statement waiting for another process's lock blocks the thread). Databases the Go program of earlier releases wrote (with `modernc.org/sqlite`) follow the same rules and open alike. `open(path, {migrations})`:
+The hub and the machine side (the agent, the chat host) open their databases with `backend/shared/store`, on `node:sqlite` (`DatabaseSync`, which Bun and Electron's Node both have; its calls are synchronous, so a statement waiting for another process's lock blocks the thread). Databases created by earlier releases follow the same rules and open alike. `open(path, {migrations})`:
 
 - **Private.** Directory 0700 and file 0600, both the user's and not links; SQLite's `-wal`, `-shm` and `-journal` files must not be links either (`UnsafeError`). On Windows the profile's ACL keeps them private.
 - **Connections.** WAL, `busy_timeout` (5 s), foreign keys, `synchronous` NORMAL (a power loss may lose the last transactions, never the database), `IMMEDIATE` transactions (two writers never deadlock), incremental vacuum for new databases.
@@ -44,7 +44,7 @@ WAL needs every connection on one host (`-shm` is shared memory), and data direc
 
 `pruneHostFiles` runs at each owner's start and removes other hosts' databases unused for 30 days (use is the file's modification time, which `open` refreshes hourly). A file of no host's name is not its business and stays. It removes only under SQLite's writer lock taken without waiting, only this user's regular files, never files this process holds, and nothing on Windows; the hub skips other instances' files.
 
-Releases before the core was renamed the hub named the hub's database `core[-<instance>]-<host>[-<id>].db`. Its records (the vault's access log, the AI usage history) are not carried over: the hub starts a database of the new name, and at its start removes this host's database of the old name of its own instance with its journal files, under the same lock (one a process still holds stays), and prunes other hosts' databases of both names as above (`backend/shared/store/hubdb.ts`, `tidyHubDBs`). It takes the names from this host's key and its instance, never a pattern, so `core-<host>.db` of the default instance never takes `core-dev-<host>.db` or `core-desktop-<host>.db`.
+At start, the hub removes any `core[-<instance>]-<host>[-<id>].db` (the hub database name from earlier releases) for this host and instance with its journal files, without carrying its records over, under the same lock (one a process still holds stays), and prunes other hosts' databases of both names as above (`backend/shared/store/hubdb.ts`, `tidyHubDBs`). It takes the names from this host's key and its instance, never a pattern, so `core-<host>.db` of the default instance never takes `core-dev-<host>.db` or `core-desktop-<host>.db`.
 
 ## Alternatives considered
 

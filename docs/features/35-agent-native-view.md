@@ -52,7 +52,7 @@ The hub accepts only a lower-case UUID with a known source and keeps it in the t
 
 ### The terminal leaf
 
-A terminal leaf of the layout document ([22](22-terminal-protocol.md)) may hold `session` (the session the agent runs) and `before` (the address of the terminal this one replaced). Values of another shape are dropped when the document is read, and so is `render`, which earlier versions wrote. The restore remembers `session` and writes `before` ([33](33-workspace-restore.md)); terminal history adopts a snapshot by `before` ([36](36-terminal-history.md)).
+A terminal leaf of the layout document ([22](22-terminal-protocol.md)) may hold `session` (the session the agent runs) and `before` (the address of the terminal this one replaced). Values of another shape (and unknown fields such as `render`) are dropped when the document is read. The restore remembers `session` and writes `before` ([33](33-workspace-restore.md)); terminal history adopts a snapshot by `before` ([36](36-terminal-history.md)).
 
 ### Claude Code's transcripts (`backend/shared/agents/transcript`)
 
