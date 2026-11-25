@@ -4,6 +4,7 @@
 // the end of the program and its group, its requests, prompts the host
 // recorded or not, trust, and sessions another Claude Code runs.
 import { afterEach, describe, expect, test } from 'bun:test';
+import { extended } from '#shared/testdata/extended.ts';
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -449,7 +450,7 @@ describe('the end', () => {
     expect(await s.done).toBeUndefined();
   }, 30_000);
 
-  test('a run whose program exited tells no process while its group is being ended', async () => {
+  extended('a run whose program exited tells no process while its group is being ended', async () => {
     const { r, s } = await started([...initLines(), { dir: 'spawn', text: 'stubborn' }, userIn('go'), { dir: 'exit', code: 1 }], {
       timing: { grace: 5000, term: 2000 },
     });

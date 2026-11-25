@@ -4,6 +4,7 @@
 // threads another Codex has open, sessions and history, and what its
 // process group left running.
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
+import { extended } from '#shared/testdata/extended.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as chat from '#shared/proto/chatproto/index.ts';
@@ -234,7 +235,7 @@ describe('the app-server and its requests', () => {
     { mode: 'ignore-eof', want: ['eof', 'term'], min: TEST_TIMING.grace },
     { mode: 'ignore-eof,ignore-term', want: ['eof', 'term'], min: TEST_TIMING.grace + TEST_TIMING.term },
   ]) {
-    test(`close ends the app-server gracefully: its input first, SIGTERM after the grace, SIGKILL after more (${tc.mode || 'exits'})`, async () => {
+    extended(`close ends the app-server gracefully: its input first, SIGTERM after the grace, SIGKILL after more (${tc.mode || 'exits'})`, async () => {
       const sc = new Script();
       sc.begin();
       const f = new FakeRun(tc.mode, HANDSHAKE, sc.file());
@@ -251,7 +252,7 @@ describe('the app-server and its requests', () => {
     });
   }
 
-  test('what the app-server left running in its group ends with it: after a close and after its own exit', async () => {
+  extended('what the app-server left running in its group ends with it: after a close and after its own exit', async () => {
     for (const crash of [false, true]) {
       const sc = new Script();
       sc.begin();

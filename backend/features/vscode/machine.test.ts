@@ -8,7 +8,8 @@
 // orphan), a broken one replaced, extensions and markers, the bridge's
 // socket tunnelled to the hub that last opened VS Code, the releases'
 // retention, and unpacking that leaves the node's thread free.
-import { afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
+import { afterEach, beforeAll, expect, setDefaultTimeout, test } from 'bun:test';
+import { extendedDescribe } from '#shared/testdata/extended.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -182,7 +183,7 @@ async function installRelease(rr: Rig, record: string): Promise<CSStatus> {
   return rep.cs!;
 }
 
-describe('the executable a request names', () => {
+extendedDescribe('the executable a request names', () => {
   // An installed code-server is found by its path, a "~/" path or a search
   // of PATH and the usual places; without bin, only the release counts.
   test('a release, a path or a search', async () => {
@@ -229,7 +230,7 @@ describe('the executable a request names', () => {
   });
 });
 
-describe('code-server listens on its socket only', () => {
+extendedDescribe('code-server listens on its socket only', () => {
   // Its port proxy would serve whatever listens on the machine with the
   // UI's origin; nothing listens on TCP.
   test('its arguments', () => {
@@ -267,7 +268,7 @@ describe('code-server listens on its socket only', () => {
   });
 });
 
-describe('releases', () => {
+extendedDescribe('releases', () => {
   // An upload is checked against the digest the hub sends before
   // anything is unpacked: a wrong digest names both, whatever the bytes.
   test('an upload is checked against its digest before it is unpacked', async () => {
@@ -340,7 +341,7 @@ describe('releases', () => {
   });
 });
 
-describe('archives that would leave the release', () => {
+extendedDescribe('archives that would leave the release', () => {
   const top = 'code-server-1-linux-amd64';
   const cases: Array<[string, Entry[], string]> = [
     ['an absolute path', [{ path: '/tmp/evil', body: 'x' }], 'an absolute path'],
@@ -430,7 +431,7 @@ describe('archives that would leave the release', () => {
   });
 });
 
-describe('downloads made by the machine', () => {
+extendedDescribe('downloads made by the machine', () => {
   const hasTool = ['curl', 'wget'].some((t) => (process.env.PATH ?? '').split(':').some((d) => existsSync(posix.join(d, t))));
   const proxyVars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy'];
   let saved: Record<string, string | undefined> = {};
@@ -523,7 +524,7 @@ describe('downloads made by the machine', () => {
   );
 });
 
-describe('the process', () => {
+extendedDescribe('the process', () => {
   // Started on its socket (and the agent's bridge in its environment), the
   // pid file naming this node; a start finds it serving and starts none.
   test('starts once, ended by stop', async () => {
@@ -658,7 +659,7 @@ describe('the process', () => {
   });
 });
 
-describe('extensions', () => {
+extendedDescribe('extensions', () => {
   test('a VSIX and ids installed by code-server, markers remembered', async () => {
     const rr = await newRig();
     const record = tempDir();
@@ -697,7 +698,7 @@ describe('extensions', () => {
   });
 });
 
-describe('the bridge socket', () => {
+extendedDescribe('the bridge socket', () => {
   /** The bridge streams a hub's session gets, answered and echoed. */
   function bridgeHub(s: Session, ok = true) {
     const seen: Header[] = [];
@@ -809,7 +810,7 @@ describe('the bridge socket', () => {
   });
 });
 
-describe('retention', () => {
+extendedDescribe('retention', () => {
   test('releases unused for 14 days go, staging after a day; the running one is kept', async () => {
     const dir = tempDir();
     const l = layoutOf({ home: dir, run: posix.join(dir, 'run'), host: posix.join(dir, 'host') }, 'linux-amd64');
@@ -858,7 +859,7 @@ describe('retention', () => {
   });
 });
 
-describe('one thread for every hub', () => {
+extendedDescribe('one thread for every hub', () => {
   // Unpacking runs in slices: the node's thread goes on (another session
   // is answered) and is never held long.
   test('unpacking a release leaves the thread free', async () => {

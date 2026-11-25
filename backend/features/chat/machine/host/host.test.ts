@@ -294,7 +294,7 @@ describe('the chat host', () => {
     w.close();
   });
 
-  test('shutdown is refused while a chat works', async () => {
+  extended('shutdown is refused while a chat works', async () => {
     const h = await host();
     const { chat: c, s } = await h.newChat();
     const a = await h.attach(c.id);
@@ -337,7 +337,7 @@ describe('the chat host', () => {
     b.close();
   });
 
-  test('idle stop and resume: the next prompt resumes the session by its id', async () => {
+  extended('idle stop and resume: the next prompt resumes the session by its id', async () => {
     const h = await host((t) => (t.o.timing = { ...t.o.timing, minute: 50 }));
     const { chat: c, s } = await h.newChat();
     await eventually('idle', () => h.chat(c.id).r.chat.state === 'idle');

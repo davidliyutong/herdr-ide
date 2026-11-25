@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { extended } from '#shared/testdata/extended.ts';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -193,7 +194,7 @@ describe('the MCP server', () => {
   });
 
   // TestRunLimitsFromTheHub
-  test("the hub's limits bound run_with_env's command", async () => {
+  extended("the hub's limits bound run_with_env's command", async () => {
     const fc = await hub(() => ({ ok: true, values: { K: 'v' }, run: { timeout: 1, max_timeout: 2, max_output: 50 } }));
     const c = client({ dial: dialSocket(fc.path) });
     await c.init();

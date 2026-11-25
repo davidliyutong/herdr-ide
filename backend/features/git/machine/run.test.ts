@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
+import { extended } from '#shared/testdata/extended.ts';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
@@ -82,7 +83,7 @@ describe('a run of git', () => {
     expect(res.out.length).toBeLessThanOrEqual(1000);
   });
 
-  test('a program git leaves holding its output does not hold the run, and keeps running (also in a session of its own)', async () => {
+  extended('a program git leaves holding its output does not hold the run, and keeps running (also in a session of its own)', async () => {
     const detach = Bun.which('setsid') ?? (Bun.which('perl') ? `${Bun.which('perl')} -MPOSIX -e 'POSIX::setsid(); exec @ARGV'` : '');
     const cases: Record<string, string> = { 'same group': 'sleep 30' };
     if (detach) cases['own session'] = `${detach} sleep 30`;

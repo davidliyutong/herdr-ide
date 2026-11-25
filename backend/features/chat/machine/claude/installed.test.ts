@@ -5,6 +5,7 @@
 // `bun build --compile` executable loads it the same way, resolving
 // nothing but Node's own modules.
 import { afterAll, expect, test } from 'bun:test';
+import { extended } from '#shared/testdata/extended.ts';
 import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,7 +67,7 @@ test('the SDK installed in a data directory runs a recording as the development 
   }
 }, 60_000);
 
-test('a compiled executable loads it from the data directory', async () => {
+extended('a compiled executable loads it from the data directory', async () => {
   const { base, pin } = await installed();
   const out = join(tempDir('sdkc-'), 'compiled');
   dirs.push(join(out, '..'));

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
+import { extended } from '#shared/testdata/extended.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -236,7 +237,7 @@ describe('the chat feature on a machine', () => {
     await expect(open(m, { start: false })).rejects.toMatchObject({ code: 'upgrading' });
   });
 
-  test("a terminal that holds the host's name and serves nothing is killed, and a host started", async () => {
+  extended("a terminal that holds the host's name and serves nothing is killed, and a host started", async () => {
     const m = new FakeMachine();
     machines.push(m);
     m.env = { TEST_HOST_SILENT: '1' };

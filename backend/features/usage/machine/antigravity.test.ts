@@ -3,6 +3,7 @@
 // agy as the fallback, at most every agyEveryMs, backed off after a
 // failure, its account from its log, its process group killed.
 import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
+import { extended } from '#shared/testdata/extended.ts';
 import { mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { FakeAPI, TEST_NOW, removeHomes, script, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
@@ -286,14 +287,14 @@ describe('a program’s process group', () => {
     ac.abort();
   }
 
-  test('killed once the program exited', async () => {
+  extended('killed once the program exited', async () => {
     const { bin, pidFile } = leaver(false);
     const r = await run(bin, [], { env: {}, ms: 10_000 });
     expect(r).toEqual({ out: 'done\n', ok: true });
     await gone(pidFile);
   }, 30_000);
 
-  test('killed when it times out', async () => {
+  extended('killed when it times out', async () => {
     const { bin, pidFile } = leaver(true);
     const start = Date.now();
     expect((await run(bin, [], { env: {}, ms: 3000 })).ok).toBe(false);
@@ -301,7 +302,7 @@ describe('a program’s process group', () => {
     await gone(pidFile);
   }, 30_000);
 
-  test('killed when its request ends', async () => {
+  extended('killed when its request ends', async () => {
     const { bin, pidFile } = leaver(true);
     const ac = new AbortController();
     void abortWhenStarted(pidFile, ac);

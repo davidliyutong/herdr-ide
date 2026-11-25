@@ -32,17 +32,17 @@ The hub (`backend/`, TypeScript, built with Bun into one executable per platform
 
 Every test belongs to one group, selected by location and name:
 
-- A feature: `cd backend && bun test features/git`; its web UI: `pnpm -C web test -- git`; its e2e spec: `make e2e E2E_ARGS='tests/git.spec.ts'`.
+- A feature: `cd backend && bun test features/git`; its web UI: `pnpm -C web test git`; its e2e spec: `make e2e E2E_ARGS='tests/git.spec.ts'`.
 - A kernel part: `bun test kernel/config` (in `backend/`); the machine side: `bun test machine`; the hosts: `bun test hosts`; a shared library: `bun test shared/store`; the build's scripts: `bun test scripts`.
-- A web UI area, one file per area in `web/src/__tests__`: `pnpm -C web test -- term`.
-- The desktop shell, beside its sources in `desktop/src`: `pnpm -C desktop test -- hub` (no argument: the whole shell).
-- Cross-cutting contracts are a group of their own: the wire protocols (`bun test shared/proto`), the agents' kinds and transcripts with the vectors of `spec/vectors` (`bun test shared/agents`, `pnpm -C web test -- transcriptVectors`, the terminal keys' `vt-keys.json` run by the vt tests).
+- A web UI area, one file per area in `web/src/__tests__`: `pnpm -C web test term`.
+- The desktop shell, beside its sources in `desktop/src`: `pnpm -C desktop test hub` (no argument: the whole shell).
+- Cross-cutting contracts are a group of their own: the wire protocols (`bun test shared/proto`), the agents' kinds and transcripts with the vectors of `spec/vectors` (`bun test shared/agents`, `pnpm -C web test transcriptVectors`, the terminal keys' `vt-keys.json` run by the vt tests).
 - Integration (`make it`), end-to-end (`make e2e`) and the machine matrix are groups of their own, each with its own target above.
 
 Each group is split into **standard** and **extended** tests:
 
 - **Standard** tests run in `make test` and on every change to their group: fast, deterministic, independent of the machine they run on (a temporary `HOME`, no network, no tools beyond the documented toolchain, free ports only). Run `make check` and the groups a change touches; run `make test` before merging and after a change that crosses groups (a protocol, a shared module). Do not run the whole suite after each edit.
-- **Extended** tests wait on real time, programs, compiles, Docker or large inputs, or give little benefit for their cost. One marker in every suite: `extended`/`extendedDescribe` of `backend/shared/testdata/extended.ts` (hub), `web/src/__tests__/extended.ts` (web UI) and `desktop/src/extended.ts` (shell), all skipped unless `EXTENDED_TESTS=1`. Run one file with `EXTENDED_TESTS=1 bun test <file>` (likewise `pnpm -C web test -- <file>`, `pnpm -C desktop test -- <name>`), everything with `make test-extended`. CI runs standard and extended. `make it`, `make e2e` and the machine matrix cost minutes and load the machine: run them only for what they cover, the whole set before a release.
+- **Extended** tests wait on real time, programs, compiles, Docker or large inputs, or give little benefit for their cost. One marker in every suite: `extended`/`extendedDescribe` of `backend/shared/testdata/extended.ts` (hub), `web/src/__tests__/extended.ts` (web UI) and `desktop/src/extended.ts` (shell), all skipped unless `EXTENDED_TESTS=1`. Run one file with `EXTENDED_TESTS=1 bun test <file>` (likewise `pnpm -C web test <file>`, `pnpm -C desktop test <name>`), everything with `make test-extended`. CI runs standard and extended. `make it`, `make e2e` and the machine matrix cost minutes and load the machine: run them only for what they cover, the whole set before a release.
 - Never add load (stress tools, busy loops) to the user's machine to provoke a failure.
 
 ## Rules

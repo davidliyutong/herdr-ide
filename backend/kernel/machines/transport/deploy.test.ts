@@ -13,7 +13,7 @@
 // build, reached with node dial; what the node's environment gets. The
 // release is a server on loopback; the executable is this host's, built
 // from the sources.
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -38,6 +38,7 @@ import { dirsFor } from '#shared/host/hostdirs.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { ChunkWriter, Op, readLine, type Reply } from '#shared/proto/agentproto/index.ts';
 import { closeStream } from '#shared/proto/yamux.ts';
+import { extendedDescribe } from '#shared/testdata/extended.ts';
 import { archiveMember, archiveName, bareName, tsVersion, type TSBuild } from './builds.ts';
 import { deployCode } from './errors.ts';
 import { dialNode } from './local.ts';
@@ -95,7 +96,9 @@ function archiveOf(bytes: Buffer): Buffer {
 const sumsOf = (o: { exe: string; archive: string }) => `${o.archive}  ${archiveName(key)}\n${o.exe}  ${archiveMember(key)}\n`;
 
 beforeAll(async () => {
-  if (!supported) return;
+  // Only the extended deployment tests need the compiled executable and
+  // the release servers; the probe's test above needs neither.
+  if (!supported || !process.env.EXTENDED_TESTS) return;
   exePath = join(work, bareName(key));
   const p = Bun.spawnSync(
     [process.execPath, join(import.meta.dir, '..', '..', '..', 'scripts', 'build.ts'), '--out', exePath, '--version', 'test-deploy'],
@@ -329,7 +332,7 @@ test('the probe reports the C library, its C++ runtime and SSE4.2; a machine Bun
   expect(here.os).toBe(process.platform);
 });
 
-describe.skipIf(!supported)('the TypeScript build over ssh', () => {
+extendedDescribe.skipIf(!supported)('the TypeScript build over ssh', () => {
   test("the hub fetches the manifest, the machine downloads the release's archive and checks it; nothing is uploaded; its node answers", async () => {
     reset();
     const home = machine();
