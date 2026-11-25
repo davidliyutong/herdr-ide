@@ -178,7 +178,7 @@ The bridge extension adds two keybindings that hand control back:
 
 The browser sends its light/dark kind (`{t: "theme", kind}`) on connect and
 on change; the core keeps the last one and sends it to every bridge window
-(`bridgeHub.setTheme`). The extension switches to the user's preferred
+(`Bridge.setTheme`). The extension switches to the user's preferred
 light or dark VS Code theme unless the current theme already matches.
 VS Code's settings are per instance on the machine, so all browsers of one
 core share them.

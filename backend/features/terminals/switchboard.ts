@@ -11,7 +11,7 @@ import { TermClient } from './client.ts';
 import type { HCSource } from './lifecycle.ts';
 import type { Timing } from './timing.ts';
 
-export interface HubDeps {
+export interface SwitchboardDeps {
   machines: Machines;
   logger: Logger;
   audit: Audit;
@@ -26,14 +26,14 @@ export interface HubDeps {
   maxBuffered: number;
 }
 
-export class Hub {
+export class Switchboard {
   private readonly backends = new Map<string, Backend>();
   private readonly clients = new Set<TermClient>();
   /** Ends with the core: every backend's connection, every client. */
   private readonly life = new AbortController();
-  private readonly d: HubDeps;
+  private readonly d: SwitchboardDeps;
 
-  constructor(d: HubDeps) {
+  constructor(d: SwitchboardDeps) {
     this.d = d;
   }
 

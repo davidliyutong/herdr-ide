@@ -11,7 +11,7 @@ import { Fail } from '#kernel/fail.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import { SSH_ENV } from '#kernel/config/ui/index.ts';
 import { Backend } from './backend.ts';
-import { Hub } from './hub.ts';
+import { Switchboard } from './switchboard.ts';
 import { hcAction, hcStatus, online, type HCSource } from './lifecycle.ts';
 import { Code } from './messages.ts';
 import { shells, type Shells } from './shells.ts';
@@ -61,7 +61,7 @@ function mustBeOnline(m: Machine): void {
 }
 
 export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
-  let hub: Hub | undefined;
+  let board: Switchboard | undefined;
   const def = defineFeature({
     id: 'terminals',
     toggle: false,
@@ -76,7 +76,7 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
           return true;
         }
       };
-      const h = new Hub({
+      const h = new Switchboard({
         machines: ctx.machines,
         logger: ctx.logger,
         audit: ctx.audit,
@@ -92,7 +92,7 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
         timing,
         maxBuffered: o.maxBuffered ?? 64 << 20,
       });
-      hub = h;
+      board = h;
 
       ctx.route('/api/v1').get('/term', (c) => {
         if (!c.env.upgrade) throw new Fail('upgrade_required', 426);
@@ -186,9 +186,9 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
     },
   });
   return Object.assign(def, {
-    existing: (machine: string) => hub?.existing(machine),
+    existing: (machine: string) => board?.existing(machine),
     shells: (machine: string) => {
-      const b = hub?.existing(machine);
+      const b = board?.existing(machine);
       return b?.connection() ? shells(b) : undefined;
     },
   });

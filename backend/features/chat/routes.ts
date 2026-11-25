@@ -54,7 +54,7 @@ import { readBody } from '#kernel/http/app.ts';
 import type { Ctx } from '#kernel/http/env.ts';
 import { auditText } from './audit.ts';
 import { badRequest, failOf, protocolError } from './errors.ts';
-import type { ChatHub } from './hub.ts';
+import type { ChatSwitchboard } from './switchboard.ts';
 import { overviews } from './overview.ts';
 import type { Timing } from './timing.ts';
 import { CoreCode } from './wire.ts';
@@ -109,14 +109,14 @@ const OK = {};
 /** The request's own signal, bounded by ms. */
 const bounded = (c: Ctx, ms: number) => AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(ms)]);
 
-export function routes(ctx: FeatureContext, hub: ChatHub, timing: Timing): void {
+export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timing): void {
   const api = ctx.machineApi;
   const query = (c: Ctx, name: string) => c.req.query(name) ?? '';
   /** One request of the machine's chat host within ms: start starts the
    * host when none serves, agent configures it first. */
   const ask = async (c: Ctx, req: chat.Request, o: { ms?: number; start: boolean; agent?: boolean }) => {
     try {
-      return await hub.request(c.var.machine.id, req, {
+      return await board.request(c.var.machine.id, req, {
         start: o.start,
         agent: o.agent ?? false,
         signal: bounded(c, o.ms ?? timing.shortMs),
@@ -212,7 +212,7 @@ export function routes(ctx: FeatureContext, hub: ChatHub, timing: Timing): void 
     // A Claude Code chat runs on Anthropic's Agent SDK, which the machine
     // gets first: asked again although it failed lately, the user asking.
     try {
-      await hub.ensureSdk(c.var.machine.id, b.kind, bounded(c, timing.sdkMs), {
+      await board.ensureSdk(c.var.machine.id, b.kind, bounded(c, timing.sdkMs), {
         retry: true,
         audit: (event, fields) => ctx.audit.log(c.var.who, event, fields),
       });
@@ -260,7 +260,7 @@ export function routes(ctx: FeatureContext, hub: ChatHub, timing: Timing): void 
   api.post('/handoff', ctx.mutating('handoff'), async (c) => {
     const id = chatParam(c);
     try {
-      await hub.handoff(c.var.machine.id, id, bounded(c, timing.handoffMs));
+      await board.handoff(c.var.machine.id, id, bounded(c, timing.handoffMs));
     } catch (e) {
       throw failOf(e);
     }
@@ -289,11 +289,11 @@ export function routes(ctx: FeatureContext, hub: ChatHub, timing: Timing): void 
     return c.json(OK);
   });
 
-  ctx.api.get('/hosts', async (c) => c.json({ hosts: await overviews(hub, c.req.raw.signal, timing.overviewMs) }));
-  ctx.api.get('/states', (c) => c.json(hub.watch.snapshot()));
+  ctx.api.get('/hosts', async (c) => c.json({ hosts: await overviews(board, c.req.raw.signal, timing.overviewMs) }));
+  ctx.api.get('/states', (c) => c.json(board.watch.snapshot()));
   ctx.api.get('/ws', (c) => {
     if (!c.env.upgrade) throw new Fail('upgrade_required', 426);
     const who = c.var.who;
-    return c.env.upgrade((ch) => hub.connectPage(ch, who), { compress: true });
+    return c.env.upgrade((ch) => board.connectPage(ch, who), { compress: true });
   });
 }

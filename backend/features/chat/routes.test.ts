@@ -144,7 +144,7 @@ describe('routes', () => {
     await r.call('POST', m('new'), '{"kind":"codex","cwd":"/w"}');
     expect(f.ops(n)).toEqual(['new']);
     // As the watch does.
-    r.settings.onChange((ch) => r.hub.settingsChanged(ch, AbortSignal.timeout(5000)));
+    r.settings.onChange((ch) => r.board.settingsChanged(ch, AbortSignal.timeout(5000)));
     r.settings.set('chat.allowFullAccess', 'gpu', true);
     n = f.requests.length;
     await r.call('POST', m('new'), '{"kind":"codex","cwd":"/w"}');
@@ -240,12 +240,12 @@ describe('routes', () => {
     expect((await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}'))[0]).toBe(200);
     expect(r.host.sdkAsks).toHaveLength(1);
     // A machine of the Go build needs none.
-    r.hub.o.sdk.forget('gpu');
+    r.board.o.sdk.forget('gpu');
     r.host.sdk = 'go';
     expect((await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}'))[0]).toBe(200);
     // Without it, and with the core offline and no operator's copy, the
     // chat is refused and the host never asked.
-    r.hub.o.sdk.forget('gpu');
+    r.board.o.sdk.forget('gpu');
     r.host.sdk = 'missing';
     const news = r.host.requests.filter((q) => q.op === chat.Op.New).length;
     const [status, body] = await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}');

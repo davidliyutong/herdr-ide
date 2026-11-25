@@ -23,7 +23,7 @@ import type { Limits, Timing } from './timing.ts';
 import { Watcher } from './watch.ts';
 import { CoreCode, type StatesData } from './wire.ts';
 
-export interface HubOptions {
+export interface SwitchboardOptions {
   machines: Machines;
   settings: Store;
   readOnly: boolean;
@@ -49,15 +49,15 @@ const AFTER_ALL = '18446744073709551615';
 /** The id of the one command of a handoff's connection. */
 const HANDOFF_ID = 'handoff';
 
-export class ChatHub {
-  readonly o: HubOptions;
+export class ChatSwitchboard {
+  readonly o: SwitchboardOptions;
   readonly link: HostLink;
   readonly config: Configurer;
   readonly watch: Watcher;
   /** The pages' WebSockets. */
   readonly pages = new Set<ChatPage>();
 
-  constructor(o: HubOptions) {
+  constructor(o: SwitchboardOptions) {
     this.o = o;
     this.link = new HostLink({
       open: o.open,
@@ -175,7 +175,7 @@ export class ChatHub {
   /** Adopts a page's WebSocket. */
   connectPage(ch: Channel, who: Who): ChannelHandlers {
     const p = new ChatPage(ch, {
-      hub: this,
+      board: this,
       audit: (event, fields) => this.o.audit.log(who, event, fields),
       now: this.o.now,
       timing: this.o.timing,

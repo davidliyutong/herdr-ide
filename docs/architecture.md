@@ -4,7 +4,7 @@
 browser (React, wasm + WebGL)  ──WebSocket + HTTP──▶  core (TypeScript on Bun, `veldr`; in the desktop app, its utility process)
 desktop app (Electron shell) ──MessagePorts, no TCP──▶  ├─ kernel: guards, event channel, machines (registry + connection state machine)
                                                         ├─ settings, keybindings (files on the core host)
-                                                        ├─ features: terminals, files, VS Code proxy and bridge hub, program windows, plugins
+                                                        ├─ features: terminals, files, VS Code proxy and bridge, program windows, plugins
                                                         └─ one ssh session per machine ──yamux──▶ agent (the machine side, served by `veldr node`)
                                                                                                     ├─ herdr-core in a session of its own (raw pipe to its API socket)
                                                                                                     ├─ agent detection in its terminals, with the agents' sessions

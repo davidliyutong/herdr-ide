@@ -4,7 +4,7 @@
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { asChatError } from './errors.ts';
 import type { HostConn, Response } from './hostconn.ts';
-import type { ChatHub } from './hub.ts';
+import type { ChatSwitchboard } from './switchboard.ts';
 import { NOT_RUNNING } from './protocol.ts';
 import { ZERO_TIME } from './wire.ts';
 
@@ -57,8 +57,8 @@ function overview(o: HostOverview): HostOverview {
 }
 
 /** Every machine's chat host, as it is now; each asked within ms. */
-export async function overviews(hub: ChatHub, signal: AbortSignal, ms: number): Promise<HostOverview[]> {
-  const states = hub.o.machines.states();
+export async function overviews(board: ChatSwitchboard, signal: AbortSignal, ms: number): Promise<HostOverview[]> {
+  const states = board.o.machines.states();
   return Promise.all(
     states.map(async (st) => {
       const base: HostOverview = {
@@ -67,11 +67,11 @@ export async function overviews(hub: ChatHub, signal: AbortSignal, ms: number): 
         machineStatus: st.status,
         running: false,
         status: '',
-        totalChats: hub.watch.chatCount(st.id),
+        totalChats: board.watch.chatCount(st.id),
         sessions: [],
       };
-      if (!hub.isReady(st.id)) return overview({ ...base, status: 'offline' });
-      return overview(await hostOverview(hub, st.id, base, AbortSignal.any([signal, AbortSignal.timeout(ms)])));
+      if (!board.isReady(st.id)) return overview({ ...base, status: 'offline' });
+      return overview(await hostOverview(board, st.id, base, AbortSignal.any([signal, AbortSignal.timeout(ms)])));
     }),
   );
 }
@@ -83,8 +83,8 @@ const failed = (base: HostOverview, e: unknown): HostOverview => {
 };
 
 /** Asks one request of machine m's host without starting one. */
-async function ask(hub: ChatHub, m: string, req: chat.Request, signal: AbortSignal): Promise<{ info: chat.HostInfo; res: Response }> {
-  const c: HostConn = await hub.link.dial(m, { start: false, reserved: false, signal });
+async function ask(board: ChatSwitchboard, m: string, req: chat.Request, signal: AbortSignal): Promise<{ info: chat.HostInfo; res: Response }> {
+  const c: HostConn = await board.link.dial(m, { start: false, reserved: false, signal });
   try {
     return { info: c.info, res: await c.send(req) };
   } finally {
@@ -92,10 +92,10 @@ async function ask(hub: ChatHub, m: string, req: chat.Request, signal: AbortSign
   }
 }
 
-async function hostOverview(hub: ChatHub, m: string, base: HostOverview, signal: AbortSignal): Promise<HostOverview> {
+async function hostOverview(board: ChatSwitchboard, m: string, base: HostOverview, signal: AbortSignal): Promise<HostOverview> {
   let err: unknown;
   try {
-    const { res } = await ask(hub, m, { op: chat.Op.HostStatus }, signal);
+    const { res } = await ask(board, m, { op: chat.Op.HostStatus }, signal);
     const hs = res.hostStatus;
     if (hs) {
       const startedAt = str(hs.startedAt);
@@ -129,7 +129,7 @@ async function hostOverview(hub: ChatHub, m: string, base: HostOverview, signal:
   // Hello.
   let listed: { info: chat.HostInfo; res: Response };
   try {
-    listed = await ask(hub, m, { op: chat.Op.Chats }, signal);
+    listed = await ask(board, m, { op: chat.Op.Chats }, signal);
   } catch {
     return failed(base, err);
   }

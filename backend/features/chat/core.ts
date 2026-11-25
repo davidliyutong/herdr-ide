@@ -9,8 +9,8 @@
 //
 // The core watches a machine's chat host while the machine is connected,
 // the feature is on and the host is in use (watch.ts); the routes
-// (routes.ts) and the pages (page.ts) reach the hosts through the hub
-// (hub.ts).
+// (routes.ts) and the pages (page.ts) reach the hosts through the switchboard
+// (switchboard.ts).
 import { join } from 'node:path';
 import { DATA_DIR_NAME } from '#shared/lib/brand.ts';
 import { userHomeDir } from '#shared/host/hostdirs.ts';
@@ -19,7 +19,7 @@ import { open } from '#kernel/agent.ts';
 import { defineFeature, type FeatureDef } from '#kernel/feature.ts';
 import { offline } from '#kernel/fail.ts';
 import type { Opener } from './hostconn.ts';
-import { ChatHub } from './hub.ts';
+import { ChatSwitchboard } from './switchboard.ts';
 import { SdkProvision, type SdkProvisionOptions } from './sdkprovision.ts';
 import { chatProtocol } from './protocol.ts';
 import { routes } from './routes.ts';
@@ -43,18 +43,18 @@ export interface ChatOptions {
 }
 
 export interface ChatFeature extends FeatureDef {
-  /** The hub, once the core set the feature up (tests). */
-  hub(): ChatHub | undefined;
+  /** The switchboard, once the core set the feature up (tests). */
+  switchboard(): ChatSwitchboard | undefined;
 }
 
 export function chatFeature(o: ChatOptions = {}): ChatFeature {
-  let hub: ChatHub | undefined;
+  let board: ChatSwitchboard | undefined;
   const def = defineFeature({
     id: 'chat',
     settings,
     setup(ctx) {
       const timing: Timing = { ...DEFAULT_TIMING, ...o.timing };
-      const h = new ChatHub({
+      const h = new ChatSwitchboard({
         machines: ctx.machines,
         settings: ctx.settings,
         readOnly: ctx.readOnly,
@@ -81,7 +81,7 @@ export function chatFeature(o: ChatOptions = {}): ChatFeature {
         timing,
         limits: { ...DEFAULT_LIMITS, ...o.limits },
       });
-      hub = h;
+      board = h;
       routes(ctx, h, timing);
       ctx.service('watch', (signal) => h.run(signal));
       ctx.onForget((m) => {
@@ -90,5 +90,5 @@ export function chatFeature(o: ChatOptions = {}): ChatFeature {
       });
     },
   });
-  return Object.assign(def, { hub: () => hub });
+  return Object.assign(def, { switchboard: () => board });
 }

@@ -21,7 +21,7 @@ import type { Machines } from '#kernel/machines/manager.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, memoryAudit, running, sshSpec, testMachines, waitFor } from '#kernel/testing.ts';
 import { chatFeature, type ChatFeature } from './core.ts';
-import type { ChatHub } from './hub.ts';
+import type { ChatSwitchboard } from './switchboard.ts';
 import { NOT_RUNNING } from './protocol.ts';
 import type { SdkProvisionOptions } from './sdkprovision.ts';
 import { settings as chatSettings } from './settings.ts';
@@ -422,7 +422,7 @@ export interface RigOptions {
 export interface Rig {
   core: Core;
   host: FakeChatHost;
-  hub: ChatHub;
+  board: ChatSwitchboard;
   machines: Machines;
   settings: Settings;
   audit: ReturnType<typeof memoryAudit>;
@@ -493,7 +493,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   );
   const stopMachines = running(machines);
   await waitFor('machine gpu', () => machines.get('gpu')!.ready);
-  const hub = feature.hub()!;
+  const board = feature.switchboard()!;
   const stops: Array<() => Promise<void>> = [];
   const pages: TestPage[] = [];
   const request: Rig['request'] = (method, path, r = {}) => {
@@ -508,7 +508,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   const r: Rig = {
     core,
     host,
-    hub,
+    board,
     machines,
     settings: store,
     audit,
@@ -526,7 +526,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
       return p;
     },
     start() {
-      stops.push(running(hub));
+      stops.push(running(board));
     },
     async setEnabled(m, on) {
       machines.setEnabled(m, on);
@@ -537,7 +537,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
     async stop() {
       for (const p of pages) if (!p.ended) p.close();
       for (const s of stops) await s();
-      hub.closePages('');
+      board.closePages('');
       await stopMachines();
       for (const c of host.conns) c.stream.destroy();
     },

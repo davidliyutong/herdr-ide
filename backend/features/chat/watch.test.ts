@@ -251,7 +251,7 @@ describe('watch', () => {
     expect(byID.get(working.id)).toMatchObject({ stale: true, state: 'sleeping', status: 'idle' });
     expect(byID.get(blocked.id)).toMatchObject({ stale: true, state: 'sleeping', status: 'idle' });
     expect(byID.get(done.id)).toMatchObject({ stale: true, state: 'sleeping', status: 'done', unread: true });
-    const snap = r.hub.watch.snapshot().machines.gpu;
+    const snap = r.board.watch.snapshot().machines.gpu;
     expect([snap.stale, snap.states.length]).toEqual([true, 3]);
 
     await r.setEnabled('gpu', true);
@@ -268,22 +268,22 @@ describe('watch', () => {
   test('a change after the machine left is dropped', async () => {
     const r = await start();
     const working = chatState(chat.Status.Working, chat.State.Working, 2);
-    const w = r.hub.watch.record('gpu');
+    const w = r.board.watch.record('gpu');
     const ac = new AbortController();
-    expect(r.hub.watch.up(ac.signal, w, { proto: chat.PROTO, version: '', pid: 0 }, [working])).toBe(true);
+    expect(r.board.watch.up(ac.signal, w, { proto: chat.PROTO, version: '', pid: 0 }, [working])).toBe(true);
     // The step: the machine left.
     ac.abort();
-    expect(r.hub.watch.markStale(w)).toBeDefined();
+    expect(r.board.watch.markStale(w)).toBeDefined();
     const n = states(r);
     // The watch takes the line it had read.
-    expect(r.hub.watch.change(ac.signal, w, { ...working, seq: 3 })).toBe(false);
-    let snap = r.hub.watch.snapshot().machines.gpu;
+    expect(r.board.watch.change(ac.signal, w, { ...working, seq: 3 })).toBe(false);
+    let snap = r.board.watch.snapshot().machines.gpu;
     expect(snap.stale).toBe(true);
     expect(snap.states).toEqual([{ ...working, state: 'sleeping', status: 'idle', stale: true }]);
     expect(states(r)).toBe(n);
     // A watch ended before it took its first states takes none.
-    expect(r.hub.watch.up(ac.signal, w, { proto: chat.PROTO, version: '', pid: 0 }, [working])).toBe(false);
-    snap = r.hub.watch.snapshot().machines.gpu;
+    expect(r.board.watch.up(ac.signal, w, { proto: chat.PROTO, version: '', pid: 0 }, [working])).toBe(false);
+    snap = r.board.watch.snapshot().machines.gpu;
     expect([snap.stale, snap.states[0].state]).toEqual([true, 'sleeping']);
   });
 
@@ -296,7 +296,7 @@ describe('watch', () => {
       await waitFor('the states', () => states(r) === 1);
       const outdated = build !== 'test';
       expect([last(r).hostVersion, last(r).outdated ?? false]).toEqual(['test', outdated]);
-      const snap = r.hub.watch.snapshot().machines.gpu;
+      const snap = r.board.watch.snapshot().machines.gpu;
       expect([snap.hostVersion, snap.outdated ?? false]).toEqual(['test', outdated]);
       r.host.end(false);
       await waitFor('the host gone', () => states(r) === 2);

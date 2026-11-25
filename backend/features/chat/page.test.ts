@@ -248,7 +248,7 @@ describe('page', () => {
     for (let i = 1; i <= 4096 && r.host.attachedTo(big) > 0; i++)
       await r.host.emit(big, { seq: i, t: 'update', item: 'm', update: { text } });
     await waitFor('the host to drop the slow connection', () => r.host.attachedTo(big) === 0);
-    expect(r.hub.pages.size).toBe(1);
+    expect(r.board.pages.size).toBe(1);
     pg.pause(false);
     let last = 0;
     for (;;) {
@@ -279,8 +279,8 @@ describe('page', () => {
   test("the core's own messages overflow", async () => {
     const r = await start({ limits: { backlogMessages: 16, backlogBytes: 256 << 10, pageBuffered: 1 } });
     const pg = await r.page();
-    await waitFor('the page', () => r.hub.pages.size === 1);
-    const page = [...r.hub.pages][0];
+    await waitFor('the page', () => r.board.pages.size === 1);
+    const page = [...r.board.pages][0];
     pg.pause(true);
     const data = new Sub(page, 'x', 'gpu', chat.newChatID(), 0);
     for (let i = 0; i < 4 * 16; i++) page.enqueue('{"t":"event","sub":"x","ev":{"t":"update"}}', data);
@@ -310,7 +310,7 @@ describe('page', () => {
   // anew, and so after the settings changed.
   test('configures', async () => {
     const r = await start();
-    r.settings.onChange((ch) => r.hub.settingsChanged(ch, AbortSignal.timeout(5000)));
+    r.settings.onChange((ch) => r.board.settingsChanged(ch, AbortSignal.timeout(5000)));
     const id = newChat(r, chat.State.Sleeping);
     const pg = await r.page();
     const attach = async (sub: string) => {
@@ -353,7 +353,7 @@ describe('page', () => {
     // A subscription that ends gives its connection back.
     pg.send({ op: 'detach', sub: 's0' });
     await attachedN(r, 2);
-    await waitFor('the connection back', () => r.hub.link.count('gpu').open === 2);
+    await waitFor('the connection back', () => r.board.link.count('gpu').open === 2);
     pg.send({ op: 'attach', sub: 'again', m: 'gpu', chat: newChat(r) });
     expect((await pg.expect('attached')).sub).toBe('again');
   });
@@ -468,7 +468,7 @@ describe('page', () => {
     expect((await r.call('POST', '/api/m/gpu/p/chat/new', '{"kind":"claude","cwd":"/w"}'))[0]).toBe(200);
     expect(r.host.sdkAsks).toHaveLength(1);
     // Another kind's chat asks nothing.
-    r.hub.o.sdk.forget('gpu');
+    r.board.o.sdk.forget('gpu');
     const codex = newChat(r);
     pg.send({ op: 'attach', sub: 's3', m: 'gpu', chat: codex });
     await pg.expect('attached');

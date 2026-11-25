@@ -72,7 +72,7 @@ export class Download implements Transfer {
    * the machine stops with it. */
   readonly signal: AbortSignal;
   private readonly stop = new AbortController();
-  private readonly hub: Downloads;
+  private readonly downloads: Downloads;
   private byUser = false;
   private sentBytes = 0;
   private total = -1;
@@ -81,8 +81,8 @@ export class Download implements Transfer {
   private last = 0;
   private over = false;
 
-  constructor(hub: Downloads, id: string, request: AbortSignal) {
-    this.hub = hub;
+  constructor(downloads: Downloads, id: string, request: AbortSignal) {
+    this.downloads = downloads;
     this.id = id;
     this.request = request;
     this.cancelled = this.stop.signal;
@@ -94,7 +94,7 @@ export class Download implements Transfer {
   describe(name: string, total: number): void {
     this.name = name;
     this.total = total;
-    this.hub.publish(this, 'running');
+    this.downloads.publish(this, 'running');
   }
 
   /** Records why it failed (the first reason counts); once the browser or
@@ -106,7 +106,7 @@ export class Download implements Transfer {
 
   sent(n: number): void {
     this.sentBytes += n;
-    if (this.hub.now() - this.last >= this.hub.everyMs) this.hub.publish(this, 'running');
+    if (this.downloads.now() - this.last >= this.downloads.everyMs) this.downloads.publish(this, 'running');
   }
 
   /** Breaks it off for the page (download.cancel). */
@@ -129,7 +129,7 @@ export class Download implements Transfer {
       state = 'failed';
       this.code = DownloadCode.Interrupted;
     }
-    this.hub.finished(this, this.event(state));
+    this.downloads.finished(this, this.event(state));
   }
 
   /** Its event in state. */
@@ -138,7 +138,7 @@ export class Download implements Transfer {
     if (this.total >= 0) ev.total = this.total;
     if (this.name) ev.name = this.name;
     if (state === 'failed' && this.code) ev.error = this.code;
-    this.last = this.hub.now();
+    this.last = this.downloads.now();
     return ev;
   }
 }

@@ -17,7 +17,7 @@ import { CloseCode, type Channel, type ChannelHandlers, type Message } from '#ke
 import { auditOf, auditText, type AuditRecord } from './audit.ts';
 import { asChatError, statusOf, TIMEOUT } from './errors.ts';
 import { readError, type HostConn, type Response } from './hostconn.ts';
-import type { ChatHub } from './hub.ts';
+import type { ChatSwitchboard } from './switchboard.ts';
 import type { Limits, Timing } from './timing.ts';
 import {
   ack,
@@ -45,7 +45,7 @@ const bytes = (s: string) => Buffer.byteLength(s);
 const pageID = (s: string) => s !== '' && bytes(s) <= MAX_PAGE_ID;
 
 export interface PageDeps {
-  hub: ChatHub;
+  board: ChatSwitchboard;
   /** Writes an audit record of the page's user. */
   audit: (event: string, fields: AuditFields) => void;
   now: () => number;
@@ -273,7 +273,7 @@ export class ChatPage {
     const s = new Sub(this, m.sub, m.m, m.chat, m.from);
     this.subs.set(m.sub, s);
     old?.abort();
-    this.d.hub.watch.inUse(s.m, 1);
+    this.d.board.watch.inUse(s.m, 1);
     void s.run();
   }
 
@@ -296,7 +296,7 @@ export class ChatPage {
       // Nothing of it is audited: it names no chat.
       return this.ack(m.id, { code: chat.Code.BadRequest, message: 'a command names a machine and a chat' });
     let rec = auditOf(m.m, m.chat, cmd);
-    if (this.d.hub.readOnly) {
+    if (this.d.board.readOnly) {
       const e = { code: CoreCode.ReadOnly, message: 'read-only mode' };
       rec ??= { event: `chat.${cmd.op}`, fields: { plugin: 'chat', machine: m.m, chat: m.chat } };
       this.audit(rec, e);
@@ -449,7 +449,7 @@ export class Sub {
     const pg = this.page;
     const gone = this.gone;
     if (!gone && pg.subs.get(this.id) === this) pg.subs.delete(this.id);
-    e ??= pg.d.hub.isReady(this.m)
+    e ??= pg.d.board.isReady(this.m)
       ? { code: CoreCode.Lost, message: 'the connection to the chat host ended' }
       : { code: CoreCode.Offline, message: 'machine not connected' };
     if (!gone) pg.send(detached(this.id, e));
@@ -458,20 +458,20 @@ export class Sub {
       pg.audit(c.rec, ackErr);
       pg.ack(c.id, ackErr);
     }
-    pg.d.hub.watch.inUse(this.m, -1);
+    pg.d.board.watch.inUse(this.m, -1);
   }
 
   /** Attaches and relays; returns why the subscription ended, undefined
    * when the connection to the host ended (or the page ended it). */
   private async relay(): Promise<chat.ChatError | undefined> {
     const pg = this.page;
-    const hub = pg.d.hub;
+    const board = pg.d.board;
     const signal = this.ac.signal;
     // The connection lives with the subscription. A prompt on it may start
     // the chat's agent: the host takes the machine's settings first.
     let c: HostConn;
     try {
-      c = await hub.connect(this.m, { start: true, agent: true, signal });
+      c = await board.connect(this.m, { start: true, agent: true, signal });
     } catch (e) {
       return signal.aborted ? undefined : asChatError(e);
     }
@@ -479,7 +479,7 @@ export class Sub {
     try {
       // A reader who may not change the chat starts nothing on the machine:
       // no catch-up of what its session did in a terminal.
-      const readOnly = hub.readOnly;
+      const readOnly = board.readOnly;
       let timedOut = false;
       const timer = setTimeout(() => {
         timedOut = true;
@@ -505,10 +505,10 @@ export class Sub {
       // it failed to lately.
       const kind = (res.chat as { kind?: unknown } | undefined)?.kind;
       if (typeof kind === 'string')
-        hub
+        board
           .ensureSdk(this.m, kind, AbortSignal.any([signal, AbortSignal.timeout(pg.d.timing.sdkMs)]), { audit: pg.d.audit })
           .catch((e: unknown) => {
-            if (!signal.aborted) pg.d.hub.o.logger(`chat: the Agent SDK on ${this.m}: ${asChatError(e).message}`);
+            if (!signal.aborted) pg.d.board.o.logger(`chat: the Agent SDK on ${this.m}: ${asChatError(e).message}`);
           });
       const it = res.chat && readOnly ? chat.redactedChat(res.chat as unknown as chat.Chat) : (res.chat ?? undefined);
       if (!this.gone) pg.enqueue(attached(this.id, it, res.first ?? 0), this);
