@@ -1,6 +1,5 @@
-// Chats with Codex: the fake app-server (e2e/fakecodex, installed as
-// `codex`) run by the machine's chat host through its Codex adapter, the Go
-// machine build's or the TypeScript one's (E2E_MACHINE=ts).
+// Chats with Codex: the fake app-server (e2e/fakes/codex.ts, installed as
+// `codex`) run by the machine's chat host through its Codex adapter.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';

@@ -1,10 +1,9 @@
 // Program windows of an SSH machine shown by two cores of one instance
 // (feature 14, 39): the machine's node serves both, one controls the
 // windows and the other views them until it takes control. The machine is
-// a container with Xvfb (harness/sshd.ts); the program is e2e/xclient,
-// which prints the clicks it gets. It runs against both machine builds
-// (E2E_MACHINE=ts: the TypeScript machine side with its GUI helper).
-// Skipped without Docker.
+// a container with Xvfb (harness/sshd.ts); the program is
+// e2e/fakes/xclient.ts, which prints the clicks it gets. Skipped without
+// Docker.
 
 import { test, expect } from '../harness/fixtures';
 import type { Instance } from '../harness/instance';

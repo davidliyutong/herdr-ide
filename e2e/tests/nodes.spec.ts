@@ -1,11 +1,9 @@
 // Two cores of one instance on one computer: two UIs of the same machines,
 // which reach the local machine through the same node; a newer build's
-// core takes the node over without the other noticing, also when the newer
-// build is the other machine build (the Go program from the TypeScript
-// machine side, and the other way round: the upgrade path).
+// core takes the node over without the other noticing (the upgrade path).
 
 import { test, expect } from '../harness/fixtures';
-import { nodeProcesses as nodes, tsNode, type Instance } from '../harness/instance';
+import { nodeProcesses as nodes, type Instance } from '../harness/instance';
 import { TermClient } from '../harness/term';
 import { newTerminalTab, run, terminalOfPane } from '../harness/ui';
 import { waitFor } from '../harness/wait';
@@ -40,14 +38,8 @@ test('two cores share the local node: each sees the terminals of the other, and 
 
 /** A newer core (exe) of the instance takes its node over: the first core's
  * machine stays ready all along, both end up on the newer build's node
- * alone, whose build is ts or not, and the terminals go on. */
-async function takeOver(
-  app: import('@playwright/test').Page,
-  instance: Instance,
-  term: TermClient,
-  exe: string,
-  ts: boolean,
-): Promise<void> {
+ * alone, and the terminals go on. */
+async function takeOver(app: import('@playwright/test').Page, instance: Instance, term: TermClient, exe: string): Promise<void> {
   // A terminal of the page, typed into after the move.
   await newTerminalTab(app);
   const pane = await terminalOfPane(term, 1);
@@ -74,7 +66,6 @@ async function takeOver(
       what: 'the newer node alone to serve the instance',
       timeout: 30_000,
     });
-    expect(tsNode(nodes(instance.name)[0])).toBe(ts);
     watching = false;
     await watch;
     expect([...seen]).toEqual(['ready']);
@@ -100,13 +91,5 @@ test('a newer build takes the node over: the other core moves to it and stays re
   instance,
   term,
 }) => {
-  await takeOver(app, instance, term, paths.coreNewer, paths.machine === 'ts');
-});
-
-test(`a newer ${paths.machine === 'ts' ? 'Go' : 'TypeScript'} machine build takes the node over, its terminals with it`, async ({
-  app,
-  instance,
-  term,
-}) => {
-  await takeOver(app, instance, term, paths.otherNewer, paths.machine !== 'ts');
+  await takeOver(app, instance, term, paths.coreNewer);
 });

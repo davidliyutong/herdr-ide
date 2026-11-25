@@ -2,9 +2,8 @@
 # Runs the TypeScript build's machine side on this machine: the driver (driver.js,
 # built with build.sh) with the executable of this machine's C
 # library (exe/: musl's on musl, glibc's elsewhere) acting as Bun
-# (BUN_BE_BUN=1), which drives that executable's node as a core does
-# (MACHINE_EXE names another build: run-go.sh). The run has a home of its
-# own, removed after. Exit status: 0 if it passed.
+# (BUN_BE_BUN=1), which drives that executable's node as a core does. The
+# run has a home of its own, removed after. Exit status: 0 if it passed.
 cd "$(dirname "$0")" || exit 2
 # glibc's getconf answers on glibc whatever else is there (a glibc system
 # with musl's package has musl's loader in /lib too).
@@ -34,8 +33,8 @@ if [ "$(uname -m)" = x86_64 ] && ! grep -qw sse4_2 /proc/cpuinfo; then
   exit 0
 fi
 home=$(mktemp -d /tmp/hmx-XXXXXX)
-echo "=== $(basename "${MACHINE_EXE:-$own}")"
-HOME=$home MACHINE_EXE=${MACHINE_EXE:-$PWD/$own} BUN_BE_BUN=1 "./$own" --no-env-file --no-install --config=/dev/null ./driver.js 2>&1
+echo "=== $(basename "$own")"
+HOME=$home MACHINE_EXE=$PWD/$own BUN_BE_BUN=1 "./$own" --no-env-file --no-install --config=/dev/null ./driver.js 2>&1
 e=$?
 rm -rf "$home"
 echo "=== exit $e"

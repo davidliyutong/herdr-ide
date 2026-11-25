@@ -34,7 +34,11 @@ if [ "${MACHINE_KIND:-}" != local ] && ! command -v Xvfb >/dev/null 2>&1; then
   fi
 fi
 home=$(mktemp -d /tmp/hmg-XXXXXX)
-cp bin/e2e-xclient "$home/"
+# The X program (bin/xclient.js) run by this machine's executable acting as
+# Bun.
+cp bin/xclient.js "$home/"
+printf '#!/bin/sh\nBUN_BE_BUN=1 exec "%s" --no-env-file --no-install --config=/dev/null "%s" "$@"\n' "$PWD/$own" "$home/xclient.js" >"$home/e2e-xclient"
+chmod 755 "$home/e2e-xclient"
 echo "=== $(basename "$own") (Xvfb: $(command -v Xvfb || echo none))"
 enc=
 [ -f enc/encoder.gz ] && enc=$PWD/enc/encoder.gz

@@ -1,4 +1,4 @@
-// Chats with the fake agent (e2e/fakeacp, installed as `kimi`).
+// Chats with the fake agent (e2e/fakes/acp.ts, installed as `kimi`).
 
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { Instance } from './instance';
