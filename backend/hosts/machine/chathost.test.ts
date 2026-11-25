@@ -18,13 +18,12 @@ test('the kinds whose adapter is not ported are refused as kinds without a chat,
   h = new TestHost();
   h.o = { ...h.o, adapters: chatAdapters(), spec: chatSpec };
   await h.serve();
-  const agents = await h.request({ op: chat.Op.Agents, kinds: ['claude', 'codex', 'opencode'] });
+  const agents = await h.request({ op: chat.Op.Agents, kinds: ['claude', 'opencode'] });
   expect(agents.agents).toEqual([
     { kind: 'claude', available: false, reason: 'unsupported' },
-    { kind: 'codex', available: false, reason: 'unsupported' },
     { kind: 'opencode', available: false, reason: 'unsupported' },
   ]);
-  for (const kind of ['claude', 'codex']) {
+  for (const kind of ['claude']) {
     expect((await h.request({ op: chat.Op.New, kind, cwd: h.cwd })).error).toEqual({
       code: 'unsupported',
       message: `this host has no adapter ${kind}`,
@@ -37,9 +36,11 @@ test('the kinds whose adapter is not ported are refused as kinds without a chat,
     message: 'the kind has no chat',
   });
   expect((await h.request({ op: chat.Op.Chats })).chats).toEqual([]);
-  // The ACP kinds have their adapter (their programs are not installed here).
-  expect((await h.request({ op: chat.Op.Agents, kinds: ['kimi'] })).agents).toEqual([
+  // The ACP kinds and Codex have their adapter (their programs are not
+  // installed here).
+  expect((await h.request({ op: chat.Op.Agents, kinds: ['kimi', 'codex'] })).agents).toEqual([
     { kind: 'kimi', available: false, reason: 'not_found' },
+    { kind: 'codex', available: false, reason: 'not_found' },
   ]);
 });
 

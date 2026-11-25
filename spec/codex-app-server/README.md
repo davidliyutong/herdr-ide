@@ -18,8 +18,10 @@ conversations in `spec/vectors/chat/codex/` were recorded with.
   the app-server, and the names of every method. `make check` fails when
   they are not what the schema makes (`bun scripts/codex-schema.ts
   --check`); the typecheck holds the adapter to them, and its tests hold
-  the recordings to the schema itself, validated with zod's
-  `fromJSONSchema` (`appserver.test.ts`).
+  the recordings and what the adapter sends (each mode's policies, its
+  other requests, its answers and refusals) to the schema itself,
+  validated with zod's `fromJSONSchema` (`appserver.test.ts`,
+  `adapter.test.ts`, `session.test.ts`).
 - `summary.json` is the part of the schema the Go adapter
   (`internal/chatadapter/codex`) relies on (a member marked with a trailing
   `!` is required), which its `TestSchemaPinned` checks it against. It is

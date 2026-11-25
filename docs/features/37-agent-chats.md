@@ -265,9 +265,11 @@ resumed nor imported (`in_terminal`).
   and imports read `~/.claude/projects`.
 - **Codex** (`codex/`): `codex app-server`, protocol v2, one per live
   chat; the schema relied on is pinned in
-  `spec/codex-app-server/summary.json` (`TestSchemaPinned`). A thread
-  started writable records its directory in `~/.codex/config.toml`, so
-  threads start read-only and each turn carries the mode as policy:
+  `spec/codex-app-server/summary.json` (`TestSchemaPinned`), made of
+  Codex's own schema of the version pinned, which `spec/codex-app-server`
+  keeps. A thread started writable records its directory in
+  `~/.codex/config.toml`, so threads start read-only and each turn carries
+  the mode as policy:
 
   | Mode | Approval policy | Sandbox | Collaboration mode |
   | --- | --- | --- | --- |
@@ -293,6 +295,20 @@ resumed nor imported (`in_terminal`).
   `allow_once` and `reject_once` options only, at most 64 waiting. Its
   tests replay `spec/vectors/chat/acp` through a fake agent and compare the
   events with the Go adapter's of the same scenarios.
+- **Codex in the TypeScript build** (`backend/features/chat/machine/codex`):
+  the same behaviour, its policies, approvals, plans, steering, queue,
+  interrupt and restart, compaction, usage and limits, sessions and
+  imports. It is written against TypeScript types generated from the JSON
+  schema Codex prints (`appserver.gen.ts`, by
+  `backend/scripts/codex-schema.ts` from `spec/codex-app-server`, which
+  `make check` holds them to), in place of the Go adapter's pinned
+  summary: the typecheck holds the adapter to the protocol, and its tests
+  validate the recordings and what it sends against the schema itself.
+  Its framing is its own (no `jsonrpc` member, as Codex writes it; a line
+  over 16 MiB passed over), every message handed on in the order of the
+  app-server's output. Its tests replay `spec/vectors/chat/codex` through
+  a fake app-server and compare the events with the Go adapter's golden
+  files of the same recordings.
 
 In the TypeScript build the seam is `backend/features/chat/machine/adapter.ts`,
 whose comment states the same rules for one thread:
@@ -321,9 +337,9 @@ The host gets its adapters by name from its composition root
 (`backend/hosts/machine/features.ts` `chatAdapters`): an adapter is added
 there, the host unchanged. A kind whose adapter the host was not given is
 refused as a kind without a chat (`unsupported`, "this host has no
-adapter claude"): so are Claude Code's and Codex's chats in the
-TypeScript build, which has the ACP adapter only (the design of the other
-two: [42](42-typescript-backend.md#claude-code)).
+adapter claude"): so are Claude Code's chats in the TypeScript build,
+which has the ACP and Codex adapters (the design of Claude Code's:
+[42](42-typescript-backend.md#claude-code)).
 
 ### The core's plugin (`backend/features/chat`)
 
@@ -489,8 +505,13 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
   core's signals in a host of its own process); its open action
   (`backend/features/chat/machine.test.ts`: start, hosts of other builds
   and protocols, a stuck host killed); the agents' processes
-  (`agentproc.test.ts`); the ACP adapter (`acp/*.test.ts`); the kinds
-  without an adapter (`backend/hosts/machine/chathost.test.ts`).
+  (`agentproc.test.ts`); the ACP adapter (`acp/*.test.ts`); the Codex
+  adapter (`codex/*.test.ts`: the recordings replayed against the Go
+  adapter's golden files, the server's requests answered or refused,
+  lines passed over, close order, leftovers, queues, plans, configuration,
+  sign-in, `in_terminal`, sessions and history, the recordings and what
+  it sends validated against Codex's schema); the kinds without an
+  adapter (`backend/hosts/machine/chathost.test.ts`).
 - `backend/features/chat`: `routes.test.ts` (routes, read-only),
   `watch.test.ts` (the watch: `a host of build …`, `a change after the
   machine left is dropped`), `page.test.ts` (the WebSocket's `limits` and

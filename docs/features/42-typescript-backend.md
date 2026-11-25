@@ -618,10 +618,47 @@ to the session synchronously, in the order of the agent's output: the
 SDK's client parses every `session/update` with the protocol's stable
 schema, dropping an agent's newer kinds and values, and dispatches
 asynchronously, which would not keep a turn's last updates ahead of the
-answer that ends it. Claude Code's and Codex's adapters are not ported
-yet: the host refuses a chat of those kinds as a kind without a chat
-(`unsupported`, "this host has no adapter claude"), lists them as
-unsupported to the page, and goes on.
+answer that ends it.
+
+It has Codex's adapter (`features/chat/machine/codex`), which keeps the
+app-server's JSON-RPC and the Go adapter's behaviour (doc 37: threads
+read-only and the policy per turn, approvals without amendments, plans,
+steering and the queue, the interrupt's restart, compaction, usage and
+limits, sessions and imports through `thread/list` and
+`thread/turns/list`). It is written against TypeScript types generated
+from the JSON schema Codex prints: `spec/codex-app-server` keeps the
+schema of the version pinned verbatim
+(`codex_app_server_protocol.schemas.json`, what `codex app-server
+generate-json-schema --experimental` writes, 980 KB for 0.171.0) and
+`backend/scripts/codex-schema.ts` makes of it `appserver.gen.ts`: the
+types of the requests the adapter sends with their results, of every
+request of the app-server with its answer, of the notifications it maps,
+the names of every method and the definitions they reach (232 of them,
+92 KB). A keyword of JSON Schema the script does not translate fails it,
+so a newer schema is never read as something else; `make check` fails
+when the types are not what the schema makes; the script takes another
+version's schema from what Codex wrote, or from Codex's repository
+(`--fetch`, its tag's experimental exports), without running Codex. The
+typecheck holds the adapter to the types (each request's params and
+result, each answer, the notifications it passes over by name), and its
+tests validate every message of the recordings and what the adapter
+sends against the schema itself, with zod's `fromJSONSchema`: that
+replaces, for the TypeScript side, the Go adapter's hand-pinned summary
+(`summary.json`, `TestSchemaPinned`), which the Go side keeps while it
+exists. The framing is the adapter's own (`rpc.ts`, a few dozen lines):
+Codex writes JSON-RPC without the `jsonrpc` member, which json-rpc-2.0
+refuses and vscode-jsonrpc adds (framing with headers besides); a line
+over 16 MiB is passed over and the connection goes on; and every line
+is handed on synchronously in the order of the app-server's output, so a
+call's answer settles it only after the notifications before it reached
+the session. What starts or steers a turn, compacts, carries out an
+approved plan or starts the app-server again holds the session's lock
+across its calls (a promise queue, nothing blocks the thread), as one of
+them at a time does in the Go adapter.
+
+Claude Code's adapter is not ported yet: the host refuses a chat of that
+kind as a kind without a chat (`unsupported`, "this host has no adapter
+claude"), lists it as unsupported to the page, and goes on.
 
 ### Wire compatibility while both exist
 
@@ -749,6 +786,26 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
   drops the updates its stable schema refuses and does not keep a turn's
   updates ahead of the answer that ends it; the notifications are taken
   out before it.
+- **Codex's own TypeScript** (`codex app-server generate-ts`): 968 files
+  of every type of the protocol (580 KB), each importing the others
+  without extensions, which this backend's module settings would need
+  rewritten, and nothing to check that the committed files are what a
+  schema makes. The JSON schema is one file, kept verbatim and checked,
+  and the types of the part the adapter uses are generated from it.
+- **json-schema-to-typescript for Codex's schema.** The common generator,
+  but a tree of dependencies (its own prettier, lodash, a reference
+  parser) for what is a few hundred lines over the subset of JSON Schema
+  that Codex's schemars writes; it names inline variants from their
+  titles and adds index signatures, where the script writes the unions as
+  Codex has them and fails on a keyword it does not know.
+- **A JSON-RPC library for Codex** (vscode-jsonrpc, json-rpc-2.0). Codex's
+  messages have no `jsonrpc` member, which they require or add;
+  vscode-jsonrpc frames with headers; neither passes over a line too long
+  and goes on. The framing is a few dozen lines.
+- **Validating what Codex sends at run time.** The adapter reads Codex's
+  messages leniently, as the Go adapter does (members and values it does
+  not know passed over, an item it cannot read passed over); the schema
+  validates the recordings in the tests instead.
 - **The sessions' strict opens through FFI on Linux** (`openat2`,
   `openat` relative to a directory). Synchronous on the node's one thread,
   where a home on a mount that stopped answering would stall every core;
@@ -795,6 +852,11 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
   events fail; a write the journal refuses fails its chat, without a hole.
 - The SDK's undeclared `cancelAsyncMessage` disappears: its test fails at
   the upgrade.
+- A Codex newer than the version pinned: the adapter reads what it sends
+  leniently, and the app-server refuses a request with a member or a
+  value it renamed (the turn fails with its message). Moving to it is its
+  schema taken and the types generated again, which the typecheck and the
+  tests then hold the adapter to (spec/codex-app-server/README.md).
 
 ## Security
 
@@ -918,9 +980,14 @@ SECURITY.md has both.
   journal that waits, and a host of its own process ended by the terminal
   core's signals), `backend/features/chat/machine.test.ts` (the open
   action against a fake terminal core: hosts of other builds and
-  protocols, a stuck one), the agents' processes, and the ACP adapter
+  protocols, a stuck one), the agents' processes, the ACP adapter
   against a fake agent replaying `spec/vectors/chat/acp`, its events
-  compared with the Go adapter's of the same scenarios.
+  compared with the Go adapter's of the same scenarios, and the Codex
+  adapter against a fake app-server replaying `spec/vectors/chat/codex`
+  (`codex/testdata/fakeappserver.ts`, the Go fake's directives), its
+  events compared with the Go adapter's golden files of every recording,
+  its scenarios the Go adapter's, and the recordings and what it sends
+  validated against Codex's schema (`codex/appserver.test.ts`)..
 - Program windows' machine side: the Go tests' tiles, flow, stats and
   video decisions ported (`features/gui/machine/wm.test.ts`), two cores
   through the wire with a fake GUI helper, the display's files, numbers,
