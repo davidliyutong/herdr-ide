@@ -207,6 +207,22 @@ describe('protocol', () => {
   });
 });
 
+// A machine build that carries its herdr-core (the TypeScript machine
+// executable) installs that one, from its own copy: the core uploads
+// nothing, also when it carries one for the platform.
+test('a machine build that carries herdr-core installs and runs its own', async () => {
+  const exe = Buffer.from('#!/bin/sh\n');
+  const digest = createHash('sha256').update(exe).digest('hex');
+  const r = await start({
+    sim: (s) => ((s.digest = 'old'), (s.embedded = 'e'.repeat(64)), (s.running = true)),
+    options: { hc: async () => ({ gz: gzipSync(exe), digest }) },
+  });
+  const c = await r.client();
+  await c.ready();
+  expect(r.sim.digest).toBe('e'.repeat(64));
+  expect(r.sim.actions).toEqual(['status', 'install-embedded', 'restart']);
+});
+
 // The terminal core is stopped, started and restarted from the UI. A
 // stopped core stays stopped while a client is subscribed (code stopped)
 // until it is started again; the machine's state shows the backend's, and

@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { connect } from 'node:net';
 import { join } from 'node:path';
-import { createGunzip } from 'node:zlib';
+import { createGunzip, gunzipSync } from 'node:zlib';
 import { execa } from 'execa';
 import { SLUG } from '#shared/lib/brand.ts';
 import { Fail } from '#shared/lib/fail.ts';
@@ -57,9 +57,13 @@ export class TerminalCore {
   /** Installs, starts and stops run one at a time. */
   private op: Promise<unknown> = Promise.resolve();
 
-  constructor(instance: string, dirs: Dirs) {
+  /** Gives the herdr-core this build carries (tests give another). */
+  private readonly carry?: () => { gz: Buffer; digest: string } | null;
+
+  constructor(instance: string, dirs: Dirs, carry?: () => { gz: Buffer; digest: string } | null) {
     this.instance = instance;
     this.dirs = dirs;
+    this.carry = carry;
   }
 
   /** The executable's directory, per host: one replaced on a shared home
@@ -120,9 +124,24 @@ export class TerminalCore {
     }
   }
 
+  /** The herdr-core this build carries (the compiled machine executable
+   * embeds its platform's: a file named herdr-core.gz); null without one. */
+  embedded(): Promise<{ gz: Buffer; digest: string } | null> {
+    this.carried ??= this.carry ? Promise.resolve(this.carry()) : carriedHC();
+    return this.carried;
+  }
+  private carried: Promise<{ gz: Buffer; digest: string } | null> | undefined;
+
   /** Whether a core answers on the socket, and its version. */
   async status(signal?: AbortSignal): Promise<HCStatus> {
-    const st: HCStatus = { digest: this.digest() || undefined, running: false, session: this.session, socket: this.socket };
+    const carried = await this.embedded();
+    const st: HCStatus = {
+      digest: this.digest() || undefined,
+      ...(carried ? { embedded: carried.digest } : {}),
+      running: false,
+      session: this.session,
+      socket: this.socket,
+    };
     const hello = await this.probe(signal);
     if (hello) {
       st.running = true;
@@ -163,8 +182,20 @@ export class TerminalCore {
    * herdr-core's own update does: a running core and its holders keep the
    * executable they started from. */
   async install(digest: string, r: Reader): Promise<void> {
+    return this.installGz(digest, new ChunkReader(r));
+  }
+
+  /** Installs the herdr-core this build carries, when it is digest. */
+  async installEmbedded(digest: string): Promise<void> {
+    const e = await this.embedded();
+    if (!e) throw new Fail(HCCode.NotInstalled, 400, 'this build carries no herdr-core');
+    if (e.digest !== digest) throw new Fail(HCCode.BadDigest, 400, `this build carries herdr-core ${e.digest}, not ${digest}`);
+    return this.installGz(digest, [e.gz]);
+  }
+
+  /** Writes the gzip-compressed executable of chunks, checked by digest. */
+  private async installGz(digest: string, chunks: AsyncIterable<Buffer> | Iterable<Buffer>): Promise<void> {
     if (!validDigest(digest)) throw new Fail(HCCode.BadDigest, 400, 'bad digest');
-    const chunks = new ChunkReader(r);
     if (this.digest() === digest) {
       for await (const _ of chunks) {
         // drained
@@ -269,4 +300,14 @@ export class TerminalCore {
       // not there
     }
   }
+}
+
+/** The herdr-core embedded in this executable (hosts/machine/compile.ts):
+ * null in a run from the sources. */
+async function carriedHC(): Promise<{ gz: Buffer; digest: string } | null> {
+  if (!Bun.isStandaloneExecutable) return null;
+  const f = Bun.embeddedFiles.find((b) => (b as File).name === 'herdr-core.gz') as File | undefined;
+  if (!f) return null;
+  const gz = Buffer.from(await f.bytes());
+  return gz.length ? { gz, digest: createHash('sha256').update(gunzipSync(gz)).digest('hex') } : null;
 }

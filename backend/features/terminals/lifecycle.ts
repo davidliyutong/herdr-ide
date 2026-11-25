@@ -84,20 +84,27 @@ export async function ensure(m: Machine, o: EnsureOptions, d: LifecycleDeps): Pr
   }
   let gz: Uint8Array | null = null;
   let digest = '';
-  if (d.hc)
+  if (st.embedded) {
+    // The machine build carries its platform's herdr-core (the TypeScript
+    // machine executable, verified by its digest when it was installed):
+    // that one runs, installed from the machine's own copy.
+    digest = st.embedded;
+  } else if (d.hc)
     try {
       ({ gz, digest } = await d.hc(info.os, info.arch));
     } catch {
       // none in this build for the machine's platform
     }
   let installed = false;
-  if (digest && gz && st.digest !== digest && !d.readOnly) {
+  if (digest && (gz || st.embedded) && st.digest !== digest && !d.readOnly) {
     let r: Reply | undefined;
     let err: unknown;
     try {
-      r = await install(m, gz, digest, signal, o.timeoutMs);
+      if (st.embedded) r = await hcAction(m, 'install-embedded', digest, signal, o.timeoutMs);
+      else r = await install(m, gz!, digest, signal, o.timeoutMs);
     } catch (e) {
       err = e;
+      if (e instanceof AgentError) r = e.reply;
     }
     if (!r?.ok || !r.hc) {
       d.logger(`term ${o.id}: install: ${err ? (err as Error).message : ''} ${r?.error ?? ''}`);

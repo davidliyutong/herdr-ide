@@ -52,6 +52,7 @@ export async function rig(
     sshConn?: string;
     fs?: Partial<FsCalls>;
     peerCred?: (c: import('node:net').Socket) => { pid: number; uid: number };
+    carryHC?: () => { gz: Buffer; digest: string } | null;
   } = {},
 ): Promise<Rig> {
   const h = tempHome();
@@ -65,6 +66,7 @@ export async function rig(
     socketWatchMs: 50,
     fs: o.fs,
     peerCred: o.peerCred,
+    carryHC: o.carryHC,
   });
   const sessions: Session[] = [];
   const connect = (client = o.client ?? 'core-1', sshConn = o.sshConn ?? '') => {

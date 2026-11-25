@@ -128,7 +128,7 @@ JSON reply line; after a successful reply it carries op-specific bytes.
 | `fs.archive` | core → agent | A zip of `Paths`, streamed. |
 | `dial-unix` | core → agent | Raw pipe to a socket in the agent's run directory. |
 | `code-server` | core → agent | `status`, `install`, `download`, `start`, `stop`, `release` (stops it unless another core's session has a connection to it), `install-ext`, `marker`. |
-| `hc` | core → agent | Terminal core `status`, `install` (digest-checked), `start`, `restart`, `stop` of the agent's instance. |
+| `hc` | core → agent | Terminal core `status`, `install` (digest-checked), `install-embedded` (the herdr-core the machine build carries, whose digest `status` reports as `embedded`: the TypeScript machine executable's), `start`, `restart`, `stop` of the agent's instance. |
 | `hc-api` | core → agent | Raw pipe to the terminal core's API socket; starts nothing. |
 | `detect` | core → agent | Stream of `DetectEvent {terminal, agent, status}` lines, with the agent's `session` when asked ([25](features/25-agent-detection.md)). |
 | `privacy` | core → agent | macOS Full Disk Access of the agent and the terminal core. |

@@ -30,6 +30,15 @@ export async function serveHC(conn: Conn, h: Header, hc: TerminalCore, signal: A
           return failed(HCCode.BadDigest, e);
         }
         break;
+      case 'install-embedded':
+        // The herdr-core this build carries, when it is the one the core
+        // expects (the digest this build reported).
+        try {
+          await hc.installEmbedded(h.digest ?? '');
+        } catch (e) {
+          return failed((e as { code?: string }).code ?? HCCode.BadDigest, e);
+        }
+        break;
       case 'start':
       case 'restart':
         // herdr-core starts the core detached from the agent (a user service

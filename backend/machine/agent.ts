@@ -102,6 +102,8 @@ export interface AgentOptions {
   fs?: Partial<FsCalls>;
   /** Reads a connection's peer credentials (tests give another). */
   peerCred?: (c: Socket) => { pid: number; uid: number };
+  /** The herdr-core this build carries (tests give one). */
+  carryHC?: () => { gz: Buffer; digest: string } | null;
 }
 
 export class Agent {
@@ -121,7 +123,7 @@ export class Agent {
     this.instance = o.instance;
     this.dirs = o.dirs;
     this.logger = o.logger;
-    this.hc = new TerminalCore(o.instance, o.dirs);
+    this.hc = new TerminalCore(o.instance, o.dirs, o.carryHC);
     this.fs = { ...FS_CALLS, ...o.fs };
     const env = this.env();
     for (const side of o.features) this.features.set(side.protocol.id, { protocol: side.protocol, served: side.start(env) });

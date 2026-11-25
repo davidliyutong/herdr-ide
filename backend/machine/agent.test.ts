@@ -228,6 +228,29 @@ describe('the plugin op', () => {
 });
 
 describe('the terminal core', () => {
+  test('a build that carries herdr-core reports it and installs it from its own copy, checked by its digest', async () => {
+    const { gzipSync } = await import('node:zlib');
+    const { createHash } = await import('node:crypto');
+    const exe = Buffer.from('#!/bin/sh\necho carried\n');
+    const digest = createHash('sha256').update(exe).digest('hex');
+    r = await rig({ carryHC: () => ({ gz: gzipSync(exe), digest }) });
+    const st = await r.session.request({ op: Op.HC, action: 'status' });
+    expect(st.hc?.embedded).toBe(digest);
+    expect(st.hc?.digest).toBeUndefined();
+    expect((await refusalOf(r.session.request({ op: Op.HC, action: 'install-embedded', digest: 'c'.repeat(64) }))).code).toBe('bad_digest');
+    const done = await r.session.request({ op: Op.HC, action: 'install-embedded', digest });
+    expect(done.hc?.digest).toBe(digest);
+    expect(readFileSync(join(r.dirs.host, 'hc', 'herdr-core'))).toEqual(exe);
+  });
+
+  test('a build that carries none refuses install-embedded', async () => {
+    r = await rig();
+    expect((await r.session.request({ op: Op.HC, action: 'status' })).hc?.embedded).toBeUndefined();
+    expect((await refusalOf(r.session.request({ op: Op.HC, action: 'install-embedded', digest: 'a'.repeat(64) }))).code).toBe(
+      'not_installed',
+    );
+  });
+
   test('a start needs the executable the core expects; status names the session and socket', async () => {
     r = await rig();
     const st = await r.session.request({ op: Op.HC, action: 'status' });

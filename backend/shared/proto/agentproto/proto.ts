@@ -231,6 +231,10 @@ export interface CSStatus {
 
 export interface HCStatus {
   digest?: string;
+  /** The SHA-256 of the herdr-core the machine build carries, which action
+   * install-embedded installs (the TypeScript machine build); absent when
+   * it carries none and the core uploads one (install). */
+  embedded?: string;
   running: boolean;
   version?: string;
   session: string;

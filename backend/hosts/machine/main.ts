@@ -13,7 +13,7 @@ import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { dialNode, stopNodes } from '#machine/dial.ts';
 import { TerminalCore } from '#machine/hc.ts';
 import { runNode } from '#machine/node.ts';
-import { buildFile } from '#machine/self.ts';
+import { buildFile, dropForeignRuntimeVars } from '#machine/self.ts';
 import { machineFeatures } from './features.ts';
 
 const USAGE = `usage: ${CORE_BIN} node [dial | stop] [--instance NAME] | version\n`;
@@ -101,6 +101,8 @@ async function dial(instance: string, client: string, logger: ReturnType<typeof 
 }
 
 async function main(argv: string[]): Promise<number> {
+  // Nothing this process starts gets them (self.ts).
+  dropForeignRuntimeVars();
   const [cmd, ...rest] = argv;
   switch (cmd) {
     case 'node':

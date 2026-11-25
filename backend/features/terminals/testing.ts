@@ -235,6 +235,8 @@ export interface DetectStream {
  * executable installed (digest), detection and privacy. */
 export class AgentSim {
   digest = 'd1';
+  /** The herdr-core the machine build carries (the TypeScript build's). */
+  embedded = '';
   running = true;
   version = '9.9.9';
   core: FakeHC | null = new FakeHC();
@@ -247,6 +249,7 @@ export class AgentSim {
   status(): HCStatus {
     return {
       ...(this.digest ? { digest: this.digest } : {}),
+      ...(this.embedded ? { embedded: this.embedded } : {}),
       running: this.running,
       version: this.version,
       session: 'veldr-test',
@@ -277,6 +280,10 @@ export class AgentSim {
             this.digest = digest;
             return once({ ok: true, hc: this.status() });
           }
+          case 'install-embedded':
+            if (!this.embedded || h.digest !== this.embedded) return once({ ok: false, error: 'bad digest', code: 'bad_digest' });
+            this.digest = this.embedded;
+            return once({ ok: true, hc: this.status() });
           case 'start':
           case 'restart':
             if (!this.digest) return once({ ok: false, error: 'not installed', code: 'not_installed' });

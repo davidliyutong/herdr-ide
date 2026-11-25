@@ -373,6 +373,10 @@ type CSStatus struct {
 type HCStatus struct {
 	// Digest is the SHA-256 of the installed executable, "" without one.
 	Digest string `json:"digest,omitempty"`
+	// Embedded is the SHA-256 of the herdr-core a machine build carries,
+	// which action install-embedded installs (the TypeScript machine
+	// build's); this build carries none and leaves it empty.
+	Embedded string `json:"embedded,omitempty"`
 	// Running: a core answers on Socket; Version is that core's.
 	Running bool   `json:"running"`
 	Version string `json:"version,omitempty"`
