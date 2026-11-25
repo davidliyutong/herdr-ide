@@ -375,7 +375,12 @@ redistribution, so do not publish bundles containing it.
 Building needs Go modules, npm packages, the Bun runtimes of the target
 platforms (`bun build --compile` downloads one for another platform) and
 the pinned herdr-core archives (verified archives in `dist/hc/` are
-reused).
+reused); a core that deploys the TypeScript machine side also embeds the
+pinned Bun runtimes of linux (x64 baseline, arm64) and darwin machines
+(`backend/scripts/runtimes.ts`). Such a core fetches the runtime of a musl
+machine (Alpine) on its own host when one connects, unless its build
+carries it: offline, that machine is refused until the runtime is in
+`~/.veldr/cache/` of the core's host.
 
 ## Remote resources
 
@@ -389,7 +394,7 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Started | Ends |
 | --- | --- | --- |
-| Node (`veldr node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace and host (`<run>/node.lock`), in a session of its own. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/hosts/<host>/node.log` (1 MiB, one old file). |
+| Node (`veldr node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace and host (`<run>/node.lock`), in a session of its own. The TypeScript machine side's node is the Bun runtime running its bundle (`bun … machine.js node`), with the same lifetime; either build takes over from the other. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/hosts/<host>/node.log` (1 MiB, one old file). |
 | Agent session | One per core and machine while connected, served by the node. | With its ssh session or socket connection; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`). | A record in the machines file; **Remove machine…** deletes it and ends the session. The machine's terminal core and terminals keep running. |
 | ssh ControlMaster | Per machine, on Linux and macOS cores. | 10 min unused or 1 min without server answers; a core that finds it dead sends `ssh -O stop`. |
@@ -436,7 +441,9 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Written | Removed |
 | --- | --- | --- |
-| Agent builds (`~/.veldr/agent/`) | On connect, by content hash. | Unused for 14 days. |
+| Agent builds (`~/.veldr/agent/`) | On connect, by content hash: the Go executable, or the TypeScript machine side's bundle (`machine.js`) and the launcher that runs it with its runtime, by the hash of both; a bundle is put in place only after the machine computed its SHA-256 and the core saw it match. | Unused for 14 days (a running node touches its build's directory every 24 h). |
+| Bun runtimes (`~/.veldr/runtime/bun-<digest>/bun`, TypeScript machine side, 90–110 MB each) | On connect, once per runtime: uploaded compressed (40–50 MB), checked by its SHA-256 on the machine before it is put in place. | Unused for 14 days (a running node touches its runtime's directory every 24 h); removed by the next upload to the machine. |
+| Bun runtimes for musl (`~/.veldr/cache/bun-*-<version>.gz`, core host) | Downloaded from Bun's releases and checked against the pinned digests when a musl machine needs one the core's build does not carry. | When a runtime of another Bun version is fetched. |
 | herdr-core executable (`<data>/hosts/<host>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
 | herdr-core state (`~/.local/state/herdr-core/veldr[-<instance>]-<host id>/`) | By herdr-core. | Kept until the user removes it. |
 | code-server versions (`~/.veldr/code-server/<version>-<os>-<arch>/`) | Install. | Unused for 14 days. |

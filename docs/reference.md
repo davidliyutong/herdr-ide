@@ -589,6 +589,7 @@ Build scripts and tests:
 | `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
 | `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the core and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
 | `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |
+| `E2E_MACHINE` | `make e2e` | `ts` runs the tests against the core that deploys the TypeScript machine side (`dist/e2e/core-ts`); the specs of the features it does not serve yet skip with the reason. Default `go`. |
 | `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets program-window tests fetch Xvfb. |
 
 ## Files and directories
@@ -605,7 +606,8 @@ else `<data>/run-<host id>`. Retention is summarized in
 
 | Path | Content | Lifetime |
 | --- | --- | --- |
-| `~/.veldr/agent/<build>/` | Uploaded machine build | Unused 14 days. |
+| `~/.veldr/agent/<build>/` | Uploaded machine build: the Go executable, or the TypeScript machine side's `machine.js` and its launcher `veldr` | Unused 14 days. |
+| `~/.veldr/runtime/bun-<digest>/bun` | The Bun runtime the TypeScript machine side runs on (shared by instances and builds), accepted only with its SHA-256 | Unused 14 days. |
 | `~/.veldr/code-server/<version>-<os>-<arch>/` | code-server releases (shared by instances and by hosts of one platform) | Unused 14 days. |
 | `~/.veldr/hosts/<host>/xvfb/<version>/` | Xvfb unpacked in user space (shared by this host's instances) | Unused 14 days, when another is unpacked. |
 | `~/.veldr/video/<sha256 prefix>/encoder` | Video encoder (shared), run only while its digest matches | Unused 14 days, when another is installed; unfinished after 1 h. |

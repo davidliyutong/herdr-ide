@@ -23,8 +23,13 @@ agents headless for the chat panes, its state in SQLite
 (`internal/store`). The core's executable embeds the UI, the machine builds
 and herdr-core for 4 platforms, the video encoder of Linux machines and a
 VS Code extension. The machine side moves to TypeScript too
-([42](docs/features/42-typescript-backend.md)); until then both sides speak
-the same wire protocols from their own code.
+([42](docs/features/42-typescript-backend.md)): `backend/machine`,
+`backend/hosts/machine` and the features' `machine.ts` serve terminals,
+files, git, search, monitor, history and the browser pane, deployed with
+the Bun runtime by a core built with `--machine ts`; the product's builds
+deploy the Go machine build until the TypeScript side serves every
+feature. Both builds speak the same wire protocols, and a node of either
+takes over from the other.
 
 ## Commands
 
@@ -38,7 +43,7 @@ the same wire protocols from their own code.
 | Rebuild the library machines preload to show a program only the GPUs of its `CUDA_VISIBLE_DEVICES` (`scripts/gpupick`; zig 0.17) | `make gpupick` |
 | Integration tests with a real terminal core, the machine build's and the core's terminals (`HC_TEST_BIN=<herdr-core>`; the pinned one: `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`) | `make it` |
 | Old kernels and C libraries: KVM guests from official cloud images and containers of old distributions, a payload run in each (on a Linux host with KVM and Docker; not part of any make target) | `e2e/machines/machines.py run-matrix <script>` ([its README](e2e/machines/README.md)) |
-| End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium, SSH machines in Docker containers (skipped without Docker; `E2E_REQUIRE_DOCKER=1` fails instead), and the desktop app with its core in process (skipped without `desktop`'s packages; `E2E_CODE_SERVER_SEED=<dir with a code-server release>` adds its VS Code window); builds into `dist/e2e` (not part of `make test`) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
+| End-to-end tests: the real core on isolated instances (`e2e-<random>`, temporary home, no network) with a fake coding agent, driven through Chromium, SSH machines in Docker containers (skipped without Docker; `E2E_REQUIRE_DOCKER=1` fails instead), and the desktop app with its core in process (skipped without `desktop`'s packages; `E2E_CODE_SERVER_SEED=<dir with a code-server release>` adds its VS Code window); builds into `dist/e2e` (not part of `make test`); `E2E_MACHINE=ts` runs them against the core that deploys the TypeScript machine side (`SKIP_BUILD=1` reuses the build) | `make e2e` (`E2E_ARGS='tests/chat.spec.ts'` for one file) |
 | Full build into `dist/`: the machine builds (Go), everything the core embeds staged in `dist/payload`, the core of each `TARGETS` platform (`bun backend/scripts/build.ts`) and the release archives | `make build` (or `scripts/build.sh`) |
 | Desktop app of this system (macOS, Windows, Linux): unpacked / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
 | macOS: build the `.app` and install it into `/Applications` | `make desktop-install` |
@@ -194,6 +199,19 @@ playbooks):
 - The binary a machine gets is `cmd/veldr` (`go build ./cmd/veldr`, with
   `-X …/internal/agentproto.Version` for releases); the core finds it by
   platform in its payloads (`backend/kernel/payloads.ts`) or in
-  `--agent-dir`.
+  `--agent-dir`. A core built with `--machine ts` uploads the TypeScript
+  machine side's bundle and the Bun runtime of the machine's platform
+  instead (`backend/kernel/machines/transport/builds.ts`), each checked by
+  its SHA-256 on the machine.
+- Bun's unix socket server removes the path it bound when it closes: the
+  machine side binds every socket under a temporary name and renames it
+  into place (`backend/machine/sockets.ts` `listenUnix`); use it, or a
+  closing server removes a socket another node put there.
+- The machine side calls no variadic C function through `bun:ffi` (on
+  macOS/arm64 their arguments go on the stack): `fs.openSync` passes
+  `open`'s flags (`O_NOFOLLOW_ANY` without `O_NOFOLLOW`, which macOS
+  refuses beside it), and Linux's system calls without a fixed-argument
+  wrapper go through `syscall(2)` with integer arguments only
+  (`backend/machine/sys`).
 - code-server's webviews need a secure context; test VS Code features on
   `http://localhost` or HTTPS, not a LAN IP.

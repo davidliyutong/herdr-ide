@@ -163,30 +163,94 @@ executable.
 ### The machine side
 
 `backend/machine` and the machine side of features run under Bun only, on
-Linux and macOS. System calls
-Node lacks go through `bun:ffi` to libc: peer credentials of unix sockets
-(`SO_PEERCRED`; `LOCAL_PEERCRED`, `LOCAL_PEERPID`), `flock`, `openat2`
-with `RESOLVE_NO_SYMLINKS` (falling back as before on ENOSYS),
-`renameat2`/`renamex_np`, `unlinkat`, `sysctl` for processes on macOS.
-Variadic C functions are not called through FFI (on macOS/arm64 their
-arguments go on the stack): files are opened with `fs.openSync`, which
-passes flags such as `O_NOFOLLOW_ANY` through, and a database is known to
-be unheld when a connection in `locking_mode = EXCLUSIVE` gets its lock
-without waiting, instead of a byte-range lock (`BEGIN EXCLUSIVE` alone
-takes only the write-ahead log's lock and misses an idle reader). SQLite's
-calls are synchronous in both runtimes: a database's busy timeout blocks
-the thread that waits, so the core keeps them short. A new session for a child is `detached: true`; a group
-is killed with `process.kill(-pgid)`.
+Linux and macOS:
+
+- `backend/machine`: the node (`node.ts`: one per instance per host,
+  `run/node.lock` taken with `flock`, `node.sock`, the hello of `serve`,
+  `stop` and `takeover`, the idle end, the drain once taken over, its
+  retirement once its bundle is gone), its clients (`dial.ts`: `node dial`,
+  `node stop`), the agent its sessions share (`agent.ts`: a yamux server
+  per session, the core's ops `hello`, `fs.*`, `fs.archive`, `dial-unix`,
+  `hc`, `hc-api`, `privacy` and `plugin`), the dispatch of `plugin` to the
+  features' machine sides (`dispatch.ts`, `feature.ts`), the terminal core
+  (`hc.ts`), hidden terminals (`hidden.ts`), housekeeping, the vault's
+  socket and system calls (`sys/`).
+- A feature's machine side is its `machine.ts` (and `machine/`), made with
+  `defineMachine(protocol, start)`: `start` runs once per agent and
+  returns the handlers of the protocol's actions, which keep what the
+  feature shares between requests; params are checked by the protocol's
+  schemas, a `Fail` thrown is the refusal's code (the error reads
+  `code: message`, as the Go agent wrote it), an action that does not
+  stream ends when the core closes its stream.
+- `backend/hosts/machine`: the command line (`main.ts`: `node`,
+  `node dial`, `node stop [--terminal-core]` and `version`, with the Go
+  build's flags), the features it serves (`features.ts`) and the bundle
+  (`bundle.ts`), which may not include the core, its hosts, a feature's
+  core side or tests (its test fails otherwise).
+
+It serves the machine sides of the terminals (the terminal core and hidden
+terminals), files, git, search, monitor, history and browser features.
+The ops and plugins of the features it does not serve yet (agents and
+detection, usage, chat, gui, vscode: `code-server`, `gui`, `detect`) are
+refused as an unknown plugin is (`unknown_plugin`); the core treats them
+as a machine without that feature.
+
+System calls Node lacks go through `bun:ffi` to libc (`machine/sys`): peer
+credentials of unix sockets (`SO_PEERCRED`; `LOCAL_PEERCRED`,
+`LOCAL_PEERPID`), `flock`, `openat2` with `RESOLVE_NO_SYMLINKS` (falling
+back on ENOSYS, below 5.6, and on EPERM, a seccomp filter, to the last
+name's `O_NOFOLLOW`), `openat` relative to a directory, `renameat2` and
+`renamex_np` without replacing, `unlinkat`, `sysctl` `kern.proc.pid` on
+macOS. Variadic C functions are not called through FFI (on macOS/arm64
+their arguments go on the stack): files are opened with `fs.openSync`,
+which passes flags such as `O_NOFOLLOW_ANY` through (without `O_NOFOLLOW`,
+which macOS refuses beside it), and the system calls Linux's C libraries
+wrap in no function of fixed arguments (`openat2` in none, `renameat2` not
+in glibc 2.17, `openat` relative to a descriptor) go through `syscall(2)`
+with integer arguments only, which both of Linux's ABIs pass in the
+registers of a fixed argument list. A database is known to be unheld when a
+connection in `locking_mode = EXCLUSIVE` gets its lock without waiting,
+instead of a byte-range lock (`BEGIN EXCLUSIVE` alone takes only the
+write-ahead log's lock and misses an idle reader). SQLite's calls are
+synchronous in both runtimes: a database's busy timeout blocks the thread
+that waits, so the core keeps them short. A new session for a child is
+`detached: true`; a group is killed with `process.kill(-pgid)`. Bun's unix
+socket server removes the path it bound when it closes, so the agent binds
+each socket under a temporary name and renames it into place: a server
+that closes never removes the socket another node or agent put at the path
+since.
 
 A machine gets two files: the Bun runtime, kept by its digest under the
-data directory and uploaded once, and the bundle of the machine side, a
-few megabytes per build; a launcher script runs one with the other, so
-command lines (`node dial`, `chat-host`, `mcp`) stay as they are. The core
+home's data directory (`~/.<slug>/runtime/bun-<digest>/bun`) and uploaded
+once, and the bundle of the machine side, a few hundred kilobytes per
+build (`~/.<slug>/agent/<version>/machine.js`, the version of the bundle
+and the runtime); a launcher script beside it (`<slug>`) runs one with the
+other without reading a `.env` file or `bunfig.toml` of the working
+directory and without installing anything (`--no-env-file --no-install
+--config=/dev/null`, `BUN_OPTIONS` and `BUN_INSPECT*` unset), so command
+lines (`node dial`, `node stop`) stay as they are. An ssh upload
+decompresses each file beside its place, the machine computes its SHA-256
+(`sha256sum`, `shasum` or `openssl`) and the core checks it before the file
+is renamed into place; the local install checks them in process. The core
 embeds the runtimes of linux x64 (baseline), linux arm64, darwin x64 and
-darwin arm64; the musl runtimes are fetched when a machine needs one and
-checked against pinned digests (they need `libstdc++` and `libgcc`, which
-the probe reports when missing). Runtimes unused for 14 days are removed,
-as builds are.
+darwin arm64; the musl runtimes are fetched by the core when a machine
+needs one and the build carries none, checked against pinned digests and
+cached on the core's host (they need `libstdc++` and `libgcc`, which the
+probe reports when missing). Runtimes unused for 14 days are removed, as
+builds are: the nodes touch the directories of theirs.
+
+Which machine build a core deploys is a choice of its build
+(`backend/scripts/build.ts --machine go|ts`, `scripts/runtimes.ts` fetching
+the runtimes), not a flag of the product: the product's builds deploy the
+Go machine build until the TypeScript side serves every feature. Both
+speak the same protocols on the same sockets, locks and files (the
+terminal history's database, the terminal core's executable and session),
+so a node of either build takes over from the other with the terminals
+kept, which is the upgrade path. `scripts/e2e.sh` builds the cores of both;
+`E2E_MACHINE=ts` runs the end-to-end tests against the one that deploys
+the TypeScript side, the specs of the features it does not serve yet
+skipped with the reason, and `tests/nodes.spec.ts` has a newer node of the
+other build take a node over.
 
 ### Wire compatibility while both exist
 
@@ -280,11 +344,16 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 - A machine Bun cannot run on: an x86-64 processor without SSE4.2 (Bun
   stops with "this CPU is missing SSE4.2 support"; a VM given QEMU's
   default model qemu64 is one), or musl without `libstdc++` and `libgcc`.
-  The probe reports it and the machine is refused with a code, as an
-  unknown platform is today. Kernels and C libraries as old as CentOS 7's
-  (3.10, glibc 2.17) run it (Testing).
+  The probe reports it and a core that deploys the TypeScript side refuses
+  the machine with a code (`cpu_unsupported`, `libs_missing`) in its
+  error, as an unknown platform is refused. Kernels and C libraries as old
+  as CentOS 7's (3.10, glibc 2.17) run it (Testing).
 - A Bun runtime missing on the core's host for a platform (a musl machine
-  without network on the core's host): the machine is refused with a code.
+  without network on the core's host, and a build that carries none for
+  it): the machine is refused with the download's error.
+- A kernel without `openat2` (below 5.6) or a container filtering it: a
+  link swapped into a directory of a path the agent resolved is followed,
+  only the last name is refused (`O_NOFOLLOW`), as with the Go build.
 - The SDK's undeclared `cancelAsyncMessage` disappears: its test fails at
   the upgrade.
 
@@ -344,3 +413,26 @@ SECURITY.md has both.
   `libstdc++`), and macOS. `openat2` returns ENOSYS below 5.6, where the
   agent falls back; `renameat2` works on CentOS 7's 3.10, which has it
   backported (upstream it needs 3.15).
+- The TypeScript machine side on the same machines
+  (`payloads/machine-node`: its node reached with `node dial` as ssh
+  reaches it, a terminal of the terminal core it installs and starts, a
+  file written and read back, links refused by the system calls and the
+  files feature, peer credentials, `node stop --terminal-core`): all passed
+  on CentOS 7 (3.10, glibc 2.17; also without AVX, `openat2` absent and
+  the fallback taken), Ubuntu 18.04 (4.15), 20.04 (5.4) and 24.04 (6.8),
+  Debian 10 (4.19), the containers of glibc 2.17 to 2.28 and Alpine with
+  `libstdc++` (musl), and the host (7.0); Alpine without `libstdc++` is
+  refused as the probe refuses it. On Ubuntu 16.04's VM (4.4, systemd 229)
+  herdr-core 0.1.21 does not start its core: `server start` runs
+  `systemd-run --collect`, which systemd before 236 does not know; the Go
+  machine build fails there alike, everything else passed.
+- `backend/machine/**/*.test.ts` and the features' `machine*.test.ts` run
+  the machine side through the wire with the kernel's own `call` and
+  `open`, so its results are checked by the core's schemas;
+  `backend/kernel/machines/transport/deploy.test.ts` deploys it as an ssh
+  upload does, through an ssh that runs the remote commands locally.
+- `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
+  runs the suite against the one deploying the TypeScript side (19 passed,
+  the specs of chats, attention, program windows and AI usage skipped with
+  the reason), and `tests/nodes.spec.ts` has the newer node of the other
+  build take a node over in both runs.

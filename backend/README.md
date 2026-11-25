@@ -4,22 +4,26 @@ The core and the machine agent in TypeScript. Bun runs it on machines and
 as the command line, built into one executable; the desktop app runs the
 core inside Electron, whose runtime is Node. It replaces the Go program in
 stages ([42](../docs/features/42-typescript-backend.md)): the core is this
-one, and machines run the Go machine build (`cmd/veldr`, `internal/`)
-until the machine side here replaces it; both speak the same wire
-protocols. It is not a translation of the Go packages: their layout is not
+one; machines run the Go machine build (`cmd/veldr`, `internal/`) by
+default, or the machine side here (`machine/`, `hosts/machine`, the
+features' `machine.ts`) in a core built to deploy it
+(`scripts/build.ts --machine ts`), which serves the features whose machine
+side is here (terminals, files, git, search, monitor, history, browser).
+Both speak the same wire protocols, and a node of either takes over from
+the other. It is not a translation of the Go packages: their layout is not
 kept.
 
 ## Layers
 
 Each layer imports only from the layers above it in this list.
 
-| Directory   | Runs in      | What                                                                                                                                                                         |
-| ----------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds (`agents/`)                       |
-| `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                           |
-| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core                                 |
-| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                               |
-| `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process, served over MessagePorts |
+| Directory   | Runs in      | What                                                                                                                                                                                                                                                              |
+| ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared/`   | Bun and Node | wire protocols (`proto/`), libraries (`lib/`), SQLite state (`store/`), the host's directories and ids (`host/`), the coding agents' kinds (`agents/`)                                                                                                            |
+| `kernel/`   | Bun and Node | the core's machinery, no feature: HTTP routing and guards, channels, machines and their connections, settings, events, audit, the feature contract                                                                                                                |
+| `machine/`  | Bun          | the machine's machinery: the node and its sessions, the dispatch of the agent protocol to features, system calls (`sys/`), the terminal core                                                                                                                      |
+| `features/` | per side     | everything the product does, one directory per feature (below)                                                                                                                                                                                                    |
+| `hosts/`    | Bun / Node   | composition roots: `common/` what both compose; `bun/` the command line and `Bun.serve`; `electron/` the core in the desktop app's utility process, served over MessagePorts; `machine/` the machine build (its command line, the features it serves, its bundle) |
 
 `tsconfig.node.json` typechecks what runs in Node with Node's types only,
 so a Bun API there does not compile; `tsconfig.bun.json` typechecks the
@@ -41,7 +45,17 @@ chats, agent detection, the browser pane. Its directory holds
   settings, the streams agents open towards the core; it gets a
   `FeatureContext` with what it may use (machines, settings, broadcast to
   the pages, audit, logger, read-only), never the whole core.
-- `machine.ts` — the handlers of its protocol's actions on the machine.
+- `machine.ts` — the handlers of its protocol's actions on the machine:
+  `defineMachine(protocol, start)` (`#machine/feature.ts`), where `start`
+  runs once per agent and returns the handlers, which keep what the
+  feature shares between requests (a limit on searches at once);
+  params come checked by the protocol's schemas, a `Fail` thrown is the
+  refusal's code, an action that does not stream ends with the core's
+  interest (`ctx.signal`); its own modules in `machine/`. Exported as a
+  factory (`gitMachine(opts)`) whose options are timeouts and limits with
+  defaults that tests override. `hosts/machine/features.ts` lists the ones
+  the machine build serves; tests run them through the wire with the
+  kernel's own `call` and `open` (`#machine/testing.ts` `rig`, `machineOf`).
 - its own modules, tests and `testdata/`.
 
 The web UI's side stays in `web/src/plugins/<id>`. Whether a feature can be
@@ -97,7 +111,13 @@ hook. The host composes them; features do not import each other.
 - Code under `shared/`, `kernel/` and the `core.ts` of features uses
   Node's modules only (`node:fs`, `node:net`, `node:child_process`,
   `node:sqlite`, `node:crypto`); `Bun.*` and `bun:*` only in `machine/`,
-  `hosts/bun/`, `machine.ts` files and tests.
+  `hosts/bun/`, `hosts/machine/`, the features' `machine.ts` and
+  `machine/`, and tests (`scripts/check.sh` fails otherwise).
+- The machine bundle carries the machine side only: no `kernel/`, no
+  core host, no feature's `core.ts` (`hosts/machine/bundle.test.ts`).
+- System calls Node lacks go through `machine/sys` (`bun:ffi`), never a
+  variadic C function (on macOS/arm64 their arguments go on the stack);
+  on Linux, `syscall(2)` with integer arguments only.
 - JSON on the wire keeps its member names. A Go field with `omitempty` is
   an optional field, left out when empty; times are written with
   `formatRFC3339` (`#shared/lib/gotime.ts`); bytes are base64.
@@ -117,9 +137,13 @@ hook. The host composes them; features do not import each other.
 
 `bun scripts/build.ts --out FILE --web ../web/dist --agents DIR --hc DIR
 --ext DIR --encoder DIR [--target bun-linux-x64-baseline] [--version V]`
-builds the core's executable; `scripts/build.sh` (`make build`) runs it for
+builds the core's executable; with `--machine ts --runtimes DIR` it embeds
+the machine side here (its bundle, built for the version) and the Bun
+runtimes of `DIR` (`bun scripts/runtimes.ts --out DIR [os/arch…]` fetches
+the pinned ones) instead of the Go machine builds; `scripts/build.sh` (`make build`) runs it for
 each platform with everything it embeds staged in `dist/payload`, and
-`scripts/e2e.sh` (`make e2e`) runs the end-to-end tests against it (with
-the Go machine builds while machines run them). `make dev-core` runs the
+`scripts/e2e.sh` (`make e2e`) runs the end-to-end tests against it (the
+core deploying the Go machine builds; `E2E_MACHINE=ts`, the one deploying
+the machine side here). `make dev-core` runs the
 core from its sources (`bun hosts/bun/main.ts`), which reads the payloads
 from `dist/payload`.
