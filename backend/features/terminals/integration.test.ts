@@ -1,7 +1,7 @@
 // From a client of /api/v1/term to programs in a real herdr-core
-// (HC_TEST_BIN), through the local machine's node of the Go machine build
-// (AGENT_TEST_BIN, else built here with go): the core installs the
-// executable on the machine, starts the terminal core and the client runs
+// (HC_TEST_BIN), through the local machine's node of the machine build
+// (AGENT_TEST_BIN, else built here with backend/scripts/build.ts): the core
+// installs the executable on the machine, starts the terminal core and the client runs
 // shells in it. Everything runs in a temporary home under the instance
 // ts-term, whose node and terminal core are stopped at the end; skipped
 // without HC_TEST_BIN.
@@ -14,8 +14,8 @@ import { gzipSync } from 'node:zlib';
 import { CHAT_HOST_NAME, HIDDEN_CHAT_HOST, HIDDEN_LABEL, Op } from '#shared/proto/agentproto/index.ts';
 import { discard } from '#shared/lib/log.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
-import { CORE_BIN } from '#shared/lib/brand.ts';
 import { dialNode, localPlatform } from '#kernel/machines/transport/local.ts';
+import { bareName, machineKey, type MachineBuild } from '#kernel/machines/transport/builds.ts';
 import { localSpec, running, testCore, testMachines, waitFor, type TestCore } from '#kernel/testing.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
 import { terminalsFeature, type TerminalsFeature } from './core.ts';
@@ -45,10 +45,10 @@ describe.skipIf(!HC)('a real herdr-core', () => {
     const base = existsSync(`/tmp/claude-${process.getuid?.()}`) ? `/tmp/claude-${process.getuid?.()}` : '/tmp';
     home = mkdtempSync(join(base, 'tt-'));
     const { os, arch } = localPlatform();
-    agentBin = process.env.AGENT_TEST_BIN ?? join(home, `${CORE_BIN}-${os}-${arch}`);
+    const key = machineKey({ os, arch });
+    agentBin = process.env.AGENT_TEST_BIN ?? join(home, bareName(key));
     if (!process.env.AGENT_TEST_BIN)
-      execFileSync('go', ['build', '-trimpath', '-o', agentBin, `./cmd/${CORE_BIN}`], {
-        cwd: REPO_ROOT,
+      execFileSync(process.execPath, [join(REPO_ROOT, 'backend', 'scripts', 'build.ts'), '--out', agentBin, '--version', 'test-term'], {
         stdio: 'inherit',
       });
     // The node and the terminal core it starts live in the temporary home.
@@ -67,8 +67,15 @@ describe.skipIf(!HC)('a real herdr-core', () => {
     }
     const exe = readFileSync(HC);
     const hc = { gz: gzipSync(exe), digest: createHash('sha256').update(exe).digest('hex') };
+    // The executable as the core's own: uploaded, checked by its digest.
     const bin = readFileSync(agentBin);
-    const builds = async () => ({ kind: 'go' as const, bin, version: createHash('sha256').update(bin).digest('hex').slice(0, 16) });
+    const digest = createHash('sha256').update(bin).digest('hex');
+    const builds = async (): Promise<MachineBuild> => ({
+      kind: 'ts',
+      key,
+      digests: async () => ({ exe: digest, source: 'test' }),
+      load: async () => ({ kind: 'gz', bytes: gzipSync(bin) }),
+    });
     machines = testMachines([localSpec()], {
       dial: async (_spec, signal) => ({
         session: await dialNode({ instance: INSTANCE, builds, logger: discard, signal }),

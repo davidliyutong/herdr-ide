@@ -6,7 +6,7 @@
 // a TypeScript build's executable from the core's own copy, checked by its
 // digest.
 import { spawn } from 'node:child_process';
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { NodeOp, VERSION, newer, readLine, writeLine, type NodeHello, type NodeInfo, type Reply } from '#shared/proto/agentproto/index.ts';
@@ -37,32 +37,11 @@ export function localPlatform(): { os: string; arch: string } {
 
 const nodeSocket = (run: string) => join(run, 'node.sock');
 
-/** Writes b into path (mode 0700) through a temporary file. */
-function place(path: string, b: Uint8Array): void {
-  const tmp = `${path}.upload.${process.pid}`;
-  try {
-    writeFileSync(tmp, b, { mode: 0o700 });
-    chmodSync(tmp, 0o700);
-    renameSync(tmp, path);
-  } finally {
-    rmSync(tmp, { force: true });
-  }
-}
-
 /** Installs a build where an upload would put it, unless it is there; the
  * file to run and the node build it is. A TypeScript build is installed by
  * the script an ssh upload runs (checked by its digest), from what the core
  * has (its own executable, for its own platform). */
 export async function installBuild(b: MachineBuild, home: string, signal?: AbortSignal): Promise<{ exe: string; build: string }> {
-  if (b.kind === 'go') {
-    const dir = join(home, AGENT_DIR, b.version);
-    const exe = join(dir, CORE_BIN);
-    if (!existsSync(exe)) {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-      place(exe, b.bin);
-    }
-    return { exe, build: nodeBuild(b) };
-  }
   const d = await b.digests(signal ? { signal } : {});
   const dir = join(home, AGENT_DIR, tsVersion(d.exe));
   const exe = join(dir, CORE_BIN);

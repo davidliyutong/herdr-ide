@@ -18,7 +18,7 @@ import {
   TestSink,
   edited,
   fixture,
-  goGolden,
+  goldenLines,
   goldens,
   invalid,
   policyProblems,
@@ -59,9 +59,9 @@ async function prompt(s: CodexSession, msg: string, body: string | unknown[]): P
 }
 
 /** Compares the events and the chat with the golden file. */
-function golden(name: string, k: TestSink): void {
+function compareGolden(name: string, k: TestSink): void {
   const got = records(k);
-  const want = goGolden(name);
+  const want = goldenLines(name);
   expect(want.length).toBeGreaterThan(2);
   expect(got.length).toBe(want.length);
   for (let i = 0; i < Math.max(got.length, want.length); i++) {
@@ -71,7 +71,7 @@ function golden(name: string, k: TestSink): void {
 
 const compared = new Set<string>();
 function checked(name: string, k: TestSink, f: FakeRun): void {
-  golden(name, k);
+  compareGolden(name, k);
   compared.add(name);
   expect(policyProblems(f)).toEqual([]);
 }

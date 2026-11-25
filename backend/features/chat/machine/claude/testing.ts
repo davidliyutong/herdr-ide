@@ -507,7 +507,7 @@ export async function replay(
   return { r, s };
 }
 
-/** What the host got, as the Go golden files have it: the events without
+/** What the host got, as the golden files have it: the events without
  * their times, the permissions and questions in Go's member names, the
  * chat with its first three commands. */
 export function goldenOf(r: FakeRun): { events: unknown[]; permissions: unknown[]; questions: unknown[]; chat: unknown } {
@@ -527,7 +527,7 @@ export function goldenOf(r: FakeRun): { events: unknown[]; permissions: unknown[
 }
 
 /** The golden file of a recording, the parts compared. */
-export function goGolden(name: string): { events: unknown[]; permissions: unknown[]; questions: unknown[]; chat: unknown; err?: string } {
+export function golden(name: string): { events: unknown[]; permissions: unknown[]; questions: unknown[]; chat: unknown; err?: string } {
   const g = JSON.parse(readFileSync(join(GOLDEN, name.replace(/\.jsonl$/, '') + '.golden.json'), 'utf8')) as Msg;
   return {
     events: (g.events as unknown[] | null) ?? [],

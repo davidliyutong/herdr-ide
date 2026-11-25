@@ -67,7 +67,6 @@ export function coreFeatures(o: FeatureInputs): FeatureDef[] {
   // terminal cores; they type into the terminals' shells.
   const gui = guiFeature({ encoder: (os, arch) => payloads.encoder(os, arch), shells: (m) => terminals.shells(m) });
   const terminals = terminalsFeature({
-    hc: (os, arch) => payloads.hc(os, arch),
     embeddedHC: (os, arch) => payloads.embeddedHC(os, arch),
     paneEnv: gui.paneEnv,
     onReady: gui.terminalReady,

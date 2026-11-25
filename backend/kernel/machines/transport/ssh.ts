@@ -509,30 +509,6 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
   return `${dir}/${CORE_BIN}`;
 }
 
-/** Uploads a Go build when the machine lacks it. */
-async function installGo(
-  o: SSHOptions,
-  b: Extract<MachineBuild, { kind: 'go' }>,
-  platform: Platform,
-  signal?: AbortSignal,
-): Promise<string> {
-  const dir = `$HOME/${AGENT_DIR}/${b.version}`;
-  const remotePath = `${dir}/${CORE_BIN}`;
-  const out = await run(o, `if [ -x "${remotePath}" ]; then echo present; else echo absent; fi`, { timeoutMs: 30_000, signal });
-  if (out.trim() !== 'present') {
-    o.logger(`ssh ${o.target}: uploading agent ${b.version} (${platform.os}/${platform.arch}, ${b.bin.length} bytes)`);
-    const script =
-      `umask 077; ${cleanup(`"${dir}/.upload.$$"`)}; mkdir -p "${dir}" && cat > "${dir}/.upload.$$" && chmod 700 "${dir}/.upload.$$" && mv -f "${dir}/.upload.$$" "${remotePath}"` +
-      `; ${PRUNE}`;
-    try {
-      await run(o, script, { stdin: b.bin, timeoutMs: 5 * 60_000, signal });
-    } catch (e) {
-      throw new Error(`upload agent: ${(e as Error).message}`);
-    }
-  }
-  return remotePath;
-}
-
 /** Probes the remote platform, uploads the matching machine build if
  * missing and reaches the machine's node of that build over ssh stdio. */
 export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ session: Session; platform: Platform }> {
@@ -551,7 +527,7 @@ export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ se
   let build: MachineBuild;
   try {
     build = await o.builds(target, signal);
-    if (build.kind === 'ts') checkRuntimeRuns(probe);
+    checkRuntimeRuns(probe);
   } catch (e) {
     // The failure's code stays with it (State.failure).
     const code = deployCode(e);
@@ -560,7 +536,7 @@ export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ se
       ...(code ? { code } : {}),
     });
   }
-  const remotePath = build.kind === 'go' ? await installGo(o, build, platform, signal) : await installTS(o, build, platform, signal);
+  const remotePath = await installTS(o, build, platform, signal);
 
   const p = execa(
     'ssh',

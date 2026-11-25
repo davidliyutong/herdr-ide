@@ -236,7 +236,7 @@ export function records(k: TestSink): string[] {
 }
 
 /** The golden lines of a recording, as records makes them. */
-export function goGolden(name: string): string[] {
+export function goldenLines(name: string): string[] {
   return readFileSync(join(GOLDEN, name + '.golden'), 'utf8')
     .split('\n')
     .filter((l) => l !== '')

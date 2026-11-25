@@ -98,16 +98,7 @@ beforeAll(async () => {
   if (!supported) return;
   exePath = join(work, bareName(key));
   const p = Bun.spawnSync(
-    [
-      process.execPath,
-      join(import.meta.dir, '..', '..', '..', 'scripts', 'build.ts'),
-      '--out',
-      exePath,
-      '--machine',
-      'ts',
-      '--version',
-      'test-deploy',
-    ],
+    [process.execPath, join(import.meta.dir, '..', '..', '..', 'scripts', 'build.ts'), '--out', exePath, '--version', 'test-deploy'],
     { stdout: 'pipe', stderr: 'pipe' },
   );
   if (p.exitCode !== 0) throw new Error(`build: ${p.stderr.toString()}`);

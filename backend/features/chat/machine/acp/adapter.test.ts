@@ -18,7 +18,7 @@ import {
   edit,
   fakeParams,
   from,
-  goGolden,
+  golden,
   logs,
   msgLine,
   promptOf,
@@ -81,7 +81,7 @@ class Harness {
 
   golden(name: string): void {
     const got = this.host.lines();
-    const want = goGolden(name);
+    const want = golden(name);
     for (let i = 0; i < Math.max(got.length, want.length); i++) {
       if (JSON.stringify(got[i]) !== JSON.stringify(want[i])) expect({ line: i + 1, got: got[i] }).toEqual({ line: i + 1, got: want[i] });
     }

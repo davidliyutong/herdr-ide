@@ -1,10 +1,11 @@
 // Program windows on a real display through the TypeScript machine side
-// and the GUI helper (the Go agent's TestGUIWindows): the display started,
+// and the GUI helper: the display started,
 // a program's window announced with its terminal and its pid, streamed,
 // clicked, typed into and closed, the keeper started and holding the
 // display; on the GPU display too where the machine has Xwayland and a
-// render node it may open. Linux with Xvfb; the X program is e2e/xclient
-// (GUI_TEST_XCLIENT, else built with go):
+// render node it may open. Linux with Xvfb; the X program is
+// e2e/fakes/xclient.ts (GUI_TEST_XCLIENT, else compiled now with bun build
+// --compile):
 //
 //	bun test features/gui/integration.test.ts        (make it)
 //	scripts/gui-it.sh                                (in Docker, from any host)
@@ -34,16 +35,16 @@ import { lookPath } from './machine/gpu.ts';
 const arch = process.arch === 'x64' ? 'amd64' : process.arch;
 const helperBin = posix.join(import.meta.dir, '..', '..', '..', 'scripts', 'gui-helper', 'bin', `gui-helper-linux-${arch}`);
 
-/** The X program: GUI_TEST_XCLIENT, else e2e/xclient built now. */
+/** The X program: GUI_TEST_XCLIENT, else e2e/fakes/xclient.ts compiled now. */
 function xclient(): string {
   if (process.env.GUI_TEST_XCLIENT) return process.env.GUI_TEST_XCLIENT;
   const dir = mkdtempSync('/tmp/gx-');
   temps.push(dir);
   const out = posix.join(dir, 'e2e-xclient');
-  const r = spawnSync('go', ['build', '-o', out, './e2e/xclient'], {
-    cwd: posix.join(import.meta.dir, '..', '..', '..'),
-    encoding: 'utf8',
-  });
+  const src = posix.join(import.meta.dir, '..', '..', '..', 'e2e', 'fakes', 'xclient.ts');
+  // In the temporary directory: Bun leaves a .<hash>.bun-build copy of the
+  // executable in its working directory.
+  const r = spawnSync(process.execPath, ['build', '--compile', src, '--outfile', out], { cwd: dir, encoding: 'utf8' });
   return r.status === 0 ? out : '';
 }
 

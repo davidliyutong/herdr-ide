@@ -1,16 +1,14 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, connect, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { INITIAL_WINDOW, Session, Stream, pairDuplex } from './yamux.ts';
-import { REPO_ROOT } from '#shared/lib/repo.ts';
+import { INITIAL_WINDOW, Session, Stream } from './yamux.ts';
 import { Reader } from '#shared/lib/streamio.ts';
-import { slow, slowDescribe } from '#shared/testdata/slow.ts';
+import { slow } from '#shared/testdata/slow.ts';
 
-// xorshift32, the pattern of testdata/yamuxpeer.
+// xorshift32: a pattern both ends compute.
 function* pattern(n: number, seed: number, size = 64 * 1024): Generator<Buffer> {
   let s = (Math.imul(seed >>> 0, 2654435761) | 1) >>> 0;
   for (let left = n; left > 0;) {
@@ -71,7 +69,7 @@ function readLine(s: Stream): Promise<[string, Buffer]> {
   });
 }
 
-/** Answers yamuxpeer's commands on the TypeScript side. */
+/** Answers the client's commands (echo, sink, source). */
 async function serve(s: Stream) {
   const [line, rest] = await readLine(s);
   const f = line.trim().split(/\s+/);
@@ -100,7 +98,7 @@ function serveAll(sess: Session) {
   })();
 }
 
-/** The client's checks, against either implementation's server. */
+/** The client's checks, against a server. */
 async function exercise(sess: Session, size: number) {
   const echoes = await Promise.all(
     Array.from({ length: 32 }, async (_, i) => {
@@ -244,43 +242,4 @@ describe('TypeScript to TypeScript', () => {
     const closed = await new Promise<Error | undefined>((r) => sess.onClose(r));
     expect(closed?.message).toBe('keepalive timeout');
   });
-});
-
-// hashicorp/yamux with the configuration of the core and the agent, while
-// the Go program exists.
-const go = spawnSync('go', ['version']).status === 0;
-// It builds the Go peer.
-slowDescribe.skipIf(!go)('with hashicorp/yamux', () => {
-  const peer = join(dir, 'yamuxpeer');
-  const built = () => {
-    const r = spawnSync('go', ['build', '-o', peer, './backend/shared/proto/testdata/yamuxpeer'], {
-      cwd: REPO_ROOT,
-      encoding: 'utf8',
-    });
-    if (r.status !== 0) throw new Error(r.stderr);
-  };
-
-  test('TypeScript client, Go server', async () => {
-    built();
-    const p = spawn(peer, ['server'], { stdio: ['pipe', 'pipe', 'ignore'] });
-    const sess = new Session(pairDuplex(p.stdout!, p.stdin!), true);
-    await exercise(sess, 4 << 20);
-    sess.close();
-    p.kill();
-  }, 60_000);
-
-  test('Go client, TypeScript server', async () => {
-    built();
-    const p = spawn(peer, ['client', String(4 << 20)], { stdio: ['pipe', 'pipe', 'pipe'] });
-    let log = '';
-    p.stderr!.on('data', (c) => (log += c));
-    const sess = new Session(pairDuplex(p.stdout!, p.stdin!), false);
-    serveAll(sess);
-    const code = await new Promise((r) => p.on('exit', r));
-    const lines = log.split('\n').filter((l) => /^(PASS|FAIL) /.test(l));
-    expect(lines.filter((l) => l.startsWith('FAIL'))).toEqual([]);
-    expect(lines.length).toBe(4);
-    expect(code).toBe(0);
-    sess.close();
-  }, 60_000);
 });

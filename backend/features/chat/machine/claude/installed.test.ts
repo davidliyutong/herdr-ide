@@ -12,7 +12,7 @@ import { create } from 'tar';
 import { CLAUDE_SDK, type NpmTarball } from '../../claudesdk.ts';
 import { SdkStore } from '../sdkstore.ts';
 import { installedSdk } from './load.ts';
-import { goGolden, goldenOf, isolateHome, replay, tempDir } from './testing.ts';
+import { golden, goldenOf, isolateHome, replay, tempDir } from './testing.ts';
 
 isolateHome();
 
@@ -58,7 +58,7 @@ test('the SDK installed in a data directory runs a recording as the development 
   try {
     expect(r.mismatches()).toEqual([]);
     const got = goldenOf(r);
-    const want = goGolden(name);
+    const want = golden(name);
     expect(got.events).toEqual(want.events);
     expect(got.permissions).toEqual(want.permissions);
   } finally {

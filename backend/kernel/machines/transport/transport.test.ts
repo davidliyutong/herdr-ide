@@ -152,7 +152,9 @@ describe('ssh', () => {
         target: 'user@gpu',
         controlDir: '/tmp/ctl',
         logger: discard,
-        builds: async () => ({ kind: 'go' as const, bin: Buffer.alloc(0), version: '' }),
+        builds: async () => {
+          throw new Error('no build in this test');
+        },
         instance: '',
       });
     } finally {

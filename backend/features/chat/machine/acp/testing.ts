@@ -218,7 +218,7 @@ function normalize(r: Msg): Msg {
 }
 
 /** The golden lines of a scenario, normalized as Host.lines. */
-export function goGolden(name: string): Msg[] {
+export function golden(name: string): Msg[] {
   return readFileSync(join(GOLDEN, name + '.jsonl'), 'utf8')
     .split('\n')
     .filter((l) => l !== '')

@@ -1,16 +1,15 @@
-// The machine builds the core deploys: the Go program, or, in a core built
-// to deploy it (backend/scripts/build.ts --machine ts), the TypeScript
-// machine side, which is the core's own program: one executable per
-// platform holds the core, the machine side and that platform's herdr-core.
+// The machine builds the core deploys: the TypeScript machine side, which
+// is the core's own program: one executable per platform holds the core,
+// the machine side and that platform's herdr-core.
 // A release publishes each platform's as an archive
 // (<bin>-<platform>.tar.gz, the executable at <bin>-<platform>/<bin>) and
-// their SHA-256 in SHA256SUMS (release.ts). A machine keeps either build
+// their SHA-256 in SHA256SUMS (release.ts). A machine keeps its build
 // under its home, shared by instances:
 //
 //   ~/<AGENT_DIR>/<version>/<bin>      the executable, version a digest of it
 //
-// so the command lines (`node dial`, `node stop`) are the same for both.
-import { createHash } from 'node:crypto';
+// where the Go program of earlier releases kept its own: a node of this
+// build takes over from one of those (docs/features/42-typescript-backend.md).
 import { CORE_BIN } from '#shared/lib/brand.ts';
 import type { OpenStream } from './tunnel.ts';
 
@@ -20,13 +19,6 @@ export interface MachineTarget {
   arch: string;
   /** Linux's C library. */
   libc?: 'glibc' | 'musl';
-}
-
-export interface GoBuild {
-  kind: 'go';
-  bin: Buffer;
-  /** Content-derived, so that a rebuilt one is uploaded again. */
-  version: string;
 }
 
 /** The digests of a TypeScript build for a platform. */
@@ -66,7 +58,7 @@ export interface TSBuild {
   load(d: TSDigests, signal?: AbortSignal): Promise<TSPayload>;
 }
 
-export type MachineBuild = GoBuild | TSBuild;
+export type MachineBuild = TSBuild;
 
 /** The machine build for a machine. */
 export type BuildSource = (t: MachineTarget, signal?: AbortSignal) => Promise<MachineBuild>;
@@ -104,5 +96,4 @@ export const tsVersion = (exe: string): string => exe.slice(0, 16);
 
 /** The build a node of b tells its clients (NodeInfo.build): the start of
  * the digest of its executable, as the node computes it from the file. */
-export const nodeBuild = (b: GoBuild | { exe: string }): string =>
-  'exe' in b ? b.exe.slice(0, 12) : createHash('sha256').update(b.bin).digest('hex').slice(0, 12);
+export const nodeBuild = (d: { exe: string }): string => d.exe.slice(0, 12);

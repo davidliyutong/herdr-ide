@@ -7,7 +7,7 @@ import { readdirSync } from 'node:fs';
 import { SLUG } from '#shared/lib/brand.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { SDK_VERSION } from './sdk.ts';
-import { TEST_SESSION, VECTORS, goGolden, goldenOf, isolateHome, replay } from './testing.ts';
+import { TEST_SESSION, VECTORS, golden, goldenOf, isolateHome, replay } from './testing.ts';
 
 isolateHome();
 
@@ -37,7 +37,7 @@ describe('replays', () => {
         try {
           expect(r.mismatches()).toEqual([]);
           const got = goldenOf(r);
-          const want = goGolden(name);
+          const want = golden(name);
           expect(got.events).toEqual(want.events);
           expect(got.permissions).toEqual(want.permissions);
           expect(got.questions).toEqual(want.questions);
