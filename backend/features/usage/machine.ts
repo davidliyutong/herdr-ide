@@ -38,7 +38,8 @@ import {
 import { BadKey, limits, setDeepseekKey } from './machine/limits.ts';
 import { validPrices } from './machine/pricing.ts';
 import { CostScanner } from './machine/scan.ts';
-import { SESSION_LIMITS, SessionReader, type LocateSession, type SessionLimits } from './machine/session.ts';
+import { Resolver } from '#machine/agents/sessions.ts';
+import { SESSION_LIMITS, SessionReader, sessionsLocator, type LocateSession, type SessionLimits } from './machine/session.ts';
 import { usageProtocol } from './protocol.ts';
 
 export type { LocateSession, Transcript } from './machine/session.ts';
@@ -56,8 +57,8 @@ export interface UsageMachineOptions {
   procRoot?: string;
   /** The agent's environment (the agent's, cleaned, by default). */
   environ?: () => Record<string, string>;
-  /** Finds a session's transcripts; without one, every session is
-   * not_found. */
+  /** Finds a session's transcripts (tests give their own); the coding
+   * agents' sessions of the agent's home by default (sessionsLocator). */
   locate?: LocateSession;
   dbLimits?: Partial<DBLimits>;
   sessionLimits?: Partial<SessionLimits>;
@@ -89,6 +90,9 @@ export function usageMachine(o: UsageMachineOptions = {}) {
     const memo = new Memo();
     const scanner = new CostScanner(env.base, { ...DB_LIMITS, ...o.dbLimits });
     const sessions = new SessionReader(scanner, { ...SESSION_LIMITS, ...o.sessionLimits });
+    // The sessions' transcripts as the agents' sessions find them, in the
+    // agent's home and environment (CLAUDE_CONFIG_DIR, CODEX_HOME).
+    const locate = o.locate ?? sessionsLocator(new Resolver({ home: env.home, getenv: (k) => (o.environ?.() ?? env.environ())[k] }));
     let shared: { client: string; params: string; at: number; accounts: Account[] } | null = null;
     const within = (signal: AbortSignal, ms: number) => AbortSignal.any([signal, AbortSignal.timeout(ms)]);
     const usageEnv = (signal: AbortSignal): UsageEnv => ({
@@ -147,10 +151,9 @@ export function usageMachine(o: UsageMachineOptions = {}) {
           const provider = sessionProvider(p.kind);
           if (!provider || !validSessionId(p.session))
             throw new Fail('bad_params', 400, 'usage: not a session of an agent whose sessions are priced');
-          if (!o.locate) throw new Fail('not_found', 404, 'usage: no transcript of the session');
           const signal = within(ctx.signal, t.sessionMs);
           try {
-            const files = await o.locate(p.kind, p.session, signal);
+            const files = await locate(p.kind, p.session, signal);
             return await sessions.cost(usageEnv(signal), provider, files, p.prices);
           } catch (err) {
             throw sessionError(err, signal);

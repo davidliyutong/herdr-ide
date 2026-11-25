@@ -3,7 +3,7 @@
 // results), their refusals and codes, one core's limits answering
 // another's, no credential in a reply or an error.
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { call } from '#kernel/agent.ts';
@@ -216,6 +216,25 @@ describe('a session', () => {
     const u = await call(m, usageProtocol, 'session', { kind, session });
     expect(asked).toBe(`${kind}/${session}`);
     expect(u).toMatchObject({ model: 'claude-opus-5-5', input: 10, cached: 5, output: 2, requests: 1, priced: true, contextUsed: 15 });
+  });
+
+  test("the agents' sessions locate a session's transcript in the agent's home, through no link", async () => {
+    const { home, m } = await start();
+    const dir = join(home, '.claude', 'projects', '-work-x');
+    write(
+      join(dir, `${session}.jsonl`),
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: new Date(TEST_NOW).toISOString(),
+        message: { role: 'assistant', id: 'm1', model: 'claude-opus-5-5', usage: { input_tokens: 7, output_tokens: 3 } },
+      }) + '\n',
+    );
+    expect(await call(m, usageProtocol, 'session', { kind, session })).toMatchObject({ input: 7, output: 3, requests: 1 });
+    // Another session has no transcript; a link in its place is not read.
+    const other = 'f6cdc860-1055-488f-9ed2-8b8019061bb9';
+    expect(await raw('session', { kind, session: other })).toMatchObject({ code: 'not_found' });
+    symlinkSync(join(dir, `${session}.jsonl`), join(dir, `${other}.jsonl`));
+    expect(await raw('session', { kind, session: other })).toMatchObject({ code: 'not_found' });
   });
 
   test('codes: a transcript gone is not found, one too large too_large; no path in an error', async () => {

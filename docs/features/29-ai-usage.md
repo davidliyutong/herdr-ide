@@ -196,11 +196,11 @@ at most 2 reads run at once; a transcript over 256 MiB or a session over
 200 000 records is `too_large`. Nothing is written. Codes: `not_found` (no
 transcript yet), `compressed`, `too_large`, `bad_params`.
 
-The TypeScript machine side reads the transcripts that a locator of the
-agents feature finds and opens (`LocateSession`, given to `usageMachine`
-by the host); the agents feature's machine side is not in that build yet
-([42](42-typescript-backend.md)), so there every session is `not_found`,
-as the UI shows no session it has not detected either.
+The TypeScript machine side finds and opens the transcripts with the
+coding agents' sessions (`backend/machine/agents`, which the agents
+feature and the chat host use too; `sessionsLocator`), in the agent's
+home and environment (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), each opened as
+the file it located, through no link ([42](42-typescript-backend.md)).
 
 #### Antigravity's and OpenCode's databases
 

@@ -13,6 +13,8 @@
 import type { FileHandle } from 'node:fs/promises';
 import type { z } from 'zod';
 import { Fail } from '#shared/lib/fail.ts';
+import { TranscriptCode } from '#shared/proto/agentproto/transcript.ts';
+import { SessionError, type Resolver, type SessionFile } from '#machine/agents/sessions.ts';
 import type { sessionUsage } from '../protocol.ts';
 import { obj, type UsageEnv } from './env.ts';
 import { NotRegular, eachLineBackward, endsLine, readLines } from './logs.ts';
@@ -32,6 +34,34 @@ export interface Transcript {
 /** Finds a session's transcripts, its own first, then its subagents'.
  * Throws Fail not_found (none yet), compressed or bad_params. */
 export type LocateSession = (kind: string, session: string, signal: AbortSignal) => Promise<Transcript[]>;
+
+/** The locator of the coding agents' sessions (backend/machine/agents),
+ * which the agents feature and the chat host use too: a session's
+ * transcript and its subagents', each opened as the file it located,
+ * through no link; a subagent's that is not that file any more is gone
+ * (ENOENT) and left out, the session's own is not found. */
+export function sessionsLocator(r: Resolver): LocateSession {
+  const opened = async (fh: Promise<FileHandle | null>): Promise<FileHandle> => {
+    const h = await fh;
+    if (!h) throw Object.assign(new Error('usage: the transcript is not the file located'), { code: 'ENOENT' });
+    return h;
+  };
+  return async (kind, session) => {
+    let f: SessionFile;
+    try {
+      f = await r.locate(kind, session);
+    } catch (err) {
+      if (!(err instanceof SessionError)) throw err;
+      if (err.code === 'not_found') throw new Fail(TranscriptCode.NotFound, 404, 'usage: no transcript of the session');
+      if (err.code === 'compressed') throw new Fail(TranscriptCode.Compressed, 400, "usage: the session's transcript is compressed");
+      throw new Fail('bad_params', 400, 'usage: not a session of an agent whose sessions are priced');
+    }
+    return [
+      { path: f.path, open: () => opened(f.open()) },
+      ...f.subagents.map((path, i) => ({ path, open: () => opened(f.openSubagent(i)) })),
+    ];
+  };
+}
 
 export type SessionUsage = z.input<typeof sessionUsage>;
 

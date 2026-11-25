@@ -203,8 +203,8 @@ agents (detection and the agents' sessions) features. The ops and plugins
 of the features it does not serve yet (chat, gui, vscode: `code-server`,
 `gui`) are refused as an unknown plugin is (`unknown_plugin`); the core
 treats them as a machine without that feature. AI usage's `session`
-action finds a session's transcripts with the agents feature's locator
-(`backend/machine/agents`), which the host gives it
+action finds a session's transcripts with the coding agents' sessions
+(`backend/machine/agents`), as the Go build's does
 ([29](29-ai-usage.md#one-sessions-usage)).
 
 AI usage on the machine side ([29](29-ai-usage.md)) keeps the Go agent's
