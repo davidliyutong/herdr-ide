@@ -42,7 +42,7 @@ function newer(fn: () => unknown): NewerError {
 // A process has one connection per shared database: the handles share it,
 // each closes once, and the connection closes with the last one.
 test('TestSharedOnePool', () => {
-  const path = join(temp(), 'core.db');
+  const path = join(temp(), 'hub.db');
   const a = shared(path);
   const b = shared(path);
   expect(a.sqlite).toBe(b.sqlite);
@@ -78,7 +78,7 @@ test.skipIf(process.platform === 'win32')('TestSharedFileReplaced', () => {
 // Features migrate independently: each step of each feature runs once, a
 // new step of one runs alone, and the layout's version stays.
 test('TestFeaturesMigrateIndependently', () => {
-  const db = shared(join(temp(), 'core.db'));
+  const db = shared(join(temp(), 'hub.db'));
   const a1 = 'CREATE TABLE a_runs (n INTEGER); INSERT INTO a_runs VALUES (1)';
   const a2 = 'INSERT INTO a_runs VALUES (2)';
   const b1 = 'CREATE TABLE b_runs (n INTEGER); INSERT INTO b_runs VALUES (1)';
@@ -102,7 +102,7 @@ test('TestFeaturesMigrateIndependently', () => {
 // Tables a newer program migrated further make their feature read-only:
 // it reads, migrate throws NewerError, and the other features still write.
 test('TestFeatureNewer', () => {
-  const db = shared(join(temp(), 'core.db'));
+  const db = shared(join(temp(), 'hub.db'));
   db.migrate('a', ['CREATE TABLE a_t (n INTEGER)', 'ALTER TABLE a_t ADD COLUMN m INTEGER']);
   db.exec('INSERT INTO a_t VALUES (1, 2)');
   const e = newer(() => db.migrate('a', ['CREATE TABLE a_t (n INTEGER)']));
@@ -116,7 +116,7 @@ test('TestFeatureNewer', () => {
 // A database whose layout is newer opens read-only: every feature reads
 // and none writes or migrates.
 test('TestLayoutNewer', () => {
-  const path = join(temp(), 'core.db');
+  const path = join(temp(), 'hub.db');
   const db = openShared(path);
   db.migrate('a', ['CREATE TABLE a_t (n INTEGER)']);
   db.exec('INSERT INTO a_t VALUES (7)');
@@ -142,7 +142,7 @@ test('TestLayoutNewer', () => {
 // durable commits and leaves its connection as the others are; update
 // rolls back what a failing function did.
 test('TestDurableAndUpdate', () => {
-  const db = shared(join(temp(), 'core.db'));
+  const db = shared(join(temp(), 'hub.db'));
   db.migrate('a', ['CREATE TABLE a_t (n INTEGER)']);
   db.durable((tx) => {
     expect(pragma(tx, 'synchronous')).toBe(2);
@@ -177,7 +177,7 @@ describe.skipIf(process.platform === 'win32')('unix', () => {
   // A shared database is private to the user as any other.
   test('TestSharedPermissions', () => {
     const dir = join(temp(), 'd');
-    const path = join(dir, 'core.db');
+    const path = join(dir, 'hub.db');
     const db = shared(path);
     db.migrate('a', ['CREATE TABLE a_t (n INTEGER)']);
     db.exec('INSERT INTO a_t VALUES (1)');
@@ -200,10 +200,10 @@ describe.skipIf(process.platform === 'win32')('unix', () => {
     fs.mkdirSync(real, { mode: 0o700 });
     const link = join(temp(), 'config');
     fs.symlinkSync(real, link);
-    const db = shared(join(link, 'core.db'));
+    const db = shared(join(link, 'hub.db'));
     db.migrate('a', ['CREATE TABLE a_t (n INTEGER)']);
-    expect(fs.lstatSync(join(real, 'core.db')).isFile()).toBe(true);
-    expect(shared(join(real, 'core.db')).sqlite).toBe(db.sqlite); // one pool for one file
+    expect(fs.lstatSync(join(real, 'hub.db')).isFile()).toBe(true);
+    expect(shared(join(real, 'hub.db')).sqlite).toBe(db.sqlite); // one pool for one file
     // open itself still refuses the linked directory.
     expect(() => open(join(link, 'x.db'))).toThrow(UnsafeError);
   });

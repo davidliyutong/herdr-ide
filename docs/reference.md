@@ -645,7 +645,7 @@ removed):
 | `keybindings[-<instance>].json` | Keybinding rules; hand-editable. |
 | `machines[-<instance>].json` | `{"version": 1, "machines": [{id, label, kind, target, enabled}], "order": [ids]}`: SSH machines, the local machine once changed, and the order. Written by the core from the first change; unknown fields kept. |
 | `vault[-<instance>].json` | Variable vault, values encrypted under a key derived from the passphrase ([30](features/30-variable-vault.md)). |
-| `core[-<instance>]-<host>[-<id>].db` (with `-wal`, `-shm`) | The core's SQLite database ([38](features/38-sqlite-state.md)): the vault's access log (last 1000 releases, 500 other records; never values) and the AI usage history (30 days of windows' use, alert periods). |
+| `hub[-<instance>]-<host>[-<id>].db` (with `-wal`, `-shm`) | The hub's SQLite database ([38](features/38-sqlite-state.md)): the vault's access log (last 1000 releases, 500 other records; never values) and the AI usage history (30 days of windows' use, alert periods). Earlier releases named it `core[-<instance>]-<host>[-<id>].db`; the hub removes this host's of its instance when it starts, without reading it. |
 
 Also on the core host: ssh control sockets in `/tmp/veldr-<uid>/s`
 (`s-<instance>` for another instance, `h-<hash>` for one longer than

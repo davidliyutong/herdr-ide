@@ -94,7 +94,7 @@ export function pruneHostFiles(dir: string, name: string, retention = HOST_FILE_
   const e = ext(name);
   const stem = name.slice(0, name.length - e.length) + '-';
   const mine = hostFileName(name, thisHost());
-  const otherInstances = coreInstances(names, name);
+  const otherInstances = instancesBeside(names, name);
   const removed: string[] = [];
   for (const n of names) {
     if (n === mine || !n.startsWith(stem) || !n.endsWith(e) || n.length < stem.length + e.length) continue;
@@ -129,10 +129,17 @@ function readNames(dir: string): string[] {
   return names;
 }
 
+/** The hub's databases of the default instance: hub.db, and core.db as
+ * releases before the rename named it (hubdb.ts). */
+const DEFAULT_HUB_DBS: readonly string[] = ['hub.db', 'core.db'];
+
 /** The instance suffixes (e.g. "dev", "desktop") of dir's configuration
- * files, so that pruning core.db never removes core-<instance>*.db. */
-export function coreInstances(names: readonly string[], target: string): string[] {
-  if (target !== 'core.db') return [];
+ * files when target is the default instance's hub database, so that
+ * pruning hub.db never removes hub-<instance>*.db (nor core.db
+ * core-<instance>*.db): their names are those of hub.db of a host whose
+ * key starts with the instance. */
+export function instancesBeside(names: readonly string[], target: string): string[] {
+  if (!DEFAULT_HUB_DBS.includes(target)) return [];
   const seen = new Set<string>();
   for (const n of names) {
     for (const prefix of ['settings-', 'vault-', 'machines-', 'keybindings-']) {
@@ -181,7 +188,7 @@ function openHere(p: string): boolean {
 /** Removes the database at p, its journal files first (a journal file
  * left without its database would be taken for the journal of the next
  * one of the name). */
-function removeFiles(p: string): void {
+export function removeFiles(p: string): void {
   for (const s of [...JOURNALS, '']) {
     try {
       fs.unlinkSync(p + s);

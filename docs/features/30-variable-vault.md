@@ -406,7 +406,7 @@ shown.
 
 Each MCP request and each value a page takes (reveal, export) is a record
 in the core's database (table `vault_access`; [38](38-sqlite-state.md)),
-which is per host: `core[-<instance>]-<host>[-<id>].db`, named for the
+which is per host: `hub[-<instance>]-<host>[-<id>].db`, named for the
 core's host (its name and a hash of its machine id), beside the settings
 file, so cores of the same instance on several hosts sharing a home keep a
 database each. It is read back at start. A record has the time,

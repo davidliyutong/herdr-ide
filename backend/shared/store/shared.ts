@@ -1,4 +1,4 @@
-// Shared databases. The core's database (core.db, beside its settings
+// Shared databases. The hub's database (hub.db, beside its settings
 // file) and a machine's (machine-<host>.db, hostFile, in the agent's data
 // directory) hold the state of several features of one owner. Such a
 // database is opened with openShared: its user_version is the store's own
@@ -21,7 +21,7 @@ import { closeConn, DB, NewerError, open, type Conn } from './store.ts';
 
 /** The name of a machine's shared database in its agent's data directory,
  * which is kept per host (hostFile: ~/.<slug>[-<instance>]/machine-<host>.db).
- * The core's is core.db beside its settings file. */
+ * The hub's is hub.db beside its settings file. */
 export const MACHINE_DB = 'machine.db';
 
 /** The store's own tables of a shared database, versioned by its

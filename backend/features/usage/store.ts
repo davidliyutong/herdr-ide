@@ -1,14 +1,13 @@
 // What the feature keeps in the core's database
-// (core[-<instance>]-<host>[-<id>].db beside the settings file, shared with
+// (hub[-<instance>]-<host>[-<id>].db beside the settings file, shared with
 // the other features; the Go core's tables, so either core reads what the
 // other wrote): the points of each account's window (usage_windows), the
 // accounts of the last poll (usage_accounts), the alerts fired
 // (usage_alerts) and each machine's last cost report (usage_machine_costs).
 // Values are JSON, written as blobs as Go wrote them. Tables of a newer
 // version are read, not written.
-import { basename, dirname, extname } from 'node:path';
 import { z } from 'zod';
-import { hostFile, NewerError, openShared, type DB } from '#shared/store/index.ts';
+import { hubDBBeside, NewerError, openShared, type DB } from '#shared/store/index.ts';
 import { History, type AlertRecord, type Kept, type Point } from './history.ts';
 import { account } from './protocol.ts';
 
@@ -36,13 +35,11 @@ const MIGRATIONS = [
 	);`,
 ];
 
-/** The core's database beside settingsFile (settings-dev.json →
- * core-dev-<host>.db); "" for a core without a settings file, which keeps
- * no state. */
+/** The hub's database beside settingsFile (settings-dev.json →
+ * hub-dev-<host>.db; #shared/store/hubdb.ts); "" for a hub without a
+ * settings file, which keeps no state. */
 export function hubDBFile(settingsFile: string): string {
-  if (!settingsFile) return '';
-  const name = basename(settingsFile).replace('settings', 'core');
-  return hostFile(dirname(settingsFile), name.slice(0, name.length - extname(name).length) + '.db');
+  return hubDBBeside(settingsFile, 'settings');
 }
 
 /** An account as kept (its windows without ids and paces). */

@@ -1,6 +1,6 @@
 // The access log records every request of a machine's MCP server and every
 // value a page took (a reveal, an export): names only, never values. It is
-// kept in the core's database (core[-<instance>]-<host>[-<id>].db beside the
+// kept in the core's database (hub[-<instance>]-<host>[-<id>].db beside the
 // settings file, named for this host), table vault_access, and read back at
 // the first use, so the panel shows what happened before a restart too. A
 // record that lets values out is committed to disk before they leave; one
@@ -8,9 +8,8 @@
 // refusals, which a program repeats at will, merge into one record with a
 // count, and are bounded apart from the releases, so they never push one
 // out.
-import { basename, dirname, extname } from 'node:path';
 import type { VaultProcess } from '#shared/proto/agentproto/index.ts';
-import { hostFile, NewerError, openShared, type DB } from '#shared/store/index.ts';
+import { hubDBBeside as hubDBOf, NewerError, openShared, type DB } from '#shared/store/index.ts';
 
 export const MAX_RELEASES = 1000;
 export const MAX_OTHERS = 500;
@@ -97,14 +96,12 @@ const MIGRATIONS = [
 	CREATE INDEX vault_access_class ON vault_access (released, id);`,
 ];
 
-/** The core's database beside the vault's file: vault[-<instance>].json
+/** The hub's database beside the vault's file: vault[-<instance>].json
  * beside settings[-<instance>].json, whose database is
- * core[-<instance>]-<host>[-<id>].db, named for this host (hostFile). ""
- * for "". */
+ * hub[-<instance>]-<host>[-<id>].db, named for this host (hostFile;
+ * #shared/store/hubdb.ts). "" for "". */
 export function hubDBBeside(vaultFile: string): string {
-  if (!vaultFile) return '';
-  const name = basename(vaultFile).replace('vault', 'core');
-  return hostFile(dirname(vaultFile), name.slice(0, name.length - extname(name).length) + '.db');
+  return hubDBOf(vaultFile, 'vault');
 }
 
 class Newer extends Error {

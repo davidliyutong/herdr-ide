@@ -303,7 +303,7 @@ does not hide another's numbers. The machines that answered worse are the
 account's `issues`. An answer without numbers keeps the last good ones with
 the new status. Accounts unseen for 7 days are forgotten.
 
-The history (the core's database `core[-<instance>]-<host>[-<id>].db`, tables
+The history (the core's database `hub[-<instance>]-<host>[-<id>].db`, tables
 `usage_windows`, `usage_accounts`, `usage_alerts`, `usage_machine_costs`;
 [38](38-sqlite-state.md)) keeps a point per window when the use changed or 15 minutes passed, for 30
 days, plus the last accounts for a restart. A window's pace compares its use

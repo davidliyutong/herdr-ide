@@ -10,6 +10,7 @@ import { userConfigDir, userHomeDir } from '#shared/host/hostdirs.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import type { Audit } from '#kernel/audit.ts';
 import { Keybindings } from '#kernel/config/keybindings/index.ts';
+import { tidyHubDBs } from '#shared/store/hubdb.ts';
 import { besideSettings, settingsPath } from '#kernel/config/paths.ts';
 import { hubModules } from '#kernel/config/registry.ts';
 import { settingsRoutes } from '#kernel/config/routes.ts';
@@ -171,6 +172,15 @@ export function composeHub(o: ComposeOptions): Composed {
     settingsFile = settingsPath(userConfigDir(), instance);
   } catch (e) {
     logger(`settings are not saved: ${(e as Error).message}`);
+  }
+  if (settingsFile) {
+    try {
+      const t = tidyHubDBs(settingsFile);
+      if (t.old.length > 0) logger(`removed the database of earlier releases: ${t.old.join(', ')}`);
+      if (t.others.length > 0) logger(`removed other hosts' unused databases: ${t.others.join(', ')}`);
+    } catch (e) {
+      logger(`databases of earlier releases or other hosts: ${(e as Error).message}`);
+    }
   }
   const settings = new Settings(settingsFile, { modules, flags: o.flags ?? {} });
   const keybindings = new Keybindings(settingsFile && besideSettings(settingsFile, 'keybindings'));

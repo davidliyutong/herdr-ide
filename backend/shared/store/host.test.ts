@@ -251,10 +251,11 @@ describe.skipIf(process.platform === 'win32')('unix', () => {
     marked.delete(q);
   });
 
-  // A database of no host's name is not one of pruneHostFiles', and core.db
-  // pruning skips other instances' databases in the shared config
-  // directory.
-  test('TestPruneHostFilesCoreInstances', () => {
+  // A database of no host's name is not one of pruneHostFiles', and the
+  // default instance's hub database (hub.db, and core.db of releases
+  // before the rename) skips other instances' databases in the shared
+  // config directory.
+  test('TestPruneHostFilesHubInstances', () => {
     const dir = temp();
     const plain = join(dir, MACHINE_DB);
     makeDB(plain);
@@ -262,17 +263,23 @@ describe.skipIf(process.platform === 'win32')('unix', () => {
     expect(pruneHostFiles(dir, MACHINE_DB)).toEqual([]);
     expect(exists(plain)).toBe(true);
 
-    // Core instance isolation: pruning core.db must not remove core-dev-*.db.
-    const cdir = temp();
-    fs.writeFileSync(join(cdir, 'settings-dev.json'), '{}', { mode: 0o600 });
-    const coreMine = hostFile(cdir, 'core.db');
-    const coreDev = join(cdir, 'core-dev-otherhost-0a1b2c3d.db');
-    const coreOther = join(cdir, 'core-otherhost-0a1b2c3d.db');
-    for (const p of [coreMine, coreDev, coreOther]) makeDB(p);
-    age(coreDev, MONTH);
-    age(coreOther, MONTH);
-    expect(pruneHostFiles(cdir, 'core.db')).toEqual(['core-otherhost-0a1b2c3d.db']);
-    expect(exists(coreDev)).toBe(true);
+    for (const stem of ['hub', 'core']) {
+      // Instance isolation: pruning hub.db must not remove hub-dev-*.db.
+      const cdir = temp();
+      fs.writeFileSync(join(cdir, 'settings-dev.json'), '{}', { mode: 0o600 });
+      const mine = hostFile(cdir, `${stem}.db`);
+      const dev = join(cdir, `${stem}-dev-otherhost-0a1b2c3d.db`);
+      const other = join(cdir, `${stem}-otherhost-0a1b2c3d.db`);
+      for (const p of [mine, dev, other]) makeDB(p);
+      age(mine, MONTH);
+      age(dev, MONTH);
+      age(other, MONTH);
+      expect(pruneHostFiles(cdir, `${stem}.db`)).toEqual([`${stem}-otherhost-0a1b2c3d.db`]);
+      expect(exists(dev)).toBe(true);
+      expect(exists(mine)).toBe(true);
+      // The instance's own name takes its other hosts' databases.
+      expect(pruneHostFiles(cdir, `${stem}-dev.db`)).toEqual([`${stem}-dev-otherhost-0a1b2c3d.db`]);
+    }
   });
 
   // removeUnheld takes SQLite's own exclusive lock of the database (Go

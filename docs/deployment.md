@@ -225,7 +225,7 @@ ARCH=arm64 make desktop-dist            # arm64 packages, also on an x64 host
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
 | The app | `/Applications/veldr.app` | `%LOCALAPPDATA%\Programs\veldr-desktop\` | `/opt/veldr/` (deb), or the AppImage |
-| Settings, keybindings, machines (`*-desktop.json`), the core's database (`core-desktop-<host>[-<id>].db`: vault access log, AI usage history) | `~/Library/Application Support/veldr/` | `%AppData%\veldr\` | `$XDG_CONFIG_HOME/veldr/` (default `~/.config/veldr/`) |
+| Settings, keybindings, machines (`*-desktop.json`), the core's database (`hub-desktop-<host>[-<id>].db`: vault access log, AI usage history) | `~/Library/Application Support/veldr/` | `%AppData%\veldr\` | `$XDG_CONFIG_HOME/veldr/` (default `~/.config/veldr/`) |
 | Electron profile (browser storage, single-instance lock, the vault's `vault-unlock.json`) | `~/Library/Application Support/veldr-desktop/` | `%AppData%\veldr-desktop\` | `~/.config/veldr-desktop/` |
 | Key encrypting the vault's unlock secret (safeStorage) | login keychain item `veldr Safe Storage`; the build that made it in `~/Library/Application Support/veldr-desktop-keychain.json` | DPAPI | – |
 | code-server downloads | `~/Library/Caches/veldr/code-server` | `%LocalAppData%\veldr\code-server` | `~/.cache/veldr/code-server` |
@@ -528,7 +528,8 @@ host's key and `<run>` the namespace's runtime directory on the host
 | Chat journal (`<data>/chat-<host>[-<id>].db`, 0600) | The chat host. | Per chat ≤ `chat.maxChatMB` (64), in all ≤ `chat.maxTotalMB` (512) and `chat.maxChats` (500), archived then longest-closed first; closed and archived chats after `chat.retentionDays` (30); a deleted chat at once. |
 | DeepSeek key (`<data>/usage/deepseek.key`, 0600) | **Save** in the usage panel (audited). | **Remove**, or the user deletes it. |
 | Kimi Code credentials (`~/.kimi-code/`) | Renewed when expiring (`usage.kimiRefresh`; not in `--read-only`), with Kimi Code's own lock. | Kimi Code's files. |
-| Vault access log (core database `core[-<instance>]-<host>[-<id>].db`, core host, 0600) | Every MCP request and value a page takes; names, never values. | Keeps the last 1000 releases and 500 other records. |
+| Vault access log (hub database `hub[-<instance>]-<host>[-<id>].db`, hub host, 0600) | Every MCP request and value a page takes; names, never values. | Keeps the last 1000 releases and 500 other records. |
+| The database of earlier releases (`core[-<instance>]-<host>[-<id>].db`, hub host) | Releases before the core was renamed the hub. | Not read: the hub of its instance removes this host's with its journal files when it starts (one a process holds stays); another host's after 30 days unused ([38](features/38-sqlite-state.md#per-host-names)). |
 | Desktop vault unlock key | Enrolling the desktop authenticator. | `vault-unlock.json` in the Electron profile, the macOS keychain item (moved to a rebuilt app after one prompt) or the Windows Hello key `veldr-vault-<install>`; kept until removed by hand. |
 | Electron profile | First desktop launch. | Until removed by hand ([where](#where-the-app-keeps-its-files)); core stderr is kept in memory only (16 KiB). |
 

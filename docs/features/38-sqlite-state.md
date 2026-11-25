@@ -74,7 +74,7 @@ managers); `open` alone refuses links.
 
 | Database | Owner | Where | Holds |
 | --- | --- | --- | --- |
-| `core[-<instance>]-<host>[-<id>].db` | the core | beside its settings file ([reference](../reference.md#files-and-directories)) | the vault's access log, the AI usage history |
+| `hub[-<instance>]-<host>[-<id>].db` | the core | beside its settings file ([reference](../reference.md#files-and-directories)) | the vault's access log, the AI usage history |
 | `machine-<host>[-<id>].db` | the machine's agent | the instance's data directory on the machine (`~/.veldr[-<instance>]/`) | terminal history snapshots and their writers' lease, the AI usage cost cache |
 | `chat-<host>[-<id>].db` | the chat host | the same data directory | chats, events, trusted folders, the host's settings ([37](37-agent-chats.md)); opened with `open`, not shared |
 
@@ -101,6 +101,17 @@ databases unused for 30 days (use is the file's modification time, which
 stays. It removes only under SQLite's writer lock taken without waiting, only this
 user's regular files, never files this process holds, and nothing on
 Windows; the core skips other instances' files.
+
+Releases before the core was renamed the hub named the hub's database
+`core[-<instance>]-<host>[-<id>].db`. Its records (the vault's access log,
+the AI usage history) are not carried over: the hub starts a database of
+the new name, and at its start removes this host's database of the old
+name of its own instance with its journal files, under the same lock
+(one a process still holds stays), and prunes other hosts' databases of
+both names as above (`backend/shared/store/hubdb.ts`, `tidyHubDBs`). It
+takes the names from this host's key and its instance, never a pattern,
+so `core-<host>.db` of the default instance never takes
+`core-dev-<host>.db` or `core-desktop-<host>.db`.
 
 ## Alternatives considered
 

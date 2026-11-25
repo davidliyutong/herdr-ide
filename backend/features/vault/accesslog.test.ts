@@ -21,8 +21,8 @@ const rec = (result: string, names = ['A']): Omit<Access, 'id'> => ({
 });
 const add = (l: AccessLog, r: Omit<Access, 'id'>) => l.add(r, noisy(r.result), released(r.result));
 
-test("the core's database beside the vault's file, per host", () => {
-  expect(hubDBBeside('/c/vault-dev.json')).toMatch(/^\/c\/core-dev-.+\.db$/);
+test("the hub's database beside the vault's file, per host", () => {
+  expect(hubDBBeside('/c/vault-dev.json')).toMatch(/^\/c\/hub-dev-.+\.db$/);
   expect(hubDBBeside('')).toBe('');
 });
 
@@ -93,7 +93,7 @@ test('a write that fails refuses its release and leaves nothing; the next is wri
 
 test('a log that cannot be read keeps its records in memory and tries again', () => {
   const logs: string[] = [];
-  const l = new AccessLog({ db: '/nonexistent\0/core.db', logger: (m) => logs.push(m) });
+  const l = new AccessLog({ db: '/nonexistent\0/hub.db', logger: (m) => logs.push(m) });
   expect(add(l, rec('allowed')).ok).toBe(false);
   expect(l.list()[0].result).toBe('log_failed');
   expect(add(l, rec('listed')).ok).toBe(true);
