@@ -16,8 +16,8 @@
 #                                          # (the desktop app carries them and
 #                                          # runs the core in Electron)
 #
-# MACHINE=ts builds the TypeScript build instead of a core that deploys
-# the Go program (docs/features/42-typescript-backend.md): each target's
+# MACHINE=ts (the default) builds the TypeScript build
+# (docs/features/42-typescript-backend.md): each target's
 # executable is the core and the machine side of its platform, with its
 # platform's herdr-core (TARGETS may name linux/amd64-musl and
 # linux/arm64-musl too), and RELEASE_URL, the release's download URL from
@@ -44,7 +44,7 @@ AGENT_PLATFORMS=${AGENT_PLATFORMS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/
 TARGETS=${TARGETS:-"$(go env GOOS)/$(go env GOARCH)"}
 # What the core embeds, staged by kind (backend/kernel/payloads.ts).
 PAYLOAD=dist/payload
-MACHINE=${MACHINE:-go}
+MACHINE=${MACHINE:-ts}
 case "$MACHINE" in go|ts) ;; *) echo "MACHINE is go or ts" >&2; exit 2 ;; esac
 RELEASE_URL=${RELEASE_URL:-}
 
@@ -156,7 +156,7 @@ for p in $TARGETS; do
   [[ $os == windows ]] && exe=.exe
   out=dist/${SLUG}-$os-$arch$exe
   if [[ "$MACHINE" == go ]]; then
-    machine=(--agents "$PAYLOAD/agents" --hc "$PAYLOAD/hc")
+    machine=(--machine go --agents "$PAYLOAD/agents" --hc "$PAYLOAD/hc")
   else
     machine=(--machine ts --hc dist/machines-hc --release-url "$RELEASE_URL")
   fi

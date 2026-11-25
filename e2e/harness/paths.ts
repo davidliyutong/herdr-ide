@@ -1,9 +1,9 @@
 // Where the binaries under test are: scripts/e2e.sh builds them into
 // dist/e2e (E2E_DIR overrides). It builds every core twice: one deploying
-// the Go machine build (the product's default) and one the TypeScript
-// machine side (docs/features/42-typescript-backend.md); E2E_MACHINE=ts
-// runs the suite against the second, whose machines' nodes run the
-// TypeScript side (a matrix dimension).
+// the TypeScript machine side (the product's,
+// docs/features/42-typescript-backend.md) and one the Go machine build;
+// the suite runs against the first, E2E_MACHINE=go against the second (a
+// matrix dimension).
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -16,7 +16,7 @@ const dir = process.env.E2E_DIR ? resolve(process.env.E2E_DIR) : join(repoRoot, 
 const slug = /^\s*Slug = "(.*)"$/m.exec(readFileSync(join(repoRoot, 'internal', 'brand', 'brand.go'), 'utf8'))?.[1] ?? '';
 
 /** The machine build the cores under test deploy: go or ts. */
-const machine = process.env.E2E_MACHINE === 'ts' ? 'ts' : 'go';
+const machine = process.env.E2E_MACHINE === 'go' ? 'go' : 'ts';
 if (process.env.E2E_MACHINE && process.env.E2E_MACHINE !== machine)
   throw new Error(`E2E_MACHINE is go or ts, not ${process.env.E2E_MACHINE}`);
 const ts = machine === 'ts';

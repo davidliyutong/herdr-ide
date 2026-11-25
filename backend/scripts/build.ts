@@ -6,10 +6,10 @@
 //     [--release-url URL] [--hc DIR] [--ext DIR] [--encoder DIR]
 //     [--payload-out DIR]
 //
-// --machine is the machine build the core deploys: go (the default) embeds
+// --machine is the machine build the core deploys: go embeds
 // the Go machine builds of --agents, <bin>-<os>-<arch> (gzip-compressed
 // here unless they end in .gz), and herdr-core of --hc for every platform.
-// ts makes the executable the machine build of its own platform too (its
+// ts (the default) makes the executable the machine build of its own platform too (its
 // `node` commands): it carries its platform's herdr-core (embedded as
 // herdr-core.gz, which its node installs), the SHA-256 of every
 // herdr-core of --hc (machine/hc.json, which the core holds the machines'
@@ -41,7 +41,7 @@ const { values: o } = parseArgs({
     target: { type: 'string', default: '' },
     version: { type: 'string', default: 'dev' },
     web: { type: 'string', default: '' },
-    machine: { type: 'string', default: 'go' },
+    machine: { type: 'string', default: 'ts' },
     agents: { type: 'string', default: '' },
     'release-url': { type: 'string', default: '' },
     'payload-out': { type: 'string', default: '' },

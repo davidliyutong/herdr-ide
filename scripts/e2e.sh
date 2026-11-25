@@ -11,13 +11,13 @@
 # and the sshd image (e2e/sshd); without it they skip, unless
 # E2E_REQUIRE_DOCKER=1 (CI), which fails instead.
 #
-# Every core is built twice: deploying the Go machine build (the product's
-# default) and as the TypeScript build (--machine ts: one executable that
-# is the core and the machine side of its platform). The latter is built
+# Every core is built twice: as the TypeScript build (--machine ts, the
+# product's: one executable that is the core and the machine side of its
+# platform) and deploying the Go machine build. The latter is built
 # for this host and for Docker's Linux, glibc's and musl's, into machines/
 # with their SHA256SUMS, which the cores take as --agent-dir (a build of no
 # release: nothing is downloaded); core-ts is this host's. The suite runs
-# against the first; E2E_MACHINE=ts runs it against the second
+# against the TypeScript build; E2E_MACHINE=go runs it against the Go one
 # (e2e/harness/paths.ts), and tests/nodes.spec.ts takes a node of one build
 # over with the other.
 #
@@ -91,8 +91,8 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   common=(--web web/dist --hc "$OUT/payload/hc")
   # The bridge extension when a build staged it (scripts/build.sh).
   [[ -d dist/payload/ext ]] && common+=(--ext dist/payload/ext)
-  bun backend/scripts/build.ts --out "$OUT/core" --agents "$OUT/payload/agents" "${common[@]}" >/dev/null
-  bun backend/scripts/build.ts --out "$OUT/core-newer" --version dev-e2e-newer --agents "$OUT/payload/agents-newer" "${common[@]}" >/dev/null
+  bun backend/scripts/build.ts --out "$OUT/core" --machine go --agents "$OUT/payload/agents" "${common[@]}" >/dev/null
+  bun backend/scripts/build.ts --out "$OUT/core-newer" --version dev-e2e-newer --machine go --agents "$OUT/payload/agents-newer" "${common[@]}" >/dev/null
   echo "==> the TypeScript builds"
   # This host's, and Docker's Linux, glibc's and musl's (the SSH machine is
   # Alpine); again as the newer version, whose node the newer core runs.

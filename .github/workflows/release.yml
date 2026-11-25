@@ -9,10 +9,10 @@ permissions:
   contents: read
 
 env:
-  # The machine build the cores deploy: go (the default), or ts, the
-  # TypeScript build, whose executable is the core and the machine side of
-  # its platform (the repository variable MACHINE; scripts/build.sh).
-  MACHINE: ${{ vars.MACHINE || 'go' }}
+  # The machine build the cores deploy: ts (the default), the TypeScript
+  # build, whose executable is the core and the machine side of its
+  # platform, or go (the repository variable MACHINE; scripts/build.sh).
+  MACHINE: ${{ vars.MACHINE || 'ts' }}
   # Where this release serves its assets: machines of the TypeScript build
   # download their platform's archive and the core SHA256SUMS from there.
   RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}

@@ -87,12 +87,15 @@ it:
 e2e:
 	scripts/e2e.sh $(E2E_ARGS)
 
-# The core from its sources (bun) on the dev instance, with this host's
-# machine build built into dist/agents and herdr-core from dist/payload
-# (scripts/build.sh stages it; go run ./scripts/fetch-hc fetches it alone).
+# The core from its sources (bun) on the dev instance. Its machine side is
+# this host's TypeScript executable, built into dist/dev with the pinned
+# herdr-core (fetched once into dist/machines-hc) and staged in
+# dist/payload/machine as the desktop app carries it.
 dev-core:
-	go build -o dist/agents/$(SLUG)-$(HOST_PLATFORM) ./cmd/$(SLUG)
-	bun backend/hosts/bun/main.ts --instance dev --local-only --listen $(DEV_LISTEN) --agent-dir dist/agents --web-dir web/dist
+	@test -f dist/machines-hc/hc-$(HOST_PLATFORM).gz || go run ./scripts/fetch-hc -out dist/machines-hc $(subst -,/,$(HOST_PLATFORM))
+	bun backend/scripts/build.ts --out dist/dev/$(SLUG)-$(HOST_PLATFORM) --hc dist/machines-hc --payload-out dist/payload
+	gzip -1 -c dist/dev/$(SLUG)-$(HOST_PLATFORM) > dist/payload/machine/$(SLUG)-$(HOST_PLATFORM).gz
+	bun backend/hosts/bun/main.ts --instance dev --local-only --listen $(DEV_LISTEN) --web-dir web/dist
 
 dev-web:
 	$(shell echo $(SLUG) | tr 'a-z-' 'A-Z_')_CORE=http://$(DEV_LISTEN) pnpm -C web dev

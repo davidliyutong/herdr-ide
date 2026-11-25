@@ -13,6 +13,8 @@ HC_VERSION=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/hcdist/release.
 test -n "$HC_VERSION"
 TARGETS=${TARGETS:-"$(go env GOOS)/$(go env GOARCH)"}
 mkdir -p dist/packages dist/release
+# What an earlier build left: SHA256SUMS lists the archives of this one only.
+rm -f dist/release/*.tar.gz dist/release/*.gz dist/release/SHA256SUMS
 packaged=
 for p in $TARGETS; do
   case "$p" in
