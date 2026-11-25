@@ -15,7 +15,7 @@ import type { Change, Store } from '#kernel/config/settings/index.ts';
 import type { AgentEvent, Machines } from '#kernel/machines/manager.ts';
 import { Adapter, chatSpec } from '#shared/agents/kinds.ts';
 import { Configurer } from './configure.ts';
-import type { SdkProvision } from './sdkprovision.ts';
+import type { EnsureOptions, SdkProvision } from './sdkprovision.ts';
 import { HostLink, readError, type HostConn, type Opener, type Response } from './hostconn.ts';
 import { ChatPage } from './page.ts';
 import { hostSettings } from './settings.ts';
@@ -114,12 +114,14 @@ export class ChatHub {
   /** Makes sure machine m can run a chat of kind: Claude Code's chats run on
    * Anthropic's Agent SDK, which the machine gets before one starts
    * (sdkprovision.ts). A read-only core installs nothing. Fails with
-   * sdk_unavailable when the machine could not get it. */
-  async ensureSdk(m: string, kind: string, signal: AbortSignal): Promise<void> {
+   * sdk_unavailable when the machine could not get it; o says whether to
+   * ask again after a failure (a new chat) and who to audit the install
+   * as. */
+  async ensureSdk(m: string, kind: string, signal: AbortSignal, o: EnsureOptions = {}): Promise<void> {
     if (this.o.readOnly || chatSpec(kind)?.adapter !== Adapter.Claude) return;
     const mc = this.o.machines.get(m);
     if (!mc?.connected) return;
-    await this.o.sdk.ensure(mc, signal);
+    await this.o.sdk.ensure(mc, signal, o);
   }
 
   /** Sends one request to machine m's chat host and returns its answer. */

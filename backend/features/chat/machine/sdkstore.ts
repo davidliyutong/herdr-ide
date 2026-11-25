@@ -76,16 +76,17 @@ export class SdkStore {
   }
 
   /** Has the machine download the tarball from url and installs it; a
-   * version there already is kept. */
-  fetch(url: string, o: { env: Record<string, string>; signal: AbortSignal }): Promise<void> {
+   * version there already is kept. Whether it was downloaded. */
+  fetch(url: string, o: { env: Record<string, string>; signal: AbortSignal }): Promise<boolean> {
     return this.locked(async () => {
-      if (await this.installed()) return;
+      if (await this.installed()) return false;
       const s = await download(this.root, url, { env: o.env, signal: o.signal, max: MAX_SDK_TARBALL, timeoutMs: this.downloadMs });
       try {
         await this.install(s);
       } finally {
         await rm(s.file, { force: true });
       }
+      return true;
     });
   }
 

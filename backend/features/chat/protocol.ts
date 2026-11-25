@@ -21,12 +21,13 @@ export const chatProtocol = defineProtocol('chat', {
   /** Anthropic's Agent SDK, which the TypeScript build's chat host loads for
    * Claude Code's chats (claudesdk.ts): whether the pinned version is
    * installed; given url, a machine without it downloads the pinned tarball
-   * from there itself (curl or wget), error saying why it could not. The Go
-   * machine build, whose chat host speaks Claude Code's protocol itself,
-   * serves neither this nor sdkUpload (bad_params, an unknown action). */
+   * from there itself (curl or wget), fetched saying it did, error saying
+   * why it could not. The Go machine build, whose chat host speaks Claude
+   * Code's protocol itself, serves neither this nor sdkUpload (bad_params,
+   * an unknown action). */
   sdk: {
     params: z.object({ url: z.string().max(2048).optional() }),
-    result: z.object({ installed: z.boolean(), error: z.string().optional() }),
+    result: z.object({ installed: z.boolean(), fetched: z.boolean().optional(), error: z.string().optional() }),
     timeoutMs: 6 * 60_000,
   },
   /** The core's upload of the SDK's pinned tarball: after the reply, the

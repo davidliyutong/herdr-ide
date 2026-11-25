@@ -62,7 +62,8 @@ runs inside the app and listens on nothing ([16](16-desktop-packaging.md)). Flag
    `/api/…` path is a 404, not the shell.
 7. **Audit log** (`--audit-log`): JSON lines for connections, mutating
    calls, uploads and downloads, VS Code and bridge use, program windows,
-   ssh authentication and denials, with the user from `--user-header` or
+   ssh authentication, the Agent SDK's installs on machines
+   (`chat.sdk_install`) and denials, with the user from `--user-header` or
    common proxy headers.
 
 ### VS Code on the UI's origin

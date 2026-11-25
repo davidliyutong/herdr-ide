@@ -788,7 +788,8 @@ downloads code-server. What is pinned (`features/chat/claudesdk.ts`) is
 the registry's tarball of version 0.3.322, its URL
 (`https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.322.tgz`,
 a mirror's with `--npm-registry`) and its integrity, the lockfile's
-`sha512-r88ij7R3…`; and the SHA-256 of its entry, `sdk.mjs`. The entry
+`sha512-r88ij7R3…` (`claudesdk.test.ts` reads it from
+`backend/pnpm-lock.yaml`); and the SHA-256 of its entry, `sdk.mjs`. The entry
 carries what it uses of the SDK's dependencies (zod among them)
 and imports Node's own modules only, so the one tarball is all it needs.
 `backend/package.json` has the SDK as a development dependency, for its
@@ -810,21 +811,36 @@ page gets or in the log, is its origin and path only
 Before a request that starts a Claude Code chat (a new chat or an import:
 `POST new`; and, without waiting for it, a page's subscription to such a
 chat, whose next prompt may start its agent), the core makes sure the
-machine has it (`features/chat/sdkprovision.ts`), at most once an hour
-for an agent session (each ask is a use of the machine's copy, and puts
-back one its retention removed):
+machine has it (`features/chat/sdkprovision.ts`; a read-only core asks
+nothing). Once the machine had it, the core asks again on the same agent
+session after an hour (each ask is a use of the machine's copy, and puts
+back one its retention removed). Once it could not get it, a
+subscription's ask fails with that answer for 5 minutes on the same agent
+session, asking nothing (every page that shows the chat would otherwise
+run each source again, the machine's download of up to 5 minutes among
+them), while `POST new`, the user's own request, asks again. Each install,
+and each that failed, is audited as `chat.sdk_install`, with the machine,
+where its copy came from (`machine`, `seed`, `cache`, `download`, or
+`none` when nothing was tried), whether it was installed, and the error,
+its URLs by origin and path, cut to 256 bytes:
 
 1. the machine side's action `sdk` says whether the pinned version is
    installed, and, unless the core is `--offline`, has the machine download
    it itself from the registry (`curl -q`, else `wget` with an empty
    regular file as its `WGETRC` and GNU wget's `--no-config` when its
    untranslated help names it, at most 32 MiB in 5 minutes;
-   `#machine/artifacts.ts`, as code-server's releases come);
+   `#machine/artifacts.ts`, as code-server's releases come), its answer
+   saying whether it did (`fetched`, for the audit record);
 2. a machine that could not gets it from the core (`sdkUpload`, in chunks):
    from an operator's directory (`--seed-dir`, as code-server's tarballs),
    the core's cache (`~/.veldr/cache/npm`, 14 days unused), or the core's
    own download from the registry through the proxy of its environment,
-   then cached;
+   then cached. A copy in a directory or the cache is a regular file,
+   opened without blocking: another file under its name (a FIFO, a device,
+   a directory) is refused at once, never waited on. The core loads its
+   copy once for every machine that waits for it, and drops a load that
+   has not settled within the download's bound and a minute, so that the
+   next ask loads it anew;
 3. every copy, the machine's download, the operator's and the cached one,
    the core's download and the upload, is checked against the pinned
    integrity before it is used, cached or unpacked; the machine unpacks
@@ -989,9 +1005,10 @@ it in, as the Go build's chat host did.
   route to the npm registry from the machine or the core, no
   `--seed-dir` copy, `--offline` without one): a new Claude Code chat is
   refused with `sdk_unavailable`, saying what each source said, which the
-  UI explains; a chat whose agent starts without it fails with it. A copy
-  that is not the pinned one (a mirror's, a seed, a cache) is refused,
-  never used.
+  UI explains; a chat whose agent starts without it fails with it. The
+  pages showing such a chat ask again after 5 minutes, a new chat at once.
+  A copy that is not the pinned one (a mirror's, a seed, a cache) is
+  refused, never used.
 - A Codex newer than the version pinned: the adapter reads what it sends
   leniently, and the app-server refuses a request with a member or a
   value it renamed (the turn fails with its message). Moving to it is its
@@ -1154,11 +1171,22 @@ SECURITY.md has both.
   hour later, the core's upload from its download and then its cache,
   offline from `--seed-dir`, every
   wrong copy refused with `sdk_unavailable` saying what each source said,
-  a machine of the Go build left alone); the routes (`routes.test.ts`); the
-  host (`hosts/machine/chathost.test.ts`: `sdk_unavailable` before
-  anything runs); and the development dependency's files packed, installed
-  and loaded from a data directory, running a recording, and loaded by a
-  `bun build --compile` executable (`machine/claude/installed.test.ts`).
+  a tampered cached copy refused and removed, a FIFO in a `--seed-dir`
+  refused at once, a load that does not settle dropped, a failure held
+  for 5 minutes but for a retry, the audit records of each source, a
+  registry with credentials refused, a machine of the Go build left
+  alone); the routes (`routes.test.ts`: an `sdk_unavailable` answer and
+  its audit record naming URLs by origin and path); a page's
+  subscriptions (`page.test.ts`: one ask per agent session, none from a
+  read-only core, a failure not asked again by the next subscription); the
+  machine's downloads without the user's `.curlrc` and `.wgetrc`
+  (`#machine/artifacts.test.ts`, with the real tools and with stand-ins
+  recording what they are given); the pin and the lockfile
+  (`claudesdk.test.ts`); the host (`hosts/machine/chathost.test.ts`:
+  `sdk_unavailable` before anything runs); and the development
+  dependency's files packed, installed and loaded from a data directory,
+  running a recording, and loaded by a `bun build --compile` executable
+  (`machine/claude/installed.test.ts`).
 - Program windows' machine side: the Go tests' tiles, flow, stats and
   video decisions ported (`features/gui/machine/wm.test.ts`), two cores
   through the wire with a fake GUI helper, the display's files, numbers,

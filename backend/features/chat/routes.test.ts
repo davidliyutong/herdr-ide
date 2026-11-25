@@ -256,6 +256,32 @@ describe('routes', () => {
     expect(r.host.requests.filter((q) => q.op === chat.Op.New)).toHaveLength(news);
   });
 
+  // What a machine or a download says of a URL reaches the page and the
+  // audit log by its origin and path only: the user information, query and
+  // fragment, where credentials go, never.
+  test('an sdk_unavailable answer and its audit record name URLs by their origin and path only', async () => {
+    const reg = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('no', { status: 404 }) });
+    try {
+      const registry = `http://127.0.0.1:${reg.port}`;
+      const r = await start({ sdk: { offline: false, registry } });
+      r.host.sdk = 'missing';
+      r.host.sdkError =
+        'download https://u:s3cret@mirror.example/npm/x.tgz?token=t0ken: exit status 22 (https://u:s3cret@mirror.example/a#fr4g)';
+      const [status, body] = await r.call('POST', m('new'), '{"kind":"claude","cwd":"/w"}');
+      expect([status, body.error]).toEqual([503, chat.Code.SdkUnavailable]);
+      expect(r.host.sdkAsks).toEqual([`${registry}/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.322.tgz`]);
+      const rec = r.audit.records().filter((a) => a.event === 'chat.sdk_install');
+      expect(rec).toEqual([expect.objectContaining({ plugin: 'chat', machine: 'gpu', source: 'download', ok: false })]);
+      for (const text of [JSON.stringify(body), JSON.stringify(rec)]) {
+        for (const secret of ['s3cret', 't0ken', 'fr4g']) expect(text).not.toContain(secret);
+        expect(text).toContain('https://mirror.example/npm/x.tgz');
+      }
+      expect(String(body.message)).toContain(`the core could not download ${registry}/@anthropic-ai/claude-agent-sdk/-/`);
+    } finally {
+      reg.stop(true);
+    }
+  });
+
   test('errors', async () => {
     const r = await start();
     const f = r.host;

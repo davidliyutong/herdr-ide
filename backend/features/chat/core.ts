@@ -73,6 +73,7 @@ export function chatFeature(o: ChatOptions = {}): ChatFeature {
         version: o.version ?? (() => VERSION),
         sdk: new SdkProvision({
           cacheDir: join(userHomeDir(), DATA_DIR_NAME, 'cache', 'npm'),
+          now: o.now,
           ...o.sdk,
           logger: ctx.logger,
         }),

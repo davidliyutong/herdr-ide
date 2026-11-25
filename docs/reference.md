@@ -27,7 +27,7 @@ build itself: its `node` commands run in it.
 | `~/.veldr[-<instance>]/bin/veldr-mcp` | The MCP server on a machine: a shell script running `veldr-mcp-$(uname -s)-$(uname -m)` beside it, a link to the uploaded machine build of that platform (the Go build has `mcp`, `node`, `gui-keep`, `gui-wl`, `chat-host` and `version`; the TypeScript build is the core's executable, started by that name as `mcp`); takes no arguments and asks the agent of its data directory on this host. |
 | `veldr gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
 | `veldr gui-wl --device NODE [--nvidia]` | Compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
-| `veldr chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS; both machine builds have it, the TypeScript build's with the ACP and Codex adapters (a Claude Code chat is refused `unsupported`). |
+| `veldr chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS; both machine builds have it, the TypeScript build's with the ACP, Codex and Claude Code adapters, Claude Code's on Anthropic's Agent SDK, which the core has the machine fetch before such a chat starts (a chat whose agent starts without it fails `sdk_unavailable`, [42](features/42-typescript-backend.md#claude-code)). |
 
 ## `serve` flags
 
@@ -44,7 +44,7 @@ and file change the value at runtime.
 | `--proxy-secret-file` | – | File with a secret (≥ 16 characters) the proxy sends in `X-veldr-Proxy-Secret`; required for requests not from loopback. |
 | `--insecure-listen` | `false` | Accept a non-loopback `--listen` without a proxy secret. Anyone reaching the port gets shell access to every machine. |
 | `--read-only` | `false` | Watch only: no terminal input, writing terminal core calls, uploads, ssh login or VS Code; no terminal core installed or started; no Kimi Code sign-in renewal. |
-| `--audit-log` | – | Append security-relevant events (connections, mutating calls, uploads, VS Code and bridge use, denials) as JSON lines. |
+| `--audit-log` | – | Append security-relevant events (connections, mutating calls, uploads, VS Code and bridge use, the Agent SDK's installs on machines, denials) as JSON lines. |
 | `--user-header` | – | Header holding the authenticated user for the audit log. Default: `Tailscale-User-Login`, `X-Forwarded-User`, `X-Auth-Request-User`, `Remote-User`, `X-Forwarded-Email`. |
 
 ### Machines

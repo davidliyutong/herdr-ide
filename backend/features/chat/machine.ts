@@ -440,13 +440,14 @@ export function chatMachine(o: ChatMachineOptions = {}) {
           await relay(s, h, ctx.signal);
         },
         // Whether the Agent SDK is installed; with url, the machine's own
-        // download of it, checked as an upload is.
+        // download of it, checked as an upload is (fetched when it was).
         sdk: async (p, ctx) => {
           if (await sdk.installed()) return { installed: true };
           if (!p.url) return { installed: false };
           try {
-            await sdk.fetch(p.url, { env: ctx.environ(), signal: ctx.signal });
-            return { installed: true };
+            return (await sdk.fetch(p.url, { env: ctx.environ(), signal: ctx.signal }))
+              ? { installed: true, fetched: true }
+              : { installed: true };
           } catch (e) {
             if (e instanceof Fail) throw e;
             return { installed: false, error: (e as Error).message };

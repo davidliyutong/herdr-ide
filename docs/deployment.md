@@ -334,8 +334,9 @@ location / {
   input, layout changes, uploads or VS Code, and no terminal core is
   installed or started. Run a second instance with it for screen sharing.
 - **Audit log** – `--audit-log FILE` records connections, mutating terminal
-  core calls, uploads, VS Code and bridge use and refused requests as JSON
-  lines, with the user from `--user-header`.
+  core calls, uploads, VS Code and bridge use, the Agent SDK's installs on
+  machines (`chat.sdk_install`) and refused requests as JSON lines, with
+  the user from `--user-header`.
 - The terminal core's API is reachable only through an allowlist: clients
   reach terminals and layouts, never the core's machine, file or server
   commands.

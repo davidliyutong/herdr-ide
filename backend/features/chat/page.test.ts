@@ -5,6 +5,7 @@ import { waitFor } from '#kernel/testing.ts';
 import { MAX_AUDIT } from './audit.ts';
 import { Sub } from './page.ts';
 import { errCode, rig, testChat, type Msg, type Rig, type RigOptions } from './testing.ts';
+import { SDK_AUDIT_EVENT, SDK_FAILURE_MS } from './sdkprovision.ts';
 import { MAX_PAGE_ID, MAX_SUBS, MAX_SUBS_PER_MACHINE } from './wire.ts';
 
 const rigs: Rig[] = [];
@@ -432,5 +433,75 @@ describe('page', () => {
     const m = await pg.expect('ack');
     expect([m.id, errCode(m)]).toEqual(['p2', 'not_attached']);
     expect(r.host.commands.length).toBe(1);
+  });
+
+  // A subscription to a Claude Code chat, whose next prompt may start its
+  // agent, gets the machine Anthropic's Agent SDK without waiting for it,
+  // once per agent session within the hour; a read-only core asks nothing
+  // of the machine.
+  test("a subscription to a Claude Code chat gets the machine the Agent SDK; a read-only core's asks nothing", async () => {
+    const id = chat.newChatID();
+    const claude = (h: Rig['host']) => h.chats.set(id, testChat({ id, kind: 'claude' }));
+    const ro = await start({ readOnly: true, host: claude });
+    let pg = await ro.page();
+    pg.send({ op: 'attach', sub: 's1', m: 'gpu', chat: id });
+    await pg.expect('attached');
+    await Bun.sleep(50);
+    expect(ro.host.sdkAsks).toEqual([]);
+    expect(ro.audit.records().filter((a) => a.event === SDK_AUDIT_EVENT)).toEqual([]);
+
+    // Online, against a registry nothing answers on: the machine downloads
+    // it itself, audited as the page's user.
+    const r = await start({ host: claude, sdk: { offline: false, registry: 'http://127.0.0.1:9' } });
+    r.host.sdk = 'downloads';
+    pg = await r.page();
+    pg.send({ op: 'attach', sub: 's1', m: 'gpu', chat: id });
+    await pg.expect('attached');
+    await waitFor('the ask', () => r.host.sdkAsks.length === 1);
+    await waitFor('the audit', () => r.audit.records().some((a) => a.event === SDK_AUDIT_EVENT));
+    expect(r.audit.records().filter((a) => a.event === SDK_AUDIT_EVENT)).toEqual([
+      expect.objectContaining({ plugin: 'chat', machine: 'gpu', source: 'machine', ok: true, remote: '127.0.0.1' }),
+    ]);
+    pg.send({ op: 'attach', sub: 's2', m: 'gpu', chat: id });
+    await pg.expect('attached');
+    // A new chat waits for the asks before it: none more.
+    expect((await r.call('POST', '/api/m/gpu/p/chat/new', '{"kind":"claude","cwd":"/w"}'))[0]).toBe(200);
+    expect(r.host.sdkAsks).toHaveLength(1);
+    // Another kind's chat asks nothing.
+    r.hub.o.sdk.forget('gpu');
+    const codex = newChat(r);
+    pg.send({ op: 'attach', sub: 's3', m: 'gpu', chat: codex });
+    await pg.expect('attached');
+    await Bun.sleep(50);
+    expect(r.host.sdkAsks).toHaveLength(1);
+  });
+
+  // A machine that could not get the SDK is not asked again by every page
+  // that shows the chat: the failure holds on that agent session for
+  // SDK_FAILURE_MS, while a new chat, the user's own request, asks again.
+  test('a machine that could not get the Agent SDK is asked again by a new chat, not by each subscription', async () => {
+    const id = chat.newChatID();
+    const r = await start({ host: (h) => h.chats.set(id, testChat({ id, kind: 'claude' })) });
+    // Without it, and the core offline without a copy: every source fails.
+    r.host.sdk = 'missing';
+    const pg = await r.page();
+    pg.send({ op: 'attach', sub: 's1', m: 'gpu', chat: id });
+    await pg.expect('attached');
+    await waitFor('the ask', () => r.host.sdkAsks.length === 1);
+    pg.send({ op: 'attach', sub: 's2', m: 'gpu', chat: id });
+    await pg.expect('attached');
+    // POST new waits for the subscription's ask before it, then asks again.
+    const [status, body] = await r.call('POST', '/api/m/gpu/p/chat/new', '{"kind":"claude","cwd":"/w"}');
+    expect([status, body.error]).toEqual([503, chat.Code.SdkUnavailable]);
+    expect(r.host.sdkAsks).toHaveLength(2);
+    const installs = r.audit.records().filter((a) => a.event === SDK_AUDIT_EVENT);
+    expect(installs).toHaveLength(2);
+    for (const a of installs) expect(a).toMatchObject({ plugin: 'chat', machine: 'gpu', source: 'none', ok: false });
+    expect(String(installs[0]!.error)).toContain('the core is offline');
+    // Once the window passed, a subscription asks again.
+    r.advance(SDK_FAILURE_MS);
+    pg.send({ op: 'attach', sub: 's3', m: 'gpu', chat: id });
+    await pg.expect('attached');
+    await waitFor('the ask after the window', () => r.host.sdkAsks.length === 3);
   });
 });

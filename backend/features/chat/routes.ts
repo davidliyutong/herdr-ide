@@ -210,9 +210,12 @@ export function routes(ctx: FeatureContext, hub: ChatHub, timing: Timing): void 
       ...(o.mode ? { mode: o.mode } : {}),
     };
     // A Claude Code chat runs on Anthropic's Agent SDK, which the machine
-    // gets first.
+    // gets first: asked again although it failed lately, the user asking.
     try {
-      await hub.ensureSdk(c.var.machine.id, b.kind, bounded(c, timing.sdkMs));
+      await hub.ensureSdk(c.var.machine.id, b.kind, bounded(c, timing.sdkMs), {
+        retry: true,
+        audit: (event, fields) => ctx.audit.log(c.var.who, event, fields),
+      });
     } catch (e) {
       throw failOf(e);
     }

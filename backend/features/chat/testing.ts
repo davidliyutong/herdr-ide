@@ -23,6 +23,7 @@ import { agentDialer, memoryAudit, running, sshSpec, testMachines, waitFor } fro
 import { chatFeature, type ChatFeature } from './core.ts';
 import type { ChatHub } from './hub.ts';
 import { NOT_RUNNING } from './protocol.ts';
+import type { SdkProvisionOptions } from './sdkprovision.ts';
 import { settings as chatSettings } from './settings.ts';
 import type { Limits, Timing } from './timing.ts';
 
@@ -68,10 +69,12 @@ export class FakeChatHost {
   /** Fails every open with that code. */
   openErr = '';
   /** What the machine answers of Anthropic's Agent SDK (action sdk): the
-   * TypeScript build with it installed, without it (and without a way to
-   * download it), or the Go build (no such action); the urls asked to
-   * download from. */
-  sdk: 'installed' | 'missing' | 'go' = 'installed';
+   * TypeScript build with it installed, one that downloads it when asked
+   * (installed then), without it (and without a way to download it, saying
+   * sdkError), or the Go build (no such action); the urls asked to download
+   * from. */
+  sdk: 'installed' | 'downloads' | 'missing' | 'go' = 'installed';
+  sdkError = 'no route';
   readonly sdkAsks: Array<string | undefined> = [];
   /** The start flags of the opens; every request; every command. */
   readonly opens: boolean[] = [];
@@ -101,9 +104,14 @@ export class FakeChatHost {
       closeStream(conn.stream);
     };
     if (h.op === Op.Plugin && h.plugin === 'chat' && h.action === 'sdk') {
-      this.sdkAsks.push((h.params as { url?: string } | undefined)?.url);
+      const url = (h.params as { url?: string } | undefined)?.url;
+      this.sdkAsks.push(url);
       if (this.sdk === 'go') return reply({ ok: false, code: 'bad_params', error: 'chat: unknown action "sdk"' });
-      return reply({ ok: true, plugin: this.sdk === 'installed' ? { installed: true } : { installed: false, error: 'no route' } });
+      if (this.sdk === 'downloads' && url) {
+        this.sdk = 'installed';
+        return reply({ ok: true, plugin: { installed: true, fetched: true } });
+      }
+      return reply({ ok: true, plugin: this.sdk === 'installed' ? { installed: true } : { installed: false, error: this.sdkError } });
     }
     if (h.op !== Op.Plugin || h.plugin !== 'chat' || h.action !== 'open') return reply({ ok: false, error: 'unsupported op' });
     const start = (h.params as { start?: boolean } | undefined)?.start !== false;
@@ -400,6 +408,9 @@ export class TestPage {
 
 export interface RigOptions {
   readOnly?: boolean;
+  /** How the core gets the machines the Agent SDK: offline by default,
+   * with a cache of its own. */
+  sdk?: Partial<SdkProvisionOptions>;
   timing?: Partial<Timing>;
   limits?: Partial<Limits>;
   /** This core's build (the chat host's is "test"). */
@@ -448,7 +459,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
   let offset = 0;
   const feature: ChatFeature = chatFeature({
     // Never the registry: the tests are offline, the cache a temporary one.
-    sdk: { offline: true, cacheDir: realpathSync(mkdtempSync(join(tmpdir(), 'chat-sdk-'))) },
+    sdk: { offline: true, cacheDir: realpathSync(mkdtempSync(join(tmpdir(), 'chat-sdk-'))), ...o.sdk },
     timing: { ...FAST, ...o.timing },
     limits: o.limits,
     now: () => Date.now() + offset,

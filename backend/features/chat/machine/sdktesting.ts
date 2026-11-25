@@ -59,16 +59,26 @@ export async function fakeSdk(
 
 /** A registry on loopback: GET /<name>/-/<file> answers what files holds
  * for file; refuse turns away the requests it takes (by their user agent),
- * hits counts the requests by user agent. */
-export function fakeRegistry(o: { files: Map<string, Buffer>; refuse?: (ua: string) => boolean }) {
+ * hang answers them with a body that never ends, hits counts the requests
+ * by user agent. */
+export function fakeRegistry(o: { files: Map<string, Buffer>; refuse?: (ua: string) => boolean; hang?: (ua: string) => boolean }) {
   const hits: string[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
+    idleTimeout: 0,
     fetch(req) {
       const ua = req.headers.get('user-agent') ?? '';
       hits.push(ua);
       if (o.refuse?.(ua)) return new Response('refused', { status: 403 });
+      if (o.hang?.(ua))
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(new Uint8Array([0x1f]));
+            },
+          }),
+        );
       const name = new URL(req.url).pathname.split('/-/')[1] ?? '';
       const b = o.files.get(name);
       return b ? new Response(b) : new Response('not found', { status: 404 });
