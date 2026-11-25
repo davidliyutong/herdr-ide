@@ -5,7 +5,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { discard } from '#shared/lib/log.ts';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
-import { coreModules } from '#kernel/config/registry.ts';
+import { hubModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { createHub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
@@ -65,7 +65,7 @@ async function withHub(answer: Answer, readOnly = false) {
     }
   };
   const machines = testMachines([sshSpec('box'), sshSpec('gpu'), sshSpec('far', 'far', 'far', false)], { dial: agentDialer({ serve }) });
-  const st = new Settings('', { modules: coreModules([usageFeature()]) });
+  const st = new Settings('', { modules: hubModules([usageFeature()]) });
   const audit = memoryAudit();
   const core = createHub({
     guard: new Guard(),

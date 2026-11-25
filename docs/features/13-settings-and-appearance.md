@@ -27,7 +27,7 @@ settings per browser; theming terminal applications.
 ### Registry
 
 `backend/kernel/config/settings` defines the model (`define.ts`) and the
-store of values (`store.ts`); `coreModules`
+store of values (`store.ts`); `hubModules`
 (`backend/kernel/config/registry.ts`) lists the modules the core registers:
 `config/ui` for the user interfaces, the feature switches (`toggles.ts`)
 and the features' own (program windows', VS Code's, browser, files, git,

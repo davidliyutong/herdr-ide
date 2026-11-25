@@ -169,8 +169,8 @@ export function processesOf(home: string): Array<{ pid: number; command: string 
 
 /** Stops the nodes of an instance of ours, with its own name and home. */
 export function stopNodes(home: string, name: string) {
-  if (!existsSync(paths.core)) return;
-  spawnSync(paths.core, ['node', 'stop', '--instance', name], {
+  if (!existsSync(paths.hub)) return;
+  spawnSync(paths.hub, ['node', 'stop', '--instance', name], {
     env: { HOME: home, PATH: '/usr/bin:/bin' },
     timeout: 15_000,
     stdio: 'ignore',
@@ -181,8 +181,8 @@ export function stopNodes(home: string, name: string) {
  * the instance's own name and home (the core's command finds its
  * executable, session and socket), nothing else. */
 export function stopTerminalCore(home: string, name: string) {
-  if (!existsSync(paths.core)) return;
-  spawnSync(paths.core, ['node', 'stop', '--instance', name, '--terminal-core'], {
+  if (!existsSync(paths.hub)) return;
+  spawnSync(paths.hub, ['node', 'stop', '--instance', name, '--terminal-core'], {
     env: { HOME: home, PATH: '/usr/bin:/bin' },
     timeout: 30_000,
     stdio: 'ignore',

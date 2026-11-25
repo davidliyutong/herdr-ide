@@ -17,7 +17,7 @@
 # The machine builds go into machines/ with their SHA256SUMS, which the
 # cores take as --agent-dir (a build of no release: nothing is
 # downloaded); core is this host's. They are built again as another, newer
-# version into machines-newer/ (core-newer), which takes the nodes over
+# version into machines-newer/ (hub-newer), which takes the nodes over
 # from the first (tests/nodes.spec.ts).
 #
 #   SKIP_WEB=1 scripts/e2e.sh       # reuse web/dist
@@ -140,8 +140,8 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
       printf '%s  %s\n' "$( { sha256sum "${SLUG}-$k" 2>/dev/null || shasum -a 256 "${SLUG}-$k"; } | cut -d' ' -f1)" "${SLUG}-$k/${SLUG}"
     done > SHA256SUMS)
   done
-  cp "$OUT/machines/${SLUG}-$os-$arch" "$OUT/core"
-  cp "$OUT/machines-newer/${SLUG}-$os-$arch" "$OUT/core-newer"
+  cp "$OUT/machines/${SLUG}-$os-$arch" "$OUT/hub"
+  cp "$OUT/machines-newer/${SLUG}-$os-$arch" "$OUT/hub-newer"
   gzip -1 -c "$OUT/machines/${SLUG}-$os-$arch" > "$OUT/payload/machine/${SLUG}-$os-$arch.gz"
   # The desktop app's smoke test (tests/desktop.spec.ts) runs it unpackaged
   # with the core bundled for its utility process and the payloads above;

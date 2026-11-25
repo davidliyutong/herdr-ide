@@ -9,7 +9,7 @@ import { connect, createServer, type AddressInfo, type Server, type Socket } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
-import { coreModules } from '#kernel/config/registry.ts';
+import { hubModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { createHub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
@@ -78,7 +78,7 @@ async function setup(o: BrowserOptions & { run?: boolean; listening?: () => Repl
   const listening = o.listening ?? (() => ({ ok: true, plugin: { ports: [] } }));
   const machines = testMachines([sshSpec('x'), localSpec('here', false)], { dial: agentDialer({ serve: browserAgent(listening) }) });
   const feature = browserFeature(o);
-  const st = new Settings('', { modules: coreModules([feature]) });
+  const st = new Settings('', { modules: hubModules([feature]) });
   const audit = memoryAudit();
   const logs: string[] = [];
   const core = createHub({

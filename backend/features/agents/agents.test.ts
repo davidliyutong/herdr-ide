@@ -3,7 +3,7 @@
 // Go agent's plugin op) to the page.
 import { afterEach, expect, test } from 'bun:test';
 import { Op, readBody, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
-import { coreModules } from '#kernel/config/registry.ts';
+import { hubModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { enableSetting } from '#kernel/feature.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
@@ -84,7 +84,7 @@ test('switch', () => {
     'plugins.agents.enabled',
     'plugins.agents.enabled',
   ]);
-  expect(new Settings('', { modules: coreModules([f]) }).get('plugins.agents.enabled')).toBe(true);
+  expect(new Settings('', { modules: hubModules([f]) }).get('plugins.agents.enabled')).toBe(true);
 });
 
 // The route is a machine's read: answered in read-only mode, not audited,

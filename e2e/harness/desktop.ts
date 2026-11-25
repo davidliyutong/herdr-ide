@@ -38,7 +38,7 @@ function electronBinary(): string | undefined {
 
 /** Why the desktop app cannot run here, or undefined when it can. */
 export function desktopUnavailable(): string | undefined {
-  if (!electronBinary() || !['main.cjs', 'preload.cjs', 'frames.cjs', 'core.mjs'].every((f) => existsSync(join(desktopDir, 'dist', f))))
+  if (!electronBinary() || !['main.cjs', 'preload.cjs', 'frames.cjs', 'hub.mjs'].every((f) => existsSync(join(desktopDir, 'dist', f))))
     return 'the desktop app is not built: pnpm -C desktop install && pnpm -C desktop build';
   if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return 'Electron needs a display';
   return undefined;
@@ -203,7 +203,7 @@ export class Desktop {
   hubPid(not?: number): Promise<number> {
     return waitFor(
       async () => {
-        const pid = (await this.processes()).find((p) => p.type === 'Utility' && / core$/.test(p.name))?.pid;
+        const pid = (await this.processes()).find((p) => p.type === 'Utility' && / hub$/.test(p.name))?.pid;
         return pid !== not ? pid : undefined;
       },
       { what: "the core's utility process", timeout: 30_000 },

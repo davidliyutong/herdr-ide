@@ -25,14 +25,14 @@ import { Settings, type Def, type Module } from './settings/index.ts';
 import { toggles, type Switchable } from './toggles.ts';
 import { UI } from './ui/index.ts';
 
-/** What coreModules reads of a feature (FeatureDef's members). */
+/** What hubModules reads of a feature (FeatureDef's members). */
 export type FeatureSettings = Switchable & { settings?: Module };
 
 /** The settings modules of the core: the user interface's, the switches
  * of the features that can be turned off and the features' own modules,
  * in the order the host composes the features (hosts/common/compose.ts
  * hubFeatures), which is the order the UIs list them in. */
-export function coreModules(features: readonly FeatureSettings[]): Module[] {
+export function hubModules(features: readonly FeatureSettings[]): Module[] {
   return [UI, toggles(features), ...features.flatMap((f) => (f.settings ? [f.settings] : []))];
 }
 
@@ -45,7 +45,7 @@ export interface RegistryInput {
 /** The registry's input of a core of features: their settings, every
  * command, every kind of coding agent. */
 export const registryInput = (features: readonly FeatureSettings[]): RegistryInput => ({
-  modules: coreModules(features),
+  modules: hubModules(features),
   commands: COMMANDS,
   agents: agentkinds.all(),
 });

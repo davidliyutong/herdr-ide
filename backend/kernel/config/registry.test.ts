@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildRegistry, coreModules, fillReference, registryInput, translationKeys, updateRegistry } from './registry.ts';
+import { buildRegistry, hubModules, fillReference, registryInput, translationKeys, updateRegistry } from './registry.ts';
 import { bool, defineModule, enumOf, Settings } from './settings/index.ts';
 import { UI } from './ui/index.ts';
 
@@ -31,7 +31,7 @@ describe('core modules', () => {
       sections: [{ id: 'files', order: 66, plugin: 'files' }],
       settings: { 'files.showHidden': bool({ default: true, section: 'files', order: 10 }) },
     });
-    const modules = coreModules([
+    const modules = hubModules([
       { id: 'machines', toggle: false },
       { id: 'vscode', defaultOff: true, browserRisk: true },
       { id: 'files', settings: files },

@@ -15,7 +15,7 @@ import { parseDuration } from '#shared/lib/gotime.ts';
 import { downloadURLRefusal } from '#shared/lib/urls.ts';
 import { auditLog, noAudit } from '#kernel/audit.ts';
 import type { Channel, ChannelHandlers, ChannelOpen, Message } from '#kernel/channel.ts';
-import { coreModules } from '#kernel/config/registry.ts';
+import { hubModules } from '#kernel/config/registry.ts';
 import { settingFlags } from '#kernel/config/settings/index.ts';
 import { Guard, isLoopbackHost } from '#kernel/http/guard.ts';
 import type { Peer } from '#kernel/http/env.ts';
@@ -143,7 +143,7 @@ export async function serve(argv: string[]): Promise<void> {
     chatSdk: { seedDirs: f['seed-dir'], offline: f.offline, registry: f['npm-registry'] },
   });
 
-  const flagDefs = settingFlags(coreModules(features));
+  const flagDefs = settingFlags(hubModules(features));
   let flags: Record<string, string | boolean | undefined>;
   try {
     flags = parseArgs({

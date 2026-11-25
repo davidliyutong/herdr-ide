@@ -58,7 +58,7 @@ scripts/build.sh`: the web UI, the build's release record and its own
 platform's executable for the local machine (no executable on Windows),
 the encoders,
 the VS Code extension), then builds the shell with the core bundled for its
-utility process (`desktop/build.mjs`: `dist/core.mjs` from
+utility process (`desktop/build.mjs`: `dist/hub.mjs` from
 `backend/hosts/electron`), then runs electron-builder
 (`desktop/electron-builder.cjs`).
 Modes: `build`, `app` (unpacked), `dist` (installers), `install` (macOS:
@@ -66,7 +66,7 @@ copy into `/Applications`) and `dev`. `DESKTOP_OS` packages another
 system's unpacked app to check its packaging; `SKIP_BUILD=1` runs
 electron-builder alone.
 
-- The core's bundle (`dist/core.mjs`) and node-pty, the native module its
+- The core's bundle (`dist/hub.mjs`) and node-pty, the native module its
   ssh logins run in (prebuilt for macOS and Windows, built by `pnpm
   install` on Linux; Node-API, so no rebuild for Electron; `build.mjs`
   makes its macOS `spawn-helper` executable, which node-pty 1.1.0's

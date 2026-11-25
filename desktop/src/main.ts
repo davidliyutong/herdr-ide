@@ -672,8 +672,8 @@ if (!app.requestSingleInstanceLock()) {
       const seed = devPath('SEED_DIR');
       const spawner: HubSpawner = {
         fork: () =>
-          utilityProcess.fork(join(__dirname, 'core.mjs'), [], {
-            serviceName: `${APP_NAME} core`,
+          utilityProcess.fork(join(__dirname, 'hub.mjs'), [], {
+            serviceName: `${APP_NAME} hub`,
             stdio: ['ignore', 'ignore', 'pipe'],
             env: hubEnv(process.env, home, platform),
             cwd: home,

@@ -12,7 +12,7 @@ import type { Server, ServerWebSocket } from 'bun';
 import { discard } from '#shared/lib/log.ts';
 import { ChunkReader, Op, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { channelPair, type Channel, type Message } from '#kernel/channel.ts';
-import { coreModules } from '#kernel/config/registry.ts';
+import { hubModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { createHub, type Hub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
@@ -258,7 +258,7 @@ export async function vscodeHub(o: VSCodeHubOptions = {}): Promise<VSCodeHub> {
   // Tests never reach the network.
   const noNetwork = (() => Promise.reject(new Error('no network in tests'))) as unknown as typeof fetch;
   const features = vscodeFeatures({ cacheDir: join(dir, 'cache'), extensions: [], fetch: noNetwork, ...o });
-  const settings = new Settings('', { modules: coreModules(features) });
+  const settings = new Settings('', { modules: hubModules(features) });
   settings.set('plugins.vscode.enabled', '', o.desktopOn ?? true);
   settings.set('plugins.vscode.browser', '', o.browserOn ?? true);
   const audit = memoryAudit();

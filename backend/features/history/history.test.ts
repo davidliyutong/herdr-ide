@@ -14,7 +14,7 @@ import {
   type HistoryCaptureParams,
   type Reply,
 } from '#shared/proto/agentproto/index.ts';
-import { coreModules } from '#kernel/config/registry.ts';
+import { hubModules } from '#kernel/config/registry.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import { createHub } from '#kernel/hub.ts';
 import { enableSetting } from '#kernel/feature.ts';
@@ -27,7 +27,7 @@ import { Scheduler, TIMING } from './scheduler.ts';
 import { LIMITS, settings } from './settings.ts';
 
 const SWITCH = 'plugins.history.enabled';
-const newSettings = () => new Settings('', { modules: coreModules([historyFeature()]) });
+const newSettings = () => new Settings('', { modules: hubModules([historyFeature()]) });
 
 const stops: Array<() => Promise<void>> = [];
 afterEach(async () => {

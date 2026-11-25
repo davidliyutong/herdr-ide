@@ -11,7 +11,7 @@ import { VERSION } from '#shared/proto/agentproto/index.ts';
 import type { Audit } from '#kernel/audit.ts';
 import { Keybindings } from '#kernel/config/keybindings/index.ts';
 import { besideSettings, settingsPath } from '#kernel/config/paths.ts';
-import { coreModules } from '#kernel/config/registry.ts';
+import { hubModules } from '#kernel/config/registry.ts';
 import { settingsRoutes } from '#kernel/config/routes.ts';
 import { Settings } from '#kernel/config/settings/index.ts';
 import type { FeatureDef } from '#kernel/feature.ts';
@@ -60,7 +60,7 @@ export interface FeatureInputs {
 /** The core's features, as both hosts run them (also what
  * scripts/reference.ts lists the routes of and scripts/registry.ts the
  * settings of), in the order the UIs list their switches and settings
- * (kernel/config/registry.ts coreModules). */
+ * (kernel/config/registry.ts hubModules). */
 export function hubFeatures(o: FeatureInputs): FeatureDef[] {
   const { payloads } = o;
   // Program windows give new terminals their display and follow the
@@ -165,7 +165,7 @@ export interface Composed {
  * agent. */
 export function composeHub(o: ComposeOptions): Composed {
   const { logger, instance, nodeInstance, payloads, controlDir } = o;
-  const modules = coreModules(o.features);
+  const modules = hubModules(o.features);
   let settingsFile = '';
   try {
     settingsFile = settingsPath(userConfigDir(), instance);

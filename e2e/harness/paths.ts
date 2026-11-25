@@ -18,10 +18,10 @@ const slug = /^export const SLUG = '(.*)';$/m.exec(readFileSync(join(repoRoot, '
 export const paths = {
   slug,
   /** The core, built with the web UI and the host's herdr-core embedded. */
-  core: join(dir, 'core'),
+  hub: join(dir, 'hub'),
   /** The same core built again as another, newer build: it takes the
    * nodes over from the first. */
-  hubNewer: join(dir, 'core-newer'),
+  hubNewer: join(dir, 'hub-newer'),
   /** The version of the newer build, which its nodes report
    * (scripts/e2e.sh). */
   newerVersion: 'dev-e2e-newer',
@@ -34,7 +34,7 @@ export const paths = {
   agents: join(dir, 'machines'),
   /** The machine build directory of a core: the builds are of a version,
    * the newer core's its own. */
-  agentsOf: (exe: string): string => (exe === join(dir, 'core-newer') ? join(dir, 'machines-newer') : join(dir, 'machines')),
+  agentsOf: (exe: string): string => (exe === join(dir, 'hub-newer') ? join(dir, 'machines-newer') : join(dir, 'machines')),
   /** The machine build an SSH machine of Docker's architecture gets: the
    * build for musl (the image is Alpine). */
   sshMachineBuild: (arch: string): string => join(dir, 'machines', `${slug}-linux-${arch}-musl`),
@@ -49,7 +49,7 @@ export const paths = {
 };
 
 export function checkBuilt() {
-  for (const p of [paths.core, join(paths.fakeBin, 'kimi'), join(paths.fakeBin, 'codex')]) {
+  for (const p of [paths.hub, join(paths.fakeBin, 'kimi'), join(paths.fakeBin, 'codex')]) {
     if (!existsSync(p)) throw new Error(`${p} is missing: run make e2e (scripts/e2e.sh builds it)`);
   }
 }

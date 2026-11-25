@@ -63,7 +63,7 @@ still running on a machine.
 ## Desktop app
 
 The Electron shell (`desktop/src/main.ts`) runs the core in a utility
-process (`backend/hosts/electron`, bundled as `desktop/dist/core.mjs`),
+process (`backend/hosts/electron`, bundled as `desktop/dist/hub.mjs`),
 instance `desktop` and the default namespace on machines
 ([39](features/39-nodes.md)), and listens on nothing
 ([42](features/42-typescript-backend.md)):

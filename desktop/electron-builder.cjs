@@ -16,7 +16,7 @@ const name = brand('APP_NAME');
 const appId = `${brand('APP_DOMAIN').split('.').reverse().join('.')}.desktop`;
 const arch = process.env.DESKTOP_ARCH || process.arch;
 if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported architecture: ${arch}`);
-// The core runs in the app's utility process (dist/core.mjs, bundled by
+// The core runs in the app's utility process (dist/hub.mjs, bundled by
 // build.mjs), with node-pty beside it, a native module: prebuilt for macOS
 // and Windows, built for this machine on Linux by pnpm install. The
 // payloads it carries for machines and the web UI are resources:
@@ -57,7 +57,7 @@ module.exports = {
     'dist/main.cjs',
     'dist/preload.cjs',
     'dist/frames.cjs',
-    'dist/core.mjs',
+    'dist/hub.mjs',
     'assets/icon.png',
     'package.json',
     // node-pty's sources and the libraries it is built from.
@@ -65,7 +65,7 @@ module.exports = {
   ],
   // The utility process's entry and node-pty (its library, and the helper
   // it spawns on macOS) as files, outside the archive.
-  asarUnpack: ['dist/core.mjs', 'node_modules/node-pty/**'],
+  asarUnpack: ['dist/hub.mjs', 'node_modules/node-pty/**'],
   extraMetadata: {
     name: `${slug}-desktop`,
     // Release tags (vX.Y.Z) stay as is in the core; app metadata takes semver.
@@ -109,7 +109,7 @@ module.exports = {
       throw new Error(`Packaging ${packing} with ${arch} modules; set DESKTOP_ARCH=${packing} (scripts/desktop.sh does)`);
     }
     const needed = [
-      'dist/core.mjs',
+      'dist/hub.mjs',
       'dist/frames.cjs',
       ptyBinary(context.electronPlatformName),
       '../web/dist/index.html',

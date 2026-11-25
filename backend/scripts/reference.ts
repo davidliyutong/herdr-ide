@@ -11,7 +11,7 @@ import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { discard } from '#shared/lib/log.ts';
 import { noAudit } from '#kernel/audit.ts';
 import { Keybindings } from '#kernel/config/keybindings/index.ts';
-import { coreModules } from '#kernel/config/registry.ts';
+import { hubModules } from '#kernel/config/registry.ts';
 import { Settings, settingFlags } from '#kernel/config/settings/index.ts';
 import { createHub } from '#kernel/hub.ts';
 import { Guard } from '#kernel/http/guard.ts';
@@ -22,7 +22,7 @@ import { describedFeatures, hostRoutes } from '#hosts/common/compose.ts';
 import { OPTIONS } from '#hosts/bun/serve.ts';
 
 const features = describedFeatures();
-const modules = coreModules(features);
+const modules = hubModules(features);
 const settings = new Settings('', { modules });
 const core = createHub({
   guard: new Guard({ allowedOrigins: [], proxySecret: '', logger: discard }),

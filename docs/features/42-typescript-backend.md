@@ -92,7 +92,7 @@ requests reach it.
 - **Electron** (`backend/hosts/electron`): the core runs in a
   `utilityProcess` (a crash leaves the window, heavy work does not block
   it), which the main process (`desktop/src/hub.ts`) forks with the
-  app's bundle of it (`dist/core.mjs`), starts with a message on its parent
+  app's bundle of it (`dist/hub.mjs`), starts with a message on its parent
   port (instance, node instance, the verify key of the launch, where the
   payloads are) and restarts after a crash, at most 3 times a minute. The
   app's windows live in a session of their own (`persist:app`), which

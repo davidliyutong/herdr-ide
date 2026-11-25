@@ -60,7 +60,7 @@ export class Instance {
    * of the same machines, which reaches the same local node, and with
    * stored the machines the first one added. Its stop() stops that core
    * only. */
-  async second(stored = false, exe = paths.core): Promise<Instance> {
+  async second(stored = false, exe = paths.hub): Promise<Instance> {
     const inst = new Instance(this);
     try {
       await inst.launch(stored, exe);
@@ -85,7 +85,7 @@ export class Instance {
     return inst;
   }
 
-  private async launch(stored = false, exe = paths.core) {
+  private async launch(stored = false, exe = paths.hub) {
     // --local-only leaves out stored machines only: the SSH machines a
     // test adds while the core runs connect. --agent-dir holds the Linux
     // machine build they get (scripts/e2e.sh).
