@@ -607,6 +607,18 @@ frame went as H.264 through VA-API at 54–62 fps, then as VP8 at 61 fps
 when the viewers decoded only that. The encoder (glibc 2.28) makes no
 kind on CentOS 7 or musl, as with the Go agent. The helper's JPEG of a
 1706×960 picture takes 16 ms on one core of an Apple M4 (the Go agent's
-encoder 47 ms; both code row groups on every core). Not run with the
-TypeScript build: NVIDIA's GPU display, NVENC and gpupick on a machine
-with several NVIDIA GPUs.
+encoder 47 ms; both code row groups on every core). On a server with
+four RTX PRO 6000 Blackwell (driver 580.159, Xwayland 23.2, the driver's
+first GPU second on the bus), whose least busy card (about 21% used by
+other work, which rose to at most 35% meanwhile) is the driver's first:
+the GPU display drew with it through the helper's compositor offering
+NVIDIA's layouts (`--nvidia`), with DRI3; GLX rendered directly on it,
+`glxgears` at about 5060 frames a second without vertical sync (the
+driver sharing its buffers with the display) and `vkcube` presented from
+its Vulkan device (each GPU is listed twice there: two NVIDIA ICDs are
+registered); the encoder ran NVENC on that card (`CUDA_VISIBLE_DEVICES`
+naming it) at 57–61 fps for the 640×360 window, then VP8 at 50 fps; and
+gpupick, with the environment the core gives a pane and
+`CUDA_VISIBLE_DEVICES=1`, left a program that card's device node alone
+(the others refused, `nvidia-smi -L` listing it alone,
+`CUDA_VISIBLE_DEVICES` rewritten to 0).

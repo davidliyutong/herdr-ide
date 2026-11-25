@@ -998,7 +998,8 @@ SECURITY.md has both.
   or Docker (`scripts/gui-it.sh`); and on the machines of `e2e/machines`
   (`payloads/gui`): CentOS 7's VM (3.10, glibc 2.17), Ubuntu 18.04's,
   containers of CentOS 7 and Alpine (musl), and Ubuntu 24.04 hosts with
-  the GPU display and VA-API video
+  the GPU display and VA-API video, and a server of four NVIDIA GPUs with
+  the GPU display on one of them, NVENC and gpupick
   ([14](14-gui-windows.md#testing) has the results).
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
   runs the suite against the TypeScript build (32 passed, none skipped;

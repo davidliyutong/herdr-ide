@@ -143,6 +143,12 @@ cloud images do) and an ssh server.
   holding the display and leaving with it, the GPU display where the
   machine has Xwayland and a render node, video through the encoder of
   `scripts/build-ffmpeg.sh` when `build.sh` finds it (H.264, then VP8),
-  and gpupick's install. `build.sh` builds the executables of linux x64
+  and gpupick's install. With `GUI_MATRIX_GL=1` it also runs OpenGL and
+  Vulkan programs on the GPU display (`glxinfo`, `glxgears` without
+  vertical sync, `vkcube` on the display GPU's Vulkan device) where they
+  are installed; with several NVIDIA GPUs it checks that gpupick leaves a
+  program only the GPU of its `CUDA_VISIBLE_DEVICES` (`GUI_MATRIX_PICK`,
+  an index in bus order; 0 by default); `GUI_MATRIX_NO_GPU=1` keeps it
+  off the GPU. `build.sh` builds the executables of linux x64
   for glibc and musl, the X program and the driver; `run.sh` runs the
   driver with the executable of the machine's C library acting as Bun.

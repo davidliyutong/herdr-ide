@@ -10,7 +10,7 @@
 // display where the machine has Xwayland and a render node it may open.
 // build.sh bundles it into driver.js; run.sh runs it with the machine
 // executable acting as Bun (BUN_BE_BUN=1), which the node does not get.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -28,6 +28,7 @@ import {
 import { pairDuplex } from '../../../../backend/shared/proto/yamux.ts';
 import { Session } from '../../../../backend/kernel/machines/transport/session.ts';
 import { machineOf } from '../../../../backend/machine/testing.ts';
+import { pickEnv } from '../../../../backend/features/gui/state.ts';
 import { machineAgent } from '../../../../backend/features/gui/agent.ts';
 import { withoutForeignRuntimeVars } from '../../../../backend/shared/lib/bunenv.ts';
 
@@ -105,6 +106,55 @@ function pngPixel(png: Buffer, x: number, y: number): number[] {
   return [...prev.subarray(x * 3, x * 3 + 3)];
 }
 
+/** OpenGL and Vulkan of programs on the GPU display (GUI_MATRIX_GL=1, where
+ * glxinfo, glxgears, vulkaninfo and vkcube are installed): direct
+ * rendering on the GPU, a few seconds of glxgears, Vulkan presenting. */
+function graphics(display: string, xauthority: string, displayUUID: string): void {
+  const genv = { PATH: '/usr/bin:/bin', HOME: home, DISPLAY: display, XAUTHORITY: xauthority };
+  const run = (argv: string[], ms: number, extra: Record<string, string> = {}) => {
+    const r = spawnSync(argv[0], argv.slice(1), { env: { ...genv, ...extra }, encoding: 'utf8', timeout: ms });
+    return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+  const pick = (out: string, re: RegExp) =>
+    out
+      .split('\n')
+      .find((l) => re.test(l))
+      ?.trim() ?? '';
+  const g = run(['glxinfo', '-B'], 15_000);
+  const renderer = pick(g.out, /OpenGL renderer string/);
+  check(
+    g.code === 0 && /direct rendering: Yes/.test(g.out) && !/llvmpipe/.test(renderer),
+    `GLX on the GPU display: ${pick(g.out, /direct rendering/)}; ${renderer}; ${pick(g.out, /OpenGL version string/)}`,
+  );
+  // glxgears prints its rate every 5 s: one report, then it is ended. Not
+  // waiting for vertical sync, its rate tells whether the driver shares its
+  // buffers with the display (thousands a second) or copies them.
+  const gears = run(['timeout', '-s', 'INT', '7', 'glxgears', '-info'], 15_000, { __GL_SYNC_TO_VBLANK: '0', vblank_mode: '0' });
+  check(/frames in 5\.0 seconds/.test(gears.out), `glxgears: ${pick(gears.out, /frames in/)}`);
+  // Vulkan on the display's GPU (vkcube takes the first device otherwise),
+  // found by its UUID in vulkaninfo's summary.
+  const v = run(['vulkaninfo', '--summary'], 20_000);
+  const devices = v.out.split(/^GPU(\d+):/m).slice(1);
+  let n = -1;
+  for (let i = 0; i + 1 < devices.length; i += 2) {
+    const uuid = /deviceUUID\s*=\s*([0-9a-f-]+)/.exec(devices[i + 1])?.[1] ?? '';
+    if (displayUUID && displayUUID.toLowerCase().endsWith(uuid) && uuid) n = Number(devices[i]);
+  }
+  console.log(
+    `INFO vulkaninfo: ${v.out
+      .split('\n')
+      .filter((l) => /^GPU\d|deviceName|deviceUUID/.test(l.trim()))
+      .map((l) => l.trim())
+      .join('; ')}`,
+  );
+  if (n < 0) return console.log(`INFO vkcube not tried: no Vulkan device of the display's GPU ${displayUUID}`);
+  const cube = run(['vkcube', '--c', '300', '--gpu_number', String(n)], 30_000);
+  check(
+    cube.code === 0,
+    `vkcube presented 300 frames on the GPU display from Vulkan device ${n} (exit ${cube.code}) ${pick(cube.out, /Selected GPU/)}`,
+  );
+}
+
 async function windows(kind: string): Promise<void> {
   const t0 = Date.now();
   const st = await machineAgent.request(m, 'start', { args: [kind], signal, timeoutMs: 60_000 });
@@ -156,6 +206,8 @@ async function windows(kind: string): Promise<void> {
     const px = pngPixel(frames.find((f) => f.h.enc === GUIEnc.PNG)!.data, 10, 10);
     check(px[0] > 200 && px[1] < 60 && px[2] < 60, `its pixels arrive: ${px}`);
     await send({ cmd: 'ack', id: w.id, seq: frames[frames.length - 1].h.seq });
+    if (kind === 'xwayland' && process.env.GUI_MATRIX_GL === '1')
+      graphics(st.display!, st.xauthority!, (st.gpus ?? []).find((g) => g.minor === st.display_minor)?.uuid.replace(/^GPU-/, '') ?? '');
     await send({ cmd: 'focus', id: w.id });
     await send({ cmd: 'button', id: w.id, x: 12, y: 34, button: 1, down: true });
     await send({ cmd: 'button', id: w.id, x: 12, y: 34, button: 1 });
@@ -290,6 +342,33 @@ await step('gpupick', async () => {
   check(
     !!st.pick && mode === 0o600,
     `the GPU selection library installed: ${st.pick} (${mode.toString(8)}); GPUs ${JSON.stringify(st.gpus ?? [])}`,
+  );
+  // With several NVIDIA GPUs: a program of a pane with gpupick's
+  // environment (as the core gives it) and CUDA_VISIBLE_DEVICES sees only
+  // that GPU: its device node opens, the others' do not, and NVML lists it
+  // alone.
+  const env = pickEnv(true, st);
+  const gpus = st.gpus ?? [];
+  if (!env) return console.log(`INFO gpupick's restriction not tried: ${gpus.length} NVIDIA GPUs`);
+  const want = gpus[Number(process.env.GUI_MATRIX_PICK ?? '0')] ?? gpus[0];
+  const script = `for n in ${gpus.map((g) => g.minor).join(' ')}; do r=$( (: < /dev/nvidia$n) 2>&1 ) && echo "$n open" || echo "$n hidden"; done; echo "CVD=$CUDA_VISIBLE_DEVICES KEEP=$GPUPICK_KEEP"; nvidia-smi -L 2>&1`;
+  const r = spawnSync('/bin/sh', ['-c', script], {
+    env: { PATH: '/usr/bin:/bin', HOME: home, ...env, CUDA_VISIBLE_DEVICES: String(want.index) },
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  const opened = out
+    .split('\n')
+    .filter((l) => / open$/.test(l))
+    .map((l) => Number(l.split(' ')[0]));
+  const listed = out.split('\n').filter((l) => /^GPU \d+:/.test(l));
+  console.log(
+    `INFO gpupick with CUDA_VISIBLE_DEVICES=${want.index} (${want.uuid}, minor ${want.minor}): ${out.trim().replaceAll('\n', ' | ')}`,
+  );
+  check(
+    opened.length === 1 && opened[0] === want.minor && listed.length === 1 && listed[0].includes(want.uuid),
+    `gpupick leaves the program only GPU ${want.index}: device ${opened.join(',')} opens, nvidia-smi lists ${listed.length}`,
   );
 });
 
