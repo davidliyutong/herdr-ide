@@ -34,8 +34,9 @@ export interface FakeCodeServer {
 }
 
 /** A code-server on a unix socket: GET /echo answers what it got, /cookie
- * sets cookies, /big streams n bytes, anything else 200 "ok"; WebSockets
- * echo, "close" makes it close with 4001. */
+ * sets cookies, /big streams n bytes, /hold answers when the request goes
+ * away, anything else 200 "ok"; WebSockets echo, "close" makes it close
+ * with 4001. */
 export function fakeCodeServer(dir: string): FakeCodeServer {
   const path = join(dir, 'cs.sock');
   const cs: FakeCodeServer = { path, requests: [], sockets: new Set(), connections: 0, stop: () => {} };
@@ -64,6 +65,13 @@ export function fakeCodeServer(dir: string): FakeCodeServer {
           return new Response(Buffer.alloc(Number(u.searchParams.get('n') ?? '0'), 'x'));
         case '/nothing':
           return new Response(null, { status: 304 });
+        case '/hold':
+          // Answers once the request goes away, or after 10 s.
+          await new Promise((r) => {
+            req.signal.addEventListener('abort', r, { once: true });
+            setTimeout(r, 10_000);
+          });
+          return new Response('held');
       }
       return new Response('ok');
     },

@@ -305,6 +305,8 @@ terminal core apart ([40](40-shared-homes.md)).
   master only while ssh stays up.
 - `backend/kernel/machines/transport/local.test.ts`: the core starts the
   local node of the machine build and talks to it.
+- `backend/kernel/payloads.test.ts`: a machine build's version derived
+  from its content (a rebuilt one is uploaded again), `--agent-dir` first.
 - `backend/kernel/machines/machines.test.ts`: no file, the file's round
   trip and errors, ordering, target validation from the shared vectors,
   refused targets never dialed, the local machine without an agent, adding,

@@ -278,8 +278,11 @@ every deployment.
 ## Testing
 
 - Switches: `backend/features/vscode/core.test.ts` (`routes follow their
-  client's switch`, `a switch turned off ends its work`, `preparations end
-  with the last switch`), `backend/kernel/core.test.ts` (`browserRisk`,
+  client's switch`, `a switch turned off ends its work`, `a switch turned
+  off ends its requests and bridge commands in flight`, `preparations end
+  with the last switch`), `backend/features/vscode/work.test.ts` (work
+  taken only while its client's switch is on, ended when it goes off),
+  `backend/kernel/core.test.ts` (`browserRisk`,
   `enabledFor`: `plugins.vscode.enabled` is the desktop app's switch only),
   `backend/features/vscode/proxy.test.ts` (the desktop app's cookie, header
   filtering), `bridge.test.ts` (bridge messages per switch),

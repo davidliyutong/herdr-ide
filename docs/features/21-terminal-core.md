@@ -214,6 +214,8 @@ build's digest before every start. See [SECURITY.md](../../SECURITY.md).
 
 - `internal/hcdist/release_test.go`: archive extraction against malformed,
   oversized and linked members.
+- `backend/kernel/payloads.test.ts`: the digest the core hands the agent is
+  of the uncompressed executable; a damaged or missing one has none.
 - `internal/hc/hc_test.go` and `backend/shared/proto/hc/hc.test.ts`: a
   scripted core — framing, hello, out-of-order replies, cancellation,
   credit violations, events across frames.

@@ -117,6 +117,33 @@ test('a switch turned off ends its work', async () => {
   desktop.ch!.close(1000, '');
 });
 
+// A proxied request and a bridge command in flight follow their client's
+// switch too: turned off, both end at once, the other client's go on.
+test('a switch turned off ends its requests and bridge commands in flight', async () => {
+  const vc = await newCore();
+  await ready(vc);
+  const w = await vc.agents[0].open({ op: Op.Bridge });
+  const r = new Reader(w.stream);
+  expect(JSON.parse(await r.line(1 << 20))).toEqual({ ok: true });
+  w.stream.write(JSON.stringify({ type: 'hello', id: 'w1', folders: ['/srv'] }) + '\n');
+  const held = vc.request('GET', '/m/local/code/hold');
+  const command = vc.request('POST', '/api/m/local/bridge', { body: JSON.stringify({ cmd: 'openFile', path: '/srv/a', folder: '/srv' }) });
+  expect(JSON.parse(await r.line(1 << 20))).toMatchObject({ cmd: 'openFile', type: 'command' }); // never acknowledged
+  const desktop = vc.request('GET', '/m/local/code/hold', { desktop: true });
+  await waitFor('both held', () => vc.cs.requests.filter((q) => q.path === '/hold').length === 2);
+  const started = Date.now();
+  vc.settings.set('plugins.vscode.browser', '', false);
+  const [h, c] = await Promise.all([held, command]);
+  expect([h.status, await errorOf(h)]).toEqual([502, 'code_server_unavailable']);
+  expect([c.status, await errorOf(c)]).toEqual([503, 'VS Code turned off']);
+  expect(Date.now() - started).toBeLessThan(5000);
+  // The desktop app's request is still held: it ends with its own switch.
+  expect(await Promise.race([desktop.then(() => 'answered'), sleep(100).then(() => 'held')])).toBe('held');
+  vc.settings.set('plugins.vscode.enabled', '', false);
+  expect((await desktop).status).toBe(502);
+  w.stream.end();
+});
+
 // Off for every client, preparing code-server ends; off for one, it goes
 // on.
 test('preparations end with the last switch', async () => {
