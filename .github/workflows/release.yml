@@ -9,12 +9,7 @@ permissions:
   contents: read
 
 env:
-  # The machine build the cores deploy: ts (the default), the TypeScript
-  # build, whose executable is the core and the machine side of its
-  # platform, or go (the repository variable MACHINE; scripts/build.sh).
-  MACHINE: ${{ vars.MACHINE || 'ts' }}
-  # Where this release serves its assets: machines of the TypeScript build
-  # download their platform's archive and the core SHA256SUMS from there.
+  # Where this release serves its assets: machines download their platform's archive and the core SHA256SUMS from there.
   RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
 
 jobs:
@@ -23,8 +18,8 @@ jobs:
     with:
       cache: false
 
-  # The cores (the TypeScript build: every machine platform's executable,
-  # musl's too), packaged with their licenses; SHA256SUMS of the archives
+  # The cores (each the core and the machine side of its platform, musl's
+  # too), packaged with their licenses; SHA256SUMS of the archives
   # and the executables in them.
   archives:
     runs-on: ubuntu-24.04
@@ -33,9 +28,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
@@ -53,7 +45,6 @@ jobs:
           bun-version: 1.4.5
       - run: make deps
       - run: make check
-      - run: go test ./...
       - run: pnpm -C backend test
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -65,7 +56,7 @@ jobs:
         run: scripts/build.sh
         env:
           VERSION: ${{ github.ref_name }}
-          TARGETS: ${{ env.MACHINE == 'ts' && 'linux/amd64 linux/arm64 linux/amd64-musl linux/arm64-musl darwin/amd64 darwin/arm64' || 'linux/amd64 linux/arm64 darwin/amd64 darwin/arm64' }}
+          TARGETS: linux/amd64 linux/arm64 linux/amd64-musl linux/arm64-musl darwin/amd64 darwin/arm64
           REQUIRE_ENCODER: 1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -81,7 +72,7 @@ jobs:
   # Package step, which runs electron-builder alone, gets the optional macOS
   # Developer ID certificate and notarization credentials (ad hoc without
   # them; Windows and Linux are not signed).
-  # With MACHINE=ts each app carries its own platform's executable from
+  # Each app (but Windows's) carries its own platform's executable from
   # the archives (the release's, so that the manifest names it).
   desktop:
     needs: [encoder, archives]
@@ -103,9 +94,6 @@ jobs:
       VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: desktop/package.json
@@ -128,14 +116,14 @@ jobs:
       - name: Place the video encoders
         run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: ${{ env.MACHINE == 'ts' && matrix.platform != 'win' }}
+        if: ${{ matrix.platform != 'win' }}
         with:
           name: archives
           path: dist/archives
       - name: The app's own executable
-        if: ${{ env.MACHINE == 'ts' && matrix.platform != 'win' }}
+        if: ${{ matrix.platform != 'win' }}
         run: |
-          slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
+          slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
           os=${{ matrix.platform == 'mac' && 'darwin' || 'linux' }}
           key=$os-${ARCH/x64/amd64}
           mkdir -p dist/executables
@@ -143,7 +131,7 @@ jobs:
       - run: scripts/desktop.sh build
         env:
           REQUIRE_ENCODER: 1
-          EXECUTABLES: ${{ env.MACHINE == 'ts' && 'dist/executables' || '' }}
+          EXECUTABLES: ${{ matrix.platform != 'win' && 'dist/executables' || '' }}
       - name: Package
         run: scripts/desktop.sh dist
         env:
@@ -179,10 +167,10 @@ jobs:
           merge-multiple: true
       # The release's files, the archives and the installers, and the
       # executables in the archives (<slug>-<platform>/<slug>, which the
-      # TypeScript build's cores check their machines' builds against).
+      # cores check their machines' builds against).
       - name: Checksums
         run: |
-          slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
+          slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
           cd dist/release
           shopt -s nullglob
           ls *.tar.gz *.dmg *.zip *.exe *.AppImage *.deb > ../assets

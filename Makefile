@@ -1,8 +1,9 @@
 # Common tasks; see CONTRIBUTING.md and AGENTS.md.
 # Development core address; keeps clear of a daily instance on the default port.
 DEV_LISTEN ?= 127.0.0.1:7790
-SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/brand.go)
-HOST_PLATFORM = $(shell go env GOOS)-$(shell go env GOARCH)
+SLUG := $(shell sed -n "s/^export const SLUG = '\(.*\)';$$/\1/p" backend/shared/lib/brand.ts)
+# This host as <os>-<arch> (darwin-arm64, linux-amd64…).
+HOST_PLATFORM := $(shell scripts/platform.sh)
 EXT  := extensions/$(SLUG)-bridge
 
 .PHONY: deps build test test-slow check tokens vt-wasm gpupick gui-helper it e2e dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
@@ -21,7 +22,6 @@ build:
 	scripts/build.sh
 
 test:
-	go test ./...
 	pnpm -C backend test
 	pnpm -C web test
 	pnpm -C desktop test
@@ -70,9 +70,6 @@ gui-helper:
 	scripts/build-gui-helper.sh
 
 it:
-	go test -tags integration -count=1 ./internal/agent -run Integration -v
-	go test -tags integration -count=1 ./internal/agent/plugin/history -run Integration -v
-	go test -tags integration -count=1 ./internal/hc -run Integration -v
 	cd backend && bun test features/terminals/integration.test.ts
 	cd backend && bun test features/history/integration.test.ts
 	cd backend && bun test features/agents/integration.test.ts

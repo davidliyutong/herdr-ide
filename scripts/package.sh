@@ -3,23 +3,21 @@
 # herdr-core the core embeds (backend/scripts/fetch-hc.ts), into
 # dist/release/<slug>-<platform>.tar.gz, and dist/release/SHA256SUMS: the
 # archives' digests and those of the executables in them
-# (<slug>-<platform>/<slug>), which a core of the TypeScript build checks
-# its machines' builds against (MACHINE=ts: the archives are also what
-# machines download).
+# (<slug>-<platform>/<slug>), which a core checks its machines' builds
+# against (the archives are also what machines download).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SLUG=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
+SLUG=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
 HC_VERSION=$(bun backend/scripts/fetch-hc.ts --version)
 test -n "$HC_VERSION"
-TARGETS=${TARGETS:-"$(go env GOOS)/$(go env GOARCH)"}
+TARGETS=${TARGETS:-"$(scripts/platform.sh --slash)"}
 mkdir -p dist/packages dist/release
 # What an earlier build left: SHA256SUMS lists the archives of this one only.
 rm -f dist/release/*.tar.gz dist/release/*.gz dist/release/SHA256SUMS
 packaged=
 for p in $TARGETS; do
   case "$p" in
-    linux/amd64|linux/arm64|darwin/amd64|darwin/arm64) ;;
-    linux/amd64-musl|linux/arm64-musl) [[ "${MACHINE:-ts}" == ts ]] || { echo "$p is a platform of the TypeScript build (MACHINE=ts)" >&2; exit 1; } ;;
+    linux/amd64|linux/arm64|darwin/amd64|darwin/arm64|linux/amd64-musl|linux/arm64-musl) ;;
     # No Windows archive: there the core runs inside the desktop app.
     windows/amd64) continue ;;
     *) echo "unsupported release platform: $p" >&2; exit 1 ;;
@@ -44,10 +42,8 @@ $SLUG release for $p
 Start the Web IDE:
   ./$SLUG
 
-$SLUG contains the unmodified herdr-core $HC_VERSION executable$([[ "${MACHINE:-ts}" == ts ]] && echo " of its
-platform" || echo "s for Linux
-and macOS machines")
-(https://github.com/herdrdev/herdr-core, Apache-2.0).
+$SLUG contains the unmodified herdr-core $HC_VERSION executable of its
+platform (https://github.com/herdrdev/herdr-core, Apache-2.0).
 
 Licenses: LICENSE, THIRD_PARTY_NOTICES.md, licenses.md, licenses/herdr-core/,
 licenses/herdr-detect/, licenses/encoder/.

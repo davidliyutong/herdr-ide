@@ -17,9 +17,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json
@@ -39,11 +36,9 @@ jobs:
       - run: make deps
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      # gofmt, vet, types, formatting, brand, flags, endpoints, notices,
-      # generated files, the terminal emulator's digest and the shared test
-      # vectors.
+      # Types, formatting, brand, flags, endpoints, notices, generated
+      # files, the terminal emulator's digest and the shared test vectors.
       - run: make check
-      - run: go test -race ./...
       # With the tests that wait on real time (make test-slow).
       - run: pnpm -C backend test
         env:
@@ -52,15 +47,12 @@ jobs:
       - run: pnpm -C desktop test
 
   # The integration tests against a real terminal core: the pinned
-  # herdr-core of internal/hcdist, fetched and verified as the build does,
-  # driven by the machine build's packages and by the core's terminals.
+  # herdr-core of backend/scripts/hcdist.ts, fetched and verified as the
+  # build does, driven by the machine side and by the core's terminals.
   integration:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: backend/package.json
@@ -74,7 +66,7 @@ jobs:
           bun-version: 1.4.5
       - run: pnpm -C backend install --frozen-lockfile
       - name: Pinned terminal core
-        run: go run ./scripts/fetch-hc -exe "$RUNNER_TEMP/hc/herdr-core" "$(go env GOOS)/$(go env GOARCH)"
+        run: bun backend/scripts/fetch-hc.ts --exe "$RUNNER_TEMP/hc/herdr-core" "$(scripts/platform.sh --slash)"
       - run: make it
         env:
           HC_TEST_BIN: ${{ runner.temp }}/hc/herdr-core
@@ -86,9 +78,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: e2e/package.json
@@ -115,9 +104,8 @@ jobs:
           name: e2e-results
           path: dist/e2e/results
 
-  # The machine build's tests on macOS and Windows (the check job runs them
-  # on Linux, with the race detector), the core's on macOS, the web UI's
-  # and the shell's tests, and the Electron app packaged as a directory on
+  # The core's tests on macOS (the check job runs them on Linux), the web
+  # UI's and the shell's tests, and the Electron app packaged as a directory on
   # each system; the release workflow builds the installers.
   desktop:
     strategy:
@@ -130,9 +118,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: desktop/package.json
@@ -149,8 +134,6 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.5
-      - if: runner.os != 'Linux'
-        run: go test ./...
       # The core's tests include the machine side's, which runs on Linux
       # and macOS only.
       - if: runner.os == 'macOS'
@@ -167,9 +150,6 @@ jobs:
     needs: check
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json

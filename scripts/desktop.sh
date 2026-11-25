@@ -6,8 +6,8 @@
 # semver, optionally with the release tag's leading v (dropped for the app
 # metadata).
 #
-#   build    the web UI, the payloads the core carries (machine builds,
-#            herdr-core, encoders, the VS Code extension) and the shell with
+#   build    the web UI, the payloads the core carries (its own platform's
+#            executable, encoders, the VS Code extension) and the shell with
 #            the core bundled for its utility process
 #   app      build, then the unpacked app in dist/desktop/<os>[-<arch>][-unpacked]/
 #   dist     build, then the installers: macOS DMG and zip, Windows NSIS
@@ -59,7 +59,7 @@ if [[ "$mode" == install && "$os" != mac ]]; then
 fi
 export DESKTOP_ARCH
 # The app carries its own platform's executable of the TypeScript build
-# (scripts/build.sh; not with MACHINE=go), for the local machine (none on
+# (scripts/build.sh), for the local machine (none on
 # Windows, where no machine side runs); other machines get theirs from the
 # release.
 case "$os" in

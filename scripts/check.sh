@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # Repository checks run by `make check` and CI (besides tests):
-#   1. gofmt / go vet of the Go program (the machine build and its
-#      tests), also for the other systems (it builds for Linux, macOS and
-#      Windows; the agent for unix only)
+#   1. no copy of an executable that a compile left in the repository
+#      (every `bun build --compile` runs in a temporary directory:
+#      backend/scripts/build.ts)
 #   2. the product slug appears in string literals only in the brand files
 #      (so a rename stays a one-file change plus scripts/rename.sh)
 #   3. every command-line flag and every HTTP route of the core
 #      (backend/scripts/reference.ts) is documented in docs/reference.md
-#   4. THIRD_PARTY_NOTICES.md matches the machine build's Go modules and
-#      the core's npm packages
+#   4. THIRD_PARTY_NOTICES.md matches the core's npm packages
 #   5. README.md and README.zh-CN.md have the same section structure
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
 #   7. the files generated from spec/tokens.json and the settings
@@ -30,9 +29,6 @@
 #      backend/scripts/codex-schema.ts)
 #  13. Anthropic's Agent SDK is imported for its types only outside the
 #      tests, and is no production dependency: no executable carries it
-#  14. no .<hash>.bun-build copy of an executable that a compile left in
-#      the repository (every `bun build --compile` runs in a temporary
-#      directory: backend/scripts/build.ts)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -40,28 +36,16 @@ fail=0
 echo "==> leftovers of bun build --compile"
 left=$(find . -name '.*.bun-build' -not -path '*/node_modules/*' -not -path './.claude/*' 2>/dev/null)
 if [[ -n "$left" ]]; then echo "a compile ran in the repository and left (remove them; run it in a temporary directory):"; echo "$left"; fail=1; fi
-slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
-module=$(sed -n 's/^module //p' go.mod)
-
-echo "==> gofmt / go vet"
-unformatted=$(gofmt -l cmd internal scripts e2e spec backend/shared/proto/testdata)
-if [[ -n "$unformatted" ]]; then echo "gofmt needed:"; echo "$unformatted"; fail=1; fi
-go vet ./... || fail=1
-go vet -tags integration ./... || fail=1
-for target in linux/amd64 darwin/arm64 windows/amd64; do
-  [[ "$target" == "$(go env GOOS)/$(go env GOARCH)" ]] && continue
-  GOOS=${target%/*} GOARCH=${target#*/} go vet ./... || fail=1
-done
+slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
 
 echo "==> brand literals"
-# String literals containing the slug outside the brand files, ignoring Go
-# import paths and comments.
-hits=$(grep -rnE --include='*.go' --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" cmd internal web/src extensions/*/src desktop/src backend --exclude-dir=node_modules 2>/dev/null \
-  | grep -vE '(internal/brand/|web/src/brand\.ts|backend/shared/lib/brand\.ts|extensions/[^/]+/src/brand\.ts|_test\.go:|\.test\.ts:|__tests__/|/testdata/|/testing\.ts:)' \
-  | grep -vE "\"${module}/" \
+# String literals containing the slug outside the brand files, ignoring
+# comments.
+hits=$(grep -rnE --include='*.ts' --include='*.tsx' "[\"'\`][^\"'\`]*\b${slug}\b" web/src extensions/*/src desktop/src backend --exclude-dir=node_modules 2>/dev/null \
+  | grep -vE '(web/src/brand\.ts|backend/shared/lib/brand\.ts|extensions/[^/]+/src/brand\.ts|\.test\.ts:|__tests__/|/testdata/|/testing\.ts:)' \
   | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' || true)
 if [[ -n "$hits" ]]; then
-  echo "hardcoded '${slug}' (use internal/brand, backend/shared/lib/brand.ts, web/src/brand.ts or the extension's src/brand.ts):"
+  echo "hardcoded '${slug}' (use backend/shared/lib/brand.ts, web/src/brand.ts or the extension's src/brand.ts):"
   echo "$hits"
   fail=1
 fi
