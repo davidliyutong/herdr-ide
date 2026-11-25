@@ -44,7 +44,10 @@ jobs:
       # vectors.
       - run: make check
       - run: go test -race ./...
+      # With the tests that wait on real time (make test-slow).
       - run: pnpm -C backend test
+        env:
+          SLOW_TESTS: 1
       - run: pnpm -C web test
       - run: pnpm -C desktop test
 
@@ -152,6 +155,8 @@ jobs:
       # and macOS only.
       - if: runner.os == 'macOS'
         run: pnpm -C backend install --frozen-lockfile && pnpm -C backend test
+        env:
+          SLOW_TESTS: 1
       - if: runner.os != 'Linux'
         run: pnpm -C web install --frozen-lockfile && pnpm -C web test
       - run: pnpm -C desktop install --frozen-lockfile && pnpm -C desktop test

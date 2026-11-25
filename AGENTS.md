@@ -39,6 +39,7 @@ takes over from the other.
 | --- | --- |
 | Install JS deps | `make deps` |
 | Unit tests (the machine build's Go, the core's `bun test`, web, desktop) | `make test` |
+| The core's tests that wait on real time for what runs in the background (marked `slow`/`slowDescribe` from `backend/shared/testdata/slow.ts`, skipped by `make test`; CI runs them) | `make test-slow` |
 | All checks (gofmt, vet, also for linux/amd64, darwin/arm64 and windows/amd64, tsc, prettier, no import cycles among the web UI's modules, brand/doc/README consistency, the core's flags and routes in `docs/reference.md` (`backend/scripts/reference.ts`), generated tokens and registry, the terminal emulator's digest, the GPU selection library's digests, shared test vectors run by the web tests) | `make check` |
 | Regenerate the design tokens' CSS after editing `spec/tokens.json`, and `spec/generated/registry.json` with the settings and commands tables of `docs/reference.md` (`backend/scripts/registry.ts`) after changing settings, commands or agent kinds (`backend/shared/agents`, `internal/agentkinds`) | `make tokens` |
 | Rebuild the web UI's terminal emulator (Ghostty's libghostty-vt as WebAssembly; zig 0.17) | `make vt-wasm` |
@@ -108,7 +109,10 @@ Run `make check test` before finishing a change.
    dir); the core's beside its sources in `backend/` (`<name>.test.ts`,
    `bun test`); web tests in `web/src/__tests__`; the desktop shell's
    beside its sources in `desktop/src`. Don't add tests that need network access or
-   real machines to `make test`.
+   real machines to `make test`. A test that waits on real time for what runs
+   in the background (a timer, a program, a worker) waits generously and is
+   marked `slow` (`backend/shared/testdata/slow.ts`): `make test` skips it,
+   `make test-slow` and CI run it.
 9. **`CHANGELOG.md` changes only in a release.** Feature and fix branches
    do not touch it. When a release is cut, a `release-manager` subagent
    writes the version's entries from the pull requests merged since the

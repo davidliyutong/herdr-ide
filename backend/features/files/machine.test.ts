@@ -23,6 +23,7 @@ import { duplexPair } from 'node:stream';
 import { join } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
 import { dirsOf, makeDirs } from '#shared/host/hostdirs.ts';
+import { slow } from '#shared/testdata/slow.ts';
 import { discard } from '#shared/lib/log.ts';
 import { ChunkWriter, readLine, type Reply } from '#shared/proto/agentproto/index.ts';
 import { closeStream } from '#shared/proto/yamux.ts';
@@ -588,74 +589,84 @@ describe('uploads', () => {
   });
 });
 
+// The fake file managers are scripts the tests write, which macOS
+// assesses on their first run.
 describe('reveal', () => {
-  test('runs the file manager with the path, a folder or a file, and nothing for a path not there', async () => {
-    const t = tempHome();
-    const out = join(t.home, 'args');
-    const script = join(t.home, 'reveal');
-    writeFileSync(script, `#!/bin/sh\nprintf '%s\\n' "$@" > ${out}\nexit 0\n`, { mode: 0o755 });
-    try {
-      const f = await files({ revealCommand: (_os, p, dir) => [script, dir ? 'dir' : 'file', p] });
-      mkdirSync(join(f.home, 'proj'));
-      write(join(f.home, 'proj', 'a.txt'), '');
-      const args = () => {
-        const s = existsSync(out) ? read(out).trim() : '';
-        rmSync(out, { force: true });
-        return s;
-      };
-      for (const [p, want] of [
-        [join(f.home, 'proj', 'a.txt'), `file\n${join(f.home, 'proj', 'a.txt')}`],
-        ['~/proj', `dir\n${join(f.home, 'proj')}`],
-        ['proj/a.txt', `file\n${join(f.home, 'proj', 'a.txt')}`],
-        ['~', `dir\n${f.home}`],
-      ]) {
-        expect((await f.act('reveal', { path: p })).paths?.length).toBe(1);
-        expect(args()).toBe(want);
+  slow(
+    'runs the file manager with the path, a folder or a file, and nothing for a path not there',
+    async () => {
+      const t = tempHome();
+      const out = join(t.home, 'args');
+      const script = join(t.home, 'reveal');
+      writeFileSync(script, `#!/bin/sh\nprintf '%s\\n' "$@" > ${out}\nexit 0\n`, { mode: 0o755 });
+      try {
+        const f = await files({ revealCommand: (_os, p, dir) => [script, dir ? 'dir' : 'file', p] });
+        mkdirSync(join(f.home, 'proj'));
+        write(join(f.home, 'proj', 'a.txt'), '');
+        const args = () => {
+          const s = existsSync(out) ? read(out).trim() : '';
+          rmSync(out, { force: true });
+          return s;
+        };
+        for (const [p, want] of [
+          [join(f.home, 'proj', 'a.txt'), `file\n${join(f.home, 'proj', 'a.txt')}`],
+          ['~/proj', `dir\n${join(f.home, 'proj')}`],
+          ['proj/a.txt', `file\n${join(f.home, 'proj', 'a.txt')}`],
+          ['~', `dir\n${f.home}`],
+        ]) {
+          expect((await f.act('reveal', { path: p })).paths?.length).toBe(1);
+          expect(args()).toBe(want);
+        }
+        for (const [p, code] of [
+          [join(f.home, 'missing'), 'not_found'],
+          ['', 'bad_params'],
+          ['a\0b', 'bad_params'],
+        ]) {
+          expect(await f.code('reveal', { path: p })).toBe(code);
+          expect(args()).toBe('');
+        }
+      } finally {
+        t.remove();
       }
-      for (const [p, code] of [
-        [join(f.home, 'missing'), 'not_found'],
-        ['', 'bad_params'],
-        ['a\0b', 'bad_params'],
-      ]) {
-        expect(await f.code('reveal', { path: p })).toBe(code);
-        expect(args()).toBe('');
-      }
-    } finally {
-      t.remove();
-    }
-  });
+    },
+    30_000,
+  );
 
-  test('a failing command, a missing one, and more at once than allowed', async () => {
-    const t = tempHome();
-    try {
-      const failing = join(t.home, 'failing');
-      writeFileSync(failing, '#!/bin/sh\necho nope >&2\nexit 3\n', { mode: 0o755 });
-      const f1 = await files({ revealCommand: () => [failing] });
-      const e = await f1.act('reveal', { path: '~' }).catch((x) => x as Fail);
-      expect((e as Fail).code).toBe('reveal_failed');
-      expect((e as Fail).message).toContain('exit status 3');
-      const f2 = await files({ revealCommand: () => [join(t.home, 'no-such-program')] });
-      expect(await f2.code('reveal', { path: '~' })).toBe('reveal_unavailable');
-      // Commands that do not exit: answered after the wait, beyond the
-      // bound busy; a file manager left running holds no place.
-      const release = join(t.home, 'release');
-      const hang = join(t.home, 'hang');
-      // It also ends once the home is gone (a test that timed out).
-      writeFileSync(hang, `#!/bin/sh\nwhile [ ! -e ${release} ] && [ -d ${t.home} ]; do sleep 0.02; done\n`, { mode: 0o755 });
-      const f3 = await files({ revealCommand: () => [hang], revealWaitMs: 100, maxRevealing: 2 });
-      const start = Date.now();
-      await f3.act('reveal', { path: '~' });
-      expect(Date.now() - start).toBeLessThan(5000);
-      const f4 = await files({ revealCommand: () => [hang], revealWaitMs: 30_000, maxRevealing: 2 });
-      const waiting = [f4.act('reveal', { path: '~' }), f4.act('reveal', { path: '~' })];
-      await new Promise((r) => setTimeout(r, 300));
-      expect(await f4.code('reveal', { path: '~' })).toBe('busy');
-      writeFileSync(release, '');
-      await Promise.all(waiting);
-      expect(await f4.code('reveal', { path: '~' })).toBe('ok');
-    } finally {
-      writeFileSync(join(t.home, 'release'), '');
-      t.remove();
-    }
-  });
+  slow(
+    'a failing command, a missing one, and more at once than allowed',
+    async () => {
+      const t = tempHome();
+      try {
+        const failing = join(t.home, 'failing');
+        writeFileSync(failing, '#!/bin/sh\necho nope >&2\nexit 3\n', { mode: 0o755 });
+        const f1 = await files({ revealCommand: () => [failing] });
+        const e = await f1.act('reveal', { path: '~' }).catch((x) => x as Fail);
+        expect((e as Fail).code).toBe('reveal_failed');
+        expect((e as Fail).message).toContain('exit status 3');
+        const f2 = await files({ revealCommand: () => [join(t.home, 'no-such-program')] });
+        expect(await f2.code('reveal', { path: '~' })).toBe('reveal_unavailable');
+        // Commands that do not exit: answered after the wait, beyond the
+        // bound busy; a file manager left running holds no place.
+        const release = join(t.home, 'release');
+        const hang = join(t.home, 'hang');
+        // It also ends once the home is gone (a test that timed out).
+        writeFileSync(hang, `#!/bin/sh\nwhile [ ! -e ${release} ] && [ -d ${t.home} ]; do sleep 0.02; done\n`, { mode: 0o755 });
+        const f3 = await files({ revealCommand: () => [hang], revealWaitMs: 100, maxRevealing: 2 });
+        const start = Date.now();
+        await f3.act('reveal', { path: '~' });
+        expect(Date.now() - start).toBeLessThan(5000);
+        const f4 = await files({ revealCommand: () => [hang], revealWaitMs: 30_000, maxRevealing: 2 });
+        const waiting = [f4.act('reveal', { path: '~' }), f4.act('reveal', { path: '~' })];
+        await new Promise((r) => setTimeout(r, 1000));
+        expect(await f4.code('reveal', { path: '~' })).toBe('busy');
+        writeFileSync(release, '');
+        await Promise.all(waiting);
+        expect(await f4.code('reveal', { path: '~' })).toBe('ok');
+      } finally {
+        writeFileSync(join(t.home, 'release'), '');
+        t.remove();
+      }
+    },
+    30_000,
+  );
 });

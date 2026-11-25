@@ -13,6 +13,7 @@ import { Fail } from '#shared/lib/fail.ts';
 import { machineOf, rig, type Rig } from '#machine/testing.ts';
 import { monitorMachine, type MonitorOptions } from './machine.ts';
 import { monitorProtocol } from './protocol.ts';
+import { slow } from '#shared/testdata/slow.ts';
 
 let r: Rig | undefined;
 afterEach(async () => {
@@ -64,26 +65,31 @@ const refusal = async (p: Promise<unknown>) => {
 };
 
 describe('on this machine', () => {
-  test('metrics and processes as the core reads them; the second sample has rates', async () => {
-    const a = await start();
-    const m = await a.metrics();
-    expect(m.os).toBe(process.platform);
-    expect(m.cpu.cores).toBeGreaterThan(0);
-    expect(m.memory.totalBytes).toBeGreaterThan(0);
-    expect(m.memory.usedPct).toBeGreaterThan(0);
-    expect(m.memory.usedPct).toBeLessThanOrEqual(100);
-    expect(m.disks?.length).toBeGreaterThan(0);
-    expect(m.uptimeSec).toBeGreaterThan(0);
-    const m2 = await a.metrics();
-    expect(m2.timestampMs).toBeGreaterThanOrEqual(m.timestampMs);
-    expect(m2.network.rxBytes).toBeGreaterThanOrEqual(0);
-    const p = await a.processes();
-    expect(p.total).toBeGreaterThan(0);
-    const me = p.processes?.find((x) => x.pid === process.pid);
-    expect(me?.user).toBe(execFileSync('id', ['-un'], { encoding: 'utf8' }).trim());
-    expect(me?.ppid).toBe(process.ppid);
-    expect(me?.rssBytes).toBeGreaterThan(0);
-  });
+  // It runs this machine's ps, top, sysctl… each bounded by cmdTimeoutMs.
+  slow(
+    'metrics and processes as the core reads them; the second sample has rates',
+    async () => {
+      const a = await start();
+      const m = await a.metrics();
+      expect(m.os).toBe(process.platform);
+      expect(m.cpu.cores).toBeGreaterThan(0);
+      expect(m.memory.totalBytes).toBeGreaterThan(0);
+      expect(m.memory.usedPct).toBeGreaterThan(0);
+      expect(m.memory.usedPct).toBeLessThanOrEqual(100);
+      expect(m.disks?.length).toBeGreaterThan(0);
+      expect(m.uptimeSec).toBeGreaterThan(0);
+      const m2 = await a.metrics();
+      expect(m2.timestampMs).toBeGreaterThanOrEqual(m.timestampMs);
+      expect(m2.network.rxBytes).toBeGreaterThanOrEqual(0);
+      const p = await a.processes();
+      expect(p.total).toBeGreaterThan(0);
+      const me = p.processes?.find((x) => x.pid === process.pid);
+      expect(me?.user).toBe(execFileSync('id', ['-un'], { encoding: 'utf8' }).trim());
+      expect(me?.ppid).toBe(process.ppid);
+      expect(me?.rssBytes).toBeGreaterThan(0);
+    },
+    30_000,
+  );
 });
 
 describe('Linux', () => {

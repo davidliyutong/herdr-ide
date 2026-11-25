@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { INITIAL_WINDOW, Session, Stream, pairDuplex } from './yamux.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { Reader } from '#shared/lib/streamio.ts';
+import { slow, slowDescribe } from '#shared/testdata/slow.ts';
 
 // xorshift32, the pattern of testdata/yamuxpeer.
 function* pattern(n: number, seed: number, size = 64 * 1024): Generator<Buffer> {
@@ -166,14 +167,19 @@ describe('TypeScript to TypeScript', () => {
     client.close();
   }, 10_000);
 
-  test('echo, half-close, source', async () => {
-    const [client, server] = await pair();
-    serveAll(server);
-    await exercise(client, 4 << 20);
-    client.close();
-  });
+  // Some 150 MiB of patterns made and digested byte by byte.
+  slow(
+    'echo, half-close, source',
+    async () => {
+      const [client, server] = await pair();
+      serveAll(server);
+      await exercise(client, 4 << 20);
+      client.close();
+    },
+    60_000,
+  );
 
-  test('a sender stops at the window until the reader reads', async () => {
+  slow('a sender stops at the window until the reader reads', async () => {
     const [client, server] = await pair();
     const s = await client.open();
     const accepted = await server.accept();
@@ -186,7 +192,7 @@ describe('TypeScript to TypeScript', () => {
         written += chunk.length;
       }
     })();
-    await Bun.sleep(100);
+    await Bun.sleep(1000);
     // the window the server grew to (1 MiB) plus what the writable buffers
     expect(written).toBeLessThan(4 << 20);
     expect(written).toBeGreaterThanOrEqual(INITIAL_WINDOW);
@@ -243,7 +249,8 @@ describe('TypeScript to TypeScript', () => {
 // hashicorp/yamux with the configuration of the core and the agent, while
 // the Go program exists.
 const go = spawnSync('go', ['version']).status === 0;
-describe.skipIf(!go)('with hashicorp/yamux', () => {
+// It builds the Go peer.
+slowDescribe.skipIf(!go)('with hashicorp/yamux', () => {
   const peer = join(dir, 'yamuxpeer');
   const built = () => {
     const r = spawnSync('go', ['build', '-o', peer, './backend/shared/proto/testdata/yamuxpeer'], {

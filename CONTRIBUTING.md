@@ -15,6 +15,7 @@ agents install on machines, into `dist/payload/hc/` and embeds it.
 make deps            # pnpm install for web/, the extension, desktop/ (with Electron's binary), e2e/ and backend/
 make build           # web UI, extension, machine builds, core (Bun); release archives
 make test            # Go, core, web and desktop unit tests
+make test-slow       # the core's tests that wait on real time (CI runs them too)
 make check           # formatting, vet, typecheck, import cycles of the web UI, brand/doc consistency
 ```
 

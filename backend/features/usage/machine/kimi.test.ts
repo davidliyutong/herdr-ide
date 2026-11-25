@@ -7,6 +7,7 @@
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, rmdirSync, statSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
+import { slow } from '#shared/testdata/slow.ts';
 import { FakeAPI, jwt, removeHomes, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
 import type { Account, UsageEnv } from './env.ts';
 import { KIMI_CLIENT_ID, KIMI_CLI_VERSION, kimiHeaders, kimiVersion, lockKimi, rewrite } from './kimi.ts';
@@ -243,21 +244,21 @@ describe('the CLI’s lock', () => {
     expect(f.asked).toBe(1);
   });
 
-  test('kept fresh while held, and not removed once another took it over', async () => {
+  slow('kept fresh while held, and not removed once another took it over', async () => {
     const home = tempHome();
     const e = testEnv(home);
     e.t = { ...e.t, kimiLockUpdateMs: 50 };
     const target = join(home, 'oauth/kimi-code');
     const l = await lockKimi(e, target);
     const first = statSync(`${target}.lock`).mtimeMs;
-    await Bun.sleep(300);
+    await Bun.sleep(1000);
     expect(statSync(`${target}.lock`).mtimeMs).toBeGreaterThan(first);
     expect(await l.held()).toBe(true);
     rmdirSync(`${target}.lock`);
     mkdirSync(`${target}.lock`);
     const theirs = new Date(Date.now() - 1000);
     utimesSync(`${target}.lock`, theirs, theirs);
-    await Bun.sleep(150);
+    await Bun.sleep(1000);
     expect(await l.held()).toBe(false);
     await l.release();
     expect(Math.abs(statSync(`${target}.lock`).mtimeMs - theirs.getTime())).toBeLessThan(2);

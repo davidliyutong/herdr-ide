@@ -5,7 +5,7 @@ SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/br
 HOST_PLATFORM = $(shell go env GOOS)-$(shell go env GOARCH)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test check tokens vt-wasm gpupick gui-helper it e2e dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test test-slow check tokens vt-wasm gpupick gui-helper it e2e dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
@@ -25,6 +25,11 @@ test:
 	pnpm -C backend test
 	pnpm -C web test
 	pnpm -C desktop test
+
+# The core's tests that wait on real time (backend/shared/testdata/slow.ts),
+# which make test skips.
+test-slow:
+	cd backend && SLOW_TESTS=1 bun test
 
 check:
 	scripts/check.sh
