@@ -1,11 +1,24 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { constants, existsSync, mkdirSync, openSync, closeSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { constants, existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { createServer, connect } from 'node:net';
 import { join } from 'node:path';
 import { tempHome } from '../testing.ts';
-import { AT_REMOVEDIR, linkGuard, openDirAt, openNoLinks, readDirAt, renameNoReplace, tryLock, unlinkAt, closeQuietly } from './fs.ts';
+import {
+  AT_REMOVEDIR,
+  linkGuard,
+  openAtAsync,
+  openDirAt,
+  openNoLinks,
+  openNoLinksAsync,
+  readDirAt,
+  renameNoReplace,
+  tryLock,
+  unlinkAt,
+  closeQuietly,
+} from './fs.ts';
 import { parentOf, peerCred, socketFd } from './proc.ts';
-import { darwin, libcPath } from './libc.ts';
+import { darwin, libcPath, linux } from './libc.ts';
 
 const h = tempHome();
 afterAll(() => h.remove());
@@ -94,6 +107,55 @@ describe('opening without links', () => {
       expect(() => unlinkAt(dir, 'missing', 0)).toThrow(/ENOENT/);
     } finally {
       closeQuietly(dir);
+    }
+  });
+});
+
+// The opens that wait in the runtime's pool, not on the node's thread.
+describe('opening without links, asynchronously', () => {
+  test('a link anywhere on the path is refused, the descriptor closed; a FIFO does not wait', async () => {
+    const real = join(h.home, 'areal');
+    mkdirSync(real);
+    writeFileSync(join(real, 'f'), 'ok');
+    symlinkSync(real, join(h.home, 'alink'));
+    symlinkSync(join(real, 'f'), join(h.home, 'aflink'));
+    const flags = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
+    const fh = await openNoLinksAsync(join(real, 'f'), flags);
+    expect((await fh.readFile()).toString()).toBe('ok');
+    await fh.close();
+    await expect(openNoLinksAsync(join(h.home, 'aflink'), flags)).rejects.toThrow(/ELOOP/);
+    await expect(openNoLinksAsync(join(h.home, 'alink', 'f'), flags)).rejects.toThrow(/ELOOP/);
+    expect(Bun.spawnSync(['mkfifo', join(h.home, 'afifo')]).exitCode).toBe(0);
+    const fifo = await openNoLinksAsync(join(h.home, 'afifo'), flags);
+    expect((await fifo.stat()).isFIFO()).toBe(true);
+    await fifo.close();
+  });
+
+  test('a name in a directory open, never a link at the name, the directory the one held', async () => {
+    const top = join(h.home, 'atop');
+    mkdirSync(join(top, 'sub'), { recursive: true });
+    writeFileSync(join(top, 'sub', 'x'), 'x1');
+    symlinkSync(join(top, 'sub', 'x'), join(top, 'sub', 'lx'));
+    const dir = await open(join(top, 'sub'), constants.O_RDONLY | constants.O_DIRECTORY);
+    try {
+      const flags = constants.O_RDONLY | constants.O_NONBLOCK;
+      const x = await openAtAsync(dir, join(top, 'sub'), 'x', flags);
+      expect((await x.readFile()).toString()).toBe('x1');
+      await x.close();
+      await expect(openAtAsync(dir, join(top, 'sub'), 'lx', flags)).rejects.toThrow(/ELOOP/);
+      for (const bad of ['', '.', '..', 'a/b']) await expect(openAtAsync(dir, join(top, 'sub'), bad, flags)).rejects.toThrow(/EINVAL/);
+      if (linux) {
+        // The directory swapped for another after it was opened: the name
+        // is still read in the one held.
+        renameSync(join(top, 'sub'), join(top, 'old'));
+        mkdirSync(join(top, 'sub'));
+        writeFileSync(join(top, 'sub', 'x'), 'x2');
+        const held = await openAtAsync(dir, join(top, 'sub'), 'x', flags);
+        expect((await held.readFile()).toString()).toBe('x1');
+        await held.close();
+      }
+    } finally {
+      await dir.close();
     }
   });
 });
