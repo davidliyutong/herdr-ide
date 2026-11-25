@@ -327,7 +327,7 @@ path than the one located), a Claude Code record relative to its checked
 directory's descriptor (`/proc/self/fd/<dir>/<name>` on Linux), processes
 from `/proc` on Linux and through sysctl on macOS. Claude Code's
 transcripts are mapped to events by `backend/shared/agents/transcript`,
-which the chat host's Claude Code adapter will use, against the shared
+which the chat host's Claude Code adapter uses too, against the shared
 vectors.
 
 System calls Node lacks go through `bun:ffi` to libc (`machine/sys`): peer
@@ -656,9 +656,9 @@ approved plan or starts the app-server again holds the session's lock
 across its calls (a promise queue, nothing blocks the thread), as one of
 them at a time does in the Go adapter.
 
-Claude Code's adapter is not ported yet: the host refuses a chat of that
-kind as a kind without a chat (`unsupported`, "this host has no adapter
-claude"), lists it as unsupported to the page, and goes on.
+And it has Claude Code's adapter (`features/chat/machine/claude`), which
+runs on Anthropic's Agent SDK, fetched by the machines when a chat needs
+it ([Claude Code](#claude-code)).
 
 ### Wire compatibility while both exist
 
@@ -718,23 +718,125 @@ the features it composes too (`backend/scripts/registry.ts`).
 
 ### Claude Code
 
-The adapter (an `Adapter` of `features/chat/machine/adapter.ts`, added to
-`chatAdapters`) calls `query()` of `@anthropic-ai/claude-agent-sdk`, pinned
-exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
+The adapter (`features/chat/machine/claude`, an `Adapter` of
+`features/chat/machine/adapter.ts`, one of the chat host's adapters) runs
+each session as a `query()` of `@anthropic-ai/claude-agent-sdk` 0.3.322,
+with the user's own `claude` (`pathToClaudeCodeExecutable`: the host's
+command for the kind). The SDK is fetched on use, never shipped (below):
+the adapter `import()`s it at run time from the machine's data directory.
+The SDK writes the command line, the protocol's lines and its variables of
+the environment, pairs the control requests with their answers, answers
+the program's requests (`can_use_tool` through `canUseTool`, an MCP
+server's elicitation declined, any other refused as unsupported, as the
+Go adapter did) and hands the program's messages on in their order. The
+adapter gives it:
 
 - `systemPrompt: {type: 'preset', preset: 'claude_code'}` (without it the
-  SDK replaces Claude Code's prompt with an empty one);
-- `settingSources` and `permissionMode` always given; the environment
-  keeps `CLAUDE_CODE_ENTRYPOINT=<slug>` so the sessions show in the
-  terminal's `/resume`;
-- `spawnClaudeCodeProcess` starts the process in a group of its own, kills
-  the group, keeps the tail of its standard error and reads the
-  `session_state_changed` frames the SDK does not pass on;
-- `canUseTool` answers permissions, questions and plan approvals;
-  `interrupt`, `setModel`, `setPermissionMode`, `applyFlagSettings`,
-  `getContextUsage` are the SDK's; withdrawing one queued message uses the
-  SDK's `cancelAsyncMessage`, which its types do not declare, behind a
-  wrapper whose test fails when it disappears.
+  SDK sends Claude Code an empty system prompt);
+- `settingSources` always (`user`; `project` and `local` too in a folder
+  Claude Code or the user trusted) and `permissionMode` always,
+  `includePartialMessages`, `sessionId` for a new session and `resume`
+  for one taken up, `model`, and `allowDangerouslySkipPermissions` only
+  for full access, which starts the program again on the same session;
+- the host's environment for the program with
+  `CLAUDE_CODE_ENTRYPOINT=<slug>`, so the sessions show in the terminal's
+  `/resume` (the SDK adds `CLAUDE_AGENT_SDK_VERSION` and
+  `CLAUDE_CODE_SDK_READS_SESSION_STATE` and drops `NODE_OPTIONS` and
+  `DEBUG`; it also sets `CLAUDE_AGENT_SDK_VERSION` in the host's own
+  environment, which the host gives every agent's login shell, so the
+  adapter puts that back);
+- `spawnClaudeCodeProcess` (`sdk.ts`, `AgentSpawn`): the program runs
+  through the host's `AgentProcesses` (a process group of its own, the end
+  of its standard error kept, ended gracefully, what it left in its group
+  swept once it exited), and its output is framed before the SDK reads it:
+  a line longer than 16 MiB is passed over (the SDK's reader has no bound),
+  and the `session_state_changed` messages Claude Code marks as the host's
+  (`sdk_host_only`), which the SDK drops, lose the mark, so that the SDK
+  hands them on in their place among the others (a turn that ends without
+  a result ends at `idle`); read beside the SDK, they would overtake the
+  messages before them;
+- the prompts, an `AsyncIterable` of user messages, each prompt done once
+  the SDK wrote it;
+- `canUseTool` for permissions, questions (`AskUserQuestion`) and plans
+  (`ExitPlanMode`). The SDK calls it as it reads the request, ahead of the
+  messages before it that it has not handed on yet; the adapter asks the
+  host on the next turn of the event loop, by when they were, so the host
+  has a tool call's event before the permission asked for it. A request
+  the program cancelled gets the denial `canUseTool` returns, as the SDK
+  answers every request it hands on (the Go adapter sent nothing).
+
+`interrupt` (with the queued messages it leaves, `still_queued`),
+`setModel`, `setPermissionMode`, `applyFlagSettings` (the effort),
+`getContextUsage` and `initializationResult` are the SDK's, each bounded
+by the adapter (30 s, initialize 60 s; the SDK waits without end).
+Withdrawing a queued message uses the SDK's `cancelAsyncMessage`, which
+its types do not declare, through a wrapper that refuses as unsupported
+when it is gone and whose test (`sdk.test.ts`) fails then. What the SDK
+does not do stays the adapter's: the messages as the chat's events
+(through `backend/shared/agents/transcript`, as in the Go adapter), turns
+and queued messages, the configuration options, Claude Code's trust of
+folders (`~/.claude.json`, at most 32 MiB, read asynchronously), the
+sessions and imports from the transcripts, and the sessions another Claude
+Code runs.
+
+**Fetched, not shipped.** The SDK's license reserves all rights
+("© Anthropic PBC. All rights reserved. Use is subject to the Legal
+Agreements"); the product's releases are MIT. So no executable, release
+archive or desktop app carries it: a machine gets it when a Claude Code
+chat needs it, from the npm registry, as the user's own deployment
+downloads code-server. What is pinned (`features/chat/claudesdk.ts`) is
+the registry's tarball of version 0.3.322, its URL
+(`https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.322.tgz`,
+a mirror's with `--npm-registry`) and its integrity, the lockfile's
+`sha512-r88ij7R3…`; and the SHA-256 of its entry, `sdk.mjs`. The entry
+carries what it uses of the SDK's dependencies (zod among them)
+and imports Node's own modules only, so the one tarball is all it needs.
+`backend/package.json` has the SDK as a development dependency, for its
+types and the tests; Claude Code's own executables, which it carries as
+optional packages, are not installed (`ignoredOptionalDependencies`), nor
+its peer dependencies but zod. The product's code imports nothing of it
+but its types (`scripts/check.sh`), and `backend/scripts/build.ts` refuses
+an executable that holds its code.
+
+Before a request that starts a Claude Code chat (a new chat or an import:
+`POST new`; and, without waiting for it, a page's subscription to such a
+chat, whose next prompt may start its agent), the core makes sure the
+machine has it (`features/chat/sdkprovision.ts`), once per agent session:
+
+1. the machine side's action `sdk` says whether the pinned version is
+   installed, and, unless the core is `--offline`, has the machine download
+   it itself from the registry (`curl -q`, else `wget` without its
+   configuration, at most 32 MiB in 5 minutes; `#machine/artifacts.ts`, as
+   code-server's releases come);
+2. a machine that could not gets it from the core (`sdkUpload`, in chunks):
+   from an operator's directory (`--seed-dir`, as code-server's tarballs),
+   the core's cache (`~/.veldr/cache/npm`, 14 days unused), or the core's
+   own download from the registry through the proxy of its environment,
+   then cached;
+3. every copy, the machine's download, the operator's and the cached one,
+   the core's download and the upload, is checked against the pinned
+   integrity before it is used, cached or unpacked; the machine unpacks
+   only `package.json`, `sdk.mjs`, `LICENSE.md` and `README.md`, with
+   code-server's refusals (node-tar strict, no absolute path, `..` or link
+   leaving the directory), into `<data>/claude-agent-sdk/0.3.322`, which
+   becomes the version once its entry's SHA-256 is the pinned one.
+
+The chat host loads it from there (`machine/claude/load.ts`), its entry's
+SHA-256 checked again first, once per process; a load counts as a use, and
+a version unused for 14 days goes (the chat feature's housekeeping on the
+node). A compiled executable `import()`s the file as Bun does (Bun's
+compiled executables load modules from the file system), resolving nothing
+but Node's own modules: no import map, plugin or rewriting is needed
+(`installed.test.ts` compiles one that does). A machine that has it not
+and could not get it refuses the chat with `sdk_unavailable`, which the
+core answers `POST new` with, saying what each source said; a chat whose
+agent starts without it fails with it, and the host goes on. A machine of
+the Go build has no `sdk` action: its chat host speaks Claude Code's
+protocol itself, and nothing is fetched.
+
+Anthropic's terms govern the user's use of the SDK and of their Claude
+account. A chat runs the user's own `claude`, signed in as the user signed
+it in, as the Go build's chat host did.
 
 ## Alternatives considered
 
@@ -782,6 +884,22 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
   chats' stored events only, at the cost of a message per statement and
   of each chat's events waiting for their writes before they reach its
   clients.
+- **The Agent SDK in the executable.** Simplest, and it runs there, but
+  its license reserves all rights and the releases are MIT.
+- **The SDK from the machine's own npm** (`npm install` on the machine).
+  Machines have no Node or npm of their own, and the user's npm
+  configuration would decide where it comes from; the pinned tarball is
+  fetched by curl or wget, or uploaded, and checked instead.
+- **A node_modules layout, an import map or a resolver plugin for the
+  SDK.** Not needed: its entry imports Node's own modules only.
+- **Claude Code's messages read beside the Agent SDK** (from the output
+  framed for it, the SDK's iterator drained). Every message would be
+  decoded twice and the SDK's own handing on would be unused; the SDK's
+  order is kept instead, the host-only messages unmarked for it and the
+  requests asked a turn of the event loop later.
+- **The hand-written protocol of the Go adapter in TypeScript.** Exactly
+  what the SDK is for: its control requests, answers, command line and
+  environment follow Claude Code's releases.
 - **The SDK's client as it is for ACP** (`client().onNotification`). It
   drops the updates its stable schema refuses and does not keep a turn's
   updates ahead of the answer that ends it; the notifications are taken
@@ -850,8 +968,18 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
   and reach their clients once written; the host goes on reading the
   agents and serving its connections. Past the bound the chats that make
   events fail; a write the journal refuses fails its chat, without a hole.
-- The SDK's undeclared `cancelAsyncMessage` disappears: its test fails at
-  the upgrade.
+- The Agent SDK's undeclared `cancelAsyncMessage` disappears: the
+  adapter refuses to withdraw a queued message (`unsupported`), and its
+  test fails at the upgrade; an SDK that hands Claude Code's messages on
+  otherwise, or answers its requests otherwise, fails the replays of the
+  recordings.
+- A machine without the Agent SDK whose core cannot get it either (no
+  route to the npm registry from the machine or the core, no
+  `--seed-dir` copy, `--offline` without one): a new Claude Code chat is
+  refused with `sdk_unavailable`, saying what each source said, which the
+  UI explains; a chat whose agent starts without it fails with it. A copy
+  that is not the pinned one (a mirror's, a seed, a cache) is refused,
+  never used.
 - A Codex newer than the version pinned: the adapter reads what it sends
   leniently, and the app-server refuses a request with a member or a
   value it renamed (the turn fails with its message). Moving to it is its
@@ -987,7 +1115,37 @@ SECURITY.md has both.
   (`codex/testdata/fakeappserver.ts`, the Go fake's directives), its
   events compared with the Go adapter's golden files of every recording,
   its scenarios the Go adapter's, and the recordings and what it sends
-  validated against Codex's schema (`codex/appserver.test.ts`)..
+  validated against Codex's schema (`codex/appserver.test.ts`).
+- The Claude Code adapter (`backend/features/chat/machine/claude/*.test.ts`):
+  the 17 recordings of `spec/vectors/chat/claude` replayed through the
+  SDK against a fake Claude Code (`testdata/fakeclaude.ts`, run by Bun),
+  which checks every line the adapter writes against the recording; the
+  host's events, permissions, questions and chat equal the Go adapter's
+  golden files of the same recordings (`replay.test.ts`). Against scripts
+  of its own: the program's end with its group, lines and messages passed
+  over, the timeouts, the start's options and refusals, full access by a
+  restart (also closed during it), the requests not served, prompts the
+  host recorded or not, trust, another Claude Code's session, titles
+  (`session.test.ts`); imports and sessions from transcripts, the
+  recorded one giving the Go golden file's events (`history.test.ts`);
+  the SDK's seam: its version, `cancelAsyncMessage` on a real `Query`,
+  the framing, the prompts, the program as the SDK sees it
+  (`sdk.test.ts`). The real Claude Code never runs; homes are temporary.
+- The Agent SDK's way to the machines, with tarballs the tests make and a
+  registry on loopback (the real tarball is in no test: it is
+  Anthropic's): the machine's store (`machine/sdkstore.test.ts`: only the
+  pinned files unpacked, a tampered tarball and another entry refused
+  before anything is put in place, a link leaving the directory, the
+  machine's download and a failed one, the retention, the load and an
+  entry changed on disk); the core and the machine through the wire
+  (`sdkprovision.test.ts`: the machine's own download, the core's upload
+  from its download and then its cache, offline from `--seed-dir`, every
+  wrong copy refused with `sdk_unavailable` saying what each source said,
+  a machine of the Go build left alone); the routes (`routes.test.ts`); the
+  host (`hosts/machine/chathost.test.ts`: `sdk_unavailable` before
+  anything runs); and the development dependency's files packed, installed
+  and loaded from a data directory, running a recording, and loaded by a
+  `bun build --compile` executable (`machine/claude/installed.test.ts`).
 - Program windows' machine side: the Go tests' tiles, flow, stats and
   video decisions ported (`features/gui/machine/wm.test.ts`), two cores
   through the wire with a fake GUI helper, the display's files, numbers,

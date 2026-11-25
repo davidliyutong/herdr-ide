@@ -309,6 +309,25 @@ resumed nor imported (`in_terminal`).
   app-server's output. Its tests replay `spec/vectors/chat/codex` through
   a fake app-server and compare the events with the Go adapter's golden
   files of the same recordings.
+- **Claude Code in the TypeScript build** (`backend/features/chat/machine/claude`,
+  on `@anthropic-ai/claude-agent-sdk`): the same behaviour, the protocol
+  spoken by Anthropic's Agent SDK rather than by hand
+  ([42](42-typescript-backend.md#claude-code)), the program run through
+  the host's processes, the user's own `claude`. Where it differs: a
+  permission the program cancelled (an interrupt) is answered with a
+  denial, as the SDK answers every request it hands on, where the Go
+  adapter sent nothing; a mode set is the one asked for, the SDK passing
+  on no answer of the program's; lines that are no JSON objects and
+  `keep_alive` the SDK drops itself. Its tests replay
+  `spec/vectors/chat/claude` through the SDK against a fake Claude Code
+  and compare what the host gets with the Go adapter's golden files of the
+  same recordings. The SDK is Anthropic's, all rights reserved, so no
+  executable carries it: a machine gets the pinned npm tarball when a
+  Claude Code chat needs it, downloading it itself or from the core,
+  checked against the pinned integrity, into
+  `<data>/claude-agent-sdk/<version>`, which the chat host loads; a
+  machine that cannot refuses the chat with `sdk_unavailable`
+  ([42](42-typescript-backend.md#claude-code)).
 
 In the TypeScript build the seam is `backend/features/chat/machine/adapter.ts`,
 whose comment states the same rules for one thread:
@@ -337,8 +356,8 @@ The host gets its adapters by name from its composition root
 (`backend/hosts/machine/features.ts` `chatAdapters`): an adapter is added
 there, the host unchanged. A kind whose adapter the host was not given is
 refused as a kind without a chat (`unsupported`, "this host has no
-adapter claude"): so are Claude Code's chats in the TypeScript build,
-which has the ACP and Codex adapters (the design of Claude Code's:
+adapter <name>"). The TypeScript build's host is given all three: the ACP
+adapter, Codex's and Claude Code's (its Agent SDK fetched on use,
 [42](42-typescript-backend.md#claude-code)).
 
 ### The core's plugin (`backend/features/chat`)
@@ -510,8 +529,18 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
   adapter's golden files, the server's requests answered or refused,
   lines passed over, close order, leftovers, queues, plans, configuration,
   sign-in, `in_terminal`, sessions and history, the recordings and what
-  it sends validated against Codex's schema); the kinds without an
-  adapter (`backend/hosts/machine/chathost.test.ts`).
+  it sends validated against Codex's schema); Claude Code's adapter
+  (`claude/*.test.ts`: `replay.test.ts` the recordings against the Go
+  golden files, `session.test.ts` full access by restart, `in_terminal`,
+  the program's end, `history.test.ts`, `sdk.test.ts` the SDK's
+  undeclared `cancelAsyncMessage`, `installed.test.ts` the SDK loaded
+  from a data directory, also by a compiled executable); the Agent SDK's
+  way to the machines (`sdkstore.test.ts`,
+  `backend/features/chat/sdkprovision.test.ts`: a registry on loopback,
+  tampered tarballs refused, the machine's download, the core's upload,
+  offline from `--seed-dir`, `sdk_unavailable`, the retention); every
+  adapter given to the host and the kinds without a chat
+  (`backend/hosts/machine/chathost.test.ts`).
 - `backend/features/chat`: `routes.test.ts` (routes, read-only),
   `watch.test.ts` (the watch: `a host of build …`, `a change after the
   machine left is dropped`), `page.test.ts` (the WebSocket's `limits` and

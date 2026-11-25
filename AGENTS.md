@@ -186,6 +186,13 @@ playbooks):
   app-server schema the adapter relies on is pinned in
   `spec/codex-app-server/summary.json` (`TestSchemaPinned`; its README
   says how to move to another version).
+- The TypeScript build's Claude Code adapter runs on Anthropic's Agent SDK,
+  which no executable may carry (all rights reserved): outside tests import
+  only its types (`scripts/check.sh`; `backend/scripts/build.ts` refuses
+  an executable that holds it). Machines fetch the npm tarball pinned in
+  `backend/features/chat/claudesdk.ts`; moving to another version changes
+  the pin (version, integrity, the entry's SHA-256) and the development
+  dependency together (`sdk.test.ts`, `installed.test.ts`).
 - A terminal the product runs for itself (the chat host) is hidden by its
   reserved name and label together (`agentproto.Hidden`, `hidden` of
   `backend/shared/proto/agentproto`): anything that

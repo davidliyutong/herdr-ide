@@ -10,9 +10,10 @@ features' `machine.ts`) in a core built to deploy it
 (`scripts/build.ts --machine ts`), which serves the features whose machine
 side is here (terminals, files, git, search, monitor, history, browser,
 agents, AI usage, VS Code, chats: the chat host, `chat-host`, with its
-adapters' interface, the ACP adapter and Codex's, program windows with the
-native GUI helper of `scripts/gui-helper`) and the vault's MCP server
-(`mcp`, which every executable serves).
+adapters' interface, the ACP adapter, Codex's and Claude Code's, on
+Anthropic's Agent SDK, which machines fetch on use and no executable
+carries, program windows with the native GUI helper of `scripts/gui-helper`)
+and the vault's MCP server (`mcp`, which every executable serves).
 Both speak the same wire protocols, and a node of either takes over from
 the other. It is not a translation of the Go packages: their layout is not
 kept.

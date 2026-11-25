@@ -405,6 +405,28 @@ mirror. Verification:
 Bundles are for your own installations: Git Graph's license restricts
 redistribution, so do not publish bundles containing it.
 
+**Claude Code's chats on machines of the TypeScript build** run on
+Anthropic's Agent SDK, which no executable or app carries
+([42](features/42-typescript-backend.md#claude-code)). Before such a chat
+starts, a machine that lacks it downloads the npm registry's tarball of
+the pinned version itself (curl or wget; not with `--offline`), else the
+core uploads it from a `--seed-dir`, its cache (`~/.veldr/cache/npm/`) or
+its own download through `HTTPS_PROXY`. `--npm-registry` names a mirror.
+For an offline site, put the tarball into a `--seed-dir` directory under
+its own name; on a connected machine:
+
+```bash
+curl -fsSLO https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.322.tgz
+# or: npm pack @anthropic-ai/claude-agent-sdk@0.3.322
+```
+
+Whatever its source, the tarball is checked against the integrity pinned
+in the build (the npm lockfile's `sha512-r88ij7R3…`); another file is
+refused. A machine that gets it from none of them refuses the chat with
+`sdk_unavailable`, saying what each source said. Anthropic's terms govern
+your use of the SDK and of your Claude account; the chats run your own
+`claude` with your own sign-in.
+
 Building needs Go modules, npm packages, the Bun runtimes of the target
 platforms (`bun build --compile` downloads one for another platform) and
 the pinned herdr-core archives (verified archives in `dist/hc/` are
@@ -479,6 +501,8 @@ host's key and `<run>` the namespace's runtime directory on the host
 | herdr-core executable (`<data>/hosts/<host>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
 | herdr-core state (`~/.local/state/herdr-core/veldr[-<instance>]-<host id>/`) | By herdr-core. | Kept until the user removes it. |
 | code-server versions (`~/.veldr/code-server/<version>-<os>-<arch>/`) | Install (an upload or a download is staged beside them as `.upload-*` or `.download-*` and unpacked into `.install-*`; on the TypeScript machine side at most 1 GiB, unpacked at most 4 GiB). | Unused for 14 days, at the next install; a start touches its version, and on the TypeScript machine side housekeeping also touches the running one and removes the unused ones every 24 h. What an interrupted install left: when it ends, else on the TypeScript machine side after a day. |
+| Anthropic's Agent SDK (`<data>/claude-agent-sdk/<version>/`: `package.json`, `sdk.mjs`, `LICENSE.md`, `README.md`; TypeScript machine build) | Before a Claude Code chat starts on a machine without it (not in `--read-only`): the machine's download (≤ 32 MiB) or the core's upload is staged beside the versions as `.download-*` or `.upload-*` and unpacked into `.install-*`, checked against the pinned integrity first. | Unused for 14 days (each load by the chat host and each look of a core counts as a use), by the node's housekeeping; what an interrupted install left after a day. |
+| Agent SDK tarballs (`~/.veldr/cache/npm/claude-agent-sdk-<version>.tgz`, core host) | When a machine needs the SDK the core has in no `--seed-dir`, from the core's download. | Unused for 14 days (touched on use); a cached file that is not the pinned one when it is read. |
 | Xvfb packages (`~/.veldr/hosts/<host>/xvfb/`), video encoders (`~/.veldr/video/`, ~2 MB), GPU selection libraries (`~/.veldr/gpupick/`, 0600, `gui.pick`) | When needed (not in `--read-only`). | Unused for 14 days, when another is installed. |
 | GUI helper (`<data>/gui/<sha256 prefix>/veldr-gui`, 0700, TypeScript machine build) | Extracted from the machine build when program windows first need it on the host; checked by its SHA-256 before each start and written again when it differs. | Another build's unused for 14 days, by the node's housekeeping (a running one touches its directory at each start); an extraction left unfinished after 1 h. |
 | Uploads (`<data>/staging/`, 0700/0600) | File explorer uploads (≤ 4 GiB). | When written or failed; one left by a killed agent is removed by an agent after 7 days. |
