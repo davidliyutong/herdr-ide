@@ -9,6 +9,185 @@ theirs under Added, Changed and Fixed, after
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-22
+
+- **Breaking:** VS Code is off by default. Enable it under **Settings →
+  Plugins** separately for the desktop app and for browsers; browsers
+  first ask you to accept that VS Code's extensions and webviews can
+  access every connected machine through the page. Turning it off closes
+  its open views for that kind of client and prevents new installations
+  and starts; its panes stay in the layout for when it is enabled again.
+
+- **Breaking:** pages on another loopback host or port can no longer
+  connect to the server unless their origin is explicitly allowed with
+  `--allowed-origin`. Custom frontends and reverse proxies must use the
+  server's own host and port or an allowed origin.
+
+- **Breaking:** custom `--agent-dir` overrides now take
+  `herdr-ide-<os>-<arch>` executables. Custom launchers using
+  `--parent-stdio` must send a JSON hello line before waiting for
+  readiness (`{}` when no desktop identity is needed).
+
+- Plugins have a sidebar on the right, their own settings pages and
+  switches under **Settings → Plugins**. Drag a panel's button or title
+  into the workspace to split it beside another pane or give it a tab,
+  or use **Open in Pane**; **Move to Sidebar** takes it back. Uploads,
+  downloads, program windows and VS Code can be turned off there too.
+
+- **Explorer** follows the focused terminal's directory on each machine:
+  file-type icons, filtering, hidden files, excluded names, sorting,
+  creating files and folders, rename, cut, copy, paste, drag to move and
+  **Move to Trash**. Select several files to act on them together. Drop
+  files or folders from your computer, or use **Upload Files…** and
+  **Upload Folder…**, to upload their structure with choices for names
+  already taken; drag files out to download them. The local machine also
+  offers to reveal a file in its file manager.
+
+- Files open in an editor tab without starting VS Code: a click reuses
+  the preview editor, a double click or an edit keeps it, and **Open to
+  the Side** splits beside the focused pane. Saves check for changes on
+  the machine and preserve links, ownership, permissions and mixed line
+  endings; files changed elsewhere offer to reload or keep editing.
+  Unsaved text stays while switching tabs, workspaces or machines, and
+  deleted files keep their text with a struck-through title. `cmd+s`
+  (`ctrl+s` elsewhere) saves the editor that has the keyboard.
+
+- **Source Control** works without VS Code: staged, unstaged, untracked
+  and merge changes as a list or tree, actions on several files or
+  folders, commits and amend, branch creation and checkout, stashes,
+  fetch, pull, push and synchronization. Search branches and repositories
+  with the keyboard; when several remotes exist, operations use the
+  branch's upstream or ask which remote to use. Changed files are
+  colored and ignored files muted in **Explorer**, and editors mark
+  changed lines in their gutter with **Open Changes**.
+
+- **Show Git Graph** opens the repository's history in its own tab, with
+  branch and tag lanes, search, filters for several branches, a commit's
+  files and menus for checkout, branches, tags, merge, rebase,
+  cherry-pick, revert and reset. History is also docked in **Source
+  Control**. Diffs open side by side or inline, let you edit the working
+  file and stage, unstage or discard selected ranges; unsaved edits are
+  checked before discarded files' editors close.
+
+- **Variable Vault** keeps encrypted API keys and environment variables
+  for coding agents on every machine. Choose which machines may read
+  each variable; other requests ask you to allow once, always or deny.
+  Connect Claude Code, Codex and other MCP clients from the panel's setup
+  guide, or let a command use variables without returning their values
+  to the model. Every read is logged with its requester. Unlock with a
+  passphrase, then use Touch ID, Windows Hello or a browser authenticator
+  during its remembered period; **Verify every Allow** verifies each
+  approval, and trusted apps can be exempted per machine. The vault locks
+  after an hour without use by default, with a countdown and a choice for
+  this unlock. Export and import variables in encrypted files, previewing
+  conflicts and choosing which machines and variables to keep.
+
+- **AI Usage** shows Claude, Codex, Grok, Antigravity, Kimi Code and
+  DeepSeek accounts across machines, merging shared accounts: limits,
+  reset countdowns, pace, credits, balances and provider incidents, with
+  configurable alerts that do not repeat for the same period. **Spend**
+  and **Tokens** show local usage by day, model, project and machine,
+  including Antigravity, Kimi Code and OpenCode sessions; spend estimates
+  use API prices, with **Your prices** for overrides and unpriced models
+  still counted in tokens. Choose refresh intervals and providers in its
+  settings. Kimi Code's sign-in is renewed when needed, except in
+  read-only mode.
+
+- **Browser** panes open development servers on a machine's localhost
+  through port forwards when the client runs on the server's computer.
+  **Ports** lists listening ports and stops forwards; forwards are opened
+  by your action and end when unused. `cmd`/`ctrl`-click a localhost link
+  in a terminal to open it in a new browser tab of the workspace; document
+  links ask before making a new forward. The desktop app can also browse
+  other web addresses. The new-tab button's menu chooses terminal,
+  browser and other enabled pane types.
+
+- **System Monitor** shows live CPU, memory, swap, per-GPU utilization
+  and memory, temperatures, power, network throughput, disk activity and
+  mounted disks for Linux and macOS machines. Hover or click its status
+  bar item, or hold `cmd` (`ctrl`/Meta elsewhere) while hovering a machine
+  in the sidebar. **Task Manager** has searchable, sortable process trees
+  and flat lists, process details, and actions to terminate, force kill,
+  pause or resume a process; it can also open as a pane or tab.
+
+- Program windows use a GPU-backed display where a Linux machine has
+  Xwayland and an accessible GPU, so OpenGL and Vulkan programs such as
+  Isaac Sim can render on it; other machines keep Xvfb. **Follow
+  CUDA_VISIBLE_DEVICES**, off by default, lets programs on machines with
+  several NVIDIA GPUs show their windows from the GPU their launch
+  command selects.
+
+- Workspaces, tabs and splits come back after a machine or its terminal
+  service restarts, with shells in their directories. Claude Code and
+  Codex resume the directory's latest conversation in their panes;
+  other programs return to shells. Recovery works with several browsers
+  open and when the app was closed during the restart.
+
+- Closing panes, tabs and workspaces acts at once with **Undo Close**
+  (`cmd+z` in the desktop app on macOS), keeping their programs running
+  until the undo time expires. **Settings → Panes and Tabs → Undo close
+  for** adjusts it from 3 to 120 seconds (5 by default). Unsaved edits
+  still ask before closing; quitting the desktop app lists the files
+  with **Show**, **Save All**, **Don't Save** and **Cancel**.
+
+- **Pin Tab** keeps a tab first and protects it from middle-click,
+  **Close Other Tabs** and **Close Tabs to the Right**. Drag a whole tab
+  onto another tab's pane to combine them into a split; resting on a tab
+  while dragging shows it. Panes and panels dropped on the tab bar's
+  empty space open in a new tab. **Go Back** and **Go Forward**
+  (`cmd+[` and `cmd+]` in the desktop app on macOS) revisit focused panes.
+
+- Select several machines, workspaces or tabs with `cmd`/`ctrl`-click or
+  Shift to reorder, move, close, enable or disable them together. Their
+  lists, pane headers, agent inbox and transfer panels work from the
+  keyboard, including rename and context menus; dragging near the
+  sidebar's edge scrolls to rows out of view. **Close Other Workspaces**
+  and the tab-closing commands act on groups with one undo.
+
+- Workspace dialogs check the folder on the machine while you type,
+  explain invalid folders and resolve `~` and relative paths before
+  saving. A folder is optional for a new workspace; without one, new
+  terminals start in the focused terminal's directory.
+
+- Terminals shown recently stay attached in the background, so switching
+  tabs returns to their current output and remembered scroll position.
+  Switching tabs keeps full-screen programs at their size. **Settings →
+  Performance** controls how many terminals stay attached, shows app and
+  server resource use and counts the terminals shown or kept. The cursor is a
+  thin bar by default, with adjustable **Cursor thickness**, and input
+  method composition no longer triggers app shortcuts.
+
+- New SSH terminals let programs recognize that the clipboard is remote,
+  so selecting in Codex copies through the terminal automatically; long
+  mouse selections also copy without an extra prompt. Agent turns already
+  seen stay seen after restarting the app, avoiding repeated completion
+  notifications.
+
+- Code in editors, diffs and previews is colored in about 125 languages,
+  including Makefiles, TOML, Dockerfiles and scripts without extensions.
+  Markdown previews render tables, task lists and formulas and open
+  relative file links. Editors can scroll beyond the last line and no
+  longer flag ordinary Chinese punctuation as confusable characters.
+
+- Settings, menus and the command palette have searchable choices,
+  highlighted matches and keyboard navigation through long lists;
+  settings pages fit narrow windows with a page picker. **Color theme**
+  chooses the interface's accent from blue, VS Code blue, teal, violet,
+  rose, amber and graphite, with consistent controls and text sizes.
+  **Customize Status Bar** or its right-click menu shows or hides widgets,
+  kept per browser; hovering uploads, downloads or AI usage shows their
+  panel or a compact summary.
+
+- VS Code keeps its own keyboard shortcuts: `cmd+w` closes an editor,
+  then the pane when no editor remains. **Give the Keyboard Back**
+  (`ctrl+b` on macOS, `ctrl+alt+shift+b` elsewhere) returns focus to the
+  pane header; **Open in VS Code** from there returns to the pane focused
+  before it.
+
+- Desktop app on macOS: the window buttons sit inside the sidebar or tab
+  header, with no separate title bar. Their placement follows interface
+  size, zoom and full-screen changes.
+
 ## [0.4.0] - 2026-11-16
 
 - **Breaking:** herdr is no longer used or shipped. Each machine's

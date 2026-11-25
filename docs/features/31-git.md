@@ -320,7 +320,8 @@ terminal; the plugin adds a way to reach it from the browser:
   renames, conflicts, worktrees, nested repositories and submodules (bounded
   scan, no links followed), unborn repositories, reftable,
   stashes), remotes with a bare repository (URL redaction, `diverged`,
-  `auth_required`), timeouts, output limits and `busy` with a fake git,
+  `auth_required`), timeouts, output limits (a single read that crosses the limit keeps its
+  prefix, `TestCappedKeepsPrefix`) and `busy` with a fake git,
   literal paths with hooks, reads with a monitor and textconv configured,
   ignored paths.
 - `backend/features/git/git.test.ts`: routes, audit records (`change

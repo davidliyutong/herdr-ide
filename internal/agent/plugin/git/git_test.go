@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1076,6 +1077,32 @@ func TestParseStatusCut(t *testing.T) {
 	many := strings.Repeat("! f\x00", maxIgnored+5)
 	if st, _ := parseStatus([]byte(changed+many), false); len(st.Ignored) != maxIgnored || !st.IgnoredTruncated || len(st.Files) != 1 {
 		t.Errorf("capped: %d ignored, truncated %v", len(st.Ignored), st.IgnoredTruncated)
+	}
+}
+
+// A read can cross the output limit on its first chunk or a later one;
+// either way, keep the entire prefix up to the limit.
+func TestCappedKeepsPrefix(t *testing.T) {
+	for _, chunks := range [][]string{{"abcdef"}, {"ab", "cdef"}, {"abcd", "ef"}} {
+		c := newCapped(4)
+		written := 0
+		var err error
+		for _, chunk := range chunks {
+			var n int
+			n, err = c.Write([]byte(chunk))
+			written += n
+		}
+		if written != 4 || !errors.Is(err, io.ErrShortWrite) {
+			t.Fatalf("chunks %q wrote %d bytes, error %v", chunks, written, err)
+		}
+		if got := c.buf.String(); got != "abcd" {
+			t.Fatalf("chunks %q kept %q, want abcd", chunks, got)
+		}
+		select {
+		case <-c.over:
+		default:
+			t.Fatal("output limit was not reported")
+		}
 	}
 }
 
