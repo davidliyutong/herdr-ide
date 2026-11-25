@@ -45,7 +45,7 @@ white stay); user-defined themes; the colors programs draw with in panes
   heights at root font size `font.root` = 13) and `font.size.*` (type
   scale).
 
-**Generator: `scripts/tokens`** (Go, standard library). `make tokens`
+**Generator: `backend/scripts/tokens.ts`** (Bun, no dependencies). `make tokens`
 writes one checked-in file, so no build needs to run it:
 
 - `web/src/tokens.css`: `--ds-*` custom properties on `:root` (dark) and
@@ -61,7 +61,7 @@ bundled into its executable): the terminal palettes as defaults of the
 
 Output is deterministic. The generator rejects malformed tokens (wrong
 color form, missing theme value, wrong palette length, unknown fields)
-and writes nothing. `go run ./scripts/tokens -check`, run by
+and writes nothing. `bun backend/scripts/tokens.ts --check`, run by
 `scripts/check.sh`, fails naming stale files.
 
 **Chrome variables.** `web/src/styles/base.css` defines the chrome's own
@@ -118,8 +118,8 @@ its build bundles.
 
 ## Testing
 
-- `scripts/tokens/main_test.go`: parsing, generated CSS, determinism,
-  rejected tokens, `-check`, and that the repository's file is current.
+- `backend/scripts/tokens.test.ts`: parsing, generated CSS, determinism,
+  rejected tokens, `--check`, and that the repository's file is current.
 - `backend/kernel/config/ui/ui.test.ts`: the color theme setting offers
   the tokens' themes (`color themes`), the core's terminal defaults are
   `tokens.css`'s (`tokens as tokens.css has them`).

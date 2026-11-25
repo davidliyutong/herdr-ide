@@ -6,17 +6,16 @@ Chinese (中文也可以). Participation is governed by the
 
 ## Setup
 
-Requirements: Bun 1.4.5 (the core and its machine side), Go (see
-`go.mod`; the build's tools such as `scripts/fetch-hc`, the Go machine
-build and its tests), Node.js 22.12+ and pnpm (and, on Windows, Git for
-Windows for its bash). The build downloads the pinned herdr-core, the
+Requirements: Bun 1.4.5 (the core, its machine side and the build's
+tools in `backend/scripts`), Node.js 22.12+ and pnpm (and, on Windows, Git
+for Windows for its bash). The build downloads the pinned herdr-core, the
 terminal core the agents install on machines, into `dist/machines-hc/`
-(`dist/payload/hc/` with `MACHINE=go`) and embeds it.
+and embeds it.
 
 ```bash
 make deps            # pnpm install for web/, the extension, desktop/ (with Electron's binary), e2e/ and backend/
 make build           # web UI, extension, each platform's executable (core and machine side, Bun); release archives
-make test            # Go, core, web and desktop unit tests
+make test            # core, web and desktop unit tests
 make test-slow       # the core's tests that wait on real time (CI runs them too)
 make check           # formatting, vet, typecheck, import cycles of the web UI, brand/doc consistency
 ```
@@ -44,13 +43,13 @@ agent's), and the core's terminals test on the instance `ts-term`, with
 temporary state:
 `HC_TEST_BIN=<path to herdr-core> make it` (without it, `hc` on `PATH`;
 without either the tests are skipped).
-`go run ./scripts/fetch-hc -exe <file> <os>/<arch>` writes the pinned,
+`bun backend/scripts/fetch-hc.ts --exe <file> <os>/<arch>` writes the pinned,
 verified executable for one platform to `<file>`, as CI does.
 
 `make e2e` runs the end-to-end tests (`e2e/`, Playwright with Chromium;
 not part of `make test`): `scripts/e2e.sh` builds the web UI, this
 platform's core with the pinned herdr-core and the fake coding agent
-(`e2e/fakeacp`, a scripted ACP agent installed as `kimi`) into
+(`e2e/fakes/acp.ts`, a scripted ACP agent installed as `kimi`, compiled by Bun) into
 `dist/e2e/`, then each test starts a core of its own with a temporary
 home under `/tmp/hie-*`, an instance `e2e-<random>`, a free loopback port,
 `--local-only` and no network, and stops its terminal core through that
@@ -83,16 +82,14 @@ starts a container of `e2e/sshd` (OpenSSH on Linux, key-only sign-in)
 published on `127.0.0.1` only, with a throwaway key, `known_hosts` and ssh
 configuration in the instance's home (never `~/.ssh` or an ssh agent), and
 removes it at the end; a run removes the labelled containers of runs that
-died. `scripts/e2e.sh` builds the Linux machine build and fake agent of
+died. `scripts/e2e.sh` builds the Linux machine builds, fake agent and X program of
 Docker's architecture and the image (cached). Without Docker these tests
 skip; `E2E_REQUIRE_DOCKER=1` (CI) makes them fail instead.
-The suite runs against the TypeScript build; `E2E_MACHINE=go` runs it
-against the core that deploys the Go machine build (`harness/paths.ts`).
 
 Release archives are in `dist/release/`; the unpacked directories are in
 `dist/packages/`. herdr-core upgrades change the version and the four
-archive digests in `internal/hcdist`; its license and notices are taken
-from the release archive by `scripts/fetch-hc`. Rerun the integration tests
+archive digests in `backend/scripts/hcdist.ts`; its license and notices are taken
+from the release archive by `backend/scripts/fetch-hc.ts`. Rerun the integration tests
 with the new executable before distributing a release.
 
 The desktop app builds on the system it is for. `make dev-desktop` builds
@@ -114,25 +111,22 @@ workspaces can live in the ignored `.worktrees/` directory.
 
 - Keep each PR focused; describe the user-visible change and how you tested
   it (the template asks for this).
-- `make check test` must pass (`make check` also vets the Go code for
-  linux/amd64, darwin/arm64 and windows/amd64, and fails when modules of
+- `make check test` must pass (`make check` also fails when modules of
   the web UI import each other in a cycle: `web/scripts/cycles.mjs`
   counts the imports that exist at run time, so move what both sides
   need into a module below them); CI
-  (`.github/workflows/ci.yml`) runs the same on Linux, plus
-  `go test -race`, `make it` against the pinned herdr-core, the
+  (`.github/workflows/ci.yml`) runs the same on Linux, with the core's
+  slow tests, plus `make it` against the pinned herdr-core, the
   cross-compiled release archives and Windows core, and a `desktop` job on
-  Linux, macOS and Windows: the Go tests (on macOS and Windows), the web
-  and desktop tests and the packaged Electron app
-  (`scripts/desktop.sh app`), and the core's tests on macOS. POSIX-only
-  Go tests skip on Windows.
-- New dependencies of the Go machine build or npm packages of the core:
+  Linux, macOS and Windows: the web and desktop tests and the packaged
+  Electron app (`scripts/desktop.sh app`), and the core's tests on macOS.
+- New npm packages of the core:
   run `scripts/notices.sh` and commit `THIRD_PARTY_NOTICES.md` (checked by
   CI); make sure the license is compatible with MIT.
-- Add or update tests with behavior changes. Go tests live next to the
-  code, the core's as `<name>.test.ts` beside its modules in `backend/`;
+- Add or update tests with behavior changes. The core's live as
+  `<name>.test.ts` beside its modules in `backend/`;
   web tests in `web/src/__tests__`, desktop tests in `desktop/src/*.test.ts`.
-  Vectors the web tests run, and the core's and Go's tests where the rule
+  Vectors the web tests run, and the core's tests where the rule
   is theirs too (keys, ssh targets, transcripts), live in `spec/vectors/`
   (`make check` fails when a vector file is run by no web test).
 - Update the docs in the same PR: flags, endpoints and files in
@@ -149,7 +143,7 @@ workspaces can live in the ignored `.worktrees/` directory.
 
 ## Conventions
 
-- **Names:** never hardcode the product name. Use `internal/brand` in Go,
+- **Names:** never hardcode the product name. Use
   `backend/shared/lib/brand.ts` in the core, `web/src/brand.ts` in the UI
   and `src/brand.ts` in the extension (`scripts/check.sh` enforces this).
   Renames go through `scripts/rename.sh`.
@@ -162,11 +156,11 @@ workspaces can live in the ignored `.worktrees/` directory.
   step (same sections, checked by CI). Reference material lives once in
   `docs/` (English).
 - **Protocols:** core and agent always ship together; extend
-  `internal/agentproto` by adding fields or ops, never by changing meanings.
+  `backend/shared/proto/agentproto` by adding fields or ops, never by changing meanings.
 - **Security:** read [SECURITY.md](SECURITY.md) before touching the
   core's guards (`backend/kernel/http/guard.ts`), the agent's file or
   socket handling, or anything that downloads or executes.
-- **Formatting:** `gofmt`; Prettier for TypeScript (`pnpm -C web format`,
+- **Formatting:** Prettier for TypeScript (`pnpm -C web format`,
   `pnpm -C backend format`).
 
 ## Project layout

@@ -24,9 +24,9 @@ process tree in the UI, without root or extra binaries on the machines.
 
 ## Design
 
-### Machine side (`internal/agent/plugin/monitor`)
+### Machine side (`backend/features/monitor/machine.ts`)
 
-Plugin id `monitor` (`internal/agent/plugins_monitor.go`, `//go:build unix`),
+Plugin id `monitor` (Linux and macOS: `machine/linux.ts`, `machine/darwin.ts`),
 three actions of the agent's `plugin` op:
 
 - `metrics`: CPU (overall, per core, load), memory and swap, per-GPU
@@ -124,9 +124,9 @@ and process reads never go through a shell (commands are run directly). See [SEC
 
 ## Testing
 
-- `internal/agent/plugin/monitor/monitor_test.go`: the Linux and macOS
-  parsers, live collection, signal guards.
-- `internal/agent/plugin/monitor/sensors_test.go`: hwmon and thermal zone
+- `backend/features/monitor/machine.test.ts` and `machine/parsers.test.ts`:
+  the Linux and macOS parsers, live collection, signal guards.
+- `backend/features/monitor/machine/sensors.test.ts`: hwmon and thermal zone
   trees in a temporary directory (labels, thresholds, duplicate chips,
   stopped fans, error values, the fallback, the bound), the 1 s budget
   against a hung scan, the macOS battery's `ioreg` output.

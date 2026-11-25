@@ -37,12 +37,12 @@ failures.
 
 ## Design
 
-`internal/hostdirs` lays out a namespace's directories on a host;
-`internal/hostid` names the host.
+`backend/shared/host/hostdirs.ts` lays out a namespace's directories on a
+host; `backend/shared/host/hostid.ts` names the host.
 
-**Host names.** `hostid.Key` is the host's whole name, sanitized, and 8
+**Host names.** `hostid.key` is the host's whole name, sanitized, and 8
 hex digits of a hash of its machine id (`/etc/machine-id`, macOS's
-platform UUID), so two hosts of one name never share a key. `hostid.ID`
+platform UUID), so two hosts of one name never share a key. `hostid.id`
 is the hash alone (the name without an id): it stays when macOS renames
 the host with the network, and names what a host must find again.
 
@@ -50,8 +50,8 @@ the host with the network, and names what a host must find again.
 
 | Kind | Where | What |
 | --- | --- | --- |
-| Runtime, host-local, private | `/run/user/<uid>/<data dir name without its dot>-<hash>` when the system has that directory (the user's, 0700; tmpfs per host); else `<data>/run-<hostid.ID>` | sockets (node, terminal core and its holders, code-server, vault, bridge, chat host), locks, `cs.pid`, the display's state and X authority |
-| Persistent, this host's | `<data>/hosts/<hostid.Key>/` | the terminal core's executable, code-server's user data and extensions, logs of node, code-server and displays; in `~/.veldr/hosts/<hostid.Key>/xvfb/`, Xvfb packages for the host's instances |
+| Runtime, host-local, private | `/run/user/<uid>/<data dir name without its dot>-<hash>` when the system has that directory (the user's, 0700; tmpfs per host); else `<data>/run-<hostid.id>` | sockets (node, terminal core and its holders, code-server, vault, bridge, chat host), locks, `cs.pid`, the display's state and X authority |
+| Persistent, this host's | `<data>/hosts/<hostid.key>/` | the terminal core's executable, code-server's user data and extensions, logs of node, code-server and displays; in `~/.veldr/hosts/<hostid.key>/xvfb/`, Xvfb packages for the host's instances |
 | Shared | `<data>/` and `~/.veldr/` | databases named per host ([38](38-sqlite-state.md)), agent builds by content hash, code-server per version, system and architecture, uploads with unique names, the vault's MCP command |
 
 The runtime directory's name carries a hash of the data directory's real
@@ -61,7 +61,7 @@ started by a login lack; it must be the user's and private, or the data
 directory's is used. A lingering user
 keeps `/run/user/<uid>` as long as the terminal core's service runs.
 
-**The terminal core's session** is `veldr[-<instance>]-<hostid.ID>`:
+**The terminal core's session** is `veldr[-<instance>]-<hostid.id>`:
 herdr-core's state directory and service are per host.
 
 **The vault's MCP command** (`<data>/bin/veldr-mcp`, named by agents'
@@ -112,9 +112,11 @@ protection. See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- `internal/hostdirs`: `TestRunDir` (in `/run/user` or the data
-  directory, homes apart, links resolved), `TestMake`.
-- `internal/hostid`: `TestID`, `TestMachineID`.
-- `internal/agent`: `TestPruneHosts`, `TestLinkMCPReplacesTheLink`,
-  `TestHCInstallStartAndPipe` (session and socket).
-- `internal/vaultmcp`: `TestSocketPath`.
+- `backend/shared/host/hostdirs.test.ts`: the runtime directory (in
+  `/run/user` or the data directory, homes apart, links resolved), making
+  the directories.
+- `backend/shared/host/hostid.test.ts`: the host's key and id, its machine
+  id.
+- `backend/machine/housekeeping.test.ts`, `vault.test.ts`,
+  `agent.test.ts`: other hosts' directories pruned, the MCP link replaced,
+  the terminal core's session and socket.

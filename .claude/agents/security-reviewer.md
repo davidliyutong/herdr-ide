@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Reviews changes for security impact against SECURITY.md. Use only when a code review is asked for, or before merging a branch with changes to backend/kernel (guards, machines, ssh transport), backend/features (files, proxy, bridge, vault, auth), backend/hosts, internal/agent (files, sockets, processes, archives), backend/features/vscode (downloads, checksums), or anything that executes, downloads, listens or writes outside the repository; not after every change. Read-only.
+description: Reviews changes for security impact against SECURITY.md. Use only when a code review is asked for, or before merging a branch with changes to backend/kernel (guards, machines, ssh transport), backend/features (files, proxy, bridge, vault, auth), backend/hosts, backend/machine (files, sockets, processes, archives), backend/features/vscode (downloads, checksums), or anything that executes, downloads, listens or writes outside the repository; not after every change. Read-only.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -10,7 +10,7 @@ than usual. Read `SECURITY.md`, `docs/features/08-web-access-and-security.md`
 and `docs/features/10-remote-resource-lifecycle.md` first.
 
 Review the diff (`git diff`, or the files you are pointed at) against these
-invariants, and run `go test ./internal/agent/...` and `pnpm -C backend test`:
+invariants, and run `pnpm -C backend test`:
 
 1. Listening: loopback by default; non-loopback only with a proxy secret or
    `--insecure-listen`. Nothing listens on TCP on machines.

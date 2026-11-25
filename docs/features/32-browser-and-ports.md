@@ -36,7 +36,7 @@ cannot show them.
 ### Forwards
 
 `backend/features/browser` (core: `forwards.ts`),
-`internal/agent/plugin/browser` (machine).
+`backend/features/browser/machine.ts` (machine).
 
 - **Machine.** The action `dial {port}` connects the stream to the port on
   `127.0.0.1` (else `::1`) and copies both ways. Loopback only: the core
@@ -254,8 +254,8 @@ never a page of a pane ([SECURITY.md](../../SECURITY.md)).
   values it refuses.
 - `backend/shared/host/loopback.test.ts`: the other address taken, held,
   absent.
-- `internal/agent/plugin/browser`: `dial` both ways and its refusals,
-  listening ports (`listening_linux_test.go`).
+- `backend/features/browser/machine.test.ts`: `dial` both ways and its
+  refusals, listening ports.
 - `backend/kernel/http/http.test.ts`: `Host and Origin` (other loopback
   origins refused), `frames` (frames by Host and client).
 - `web/src/__tests__/browser*.test.ts(x)`: address parsing, the core's

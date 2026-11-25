@@ -133,13 +133,13 @@ Requirements:
 
 - an OpenSSH client with working access to the machines you want to use
   (this host needs none);
-- to build: Bun 1.4.5 (the core and its machine side), Go (version in
-  `go.mod`; the build's tools and the Go machine build), Node.js 22.12+
-  and pnpm (`corepack enable` picks the pinned version).
+- to build: Bun 1.4.5 (the core, its machine side and the build's
+  tools), Node.js 22.12+ and pnpm (`corepack enable` picks the pinned
+  version).
 
 ```bash
 make deps && make build
-cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
+cd dist/packages/veldr-$(scripts/platform.sh)
 ./veldr
 ```
 
@@ -265,7 +265,7 @@ Issues and pull requests are welcome, in English or Chinese. Please read
 ## License
 
 [MIT](LICENSE). Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-(the core's Bun runtime and npm packages, the machine builds' Go modules)
+(the core's Bun runtime and npm packages)
 and `/licenses.md` served by the core (the web UI bundle,
 with Ghostty's terminal library (MIT), KaTeX and the JetBrains Mono font).
 The core embeds

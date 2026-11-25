@@ -34,33 +34,31 @@ One X display per instance and machine; the agent is its window manager
 and captures each top-level window separately; the core routes the frames
 to browser windows and their input back.
 
-The machine side exists in both machine builds
-([42](42-typescript-backend.md)) with the same wire, files and processes,
-so either build's node takes over a display the other started: the Go
-agent (`internal/agent/gui*.go`) and the TypeScript machine side
-(`backend/features/gui/machine.ts`, `machine/`) with the GUI helper
-(below). File names below are the Go agent's where they differ.
+The machine side is `backend/features/gui/machine.ts` and `machine/` with
+the GUI helper (below). It keeps the wire, files and processes of the Go
+program of earlier releases ([42](42-typescript-backend.md)), so its node
+takes over a display a node of that program started.
 
-### The TypeScript machine side and the GUI helper
+### The machine side and the GUI helper
 
 What is native work is a helper written in Zig (`scripts/gui-helper`):
 one static executable per architecture (linux/amd64, linux/arm64; no C
 library, so it runs on glibc machines as old as CentOS 7's and on musl
-alike), which the TypeScript machine build carries
+alike), which the machine build carries
 (`backend/scripts/build.ts`, `gui-helper.gz` beside the payload) and
 places in `<data>/gui/<sha256 prefix>/<bin>-gui` (the directory 0700),
 checked against the digest of the copy it carries before each start. Its
 commands:
 
 - `gui-wm`: the X client of the window manager. It connects to the
-  display, makes itself its window manager (the Go agent's `guiwm.go`:
-  windows at the origin, EWMH, layers, focus, adoption), reports windows,
+  display, makes itself its window manager (windows at the origin, EWMH, layers,
+  focus, adoption), reports windows,
   layers, the pointer image and damage (coalesced per drawable) to the
   node, replays the controller's input with XTEST, and captures and
   encodes what the node asks for: every rectangle of a batch requested
-  through MIT-SHM before the first reply is read, JPEG (the Go agent's
-  `internal/jpegstrip` ported: byte for byte image/jpeg's output for one
-  row group, row groups on all cores), PNG (deflate of Zig's standard
+  through MIT-SHM before the first reply is read, JPEG (Go's image/jpeg
+  encoder ported, as the Go program encoded windows: byte for byte its
+  output for one row group, row groups on all cores), PNG (deflate of Zig's standard
   library) and video frames through the window's encoder process, which
   it starts and ends. It speaks to the node over its stdin and stdout
   (`proto.zig`, `machine/helper.ts`: [u32 length][u8 type][payload],
@@ -92,11 +90,11 @@ encoder's path absolute; a job captures only a window the helper manages
 or one of its layers); one that is not ends the helper, as does a node that stops reading
 (256 MB waiting) or goes (end of its stdin). Every X connection goes only
 to the server whose process the node recorded and whose user is this one,
-on the socket and its abstract twin, as the Go agent's.
+on the socket and its abstract twin.
 
 ### Display
 
-Agent: `internal/agent/gui.go`; `backend/features/gui/machine/display.ts`.
+Agent: `backend/features/gui/machine/display.ts`.
 
 - **Two kinds of X server.** The setting `gui.display` chooses: `auto` (the
   default) or `xvfb`.
@@ -112,10 +110,9 @@ Agent: `internal/agent/gui.go`; `backend/features/gui/machine/display.ts`.
     Xwayland is never fetched.
   - An Xwayland that does not come up, or comes up without DRI3, is ended
     and Xvfb started instead; the next connection tries again.
-- **A compositor of our own** (`internal/agent/guiwl.go`; the helper's
-  `wl.zig`). Xwayland needs a Wayland compositor and machines have none.
+- **A compositor of our own** (the helper's `wl.zig`). Xwayland needs a Wayland compositor and machines have none.
   Nobody looks at Xwayland's screen (windows are captured from the X
-  side), so the machine's binary (the GUI helper in the TypeScript build)
+  side), so the GUI helper
   run as `gui-wl` is a Wayland server for one client that draws nothing: it
   offers the globals Xwayland needs with a GPU (including `wl_drm`, which
   Xwayland before 24.1 requires for glamor), releases each buffer as soon as
@@ -143,8 +140,7 @@ Agent: `internal/agent/gui.go`; `backend/features/gui/machine/display.ts`.
   programs, the agent's window manager while the core is connected, and the
   display keeper. The display thus lives as long as terminals that have its
   `DISPLAY` may start programs.
-- **Keeper** (`internal/agent/guikeep.go`; the helper's `keep.zig`): the
-  machine's binary (the GUI helper in the TypeScript build) run as
+- **Keeper** (the helper's `keep.zig`): the GUI helper run as
   `gui-keep`, one per instance whichever build started it (its lock file). It holds a connection to the display while
   the instance's terminal core (`hc.sock`) runs, follows a terminal core
   restarted within a short grace period, and exits once none runs. The core
@@ -157,8 +153,8 @@ Agent: `internal/agent/gui.go`; `backend/features/gui/machine/display.ts`.
 
 ### GPUs
 
-Agent: `internal/agent/guigpu.go`; `backend/features/gui/machine/gpu.ts`,
-`pick.ts`; library `scripts/gpupick`.
+Agent: `backend/features/gui/machine/gpu.ts`, `pick.ts`; library
+`scripts/gpupick`.
 
 - **The display's GPU.** With NVIDIA GPUs it is the driver's first one
   (`/dev/nvidia0`, read from `/proc/driver/nvidia/gpus/*/information`; not
@@ -196,9 +192,9 @@ Agent: `internal/agent/guigpu.go`; `backend/features/gui/machine/gpu.ts`,
   - Windows from a GPU other than the display's are copied through the CPU
     by the driver: slower, but they work.
 - The library is ~10 kB of C, built for linux/amd64 and linux/arm64 against
-  glibc 2.17 (`scripts/build-gpupick.sh`; builds and digests committed and
-  checked by `make check`). The agent carries it (the TypeScript build
-  carries its architecture's as `gpupick.so`) and writes it to
+  glibc 2.17 (`scripts/build-gpupick.sh` into `scripts/gpupick/bin`; builds
+  and digests committed and checked by `make check`). The machine build
+  for Linux carries its architecture's as `gpupick.so` and writes it to
   `~/.veldr/gpupick/<sha256 prefix>/` (0600) when the core asks (action
   `pick`, never in read-only mode), after checking the dynamic loader takes
   it (a `noexec` home would make every program complain). Machines with
@@ -237,12 +233,10 @@ Agent: `internal/agent/guigpu.go`; `backend/features/gui/machine/gpu.ts`,
 
 ### Window manager and capture
 
-Agent: `internal/agent/guiwm.go`, `guiframes.go`, `guishm.go`; the
-helper's `wm.zig`, `capture.zig`, `jpeg.zig`, `png.zig` and the node's
+The helper's `wm.zig`, `capture.zig`, `jpeg.zig`, `png.zig` and the node's
 `backend/features/gui/machine/wm.ts`, `flow.ts`.
 
-- The agent connects to the display (jezek/xgb, pure Go; the helper's own
-  X11 client, `x11.zig`) and becomes its window manager: windows keep their requested size at the origin, get the
+- The helper connects to the display (its own X11 client, `x11.zig`) and becomes its window manager: windows keep their requested size at the origin, get the
   EWMH basics toolkits wait for, and are adopted from a previous agent.
   Override-redirect windows (menus, tooltips) are layers of their
   transient-for or the focused window.
@@ -254,7 +248,7 @@ helper's `wm.zig`, `capture.zig`, `jpeg.zig`, `png.zig` and the node's
   PNG, so still pictures end up exact.
 - **Speed.** Tiles are read through MIT-SHM into one shared segment (0600,
   at most 64 MB, removed when the agent goes), else with `GetImage`. JPEG is
-  encoded by `internal/jpegstrip`: Go's encoder split into row groups coded
+  encoded by `jpeg.zig`: Go's encoder ported and split into row groups coded
   on separate cores and joined with restart markers, giving one ordinary
   JPEG with the same pixels.
 - **Flow control.** A window may have frames in flight up to a byte budget
@@ -281,8 +275,8 @@ helper's `wm.zig`, `capture.zig`, `jpeg.zig`, `png.zig` and the node's
 
 ### Video
 
-Setting `gui.video`, on by default. Agent `internal/agent/guiwm_video.go`,
-`guivideo.go`; the node's `machine/wm.ts`, `video.ts` and the helper's
+Setting `gui.video`, on by default. The node's `machine/wm.ts`,
+`video.ts` and the helper's
 `video.zig`; encoder `scripts/encoder/`.
 
 - **When.** A window that keeps changing (a simulator) would cost a whole
@@ -300,11 +294,11 @@ Setting `gui.video`, on by default. Agent `internal/agent/guiwm_video.go`,
   arm64) that the core embeds and pushes to each Linux machine:
   `~/.veldr/video/<sha256 prefix>/encoder`, verified by digest. Release
   builds embed it (`scripts/build-ffmpeg.sh`, [deployment](../deployment.md));
-  a build without it sends pictures. A core that deploys the TypeScript
-  build carries only its own platform's encoder; for another machine it
-  asks for the machine build's own (action `video` without a digest),
-  which the TypeScript build installs from its copy and the Go build
-  answers without video.
+  a build without it sends pictures. A core carries only its own
+  platform's encoder; for another machine it asks for the machine build's
+  own (action `video` without a digest), which the machine build installs
+  from its copy (a node of the Go program of earlier releases answers
+  without video).
   - H.264 comes from NVENC, else VA-API (the first usable render node whose
     driver encodes H.264, loaded by the built-in libva, VA-API ≤ 1.24); VP8
     from libvpx on the CPU. The agent probes once which kinds work.
@@ -336,7 +330,7 @@ Setting `gui.video`, on by default. Agent `internal/agent/guiwm_video.go`,
   with each machine's phase (`installing`, `starting`, `ready`, `error`,
   `unavailable`, `disconnected`, …) and windows.
 - **Several cores** ([39](39-nodes.md)). Every core a machine's node
-  serves attaches to the one window manager (`internal/agent/guiclients.go`)
+  serves attaches to the one window manager
   and gets every window. One controls them, the others view:
   - input, focus and closing come from the controller only; a viewer's
     browser windows show **View only** with **Take Control**, which takes
@@ -428,11 +422,11 @@ section and as flags ([reference](../reference.md#program-windows),
 | Only pictures | MuJoCo at 60 fps: pictures 48 fps at 44 Mbit/s (7.5 fps on 10 Mbit/s), H.264 58 fps at 1.7 Mbit/s on both, at a third of JPEG's CPU. |
 | The ffmpeg program as encoder | Its muxers hold each frame until the next arrives, stalling acknowledgement-paced streams. |
 | The machine's own ffmpeg | Often missing, of varying versions and builds. |
-| NVENC from the agent (purego) | Hand-written bindings, no VP8 fallback, and the agent would depend on the machine's libc. |
+| NVENC from the agent through FFI | Hand-written bindings, no VP8 fallback, and the agent would depend on the machine's libc. |
 | WebRTC to the browser | Needs connections outside the guarded WebSocket. |
 | AV1 | NVENC encodes it only from Ada GPUs; Safari decodes it only in hardware. |
 | HEVC | Browsers decode it only in hardware. |
-| WebP pictures | No encoder in Go's standard library. |
+| WebP pictures | No encoder the helper could port as it ported Go's JPEG one. |
 | JPEG row groups as separate frames | Extra headers, tearing between parts, separate acknowledgements. |
 | A fixed number of frames in flight | Large pictures queue on slow links; small video frames are held back. |
 | The machine's libva | The encoder would not start where libva is missing; drivers do not need it linked. |
@@ -440,8 +434,8 @@ section and as flags ([reference](../reference.md#program-windows),
 | `DISPLAY` only when asked | MuJoCo and matplotlib would need setup in every pane; machines can be turned off individually. |
 | Restarting the terminal core with `DISPLAY`, or a wrapper shell | Every terminal would inherit a display; a wrapper changes the user's shell. |
 | Typing the export into every pane | Would land in agents' prompts and editors. |
-| The TypeScript machine side's X client in JavaScript (the `x11` npm package, or one of our own) | `x11` is unmaintained since 2019 and has neither MIT-SHM nor X-Resource; capturing and encoding at frame rate on the node's one thread would hold back every terminal of the machine. The helper is the X client; the node decides. |
-| libjpeg-turbo in the helper | Its SIMD on x86-64 is NASM assembly, which zig cannot assemble; without it the gain over the port of the Go agent's encoder (the same bytes, row groups on every core) is small, for a CMake project to build per architecture and a library to track. |
+| The machine side's X client in JavaScript (the `x11` npm package, or one of our own) | `x11` is unmaintained since 2019 and has neither MIT-SHM nor X-Resource; capturing and encoding at frame rate on the node's one thread would hold back every terminal of the machine. The helper is the X client; the node decides. |
+| libjpeg-turbo in the helper | Its SIMD on x86-64 is NASM assembly, which zig cannot assemble; without it the gain over the port of Go's encoder (the same bytes, row groups on every core) is small, for a CMake project to build per architecture and a library to track. |
 | The flow and the routing in the helper too | The decisions the tests reason about would move to a third language, and a core's queue is the node's: the helper cannot see it. The helper reports damage and does what a batch says; the node assigns the frames' numbers, so a core that missed frames gets the whole window from the next number on without a marker from the helper. |
 | The node writing frames to the encoder | About 400 MB/s of raw pixels for a 1706×960 window at 60 fps through the node's thread. |
 | The keeper in TypeScript (the executable run as `gui-keep`) | A Bun runtime idles at 30–40 MB for as long as the terminal core runs; the helper's keeper at a few hundred kB. |
@@ -487,7 +481,7 @@ section and as flags ([reference](../reference.md#program-windows),
   NVENC sessions in use → VP8 on the CPU if viewers decode it, else
   pictures.
 - **No MIT-SHM** → captures through the X connection (slower); logged once.
-- **No GUI helper in the TypeScript build** (a run from the sources, or a
+- **No GUI helper in the build** (a run from the sources, or a
   build without `scripts/gui-helper/bin`) → the attach fails with "this
   build carries no GUI helper for the machine"; panes still get the
   display.
@@ -515,51 +509,33 @@ section and as flags ([reference](../reference.md#program-windows),
 - The GPU display's compositor listens nowhere and opens no file, talks to
   Xwayland over a close-on-exec socket pair, and bounds what its one client
   can make it hold; Xwayland is checked like Xvfb.
-- gpupick is off by default, written from the agent's own binary into a
+- gpupick is off by default, written from the machine build's own copy into a
   directory only the user can write, and only restricts what a program sees.
 - Xvfb packages are verified by apt; the video encoder runs only as pushed
-  by the core and verified by its SHA-256 (or, in the TypeScript build, as
-  the build carries it, verified the same way).
-- The TypeScript build's GUI helper runs only as the build carries it
+  by the core or as the build carries it, verified by its SHA-256.
+- The GUI helper runs only as the build carries it
   (its SHA-256 checked before each start, in a 0700 directory), with the
   agent's environment; it checks every message of the node, the X
   server's peer credentials on every connection, and the bounds of what
-  the compositor's client may make it hold, as the Go agent does.
+  the compositor's client may make it hold.
 
 See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- `internal/agent/gui_test.go` (real Xvfb, skipped without one;
-  `GUI_TEST_INSTALL=1` fetches it): a window announced with its terminal,
-  streamed, clicked, typed into and closed; cookie rotation, display
-  reservation against another user's files, the socket directory check,
-  capture tiles, shell recognition, the flow on a simulated slow link.
-  `TestGUIWindowsGPU` runs it on Xwayland with the compositor.
-  `BenchmarkGUICapture` times capture and encoding.
-- `internal/agent/guiwl_test.go`: the compositor's wire protocol and the
-  NVIDIA layouts it offers.
-- `internal/agent/guigpu_test.go`: GPUs from the driver's description, the
-  display kind and its fallback, the change of kind, gpupick itself (Linux).
-- `internal/agent/guikeep_test.go`, `guiorigin_test.go`, `guivideo_test.go`
-  (encoder protocol against a stand-in, install digests, switching between
-  video and pictures).
-- `internal/jpegstrip`: one row group equals `image/jpeg`'s bytes, any
-  number its pixels.
-- The TypeScript machine side (`backend/features/gui/machine.test.ts`,
+- The machine side (`backend/features/gui/machine.test.ts`,
   `machine/wm.test.ts`, `machine/display.test.ts`): two cores through the
   wire with a fake helper (control, viewing, input from the controller
   only, a command of the wrong shape dropped, a display that ends, a
   helper that does not start), the encoder's install held to its digest;
-  the Go tests' tiles, flow on a simulated slow link, stats and video
-  decisions ported; the cookie, the display number against another user's
+  tiles, flow on a simulated slow link, stats and video decisions; the cookie, the display number against another user's
   files and listeners (Linux), the socket directory, Xvfb packages,
   shells, GPUs from the driver's description, the kind wanted, the
   helper's placement by digest and retention, the helper's message
   layout.
 - The GUI helper (`zig build test` in `scripts/gui-helper`, run by
-  `make gui-helper`): its JPEG byte for byte the Go agent's
-  (`src/testdata`, written by `gen.go` from `internal/jpegstrip`), PNG
+  `make gui-helper`): its JPEG byte for byte what Go's encoder wrote for
+  the same pictures (`src/testdata`, kept as it made them), PNG
   decoding to its pixels, every malformed message of the node refused,
   the compositor's protocol, errors and bounds, NVIDIA's layouts, system
   calls' errors (Linux). All of them also pass built for Linux and run in
@@ -567,9 +543,10 @@ See [SECURITY.md](../../SECURITY.md).
   <arch>-linux-musl src/main.zig --test-no-exec`, the binary run there).
 - `backend/features/gui/integration.test.ts` (`make it`, Linux with Xvfb;
   `scripts/gui-it.sh` runs it in Docker): the helper against a real Xvfb
-  through the node, as `TestGUIWindows` (and on the GPU display where the
-  machine has one); an Xwayland that does not come up leaving Xvfb, as
-  `TestGPUDisplayFallsBack`; video through a stand-in encoder (the
+  through the node (and on the GPU display where the machine has one),
+  the X program `e2e/fakes/xclient.ts` (`GUI_TEST_XCLIENT`, else compiled
+  with `bun build --compile`); an Xwayland that does not come up leaving
+  Xvfb; video through a stand-in encoder (the
   encoder's protocol, VP8 only): probed, installed by digest, a window that
   keeps changing sent as a stream that ends when nobody watches.
 - `backend/features/gui/state.test.ts`, `manager.test.ts`,
@@ -592,7 +569,7 @@ and 58 as H.264 (58 also on a 10 Mbit/s link with 50 ms added); Isaac Sim
 GPU; `glxgears` 5500–7000 fps on the GPU display. Not run: Mesa GPUs under
 Xwayland, linux/arm64, Xwayland 24.1 or newer.
 
-The TypeScript machine side with the GUI helper, on the machines of
+The machine side with the GUI helper, on the machines of
 `e2e/machines` (`payloads/gui`: a program's window announced with its
 terminal and process, its pixels, clicks, keys and closing, the keeper
 holding the display and leaving with it, gpupick's install): CentOS 7's
@@ -605,9 +582,9 @@ Xvfb (its GPU, busy with other work, was not used). On the Ubuntu host
 compositor with `wl_drm`, DRI3) and a 640×360 window that changes every
 frame went as H.264 through VA-API at 54–62 fps, then as VP8 at 61 fps
 when the viewers decoded only that. The encoder (glibc 2.28) makes no
-kind on CentOS 7 or musl, as with the Go agent. The helper's JPEG of a
-1706×960 picture takes 16 ms on one core of an Apple M4 (the Go agent's
-encoder 47 ms; both code row groups on every core). On a server with
+kind on CentOS 7 or musl. The helper's JPEG of a 1706×960 picture takes
+16 ms on one core of an Apple M4 (Go's encoder, which the Go program of
+earlier releases ran, 47 ms; both code row groups on every core). On a server with
 four RTX PRO 6000 Blackwell (driver 580.159, Xwayland 23.2, the driver's
 first GPU second on the bus), whose least busy card (about 21% used by
 other work, which rose to at most 35% meanwhile) is the driver's first:

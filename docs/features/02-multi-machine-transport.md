@@ -38,19 +38,16 @@ machine's platform, the core and the TypeScript machine side
 musl) and darwin × amd64/arm64. The core carries its own platform's; a
 machine gets its platform's from the core's release, checked against the
 release's `SHA256SUMS`: it downloads the archive, else the core uploads it
-(`backend/kernel/machines/transport/release.ts`). A core built with
-`MACHINE=go` carries the Go program `cmd/veldr` instead: a static Go
-binary (`CGO_ENABLED=0`) for linux/darwin × amd64/arm64, embedded gzipped
-in the core's executable (`backend/kernel/payloads.ts`). Its version is
-its content hash, so a changed build is always installed again and core
-and agent never disagree on the protocol.
+(`backend/kernel/machines/transport/release.ts`). Its version is its
+executable's digest, so a changed build is always installed again and
+core and agent never disagree on the protocol. Machines that still run the
+Go program of earlier releases get this build and its node takes over
+([39](39-nodes.md)).
 
-The agent runs on Linux and macOS only, the Go one `//go:build unix`
-(unix sockets with peer checks, process groups, code-server and Xvfb are
-POSIX). The core speaks the same
-protocol in TypeScript (`backend/shared/proto`: agentproto, and yamux with
-the window, keepalive and backlog of `agentproto.YamuxConfig`,
-[42](42-typescript-backend.md)).
+The agent runs on Linux and macOS only (unix sockets with peer checks,
+process groups, code-server and Xvfb are POSIX). Core and agent speak the
+protocol of `backend/shared/proto` (agentproto, and yamux with its window,
+keepalive and backlog, [42](42-typescript-backend.md)).
 
 ### Connect
 
@@ -59,9 +56,8 @@ the window, keepalive and backlog of `agentproto.YamuxConfig`,
 1. probe `uname -s`, `uname -m` and `$HOME` through `/bin/sh -c` (works with
    any login shell);
 2. if `~/.veldr/agent/<hash>/veldr` is missing, install it: the machine
-   downloads its platform's archive, else the core uploads it (the Go
-   build with `cat >`), written to a temporary name and renamed
-   atomically, the TypeScript build's once its SHA-256 is the release's
+   downloads its platform's archive, else the core uploads it, written to
+   a temporary name and renamed atomically once its SHA-256 is the release's
    ([42](42-typescript-backend.md#the-machine-side)); builds unused for 14
    days are removed in the same step;
 3. `exec` it with `node dial --instance NAME` and speak yamux over the ssh
@@ -72,7 +68,7 @@ the window, keepalive and backlog of `agentproto.YamuxConfig`,
 
 One yamux session per machine carries every stream; each stream starts with
 a JSON header and reply
-([architecture](../architecture.md#core--agent-protocol-internalagentproto)).
+([architecture](../architecture.md#core--agent-protocol-backendsharedprotoagentproto)).
 This avoids sshd's `MaxSessions` and any dependence on
 `AllowStreamLocalForwarding`. Every ssh command puts `--` before the target.
 
@@ -104,9 +100,8 @@ a passphrase) and an accepted host key.
 machine's node through its socket, starting it when none answers from this
 platform's machine build, which the core installs where an upload would
 put it (`~/.veldr/agent/<hash>/veldr`): identical protocol, no ssh. The
-Go tests serve an agent in the test's process over a socketpair
-(`internal/agent/agenttest`); the core's tests use an agent in memory
-(`backend/kernel/testing.ts`).
+core's tests use an agent in memory (`backend/kernel/testing.ts`,
+`backend/machine/testing.ts`).
 
 A core on Windows has no local agent (`LOCAL_SUPPORTED` in
 `transport/local.ts`): its
@@ -225,14 +220,14 @@ A refused target answers `invalid_target`; `--ssh` with one stops the core.
 ### The terminal core of each machine
 
 `backend/features/terminals/backend.ts` and `lifecycle.ts`,
-`internal/agent/hc.go` ([21](21-terminal-core.md)). Connecting a machine
+`backend/machine/hc.ts` ([21](21-terminal-core.md)). Connecting a machine
 starts only its agent. When the first client of `/api/v1/term` subscribes
 to a machine's terminals ([22](22-terminal-protocol.md)), the core:
 
 1. asks the agent for the terminal core's status (op `hc`);
-2. installs this build's herdr-core (`internal/hcdist`) when the installed
-   one differs, from the copy the node's executable carries (`hc`'s
-   `install-embedded`; a Go build's is uploaded); the agent checks the
+2. installs this build's herdr-core (`backend/scripts/hcdist.ts`) when the
+   installed one differs, from the copy the node's executable carries
+   (`hc`'s `install-embedded`); the agent checks the
    digest and swaps it into
    `~/.veldr[-<instance>]/hosts/<host>/hc/`, and a running core of
    another build is restarted, its successor adopting the programs;
@@ -274,7 +269,7 @@ terminal core apart ([40](40-shared-homes.md)).
 | An ssh library (Node's `ssh2`, Go's `x/crypto/ssh`) instead of OpenSSH | Would not honour the user's ssh config (ProxyJump, Match, agents, certificates). |
 | Ids derived from the target | Ids appear in URLs and settings; random ids keep the target out. |
 | Starting the terminal core when a machine connects | Unused machines would get a process outliving the core; the first subscription starts it. |
-| A core in Go, as the agent | The core is TypeScript, one Bun executable per platform ([42](42-typescript-backend.md)): one language with the UI and the desktop shell, and the SDKs the coding agents publish. |
+| A core in Go, the language of the agent in earlier releases | The core is TypeScript, one Bun executable per platform ([42](42-typescript-backend.md)): one language with the UI and the desktop shell, and the SDKs the coding agents publish. |
 
 ## Failure modes
 
@@ -311,18 +306,19 @@ terminal core apart ([40](40-shared-homes.md)).
 
 ## Testing
 
-- `internal/agent/agent_test.go`: the agent over the tests' in-process
-  transport, file ops, dial restrictions.
-- `internal/agent/node_test.go`: the node's socket, several clients, one
+- `backend/machine/agent.test.ts`, `fsops.test.ts`: the agent over the
+  tests' in-process transport, file ops, dial restrictions.
+- `backend/machine/node.test.ts`: the node's socket, several clients, one
   node per build, idle end, stop, retiring when its executable is gone.
 - `backend/kernel/machines/transport/transport.test.ts`: error
   classification, arch normalization, quoting, the target after `--`, the
   control directory checks, no `Control*` options without it, stopping the
   master only while ssh stays up.
-- `backend/kernel/machines/transport/local.test.ts`: the core starts the
-  local node of the machine build and talks to it.
-- `backend/kernel/payloads.test.ts`: a machine build's version derived
-  from its content (a rebuilt one is uploaded again), `--agent-dir` first.
+- `backend/kernel/machines/transport/deploy.test.ts`: the machine build
+  over ssh (download, upload, bounds, failures) and the local node started
+  from the core's own executable.
+- `backend/kernel/payloads.test.ts`: the release the build records, the
+  machine build of each platform from it.
 - `backend/kernel/machines/machines.test.ts`: no file, the file's round
   trip and errors, ordering, target validation from the shared vectors,
   refused targets never dialed, the local machine without an agent, adding,
@@ -335,14 +331,12 @@ terminal core apart ([40](40-shared-homes.md)).
 - `backend/features/terminals/terminals.test.ts` (`installs and starts the
   build’s terminal core`, `the terminal core’s lifecycle from the UI`,
   `without a terminal core`, `routes that change state are guarded`) and
-  `internal/agent/hc_test.go` (`TestHCInstallStartAndPipe`): install,
+  `backend/machine/agent.test.ts`: install,
   start, stop and restart of the terminal core, its endpoints' guards.
 - Web: `menus.test.ts`, `sidebarMachines.test.ts`, `addMachine.test.ts`,
   `addMachineHosts.test.ts`, `codePanes.test.ts` in `web/src/__tests__`.
-- The agent's Go tests skip on Windows, and the core's tests that run the
-  machine build build it with Go; CI runs the Go tests on Linux, macOS and
-  Windows and the core's on Linux and macOS.
-- `make it` (`TestIntegrationHC`,
+- CI runs the core's tests on Linux and macOS.
+- `make it` (`backend/machine/integration.test.ts`,
   `backend/features/terminals/integration.test.ts`) with the real
   herdr-core.
 - `make e2e` (`e2e/tests/ssh.spec.ts`, with Docker): a container running

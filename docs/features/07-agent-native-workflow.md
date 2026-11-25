@@ -91,7 +91,7 @@ window allows autoplay.
 
 ### Starting agents
 
-The palette offers the agent kinds of the registry (`internal/agentkinds`,
+The palette offers the agent kinds of the registry (`backend/shared/agents/kinds.ts`,
 [35](35-agent-native-view.md)). The focused pane is split to the right and
 the kind's command line runs there (`terminal.run`) in the focused
 terminal's directory, or in a new tab when no pane has the focus. The

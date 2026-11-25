@@ -41,13 +41,13 @@ headless is [37](37-agent-chats.md).
 
 ## Design
 
-### Agent kinds (`internal/agentkinds`)
+### Agent kinds (`backend/shared/agents/kinds.ts`)
 
-The registry of the coding agents: per kind its `ID` (the detector's
-manifest id), `Title`, `UsageProvider` ([29](29-ai-usage.md)), `Start`
-(argv), `NewSession` (arguments that set the session id), `ContinueLatest`,
-`ResumeByID`, `Transcript` (the format of its transcripts, or none) and
-`Chat` (how the chat host runs it, [37](37-agent-chats.md)). It is data
+The registry of the coding agents: per kind its `id` (the detector's
+manifest id), `title`, `usageProvider` ([29](29-ai-usage.md)), `start`
+(argv), `newSession` (arguments that set the session id), `continueLatest`,
+`resumeById`, `transcript` (the format of its transcripts, or none) and
+`chat` (how the chat host runs it, [37](37-agent-chats.md)). It is data
 only.
 
 | Kind | Start | New session | Continue latest | Resume by id | Transcript | Chat |
@@ -65,17 +65,16 @@ kind's transcripts are read, its chat adapter. Argv, environment and
 session metadata of chats stay on the machine, never in that JSON. A
 `{id}` placeholder is replaced only by a lower-case UUID; anything else
 makes no command. How to add a kind is in [AGENTS.md](../../AGENTS.md)
-(gotchas); `TestKindsMatchManifestsAndSettings` and `TestChatKinds` hold
-the pieces together.
+(gotchas); `backend/shared/agents/kinds.test.ts` holds the pieces
+together.
 
-### Finding a session (`internal/agent/sessions`, `backend/machine/agents`)
+### Finding a session (`backend/machine/agents`)
 
-Both machine builds find sessions alike; the TypeScript side's
-`Resolver` (`backend/machine/agents/sessions.ts`) reads everything
+The `Resolver` (`backend/machine/agents/sessions.ts`) reads everything
 asynchronously, so the node's one thread never waits for the file system
 ([42](42-typescript-backend.md)).
 
-`Resolver.Resolve(kind, Proc{PID, Argv, Cwd})` answers the session id of a
+`Resolver.resolve(kind, {pid, argv, cwd})` answers the session id of a
 terminal's foreground program and a source word. Candidates are the
 program and a bounded set of its descendants (wrappers, npm's launcher).
 
@@ -101,19 +100,17 @@ A guess is never remembered in the layout nor shown as the session's
 usage. `Stamp` is a cheap fingerprint of what `Resolve` reads, polled to
 know when to resolve again.
 
-`Locate(kind, id)` finds a transcript inside the kind's root (Claude
+`locate(kind, id)` finds a transcript inside the kind's root (Claude
 Code's `projects/*/`, Codex's dated `sessions` and `archived_sessions`) and
 its subagents' (Claude Code's `<session>/subagents/*.jsonl`; Codex's
 rollouts naming the session as their parent, in its rollout's directory
 and the dated ones from the session's start to now, at most 256 first
 lines read);
-the id must be a lower-case UUID before it reaches a path. `OpenLocated`
-opens it without following any link (Go: `openat2` with
-`RESOLVE_NO_SYMLINKS`, `O_NOFOLLOW_ANY` on macOS, else component by
-component; TypeScript: `O_NOFOLLOW_ANY` on macOS, on Linux `O_NOFOLLOW`
-and the descriptor refused before any read when `/proc/self/fd` names
+the id must be a lower-case UUID before it reaches a path. `openLocated`
+opens it without following any link (`O_NOFOLLOW_ANY` on macOS, on Linux
+`O_NOFOLLOW` and the descriptor refused before any read when `/proc/self/fd` names
 another path) and checks it is a regular file of the user's with one link
-and the identity `Locate` saw. Searches for unknown ids are rate-limited
+and the identity `locate` saw. Searches for unknown ids are rate-limited
 and the resolver's maps bounded.
 
 ### The detector's part
@@ -124,8 +121,7 @@ agent reads no session file. For each terminal whose agent's
 transcripts are read, a follower resolves after the startup grace, retries
 with back-off while nothing is found, and resolves again when the stamp,
 the foreground pid or its command line changes
-(`internal/agent/agentdetect_session.go`; `followSession` of
-`backend/features/agents/machine/detector.ts`).
+(`followSession` of `backend/features/agents/machine/detector.ts`).
 
 The core accepts only a lower-case UUID with a known source and keeps it
 in the terminal record as `agent_session` and `agent_session_source`
@@ -143,16 +139,16 @@ wrote. The restore remembers `session` and writes `before`
 ([33](33-workspace-restore.md)); terminal history adopts a snapshot by
 `before` ([36](36-terminal-history.md)).
 
-### Claude Code's transcripts (`internal/agent/transcript`, `backend/shared/agents/transcript`)
+### Claude Code's transcripts (`backend/shared/agents/transcript`)
 
 The parser maps the lines of a Claude Code transcript, and the messages
 of its SDK protocol, which have their shapes, to events shaped as ACP v1
-`session/update` notifications (`internal/agentproto/transcript.go`):
+`session/update` notifications (`backend/shared/proto/agentproto/transcript.ts`):
 `update`, `user`, `turn` (`start`, `end`, `error` with a `stopReason`)
 and `notice` (`_<slug>/<name>`: `compacted`, `command`, `error`,
 `skipped`); the product's own marks are under `_meta.<slug>`. Each event
-is made from its line alone. `ClaudeFrame` (`claudeFrame`) maps one line,
-`EachClaude` (`eachClaude`) a file's lines forward from an offset, for the
+is made from its line alone. `claudeFrame` maps one line,
+`eachClaude` a file's lines forward from an offset, for the
 chat host's Claude Code adapter: imported sessions, what a session did in a terminal, and a live
 chat's tool results ([37](37-agent-chats.md)). No route sends a
 transcript to the page.
@@ -182,7 +178,7 @@ with chats whose agent has quit, opening it as a chat
 ([37](37-agent-chats.md)).
 
 `GET /api/m/{id}/p/agents/resolve?kind=&session=&cwd=`
-(`backend/features/agents`, machine side `internal/agent/plugin/agents`)
+(`backend/features/agents`, machine side `machine.ts` there)
 answers `{ok}` when the machine has the session's transcript and it
 records that directory, else a code (`not_found`, `other_cwd`,
 `compressed`, `bad_request`). It is validated on the core and again on
@@ -254,32 +250,28 @@ agents' sessions, agent detection).
 
 ## Testing
 
-- `internal/agentkinds/agentkinds_test.go` (kinds against manifests,
-  settings and usage providers; UUID substitution; chat specs) and
-  `backend/shared/agents/kinds.test.ts` (the same of the core's kinds;
-  `the generated registry`).
-- `internal/agent/sessions` and `backend/machine/agents/sessions.test.ts`
-  (the same cases): command lines, records trusted and refused, guesses,
-  stamps, `Locate`, opening through no link, hard links, the process
-  table; the Go tests also run on Linux with `openat2` allowed and denied,
-  the TypeScript ones on Linux in a container.
-- `internal/agent/agentdetect_session_test.go`,
-  `backend/features/agents/machine/detector.test.ts` and
+- `backend/shared/agents/kinds.test.ts` (kinds against manifests,
+  settings and usage providers; UUID substitution; chat specs; `the
+  generated registry`).
+- `backend/machine/agents/sessions.test.ts`: command lines, records
+  trusted and refused, guesses, stamps, `locate`, opening through no link,
+  hard links, the process table; also run on Linux in a container.
+- `backend/features/agents/machine/detector.test.ts` and
   `backend/features/terminals/sessions.test.ts`: schedule, sessions in
   records and events, sessions ending (`a session ends`), the plugin's
   switch (`detected again after a switch`, `a switch notifies once`).
-- `internal/agent/transcript` and `backend/shared/agents/transcript`: the
-  shared vectors (`vectors_test.go`, `transcript.test.ts`, also run by
+- `backend/shared/agents/transcript`: the shared vectors
+  (`transcript.test.ts`, which rewrites their expected events with
+  `UPDATE_TESTDATA=1` after a deliberate change, also run by
   `web/src/__tests__/transcriptVectors.test.ts` against the conversation
-  model), frames, bounds (`TestLineMemory`, `TestWalkPastALongLine`; `a
-  line of many small values`, `walking past a long line`). Vectors in
+  model), frames, bounds (`a line of many small values`, `walking past a long
+  line`). Vectors in
   `spec/vectors/transcript/`: a real sanitized transcript (Claude Code
   2.1.330), one of a session driven through the SDK protocol, and
   hand-written ones.
   `spec/vectors/layout/agent-leaves.json`: the leaf's fields.
 - `backend/features/agents/agents.test.ts`,
-  `backend/features/agents/machine.test.ts` and
-  `internal/agent/plugin/agents`: the route, validation, its limit
+  `backend/features/agents/machine.test.ts`: the route, validation, its limit
   (`busy`), the machine side (`resolve` through the wire).
 - `web/src/__tests__`: `agents.test.ts`, `chatImport.test.tsx`,
   `agentLeaves.test.ts`, `conversation.test.ts`,

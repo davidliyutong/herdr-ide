@@ -149,5 +149,5 @@ in the instance's 0700 run directory with 0600 modes, and the agent's
   `backend/features/machines/core.test.ts` (`needs a control directory`).
 - `backend/kernel/machines/transport/transport.test.ts`: `a private
   directory only`, `args without a control directory`;
-  `internal/agent/agent_test.go`: `TestHelloAndPrivateRunDir`,
-  `TestDialRestriction`.
+  `backend/machine/agent.test.ts`: `hello and the run directory`, `only
+  sockets in the run directory are dialed`.

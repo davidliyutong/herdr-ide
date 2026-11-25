@@ -16,7 +16,7 @@ listens on the machines.
 
 ```bash
 scripts/build.sh
-cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
+cd dist/packages/veldr-$(scripts/platform.sh)
 ./veldr    # http://127.0.0.1:7780
 ```
 
@@ -41,16 +41,14 @@ What the core embeds:
   (`veldr node`) with its platform's herdr-core and, on Linux, its video
   encoder, for Linux (amd64, arm64, each for glibc and for musl) and macOS
   (amd64, arm64); machines of other platforms get theirs from the release
-  ([air-gapped networks](#air-gapped-networks)). A core built with
-  `MACHINE=go` embeds instead the Go program `cmd/veldr` for Linux and
-  macOS on amd64 and arm64, with herdr-core for each and both Linux video
-  encoders.
+  ([air-gapped networks](#air-gapped-networks)).
 - herdr-core 0.1.21 (about 12 MB), the terminal core installed on machines
   ([21](features/21-terminal-core.md)): the executable's own platform's,
   with the digests of the Linux and macOS ones on amd64 and arm64.
-  `scripts/build.sh` runs `scripts/fetch-hc`, which downloads the archives
-  from `releases.herdr.dev` (or reuses `dist/hc/`) and verifies them
-  against the digests pinned in `internal/hcdist`; the build fails
+  `scripts/build.sh` runs `backend/scripts/fetch-hc.ts`, which downloads
+  the archives from `releases.herdr.dev` (or reuses `dist/hc/`) and
+  verifies them against the digests pinned in `backend/scripts/hcdist.ts`;
+  the build fails
   otherwise. `scripts/build.sh` stages everything the core embeds in
   `dist/payload` first (herdr-core in `dist/machines-hc`); a core run from
   the sources (`make dev-core`) reads `dist/payload`, where it stages this
@@ -150,7 +148,7 @@ keep their grant across updates.
 Finder launches put `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`
 and system paths on the core's PATH. Shell startup files are not run.
 
-To build on a Mac (Go, Bun, Node.js 22.12+, pnpm):
+To build on a Mac (Bun, Node.js 22.12+, pnpm):
 
 ```bash
 make desktop-app                        # host-architecture .app in dist/desktop/mac-arm64/ or mac/
@@ -194,7 +192,7 @@ ssh-add                  # adds ~/.ssh/id_* to the agent
 Then **Retry** the machine. Notifications come from the installed app only
 (its Start menu shortcut carries the app id), not from `win-unpacked/`.
 
-To build: install Go, Bun, Node.js 22.12+, pnpm and Git for Windows, and run
+To build: install Bun, Node.js 22.12+, pnpm and Git for Windows, and run
 `scripts/desktop.sh app` or `scripts/desktop.sh dist` in Git Bash.
 
 ### Linux
@@ -360,8 +358,7 @@ usage plugin, which asks the providers from the machines
 ([29](features/29-ai-usage.md)); offline, it reports the failure.
 
 The core ([42](features/42-typescript-backend.md)) carries no other
-platform's executable (a core built with `MACHINE=go` embeds the Go
-machine builds of all four platforms instead and uploads them). A machine
+platform's executable. A machine
 that lacks its build first downloads its platform's archive from the
 core's release itself (`curl` or `wget`; the setting
 `machines.download`, or `--machine-download=false`, turns this off, and a
@@ -417,7 +414,7 @@ machines downloading releases get it on their command lines). Verification:
 Bundles are for your own installations: Git Graph's license restricts
 redistribution, so do not publish bundles containing it.
 
-**Claude Code's chats on machines of the TypeScript build** run on
+**Claude Code's chats on machines** run on
 Anthropic's Agent SDK, which no executable or app carries
 ([42](features/42-typescript-backend.md#claude-code)). Before such a chat
 starts, a machine that lacks it downloads the npm registry's tarball of
@@ -442,13 +439,12 @@ refused. A machine that gets it from none of them refuses the chat with
 your use of the SDK and of your Claude account; the chats run your own
 `claude` with your own sign-in.
 
-Building needs Go modules, npm packages, the Bun runtimes of the target
+Building needs npm packages, the Bun runtimes of the target
 platforms (`bun build --compile` downloads one for another platform) and
 the pinned herdr-core archives (verified archives in `dist/hc/` are
 reused); `scripts/build.sh` builds the executables of `TARGETS`
 (`linux/amd64-musl` and `linux/arm64-musl` among them) with `RELEASE_URL`,
-the release's download URL their machines use, and with `MACHINE=go` the
-cores that embed the Go machine builds instead.
+the release's download URL their machines use.
 
 ## Remote resources
 
@@ -462,7 +458,7 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Started | Ends |
 | --- | --- | --- |
-| Node (`veldr node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace and host (`<run>/node.lock`), in a session of its own. The TypeScript build's node is its executable (`~/.veldr/agent/<build>/veldr node`) as the Go build's is, with the same lifetime; either build takes over from the other. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/hosts/<host>/node.log` (1 MiB, one old file). |
+| Node (`veldr node`) | By a core reaching the machine (`node dial` over ssh, the socket for its own machine) when no node answers, or one of an older build does; one per namespace and host (`<run>/node.lock`), in a session of its own. The node is the build's executable (`~/.veldr/agent/<build>/veldr node`); it takes over from a node of an older build, the Go program of earlier releases too. | 15 s after its last client left, on `node stop`, once taken over by a newer build's node and its clients moved (at most 10 min), or once its executable is removed (it then takes no new client). Log `<data>/hosts/<host>/node.log` (1 MiB, one old file). |
 | Agent session | One per core and machine while connected, served by the node. | With its ssh session or socket connection; a dead link is detected by keepalives within about 45 s. |
 | A machine added from the UI | **Add machine…** (`POST /api/machines`). | A record in the machines file; **Remove machine…** deletes it and ends the session. The machine's terminal core and terminals keep running. |
 | ssh ControlMaster | Per machine, on Linux and macOS cores. | 10 min unused or 1 min without server answers; a core that finds it dead sends `ssh -O stop`. |
@@ -473,7 +469,7 @@ host's key and `<run>` the namespace's runtime directory on the host
 | A closed pane's terminal | **Close Pane** / **Close Tab**. | Labeled `closing`; any page showing the machine kills it after `layout.undoClose` (5 s) unless **Undo Close** brings it back. |
 | Attached streams of a page | One per terminal shown or kept hidden (`performance.keptTerminals`, 12 by default, max 64; [26](features/26-web-terminals.md)). | With the pane, the page, the program, or the machine. No process, no disk. |
 | Streams kept for terminals' sizes | When the last client that set a live terminal's size leaves ([22](features/22-terminal-protocol.md)). | At most one per terminal; closed when a new sizing viewer attaches, the terminal ends, or the connection to the terminal core closes. Buffered at most 256 KiB credit plus 4 MiB queue. |
-| Agent detection (op `detect`) | While the connection to the terminal core lasts. | With that stream or the agent, or 45 s of the terminal core's silence (it sends a heartbeat every 15 s). One extra connection, an observing attach per agent terminal, screen reads at most every 300 ms; on the TypeScript machine side at most 10000 events waiting for the core, past which the stream ends (the core opens it again). No process, no disk. |
+| Agent detection (op `detect`) | While the connection to the terminal core lasts. | With that stream or the agent, or 45 s of the terminal core's silence (it sends a heartbeat every 15 s). One extra connection, an observing attach per agent terminal, screen reads at most every 300 ms; at most 10000 events waiting for the core, past which the stream ends (the core opens it again). No process, no disk. |
 | Finding agents' sessions (`detect` with `sessions`, plugin `agents`) | Per terminal running Claude Code or Codex. | A follower per terminal (a goroutine; a task of the node's on the TypeScript side), ending with the agent, the terminal, the stream or the plugin; stats every 2–5 s (backing off to 30 s), reads of the process table. Caches ≤ 1024 entries. No process, no disk ([35](features/35-agent-native-view.md)). |
 | Confirming a session (`agents` action `resolve`) | A page bringing an agent back ([33](features/33-workspace-restore.md)); ≤ 8 at once per machine, 15 s each. | Reads the transcript's header; locations cached in memory (≤ 1024). No process, no disk. |
 | A session's usage (`usage` action `session`) | The status bar's session item, at most every 10 s per session, ≤ 8 at once per machine. | Reads transcripts (≤ 256 MiB each); the last 16 (48 MiB) cached in memory. No process, no disk. |
@@ -482,13 +478,13 @@ host's key and `<run>` the namespace's runtime directory on the host
 | code-server | First VS Code use. | A core's `--code-server-idle` (20 min) without connections while no other core of the node has one, the node's end, **Stop VS Code**, or VS Code switched off for every client kind. Orphans are stopped by the next agent; code-server exits by itself after 1 h without connections. |
 | VS Code windows | One per VS Code pane on screen. | Off-screen windows stay loaded 10 min, at most 3 per page; a closed pane disconnects at once. |
 | VS Code extension hosts | One per VS Code window. | 5 min after the window disconnects. |
-| curl or wget (`--code-server-install=download`) | While a machine downloads code-server. | With the download (20 min limit; on the TypeScript machine side also past 1 GiB) or when the core stops waiting; the partial file is removed. |
+| curl or wget (`--code-server-install=download`) | While a machine downloads code-server. | With the download (20 min limit, or past 1 GiB) or when the core stops waiting; the partial file is removed. |
 | Xvfb or Xwayland | A remote Linux machine connects with GUI on (`gui.display` picks). | In its own session; exits 1 min after its last client (programs, window manager, display keeper). Replaced by the other kind only while no program is connected. |
-| GUI helper's window manager (`veldr-gui gui-wm`, TypeScript machine build) | While a core is attached to the display (op `gui` `attach`). | A child of the node: exits when its last core leaves, the display ends, the node ends or a newer node takes over (its stdin closes), or the node stops reading (256 MB waiting). |
-| GPU display compositor (`veldr gui-wl`; the GUI helper's in the TypeScript build) | With each Xwayland. | Exits with its Xwayland; listens nowhere. Logs to `<data>/hosts/<host>/xwayland.log`. |
-| Display keeper (`veldr gui-keep`; the GUI helper's in the TypeScript build) | When a display is ready and when the terminal core becomes reachable (`gui.keep`; not in `--read-only`). | One per instance and host (`<run>/gui-keep.lock`); holds the display while the terminal core runs, exits once it stops or the display ends. |
+| GUI helper's window manager (`veldr-gui gui-wm`) | While a core is attached to the display (op `gui` `attach`). | A child of the node: exits when its last core leaves, the display ends, the node ends or a newer node takes over (its stdin closes), or the node stops reading (256 MB waiting). |
+| GPU display compositor (`veldr-gui gui-wl`, the GUI helper's) | With each Xwayland. | Exits with its Xwayland; listens nowhere. Logs to `<data>/hosts/<host>/xwayland.log`. |
+| Display keeper (`veldr-gui gui-keep`, the GUI helper's) | When a display is ready and when the terminal core becomes reachable (`gui.keep`; not in `--read-only`). | One per instance and host (`<run>/gui-keep.lock`); holds the display while the terminal core runs, exits once it stops or the display ends. |
 | `apt-get download xvfb` | A machine has no Xvfb (not in `--read-only`). | With the download (5 min limit); retried with backoff up to 5 min while connected. |
-| Video encoder | One per program window sent as video (`gui.video`); the TypeScript build's GUI helper starts it. | 5 s without frames, window unwatched, resized or gone, video turned off, or with the agent or the helper (own process group, killed when its parent dies). NVENC sessions are limited per machine; it falls back to VA-API, VP8 or pictures. |
+| Video encoder | One per program window sent as video (`gui.video`); the GUI helper starts it. | 5 s without frames, window unwatched, resized or gone, video turned off, or with the agent or the helper (own process group, killed when its parent dies). NVENC sessions are limited per machine; it falls back to VA-API, VP8 or pictures. |
 | Shared memory for captures | While the agent's window manager (the GUI helper's) runs. | One System V segment ≤ 64 MB (0600), marked for removal once attached, so it goes with the agent. |
 | Port forwards (core host loopback) | A browser pane opens a machine's port ([32](features/32-browser-and-ports.md)). | Listeners on `127.0.0.1`/`::1`, at most 32 with 128 connections each; end when stopped, idle for `browser.forwardIdle` (30 min), the machine removed, the plugin off, or the core stops. Nothing listens on the machine. |
 | Vault and bridge sockets (`<run>/vault.sock`, `<run>/bridge.sock`) | Served by the newest node of the instance. | Unix sockets (0600); a node removes them on exit only if they are still its own. Each connection is one stream to the core (vault: at most 16 at once). |
@@ -497,11 +493,11 @@ host's key and `<run>` the namespace's runtime directory on the host
 | Git (plugin `git`) | One `git` process per request; `git.autoFetch` while a panel shows the repository. | At most 8 per machine, each its own process group, killed after 15 s (reads) or 120 s (changes, fetch, pull, push) or when the request ends. No background maintenance (`gc.autoDetach=false`). Hooks' background programs and fsmonitor daemons are the user's, as in a terminal. |
 | Project Search (plugin `search`) | a search from the Search panel (300 ms after the last key, or Enter), one at a time per panel: a new one cancels the one in flight | One `rg` process per search where the machine has ripgrep, else none (the agent's walker): at most 4 searches at once per machine, each in a process group of its own killed after 30 s, once 5000 matches at most were read, or when the core closes the request's stream (the browser abandoned the search, the core's 45 s passed). Nothing is written on the machine and nothing is kept between searches ([41](features/41-project-search.md)). |
 | AI usage limits (plugin `usage`) | The core's scheduler while the plugin is on (manual, 1–60 min, or adaptive). | HTTPS requests (15 s each, 45 s per action). On macOS `security` for Claude's keychain item (10 s), `ps`/`lsof` for Antigravity (5 s). Manual refresh at most every 30 s. |
-| SQLite worker thread (plugin `usage`, TypeScript machine side) | A cost scan that reads OpenCode's or Antigravity's databases. | In the node's process; ended with the scan, or when a request (a batch of rows) is not answered in 30 s; a thread blocked in a system call (a FIFO swapped in, a dead mount) ends when the call returns. Reads only; writes nothing but the `-shm` SQLite makes beside a database whose WAL has none. |
+| SQLite worker thread (plugin `usage`) | A cost scan that reads OpenCode's or Antigravity's databases. | In the node's process; ended with the scan, or when a request (a batch of rows) is not answered in 30 s; a thread blocked in a system call (a FIFO swapped in, a dead mount) ends when the call returns. Reads only; writes nothing but the `-shm` SQLite makes beside a database whose WAL has none. |
 | `agy -p /usage` (plugin `usage`) | No Antigravity language server answers: at most every 10 min, 30 min after a failure. | Own process group, killed after 20 s; output ≤ 4 MiB. |
 | Download archives (`fs.archive`) | A folder or several files download. | Zipped into the stream; ends with it. No disk. |
 | Chat host (`veldr chat-host`, plugin `chat`, [37](features/37-agent-chats.md)) | A writing chat request or a page's chat subscription with no host serving; a hidden terminal of the instance's terminal core, one per instance and machine. Never for a `--read-only` core. | Outlives ssh, agent and core. Exits after 60 s with no agent process and no connection, with the terminal core, or when a newer build asks it to make way while no chat works; a host holding its name without serving for 45 s is killed by the next agent. Log `<data>/chat-host-<host>[-<id>].log` (1 MiB, one old file). |
-| Chat host's journal worker (TypeScript machine side) | The chat host of the TypeScript build, as it starts. | A worker thread in the host's process that runs the journal's statements in order; ends with the host, which waits for its writes first. At most 64 MiB of events wait for it; past that the chats that make events fail. The host's log waits for its file at most 1 MiB, the rest counted. |
+| Chat host's journal worker | The chat host, as it starts. | A worker thread in the host's process that runs the journal's statements in order; ends with the host, which waits for its writes first. At most 64 MiB of events wait for it; past that the chats that make events fail. The host's log waits for its file at most 1 MiB, the rest counted. |
 | Agents of chats (`claude`, `codex app-server`, `kimi acp`, `grok agent … stdio`) | A chat's prompt, with the PATH of the user's login shell (`$SHELL -l -i -c env`, at most every 6 h). | Own process group under the chat host. Ended idle after `chat.idleStopMinutes` (30), the idlest beyond `chat.maxLive` (8), on close, archive, delete or handoff, and with the host: input closed, SIGTERM after 2 s, SIGKILL later. Their own session files are theirs and never removed. |
 | Short agent processes of a chat host | Listing a directory's sessions; importing a session (Codex without a live app-server, ACP agents). | ≤ 4 at once per host, each within 60 s (2 min for an ACP load). |
 | Connections to a chat host | Page subscriptions, chat requests and the core's watch, as streams of op `plugin` to the host's socket. | ≤ 128 per machine, ≤ 32 subscriptions per page; the host serves ≤ 256 and drops one 8192 events or 16 MiB behind. The watch lets a host go after 2 min unused. Nothing on TCP. |
@@ -512,15 +508,15 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Written | Removed |
 | --- | --- | --- |
-| Agent builds (`~/.veldr/agent/`) | On connect, by content hash: the Go executable, or the TypeScript build's executable (111–131 MiB; the release's archive, 48–58 MiB, downloaded by the machine or uploaded by the core, and unpacked); either is put in place only when the SHA-256 the machine computed is the one expected, which the core checks again. | Unused for 14 days (a running node touches its build's directory every 24 h). A partial download or upload (`.upload.<pid>` with its `.in` and `.rc`) is removed when its script ends: an upload when its input ends (the connection went), a download within its bounds (256 MiB, 5 min); what a killed shell left, by a node's housekeeping after 1 h. |
+| Agent builds (`~/.veldr/agent/`) | On connect, by content hash: the executable (111–131 MiB; the release's archive, 48–58 MiB, downloaded by the machine or uploaded by the core, and unpacked), put in place only when the SHA-256 the machine computed is the one expected, which the core checks again. | Unused for 14 days (a running node touches its build's directory every 24 h). A partial download or upload (`.upload.<pid>` with its `.in` and `.rc`) is removed when its script ends: an upload when its input ends (the connection went), a download within its bounds (256 MiB, 5 min); what a killed shell left, by a node's housekeeping after 1 h. |
 | Release manifests and archives (`~/.veldr/cache/machine/SHA256SUMS-<version>`, `veldr-<platform>-<digest>.tar.gz`, core host) | The manifest when the core fetches it from its release; an archive when a machine needs one the core neither has in `--agent-dir` nor is (its own platform's), checked against the manifest first. | Unused for 14 days (touched on use); a cached file that is not the build when it is read. |
 | herdr-core executable (`<data>/hosts/<host>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
 | herdr-core state (`~/.local/state/herdr-core/veldr[-<instance>]-<host id>/`) | By herdr-core. | Kept until the user removes it. |
-| code-server versions (`~/.veldr/code-server/<version>-<os>-<arch>/`) | Install (an upload or a download is staged beside them as `.upload-*` or `.download-*` and unpacked into `.install-*`; on the TypeScript machine side at most 1 GiB, unpacked at most 4 GiB). | Unused for 14 days, at the next install; a start touches its version, and on the TypeScript machine side housekeeping also touches the running one and removes the unused ones every 24 h. What an interrupted install left: when it ends, else on the TypeScript machine side after a day. |
-| Anthropic's Agent SDK (`<data>/claude-agent-sdk/<version>/`: `package.json`, `sdk.mjs`, `LICENSE.md`, `README.md`; TypeScript machine build) | Before a Claude Code chat starts on a machine without it (not in `--read-only`): the machine's download (≤ 32 MiB) or the core's upload is staged beside the versions as `.download-*` or `.upload-*` and unpacked into `.install-*`, checked against the pinned integrity first. | Unused for 14 days (each load by the chat host and each look of a core counts as a use), by the node's housekeeping; what an interrupted install left after a day. |
+| code-server versions (`~/.veldr/code-server/<version>-<os>-<arch>/`) | Install (an upload or a download is staged beside them as `.upload-*` or `.download-*` and unpacked into `.install-*`; at most 1 GiB, unpacked at most 4 GiB). | Unused for 14 days, at the next install; a start touches its version, and housekeeping also touches the running one and removes the unused ones every 24 h. What an interrupted install left: when it ends, else on the TypeScript machine side after a day. |
+| Anthropic's Agent SDK (`<data>/claude-agent-sdk/<version>/`: `package.json`, `sdk.mjs`, `LICENSE.md`, `README.md`) | Before a Claude Code chat starts on a machine without it (not in `--read-only`): the machine's download (≤ 32 MiB) or the core's upload is staged beside the versions as `.download-*` or `.upload-*` and unpacked into `.install-*`, checked against the pinned integrity first. | Unused for 14 days (each load by the chat host and each look of a core counts as a use), by the node's housekeeping; what an interrupted install left after a day. |
 | Agent SDK tarballs (`~/.veldr/cache/npm/claude-agent-sdk-<version>.tgz`, core host) | When a machine needs the SDK the core has in no `--seed-dir`, from the core's download. | Unused for 14 days (touched on use); a cached file that is not the pinned one when it is read. |
 | Xvfb packages (`~/.veldr/hosts/<host>/xvfb/`), video encoders (`~/.veldr/video/`, ~2 MB), GPU selection libraries (`~/.veldr/gpupick/`, 0600, `gui.pick`) | When needed (not in `--read-only`). | Unused for 14 days, when another is installed. |
-| GUI helper (`<data>/gui/<sha256 prefix>/veldr-gui`, 0700, TypeScript machine build) | Extracted from the machine build when program windows first need it on the host; checked by its SHA-256 before each start and written again when it differs. | Another build's unused for 14 days, by the node's housekeeping (a running one touches its directory at each start); an extraction left unfinished after 1 h. |
+| GUI helper (`<data>/gui/<sha256 prefix>/veldr-gui`, 0700) | Extracted from the machine build when program windows first need it on the host; checked by its SHA-256 before each start and written again when it differs. | Another build's unused for 14 days, by the node's housekeeping (a running one touches its directory at each start); an extraction left unfinished after 1 h. |
 | Uploads (`<data>/staging/`, 0700/0600) | File explorer uploads (≤ 4 GiB). | When written or failed; one left by a killed agent is removed by an agent after 7 days. |
 | Pasted files (`<data>/uploads/`) | Pasted files, and dropped files when the terminal's directory cannot take them. | After 7 days. |
 | Dropped files (`.veldr-upload-*` while writing) | Files dropped on a pane, into its terminal's directory. | The files are the user's; a temporary file is removed when its stream ends early. |
@@ -528,7 +524,7 @@ host's key and `<run>` the namespace's runtime directory on the host
 | code-server logs (`<data>/hosts/<host>/cs-data/logs/`) | code-server. | After 7 days. |
 | Display and code-server logs (`<data>/hosts/<host>/xvfb.log`, `xwayland.log`, `gui-keep.log`, `code-server.log`) | Each start of the display, its keeper or code-server. | Overwritten at each start. |
 | MCP command (`<data>/bin/veldr-mcp`, a script, and `veldr-mcp-<system>-<machine>`, a link per platform) | Each agent start: the script if it differs, the link of its platform. | Replaced by the next agent; removed with the data directory. |
-| Machine database (`<data>/machine-<host>[-<id>].db`, 0600, [38](features/38-sqlite-state.md)) | Terminal history snapshots; the AI usage cost cache (Cost tab scans, ≤ 1/min per range, ≤ 2 min). | History: two generations per terminal of ≤ `history.lines` (2000) lines and 2 MiB, ≤ `history.maxTerminals` (32) terminals and `history.maxTotalMB` (64) in all, oldest first; removed after `history.days` (7), when the terminal ends or is gone 2 min, with **Clear Saved Output**, and when capture is turned off ([36](features/36-terminal-history.md)). Cost cache (the same tables in both machine builds): records and logs older than 90 days leave at each scan; the TypeScript machine side's housekeeping also drops a cache no scan saved for 90 days (the plugin off on that machine). |
+| Machine database (`<data>/machine-<host>[-<id>].db`, 0600, [38](features/38-sqlite-state.md)) | Terminal history snapshots; the AI usage cost cache (Cost tab scans, ≤ 1/min per range, ≤ 2 min). | History: two generations per terminal of ≤ `history.lines` (2000) lines and 2 MiB, ≤ `history.maxTerminals` (32) terminals and `history.maxTotalMB` (64) in all, oldest first; removed after `history.days` (7), when the terminal ends or is gone 2 min, with **Clear Saved Output**, and when capture is turned off ([36](features/36-terminal-history.md)). Cost cache (the tables the Go program of earlier releases kept): records and logs older than 90 days leave at each scan; the housekeeping also drops a cache no scan saved for 90 days (the plugin off on that machine). |
 | Chat journal (`<data>/chat-<host>[-<id>].db`, 0600) | The chat host. | Per chat ≤ `chat.maxChatMB` (64), in all ≤ `chat.maxTotalMB` (512) and `chat.maxChats` (500), archived then longest-closed first; closed and archived chats after `chat.retentionDays` (30); a deleted chat at once. |
 | DeepSeek key (`<data>/usage/deepseek.key`, 0600) | **Save** in the usage panel (audited). | **Remove**, or the user deletes it. |
 | Kimi Code credentials (`~/.kimi-code/`) | Renewed when expiring (`usage.kimiRefresh`; not in `--read-only`), with Kimi Code's own lock. | Kimi Code's files. |

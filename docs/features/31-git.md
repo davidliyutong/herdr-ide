@@ -37,7 +37,7 @@ management, blame, line history.
 panel (**Show Source Control**, `view.panel.git`, Ctrl+Shift+G in the
 desktop app), the pane kinds `graph` and `diff`, and **Show Git Graph**
 (`git.graph`). Code: `web/src/plugins/git`, `backend/features/git` (core),
-`internal/agent/plugin/git` (machine).
+`backend/features/git/machine.ts` (machine).
 
 ### Machine side
 
@@ -315,20 +315,21 @@ terminal; the plugin adds a way to reach it from the browser:
 
 ## Testing
 
-- `internal/agent/plugin/git/git_test.go`: argument checks and refused
-  options, every read and change against real repositories (merges,
+- `backend/features/git/machine.test.ts`, `machine/check.test.ts`,
+  `machine/run.test.ts`: argument checks and refused options, every read
+  and change against real repositories (merges,
   renames, conflicts, worktrees, nested repositories and submodules (bounded
   scan, no links followed), unborn repositories, reftable,
   stashes), remotes with a bare repository (URL redaction, `diverged`,
-  `auth_required`), timeouts, output limits (a single read that crosses the limit keeps its
-  prefix, `TestCappedKeepsPrefix`) and `busy` with a fake git,
+  `auth_required`), timeouts, output limits (a single read that crosses
+  the limit keeps its prefix) and `busy` with a fake git,
   literal paths with hooks, reads with a monitor and textconv configured,
   ignored paths.
 - `backend/features/git/git.test.ts`: routes, audit records (`change
-  audit`), settings, the guards (`checkGuarded`), and that the machine
-  build has the same actions.
+  audit`), settings, the guards (`checkGuarded`).
 - `spec/vectors/git/range-patches.json`: range patch vectors, run by
-  `web/src/__tests__/gitPatch.test.ts` and applied with git by the Go test.
+  `web/src/__tests__/gitPatch.test.ts` and applied with git by
+  `backend/features/git/machine.test.ts`.
 - Web: `gitGraph.test.ts` (lanes, rows, pages), `gitPanel.test.ts`,
   `gitGraphPane.test.ts`, `gitDiff.test.ts` (panel actions, pickers,
   remotes, graph menus and filter, diff modes, saves, mixed line endings),

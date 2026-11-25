@@ -75,7 +75,7 @@ only picks entries.
 ### Downloads
 
 `web/src/download.ts`, `backend/features/files/core.ts`, `names.ts`,
-`internal/agent/archive.go`.
+`backend/machine/fsops.ts`.
 
 - `GET /api/m/<machine>/download?path=…&path=…` takes up to 1000 absolute
   paths. One file comes as itself; a directory or several paths come as one
@@ -226,9 +226,9 @@ Shared: `web/src/transferList.ts`, `web/src/components/TransferPanel.tsx`,
   (`upload names are unique and safe`, `upload into a directory`);
   `transfers.test.ts`: aborted uploads (`a cancelled upload leaves no
   file`).
-- `internal/agent/agent_test.go`: ranged reads and chunked writes
-  (`TestFileOps`, `TestWriteKeepsExistingFiles`).
-- `internal/agent/archive_test.go`: archive contents, names, links, the end
+- `backend/machine/agent.test.ts`: ranged reads and chunked writes
+  (`file operations`).
+- `backend/machine/fsops.test.ts`: archive contents, names, links, the end
   mark.
 - `backend/features/files/names.test.ts` (`downloadPaths`),
   `transfers.test.ts` (`files and archives`, `progress, ends and cancels`,

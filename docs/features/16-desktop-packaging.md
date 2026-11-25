@@ -11,9 +11,9 @@ Chromium and a secure loopback origin, so the shell must preserve the
 existing HTTP, WebSocket and service-worker behavior.
 
 The agent relies on POSIX (unix sockets with peer checks, process groups,
-code-server, Xvfb) and is built for Linux and macOS only
-(`//go:build unix`); this repository pins no Windows herdr-core
-(`internal/hcdist`). On Windows the app is therefore a client of SSH
+code-server, Xvfb) and runs on Linux and macOS only (a Windows core
+carries no machine side); this repository pins no Windows herdr-core
+(`backend/scripts/hcdist.ts`). On Windows the app is therefore a client of SSH
 machines only ([02](02-multi-machine-transport.md)).
 
 ## Goals / non-goals
@@ -55,8 +55,8 @@ how a Linux command line names folders.
 
 `scripts/desktop.sh` stages what the core carries (`PAYLOAD_ONLY=1
 scripts/build.sh`: the web UI, the build's release record and its own
-platform's executable for the local machine (no executable on Windows;
-with `MACHINE=go`, the machine builds and herdr-core instead), the encoders,
+platform's executable for the local machine (no executable on Windows),
+the encoders,
 the VS Code extension), then builds the shell with the core bundled for its
 utility process (`desktop/build.mjs`: `dist/core.mjs` from
 `backend/hosts/electron`), then runs electron-builder
@@ -243,7 +243,7 @@ none: its local machine is `local_unsupported`.
 
 `desktop/src/privacy.ts`, `web/src/fullDiskAccess.ts`,
 `web/src/components/settings/FullDiskAccess.tsx`,
-`internal/agent/privacy.go`.
+`backend/machine/privacy.ts`.
 
 macOS has no request for Full Disk Access: the user turns it on in System
 Settings. It checks the process it holds responsible, which children
@@ -395,11 +395,10 @@ See [SECURITY.md](../../SECURITY.md) for the trust boundaries.
   `verify`, `windowsHello`, `enclave`, `relay`, `unlockStore`, `keychain`.
 - `web/src/__tests__/`: `quitGuard`, `desktop` (menu commands),
   `zoom`, `drop` (dropped and opened folders), `fullDiskAccess`.
-- `internal/agent/privacy_test.go`, `privacy_op_test.go` and
+- `backend/machine/housekeeping.test.ts` and
   `backend/features/terminals/terminals.test.ts` (`the terminal core’s
-  lifecycle from the UI`): the probes, the op and the endpoint;
-  `TestIntegrationHC` runs the probe through a real herdr-core.
-- CI's `desktop` job runs the Go, web and desktop tests (the core's on
+  lifecycle from the UI`): the probes, the op and the endpoint.
+- CI's `desktop` job runs the web and desktop tests (the core's on
   macOS) and `scripts/desktop.sh app` on Ubuntu, macOS and Windows.
 - `e2e/tests/desktop.spec.ts` (`make e2e`, when the desktop's packages
   are installed) launches the unpackaged app with Playwright on an

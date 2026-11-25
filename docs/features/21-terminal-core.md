@@ -84,12 +84,12 @@ running the core's agent on Windows.
 
 ## Design
 
-**Clients** (`backend/shared/proto/hc` in the core, `internal/hc` in the
-agent). Each says hello on any byte stream, checks the generation and
+**Client** (`backend/shared/proto/hc`, in the core and on the machine).
+It says hello on any byte stream, checks the generation and
 switches to frames. One reader takes the frames; a reply that opens a
 channel registers it before the next frame is read, because the core
 sends the channel's first frames right behind the reply. A call given up
-(its signal, Go's context) sends `$/cancelRequest`.
+(its abort signal) sends `$/cancelRequest`.
 
 A stream's `ack` returns credit only when the caller has passed bytes on,
 so a slow browser slows the core instead of filling memory along the way.
@@ -97,24 +97,22 @@ A channel buffers at most twice the credit window; a core exceeding its
 credit ends the connection. An event subscription's `recv` joins lines
 across frames and returns their credit itself.
 
-**Delivery** (`internal/hcdist`, `scripts/fetch-hc`,
+**Delivery** (`backend/scripts/hcdist.ts`, `backend/scripts/fetch-hc.ts`,
 `backend/kernel/payloads.ts`).
-`internal/hcdist` pins the version and the SHA-256 of the four release
-archives (Linux and macOS, amd64 and arm64). `scripts/fetch-hc`, run by
+`hcdist.ts` pins the version and the SHA-256 of the four release
+archives (Linux and macOS, amd64 and arm64). `fetch-hc.ts`, run by
 `scripts/build.sh`, downloads and verifies each archive, takes only the
 regular `herdr-core` file at the archive root (at most 64 MiB; never the
 copy inside the macOS app bundle, links or duplicates), and writes it
 gzip-compressed as `hc-<os>-<arch>.gz` into `dist/machines-hc/`, of which
 each executable embeds its own platform's and records the digests of all
-([42](42-typescript-backend.md#the-machine-side)), or, for a core built
-with `MACHINE=go`, into `dist/payload/hc/`, all of which it embeds; the
-release's licenses go under `dist/hc/licenses/`.
-The executable is never run during a build. `go run ./scripts/fetch-hc
--exe <file> <os>/<arch>` writes one verified executable for the
-integration tests (`HC_TEST_BIN`). The core's `hc(os, arch)` returns the
-compressed executable and the digest of the uncompressed one.
+([42](42-typescript-backend.md#the-machine-side)); the release's licenses
+go under `dist/hc/licenses/`.
+The executable is never run during a build. `bun backend/scripts/fetch-hc.ts
+--exe <file> <os>/<arch>` writes one verified executable for the
+integration tests (`HC_TEST_BIN`).
 
-**Agent** (`internal/agent/hc.go`). The session is
+**Agent** (`backend/machine/hc.ts`, `hcop.ts`). The session is
 `veldr[-<instance>]-<host id>`, so hosts sharing a home keep their
 cores and herdr-core's state apart ([40](40-shared-homes.md)); the socket
 is `hc.sock` in the namespace's runtime directory on the host (short, for
@@ -141,23 +139,23 @@ does ([02](02-multi-machine-transport.md)), or `veldr node stop
 --terminal-core` on the machine, which runs `server stop` when a core
 answers on the instance's socket.
 
-**Helpers as hidden terminals** (`internal/agent/hidden.go`). The chat host
+**Helpers as hidden terminals** (`backend/machine/hidden.ts`). The chat host
 ([37](37-agent-chats.md)) must outlive the agent, so it runs as a terminal
-of the instance's terminal core (`plugin.Env.RunHidden`): a reserved name,
+of the instance's terminal core (`runHidden`): a reserved name,
 the label `veldr.hidden`, `no_parent`, `no_notify` and `rm`, in the
 user's home with a minimal environment. It thereby has the lifetime, owner
 and macOS privacy attribution of the user's terminals and ends with its
 program or the core's stop. The core gives a name to one live terminal at
 a time, so the name is the lock against a second chat host; when a user's
 terminal holds it, the helper takes a numbered fallback name (at most 16).
-`KillHidden` ends a helper only when label and arguments match. The name and label together
-(`agentproto.Hidden`) hide it from the terminal protocol
+`killHidden` ends a helper only when label and arguments match. The name and label together
+(`hidden` of agentproto) hide it from the terminal protocol
 ([22](22-terminal-protocol.md)), agent detection and terminal history. No
 terminal core is started for a helper: without one it answers
 `no_terminal_core`.
 
 **Environment of terminals.** The agent starts the core (and code-server
-and the display) with `cleanEnv` (`internal/agent/procutil.go`): without
+and the display) with `cleanEnv` (`backend/machine/env.ts`): without
 `HC_*`, `HERDR_*` (the product's own `VELDR_*` stay), `TMUX`,
 `TMUX_PANE`, `STY`, `ZELLIJ` and `ZELLIJ_*`. Otherwise a core started from
 a herdr pane or inside tmux would give its terminals the look of nested
@@ -215,23 +213,22 @@ build's digest before every start. See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- `internal/hcdist/release_test.go`: archive extraction against malformed,
+- `backend/scripts/fetch-hc.test.ts`: archive extraction against malformed,
   oversized and linked members.
-- `backend/kernel/payloads.test.ts`: the digest the core hands the agent is
-  of the uncompressed executable; a damaged or missing one has none.
-- `internal/hc/hc_test.go` and `backend/shared/proto/hc/hc.test.ts`: a
+- `backend/kernel/payloads.test.ts`: the herdr-core digests the build
+  records.
+- `backend/shared/proto/hc/hc.test.ts`: a
   scripted core — framing, hello, out-of-order replies, cancellation,
   credit violations, events across frames.
-- `internal/agent/hc_test.go`: install, digest checks before start and
+- `backend/machine/agent.test.ts`: install, digest checks before start and
   restart, socket mode, session names, failure codes.
 - `backend/features/terminals/units.test.ts` (`sshEnv`, `the local
   machine gets no ssh session`), `terminals.test.ts` (`terminal.run gets
-  the ssh session`) and `internal/agent/procutil_test.go`
-  (`TestCleanEnv`, `TestCleanEnvAgentSessionMarkers`): terminal
-  environment.
-- `internal/agent/hidden_test.go`: hidden helpers' flags, a taken name, no
-  terminal core, `KillHidden`; `TestIntegrationChatHost` (`make it`) the
-  chat host started again after the terminal core restarted.
-- `make it`: `TestIntegrationTerminal` (`internal/hc`) and
-  `TestIntegrationHC` (`internal/agent`) against a real herdr-core in the
-  sessions `veldr-it` and `veldr-it-<host id>` (the agent's).
+  the ssh session`) and `backend/machine/hidden.test.ts`,
+  `housekeeping.test.ts` (`cleanEnv`): terminal environment.
+- `backend/machine/hidden.test.ts`: hidden helpers' flags, a taken name, no
+  terminal core, killing a helper by name.
+- `make it`: `backend/machine/integration.test.ts` and
+  `backend/features/terminals/integration.test.ts` against a real
+  herdr-core in the session `veldr-it-<host id>` and the instance
+  `ts-term`'s.

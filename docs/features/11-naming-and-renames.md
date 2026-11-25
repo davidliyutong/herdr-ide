@@ -2,7 +2,7 @@
 
 ## Context
 
-The product name appears in binaries, the Go module path, directories on
+The product name appears in binaries, directories on
 every machine, the terminal core's session, environment variables, browser
 storage, the VS Code extension's identity, the desktop app's bundle ID and
 the docs. A rename must be quick and mechanical.
@@ -11,7 +11,7 @@ the docs. A rename must be quick and mechanical.
 
 Goals:
 
-- one place per language defines the name;
+- one place defines the name, copied where it cannot be imported;
 - one command renames everything;
 - CI rejects new hardcoded names.
 
@@ -22,10 +22,9 @@ executable, `HC_*` variables, state directory).
 ## Design
 
 - **Definitions**:
-  - Go: `internal/brand/brand.go` (`Name`, `Slug`, `Domain`, `EnvPrefix`,
-    `DataDir(instance)`, `AgentDir`, `BridgeExtID`, …);
-  - core: `backend/shared/lib/brand.ts` (`NAME`, `SLUG`, `DOMAIN`,
-    `ENV_PREFIX`, `dataDir(instance)`, …);
+  - core and machine side: `backend/shared/lib/brand.ts` (`NAME`, `SLUG`,
+    `DOMAIN`, `ENV_PREFIX`, `dataDir(instance)`, `AGENT_DIR`,
+    `BRIDGE_EXT_ID`, …);
   - web UI: `web/src/brand.ts` (`APP_NAME`, `APP_SLUG`, `APP_DOMAIN`,
     namespaced `storage`).
 
@@ -38,11 +37,10 @@ executable, `HC_*` variables, state directory).
 
   Display name and slug are separate, so the visible name can change
   without touching identifiers.
-- **Consistency**: `internal/brand/brand_test.go` checks that the
-  TypeScript copies and the extension's `package.json` agree with Go,
-  `backend/shared/lib/brand.test.ts` the core's.
-  `scripts/check.sh` fails on string literals with the slug in Go and
-  TypeScript outside these files. Build scripts, the Makefile, Vite, the
+- **Consistency**: `backend/shared/lib/brand.test.ts` checks that the web
+  UI's and the extension's copies and the extension's `package.json` agree
+  with the core's. `scripts/check.sh` fails on string literals with the
+  slug in TypeScript outside these files. Build scripts, the Makefile, Vite, the
   PWA manifest, the desktop launcher and electron-builder derive names from
   them.
 - **Derived at runtime**: the agent's state directory
@@ -54,10 +52,9 @@ executable, `HC_*` variables, state directory).
   `<slug>-chat-host`), the notices' methods (`_<slug>/<name>`), and the
   client name chat agents are given (`CLAUDE_CODE_ENTRYPOINT=<slug>`,
   Codex's client name; [37](37-agent-chats.md)).
-- **Rename**: `scripts/rename.sh NEW [--name "Display"] [--module PATH]
-  [--dry-run]` replaces the slug, env prefix and module path, moves
-  `cmd/<slug>` and `extensions/<slug>-bridge`, sets the display name,
-  removes generated artifacts, then builds and runs the brand test.
+- **Rename**: `scripts/rename.sh NEW [--name "Display"] [--dry-run]`
+  replaces the slug and env prefix, moves `extensions/<slug>-bridge`, sets
+  the display name, removes generated artifacts, then runs the brand test.
 - **No carry-over**: the renamed version is a namespace of its own
   (`~/.<new>` on machines, its own terminal cores, configuration
   directory, browser storage and desktop app id); what the previous name
@@ -81,7 +78,7 @@ executable, `HC_*` variables, state directory).
 
 ## Testing
 
-- `internal/brand/brand_test.go` (`TestBrandMirrorsAgree`).
+- `backend/shared/lib/brand.test.ts` (`the copies of the names agree`).
 - The brand step of `scripts/check.sh`.
 - The rename script was run on a copy of the repository: no old name
   remained, and tests and checks passed.

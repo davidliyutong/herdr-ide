@@ -15,8 +15,8 @@ terminals on narrow windows ([05](05-vscode-panes.md)). Panels stay small
 ## Goals / non-goals
 
 - One shape on each side: core (a feature, `backend/kernel/feature.ts`,
-  one directory each in `backend/features`), agent
-  (`internal/agent/plugin`), web UI (`web/src/plugins`).
+  one directory each in `backend/features`), machine side (the feature's
+  `machine.ts`), web UI (`web/src/plugins`).
 - A switch per plugin, in Settings › Plugins.
 - Non-goal: plugins loaded at runtime or written by third parties. Plugins
   are compiled in and pass the same guards as any route; foreign code
@@ -238,9 +238,9 @@ panels into panes.
 - `backend/kernel/agent.test.ts`: large params and results (`inline and
   as bodies`), the agent's codes (`agent errors`), `open` closing with
   the caller (`open and stream`).
-- `internal/agent/plugin/plugin_test.go`, `internal/agent/plugins_test.go`,
-  `internal/agentproto/proto_test.go`: replies, codes, bodies,
-  `UntilClosed`, panics.
+- `backend/machine/agent.test.ts` (`the plugin op`): params and results
+  inline or as bodies, refusals with codes, a throwing handler, actions
+  ended by the core.
 - `backend/hosts/bun/registry.test.ts`: `plugin sections`, the features'
   switches in their order.
 - Web: `plugins.test.ts`, `viewStatus.test.tsx`, `notifyViews.test.ts`,

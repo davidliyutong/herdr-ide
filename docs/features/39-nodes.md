@@ -55,11 +55,9 @@ the UI installs it on its own machine, and other machines download their
 platform's from the release or get it uploaded
 ([02](02-multi-machine-transport.md)). `backend/machine/node.ts` is the
 node, `backend/hosts/machine/cli.ts` its commands (`chathost.ts` the chat
-host's). A core built with `MACHINE=go` passes `node` on to the Go machine
-build it carries (`cmd/veldr`: no `serve`, no web UI, no payloads), which
-it installs on its own machine and uploads to others;
-`internal/agent/node.go` is that node, `cmd/veldr/node_unix.go` its
-commands.
+host's). The Go program of earlier releases served the same node protocol
+on the same socket, so a node of this build takes over from one of those
+as from any older build (below).
 
 ### The node
 
@@ -72,8 +70,8 @@ commands.
   id per core process, the same across its reconnects) and its build: a
   digest of its executable, its version and when the executable was
   written. The node answers with its own build; with `serve` the
-  connection then carries one yamux session speaking `internal/agentproto`
-  as the agent did.
+  connection then carries one yamux session speaking the agent protocol
+  (`backend/shared/proto/agentproto`) as the agent did.
 - **One per namespace and host.** `node.lock` in the runtime directory
   is held while a node serves; a second node started for the namespace
   exits unless it takes over (below).
@@ -82,14 +80,14 @@ commands.
   in `<data>/hosts/<host>/node.log`. It ends 15 s after its last client
   left, on `node stop` (with `--terminal-core` the instance's terminal
   core on the host is stopped too), or once it was taken over and its
-  clients moved. One whose executable is removed (a `go run` build, an
-  uninstalled app) takes no new client. Terminals and chats do not depend
+  clients moved. One whose executable is removed (a development
+  build, an uninstalled app) takes no new client. Terminals and chats do not depend
   on it: herdr-core runs as a service of its own (`herdr-core server
   start`), and the chat host as one of its terminals.
 
 ### The terminal core
 
-herdr-core stays its own executable, pinned by `internal/hcdist` and
+herdr-core stays its own executable, pinned by `backend/scripts/hcdist.ts` and
 installed by a UI into `<data>/hosts/<host>/hc/herdr-core` only with its
 digest, as
 before ([21](21-terminal-core.md)). The node starts, restarts and stops it
@@ -151,7 +149,7 @@ stopped ([deployment](../deployment.md#desktop-app)).
 ### Upgrades without interruption
 
 The client that reaches a node compares builds
-(`agentproto.NodeInfo.Newer`: by version when both builds have a release
+(`newer` of agentproto: by version when both builds have a release
 version, else by when their executables were written):
 
 - the node's build or a newer one: the client uses the node; the
@@ -225,13 +223,14 @@ chat works, the terminal core restarts only when asked.
 
 ## Testing
 
-- `internal/agent/node_test.go`: the socket's mode, several clients, one
+- `backend/machine/node.test.ts`: the socket's mode, several clients, one
   node per namespace, idle end and stop, retiring when the executable is
-  gone, takeover with its drain notice, the order of builds.
-- `internal/agent/shared_test.go`: vault requests asked of every core,
-  code-server kept for another core, bridge connections, a program window
-  viewer that falls behind; `guiclients_test.go` (Linux with Xvfb): two
-  cores on one window manager.
+  gone, takeover with its drain notice, the order of builds
+  (`backend/shared/proto/agentproto/agentproto.test.ts` too).
+- `backend/machine/vault.test.ts`, `backend/features/vscode/machine.test.ts`,
+  `backend/features/gui/machine.test.ts`: vault requests asked of every
+  core, code-server kept for another core, bridge connections, a program
+  window viewer that falls behind, two cores on one window manager.
 - End to end (`e2e/tests/nodes.spec.ts`, `gui.spec.ts`): two cores of one
   instance share the local node; a newer build takes the node over while
   the other core stays ready and its page's terminal works on; two cores

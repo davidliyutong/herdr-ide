@@ -75,11 +75,11 @@
 需要：
 
 - 能正常连到要使用的机器的 OpenSSH 客户端（只用本机时不需要）；
-- 构建需要：Bun 1.4.5（核心程序及其机器端）、Go（版本见 `go.mod`，用于构建工具和 Go 版的机器程序）、Node.js 22.12+ 和 pnpm（`corepack enable` 会使用固定的版本）。
+- 构建需要：Bun 1.4.5（核心程序、其机器端和构建工具）、Node.js 22.12+ 和 pnpm（`corepack enable` 会使用固定的版本）。
 
 ```bash
 make deps && make build
-cd dist/packages/veldr-$(go env GOOS)-$(go env GOARCH)
+cd dist/packages/veldr-$(scripts/platform.sh)
 ./veldr
 ```
 
@@ -182,7 +182,7 @@ make check test    # 提交 PR 之前运行
 ## 许可证
 
 [MIT](LICENSE)。
-第三方许可证：核心程序的 Bun 运行时和 npm 依赖、各机器程序的 Go 依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，前端打包的依赖（包括 Ghostty 的终端库（MIT）、KaTeX 和 JetBrains Mono 字体）见程序提供的 `/licenses.md`。
+第三方许可证：核心程序的 Bun 运行时和 npm 依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，前端打包的依赖（包括 Ghostty 的终端库（MIT）、KaTeX 和 JetBrains Mono 字体）见程序提供的 `/licenses.md`。
 核心程序内嵌供各机器使用的 [herdr-core](https://github.com/herdrdev/herdr-core)（Apache-2.0），其许可证及依赖声明在发布包的 `licenses/herdr-core/` 中。
 agent 中带有 herdr 的 agent 识别规则（Apache-2.0，见 [licenses/herdr-detect/](licenses/herdr-detect/)）。
 核心程序还内嵌供 Linux 机器使用的视频编码器（FFmpeg，LGPL-2.1，以及 libvpx、libva 和 libdrm；见 [licenses/encoder/](licenses/encoder/)）。

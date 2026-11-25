@@ -13,24 +13,22 @@ platform too ([42](features/42-typescript-backend.md)): besides `serve`,
 `fetch-assets` and `version` it runs the machine's commands (`node`, `mcp`,
 `chat-host`), and each machine runs its platform's from
 `~/.veldr/agent/<build>/veldr`, downloaded from the release or uploaded by
-the core. A core built with
-`MACHINE=go` passes `node` on to the Go machine build of its own host
-instead, the program it uploads to each machine, which has the machine's
-commands and `gui-keep` and `gui-wl` besides.
+the core. On Linux machines the GUI helper it carries (`veldr-gui`,
+[14](features/14-gui-windows.md)) has the display's commands.
 
 | Command | Description |
 | --- | --- |
 | `veldr [serve] [flags]` | Run the server (default command). |
 | `veldr fetch-assets [flags] DIR` | Download and verify code-server releases and extensions into `DIR` for air-gapped installs. |
-| `veldr mcp [--instance NAME] [--socket PATH]` | The variable vault's MCP server on stdio for coding agents' CLIs; asks the instance's agent through `vault.sock`, exits when stdin closes or on SIGTERM/SIGINT/SIGHUP, killing the commands it runs first ([30](features/30-variable-vault.md)). Exit 2: bad command line; 1: no home directory, or a line over 4 MiB. Served by the Go machine build and by every TypeScript executable. |
+| `veldr mcp [--instance NAME] [--socket PATH]` | The variable vault's MCP server on stdio for coding agents' CLIs; asks the instance's agent through `vault.sock`, exits when stdin closes or on SIGTERM/SIGINT/SIGHUP, killing the commands it runs first ([30](features/30-variable-vault.md)). Exit 2: bad command line; 1: no home directory, or a line over 4 MiB. Served by every executable. |
 | `veldr version` | Print the version. |
 | `veldr node [--instance NAME] [--takeover]` | The machine's node: serves the core's protocol on `<run>/node.sock` (the namespace's runtime directory on this host, see [files](#files-and-directories)) to any number of cores; started by them, ends 15 s after its last client; `--takeover` takes the socket from the running node, which drains ([39](features/39-nodes.md)). Linux and macOS. |
 | `veldr node dial [--instance NAME] [--client ID]` | Pipes stdio to the node, starting one (or one that takes over from an older build's) when none answers; what a core runs over ssh, `--client` naming the core. |
 | `veldr node stop [--instance NAME] [--terminal-core]` | Asks the instance's nodes to stop; `--terminal-core` also stops the instance's terminal core on this host when one answers on its socket, ending its terminals. |
-| `~/.veldr[-<instance>]/bin/veldr-mcp` | The MCP server on a machine: a shell script running `veldr-mcp-$(uname -s)-$(uname -m)` beside it, a link to the installed machine build of that platform (the Go build has `mcp`, `node`, `gui-keep`, `gui-wl`, `chat-host` and `version`; the TypeScript build is the core's executable, started by that name as `mcp`); takes no arguments and asks the agent of its data directory on this host. |
-| `veldr gui-keep --instance NAME` | Holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
-| `veldr gui-wl --device NODE [--nvidia]` | Compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
-| `veldr chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS; both machine builds have it, the TypeScript build's with the ACP, Codex and Claude Code adapters, Claude Code's on Anthropic's Agent SDK, which the core has the machine fetch before such a chat starts (a chat whose agent starts without it fails `sdk_unavailable`, [42](features/42-typescript-backend.md#claude-code)). |
+| `~/.veldr[-<instance>]/bin/veldr-mcp` | The MCP server on a machine: a shell script running `veldr-mcp-$(uname -s)-$(uname -m)` beside it, a link to the installed machine build of that platform (the core's executable, started by that name as `mcp`); takes no arguments and asks the agent of its data directory on this host. |
+| `veldr-gui gui-keep --socket S --pid P --xauth F --hc-socket H --lock L --display D` | The GUI helper's display keeper: holds a machine's virtual display while the instance's terminal core runs; started by the agent. |
+| `veldr-gui gui-wl --device NODE [--nvidia]` | The GUI helper's compositor of a machine's GPU display: a Wayland server showing nothing, for the one Xwayland on file descriptor 3, drawing with the render node's GPU (`--nvidia`: NVIDIA's buffer layouts); started by the agent. |
+| `veldr chat-host --base DIR --run DIR` | A machine's chat host ([37](features/37-agent-chats.md)), serving `chat.sock` in `--run` with its journal and log in `--base`; started by the agent as a hidden terminal of the terminal core. Ends on SIGHUP/SIGTERM/SIGINT, when asked to make way, or a minute after going idle. Exit 2: bad command line; 1: socket taken, directories not the user's alone, a newer host's journal, or not stopped within 30 s. Linux and macOS; with the ACP, Codex and Claude Code adapters, Claude Code's on Anthropic's Agent SDK, which the core has the machine fetch before such a chat starts (a chat whose agent starts without it fails `sdk_unavailable`, [42](features/42-typescript-backend.md#claude-code)). |
 
 ## `serve` flags
 
@@ -68,9 +66,9 @@ and file change the value at runtime.
 | `--code-server-idle` | `20m` | Stop a machine's code-server after this long without VS Code connections; `0` keeps it while the agent lives. |
 | `--code-server-url` | GitHub releases | Download URL template (`{version}`, `{asset}`, `{file}`); point it at a mirror. An `http` or `https` URL without user information, query or fragment: machines get it on their command line (`--code-server-install=download`), so the core refuses to start with credentials in it; serve a mirror that needs credentials through a `--seed-dir`. |
 | `--extension-url` | Open VSX | Extension URL template (`{publisher}`, `{name}`, `{version}`, `{file}`). |
-| `--seed-dir` | – | Directory of pre-downloaded tarballs and VSIXs (from `fetch-assets`), and of Anthropic's Agent SDK tarball (`claude-agent-sdk-0.3.322.tgz`, for Claude Code's chats on machines of the TypeScript build), searched before the cache (repeatable). |
+| `--seed-dir` | – | Directory of pre-downloaded tarballs and VSIXs (from `fetch-assets`), and of Anthropic's Agent SDK tarball (`claude-agent-sdk-0.3.322.tgz`, for Claude Code's chats on machines), searched before the cache (repeatable). |
 | `--offline` | `false` | Never download; artifacts come from `--seed-dir` or the cache. Machines are not asked to download the Agent SDK either. |
-| `--npm-registry` | `https://registry.npmjs.org` | npm registry or mirror from which the core and the machines download Anthropic's Agent SDK when a Claude Code chat on a machine of the TypeScript build needs it; the tarball is checked against the pinned integrity whatever its source ([42](features/42-typescript-backend.md#claude-code)). An `http` or `https` URL without user information, query or fragment: machines get it on their command line, so the core refuses to start with credentials in it; put the tarball of a mirror that needs credentials into a `--seed-dir`. |
+| `--npm-registry` | `https://registry.npmjs.org` | npm registry or mirror from which the core and the machines download Anthropic's Agent SDK when a Claude Code chat on a machine needs it; the tarball is checked against the pinned integrity whatever its source ([42](features/42-typescript-backend.md#claude-code)). An `http` or `https` URL without user information, query or fragment: machines get it on their command line, so the core refuses to start with credentials in it; put the tarball of a mirror that needs credentials into a `--seed-dir`. |
 | `--code-server-install` | `push` | `push` (the core uploads), `download` (the machine fetches with curl or wget, same digest; off with `--offline`) or `existing`; the last two fall back to `push`. Setting `codeServer.install`. |
 | `--code-server-path` | – | code-server on machines for `existing`; empty searches `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/snap/bin`. Setting `codeServer.path`. |
 
@@ -100,7 +98,7 @@ remote machine.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--agent-dir` | – | Directory of machine builds, the core's first source of them: the release's `SHA256SUMS` with the archives (`veldr-<os>-<arch>[-musl].tar.gz`) or the executables in them (`veldr-<os>-<arch>[-musl]`), each checked against that `SHA256SUMS`, which must name the core's own executable (offline sites, [deployment](deployment.md#air-gapped-networks)); for a core built with `MACHINE=go`, uncompressed `veldr-<os>-<arch>` Go builds (`go build ./cmd/veldr`). |
+| `--agent-dir` | – | Directory of machine builds, the core's first source of them: the release's `SHA256SUMS` with the archives (`veldr-<os>-<arch>[-musl].tar.gz`) or the executables in them (`veldr-<os>-<arch>[-musl]`), each checked against that `SHA256SUMS`, which must name the core's own executable (offline sites, [deployment](deployment.md#air-gapped-networks)). |
 | `--ext-dir` | – | Directory containing `veldr-bridge.vsix`, used instead of the embedded one. |
 | `--web-dir` | – | Serve the UI from this directory instead of the embedded build. |
 | `--parent-stdio` | `false` | Launcher lifecycle (the end-to-end tests): write `{"event":"ready","url":"…"}` to stdout after binding, clean up when stdin closes (what stdin carries is not read). Does not change HTTP guards; every client is a browser. |
@@ -519,7 +517,7 @@ it, except on a read-only core, which refuses them.
 | `POST /api/m/{id}/p/chat/host/stop` | writes | Stops the chat host; `409 busy` while a chat works. |
 | `GET /api/p/chat/hosts` | – | Every machine's chat host and its active sessions, starting none. |
 | `GET /api/p/chat/states` | – | Every machine's chat states as last read, with revisions continued on `/ws`. |
-| `GET /api/p/chat/ws` | – | The chat WebSocket, one per page ([architecture](architecture.md#chats-internalchatproto-backendfeatureschat)): subscriptions (≤ 32, 16 per machine) and commands; read-only cores refuse commands. |
+| `GET /api/p/chat/ws` | – | The chat WebSocket, one per page ([architecture](architecture.md#chats-backendsharedprotochatproto-backendfeatureschat)): subscriptions (≤ 32, 16 per machine) and commands; read-only cores refuse commands. |
 
 ### Variable vault
 
@@ -577,10 +575,9 @@ Build scripts and tests:
 
 | Variable | Where | Description |
 | --- | --- | --- |
-| `TARGETS` | `scripts/build.sh` | Core platforms (default the host's), e.g. `"linux/amd64 darwin/arm64"`, also `linux/amd64-musl` and `linux/arm64-musl` (not with `MACHINE=go`); `windows/amd64` builds only `dist/veldr-windows-amd64.exe`. |
-| `MACHINE` | `scripts/build.sh`; the release workflow's repository variable | `ts` (default): each `TARGETS` platform's executable is the core and that platform's machine side; `go`: cores that embed and upload the Go machine builds ([42](features/42-typescript-backend.md)). |
-| `RELEASE_URL` | `scripts/build.sh` | The release's download URL, from which machines get their platform's archive (unused with `MACHINE=go`; none for a build of no release, whose machines get theirs from `--agent-dir` or the core's own executable). |
-| `AGENT_PLATFORMS` | `scripts/build.sh` | herdr-core platforms whose digests the executables record, and with `MACHINE=go` the agent and herdr-core platforms to embed (default all four). |
+| `TARGETS` | `scripts/build.sh` | Core platforms (default the host's), e.g. `"linux/amd64 darwin/arm64"`, also `linux/amd64-musl` and `linux/arm64-musl`; `windows/amd64` builds only `dist/veldr-windows-amd64.exe`. |
+| `RELEASE_URL` | `scripts/build.sh` | The release's download URL, from which machines get their platform's archive (none for a build of no release, whose machines get theirs from `--agent-dir` or the core's own executable). |
+| `HC_PLATFORMS` | `scripts/build.sh` | herdr-core platforms fetched (`backend/scripts/fetch-hc.ts`) whose digests the executables record (default all four). |
 | `SKIP_WEB`, `SKIP_EXT` | `scripts/build.sh` | `1` reuses `web/dist` or the built bridge extension. |
 | `REQUIRE_ENCODER` | `scripts/build.sh` | `1` fails when the Linux video encoder is missing. |
 | `VERSION` | `scripts/build.sh`, `scripts/desktop.sh` | Reported version (default `git describe`); desktop metadata takes a semver and drops a leading `v`. |
@@ -598,9 +595,7 @@ Build scripts and tests:
 | `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
 | `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the core and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
 | `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |
-| `E2E_MACHINE` | `make e2e` | `go` runs the tests against the core that deploys the Go machine build (`dist/e2e/core`, the Go builds in `dist/e2e/agents`). Default `ts`: the TypeScript build (`dist/e2e/core-ts`, its machines' builds and `SHA256SUMS` in `dist/e2e/machines`). |
-| `GUI_TEST_INSTALL` | `go test ./internal/agent` on Linux | `1` lets program-window tests fetch Xvfb. |
-| `GUI_TEST_XCLIENT` | `bun test features/gui/integration.test.ts` (`make it`, `scripts/gui-it.sh`) | The X program of the program windows' integration test (e2e/xclient built for the machine); without it the test builds one with go. |
+| `GUI_TEST_XCLIENT` | `bun test features/gui/integration.test.ts` (`make it`, `scripts/gui-it.sh`) | The X program of the program windows' integration test (e2e/fakes/xclient.ts compiled for the machine); without it the test compiles one with bun build --compile. |
 
 ## Files and directories
 
@@ -616,12 +611,12 @@ else `<data>/run-<host id>`. Retention is summarized in
 
 | Path | Content | Lifetime |
 | --- | --- | --- |
-| `~/.veldr/agent/<build>/veldr` | The machine build: the Go executable, or the TypeScript build's executable (from its release archive, downloaded by the machine or uploaded by the core), accepted only with the SHA-256 its release's `SHA256SUMS` names | Unused 14 days. |
+| `~/.veldr/agent/<build>/veldr` | The machine build: the executable (from its release archive, downloaded by the machine or uploaded by the core), accepted only with the SHA-256 its release's `SHA256SUMS` names | Unused 14 days. |
 | `~/.veldr/code-server/<version>-<os>-<arch>/` | code-server releases (shared by instances and by hosts of one platform) | Unused 14 days. |
 | `~/.veldr/hosts/<host>/xvfb/<version>/` | Xvfb unpacked in user space (shared by this host's instances) | Unused 14 days, when another is unpacked. |
 | `~/.veldr/video/<sha256 prefix>/encoder` | Video encoder (shared), run only while its digest matches | Unused 14 days, when another is installed; unfinished after 1 h. |
 | `~/.veldr/gpupick/<sha256 prefix>/gpupick.so` | GPU selection library (0600, shared) | Unused 14 days, when another is installed. |
-| `<data>/gui/<sha256 prefix>/veldr-gui` (0700 directory) | The GUI helper of the TypeScript machine build (window manager and capture, compositor, keeper), run only while its digest is the build's | Another build's unused 14 days; unfinished after 1 h. |
+| `<data>/gui/<sha256 prefix>/veldr-gui` (0700 directory) | The GUI helper of the machine side (window manager and capture, compositor, keeper), run only while its digest is the build's | Another build's unused 14 days; unfinished after 1 h. |
 | `<data>/hosts/<host>/` (0700) | This host's own files of the namespace (below) | Touched at each agent start and every 24 h; another host's unused 30 days loses all but `hc/`, and goes whole after 180 days. |
 | `<data>/hosts/<host>/hc/herdr-core` (0700 directory) | Terminal core executable, accepted only with its SHA-256 | Replaced by the next build. |
 | `~/.local/state/herdr-core/veldr[-<instance>]-<host id>/` (`$XDG_STATE_HOME`) | herdr-core's own state (records, saved screens, logs) | Until the user removes it. |
@@ -657,7 +652,7 @@ Also on the core host: ssh control sockets in `/tmp/veldr-<uid>/s`
 16 characters; Linux and macOS; owned by you, 0700), and code-server downloads with
 `.sha256` sidecars in the user cache directory
 (`~/Library/Caches/veldr/code-server`, `~/.cache/veldr/code-server`,
-`%LocalAppData%\veldr\code-server`), and what the TypeScript build
+`%LocalAppData%\veldr\code-server`), and what the core
 fetched from its release (`~/.veldr/cache/machine/`: `SHA256SUMS-<version>`
 and the archives machines needed, `veldr-<platform>-<digest>.tar.gz`,
 checked when read, removed unused for 14 days).

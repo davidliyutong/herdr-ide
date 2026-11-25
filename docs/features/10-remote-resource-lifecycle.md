@@ -62,7 +62,7 @@ runs each have a process group of their own and stop when idle
 (`chat.idleStopMinutes`), beyond `chat.maxLive`, or when their chat
 closes: input closed, SIGTERM, then SIGKILL after a grace.
 
-**code-server has an owner and several ends** (`internal/agent/codeserver.go`).
+**code-server has an owner and several ends** (`backend/features/vscode/machine/process.ts`).
 
 - `cs.pid` in the runtime directory holds the process id and the owning
   agent's pid.
@@ -80,7 +80,7 @@ windows stay; then it is unmounted, closing its WebSocket so the idle timer
 can run. A closed pane, or a disabled or removed machine, unmounts its
 windows at once (`web/src/codeFrames.ts`, `web/src/components/CodeLayer.tsx`).
 
-**Files.** Retention is by age (`internal/agent/housekeeping.go` prunes at
+**Files.** Retention is by age (`backend/machine/housekeeping.ts` prunes at
 agent start and every 24 h; Xvfb packages, gpupick libraries and video
 encoders when another build is installed):
 
@@ -140,22 +140,22 @@ sockets, locks and pid files are in the host-local runtime directory.
 
 ## Testing
 
-- `internal/agent/lifecycle_test.go`: orphan reaping, owner-only stop,
-  upload pruning (`TestHousekeeping`), other hosts' directories
-  (`TestPruneHosts`).
+- `backend/features/vscode/machine.test.ts`: orphan reaping, owner-only
+  stop; `backend/machine/housekeeping.test.ts`: upload pruning, other
+  hosts' directories.
 - `backend/features/vscode/proxy.test.ts` (`idle tracking`) and
   `core.test.ts` (`idle code-servers are released`): idle detection with
   open connections.
 - `web/src/__tests__/codePanes.test.ts`: VS Code windows kept off screen
   until they expire or exceed 3, gone when their pane closes.
-- `internal/agent/hc_test.go` (`TestHCInstallStartAndPipe`) and
+- `backend/machine/agent.test.ts` and
   `backend/features/terminals/terminals.test.ts` (`the terminal core’s
   lifecycle from the UI`): herdr-core installs and a stopped terminal core
   staying stopped.
-- `internal/agent/guikeep_test.go`, `gui_test.go`, `guivideo_test.go`: the
+- `backend/features/gui/machine/display.test.ts`, `machine.test.ts`: the
   display keeper, unfinished Xvfb installs, old encoder builds.
-- `internal/chathost` (idle exit and stop, `TestMaxLive`, shutdown, agents'
-  groups ended on the terminal core's signals), `internal/agent/plugin/chat`
-  (`TestHandover`, `TestNeverDowngrade`, `TestStuckHostKilled`),
-  `TestIntegrationChatHost` (`make it`), `internal/store`
-  (`TestPruneHostFiles`).
+- `backend/features/chat/machine/host/host.test.ts` (idle exit and stop,
+  `chat.maxLive`, shutdown, agents' groups ended on the terminal core's
+  signals), `backend/features/chat/machine.test.ts` (handover, never a
+  downgrade, a stuck host killed), `backend/shared/store/host.test.ts`
+  (other hosts' files pruned).

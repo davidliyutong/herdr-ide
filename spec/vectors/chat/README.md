@@ -1,7 +1,7 @@
 # Chat protocol recordings
 
 Recordings of coding agents driven headless over their own protocols, one
-JSON object per line, for the chat host's adapters (`internal/chatadapter`)
+JSON object per line, for the chat host's adapters (`backend/features/chat/machine`)
 and the web UI's tests. Every line is `{"dir", "t", "msg"}`: `dir` tells
 who wrote it, as each recording's driver saw it (in `claude/`, `out` is
 what the agent wrote and `in` what the client sent; in `codex/` and

@@ -36,7 +36,7 @@ changing herdr-core's configuration.
 
 ## Design
 
-### Capture (`internal/agent/plugin/history`)
+### Capture (`backend/features/history/machine`)
 
 The core asks the machine's agent to `capture {lines, maxTerminals,
 maxTotalBytes, days}` (within 25 s); the agent snapshots the live
@@ -222,20 +222,19 @@ refused read-only and audited. See [SECURITY.md](../../SECURITY.md)
 
 ## Testing
 
-- `internal/agent/plugin/history/history_test.go` with a scripted core
-  (`fakecore_test.go`): capture, paint end, resize, dropped and oversized
-  paints, rotation, limits (`TestLimitsClamped`, `TestMaxTerminals`,
-  `TestMaxTotalBytes`, `TestAge`), the database (`TestDatabasePrivate`,
-  `TestPerHostDatabase`, `TestNewerVersion`), the lease (`TestTwoAgentsCapture`, `TestLease`),
-  failures that change nothing, adoption (`TestAdopt`,
-  `TestAdoptRefused`, `TestVanishedGrace`). `hidden_test.go`: the chat
-  host's terminal is never captured.
-- `integration_test.go` (`TestIntegrationCapture`, `make it`): a real
+- `backend/features/history/machine.test.ts` with a scripted core
+  (`testdata/fakecore.ts`): capture, paint end, dropped and oversized
+  paints, rotation, the limits (clamped, `maxTerminals`, `maxTotalBytes`,
+  days), the database (private, newer versions), the lease (two captures
+  at once), failures that change nothing, adoption and the grace of a
+  terminal gone; the chat host's terminal is never captured.
+- `backend/features/history/integration.test.ts` (`make it`): a real
   herdr-core; the stored bytes start with CAN, hold no titles or
   `ESC[?9001`, and carry exactly the history asked for.
 - `backend/features/history/history.test.ts`: route guards, scheduling,
   clears (`clears when turned off`), the adopt route (`adopt`);
-  `internal/agentproto/history_test.go`.
+  `backend/shared/proto/agentproto/agentproto.test.ts` (the History
+  messages).
 - `web/src/__tests__/history.test.ts` (choice, follower, schedule,
   adoption, retries), `historySettings.test.tsx`, `termPane.test.ts`
   (preludes).

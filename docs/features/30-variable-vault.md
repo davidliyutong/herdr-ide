@@ -489,10 +489,9 @@ build's may linger); one whose socket was taken over checks every 2 s and
 serves it again once free; an exiting node removes the socket only if it
 is still its own (same inode).
 
-The MCP server is the `mcp` command of the machine build: of the Go
-build (`internal/vaultmcp`) and of the TypeScript executable, the core's
-and the machine side's (`backend/features/vault/machine/mcp.ts`, the
-command in `backend/hosts/machine/mcp.ts`).
+The MCP server is the `mcp` command of the executable, the core's and
+the machine side's (`backend/features/vault/machine/mcp.ts`, the command
+in `backend/hosts/machine/mcp.ts`).
 `<data dir>/bin/<slug>-mcp`, the path agents' configurations name, stays
 the same across agent updates: a POSIX shell script that runs
 `<slug>-mcp-$(uname -s)-$(uname -m)` beside it, and each agent keeps the
@@ -503,22 +502,20 @@ the MCP server without arguments and asks the vault socket in the
 runtime directory, on this host, of the data directory holding it.
 
 The server speaks MCP over stdio (JSON-RPC 2.0, one message per line of
-at most 4 MiB; revisions 2025-06-18, 2025-03-26, 2024-11-05, and the
-TypeScript server also 2025-11-25 and 2024-10-07). It names its client by
-its parent process (the kernel's name of it: Linux's comm, macOS's p_comm
-in the TypeScript server, which runs no `ps`) and its terminal by
+at most 4 MiB; revisions 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05
+and 2024-10-07). It names its client by its parent process (the kernel's
+name of it: Linux's comm, macOS's p_comm; it runs no `ps`) and its terminal by
 `HC_TERMINAL_ID`. Each tool call is one connection to `vault.sock`;
 `notifications/cancelled` ends a call (a waiting approval is denied, a
 command killed) and leaves it unanswered; arguments a tool does not take
 are refused with "invalid params" (-32602) before anything is asked or
-run. The TypeScript server is the official MCP SDK's
+run. The server is the official MCP SDK's
 (`@modelcontextprotocol/server`, pinned): its stdio transport, handshake,
 version negotiation and cancellation, with the tools as handlers of its
-low-level `Server`, whose definitions are the Go server's. Where the two
-differ: a line that is no JSON is dropped without the Go server's parse
-error (-32700); a line over 4 MiB ends either; calls still running when
-stdin closes are killed and, in the TypeScript server, not answered (the
-Go server writes their cancelled output). Tools:
+low-level `Server`, whose definitions are those of the Go program of
+earlier releases. A line that is no JSON is dropped without a parse error;
+a line over 4 MiB ends the server; calls still running when stdin closes
+are killed and not answered. Tools:
 
 - `list_variables`;
 - `get_variable {name}`: the value as text, which enters the conversation;
@@ -535,11 +532,10 @@ background programs do not outlive the call with the values; a program
 that leaves the group (`setsid`) escapes. The server kills its commands
 when stdin closes or on SIGTERM, SIGINT or SIGHUP. For SIGKILL, each
 command's shell starts a watcher holding a pipe whose write end only the
-server has, and kills the group when the pipe closes; on Linux the Go
-server's shell also gets `Pdeathsig` (Node's process API, which the
-TypeScript server uses, cannot ask for it: the watcher alone ends the group
-there). Both servers merge the command's standard error into its output
-in one pipe, in the order written.
+server has, and kills the group when the pipe closes (Node's process API
+cannot ask for Linux's `Pdeathsig`: the watcher alone ends the group). The
+server merges the command's standard error into its output in one pipe, in
+the order written.
 
 ### Web UI (`web/src/plugins/vault`)
 
@@ -592,8 +588,8 @@ between changes.
 | Inject variables into terminals | Every program of the terminal gets them for its whole life; no per-use approval or record. |
 | The vault on each machine | Secrets would be copied to every host. |
 | An MCP server over HTTP from the core | Machines would need a port reaching the core; the agent's yamux session already connects them, and nothing listens on TCP on machines. |
-| An MCP SDK in the Go build | Four methods over stdio; an SDK adds dependencies to the agent uploaded everywhere. The TypeScript build uses the official TypeScript SDK (doc [42](42-typescript-backend.md)): its machine side is the core's executable anyway, and the SDK keeps the protocol's handshake and cancellation current. |
-| The SDK's `McpServer` with zod input schemas | Its tool list would carry the converted schemas (and `listChanged`), and wrong arguments would come back as a tool's error text; the low-level `Server`'s handlers keep the Go server's definitions and refusals. |
+| A server of our own, without an SDK | Four methods over stdio, as the Go program of earlier releases had it; the official TypeScript SDK (doc [42](42-typescript-backend.md)) adds nothing to upload, since the machine side is the core's executable anyway, and keeps the protocol's handshake and cancellation current. |
+| The SDK's `McpServer` with zod input schemas | Its tool list would carry the converted schemas (and `listChanged`), and wrong arguments would come back as a tool's error text; the low-level `Server`'s handlers keep the definitions and refusals the Go program's server had. |
 | Keychain on every machine | Headless Linux machines have none. |
 | The master key in the system keychain | Any program of the user reads it without a prompt and with the file has every value. An unlock entry is wrapped under a KEK only the authenticator gives again; safeStorage holds only half of a desktop KEK. |
 | The loopback API or the page's origin as proof of the user | Programs on the core host call the API as pages do, and content on the core's origin passes the origin check. |
@@ -742,14 +738,7 @@ variables from machines and the MCP server. Limits of the design:
   beside the vault's file, records surviving a restart, releases never
   merged, releases and others bounded apart, a write that fails leaving
   nothing, a log that cannot be read.
-- `internal/vaultmcp`: `mcp_test.go` (JSON-RPC, masking,
-  `TestMaskAtTheCut`, `TestRunLimitsFromTheCore`, cancellation,
-  `TestSocketPath`),
-  `run_unix_test.go` and `signal_unix_test.go` (background programs and
-  signals including SIGKILL).
-- `internal/agent/vault_test.go` (`TestSocketsFollowTheNewestAgent`,
-  `TestLinkMCPReplacesTheLink`).
-- The TypeScript server: `backend/features/vault/machine/mcp.test.ts`
+- The MCP server: `backend/features/vault/machine/mcp.test.ts`
   (the handshake, the tools, refusals reaching the model, the core's
   limits, a cancelled call leaving the core unanswered, a cancelled
   command killed with its background programs, stdin's end killing what

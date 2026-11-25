@@ -17,7 +17,7 @@ Goals:
 - internal mirrors are supported;
 - every artifact is verified.
 
-Non-goals: offline builds from source (Go and npm dependencies and the
+Non-goals: offline builds from source (npm dependencies and the
 pinned herdr-core downloads need network access or a prepared cache).
 
 ## Design
@@ -29,12 +29,11 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
 - **Embedded in the core binary**: the web UI, the machine build of its
   own platform (the executable is that build too,
   [42](42-typescript-backend.md#the-machine-side)) with that platform's
-  herdr-core (pinned in `internal/hcdist`, archives checked against its
-  digests when the build fetches them, `scripts/fetch-hc`; the executable
-  records every platform's digest), the video encoder for program windows
-  when the build has one ([14](14-gui-windows.md)) and the bridge
-  extension; a core built with `MACHINE=go` embeds the Go machine builds
-  and herdr-core for four platforms instead. Each executable carries its
+  herdr-core (pinned in `backend/scripts/hcdist.ts`, archives checked
+  against its digests when the build fetches them,
+  `backend/scripts/fetch-hc.ts`; the executable records every platform's
+  digest), the video encoder for program windows when the build has one
+  ([14](14-gui-windows.md)) and the bridge extension. Each executable carries its
   platform's herdr-core, so the terminal core needs no bundle
   ([21](21-terminal-core.md)). The agent checks the digest of every
   herdr-core and encoder it receives.
@@ -52,8 +51,7 @@ Operator steps (`fetch-assets`, `--offline`, `--seed-dir`) are in
      (which may name a mirror), unless `--offline`.
 - **Pushed through the agent** to machines as a chunked upload with the
   digest the core verified it by, unpacked by the agent (no `tar` needed on
-  the machine: Go's archive/tar in the Go machine build, node-tar in the
-  TypeScript one, which checks the digest first). With
+  the machine: node-tar, after the digest is checked). With
   `--code-server-install=download` machines fetch the tarball themselves
   and verify it against the core's digest; `--offline` turns this off, and a
   machine that cannot download gets the upload.
@@ -115,10 +113,9 @@ A release carries the licenses of embedded components:
 
 - Pinned digests (`PINNED`) are updated together with `DEFAULT_VERSION`
   and `DEFAULT_EXTENSIONS` (the release role in `.claude/agents/`), and
-  herdr-core's together with `hcdist.Version`.
+  herdr-core's together with `VERSION` of `backend/scripts/hcdist.ts`.
 - Extraction rejects absolute paths, `..` and links leaving the install
-  directory (the TypeScript machine side refuses the whole archive, the Go
-  agent skips the entry).
+  directory (the machine side refuses the whole archive).
 - herdr-core's archive must hold the executable as one regular file of
   bounded size.
 
@@ -131,18 +128,16 @@ A release carries the licenses of embedded components:
   sends`), sidecar recording and `fetch-assets` (`downloads record their
   digest, fetch-assets copies with sidecars`, `the fetch-assets
   command`).
-- `internal/agent/codeserver_test.go` (`TestCodeServerDownload`): a
-  machine's own download checked against the core's digest.
 - `backend/features/vscode/machine.test.ts` (`releases`, `archives that
   would leave the release`, `downloads made by the machine`): an upload and
-  a download checked against the core's digest before anything is
+  a machine's own download checked against the core's digest before anything is
   unpacked, archives refused, bounds; `provision.test.ts`: the core sends
   the digest of what it uploads.
-- `internal/hcdist/release_test.go`, `internal/agent/hc_test.go`: pinned
-  herdr-core archives and the executables a machine receives.
+- `backend/scripts/fetch-hc.test.ts`, `backend/machine/agent.test.ts`:
+  pinned herdr-core archives and the executables a machine receives.
 - `backend/kernel/machines/transport/release.test.ts`: the release's
   manifest (the operator's directory first, one of another build refused,
   fetched through the machine when the release is unreachable) and what
   the core uploads, each checked against it.
-- `internal/agent/guivideo_test.go` (`TestInstallVideo`): a wrong digest
-  installs nothing.
+- `backend/features/gui/machine.test.ts` (`the encoder is installed only
+  as its digest says`): a wrong digest installs nothing.

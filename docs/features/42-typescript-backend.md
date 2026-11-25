@@ -19,9 +19,10 @@ The backend is now TypeScript under `backend/`, built by Bun into one
 executable per platform that is both the core and that platform's machine
 side, with the behavior the Go program had; the desktop app runs the core
 inside Electron without a TCP listener. This document describes that
-design and why it is so. The Go program remains the other machine build
-(`MACHINE=go`): both speak the same wire protocols, and a node of either
-takes over from the other.
+design and why it is so. The Go program was kept as a second machine
+build while the TypeScript one proved itself, then removed; a machine that
+still runs a node of it is taken over by this build's node, which speaks
+the same wire protocols ([below](#the-go-program-and-its-removal)).
 
 ## Goals / non-goals
 
@@ -32,7 +33,7 @@ Goals:
   (`spec/vectors`) and the ported unit tests are the measure.
 - The desktop app's core runs in an Electron utility process and serves
   its window without listening on TCP.
-- Official SDKs where the Go program reimplements one: Claude Code through
+- Official SDKs where the Go program reimplemented one: Claude Code through
   `@anthropic-ai/claude-agent-sdk`, ACP through `@agentclientprotocol/sdk`;
   Codex's app-server types generated from the schema Codex prints.
 
@@ -159,8 +160,8 @@ for.
 
 The app carries what the core carries for machines as resources, laid out
 as `scripts/build.sh` stages them (`payload/`: the TypeScript machine
-side's digests and its own platform's executable, or, with `MACHINE=go`,
-machine builds and herdr-core, the video encoders, the VS Code extension;
+side's digests and its own platform's executable, the video encoders, the
+VS Code extension;
 `web/`: the web UI), and
 node-pty 1.1.0 for the ssh login's terminal: a Node-API module, so the
 binary built for Node loads in Electron's utility process without a
@@ -201,7 +202,8 @@ Linux and macOS:
   ends (`Served.close`, once the sessions' requests were waited for) and
   hands it to the node that took over (`Served.handOver`).
 - `backend/hosts/machine`: the machine side's commands (`cli.ts`: `node`,
-  `node dial`, `node stop [--terminal-core]`, with the Go build's flags),
+  `node dial`, `node stop [--terminal-core]`, with the Go build's flags
+  kept),
   which the one command line (`backend/hosts/bun/main.ts`) runs, and the
   features its node serves (`features.ts`). The executable is the core's
   too; the layers keep apart what runs where (Bun's APIs only on the
@@ -216,15 +218,15 @@ and the vault's MCP server (the `mcp` command, below). An op or plugin it
 does not serve is refused as an unknown plugin is (`unknown_plugin`); the
 core treats it as a machine without that feature. AI usage's `session`
 action finds a session's transcripts with the coding agents' sessions
-(`backend/machine/agents`), as the Go build's does
+(`backend/machine/agents`), as the Go build's did
 ([29](29-ai-usage.md#one-sessions-usage)).
 
 VS Code's machine side ([05](05-vscode-panes.md)) answers op
-`code-server` as the Go agent does, on the same files (the releases in
+`code-server` as the Go agent did, on the same files (the releases in
 `~/.<slug>/code-server/<version>-<os>-<arch>`, the pid file `cs.pid`
 naming the node that owns code-server, `cs.sock`, `bridge.sock`), so
-a node of either build adopts, ends or hands over the other's
-code-server; it is restructured rather than translated: the releases
+a node of this build adopts, ends or takes over the code-server of a Go
+node it replaces; it is restructured rather than translated: the releases
 (`machine/release.ts`: receiving, downloading, unpacking, retention), the
 process (`server.ts`), the extensions (`extensions.ts`), the bridge's
 socket (`bridge.ts`, tunnelled to the session that last opened a pipe to
@@ -256,7 +258,7 @@ killed as a group at their bound.
 
 AI usage on the machine side ([29](29-ai-usage.md)) keeps the Go agent's
 answers, files, lock protocol and cost cache (the same tables and
-entries, so a node of either build reads the other's), and is restructured
+entries, so a node of this build reads what a Go node left), and is restructured
 rather than translated: the providers in `machine/limits.ts`, Kimi Code's
 renewal in `kimi.ts`, Antigravity in `antigravity.ts`, the scan and its
 cache in `scan.ts` and `cache.ts`, the logs' parsers in `parsers.ts`.
@@ -264,7 +266,7 @@ Where the runtime has what the Go program wrote itself, it is used:
 SQLite (`node:sqlite`) reads OpenCode's and Antigravity's databases in
 place of the Go agent's reader of the file format, and `fetch` asks the
 providers through the environment's proxy. The price table is
-`spec/pricing/pricing.json`, which both builds and the core read. A cost
+`spec/pricing/pricing.json`, which the machine side and the core read. A cost
 scan runs on the node's thread in slices (chunks of a log read with
 `fs/promises`, the summing yielding every 8 ms); only SQLite, whose opens
 and reads are synchronous and by name, runs in a worker thread started
@@ -303,13 +305,14 @@ thread once, encoded. A pure-JavaScript X11 client was not used: the
 `x11` package is unmaintained since 2019 and has neither MIT-SHM nor
 X-Resource, and the capture would be on the node's thread anyway.
 
-Agent detection ([25](25-agent-detection.md)) reads herdr's manifests,
-the Go build's files (`internal/agent/detect/manifests`), embedded as text
+Agent detection ([25](25-agent-detection.md)) reads herdr's manifests
+(`features/agents/machine/detect/manifests`), embedded as text
 and parsed with Bun's TOML parser strictly (unknown members, types,
-herdr's limits); what every manifest parses to is a file both builds'
-tests compare with (`testdata/manifests.json`, which `go test -update`
-writes), and the screens, identifications, regions and gates of
-`testdata/` are both builds' cases. The rules' regular expressions are
+herdr's limits); what every manifest parses to is a file the tests
+compare with (`detect/testdata/manifests.json`, which
+`UPDATE_TESTDATA=1 bun test features/agents/machine/detect` rewrites), and
+the screens, identifications, regions and gates of `detect/testdata/` are
+the Go build's cases, kept. The rules' regular expressions are
 RE2's, run by re2js, a JavaScript port of RE2 (by way of RE2/J) with Go's
 syntax and semantics, in linear time: JavaScript's RegExp would read the
 same rules otherwise (`\s` is ASCII space in RE2 and Unicode space in
@@ -318,10 +321,10 @@ backtrack, so a screen could make a rule take long; Google's WebAssembly build o
 (`re2-wasm`) is unmaintained since 2022, and the native `re2` package
 would need a build per platform inside the compiled executable. The
 detector follows the terminal core's events, attaches as an observer and
-reads screens without history lines, as the Go build's; its timing and the
-sessions' schedule are the same. The coding agents' sessions
+reads screens without history lines, as the Go build's did; its timing and
+the sessions' schedule are the same. The coding agents' sessions
 (`backend/machine/agents`) are found from their files as the Go build
-finds them, reading everything with `fs/promises`: a transcript is opened
+found them, reading everything with `fs/promises`: a transcript is opened
 with no link on its path (`O_NOFOLLOW_ANY` on macOS; on Linux, which has
 no such flag for `open(2)` and whose `openat2` would be a call through FFI
 on the node's thread, with `O_NOFOLLOW` in the runtime's pool, the
@@ -358,8 +361,7 @@ each socket under a temporary name and renames it into place: a server
 that closes never removes the socket another node or agent put at the path
 since.
 
-A core built to deploy the TypeScript machine side
-(`backend/scripts/build.ts --machine ts`) is that machine build itself:
+A core (`backend/scripts/build.ts`) is the machine build itself:
 one executable per platform holds the core (`serve`, the web UI and its
 API), the machine side (`node`, `node dial`, `node stop`), that platform's
 herdr-core and, on Linux, its video encoder, besides the VS Code bridge
@@ -372,8 +374,8 @@ core alone (the desktop app's platform, reaching SSH machines only). Users
 run it as the web UI (`serve`, in a browser) or in the desktop app, whose
 core runs in Electron and which carries its own platform's executable for
 the local machine. A machine keeps it at `~/.<slug>/agent/<version>/<slug>`
-(the version is the start of the executable's SHA-256) as the Go build is,
-so command lines are the same for both; the local machine gets a copy of
+(the version is the start of the executable's SHA-256) where the Go build
+was, with the same command lines; the local machine gets a copy of
 the running executable (the desktop app's from its resources). The
 executable is compiled without loading a `.env` file or `bunfig.toml`
 (`--no-compile-autoload-dotenv`, `--no-compile-autoload-bunfig`) and
@@ -387,8 +389,9 @@ compiled executable writes no transpiler cache. Its node installs the
 terminal core from the copy it carries (the `hc` op's `install-embedded`),
 when that copy is the one the core's build recorded for the platform
 (`machine/hc.json`: the digests of the herdr-core executables the build
-embeds, from the archives `scripts/fetch-hc` verified against the digests
-pinned in `internal/hcdist`); the core uploads none to it. Sizes with Bun
+embeds, from the archives `backend/scripts/fetch-hc.ts` verified against
+the digests pinned in `backend/scripts/hcdist.ts`); the core uploads none
+to it. Sizes with Bun
 1.4.5 and herdr-core 0.1.21, the executable and its release archive:
 
 | Platform | Executable | Archive |
@@ -525,9 +528,8 @@ the server and its runner in `backend/features/vault/machine/`), also when
 the executable is started by the name of its link in a data directory's
 `bin` (`process.argv0`, which a compiled executable has as exec gave it;
 its `argv[0]` is `bun`); the node points that link at its own executable
-when it starts, as the Go agent does (`linkMCP`, `backend/machine/vault.ts`:
-the same script, byte for byte, so a node of either build leaves the
-other's in place). The protocol is the official MCP SDK's
+when it starts, as the Go agent did (`linkMCP`, `backend/machine/vault.ts`:
+the same script, byte for byte, so the link a Go node left is the same). The protocol is the official MCP SDK's
 (`@modelcontextprotocol/server` 2.4.0, Apache-2.0, pinned; it depends on
 zod and its own core package only, and bundles ajv for the JSON Schema
 validation it offers, which THIRD_PARTY_NOTICES.md names): its stdio
@@ -537,45 +539,38 @@ leaves the call unanswered. The tools are handlers of its low-level
 `Server` rather than its `McpServer`, whose zod schemas would change the
 tools' definitions and turn wrong arguments into a tool's error text; the
 Go server's definitions and refusals (-32602) are kept. A command runs as
-the Go server runs it (`sh -c`, a session of its own, the watcher on fd 3
+the Go server ran it (`sh -c`, a session of its own, the watcher on fd 3
 that kills the group once the server's end of the pipe closes, the output
 captured 64 KiB beyond its bound and masked by bytes); Node's spawn cannot
-ask for Linux's `Pdeathsig`, which the Go server adds, so the watcher alone
+ask for Linux's `Pdeathsig`, which the Go server added, so the watcher alone
 ends a command of a server killed outright. What a client sees differently:
 a line that is no JSON gets no parse error, calls still running when stdin
 closes are not answered, and the newer revisions 2025-11-25 and 2024-10-07
 negotiate too.
 
-Which machine build a core deploys is a choice of its build
-(`backend/scripts/build.ts --machine ts|go`, `scripts/build.sh MACHINE=go`;
-the release workflow's repository variable `MACHINE`), not a flag of the
-product: the TypeScript side serves every feature, and the product's builds
-deploy it (`ts`, the default); `go` builds a core that embeds and uploads
-the Go machine builds. Both speak the same protocols on the same sockets,
+The machine side speaks the Go program's protocols on the same sockets,
 locks and files (the terminal history's database, the terminal core's
-executable and session), so a node of either build takes
-over from the other with the terminals kept, which is the upgrade path.
-`scripts/e2e.sh` builds the cores of both, the TypeScript build for the
-host and Docker's Linux (glibc and musl) into a directory with its
-`SHA256SUMS`, which the cores take as `--agent-dir`, offline; the
-end-to-end tests run against the TypeScript build, `E2E_MACHINE=go`
-against the Go one, and `tests/nodes.spec.ts` has a newer node of the
-other build take a node over.
+executable and session), so a node of this build takes over from a Go
+node of an earlier release with the terminals kept, which is the upgrade
+path ([below](#the-go-program-and-its-removal)). `scripts/e2e.sh` builds
+the executable for the host and Docker's Linux (glibc and musl) into a
+directory with its `SHA256SUMS`, which the cores take as `--agent-dir`,
+offline, and `tests/nodes.spec.ts` has a newer node take a node over.
 
 ### The chat host
 
 The chat host ([37](37-agent-chats.md)) is the `chat-host` command of
-the same executable (`backend/hosts/machine/chathost.ts`, the Go build's
-flags and statuses), which the node has the terminal core run as a hidden
+the same executable (`backend/hosts/machine/chathost.ts`, with the Go
+build's flags and statuses), which the node has the terminal core run as a hidden
 terminal (`backend/features/chat/machine.ts`, the chat feature's `open`
 action: the start, the hand-over to a newer build and the stuck host as
-the Go agent has them). The host itself is `backend/features/chat/machine/host`,
+the Go agent had them). The host itself is `backend/features/chat/machine/host`,
 restructured for one thread rather than translated: no locks; a chat
 (`chat.ts`) is a state machine whose agent calls and permissions are
 promises, its connections (`subscriber.ts`) bounded queues written by a
 loop each, the host (`host.ts`) its requests, bounds, idle end and stop.
-Its wire, journal tables, log, socket and lock are the Go host's, so either
-build's host takes over from the other with its chats.
+Its wire, journal tables, log, socket and lock are the Go host's, so this
+build's host takes over from a Go host with its chats.
 
 The journal is SQLite, whose calls are synchronous. It runs in a worker
 thread (`journal.ts`, a script started from a Blob, as AI usage's reads;
@@ -650,9 +645,7 @@ typecheck holds the adapter to the types (each request's params and
 result, each answer, the notifications it passes over by name), and its
 tests validate every message of the recordings and what the adapter
 sends against the schema itself, with zod's `fromJSONSchema`: that
-replaces, for the TypeScript side, the Go adapter's hand-pinned summary
-(`summary.json`, `TestSchemaPinned`), which the Go side keeps while it
-exists. The framing is the adapter's own (`rpc.ts`, a few dozen lines):
+replaces the Go adapter's hand-pinned summary of the schema. The framing is the adapter's own (`rpc.ts`, a few dozen lines):
 Codex writes JSON-RPC without the `jsonrpc` member, which json-rpc-2.0
 refuses and vscode-jsonrpc adds (framing with headers besides); a line
 over 16 MiB is passed over and the connection goes on; and every line
@@ -660,24 +653,33 @@ is handed on synchronously in the order of the app-server's output, so a
 call's answer settles it only after the notifications before it reached
 the session. What starts or steers a turn, compacts, carries out an
 approved plan or starts the app-server again holds the session's lock
-across its calls (a promise queue, nothing blocks the thread), as one of
-them at a time does in the Go adapter.
+across its calls (a promise queue, nothing blocks the thread): one of
+them at a time.
 
 And it has Claude Code's adapter (`features/chat/machine/claude`), which
 runs on Anthropic's Agent SDK, fetched by the machines when a chat needs
 it ([Claude Code](#claude-code)).
 
-### Wire compatibility while both exist
+### The Go program and its removal
 
 yamux (`backend/shared/proto/yamux.ts`) speaks hashicorp/yamux's protocol with
 its semantics (a close is a half-close; window, keepalive and backlog as
-`agentproto.YamuxConfig`), and agentproto, herdr-core's protocol and the
-chat host's protocol keep their wire forms, so a TypeScript core serves Go
+the Go program had them), and agentproto, herdr-core's protocol and the
+chat host's protocol kept their wire forms, so a TypeScript core served Go
 machine builds and the other way round. That let the rewrite land in
 stages, each one usable: shared libraries; the core in TypeScript with
 the Go machine builds, the Go core removed; the desktop app's core in
 process; the machine side in TypeScript, which became the default machine
-build. The Go program is now the machine build of `MACHINE=go` only.
+build. The Go program (`cmd/veldr`, `internal/`) then stayed a second
+machine build of the build scripts for a while, and was removed with the
+Go tools of the build (the herdr-core fetcher, the design tokens'
+generator, the VSIX normalizer and the price check, now
+`backend/scripts/`). What remains of it is compatibility: a machine whose
+node is the Go program of an earlier release gets this build when a core
+connects, and its node takes the Go node over (the same node protocol,
+socket and lock, [39](39-nodes.md)), as it would an older build of its own;
+the files a Go node wrote (the terminal history's and chat host's
+databases, AI usage's cost cache, the vault's link) are read as they are.
 
 ### What changes on the wire
 
@@ -709,17 +711,15 @@ Other differences a user or an operator can see:
 
 ### Building and testing the core
 
-`backend/scripts/build.ts` packs the payloads (the web UI, the machine
-builds, herdr-core, the video encoder, the VS Code extension) into one tar
-archive and compiles `backend/hosts/bun/main.ts` with it embedded (`bun
+`backend/scripts/build.ts` packs the payloads (the web UI, the release
+record and herdr-core digests, the video encoder, the VS Code extension)
+into one tar archive and compiles `backend/hosts/bun/main.ts` with it embedded (`bun
 build --compile`, a Bun target per platform: x64 Linux and Windows as
 baseline builds); the core reads it with `Bun.Archive`, keeping the UI's
-files in memory and reading a machine build when a machine needs one.
-`scripts/build.sh` stages the payloads in `dist/payload` and builds the
-core of each platform; `scripts/e2e.sh` runs the end-to-end tests against
-that executable, the TypeScript build, and with `E2E_MACHINE=go` against
-the core with the Go machine builds. The checks that read the Go core
-read the TypeScript one now: the flags and routes `docs/reference.md` must
+files in memory. `scripts/build.sh` stages the payloads in `dist/payload`
+and builds the core of each platform; `scripts/e2e.sh` runs the
+end-to-end tests against that executable. The checks that read the Go core
+read the TypeScript one: the flags and routes `docs/reference.md` must
 list come from the core composed as `serve` composes it
 (`backend/scripts/reference.ts`), the registry from the features it
 composes too (`backend/scripts/registry.ts`).
@@ -868,9 +868,9 @@ but Node's own modules: no import map, plugin or rewriting is needed
 (`installed.test.ts` compiles one that does). A machine that has it not
 and could not get it refuses the chat with `sdk_unavailable`, which the
 core answers `POST new` with, saying what each source said; a chat whose
-agent starts without it fails with it, and the host goes on. A machine of
-the Go build has no `sdk` action: its chat host speaks Claude Code's
-protocol itself, and nothing is fetched.
+agent starts without it fails with it, and the host goes on. A Go node of
+an earlier release had no `sdk` action (its chat host spoke Claude Code's
+protocol itself): the core leaves such a machine alone, fetching nothing.
 
 Anthropic's terms govern the user's use of the SDK and of their Claude
 account. A chat runs the user's own `claude`, signed in as the user signed
@@ -959,7 +959,7 @@ it in, as the Go build's chat host did.
   vscode-jsonrpc frames with headers; neither passes over a line too long
   and goes on. The framing is a few dozen lines.
 - **Validating what Codex sends at run time.** The adapter reads Codex's
-  messages leniently, as the Go adapter does (members and values it does
+  messages leniently, as the Go adapter did (members and values it does
   not know passed over, an item it cannot read passed over); the schema
   validates the recordings in the tests instead.
 - **The sessions' strict opens through FFI on Linux** (`openat2`,
@@ -1053,11 +1053,9 @@ SECURITY.md has both.
 ## Testing
 
 - `backend/**/*.test.ts` (`bun test`), ported from the Go tests package by
-  package; `spec/vectors` run by both.
-- While both exist, yamux is tested against hashicorp/yamux
-  (`backend/shared/proto/testdata/yamuxpeer`).
-- `make e2e`, against the TypeScript build (`E2E_MACHINE=go`: the core
-  that deploys the Go machine build); with the
+  package; `spec/vectors` run by them and the web UI's tests. Until the Go
+  program went, yamux was also tested against hashicorp/yamux.
+- `make e2e`; with the
   desktop's packages installed it also runs the desktop app's smoke test
   (`e2e/tests/desktop.spec.ts`: Playwright's Electron, the unpackaged app
   on an isolated instance, profile and home, Chromium's mock keychain):
@@ -1095,7 +1093,7 @@ SECURITY.md has both.
   refused as the probe refuses it. On Ubuntu 16.04's VM (4.4, systemd 229)
   herdr-core 0.1.21 does not start its core: `server start` runs
   `systemd-run --collect`, which systemd before 236 does not know; the Go
-  machine build fails there alike, everything else passed.
+  machine build failed there alike, everything else passed.
 - `backend/machine/**/*.test.ts` and the features' `machine*.test.ts` run
   the machine side through the wire with the kernel's own `call` and
   `open`, so its results are checked by the core's schemas;
@@ -1119,8 +1117,8 @@ SECURITY.md has both.
   refusal of another build's, and the uploads' sources (tampered files of
   the directory or the cache refused, a download through a proxy checked
   and cached, one load for the machines of a platform).
-- The agents feature's machine side: the manifests' cases shared with the
-  Go build (`internal/agent/detect/testdata`), the detector's schedule on a
+- The agents feature's machine side: the manifests' cases
+  (`features/agents/machine/detect/testdata`), the detector's schedule on a
   fake clock, `detect` and `resolve` through the wire against a fake
   terminal core, the sessions' cases on temporary homes with fake process
   tables and `/proc` (also run on Linux), and, in `make it`, a fake Claude
@@ -1150,11 +1148,11 @@ SECURITY.md has both.
   action against a fake terminal core: hosts of other builds and
   protocols, a stuck one), the agents' processes, the ACP adapter
   against a fake agent replaying `spec/vectors/chat/acp`, its events
-  compared with the Go adapter's of the same scenarios, and the Codex
+  compared with the golden files of the same scenarios
+  (`acp/testdata/golden`, as the Go adapter made them), and the Codex
   adapter against a fake app-server replaying `spec/vectors/chat/codex`
-  (`codex/testdata/fakeappserver.ts`, the Go fake's directives), its
-  events compared with the Go adapter's golden files of every recording,
-  its scenarios the Go adapter's, and the recordings and what it sends
+  (`codex/testdata/fakeappserver.ts`), its events compared with the golden
+  files of every recording (`codex/testdata/golden`), and the recordings and what it sends
   validated against Codex's schema (`codex/appserver.test.ts`); the
   tool calls and subagents an app-server never completes bounded
   (`codex/session.test.ts`).
@@ -1162,15 +1160,16 @@ SECURITY.md has both.
   the 17 recordings of `spec/vectors/chat/claude` replayed through the
   SDK against a fake Claude Code (`testdata/fakeclaude.ts`, run by Bun),
   which checks every line the adapter writes against the recording; the
-  host's events, permissions, questions and chat equal the Go adapter's
-  golden files of the same recordings (`replay.test.ts`). Against scripts
+  host's events, permissions, questions and chat equal the golden files of
+  the same recordings (`claude/testdata/golden`, as the Go adapter made
+  them; `replay.test.ts`). Against scripts
   of its own: the program's end with its group, lines and messages passed
   over, the timeouts, the start's options and refusals, full access by a
   restart (also closed during it), the requests not served, prompts the
   host recorded or not, trust, another Claude Code's session, titles,
   the program's environment without `DEBUG` (`session.test.ts`);
   imports and sessions from transcripts, the
-  recorded one giving the Go golden file's events (`history.test.ts`);
+  recorded one giving the golden file's events (`history.test.ts`);
   the SDK's seam: its version, `cancelAsyncMessage` on a real `Query`,
   the framing, the prompts, the program as the SDK sees it
   (`sdk.test.ts`). The real Claude Code never runs; homes are temporary.
@@ -1188,7 +1187,7 @@ SECURITY.md has both.
   a tampered cached copy refused and removed, a FIFO in a `--seed-dir`
   refused at once, a load that does not settle dropped, a failure held
   for 5 minutes but for a retry, the audit records of each source, a
-  registry with credentials refused, a machine of the Go build left
+  registry with credentials refused, a machine without the action left
   alone); the routes (`routes.test.ts`: an `sdk_unavailable` answer and
   its audit record naming URLs by origin and path); a page's
   subscriptions (`page.test.ts`: one ask per agent session, none from a
@@ -1206,7 +1205,8 @@ SECURITY.md has both.
   through the wire with a fake GUI helper, the display's files, numbers,
   GPUs and the helper's placement (`machine.test.ts`,
   `machine/display.test.ts`); the helper's own tests (`zig build test`:
-  its JPEG byte for byte the Go agent's, every malformed message refused,
+  its JPEG byte for byte what the Go agent's encoder wrote, every malformed
+  message refused,
   the compositor's protocol and bounds); against a real Xvfb in `make it`
   or Docker (`scripts/gui-it.sh`); and on the machines of `e2e/machines`
   (`payloads/gui`): CentOS 7's VM (3.10, glibc 2.17), Ubuntu 18.04's,
@@ -1214,11 +1214,10 @@ SECURITY.md has both.
   the GPU display and VA-API video, and a server of four NVIDIA GPUs with
   the GPU display on one of them, NVENC and gpupick
   ([14](14-gui-windows.md#testing) has the results).
-- `make e2e` builds the cores of both machine builds (`E2E_MACHINE=go`
-  runs the suite against the Go one) and runs the suite against the
-  TypeScript build (32 passed, none skipped;
+- `make e2e` runs the suite against the TypeScript build (32 passed, none
+  skipped;
   the chats' specs run with the fake ACP agent, also on an SSH machine,
-  and with a fake Codex app-server, `e2e/fakecodex`, in
+  and with a fake Codex app-server, `e2e/fakes/codex.ts`, in
   `tests/chat-codex.spec.ts`: a command allowed and rejected, a turn
   stopped, the thread resumed, and none of what the host must never ask
   Codex for; `tests/gui.spec.ts` has two cores show a program window
@@ -1229,5 +1228,4 @@ SECURITY.md has both.
   folder listed;
   `tests/attention.spec.ts` has a fake Claude Code in a terminal draw
   attention, its session found and confirmed for a resume), and
-  `tests/nodes.spec.ts` has the newer node of the other build take a node
-  over in both runs.
+  `tests/nodes.spec.ts` has a newer node take a node over.

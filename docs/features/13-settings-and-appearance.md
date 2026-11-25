@@ -384,7 +384,7 @@ See [SECURITY.md](../../SECURITY.md).
 - Generated files: `backend/kernel/config/registry.test.ts` (the modules
   and switches in the features' order, the tables, writing and checking),
   `backend/hosts/bun/registry.test.ts` (the composed core's registry and
-  tables are the repository's), `scripts/tokens/main_test.go`.
+  tables are the repository's), `backend/scripts/tokens.test.ts`.
 - Web UI: `settings.test.ts`, `settingsDialog.test.ts`,
   `pluginSettings.test.ts`, `keysTable.test.tsx`, `localFonts.test.ts`,
   `theme.test.ts`, `termOptions.test.ts`, `tokens.test.ts`,

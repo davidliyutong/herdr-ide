@@ -58,8 +58,8 @@ page (chat pane) ──WebSocket──▶ core (plugin chat) ──yamux──�
 
 ### Agent kinds with chats
 
-A kind of `internal/agentkinds` has a chat when its row has a `Chat`
-spec: the adapter, the command, added environment and, for ACP, the
+A kind of `backend/shared/agents/kinds.ts` has a chat when its row has a
+`chat` spec: the adapter, the command, added environment and, for ACP, the
 `_meta` of `session/new`. Only the adapter's name reaches the page; the
 command is looked up on the machine in the login shell's PATH.
 
@@ -70,12 +70,12 @@ command is looked up on the machine in the login shell's PATH.
 | `kimi` | `acp` | `kimi acp` |
 | `grok` | `acp` | `grok agent --no-leader stdio`, sessions made with `{"yoloMode": false}` |
 
-### The chat host (`internal/chathost`, `backend/features/chat/machine/host`)
+### The chat host (`backend/features/chat/machine/host`)
 
 `chat-host --base <data dir> --run <run dir>` (the namespace's runtime
-directory on the host, [40](40-shared-homes.md); the Go machine build's
-`cmd/veldr/chathost_unix.go`, the TypeScript one's below; Linux and macOS
-only) is the long-lived
+directory on the host, [40](40-shared-homes.md); the `chat-host` command of
+the executable, `backend/hosts/machine/chathost.ts`; Linux and macOS only)
+is the long-lived
 process that runs the agents and keeps their conversations. It serves
 `chat.sock` (0600) in the run directory (0700) under a lock; a second
 host exits. It runs as a **hidden terminal** of the instance's terminal
@@ -95,21 +95,20 @@ the host terminal's, ssh's and other agent sessions' variables, with
 so the terminal core's crash sweep finds them. The host logs to
 `chat-host-<host>.log` (0600, rotated at 1 MiB once).
 
-The TypeScript machine build has the same host: the `chat-host` command
-of its executable (`backend/hosts/machine/chathost.ts`), with the same
-socket, lock, wire, journal tables and log, so a host of either build
-takes over from the other with its chats. Its journal's statements run in
+The host keeps the socket, lock, wire, journal tables and log of the Go
+program of earlier releases, so it takes over from a host of that program
+with its chats. Its journal's statements run in
 a worker thread, and a chat's events reach its clients once they are
 stored, in the order made ([42](42-typescript-backend.md#the-chat-host)).
 
-### Starting the host, and handover (`internal/agent/plugin/chat`, `backend/features/chat/machine.ts`)
+### Starting the host, and handover (`backend/features/chat/machine.ts`)
 
 The machine side has one action, `open`: a stream the core opens, joined
 to the host's socket. When no host serves, the agent has the terminal
-core run one (`plugin.Env.RunHidden`) with a minimal environment, named
+core run one (`runHidden`, `backend/machine/hidden.ts`) with a minimal environment, named
 `veldr-chat-host` and labeled `veldr.hidden=chat-host`. If a
 user's own terminal holds that name, it is left alone and a fallback name
-(`-1`..`-16`, `agentproto.IsChatHostName`) is used. The open waits up to
+(`-1`..`-16`, `agentproto.isChatHostName`) is used. The open waits up to
 15 s; a name held by a host that serves nothing for that long plus 30 s
 is killed (only when it carries the label and matching arguments) and
 replaced.
@@ -126,7 +125,7 @@ host. Other errors: `no_terminal_core` (503), `start_failed`.
 ### Hidden terminals
 
 A product helper's terminal is hidden when it has both the reserved name
-and the label (`agentproto.Hidden`); labels are free-form, so a label
+and the label (`agentproto.hidden`); labels are free-form, so a label
 alone hides nothing, and clients may take neither. Every walker of the
 terminal core's terminals uses that rule: the terminal protocol leaves it
 out of snapshots, events and lists, refuses to set the label or take the
@@ -188,7 +187,7 @@ vocabulary `working`, `blocked`, `done`, `idle`.
 - **Subagents.** Their events carry `parent`, the tool call that started
   them; their permissions are the chat's.
 
-### The protocol (`internal/chatproto`, version 2)
+### The protocol (`backend/shared/proto/chatproto`, version 2)
 
 JSON lines (≤ 16 MiB) on the socket: the host's hello, then one request
 per connection, except `attach` and `watch`, which stay open. Agents are
@@ -243,34 +242,47 @@ An event the journal refuses fails the chat, so a log never has a gap. A
 newer host's journal is not used; other hosts' journals on a shared home
 unopened for 30 days are removed.
 
-### Adapters (`internal/chatadapter`)
+### Adapters (`backend/features/chat/machine/{claude,codex,acp}`)
 
 The host owns chats, logs, clients, bounds and process decisions; an
 adapter owns one agent process and turns its protocol into events. The
-package comment states the rules: argv and environment as given;
-unserved requests answered "method not found"; unknown members passed
-over; the user's configuration never written; the agent in its own
-process group, ended gracefully before SIGKILL; output never blocked;
-increments live, complete items stored; a prompt recorded once;
-full-access values marked; a session another process runs neither
-resumed nor imported (`in_terminal`).
+rules: argv and environment as given; unserved requests answered "method
+not found"; unknown members passed over; the user's configuration never
+written; the agent in its own process group, ended gracefully before
+SIGKILL; output never blocked; increments live, complete items stored; a
+prompt recorded once; full-access values marked; a session another
+process runs neither resumed nor imported (`in_terminal`).
 
-- **Claude Code** (`claude/`): the Agent SDK protocol in Go, after the
-  TypeScript SDK's types and recordings of Claude Code 2.1.330. Full
-  access needs `--allow-dangerously-skip-permissions`, so switching to it
-  restarts the program on the same session. `CLAUDE_CODE_ENTRYPOINT`
-  marks its sessions as the SDK's. `can_use_tool`, `AskUserQuestion` and
-  `ExitPlanMode` become permission, question and plan; tool results are
-  mapped by `internal/agent/transcript`. A session with a live
-  `<claude dir>/sessions/<pid>.json` record is `in_terminal`. Sessions
-  and imports read `~/.claude/projects`.
+- **Claude Code** (`claude/`, on `@anthropic-ai/claude-agent-sdk`): the
+  protocol spoken by Anthropic's Agent SDK
+  ([42](42-typescript-backend.md#claude-code)), the program run through
+  the host's processes, the user's own `claude`; recorded with Claude Code
+  2.1.330. Full access needs `--allow-dangerously-skip-permissions`, so
+  switching to it restarts the program on the same session.
+  `CLAUDE_CODE_ENTRYPOINT` marks its sessions as the SDK's. `can_use_tool`,
+  `AskUserQuestion` and `ExitPlanMode` become permission, question and
+  plan; tool results are mapped by `backend/shared/agents/transcript`. A
+  permission the program cancelled (an interrupt) is answered with a
+  denial, as the SDK answers every request it hands on; a mode set is the
+  one asked for, the SDK passing on no answer of the program's; lines that
+  are no JSON objects and `keep_alive` the SDK drops itself. A session
+  with a live `<claude dir>/sessions/<pid>.json` record is `in_terminal`.
+  Sessions and imports read `~/.claude/projects`. The SDK is Anthropic's,
+  all rights reserved, so no executable carries it: a machine gets the
+  pinned npm tarball when a Claude Code chat needs it, downloading it
+  itself or from the core, checked against the pinned integrity, into
+  `<data>/claude-agent-sdk/<version>`, which the chat host loads; a
+  machine that cannot refuses the chat with `sdk_unavailable`
+  ([42](42-typescript-backend.md#claude-code)).
 - **Codex** (`codex/`): `codex app-server`, protocol v2, one per live
-  chat; the schema relied on is pinned in
-  `spec/codex-app-server/summary.json` (`TestSchemaPinned`), made of
-  Codex's own schema of the version pinned, which `spec/codex-app-server`
-  keeps. A thread started writable records its directory in
-  `~/.codex/config.toml`, so threads start read-only and each turn carries
-  the mode as policy:
+  chat. It is written against TypeScript types generated from the JSON
+  schema Codex prints of the version pinned (`appserver.gen.ts`, by
+  `backend/scripts/codex-schema.ts` from `spec/codex-app-server`, which
+  `make check` holds them to): the typecheck holds the adapter to the
+  protocol, and its tests validate the recordings and what it sends
+  against the schema itself (`appserver.test.ts`). A thread started
+  writable records its directory in `~/.codex/config.toml`, so threads
+  start read-only and each turn carries the mode as policy:
 
   | Mode | Approval policy | Sandbox | Collaboration mode |
   | --- | --- | --- | --- |
@@ -283,57 +295,29 @@ resumed nor imported (`in_terminal`).
   to write instead of asking.) Approvals never map to the amendments
   Codex saves. A command still running 2 s after an interrupt has the
   app-server restarted. Close closes stdin before SIGTERM: Codex killed
-  outright leaves its shell snapshots.
-- **ACP** (`acp/`, on `internal/acp`): Kimi Code and Grok. No file system
-  or terminal capability is offered. One turn per prompt; prompts during
-  a turn wait in the adapter. Sessions and imports run a short agent
-  process (`session/list`, `session/load`, whose replay is lossy). An ACP
-  agent cannot tell that a terminal runs a session.
-- **ACP in the TypeScript build** (`backend/features/chat/machine/acp`, on
-  `@agentclientprotocol/sdk`): the same behaviour. Every request of the
-  agent but a permission is answered "method not found"; prompts during a
-  turn wait in the adapter (at most 16); permissions offer the agent's
-  `allow_once` and `reject_once` options only, at most 64 waiting. Its
-  tests replay `spec/vectors/chat/acp` through a fake agent and compare the
-  events with the Go adapter's of the same scenarios.
-- **Codex in the TypeScript build** (`backend/features/chat/machine/codex`):
-  the same behaviour, its policies, approvals, plans, steering, queue,
-  interrupt and restart, compaction, usage and limits, sessions and
-  imports. It is written against TypeScript types generated from the JSON
-  schema Codex prints (`appserver.gen.ts`, by
-  `backend/scripts/codex-schema.ts` from `spec/codex-app-server`, which
-  `make check` holds them to), in place of the Go adapter's pinned
-  summary: the typecheck holds the adapter to the protocol, and its tests
-  validate the recordings and what it sends against the schema itself.
-  Its framing is its own (no `jsonrpc` member, as Codex writes it; a line
-  over 16 MiB passed over), every message handed on in the order of the
-  app-server's output. What it keeps of the tool calls that started and
-  did not complete and of the subagents' threads is bounded (4096 each,
-  the oldest going: such a call is then not marked cancelled at its
-  turn's end, and such a thread is its own parent). Its tests replay
-  `spec/vectors/chat/codex` through a fake app-server and compare the
-  events with the Go adapter's golden files of the same recordings.
-- **Claude Code in the TypeScript build** (`backend/features/chat/machine/claude`,
-  on `@anthropic-ai/claude-agent-sdk`): the same behaviour, the protocol
-  spoken by Anthropic's Agent SDK rather than by hand
-  ([42](42-typescript-backend.md#claude-code)), the program run through
-  the host's processes, the user's own `claude`. Where it differs: a
-  permission the program cancelled (an interrupt) is answered with a
-  denial, as the SDK answers every request it hands on, where the Go
-  adapter sent nothing; a mode set is the one asked for, the SDK passing
-  on no answer of the program's; lines that are no JSON objects and
-  `keep_alive` the SDK drops itself. Its tests replay
-  `spec/vectors/chat/claude` through the SDK against a fake Claude Code
-  and compare what the host gets with the Go adapter's golden files of the
-  same recordings. The SDK is Anthropic's, all rights reserved, so no
-  executable carries it: a machine gets the pinned npm tarball when a
-  Claude Code chat needs it, downloading it itself or from the core,
-  checked against the pinned integrity, into
-  `<data>/claude-agent-sdk/<version>`, which the chat host loads; a
-  machine that cannot refuses the chat with `sdk_unavailable`
-  ([42](42-typescript-backend.md#claude-code)).
+  outright leaves its shell snapshots. Its framing is its own (no
+  `jsonrpc` member, as Codex writes it; a line over 16 MiB passed over),
+  every message handed on in the order of the app-server's output. What
+  it keeps of the tool calls that started and did not complete and of the
+  subagents' threads is bounded (4096 each, the oldest going: such a call
+  is then not marked cancelled at its turn's end, and such a thread is its
+  own parent).
+- **ACP** (`acp/`, on `@agentclientprotocol/sdk`): Kimi Code and Grok. No
+  file system or terminal capability is offered: every request of the
+  agent but a permission is answered "method not found". One turn per
+  prompt; prompts during a turn wait in the adapter (at most 16);
+  permissions offer the agent's `allow_once` and `reject_once` options
+  only, at most 64 waiting. Sessions and imports run a short agent process
+  (`session/list`, `session/load`, whose replay is lossy). An ACP agent
+  cannot tell that a terminal runs a session.
 
-In the TypeScript build the seam is `backend/features/chat/machine/adapter.ts`,
+Each adapter's tests replay `spec/vectors/chat/<adapter>` through a fake
+agent (Claude Code's through the SDK) and compare what the host gets with
+the golden files of the same recordings (`testdata/golden` beside the
+adapter's tests: the events the Go program of earlier releases made of
+them, kept and edited by hand after a deliberate change of the mapping).
+
+The seam is `backend/features/chat/machine/adapter.ts`,
 whose comment states the same rules for one thread:
 
 - `Adapter`: `start(p, sink, signal)` resolves with a `Session` once the
@@ -360,7 +344,7 @@ The host gets its adapters by name from its composition root
 (`backend/hosts/machine/features.ts` `chatAdapters`): an adapter is added
 there, the host unchanged. A kind whose adapter the host was not given is
 refused as a kind without a chat (`unsupported`, "this host has no
-adapter <name>"). The TypeScript build's host is given all three: the ACP
+adapter <name>"). The host is given all three: the ACP
 adapter, Codex's and Claude Code's (its Agent SDK fetched on use,
 [42](42-typescript-backend.md#claude-code)).
 
@@ -453,7 +437,7 @@ next prompt resumes the session with its context.
 | --- | --- |
 | The conversation drawn over the agent's terminal (the earlier version of 35) | Input pasted into a program, confirmation a turn late, permissions only in the terminal, no streaming. |
 | ACP for every agent | Claude Code and Codex speak it only through third-party adapters, without their permissions, plans, questions, effort, usage and limits. |
-| The Agent SDK in Node as a sidecar | A Node runtime per machine (often offline); the protocol is small enough to speak from Go, pinned and recorded. |
+| The Agent SDK in Node as a sidecar | A Node runtime per machine (often offline); the machine side runs on Bun, which loads the SDK itself. |
 | `character-ai/claude-agent-sdk-go` | One-shot `claude --print` without control requests: no permissions, questions, plans, model changes, interrupts or queues. |
 | The host as a child of the agent | It would die with every ssh drop and core restart; as a terminal of the terminal core it lives as the user's programs do. |
 | A socket or port the core reaches directly | Nothing listens on TCP on machines; the agent's stream suffices. |
@@ -500,25 +484,9 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- `internal/chatproto`, `internal/chatadapter`: wire, statuses, ids,
-  clamping, rule types.
-- `internal/chathost`: requests, the login environment, turns, prompts
-  recorded once and resent (`TestPromptRecorded`, `TestPromptSentAgain`),
-  permissions, idle stop and resume, handoff and catch-up
-  (`TestHandoffAndCatchUp`, `TestCatchUpImportsOnce`), archive
-  (`TestArchive`), trust, full access, the journal and its bounds
-  (`journal_test.go`, `TestBoundsRemoveArchivedFirst`), signals
-  (`signal_test.go`).
-- Adapters against fake agents replaying the recordings in
-  `spec/vectors/chat/` (its README names the versions):
-  `internal/chatadapter/claude` (`TestReplay`, full access by restart,
-  `in_terminal`), `internal/chatadapter/codex` (`TestSchemaPinned`,
-  policies per mode, close order), `internal/chatadapter/acp`,
-  `internal/acp`.
-- `internal/agent/plugin/chat`: start, name taken, handover
-  (`TestDirtyBuildKept`), a stuck host killed; `internal/agent`
-  `hidden_test.go`.
-- The TypeScript host (`backend/features/chat/machine/host`):
+- `backend/shared/proto/chatproto/chatproto.test.ts`: wire, statuses,
+  ids, clamping, rule types.
+- The host (`backend/features/chat/machine/host`):
   `host.test.ts` (requests and refusals, turns, prompts sent again,
   queues, permissions, questions, failures, close, delete, archive, watch,
   shutdown, recovery, idle stop and resume, `maxLive`, handoff and
@@ -529,13 +497,13 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
   (`backend/features/chat/machine.test.ts`: start, hosts of other builds
   and protocols, a stuck host killed); the agents' processes
   (`agentproc.test.ts`); the ACP adapter (`acp/*.test.ts`); the Codex
-  adapter (`codex/*.test.ts`: the recordings replayed against the Go
-  adapter's golden files, the server's requests answered or refused,
+  adapter (`codex/*.test.ts`: the recordings replayed against the golden
+  files, the server's requests answered or refused,
   lines passed over, close order, leftovers, queues, plans, configuration,
   sign-in, `in_terminal`, sessions and history, the recordings and what
   it sends validated against Codex's schema); Claude Code's adapter
-  (`claude/*.test.ts`: `replay.test.ts` the recordings against the Go
-  golden files, `session.test.ts` full access by restart, `in_terminal`,
+  (`claude/*.test.ts`: `replay.test.ts` the recordings against the golden
+  files, `session.test.ts` full access by restart, `in_terminal`,
   the program's end, `history.test.ts`, `sdk.test.ts` the SDK's
   undeclared `cancelAsyncMessage`, `installed.test.ts` the SDK loaded
   from a data directory, also by a compiled executable); the Agent SDK's
@@ -550,13 +518,15 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
   machine left is dropped`), `page.test.ts` (the WebSocket's `limits` and
   `flow control`), `wire.test.ts`.
 - Hidden terminals: `backend/features/terminals/hidden.test.ts`,
-  `TestDetectSkipsHelperTerminals`, `TestHiddenTerminalsNotCaptured`.
-- End to end (`make e2e`, both machine builds): `tests/chat.spec.ts`
-  with a fake ACP agent (`e2e/fakeacp`), `tests/chat-codex.spec.ts` with
-  a fake Codex app-server (`e2e/fakecodex`, which records a thread that
+  `backend/machine/hidden.test.ts`,
+  `backend/features/agents/machine/detector.test.ts`,
+  `backend/features/history/machine.test.ts`.
+- End to end (`make e2e`): `tests/chat.spec.ts` with a fake ACP agent
+  (`e2e/fakes/acp.ts`), `tests/chat-codex.spec.ts` with a fake Codex
+  app-server (`e2e/fakes/codex.ts`, which records a thread that
   is not read-only, a turn without its policies and an approval with an
   amendment as violations the spec expects none of).
-- Integration (`make it`): `TestIntegrationChatHost`,
-  `backend/features/terminals/integration.test.ts` (`hidden terminals`).
+- Integration (`make it`): `backend/features/terminals/integration.test.ts`
+  (`hidden terminals`).
 - `web/src/__tests__`: `chat*.test.ts(x)`, `conversation*.test.ts(x)`,
   `viewStatus.test.tsx`, `notifyViews.test.ts`, `attention.test.tsx`.

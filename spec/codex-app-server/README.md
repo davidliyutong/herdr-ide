@@ -22,16 +22,6 @@ conversations in `spec/vectors/chat/codex/` were recorded with.
   other requests, its answers and refusals) to the schema itself,
   validated with zod's `fromJSONSchema` (`appserver.test.ts`,
   `adapter.test.ts`, `session.test.ts`).
-- `summary.json` is the part of the schema the Go adapter
-  (`internal/chatadapter/codex`) relies on (a member marked with a trailing
-  `!` is required), which its `TestSchemaPinned` checks it against. It is
-  generated from the schema split into files, as the command above writes
-  them:
-
-  ```sh
-  codex app-server generate-json-schema --experimental --out DIR
-  CODEX_SCHEMA_DIR=DIR go test ./internal/chatadapter/codex -run TestSchemaSummary -update
-  ```
 
 To move to another version of Codex:
 
@@ -56,5 +46,3 @@ To move to another version of Codex:
    shapes changed, and name the version in that directory's README (the
    tests check that the recordings are of the version pinned and validate
    every message against the schema).
-4. Generate `summary.json` again as above and fix what `TestSchemaPinned`
-   reports, while the Go adapter exists.

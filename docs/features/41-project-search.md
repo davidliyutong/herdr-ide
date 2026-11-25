@@ -28,11 +28,11 @@ and only its result crosses the ssh link.
 
 ## Design
 
-### Machine side (`internal/agent/plugin/search`)
+### Machine side (`backend/features/search/machine.ts`)
 
 The plugin `search` has one action, `search`, with `dir`, `query`, `regex`,
 `caseSensitive`, `wholeWord`, `include`, `exclude` and `maxResults`
-(`internal/agent/plugins_search.go` registers it). `dir` is expanded as the
+(`machine/`). `dir` is expanded as the
 explorer's paths are (`~`, relative to home) and must be a directory
 (`not_found`, `not_dir`, `denied`); the query is one line of 1 to 2000
 bytes; the patterns at most 4000 bytes, 100 of each.
@@ -54,20 +54,20 @@ Two engines give the same result shape:
   UTF-8 (ripgrep's `bytes`) is decoded with replacement characters. ripgrep
   exiting with code 2 after printing nothing means the query or a glob was
   refused: `bad_regex` or `bad_glob` with ripgrep's message.
-- **The walker** (`walk.go`) otherwise: Go's `filepath.WalkDir` (no links
-  followed), regular files of at most 1 MiB, opened without blocking and
+- **The walker** (`machine/walk.ts`) otherwise: a walk of the folder (no
+  links followed), regular files of at most 1 MiB, opened without blocking and
   checked to still be regular files (a FIFO swapped in is not read), a NUL
   byte in the first 8 KiB makes a file binary and skipped, at most 100 000
-  files read. The query is a Go regular expression (RE2), or the literal
-  text quoted (`regexp.QuoteMeta`); `(?i)` unless Match Case; whole words
+  files read. The query is a JavaScript regular expression (Unicode
+  mode), or the literal text quoted; case-insensitive unless Match Case; whole words
   are matches with no letter, digit or `_` right before or after them. Of
   ignore files it reads the top-level `.gitignore` of the folder searched
-  (its patterns, without negations) as excludes. A regular expression Go
-  refuses is `bad_regex`.
+  (its patterns, without negations) as excludes. A regular expression
+  JavaScript refuses is `bad_regex`.
 
 Both skip the folders `.git`, `.hg`, `.svn`, `.bzr`, `.jj`, `CVS` and
 `node_modules` (as VS Code's `search.exclude` does node_modules). The
-include and exclude patterns mean the same in both (`glob.go`): a pattern
+include and exclude patterns mean the same in both (`machine/glob.ts`): a pattern
 without `/` matches the name of a file or of a folder on its path (`*.ts`,
 `lib`), one with `/` the path below the folder searched or a folder's path
 on it (`src/lib`, `docs/**/*.md`; a leading `/` or `./` is dropped); `**`
@@ -83,7 +83,7 @@ with their matching lines: the line number, the first match's column, a
 preview and the matches in it. A preview is at most 250 characters around
 the first match, without leading blanks, with `…` where it was cut; the
 column and the ranges count UTF-16 code units, as Monaco and the browser's
-strings do (`excerpt.go`). Several matches on a line are one row and count
+strings do (`machine/excerpt.ts`). Several matches on a line are one row and count
 each. A search stops after `maxResults` matches (2000 unless asked, at most
 5000), after 30 s, or after 100 000 files (the walker), and answers what it
 found with `truncated` and `reason` (`max_results`, `timeout`,
@@ -188,7 +188,7 @@ links and opens files without blocking. See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- `internal/agent/plugin/search/search_test.go`: the same searches with the
+- `backend/features/search/machine.test.ts`: the same searches with the
   walker and, where the machine running the tests has `rg`, with ripgrep
   (literal, case, whole word, regular expression, include and exclude
   globs, braces, hidden files, skipped folders, binary files, the match

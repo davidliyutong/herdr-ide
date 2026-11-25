@@ -46,30 +46,28 @@ beyond the state.
 
 ## Design
 
-**Package `internal/agent/detect`** (Go) and
-**`backend/features/agents/machine/detect`** (the TypeScript machine side,
+**`backend/features/agents/machine/detect`** (the machine side,
 [42](42-typescript-backend.md)).
 
 - `manifests/*.toml`: herdr's 22 manifests, unchanged and embedded
-  ([licenses/herdr-detect](../../licenses/herdr-detect/README.md)); both
-  builds embed the same files. The parser is strict and enforces herdr's
-  limits. Rust regex spellings that RE2 lacks (`\uXXXX`, `\u{X}`,
+  ([licenses/herdr-detect](../../licenses/herdr-detect/README.md)). The
+  parser is strict and enforces herdr's limits. Rust regex spellings that RE2 lacks (`\uXXXX`, `\u{X}`,
   `\p{Alphabetic}`) are rewritten at compile time. The regular expressions
-  run as RE2: Go's `regexp`, and re2js on the TypeScript side (a port of
-  RE2 with Go's syntax and semantics, linear in time), so both read a rule
-  alike; the TypeScript side reads the TOML with Bun's parser and checks it
-  against what Go parses (`testdata/manifests.json`).
+  run as RE2 with re2js (a port of RE2 with Go's syntax and semantics,
+  linear in time), as the Go program of earlier releases ran them. The
+  TOML is read with Bun's parser and checked against what the manifests parse to (`testdata/manifests.json`;
+  `UPDATE_TESTDATA=1 bun test features/agents/machine/detect`, in
+  `backend/`, rewrites it after a deliberate change: review the diff).
 - Identification (`Identify`, `identify.ts`) names the agent of a
   foreground process.
 - The tracker is one agent's state machine: startup grace, idle
   confirmation, done, and the program's own report (OSC 7501; `error`
   reads as blocked), which applies at once and suspends screen reads.
 - `testdata/`: the screens of the common agents, identifications, regions,
-  gate semantics and refused manifests, which both builds' tests run.
+  gate semantics and refused manifests, which the tests run.
 
-**In the agent** (`internal/agent/agentdetect.go`, op `detect`; on the
-TypeScript side `backend/features/agents/machine/detect.ts` and
-`detector.ts`, the op a feature's machine side serves). The core
+**In the agent** (op `detect`: `backend/features/agents/machine/detect.ts`
+and `detector.ts`, the op a feature's machine side serves). The core
 opens the stream while its backend connection for the machine is up
 ([22](22-terminal-protocol.md)), i.e. while some client follows the
 machine. The agent subscribes to the terminal core's events and follows
@@ -84,8 +82,8 @@ have no terminal and report through it ([37](37-agent-chats.md)).
 
 **Sessions.** While the agents plugin is on, the core sets
 `Header.Sessions` when it opens the stream, and the agent also finds the
-session each Claude Code or Codex runs (`agentdetect_session.go` with
-`internal/agent/sessions`; how: [35](35-agent-native-view.md)). Switching
+session each Claude Code or Codex runs (`backend/machine/agents`; how:
+[35](35-agent-native-view.md)). Switching
 the plugin reopens the stream, so the agents are detected again; without
 the header no session file is read. One follower per agent resolves
 sessions with backoff while none is found, and again when the session
@@ -161,22 +159,19 @@ leaves the machine through this path. See [SECURITY.md](../../SECURITY.md).
 
 ## Testing
 
-- `internal/agent/detect/detect_test.go` and
-  `backend/features/agents/machine/detect/detect.test.ts`: every manifest
-  loads and parses alike in both builds; the cases of `testdata/` (screens
+- `backend/features/agents/machine/detect/detect.test.ts`: every manifest
+  loads and parses to `testdata/manifests.json`; the cases of `testdata/` (screens
   of the common agents giving working, blocked and idle; gates, regions,
-  regex rewriting, identification); RE2's semantics on the TypeScript side;
+  regex rewriting, identification); RE2's semantics;
   the tracker's timing and done.
-- `backend/features/agents/machine/detector.test.ts` (the Go tests'
-  cases on a fake clock) and `machine.test.ts` (op `detect` through the
+- `backend/features/agents/machine/detector.test.ts` (the tracker's
+  cases on a fake clock, hidden terminals skipped) and `machine.test.ts` (op `detect` through the
   wire against a fake terminal core: sessions only when asked, the
   terminal core's events in order, the screen read without history lines,
   the stream ending with the core's close and with the terminal core's
   silence).
-- `internal/agent/agentdetect_session_test.go`: hidden terminals skipped
-  (`TestDetectSkipsHelperTerminals`), the resolution schedule, process
-  changes, peers, no session files read without the header, many
-  terminals at once.
+- `backend/machine/agents/sessions.test.ts`: how a session is found and
+  resolved.
 - `backend/features/terminals/terminals.test.ts`: `agents` (`records,
   events and /ws`, `a seen turn outlives the core`); `sessions.test.ts`:
   sessions in records and events (`agent sessions`), the header following
@@ -186,9 +181,8 @@ leaves the machine through this path. See [SECURITY.md](../../SECURITY.md).
 - `backend/features/terminals/integration.test.ts` (`agent detection`,
   `make it`): a fake `claude` in a real herdr-core followed through to
   `/api/v1/term` and `/ws`; `backend/features/agents/integration.test.ts`
-  (`make it`): the TypeScript side's `detect` on a real herdr-core, with the
+  (`make it`): `detect` on a real herdr-core, with the
   fake `claude`'s session found from its record and resolved.
 - `e2e/tests/attention.spec.ts`: a fake `claude` in a terminal draws
-  attention while blocked, its session found and confirmed for a resume,
-  on both machine builds.
+  attention while blocked, its session found and confirmed for a resume.
 - `web/src/__tests__/terms.test.ts`, `sound.test.ts`.

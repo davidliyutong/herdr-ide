@@ -21,7 +21,7 @@ Bumping pinned artifacts (`backend/features/vscode/artifacts.ts`):
 
 Cutting a release:
 1. `make check test`, `make it` (with the pinned herdr-core:
-   `go run ./scripts/fetch-hc -exe <file> <os>/<arch>`, then
+   `bun backend/scripts/fetch-hc.ts --exe <file> <os>/<arch>`, then
    `HC_TEST_BIN=<file> make it`) pass on a clean tree.
 2. Write `CHANGELOG.md`. It is edited only here; feature and fix branches
    leave it alone. List what was merged since the last tag:

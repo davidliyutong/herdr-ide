@@ -36,7 +36,7 @@ the trash.
 Plugin `files`, on by default: a right-sidebar panel (**Show Explorer**,
 `view.panel.files`) and the pane kind `editor`. Code:
 `web/src/plugins/files`, `backend/features/files` (core),
-`internal/agent/plugin/files` (machine). Settings (`files.showHidden`,
+`backend/features/files/machine.ts` (machine). Settings (`files.showHidden`,
 `files.exclude`, `files.sortOrder`, `files.followFocus`,
 `files.confirmTrash`) are listed in [reference.md](../reference.md).
 
@@ -175,7 +175,7 @@ Look (`MediaView`).
   it; a change since is `409 conflict`, and the pane offers **Load
   Theirs**, **Overwrite**, **Keep Editing**. The Git diff pane saves through
   the same route.
-- **Writing in place** (`save.go`), as VS Code writes a user's file: open
+- **Writing in place** (`machine/save.ts`), as VS Code writes a user's file: open
   without following links anywhere on the real path (`O_NOFOLLOW_ANY` on
   macOS, `openat2` `RESOLVE_NO_SYMLINKS` on Linux) and without blocking;
   require a regular file; re-check the precondition on that descriptor;
@@ -312,17 +312,15 @@ Changes answer `{"paths": [made], "failed": {path: code}}`; failures
 
 ## Testing
 
-- `internal/agent/plugin/files/`: `files_test.go` (each action, no-replace
-  renames and moves also across file systems, copies through links, both
-  trash layouts and planted mount trashes, refused paths through links and
-  case, dead mounts), `save_test.go` (in-place saves keeping inode, links
-  and mode; FIFOs refused; links swapped in; `partial_write`;
-  `PruneStaged`), `upload_test.go`, `remove_test.go`, `reveal_test.go`.
+- `backend/features/files/machine.test.ts` (each action through the wire,
+  no-replace renames and moves also across file systems, copies through
+  links, both trash layouts and planted mount trashes, refused paths
+  through links and case, in-place saves keeping inode, links and mode,
+  FIFOs refused, uploads, removals, reveals) and `machine/units.test.ts`.
 - `backend/features/files/`: `explorer.test.ts` (routes, audit records,
   `reveal gate`, `the routes that change things are guarded`),
   `settings.test.ts`, `transfers.test.ts` (`list`: large listings;
-  downloads); `internal/agent/serve_test.go`
-  `TestServeWaitsForRequestsToClean`.
+  downloads).
 - `web/src/__tests__/`: `files.test.ts` (rows, keys, menus, polling,
   settings, decorations), `filesUpload.test.ts`, `filesEditor.test.ts`
   (versions, conflicts, line endings, reloads), `filesGone.test.ts`,

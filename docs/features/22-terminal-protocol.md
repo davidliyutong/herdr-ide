@@ -183,7 +183,7 @@ Every client of the machine shows the same arrangement. Version 2:
   - a terminal `{"terminal": address}`, optionally with `agent` and `pid`
     or `resume` for restoring a coding agent
     ([33](33-workspace-restore.md)), whose ids select a kind of the agent
-    kind registry (`internal/agentkinds`); `session` (the agent's session
+    kind registry (`backend/shared/agents/kinds.ts`); `session` (the agent's session
     UUID, [35](35-agent-native-view.md)) and `before` (the address of the
     terminal this one replaced), checked by `terminalFields` in
     `web/src/term/layout.ts`, which leaves out malformed values and the
