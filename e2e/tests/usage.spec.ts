@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test, expect } from '../harness/fixtures';
 import { showPanel } from '../harness/ui';
 import { waitFor } from '../harness/wait';
@@ -37,4 +38,32 @@ test('AI usage prices a Claude Code log at API prices, and at the user’s own',
   });
   // The panel reads the report again at once.
   await expect(panel).toContainText('Claude $2.00');
+});
+
+test('AI usage reads OpenCode’s database on the machine, its steps at the cost OpenCode recorded', async ({ instance }) => {
+  // A database of OpenCode's, its writer gone: the machine reads it
+  // read-only (the TypeScript side in a worker thread of SQLite's).
+  const dir = join(instance.home, '.local', 'share', 'opencode');
+  mkdirSync(dir, { recursive: true });
+  const db = new DatabaseSync(join(dir, 'opencode.db'));
+  db.exec(
+    'CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)',
+  );
+  const now = Date.now();
+  const step = {
+    role: 'assistant',
+    time: { created: now },
+    modelID: 'deepseek-v4-flash',
+    providerID: 'deepseek',
+    cost: 0.25,
+    path: { cwd: instance.work },
+    tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+  };
+  db.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)').run('msg_e2e', 'ses_1', now, now, JSON.stringify(step));
+  db.close();
+
+  const cost = await instance.api<Cost>('GET', '/api/p/usage/cost?days=7&tz=0');
+  expect(cost.rows).toEqual([
+    expect.objectContaining({ provider: 'opencode', model: 'deepseek-v4-flash', cost: 0.25, priced: true, machine: 'local' }),
+  ]);
 });

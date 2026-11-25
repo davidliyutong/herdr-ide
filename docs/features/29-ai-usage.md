@@ -568,5 +568,9 @@ immutable without a writer, a WAL reader with one).
   worker and not the node), and
   `machine/session.test.ts` (the spend's numbers, no content, subagents,
   context, bounds, two at once).
+- `e2e/tests/usage.spec.ts`, against both machine builds: a Claude Code
+  log's cost in the panel, at the table's price and the user's, and
+  OpenCode's database read on the machine (on the TypeScript side through
+  the compiled executable's SQLite worker).
 - `backend/features/usage/core.test.ts` (`guards`) walks the plugin's
   routes with `checkGuarded`.

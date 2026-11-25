@@ -707,7 +707,7 @@ SECURITY.md has both.
   (`features/agents/integration.test.ts`); the transcript vectors and the
   bounds of a read (`backend/shared/agents/transcript`).
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
-  runs the suite against the TypeScript build (22 passed, the specs of
+  runs the suite against the TypeScript build (23 passed, the specs of
   chats and program windows skipped with the reason;
   `tests/attention.spec.ts` has a fake Claude Code in a terminal draw
   attention, its session found and confirmed for a resume), and
