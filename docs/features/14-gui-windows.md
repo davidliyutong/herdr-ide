@@ -87,8 +87,9 @@ frame's bytes once, from the helper's pipe to the attach stream).
 Every message the node sends the helper is checked before it is used
 (type, length, rectangles inside X's coordinates and at most 8192 a side,
 video frames whole windows of at most 4096, at most 1024 jobs and
-256 Mpixels a batch, one batch at a time, the encoder's path absolute);
-one that is not ends the helper, as does a node that stops reading
+256 Mpixels a batch, at most one batch waiting while one is encoded, the
+encoder's path absolute; a job captures only a window the helper manages
+or one of its layers); one that is not ends the helper, as does a node that stops reading
 (256 MB waiting) or goes (end of its stdin). Every X connection goes only
 to the server whose process the node recorded and whose user is this one,
 on the socket and its abstract twin, as the Go agent's.
@@ -445,7 +446,7 @@ section and as flags ([reference](../reference.md#program-windows),
 | The node writing frames to the encoder | About 400 MB/s of raw pixels for a 1706×960 window at 60 fps through the node's thread. |
 | The keeper in TypeScript (the executable run as `gui-keep`) | A Bun runtime idles at 30–40 MB for as long as the terminal core runs; the helper's keeper at a few hundred kB. |
 | The helper built by every build | CI and contributors have no zig: its executables are committed with the digests of their sources and of themselves, which `make check` verifies, as with gpupick and the terminal emulator's module. |
-| A helper per machine linked to its C library | Machines are as old as glibc 2.17 and as different as musl: static and without a C library (raw system calls, the helper's own futex-free thread pool), one executable per architecture runs on all. |
+| A helper per machine linked to its C library | Machines are as old as glibc 2.17 and as different as musl: static and without a C library (raw system calls, its encoding threads started per batch), one executable per architecture runs on all. |
 
 ## Failure modes
 
