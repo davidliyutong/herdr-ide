@@ -17,3 +17,6 @@ TODO.md
 
 # What bun build --compile leaves when it is interrupted.
 *.bun-build
+
+# Review files of the docs-keeper's slimming (the user reviews them).
+/docs-review/

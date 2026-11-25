@@ -146,10 +146,13 @@ playbooks):
 | --- | --- |
 | `hc-integration` | Changing anything that talks to the terminal core (herdr-core), or upgrading it. |
 | `security-reviewer` | Only when a code review is asked for, or before merging a branch that changes guards, files, sockets, processes, ssh or downloads; not after every change. |
-| `docs-keeper` | After changing flags, shortcuts, protocols, layout on disk or features. |
+| `docs-keeper` | After changing flags, shortcuts, protocols, layout on disk or features; or to slim the docs (unwrap, drop outdated content, refresh screenshots, collect disclaimers and history into `docs-review/` for review). |
 | `i18n-translator` | After adding or changing user-visible text, or to add a locale. |
 | `release-manager` | Cutting a release (it writes `CHANGELOG.md`) or bumping pinned code-server/extension versions. |
 | `oss-steward` | Auditing open-source health before releases or after restructurings. |
+| `code-slimmer` | Removing backward-compatibility code, unused code and defensive structure; it reports a plan first and changes code only once the plan is approved. |
+| `test-curator` | Grouping tests by subsystem, making them independent of the machine, sorting them into standard and extended, deleting badly designed ones. |
+| `perf-reviewer` | A performance and robustness review: polling, caches, unbounded resources, retries and backoff, algorithms, concurrency, races between hub and nodes. Read-only. |
 
 ## Gotchas
 
