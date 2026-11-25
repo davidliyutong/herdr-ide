@@ -119,6 +119,9 @@ test('an SSH machine that drops shows offline, then comes back with its terminal
 });
 
 test('a chat on an SSH machine shows it offline and goes on, and nothing stays when the hub stops', async ({ app, instance, sshd }) => {
+  // An upload of the machine build, an outage and the machine's cleanup
+  // in one test: about 45 s alone, more beside the suite's other workers.
+  test.setTimeout(150_000);
   const id = await addMachine(instance);
   await showMachine(app);
   // A chat in a new tab on the machine shown.
