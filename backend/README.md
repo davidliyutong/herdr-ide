@@ -9,8 +9,9 @@ default, or the machine side here (`machine/`, `hosts/machine`, the
 features' `machine.ts`) in a core built to deploy it
 (`scripts/build.ts --machine ts`), which serves the features whose machine
 side is here (terminals, files, git, search, monitor, history, browser,
-agents, AI usage, VS Code) and the vault's MCP server (`mcp`, which every
-executable serves).
+agents, AI usage, VS Code, chats: the chat host, `chat-host`, with its
+adapters' interface and the ACP adapter) and the vault's MCP server (`mcp`,
+which every executable serves).
 Both speak the same wire protocols, and a node of either takes over from
 the other. It is not a translation of the Go packages: their layout is not
 kept.

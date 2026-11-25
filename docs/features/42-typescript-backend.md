@@ -207,10 +207,11 @@ Linux and macOS:
 
 It serves the machine sides of the terminals (the terminal core and hidden
 terminals), files, git, search, monitor, history, browser, AI usage,
-agents (detection and the agents' sessions) and VS Code features, and the
-vault's MCP server (the `mcp` command, below). The ops and plugins of the
-features it does not serve yet (chat, gui: `gui`) are refused as an
-unknown plugin is (`unknown_plugin`); the core
+agents (detection and the agents' sessions), VS Code and chat (the chat
+host, the `chat-host` command, below) features, and the vault's MCP server
+(the `mcp` command, below). The ops and plugins of the features it does
+not serve yet (gui: `gui`) are refused as an unknown plugin is
+(`unknown_plugin`); the core
 treats them as a machine without that feature. AI usage's `session`
 action finds a session's transcripts with the coding agents' sessions
 (`backend/machine/agents`), as the Go build's does
@@ -296,7 +297,8 @@ path than the one located), a Claude Code record relative to its checked
 directory's descriptor (`/proc/self/fd/<dir>/<name>` on Linux), processes
 from `/proc` on Linux and through sysctl on macOS. Claude Code's
 transcripts are mapped to events by `backend/shared/agents/transcript`,
-which the chat host will use, against the shared vectors.
+which the chat host's Claude Code adapter will use, against the shared
+vectors.
 
 System calls Node lacks go through `bun:ffi` to libc (`machine/sys`): peer
 credentials of unix sockets (`SO_PEERCRED`; `LOCAL_PEERCRED`,
@@ -527,6 +529,71 @@ the specs of the features it does not serve yet skipped with the reason,
 and `tests/nodes.spec.ts` has a newer node of the other build take a node
 over.
 
+### The chat host
+
+The chat host ([37](37-agent-chats.md)) is the `chat-host` command of
+the same executable (`backend/hosts/machine/chathost.ts`, the Go build's
+flags and statuses), which the node has the terminal core run as a hidden
+terminal (`backend/features/chat/machine.ts`, the chat feature's `open`
+action: the start, the hand-over to a newer build and the stuck host as
+the Go agent has them). The host itself is `backend/features/chat/machine/host`,
+restructured for one thread rather than translated: no locks; a chat
+(`chat.ts`) is a state machine whose agent calls and permissions are
+promises, its connections (`subscriber.ts`) bounded queues written by a
+loop each, the host (`host.ts`) its requests, bounds, idle end and stop.
+Its wire, journal tables, log, socket and lock are the Go host's, so either
+build's host takes over from the other with its chats.
+
+The journal is SQLite, whose calls are synchronous. It runs in a worker
+thread (`journal.ts`, a script started from a Blob, as AI usage's reads;
+the host's thread only opens, checks and migrates the database once,
+before it serves), because the host streams every agent's output and
+serves every connection on one thread: a write that waits (a data
+directory on a network mount that stopped answering, a checkpoint's sync
+on a slow disk, a lock of a database another host still holds after a
+hand-over that timed out) would stop all of them, where the Go host
+stopped one goroutine. The worker runs the statements in the order they
+were sent, each change a transaction, and answers each. So that no client
+ever sees what the journal does not have, a chat's events reach its
+connections only once they are stored, in the order the chat made them,
+live increments behind the stored events made before them; an append is
+refused by the worker unless the chat's row has the event before it, so
+when one write fails, nothing made after it is stored or told, the chat
+fails and goes on numbering from its last stored event: the log never has
+a hole. What a write that waits holds is the chats' stored events (and
+the replays of attaches), at most 64 MiB of them waiting before the chats
+that make more fail; the agents' output is still read, the sockets
+served, the requests that need no journal answered. The host's log is
+written in order by the runtime's pool, at most 1 MiB waiting, the rest
+counted.
+
+Every process the host and its adapters start (the agents, the probes
+that list or import sessions, the login shell) goes through
+`AgentProcesses` (`features/chat/machine/agentproc.ts`): a process group
+of its own (`detached`, a session of its own, where the Go host had a
+group in the host's session), the end of its standard error kept, ended
+gracefully (input closed, SIGTERM to the group after a grace period,
+SIGKILL after another, then what it left in its group), and signalled as
+a whole when the host stops on the terminal core's signals.
+
+The adapters implement `features/chat/machine/adapter.ts` (`Adapter`,
+`Session`, `Sink`; doc 37 has the rules); the host gets them by name from
+its composition root (`hosts/machine/features.ts` `chatAdapters`), so an
+adapter is added there and nowhere in the host. The TypeScript build has
+the ACP adapter (`features/chat/machine/acp`): ACP is spoken through
+`@agentclientprotocol/sdk` 2.6.0, pinned exactly (Apache-2.0; protocol
+version 1, as the Go client's). It frames the agent's lines (at most
+16 MiB), pairs calls with answers and answers the agent's requests.
+Notifications are taken out of its stream before it sees them and handed
+to the session synchronously, in the order of the agent's output: the
+SDK's client parses every `session/update` with the protocol's stable
+schema, dropping an agent's newer kinds and values, and dispatches
+asynchronously, which would not keep a turn's last updates ahead of the
+answer that ends it. Claude Code's and Codex's adapters are not ported
+yet: the host refuses a chat of those kinds as a kind without a chat
+(`unsupported`, "this host has no adapter claude"), lists them as
+unsupported to the page, and goes on.
+
 ### Wire compatibility while both exist
 
 yamux (`backend/shared/proto/yamux.ts`) speaks hashicorp/yamux's protocol with
@@ -585,7 +652,8 @@ the features it composes too (`backend/scripts/registry.ts`).
 
 ### Claude Code
 
-The adapter calls `query()` of `@anthropic-ai/claude-agent-sdk`, pinned
+The adapter (an `Adapter` of `features/chat/machine/adapter.ts`, added to
+`chatAdapters`) calls `query()` of `@anthropic-ai/claude-agent-sdk`, pinned
 exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 
 - `systemPrompt: {type: 'preset', preset: 'claude_code'}` (without it the
@@ -642,6 +710,16 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
   case folding, `\A`, `\x{…}`), and it backtracks: a rule on a screen the
   program draws could take long. re2js keeps Go's reading, linear in
   time, in plain JavaScript inside the compiled executable.
+- **The chat host's journal on its own thread**, as the node's own
+  databases are. Simpler, but a write that waits would stop every chat's
+  output and every connection of the host; in a worker it holds the
+  chats' stored events only, at the cost of a message per statement and
+  of each chat's events waiting for their writes before they reach its
+  clients.
+- **The SDK's client as it is for ACP** (`client().onNotification`). It
+  drops the updates its stable schema refuses and does not keep a turn's
+  updates ahead of the answer that ends it; the notifications are taken
+  out before it.
 - **The sessions' strict opens through FFI on Linux** (`openat2`,
   `openat` relative to a directory). Synchronous on the node's one thread,
   where a home on a mount that stopped answering would stall every core;
@@ -673,6 +751,11 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 - A kernel without `openat2` (below 5.6) or a container filtering it: a
   link swapped into a directory of a path the agent resolved is followed,
   only the last name is refused (`O_NOFOLLOW`), as with the Go build.
+- A chat host whose journal stops answering (a data directory on a mount
+  that stopped): the chats' stored events wait for it, at most 64 MiB,
+  and reach their clients once written; the host goes on reading the
+  agents and serving its connections. Past the bound the chats that make
+  events fail; a write the journal refuses fails its chat, without a hole.
 - The SDK's undeclared `cancelAsyncMessage` disappears: its test fails at
   the upgrade.
 
@@ -793,12 +876,21 @@ SECURITY.md has both.
   `E2E_CODE_SERVER_SEED`, a real code-server release uploaded, started on
   its socket only (nothing of its process group listening on TCP) and
   stopped (`features/vscode/integration.test.ts`).
+- The chat host: `backend/features/chat/machine/host/*.test.ts` (a host
+  in the test's process with a fake adapter, its journal's refusal and a
+  journal that waits, and a host of its own process ended by the terminal
+  core's signals), `backend/features/chat/machine.test.ts` (the open
+  action against a fake terminal core: hosts of other builds and
+  protocols, a stuck one), the agents' processes, and the ACP adapter
+  against a fake agent replaying `spec/vectors/chat/acp`, its events
+  compared with the Go adapter's of the same scenarios.
 - `make e2e` builds the cores of both machine builds; `E2E_MACHINE=ts`
-  runs the suite against the TypeScript build (23 passed, the specs of
-  chats and program windows skipped with the reason; given
-  `E2E_CODE_SERVER_SEED`, the desktop app's smoke test has its VS Code
-  window installed, started and served by the TypeScript machine side,
-  its workbench loaded and the folder listed;
+  runs the suite against the TypeScript build (30 passed, the specs of
+  program windows skipped with the reason; the chats' specs run with the
+  fake ACP agent, also on an SSH machine; given `E2E_CODE_SERVER_SEED`,
+  the desktop app's smoke test has its VS Code window installed, started
+  and served by the TypeScript machine side, its workbench loaded and the
+  folder listed;
   `tests/attention.spec.ts` has a fake Claude Code in a terminal draw
   attention, its session found and confirmed for a resume), and
   `tests/nodes.spec.ts` has the newer node of the other build take a node

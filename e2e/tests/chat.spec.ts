@@ -1,12 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect } from '../harness/fixtures';
-import { unported } from '../harness/paths';
 import { AGENT, chatPane, chats, log, newChat, onlyChat, send } from '../harness/chat';
 import { showPanel } from '../harness/ui';
 import { waitFor } from '../harness/wait';
-
-test.skip(!!unported('chat'), unported('chat'));
 
 test('a chat streams answers and asks before it writes', async ({ app, instance }) => {
   const pane = await newChat(app);

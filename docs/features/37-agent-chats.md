@@ -70,7 +70,7 @@ command is looked up on the machine in the login shell's PATH.
 | `kimi` | `acp` | `kimi acp` |
 | `grok` | `acp` | `grok agent --no-leader stdio`, sessions made with `{"yoloMode": false}` |
 
-### The chat host (`internal/chathost`)
+### The chat host (`internal/chathost`, `backend/features/chat/machine/host`)
 
 `chat-host --base <data dir> --run <run dir>` (the namespace's runtime
 directory on the host, [40](40-shared-homes.md); machine build,
@@ -94,7 +94,14 @@ the host terminal's, ssh's and other agent sessions' variables, with
 so the terminal core's crash sweep finds them. The host logs to
 `chat-host-<host>.log` (0600, rotated at 1 MiB once).
 
-### Starting the host, and handover (`internal/agent/plugin/chat`)
+The TypeScript machine build has the same host: the `chat-host` command
+of its executable (`backend/hosts/machine/chathost.ts`), with the same
+socket, lock, wire, journal tables and log, so a host of either build
+takes over from the other with its chats. Its journal's statements run in
+a worker thread, and a chat's events reach its clients once they are
+stored, in the order made ([42](42-typescript-backend.md#the-chat-host)).
+
+### Starting the host, and handover (`internal/agent/plugin/chat`, `backend/features/chat/machine.ts`)
 
 The machine side has one action, `open`: a stream the core opens, joined
 to the host's socket. When no host serves, the agent has the terminal
@@ -279,6 +286,44 @@ resumed nor imported (`in_terminal`).
   a turn wait in the adapter. Sessions and imports run a short agent
   process (`session/list`, `session/load`, whose replay is lossy). An ACP
   agent cannot tell that a terminal runs a session.
+- **ACP in the TypeScript build** (`backend/features/chat/machine/acp`, on
+  `@agentclientprotocol/sdk`): the same behaviour. Every request of the
+  agent but a permission is answered "method not found"; prompts during a
+  turn wait in the adapter (at most 16); permissions offer the agent's
+  `allow_once` and `reject_once` options only, at most 64 waiting. Its
+  tests replay `spec/vectors/chat/acp` through a fake agent and compare the
+  events with the Go adapter's of the same scenarios.
+
+In the TypeScript build the seam is `backend/features/chat/machine/adapter.ts`,
+whose comment states the same rules for one thread:
+
+- `Adapter`: `start(p, sink, signal)` resolves with a `Session` once the
+  session exists (`signal` bounds the start only), `sessions(p, signal)`
+  a page of the agent's sessions, `history(p, emit, signal)` an import's
+  or a catch-up's stored events, and, where the adapter can tell,
+  `inTerminal(p, signal)` the `in_terminal` error of a session another
+  process runs. Every call gets the kind, the resolved command, the whole
+  environment, the directory, the logger and `procs`, the host's
+  `AgentProcesses`, through which every program is started (a process
+  group of its own, ended gracefully; the host signals the groups when it
+  stops).
+- `Session`: `id`, `pid` (its group's), `prompt`, `cancel`,
+  `cancelQueued`, `setConfig`, `compact`, `close` (graceful), and `done`,
+  which settles once the agent is gone and the sink had every event, with
+  why it ended.
+- `Sink`: `event` (stored or live, returns at once), `update` (what the
+  chat states), and `permission` and `question`, promises the user's
+  answer settles (or the turn's cancel, or the chat's end). An adapter may
+  call the sink from within its own methods; the host calls a session's
+  methods only where its own state is settled.
+
+The host gets its adapters by name from its composition root
+(`backend/hosts/machine/features.ts` `chatAdapters`): an adapter is added
+there, the host unchanged. A kind whose adapter the host was not given is
+refused as a kind without a chat (`unsupported`, "this host has no
+adapter claude"): so are Claude Code's and Codex's chats in the
+TypeScript build, which has the ACP adapter only (the design of the other
+two: [42](42-typescript-backend.md#claude-code)).
 
 ### The core's plugin (`backend/features/chat`)
 
@@ -434,6 +479,18 @@ client's. See the agent-chat rows in [SECURITY.md](../../SECURITY.md).
 - `internal/agent/plugin/chat`: start, name taken, handover
   (`TestDirtyBuildKept`), a stuck host killed; `internal/agent`
   `hidden_test.go`.
+- The TypeScript host (`backend/features/chat/machine/host`):
+  `host.test.ts` (requests and refusals, turns, prompts sent again,
+  queues, permissions, questions, failures, close, delete, archive, watch,
+  shutdown, recovery, idle stop and resume, `maxLive`, handoff and
+  catch-up, import, sessions, configuration, replay, slow subscribers,
+  bounds, cut events, trust, full access, `an event the journal refuses`),
+  `units.test.ts` (the environment, trust, events, the log, the terminal
+  core's signals in a host of its own process); its open action
+  (`backend/features/chat/machine.test.ts`: start, hosts of other builds
+  and protocols, a stuck host killed); the agents' processes
+  (`agentproc.test.ts`); the ACP adapter (`acp/*.test.ts`); the kinds
+  without an adapter (`backend/hosts/machine/chathost.test.ts`).
 - `backend/features/chat`: `routes.test.ts` (routes, read-only),
   `watch.test.ts` (the watch: `a host of build …`, `a change after the
   machine left is dropped`), `page.test.ts` (the WebSocket's `limits` and

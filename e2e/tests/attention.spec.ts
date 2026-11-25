@@ -3,7 +3,6 @@ import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { test, expect } from '../harness/fixtures';
-import { unported } from '../harness/paths';
 import { AGENT, chatPane, log, newChat, send } from '../harness/chat';
 import type { Instance } from '../harness/instance';
 import { cdInTerminal, newTerminalTab, terminalOfPane } from '../harness/ui';
@@ -88,7 +87,6 @@ async function chatWaitingInBackground(app: Page, instance: Instance) {
 }
 
 test('a chat that waits for an answer draws attention while it is not shown', async ({ app, instance }) => {
-  test.skip(!!unported('chat'), unported('chat'));
   const { name } = await instance.api<{ name: string }>('GET', '/api/config');
   await chatWaitingInBackground(app, instance);
 
@@ -114,7 +112,6 @@ test('a chat that waits for an answer draws attention while it is not shown', as
 });
 
 test('a page in the background gets a web notification whose click shows the chat', async ({ app, instance }) => {
-  test.skip(!!unported('chat'), unported('chat'));
   // The page has no focus, and the browser's notifications are recorded.
   await app.evaluate(() => {
     const w = window as unknown as { __notes: { title: string; body?: string; n: { onclick: null | (() => void) } }[] };

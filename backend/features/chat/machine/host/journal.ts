@@ -645,6 +645,12 @@ export class Journal {
     await this.tx({ sql: `DELETE FROM trusted WHERE path IN (${paths.map(() => '?').join(', ')})`, params: paths });
   }
 
+  /** Holds the worker for as long as a statement of n rows takes, as a
+   * write that waits would (tests). */
+  async holdForTests(n: number): Promise<void> {
+    await this.all('WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?) SELECT count(*) AS n FROM c', n);
+  }
+
   /** Waits for every request made so far; then closes the database and
    * ends the worker. */
   async close(): Promise<void> {

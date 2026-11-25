@@ -613,6 +613,32 @@ describe('the chat host', () => {
     a.close();
   });
 
+  test("a journal that waits holds the chats' stored events, not the host", async () => {
+    const h = await host();
+    const { chat: c, s } = await h.newChat();
+    const a = await h.attach(c.id);
+    await eventually('idle', () => h.chat(c.id).r.chat.state === 'idle');
+    await eventually('stored', () => h.chat(c.id).r.chat.seq === h.chat(c.id).madeSeq());
+    let held = true;
+    const holding = h.host.journal.holdForTests(30_000_000).then(() => (held = false));
+    s.say('m1', 'one');
+    let told = false;
+    const m1 = a
+      .until((e) => e.item === 'm1')
+      .then((e) => {
+        told = true;
+        return e;
+      });
+    // The host answers meanwhile, from what it has.
+    expect((await h.request({ op: chat.Op.Chats })).chats).toHaveLength(1);
+    expect((await h.request({ op: chat.Op.HostStatus })).hostStatus?.liveAgents).toBe(1);
+    expect(held).toBe(true);
+    expect(told).toBe(false);
+    await holding;
+    expect((await m1).seq).toBe(h.chat(c.id).r.chat.seq);
+    a.close();
+  });
+
   test('host_status', async () => {
     const h = await host();
     const { chat: c } = await h.newChat();
