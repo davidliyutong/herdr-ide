@@ -10,9 +10,15 @@
 //   - the release, fetched by the core over its own HTTPS (Bun's or Node's
 //     fetch, which verify the certificate; the proxy of the environment,
 //     shared/lib/proxy.ts), then cached;
-//   - the release, downloaded by the machine (viaHost) when only the
-//     machine reaches it: that one tells a damaged download, not one
-//     changed on the machine's path (integrityOnly, logged).
+//   - when that fetch found the release unreachable (no name, no route, a
+//     refused connection, no answer in time), the release fetched by the
+//     core again, through the machine (tunnel: an ssh stdio forward), its
+//     TLS still the core's own, end to end (tunnel.ts), then cached.
+// A fetch that reached something (a certificate the core does not trust,
+// an HTTP answer, a manifest it refuses) ends there: the machine is not
+// asked, whose own download of the manifest could not be told from one an
+// attacker on its path gave it. There is no manifest the core did not
+// verify itself.
 // A manifest is this build's only when it names this core's own executable
 // (its platform's line) by its digest: one of another release is refused.
 // A core without an executable of its own (the desktop app on Windows)
@@ -32,6 +38,7 @@ import { promisify } from 'node:util';
 import { createGunzip, gzip } from 'node:zlib';
 import { archiveMember, archiveName, bareName, type TSDigests, type TSPayload } from './builds.ts';
 import { DeployCode, Unsupported } from './errors.ts';
+import { tunnelGet, type OpenStream } from './tunnel.ts';
 
 /** Bounds an archive and an executable (they are about 55 and 120 MB). */
 export const MAX_ARCHIVE = 256 << 20;
@@ -45,22 +52,63 @@ export const CACHE_RETENTION_MS = 14 * 24 * 60 * 60_000;
 /** How long a failed fetch of the manifest keeps the core from trying
  * again. */
 const FETCH_RETRY_MS = 10 * 60_000;
-/** How long the core's downloads may take in all. */
-const SUMS_TIMEOUT_MS = 60_000;
+/** How long the core's downloads may take in all (the manifest is small:
+ * a release that does not answer within this is unreachable). */
+const SUMS_TIMEOUT_MS = 15_000;
 const ARCHIVE_TIMEOUT_MS = 10 * 60_000;
 
 const gzipAsync = promisify(gzip);
 const HEX64 = /^[0-9a-f]{64}$/;
 
 /** The lines of a manifest: name to SHA-256 (sha256sum's format, text or
- * binary mode); other lines are ignored. */
+ * binary mode); other lines are ignored. Two lines that name a file with
+ * different digests make it no manifest. */
 export function parseSums(text: string): Map<string, string> {
   const m = new Map<string, string>();
   for (const line of text.split('\n')) {
     const r = /^([0-9a-fA-F]{64}) [ *](.+)$/.exec(line.trimEnd());
-    if (r) m.set(r[2], r[1].toLowerCase());
+    if (!r) continue;
+    const d = r[1].toLowerCase();
+    if (m.has(r[2]) && m.get(r[2]) !== d) throw new Error(`${SUMS} names ${r[2]} twice, with different digests`);
+    m.set(r[2], d);
   }
   return m;
+}
+
+/** A failed fetch's message, with its cause's. */
+const errorText = (e: unknown): string => {
+  const x = e as { message?: string; cause?: { message?: string; code?: unknown } };
+  const cause = x?.cause?.message ?? (typeof x?.cause?.code === 'string' ? x.cause.code : '');
+  return [x?.message ?? String(e), cause].filter(Boolean).join(': ');
+};
+
+/** The codes of a fetch that reached nothing (Bun puts them on the error,
+ * Node on its cause). */
+const UNREACHABLE = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'ConnectionRefused',
+  'FailedToOpenSocket',
+]);
+
+/** Whether a failed fetch found its host unreachable: no name, no route, a
+ * refused connection, or no answer in time. A certificate error, an HTTP
+ * answer or anything else is not. */
+export function unreachable(e: unknown): boolean {
+  const x = e as {
+    name?: string;
+    code?: unknown;
+    cause?: { code?: unknown; errors?: { code?: unknown }[] };
+    errors?: { code?: unknown }[];
+  } | null;
+  if (x?.name === 'TimeoutError') return true;
+  const codes = [x?.code, x?.cause?.code, ...(x?.errors ?? []).map((y) => y?.code), ...(x?.cause?.errors ?? []).map((y) => y?.code)];
+  return codes.some((c) => typeof c === 'string' && UNREACHABLE.has(c));
 }
 
 /** The core's own executable, for a machine of its platform (and to tell
@@ -73,13 +121,21 @@ export interface OwnExecutable {
   gz(): Promise<Buffer>;
 }
 
-/** The own executable as a file (the command line's, compiled). */
-export function ownFile(key: string, path: string): OwnExecutable {
+/** The own executable as an open file (the command line's, compiled):
+ * the running program, opened when it started (/proc/self/exe on Linux),
+ * so a file put at its path since (an upgrade in place) is not taken for
+ * it. Read through the descriptor from its start each time. */
+export function ownFile(key: string, fd: number): OwnExecutable {
+  const read = () => collect(createReadStream('', { fd, start: 0, autoClose: false }), MAX_EXECUTABLE, 'the own executable');
   let d: Promise<string> | undefined;
   return {
     key,
-    digest: () => (d ??= collect(createReadStream(path), MAX_EXECUTABLE, path).then((r) => r.digest)),
-    gz: async () => gzipAsync((await collect(createReadStream(path), MAX_EXECUTABLE, path)).bytes, { level: 6 }),
+    digest: () => (d ??= read().then((r) => r.digest)),
+    gz: async () => {
+      const r = await read();
+      if (r.digest !== (await (d ??= Promise.resolve(r.digest)))) throw new Error('the own executable changed');
+      return gzipAsync(r.bytes, { level: 6 });
+    },
   };
 }
 
@@ -181,7 +237,6 @@ const exists = (p: string) =>
 export interface Manifest {
   sums: Map<string, string>;
   source: string;
-  integrityOnly: boolean;
 }
 
 export interface ReleaseOptions {
@@ -195,6 +250,9 @@ export interface ReleaseOptions {
   /** The core host's cache of manifests and archives. */
   cacheDir: string;
   own?: OwnExecutable | null;
+  /** Certificate authorities the fetch through a machine trusts in place of
+   * the default ones (tests). */
+  tunnelCA?: string | Buffer;
   /** Where what was refused is logged with its paths (the errors the
    * machines' states carry name none of the core's host). */
   logger?: (line: string) => void;
@@ -204,7 +262,7 @@ export interface ReleaseOptions {
 /** A core's release: its manifest and the archives of every platform. */
 export class Release {
   private manifestP?: Promise<Manifest | null>;
-  private fetchFailedAt = -Infinity;
+  private unreachableAt = -Infinity;
   private readonly loads = new Map<string, Promise<TSPayload>>();
   private ownChecked = false;
   private readonly o: ReleaseOptions;
@@ -243,14 +301,14 @@ export class Release {
   }
 
   /** The manifest from the directory, the cache or the release (fetched
-   * by the core, or, with viaHost, by the machine); null when none has
-   * it. reasons gets what each source said. */
-  private async find(reasons: string[], signal?: AbortSignal, viaHost?: (url: string) => Promise<string>): Promise<Manifest | null> {
-    const parse = async (text: string, source: string, label: string, integrityOnly = false): Promise<Manifest | null> => {
-      const sums = parseSums(text);
+   * by the core, directly or, when the release is unreachable, through
+   * tunnel); null when none has it. reasons gets what each source said. */
+  private async find(reasons: string[], signal?: AbortSignal, tunnel?: OpenStream): Promise<Manifest | null> {
+    const parse = async (text: string, source: string, label: string): Promise<Manifest | null> => {
       try {
+        const sums = parseSums(text);
         await this.ofThisBuild(sums, label);
-        return { sums, source, integrityOnly };
+        return { sums, source };
       } catch (e) {
         reasons.push(`${label}: ${(e as Error).message}`);
         this.log(`${source}: refused: ${(e as Error).message}`);
@@ -282,59 +340,76 @@ export class Release {
       reasons.push('this build has no release to download it from');
       return null;
     }
-    if (this.now() - this.fetchFailedAt >= FETCH_RETRY_MS) {
+    const keep = async (text: string) => {
+      await mkdir(this.o.cacheDir, { recursive: true, mode: 0o700 });
+      await writeFile(`${cached}.${process.pid}`, text, { mode: 0o600 });
+      await rename(`${cached}.${process.pid}`, cached);
+    };
+    // The core's own fetch, not again for a while once the release was
+    // unreachable.
+    if (this.now() - this.unreachableAt >= FETCH_RETRY_MS) {
       try {
         const text = (await download(url, MAX_SUMS, SUMS_TIMEOUT_MS, signal)).bytes.toString('utf8');
         const m = await parse(text, url, `the release's ${SUMS}`);
-        if (m) {
-          await mkdir(this.o.cacheDir, { recursive: true, mode: 0o700 });
-          await writeFile(`${cached}.${process.pid}`, text, { mode: 0o600 });
-          await rename(`${cached}.${process.pid}`, cached);
-          return m;
+        if (m) await keep(text);
+        return m;
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        const why = errorText(e);
+        this.log(`the core could not download ${url}: ${why}`);
+        if (!unreachable(e)) {
+          // It reached something that is not the release as the core
+          // trusts it: the machine is not asked instead.
+          reasons.push(`the core could not download ${url}: ${why}`);
+          return null;
         }
-      } catch (e) {
-        if (signal?.aborted) throw e;
-        this.fetchFailedAt = this.now();
-        reasons.push(`the core could not download ${url}: ${(e as Error).message}`);
-        this.log(`the core could not download ${url}: ${(e as Error).message}`);
+        this.unreachableAt = this.now();
+        reasons.push(`the core cannot reach ${url} (${why})`);
       }
-    } else reasons.push(`the core could not download ${url} lately`);
-    if (viaHost) {
-      try {
-        const m = await parse(await viaHost(url), `${url} (downloaded by the machine)`, `the machine's download of ${SUMS}`, true);
-        if (m) return m;
-      } catch (e) {
-        if (signal?.aborted) throw e;
-        reasons.push(`the machine could not download ${SUMS}: ${(e as Error).message.trim()}`);
-      }
+    } else reasons.push(`the core could not reach ${url} lately`);
+    if (!tunnel) return null;
+    try {
+      const text = (
+        await tunnelGet(url, tunnel, {
+          max: MAX_SUMS,
+          timeoutMs: 60_000,
+          ...(signal ? { signal } : {}),
+          ...(this.o.tunnelCA ? { ca: this.o.tunnelCA } : {}),
+        })
+      ).toString('utf8');
+      const m = await parse(text, `${url} (through the machine)`, `the release's ${SUMS} through the machine`);
+      if (m) await keep(text);
+      return m;
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      const why = errorText(e);
+      reasons.push(`the core could not download ${url} through the machine either: ${why}`);
+      this.log(
+        `the core could not download ${url} through the machine (ssh -W; a machine whose sshd forbids forwarding, AllowTcpForwarding no, cannot carry it: give the core a route to the release, or --agent-dir with the release's files): ${why}`,
+      );
+      return null;
     }
-    return null;
   }
 
-  /** The manifest, or null with the reasons; a found one is kept (only one
-   * the core verified: a machine's is asked for each time). */
-  async manifest(signal?: AbortSignal, viaHost?: (url: string) => Promise<string>): Promise<{ m: Manifest | null; reasons: string[] }> {
+  /** The manifest, or null with the reasons; a found one is kept. */
+  async manifest(signal?: AbortSignal, tunnel?: OpenStream): Promise<{ m: Manifest | null; reasons: string[] }> {
     const reasons: string[] = [];
     if (this.manifestP) {
       const m = await this.manifestP;
       if (m) return { m, reasons };
     }
-    const p = this.find(reasons, signal, viaHost);
-    this.manifestP = p.then(
-      (m) => (m && !m.integrityOnly ? m : null),
-      () => null,
-    );
+    const p = this.find(reasons, signal, tunnel);
+    this.manifestP = p.catch(() => null);
     return { m: await p, reasons };
   }
 
   /** The digests of key's build. */
-  async digests(key: string, o: { signal?: AbortSignal; viaHost?: (url: string) => Promise<string> } = {}): Promise<TSDigests> {
-    const { m, reasons } = await this.manifest(o.signal, o.viaHost);
+  async digests(key: string, o: { signal?: AbortSignal; tunnel?: OpenStream } = {}): Promise<TSDigests> {
+    const { m, reasons } = await this.manifest(o.signal, o.tunnel);
     if (m) {
       const exe = m.sums.get(archiveMember(key));
       const archive = m.sums.get(archiveName(key));
-      if (exe && HEX64.test(exe))
-        return { exe, ...(archive && HEX64.test(archive) ? { archive } : {}), integrityOnly: m.integrityOnly, source: m.source };
+      if (exe && HEX64.test(exe)) return { exe, ...(archive && HEX64.test(archive) ? { archive } : {}), source: m.source };
       reasons.push(`${SUMS} has no executable for ${key}`);
     }
     if (this.o.own && this.o.own.key === key) return { exe: await this.o.own.digest(), source: "this core's own executable" };

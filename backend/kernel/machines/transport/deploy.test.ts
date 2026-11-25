@@ -1,7 +1,10 @@
 // The TypeScript build deployed as an ssh connection deploys it, through an
 // ssh that runs the remote commands here (homes of the test's own): the
-// probe; the release's manifest (SHA256SUMS), which the core fetches (or
-// the machine, when only it reaches the release); the machine's own
+// probe; the release's manifest (SHA256SUMS), which the core fetches, by
+// its own HTTPS through the machine when the release is unreachable from
+// it (an ssh -W stand-in forwarding to a TLS server on loopback whose
+// certificate a test authority signed, testdata/), and never otherwise
+// takes from the machine; the machine's own
 // download of the release's archive, checked against the manifest before
 // it is unpacked, bounded in size and time, with curl or wget alone; the
 // core's upload when the machine cannot (no tool, not allowed, a failed or
@@ -18,6 +21,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -26,6 +30,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { AGENT_DIR, CORE_BIN } from '#shared/lib/brand.ts';
@@ -61,6 +66,7 @@ let archive: Buffer = Buffer.alloc(0);
 let goodSums = '';
 let releaseURL = '';
 let release: Server | undefined;
+let tlsRelease: HttpsServer | undefined;
 const homes: string[] = [];
 
 /** What the release serves, to the machine (curl, wget) and to the core
@@ -141,10 +147,20 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => release!.listen(0, '127.0.0.1', r));
   releaseURL = `http://127.0.0.1:${(release.address() as { port: number }).port}/v1`;
+  tlsRelease = createHttpsServer(
+    {
+      cert: readFileSync(join(import.meta.dir, 'testdata', 'test-release.pem')),
+      key: readFileSync(join(import.meta.dir, 'testdata', 'test-release-key.pem')),
+    },
+    (req, res) => (req.url === `/v1/${SUMS}` ? res.writeHead(200).end(goodSums) : res.writeHead(404).end()),
+  );
+  await new Promise<void>((r) => tlsRelease!.listen(0, '127.0.0.1', r));
+  tlsPort = (tlsRelease.address() as { port: number }).port;
 }, 120_000);
 
 afterAll(async () => {
   release?.close();
+  tlsRelease?.close();
   // Each home's nodes end through their own command, at once.
   await Promise.all(
     homes.flatMap((h) =>
@@ -218,15 +234,42 @@ function machine(path = saved.PATH ?? '/usr/bin:/bin'): string {
   homes.push(home);
   const bin = join(home, '.ssh-bin');
   mkdirSync(bin);
+  // ssh -W host:port forwards (forward.js) as tunnel says: a port of this
+  // host, or a refusal as an sshd that forbids forwarding gives one.
   writeFileSync(
     join(bin, 'ssh'),
-    `#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift 2\ncd "$HOME" && PATH=${JSON.stringify(path)} exec /bin/sh -c "$*"\n`,
+    `#!/bin/sh\nfwd=\nwhile [ "$1" != "--" ]; do [ "$1" = -W ] && fwd=$2; shift; done\n` +
+      `[ -n "$fwd" ] && exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FORWARD)} ${JSON.stringify(TUNNEL)} "$fwd"\n` +
+      `shift 2\ncd "$HOME" && PATH=${JSON.stringify(path)} exec /bin/sh -c "$*"\n`,
   );
   chmodSync(join(bin, 'ssh'), 0o755);
   process.env.PATH = `${bin}:${saved.PATH}`;
   process.env.HOME = home;
   return home;
 }
+
+/** The stand-in's ssh -W: where it forwards (TUNNEL holds a port, or
+ * "refuse"), each request written down beside it. */
+const FORWARD = join(work, 'forward.js');
+const TUNNEL = join(work, 'tunnel');
+writeFileSync(
+  FORWARD,
+  `const net = require('net'), fs = require('fs');
+const [ctl, to] = process.argv.slice(2);
+fs.appendFileSync(ctl + '.log', to + '\\n');
+const how = fs.existsSync(ctl) ? fs.readFileSync(ctl, 'utf8').trim() : 'refuse';
+if (how === 'refuse') { process.stderr.write('channel 0: open failed: administratively prohibited: open failed\\nstdio forwarding failed\\n'); process.exit(255); }
+const s = net.connect(Number(how), '127.0.0.1');
+process.stdin.pipe(s); s.pipe(process.stdout);
+s.on('close', () => process.exit(0)); s.on('error', () => process.exit(1));
+`,
+);
+const tunnelled = () => (existsSync(`${TUNNEL}.log`) ? readFileSync(`${TUNNEL}.log`, 'utf8').trim().split('\n') : []);
+
+/** The test authority, and the release over TLS with the certificate of
+ * releases.test it signed (testdata/, tests only). */
+const TEST_CA = readFileSync(join(import.meta.dir, 'testdata', 'test-ca.pem'));
+let tlsPort = 0;
 
 /** The environment of a session's node, as the programs it starts get it:
  * a terminal core that writes it down. */
@@ -307,7 +350,6 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       expect(hello.info?.version).toBe('test-deploy');
       expect(b.loads).toBe(0);
       expect(saw(b, 'downloads its build')).toBe(true);
-      expect(saw(b, 'integrity only')).toBe(false);
       expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
       expect(readdirSync(installed(home))).toEqual([CORE_BIN]);
     } finally {
@@ -425,19 +467,76 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
     expect(failures.recent('box')).toBe(false);
   }, 120_000);
 
-  test('when only the machine reaches the release, it downloads the manifest too: the deployment is integrity only, which the core logs', async () => {
+  test('a release the core cannot reach: it fetches the manifest through the machine with its own TLS, the machine is never trusted for it; the build follows', async () => {
     reset();
-    serve.coreSums = 404;
-    serve.coreArchive = 404;
+    writeFileSync(TUNNEL, String(tlsPort));
+    rmSync(`${TUNNEL}.log`, { force: true });
     const home = machine();
-    const b = build();
+    // releases.test has no address: the core's own fetch finds it unreachable.
+    const b = build({ url: `https://releases.test:${tlsPort}/v1`, tunnelCA: TEST_CA, own: ownFile(key, openSync(exePath, 'r')) });
     const { session } = await dialSSH(options(b));
     try {
       expect((await session.request({ op: Op.Hello })).ok).toBe(true);
-      expect(saw(b, 'the machine downloads')).toBe(true);
-      expect(saw(b, 'integrity only')).toBe(true);
-      expect(b.loads).toBe(0);
+      expect(tunnelled()).toEqual([`releases.test:${tlsPort}`]);
+      expect(saw(b, 'the core could not download')).toBe(true);
+      // The machine cannot resolve the release either: the core uploads its own.
+      expect(b.loads).toBe(1);
       expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+    } finally {
+      session.close();
+      rmSync(TUNNEL, { force: true });
+    }
+  }, 60_000);
+
+  test('a certificate the core does not trust, or an HTTP answer, on its own fetch: build_unavailable, and the machine is not asked for the manifest', async () => {
+    reset();
+    serve.coreSums = 404;
+    writeFileSync(TUNNEL, String(tlsPort));
+    for (const url of [`https://127.0.0.1:${tlsPort}/v1`, releaseURL]) {
+      rmSync(`${TUNNEL}.log`, { force: true });
+      machine();
+      const b = build({ url, tunnelCA: TEST_CA });
+      const e = await dialSSH(options(b)).then(
+        () => new Error('dialed'),
+        (x: unknown) => x as Error,
+      );
+      expect(deployCode(e), url).toBe('build_unavailable');
+      expect(e.message).toContain('the core could not download');
+      expect(tunnelled()).toEqual([]);
+    }
+    rmSync(TUNNEL, { force: true });
+    reset();
+  }, 60_000);
+
+  test('a release the core cannot reach and a machine whose sshd does not forward: build_unavailable, saying so', async () => {
+    reset();
+    writeFileSync(TUNNEL, 'refuse');
+    machine();
+    const b = build({ url: `https://releases.test:${tlsPort}/v1`, tunnelCA: TEST_CA });
+    const e = await dialSSH(options(b)).then(
+      () => new Error('dialed'),
+      (x: unknown) => x as Error,
+    );
+    expect(deployCode(e)).toBe('build_unavailable');
+    expect(e.message).toContain('administratively prohibited');
+    expect(saw(b, 'AllowTcpForwarding')).toBe(true);
+    rmSync(TUNNEL, { force: true });
+  }, 60_000);
+
+  test('a machine whose download failed lately is asked again when the core has nothing to upload', async () => {
+    reset();
+    serve.coreArchive = 404;
+    const failures = new DownloadFailures();
+    failures.failure('box');
+    const home = machine();
+    const b = build();
+    const { session } = await dialSSH(options(b, { downloadFailures: failures }));
+    try {
+      expect((await session.request({ op: Op.Hello })).ok).toBe(true);
+      expect(saw(b, 'failed within the last day')).toBe(true);
+      expect(saw(b, 'downloads its build')).toBe(true);
+      expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);
+      expect(failures.recent('box')).toBe(false);
     } finally {
       session.close();
       reset();
@@ -485,8 +584,8 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       (x: unknown) => x as Error & { code?: string },
     );
     expect(deployCode(e)).toBe('build_unavailable');
-    expect(e.message).toContain('the core could not download');
-    expect(e.message).toContain('the machine could not download');
+    expect(e.message).toContain('the core cannot reach');
+    expect(e.message).toContain('through the machine either');
     expect(saw(b, 'the core could not download')).toBe(true);
   }, 60_000);
 
@@ -525,16 +624,21 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
     for (const f of preloads()) rmSync(join(home, f));
 
     process.env.BUN_OPTIONS = `--preload=${join(home, 'evil.js')}`;
-    const { session } = await dialSSH(options(build()));
+    process.env.BUN_CONFIG_VERBOSE_FETCH = 'curl';
+    // The core's own executable: this process fetches nothing meanwhile
+    // (it would print it).
+    const { session } = await dialSSH(options(build({ url: undefined, own: ownFile(key, openSync(exePath, 'r')) })));
     try {
       expect((await session.request({ op: Op.Hello })).ok).toBe(true);
       const env = await nodeEnvironment(session);
       expect(env).not.toContain('EVIL_DOTENV');
       expect(env).not.toContain('BUN_OPTIONS');
+      expect(env).not.toContain('BUN_CONFIG_VERBOSE_FETCH');
       expect(preloads()).toEqual([]);
     } finally {
       session.close();
       delete process.env.BUN_OPTIONS;
+      delete process.env.BUN_CONFIG_VERBOSE_FETCH;
     }
   }, 60_000);
 
@@ -546,12 +650,13 @@ describe.skipIf(!supported)('the TypeScript build over ssh', () => {
       BUN_OPTIONS: `--preload=${join(home, 'evil.js')}`,
       BUN_INSPECT: 'ws://127.0.0.1:9/x',
       BUN_INSPECT_NOTIFY: 'unix:///nonexistent',
+      BUN_CONFIG_VERBOSE_FETCH: 'curl',
     };
     Object.assign(process.env, vars);
     let session: Awaited<ReturnType<typeof dialNode>> | undefined;
     try {
       // A build of no release, offline: its own executable is the build.
-      const b = build({ url: undefined, own: ownFile(key, exePath) });
+      const b = build({ url: undefined, own: ownFile(key, openSync(exePath, 'r')) });
       session = await dialNode({ instance, builds: async () => b, logger: () => {} });
       expect((await session.request({ op: Op.Hello })).info?.home).toBe(home);
       expect(readFileSync(join(installed(home), CORE_BIN)).equals(exe)).toBe(true);

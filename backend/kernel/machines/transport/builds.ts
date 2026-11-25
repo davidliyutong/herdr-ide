@@ -12,6 +12,7 @@
 // so the command lines (`node dial`, `node stop`) are the same for both.
 import { createHash } from 'node:crypto';
 import { CORE_BIN } from '#shared/lib/brand.ts';
+import type { OpenStream } from './tunnel.ts';
 
 /** A machine as the probe found it. */
 export interface MachineTarget {
@@ -35,10 +36,6 @@ export interface TSDigests {
   /** The SHA-256 of the release's archive, when the manifest has it: then
    * a machine can download it. */
   archive?: string;
-  /** The manifest came from the machine's own download, the core having
-   * none: it tells a damaged download, not one changed on the machine's
-   * path. */
-  integrityOnly?: boolean;
   /** Where the digests came from, for the logs. */
   source: string;
 }
@@ -58,10 +55,12 @@ export interface TSBuild {
   /** The release's archive of the platform; absent for a build of no
    * release (development, the end-to-end tests). */
   url?: string;
-  /** The digests, from the release's manifest (or the core's own
-   * executable); viaHost downloads a URL on the machine, for a core that
-   * cannot reach the release. Fails with Unsupported build_unavailable. */
-  digests(o?: { signal?: AbortSignal; viaHost?: (url: string) => Promise<string> }): Promise<TSDigests>;
+  /** The digests, from the release's manifest, which the core verified
+   * itself (or from the core's own executable); tunnel opens a stream
+   * through the machine for a core that cannot reach the release, over
+   * which the core speaks its own TLS. Fails with Unsupported
+   * build_unavailable. */
+  digests(o?: { signal?: AbortSignal; tunnel?: OpenStream }): Promise<TSDigests>;
   /** What the core uploads when the machine cannot download it, checked
    * against d; fails with Unsupported build_unavailable. */
   load(d: TSDigests, signal?: AbortSignal): Promise<TSPayload>;

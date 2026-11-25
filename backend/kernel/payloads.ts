@@ -116,8 +116,8 @@ export function payloads(o: {
   machineCache?: string;
   /** Where what a machine build's sources refused is logged. */
   logger?: (line: string) => void;
-  /** The running executable (a compiled command line). */
-  ownFile?: string;
+  /** The running executable, open (a compiled command line). */
+  ownFd?: number;
 }): Payloads {
   const agents = new Map<string, Promise<GoBuild>>();
   const gzs = new Map<string, Promise<{ gz: Buffer; digest: string }>>();
@@ -145,7 +145,7 @@ export function payloads(o: {
     (release ??= (async () => {
       const key = r.key ?? '';
       let own: OwnExecutable | null = null;
-      if (key && o.ownFile) own = ownFile(key, o.ownFile);
+      if (key && o.ownFd !== undefined) own = ownFile(key, o.ownFd);
       else if (key && (await o.files.get(ownExecutablePath(key)))) own = ownGz(key, () => o.files.get(ownExecutablePath(key)));
       return new Release({
         version: r.version,

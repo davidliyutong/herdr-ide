@@ -6,7 +6,7 @@
 // development) is the entry module run by bun.
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
-import { FOREIGN_RUNTIME_VARS } from '#shared/lib/bunenv.ts';
+import { isForeignRuntimeVar } from '#shared/lib/bunenv.ts';
 import { VERSION, type NodeInfo } from '#shared/proto/agentproto/index.ts';
 
 /** Whether this process is a compiled executable. */
@@ -42,5 +42,5 @@ export const selfCommand = (): string[] => (compiled() ? [process.execPath] : [p
  * (compiled without their autoloading), ignores NODE_OPTIONS and
  * transpiles nothing at run time, so it writes no transpiler cache. */
 export function dropForeignRuntimeVars(env: NodeJS.ProcessEnv = process.env): void {
-  for (const k of FOREIGN_RUNTIME_VARS) delete env[k];
+  for (const k of Object.keys(env)) if (isForeignRuntimeVar(k)) delete env[k];
 }

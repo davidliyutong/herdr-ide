@@ -28,9 +28,11 @@ export const STAGING_RETENTION_MS = 60 * 60_000;
 /** How often a running agent applies its rules: a node runs for weeks. */
 export const HOUSEKEEP_MS = DAY;
 
-/** The temporary files of an install: the ssh upload's or the machine's
- * own download's .upload.<pid>, the local install's <name>.upload.<pid>. */
-const STAGED = /^\.upload\.\d+$|\.upload\.\d+$/;
+/** The temporary files of an install: the ssh script's .upload.<pid> (the
+ * executable) with its .in (the download or the upload, up to 256 MiB) and
+ * .rc (wget's empty configuration), the local install's
+ * <name>.upload.<pid>. */
+const STAGED = /^\.upload\.\d+(\.in|\.rc)?$|\.upload\.\d+$/;
 
 const touch = async (p: string, now: Date) => {
   try {

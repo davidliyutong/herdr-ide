@@ -344,33 +344,47 @@ app's core, in Node, sets them for its own process with
 `http.setGlobalProxyFromEnv`, `backend/shared/lib/proxy.ts`, loopback
 always excepted, so no variable reaches the programs it starts, as
 `NODE_USE_ENV_PROXY` would make every Node program of the local machine
-send its requests, loopback's too, to the proxy); a core whose fetch failed
-does not try again for 10 minutes. When only the machine reaches the
-release, the machine downloads `SHA256SUMS` alongside the archive and
-prints it back: that tells a damaged download, not one changed on the
-machine's path, and the core says so in its log (integrity only). A
-manifest is this build's only when it names the core's own executable by
-its digest (its platform's line): one of another release is refused (the
-desktop app on Windows, which has no executable of its own, cannot tell,
-and logs it). Without one, a machine of the core's own platform still gets
-the core's own executable.
+send its requests, loopback's too, to the proxy). When that fetch finds the
+release unreachable (no name, no route, a refused connection, no answer
+within 15 s), the core does not try it again for 10 minutes and fetches the
+manifest through the machine instead: an ssh stdio forward (`ssh -W
+<host>:443` over the control master; a core without one, on Windows, opens
+a non-interactive connection of its own) carries the core's own TLS
+(`tunnel.ts`), which verifies the release's certificate against its host
+name as fetch does, so the machine carries bytes it can neither read nor
+change. A fetch that reached something else (a certificate the core does
+not trust, an HTTP answer, a manifest it refuses) ends there with
+`build_unavailable` and the reason in the core's log; a machine whose sshd
+forbids forwarding (`AllowTcpForwarding no`, common on clusters) fails the
+same way, and its site gives the core a route to the release or uses
+`--agent-dir`. A manifest is this build's only when it names the core's own
+executable by its digest (its platform's line): one of another release is
+refused (the desktop app on Windows, which has no executable of its own,
+cannot tell, and logs it), and so is one that names a file twice with
+different digests. Without one, a machine of the core's own platform still
+gets the core's own executable: the running program, opened when the core
+started (`/proc/self/exe` on Linux), not whatever an upgrade in place put
+at its path since.
 
 A machine that does not hold its build gets it, in this order:
 
 1. The machine downloads the release's archive itself, with `curl`, else
    `wget`, unless the setting `machines.download` is off for it (or
    `--machine-download=false`) or its download failed within the last day
-   (the core keeps that in memory, per machine, and goes straight to the
-   upload meanwhile). The tool runs without its user's configuration
-   (`curl -q`; an empty `WGETRC`, GNU wget's `--no-config` where it has
-   it), over the URL's scheme only (`curl --proto`, GNU wget's
-   `--https-only` where it has it), with one try, few redirects and 10 s to
-   connect; the download goes to a file beside its place through `head`,
-   at most 256 MiB, and a watchdog ends it after 5 minutes in all, whatever
-   the tool (wget's `-T` bounds each read, not the whole). Only an archive
-   of the manifest's SHA-256 is unpacked. BusyBox's wget may not verify the
-   server's certificate: the manifest the core fetched still holds the
-   archive to the release.
+   (the core keeps that in memory, per machine, and uploads first
+   meanwhile, asking the machine again when it has nothing to upload; only
+   the download's own failures count, not the connection's). The tool runs
+   without its user's configuration (`curl -q`; an empty `WGETRC`, GNU
+   wget's `--no-config` where it has it), with one try, few redirects and
+   10 s to connect; curl keeps to the URL's scheme, redirects included
+   (`--proto`, `--proto-redir`), while wget may follow a redirect to http
+   (GNU wget's `--https-only` holds in recursive downloads only) and
+   BusyBox's may not verify the server's certificate: what either gives is
+   held to the manifest the core verified. The download goes to a file
+   beside its place through `head`, at most 256 MiB, and a watchdog ends it
+   after 5 minutes in all, whatever the tool (wget's `-T` bounds each read,
+   not the whole). Only an archive of the manifest's SHA-256 is unpacked,
+   within 2 minutes.
 2. Else, or when that fails (neither tool, no route to the release, a
    timeout, an archive that is not the release's), the core uploads it over
    ssh, taking the first of: the operator's directory (the archive, or the
@@ -387,8 +401,9 @@ run on the core's host): the archive's SHA-256 checked before it is
 unpacked, the executable written beside its place, its SHA-256 computed on
 the machine (`sha256sum`, `shasum` or `openssl`), renamed into place only
 when it is the one the manifest names, else removed and failed, and
-printed, which the core checks again. Its files are removed when the script
-ends (`trap`): an upload ends when its input does (the connection went), a
+printed, which the core checks again. Its files (`.upload.<pid>`, with
+`.in`, the archive, and `.rc`, wget's empty configuration) are removed when
+the script ends (`trap`): an upload ends when its input does (the connection went), a
 download within its bounds (sshd sends no hangup to a session without a
 terminal, so a dropped connection does not end it sooner); the nodes'
 housekeeping removes what a killed shell left, after an hour. When none of
@@ -534,6 +549,13 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
 - **Every platform's executable in each core.** About 300 MB more per core
   (and per desktop app): the release serves them, and a core carries its
   own.
+- **The machine's own download of the manifest.** For a core that cannot
+  reach the release, a manifest the machine downloads could not be told
+  from one an attacker on the machine's path gave it (BusyBox's wget may
+  not verify certificates, wget follows redirects to http), and a core that
+  cannot reach the release may be one whose path is being attacked: the
+  core fetches it through the machine with its own TLS instead, or not at
+  all.
 - **A signed manifest.** A signature over `SHA256SUMS` (a release key in a
   secret, its public half in every build) would hold the builds to the
   key rather than to the GitHub release; it means a key for the
@@ -572,9 +594,9 @@ exactly, with the user's own `claude` (`pathToClaudeCodeExecutable`):
   offline site without `--agent-dir`): the machine is refused with
   `build_unavailable`, saying what each source said, which the UI
   explains (deployment.md, offline sites).
-- A machine that reaches the release when its core does not: its build is
-  checked against the manifest it downloaded itself, integrity only (the
-  core's log says so).
+- A core that cannot reach its release, for a machine that can: the core
+  fetches the manifest through the machine (`ssh -W`), its TLS its own; a
+  machine whose sshd forbids forwarding fails with `build_unavailable`.
 - A kernel without `openat2` (below 5.6) or a container filtering it: a
   link swapped into a directory of a path the agent resolved is followed,
   only the last name is refused (`O_NOFOLLOW`), as with the Go build.
@@ -662,7 +684,10 @@ SECURITY.md has both.
   tool, may not download, its download fails or was tampered with on its
   path; the bounds (a stream without end, a trickle, a gzip bomb); the
   remembered failure and its expiry; the manifest downloaded by the
-  machine when only it reaches the release (integrity only); a manifest
+  machine (an ssh -W stand-in to a TLS server whose certificate a test
+  authority signed) when the release is unreachable from the core, a
+  certificate the core does not trust and an HTTP answer ending there
+  without asking the machine, a machine that does not forward; a manifest
   whose executable is not the archive's (nothing put in place); an offline
   site's directory; no route anywhere (`build_unavailable`); the local
   install of the core's own executable; and a working directory's `.env`

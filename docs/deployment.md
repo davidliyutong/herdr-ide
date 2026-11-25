@@ -354,16 +354,19 @@ The TypeScript build (`MACHINE=ts`,
 executable. A machine that lacks its build first downloads its platform's
 archive from the core's release itself (`curl` or `wget`; the setting
 `machines.download`, or `--machine-download=false`, turns this off, and a
-machine whose download failed is not asked again for a day), checked
-against the release's `SHA256SUMS`, which the core fetches over its own
-HTTPS (through the proxy of `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`).
-Otherwise the core uploads it over ssh, from `--agent-dir`, its cache
-(`~/.veldr/cache/machine/`), its own executable (a machine of its
+machine whose download failed is not asked first again for a day),
+checked against the release's `SHA256SUMS`, which the core fetches over its
+own HTTPS (through the proxy of `HTTPS_PROXY`, `HTTP_PROXY` and
+`NO_PROXY`). Otherwise the core uploads it over ssh, from `--agent-dir`,
+its cache (`~/.veldr/cache/machine/`), its own executable (a machine of its
 platform), or a download from the release on the core host: a core that
-reaches the internet serves machines that do not. When only the machine
-reaches the release, it downloads `SHA256SUMS` too; the core logs that
-deployment as integrity only (a damaged download is refused, one changed
-on the machine's path is not).
+reaches the internet serves machines that do not. A core that cannot reach
+the release (no name, no route) fetches `SHA256SUMS` through the machine
+instead, over `ssh -W` with its own TLS end to end; that needs the
+machine's sshd to allow forwarding (`AllowTcpForwarding`). A core whose
+fetch reaches something it does not trust (a certificate, an HTTP error)
+stops there with `build_unavailable`, and never uses a manifest the machine
+downloaded itself.
 
 For an offline site, put the release's `SHA256SUMS` and the archives
 (`veldr-<os>-<arch>[-musl].tar.gz`, or the executables in them saved as
@@ -468,7 +471,7 @@ host's key and `<run>` the namespace's runtime directory on the host
 
 | Resource | Written | Removed |
 | --- | --- | --- |
-| Agent builds (`~/.veldr/agent/`) | On connect, by content hash: the Go executable, or the TypeScript build's executable (111–131 MiB; the release's archive, 48–58 MiB, downloaded by the machine or uploaded by the core, and unpacked); either is put in place only when the SHA-256 the machine computed is the one expected, which the core checks again. | Unused for 14 days (a running node touches its build's directory every 24 h). A partial download or upload is removed when its script ends: an upload when its input ends (the connection went), a download within its bounds (256 MiB, 5 min); what a killed shell left, by a node's housekeeping after 1 h. |
+| Agent builds (`~/.veldr/agent/`) | On connect, by content hash: the Go executable, or the TypeScript build's executable (111–131 MiB; the release's archive, 48–58 MiB, downloaded by the machine or uploaded by the core, and unpacked); either is put in place only when the SHA-256 the machine computed is the one expected, which the core checks again. | Unused for 14 days (a running node touches its build's directory every 24 h). A partial download or upload (`.upload.<pid>` with its `.in` and `.rc`) is removed when its script ends: an upload when its input ends (the connection went), a download within its bounds (256 MiB, 5 min); what a killed shell left, by a node's housekeeping after 1 h. |
 | Release manifests and archives (`~/.veldr/cache/machine/SHA256SUMS-<version>`, `veldr-<platform>-<digest>.tar.gz`, core host) | The manifest when the core fetches it from its release; an archive when a machine needs one the core neither has in `--agent-dir` nor is (its own platform's), checked against the manifest first. | Unused for 14 days (touched on use); a cached file that is not the build when it is read. |
 | herdr-core executable (`<data>/hosts/<host>/hc/herdr-core`) | First subscription when the machine has another build (`term.install`; not in `--read-only`). A running core is restarted onto it, keeping programs. | Replaced whole by the next install; a partial upload is removed after 1 h. |
 | herdr-core state (`~/.local/state/herdr-core/veldr[-<instance>]-<host id>/`) | By herdr-core. | Kept until the user removes it. |

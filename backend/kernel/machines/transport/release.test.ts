@@ -1,21 +1,37 @@
 // A core's release (release.ts): the manifest from the operator's
 // directory, the cache, the core's own download (through the
-// environment's proxy) or the machine's, refused when it is another
-// build's; what the core uploads from the directory, the cache, its own
-// executable or a download, each checked against the manifest. The
-// executables are fakes; nothing leaves this host (the "release" is a
-// server on loopback, reached through a proxy on loopback).
+// environment's proxy) or, when the release is unreachable, the core's own
+// HTTPS through the machine (a stream to a server on loopback whose
+// certificate a test authority signed, which these tests alone trust:
+// testdata/), refused when it is another build's; never the machine's own
+// download of it. What the core uploads from the directory, the cache, its
+// own executable or a download, each checked against the manifest. The
+// executables are fakes; nothing leaves this host.
 import { afterAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import { connect as netConnect } from 'node:net';
+import { Duplex } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { archiveMember, archiveName, bareName } from './builds.ts';
 import { deployCode } from './errors.ts';
-import { CACHE_RETENTION_MS, ownGz, parseSums, Release, SUMS, type OwnExecutable } from './release.ts';
+import { CACHE_RETENTION_MS, ownFile, ownGz, parseSums, Release, SUMS, unreachable, type OwnExecutable } from './release.ts';
 
 const dirs: string[] = [];
 const servers: Server[] = [];
@@ -80,6 +96,37 @@ test('parseSums reads sha256sum lines, text and binary mode', () => {
   ]);
 });
 
+/** The test authority and the certificate of releases.test it signed
+ * (testdata/, for tests only; the authority's key was not kept). */
+const TEST_CA = readFileSync(join(import.meta.dir, 'testdata', 'test-ca.pem'));
+const TLS = {
+  cert: readFileSync(join(import.meta.dir, 'testdata', 'test-release.pem')),
+  key: readFileSync(join(import.meta.dir, 'testdata', 'test-release-key.pem')),
+};
+
+/** A release on loopback over TLS (releases.test's certificate), and a
+ * tunnel to it that records where it was asked to go. */
+async function tlsRelease(files: Record<string, string>) {
+  const hits: string[] = [];
+  const srv = createHttpsServer(TLS, (req, res) => {
+    hits.push(req.url ?? '');
+    const body = files[(req.url ?? '').replace(/^\/v1\//, '')];
+    if (body === undefined) return void res.writeHead(404).end();
+    res.writeHead(200, { 'content-length': Buffer.byteLength(body) }).end(body);
+  });
+  servers.push(srv as unknown as Server);
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const port = (srv.address() as { port: number }).port;
+  return {
+    port,
+    hits,
+    open: (opened: string[]) => async (host: string, p: number) => {
+      opened.push(`${host}:${p}`);
+      return netConnect(port, '127.0.0.1');
+    },
+  };
+}
+
 describe('the manifest', () => {
   test("is the release's, fetched by the core and cached per version; the next core reads the cache", async () => {
     const r = await release({ [SUMS]: sums() });
@@ -88,7 +135,6 @@ describe('the manifest', () => {
     expect(await rel.digests(KEY)).toEqual({
       exe: sha256(EXE),
       archive: sha256(ARCHIVE),
-      integrityOnly: false,
       source: `${r.url}/${SUMS}`,
     });
     expect(r.hits).toEqual([`/v1/${SUMS}`]);
@@ -122,22 +168,87 @@ describe('the manifest', () => {
     expect((await new Release({ version: 'v1', dir: ok, cacheDir: temp(), own: ownOther() }).digests(KEY)).exe).toBe(sha256(EXE));
   });
 
-  test("when only the machine reaches the release, the machine's download: integrity only, and not cached", async () => {
+  test("an unreachable release: the core's own HTTPS through the machine, verified against the release's host name, then cached", async () => {
+    const t = await tlsRelease({ [SUMS]: sums() });
     const cacheDir = temp();
-    const rel = new Release({ version: 'v1', url: 'http://127.0.0.1:9/v1', cacheDir });
-    const asked: string[] = [];
-    const d = await rel.digests(KEY, { viaHost: async (url) => (asked.push(url), sums()) });
-    expect(asked).toEqual([`http://127.0.0.1:9/v1/${SUMS}`]);
-    expect(d.integrityOnly).toBe(true);
-    expect(existsSync(join(cacheDir, `${SUMS}-v1`))).toBe(false);
+    const rel = new Release({ version: 'v1', url: 'https://releases.test/v1', cacheDir, tunnelCA: TEST_CA });
+    const opened: string[] = [];
+    const d = await rel.digests(KEY, { tunnel: t.open(opened) });
+    expect(d).toEqual({ exe: sha256(EXE), archive: sha256(ARCHIVE), source: 'https://releases.test/v1/SHA256SUMS (through the machine)' });
+    expect(opened).toEqual(['releases.test:443']);
+    expect(t.hits).toEqual(['/v1/SHA256SUMS']);
+    expect(readFileSync(join(cacheDir, `${SUMS}-v1`), 'utf8')).toBe(sums());
+    // Without the test authority (the default ones) the server is refused.
+    const e = await new Release({ version: 'v1', url: 'https://releases.test/v1', cacheDir: temp() })
+      .digests(KEY, { tunnel: t.open([]) })
+      .catch((x) => x as Error);
+    expect(deployCode(e)).toBe('build_unavailable');
+    expect((e as Error).message).toContain('through the machine either');
   });
 
-  test('the core does not try again for 10 minutes after its download failed; nothing anywhere: build_unavailable, saying what was tried', async () => {
+  test('a fetch that reached something (a certificate the core does not trust, an HTTP answer) does not ask the machine', async () => {
+    const t = await tlsRelease({ [SUMS]: sums() });
+    for (const url of [`https://127.0.0.1:${t.port}/v1`, (await release({})).url]) {
+      const asked: string[] = [];
+      const e = await new Release({ version: 'v1', url, cacheDir: temp(), tunnelCA: TEST_CA })
+        .digests(KEY, { tunnel: t.open(asked) })
+        .catch((x) => x as Error);
+      expect(deployCode(e)).toBe('build_unavailable');
+      expect((e as Error).message).toContain('the core could not download');
+      expect(asked).toEqual([]);
+    }
+  });
+
+  test('a machine whose ssh does not forward: build_unavailable, saying so', async () => {
+    const logged: string[] = [];
+    const rel = new Release({ version: 'v1', url: 'https://releases.test/v1', cacheDir: temp(), logger: (l) => logged.push(l) });
+    const e = await rel
+      .digests(KEY, {
+        tunnel: async () => {
+          // A stream that takes what is written and gives nothing back, then
+          // fails as ssh -W does when the machine forbids forwarding.
+          const d = new Duplex({ read() {}, write: (_c, _e, cb) => cb() });
+          setImmediate(() =>
+            d.destroy(new Error('ssh -W releases.test:443: channel 0: open failed: administratively prohibited: open failed')),
+          );
+          return d;
+        },
+      })
+      .catch((x) => x as Error);
+    expect(deployCode(e)).toBe('build_unavailable');
+    expect((e as Error).message).toContain('administratively prohibited');
+    expect(logged.join('\n')).toContain('AllowTcpForwarding');
+  });
+
+  test('which failed fetches found the release unreachable', () => {
+    for (const e of [
+      Object.assign(new TypeError('getaddrinfo ENOTFOUND x'), { code: 'ENOTFOUND' }),
+      Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }),
+      Object.assign(new TypeError('fetch failed'), { cause: { code: 'EHOSTUNREACH' } }),
+      Object.assign(new TypeError('fetch failed'), { cause: { errors: [{ code: 'ENETUNREACH' }] } }),
+      new DOMException('timed out', 'TimeoutError'),
+    ])
+      expect(unreachable(e)).toBe(true);
+    for (const e of [
+      Object.assign(new TypeError('unable to verify'), { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' }),
+      Object.assign(new TypeError('fetch failed'), { cause: { code: 'ERR_TLS_CERT_ALTNAME_INVALID' } }),
+      new Error('https://x/SHA256SUMS: 404'),
+      Object.assign(new TypeError('fetch failed'), { cause: { code: 0, message: 'Request was cancelled.' } }),
+    ])
+      expect(unreachable(e)).toBe(false);
+  });
+
+  test('two lines naming one file with different digests make no manifest', () => {
+    expect(() => parseSums(`${'a'.repeat(64)}  x\n${'a'.repeat(64)}  x\n`)).not.toThrow();
+    expect(() => parseSums(`${'a'.repeat(64)}  x\n${'b'.repeat(64)}  x\n`)).toThrow(/twice/);
+  });
+
+  test('the core does not try again for 10 minutes after the release was unreachable; nothing anywhere: build_unavailable, saying what was tried', async () => {
     let now = 0;
-    const rel = new Release({ version: 'v1', url: 'http://127.0.0.1:9/v1', cacheDir: temp(), now: () => now });
+    const rel = new Release({ version: 'v1', url: 'http://127.0.0.1:1/v1', cacheDir: temp(), now: () => now });
     const e = await rel.digests(KEY).catch((x) => x as Error);
     expect(deployCode(e)).toBe('build_unavailable');
-    expect((e as Error).message).toContain('the core could not download');
+    expect((e as Error).message).toContain('the core cannot reach');
     expect((e as Error).message).toContain('--agent-dir');
     now += 60_000;
     expect(((await rel.digests(KEY).catch((x) => x)) as Error).message).toContain('lately');
@@ -224,6 +335,24 @@ describe('what the core uploads', () => {
     expect((e as Error).message).toContain('is not the release');
     expect(existsSync(join(cacheDir, `${bareName(KEY)}-${d.exe.slice(0, 16)}.tar.gz`))).toBe(false);
     expect(existsSync(old)).toBe(false);
+  });
+
+  test("the core's own executable is the running one: a file put at its path since is not taken for it", async () => {
+    const d = temp();
+    const path = join(d, 'core');
+    writeFileSync(path, OWN_EXE);
+    const fd = openSync(path, 'r');
+    try {
+      const own = ownFile(OTHER, fd);
+      // An upgrade in place: another file renamed over the path.
+      writeFileSync(join(d, 'new'), Buffer.from('a newer core'));
+      renameSync(join(d, 'new'), path);
+      expect(await own.digest()).toBe(sha256(OWN_EXE));
+      expect(gunzipSync(await own.gz())).toEqual(OWN_EXE);
+      expect(await own.digest()).toBe(sha256(OWN_EXE));
+    } finally {
+      closeSync(fd);
+    }
   });
 
   test("the core's own executable for a machine of its platform, when it is the build; one load for machines deployed at once", async () => {

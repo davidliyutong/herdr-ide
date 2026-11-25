@@ -81,11 +81,16 @@ describe('housekeeping follows no link', () => {
     const agents = join(h.home, 'a', 'agent');
     const v = join(agents, 'v1');
     mkdirSync(v, { recursive: true });
-    for (const f of ['.upload.123', 'veldr.upload.77', 'veldr', '.upload.new']) writeFileSync(join(v, f), '');
+    for (const f of ['.upload.123', '.upload.123.in', '.upload.123.rc', 'veldr.upload.77', 'veldr', '.upload.new', '.upload.12.inx'])
+      writeFileSync(join(v, f), '');
     writeFileSync(join(v, '.upload.456'), '');
-    for (const f of ['.upload.123', 'veldr.upload.77', 'veldr', '.upload.new']) age(join(v, f), 2 * 60 * 60_000);
+    for (const f of ['.upload.123', '.upload.123.in', '.upload.123.rc', 'veldr.upload.77', 'veldr', '.upload.new', '.upload.12.inx'])
+      age(join(v, f), 2 * 60 * 60_000);
     await pruneStaged([agents], Date.now() - 60 * 60_000, discard);
     expect(existsSync(join(v, '.upload.123'))).toBe(false);
+    expect(existsSync(join(v, '.upload.123.in'))).toBe(false);
+    expect(existsSync(join(v, '.upload.123.rc'))).toBe(false);
+    expect(existsSync(join(v, '.upload.12.inx'))).toBe(true);
     expect(existsSync(join(v, 'veldr.upload.77'))).toBe(false);
     expect(existsSync(join(v, 'veldr'))).toBe(true);
     expect(existsSync(join(v, '.upload.new'))).toBe(true);

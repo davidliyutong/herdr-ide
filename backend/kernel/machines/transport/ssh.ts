@@ -2,14 +2,25 @@
 // build when it is missing and reaches the machine's node of that build over
 // stdio (`node dial`, which starts the node when none answers). ssh is the
 // system's own, with a ControlMaster per instance (controldir.ts).
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
+import { Duplex, PassThrough } from 'node:stream';
 import { execa } from 'execa';
 import { AGENT_DIR, CORE_BIN, NAME } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
-import { FOREIGN_RUNTIME_VARS } from '#shared/lib/bunenv.ts';
-import { archiveMember, tsVersion, type BuildSource, type MachineBuild, type MachineTarget, type TSBuild } from './builds.ts';
-import { MAX_ARCHIVE, MAX_EXECUTABLE, MAX_SUMS } from './release.ts';
-import { deployCode } from './errors.ts';
+import { UNSET_FOREIGN_RUNTIME_VARS } from '#shared/lib/bunenv.ts';
+import {
+  archiveMember,
+  tsVersion,
+  type BuildSource,
+  type MachineBuild,
+  type MachineTarget,
+  type TSBuild,
+  type TSPayload,
+} from './builds.ts';
+import { MAX_ARCHIVE, MAX_EXECUTABLE } from './release.ts';
+import type { OpenStream } from './tunnel.ts';
+import { DeployCode, deployCode } from './errors.ts';
 import { CLIENT_ID, Session } from './session.ts';
 
 /** ssh could not authenticate without the user. */
@@ -306,28 +317,34 @@ const cleanup = (files: string, extra = '') => `trap 'rm -f ${files}${extra}' EX
  * has. */
 const SUM = `sum() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1" 2>/dev/null || openssl dgst -sha256 -r "$1"; } | cut -d' ' -f1; }`;
 
+/** The lines that run a pipeline in the background ending in "| head …
+ * > file" and wait for it, ending it after limitS seconds (the watchdog
+ * ends head, after which the pipeline's next write fails). They run with w
+ * set (prelude). */
+const bounded = (pipeline: string, limitS: number, what: string): string[] => [
+  `${pipeline} & p=$!`,
+  `( i=0; while [ $i -lt ${limitS} ]; do sleep 1; kill -0 $p 2>/dev/null || exit 0; i=$((i+1)); done; echo "${what} took more than ${limitS} s" >&2; kill $p 2>/dev/null ) & w=$!`,
+  `wait $p; kill $w 2>/dev/null; w=`,
+];
+
 /** The lines that download url into "$t.in": at most cap bytes (head), with
  * curl, else wget (status 4 with neither), each without its user's
- * configuration (curl -q; an empty WGETRC, GNU wget's --no-config where it
- * has it), over the URL's scheme only (curl --proto, GNU wget's
- * --https-only where it has it), one try, few redirects, 10 s to connect;
- * a watchdog ends it after limitS seconds in all, whatever the tool (wget's
- * -T bounds one read only). It runs with "$t", "$t.in", "$t.rc" and w set
- * (downloadPrelude). */
+ * configuration (curl -q first, so no .curlrc applies; an empty WGETRC, GNU
+ * wget's --no-config where it has it), one try, few redirects, 10 s to
+ * connect; curl keeps to the URL's scheme, redirects included (--proto,
+ * --proto-redir); wget may follow a redirect to another scheme, which only
+ * the archive's digest then answers for. A watchdog ends it after limitS
+ * seconds in all, whatever the tool (wget's -T bounds one read only). */
 function fetchInto(url: string, cap: number, limitS: number): string[] {
   const scheme = new URL(url).protocol.replace(/:$/, '');
   if (scheme !== 'https' && scheme !== 'http') throw new Error(`not a download URL: ${url}`);
   return [
     `if command -v curl >/dev/null 2>&1; then set -- curl -q -fsSL --proto =${scheme} --proto-redir =${scheme} --max-filesize ${cap} --max-redirs 5 --connect-timeout 10 --max-time ${limitS}`,
-    `elif command -v wget >/dev/null 2>&1; then set -- wget -q -T 10 -O -; if wget --version 2>/dev/null | grep -q 'GNU Wget'; then set -- "$@" -t 1 --max-redirect=5; wget --help 2>&1 | grep -q -- --no-config && set -- "$@" --no-config; ${scheme === 'https' ? `wget --help 2>&1 | grep -q -- --https-only && set -- "$@" --https-only; ` : ''}fi`,
+    `elif command -v wget >/dev/null 2>&1; then set -- wget -q -T 10 -O -; if wget --version 2>/dev/null | grep -q 'GNU Wget'; then set -- "$@" -t 1 --max-redirect=5; wget --help 2>&1 | grep -q -- --no-config && set -- "$@" --no-config; fi`,
     `else echo "no curl or wget" >&2; exit 4; fi`,
-    // The download, bounded by size (head) and by time (the watchdog ends
-    // head, after which the tool's next write fails; wget's -T and curl's
-    // --max-time end a silent one).
-    `: > "$t.rc"; WGETRC="$t.rc" "$@" ${shQuote(url)} | head -c ${cap + 1} > "$t.in" & p=$!`,
-    `( i=0; while [ $i -lt ${limitS} ]; do sleep 1; kill -0 $p 2>/dev/null || exit 0; i=$((i+1)); done; echo "the download took more than ${limitS} s" >&2; kill $p 2>/dev/null ) & w=$!`,
-    `wait $p; kill $w 2>/dev/null; w=`,
-    `n=$(wc -c < "$t.in" | tr -d ' '); [ "$n" -le ${cap} ] || { echo "${url} is larger than ${cap} bytes" >&2; exit 3; }`,
+    `: > "$t.rc"`,
+    ...bounded(`WGETRC="$t.rc" "$@" ${shQuote(url)} | head -c ${cap + 1} > "$t.in"`, limitS, 'the download'),
+    `n=$(wc -c < "$t.in" | tr -d ' '); [ "$n" -le ${cap} ] || { echo "the download is larger than ${cap} bytes" >&2; exit 3; }`,
   ];
 }
 
@@ -336,16 +353,20 @@ function fetchInto(url: string, cap: number, limitS: number): string[] {
 const prelude = (dir: string) =>
   `umask 077; d="${dir}"; t="$d/.upload.$$"; w=; ${cleanup('"$t" "$t.in" "$t.rc"', '; [ -z "$w" ] || kill $w 2>/dev/null')}; ${SUM}; mkdir -p "$d" || exit 3`;
 
+/** How long unpacking may take. */
+const UNPACK_LIMIT_S = 120;
+
 /** The script that installs a TypeScript build as dir/name from the
  * release's archive (archive: its SHA-256 and the executable's path in it)
  * or the executable gzip-compressed, read from standard input (the core's
  * upload) or downloaded from url by the machine itself (fetchInto). An
- * archive is unpacked only when its SHA-256 is the manifest's; the
- * executable is put in place only when its SHA-256, computed on the
- * machine, is exe (else it is removed and the script fails with status 3);
- * the script prints it, which the core checks again. Its files are removed
- * when it ends (an upload ends with its input); what a killed shell
- * leaves, the nodes' housekeeping removes after an hour. */
+ * archive is unpacked only when its SHA-256 is the manifest's, within
+ * UNPACK_LIMIT_S; the executable is put in place only when its SHA-256,
+ * computed on the machine, is exe (else it is removed and the script fails
+ * with status 3; status 4: no tool to download with); the script prints
+ * it, which the core checks again. Its files are removed when it ends (an
+ * upload ends with its input); what a killed shell leaves, the nodes'
+ * housekeeping removes after an hour. */
 export function installScript(o: {
   dir: string;
   name: string;
@@ -363,19 +384,46 @@ export function installScript(o: {
   if (o.archive)
     lines.push(
       `s=$(sum "$t.in"); [ "$s" = "${o.archive.digest}" ] || { echo "the archive's sha256 $s is not the release's ${o.archive.digest}" >&2; exit 3; }`,
-      `gunzip -c "$t.in" | tar -xf - -O ${shQuote(o.archive.member)} | head -c ${MAX_EXECUTABLE + 1} > "$t"`,
+      ...bounded(
+        `gunzip -c "$t.in" | tar -xf - -O ${shQuote(o.archive.member)} | head -c ${MAX_EXECUTABLE + 1} > "$t"`,
+        UNPACK_LIMIT_S,
+        'unpacking',
+      ),
     );
-  else lines.push(`gunzip -c "$t.in" | head -c ${MAX_EXECUTABLE + 1} > "$t"`);
+  else lines.push(...bounded(`gunzip -c "$t.in" | head -c ${MAX_EXECUTABLE + 1} > "$t"`, UNPACK_LIMIT_S, 'unpacking'));
   lines.push(
     `s=$(sum "$t") && echo "@sha256=$s" && [ "$s" = "${o.exe}" ] && chmod 700 "$t" && mv -f "$t" "$d/${o.name}" || { echo "sha256 \${s:-unknown}, expected ${o.exe}" >&2; exit 3; }`,
   );
   return lines.join('\n');
 }
 
-/** The script with which a machine downloads a small file (the release's
- * manifest) and prints it, bounded as the archive's download is. */
-export function fetchTextScript(url: string, cap = MAX_SUMS, limitS = 60): string {
-  return [prelude('$HOME'), ...fetchInto(url, cap, limitS), `cat "$t.in"`].join('\n');
+/** A stream to host:port through the target (`ssh -W`, over the control
+ * master when there is one; a core without one, on Windows, opens a
+ * connection of its own, non-interactively): for the core's HTTPS through
+ * the machine (tunnel.ts). It fails with ssh's words when the machine's
+ * sshd forbids forwarding (AllowTcpForwarding no). */
+export function sshTunnel(o: Pick<SSHOptions, 'controlDir' | 'target'>): OpenStream {
+  return async (host, port) => {
+    const p = spawn('ssh', [...sshArgs(o.controlDir, true), '-W', `${host}:${port}`, '--', o.target], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let err = '';
+    p.stderr!.setEncoding('utf8').on('data', (c: string) => (err = (err + c).slice(-2000)));
+    // The stream ends once ssh did, with ssh's words when it failed (its
+    // output may end before its status is known).
+    const out = new PassThrough();
+    p.stdout!.pipe(out, { end: false });
+    // Node's Duplex.from takes a pair of streams (its types name web streams only).
+    const d = Duplex.from({ readable: out, writable: p.stdin! } as unknown as Parameters<typeof Duplex.from>[0]);
+    p.once('error', (e) => d.destroy(e));
+    p.once('close', (code) => {
+      if (code) d.destroy(new Error(`ssh -W ${host}:${port}: ${err.trim() || `exit status ${code}`}`));
+      else out.end();
+    });
+    d.once('close', () => p.kill());
+    return d;
+  };
 }
 
 /** Builds used by other cores are kept until unused for 14 days (running
@@ -383,54 +431,62 @@ export function fetchTextScript(url: string, cap = MAX_SUMS, limitS = 60): strin
 const PRUNE = `find "$HOME/${AGENT_DIR}" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null; true`;
 
 /** What a TypeScript build's install does when the machine lacks it: the
- * digests from the release's manifest (release.ts; the machine downloads
- * the manifest when only it can); the machine downloads the release's
- * archive itself when it may (machineDownload, no failure within the last
- * day) and the build has a release; else, or when that fails, the core
- * uploads the archive or its own executable (release.ts). Each is checked
- * on the machine before it is put in place (installScript). */
+ * digests from the release's manifest, which the core verified itself
+ * (release.ts; through the machine with its own TLS when the release is
+ * unreachable from the core); the machine downloads the release's archive
+ * itself when it may (machineDownload) and the build has a release; else,
+ * or when that fails, the core uploads the archive or its own executable
+ * (release.ts). A machine whose download failed within the last day gets
+ * the upload first, and is asked to download again only when the core has
+ * nothing to upload. Each is checked on the machine before it is put in
+ * place (installScript). */
 async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?: AbortSignal): Promise<string> {
-  const mayDownload = o.machineDownload !== false && !o.downloadFailures?.recent(o.target);
-  const viaHost = mayDownload
-    ? async (url: string) => {
-        o.logger(`ssh ${o.target}: the core cannot reach the release; the machine downloads ${url}`);
-        return run(o, fetchTextScript(url), { timeoutMs: 120_000, signal });
-      }
-    : undefined;
-  const d = await b.digests({ ...(signal ? { signal } : {}), ...(viaHost ? { viaHost } : {}) });
-  if (d.integrityOnly)
-    o.logger(
-      `ssh ${o.target}: integrity only: the build is checked against the ${'SHA256SUMS'} the machine downloaded, which tells a damaged download, not one changed on the machine's path`,
-    );
+  const allowed = o.machineDownload !== false;
+  const d = await b.digests({ ...(signal ? { signal } : {}), ...(allowed ? { tunnel: sshTunnel(o) } : {}) });
   const version = tsVersion(d.exe);
   const dir = `$HOME/${AGENT_DIR}/${version}`;
   const there = await run(o, `[ -x "${dir}/${CORE_BIN}" ] && echo @build; true`, { timeoutMs: 30_000, signal });
   if (/^@build$/m.test(there)) return `${dir}/${CORE_BIN}`;
   const confirmed = (out: string) => out.split('\n').includes(`@sha256=${d.exe}`);
   const archive = d.archive ? { digest: d.archive, member: archiveMember(b.key) } : undefined;
-  if (b.url && archive && o.machineDownload !== false && o.downloadFailures?.recent(o.target))
-    o.logger(`ssh ${o.target}: the machine's own download failed within the last day; the core uploads its build`);
-  else if (b.url && archive && o.machineDownload !== false) {
+  const canDownload = !!(b.url && archive && allowed);
+  /** The machine's own download; whether it put the build in place. */
+  const download = async (): Promise<boolean> => {
     o.logger(`ssh ${o.target}: the machine downloads its build ${version} (${platform.os}/${platform.arch}) from ${b.url}`);
+    let out: string;
     try {
-      const out = await run(o, `${installScript({ dir, name: CORE_BIN, exe: d.exe, archive, url: b.url })}\n${PRUNE}`, {
-        timeoutMs: (machineDownloadLimitS + 60) * 1000,
+      out = await run(o, `${installScript({ dir, name: CORE_BIN, exe: d.exe, archive: archive!, url: b.url! })}\n${PRUNE}`, {
+        timeoutMs: (machineDownloadLimitS + UNPACK_LIMIT_S + 60) * 1000,
         signal,
       });
-      // The core checks what the machine computed, too.
-      if (confirmed(out)) {
-        o.downloadFailures?.success(o.target);
-        return `${dir}/${CORE_BIN}`;
-      }
-      o.downloadFailures?.failure(o.target);
-      o.logger(`ssh ${o.target}: the machine did not confirm its build's sha256; the core uploads it`);
     } catch (e) {
       if (signal?.aborted) throw e;
-      o.downloadFailures?.failure(o.target);
-      o.logger(`ssh ${o.target}: the machine could not download its build (${(e as Error).message.trim()}); the core uploads it`);
+      // Only the download's own failures (the script's status 3 and 4) are
+      // remembered, not the connection's.
+      if (/exit status [34]\b/.test((e as Error).message)) o.downloadFailures?.failure(o.target);
+      o.logger(`ssh ${o.target}: the machine could not download its build (${(e as Error).message.trim()})`);
+      return false;
     }
+    // The core checks what the machine computed, too.
+    if (confirmed(out)) {
+      o.downloadFailures?.success(o.target);
+      return true;
+    }
+    o.downloadFailures?.failure(o.target);
+    o.logger(`ssh ${o.target}: the machine did not confirm its build's sha256`);
+    return false;
+  };
+  const remembered = canDownload && !!o.downloadFailures?.recent(o.target);
+  if (canDownload && !remembered && (await download())) return `${dir}/${CORE_BIN}`;
+  if (remembered) o.logger(`ssh ${o.target}: the machine's own download failed within the last day; the core uploads its build`);
+  let p: TSPayload;
+  try {
+    p = await b.load(d, signal);
+  } catch (e) {
+    // Nothing to upload: the machine is asked again after all.
+    if (remembered && deployCode(e) === DeployCode.BuildUnavailable && (await download())) return `${dir}/${CORE_BIN}`;
+    throw e;
   }
-  const p = await b.load(d, signal);
   o.logger(
     `ssh ${o.target}: uploading the machine build ${version} (${platform.os}/${platform.arch}, ${p.kind === 'archive' ? 'the release archive' : 'the executable'}, ${p.bytes.length} bytes)`,
   );
@@ -507,7 +563,7 @@ export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ se
 
   const p = execa(
     'ssh',
-    runArgs(o, `unset ${FOREIGN_RUNTIME_VARS.join(' ')}; exec "${remotePath}" node dial --instance '${o.instance}' --client ${CLIENT_ID}`),
+    runArgs(o, `${UNSET_FOREIGN_RUNTIME_VARS}; exec "${remotePath}" node dial --instance '${o.instance}' --client ${CLIENT_ID}`),
     {
       ...SSH_OPTIONS,
       buffer: false,

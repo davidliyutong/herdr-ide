@@ -4,6 +4,7 @@
 // development flags --agent-dir, --ext-dir and --web-dir come first. A
 // development run from the sources (`make dev-core`) has no archive and
 // reads what scripts/build.sh staged in the repository's dist/payload.
+import { openSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirFiles, layered, payloads, type Files, type Payloads } from '#kernel/payloads.ts';
 
@@ -30,6 +31,15 @@ async function embedded(): Promise<{ files: Files; web: Files } | null> {
   };
 }
 
+/** The running executable, opened once: on Linux the running image
+ * itself, elsewhere the file at its path when the program started (a file
+ * put there since, by an upgrade in place, is not it). */
+let ownFd: number | undefined;
+function ownExecutable(): number {
+  ownFd ??= openSync(process.platform === 'linux' ? '/proc/self/exe' : process.execPath, 'r');
+  return ownFd;
+}
+
 export async function openPayloads(o: {
   agentDir: string;
   extDir: string;
@@ -50,6 +60,6 @@ export async function openPayloads(o: {
     agentDir: o.agentDir || undefined,
     ...(o.logger ? { logger: o.logger } : {}),
     // The running executable is the machine build of its platform.
-    ...(Bun.isStandaloneExecutable ? { ownFile: process.execPath } : {}),
+    ...(Bun.isStandaloneExecutable ? { ownFd: ownExecutable() } : {}),
   });
 }
