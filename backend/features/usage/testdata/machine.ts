@@ -117,7 +117,7 @@ export class FakeAPI {
 }
 
 /** The machine as the readers see it in a test: home, its data directory
- * home/.app, no environment, Linux, uid 501, the tests' clock, programs
+ * home/.app, no environment, Linux, this user, the tests' clock, programs
  * that are not there and endpoints that answer nothing (or api's). */
 export function testEnv(home: string, o: Partial<UsageEnv> & { api?: FakeAPI } = {}): UsageEnv {
   const { api, ...rest } = o;
@@ -126,7 +126,7 @@ export function testEnv(home: string, o: Partial<UsageEnv> & { api?: FakeAPI } =
     base: join(home, '.app'),
     env: {},
     platform: 'linux',
-    uid: 501,
+    uid: process.getuid?.() ?? -1,
     now: () => TEST_NOW,
     urls: api
       ? api.urls()

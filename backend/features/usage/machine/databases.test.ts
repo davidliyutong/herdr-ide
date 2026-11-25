@@ -2,16 +2,31 @@
 // their steps and generations priced as the spend prices them, read again
 // when they or their write-ahead log change (a writer's commits that are
 // only in its log included), read without making a file when they have no
-// log, a damaged one, one at a FIFO's name and one past a bound failing
-// the read (or skipped) without holding the scan; the protobuf blobs of
-// Antigravity decoded without trusting their lengths.
+// log, a damaged one, one at a FIFO's or a link's name (also its log's,
+// index's or journal's), one of another user and one past a bound failing
+// the read (or skipped) without holding the scan or the node, a FIFO
+// swapped in holding the worker only; the protobuf blobs of Antigravity
+// decoded without trusting their lengths.
 import { afterAll, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  openSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { removeHomes, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
-import { parseGen, parseStepTime, parseTrajectory, protoFields, readOpenCode } from './databases.ts';
+import { DB_LIMITS, parseGen, parseStepTime, parseTrajectory, protoFields, readAntigravity, readOpenCode } from './databases.ts';
+import { NO_ANSWER, SQLiteWorker } from './sqlworker.ts';
 import { modelPricing, tierCost, tierOf } from './pricing.ts';
 import { CostScanner, type CostOptions, type CostReport } from './scan.ts';
 
@@ -211,16 +226,16 @@ describe('OpenCode', () => {
     const p = join(home, 'opencode.db');
     openCodeDB(p).close();
     for (const f of [`${p}-wal`, `${p}-shm`]) expect(() => statSync(f)).toThrow();
-    const recs = await readOpenCode(p, since, new AbortController().signal);
+    const recs = await readOpenCode(p, since, { signal: new AbortController().signal });
     expect(recs).toHaveLength(14);
     expect(readdirSync(home)).toEqual(['opencode.db']);
   });
 
   test('past a bound the read fails (too_large) and the last records stay; damaged; a FIFO is skipped without waiting', async () => {
     const { home, p, e } = openCodeHome();
-    const s = new CostScanner(e.base, { openCodeRecords: 100, antigravityRecords: 100 });
+    const s = new CostScanner(e.base, { ...DB_LIMITS, openCodeRecords: 100, antigravityRecords: 100 });
     expect((await s.scan(e, { since, providers: ['opencode'] })).rows!.length).toBeGreaterThan(0);
-    const small = new CostScanner(e.base, { openCodeRecords: 2, antigravityRecords: 100 });
+    const small = new CostScanner(e.base, { ...DB_LIMITS, openCodeRecords: 2, antigravityRecords: 100 });
     utimesSync(p, new Date(), new Date(Date.now() + 5000));
     const rep = await small.scan(e, { since, providers: ['opencode'] });
     expect(rep.failed).toEqual(['opencode:too_large']);
@@ -235,6 +250,92 @@ describe('OpenCode', () => {
     const r = await s.scan({ ...e, env: { OPENCODE_DB: fifo } }, { since, providers: ['opencode'] });
     expect(r.rows).toEqual([]);
     expect(Date.now() - start).toBeLessThan(5000);
+  });
+
+  /** Runs read while the node's other work goes on: what it gave, the
+   * ticks a timer made meanwhile, and how long it took. */
+  async function meanwhile<T>(read: () => Promise<T>): Promise<{ out: T | Error; ticks: number; ms: number }> {
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 10);
+    const start = Date.now();
+    let out: T | Error;
+    try {
+      out = await read();
+    } catch (e) {
+      out = e as Error;
+    } finally {
+      clearInterval(timer);
+    }
+    return { out, ticks, ms: Date.now() - start };
+  }
+
+  for (const side of ['-wal', '-shm', '-journal']) {
+    test(`a FIFO at the database’s ${side}: the read fails at once, the scan skips it, the node goes on`, async () => {
+      const { home, p, e } = openCodeHome();
+      execFileSync('/usr/bin/mkfifo', [`${p}${side}`]);
+      const signal = new AbortController().signal;
+      const r = await meanwhile(() => readOpenCode(p, since, { signal }));
+      expect(r.out).toMatchObject({ code: 'unreadable' });
+      expect(r.ms).toBeLessThan(5000);
+      // Another request is answered meanwhile.
+      const other = await meanwhile(() => stat(home));
+      expect(other.out).toBeTruthy();
+      const ag = join(home, '.gemini/antigravity/conversations/c.db');
+      write(ag, '');
+      conversation(ag);
+      execFileSync('/usr/bin/mkfifo', [`${ag}${side}`]);
+      expect((await meanwhile(() => readAntigravity(ag, since, 0, { signal }))).out).toMatchObject({ code: 'unreadable' });
+      const rep = await new CostScanner(e.base).scan(e, { since, providers: ['opencode', 'antigravity'] });
+      expect([rep.files, rep.rows, rep.failed]).toEqual([0, [], undefined]);
+    });
+  }
+
+  test('a link at the database’s or its log’s name, a file of another user: not read', async () => {
+    const { home, p } = openCodeHome();
+    const signal = new AbortController().signal;
+    const uid = process.getuid!();
+    expect(await readOpenCode(p, since, { signal, uid })).toHaveLength(14);
+    await expect(readOpenCode(p, since, { signal, uid: uid + 1 })).rejects.toMatchObject({ code: 'unreadable' });
+    const link = join(home, 'link.db');
+    symlinkSync(p, link);
+    await expect(readOpenCode(link, since, { signal, uid })).rejects.toMatchObject({ code: 'unreadable' });
+    writeFileSync(join(home, 'elsewhere'), '');
+    symlinkSync(join(home, 'elsewhere'), `${p}-wal`);
+    await expect(readOpenCode(p, since, { signal, uid })).rejects.toMatchObject({ code: 'unreadable' });
+  });
+
+  test('a FIFO swapped in after the check holds the worker, never the node: no answer in time, the worker ended', async () => {
+    const home = tempHome();
+    const p = join(home, 'a.db');
+    const db = new DatabaseSync(p);
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('CREATE TABLE message (id text, time_created integer, data text)');
+    db.close();
+    // As if swapped in after it was looked at: SQLite opens it by name.
+    rmSync(`${p}-wal`, { force: true });
+    rmSync(`${p}-shm`, { force: true });
+    const fifo = `${p}-wal`;
+    execFileSync('/usr/bin/mkfifo', [fifo]);
+    const worker = new SQLiteWorker(500);
+    const signal = new AbortController().signal;
+    try {
+      const r = await meanwhile(async () => {
+        const opened = await worker.request({ op: 'open', path: p }, signal);
+        if (!opened.ok) return opened;
+        return worker.request({ op: 'all', sql: 'SELECT count(*) AS n FROM message', params: [] }, signal);
+      });
+      expect(r.out).toEqual({ ok: false, errcode: NO_ANSWER });
+      expect(r.ticks).toBeGreaterThan(10);
+      expect(worker.running).toBe(false);
+    } finally {
+      worker.close();
+      // The thread waiting in open() for a writer gets one, and ends.
+      try {
+        closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+      } catch {
+        // no reader left
+      }
+    }
   });
 
   test('its databases: every channel’s, or $OPENCODE_DB; none in memory', async () => {

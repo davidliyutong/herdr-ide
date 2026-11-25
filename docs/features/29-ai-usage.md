@@ -167,10 +167,15 @@ differs in three ways:
 The node serves every core on one thread, so the TypeScript scan never
 holds it for long: logs are read with `fs/promises` in chunks of 1 MiB,
 each chunk's lines parsed before the next read (a line is at most
-16 MiB), the databases a slice of 256 rows at a time, and the summing
-yields every 8 ms. A Worker would take the parsing off the thread too,
-but needs its own entrypoint in the compiled executable, its own copy of
-the cache and a protocol to the node, for scans that run a few times an
+16 MiB), and the summing yields every 8 ms. The databases are read in a
+worker thread (below), whose rows come back in batches of at most 256 rows
+or about 1 MiB. Only SQLite runs in the worker, which is a short script
+started from a Blob (no entrypoint of its own in the compiled executable):
+SQLite's opens and reads are synchronous and by name, where an open waits
+for a FIFO's writer or a mount that stopped answering. The logs' reading
+and parsing, the cache and the summing stay on the thread: their opens and
+reads are asynchronous, and moving them would give the worker its own copy
+of the cache and a protocol to the node, for scans that run a few times an
 hour.
 
 #### One session's usage
@@ -249,8 +254,19 @@ read, never crash the process or exhaust its memory:
 
 The TypeScript machine side has SQLite in its runtime and reads the
 databases with it (`node:sqlite`, `machine/databases.ts`), read-only and
-with SQL that asks only for the needed tables' columns:
+with SQL that asks only for the needed tables' columns, in a worker thread
+of the scan's (`machine/sqlworker.ts`):
 
+- The database and the files SQLite opens beside it (`-wal`, `-shm`,
+  `-journal`) must be regular files of the user, not links: a FIFO,
+  device or link at any of those names, or another user's file, means no
+  database (the scan skips it) and SQLite opens nothing.
+- A FIFO or device swapped in after that look, a mount that stops
+  answering or a read that takes long holds the worker, not the node:
+  each request (a batch of rows) gets 30 s and no longer than the scan,
+  then the worker is ended and the database is `unreadable`; a thread
+  blocked in a system call stays blocked until the call returns, and the
+  next database gets a new worker.
 - A database without a WAL beside it (its writer is not running) is
   opened `immutable`: no lock, no file made; a read during which it or a
   WAL appearing changed is read again, at most three times, then `busy`.
@@ -258,11 +274,15 @@ with SQL that asks only for the needed tables' columns:
   commit, which never holds the writer up; it shares the WAL's index
   (`-shm`) with the writer, and makes one when the WAL has none.
 - No busy wait: a database another connection holds is `busy`.
-- Only a regular file is opened; a record over its bound (64 KiB for
-  OpenCode's messages, 64 MiB, 256 KiB and 64 KiB for Antigravity's
-  generations, steps and metadata) is skipped unread (SQLite's `length()`
-  of a blob reads no content); more steps kept than 300,000 (OpenCode) or
-  100,000 generations (Antigravity) fail the read as `too_large`.
+- A record over its bound (64 KiB for OpenCode's messages, 64 MiB,
+  256 KiB and 64 KiB for Antigravity's generations, steps and metadata)
+  is skipped unread (SQLite's `octet_length()` reads no content; SQLite
+  before 3.43, which lacks it, measures OpenCode's text by reading it);
+  more steps kept than 300,000 (OpenCode) or 100,000 generations
+  (Antigravity) fail the read as `too_large`. Antigravity's steps are
+  looked up for at most 64 per generation and 100,000 per conversation
+  (a generation past them is dated by the conversation's start), 500 per
+  statement.
 - SQLite checks the file as it reads it: a damaged one fails as `damaged`.
 - The protobuf blobs are decoded by a reader that compares every length
   with what is left (`protoFields`).
@@ -543,7 +563,9 @@ immutable without a writer, a WAL reader with one).
   read on, written seldom, cut short, another agent's save, a newer
   version, the Go agent's entries, the ETag, housekeeping),
   `machine/databases.test.ts` (databases made with SQLite: WAL commits,
-  immutable reads that make no file, bounds, damage, a FIFO), and
+  immutable reads that make no file, bounds, damage, a FIFO or a link at
+  the database's or its side files' names, a FIFO swapped in holding the
+  worker and not the node), and
   `machine/session.test.ts` (the spend's numbers, no content, subagents,
   context, bounds, two at once).
 - `backend/features/usage/core.test.ts` (`guards`) walks the plugin's

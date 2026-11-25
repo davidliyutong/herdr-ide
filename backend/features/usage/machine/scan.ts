@@ -27,7 +27,8 @@ import { posix } from 'node:path';
 import type { z } from 'zod';
 import type { costReport } from '../protocol.ts';
 import { cacheState, dropStale, loadCache, saveCache } from './cache.ts';
-import { DB_LIMITS, DBError, readAntigravity, readOpenCode, type DBLimits } from './databases.ts';
+import { DB_LIMITS, DBError, dbFiles, readAntigravity, readOpenCode, type DBLimits, type DBRead } from './databases.ts';
+import { SQLiteWorker } from './sqlworker.ts';
 import { expand, getenv, type UsageEnv } from './env.ts';
 import { claudeDir, codexHomes, grokHome } from './limits.ts';
 import { kimiHome } from './kimi.ts';
@@ -192,22 +193,14 @@ async function costLogs(e: UsageEnv, o: CostOptions): Promise<LogFile[]> {
 /** A log's size and time (ns), which tell whether it changed: for SQLite
  * databases with their log's, where commits go first. null when it is not
  * a regular file. */
-async function stampOf(lf: LogFile): Promise<{ size: number; mtime: number } | null> {
+async function stampOf(lf: LogFile, uid: number): Promise<{ size: number; mtime: number } | null> {
   try {
+    // A database, its log and the files SQLite opens beside it: regular
+    // files of the user, none a link (dbFiles), else no database.
+    if (lf.kind === LOG.opencode || lf.kind === LOG.antigravity) return await dbFiles(lf.path, uid);
     const st = await stat(lf.path, { bigint: true });
     if (!st.isFile()) return null;
-    let size = Number(st.size);
-    let mtime = Number(st.mtimeNs);
-    if (lf.kind === LOG.opencode || lf.kind === LOG.antigravity) {
-      try {
-        const w = await stat(`${lf.path}-wal`, { bigint: true });
-        size += Number(w.size);
-        mtime = Math.max(mtime, Number(w.mtimeNs));
-      } catch {
-        // no log
-      }
-    }
-    return { size, mtime };
+    return { size: Number(st.size), mtime: Number(st.mtimeNs) };
   } catch {
     return null;
   }
@@ -263,20 +256,14 @@ async function lineParser(kind: string, path: string, ent: Entry): Promise<{ lin
  * state carried over), else from the start; its last line counts once it
  * ends (all of a compressed log). Databases are read whole, from since on.
  * The bytes read. */
-export async function parseLog(
-  lf: LogFile,
-  old: Entry | undefined,
-  ent: Entry,
-  since: number,
-  signal: AbortSignal,
-  limits: DBLimits,
-): Promise<number> {
+export async function parseLog(lf: LogFile, old: Entry | undefined, ent: Entry, since: number, db: DBRead): Promise<number> {
+  const signal = db.signal;
   if (lf.kind === LOG.opencode) {
-    ent.records = await readOpenCode(lf.path, since, signal, limits);
+    ent.records = await readOpenCode(lf.path, since, db);
     return ent.size;
   }
   if (lf.kind === LOG.antigravity) {
-    ent.records = await readAntigravity(lf.path, since, Math.floor(ent.mtime / 1e9), signal, limits);
+    ent.records = await readAntigravity(lf.path, since, Math.floor(ent.mtime / 1e9), db);
     return ent.size;
   }
   const fh: FileHandle = await openRegular(lf.path);
@@ -426,6 +413,8 @@ export class CostScanner {
     let read = 0;
     let lastSave = performance.now();
     const logs = await costLogs(e, o);
+    // The databases' reads, in a worker of this scan's.
+    const db: DBRead = { signal: e.signal, limits: this.limits, uid: e.uid, worker: new SQLiteWorker(this.limits.requestMs) };
     try {
       for (const lf of logs) {
         e.signal.throwIfAborted();
@@ -433,14 +422,14 @@ export class CostScanner {
           this.save();
           lastSave = performance.now();
         }
-        const st = await stampOf(lf);
+        const st = await stampOf(lf, e.uid);
         if (!st || Math.floor(st.mtime / 1e9) < cutoff) continue;
         seen.add(lf.path);
         const old = files.get(lf.path);
         if (old && old.kind === lf.kind && old.size === st.size && old.mtime === st.mtime) continue;
         const ent: Entry = { kind: lf.kind, size: st.size, mtime: st.mtime, off: 0, records: [] };
         try {
-          read += await parseLog(lf, old, ent, cutoff, e.signal, this.limits);
+          read += await parseLog(lf, old, ent, cutoff, db);
         } catch (err) {
           e.signal.throwIfAborted();
           failed.add(`${providerOf(lf.kind)}:${err instanceof NotRegular ? 'unreadable' : readFailure(err)}`);
@@ -456,6 +445,8 @@ export class CostScanner {
       // Cut short: what was read stays, saved now.
       this.save();
       throw err;
+    } finally {
+      db.worker!.close();
     }
     // Logs that are gone or too old leave the cache; those of providers
     // not selected stay as they are.

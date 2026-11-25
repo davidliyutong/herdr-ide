@@ -58,7 +58,7 @@ describe('the language server', () => {
           {"label":"No quota"}]}}}`,
     );
     const home = tempHome();
-    const e = testEnv(home, { platform: 'darwin' });
+    const e = testEnv(home, { platform: 'darwin', uid: 501 });
     e.programs.ps = script(
       join(home, 'bin/ps'),
       `[ "$*" = "-ax -o uid=,pid=,command=" ] || exit 9
@@ -92,7 +92,7 @@ printf 'p345\\nf20\\nn127.0.0.1:${ls.port}\\nf21\\nn10.0.0.2:9999\\n'`,
     const home = tempHome();
     const state = join(home, 'state');
     const runs = join(home, 'runs');
-    const e = testEnv(home, { platform: 'darwin' });
+    const e = testEnv(home, { platform: 'darwin', uid: 501 });
     e.programs.ps = script(
       join(home, 'bin/ps'),
       `echo ps >> ${runs}.ps\nprintf '  501   345 /x/language_server_macos_arm --csrf_token %s antigravity\\n' "$(cut -d' ' -f1 ${state})"`,

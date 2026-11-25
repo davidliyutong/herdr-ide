@@ -1,32 +1,39 @@
 // OpenCode's and Antigravity's SQLite databases, read with the runtime's
-// own SQLite (node:sqlite), read-only, in slices that let the node's other
-// work in between:
+// own SQLite (node:sqlite), read-only, in a worker thread (sqlworker.ts):
+// nothing SQLite waits for (a FIFO swapped in at one of the names it opens,
+// a mount that stopped answering, a long read) holds the node's one
+// thread, which gets each batch of rows as a message.
 //
-//   - a database without a write-ahead log beside it (its writer is not
+//   - Before it is opened, the database and the files SQLite opens beside
+//     it (-wal, -shm, -journal) must be regular files of the user, not
+//     links: a FIFO, device or link at any of those names, or a file of
+//     another user, fails the read (unreadable) without SQLite opening
+//     anything; the scan skips such a database as it skips a FIFO at a
+//     log's name.
+//   - A database without a write-ahead log beside it (its writer is not
 //     running, or it is not in WAL mode) is opened immutable: no lock is
 //     taken and no file made; a read during which its or its log's size or
-//     time changed is read again (at most 3 times, then busy);
-//   - one with a log is read as any reader reads it: a snapshot of the
+//     time changed is read again (at most 3 times, then busy).
+//   - One with a log is read as any reader reads it: a snapshot of the
 //     last commit, the log's index (-shm) shared with the writer, which a
-//     reader never holds up (SQLite makes that index when it is missing);
-//   - no busy wait: a database another connection holds locked is busy;
-//   - only regular files are opened (a FIFO or device at the name is
-//     unreadable), and only the tables needed are read, of each row only
-//     what the spend keeps (model, provider, tokens, recorded cost, request
-//     id, time, the workspace directory's name). Records over a bound are
-//     skipped unread (SQLite's length() of a blob reads no content), and a
-//     database with more steps than kept fails the read (too_large)
-//     rather than leaving some out. SQLite checks a damaged file and fails
-//     it (damaged).
+//     reader never holds up (SQLite makes that index when it is missing).
+//   - No busy wait: a database another connection holds locked is busy.
+//   - Only the tables needed are read, of each row only what the spend
+//     keeps (model, provider, tokens, recorded cost, request id, time, the
+//     workspace directory's name). Records over a bound are skipped unread
+//     (octet_length reads no content; SQLite before 3.43, which lacks it,
+//     measures OpenCode's text by reading it), and a database with more
+//     steps than kept fails the read (too_large) rather than leaving some
+//     out. SQLite checks a damaged file and fails it (damaged).
 //
 // The project of an Antigravity generation and its time come from
 // protobuf blobs, decoded by a reader of the wire format that checks every
-// length against what is left (protoNext).
-import { stat } from 'node:fs/promises';
-import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite';
+// length against what is left (protoFields).
+import { lstat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { firstNonEmpty, isObj, obj, str } from './env.ts';
 import { projectName, rec, type Rec } from './parsers.ts';
+import { NO_ANSWER, SQLiteWorker, type SQLReply, type SQLRow, type SQLValue } from './sqlworker.ts';
 
 /** Bounds of a read; variables of a scan so that tests can make them
  * small. */
@@ -36,9 +43,23 @@ export interface DBLimits {
   openCodeRecords: number;
   /** Antigravity's generations kept per conversation. */
   antigravityRecords: number;
+  /** How long the worker gets to answer one request (a batch of rows). */
+  requestMs: number;
 }
 
-export const DB_LIMITS: DBLimits = { openCodeRecords: 300_000, antigravityRecords: 100_000 };
+export const DB_LIMITS: DBLimits = { openCodeRecords: 300_000, antigravityRecords: 100_000, requestMs: 30_000 };
+
+/** How a database is read. */
+export interface DBRead {
+  /** Ends the read. */
+  signal: AbortSignal;
+  limits?: DBLimits;
+  /** The user whose files the database's must be (-1: not looked at). */
+  uid?: number;
+  /** The worker the read runs in; without one, a worker of the read's
+   * own, ended after it. */
+  worker?: SQLiteWorker;
+}
 
 /** A message's record bound: a prompt with what it attached can be
  * megabytes and is skipped unread; an answer's is a few hundred bytes. */
@@ -48,8 +69,12 @@ const OPENCODE_MAX_RECORD = 64 << 10;
 const AG_MAX_GEN = 64 << 20;
 const AG_MAX_STEP = 256 << 10;
 const AG_MAX_META = 64 << 10;
-/** Rows read between two yields to the node's other work. */
-const SLICE_ROWS = 256;
+/** The steps of a generation, and of a conversation, looked up for their
+ * times; a generation past them is dated by the conversation. */
+const AG_MAX_GEN_STEPS = 64;
+const AG_MAX_STEPS = 100_000;
+/** Steps looked up per statement. */
+const AG_STEP_BATCH = 500;
 
 /** Why a database could not be read: too_large (a bound), busy (it changed
  * at each read, or is locked), damaged, unreadable. */
@@ -63,25 +88,43 @@ export class DBError extends Error {
   }
 }
 
-/** A database's and its log's size and time (ns). */
-async function stampOf(p: string): Promise<string> {
+/** The names SQLite opens besides a database's own. */
+const SIDE_FILES = ['-wal', '-shm', '-journal'];
+
+/** Looks at the database p and the files beside it that SQLite opens:
+ * each one there must be a regular file of uid (no link, FIFO or device),
+ * else DBError unreadable. Whether it has a write-ahead log; the stamp,
+ * size and time (ns) of the database and its log together. */
+export async function dbFiles(p: string, uid = -1): Promise<{ wal: boolean; stamp: string; size: number; mtime: number }> {
   const parts: string[] = [];
-  for (const f of [p, `${p}-wal`]) {
+  let wal = false;
+  let size = 0;
+  let mtime = 0;
+  for (const suffix of ['', ...SIDE_FILES]) {
+    let st;
     try {
-      const st = await stat(f, { bigint: true });
+      st = await lstat(p + suffix, { bigint: true });
+    } catch (err) {
+      if (suffix !== '' && (err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        if (suffix === '-wal') parts.push('-');
+        continue;
+      }
+      throw new DBError('unreadable');
+    }
+    if (!st.isFile() || (uid >= 0 && Number(st.uid) !== uid)) throw new DBError('unreadable');
+    if (suffix === '' || suffix === '-wal') {
       parts.push(`${st.size}:${st.mtimeNs}:${st.ino}`);
-    } catch {
-      parts.push('-');
+      size += Number(st.size);
+      mtime = Math.max(mtime, Number(st.mtimeNs));
+      if (suffix === '-wal') wal = true;
     }
   }
-  return parts.join('|');
+  return { wal, stamp: parts.join('|'), size, mtime };
 }
 
-/** The code of a failure of SQLite's. */
-function codeOf(err: unknown): DBError {
-  if (err instanceof DBError) return err;
-  const c = (err as { errcode?: number })?.errcode ?? -1;
-  switch (c & 0xff) {
+/** The error of SQLite's code. */
+function codeOf(errcode: number): DBError {
+  switch (errcode & 0xff) {
     case 5: // SQLITE_BUSY
     case 6: // SQLITE_LOCKED
       return new DBError('busy');
@@ -92,117 +135,110 @@ function codeOf(err: unknown): DBError {
   return new DBError('unreadable');
 }
 
-const yieldNow = () => new Promise<void>((r) => setImmediate(r));
+/** The rows of a reply; DBError for a failure (unreadable when the worker
+ * did not answer). */
+function rowsOf(r: SQLReply): { rows: SQLRow[]; done: boolean } {
+  if (!r.ok) throw r.errcode === NO_ANSWER ? new DBError('unreadable') : codeOf(r.errcode);
+  return { rows: r.rows ?? [], done: r.done ?? true };
+}
 
-/** A database opened for one read: rows() iterates a statement's rows,
- * yielding between slices and checking signal. */
+/** A database opened in the worker for one read. */
 class Reader {
-  private readonly db: DatabaseSync;
+  private readonly w: SQLiteWorker;
   private readonly signal: AbortSignal;
   /** Opened immutable: nothing tells a change while it is read. */
   readonly immutable: boolean;
+  /** The function that measures a record without reading it. */
+  readonly len: string;
 
-  private constructor(db: DatabaseSync, signal: AbortSignal, immutable: boolean) {
-    this.db = db;
+  private constructor(w: SQLiteWorker, signal: AbortSignal, immutable: boolean, len: string) {
+    this.w = w;
     this.signal = signal;
     this.immutable = immutable;
+    this.len = len;
   }
 
   /** Opens p read-only: immutable without a log beside it. */
-  static async open(p: string, signal: AbortSignal): Promise<Reader> {
-    const st = await stat(p).catch(() => null);
-    if (!st?.isFile()) throw new DBError('unreadable');
-    const wal = await stat(`${p}-wal`).catch(() => null);
-    let db: DatabaseSync;
-    try {
-      if (wal) db = new DatabaseSync(p, { readOnly: true });
-      else {
-        const u = pathToFileURL(p);
-        u.searchParams.set('immutable', '1');
-        db = new DatabaseSync(u, { readOnly: true });
-      }
-      db.exec('PRAGMA query_only = 1');
-    } catch (err) {
-      throw codeOf(err);
+  static async open(w: SQLiteWorker, p: string, signal: AbortSignal, wal: boolean): Promise<Reader> {
+    let url: string | undefined;
+    if (!wal) {
+      const u = pathToFileURL(p);
+      u.searchParams.set('immutable', '1');
+      url = u.href;
     }
-    return new Reader(db, signal, !wal);
+    rowsOf(await w.request(wal ? { op: 'open', path: p } : { op: 'open', url }, signal));
+    const v = rowsOf(await w.request({ op: 'all', sql: 'SELECT sqlite_version() AS v', params: [] }, signal)).rows[0]?.v;
+    const [major = 0, minor = 0] = String(v ?? '')
+      .split('.')
+      .map(Number);
+    return new Reader(w, signal, !wal, major > 3 || (major === 3 && minor >= 43) ? 'octet_length' : 'length');
   }
 
   /** The columns of table, [] when it does not exist. */
-  columns(table: string): string[] {
-    try {
-      return (this.db.prepare(`SELECT name FROM pragma_table_info(?)`).all(table) as { name: string }[]).map((r) => r.name);
-    } catch (err) {
-      throw codeOf(err);
+  async columns(table: string): Promise<string[]> {
+    const { rows } = rowsOf(
+      await this.w.request({ op: 'all', sql: 'SELECT name FROM pragma_table_info(?)', params: [table] }, this.signal),
+    );
+    return rows.map((r) => String(r.name));
+  }
+
+  /** Hands fn each row of sql, a batch at a time: the node's other work
+   * goes on between batches. */
+  async rows(sql: string, params: (string | number)[], fn: (r: SQLRow) => void): Promise<void> {
+    let batch = rowsOf(await this.w.request({ op: 'query', sql, params }, this.signal));
+    for (;;) {
+      for (const r of batch.rows) fn(r);
+      this.signal.throwIfAborted();
+      if (batch.done) return;
+      batch = rowsOf(await this.w.request({ op: 'more' }, this.signal));
     }
   }
 
-  /** Hands fn each row of sql, a slice of rows at a time. */
-  async rows(sql: string, params: (string | number)[], fn: (r: Record<string, SQLOutputValue>) => void): Promise<void> {
-    let st: StatementSync;
-    try {
-      st = this.db.prepare(sql);
-    } catch (err) {
-      throw codeOf(err);
-    }
-    const it = st.iterate(...params) as IterableIterator<Record<string, SQLOutputValue>>;
-    try {
-      for (let n = 1; ; n++) {
-        let next: IteratorResult<Record<string, SQLOutputValue>>;
-        try {
-          next = it.next();
-        } catch (err) {
-          throw codeOf(err);
-        }
-        if (next.done) return;
-        fn(next.value);
-        if (n % SLICE_ROWS === 0) {
-          await yieldNow();
-          this.signal.throwIfAborted();
-        }
-      }
-    } finally {
-      it.return?.();
-    }
-  }
-
-  close(): void {
-    try {
-      this.db.close();
-    } catch {
-      // closed
-    }
+  async close(): Promise<void> {
+    await this.w.request({ op: 'close' }, this.signal);
   }
 }
 
 /** Reads p with read (whole each time): again when the database changed
  * while it was read without a log (a read with one is of a snapshot), or
  * was busy, at most 3 times. */
-async function readDB<T>(p: string, signal: AbortSignal, read: (r: Reader) => Promise<T>): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    const before = await stampOf(p);
-    const r = await Reader.open(p, signal);
-    let out: T | undefined;
-    let err: unknown;
-    try {
-      out = await read(r);
-    } catch (e) {
-      err = e;
-    } finally {
-      r.close();
+async function readDB<T>(p: string, o: DBRead, read: (r: Reader) => Promise<T>): Promise<T> {
+  const w = o.worker ?? new SQLiteWorker((o.limits ?? DB_LIMITS).requestMs);
+  try {
+    for (let attempt = 0; ; attempt++) {
+      const before = await dbFiles(p, o.uid);
+      let r: Reader | undefined;
+      let out: T | undefined;
+      let err: unknown;
+      try {
+        r = await Reader.open(w, p, o.signal, before.wal);
+        out = await read(r);
+      } catch (e) {
+        err = e;
+      } finally {
+        await r?.close();
+      }
+      o.signal.throwIfAborted();
+      const changed =
+        !!r?.immutable &&
+        before.stamp !==
+          (await dbFiles(p, o.uid).then(
+            (a) => a.stamp,
+            () => '',
+          ));
+      if (changed || (err instanceof DBError && err.code === 'busy')) {
+        if (attempt < 2) continue;
+        throw new DBError('busy');
+      }
+      if (err !== undefined) throw err instanceof DBError ? err : new DBError('unreadable');
+      return out as T;
     }
-    signal.throwIfAborted();
-    const changed = r.immutable && before !== (await stampOf(p));
-    if (changed || (err instanceof DBError && err.code === 'busy')) {
-      if (attempt < 2) continue;
-      throw new DBError('busy');
-    }
-    if (err !== undefined) throw codeOf(err);
-    return out as T;
+  } finally {
+    if (!o.worker) w.close();
   }
 }
 
-const int = (v: SQLOutputValue | undefined): number => (typeof v === 'bigint' ? Number(v) : typeof v === 'number' ? Math.trunc(v) : 0);
+const int = (v: SQLValue | undefined): number => (typeof v === 'bigint' ? Number(v) : typeof v === 'number' ? Math.trunc(v) : 0);
 
 // --- OpenCode ------------------------------------------------------------
 
@@ -210,15 +246,16 @@ const int = (v: SQLOutputValue | undefined): number => (typeof v === 'bigint' ? 
  * message of its table message is one step of a turn with its model,
  * provider, directory, tokens (input without the cache's, output without
  * the reasoning) and the cost OpenCode computed. */
-export function readOpenCode(p: string, since: number, signal: AbortSignal, limits: DBLimits = DB_LIMITS): Promise<Rec[]> {
-  return readDB(p, signal, async (r) => {
-    const cols = r.columns('message');
+export function readOpenCode(p: string, since: number, o: DBRead): Promise<Rec[]> {
+  const limits = o.limits ?? DB_LIMITS;
+  return readDB(p, o, async (r) => {
+    const cols = await r.columns('message');
     if (!cols.includes('data')) throw new DBError('unreadable');
     const id = cols.includes('id') ? 'id' : 'NULL';
     const time = cols.includes('time_created') ? 'time_created' : 'NULL';
     const recs: Rec[] = [];
     await r.rows(
-      `SELECT ${id} AS id, ${time} AS t, CASE WHEN length(data) <= ? THEN data END AS data FROM message`,
+      `SELECT ${id} AS id, ${time} AS t, CASE WHEN ${r.len}(data) <= ? THEN data END AS data FROM message`,
       [OPENCODE_MAX_RECORD],
       (row) => {
         const data = typeof row.data === 'string' ? row.data : '';
@@ -363,7 +400,7 @@ export interface Gen {
 
 /** A gen_metadata blob's usage:
  *
- *	field 2: step indices (packed varints or repeated varint)
+ *	field 2: step indices (packed varints or repeated varint), at most 64
  *	field 1 (payload):
  *	  field 4 (usage): 2 prompt tokens (not cached), 3 output, 5 cached
  *	    input, 9 thinking (part of the output), 10 content
@@ -376,10 +413,10 @@ export function parseGen(b: Uint8Array): Gen | null {
   let usage = false;
   for (const f of protoFields(b)) {
     if (f.num === 2 && f.wt === 0) {
-      if (f.u <= MAX_TOK) g.steps.push(f.u);
+      if (f.u <= MAX_TOK && g.steps.length < AG_MAX_GEN_STEPS) g.steps.push(f.u);
     } else if (f.num === 2 && f.wt === 2) {
       let i = 0;
-      while (i < f.b.length && g.steps.length < 64) {
+      while (i < f.b.length && g.steps.length < AG_MAX_GEN_STEPS) {
         const v = varint(f.b, i);
         if (!v) break;
         i = v[1];
@@ -470,29 +507,27 @@ export function parseStepTime(b: Uint8Array): number {
   return fallback;
 }
 
-const bytesOf = (v: SQLOutputValue | undefined): Uint8Array =>
+const bytesOf = (v: SQLValue | undefined): Uint8Array =>
   v instanceof Uint8Array ? v : typeof v === 'string' ? Buffer.from(v) : new Uint8Array();
 
 /** The generations of an Antigravity conversation database at p from since
  * on: gen_metadata first, then trajectory_metadata_blob and only the steps
- * rows the generations name. fallbackTs (the file's time) dates a
- * generation nothing else dates. */
-export function readAntigravity(
-  p: string,
-  since: number,
-  fallbackTs: number,
-  signal: AbortSignal,
-  limits: DBLimits = DB_LIMITS,
-): Promise<Rec[]> {
+ * rows the generations name (at most AG_MAX_STEPS). fallbackTs (the
+ * file's time) dates a generation nothing else dates. */
+export function readAntigravity(p: string, since: number, fallbackTs: number, o: DBRead): Promise<Rec[]> {
+  const limits = o.limits ?? DB_LIMITS;
   const conv = p.replace(/^.*\//, '').replace(/\.db$/, '');
-  return readDB(p, signal, async (r) => {
-    const genCols = r.columns('gen_metadata');
+  return readDB(p, o, async (r) => {
+    const genCols = await r.columns('gen_metadata');
     if (genCols.length === 0) return [];
     if (!genCols.includes('data')) throw new DBError('unreadable');
     const gens: { idx: number; g: Gen }[] = [];
     const need = new Set<number>();
+    const want = (s: number) => {
+      if (need.size < AG_MAX_STEPS) need.add(s);
+    };
     await r.rows(
-      `SELECT rowid AS rid, ${genCols.includes('idx') ? 'idx' : 'NULL'} AS idx, CASE WHEN length(data) <= ? THEN data END AS data FROM gen_metadata`,
+      `SELECT rowid AS rid, ${genCols.includes('idx') ? 'idx' : 'NULL'} AS idx, CASE WHEN ${r.len}(data) <= ? THEN data END AS data FROM gen_metadata`,
       [AG_MAX_GEN],
       (row) => {
         const b = bytesOf(row.data);
@@ -500,17 +535,17 @@ export function readAntigravity(
         const g = parseGen(b);
         if (!g || g.input + g.cached + g.output === 0) return;
         if (gens.length >= limits.antigravityRecords) throw new DBError('too_large');
-        for (const s of g.steps) need.add(s);
-        if (g.lastStep !== undefined) need.add(g.lastStep);
+        for (const s of g.steps) want(s);
+        if (g.lastStep !== undefined) want(g.lastStep);
         gens.push({ idx: row.idx === null ? int(row.rid) : int(row.idx), g });
       },
     );
     if (!gens.length) return [];
     let project = '';
     let convTs = 0;
-    const metaCols = r.columns('trajectory_metadata_blob');
+    const metaCols = await r.columns('trajectory_metadata_blob');
     if (metaCols.includes('data')) {
-      await r.rows(`SELECT CASE WHEN length(data) <= ? THEN data END AS data FROM trajectory_metadata_blob`, [AG_MAX_META], (row) => {
+      await r.rows(`SELECT CASE WHEN ${r.len}(data) <= ? THEN data END AS data FROM trajectory_metadata_blob`, [AG_MAX_META], (row) => {
         if (project && convTs) return;
         const b = bytesOf(row.data);
         if (!b.length) return;
@@ -520,15 +555,16 @@ export function readAntigravity(
       });
     }
     const stepTs = new Map<number, number>();
-    const stepCols = r.columns('steps');
+    const stepCols = await r.columns('steps');
     if (need.size && stepCols.includes('metadata')) {
       const idx = stepCols.includes('idx') ? 'idx' : 'NULL';
       const ids = [...need];
-      // The rows the generations name, by their rowid, in batches.
-      for (let i = 0; i < ids.length; i += 500) {
-        const batch = ids.slice(i, i + 500);
+      // The rows the generations name, by their rowid, in batches: each is
+      // a request to the worker, between which the node goes on.
+      for (let i = 0; i < ids.length; i += AG_STEP_BATCH) {
+        const batch = ids.slice(i, i + AG_STEP_BATCH);
         await r.rows(
-          `SELECT rowid AS rid, ${idx} AS idx, CASE WHEN length(metadata) <= ? THEN metadata END AS metadata FROM steps WHERE rowid IN (${batch.map(() => '?').join(',')})`,
+          `SELECT rowid AS rid, ${idx} AS idx, CASE WHEN ${r.len}(metadata) <= ? THEN metadata END AS metadata FROM steps WHERE rowid IN (${batch.map(() => '?').join(',')})`,
           [AG_MAX_STEP, ...batch],
           (row) => {
             const b = bytesOf(row.metadata);

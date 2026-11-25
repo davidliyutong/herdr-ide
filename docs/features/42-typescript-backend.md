@@ -219,9 +219,11 @@ place of the Go agent's reader of the file format, and `fetch` asks the
 providers through the environment's proxy. The price table is
 `spec/pricing/pricing.json`, which both builds and the core read. A cost
 scan runs on the node's thread in slices (chunks of a log read with
-`fs/promises`, a database 256 rows at a time, the summing yielding every
-8 ms) rather than in a Worker, which would need its own entrypoint in the
-compiled executable and its own copy of the cache.
+`fs/promises`, the summing yielding every 8 ms); only SQLite, whose opens
+and reads are synchronous and by name, runs in a worker thread started
+from a Blob (no entrypoint of its own in the compiled executable), so
+that a FIFO swapped in at a database's name or a mount that stopped
+answering holds the worker, never the node.
 
 Agent detection ([25](25-agent-detection.md)) reads herdr's manifests,
 the Go build's files (`internal/agent/detect/manifests`), embedded as text
