@@ -526,8 +526,8 @@ export class TestHost {
       client: { name: 'test', version: 'test' },
       timing: { ...HOST_TIMING, idleExit: 3600_000, minute: 3600_000, enforceEvery: 3600_000, infoDelay: 20, closeGrace: 5000 },
       settings,
-      environ: async () => ({ PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: this.home }),
-      hostEnv: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: this.home, SHELL: '/bin/sh' },
+      environ: async () => ({ PATH: '/usr/bin:/bin', HOME: this.home }),
+      hostEnv: { PATH: '/usr/bin:/bin', HOME: this.home, SHELL: '/bin/sh' },
       onHost: (h) => (this.host = h),
     };
     change?.(this);

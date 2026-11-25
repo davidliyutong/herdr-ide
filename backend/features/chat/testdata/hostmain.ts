@@ -47,8 +47,8 @@ if (process.env.TEST_HOST_SILENT) {
     adapters: { fake },
     spec: fakeSpecs,
     client: { name: 'test', version: 'test' },
-    hostEnv: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/', SHELL: '/bin/sh' },
-    environ: async () => ({ PATH: process.env.PATH ?? '/usr/bin:/bin' }),
+    hostEnv: { PATH: '/usr/bin:/bin', HOME: process.env.HOME ?? '/', SHELL: '/bin/sh' },
+    environ: async () => ({ PATH: '/usr/bin:/bin' }),
     timing: { closeGrace: 1000, stopDeadline: 3000 },
     signals: (on) => {
       const sigs = ['SIGHUP', 'SIGTERM', 'SIGINT'] as const;
