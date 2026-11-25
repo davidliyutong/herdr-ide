@@ -2,17 +2,16 @@
 // (feature 14, 39): the machine's node serves both, one controls the
 // windows and the other views them until it takes control. The machine is
 // a container with Xvfb (harness/sshd.ts); the program is e2e/xclient,
-// which prints the clicks it gets. Skipped without Docker.
+// which prints the clicks it gets. It runs against both machine builds
+// (E2E_MACHINE=ts: the TypeScript machine side with its GUI helper).
+// Skipped without Docker.
 
 import { test, expect } from '../harness/fixtures';
-import { unported } from '../harness/paths';
 import type { Instance } from '../harness/instance';
 import { ALIAS } from '../harness/sshd';
 import { TermClient } from '../harness/term';
 import { waitFor } from '../harness/wait';
 import type { Browser, Page } from '@playwright/test';
-
-test.skip(!!unported('gui'), unported('gui'));
 
 interface GuiState {
   m: string;

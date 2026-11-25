@@ -18,7 +18,11 @@
 // where machines get their platform's build (kernel/machines/transport/
 // release.ts). --hc holds hc-<os>-<arch>.gz, --ext <bridge>.vsix,
 // --encoder encoder-<os>-<arch>.gz (scripts/build-ffmpeg.sh; a ts build
-// carries its own platform's). --payload-out also writes the payloads as
+// carries its own platform's). A ts build for Linux also carries the GUI
+// helper of its architecture (gui-helper.gz, from --gui: the committed
+// scripts/gui-helper/bin, checked against its gui-helper.sha256) and the
+// GPU selection library (gpupick.so, from --gpupick:
+// internal/agent/gpupick). --payload-out also writes the payloads as
 // files, laid out as the desktop app carries them.
 //
 // Every executable is compiled without autoloading a .env or bunfig.toml
@@ -44,6 +48,8 @@ const { values: o } = parseArgs({
     hc: { type: 'string', default: '' },
     ext: { type: 'string', default: '' },
     encoder: { type: 'string', default: '' },
+    gui: { type: 'string', default: join(import.meta.dir, '..', '..', 'scripts', 'gui-helper', 'bin') },
+    gpupick: { type: 'string', default: join(import.meta.dir, '..', '..', 'internal', 'agent', 'gpupick') },
   },
 });
 if (!o.out) throw new Error('--out is required');
@@ -83,6 +89,20 @@ if (o.machine === 'ts') {
   // Without one (tests), its node installs none and runs the machine's.
   if (key && hcs[ownPlatform]) extra['herdr-core.gz'] = readFileSync(join(o.hc, `hc-${ownPlatform}.gz`));
   else if (key) console.warn(`${o.out}: no herdr-core for ${ownPlatform} (--hc)`);
+  if (ownPlatform.startsWith('linux-')) {
+    const arch = ownPlatform.slice('linux-'.length);
+    // The digests recorded beside each, which make check verifies.
+    const recorded = (dir: string, list: string, name: string) => {
+      const line = readFileSync(join(dir, list), 'utf8')
+        .split('\n')
+        .find((l) => l.endsWith(`  ${name}`));
+      const b = readFileSync(join(dir, name));
+      if (!line || line.split(' ')[0] !== sha256(b)) throw new Error(`${join(dir, name)} is not the one ${list} records`);
+      return b;
+    };
+    extra['gui-helper.gz'] = gzipSync(recorded(o.gui, 'gui-helper.sha256', `gui-helper-linux-${arch}`), { level: 9 });
+    extra['gpupick.so'] = recorded(o.gpupick, 'gpupick.sha256', `gpupick-linux-${arch}.so`);
+  }
 } else {
   if (o.agents)
     for (const name of readdirSync(o.agents)) {

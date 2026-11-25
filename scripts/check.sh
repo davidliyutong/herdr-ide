@@ -18,7 +18,10 @@
 #   9. every shared test vector (spec/vectors) is run by the web UI's
 #      tests
 #  10. the GPU selection library the agent embeds (internal/agent/gpupick)
-#      is the one scripts/build-gpupick.sh built from its source
+#      is the one scripts/build-gpupick.sh built from its source, and the
+#      GUI helper the TypeScript machine build embeds
+#      (scripts/gui-helper/bin) the one scripts/build-gui-helper.sh built
+#      from its sources
 #  11. Bun's APIs (Bun.*, bun:*) are used only by what runs under Bun alone:
 #      the machine side (backend/machine, hosts/machine, the features'
 #      machine.ts and machine/), the command line (hosts/bun) and tests
@@ -91,6 +94,7 @@ go run ./scripts/tokens -check || fail=1
 echo "==> terminal emulator module"
 scripts/fetch-ghostty-vt.sh --check || fail=1
 scripts/build-gpupick.sh --check || fail=1
+scripts/build-gui-helper.sh --check || fail=1
 
 echo "==> shared test vectors"
 # The web UI's tests, or the desktop shell's for vectors the core shares

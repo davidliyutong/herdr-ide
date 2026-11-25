@@ -82,8 +82,7 @@ died. `scripts/e2e.sh` builds the Linux machine build and fake agent of
 Docker's architecture and the image (cached). Without Docker these tests
 skip; `E2E_REQUIRE_DOCKER=1` (CI) makes them fail instead.
 `E2E_MACHINE=ts` runs the suite against the core that deploys the
-TypeScript machine side (`harness/paths.ts`); a spec of a feature that side
-does not serve yet skips with `unported(<feature>)`'s reason.
+TypeScript machine side (`harness/paths.ts`).
 
 Release archives are in `dist/release/`; the unpacked directories are in
 `dist/packages/`. herdr-core upgrades change the version and the four

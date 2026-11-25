@@ -5,7 +5,7 @@ SLUG := $(shell sed -n 's/^[[:space:]]*Slug = "\(.*\)"$$/\1/p' internal/brand/br
 HOST_PLATFORM = $(shell go env GOOS)-$(shell go env GOARCH)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test check tokens vt-wasm gpupick it e2e dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test check tokens vt-wasm gpupick gui-helper it e2e dev-core dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
@@ -58,6 +58,12 @@ vt-wasm:
 gpupick:
 	scripts/build-gpupick.sh
 
+# The GUI helper of Linux machines (scripts/gui-helper: the X window
+# manager and capture, the GPU display's compositor, the display keeper),
+# its tests and its static executables with their digests (needs zig 0.17).
+gui-helper:
+	scripts/build-gui-helper.sh
+
 it:
 	go test -tags integration -count=1 ./internal/agent -run Integration -v
 	go test -tags integration -count=1 ./internal/agent/plugin/history -run Integration -v
@@ -65,6 +71,7 @@ it:
 	cd backend && bun test features/terminals/integration.test.ts
 	cd backend && bun test features/history/integration.test.ts
 	cd backend && bun test features/agents/integration.test.ts
+	cd backend && bun test features/gui/integration.test.ts
 	cd backend && bun test machine/integration.test.ts
 	cd backend && bun test features/vscode/integration.test.ts
 

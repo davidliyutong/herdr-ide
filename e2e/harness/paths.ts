@@ -3,8 +3,7 @@
 // the Go machine build (the product's default) and one the TypeScript
 // machine side (docs/features/42-typescript-backend.md); E2E_MACHINE=ts
 // runs the suite against the second, whose machines' nodes run the
-// TypeScript side (a matrix dimension: unported() names what such a
-// machine does not serve yet, which a spec skips with the reason).
+// TypeScript side (a matrix dimension).
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -65,16 +64,6 @@ export const paths = {
    * machine's Linux. */
   linuxXClient: (arch: string) => join(dir, `linux-${arch}`, 'e2e-xclient'),
 };
-
-/** The features whose machine side the TypeScript build does not serve
- * yet (it refuses them as an unknown plugin). */
-const UNPORTED = ['gui'] as const;
-
-/** Why a test of feature does not run in this run ("" when it does): the
- * TypeScript machine side does not serve it yet. */
-export function unported(feature: (typeof UNPORTED)[number]): string {
-  return ts && UNPORTED.includes(feature) ? `the TypeScript machine side does not serve ${feature} yet (E2E_MACHINE=ts)` : '';
-}
 
 export function checkBuilt() {
   for (const p of [paths.core, join(paths.fakeBin, 'kimi')]) {

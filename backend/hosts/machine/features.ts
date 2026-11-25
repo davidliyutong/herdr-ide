@@ -1,6 +1,6 @@
 // The machine sides of the features this build serves, and the chat host's
-// adapters. The features whose machine side is not here yet (gui) are
-// refused as an unknown plugin is (machine/agent.ts).
+// adapters. An op or plugin no feature serves is refused as an unknown
+// plugin is (machine/agent.ts).
 import type { MachineSide } from '#machine/feature.ts';
 import { agentsMachine } from '#features/agents/machine.ts';
 import { browserMachine } from '#features/browser/machine.ts';
@@ -10,11 +10,13 @@ import type { Adapters } from '#features/chat/machine/adapter.ts';
 import { Adapter } from '#shared/agents/kinds.ts';
 import { filesMachine } from '#features/files/machine.ts';
 import { gitMachine } from '#features/git/machine.ts';
+import { guiMachine } from '#features/gui/machine.ts';
 import { historyMachine } from '#features/history/machine.ts';
 import { monitorMachine } from '#features/monitor/machine.ts';
 import { searchMachine } from '#features/search/machine.ts';
 import { usageMachine } from '#features/usage/machine.ts';
 import { vscodeMachine } from '#features/vscode/machine.ts';
+import { carriedEncoder, carriedGPUPick, carriedGUIHelper } from './carried.ts';
 
 export function machineFeatures(): MachineSide[] {
   return [
@@ -28,6 +30,14 @@ export function machineFeatures(): MachineSide[] {
     usageMachine(),
     vscodeMachine(),
     chatMachine(),
+    guiMachine({
+      helper: async () => {
+        const h = await carriedGUIHelper();
+        return h && { bytes: h.bytes, digest: h.digest };
+      },
+      pick: carriedGPUPick,
+      encoder: carriedEncoder,
+    }),
   ] as MachineSide[];
 }
 

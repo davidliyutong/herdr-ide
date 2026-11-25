@@ -374,21 +374,31 @@ export class Manager {
   }
 
   /** Puts the video encoder this build brings on the machine, so that its
-   * windows can be sent as video. Without it, or when it fails, windows
-   * are sent as pictures. */
+   * windows can be sent as video. A build without one for the machine asks
+   * for the machine build's own (the TypeScript machine build carries its
+   * platform's): a video request without a digest, which the Go machine
+   * build answers without video. Without either, or when it fails,
+   * windows are sent as pictures. */
   private async prepareVideo(d: Display): Promise<void> {
     const m = d.machine;
     const info = m.state().info;
     if (!info) return;
     const log = (e: unknown) => !this.closed && this.o.logger(`gui ${m.label}: video: ${errorText(e)}`);
+    const timeoutMs = this.timing.videoMs;
     let enc: { gz: Uint8Array; digest: string };
     try {
       if (!this.o.encoder) throw new Error(`no video encoder for ${info.os}-${info.arch} in this build`);
       enc = await this.o.encoder(info.os, info.arch);
     } catch (e) {
+      try {
+        const st = await this.agent.video(m, '', { signal: this.bounded(timeoutMs), timeoutMs });
+        if (st?.video)
+          return void this.o.logger(`gui ${m.label}: video encoders [${(st.video_encoders ?? []).join(' ')}] (the machine's own)`);
+      } catch {
+        // as without
+      }
       return void log(e);
     }
-    const timeoutMs = this.timing.videoMs;
     const signal = this.bounded(timeoutMs);
     try {
       let st = await this.agent.video(m, enc.digest, { signal, timeoutMs });

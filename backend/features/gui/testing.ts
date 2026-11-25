@@ -108,7 +108,7 @@ export class FakeDisplay {
         return this.done(conn);
       }
       case 'video':
-        await writeLine(conn.stream, { ok: true, gui: { ...this.status, video: this.video } } satisfies Reply);
+        await writeLine(conn.stream, { ok: true, gui: { ...this.status, video: this.video || this.status.video } } satisfies Reply);
         return this.done(conn);
       case 'video-install': {
         await writeLine(conn.stream, { ok: true } satisfies Reply);

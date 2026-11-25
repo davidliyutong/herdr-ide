@@ -64,7 +64,11 @@ describe('preparing a display', () => {
     await t.phase('ready');
     await t.phase('local', 'local');
     await waitFor('keep', () => t.disp.count('keep') === 1);
-    expect(t.disp.actions).toEqual(['status', 'start auto', 'attach', 'keep']);
+    // No encoder in this build: the machine is asked for its own (video
+    // without a digest), which it has not.
+    await waitFor('the log', () => t.logs.some((l) => l === 'gui m1: video: no video encoder for linux-amd64 in this build'));
+    expect(t.disp.actions.filter((a) => a !== 'video')).toEqual(['status', 'start auto', 'attach', 'keep']);
+    expect(t.disp.actions).toContain('video');
     expect(t.phases()).toEqual(['starting', 'ready']);
     expect(t.audit.records().map((r) => [r.event, r.machine])).toEqual([
       ['gui.start', 'm1'],
@@ -72,8 +76,6 @@ describe('preparing a display', () => {
     ]);
     expect(t.mgr.paneEnv(t.m1())).toEqual({ DISPLAY: ':20', XAUTHORITY: '/h/xauth' });
     expect(t.last()).toEqual({ m: 'm1', phase: 'ready', display: 'xvfb', windows: [] });
-    // No encoder in this build: pictures.
-    await waitFor('the log', () => t.logs.some((l) => l === 'gui m1: video: no video encoder for linux-amd64 in this build'));
   });
 
   // Windows reach the state and their viewers; commands reach the agent;
@@ -180,6 +182,15 @@ describe('preparing a display', () => {
     expect(t.disp.actions).toContain('video-install linux-amd64-digest');
     expect(t.audit.records().find((r) => r.event === 'gui.video')).toMatchObject({ machine: 'm1', sha256: 'linux-amd64-digest' });
     await waitFor('the log', () => t.logs.includes('gui m1: video encoders [libvpx]'));
+  });
+
+  // A build without the machine's encoder uses the one the machine build
+  // carries (the TypeScript machine build's), asked for without a digest.
+  test("the machine's own encoder", async () => {
+    const t = setup({ status: { video: true, video_encoders: ['vp8'] } });
+    await waitFor('the log', () => t.logs.includes("gui m1: video encoders [vp8] (the machine's own)"));
+    expect(t.disp.actions).toContain('video');
+    expect(t.disp.count('video-install')).toBe(0);
   });
 
   // With gpupick on, a machine with several NVIDIA GPUs gets the library.

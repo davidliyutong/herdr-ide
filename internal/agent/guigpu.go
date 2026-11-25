@@ -245,8 +245,9 @@ var compositorCommand = func(node string, nvidia bool) (*exec.Cmd, error) {
 }
 
 // ownClient tells whether process pid is one of the instance's own that
-// uses the display without showing anything: this agent, another one, or a
-// display keeper.
+// uses the display without showing anything: this agent, another one, a
+// display keeper, or the GUI helper of the TypeScript machine build
+// (<bin>-gui gui-wm, gui-probe, gui-keep).
 func ownClient(pid int) bool {
 	if pid == os.Getpid() {
 		return true
@@ -259,7 +260,11 @@ func ownClient(pid int) bool {
 	if len(argv) < 2 || !strings.HasPrefix(filepath.Base(string(argv[0])), brand.CoreBin) {
 		return false
 	}
-	return string(argv[1]) == "gui-keep" || string(argv[1]) == "agent"
+	switch string(argv[1]) {
+	case "gui-keep", "gui-wm", "gui-probe", "agent", "node":
+		return true
+	}
+	return false
 }
 
 // user returns a process that uses display n besides the instance's own

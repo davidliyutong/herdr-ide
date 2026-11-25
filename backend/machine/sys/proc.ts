@@ -36,6 +36,16 @@ export function peerCred(fd: number): { pid: number; uid: number } {
   return { pid: pid.readInt32LE(0), uid: cred.readUInt32LE(4) };
 }
 
+/** A connected pair of unix stream sockets, both close-on-exec (Linux):
+ * a child gets one end only where it is passed to it. */
+export function socketPair(): [number, number] {
+  if (!linux) throw new Error(`no close-on-exec socket pairs on ${process.platform}`);
+  const sv = new Int32Array(2);
+  // AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC
+  if (libc().socketpair(1, 1 | 0o2000000, 0, sv) !== 0) throw new SysError(errno(), 'socketpair');
+  return [sv[0], sv[1]];
+}
+
 /** The offsets of struct kinfo_proc (macOS, 64-bit) that parentOf reads. */
 const KINFO = { size: 648, pid: 40, comm: 243, commLen: 17, ppid: 560, pgid: 564 };
 
