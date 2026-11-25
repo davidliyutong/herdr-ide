@@ -57,6 +57,22 @@ role and accessible name, and wait on conditions (`expect`, `waitFor`),
 never on time; read what a terminal shows with the terminal protocol
 client (`harness/term.ts`), since the page draws it on a canvas.
 
+The fixtures are built from parts a new kind of test reuses:
+
+- `harness/home.ts`: an isolated home (instance name, settings, an
+  environment built from scratch, offline) and its cleanup, also of the
+  homes of a run that was killed;
+- `harness/instance.ts`: the command line's core on such a home (the
+  `instance` fixture);
+- `harness/desktop.ts`: the desktop app on such a home with its own
+  Chromium profile and the mock keychain, its core reached through the
+  app's window (the `desktop` fixture, `test.use({ desktopOptions })`);
+- `harness/sshd.ts`: an SSH machine in a Docker container (the `sshd`
+  fixture);
+- `e2e/machines/`: KVM guests from cloud images and containers of old
+  distributions for runs on old kernels and C libraries (its README; on a
+  Linux host, not part of `make e2e`).
+
 With Docker running, `tests/ssh.spec.ts` adds SSH machines: each test
 starts a container of `e2e/sshd` (OpenSSH on Linux, key-only sign-in)
 published on `127.0.0.1` only, with a throwaway key, `known_hosts` and ssh

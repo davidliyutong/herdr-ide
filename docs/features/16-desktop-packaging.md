@@ -401,9 +401,11 @@ See [SECURITY.md](../../SECURITY.md) for the trust boundaries.
 - `e2e/tests/desktop.spec.ts` (`make e2e`, when the desktop's packages
   are installed) launches the unpackaged app with Playwright on an
   isolated instance (`VELDR_DESKTOP_DEV`), profile (`--user-data-dir`),
-  home and mock keychain: the UI from the app's origin with no TCP
-  listener of the core, the local machine, a terminal, a download, a
-  restart after the core is killed, and a VS Code window given a
-  code-server release ([42](42-typescript-backend.md)).
+  home and mock keychain (`e2e/harness/desktop.ts`, the `desktop`
+  fixture, which other desktop tests reuse): the UI from the app's
+  origin with no TCP listener of the core, the local machine, a
+  terminal, an ssh login through node-pty, a download, a restart after
+  the core is killed, and a VS Code window given a code-server release
+  (`E2E_CODE_SERVER_SEED`; [42](42-typescript-backend.md)).
 - Packaged smoke tests launch the executable with `VELDR_DESKTOP_DEV`
   and their own `--user-data-dir`.

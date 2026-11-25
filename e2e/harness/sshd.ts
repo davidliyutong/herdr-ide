@@ -19,7 +19,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { alive, type Instance } from './instance';
+import { alive } from './home';
+import type { Instance } from './instance';
 import { paths } from './paths';
 import { waitFor } from './wait';
 

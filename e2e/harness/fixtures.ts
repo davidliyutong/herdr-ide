@@ -1,9 +1,11 @@
-import { writeFileSync } from 'node:fs';
 // The tests' fixtures: an isolated instance per test, a page of it in
-// English that reaches nothing but the instance, and a terminal protocol
-// client for what the page draws on canvases.
+// English that reaches nothing but the instance, a terminal protocol
+// client for what the page draws on canvases, and the desktop app on an
+// instance of its own.
 
 import { test as base, expect, type Page } from '@playwright/test';
+import { writeFileSync } from 'node:fs';
+import { Desktop, desktopUnavailable, type DesktopOptions } from './desktop';
 import { Instance } from './instance';
 import { SSHMachine, sshUnavailable } from './sshd';
 import { TermClient } from './term';
@@ -15,6 +17,11 @@ interface Fixtures {
   /** An SSH machine in a container for the instance (harness/sshd.ts);
    * the test skips without Docker. */
   sshd: SSHMachine;
+  /** What the desktop fixture launches the app with (test.use). */
+  desktopOptions: DesktopOptions;
+  /** The desktop app on an instance of its own (harness/desktop.ts); the
+   * test skips where it is not built or has no display. */
+  desktop: Desktop;
 }
 
 export const test = base.extend<Fixtures>({
@@ -47,6 +54,21 @@ export const test = base.extend<Fixtures>({
         writeFileSync(info.outputPath('machine.log'), nodes);
       }
       await m.remove();
+    }
+  },
+  desktopOptions: [{}, { option: true }],
+  desktop: async ({ desktopOptions }, use, info) => {
+    const why = desktopUnavailable();
+    info.skip(!!why, why);
+    const d = await Desktop.launch(desktopOptions);
+    try {
+      await use(d);
+    } finally {
+      if (info.status !== info.expectedStatus) {
+        await info.attach('app.log', { body: d.logs(), contentType: 'text/plain' });
+        writeFileSync(info.outputPath('app.log'), d.logs());
+      }
+      await d.close();
     }
   },
   term: async ({ instance }, use) => {

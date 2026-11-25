@@ -25,6 +25,9 @@ export const paths = {
   fakeBin: join(dir, 'fakebin'),
   /** The machine builds the core uploads to SSH machines (--agent-dir). */
   agents: join(dir, 'agents'),
+  /** What the core embeds, staged as the desktop app carries it in its
+   * resources (harness/desktop.ts). */
+  payload: join(dir, 'payload'),
   /** The fake agent built for an SSH machine's Linux. */
   linuxFake: (arch: string) => join(dir, `linux-${arch}`, 'kimi'),
   /** The X program of the program window tests (e2e/xclient), for an SSH

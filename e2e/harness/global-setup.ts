@@ -1,5 +1,5 @@
 import { checkBuilt } from './paths';
-import { sweepLeftovers } from './instance';
+import { sweepLeftovers } from './home';
 import { sshUnavailable, sweepContainers } from './sshd';
 
 export default function globalSetup() {
