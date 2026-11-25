@@ -72,10 +72,9 @@ test('a compiled executable loads it from the data directory', async () => {
   dirs.push(join(out, '..'));
   const build = Bun.spawnSync(
     [process.execPath, 'build', '--compile', join(import.meta.dir, 'testdata', 'compiled.ts'), '--outfile', out],
-    {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
+    // In the temporary directory: Bun leaves a .<hash>.bun-build copy of
+    // the executable in its working directory.
+    { cwd: join(out, '..'), stdout: 'pipe', stderr: 'pipe' },
   );
   expect(build.exitCode).toBe(0);
   // The executable carries none of the SDK.

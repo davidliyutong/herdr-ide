@@ -30,9 +30,16 @@
 #      backend/scripts/codex-schema.ts)
 #  13. Anthropic's Agent SDK is imported for its types only outside the
 #      tests, and is no production dependency: no executable carries it
+#  14. no .<hash>.bun-build copy of an executable that a compile left in
+#      the repository (every `bun build --compile` runs in a temporary
+#      directory: backend/scripts/build.ts)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
+
+echo "==> leftovers of bun build --compile"
+left=$(find . -name '.*.bun-build' -not -path '*/node_modules/*' -not -path './.claude/*' 2>/dev/null)
+if [[ -n "$left" ]]; then echo "a compile ran in the repository and left (remove them; run it in a temporary directory):"; echo "$left"; fail=1; fi
 slug=$(sed -n 's/^[[:space:]]*Slug = "\(.*\)"$/\1/p' internal/brand/brand.go)
 module=$(sed -n 's/^module //p' go.mod)
 

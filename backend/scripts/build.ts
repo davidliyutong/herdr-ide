@@ -30,7 +30,7 @@
 // it embeds is staged beside it).
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { keyOfTarget } from '../kernel/machines/transport/builds.ts';
@@ -129,8 +129,10 @@ if (o['payload-out'])
   }
 
 // Beside the output, at a path of its own: Bun names the files in the
-// executable, which then depends on nothing but the output's path.
-const stage = `${o.out}.files`;
+// executable, which then depends on nothing but the output's path. The
+// compile runs in it: Bun leaves a .<hash>.bun-build copy of the
+// executable in its working directory, which goes with the stage.
+const stage = resolve(`${o.out}.files`);
 rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 try {
@@ -151,8 +153,8 @@ try {
     `--define=BUILD_VERSION=${JSON.stringify(o.version)}`,
   ];
   if (o.target) args.push(`--target=${o.target}`);
-  args.push(join(import.meta.dir, '..', 'hosts', 'bun', 'main.ts'), ...files, '--outfile', o.out);
-  const p = Bun.spawnSync([process.execPath, ...args], { stdout: 'inherit', stderr: 'inherit' });
+  args.push(join(import.meta.dir, '..', 'hosts', 'bun', 'main.ts'), ...files, '--outfile', resolve(o.out));
+  const p = Bun.spawnSync([process.execPath, ...args], { cwd: stage, stdout: 'inherit', stderr: 'inherit' });
   if (p.exitCode !== 0) process.exit(p.exitCode ?? 1);
   // Anthropic's Agent SDK is fetched by the machines that use it, never
   // shipped (features/chat/claudesdk.ts): an executable with its code in it
