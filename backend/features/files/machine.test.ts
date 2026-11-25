@@ -565,6 +565,28 @@ describe('uploads', () => {
     expect(ok(await f.send('upload', { path: p }, 'new')).paths).toEqual([join(f.home, 'big-1.bin')]);
   });
 
+  test('a session that ends during an upload is served until the upload removed what it staged', async () => {
+    const t = tempHome();
+    const dirs = dirsOf(join(t.home, '.agent-base'));
+    makeDirs(dirs);
+    const agent = new Agent({ instance: '', dirs, logger: discard, features: [filesMachine({ platform: 'linux', dataHome: '' })] });
+    try {
+      const [a, b] = duplexPair();
+      const served = agent.serve(a, 'hub', '');
+      const s = new Session(b, () => b.destroy());
+      const { conn } = await open(machineOf(s), filesProtocol, 'upload', { path: join(t.home, 'big.bin') } as never);
+      await new ChunkWriter(conn.stream).write(Buffer.from('x'.repeat(1000)));
+      await until(() => left(dirs.base).length === 1, 'the upload to stage its file');
+      s.close();
+      await served;
+      expect(left(dirs.base)).toEqual([]);
+      expect(existsSync(join(t.home, 'big.bin'))).toBe(false);
+    } finally {
+      await agent.close();
+      t.remove();
+    }
+  });
+
   test("old files of broken-off uploads go; recent ones and other directories' files stay", () => {
     const t = tempHome();
     try {

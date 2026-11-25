@@ -464,6 +464,47 @@ describe('the chat host', () => {
     a.close();
   });
 
+  test('bounds: connections, listings and commands waiting for the agent', async () => {
+    const h = await host();
+    // 256 connections, none past its hello, are served; the next is refused.
+    // Dialed one after another: the listen backlog is smaller.
+    const held: Client[] = [];
+    for (let i = 0; i < 256; i++) held.push(await Client.dial(h.sock));
+    const over = await Client.dial(h.sock);
+    expect((await over.next()).error).toMatchObject({ code: 'too_many' });
+    expect(await over.closed()).toBe(true);
+    for (const c of held) c.close();
+    await eventually('the connections to go', async () => (await h.request({ op: chat.Op.Chats })).ok === true);
+
+    // Four listings at a time.
+    let open!: () => void;
+    h.fake.sessionsGate = new Promise((r) => (open = r));
+    const listings = Array.from({ length: 4 }, () => h.request({ op: chat.Op.Sessions, kind: FAKE_KIND, cwd: h.cwd }));
+    await eventually('four listings to run', () => h.fake.sessionsP.length === 4);
+    expect((await h.request({ op: chat.Op.Sessions, kind: FAKE_KIND, cwd: h.cwd })).error?.code).toBe('busy');
+    open();
+    for (const l of await Promise.all(listings)) expect(l.nextCursor).toBe('next-page');
+
+    // Eight commands of a connection wait for the agent; the ninth is refused.
+    const { chat: c, s } = await h.newChat();
+    const a = await h.attach(c.id);
+    await eventually('idle', () => h.chat(c.id).r.chat.state === 'idle');
+    let done!: () => void;
+    h.fake.compactGate = new Promise((r) => (done = r));
+    const waiting = await Promise.all(Array.from({ length: 8 }, () => a.send({ op: 'compact' })));
+    for (let i = 0; i < 8; i++) await s.expect('compact');
+    expect(await a.command({ op: 'compact' })).toMatchObject({ code: 'busy' });
+    done();
+    for (const id of waiting) expect((await a.ack(id)).error).toBeUndefined();
+    a.close();
+  });
+
+  test('a connection that sends no request in time is closed', async () => {
+    const h = await host((t) => (t.o.timing = { ...t.o.timing!, requestTimeout: 200 }));
+    const c = await Client.dial(h.sock);
+    expect(await c.closed(5000)).toBe(true);
+  });
+
   test('commands that need an agent, without one', async () => {
     const h = await host();
     const { chat: c, s } = await h.newChat();

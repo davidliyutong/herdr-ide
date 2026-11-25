@@ -185,6 +185,7 @@ export class FakeSession implements Session {
 
   async compact(): Promise<void> {
     this.calls.push('compact');
+    if (this.a.compactGate) await this.a.compactGate;
   }
 
   async close(signal: AbortSignal): Promise<void> {
@@ -298,6 +299,9 @@ export class FakeAdapter implements Adapter {
   historyGate: Promise<void> | null = null;
   histories: HistoryParams[] = [];
   sessionsP: SessionsParams[] = [];
+  /** Held, the listings and the compactions wait for it. */
+  sessionsGate: Promise<void> | null = null;
+  compactGate: Promise<void> | null = null;
 
   async start(p: StartParams, sink: Sink, signal: AbortSignal): Promise<Session> {
     this.starts.push(p);
@@ -328,6 +332,7 @@ export class FakeAdapter implements Adapter {
 
   async sessions(p: SessionsParams): Promise<{ sessions: chat.Session[]; next: string }> {
     this.sessionsP.push(p);
+    if (this.sessionsGate) await this.sessionsGate;
     return { sessions: this.list.map((s) => ({ ...s })), next: 'next-page' };
   }
 
