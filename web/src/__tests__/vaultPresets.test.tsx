@@ -50,9 +50,18 @@ const setInput = (el: HTMLInputElement | HTMLTextAreaElement, value: string) => 
   el.dispatchEvent(new Event('input', { bubbles: true }));
 };
 
-const setSelect = (el: HTMLSelectElement, value: string) => {
-  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(el, value);
-  el.dispatchEvent(new Event('change', { bubbles: true }));
+const pickerPopup = () => document.body.querySelector<HTMLElement>('.picker');
+const pickerSearch = () => pickerPopup()!.querySelector<HTMLInputElement>('.picker-search')!;
+const groupPickerButton = () =>
+  document.querySelector<HTMLButtonElement>(`[role="dialog"] .picker-button[aria-label="${t('vault.group')}"]`)!;
+const pressKey = (key: string, target: EventTarget = document.activeElement ?? document.body) =>
+  act(async () => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  });
+const selectGroup = async (query: string) => {
+  await act(async () => groupPickerButton().click());
+  act(() => setInput(pickerSearch(), query));
+  await act(async () => pickerPopup()!.querySelector<HTMLElement>('.picker-row')!.click());
 };
 
 interface Call {
@@ -285,10 +294,10 @@ describe('vault groups, presets and workspace linking UI', () => {
     expect(host.querySelector('[data-group-section="g1"]')).not.toBeNull();
     expect(host.querySelector('[data-group-section="__ungrouped__"]')).not.toBeNull();
 
-    // Assign OPENAI_API_KEY to LLM via the variable editor.
+    // Assign OPENAI_API_KEY to LLM via the variable editor's searchable group picker.
     await act(async () => host.querySelector<HTMLButtonElement>('[data-name="OPENAI_API_KEY"] [data-action="edit"]')!.click());
-    const groupSelect = document.querySelector<HTMLSelectElement>(`[role="dialog"] select[aria-label="${t('vault.group')}"]`)!;
-    act(() => setSelect(groupSelect, 'g1'));
+    expect(document.querySelector('[role="dialog"] select')).toBeNull();
+    await selectGroup('LLM');
     await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
     await flush();
     expect(variables.find((v) => v.name === 'OPENAI_API_KEY')?.group).toBe('g1');
@@ -301,11 +310,11 @@ describe('vault groups, presets and workspace linking UI', () => {
     await act(async () => host.querySelector<HTMLButtonElement>('[data-group-filter="ungrouped"]')!.click());
     expect([...host.querySelectorAll<HTMLElement>('[data-name]')].map((el) => el.dataset.name)).toEqual(['DB_URL']);
 
-    // Bulk move DB_URL into LLM.
+    // Bulk move DB_URL into LLM via the searchable group picker.
     await act(async () => host.querySelector<HTMLInputElement>('[data-name="DB_URL"] .vault-row-check')!.click());
     await act(async () => host.querySelector<HTMLButtonElement>('[data-bulk="group"]')!.click());
-    const bulkSel = document.querySelector<HTMLSelectElement>(`[role="dialog"] select[aria-label="${t('vault.group')}"]`)!;
-    act(() => setSelect(bulkSel, 'g1'));
+    expect(document.querySelector('[role="dialog"] select')).toBeNull();
+    await selectGroup('LLM');
     await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
     await flush();
     expect(variables.every((v) => v.group === 'g1')).toBe(true);
@@ -451,14 +460,14 @@ describe('vault groups, presets and workspace linking UI', () => {
 
     // 1. New variable created directly into a group belonging to a linked preset.
     await act(async () => host.querySelector<HTMLButtonElement>('.vault-toolbar .primary')!.click());
+    expect(document.querySelector('[role="dialog"] select')).toBeNull();
     const nameIn = document.querySelector<HTMLInputElement>('[role="dialog"] input[placeholder="API_KEY"]')!;
-    const groupSel = document.querySelector<HTMLSelectElement>(`[role="dialog"] select[aria-label="${t('vault.group')}"]`)!;
     const valIn = document.querySelector<HTMLInputElement>('[role="dialog"] input[name="value"]')!;
     act(() => {
       setInput(nameIn, 'NEW_IN_GROUP');
-      setSelect(groupSel, 'g1');
       setInput(valIn, 'secret-1');
     });
+    await selectGroup('AI');
     await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
     await flush();
     const passIn = document.querySelector<HTMLInputElement>('[data-fresh="change"] input')!;
@@ -484,6 +493,150 @@ describe('vault groups, presets and workspace linking UI', () => {
     await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
     await flush();
     expect(variables.some((v) => v.name === 'MISSING_REF')).toBe(true);
+  });
+
+  it('uses a searchable group picker in variable editor and bulk move dialogs with filtering, Ungrouped, keyboard navigation, Escape, click-outside, and empty state', async () => {
+    groups = [
+      { id: 'g1', name: 'Production API', description: 'Live keys', created: '1', updated: '1' },
+      { id: 'g2', name: 'LLM Models', description: 'OpenAI and Claude', created: '1', updated: '1' },
+      { id: 'g3', name: 'Staging DB', description: 'Test postgres', created: '1', updated: '1' },
+    ];
+    variables = [
+      { name: 'OPENAI_API_KEY', description: 'OpenAI', machines: [], injectOnly: false, created: '1', updated: '1' },
+      { name: 'DB_URL', description: 'Postgres', machines: [], injectOnly: false, group: 'g3', created: '1', updated: '1' },
+    ];
+
+    await act(async () => root.render(createElement(VaultPanel)));
+    await flush();
+    await act(async () => openSession(PASS));
+    await flush();
+
+    // Open Edit Variable dialog for an ungrouped variable: no native <select>.
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-name="OPENAI_API_KEY"] [data-action="edit"]')!.click());
+    expect(document.querySelector('[role="dialog"] select')).toBeNull();
+    const trigger = groupPickerButton();
+    expect(trigger.classList.contains('vault-group-picker')).toBe(true);
+    expect(trigger.getAttribute('aria-haspopup')).toBe('listbox');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger.textContent).toBe(t('vault.group.none'));
+
+    // Open popover: portaled outside dialog, auto-focused combobox search input, proper ARIA listbox/options.
+    await act(async () => trigger.click());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    const pop = pickerPopup()!;
+    expect(pop).not.toBeNull();
+    expect(document.querySelector('[role="dialog"]')!.contains(pop)).toBe(false);
+    const search = pickerSearch();
+    expect(document.activeElement).toBe(search);
+    expect(search.getAttribute('role')).toBe('combobox');
+    expect(search.getAttribute('aria-expanded')).toBe('true');
+    expect(search.placeholder).toBe(t('vault.group.search'));
+    const listbox = pop.querySelector<HTMLElement>('[role="listbox"]')!;
+    expect(listbox).not.toBeNull();
+    const initialOptions = [...pop.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(initialOptions).toHaveLength(4);
+    expect(initialOptions[0].textContent).toBe(t('vault.group.none'));
+    expect(initialOptions[0].getAttribute('aria-selected')).toBe('true');
+    expect(initialOptions[0].querySelector('.picker-current')).not.toBeNull();
+    expect(initialOptions[0].classList.contains('active')).toBe(true);
+
+    // Case-insensitive filtering by group name and description.
+    act(() => setInput(search, 'pRoD'));
+    expect([...pop.querySelectorAll<HTMLElement>('[role="option"]')].map((o) => o.querySelector('.picker-label')!.textContent)).toEqual([
+      'Production API',
+    ]);
+    act(() => setInput(search, 'claude'));
+    expect([...pop.querySelectorAll<HTMLElement>('[role="option"]')].map((o) => o.querySelector('.picker-label')!.textContent)).toEqual([
+      'LLM Models',
+    ]);
+
+    // Empty search state: clear empty message; Enter does not select or close.
+    act(() => setInput(search, 'no-such-group'));
+    expect(pop.querySelectorAll('[role="option"]')).toHaveLength(0);
+    expect(pop.querySelector('.picker-empty')?.textContent).toBe(t('vault.group.noMatch'));
+    await pressKey('Enter', search);
+    expect(pickerPopup()).not.toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+
+    // Escape closes the picker and restores focus to trigger WITHOUT closing the outer dialog.
+    await pressKey('Escape', search);
+    expect(pickerPopup()).toBeNull();
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    // Keyboard navigation: ArrowDown on closed trigger opens popover; ArrowDown/ArrowUp move active option; Enter selects without submitting.
+    await pressKey('ArrowDown', trigger);
+    expect(pickerPopup()).not.toBeNull();
+    const kbSearch = pickerSearch();
+    expect(document.activeElement).toBe(kbSearch);
+    const activeLabel = () => pickerPopup()!.querySelector('.picker-row.active .picker-label')?.textContent;
+    expect(activeLabel()).toBe(t('vault.group.none'));
+    await pressKey('ArrowDown', kbSearch);
+    expect(activeLabel()).toBe('Production API');
+    expect(kbSearch.getAttribute('aria-activedescendant')).toBe(pickerPopup()!.querySelector('.picker-row.active')!.id);
+    await pressKey('ArrowDown', kbSearch);
+    expect(activeLabel()).toBe('LLM Models');
+    await pressKey('ArrowUp', kbSearch);
+    expect(activeLabel()).toBe('Production API');
+    await pressKey('ArrowDown', kbSearch);
+    expect(activeLabel()).toBe('LLM Models');
+    await pressKey('Enter', kbSearch);
+    expect(pickerPopup()).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(trigger.textContent).toBe('LLM Models');
+    expect(document.activeElement).toBe(trigger);
+
+    // Reopen to verify selected checkmark moved to LLM Models, then click outside closes popover without closing dialog.
+    await act(async () => trigger.click());
+    const selectedOpt = pickerPopup()!.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')!;
+    expect(selectedOpt.querySelector('.picker-label')?.textContent).toBe('LLM Models');
+    expect(selectedOpt.querySelector('.picker-current')).not.toBeNull();
+    await act(async () => {
+      document.querySelector('.modal-title')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    });
+    expect(pickerPopup()).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(trigger.textContent).toBe('LLM Models');
+
+    // Save variable with new group.
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
+    await flush();
+    expect(variables.find((v) => v.name === 'OPENAI_API_KEY')?.group).toBe('g2');
+
+    // Edit a grouped variable (DB_URL in Staging DB) and switch it back to Ungrouped via search + Enter.
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-name="DB_URL"] [data-action="edit"]')!.click());
+    expect(groupPickerButton().textContent).toBe('Staging DB');
+    await act(async () => groupPickerButton().click());
+    expect(pickerPopup()!.querySelector('[role="option"][aria-selected="true"] .picker-label')?.textContent).toBe('Staging DB');
+    act(() => setInput(pickerSearch(), t('vault.group.none').toLowerCase()));
+    await pressKey('Enter', pickerSearch());
+    expect(groupPickerButton().textContent).toBe(t('vault.group.none'));
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
+    await flush();
+    expect(variables.find((v) => v.name === 'DB_URL')?.group).toBeUndefined();
+
+    // Escape when the picker is closed still closes the outer variable editor dialog.
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-name="DB_URL"] [data-action="edit"]')!.click());
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await pressKey('Escape', groupPickerButton());
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    // Bulk "Move to Group…" dialog: no native <select>, Escape closes picker only, filter & select moves variables.
+    await act(async () => host.querySelector<HTMLInputElement>('[data-name="DB_URL"] .vault-row-check')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-bulk="group"]')!.click());
+    expect(document.querySelector('[role="dialog"] select')).toBeNull();
+    expect(groupPickerButton().textContent).toBe(t('vault.group.none'));
+    await act(async () => groupPickerButton().click());
+    expect(pickerPopup()).not.toBeNull();
+    await pressKey('Escape', pickerSearch());
+    expect(pickerPopup()).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await selectGroup('stag');
+    expect(groupPickerButton().textContent).toBe('Staging DB');
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
+    await flush();
+    expect(variables.find((v) => v.name === 'DB_URL')?.group).toBe('g3');
   });
 });
 

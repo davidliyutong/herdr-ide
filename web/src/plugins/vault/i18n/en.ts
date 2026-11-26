@@ -264,6 +264,8 @@ export const en = {
   'vault.group.deleteTitle': 'Delete the group?',
   'vault.group.deleteMessage': '“{name}” will be removed. Its variables stay in the vault as ungrouped.',
   'vault.group.empty': 'No variables in this group.',
+  'vault.group.search': 'Search groups',
+  'vault.group.noMatch': 'No group matches.',
   'vault.bulk.group': 'Move to Group…',
   'vault.bulk.groupTitle': 'Move chosen variables ({n}) to a group',
   'vault.fresh.groupAssign': 'Moving variables into a group used by a linked workspace preset needs the passphrase.',

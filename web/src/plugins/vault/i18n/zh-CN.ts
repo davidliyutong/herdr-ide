@@ -254,6 +254,8 @@ export const zhCN: Record<keyof typeof en, string> = {
   'vault.group.deleteTitle': '删除分组？',
   'vault.group.deleteMessage': '将移除分组“{name}”，其中的变量会保留在变量库中并归为未分组。',
   'vault.group.empty': '此分组中还没有变量。',
+  'vault.group.search': '搜索分组',
+  'vault.group.noMatch': '没有匹配的分组。',
   'vault.bulk.group': '移至分组…',
   'vault.bulk.groupTitle': '将所选变量（{n} 个）移至分组',
   'vault.fresh.groupAssign': '将变量移入已关联工作区预设的分组需要输入主口令。',

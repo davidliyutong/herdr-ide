@@ -27,7 +27,7 @@ import { useStore } from '../../state/store';
 import { confirmDialog } from '../../dialog';
 import { t } from '../../i18n';
 import { errorText, loadVault, useVault, vaultApi, VaultError, type VaultGroup, type VaultVariable } from './api';
-import { Picker } from '../../components/Picker';
+import { Picker, type PickerItem } from '../../components/Picker';
 import { FreshPassphrase } from './fields';
 import { openVaultExport, openVaultImport } from './dialogs';
 import { ways, widens, withFresh } from './proof';
@@ -673,6 +673,35 @@ function AccessChooser({
 
 const machinesFor = (mode: AccessMode, picked: string[]): string[] => (mode === 'all' ? ['*'] : mode === 'some' ? picked : []);
 
+/** Searchable single-choice selector for a variable's group (or ungrouped). */
+function GroupPicker({ groups, value, onChange }: { groups: readonly VaultGroup[]; value: string; onChange(groupId: string): void }) {
+  const current = value && groups.some((g) => g.id === value) ? value : '';
+  const items: PickerItem[] = useMemo(
+    () => [
+      { value: '', label: t('vault.group.none') },
+      ...groups.map((g) => ({
+        value: g.id,
+        label: g.name,
+        icon: <Folder />,
+        description: g.description || undefined,
+      })),
+    ],
+    [groups],
+  );
+  return (
+    <Picker
+      className="vault-group-picker"
+      aria-label={t('vault.group')}
+      label={t('vault.group')}
+      placeholder={t('vault.group.search')}
+      emptyText={t('vault.group.noMatch')}
+      items={items}
+      value={current}
+      onChange={onChange}
+    />
+  );
+}
+
 /** Creates or renames a group in a dialog. */
 function GroupEditor({ group, onDone }: { group?: VaultGroup; onDone(): void }) {
   const [name, setName] = useState(group?.name ?? '');
@@ -815,17 +844,10 @@ function BulkGroup({ names, onDone }: { names: string[]; onDone(err?: string): v
               <code key={n}>{n}</code>
             ))}
           </div>
-          <label className="vault-field">
+          <div className="vault-field">
             <span>{t('vault.group')}</span>
-            <select className="input" aria-label={t('vault.group')} value={group} onChange={(e) => setGroup(e.target.value)}>
-              <option value="">{t('vault.group.none')}</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-          </label>
+            <GroupPicker groups={groups} value={group} onChange={setGroup} />
+          </div>
           {asking && (
             <div className="vault-field" data-fresh="group-assign">
               <small>{t('vault.fresh.groupAssign')}</small>
@@ -1068,17 +1090,10 @@ function Editor({ variable, defaultGroup, onDone }: { variable?: VaultVariable; 
             <textarea className="input" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
           </label>
           {groups.length > 0 && (
-            <label className="vault-field">
+            <div className="vault-field">
               <span>{t('vault.group')}</span>
-              <select className="input" aria-label={t('vault.group')} value={group} onChange={(e) => setGroup(e.target.value)}>
-                <option value="">{t('vault.group.none')}</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <GroupPicker groups={groups} value={group} onChange={setGroup} />
+            </div>
           )}
           <label className="vault-field">
             <span>{variable ? t('vault.newValue') : t('vault.value')}</span>

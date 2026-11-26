@@ -215,6 +215,7 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
       groups.map((g) => ({
         value: g.id,
         label: g.name,
+        icon: <Folder />,
         description: `${variables.filter((v) => v.group === g.id).length}`,
       })),
     [groups, variables],
@@ -347,6 +348,8 @@ function PresetEditor({ preset, onDone }: { preset?: VaultPreset; onDone(): void
                 aria-label={t('vault.preset.groups')}
                 label={t('vault.preset.groups')}
                 noneLabel={t('vault.preset.groupsPick')}
+                placeholder={t('vault.group.search')}
+                emptyText={t('vault.group.noMatch')}
                 items={groupItems}
                 value={pickedGroups}
                 onChange={setPickedGroups}
