@@ -101,15 +101,31 @@ const newBody = z.object({
     .boolean()
     .nullish()
     .transform((v) => v ?? false),
+  workspace: opt,
   options: z.object({ model: opt, effort: opt, mode: opt }).nullish(),
 });
+
+export interface WorkspaceEnvLookup {
+  (
+    machine: string,
+    workspace: string,
+  ): Promise<{
+    presets: string[];
+    env: Record<string, string>;
+    names: string[];
+    missing: string[];
+    locked: boolean;
+    logFailed?: boolean;
+    corrupt?: boolean;
+  }>;
+}
 
 const OK = {};
 
 /** The request's own signal, bounded by ms. */
 const bounded = (c: Ctx, ms: number) => AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(ms)]);
 
-export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timing): void {
+export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timing, workspaceEnv?: WorkspaceEnvLookup): void {
   const api = ctx.machineApi;
   const query = (c: Ctx, name: string) => c.req.query(name) ?? '';
   /** One request of the machine's chat host within ms: start starts the
@@ -201,6 +217,8 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
     const o = b.options;
     if (o && (!validOption(o.model) || !validOption(o.effort) || (o.mode && !(chat.MODES as readonly string[]).includes(o.mode))))
       throw badRequest('options: model, effort and a mode');
+    if (b.workspace && (Buffer.byteLength(b.workspace) > 128 || /[\x00-\x1f\x7f]/.test(b.workspace)))
+      throw badRequest('workspace: a workspace id');
     c.var.audit.cwd = auditText(b.cwd);
     if (b.resume) Object.assign(c.var.audit, { resume: b.resume, import: b.import });
     if (o?.mode) c.var.audit.mode = o.mode;
@@ -209,6 +227,25 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
       ...(o.effort ? { effort: o.effort } : {}),
       ...(o.mode ? { mode: o.mode } : {}),
     };
+    let env: Record<string, string> | undefined;
+    let vault: { injected: number; locked?: boolean; missing?: string[]; logFailed?: boolean; corrupt?: boolean } | undefined;
+    if (b.workspace && workspaceEnv) {
+      const resolved = await workspaceEnv(c.var.machine.id, b.workspace);
+      if (resolved.presets.length > 0 || resolved.corrupt) {
+        if (resolved.names.length) {
+          env = resolved.env;
+          c.var.audit.vault_env = resolved.names;
+          c.var.audit.vault_presets = resolved.presets;
+        }
+        vault = {
+          injected: resolved.names.length,
+          ...(resolved.locked ? { locked: true } : {}),
+          ...(resolved.missing.length ? { missing: resolved.missing } : {}),
+          ...(resolved.logFailed ? { logFailed: true } : {}),
+          ...(resolved.corrupt ? { corrupt: true } : {}),
+        };
+      }
+    }
     // A Claude Code chat runs on Anthropic's Agent SDK, which the machine
     // gets first: asked again although it failed lately, the user asking.
     try {
@@ -228,13 +265,14 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
         ...(b.resume ? { resume: b.resume } : {}),
         ...(b.import ? { import: true } : {}),
         ...(options ? { options } : {}),
+        ...(env ? { env } : {}),
       },
       { start: true, agent: true },
     );
     const id = res.chat?.id;
     if (typeof id !== 'string' || !chat.validChatID(id)) throw failOf(protocolError("the chat host's answer has no chat"));
     c.var.audit.chat = id;
-    return c.json({ chat: res.chat });
+    return c.json({ chat: res.chat, ...(vault ? { vault } : {}) });
   });
 
   /** A request on a chat that answers nothing but OK. */

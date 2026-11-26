@@ -312,7 +312,12 @@ describe('the chat panel’s earlier sessions', () => {
     await act(async () => rowOf(S1).click());
     for (let i = 0; i < 4; i++) await act(settle);
     expect(chats.posts()).toEqual([
-      { method: 'POST', path: '/api/m/m/p/chat/new', query: {}, body: { kind: 'claude', cwd: DIR, resume: S1, import: true } },
+      {
+        method: 'POST',
+        path: '/api/m/m/p/chat/new',
+        query: {},
+        body: { kind: 'claude', cwd: DIR, resume: S1, import: true, workspace: 'w1' },
+      },
     ]);
     const opened = chatViews(model).find((v) => v.view.chat === NEW_CHAT)!;
     expect(opened.view).toMatchObject({ plugin: 'chat', kind: 'chat', chat: NEW_CHAT, agent: 'claude' });
@@ -363,7 +368,12 @@ describe('the chat panel’s earlier sessions', () => {
     await act(async () => rowOf(C1).click());
     for (let i = 0; i < 4; i++) await act(settle);
     expect(chats.posts()).toEqual([
-      { method: 'POST', path: '/api/m/m/p/chat/new', query: {}, body: { kind: 'codex', cwd: DIR, resume: C1, import: true } },
+      {
+        method: 'POST',
+        path: '/api/m/m/p/chat/new',
+        query: {},
+        body: { kind: 'codex', cwd: DIR, resume: C1, import: true, workspace: 'w1' },
+      },
     ]);
   });
 
@@ -470,7 +480,7 @@ describe('Continue in Chat in a terminal’s header', () => {
     expect(button.title).toBe('Continue this Claude Code session in a chat');
     await act(async () => button.click());
     for (let i = 0; i < 4; i++) await act(settle);
-    expect(chats.posts().map((r) => r.body)).toEqual([{ kind: 'claude', cwd: DIR, resume: S1, import: true }]);
+    expect(chats.posts().map((r) => r.body)).toEqual([{ kind: 'claude', cwd: DIR, resume: S1, import: true, workspace: 'w1' }]);
     const opened = chatViews(model).find((v) => v.view.chat === NEW_CHAT)!;
     expect(opened).toMatchObject({ ws: 'w1', tab: 2, view: { agent: 'claude' } });
   });

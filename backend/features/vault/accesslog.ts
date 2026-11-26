@@ -31,6 +31,8 @@ export const Result = {
   Exported: 'exported',
   /** Values given without asking to an exempt app. */
   Exempted: 'exempted',
+  /** Values injected into a new panel from workspace-linked presets. */
+  Injected: 'injected',
   /** Not released: the record could not be written. */
   LogFailed: 'log_failed',
 } as const;
@@ -40,6 +42,7 @@ const RELEASES: readonly string[] = [
   Result.Approved,
   Result.ApprovedAlways,
   Result.Exempted,
+  Result.Injected,
   Result.Revealed,
   Result.Exported,
 ];

@@ -324,7 +324,7 @@ describe('the gate', () => {
     });
     const { problems, checked } = await checkGuarded(rw.t, ro, { machine: 'm1' });
     expect(problems).toEqual([]);
-    expect(checked.length).toBe(17);
+    expect(checked.length).toBe(25);
   });
 });
 
@@ -890,5 +890,142 @@ describe('export and import', () => {
     const imp = await w.call('POST', '/import', { file, passphrase: FILE, choices: [{ i: 0, action: 'import' }] });
     expect(imp.json).toEqual({ imported: ['A'] });
     expect((await w.call('GET', '')).json.variables).toMatchObject([{ name: 'A', machines: ['m1'] }]);
+  });
+});
+
+describe('groups, presets and workspace env injection routes', () => {
+  test('CRUD routes, session gate, verifyEachAllow widening, and no secret values in audit', async () => {
+    const v = await vault();
+    const gRes = await v.call('POST', '/groups', { name: 'LLM', description: 'Model API keys' });
+    expect(gRes.status).toBe(200);
+    const gid = gRes.json.id as string;
+
+    await v.call('PUT', '/vars/LLM_KEY', { value: 'super-secret-llm', group: gid });
+    await v.call('PUT', '/vars/OTHER_KEY', { value: 'super-secret-other' });
+
+    const pRes = await v.call('POST', '/presets', { name: 'Dev', description: 'Dev env', groups: [gid], variables: ['OTHER_KEY'] });
+    expect(pRes.status).toBe(200);
+    const pid = pRes.json.id as string;
+
+    const linkRes = await v.call('PUT', '/workspaces/m1/ws-1', { presets: [pid] });
+    expect(linkRes.status).toBe(200);
+    expect(linkRes.json.link).toMatchObject({ machine: 'm1', workspace: 'ws-1', presets: [pid] });
+
+    // GET / exposes metadata for groups, presets and workspaceLinks without values.
+    const list = await v.call('GET', '');
+    expect(list.json.groups).toMatchObject([{ id: gid, name: 'LLM', description: 'Model API keys' }]);
+    expect(list.json.presets).toMatchObject([{ id: pid, name: 'Dev', groups: [gid], variables: ['OTHER_KEY'] }]);
+    expect(list.json.workspaceLinks).toMatchObject([{ machine: 'm1', workspace: 'ws-1', presets: [pid] }]);
+    expect(JSON.stringify(list.json)).not.toContain('super-secret');
+
+    // Without a session, mutations are refused.
+    expect((await v.call('POST', '/groups', { name: 'NoAuth' }, { token: '' })).status).toBe(401);
+    expect((await v.call('POST', '/presets', { name: 'NoAuth' }, { token: '' })).status).toBe(401);
+    expect((await v.call('PUT', '/workspaces/m1/ws-1', { presets: [] }, { token: '' })).status).toBe(401);
+
+    // verifyEachAllow guards widening of workspace links, linked presets, and group moves into linked presets.
+    expect((await v.call('POST', '/guard', { verifyEachAllow: true })).status).toBe(200);
+    await v.call('PUT', '/vars/THIRD_KEY', { value: 'super-secret-third' });
+    expect((await v.call('PUT', '/workspaces/m1/ws-2', { presets: [pid] })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', '/workspaces/m1/ws-2', { presets: [pid], passphrase: PASS })).status).toBe(200);
+    expect((await v.call('PUT', `/presets/${pid}`, { variables: ['OTHER_KEY', 'THIRD_KEY'] })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', `/presets/${pid}`, { variables: ['OTHER_KEY', 'THIRD_KEY'], passphrase: PASS })).status).toBe(200);
+    expect((await v.call('POST', '/groups/assign', { names: ['THIRD_KEY'], group: gid })).json.error).toBe('vault_proof');
+    expect((await v.call('POST', '/groups/assign', { names: ['THIRD_KEY'], group: gid, passphrase: PASS })).status).toBe(200);
+    // Creating a new variable directly into a linked group needs passphrase (not POST /proof, which 404s for non-existent vars).
+    expect((await v.call('PUT', '/vars/FOURTH_KEY', { value: 'super-secret-fourth', group: gid })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', '/vars/FOURTH_KEY', { value: 'super-secret-fourth', group: gid, passphrase: PASS })).status).toBe(200);
+    // Deleting a variable referenced by a linked preset, then renaming an unlinked variable
+    // or creating a new variable with that referenced name, also requires fresh verification.
+    expect((await v.call('DELETE', '/vars/OTHER_KEY')).status).toBe(200);
+    expect((await v.call('PUT', '/vars/UNLINKED_KEY', { value: 'super-secret-unlinked' })).status).toBe(200);
+    expect((await v.call('PUT', '/vars/UNLINKED_KEY', { to: 'OTHER_KEY' })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', '/vars/UNLINKED_KEY', { to: 'OTHER_KEY', passphrase: PASS })).status).toBe(200);
+    expect((await v.call('DELETE', '/vars/OTHER_KEY')).status).toBe(200);
+    expect((await v.call('PUT', '/vars/OTHER_KEY', { value: 'super-secret-recreated' })).json.error).toBe('vault_proof');
+    expect((await v.call('PUT', '/vars/OTHER_KEY', { value: 'super-secret-recreated', passphrase: PASS })).status).toBe(200);
+    // Narrowing / unlinking requires no extra passphrase.
+    expect((await v.call('PUT', '/workspaces/m1/ws-2', { presets: [] })).status).toBe(200);
+
+    // Rename & delete group/preset routes.
+    expect((await v.call('PUT', `/groups/${gid}`, { name: 'AI' })).json.name).toBe('AI');
+    expect((await v.call('DELETE', `/groups/${gid}`)).status).toBe(200);
+    expect((await v.call('DELETE', `/presets/${pid}`)).status).toBe(200);
+    expect((await v.call('GET', '')).json.workspaceLinks).toEqual([]);
+
+    // Audit log never leaks secret values.
+    expect(v.t.audit.text()).not.toContain('super-secret');
+  });
+
+  test('workspaceEnv: injects when unlocked, records access log, refuses when locked, disabled, or log fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vault-ws-'));
+    dirs.push(dir);
+    const feat = vaultFeature({ path: join(dir, 'vault.json'), store: { kdf: FAST }, changedEveryMs: 1 });
+    const t = testHub({
+      features: [feat],
+      machines: testMachines([sshSpec('m1', 'm1', 'gpu')]),
+      settings: { 'plugins.vault.enabled': true },
+      guard: { allowedOrigins: [ORIGIN] },
+    });
+    const call = async (method: string, path: string, body?: unknown, token?: string) => {
+      const r = await t.request(method, `/api/p/vault${path}`, {
+        host: HOST,
+        origin: ORIGIN,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(token ? { headers: { 'X-Vault-Session': token } } : {}),
+      });
+      return { status: r.status, json: (await r.json().catch(() => ({}))) as any };
+    };
+    const tok = (await call('POST', '/passphrase', { passphrase: PASS })).json.session as string;
+    await call('PUT', '/vars/API_KEY', { value: 'val-1' }, tok);
+    await call('PUT', '/vars/GONE_VAR', { value: 'val-2' }, tok);
+    const pid = (await call('POST', '/presets', { name: 'Work', variables: ['API_KEY', 'GONE_VAR'] }, tok)).json.id as string;
+    await call('PUT', '/workspaces/m1/ws-1', { presets: [pid] }, tok);
+    await call('DELETE', '/vars/GONE_VAR', undefined, tok);
+
+    // Unlocked: resolves values and durably records Result.Injected in access log.
+    const ok = await feat.workspaceEnv('m1', 'ws-1', 'terminal');
+    expect(ok).toEqual({
+      env: { API_KEY: 'val-1' },
+      names: ['API_KEY'],
+      presets: [pid],
+      missing: ['GONE_VAR'],
+      locked: false,
+    });
+    const log = (await call('GET', '/log', undefined, tok)).json.log as any[];
+    expect(log[0]).toMatchObject({ m: 'm1', tool: 'terminal', names: ['API_KEY'], result: 'injected' });
+
+    // Locked: returns locked=true and empty env, records vault_locked.
+    await call('POST', '/lock', undefined, tok);
+    const locked = await feat.workspaceEnv('m1', 'ws-1', 'chat');
+    expect(locked).toEqual({ env: {}, names: [], presets: [pid], missing: [], locked: true });
+
+    // Unlock again, then disable the vault plugin: refuses injection.
+    const tok2 = (await call('POST', '/session', { passphrase: PASS })).json.session as string;
+    t.settings['plugins.vault.enabled'] = false;
+    expect(await feat.workspaceEnv('m1', 'ws-1', 'terminal')).toEqual({
+      env: {},
+      names: [],
+      presets: [],
+      missing: [],
+      locked: false,
+    });
+    t.settings['plugins.vault.enabled'] = true;
+    const log2 = (await call('GET', '/log', undefined, tok2)).json.log as any[];
+    expect(log2.some((e) => e.tool === 'chat' && e.result === 'vault_locked')).toBe(true);
+
+    // Access log write failure refuses release and wipes env.
+    const db = openShared(hubDBBeside(join(dir, 'vault.json')));
+    db.run(`CREATE TRIGGER ws_disk_fails AFTER INSERT ON vault_access BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`);
+    db.close();
+    const failed = await feat.workspaceEnv('m1', 'ws-1', 'terminal');
+    expect(failed).toEqual({
+      env: {},
+      names: [],
+      presets: [pid],
+      missing: ['GONE_VAR'],
+      locked: false,
+      logFailed: true,
+    });
   });
 });

@@ -97,6 +97,7 @@ describe('PaneHeader', () => {
     expect(hub.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
       keep: true,
       cwd: '/home/u/src',
+      workspace: 'w1w1w1w1',
       display: expect.any(Object),
     });
     expect(hub.layout('m')!.workspaces[0].tabs[0].root).toMatchObject({

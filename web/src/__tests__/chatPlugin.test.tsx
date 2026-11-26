@@ -390,7 +390,7 @@ describe('new chats', () => {
     await settle();
     const post = calls.find((c) => c.method === 'POST')!;
     expect(post.url).toBe('/api/m/m/p/chat/new');
-    expect(post.body).toEqual({ kind: 'codex', cwd: '/src/proj', options: { mode: 'acceptEdits' } });
+    expect(post.body).toEqual({ kind: 'codex', cwd: '/src/proj', options: { mode: 'acceptEdits' }, workspace: 'w1w1w1w1' });
     const ws = hub.layout('m')!.workspaces[0];
     expect(ws.tabs).toHaveLength(2);
     const leaf = ws.tabs[1].root as L.PluginLeaf;

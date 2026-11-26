@@ -40,6 +40,9 @@ export interface ClientDeps {
   /** The variables of the machine's ssh session for new terminals
    * (sshenv.ts); the client's own stay. */
   sshEnv(m: Machine): Record<string, string> | null;
+  /** Optional vault preset environment variables for a workspace's new
+   * terminals; names only are audited, never values. */
+  workspaceEnv?(m: Machine, workspace: string): Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>;
   timing: Timing;
   /** A client whose channel holds more unsent bytes than this stopped
    * reading: it is disconnected. Output is credited (a stream has at most
@@ -369,6 +372,15 @@ export class TermClient implements Subscriber {
     if (params && (await this.refuseTargets(sub.b, sub.conn, m, params, signal))) return;
     const ev: AuditFields = { machine: m.m, terminal: params?.terminal ?? null, argv: params?.argv ?? null };
     if (m.method === 'terminal.run') {
+      // Hub-only parameter naming the workspace whose linked vault presets
+      // should be injected; stripped before reaching the terminal core.
+      let workspace = '';
+      if (params && 'workspace' in params) {
+        if (typeof params.workspace !== 'string' || Buffer.byteLength(params.workspace) > 128 || /[\x00-\x1f\x7f]/.test(params.workspace))
+          return this.fail(m.rid, 'usage');
+        workspace = params.workspace;
+        delete params.workspace;
+      }
       // The audit entry names the variables the client gave, not their
       // values, which may be secrets.
       const given = envOf(params?.env);
@@ -379,6 +391,21 @@ export class TermClient implements Subscriber {
       if (mc) {
         const p: Params = params ?? {};
         const added: string[] = [];
+        // Workspace-linked vault presets (feature 30): injected before
+        // virtual display variables so DISPLAY cannot be overridden, while
+        // keeping explicit client-supplied env vars. Only names are audited.
+        if (workspace && this.d.workspaceEnv) {
+          const resolved = await this.d.workspaceEnv(mc, workspace);
+          if (resolved && Object.keys(resolved.env).length) {
+            const names = addEnv(p, resolved.env, false);
+            if (!names) return this.fail(m.rid, 'usage');
+            if (names.length) {
+              ev.vault_env = names;
+              ev.vault_presets = resolved.presets;
+              added.push(...names);
+            }
+          }
+        }
         // New programs get the machine's virtual display (feature 14): its
         // variables replace any the client gave, so a client cannot point
         // them elsewhere.
@@ -397,7 +424,7 @@ export class TermClient implements Subscriber {
           added.push(...names);
         }
         if (added.length) {
-          ev.env = added.sort();
+          ev.env = [...new Set(added)].sort();
           params = p;
         }
       }

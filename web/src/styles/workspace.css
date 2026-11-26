@@ -152,6 +152,22 @@
   color: var(--fg-mute);
   flex: none;
 }
+/* A workspace with linked variable vault presets. */
+.ws-presets.lucide {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--accent);
+  flex: none;
+}
+.workspace-presets-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.workspace-presets-field > span:first-child {
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
 /* A preview pane's title (a file shown by a single click, replaced by the
    next one), as VS Code's preview editors. */
 .is-preview {

@@ -275,11 +275,16 @@ export class Chat {
   private trimming = false;
   private restoreClientIDs: boolean;
   private loadClientIDs?: Promise<void>;
+  /** Extra environment variables for this chat's agent process (e.g. from
+   * workspace-linked vault presets): kept in memory only, never written to
+   * the journal or logged. */
+  private extraEnv?: Record<string, string>;
 
-  constructor(h: Host, r: Row, restoreClientIDs = false) {
+  constructor(h: Host, r: Row, restoreClientIDs = false, extraEnv?: Record<string, string>) {
     this.h = h;
     this.r = r;
     this.restoreClientIDs = restoreClientIDs;
+    this.extraEnv = extraEnv ? { ...extraEnv } : undefined;
     this.made = { seq: r.chat.seq, historyAfter: r.historyAfter, turnEnd: r.turnEnd };
   }
 
@@ -805,7 +810,8 @@ export class Chat {
     const bad = await h.checkCwd(cwd);
     if (bad) return { err: bad };
     const signal = AbortSignal.any([st.abort.signal, AbortSignal.timeout(h.o.startTimeout)]);
-    const env = agentEnv(await h.env(signal), found.spec.env, cwd);
+    const extra = this.extraEnv ? { ...this.extraEnv, ...found.spec.env } : found.spec.env;
+    const env = agentEnv(await h.env(signal), extra, cwd);
     const path = await lookPath(found.spec.argv[0]!, env);
     if (!path) return { err: perr(chat.Code.NotFound, `${found.spec.argv[0]} is not in the user's PATH`) };
     if (!h.makeRoom(this)) return { err: perr(chat.Code.TooMany, 'as many agents as the settings allow work, wait or start') };

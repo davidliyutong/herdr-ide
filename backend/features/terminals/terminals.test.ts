@@ -628,3 +628,46 @@ test('disabling with a stopped core rests quietly and re-enabling starts the cor
   while ((await c.until('backend')).state !== 'ready');
   expect((await c.until('snapshot')).terminals).toHaveLength(1);
 });
+
+test('terminal.run injects workspace-linked vault env, strips workspace param, preserves paneEnv/client env, never audits values', async () => {
+  const calls: Array<{ m: string; ws: string }> = [];
+  const r = await start({
+    options: {
+      paneEnv: () => ({ DISPLAY: ':99' }),
+      workspaceEnv: async (m, ws) => {
+        calls.push({ m: m.id, ws });
+        return {
+          env: { VAULT_SECRET: 's3cr3t-value', DISPLAY: ':wrong', CLIENT_OVERRIDE: 'from-vault' },
+          names: ['VAULT_SECRET', 'DISPLAY', 'CLIENT_OVERRIDE'],
+          presets: ['p1'],
+          missing: [],
+          locked: false,
+        };
+      },
+    },
+  });
+  const c = await r.client();
+  await c.ready();
+  const res = await c.call(1, 'terminal.run', {
+    keep: true,
+    workspace: 'ws-42',
+    env: { CLIENT_OVERRIDE: 'from-client' },
+  });
+  expect(res.result).toBeTruthy();
+  expect(calls).toEqual([{ m: 'x', ws: 'ws-42' }]);
+  const runCall = r.sim.core!.calls.find((x) => x.method === 'terminal.run')!;
+  const params = runCall.params as Record<string, unknown>;
+  expect(params.workspace).toBeUndefined();
+  expect(params.env).toEqual({
+    CLIENT_OVERRIDE: 'from-client',
+    VAULT_SECRET: 's3cr3t-value',
+    DISPLAY: ':99',
+  });
+  const auditRec = r.tc.audit.records().find((a) => a.event === 'terminal.run');
+  expect(auditRec).toMatchObject({
+    client_env: ['CLIENT_OVERRIDE'],
+    vault_env: ['DISPLAY', 'VAULT_SECRET'],
+    vault_presets: ['p1'],
+  });
+  expect(r.tc.audit.text()).not.toContain('s3cr3t-value');
+});

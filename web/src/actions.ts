@@ -10,6 +10,7 @@ import { describeView, isPluginOn, viewStatus, viewUnopened } from './plugins/re
 import { isLive, type TerminalRecord } from './term/protocol';
 import { terms, useTerms } from './state/terms';
 import { useStore } from './state/store';
+import { saveWorkspacePresets } from './state/workspacePresets';
 import { withView, unsavedPanes } from './state/panes';
 import { settingValue } from './settings';
 import { aggregate, agentOf, agentStatus, statusRank, terminalTitle, type AgentStatus } from './lib/machine';
@@ -345,8 +346,10 @@ export const actions = {
     terms.mutate(m, (l) => L.focusPane(l, pane));
     const layout = terms.layout(m);
     const cwd = layout ? paneDirectory(m, L.findLeaf(layout, pane)) : undefined;
+    const at = layout ? L.locate(layout, pane) : null;
+    const workspace = at ? layout!.workspaces[at.workspace]?.id : undefined;
     try {
-      const address = await terms.run(m, { split: true, argv, cwd }, (l, a) => {
+      const address = await terms.run(m, { workspace, split: true, argv, cwd }, (l, a) => {
         const next = L.splitPane(l, pane, axisOf(dir), { terminal: a });
         return next === l ? L.openTerminal(l, a) : next;
       });
@@ -379,7 +382,20 @@ export const actions = {
     const def = paneDirectory(m, leaf) || useStore.getState().machines[m]?.info?.home || '~';
     const input = await newWorkspaceDialog(m, def);
     if (!input) return;
-    actions.movePaneToWorkspace(m, pane, L.newId(), { name: input.label, cwd: input.cwd });
+    const id = L.newId();
+    actions.movePaneToWorkspace(m, pane, id, { name: input.label, cwd: input.cwd });
+    if (input.presets?.length) {
+      await saveWorkspacePresets(m, id, input.presets, input.passphrase).catch((e) =>
+        useStore
+          .getState()
+          .toast(
+            t('vault.workspace.presetsSaveFailed', { error: e instanceof Error ? e.message : String(e) }),
+            undefined,
+            undefined,
+            'warning',
+          ),
+      );
+    }
   },
 
   /** Shows a pane alone in its tab, or all of the tab again. */
@@ -554,7 +570,20 @@ export const actions = {
     const def = paneDirectory(m, L.leafOf(first.root, first.focused)) || useStore.getState().machines[m]?.info?.home || '~';
     const input = await newWorkspaceDialog(m, def);
     if (!input) return;
-    actions.moveTabsToWorkspace(m, keys, L.newId(), { name: input.label, cwd: input.cwd });
+    const id = L.newId();
+    actions.moveTabsToWorkspace(m, keys, id, { name: input.label, cwd: input.cwd });
+    if (input.presets?.length) {
+      await saveWorkspacePresets(m, id, input.presets, input.passphrase).catch((e) =>
+        useStore
+          .getState()
+          .toast(
+            t('vault.workspace.presetsSaveFailed', { error: e instanceof Error ? e.message : String(e) }),
+            undefined,
+            undefined,
+            'warning',
+          ),
+      );
+    }
   },
 
   /** Adds an SSH machine to the hub's machines (docs/features/02) and
@@ -762,6 +791,8 @@ export const actions = {
     if (!m) return;
     useStore.getState().selectMachine(m);
     terms.subscribe(m);
+    let presets: string[] | undefined;
+    let passphrase: string | undefined;
     if (cwd === undefined) {
       const c = current();
       const def = (c?.m === m && terms.directory(m, c.focused)) || useStore.getState().machines[m]?.info?.home || '~';
@@ -769,12 +800,26 @@ export const actions = {
       if (!input) return;
       cwd = input.cwd;
       name = input.label;
+      presets = input.presets;
+      passphrase = input.passphrase;
     }
     const id = L.newId();
     const own = name.trim();
     const dir = cwd;
     await whenLoaded(m);
     terms.mutate(m, (l) => L.createWorkspace(l, id, own, dir));
+    if (presets?.length) {
+      await saveWorkspacePresets(m, id, presets, passphrase).catch((e) =>
+        useStore
+          .getState()
+          .toast(
+            t('vault.workspace.presetsSaveFailed', { error: e instanceof Error ? e.message : String(e) }),
+            undefined,
+            undefined,
+            'warning',
+          ),
+      );
+    }
     await actions.newTab(m, id);
   },
 
@@ -858,8 +903,21 @@ export const actions = {
   async editWorkspace(m: string, ws: string) {
     const w = terms.layout(m)?.workspaces.find((x) => x.id === ws);
     if (!w) return;
-    const input = await editWorkspaceDialog(m, w.cwd, w.name);
-    if (input) terms.mutate(m, (l) => L.editWorkspace(l, ws, input.label, input.cwd));
+    const input = await editWorkspaceDialog(m, w.cwd, w.name, w.id);
+    if (!input) return;
+    terms.mutate(m, (l) => L.editWorkspace(l, ws, input.label, input.cwd));
+    if (input.presets !== undefined) {
+      await saveWorkspacePresets(m, ws, input.presets, input.passphrase).catch((e) =>
+        useStore
+          .getState()
+          .toast(
+            t('vault.workspace.presetsSaveFailed', { error: e instanceof Error ? e.message : String(e) }),
+            undefined,
+            undefined,
+            'warning',
+          ),
+      );
+    }
   },
 
   /** Names a terminal's pane (its "name" label); empty shows its title again. */

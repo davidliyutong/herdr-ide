@@ -450,4 +450,36 @@ describe('routes', () => {
     expect(f.running).toBe(false);
     expect((await r.call('POST', m('host/stop')))[0]).toBe(409);
   });
+
+  test('new chat with workspace injects vault preset env, reports summary, and never audits values', async () => {
+    let locked = false;
+    const seen: Array<{ machine: string; ws: string }> = [];
+    const r = await start({
+      workspaceEnv: async (machine, ws) => {
+        seen.push({ machine, ws });
+        if (locked) return { env: {} as Record<string, string>, names: [], presets: ['p1'], missing: [], locked: true };
+        return {
+          env: { CHAT_SECRET: 'chat-secret-val' } as Record<string, string>,
+          names: ['CHAT_SECRET'],
+          presets: ['p1'],
+          missing: ['OLD_KEY'],
+          locked: false,
+        };
+      },
+    });
+    const [code, body] = await r.call('POST', m('new'), JSON.stringify({ kind: 'claude', cwd: '/w', workspace: 'ws-9' }));
+    expect(code).toBe(200);
+    expect(seen).toEqual([{ machine: 'gpu', ws: 'ws-9' }]);
+    expect(body.vault).toEqual({ injected: 1, missing: ['OLD_KEY'] });
+    const req = r.host.requests.find((q) => q.op === chat.Op.New)!;
+    expect(req.env).toEqual({ CHAT_SECRET: 'chat-secret-val' });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.new', vault_env: ['CHAT_SECRET'], vault_presets: ['p1'] });
+    expect(r.audit.text()).not.toContain('chat-secret-val');
+
+    locked = true;
+    const [code2, body2] = await r.call('POST', m('new'), JSON.stringify({ kind: 'claude', cwd: '/w', workspace: 'ws-9' }));
+    expect(code2).toBe(200);
+    expect(body2.vault).toEqual({ injected: 0, locked: true });
+    expect(r.host.requests.filter((q) => q.op === chat.Op.New).at(-1)!.env).toBeUndefined();
+  });
 });

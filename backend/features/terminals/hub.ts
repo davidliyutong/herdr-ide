@@ -30,6 +30,12 @@ export interface TerminalsOptions {
   /** The variables of a machine's virtual display that new terminals get
    * (program windows, feature 14); none by default. */
   paneEnv?: (m: Machine) => Record<string, string> | undefined;
+  /** Optional vault preset environment variables for a workspace's new
+   * terminals (feature 30); none by default. */
+  workspaceEnv?: (
+    m: Machine,
+    workspace: string,
+  ) => Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>;
   /** Told whether a machine's terminal core is ready, at each change of
    * the backend's state (program windows follow it). */
   onReady?: (m: Machine, ready: boolean) => void;
@@ -80,6 +86,7 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
         hc: o.hc,
         ...(o.embeddedHC ? { embeddedHC: o.embeddedHC } : {}),
         paneEnv: o.paneEnv ?? (() => undefined),
+        workspaceEnv: o.workspaceEnv,
         // SSH_CONNECTION and SSH_CLIENT as the ssh session of the agent of
         // an ssh machine has them (sshenv.ts).
         sshEnv: (m) => (m.local || !setting(SSH_ENV, m.id) ? null : sshEnv(m.sshConnection)),

@@ -110,6 +110,26 @@ const MAX_PROBES = 4;
 const MAX_CALLS = 8;
 /** The most kinds Op.Agents asks about. */
 const MAX_KINDS = 64;
+const MAX_CHAT_ENV = 1000;
+const MAX_CHAT_ENV_NAME = 128;
+const MAX_CHAT_ENV_VALUE = 64 << 10;
+const CHAT_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Validates optional extra env variables for a new chat; undefined for none,
+ * null when invalid. Kept in memory only (never logged or written to disk). */
+function validateEnv(raw: Record<string, string> | undefined): Record<string, string> | undefined | null {
+  if (!raw) return undefined;
+  const entries = Object.entries(raw);
+  if (!entries.length) return undefined;
+  if (entries.length > MAX_CHAT_ENV) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of entries) {
+    if (typeof k !== 'string' || k.length > MAX_CHAT_ENV_NAME || !CHAT_ENV_NAME.test(k)) return null;
+    if (typeof v !== 'string' || Buffer.byteLength(v) > MAX_CHAT_ENV_VALUE || v.includes('\0')) return null;
+    out[k] = v;
+  }
+  return out;
+}
 /** How much of a line that is too long is read before the answer that
  * says so, for the answer to reach a client still writing. */
 const MAX_DISCARD = 4 * chat.MAX_LINE;
@@ -828,17 +848,19 @@ export class Host {
       return refusal(chat.Code.BadRequest, 'options out of their bounds');
     if (opts.mode === chat.Mode.Full && !this.current.allowFull)
       return refusal(chat.Code.NotAllowed, 'full access is not allowed on this machine');
+    const env = validateEnv(req.env);
+    if (env === null) return refusal(chat.Code.BadRequest, 'env: valid environment variable names and string values');
     if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
     if (resume !== '') {
       const e = await this.inTerminal(req.kind!, req.cwd!, resume);
       if (e) return { error: e };
     }
-    const turn = this.newTurn.then(() => this.newChatTurn(req, resume, opts));
+    const turn = this.newTurn.then(() => this.newChatTurn(req, resume, opts, env));
     this.newTurn = turn.catch(() => {});
     return turn;
   }
 
-  private async newChatTurn(req: Request, resume: string, opts: chat.Options): Promise<chat.Response> {
+  private async newChatTurn(req: Request, resume: string, opts: chat.Options, env?: Record<string, string>): Promise<chat.Response> {
     if (resume !== '') {
       const other = this.chatOfSession(req.kind!, resume);
       if (other) return refusal(chat.Code.BadRequest, `chat ${other} has the session`);
@@ -878,7 +900,7 @@ export class Host {
       this.logf(`new chat: ${(e as Error).message}`);
       return refusal(chat.Code.Failed, 'the journal did not take the chat');
     }
-    const c = new Chat(this, r);
+    const c = new Chat(this, r, false, env);
     c.first = 1;
     this.chats.set(r.chat.id, c);
     const st = c.beginStart();

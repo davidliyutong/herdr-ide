@@ -214,6 +214,7 @@ describe('a VS Code pane', () => {
     expect(hub.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
       keep: true,
       cwd: '/home/u/w1/docs',
+      workspace: 'w1',
       display: expect.any(Object),
     });
     expect(L.leafOf(tabs()[0].root, 'code:c1')).not.toBeNull();

@@ -8,6 +8,7 @@ import {
   useDialog,
   type DialogRequest,
   type FolderProblem,
+  type NewWorkspace,
   type UnsavedAnswer,
 } from '../dialog';
 import { startDownload } from '../download';
@@ -15,10 +16,13 @@ import { FileIcon } from '../fileIcons';
 import { formatSize, listDir, type RemoteStat } from '../lib/files';
 import { shortPath } from '../lib/machine';
 import { useStore } from '../state/store';
+import { useWorkspacePresets, workspacePresetIds } from '../state/workspacePresets';
+import { usePluginOn } from '../plugins/registry';
 import { t, type MessageKey } from '../i18n';
 import { match } from '../lib/match';
 import { rangeOf } from './tree/selection';
 import { Highlight } from './Highlight';
+import { Picker, type PickerItem } from './Picker';
 
 /** Renders the pending dialog request (see dialog.ts). */
 export function Dialogs() {
@@ -191,20 +195,55 @@ const folderMessage: Record<FolderProblem, MessageKey> = {
   denied: 'newWorkspace.denied',
 };
 
-/** A new workspace's directory and name, or an existing one's (req.edit),
- * whose directory may be left empty. */
+/** A new workspace's directory, name and optional linked vault presets, or an
+ * existing one's (req.edit), whose directory may be left empty. */
 function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspace' }> }) {
   const machine = useStore((s) => s.machines[req.m]?.label ?? req.m);
+  const readOnly = useStore((s) => s.readOnly);
+  const vaultOn = usePluginOn('vault');
+  const presets = useWorkspacePresets((s) => s.presets);
+  const presetOrder = useWorkspacePresets((s) => s.order);
+  const presetLinks = useWorkspacePresets((s) => s.links);
+  const vaultSession = useWorkspacePresets((s) => s.session);
+  const verifyEachAllow = useWorkspacePresets((s) => s.verifyEachAllow);
   const edit = !!req.edit;
+  const initialPresets = req.edit?.id ? workspacePresetIds(req.m, req.edit.id, presetLinks) : [];
   const [cwd, setCwd] = useState(req.cwd);
   const [label, setLabel] = useState(req.edit?.name ?? '');
+  const [pickedPresets, setPickedPresets] = useState<string[]>(initialPresets);
+  const [passphrase, setPassphrase] = useState('');
   const [dirs, setDirs] = useState<string[]>([]);
   const [sel, setSel] = useState(-1);
+  // A request that replaces another one shown starts from its own state.
+  useEffect(() => {
+    setCwd(req.cwd);
+    setLabel(req.edit?.name ?? '');
+    setPickedPresets(req.edit?.id ? workspacePresetIds(req.m, req.edit.id) : []);
+    setPassphrase('');
+  }, [req]);
   // What the machine says of the typed folder: the absolute path it
   // resolves to, or why it cannot be used; undefined while unknown.
   const [check, setCheck] = useState<{ path: string; problem?: FolderProblem; resolved?: string }>();
   const home = useStore((s) => s.machines[req.m]?.info?.home ?? '');
   const typed = cwd.trim().replace(/(.)\/+$/, '$1');
+
+  const showPresets = vaultOn && (presetOrder.length > 0 || initialPresets.length > 0);
+  const canEditPresets = vaultSession && !readOnly;
+  const presetsChanged = pickedPresets.length !== initialPresets.length || pickedPresets.some((id, i) => id !== initialPresets[i]);
+  const wideningPresets = pickedPresets.some((id) => !initialPresets.includes(id));
+  const needPassphrase = showPresets && canEditPresets && verifyEachAllow && wideningPresets;
+  const presetItems: PickerItem[] = presetOrder.map((id) => {
+    const p = presets[id];
+    return {
+      value: id,
+      label: p?.name ?? id,
+      description: p ? t('vault.preset.varCount', { n: p.resolved.length }) : undefined,
+      detail: p?.description,
+    };
+  });
+  for (const id of pickedPresets) {
+    if (!presetOrder.includes(id)) presetItems.push({ value: id, label: id });
+  }
 
   // Subdirectories matching what is typed, listed on the machine.
   useEffect(() => {
@@ -253,22 +292,31 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
   const problem = check?.path === typed ? check.problem : undefined;
   const resolved = check?.path === typed ? check.resolved : undefined;
 
-  const done = (v: { cwd: string; label: string } | undefined) => {
+  const done = (v: NewWorkspace | undefined) => {
     closeDialog(req);
     req.resolve(v);
+  };
+  const buildResult = (resolvedCwd: string): NewWorkspace => {
+    const out: NewWorkspace = { cwd: resolvedCwd, label: label.trim() };
+    if (showPresets && canEditPresets && (edit ? presetsChanged : pickedPresets.length > 0)) {
+      out.presets = pickedPresets;
+      if (needPassphrase && passphrase) out.passphrase = passphrase;
+    }
+    return out;
   };
   const complete = (name: string) => {
     const [dir] = completionParts(cwd);
     setCwd(`${dir === '/' ? '' : dir}/${name}/`);
   };
   const submit = async () => {
+    if (needPassphrase && !passphrase) return;
     const path = typed;
     // A workspace without a directory follows its focused pane.
-    if (!path) return done({ cwd: '', label: label.trim() });
+    if (!path) return done(buildResult(''));
     try {
       const d = await listDir(req.m, path);
       if (!d.dir.is_dir) throw new Error('not a directory');
-      done({ cwd: d.dir.path || expandPath(path, home), label: label.trim() });
+      done(buildResult(d.dir.path || expandPath(path, home)));
     } catch (err) {
       setCheck({ path, problem: folderProblem(err) ?? 'missing' });
     }
@@ -324,11 +372,57 @@ function WorkspaceDialog({ req }: { req: Extract<DialogRequest, { kind: 'workspa
             onKeyDown={(e) => e.key === 'Enter' && submit()}
           />
         </label>
+        {showPresets && (
+          <div className="workspace-presets-field">
+            <span>{t('vault.workspace.presets')}</span>
+            <Picker
+              multiple
+              disabled={!canEditPresets}
+              aria-label={t('vault.workspace.presets')}
+              label={t('vault.workspace.presets')}
+              noneLabel={t('vault.workspace.presetsPick')}
+              items={presetItems}
+              value={pickedPresets}
+              onChange={setPickedPresets}
+            />
+            {canEditPresets ? (
+              <div className="muted small">{t('vault.workspace.presetsHint')}</div>
+            ) : (
+              <div className="muted small">
+                {t('vault.workspace.presetsLocked')}{' '}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="link"
+                    onClick={() => {
+                      useStore.getState().setPanel('vault');
+                      done(undefined);
+                    }}
+                  >
+                    {t('vault.workspace.presetsOpen')}
+                  </button>
+                )}
+              </div>
+            )}
+            {needPassphrase && (
+              <input
+                className="input"
+                type="password"
+                autoComplete="off"
+                data-field="workspace-preset-passphrase"
+                placeholder={t('vault.fresh.passphrase')}
+                aria-label={t('vault.fresh.passphrase')}
+                value={passphrase}
+                onChange={(e) => setPassphrase(e.target.value)}
+              />
+            )}
+          </div>
+        )}
         <div className="muted small">{t(edit ? 'editWorkspace.hint' : 'newWorkspace.hint')}</div>
       </div>
       <div className="dialog-actions">
         <button onClick={() => done(undefined)}>{t('dialog.cancel')}</button>
-        <button className="primary" disabled={!!problem} onClick={submit}>
+        <button className="primary" disabled={!!problem || (needPassphrase && !passphrase)} onClick={submit}>
           {t(edit ? 'editWorkspace.save' : 'newWorkspace.create')}
         </button>
       </div>

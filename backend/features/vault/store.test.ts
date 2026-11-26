@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createECDH, randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -580,5 +580,195 @@ describe('unlock entries', () => {
     await s.lock();
     expect(await codeOf(s.addPRF(WEB, ORIGIN, RPID, CRED, r(), r(), PASS))).toBe('vault_locked');
     expect(await codeOf(f.unlock('nope', p2.kek))).toBe('unlock_stale');
+  });
+});
+
+describe('groups, presets and workspace links', () => {
+  test('groups: create, rename, assign, bulk move, and delete falls back to ungrouped', async () => {
+    const path = join(temp(), 'vault.json');
+    const s = Store.open(path, { kdf: FAST });
+    await s.setPassphrase(PASS, WINDOW);
+
+    const g1 = await s.createGroup({ name: 'Cloud', description: 'Cloud API keys' });
+    const g2 = await s.createGroup({ name: 'Database' });
+    expect(s.listGroups().map((g) => g.name)).toEqual(['Cloud', 'Database']);
+    expect(await codeOf(s.createGroup({ name: 'cloud' }))).toBe('exists');
+    expect(await codeOf(s.createGroup({ name: '   ' }))).toBe('invalid');
+    expect(await codeOf(s.createGroup({ name: 'a\nb' }))).toBe('invalid');
+
+    const renamed = await s.updateGroup(g1.id, { name: 'AWS', description: 'AWS creds' });
+    expect(renamed).toMatchObject({ id: g1.id, name: 'AWS', description: 'AWS creds' });
+    expect(await codeOf(s.updateGroup(g1.id, { name: 'database' }))).toBe('exists');
+
+    // Assign on set and bulk assign.
+    await s.set('AWS_KEY', { value: 'ak', group: g1.id });
+    await s.set('DB_URL', { value: 'pg' });
+    expect(s.get('AWS_KEY')?.group).toBe(g1.id);
+    expect(s.get('DB_URL')?.group).toBeUndefined();
+    expect(await codeOf(s.set('BAD_G', { value: 'x', group: 'nope' }))).toBe('not_found');
+
+    await s.assignGroup(['AWS_KEY', 'DB_URL'], g2.id);
+    expect(s.get('AWS_KEY')?.group).toBe(g2.id);
+    expect(s.get('DB_URL')?.group).toBe(g2.id);
+
+    // Atomic bulk assign fails cleanly on unknown variable or unknown group.
+    expect(await codeOf(s.assignGroup(['AWS_KEY', 'MISSING'], g1.id))).toBe('not_found');
+    expect(s.get('AWS_KEY')?.group).toBe(g2.id);
+    expect(await codeOf(s.assignGroup(['AWS_KEY'], 'no-such-group'))).toBe('not_found');
+
+    // Deleting a group leaves its variables intact as ungrouped and drops the group from presets.
+    const preset = await s.createPreset({ name: 'Backend', groups: [g2.id], variables: ['AWS_KEY'] });
+    await s.deleteGroup(g2.id);
+    expect(s.listGroups().map((g) => g.id)).toEqual([g1.id]);
+    expect(s.get('AWS_KEY')?.group).toBeUndefined();
+    expect(s.get('DB_URL')?.group).toBeUndefined();
+    expect(await s.value('AWS_KEY')).toBe('ak');
+    expect(s.getPreset(preset.id)?.groups).toEqual([]);
+    expect(s.getPreset(preset.id)?.variables).toEqual(['AWS_KEY']);
+
+    // Ungroup via set(..., { group: '' }).
+    await s.set('AWS_KEY', { group: g1.id });
+    expect(s.get('AWS_KEY')?.group).toBe(g1.id);
+    await s.set('AWS_KEY', { group: '' });
+    expect(s.get('AWS_KEY')?.group).toBeUndefined();
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  test('presets, workspace links, rename/delete tracking, locked state, and tamper fail-closed', async () => {
+    const path = join(temp(), 'vault.json');
+    const s = Store.open(path, { kdf: FAST });
+    await s.setPassphrase(PASS, WINDOW);
+
+    const g = await s.createGroup({ name: 'OpenAI' });
+    await s.set('OPENAI_API_KEY', { value: 'sk-1', group: g.id });
+    await s.set('EXTRA_TOKEN', { value: 'tok-2' });
+    await s.set('TO_DELETE', { value: 'gone-3' });
+
+    const p1 = await s.createPreset({ name: 'AI Dev', description: 'AI tools', groups: [g.id], variables: ['EXTRA_TOKEN', 'TO_DELETE'] });
+    const p2 = await s.createPreset({ name: 'Overlap', variables: ['OPENAI_API_KEY'] });
+    expect(await codeOf(s.createPreset({ name: 'ai dev' }))).toBe('exists');
+    expect(await codeOf(s.createPreset({ name: 'BadGroup', groups: ['nope'] }))).toBe('not_found');
+
+    await s.setWorkspacePresets('m1', 'ws-1', [p1.id, p2.id]);
+    expect(s.presetLinked(p1.id)).toBe(true);
+    expect(s.groupInLinkedPreset(g.id)).toBe(true);
+    expect(s.getWorkspaceLink('m1', 'ws-1')?.presets).toEqual([p1.id, p2.id]);
+
+    // Rename variable updates preset reference automatically.
+    await s.set('EXTRA_TOKEN', { to: 'EXTRA_RENAMED' });
+    expect(s.getPreset(p1.id)?.variables).toEqual(['EXTRA_RENAMED', 'TO_DELETE']);
+
+    // Delete variable leaves preset intact and resolution reports missing while injecting the rest.
+    await s.delete('TO_DELETE');
+    const resolved = await s.resolveWorkspaceEnv('m1', 'ws-1');
+    expect(resolved).toEqual({
+      env: { OPENAI_API_KEY: 'sk-1', EXTRA_RENAMED: 'tok-2' },
+      names: ['OPENAI_API_KEY', 'EXTRA_RENAMED'],
+      presets: [p1.id, p2.id],
+      missing: ['TO_DELETE'],
+      locked: false,
+    });
+
+    // Locked vault returns locked=true and never decrypts values.
+    await s.lock();
+    expect(await s.resolveWorkspaceEnv('m1', 'ws-1')).toEqual({
+      env: {},
+      names: [],
+      presets: [p1.id, p2.id],
+      missing: [],
+      locked: true,
+    });
+    // Unlinked workspace returns empty, locked=false even while vault is locked.
+    expect(await s.resolveWorkspaceEnv('m1', 'ws-unlinked')).toEqual({
+      env: {},
+      names: [],
+      presets: [],
+      missing: [],
+      locked: false,
+    });
+
+    // Reopen + changePassphrase re-seals #policy so resolution keeps working.
+    const reopened = Store.open(path, { kdf: FAST });
+    await reopened.unlock(PASS, WINDOW);
+    await reopened.changePassphrase(PASS, 'new strong passphrase', WINDOW);
+    const afterRekey = Store.open(path, { kdf: FAST });
+    await afterRekey.unlock('new strong passphrase', WINDOW);
+    expect((await afterRekey.resolveWorkspaceEnv('m1', 'ws-1')).env).toEqual({
+      OPENAI_API_KEY: 'sk-1',
+      EXTRA_RENAMED: 'tok-2',
+    });
+
+    // Deleting a preset removes it from workspace links; empty workspace links are dropped.
+    await afterRekey.deletePreset(p2.id);
+    expect(afterRekey.getWorkspaceLink('m1', 'ws-1')?.presets).toEqual([p1.id]);
+    await afterRekey.setWorkspacePresets('m1', 'ws-2', [p1.id]);
+    await afterRekey.forgetMachine('m1');
+    expect(afterRekey.listWorkspaceLinks()).toEqual([]);
+
+    // Tamper tests: editing cleartext links, presets, or entry.group on disk fails closed as corrupt.
+    await afterRekey.setWorkspacePresets('m2', 'ws-t', [p1.id]);
+    const snapshot = readFileSync(path, 'utf8');
+
+    for (const [label, tamper] of [
+      [
+        'tampered workspaceLinks',
+        (raw: any) =>
+          (raw.workspaceLinks = [
+            { machine: 'm2', workspace: 'ws-t', presets: [p1.id], updated: 'x' },
+            { machine: 'm2', workspace: 'ws-evil', presets: [p1.id], updated: 'x' },
+          ]),
+      ],
+      ['tampered preset variables', (raw: any) => raw.presets[0].variables.push('INJECTED')],
+      ['tampered entry group', (raw: any) => (raw.entries.find((e: any) => e.name === 'EXTRA_RENAMED').group = g.id)],
+      ['stripped policy seal', (raw: any) => delete raw.policy],
+    ] as const) {
+      writeFileSync(path, snapshot);
+      editFile(path, tamper);
+      const t = Store.open(path, { kdf: FAST });
+      await t.unlock('new strong passphrase', WINDOW);
+      // Resolution and every policy-writing mutation (including rekey) must fail closed
+      // and never re-seal tampered cleartext under #policy.
+      expect([label, 'resolve', await codeOf(t.resolveWorkspaceEnv('m2', 'ws-t'))]).toEqual([label, 'resolve', 'corrupt']);
+      expect([label, 'set', await codeOf(t.set('OTHER', { value: 'v' }))]).toEqual([label, 'set', 'corrupt']);
+      expect([label, 'createPreset', await codeOf(t.createPreset({ name: 'Extra', variables: ['EXTRA_RENAMED'] }))]).toEqual([
+        label,
+        'createPreset',
+        'corrupt',
+      ]);
+      expect([label, 'assignGroup', await codeOf(t.assignGroup(['EXTRA_RENAMED'], g.id))]).toEqual([label, 'assignGroup', 'corrupt']);
+      expect([label, 'setWorkspacePresets', await codeOf(t.setWorkspacePresets('m2', 'ws-other', [p1.id]))]).toEqual([
+        label,
+        'setWorkspacePresets',
+        'corrupt',
+      ]);
+      expect([
+        label,
+        'importVariables',
+        await codeOf(
+          t.importVariables([{ name: 'IMP', value: 'v', description: '', machines: [], injectOnly: false, created: '', overwrite: false }]),
+        ),
+      ]).toEqual([label, 'importVariables', 'corrupt']);
+      expect([label, 'changePassphrase', await codeOf(t.changePassphrase('new strong passphrase', 'another strong pass', WINDOW))]).toEqual(
+        [label, 'changePassphrase', 'corrupt'],
+      );
+      expect([label, 'delete grouped', await codeOf(t.delete('OPENAI_API_KEY'))]).toEqual([label, 'delete grouped', 'corrupt']);
+      // Resolution must still fail closed after every attempted mutation.
+      expect([label, 'still corrupt', await codeOf(t.resolveWorkspaceEnv('m2', 'ws-t'))]).toEqual([label, 'still corrupt', 'corrupt']);
+    }
+
+    // Deleting a grouped variable requires an unlocked vault so #policy stays in sync;
+    // deleting an ungrouped variable still works while locked and leaves #policy intact.
+    writeFileSync(path, snapshot);
+    const lockedStore = Store.open(path, { kdf: FAST });
+    expect(await codeOf(lockedStore.delete('OPENAI_API_KEY'))).toBe('vault_locked');
+    await lockedStore.delete('EXTRA_RENAMED');
+    await lockedStore.unlock('new strong passphrase', WINDOW);
+    expect(await lockedStore.resolveWorkspaceEnv('m2', 'ws-t')).toEqual({
+      env: { OPENAI_API_KEY: 'sk-1' },
+      names: ['OPENAI_API_KEY'],
+      presets: [p1.id],
+      missing: ['EXTRA_RENAMED', 'TO_DELETE'],
+      locked: false,
+    });
   });
 });

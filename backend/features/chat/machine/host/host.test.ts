@@ -740,6 +740,30 @@ describe('the chat host', () => {
     void s;
     a.close();
   });
+
+  test('new chat env: validated, forwarded to adapter in memory only, never persisted to sqlite or logs', async () => {
+    const h = await host();
+    // Invalid env entries are rejected before starting any agent.
+    expect((await h.request({ op: chat.Op.New, kind: FAKE_KIND, cwd: h.cwd, env: { 'BAD-NAME': 'x' } })).error?.code).toBe('bad_request');
+    expect((await h.request({ op: chat.Op.New, kind: FAKE_KIND, cwd: h.cwd, env: { OK_KEY: 'has\0nul' } })).error?.code).toBe(
+      'bad_request',
+    );
+    expect(h.fake.starts).toHaveLength(0);
+
+    const secret = 'vault-chat-env-s3cr3t-value';
+    const res = await h.request({ op: chat.Op.New, kind: FAKE_KIND, cwd: h.cwd, env: { API_TOKEN: secret } });
+    expect(res.ok).toBe(true);
+    await h.fake.session();
+    expect(h.fake.starts.at(-1)!.env).toMatchObject({ API_TOKEN: secret });
+    expect(h.log.join('\n')).not.toContain(secret);
+    // Secret value must never be written into SQLite database files.
+    const { readFileSync } = await import('node:fs');
+    for (const f of readdirSync(h.base)) {
+      if (f.endsWith('.db') || f.endsWith('.db-wal')) {
+        expect(readFileSync(join(h.base, f)).includes(Buffer.from(secret))).toBe(false);
+      }
+    }
+  });
 });
 
 void writeFileSync;

@@ -13,9 +13,10 @@ import { hasMessage, t, type MessageKey } from '../../i18n';
 import type { MenuEntry } from '../../contextMenu';
 import { useSettings } from '../../settings';
 import { useStore } from '../../state/store';
+import { terms } from '../../state/terms';
 import * as L from '../../term/layout';
 import { ProviderLogo } from '../usage/logos';
-import { ChatFailure, chatApi, failureText, permissionMode } from './api';
+import { ChatFailure, chatApi, failureText, permissionMode, type NewChatVault } from './api';
 import { canContinueInTerminal, continueInTerminal } from './handoff';
 import { STATE_DELETED } from './protocol';
 import { applyStates, chatState, loadAgents, offeredKinds, upsertState, useChats } from './state';
@@ -89,23 +90,63 @@ export async function openChat(m: string, chat: string, kind: string, from?: str
   return actions.openView(m, view, { from, tab: true, reuse: (v) => chatRef(v).chat === chat });
 }
 
+/** Warns the user when vault preset injection for a new chat was skipped or partial. */
+export function reportChatVault(vault?: NewChatVault) {
+  if (!vault) return;
+  const s = useStore.getState();
+  if (vault.locked) {
+    s.toast(
+      t('vault.inject.locked'),
+      { label: t('vault.workspace.presetsOpen'), run: () => useStore.getState().setPanel('vault') },
+      undefined,
+      'warning',
+    );
+  } else if (vault.corrupt) {
+    s.toast(t('vault.inject.corrupt'), undefined, undefined, 'warning');
+  } else if (vault.logFailed) {
+    s.toast(t('vault.inject.logFailed'), undefined, undefined, 'warning');
+  } else if (vault.missing?.length) {
+    s.toast(t('vault.inject.missing', { names: vault.missing.join(', ') }), undefined, undefined, 'warning');
+  }
+}
+
+/** Workspace id to pass on POST /new whenever a workspace is known, so the hub
+ * resolves linked vault presets even before the client's vault snapshot loads. */
+export function chatWorkspaceFor(m: string, explicit?: string, from?: string): string | undefined {
+  if (explicit) return explicit;
+  const layout = terms.layout(m);
+  if (!layout) return undefined;
+  const at = from ? L.locate(layout, from) : null;
+  return (at ? layout.workspaces[at.workspace] : L.selectedWorkspace(layout))?.id;
+}
+
 /** Makes a chat with an agent on machine m and shows it in a new tab.
  * Resolves to the pane's key; a failure is said in a toast. */
-export async function newChat(m: string, kind: string, o: { cwd?: string } = {}): Promise<string | undefined> {
+export async function newChat(m: string, kind: string, o: { cwd?: string; workspace?: string } = {}): Promise<string | undefined> {
   const agent = agentName(kind);
   if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
   const cwd = cleanDir(o.cwd) ?? defaultCwd(m);
   if (!cwd) return void toast(t('chat.noDirectory', { agent }));
   const mode = permissionMode(useSettings.getState().values, m);
+  const workspace = chatWorkspaceFor(m, o.workspace);
   let chat;
+  let vault: NewChatVault | undefined;
   try {
-    chat = await chatApi.newChat(m, { kind, cwd, ...(mode ? { options: { mode } } : {}) });
+    const res = await chatApi.createChat(m, {
+      kind,
+      cwd,
+      ...(mode ? { options: { mode } } : {}),
+      ...(workspace ? { workspace } : {}),
+    });
+    chat = res.chat;
+    vault = res.vault;
   } catch (e) {
     toast(failureText(e, agent, 'chat.newFailed'));
     // What it can start may have changed.
     void loadAgents(m, true);
     return undefined;
   }
+  reportChatVault(vault);
   upsertState(m, chat);
   return openChat(m, chat.id, kind);
 }

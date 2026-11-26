@@ -9,6 +9,7 @@
 import { create } from 'zustand';
 import { hasMessage, t } from '../../i18n';
 import { jsonBody, jsonInit, makeErrorText, PluginError } from '../../lib/pluginApi';
+import { registerWorkspacePresetSaver, syncVaultWorkspacePresets, useWorkspacePresets } from '../../state/workspacePresets';
 import type { Fresh } from './proof';
 
 export interface VaultStatus {
@@ -27,7 +28,34 @@ export interface VaultVariable {
   /** Machine ids; '*' is every machine. */
   machines: string[];
   injectOnly: boolean;
+  /** Optional group id; absent when ungrouped. */
+  group?: string;
   created: string;
+  updated: string;
+}
+
+export interface VaultGroup {
+  id: string;
+  name: string;
+  description?: string;
+  created: string;
+  updated: string;
+}
+
+export interface VaultPreset {
+  id: string;
+  name: string;
+  description?: string;
+  variables: string[];
+  groups: string[];
+  created: string;
+  updated: string;
+}
+
+export interface VaultWorkspaceLink {
+  machine: string;
+  workspace: string;
+  presets: string[];
   updated: string;
 }
 
@@ -126,6 +154,7 @@ function endLocalSession() {
   token = '';
   // The log is a session's: it goes with it.
   useVault.setState({ session: false, sessionProof: false, log: [] });
+  useWorkspacePresets.setState({ session: false });
 }
 
 interface Opened {
@@ -138,6 +167,7 @@ interface Opened {
 function opened(o: Opened) {
   token = o.session;
   useVault.setState({ session: true, sessionProof: !!o.proof, status: o.status });
+  useWorkspacePresets.setState({ session: true, locked: !!o.status.locked });
 }
 
 const enc = encodeURIComponent;
@@ -147,6 +177,9 @@ export const vaultApi = {
     call<{
       status: VaultStatus;
       variables: VaultVariable[];
+      groups?: VaultGroup[];
+      presets?: VaultPreset[];
+      workspaceLinks?: VaultWorkspaceLink[];
       session?: boolean;
       sessionProof?: boolean;
       idle?: number;
@@ -157,11 +190,23 @@ export const vaultApi = {
   /** Creates or changes a variable; `to` renames it in the same write. */
   set: (
     name: string,
-    body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; value?: string },
+    body: { to?: string; description?: string; machines?: string[]; injectOnly?: boolean; group?: string; value?: string },
     fresh?: Fresh,
   ) => call<VaultVariable>('PUT', `/vars/${enc(name)}`, { ...body, ...fresh }),
   remove: (name: string) => call('DELETE', `/vars/${enc(name)}`),
   reveal: (name: string, fresh?: Fresh) => call<{ value: string }>('POST', `/vars/${enc(name)}/reveal`, fresh),
+  createGroup: (body: { name: string; description?: string }) => call<VaultGroup>('POST', '/groups', body),
+  updateGroup: (id: string, body: { name?: string; description?: string }) => call<VaultGroup>('PUT', `/groups/${enc(id)}`, body),
+  deleteGroup: (id: string) => call('DELETE', `/groups/${enc(id)}`),
+  assignGroup: (names: string[], group: string, fresh?: Fresh) =>
+    call<{ ok: boolean }>('POST', '/groups/assign', { names, group, ...fresh }),
+  createPreset: (body: { name: string; description?: string; variables?: string[]; groups?: string[] }) =>
+    call<VaultPreset>('POST', '/presets', body),
+  updatePreset: (id: string, body: { name?: string; description?: string; variables?: string[]; groups?: string[] }, fresh?: Fresh) =>
+    call<VaultPreset>('PUT', `/presets/${enc(id)}`, { ...body, ...fresh }),
+  deletePreset: (id: string) => call('DELETE', `/presets/${enc(id)}`),
+  setWorkspacePresets: (machine: string, workspace: string, presets: string[], fresh?: Fresh) =>
+    call<{ link: VaultWorkspaceLink | null }>('PUT', `/workspaces/${enc(machine)}/${enc(workspace)}`, { presets, ...fresh }),
   session: (passphrase: string) => call<Opened>('POST', '/session', { passphrase }),
   sessionByProof: (proof: Proof) => call<Opened>('POST', '/session', { proof }),
   /** Unlocks a locked vault with an unlock entry: the desktop app's relay
@@ -407,6 +452,9 @@ interface VaultState {
    * undefined until loaded. */
   guard?: VaultGuard | null;
   variables: VaultVariable[];
+  groups: VaultGroup[];
+  presets: VaultPreset[];
+  workspaceLinks: VaultWorkspaceLink[];
   log: VaultAccess[];
   /** By id: requests waiting for an answer. */
   requests: Record<string, VaultRequest>;
@@ -420,7 +468,16 @@ interface VaultState {
   unlock?: VaultUnlock;
 }
 
-export const useVault = create<VaultState>(() => ({ variables: [], log: [], requests: {}, session: false, sessionProof: false }));
+export const useVault = create<VaultState>(() => ({
+  variables: [],
+  groups: [],
+  presets: [],
+  workspaceLinks: [],
+  log: [],
+  requests: {},
+  session: false,
+  sessionProof: false,
+}));
 
 /** Opens a session with the passphrase (unlocking the vault). */
 export async function openSession(passphrase: string) {
@@ -502,17 +559,33 @@ export async function loadVault() {
     const sent = token;
     const [list, log] = await Promise.all([vaultApi.list(), sent ? vaultApi.log().catch(() => ({ log: [] })) : { log: [] }]);
     if (token === sent && !list.session) token = '';
+    const variables = list.variables ?? [];
+    const groups = list.groups ?? [];
+    const presets = list.presets ?? [];
+    const workspaceLinks = list.workspaceLinks ?? [];
+    const guard = list.guard ?? null;
     useVault.setState({
       status: list.status,
-      variables: list.variables ?? [],
+      variables,
+      groups,
+      presets,
+      workspaceLinks,
       log: token && token === sent ? (log.log ?? []) : [],
       session: !!token,
       sessionProof: !!token && !!list.sessionProof,
-      guard: list.guard ?? null,
+      guard,
       idle: list.idle,
       autoLock: list.autoLock,
       unlock: list.unlock,
       error: undefined,
+    });
+    syncVaultWorkspacePresets({
+      variables,
+      presets,
+      workspaceLinks,
+      locked: !!list.status?.locked,
+      session: !!token,
+      verifyEachAllow: !!(guard && 'verifyEachAllow' in guard && guard.verifyEachAllow),
     });
   } catch (e) {
     useVault.setState({ error: e instanceof VaultError ? e.code : 'failed' });
@@ -578,11 +651,17 @@ export function dropRequest(id: string) {
   });
 }
 
-/** Loads the requests, and the vault if it was loaded, again: the page's
- * connection to the hub came back, and the hub may have restarted (its
- * requests and sessions gone, the vault locked) or changed meanwhile. */
+/** Loads the requests and the vault again: the page's connection to the
+ * hub came back, and the hub may have restarted (its requests and sessions
+ * gone, the vault locked) or changed meanwhile. Loading the vault on
+ * connect also keeps workspace-linked presets current before the Vault
+ * panel is opened. */
 export function reloadVault() {
   void loadRequests();
-  const s = useVault.getState();
-  if (s.status || s.error) void loadVault();
+  void loadVault();
 }
+
+registerWorkspacePresetSaver(async (machine, workspace, presets, passphrase) => {
+  await vaultApi.setWorkspacePresets(machine, workspace, presets, passphrase ? { passphrase } : undefined);
+  await loadVault();
+});

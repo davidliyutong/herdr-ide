@@ -66,12 +66,15 @@ export interface FeatureInputs {
  * (kernel/config/registry.ts hubModules). */
 export function hubFeatures(o: FeatureInputs): FeatureDef[] {
   const { payloads } = o;
+  // Variable vault provides workspace-linked presets for new terminals and chats.
+  const vault = vaultFeature({ verifyKey: o.verifyKey });
   // Program windows give new terminals their display and follow the
   // terminal cores; they type into the terminals' shells.
   const gui = guiFeature({ encoder: (os, arch) => payloads.encoder(os, arch), shells: (m) => terminals.shells(m) });
   const terminals = terminalsFeature({
     embeddedHC: (os, arch) => payloads.embeddedHC(os, arch),
     paneEnv: gui.paneEnv,
+    workspaceEnv: (m, ws) => vault.workspaceEnv(m.id, ws, 'terminal'),
     onReady: gui.terminalReady,
   });
   return [
@@ -86,9 +89,9 @@ export function hubFeatures(o: FeatureInputs): FeatureDef[] {
     gitFeature(),
     monitorFeature(),
     usageFeature(),
-    vaultFeature({ verifyKey: o.verifyKey }),
+    vault,
     agentsFeature(),
-    chatFeature({ sdk: o.chatSdk }),
+    chatFeature({ sdk: o.chatSdk, workspaceEnv: (m, ws) => vault.workspaceEnv(m, ws, 'chat') }),
     historyFeature(),
   ];
 }

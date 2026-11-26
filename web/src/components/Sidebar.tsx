@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { BellOff, ChevronDown, ChevronRight, Ellipsis, FolderPlus, ServerPlus, Settings } from 'lucide-react';
+import { BellOff, ChevronDown, ChevronRight, Ellipsis, FolderPlus, KeyRound, ServerPlus, Settings } from 'lucide-react';
 import { SIDEBAR_WIDTH, useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
+import { useWorkspacePresets, workspacePresetNames } from '../state/workspacePresets';
 import { conn } from '../lib/conn';
 import {
   actions,
@@ -409,6 +410,8 @@ function MachineItem({ m }: { m: MachineState }) {
   const setRenaming = useStore((s) => s.setRenaming);
   const busy = useStore((s) => s.hcBusy[m.id] === true);
   const mt = useTerms((s) => s.machines[m.id]);
+  const presetLinks = useWorkspacePresets((s) => s.links);
+  const presets = useWorkspacePresets((s) => s.presets);
   const layout = mt?.layout;
   // The workspaces' dots follow the plugins' panes' statuses too.
   useViewStatusOf(() => layout?.workspaces.map((w) => workspaceStatus(m.id, w) ?? '').join());
@@ -553,11 +556,13 @@ function MachineItem({ m }: { m: MachineState }) {
             const selected = selM === m.id && layout.selected === i;
             const editing = renaming === w.id;
             const name = workspaceTitle(m.id, w);
-            // The row stays quiet: the tab count is in the tooltip.
+            const linkedPresets = workspacePresetNames(m.id, w.id, { links: presetLinks, presets });
+            // The row stays quiet: the tab count and linked presets are in the tooltip.
             const about = [
               name,
               w.cwd && shortPath(w.cwd, m.info?.home),
               w.tabs.length === 1 ? t('sidebar.oneTab') : t('sidebar.tabs', { n: w.tabs.length }),
+              linkedPresets.length > 0 && t('vault.workspace.presetsIndicator', { names: linkedPresets.join(', ') }),
             ]
               .filter(Boolean)
               .join(' · ');
@@ -610,6 +615,12 @@ function MachineItem({ m }: { m: MachineState }) {
                   />
                 ) : (
                   <span className="ellipsis ws-name">{name}</span>
+                )}
+                {linkedPresets.length > 0 && (
+                  <KeyRound
+                    className="ws-presets"
+                    aria-label={t('vault.workspace.presetsIndicator', { names: linkedPresets.join(', ') })}
+                  />
                 )}
                 {w.muted && <BellOff className="ws-muted" aria-label={t('workspace.muted')} />}
                 {agg && (

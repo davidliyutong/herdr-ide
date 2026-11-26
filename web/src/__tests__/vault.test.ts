@@ -454,7 +454,7 @@ describe('vault', () => {
     ];
     await act(async () => root.render(createElement('div', null, createElement(VaultPanel), createElement(VaultApprovals))));
     await flush();
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')][1].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][data-tab="log"]')!.click());
     // Without a session the log is not asked for: the hub shows it to a
     // session only.
     expect(calls.some((c) => c.url === '/api/p/vault/log')).toBe(false);

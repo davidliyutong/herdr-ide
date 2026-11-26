@@ -123,7 +123,12 @@ describe('TermModel', () => {
     await settle();
     await opened;
     expect(model.isSubscribed('m')).toBe(true);
-    expect(hub.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: true, cwd: '/srv', display: expect.any(Object) });
+    expect(hub.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
+      keep: true,
+      cwd: '/srv',
+      workspace: 'xxxxxxxx',
+      display: expect.any(Object),
+    });
     expect(model.layout('m')?.workspaces[0].tabs.map((x) => x.focused)).toEqual(['t1']);
     expect(terminalOnScreen('m', 't1')).toBe(true);
     expect(terminalOnScreen('m', 'other')).toBe(false);
@@ -146,6 +151,7 @@ describe('TermModel', () => {
     expect(hub.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
       keep: true,
       cwd: '/home/u/proj',
+      workspace: 'xxxxxxxx',
       display: expect.any(Object),
     });
   });

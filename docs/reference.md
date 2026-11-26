@@ -444,7 +444,7 @@ The chat plugin ([37](features/37-agent-chats.md)). GETs never start a machine's
 | `POST /api/m/{id}/p/chat/agents` | writes | The same, starting the host. |
 | `GET /api/m/{id}/p/chat/chats` | – | The machine's chats, latest first. |
 | `POST /api/m/{id}/p/chat/sessions` | writes | A page of an agent's sessions for a directory (`?kind=&cwd=&cursor=`); a change because listing may run the agent. |
-| `POST /api/m/{id}/p/chat/new` | writes | A new chat (`{kind, cwd, resume?, import?, options?: {model?, effort?, mode?}}`). |
+| `POST /api/m/{id}/p/chat/new` | writes | A new chat (`{kind, cwd, resume?, import?, options?: {model?, effort?, mode?}, workspace?}`). When `workspace` has linked vault presets and the vault is unlocked, injects resolved preset env vars into the new agent process (never persisted to disk) and returns an optional non-secret `vault` summary. |
 | `POST /api/m/{id}/p/chat/close` | writes | Ends a chat's agent, keeping the chat (`?chat=`). |
 | `DELETE /api/m/{id}/p/chat/chat` | writes | Forgets a chat and its log; the agent's own session stays. |
 | `POST /api/m/{id}/p/chat/archive` | writes | Ends the agent and keeps the chat archived. |
@@ -466,10 +466,18 @@ Semantics (sessions, proofs, unlock entries, approvals, exemptions) are in [30](
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
-| `GET /api/p/vault` | – | Status, variables (never values), session, authenticators, guard rule, exemptions, idle and auto-lock times, unlock ways; `503` with `unavailable`, `version`, `invalid` or `failed` when the store does not open. |
-| `PUT /api/p/vault/vars/{name}` | writes, gated | Creates, changes or renames (`to`) a variable. Names `^[A-Za-z_][A-Za-z0-9_]*$` (≤ 128), values ≤ 64 KiB. Widening access needs a proof or the passphrase under the verify-every-Allow rule. |
+| `GET /api/p/vault` | – | Status, variables (never values), groups, presets, workspace links, session, authenticators, guard rule, exemptions, idle and auto-lock times, unlock ways; `503` with `unavailable`, `version`, `invalid` or `failed` when the store does not open. |
+| `PUT /api/p/vault/vars/{name}` | writes, gated | Creates, changes or renames (`to`) a variable, including optional `group` (`""` ungroups). Names `^[A-Za-z_][A-Za-z0-9_]*$` (≤ 128), values ≤ 64 KiB. Widening access or assigning into a group used by a linked workspace preset needs a proof or the passphrase under the verify-every-Allow rule. |
 | `DELETE /api/p/vault/vars/{name}` | writes, gated | Removes a variable. |
 | `POST /api/p/vault/vars/{name}/reveal` | writes, gated | Returns the value; logged as `revealed` before it is sent. |
+| `POST /api/p/vault/groups` | writes, gated | Creates a variable group (`{name, description?}`); at most 128 groups. |
+| `PUT /api/p/vault/groups/{id}` | writes, gated | Renames or updates a group's description. |
+| `DELETE /api/p/vault/groups/{id}` | writes, gated | Deletes a group; its variables remain in the vault as ungrouped and the group is removed from presets. |
+| `POST /api/p/vault/groups/assign` | writes, gated | Moves variables (`{names, group}`) to a group or ungroups them (`group: ""`) atomically; moving into a group used by a linked preset needs the passphrase under the verify-every-Allow rule. |
+| `POST /api/p/vault/presets` | writes, gated | Creates a preset (`{name, description?, variables?, groups?}`); at most 128 presets. |
+| `PUT /api/p/vault/presets/{id}` | writes, gated | Updates a preset; adding variables or groups to a preset linked to workspaces needs the passphrase under the verify-every-Allow rule. |
+| `DELETE /api/p/vault/presets/{id}` | writes, gated | Deletes a preset and unlinks it from workspaces. |
+| `PUT /api/p/vault/workspaces/{machine}/{workspace}` | writes, gated | Sets the presets linked to a workspace (`{presets}`, empty unlinks; ≤ 32 per workspace); adding links needs the passphrase under the verify-every-Allow rule. |
 | `POST /api/p/vault/export` | writes, passphrase | An encrypted export file (Argon2id, AES-256-GCM) of the named variables; file passphrase ≥ 12 characters; ≤ 16 MiB. |
 | `POST /api/p/vault/import/preview` | writes, passphrase | What an export file holds and how its machines map here, never values. |
 | `POST /api/p/vault/import` | writes, passphrase | Imports chosen variables (`import`, `overwrite`, `rename`, `skip`) in one write; any refusal changes nothing. |

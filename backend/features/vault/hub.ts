@@ -4,7 +4,7 @@
 import { randomBytes } from 'node:crypto';
 import type { MiddlewareHandler } from 'hono';
 import { z } from 'zod';
-import { defineFeature, type FeatureContext } from '#kernel/feature.ts';
+import { defineFeature, type FeatureContext, type FeatureDef } from '#kernel/feature.ts';
 import { Fail } from '#kernel/fail.ts';
 import { readBody } from '#kernel/http/app.ts';
 import type { Ctx, Env } from '#kernel/http/env.ts';
@@ -49,6 +49,7 @@ import {
   type UnlockBody,
   type UnlockResult,
   type VaultOptions,
+  type WorkspaceEnvResult,
 } from './vault.ts';
 import { verifyAssertion, verifyRegistration } from './webauthn.ts';
 
@@ -88,12 +89,21 @@ const notFound = (message: string) => new Fail('not_found', 404, message);
  * had to ask, or to the model's reach when it was inject-only. */
 const widens = (cur: Info, u: Update) => (u.injectOnly === false && cur.injectOnly) || !!u.machines?.some((m) => !allows(cur, m));
 
-export function vaultFeature(opts: VaultOptions = {}) {
-  return defineFeature({
+export interface VaultFeature extends FeatureDef {
+  /** Resolves environment variables of presets linked to (machine, workspace)
+   * for injection into a new terminal or chat panel. Never exposes values
+   * while disabled, locked, tampered, or when the access log fails. */
+  workspaceEnv(machine: string, workspace: string, source: 'terminal' | 'chat'): Promise<WorkspaceEnvResult>;
+}
+
+export function vaultFeature(opts: VaultOptions = {}): VaultFeature {
+  let instance: Vault | undefined;
+  const def = defineFeature({
     id: 'vault',
     settings,
     setup(ctx: FeatureContext) {
       const v: Vault = new Vault(ctx, opts);
+      instance = v;
       const { api } = ctx;
       const open = () => v.open();
 
@@ -122,6 +132,9 @@ export function vaultFeature(opts: VaultOptions = {}) {
         return c.json({
           status: s.status(),
           variables: s.list(),
+          groups: s.listGroups(),
+          presets: s.listPresets(),
+          workspaceLinks: s.listWorkspaceLinks(),
           session,
           sessionProof: session && byProof,
           idle: v.sessionLimits().idle / 1000,
@@ -134,6 +147,7 @@ export function vaultFeature(opts: VaultOptions = {}) {
       const setBody = z.object({
         to: str,
         description: str,
+        group: str,
         machines: z.array(z.string()).nullish(),
         injectOnly: z.boolean().nullish(),
         value: str,
@@ -145,6 +159,7 @@ export function vaultFeature(opts: VaultOptions = {}) {
         const u: Update = {
           to: opt(b.to),
           description: opt(b.description),
+          group: opt(b.group),
           machines: opt(b.machines),
           injectOnly: opt(b.injectOnly),
           value: opt(b.value),
@@ -153,8 +168,15 @@ export function vaultFeature(opts: VaultOptions = {}) {
         // Where every Allow is verified, letting more read a variable is an
         // Allow: it needs the user's word for it.
         const cur = s.get(from);
-        if (cur && widens(cur, u) && (await v.strict(s)) && !(await v.verified(c, s, b, { for: For.Change, request: from })))
-          v.needFresh(c);
+        const widensAccess = !!cur && widens(cur, u);
+        const widensLinkedGroup = !!u.group && u.group !== cur?.group && s.groupInLinkedPreset(u.group);
+        const widensLinkedVar = (!cur && s.variableInLinkedPreset(from)) || (!!u.to && u.to !== from && s.variableInLinkedPreset(u.to));
+        if ((widensAccess || widensLinkedGroup || widensLinkedVar) && (await v.strict(s))) {
+          const verified = cur
+            ? await v.verified(c, s, b, { for: For.Change, request: from })
+            : await v.verified(c, s, { passphrase: opt(b.passphrase) }, { for: '' });
+          if (!verified) v.needFresh(c);
+        }
         try {
           await s.set(from, u);
         } catch (e) {
@@ -169,6 +191,7 @@ export function vaultFeature(opts: VaultOptions = {}) {
           machines: i.machines,
           inject_only: i.injectOnly,
           value_changed: u.value !== undefined,
+          ...(i.group ? { group: i.group } : {}),
           ...(i.name !== from ? { from } : {}),
         });
         return c.json(i);
@@ -180,6 +203,120 @@ export function vaultFeature(opts: VaultOptions = {}) {
         v.audit(c, 'vault.deleted', { name });
         v.changed();
         return c.json({ ok: true });
+      });
+
+      // Groups: organize variables cleanly, with ungrouped fallback on delete.
+      const groupBody = z.object({ name: str, description: str });
+      api.post('/groups', ctx.mutating('group_add'), gated, async (c) => {
+        const s = open();
+        const b = await body(c, groupBody, 16 << 10);
+        const g = await s.createGroup({ name: b.name ?? '', description: opt(b.description) });
+        v.audit(c, 'vault.group_saved', { id: g.id, name: g.name });
+        v.changed();
+        return c.json(g);
+      });
+
+      api.put('/groups/:id', ctx.mutating('group_set'), gated, async (c) => {
+        const s = open();
+        const id = c.req.param('id');
+        const b = await body(c, groupBody, 16 << 10);
+        const g = await s.updateGroup(id, { name: opt(b.name), description: opt(b.description) });
+        v.audit(c, 'vault.group_saved', { id: g.id, name: g.name });
+        v.changed();
+        return c.json(g);
+      });
+
+      api.delete('/groups/:id', ctx.mutating('group_delete'), gated, async (c) => {
+        const id = c.req.param('id');
+        await open().deleteGroup(id);
+        v.audit(c, 'vault.group_deleted', { id });
+        v.changed();
+        return c.json({ ok: true });
+      });
+
+      api.post('/groups/assign', ctx.mutating('group_assign'), gated, async (c) => {
+        const s = open();
+        const b = await body(
+          c,
+          z.object({ names: z.array(z.string()).default([]), group: z.string().default(''), passphrase: str }),
+          64 << 10,
+        );
+        if (b.group && s.groupInLinkedPreset(b.group) && (await v.strict(s))) {
+          const addsMember = b.names.some((n) => s.get(n)?.group !== b.group);
+          if (addsMember && !(await v.verified(c, s, { passphrase: opt(b.passphrase) }, { for: '' }))) v.needFresh(c);
+        }
+        await s.assignGroup(b.names, b.group);
+        v.audit(c, 'vault.group_assigned', { names: b.names, group: b.group });
+        v.changed();
+        return c.json({ ok: true });
+      });
+
+      // Presets: named collections of variables and/or groups.
+      const presetBody = z.object({
+        name: str,
+        description: str,
+        variables: z.array(z.string()).nullish(),
+        groups: z.array(z.string()).nullish(),
+        passphrase: str,
+      });
+      api.post('/presets', ctx.mutating('preset_add'), gated, async (c) => {
+        const s = open();
+        const b = await body(c, presetBody, 128 << 10);
+        const p = await s.createPreset({
+          name: b.name ?? '',
+          description: opt(b.description),
+          variables: b.variables ?? [],
+          groups: b.groups ?? [],
+        });
+        v.audit(c, 'vault.preset_saved', { id: p.id, name: p.name, variables: p.variables, groups: p.groups });
+        v.changed();
+        return c.json(p);
+      });
+
+      api.put('/presets/:id', ctx.mutating('preset_set'), gated, async (c) => {
+        const s = open();
+        const id = c.req.param('id');
+        const b = await body(c, presetBody, 128 << 10);
+        const cur = s.getPreset(id);
+        if (cur && s.presetLinked(id) && (await v.strict(s))) {
+          const widensPreset = !!b.variables?.some((n) => !cur.variables.includes(n)) || !!b.groups?.some((g) => !cur.groups.includes(g));
+          if (widensPreset && !(await v.verified(c, s, { passphrase: opt(b.passphrase) }, { for: '' }))) v.needFresh(c);
+        }
+        const p = await s.updatePreset(id, {
+          name: opt(b.name),
+          description: opt(b.description),
+          variables: opt(b.variables),
+          groups: opt(b.groups),
+        });
+        v.audit(c, 'vault.preset_saved', { id: p.id, name: p.name, variables: p.variables, groups: p.groups });
+        v.changed();
+        return c.json(p);
+      });
+
+      api.delete('/presets/:id', ctx.mutating('preset_delete'), gated, async (c) => {
+        const id = c.req.param('id');
+        await open().deletePreset(id);
+        v.audit(c, 'vault.preset_deleted', { id });
+        v.changed();
+        return c.json({ ok: true });
+      });
+
+      // Linking presets to a workspace on a machine: injected into new
+      // terminals and chats of that workspace while the vault is unlocked.
+      api.put('/workspaces/:machine/:workspace', ctx.mutating('workspace_link'), gated, async (c) => {
+        const s = open();
+        const machine = c.req.param('machine');
+        const workspace = c.req.param('workspace');
+        const b = await body(c, z.object({ presets: z.array(z.string()).default([]), passphrase: str }), 16 << 10);
+        if (b.presets.length > 0 && (machine === ALL_MACHINES || !ctx.machines.get(machine)))
+          throw new Fail('unknown_machine', 400, `no machine ${clip(machine, 64)}`);
+        const cur = s.getWorkspaceLink(machine, workspace);
+        const addsPreset = b.presets.some((pid) => !cur?.presets.includes(pid));
+        if (addsPreset && (await v.strict(s)) && !(await v.verified(c, s, { passphrase: opt(b.passphrase) }, { for: '' }))) v.needFresh(c);
+        const link = await s.setWorkspacePresets(machine, workspace, b.presets);
+        v.audit(c, 'vault.workspace_linked', { machine, workspace, presets: b.presets });
+        v.changed();
+        return c.json({ link });
       });
 
       // The only way a value reaches a browser: audited, and recorded before
@@ -662,6 +799,12 @@ export function vaultFeature(opts: VaultOptions = {}) {
         await v.stop();
       });
     },
+  });
+  return Object.assign(def, {
+    workspaceEnv: (machine: string, workspace: string, source: 'terminal' | 'chat') =>
+      instance
+        ? instance.workspaceEnv(machine, workspace, source)
+        : Promise.resolve({ env: {}, names: [], presets: [], missing: [], locked: false }),
   });
 }
 

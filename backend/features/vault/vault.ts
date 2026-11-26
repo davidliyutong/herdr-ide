@@ -1133,6 +1133,78 @@ export class Vault {
     this.#lockTimer = this.#changedLater = null;
     await this.#alog?.close();
   }
+
+  /** Resolves workspace-linked vault presets for injection into a new
+   * terminal or chat panel on machine. Never releases values while the
+   * vault plugin is disabled, the vault is locked, the sealed policy is
+   * tampered, or the durable access log write fails. */
+  async workspaceEnv(machine: string, workspace: string, source: 'terminal' | 'chat'): Promise<WorkspaceEnvResult> {
+    const empty: WorkspaceEnvResult = { presets: [], env: {}, names: [], missing: [], locked: false };
+    if (!machine || !workspace) return empty;
+    if (!this.ctx.enabledFor('desktop') && !this.ctx.enabledFor('browser')) return empty;
+    let s: Store;
+    try {
+      s = this.open();
+    } catch {
+      return empty;
+    }
+    let res: Awaited<ReturnType<Store['resolveWorkspaceEnv']>>;
+    try {
+      res = await s.resolveWorkspaceEnv(machine, workspace);
+    } catch (e) {
+      const corrupt = isCode(e, 'corrupt');
+      this.ctx.logger(`vault: resolving workspace presets for ${machine}/${workspace}: ${(e as Error).message}`);
+      if (corrupt) {
+        await this.record(null, 'vault.access', {
+          time: formatRFC3339(new Date()),
+          m: machine,
+          tool: source,
+          client: clip(workspace, 64),
+          result: 'corrupt',
+        }).catch(() => {});
+        return { ...empty, corrupt: true };
+      }
+      return empty;
+    }
+    if (!res.presets.length) return res;
+    if (res.locked) {
+      await this.record(null, 'vault.access', {
+        time: formatRFC3339(new Date()),
+        m: machine,
+        tool: source,
+        client: clip(workspace, 64),
+        result: 'vault_locked',
+      }).catch(() => {});
+      return res;
+    }
+    if (res.names.length > 0) {
+      const rec: Omit<Access, 'id'> = {
+        time: formatRFC3339(new Date()),
+        m: machine,
+        tool: source,
+        names: res.names,
+        client: clip(workspace, 64),
+        result: Result.Injected,
+      };
+      // Values leave only once the release record is durably written.
+      if (!(await this.record(null, 'vault.injected', rec))) {
+        for (const k of Object.keys(res.env)) res.env[k] = '';
+        return { presets: res.presets, env: {}, names: [], missing: res.missing, locked: false, logFailed: true };
+      }
+      this.touch();
+    }
+    return res;
+  }
+}
+
+export interface WorkspaceEnvResult {
+  presets: string[];
+  env: Record<string, string>;
+  names: string[];
+  missing: string[];
+  locked: boolean;
+  logFailed?: boolean;
+  corrupt?: boolean;
 }
 
 /** An unlock as a page sends it in POST session: the desktop app's entry

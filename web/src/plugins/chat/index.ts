@@ -89,7 +89,7 @@ export const chatPlugin: PluginDef = {
       id: `chat.${k.id}`,
       title: newTabTitle(k.id),
       icon: kindIcon(k.id),
-      run: (machine: string) => void newChat(machine, k.id),
+      run: (machine: string, ws: string) => void newChat(machine, k.id, { workspace: ws }),
     }));
   },
   onMessage(m, data) {

@@ -21,7 +21,7 @@ import { chatAdapter } from '../../conversation/kinds';
 import { t } from '../../i18n';
 import { useStore } from '../../state/store';
 import { ChatFailure, chatApi, reasonText } from './api';
-import { openChat } from './ops';
+import { chatWorkspaceFor, openChat, reportChatVault } from './ops';
 import type { ChatState, Session } from './protocol';
 import { chatGone, upsertState, useChats } from './state';
 
@@ -156,7 +156,15 @@ export async function importSession(m: string, target: ImportTarget, from?: stri
   if (importing.has(key) || !cwd.startsWith('/')) return undefined;
   importing.add(key);
   try {
-    const chat = await chatApi.newChat(m, { kind, cwd, resume: session, import: true });
+    const workspace = chatWorkspaceFor(m, undefined, from);
+    const { chat, vault } = await chatApi.createChat(m, {
+      kind,
+      cwd,
+      resume: session,
+      import: true,
+      ...(workspace ? { workspace } : {}),
+    });
+    reportChatVault(vault);
     upsertState(m, chat);
     await openChat(m, chat.id, kind, from);
     return chat.id;

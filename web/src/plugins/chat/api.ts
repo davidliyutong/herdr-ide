@@ -220,6 +220,29 @@ export interface NewChat {
   resume?: string;
   import?: boolean;
   options?: Options;
+  /** Optional workspace id whose linked vault presets are injected into the chat agent. */
+  workspace?: string;
+}
+
+/** Vault preset injection summary returned by POST /new when presets are linked. */
+export interface NewChatVault {
+  injected: number;
+  locked?: boolean;
+  corrupt?: boolean;
+  logFailed?: boolean;
+  missing?: string[];
+}
+
+function readNewChatVault(v: unknown): NewChatVault | undefined {
+  if (!isObject(v)) return undefined;
+  const injected = typeof v.injected === 'number' && Number.isSafeInteger(v.injected) && v.injected >= 0 ? v.injected : 0;
+  const missing = Array.isArray(v.missing) ? v.missing.filter((x): x is string => typeof x === 'string') : undefined;
+  const out: NewChatVault = { injected };
+  if (v.locked === true) out.locked = true;
+  if (v.corrupt === true) out.corrupt = true;
+  if (v.logFailed === true) out.logFailed = true;
+  if (missing?.length) out.missing = missing;
+  return out;
 }
 
 export const chatApi = {
@@ -262,12 +285,17 @@ export const chatApi = {
     });
     return { sessions, nextCursor: plain(r.nextCursor, 4096) ?? '' };
   },
-  /** Makes a chat; resolves to its state as the host made it. */
-  async newChat(m: string, body: NewChat): Promise<ChatState> {
-    const r = await send<{ chat?: unknown }>(`${base(m)}/new`, jsonInit('POST', body));
+  /** Makes a chat; resolves to its state and optional vault injection summary. */
+  async createChat(m: string, body: NewChat): Promise<{ chat: ChatState; vault?: NewChatVault }> {
+    const r = await send<{ chat?: unknown; vault?: unknown }>(`${base(m)}/new`, jsonInit('POST', body));
     const chat = readState(r.chat);
     if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
-    return chat;
+    const vault = readNewChatVault(r.vault);
+    return vault ? { chat, vault } : { chat };
+  },
+  /** Makes a chat; resolves to its state as the host made it. */
+  async newChat(m: string, body: NewChat): Promise<ChatState> {
+    return (await chatApi.createChat(m, body)).chat;
   },
   /** Ends a chat's agent; the chat stays, closed. */
   close: (m: string, chat: string) => send<unknown>(`${base(m)}/close?${query({ chat })}`, { method: 'POST' }).then(() => {}),

@@ -13,7 +13,9 @@ import { isLive, type BackendState, type TerminalRecord } from '../term/protocol
 import * as L from '../term/layout';
 import { nextPlace, settled, SETTLE_MS, type Place } from '../term/place';
 import { currentDisplay } from '../appearance';
+import { t } from '../i18n';
 import { useStore } from './store';
+import { useWorkspacePresets, workspacePresetIds } from './workspacePresets';
 import {
   AGENT_FORGET_MS,
   confirmSession,
@@ -537,6 +539,10 @@ export class TermModel {
     const cwd = this.store.terminal(m, old)?.cwd ?? fallbackCwd;
     const params: Record<string, unknown> = { keep: true, display: currentDisplay() };
     if (typeof cwd === 'string' && cwd) params.cwd = cwd;
+    const curLayout = this.layouts.get(m);
+    const at = curLayout ? L.locate(curLayout, old) : null;
+    const ws = at ? curLayout!.workspaces[at.workspace] : undefined;
+    if (ws) params.workspace = ws.id;
     this.call(m, 'terminal.run', params)
       .then(
         (rec) => {
@@ -817,6 +823,19 @@ export class TermModel {
     const params: Record<string, unknown> = { keep: true, display: currentDisplay() };
     if (cwd) params.cwd = cwd;
     if (o.argv?.length) params.argv = o.argv;
+    if (ws) {
+      params.workspace = ws.id;
+      if (workspacePresetIds(m, ws.id).length > 0 && useWorkspacePresets.getState().locked) {
+        useStore
+          .getState()
+          .toast(
+            t('vault.inject.locked'),
+            { label: t('vault.workspace.presetsOpen'), run: () => useStore.getState().setPanel('vault') },
+            undefined,
+            'warning',
+          );
+      }
+    }
     return this.call(m, 'terminal.run', params).then((rec) => {
       const address = typeof rec.address === 'string' ? rec.address : undefined;
       // The first pane of a workspace without a directory gives it its own.

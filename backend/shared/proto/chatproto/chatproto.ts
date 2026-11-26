@@ -220,6 +220,9 @@ export interface Request {
   import?: boolean;
   /** What Op.New's chat starts with. */
   options?: Options;
+  /** Additional environment variables for Op.New's agent process (kept in
+   * memory only, never persisted to the journal or logged). */
+  env?: Record<string, string>;
   /** The chat of Op.Attach, Op.Close, Op.Delete, Op.Archive, Op.Unarchive
    * and Op.Seen. */
   chat?: string;

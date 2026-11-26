@@ -40,6 +40,20 @@ export interface ChatOptions {
    * (sdkprovision.ts): the operator's directories, offline, the registry,
    * the cache (~/.<slug>/cache/npm by default). */
   sdk?: Partial<SdkProvisionOptions>;
+  /** Optional vault preset environment variables for a workspace's new
+   * chats (feature 30); none by default. */
+  workspaceEnv?: (
+    machine: string,
+    workspace: string,
+  ) => Promise<{
+    presets: string[];
+    env: Record<string, string>;
+    names: string[];
+    missing: string[];
+    locked: boolean;
+    logFailed?: boolean;
+    corrupt?: boolean;
+  }>;
 }
 
 export interface ChatFeature extends FeatureDef {
@@ -82,7 +96,7 @@ export function chatFeature(o: ChatOptions = {}): ChatFeature {
         limits: { ...DEFAULT_LIMITS, ...o.limits },
       });
       board = h;
-      routes(ctx, h, timing);
+      routes(ctx, h, timing, o.workspaceEnv);
       ctx.service('watch', (signal) => h.run(signal));
       ctx.onForget((m) => {
         h.forget(m);

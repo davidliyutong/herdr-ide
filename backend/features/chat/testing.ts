@@ -417,6 +417,8 @@ export interface RigOptions {
   version?: string;
   /** Prepares the host before the machines connect. */
   host?: (h: FakeChatHost) => void;
+  /** Optional vault workspace env resolver. */
+  workspaceEnv?: import('./hub.ts').ChatOptions['workspaceEnv'];
 }
 
 export interface Rig {
@@ -464,6 +466,7 @@ export async function rig(o: RigOptions = {}): Promise<Rig> {
     limits: o.limits,
     now: () => Date.now() + offset,
     version: () => o.version ?? 'test',
+    workspaceEnv: o.workspaceEnv,
   });
   const store = new Settings('', { modules: [chatSettings, toggles([feature])] });
   const audit = memoryAudit();

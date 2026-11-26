@@ -247,7 +247,12 @@ describe('menus', () => {
     find(paneMenu('m', 'p1'), 'Split Down').run!();
     await vi.waitFor(() => expect(hub.calls.some((c) => c.method === 'terminal.run')).toBe(true));
     // The new terminal starts in the split one's folder and goes below it.
-    expect(hub.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({ keep: true, cwd: '/src', display: expect.any(Object) });
+    expect(hub.calls.find((c) => c.method === 'terminal.run')?.params).toEqual({
+      keep: true,
+      cwd: '/src',
+      workspace: 'w1w1w1w1',
+      display: expect.any(Object),
+    });
     await settle();
     expect(hub.layout('m')!.workspaces[0].tabs[0]).toMatchObject({
       root: { split: 'vertical', children: [{ terminal: 'p1' }, { terminal: 't1' }] },
@@ -403,12 +408,14 @@ describe('menus', () => {
     expect(hub.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
       keep: true,
       cwd: '/tmp',
+      workspace: 'w2w2w2w2',
       display: expect.any(Object),
     });
     await actions.newTab('m', 'w1w1w1w1');
     expect(hub.calls.filter((c) => c.method === 'terminal.run').pop()?.params).toEqual({
       keep: true,
       cwd: '/src',
+      workspace: 'w1w1w1w1',
       display: expect.any(Object),
     });
     await settle();

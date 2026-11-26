@@ -20,6 +20,10 @@ export interface SwitchboardDeps {
   embeddedHC?: (os: string, arch: string) => Promise<string | null>;
   paneEnv: (m: Machine) => Record<string, string> | undefined;
   sshEnv: (m: Machine) => Record<string, string> | null;
+  workspaceEnv?: (
+    m: Machine,
+    workspace: string,
+  ) => Promise<{ env: Record<string, string>; names: string[]; presets: string[] } | undefined>;
   sessions: () => boolean;
   onSessionsChange: (changed: () => void) => () => void;
   onReady?: (m: Machine, ready: boolean) => void;

@@ -53,6 +53,10 @@ const request = z.object({
     .object({ model: str, effort: str, mode: str })
     .nullish()
     .transform((v) => v ?? undefined),
+  env: z
+    .record(z.string(), z.string())
+    .nullish()
+    .transform((v) => v ?? undefined),
   chat: str,
   from: seq,
   noCatchUp: bool,
