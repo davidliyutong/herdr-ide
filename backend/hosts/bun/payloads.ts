@@ -44,6 +44,11 @@ export async function openPayloads(o: {
   agentDir: string;
   extDir: string;
   webDir: string;
+  payloadDir?: string;
+  /** False in `<slug> desktop`, whose machine builds come from its Stage 1
+   * archives directory (--agent-dir) even after macOS signs the app's hub
+   * executable. */
+  ownDigest?: boolean;
   logger?: (line: string) => void;
 }): Promise<Payloads> {
   const e = await embedded();
@@ -51,8 +56,9 @@ export async function openPayloads(o: {
   const ext: Files | null = o.extDir
     ? { get: (p) => (p.startsWith('ext/') ? dirFiles(o.extDir).get(p.slice(4)) : Promise.resolve(null)) }
     : null;
+  const override = o.payloadDir ? dirFiles(o.payloadDir) : null;
   const staged = Bun.isStandaloneExecutable ? null : dirFiles(fileURLToPath(new URL('../../../dist/payload/', import.meta.url)));
-  const files = layered(ext, e?.files ?? staged);
+  const files = layered(ext, override, e?.files ?? staged);
   const web = o.webDir ? dirFiles(o.webDir) : (e?.web ?? null);
   return payloads({
     files,
@@ -60,6 +66,6 @@ export async function openPayloads(o: {
     agentDir: o.agentDir || undefined,
     ...(o.logger ? { logger: o.logger } : {}),
     // The running executable is the machine build of its platform.
-    ...(Bun.isStandaloneExecutable ? { ownFd: ownExecutable() } : {}),
+    ...(Bun.isStandaloneExecutable && o.ownDigest !== false ? { ownFd: ownExecutable() } : {}),
   });
 }

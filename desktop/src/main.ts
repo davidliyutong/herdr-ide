@@ -12,7 +12,6 @@ import {
   session,
   shell,
   systemPreferences,
-  utilityProcess,
   type BaseWindow,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
@@ -20,7 +19,7 @@ import {
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { electronPort, refuseChannel, type ElectronPort } from '../../backend/hosts/electron/bridge';
+import { electronPort, refuseChannel, type ElectronPort } from '../../backend/hosts/desktop/bridge';
 import registry from '../../spec/generated/registry.json';
 import tokens from '../../spec/tokens.json';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
@@ -38,8 +37,8 @@ import {
   ENV_PREFIX,
   isChannelId,
   nodeInstance,
+  stdioChild,
   verifyKey,
-  type HubChild,
   type HubSpawner,
 } from './hub';
 import { enclaveFor, helperPath, helperRunner, runBounded } from './enclave';
@@ -665,22 +664,28 @@ if (!app.requestSingleInstanceLock()) {
       // message, and to nothing else.
       const key = verifyKey();
       const home = app.getPath('home');
-      const resources = hubResources(app.isPackaged ? process.resourcesPath : undefined, join(app.getAppPath(), '..'));
-      // Development only: the payloads, machine builds and code-server
-      // seed of a test run (the desktop smoke test).
+      const resources = hubResources(
+        app.isPackaged ? process.resourcesPath : undefined,
+        join(app.getAppPath(), '..'),
+        platform,
+        process.arch,
+      );
+      // Development only: overrides for the hub executable, payloads,
+      // machine builds and code-server seed of a test run.
       const devPath = (name: string) => (dev ? process.env[`${ENV_PREFIX}${name}`] || undefined : undefined);
       const seed = devPath('SEED_DIR');
+      const hubBin = devPath('HUB_BIN') ?? resources.hub;
       const spawner: HubSpawner = {
         fork: () =>
-          utilityProcess.fork(join(__dirname, 'hub.mjs'), [], {
-            serviceName: `${APP_NAME} hub`,
-            stdio: ['ignore', 'ignore', 'pipe'],
-            env: hubEnv(process.env, home, platform),
-            cwd: home,
-            // macOS: node-pty's native library, which library validation
-            // would refuse in an app signed ad hoc (no team).
-            allowLoadingUnsignedLibraries: platform === 'darwin',
-          }) as unknown as HubChild,
+          stdioChild(
+            spawn(hubBin, ['desktop'], {
+              stdio: ['pipe', 'pipe', 'pipe'],
+              env: hubEnv(process.env, home, platform),
+              cwd: home,
+              windowsHide: true,
+            }),
+            (end) => electronPort(end as ElectronPort),
+          ),
         pair: () => {
           const { port1, port2 } = new MessageChannelMain();
           return [port1, port2];
@@ -695,15 +700,16 @@ if (!app.requestSingleInstanceLock()) {
           localOnly: instance !== 'desktop',
           origin,
           verifyKey: key,
-          payload: devPath('DESKTOP_PAYLOAD') ?? resources.payload,
-          web: resources.web,
-          agentDir: devPath('AGENT_DIR'),
+          payload: devPath('DESKTOP_PAYLOAD'),
+          web: devPath('WEB_DIR'),
+          agentDir: devPath('AGENT_DIR') ?? resources.machines,
           seedDirs: seed ? [seed] : undefined,
         },
         lost: (error) => void fail(error),
         log: (text) => process.stderr.write(text),
       });
       hub = host;
+      (globalThis as { __hubPid?: () => number | undefined }).__hubPid = () => hub?.pid;
       // The app's windows live in a session of their own, where the app's
       // origin is the hub's: the handler is there before a page loads.
       const ses = session.fromPartition(APP_PARTITION);

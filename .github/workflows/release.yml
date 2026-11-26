@@ -13,17 +13,12 @@ env:
   RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
 
 jobs:
-  encoder:
-    uses: ./.github/workflows/encoder.yml
-    with:
-      cache: false
-
-  # The hubs (each the hub and the machine side of its platform, musl's
-  # too), packaged with their licenses; SHA256SUMS of the archives
-  # and the executables in them.
+  # Stage 1: Full-featured headless Bun executables for all 6 POSIX platforms
+  # (with pinned encoders, herdr-core, gui-helper, gpupick, web UI and VS Code
+  # bridge embedded), packaged with licenses and SHA256SUMS, plus the Windows
+  # hub executable for Stage 2's Windows desktop installer.
   archives:
     runs-on: ubuntu-24.04
-    needs: encoder
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,44 +33,42 @@ jobs:
           cache-dependency-path: |
             web/pnpm-lock.yaml
             desktop/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
             backend/pnpm-lock.yaml
             extensions/*/pnpm-lock.yaml
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.5
       - run: make deps
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: make check
       - run: pnpm -C backend test
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: encoder-*
-          path: dist/ffmpeg
-      - name: Place the video encoders
-        run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
-      - name: Build
+      - name: Stage 1 build
         run: scripts/build.sh
         env:
           VERSION: ${{ github.ref_name }}
-          TARGETS: linux/amd64 linux/arm64 linux/amd64-musl linux/arm64-musl darwin/amd64 darwin/arm64
-          REQUIRE_ENCODER: 1
+          WITH_WINDOWS: 1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: archives
-          path: dist/release/*.tar.gz
+          path: |
+            dist/release/*.tar.gz
+            dist/release/SHA256SUMS
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hub-windows
+          path: dist/*-windows-amd64.exe
           if-no-files-found: error
 
-  # The desktop app's installers, each built on its own system: macOS DMG
-  # and zip (x64 on the arm64 runner, with the Intel Electron and
-  # node-pty's Intel prebuild), the Windows setup, Linux AppImage and deb (each
-  # on a runner of its architecture: node-pty is built there by pnpm
-  # install). Everything is built without any secret; only the
-  # Package step, which runs electron-builder alone, gets the optional macOS
-  # Developer ID certificate and notarization credentials (ad hoc without
-  # them; Windows and Linux are not signed).
-  # Each app (but Windows's) carries its own platform's executable from
-  # the archives (the release's, so that the manifest names it).
+  # Stage 2: The Electron desktop installers on each system, bundling all 6
+  # Stage 1 machine archives (plus SHA256SUMS) and this target's Stage 1 Bun
+  # hub executable without recompiling the backend or web UI. Only the Package
+  # step receives the optional macOS Developer ID signing and notarization
+  # secrets.
   desktop:
-    needs: [encoder, archives]
+    needs: [archives]
     strategy:
       fail-fast: false
       matrix:
@@ -101,37 +94,24 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: |
-            web/pnpm-lock.yaml
-            desktop/pnpm-lock.yaml
-            backend/pnpm-lock.yaml
-            extensions/*/pnpm-lock.yaml
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.5
+          cache-dependency-path: desktop/pnpm-lock.yaml
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: encoder-*
-          path: dist/ffmpeg
-      - name: Place the video encoders
-        run: for d in dist/ffmpeg/encoder-*; do mv "$d" "dist/ffmpeg/${d#dist/ffmpeg/encoder-}"; done
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: ${{ matrix.platform != 'win' }}
         with:
           name: archives
           path: dist/archives
-      - name: The app's own executable
-        if: ${{ matrix.platform != 'win' }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ matrix.platform == 'win' }}
+        with:
+          name: hub-windows
+          path: dist/hub-windows
+      - name: Stage 2 build
         run: |
           slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
-          os=${{ matrix.platform == 'mac' && 'darwin' || 'linux' }}
-          key=$os-${ARCH/x64/amd64}
-          mkdir -p dist/executables
-          tar -xzf "dist/archives/$slug-$key.tar.gz" -O "$slug-$key/$slug" > "dist/executables/$slug-$key"
-      - run: scripts/desktop.sh build
-        env:
-          REQUIRE_ENCODER: 1
-          EXECUTABLES: ${{ matrix.platform != 'win' && 'dist/executables' || '' }}
+          export STAGE1_ARCHIVES=dist/archives
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            export STAGE1_HUB_EXE="dist/hub-windows/$slug-windows-amd64.exe"
+          fi
+          scripts/desktop.sh build
       - name: Package
         run: scripts/desktop.sh dist
         env:
@@ -163,11 +143,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          pattern: archives
           path: dist/release
           merge-multiple: true
-      # The release's files, the archives and the installers, and the
-      # executables in the archives (<slug>-<platform>/<slug>, which the
-      # hubs check their machines' builds against).
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-*
+          path: dist/release
+          merge-multiple: true
       - name: Checksums
         run: |
           slug=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
@@ -182,9 +165,6 @@ jobs:
             done
           } > SHA256SUMS
           cat SHA256SUMS
-      # GitHub stores attestations for public repositories (private ones need
-      # GitHub Enterprise Cloud); a private repository releases without
-      # provenance.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: ${{ !github.event.repository.private }}
         with:

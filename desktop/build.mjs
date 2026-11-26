@@ -1,22 +1,5 @@
 import { build } from 'esbuild';
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { isBuiltin } from 'node:module';
 import { buildHelper, swiftcFound } from './helper/build.mjs';
-
-// node-pty 1.1.0 ships its macOS spawn-helper without the executable bit
-// (its tarball's mode is 0644), so every spawn fails with "posix_spawnp
-// failed": give it back to the installed copy, which development runs and
-// packaging use. A copy of its own: the package manager's store links the
-// file, whose mode it shares.
-const prebuilds = 'node_modules/node-pty/prebuilds';
-if (existsSync(prebuilds))
-  for (const dir of readdirSync(prebuilds).filter((d) => d.startsWith('darwin-'))) {
-    const helper = `${prebuilds}/${dir}/spawn-helper`;
-    if (!existsSync(helper) || statSync(helper).mode & 0o111) continue;
-    const bytes = readFileSync(helper);
-    unlinkSync(helper);
-    writeFileSync(helper, bytes, { mode: 0o755 });
-  }
 
 await build({
   entryPoints: ['src/main.ts'],
@@ -43,56 +26,6 @@ for (const [entry, out] of [
     external: ['electron'],
   });
 }
-
-// The hub, for the app's utility process (backend/hosts/electron), with
-// the backend's packages bundled (pnpm -C backend install first); node-pty,
-// a native module, stays a package of the app, loaded when an ssh login
-// needs it. ws's optional native helpers (bufferutil, utf-8-validate) are
-// not shipped: they are bundled as modules that fail to load, which ws
-// takes as their absence, so the hub never looks for a module the app
-// does not carry (a search that leaves the app's directory would find one
-// anyone could put there). Nothing but Node's own modules and node-pty is
-// loaded at run time: checked below.
-const SHIPPED = new Set(['node-pty']);
-const notShipped = {
-  name: 'not-shipped',
-  setup(b) {
-    b.onResolve({ filter: /^(bufferutil|utf-8-validate)$/ }, (a) => ({ path: a.path, namespace: 'not-shipped' }));
-    b.onLoad({ filter: /.*/, namespace: 'not-shipped' }, (a) => ({
-      contents: `throw Object.assign(new Error(${JSON.stringify(a.path + ' is not shipped')}), { code: 'MODULE_NOT_FOUND' });`,
-      loader: 'js',
-    }));
-  },
-};
-await build({
-  entryPoints: [
-    { in: '../backend/hosts/electron/main.ts', out: 'hub' },
-    { in: '../backend/hosts/common/hub-state-worker.ts', out: 'hub-state-worker' },
-  ],
-  outdir: 'dist',
-  outExtension: { '.js': '.mjs' },
-  bundle: true,
-  platform: 'node',
-  target: 'node24',
-  format: 'esm',
-  // ES module builds first: jsonc-parser's main is UMD, which hides its
-  // modules from the bundler.
-  mainFields: ['module', 'main'],
-  external: [...SHIPPED],
-  plugins: [notShipped],
-  // CommonJS packages in an ES module bundle require what they need.
-  banner: { js: "import { createRequire as __hubRequire } from 'node:module'; const require = __hubRequire(import.meta.url);" },
-  logLevel: 'warning',
-});
-const loaded = new Set(
-  ['dist/hub.mjs', 'dist/hub-state-worker.mjs'].flatMap((path) =>
-    [...readFileSync(path, 'utf8').matchAll(/\b(?:require|__require|createRequire\([^()]*\))\(\s*["'`]([^"'`]+)["'`]\s*\)/g)].map(
-      (m) => m[1],
-    ),
-  ),
-);
-const foreign = [...loaded].filter((m) => !isBuiltin(m) && !SHIPPED.has(m));
-if (foreign.length) throw new Error(`the hub loads modules the app does not carry: ${foreign.join(', ')}`);
 
 // macOS: the Secure Enclave helper (helper/build.mjs), which the packaged app
 // carries in Contents/Helpers and the development run finds here. Without

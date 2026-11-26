@@ -32,12 +32,14 @@ for a in $archs; do
   esac
 done
 mkdir -p "$here/hc"
+bun backend/scripts/fetch-deps.ts --only encoder,gpupick,gui-helper
 # shellcheck disable=SC2086
 bun backend/scripts/fetch-hc.ts --out "$here/hc" $hc_plats
 rm -rf "$here/exe"
 mkdir -p "$here/exe"
 slug=$(sed -n "s/^export const SLUG = '\\(.*\\)';$/\\1/p" backend/shared/lib/brand.ts)
 for k in $pairs; do
-  bun backend/scripts/build.ts --out "$here/exe/$slug-${k%%:*}" --target "${k#*:}" --version matrix --hc "$here/hc"
+  bun backend/scripts/build.ts --out "$here/exe/$slug-${k%%:*}" --target "${k#*:}" --version matrix --hc "$here/hc" \
+    --encoder dist/deps/encoder --gui dist/deps/gui-helper --gpupick dist/deps/gpupick
 done
 echo "built $here ($archs)"

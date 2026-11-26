@@ -26,7 +26,7 @@ function walkTests(dir: string, skipMachine = false): string[] {
 }
 
 const files: string[] = [];
-for (const sub of ['shared/agents', 'shared/lib', 'shared/proto', 'kernel', 'hosts/common', 'hosts/electron']) {
+for (const sub of ['shared/agents', 'shared/lib', 'shared/proto', 'kernel', 'hosts/common', 'hosts/desktop']) {
   for (const f of walkTests(join(ROOT, sub))) files.push(relative(ROOT, f).replaceAll('\\', '/'));
 }
 for (const f of walkTests(join(ROOT, 'features'), true)) files.push(relative(ROOT, f).replaceAll('\\', '/'));

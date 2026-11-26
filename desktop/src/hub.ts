@@ -1,16 +1,20 @@
-// The app's hub runs in an Electron utility process
-// (backend/hosts/electron), which the main process starts, restarts when
-// it crashes (the windows stay) and stops when the app quits. Nothing
-// listens: the main process hands the hub the requests of the app's
-// windows, which it intercepts at the app's origin (protocol.ts), and the
-// channels (WebSockets) it brokers between a frame and the hub, over the
-// bridge of backend/hosts/electron/bridge.ts. The client is the desktop
-// app because the main process says so; the verify key of the system's
-// prompts goes to the hub in its start message only.
+// The app's hub runs as the Stage 1 compiled Bun executable (`<slug>
+// desktop`), which the main process spawns over stdio, restarts when it
+// crashes (the windows stay) and stops when the app quits. Nothing listens
+// on TCP: the main process hands the hub the requests of the app's windows,
+// which it intercepts at the app's origin (protocol.ts), and the channels
+// (WebSockets) it brokers between a frame and the hub, over the binary
+// stdio multiplex (backend/hosts/desktop/mux.ts) and bridge
+// (backend/hosts/desktop/bridge.ts). The client is the desktop app because
+// the main process says so; the verify key of the system's prompts goes to
+// the hub in its start message only.
+import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { posix } from 'node:path';
+import { PassThrough } from 'node:stream';
 import {
   channelClient,
+  pipePort,
   refuseChannel,
   request,
   type ChannelClient,
@@ -20,7 +24,9 @@ import {
   type Port,
   type RequestHead,
   type ToHub,
-} from '../../backend/hosts/electron/bridge';
+} from '../../backend/hosts/desktop/bridge';
+import { muxParent } from '../../backend/hosts/desktop/mux';
+import { withoutForeignRuntimeVars } from '../../backend/shared/lib/bunenv';
 import { APP_SLUG } from '../../web/src/brand';
 import type { MessageKey } from '../../web/src/i18n/en';
 import { APP_HOST, APP_ORIGIN } from './origin';
@@ -66,17 +72,22 @@ export function verifyKey(random: (n: number) => Buffer = randomBytes): string {
 }
 
 export function hubEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform): NodeJS.ProcessEnv {
+  // Strip foreign Bun runtime/debugger/config variables (BUN_BE_BUN,
+  // BUN_OPTIONS, BUN_INSPECT*, BUN_CONFIG_*) before spawning the compiled Bun
+  // hub executable: Bun evaluates them in its native entrypoint before JS
+  // main() runs.
+  const clean = withoutForeignRuntimeVars(env);
   // The hub takes the user's proxy (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) for
-  // its own fetch itself (backend/shared/lib/proxy.ts): nothing is added
-  // here that the programs it starts would inherit.
-  // Windows keeps its Path as it is (its name differs in case, which a copy
-  // of the environment would duplicate).
-  if (platform === 'win32') return env;
+  // its own fetch itself: nothing is added here that the programs it starts
+  // would inherit.
+  // Windows keeps its Path as it is (its name differs in case, which adding
+  // PATH alongside it would duplicate).
+  if (platform === 'win32') return clean;
   // Finder and desktop launchers do not load shell rc files. Include common
   // installations without executing the user's login shell or interpolating
   // shell commands.
   const paths = [
-    env.PATH || '',
+    clean.PATH || '',
     posix.join(home, '.local/bin'),
     '/opt/homebrew/bin',
     '/usr/local/bin',
@@ -85,11 +96,12 @@ export function hubEnv(env: NodeJS.ProcessEnv, home: string, platform: Platform)
     '/usr/sbin',
     '/sbin',
   ];
-  return { ...env, PATH: paths.filter(Boolean).join(posix.delimiter) };
+  return { ...clean, PATH: paths.filter(Boolean).join(posix.delimiter) };
 }
 
-/** The utility process as the host uses it (Electron's UtilityProcess). */
+/** The spawned hub process as the host uses it. */
 export interface HubChild {
+  readonly pid?: number;
   postMessage(message: ToHub, transfer?: unknown[]): void;
   on(event: 'message', fn: (message: unknown) => void): unknown;
   on(event: 'exit', fn: (code: number) => void): unknown;
@@ -97,7 +109,72 @@ export interface HubChild {
   readonly stderr: NodeJS.ReadableStream | null;
 }
 
-/** What the host needs of Electron (a test gives worker_threads'). */
+/** Wraps a ChildProcess running `<slug> desktop` (stdin/stdout binary mux)
+ * as a HubChild, piping transferred MessagePorts onto virtual mux ports. */
+export function stdioChild(proc: ChildProcess, portOf: (end: unknown) => Port): HubChild {
+  const stderr = new PassThrough();
+  proc.stderr?.pipe(stderr, { end: false });
+  const exitListeners: Array<(code: number) => void> = [];
+  let exited = false;
+  let stopping = false;
+  let mux: ReturnType<typeof muxParent> | undefined;
+  const emitExit = (code: number) => {
+    if (exited) return;
+    exited = true;
+    mux?.close();
+    stderr.end();
+    for (const fn of exitListeners) fn(code);
+  };
+  mux = muxParent(proc.stdout!, proc.stdin!, {
+    onDisconnect: () => {
+      // During an explicit graceful stop, let `proc` finish exiting and emit
+      // `close` with its true code (bounded by HubHost.stop's deadline).
+      // Otherwise, if the stdio mux closed or broke before `proc` exited,
+      // terminate the child and trigger HubHost's recovery immediately.
+      if (exited || stopping) return;
+      if (proc.exitCode === null && proc.signalCode === null) {
+        try {
+          proc.kill('SIGKILL');
+        } catch {
+          // already gone
+        }
+      }
+      emitExit(proc.exitCode ?? 1);
+    },
+  });
+  proc.on('error', (err) => {
+    stderr.write(`hub spawn: ${err.message}\n`);
+    emitExit(1);
+  });
+  proc.on('close', (code, signal) => emitExit(code ?? (signal ? -1 : 0)));
+  return {
+    get pid() {
+      return proc.pid;
+    },
+    stderr,
+    postMessage(m: ToHub, transfer: unknown[] = []) {
+      if (m.t === 'stop') stopping = true;
+      if (m.t === 'request' || m.t === 'channel') {
+        const vport = mux!.send(m, true)!;
+        if (transfer[0]) pipePort(portOf(transfer[0]), vport);
+        else vport.close();
+        return;
+      }
+      mux!.send(m, false);
+    },
+    on(event: 'message' | 'exit', fn: (arg: never) => void) {
+      if (event === 'message') mux.onMessage(fn as (m: FromHub) => void);
+      else exitListeners.push(fn as (code: number) => void);
+      return undefined;
+    },
+    kill() {
+      return proc.kill('SIGKILL');
+    },
+  };
+}
+
+/** What the host needs to spawn the hub and broker MessagePorts (a test
+ * gives worker_threads'). */
 export interface HubSpawner {
   fork(): HubChild;
   /** A new MessageChannel: the ends as they are sent, and the bridge's
@@ -123,7 +200,7 @@ export interface HubHostOptions {
 
 const isFromHub = (m: unknown): m is FromHub => typeof m === 'object' && m !== null && typeof (m as { t?: unknown }).t === 'string';
 
-/** The hub in its utility process. */
+/** The hub child process managed by the main process. */
 export class HubHost {
   private child?: HubChild;
   /** The processes that exited. */
@@ -139,6 +216,11 @@ export class HubHost {
 
   constructor(private readonly o: HubHostOptions) {
     this.ready.catch(() => {});
+  }
+
+  /** The running hub child's process id, when alive. */
+  get pid(): number | undefined {
+    return this.child && !this.ended.has(this.child) ? this.child.pid : undefined;
   }
 
   /** The end of the hub's log, for the failure dialog. */
@@ -259,10 +341,13 @@ export class HubHost {
     if (!req.headers.has('host')) headers.push(['host', new URL(req.url).host]);
     const head: RequestHead = { method: req.method, url: req.url, headers, body: req.body !== null };
     const [ours, theirs] = this.o.spawner.pair();
+    const ourPort = this.o.spawner.port(ours);
     try {
       child.postMessage({ t: 'request', head }, [theirs]);
-      return await request(this.o.spawner.port(ours), head, req.body, req.signal);
+      return await request(ourPort, head, req.body, req.signal);
     } catch {
+      ourPort.close();
+      this.o.spawner.port(theirs).close();
       return Response.json({ error: 'unavailable', message: 'the hub went away' }, { status: 502 });
     }
   }

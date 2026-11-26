@@ -35,7 +35,7 @@ for p in $TARGETS; do
   cp LICENSE THIRD_PARTY_NOTICES.md web/dist/licenses.md "$dir/"
   cp dist/hc/licenses/LICENSE dist/hc/licenses/THIRD-PARTY-NOTICES "$dir/licenses/herdr-core/"
   cp licenses/herdr-detect/* "$dir/licenses/herdr-detect/"
-  cp licenses/encoder/* "$dir/licenses/encoder/"
+  cp dist/deps/licenses/encoder/* "$dir/licenses/encoder/"
   cat > "$dir/README.txt" <<EOF
 $SLUG release for $p
 

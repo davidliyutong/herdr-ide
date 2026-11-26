@@ -178,6 +178,7 @@ test("behind a proxy, the hub downloads through it and its programs get only the
     res.writeHead(403).end();
   });
   proxy.on('connect', (req, sock) => {
+    sock.on('error', () => {});
     seen.push(`CONNECT ${req.url}`);
     sock.end('HTTP/1.1 403 Forbidden\r\n\r\n');
   });

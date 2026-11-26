@@ -38,8 +38,9 @@ function electronBinary(): string | undefined {
 
 /** Why the desktop app cannot run here, or undefined when it can. */
 export function desktopUnavailable(): string | undefined {
-  if (!electronBinary() || !['main.cjs', 'preload.cjs', 'frames.cjs', 'hub.mjs'].every((f) => existsSync(join(desktopDir, 'dist', f))))
+  if (!electronBinary() || !['main.cjs', 'preload.cjs', 'frames.cjs'].every((f) => existsSync(join(desktopDir, 'dist', f))))
     return 'the desktop app is not built: pnpm -C desktop install && pnpm -C desktop build';
+  if (!existsSync(paths.hub)) return `the hub binary is not built: ${paths.hub}`;
   if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return 'Electron needs a display';
   return undefined;
 }
@@ -109,7 +110,7 @@ export class Desktop {
         env: home.env({
           [`${PREFIX}DESKTOP_DEV`]: home.name,
           [`${PREFIX}DESKTOP_NO_OPEN`]: '1',
-          [`${PREFIX}DESKTOP_PAYLOAD`]: paths.payload,
+          [`${PREFIX}HUB_BIN`]: paths.hub,
           [`${PREFIX}AGENT_DIR`]: paths.agents,
           [`${PREFIX}SEED_DIR`]: o.codeServerSeed,
           DISPLAY: process.env.DISPLAY,
@@ -218,15 +219,15 @@ export class Desktop {
     );
   }
 
-  /** The hub's utility process; waits for one other than not (the one
-   * that crashed). */
+  /** The spawned hub process (`<slug> desktop`); waits for one other than
+   * not (the one that crashed). */
   hubPid(not?: number): Promise<number> {
     return waitFor(
       async () => {
-        const pid = (await this.processes()).find((p) => p.type === 'Utility' && / hub$/.test(p.name))?.pid;
-        return pid !== not ? pid : undefined;
+        const pid = await this.app.evaluate(() => (globalThis as { __hubPid?: () => number | undefined }).__hubPid?.());
+        return typeof pid === 'number' && pid !== not ? pid : undefined;
       },
-      { what: "the hub's utility process", timeout: 30_000 },
+      { what: "the hub's process", timeout: 30_000 },
     );
   }
 

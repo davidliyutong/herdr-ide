@@ -61,13 +61,6 @@ else
   warn "python3" "needed for e2e/machines and winvm.py"
 fi
 
-if command -v zig >/dev/null 2>&1; then
-  zv=$(zig version)
-  if [[ "$zv" == 0.17.* ]]; then ok "zig" "$zv (optional: vt-wasm/gpupick/gui-helper)"; else warn "zig" "$zv (rebuilding native artifacts needs 0.17)"; fi
-else
-  warn "zig" "optional (committed artifacts verified by make check)"
-fi
-
 for t in git ssh ssh-keygen curl tar gzip; do
   if command -v "$t" >/dev/null 2>&1; then ok "$t" "$(command -v "$t")"; else miss "$t" "required"; fi
 done

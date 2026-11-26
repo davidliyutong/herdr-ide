@@ -4,7 +4,7 @@
 import { statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { APP_DOMAIN } from '../../web/src/brand';
+import { APP_DOMAIN, APP_SLUG } from '../../web/src/brand';
 import type { OpenedFolders } from '../../web/src/shell';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
@@ -26,13 +26,31 @@ export function keyPlatform(p: Platform): 'mac' | 'windows' | 'linux' {
   return p === 'darwin' ? 'mac' : p === 'win32' ? 'windows' : 'linux';
 }
 
-/** Where the hub's payloads are: in the app's resources (payload/ as
- * scripts/build.sh stages it: machine builds, herdr-core, the video
- * encoders, the VS Code extension; web/ the web UI), or in the repository
- * for unpackaged development (dist/payload, web/dist). */
-export function hubResources(resources: string | undefined, repo: string): { payload: string; web: string } {
-  if (resources) return { payload: join(resources, 'payload'), web: join(resources, 'web') };
-  return { payload: join(repo, 'dist', 'payload'), web: join(repo, 'web', 'dist') };
+/** Where the Stage 1 compiled Bun hub executable and the bundled Stage 1
+ * machine archives (all platforms + SHA256SUMS) live: inside the packaged
+ * app's bundle (Contents/Helpers/<slug> on macOS so Hardened Runtime signs
+ * it, resources/bin/<slug>[.exe] on Linux and Windows, and
+ * resources/machines/), or in dist/ for unpackaged development. */
+export function hubResources(
+  resources: string | undefined,
+  repo: string,
+  platform: Platform = process.platform as Platform,
+  arch: string = process.arch,
+): { hub: string; machines: string } {
+  if (resources) {
+    const hub =
+      platform === 'darwin'
+        ? join(resources, '..', 'Helpers', APP_SLUG)
+        : join(resources, 'bin', platform === 'win32' ? `${APP_SLUG}.exe` : APP_SLUG);
+    return { hub, machines: join(resources, 'machines') };
+  }
+  const os = platform === 'win32' ? 'windows' : platform;
+  const cpu = arch === 'x64' ? 'amd64' : arch;
+  const ext = platform === 'win32' ? '.exe' : '';
+  return {
+    hub: join(repo, 'dist', `${APP_SLUG}-${os}-${cpu}${ext}`),
+    machines: join(repo, 'dist', 'release'),
+  };
 }
 
 /** Whether closing the main window quits: everywhere but macOS, where the

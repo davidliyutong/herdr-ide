@@ -1,5 +1,5 @@
-// The bridge between the main process and the hub's utility process
-// (backend/hosts/electron/bridge.ts), with worker_threads' MessagePorts
+// The bridge between the main process and the hub process
+// (backend/hosts/desktop/bridge.ts), with worker_threads' MessagePorts
 // standing in for Electron's: requests and their bodies, with credit both
 // ways, failures and cancels; channels, with their opening, messages,
 // acks and closes.
@@ -20,7 +20,8 @@ import {
   type HubChannel,
   type RequestHead,
   type Upgrade,
-} from '../../backend/hosts/electron/bridge';
+} from '../../backend/hosts/desktop/bridge';
+import { extended } from './extended';
 
 /** A MessageChannel whose ports do not keep the test's process alive. */
 function pair() {
@@ -186,9 +187,9 @@ test('a hub that goes away fails what is in flight', async () => {
 });
 
 /** A channel served by behave, and its client. */
-function channel(behave: (req: Request, upgrade: Upgrade) => Promise<Response>) {
+function channel(behave: (req: Request, upgrade: Upgrade) => Promise<Response>, opts?: { maxMessage?: number }) {
   const { port1, port2 } = pair();
-  void serveChannel(nodePort(port2), { url: 'https://app.localhost/ws', headers: [['origin', 'https://app.localhost']] }, behave);
+  void serveChannel(nodePort(port2), { url: 'https://app.localhost/ws', headers: [['origin', 'https://app.localhost']] }, behave, opts);
   const got: Array<string | Uint8Array> = [];
   const ends: Array<[number, string]> = [];
   let opened = false;
@@ -315,11 +316,12 @@ test('a close handler that throws ends its channel only', async () => {
   }
 });
 
-test("a client's message above MAX_MESSAGE ends its channel as too big, also before the hub took it", async () => {
+test("a client's message above maxMessage ends its channel as too big, also before the hub took it", async () => {
+  const limit = 4096;
   const a = echo();
-  const open = channel(a.behave);
+  const open = channel(a.behave, { maxMessage: limit });
   await until(open.opened);
-  open.client.send(new Uint8Array(MAX_MESSAGE + 1));
+  open.client.send(new Uint8Array(limit + 1));
   await until(() => open.ends.length === 1);
   assert.deepEqual(open.ends, [[TOO_BIG, 'message too big']]);
   assert.deepEqual(a.seen.closes, [[TOO_BIG, 'message too big']]);
@@ -340,10 +342,15 @@ test("a client's message above MAX_MESSAGE ends its channel as too big, also bef
       }, closed),
   };
   const ends: Array<[number, string]> = [];
-  void serveChannel(counting, { url: 'https://app.localhost/ws', headers: [] }, async (req, upgrade) => {
-    await until(() => arrived === 2, 10_000);
-    return b.behave(req, upgrade);
-  });
+  void serveChannel(
+    counting,
+    { url: 'https://app.localhost/ws', headers: [] },
+    async (req, upgrade) => {
+      await until(() => arrived === 2, 10_000);
+      return b.behave(req, upgrade);
+    },
+    { maxMessage: limit },
+  );
   const early = nodePort(port1);
   early.listen(
     (m) => {
@@ -352,9 +359,19 @@ test("a client's message above MAX_MESSAGE ends its channel as too big, also bef
     },
     () => {},
   );
-  early.post(new Uint8Array(MAX_MESSAGE / 2 + 1));
-  early.post(new Uint8Array(MAX_MESSAGE / 2 + 1));
+  early.post(new Uint8Array(limit / 2 + 1));
+  early.post(new Uint8Array(limit / 2 + 1));
   await until(() => ends.length === 1, 10_000);
   early.close();
   assert.deepEqual(ends, [[TOO_BIG, 'message too big']]);
+});
+
+extended("a client's message above the default 64 MiB MAX_MESSAGE ends its channel as too big", async () => {
+  const a = echo();
+  const open = channel(a.behave);
+  await until(open.opened);
+  open.client.send(new Uint8Array(MAX_MESSAGE + 1));
+  await until(() => open.ends.length === 1, 10_000);
+  assert.deepEqual(open.ends, [[TOO_BIG, 'message too big']]);
+  assert.deepEqual(a.seen.closes, [[TOO_BIG, 'message too big']]);
 });

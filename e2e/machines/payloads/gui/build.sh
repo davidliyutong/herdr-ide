@@ -13,6 +13,7 @@ root=$(cd "$here/../../../.." && pwd)
 cd "$root"
 rm -rf "$here/exe" "$here/bin" "$here/enc"
 mkdir -p "$here/exe" "$here/bin"
+bun backend/scripts/fetch-deps.ts --only encoder,gpupick,gui-helper
 bun -e "
   for (const [src, out] of [['$here/driver.ts', '$here/driver.js'], ['$root/e2e/fakes/xclient.ts', '$here/bin/xclient.js']]) {
     const r = await Bun.build({ entrypoints: [src], target: 'bun' });
@@ -36,11 +37,12 @@ for a in $archs; do
   esac
   for k in $pairs; do
     # No herdr-core: the display needs none.
-    bun backend/scripts/build.ts --out "$here/exe/$slug-${k%%:*}" --target "${k#*:}" --version matrix 2>&1 | grep -v 'no herdr-core' || true
+    bun backend/scripts/build.ts --out "$here/exe/$slug-${k%%:*}" --target "${k#*:}" --version matrix \
+      --encoder dist/deps/encoder --gui dist/deps/gui-helper --gpupick dist/deps/gpupick 2>&1 | grep -v 'no herdr-core' || true
     [ -x "$here/exe/$slug-${k%%:*}" ]
   done
-  if [ -f "dist/ffmpeg/linux-$a/encoder.gz" ]; then
-    mkdir -p "$here/enc" && cp "dist/ffmpeg/linux-$a/encoder.gz" "$here/enc/encoder-linux-$a.gz"
+  if [ -f "dist/deps/encoder/encoder-linux-$a.gz" ]; then
+    mkdir -p "$here/enc" && cp "dist/deps/encoder/encoder-linux-$a.gz" "$here/enc/encoder-linux-$a.gz"
   fi
 done
 echo "built $here ($archs)"

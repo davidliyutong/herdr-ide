@@ -3,29 +3,27 @@
 //
 //   bun scripts/build.ts --out FILE [--target bun-linux-x64-baseline]
 //     [--version V] [--web DIR] [--release-url URL] [--hc DIR] [--ext DIR]
-//     [--encoder DIR] [--payload-out DIR]
+//     [--encoder DIR] [--gui DIR] [--gpupick DIR] [--payload-out DIR]
 //
-// The executable is the machine build of its own platform too (its `node`
-// commands): it carries its platform's herdr-core (embedded as
-// herdr-core.gz, which its node installs), the SHA-256 of every
-// herdr-core of --hc (machine/hc.json, which the hub holds the machines'
-// builds to), and machine/release.json: its version, its platform and the
-// release's download URL (--release-url; none for a build of no release),
-// where machines get their platform's build (kernel/machines/transport/
-// release.ts). --hc holds hc-<os>-<arch>.gz (fetch-hc.ts), --ext
-// <bridge>.vsix, --encoder encoder-<os>-<arch>.gz (scripts/build-ffmpeg.sh;
-// the build carries its own platform's). A build for Linux also carries
-// the GUI helper of its architecture (gui-helper.gz, from --gui: the
-// committed scripts/gui-helper/bin, checked against its gui-helper.sha256)
-// and the GPU selection library (gpupick.so, from --gpupick:
-// scripts/gpupick/bin). --payload-out also writes the payloads as files,
-// laid out as the desktop app carries them.
+// The executable is both the hub (`serve`, `desktop`) and the machine build
+// of its own platform (`node`): it carries its platform's herdr-core
+// (embedded as herdr-core.gz, which its node installs), the SHA-256 of
+// every herdr-core of --hc (machine/hc.json, which the hub holds the
+// machines' builds to), machine/release.json (its version, its platform and
+// the release's download URL), the bridge extension (--ext <bridge>.vsix),
+// and the Linux video encoders (--encoder encoder-linux-{amd64,arm64}.gz,
+// embedded in every hub executable so any hub can provision remote Linux
+// machines, and read directly by a Linux machine's carriedEncoder()). A
+// build for Linux also carries the GUI helper of its architecture
+// (gui-helper.gz, from --gui: dist/deps/gui-helper) and the GPU selection
+// library (gpupick.so, from --gpupick: dist/deps/gpupick), both fetched and
+// verified by fetch-deps.ts.
 //
 // Every executable is compiled without autoloading a .env or bunfig.toml
 // of the directory it runs in, and reproducibly for one output path (what
 // it embeds is staged beside it).
 import { createHash } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { gunzipSync, gzipSync } from 'node:zlib';
@@ -42,8 +40,8 @@ const { values: o } = parseArgs({
     hc: { type: 'string', default: '' },
     ext: { type: 'string', default: '' },
     encoder: { type: 'string', default: '' },
-    gui: { type: 'string', default: join(import.meta.dir, '..', '..', 'scripts', 'gui-helper', 'bin') },
-    gpupick: { type: 'string', default: join(import.meta.dir, '..', '..', 'scripts', 'gpupick', 'bin') },
+    gui: { type: 'string', default: '' },
+    gpupick: { type: 'string', default: '' },
   },
 });
 if (!o.out) throw new Error('--out is required');
@@ -66,9 +64,9 @@ const walk = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
     e.isDirectory() ? walk(join(dir, e.name)) : e.isFile() ? [join(dir, e.name)] : [],
   );
-if (o.web) for (const f of walk(o.web)) entries[`web/${relative(o.web, f)}`] = readFileSync(f);
+if (o.web) for (const f of walk(o.web)) entries[`web/${relative(o.web, f).replaceAll('\\', '/')}`] = readFileSync(f);
 const key = ownKey(o.target);
-// The platform, os-arch, of the herdr-core and the encoder this build carries.
+// The platform, os-arch, of the herdr-core this build carries.
 const ownPlatform = key.replace(/-musl$/, '');
 entries['machine/release.json'] = Buffer.from(
   JSON.stringify({ version: o.version, key, ...(o['release-url'] ? { release: o['release-url'].replace(/\/$/, '') } : {}) }),
@@ -77,32 +75,37 @@ const hcs: Record<string, string> = {};
 if (o.hc)
   for (const name of readdirSync(o.hc)) {
     const m = /^hc-([a-z0-9]+-[a-z0-9]+)\.gz$/.exec(name);
-    if (m) hcs[m[1]] = sha256(gunzipSync(readFileSync(join(o.hc, name))));
+    if (m) hcs[m[1]!] = sha256(gunzipSync(readFileSync(join(o.hc, name))));
   }
 entries['machine/hc.json'] = Buffer.from(JSON.stringify(hcs));
 // Without one (tests), its node installs none and runs the machine's.
 if (key && hcs[ownPlatform]) extra['herdr-core.gz'] = readFileSync(join(o.hc, `hc-${ownPlatform}.gz`));
 else if (key) console.warn(`${o.out}: no herdr-core for ${ownPlatform} (--hc)`);
-if (ownPlatform.startsWith('linux-')) {
+if (ownPlatform.startsWith('linux-') && (o.gui || o.gpupick)) {
   const arch = ownPlatform.slice('linux-'.length);
-  // The digests recorded beside each, which make check verifies.
   const recorded = (dir: string, list: string, name: string) => {
-    const line = readFileSync(join(dir, list), 'utf8')
+    const listPath = join(dir, list);
+    if (!existsSync(listPath)) throw new Error(`${listPath} is missing; run 'bun backend/scripts/fetch-deps.ts'`);
+    const line = readFileSync(listPath, 'utf8')
       .split('\n')
       .find((l) => l.endsWith(`  ${name}`));
     const b = readFileSync(join(dir, name));
     if (!line || line.split(' ')[0] !== sha256(b)) throw new Error(`${join(dir, name)} is not the one ${list} records`);
     return b;
   };
-  extra['gui-helper.gz'] = gzipSync(recorded(o.gui, 'gui-helper.sha256', `gui-helper-linux-${arch}`), { level: 9 });
-  extra['gpupick.so'] = recorded(o.gpupick, 'gpupick.sha256', `gpupick-linux-${arch}.so`);
+  if (o.gui) extra['gui-helper.gz'] = gzipSync(recorded(o.gui, 'gui-helper.sha256', `gui-helper-linux-${arch}`), { level: 9 });
+  if (o.gpupick) extra['gpupick.so'] = recorded(o.gpupick, 'gpupick.sha256', `gpupick-linux-${arch}.so`);
 }
 if (o.ext) for (const name of readdirSync(o.ext)) if (name.endsWith('.vsix')) entries[`ext/${name}`] = readFileSync(join(o.ext, name));
-if (o.encoder)
-  for (const name of readdirSync(o.encoder)) {
-    const m = /^encoder-([a-z0-9]+-[a-z0-9]+)\.gz$/.exec(name);
-    if (m && m[1] === ownPlatform) entries[`encoder/${name}`] = readFileSync(join(o.encoder, name));
+if (o.encoder) {
+  if (!existsSync(o.encoder)) throw new Error(`${o.encoder} is missing; run 'bun backend/scripts/fetch-deps.ts'`);
+  for (const plat of ['linux-amd64', 'linux-arm64']) {
+    const name = `encoder-${plat}.gz`;
+    const p = join(o.encoder, name);
+    if (!existsSync(p)) throw new Error(`missing ${p}; run 'bun backend/scripts/fetch-deps.ts'`);
+    entries[`encoder/${name}`] = readFileSync(p);
   }
+}
 
 if (o['payload-out'])
   for (const [path, b] of Object.entries(entries)) {

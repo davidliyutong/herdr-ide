@@ -3,5 +3,5 @@
   // machine.ts), the command line, and the tests.
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "types": ["bun"] },
-  "include": ["shared", "kernel", "machine", "features", "hosts/common", "hosts/bun", "hosts/machine", "hosts/electron/**/*.test.ts"]
+  "include": ["shared", "kernel", "machine", "features", "hosts/common", "hosts/bun", "hosts/machine", "hosts/desktop/**/*.test.ts"]
 }

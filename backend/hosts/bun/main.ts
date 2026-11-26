@@ -13,6 +13,7 @@ import { mcpCommand } from '#hosts/machine/mcp.ts';
 import { chatHostCommand } from '#hosts/machine/chathost.ts';
 import { dropForeignRuntimeVars } from '#machine/self.ts';
 import { isMcpLink } from '#machine/vault.ts';
+import { desktopServe } from './desktop.ts';
 import { serve } from './serve.ts';
 
 const USAGE = `usage: ${HUB_BIN} [serve] [flags] | fetch-assets [flags] DIR | node serve|dial|stop [flags] | mcp [flags] | version`;
@@ -29,6 +30,8 @@ async function main(argv: string[]): Promise<void> {
   switch (cmd) {
     case 'serve':
       return serve(argv);
+    case 'desktop':
+      return desktopServe();
     case 'version':
       console.log(HUB_BIN, VERSION);
       return;

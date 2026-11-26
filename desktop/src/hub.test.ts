@@ -1,8 +1,19 @@
 import assert from 'node:assert/strict';
+import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { MessageChannel, type MessagePort } from 'node:worker_threads';
-import { nodePort, serveChannel, serveRequest, type HubStart, type NodePort, type ToHub } from '../../backend/hosts/electron/bridge';
+import {
+  nodePort,
+  serveChannel,
+  serveRequest,
+  type HubStart,
+  type NodePort,
+  type Port,
+  type ToHub,
+} from '../../backend/hosts/desktop/bridge';
+import { muxChild } from '../../backend/hosts/desktop/mux';
 import { APP_SLUG } from '../../web/src/brand';
 import {
   channelHead,
@@ -12,6 +23,7 @@ import {
   DesktopError,
   isChannelId,
   nodeInstance,
+  stdioChild,
   verifyKey,
   type HubChild,
   type HubSpawner,
@@ -34,20 +46,37 @@ test('development is isolated; packaged mode has its own instance', () => {
   assert.equal(nodeInstance('dev'), 'dev');
 });
 
-test('PATH gains the usual installations on macOS and Linux; Windows keeps its own', () => {
+test('PATH gains the usual installations on macOS and Linux; Windows keeps its own; foreign Bun vars are stripped', () => {
   for (const p of ['darwin', 'linux'] as const) {
     assert.ok(hubEnv({ PATH: '/custom/bin' }, '/home/test', p).PATH?.startsWith('/custom/bin'));
     assert.ok(hubEnv({ PATH: '/custom/bin' }, '/home/test', p).PATH?.includes('/home/test/.local/bin'));
     assert.ok(hubEnv({}, '/Users/test', p).PATH?.includes('/opt/homebrew/bin'));
   }
   const env = { Path: 'C:\\Windows\\System32' };
-  assert.equal(hubEnv(env, 'C:\\Users\\test', 'win32'), env);
+  assert.deepEqual(hubEnv(env, 'C:\\Users\\test', 'win32'), env);
   // Nothing that switches the proxy on for every program the hub starts
-  // (the hub sets its own, backend/shared/lib/proxy.ts).
+  // (the hub sets its own, backend/shared/lib/proxy.ts), and no Bun CLI /
+  // preload / inspector / config variables inherited from the parent shell.
   for (const p of ['darwin', 'linux', 'win32'] as const) {
-    const out = hubEnv({ HTTPS_PROXY: 'http://proxy:3128' }, '/home/test', p);
+    const out = hubEnv(
+      {
+        HTTPS_PROXY: 'http://proxy:3128',
+        BUN_BE_BUN: '1',
+        BUN_OPTIONS: '--preload=/tmp/evil.js',
+        BUN_INSPECT: 'ws://127.0.0.1:6499/',
+        BUN_INSPECT_PRELOAD: '/tmp/ preload.js',
+        BUN_CONFIG_VERBOSE_FETCH: 'curl',
+      },
+      '/home/test',
+      p,
+    );
     assert.equal(out.NODE_USE_ENV_PROXY, undefined);
     assert.equal(out.HTTPS_PROXY, 'http://proxy:3128');
+    assert.equal(out.BUN_BE_BUN, undefined);
+    assert.equal(out.BUN_OPTIONS, undefined);
+    assert.equal(out.BUN_INSPECT, undefined);
+    assert.equal(out.BUN_INSPECT_PRELOAD, undefined);
+    assert.equal(out.BUN_CONFIG_VERBOSE_FETCH, undefined);
   }
 });
 
@@ -298,4 +327,79 @@ test("a frame's channel: of the app's origin, a path of it, WebSocket subprotoco
     assert.equal(channelHead(APP_ORIGIN, '/ws', protocols), undefined);
   assert.ok(isChannelId('0123456789abcdef0123456789abcdef'));
   for (const id of ['', 'short', 'has space here', 3, 'x'.repeat(65)]) assert.equal(isChannelId(id), false);
+});
+
+test('stdioChild triggers hub recovery when stdout closes while the child process is still alive', async () => {
+  class FakeProc extends EventEmitter {
+    readonly stdin = new PassThrough();
+    readonly stdout = new PassThrough();
+    readonly stderr = new PassThrough();
+    exitCode: number | null = null;
+    signalCode: NodeJS.Signals | null = null;
+    readonly pid: number;
+    killedWith?: string;
+    constructor(pid: number) {
+      super();
+      this.pid = pid;
+      const side = muxChild(this.stdin, this.stdout);
+      side.on('message', (e) => {
+        const m = e.data as ToHub;
+        const p = e.ports[0] as Port | undefined;
+        if (m.t === 'start') side.postMessage({ t: 'ready' });
+        else if (m.t === 'request' && p) {
+          if (m.head.url.endsWith('/hang')) return; // stays in-flight until stdout breaks
+          void serveRequest(p, m.head, async () => Response.json({ pid: this.pid }));
+        } else if (m.t === 'stop') {
+          this.stdout.end();
+          setImmediate(() => {
+            this.exitCode = 0;
+            this.emit('close', 0, null);
+          });
+        }
+      });
+    }
+    kill(signal = 'SIGTERM'): boolean {
+      this.killedWith = signal;
+      this.signalCode = signal as NodeJS.Signals;
+      setImmediate(() => this.emit('close', null, signal));
+      return true;
+    }
+  }
+
+  const procs: FakeProc[] = [];
+  const s: HubSpawner = {
+    fork() {
+      const p = new FakeProc(1000 + procs.length);
+      procs.push(p);
+      return stdioChild(p as unknown as ChildProcess, (end) => nodePort(end as NodePort));
+    },
+    pair() {
+      const { port1, port2 } = new MessageChannel();
+      port1.unref();
+      port2.unref();
+      return [port1, port2];
+    },
+    port: (end) => nodePort(end as NodePort),
+  };
+
+  const host = new HubHost({ spawner: s, start: START, lost: () => assert.fail('lost') });
+  await host.start();
+  assert.deepEqual(await (await host.fetch('/ok')).json(), { pid: 1000 });
+
+  // Start an in-flight request, then close stdout WITHOUT exiting the child:
+  // the hanging request resolves 502 instead of hanging, the orphaned child
+  // is killed, and HubHost restarts onto pid 1001.
+  const hanging = host.fetch('/hang');
+  await new Promise((r) => setTimeout(r, 10));
+  procs[0]!.stdout.end();
+  assert.equal((await hanging).status, 502);
+  assert.equal(procs[0]!.killedWith, 'SIGKILL');
+
+  const recovered = await host.fetch('/ok');
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(await recovered.json(), { pid: 1001 });
+
+  // Graceful stop lets stdout close without SIGKILLing the stopping child.
+  await host.stop();
+  assert.equal(procs[1]!.killedWith, undefined);
 });

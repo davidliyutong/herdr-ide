@@ -506,14 +506,13 @@ Build scripts and tests:
 
 | Variable | Where | Description |
 | --- | --- | --- |
-| `TARGETS` | `scripts/build.sh` | Hub platforms (default the host's), e.g. `"linux/amd64 darwin/arm64"`, also `linux/amd64-musl` and `linux/arm64-musl`; `windows/amd64` builds only `dist/veldr-windows-amd64.exe`. |
+| `TARGETS` | `scripts/build.sh` | Hub platforms (default all 6 POSIX platforms: `linux/amd64`, `linux/arm64`, `linux/amd64-musl`, `linux/arm64-musl`, `darwin/amd64`, `darwin/arm64`, plus `windows/amd64` on Windows or when `WITH_WINDOWS=1`). |
+| `WITH_WINDOWS` | `scripts/build.sh` | `1` also cross-compiles `dist/veldr-windows-amd64.exe` for Stage 2 Windows desktop packaging. |
 | `RELEASE_URL` | `scripts/build.sh` | The release's download URL, from which machines get their platform's archive (none for a build of no release, whose machines get theirs from `--agent-dir` or the hub's own executable). |
 | `HC_PLATFORMS` | `scripts/build.sh` | herdr-core platforms fetched (`backend/scripts/fetch-hc.ts`) whose digests the executables record (default all four). |
 | `SKIP_WEB`, `SKIP_EXT` | `scripts/build.sh` | `1` reuses `web/dist` or the built bridge extension. |
-| `REQUIRE_ENCODER` | `scripts/build.sh` | `1` fails when the Linux video encoder is missing. |
 | `VERSION` | `scripts/build.sh`, `scripts/desktop.sh` | Reported version (default `git describe`); desktop metadata takes a semver and drops a leading `v`. |
-| `FFMPEG_PLATFORMS` | `scripts/build-ffmpeg.sh` | Linux platforms for the video encoder (default both). |
-| `GHOSTTY_SRC` | `make vt-wasm` | Ghostty checkout to build libghostty-vt from. |
+| `STAGE1_ARCHIVES`, `STAGE1_HUB_EXE` | `scripts/desktop.sh` | Stage 2 inputs from an earlier Stage 1 build (directory of the 6 `*.tar.gz` archives + `SHA256SUMS`, and optional explicit host hub executable). |
 | `ARCH` | `scripts/desktop.sh` | `arm64` or `x64` (default the host's); Windows is `x64` only. |
 | `DESKTOP_OS` | `scripts/desktop.sh` | `mac`, `win` or `linux`: package another system's unpacked app to check it; installers need their own system. |
 | `SKIP_BUILD` | `scripts/desktop.sh` | `1` runs electron-builder alone on an earlier build. |
@@ -585,4 +584,4 @@ Desktop artifacts in `dist/desktop/` (`make desktop-app` unpacked, `make desktop
 - Windows: `win-unpacked/veldr.exe`, `veldr-<version>-win-x64.exe`
 - Linux: `linux-unpacked/veldr`, `linux-arm64-unpacked/veldr`, `veldr-<version>-linux-x86_64.AppImage`, `-linux-arm64.AppImage`, `-linux-amd64.deb`, `-linux-arm64.deb`
 
-The hub is bundled as `dist/hub.mjs` (unpacked from `app.asar` for its utility process), with `payload/` and `web/` in the app's resources. Shell code builds into `desktop/dist/`; `make clean` removes the outputs. Icon sources are in `desktop/assets/` (`make desktop-icons` regenerates them on macOS). Electron's profile is `veldr-desktop` (`-dev`, or `--user-data-dir`) in the system's application data directory and survives uninstalling; on macOS `veldr-desktop-keychain.json` beside it records which build owns the safeStorage keychain item ([30](features/30-variable-vault.md)). The desktop hub uses `settings-desktop.json` and, on machines, the default `~/.veldr/`. No desktop log files are kept: the last 16 KiB of the hub's stderr stay in memory for error dialogs.
+The desktop app embeds this host's Stage 1 compiled Bun hub executable (`Contents/Helpers/veldr` on macOS, `resources/bin/veldr[.exe]` on Linux and Windows) and all 6 Stage 1 machine release archives (`resources/machines/*.tar.gz` + `SHA256SUMS`). Shell code builds into `desktop/dist/`; `make clean` removes the outputs. Icon sources are in `desktop/assets/` (`make desktop-icons` regenerates them on macOS). Electron's profile is `veldr-desktop` (`-dev`, or `--user-data-dir`) in the system's application data directory and survives uninstalling; on macOS `veldr-desktop-keychain.json` beside it records which build owns the safeStorage keychain item ([30](features/30-variable-vault.md)). The desktop hub uses `settings-desktop.json` and, on machines, the default `~/.veldr/`. No desktop log files are kept: the last 16 KiB of the hub's stderr stay in memory for error dialogs.

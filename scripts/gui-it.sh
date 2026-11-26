@@ -22,6 +22,7 @@ if [[ ! -d backend/node_modules ]]; then
   echo "backend/node_modules is missing; run 'make deps' or 'pnpm -C backend install'" >&2
   exit 1
 fi
+bun backend/scripts/fetch-deps.ts --only gui-helper
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/x" "$tmp/stage"

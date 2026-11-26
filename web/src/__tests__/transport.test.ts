@@ -1,12 +1,12 @@
 // Channels to the hub (lib/transport.ts): a WebSocket in a browser; in the
 // desktop app a PortSocket (lib/portSocket.ts) over the MessagePort the
 // shell hands the page, speaking the bridge's frames with the hub's side
-// of it (backend/hosts/electron/bridge.ts serveChannel, run here as the
-// hub's utility process runs it). And uploads, which the desktop app
+// of it (backend/hosts/desktop/bridge.ts serveChannel, run here as the
+// hub process runs it). And uploads, which the desktop app
 // streams with fetch.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ACK_BYTES, ABNORMAL, serveChannel, type HubChannel, type Port, type Upgrade } from '../../../backend/hosts/electron/bridge';
+import { ACK_BYTES, ABNORMAL, serveChannel, type HubChannel, type Port, type Upgrade } from '../../../backend/hosts/desktop/bridge';
 import { CHANNEL_PORT } from '../shell';
 import { installPortSocket } from '../lib/portSocket';
 

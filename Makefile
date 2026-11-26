@@ -6,17 +6,19 @@ SLUG := $(shell sed -n "s/^export const SLUG = '\(.*\)';$$/\1/p" backend/shared/
 HOST_PLATFORM := $(shell scripts/platform.sh)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test test-extended test-linux test-win test-remote check tokens vt-wasm gpupick gui-helper it e2e screenshots ci-local test-doctor test-clean dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test test-extended test-linux test-win test-remote check tokens it e2e screenshots ci-local test-doctor test-clean dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
-# sets), and packaging downloads its own.
+# sets), and packaging downloads its own. fetch-deps.ts fetches and verifies
+# the pinned native submodules (vt, encoder, gpupick, gui-helper).
 deps:
 	pnpm -C web install --frozen-lockfile
 	pnpm -C $(EXT) install --frozen-lockfile
 	pnpm -C desktop install --frozen-lockfile
 	pnpm -C e2e install --frozen-lockfile
 	pnpm -C backend install --frozen-lockfile
+	bun backend/scripts/fetch-deps.ts
 
 build:
 	scripts/build.sh
@@ -55,22 +57,6 @@ check:
 tokens:
 	bun backend/scripts/tokens.ts
 	pnpm -C backend registry
-
-# The web UI's terminal emulator, Ghostty's libghostty-vt as WebAssembly
-# (needs zig 0.17; GHOSTTY_SRC=<checkout> skips the clone).
-vt-wasm:
-	scripts/fetch-ghostty-vt.sh
-
-# gpupick, the library that shows a program only the NVIDIA GPUs of its
-# CUDA_VISIBLE_DEVICES, for Linux machines (needs zig 0.17).
-gpupick:
-	scripts/build-gpupick.sh
-
-# The GUI helper of Linux machines (scripts/gui-helper: the X window
-# manager and capture, the GPU display's compositor, the display keeper),
-# its tests and its static executables with their digests (needs zig 0.17).
-gui-helper:
-	scripts/build-gui-helper.sh
 
 # Runs Linux-specific backend tests (sys, /proc sessions, gpupick, display,
 # real Xvfb GUI integration) inside a Linux container from any host with Docker.
@@ -121,15 +107,12 @@ e2e:
 screenshots:
 	SCREENSHOT_ONLY="$(SCREENSHOT_ONLY)" SCREENSHOT_DIR="$(SCREENSHOT_DIR)" SKIP_BUILD="$(SKIP_BUILD)" E2E_CODE_SERVER_SEED="$(E2E_CODE_SERVER_SEED)" E2E_REQUIRE_DOCKER=1 scripts/e2e.sh --config=playwright.screenshots.config.ts
 
-# The hub from its sources (bun) on the dev instance. Its machine side is
-# this host's TypeScript executable, built into dist/dev with the pinned
-# herdr-core (fetched once into dist/machines-hc) and staged in
-# dist/payload/machine as the desktop app carries it.
+# Builds all Stage 1 full-featured binaries (web, vsix, herdr-core, encoders,
+# gpupick, gui-helper, and all 6 platform archives in dist/release) and runs
+# the compiled host executable on the isolated dev instance.
 dev-hub:
-	@test -f dist/machines-hc/hc-$(HOST_PLATFORM).gz || bun backend/scripts/fetch-hc.ts --out dist/machines-hc $(subst -,/,$(HOST_PLATFORM))
-	bun backend/scripts/build.ts --out dist/dev/$(SLUG)-$(HOST_PLATFORM) --hc dist/machines-hc --payload-out dist/payload
-	gzip -1 -c dist/dev/$(SLUG)-$(HOST_PLATFORM) > dist/payload/machine/$(SLUG)-$(HOST_PLATFORM).gz
-	bun backend/hosts/bun/main.ts --instance dev --local-only --listen $(DEV_LISTEN) --web-dir web/dist
+	scripts/build.sh
+	./dist/$(SLUG)-$(HOST_PLATFORM) serve --instance dev --local-only --listen $(DEV_LISTEN) --agent-dir dist/release
 
 dev-web:
 	$(shell echo $(SLUG) | tr 'a-z-' 'A-Z_')_HUB=http://$(DEV_LISTEN) pnpm -C web dev

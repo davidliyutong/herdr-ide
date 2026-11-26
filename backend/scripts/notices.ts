@@ -22,7 +22,7 @@ const pkgs: Pkg[] = Object.entries(byLicense)
 const out: string[] = [];
 out.push('## The hub in TypeScript (backend/)', '');
 out.push(
-  "The hub's executable built from backend/ is the Bun runtime (https://github.com/oven-sh/bun, MIT; its LICENSE.md lists the libraries it includes, JavaScriptCore among them, LGPL-2.0) with the hub's code and the npm packages below bundled. The desktop app runs the same hub in Electron, with node-pty (and node-addon-api, which it is built with) beside it in the app. In the TypeScript build (backend/scripts/build.ts --machine ts) the same executable is also the machine side of its platform and carries that platform's herdr-core (Apache-2.0; its license and notices are in licenses/herdr-core/ of the release archive).",
+  "The hub's executable built from backend/ is the Bun runtime (https://github.com/oven-sh/bun, MIT; its LICENSE.md lists the libraries it includes, JavaScriptCore among them, LGPL-2.0) with the hub's code and the npm packages below bundled. Both the command line and the desktop app run this Stage 1 compiled executable (`serve` and `desktop`), which on Linux and macOS is also the machine side of its platform (`node`) and carries that platform's herdr-core (Apache-2.0; its license and notices are in licenses/herdr-core/ of the release archive).",
 );
 // The licenses of packages that a package's own build bundles into its
 // files without their license texts (the MCP server SDK's validators), as

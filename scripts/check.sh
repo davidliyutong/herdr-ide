@@ -12,16 +12,12 @@
 #   6. CHANGELOG.md's [Unreleased] is one list without subsections
 #   7. the files generated from spec/tokens.json and the settings
 #      registry are current
-#   8. the web UI's terminal emulator (web/src/vt/ghostty-vt.wasm) is the
-#      module whose digest scripts/fetch-ghostty-vt.sh recorded
+#   8. the pinned native submodule releases (vt, encoder, gpupick,
+#      gui-helper in backend/scripts/deps.ts) and the staged vt Wasm,
+#      gpupick libraries and GUI helpers match their recorded SHA-256 digests
 #   9. every shared test vector (spec/vectors) is run by the web UI's
 #      tests
-#  10. the GPU selection library the machine side carries (scripts/gpupick/bin)
-#      is the one scripts/build-gpupick.sh built from its source, and the
-#      GUI helper the TypeScript machine build embeds
-#      (scripts/gui-helper/bin) the one scripts/build-gui-helper.sh built
-#      from its sources
-#  11. Bun's APIs (Bun.*, bun:*) are used only by what runs under Bun alone:
+#  10. Bun's APIs (Bun.*, bun:*) are used only by what runs under Bun alone:
 #      the machine side (backend/machine, hosts/machine, the features'
 #      machine.ts and machine/), the command line (hosts/bun) and tests
 #  12. the types of Codex's app-server the chat host's Codex adapter
@@ -109,10 +105,8 @@ bun backend/scripts/tokens.ts --check || fail=1
 echo "==> Codex's app-server types"
 (cd backend && bun scripts/codex-schema.ts --check) || fail=1
 
-echo "==> terminal emulator module"
-scripts/fetch-ghostty-vt.sh --check || fail=1
-scripts/build-gpupick.sh --check || fail=1
-scripts/build-gui-helper.sh --check || fail=1
+echo "==> pinned native submodules"
+bun backend/scripts/fetch-deps.ts --check || fail=1
 
 echo "==> shared test vectors"
 # The web UI's tests, or the desktop shell's for vectors the hub shares

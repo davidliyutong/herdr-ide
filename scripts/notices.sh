@@ -26,16 +26,16 @@ trap 'rm -f "$tmp"' EXIT
   echo "The web UI's terminal emulator is Ghostty's libghostty-vt (https://github.com/ghostty-org/ghostty, MIT) built as WebAssembly; its license is in licenses.md too, as are those of KaTeX (MIT), Monaco (https://github.com/microsoft/monaco-editor, MIT, with the notices of the code it bundles), the JetBrains Mono font (OFL-1.1), VSCodium's logo (https://github.com/VSCodium/vscodium, MIT; recolored, its VS Code icon) and the AI services' marks of Lobe Icons (https://github.com/lobehub/lobe-icons, MIT; the AI usage plugin's) the UI bundles."
   echo "Each executable for Linux and macOS embeds the unmodified herdr-core executable of its platform (https://github.com/herdrdev/herdr-core, Apache-2.0); release archives carry its license and dependency notices in licenses/herdr-core/."
   echo "The machine side carries herdr's agent detection rules (herdr v0.9.5, https://github.com/herdrdev/herdr, Apache-2.0), unchanged; see licenses/herdr-detect/."
-  echo "The hub also embeds a video encoder for Linux machines, built from FFmpeg (LGPL-2.1-or-later), libvpx, libva, libdrm and nv-codec-headers; see licenses/encoder/ for their licenses and sources."
-  echo "The TypeScript machine build for Linux carries the GUI helper (scripts/gui-helper), a static executable built with Zig that includes parts of Zig's standard library (MIT, below) and Go's image/jpeg encoder ported (BSD-3-Clause, below)."
+  echo "The hub also embeds a video encoder for Linux machines (https://github.com/davidliyutong/veldr-encoder), built from FFmpeg (LGPL-2.1-or-later), libvpx, libva, libdrm and nv-codec-headers; see licenses/encoder/ for their licenses and sources."
+  echo "The TypeScript machine build for Linux carries gpupick (https://github.com/davidliyutong/veldr-gpupick, MIT) and the GUI helper (https://github.com/davidliyutong/veldr-gui-helper), a static executable built with Zig that includes parts of Zig's standard library (MIT, below) and Go's image/jpeg encoder ported (BSD-3-Clause, below)."
   echo
-  echo "## Go (image/jpeg, adapted in scripts/gui-helper)"
+  echo "## Go (image/jpeg, adapted in veldr-gui-helper)"
   echo
   echo '```text'
   cat licenses/go/LICENSE
   echo '```'
   echo
-  echo "## Zig standard library (in the GUI helper, scripts/gui-helper)"
+  echo "## Zig standard library (in veldr-gui-helper)"
   echo
   echo '```text'
   cat licenses/zig/LICENSE

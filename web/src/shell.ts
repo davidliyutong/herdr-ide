@@ -178,7 +178,7 @@ export interface DesktopChannels {
    * WebSocket subprotocols; returns its id. Its MessagePort arrives as a
    * message to this window from its own origin, {[CHANNEL_PORT]: id} with
    * the port; the bridge's frames on it are
-   * backend/hosts/electron/bridge.ts's. */
+   * backend/hosts/desktop/bridge.ts's. */
   open(path: string, protocols: string[]): string;
 }
 

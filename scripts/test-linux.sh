@@ -21,6 +21,7 @@ if [[ ! -d backend/node_modules ]]; then
   echo "backend/node_modules is missing; run 'make deps' or 'pnpm -C backend install'" >&2
   exit 1
 fi
+bun backend/scripts/fetch-deps.ts --only gpupick,gui-helper
 if ! command -v docker >/dev/null 2>&1 || ! darch=$(docker info --format '{{.Architecture}}' 2>/dev/null); then
   echo "Docker is not available (make test-linux needs it)" >&2
   exit 1

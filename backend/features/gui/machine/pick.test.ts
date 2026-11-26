@@ -14,7 +14,7 @@ import { extended } from '#shared/testdata/extended.ts';
 import { Pick } from './pick.ts';
 
 const arch = process.arch === 'x64' ? 'amd64' : process.arch;
-const LIB = join(REPO_ROOT, 'scripts', 'gpupick', 'bin', `gpupick-linux-${arch}.so`);
+const LIB = join(REPO_ROOT, 'dist', 'deps', 'gpupick', `gpupick-linux-${arch}.so`);
 const supported = process.platform === 'linux' && existsSync(LIB);
 
 const dirs: string[] = [];

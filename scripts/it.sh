@@ -60,6 +60,7 @@ echo "==> herdr-core integration tests"
 
 echo "==> GUI integration test"
 if [[ "$(uname -s)" == Linux ]] && (command -v Xvfb >/dev/null 2>&1 || [[ -x /usr/bin/Xvfb ]]); then
+  [[ -n "${IT_SKIP_FETCH:-}" ]] || bun backend/scripts/fetch-deps.ts --only gui-helper
   (cd backend && bun test features/gui/integration.test.ts)
 elif [[ -z "${IT_NO_DOCKER:-}" ]] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   echo "    (running in Linux Docker container via scripts/gui-it.sh)"

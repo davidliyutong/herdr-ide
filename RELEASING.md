@@ -15,8 +15,8 @@ match; the bridge extension is reinstalled whenever its content changes.
    pinned digests in `backend/features/vscode/artifacts.ts` (`PINNED`) were
    updated from the upstream source (see
    `.claude/agents/release-manager.md`); the same for herdr-core
-   (`backend/scripts/hcdist.ts`) and the web UI's terminal emulator
-   (`make vt-wasm`). Run `bun backend/scripts/pricecheck.ts` and bring the AI
+   (`backend/scripts/hcdist.ts`) and the pinned native submodules
+   (`backend/scripts/deps.ts`). Run `bun backend/scripts/pricecheck.ts` and bring the AI
    usage plugin's prices (`spec/pricing/pricing.json`) up to date from
    the providers' pages for what it reports
    ([29](docs/features/29-ai-usage.md#cost-of-the-logs)). Its output
@@ -32,13 +32,13 @@ match; the bridge extension is reinstalled whenever its content changes.
    `[Unreleased]` section. Read its entries, then commit as
    `release: vX.Y.Z`.
 5. Tag and push: `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`.
-6. The `release` workflow (`.github/workflows/release.yml`) builds the
-   video encoders of Linux machines (`encoder.yml`), then the TypeScript
-   build ([42](docs/features/42-typescript-backend.md)): one executable per
-   platform that is the hub and the machine side, for linux x64 and
-   arm64, each for glibc and musl, and darwin x64 and arm64, each with its
-   platform's herdr-core (and, on Linux, video encoder) and the release's
-   download URL
+6. The `release` workflow (`.github/workflows/release.yml`) runs in two
+   stages: Stage 1 (`archives`) fetches the SHA-256-verified native
+   submodules (`backend/scripts/fetch-deps.ts`) and herdr-core, then builds
+   the complete headless executables ([42](docs/features/42-typescript-backend.md))
+   for linux x64 and arm64 (glibc and musl), darwin x64 and arm64, and
+   windows x64, each carrying both Linux video encoders, the web UI, VS Code
+   bridge, and its platform's herdr-core, plus the release's download URL
    (`$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/<tag>`, from
    the workflow's context, not from the code), from which machines
    download their platform's archive. Each is packaged with `LICENSE`,
@@ -59,8 +59,9 @@ match; the bridge extension is reinstalled whenever its content changes.
    when the notary secrets are set too; without it it is signed ad hoc.
    The Windows and Linux packages are not signed. Every action the
    workflows use is pinned by its commit (with the version in a comment).
-   Each desktop app carries its own platform's executable, taken from the
-   `archives` job's archive (so that `SHA256SUMS` names it).
+   Each desktop app bundles its own platform's Stage 1 hub executable and
+   all 6 Stage 1 machine release archives (`machines/*.tar.gz` +
+   `SHA256SUMS`) directly from the `archives` job without recompiling.
    The workflow then writes `SHA256SUMS` over the archives and installers
    (`*.tar.gz`, `*.dmg`, `*.zip`, `*.exe`, `*.AppImage`, `*.deb`) and
    the executables in the archives (`<slug>-<platform>/<slug>`, the lines

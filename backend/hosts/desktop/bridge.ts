@@ -1,28 +1,29 @@
-// The desktop app's bridge between its main process and the hub in its
-// utility process: the requests of the app's windows, which the main
-// process intercepts at the app's origin (desktop/src/protocol.ts), and
-// channels, the WebSockets of a browser, as MessagePorts.
+// The desktop app's bridge between its main process and the hub child
+// process: the requests of the app's windows, which the main process
+// intercepts at the app's origin (desktop/src/protocol.ts), and channels,
+// the WebSockets of a browser, over MessagePorts in the windows and over
+// virtual ports multiplexed on the hub process's stdio (mux.ts).
 //
-// A request has a MessagePort of its own. The main process sends the
-// request's head on the utility process's parent port with the port, then
-// the body in chunks; the hub answers the response's head, then its body
-// in chunks. Either side sends at most WINDOW chunks the other has not
-// taken yet: a receiver gives credit back as the chunks are read, so a
-// stalled reader stalls the writer instead of filling memory. A response
-// body that fails ends with an error, which the main process passes on as
-// a failed transfer.
+// A request has a Port of its own. The main process sends the request's
+// head with the port, then the body in chunks; the hub answers the
+// response's head, then its body in chunks. Either side sends at most
+// WINDOW chunks the other has not taken yet: a receiver gives credit back
+// as the chunks are read, so a stalled reader stalls the writer instead of
+// filling memory. A response body that fails ends with an error, which the
+// main process passes on as a failed transfer.
 //
-// A channel is a MessagePort too, between the hub and its client (a
-// page's frame, which gets the other end from the main process, or the
-// main process itself). Data are strings (text messages) and binary
+// A channel is a Port too, between the hub and its client (a page's frame,
+// whose MessagePort the main process pipes onto the hub's virtual port, or
+// the main process itself). Data are strings (text messages) and binary
 // messages; the rest are control frames (ChannelControl). The client acks
 // what it took in, so the hub sees what is buffered as on a WebSocket.
 //
-// Without imports: the desktop shell's main process, the utility process,
-// the web UI's tests and the tests of both import it as it is.
+// Without imports: the desktop shell's main process, the hub host, the web
+// UI's tests and the tests of both import it as it is.
 
-/** One end of a MessagePort, whichever runtime gives it (Electron's
- * MessagePortMain, Node's worker_threads MessagePort). */
+/** One end of a port, whichever transport gives it (Electron's
+ * MessagePortMain, Node's worker_threads MessagePort, or mux.ts's stdio
+ * virtual port). */
 export interface Port {
   post(msg: unknown): void;
   /** Starts delivering: each message's data to message, then closed once
@@ -72,6 +73,21 @@ export function nodePort(p: NodePort): Port {
   };
 }
 
+/** Bridges two ports end to end (a frame's MessagePort and a virtual port
+ * on the hub's stdio mux): messages pass both ways and closing either
+ * closes the other. */
+export function pipePort(a: Port, b: Port): void {
+  let done = false;
+  const endBoth = () => {
+    if (done) return;
+    done = true;
+    a.close();
+    b.close();
+  };
+  a.listen((m) => !done && b.post(m), endBoth);
+  b.listen((m) => !done && a.post(m), endBoth);
+}
+
 /** A timer that does not keep a Node process alive; typed alike under
  * Node's and the DOM's types. */
 type Timer = Parameters<typeof clearTimeout>[0];
@@ -90,7 +106,7 @@ function once(fn: () => void): () => void {
   };
 }
 
-// ---- the utility process's parent port
+// ---- the hub process's control channel
 
 /** What the hub of the desktop app is started with: what the command
  * line's hub gets as flags, and what the app holds for it. */
@@ -107,23 +123,23 @@ export interface HubStart {
   /** The key with which the shell signs the user's answers to the
    * system's prompts (the vault's desktop proofs). */
   verifyKey: string;
-  /** The payloads laid out as scripts/build.sh stages them: agents/,
-   * hc/, encoder/, ext/. */
-  payload: string;
-  /** The web UI's built files. */
-  web: string;
-  /** Uncompressed machine builds searched first (development). */
+  /** Optional directory override for payloads (development / tests); a
+   * compiled hub reads its embedded archive by default. */
+  payload?: string;
+  /** Optional directory override for the web UI's built files. */
+  web?: string;
+  /** Directory of Stage 1 machine archives and SHA256SUMS. */
   agentDir?: string;
   /** Directories with code-server releases and extensions (offline). */
   seedDirs?: string[];
 }
 
-/** The main process's messages on the parent port; request and channel
- * carry their port. */
+/** The main process's messages to the hub; request and channel carry a
+ * virtual port. */
 export type ToHub =
   { t: 'start'; start: HubStart } | { t: 'request'; head: RequestHead } | { t: 'channel'; head: ChannelHead } | { t: 'stop' };
 
-/** The utility process's: started, or why not. */
+/** The hub process's: started, or why not. */
 export type FromHub = { t: 'ready' } | { t: 'failed'; message: string };
 
 // ---- requests
@@ -147,7 +163,7 @@ export interface ResponseHead {
 
 /** Frames on a request's port (both ways): its body or the response's,
  * credit for chunks taken, the request's end. */
-type Frame =
+export type Frame =
   | { t: 'head'; head: ResponseHead }
   | { t: 'chunk'; data: Uint8Array }
   | { t: 'end' }
@@ -248,7 +264,7 @@ class Inbound {
 
 /** Data that came through a port as bytes: a Uint8Array (Node and
  * Electron keep the view), an ArrayBuffer, or another view. */
-function bytes(data: unknown): Uint8Array {
+export function bytes(data: unknown): Uint8Array {
   if (data instanceof Uint8Array) return data;
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
@@ -284,9 +300,9 @@ async function pump(body: ReadableStream<Uint8Array>, credit: Credit, send: (chu
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** The main process's side of a request: sends it on port (whose other
- * end went to the utility process with the head) and resolves with the
- * hub's response, whose body streams as it is read. A response body that
- * breaks off errors; cancelling it tells the hub. */
+ * end went to the hub process with the head) and resolves with the hub's
+ * response, whose body streams as it is read. A response body that breaks
+ * off errors; cancelling it tells the hub. */
 export function request(port: Port, head: RequestHead, body: ReadableStream<Uint8Array> | null, signal?: AbortSignal): Promise<Response> {
   return new Promise<Response>((resolve, reject) => {
     const credit = new Credit(WINDOW);
@@ -378,9 +394,9 @@ export function request(port: Port, head: RequestHead, body: ReadableStream<Uint
   });
 }
 
-/** The utility process's side of a request on port: the request as
- * handle gets it (its signal aborts when the client goes), and the
- * response sent back as it is read. */
+/** The hub process's side of a request on port: the request as handle
+ * gets it (its signal aborts when the client goes), and the response sent
+ * back as it is read. */
 export async function serveRequest(port: Port, head: RequestHead, handle: (req: Request) => Promise<Response>): Promise<void> {
   const aborted = new AbortController();
   const credit = new Credit(WINDOW);
@@ -473,7 +489,8 @@ export interface ChannelHead {
  * side; the other side answers with its own close, then the client closes
  * the port); ack counts what the client took in (strings by their length,
  * bytes by theirs). */
-export type ChannelControl = { t: 'open'; protocol: string } | { t: 'close'; code: number; reason: string } | { t: 'ack'; n: number };
+export type ChannelControl =
+  { t: 'open'; protocol: string } | { t: 'close'; code: number; reason: string } | { t: 'ack'; n: number } | { t: 'oversize' };
 
 /** The client acks once it took in this much, and what it took in less
  * than that at its next turn. */
@@ -497,6 +514,15 @@ const isControl = (m: unknown): m is ChannelControl =>
 
 /** The size a message counts for in acks. */
 export const channelSize = (d: string | Uint8Array | ArrayBuffer): number => (typeof d === 'string' ? d.length : d.byteLength);
+
+const utf8Encoder = new TextEncoder();
+
+function exceedsLimit(d: string | Uint8Array, limit: number): boolean {
+  if (typeof d !== 'string') return d.byteLength > limit;
+  if (d.length > limit) return true;
+  if (d.length * 3 <= limit) return false;
+  return utf8Encoder.encode(d).byteLength > limit;
+}
 
 /** A channel as the hub's kernel takes it (kernel/channel.ts Channel). */
 export interface HubChannel {
@@ -531,7 +557,7 @@ export function refuseChannel(port: Port, reason: string): void {
   later(() => port.close(), CLOSE_WAIT_MS);
 }
 
-/** The utility process's side of a channel on port: the request with the
+/** The hub process's side of a channel on port: the request with the
  * channel's head as handle gets it, with the upgrade that adopts port as
  * the channel. A request the hub answers without upgrading is refused:
  * the client sees an abnormal close, with the status and the error code. */
@@ -539,16 +565,24 @@ export async function serveChannel(
   port: Port,
   head: ChannelHead,
   handle: (req: Request, upgrade: Upgrade) => Promise<Response>,
+  opts: { maxMessage?: number } = {},
 ): Promise<void> {
+  const maxMessage = opts.maxMessage ?? MAX_MESSAGE;
   let open: ((ch: HubChannel) => HubChannelHandlers) | undefined;
   // What the client sends before the hub takes the channel, up to
-  // MAX_MESSAGE; more ends the channel once it opens.
+  // maxMessage; more ends the channel once it opens.
   const early: unknown[] = [];
   let earlyBytes = 0;
   let receive: (m: unknown) => void = (m) => {
-    if (typeof m === 'string') earlyBytes += m.length;
-    else if (m instanceof ArrayBuffer || ArrayBuffer.isView(m)) earlyBytes += m.byteLength;
-    if (earlyBytes <= MAX_MESSAGE) early.push(m);
+    if (typeof m === 'string') {
+      earlyBytes += exceedsLimit(m, maxMessage) ? maxMessage + 1 : m.length;
+    } else if (m instanceof ArrayBuffer || ArrayBuffer.isView(m)) {
+      earlyBytes += m.byteLength;
+    } else if (isControl(m) && m.t === 'oversize') {
+      earlyBytes = maxMessage + 1;
+      return;
+    }
+    if (earlyBytes <= maxMessage) early.push(m);
   };
   let gone: () => void = () => {};
   let closedEarly = false;
@@ -599,6 +633,10 @@ export async function serveChannel(
   const ch: HubChannel = {
     send(data) {
       if (closed) return;
+      if (exceedsLimit(data, maxMessage)) {
+        ch.close(TOO_BIG, 'message too big');
+        return;
+      }
       sent += channelSize(data);
       port.post(typeof data === 'string' ? data : compact(data));
     },
@@ -626,7 +664,7 @@ export async function serveChannel(
   };
   const take = (d: string | Uint8Array) => {
     if (closed) return;
-    if (channelSize(d) > MAX_MESSAGE) return ch.close(TOO_BIG, 'message too big');
+    if (exceedsLimit(d, maxMessage)) return ch.close(TOO_BIG, 'message too big');
     safely(() => handlers?.message(d));
   };
   receive = (m) => {
@@ -636,6 +674,8 @@ export async function serveChannel(
     if (m.t === 'ack') {
       if (Number.isFinite(m.n) && m.n > 0) acked = Math.min(sent, acked + m.n);
       safely(() => handlers?.drain?.());
+    } else if (m.t === 'oversize') {
+      ch.close(TOO_BIG, 'message too big');
     } else if (m.t === 'close') {
       // The client's close: answered, then the client closes the port, or
       // this side once it waited for that.
@@ -658,7 +698,7 @@ export async function serveChannel(
   }
   port.post({ t: 'open', protocol: '' } satisfies ChannelControl);
   for (const m of early.splice(0)) receive(m);
-  if (earlyBytes > MAX_MESSAGE) ch.close(TOO_BIG, 'message too big');
+  if (earlyBytes > maxMessage) ch.close(TOO_BIG, 'message too big');
   if (closedEarly) gone();
 }
 

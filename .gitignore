@@ -11,6 +11,8 @@ coverage/
 .claude/settings.local.json
 CLAUDE.local.md
 web/.deps/
+/web/src/vt/ghostty-vt.wasm
+/web/src/vt/LICENSE
 
 TODO.md
 .codegraph

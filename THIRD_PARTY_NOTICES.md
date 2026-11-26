@@ -9,10 +9,10 @@ Anthropic's Claude Agent SDK (@anthropic-ai/claude-agent-sdk), on which the Type
 The web UI's terminal emulator is Ghostty's libghostty-vt (https://github.com/ghostty-org/ghostty, MIT) built as WebAssembly; its license is in licenses.md too, as are those of KaTeX (MIT), Monaco (https://github.com/microsoft/monaco-editor, MIT, with the notices of the code it bundles), the JetBrains Mono font (OFL-1.1), VSCodium's logo (https://github.com/VSCodium/vscodium, MIT; recolored, its VS Code icon) and the AI services' marks of Lobe Icons (https://github.com/lobehub/lobe-icons, MIT; the AI usage plugin's) the UI bundles.
 Each executable for Linux and macOS embeds the unmodified herdr-core executable of its platform (https://github.com/herdrdev/herdr-core, Apache-2.0); release archives carry its license and dependency notices in licenses/herdr-core/.
 The machine side carries herdr's agent detection rules (herdr v0.9.5, https://github.com/herdrdev/herdr, Apache-2.0), unchanged; see licenses/herdr-detect/.
-The hub also embeds a video encoder for Linux machines, built from FFmpeg (LGPL-2.1-or-later), libvpx, libva, libdrm and nv-codec-headers; see licenses/encoder/ for their licenses and sources.
-The TypeScript machine build for Linux carries the GUI helper (scripts/gui-helper), a static executable built with Zig that includes parts of Zig's standard library (MIT, below) and Go's image/jpeg encoder ported (BSD-3-Clause, below).
+The hub also embeds a video encoder for Linux machines (https://github.com/davidliyutong/veldr-encoder), built from FFmpeg (LGPL-2.1-or-later), libvpx, libva, libdrm and nv-codec-headers; see licenses/encoder/ for their licenses and sources.
+The TypeScript machine build for Linux carries gpupick (https://github.com/davidliyutong/veldr-gpupick, MIT) and the GUI helper (https://github.com/davidliyutong/veldr-gui-helper), a static executable built with Zig that includes parts of Zig's standard library (MIT, below) and Go's image/jpeg encoder ported (BSD-3-Clause, below).
 
-## Go (image/jpeg, adapted in scripts/gui-helper)
+## Go (image/jpeg, adapted in veldr-gui-helper)
 
 ```text
 Copyright 2009 The Go Authors.
@@ -44,7 +44,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-## Zig standard library (in the GUI helper, scripts/gui-helper)
+## Zig standard library (in veldr-gui-helper)
 
 ```text
 The MIT License (Expat)
@@ -72,7 +72,7 @@ THE SOFTWARE.
 
 ## The hub in TypeScript (backend/)
 
-The hub's executable built from backend/ is the Bun runtime (https://github.com/oven-sh/bun, MIT; its LICENSE.md lists the libraries it includes, JavaScriptCore among them, LGPL-2.0) with the hub's code and the npm packages below bundled. The desktop app runs the same hub in Electron, with node-pty (and node-addon-api, which it is built with) beside it in the app. In the TypeScript build (backend/scripts/build.ts --machine ts) the same executable is also the machine side of its platform and carries that platform's herdr-core (Apache-2.0; its license and notices are in licenses/herdr-core/ of the release archive).
+The hub's executable built from backend/ is the Bun runtime (https://github.com/oven-sh/bun, MIT; its LICENSE.md lists the libraries it includes, JavaScriptCore among them, LGPL-2.0) with the hub's code and the npm packages below bundled. Both the command line and the desktop app run this Stage 1 compiled executable (`serve` and `desktop`), which on Linux and macOS is also the machine side of its platform (`node`) and carries that platform's herdr-core (Apache-2.0; its license and notices are in licenses/herdr-core/ of the release archive).
 
 ### @agentclientprotocol/sdk 2.6.0 (Apache-2.0)
 
@@ -1797,94 +1797,6 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-```
-
-### node-addon-api 7.1.1 (MIT)
-
-```text
-The MIT License (MIT)
-
-Copyright (c) 2017 [Node.js API collaborators](https://github.com/nodejs/node-addon-api#collaborators)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
-
-### node-pty 1.1.0 (MIT)
-
-```text
-Copyright (c) 2012-2015, Christopher Jeffrey (https://github.com/chjj/)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
-
-
-The MIT License (MIT)
-
-Copyright (c) 2016, Daniel Imms (http://www.growingwiththeweb.com)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-
-
-MIT License
-
-Copyright (c) 2018 - present Microsoft Corporation
-
-All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 ```
 
 ### npm-run-path 6.0.0 (MIT)

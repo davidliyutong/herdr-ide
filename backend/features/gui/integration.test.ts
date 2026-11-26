@@ -33,7 +33,7 @@ import { guiMachine } from './machine.ts';
 import { lookPath } from './machine/gpu.ts';
 
 const arch = process.arch === 'x64' ? 'amd64' : process.arch;
-const helperBin = posix.join(import.meta.dir, '..', '..', '..', 'scripts', 'gui-helper', 'bin', `gui-helper-linux-${arch}`);
+const helperBin = posix.join(import.meta.dir, '..', '..', '..', 'dist', 'deps', 'gui-helper', `gui-helper-linux-${arch}`);
 
 /** The X program: GUI_TEST_XCLIENT, else e2e/fakes/xclient.ts compiled now. */
 function xclient(): string {

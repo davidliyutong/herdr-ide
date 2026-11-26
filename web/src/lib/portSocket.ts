@@ -6,7 +6,7 @@
 // contextBridge.executeInMainWorld, which runs its source in the page:
 // it references nothing outside its body (its constants are written out;
 // the tests check them against shell.ts and the bridge,
-// backend/hosts/electron/bridge.ts, whose frames it speaks).
+// backend/hosts/desktop/bridge.ts, whose frames it speaks).
 
 /** What installPortSocket gives the web UI: WebSocket's constructor. */
 export type PortSocketClass = new (url: string | URL, protocols?: string | string[]) => WebSocket;

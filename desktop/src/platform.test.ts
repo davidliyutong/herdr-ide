@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { APP_DOMAIN } from '../../web/src/brand';
+import { APP_DOMAIN, APP_SLUG } from '../../web/src/brand';
 import { APP_ID, hubResources, reverseDomain, foldersOf, keyPlatform, quitsWithLastWindow } from './platform';
 
 test('the keybindings, the last window and the app id by platform', () => {
@@ -17,12 +17,27 @@ test('the keybindings, the last window and the app id by platform', () => {
   assert.equal(APP_ID, `${reverseDomain(APP_DOMAIN)}.desktop`);
 });
 
-test("the hub's payloads are the app's resources, or scripts/build.sh's and the web UI's build in development", () => {
-  assert.deepEqual(hubResources('/App/Resources', '/repo'), {
-    payload: join('/App/Resources', 'payload'),
-    web: join('/App/Resources', 'web'),
+test("the hub executable and Stage 1 machine archives are in the app's bundle, or dist/ in development", () => {
+  assert.deepEqual(hubResources('/App/Contents/Resources', '/repo', 'darwin', 'arm64'), {
+    hub: join('/App/Contents/Resources', '..', 'Helpers', APP_SLUG),
+    machines: join('/App/Contents/Resources', 'machines'),
   });
-  assert.deepEqual(hubResources(undefined, '/repo'), { payload: join('/repo', 'dist', 'payload'), web: join('/repo', 'web', 'dist') });
+  assert.deepEqual(hubResources('/opt/app/resources', '/repo', 'linux', 'x64'), {
+    hub: join('/opt/app/resources', 'bin', APP_SLUG),
+    machines: join('/opt/app/resources', 'machines'),
+  });
+  assert.deepEqual(hubResources('C:\\App\\resources', 'C:\\repo', 'win32', 'x64'), {
+    hub: join('C:\\App\\resources', 'bin', `${APP_SLUG}.exe`),
+    machines: join('C:\\App\\resources', 'machines'),
+  });
+  assert.deepEqual(hubResources(undefined, '/repo', 'darwin', 'arm64'), {
+    hub: join('/repo', 'dist', `${APP_SLUG}-darwin-arm64`),
+    machines: join('/repo', 'dist', 'release'),
+  });
+  assert.deepEqual(hubResources(undefined, '/repo', 'win32', 'x64'), {
+    hub: join('/repo', 'dist', `${APP_SLUG}-windows-amd64.exe`),
+    machines: join('/repo', 'dist', 'release'),
+  });
 });
 
 test(

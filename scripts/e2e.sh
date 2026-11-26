@@ -91,6 +91,8 @@ fake() {
 }
 
 if [[ -z "${SKIP_BUILD:-}" ]]; then
+  echo "==> native submodules (vt, encoder, gpupick, gui-helper)"
+  bun backend/scripts/fetch-deps.ts
   if [[ -z "${SKIP_WEB:-}" ]]; then
     echo "==> web"
     (cd web && pnpm install --frozen-lockfile >/dev/null && pnpm run build >/dev/null)
@@ -118,7 +120,7 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   fi
   echo "==> machine builds"
   (cd backend && pnpm install --frozen-lockfile >/dev/null)
-  common=(--web web/dist --hc "$OUT/hc")
+  common=(--web web/dist --hc "$OUT/hc" --encoder dist/deps/encoder --gui dist/deps/gui-helper --gpupick dist/deps/gpupick)
   # The bridge extension when a build staged it (scripts/build.sh).
   [[ -d dist/payload/ext ]] && common+=(--ext dist/payload/ext)
   # This host's, and Docker's Linux, glibc's and musl's; again as the newer
@@ -135,8 +137,6 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
       t=$(target_of "$k")
       extra=()
       [[ -n "$t" ]] && extra+=(--target "$t")
-      # This host's, as the desktop app carries it.
-      [[ "$k" == "$os-$arch" && "$v" == dev ]] && extra+=(--payload-out "$OUT/payload")
       bun backend/scripts/build.ts --out "$dir/${SLUG}-$k" --version "$v" "${common[@]}" ${extra[@]+"${extra[@]}"} >/dev/null
     done
     # The manifest of this "release": the executables as an archive would
@@ -147,10 +147,9 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   done
   cp "$OUT/machines/${SLUG}-$os-$arch" "$OUT/hub"
   cp "$OUT/machines-newer/${SLUG}-$os-$arch" "$OUT/hub-newer"
-  gzip -1 -c "$OUT/machines/${SLUG}-$os-$arch" > "$OUT/payload/machine/${SLUG}-$os-$arch.gz"
   # The desktop app's smoke test (tests/desktop.spec.ts) runs it unpackaged
-  # with the hub bundled for its utility process and the payloads above;
-  # it skips where the desktop's packages are not installed.
+  # spawning $OUT/hub (`<slug> desktop`) with $OUT/machines; it skips where
+  # the desktop's packages are not installed.
   if [[ -d desktop/node_modules/electron ]]; then
     echo "==> desktop app"
     pnpm -C desktop build >/dev/null
