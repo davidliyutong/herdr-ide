@@ -44,11 +44,19 @@ image() {
 }
 PLATFORMS=${FFMPEG_PLATFORMS:-linux/amd64 linux/arm64}
 
+sha256_cmd() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  else
+    shasum -a 256 "$@"
+  fi
+}
+
 src=dist/ffmpeg/src
 mkdir -p "$src"
 fetch() { # url file sha256
   if [[ ! -f "$src/$2" ]]; then curl -sSfL -o "$src/$2.part" "$1" && mv "$src/$2.part" "$src/$2"; fi
-  echo "$3  $src/$2" | shasum -a 256 -c - >/dev/null || { echo "$2: checksum mismatch" >&2; exit 1; }
+  echo "$3  $src/$2" | sha256_cmd -c - >/dev/null || { echo "$2: checksum mismatch" >&2; exit 1; }
 }
 fetch "https://ffmpeg.org/releases/ffmpeg-$FFMPEG.tar.xz" "ffmpeg-$FFMPEG.tar.xz" "$FFMPEG_SHA256"
 fetch "https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/$NVHEADERS.tar.gz" "nv-codec-headers-$NVHEADERS.tar.gz" "$NVHEADERS_SHA256"
@@ -66,7 +74,7 @@ for p in $PLATFORMS; do
   docker run --rm --platform "$p" -v "$PWD/$src:/src:ro" -v "$PWD/scripts/encoder:/encoder:ro" \
     -v "$PWD/$build:/b" -v "$PWD/$out:/out" \
     -e FFMPEG="$FFMPEG" -e NVHEADERS="$NVHEADERS" -e LIBVPX="$LIBVPX" -e LIBVA="$LIBVA" -e LIBDRM="$LIBDRM" -e MESON="$MESON" \
-    -e RECIPE="$(shasum -a 256 "$0" | cut -c1-12)" \
+    -e RECIPE="$(sha256_cmd "$0" | cut -c1-12)" \
     "$img" bash -euo pipefail -c '
     dnf -y -q install dnf-plugins-core >/dev/null && dnf config-manager --set-enabled powertools
     dnf -y -q install gcc gcc-c++ make diffutils pkgconf-pkg-config xz bzip2 perl nasm python3.11 python3.11-pip ninja-build libatomic-static >/dev/null

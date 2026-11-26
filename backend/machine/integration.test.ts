@@ -20,7 +20,7 @@ import { Agent } from './agent.ts';
 import { hcSession } from './hc.ts';
 import { dialHC } from './hidden.ts';
 
-const BIN = process.env.HC_TEST_BIN ?? '';
+const BIN = process.env.HC_TEST_BIN || Bun.which('hc') || '';
 const INSTANCE = 'it';
 const saved: Record<string, string | undefined> = {};
 let home = '';

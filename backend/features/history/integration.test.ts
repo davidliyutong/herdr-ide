@@ -19,7 +19,7 @@ import { historyMachine } from './machine.ts';
 import { restoredByCore } from './machine/paint.ts';
 import { historyProtocol } from './protocol.ts';
 
-const bin = process.env.HC_TEST_BIN ?? '';
+const bin = process.env.HC_TEST_BIN || Bun.which('hc') || '';
 let r: Rig | undefined;
 let core: (...args: string[]) => { status: number | null; out: string };
 

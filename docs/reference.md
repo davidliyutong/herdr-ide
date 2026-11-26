@@ -523,10 +523,17 @@ Build scripts and tests:
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | `scripts/desktop.sh` on macOS | Notarize with this Apple ID. |
 | `ELECTRON_SKIP_BINARY_DOWNLOAD` | `make deps` | `1` skips Electron's binary (enough for checks and tests). |
 | `DEV_LISTEN` | `make dev-hub`, `make dev-web` | Development hub address (default `127.0.0.1:7790`). |
-| `HC_TEST_BIN` | `make it` | herdr-core for integration tests (else `hc` on `PATH`, else skipped). |
+| `HC_TEST_BIN` | `make it` | herdr-core for integration tests (default: auto-fetched pinned binary in `dist/it/`, or `hc` on `PATH` when `IT_SKIP_FETCH=1`). |
+| `IT_SKIP_FETCH`, `IT_NO_DOCKER`, `IT_WITH_VSCODE` | `make it` | `1` disables auto-fetching herdr-core; disables the macOS/Xvfb-less Docker GUI fallback (`scripts/gui-it.sh`); or seeds and runs the real code-server integration test. |
 | `E2E_ARGS`, `E2E_DIR`, `SKIP_BUILD`, `SKIP_WEB` | `make e2e` | Playwright arguments; where the hub and fake agents under test are (default `dist/e2e`); `1` reuses an earlier build. |
-| `E2E_REQUIRE_DOCKER` | `make e2e` | `1` fails instead of skipping the SSH machine tests without Docker (CI). |
+| `E2E_REQUIRE_DOCKER`, `E2E_ELECTRON_NO_SANDBOX` | `make e2e` | `1` fails instead of skipping SSH machine tests without Docker (CI); forces `--no-sandbox` for Electron on Linux (auto-detected in containers and restricted AppArmor userns). |
 | `GUI_TEST_XCLIENT` | `bun test features/gui/integration.test.ts` (`make it`, `scripts/gui-it.sh`) | The X program of the program windows' integration test (e2e/fakes/xclient.ts compiled for the machine); without it the test compiles one with bun build --compile. |
+| `DOTENV_DISABLE` | Test/harness runners (`scripts/load-env.sh`, `scripts/dotenv.py`, `e2e/machines/`) | `1` disables loading the gitignored repository `.env` file (see `.env.example`; standard `make test` never reads `.env`). |
+| `LINUX_TEST_ALL`, `TEST_ARGS` | `make test-linux` | `1` runs the full backend suite in a Linux container; `TEST_ARGS` forwards specific test paths to `bun test`. |
+| `LINUX_TEST_HOST`, `LINUX_TEST_SSH_OPTS`, `SUITE`, `REMOTE_ARGS`, `KEEP_REMOTE` | `make test-remote` (`scripts/test-remote.sh`) | Remote Linux physical host SSH alias and extra SSH flags (read from `.env` or environment); suite (`doctor`, `check`, `test-linux`, `it`, `e2e`, `ci-e2e`, `ci-local`, `win-dockur`), extra CLI args, and `1` to keep the remote snapshot directory. |
+| `JOB`, `ACT_ARCH`, `ACT_BASE_IMAGE`, `ACT_ARTIFACTS_DIR`, `ACT_ENV_FILE`, `ACT_FORCE_E2E` | `make ci-local` | CI job for `nektos/act` (`check`, `integration`, `desktop`, `e2e`, `cross-compile`, `all`); container platform, base runner image, artifact directory, `--env-file` passed to `act` (default `/dev/null`), and `1` to force `act` for `e2e` on macOS. |
+| `MATRIX_ARCHS`, `MACHINES_WORK`, `MACHINES_CACHE`, `MACHINES_PREFIX`, `MACHINES_TTL`, `MACHINES_MANIFEST`, `MACHINES_ARCH`, `MACHINES_EMULATE`, `MACHINES_SSH_OPTS`, `MACHINES_UEFI_CODE` | `e2e/machines/machines.py` | Target Linux architectures for matrix payloads (default `amd64 arm64`); work/cache dirs, container/VM prefix, TTL watchdog seconds, image manifest path, target arch override, `1` to allow QEMU TCG fallback, extra SSH options for `remote`, and ARM64 UEFI firmware override. |
+| `WIN_TEST_HOST`, `WINVM_BASE`, `WIN_ARGS`, `WINVM_WORK`, `WINVM_PREFIX`, `WINVM_TTL`, `WINVM_USER`, `WINVM_PASS`, `WINVM_SSH_OPTS`, `WINVM_DOCKUR_IMAGE`, `WINVM_UEFI_CODE`, `WINVM_UEFI_VARS` | `make test-win` (`e2e/machines/winvm.py`) | Existing SSH Windows host alias, golden Windows qcow2 base image (booted via macOS HVF or Linux KVM CoW overlay), extra CLI args for `winvm.py test`, work dir, VM prefix, TTL seconds, guest username, optional password override (random per run when unset), extra SSH options for `--host`, `dockurr/windows` image override, and UEFI code/vars overrides. |
 
 ## Files and directories
 

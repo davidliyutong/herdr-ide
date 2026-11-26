@@ -20,3 +20,9 @@ TODO.md
 
 # Review files of the docs-keeper's slimming (the user reviews them).
 /docs-review/
+
+# Local test/machine environment overrides (copy from .env.example; never commit).
+.env
+.env.local
+.env.*.local
+/.machines-work/

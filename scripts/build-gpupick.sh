@@ -14,7 +14,7 @@ src=scripts/gpupick/gpupick.c
 dir=scripts/gpupick/bin
 digest=$dir/gpupick.sha256
 
-sum() { shasum -a 256 "$1" | cut -d' ' -f1; }
+sum() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | cut -d' ' -f1; }
 
 if [[ "${1:-}" == "--check" ]]; then
   fail=0

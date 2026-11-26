@@ -74,7 +74,7 @@ const why = !linux
     : !haveHelper
       ? `no ${helperBin}`
       : !xprog
-        ? 'no X program (GUI_TEST_XCLIENT, or go)'
+        ? 'no X program (GUI_TEST_XCLIENT, or bun build --compile failed)'
         : '';
 if (why) console.warn(`gui integration: skipped (${why})`);
 

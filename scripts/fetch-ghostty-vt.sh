@@ -23,7 +23,7 @@ FEATURES=-all,+render-state,+input-encode,+selection,+color,+formatter,+search,+
 dir=web/src/vt
 out=$dir/ghostty-vt.wasm
 digest=$dir/ghostty-vt.wasm.sha256
-sum() { shasum -a 256 "$1" | cut -d' ' -f1; }
+sum() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | cut -d' ' -f1; }
 
 if [[ "${1:-}" == "--check" ]]; then
   want=$(cut -d' ' -f1 "$digest")

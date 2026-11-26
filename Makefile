@@ -6,7 +6,7 @@ SLUG := $(shell sed -n "s/^export const SLUG = '\(.*\)';$$/\1/p" backend/shared/
 HOST_PLATFORM := $(shell scripts/platform.sh)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test test-extended check tokens vt-wasm gpupick gui-helper it e2e screenshots dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test test-extended test-linux test-win test-remote check tokens vt-wasm gpupick gui-helper it e2e screenshots ci-local test-doctor test-clean dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
@@ -72,13 +72,41 @@ gpupick:
 gui-helper:
 	scripts/build-gui-helper.sh
 
+# Runs Linux-specific backend tests (sys, /proc sessions, gpupick, display,
+# real Xvfb GUI integration) inside a Linux container from any host with Docker.
+# LINUX_TEST_ALL=1 runs the full backend suite in Linux; TEST_ARGS selects files.
+test-linux:
+	scripts/test-linux.sh $(TEST_ARGS)
+
+# Runs Windows hub, web, desktop and packaging tests against a disposable
+# Windows VM (macOS HVF or Linux KVM CoW overlay / dockurr/windows) or an
+# existing SSH Windows host (WIN_TEST_HOST).
+test-win:
+	python3 e2e/machines/winvm.py test $(WIN_ARGS)
+
+# Ships the working tree (excluding gitignored files like .env) to a remote
+# Linux physical host (LINUX_TEST_HOST in gitignored .env or environment) and
+# runs SUITE=doctor|check|test-linux|it|e2e|ci-e2e|ci-local|win-dockur.
+test-remote:
+	scripts/test-remote.sh $(REMOTE_ARGS)
+
 it:
-	cd backend && bun test features/terminals/integration.test.ts
-	cd backend && bun test features/history/integration.test.ts
-	cd backend && bun test features/agents/integration.test.ts
-	cd backend && bun test features/gui/integration.test.ts
-	cd backend && bun test machine/integration.test.ts
-	cd backend && bun test features/vscode/integration.test.ts
+	scripts/it.sh
+
+# Runs .github/workflows/ci.yml jobs locally via nektos/act (default JOB=check;
+# also integration, desktop, e2e, cross-compile, all).
+ci-local:
+	scripts/ci-local.sh $(JOB)
+
+# Diagnoses local toolchain, Docker, KVM/HVF virtualization, Xvfb, Playwright,
+# act and leftover test artifacts on macOS and Linux.
+test-doctor:
+	scripts/test-doctor.sh
+
+# Safely removes test containers, disposable VMs, stale /tmp/hie-* homes and
+# test build directories without touching the user's instance.
+test-clean:
+	scripts/test-clean.sh $(CLEAN_ARGS)
 
 # End-to-end tests: the hub of this platform on isolated instances,
 # driven through Chromium, and SSH machines in Docker containers (e2e/,

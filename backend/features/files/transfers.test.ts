@@ -137,7 +137,7 @@ describe('file', () => {
   // 404 only for a path that is not there: a file the agent cannot stat for
   // another reason is not taken for a new one (the editor would offer to
   // create it).
-  test.skipIf(process.getuid?.() === 0)('stat failures', async () => {
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('stat failures', async () => {
     const locked = at('locked');
     mkdirSync(locked, { mode: 0o700 });
     writeFileSync(join(locked, 'f'), 'f');

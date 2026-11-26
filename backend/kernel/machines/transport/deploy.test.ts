@@ -57,7 +57,7 @@ import {
 
 const supported = process.platform === 'linux' || process.platform === 'darwin';
 const key = `${process.platform}-${process.arch === 'x64' ? 'amd64' : process.arch}`;
-const work = realpathSync(mkdtempSync('/tmp/hdp-'));
+const work = supported ? realpathSync(mkdtempSync('/tmp/hdp-')) : '';
 const instance = 'dev';
 const saved = { HOME: process.env.HOME, PATH: process.env.PATH, BUN_OPTIONS: process.env.BUN_OPTIONS };
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -174,7 +174,7 @@ afterAll(async () => {
   Object.assign(process.env, { HOME: saved.HOME, PATH: saved.PATH });
   if (saved.BUN_OPTIONS === undefined) delete process.env.BUN_OPTIONS;
   else process.env.BUN_OPTIONS = saved.BUN_OPTIONS;
-  rmSync(work, { recursive: true, force: true });
+  if (work) rmSync(work, { recursive: true, force: true });
 }, 60_000);
 
 /** The tools a machine has besides curl and wget, linked into a directory
@@ -244,11 +244,12 @@ function machine(path = saved.PATH ?? '/usr/bin:/bin'): string {
 
 /** The stand-in's ssh -W: where it forwards (TUNNEL holds a port, or
  * "refuse"), each request written down beside it. */
-const FORWARD = join(work, 'forward.js');
-const TUNNEL = join(work, 'tunnel');
-writeFileSync(
-  FORWARD,
-  `const net = require('net'), fs = require('fs');
+const FORWARD = work ? join(work, 'forward.js') : '';
+const TUNNEL = work ? join(work, 'tunnel') : '';
+if (supported) {
+  writeFileSync(
+    FORWARD,
+    `const net = require('net'), fs = require('fs');
 const [ctl, to] = process.argv.slice(2);
 fs.appendFileSync(ctl + '.log', to + '\\n');
 const how = fs.existsSync(ctl) ? fs.readFileSync(ctl, 'utf8').trim() : 'refuse';
@@ -257,7 +258,8 @@ const s = net.connect(Number(how), '127.0.0.1');
 process.stdin.pipe(s); s.pipe(process.stdout);
 s.on('close', () => process.exit(0)); s.on('error', () => process.exit(1));
 `,
-);
+  );
+}
 const tunnelled = () => (existsSync(`${TUNNEL}.log`) ? readFileSync(`${TUNNEL}.log`, 'utf8').trim().split('\n') : []);
 
 /** The test authority, and the release over TLS with the certificate of
@@ -328,8 +330,10 @@ test('the probe reports the C library, its C++ runtime and SSE4.2; a machine Bun
   expect(
     parseProbe('@os=Linux\n@arch=aarch64\n@home=/h\n@gnulibc=glibc 2.41\n@ldd=ldd (Debian GLIBC 2.41) 2.41\n@muslloader=yes\n').libc,
   ).toBe('glibc');
-  const here = parseProbe(spawnSync('/bin/sh', ['-c', PROBE_SCRIPT], { encoding: 'utf8' }).stdout);
-  expect(here.os).toBe(process.platform);
+  if (supported) {
+    const here = parseProbe(spawnSync('/bin/sh', ['-c', PROBE_SCRIPT], { encoding: 'utf8' }).stdout);
+    expect(here.os).toBe(process.platform);
+  }
 });
 
 extendedDescribe.skipIf(!supported)('the TypeScript build over ssh', () => {

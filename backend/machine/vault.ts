@@ -262,6 +262,13 @@ export function mcpSocketPath(argv0: string, home: string, instance: string): st
   return posix.join(runDir(posix.join(home, dataDir(instance))), 'vault.sock');
 }
 
+/** Host machine name matching `uname -m` (Bun's os.machine() returns "arm64"
+ * on Linux aarch64 where `uname -m` prints "aarch64"). */
+function hostMachine(): string {
+  const m = machine();
+  return process.platform === 'linux' && m === 'arm64' ? 'aarch64' : m;
+}
+
 /** Makes dir/<slug>-mcp the script that runs this host's platform link
  * (MCP_LINK_SCRIPT), and that link, beside it, a link to exe; each
  * replaced atomically (a file beside it renamed into place). */
@@ -274,7 +281,7 @@ export async function linkMCP(dir: string, exe: string): Promise<void> {
     const st = await lstat(p).catch(() => null);
     if (st && st.mtimeMs < cutoff) await rm(p, { force: true }).catch(() => {});
   }
-  const link = posix.join(dir, platformLink(type(), machine()));
+  const link = posix.join(dir, platformLink(type(), hostMachine()));
   const cur = await readlink(link).catch(() => null);
   if (cur !== exe) {
     const tmp = `${link}.${process.pid}.${randomUUID()}.new`;

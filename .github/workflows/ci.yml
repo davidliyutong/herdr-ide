@@ -138,10 +138,15 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.5
-      # The hub's tests include the machine side's, which runs on Linux
-      # and macOS only.
+      # The full backend suite includes the POSIX machine side (Linux and
+      # macOS); on Windows run the hub-side tests (shared, kernel, features'
+      # hub tests, hosts/common and hosts/electron).
       - if: runner.os == 'macOS'
         run: pnpm -C backend install --frozen-lockfile && pnpm -C backend test
+        env:
+          EXTENDED_TESTS: 1
+      - if: runner.os == 'Windows'
+        run: pnpm -C backend install --frozen-lockfile && pnpm -C backend test:hub
         env:
           EXTENDED_TESTS: 1
       - if: runner.os != 'Linux'

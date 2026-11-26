@@ -279,7 +279,7 @@ describe('Claude Code', () => {
     const start = e.now - MIN;
     for (const pid of [100, 200, 300]) e.procs.set(pid, { ppid: 1, pgid: pid, start });
     const dir = posix.join(e.home, '.claude', 'sessions');
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
     for (const k of ['100.6b1d0e.key', '200.0f3a.key', '300.9c.key', '100.json.key'])
       writeFileSync(posix.join(dir, k), `{"pid":100,"sessionId":"${sid(7)}","startedAt":${start}}`, { mode: 0o600 });
     mkfifo(posix.join(dir, '300.json'));

@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
+    "test:hub": "bun scripts/test-hub.ts",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.bun.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

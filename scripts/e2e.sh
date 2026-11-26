@@ -26,6 +26,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
+# shellcheck source=scripts/load-env.sh
+source "$ROOT/scripts/load-env.sh"
+load_repo_dotenv "$ROOT"
 
 SLUG=$(sed -n "s/^export const SLUG = '\(.*\)';$/\1/p" backend/shared/lib/brand.ts)
 OUT=${E2E_DIR:-dist/e2e}
@@ -168,5 +171,12 @@ chromium=$(pnpm -C e2e exec playwright install --dry-run --no-shell chromium | s
 if [[ ! -f "$chromium/INSTALLATION_COMPLETE" ]]; then
   echo "==> Chromium for Playwright"
   pnpm -C e2e exec playwright install --no-shell chromium
+fi
+if [[ "$os" == linux && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+  if command -v xvfb-run >/dev/null 2>&1; then
+    echo "==> headless Linux: wrapping Playwright in xvfb-run"
+    exec xvfb-run -a -s "-screen 0 2000x1200x24" pnpm -C e2e exec playwright test "$@"
+  fi
+  echo "note: no DISPLAY/WAYLAND_DISPLAY and no xvfb-run; desktop Electron tests will skip" >&2
 fi
 exec pnpm -C e2e exec playwright test "$@"

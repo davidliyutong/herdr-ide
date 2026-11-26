@@ -15,7 +15,7 @@ src=scripts/gui-helper
 bin=$src/bin
 digest=$bin/gui-helper.sha256
 
-sum() { shasum -a 256 "$1" | cut -d' ' -f1; }
+sum() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | cut -d' ' -f1; }
 
 # The sources the executables are built from, in a stable order.
 sources() { (cd "$src" && { echo build.zig; find src -type f -name '*.zig' | LC_ALL=C sort; }); }

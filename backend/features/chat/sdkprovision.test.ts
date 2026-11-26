@@ -92,7 +92,8 @@ const failure = async (p: Promise<unknown>): Promise<{ code: string; message: st
   return { code: 'no error', message: '' };
 };
 
-describe('the Agent SDK on a machine', () => {
+// Exercises the in-process POSIX machine rig (unix sockets, curl/tar).
+describe.skipIf(process.platform === 'win32')('the Agent SDK on a machine', () => {
   test('the machine downloads it itself; the hub fetches nothing, and asks no more on that session for an hour', async () => {
     let now = Date.now();
     const { f, reg, p, audits, audit } = await setup({ now: () => now });

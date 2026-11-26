@@ -12,9 +12,9 @@
 
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { TestHome } from './home';
 import { paths, repoRoot } from './paths';
 import { waitFor } from './wait';
@@ -62,6 +62,23 @@ export interface AppProcess {
   name: string;
 }
 
+/** Whether Electron needs --no-sandbox on Linux (containers or Ubuntu 24.04
+ * AppArmor userns restriction without a setuid chrome-sandbox). */
+function needsNoSandbox(bin: string | undefined): boolean {
+  if (process.platform !== 'linux') return false;
+  if (process.env.E2E_ELECTRON_NO_SANDBOX === '1') return true;
+  if (existsSync('/.dockerenv')) return true;
+  try {
+    const restricted = readFileSync('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', 'utf8').trim() === '1';
+    if (!restricted) return false;
+    const sandbox = bin ? join(dirname(bin), 'chrome-sandbox') : '';
+    const st = sandbox && existsSync(sandbox) ? statSync(sandbox) : undefined;
+    return !(st && st.uid === 0 && (st.mode & 0o4000) !== 0);
+  } catch {
+    return false;
+  }
+}
+
 export class Desktop {
   private closed?: Promise<void>;
 
@@ -81,10 +98,13 @@ export class Desktop {
     let app: ElectronApplication | undefined;
     const log: string[] = [];
     try {
+      const bin = electronBinary();
+      const args = [desktopDir, `--user-data-dir=${join(home.dir, 'profile')}`, '--use-mock-keychain', '--lang=en-US'];
+      if (needsNoSandbox(bin)) args.push('--no-sandbox');
       app = await electron.launch({
-        executablePath: electronBinary(),
+        executablePath: bin,
         // The mock keychain: Chromium's own secrets never reach the user's.
-        args: [desktopDir, `--user-data-dir=${join(home.dir, 'profile')}`, '--use-mock-keychain', '--lang=en-US'],
+        args,
         cwd: home.dir,
         env: home.env({
           [`${PREFIX}DESKTOP_DEV`]: home.name,
@@ -223,11 +243,72 @@ export class Desktop {
 
 const tail = (log: string[]) => log.join('').slice(-6000);
 
-/** What a process listens on over TCP (lsof), one line each. */
+/** What a process listens on over TCP (lsof, falling back on Linux to ss
+ * and /proc/net/tcp when lsof is not installed), one line each. */
 export function tcpListeners(pid: number): string[] {
   const r = spawnSync('lsof', ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', String(pid)], { encoding: 'utf8' });
-  return r.stdout
-    .split('\n')
-    .slice(1)
-    .filter((l) => l.trim());
+  if (!r.error && typeof r.stdout === 'string') {
+    return r.stdout
+      .split('\n')
+      .slice(1)
+      .filter((l) => l.trim());
+  }
+  if (process.platform !== 'linux') {
+    throw new Error(`lsof failed: ${r.error?.message ?? `exit ${r.status}`}`);
+  }
+  const ss = spawnSync('ss', ['-H', '-ltnp'], { encoding: 'utf8' });
+  if (!ss.error && typeof ss.stdout === 'string') {
+    const tag = `pid=${pid},`;
+    return ss.stdout
+      .split('\n')
+      .filter((l) => l.includes(tag))
+      .map((l) => {
+        const local = l.trim().split(/\s+/)[3] ?? l.trim();
+        return `${local} (LISTEN)`;
+      });
+  }
+  return procTcpListeners(pid);
+}
+
+/** Parses /proc/<pid>/fd and /proc/net/tcp{,6} for listening TCP sockets. */
+function procTcpListeners(pid: number): string[] {
+  const inodes = new Set<string>();
+  try {
+    for (const fd of readdirSync(`/proc/${pid}/fd`)) {
+      try {
+        const m = /^socket:\[(\d+)\]$/.exec(readlinkSync(`/proc/${pid}/fd/${fd}`));
+        if (m) inodes.add(m[1]);
+      } catch {
+        // fd closed meanwhile
+      }
+    }
+  } catch {
+    return [];
+  }
+  if (!inodes.size) return [];
+  const out: string[] = [];
+  for (const [file, v6] of [
+    ['/proc/net/tcp', false],
+    ['/proc/net/tcp6', true],
+  ] as const) {
+    let text = '';
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const line of text.split('\n').slice(1)) {
+      const f = line.trim().split(/\s+/);
+      if (f.length < 10 || f[3] !== '0A' || !inodes.has(f[9])) continue;
+      const [hexIp, hexPort] = f[1].split(':');
+      const port = parseInt(hexPort, 16);
+      const host = v6
+        ? hexIp === '00000000000000000000000001000000'
+          ? '[::1]'
+          : `[${hexIp}]`
+        : [6, 4, 2, 0].map((i) => parseInt(hexIp.slice(i, i + 2), 16)).join('.');
+      out.push(`${host}:${port} (LISTEN)`);
+    }
+  }
+  return out;
 }

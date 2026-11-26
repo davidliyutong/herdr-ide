@@ -1,18 +1,17 @@
 #!/bin/sh
 # Builds this payload on a computer with the repository: the TypeScript
-# build's executables of linux/amd64 for glibc and musl (exe/,
-# backend/scripts/build.ts, each with the GUI helper of linux/amd64
-# embedded), the X program of the program windows' tests bundled
-# (bin/xclient.js, e2e/fakes/xclient.ts: run.sh runs it with the machine's
-# executable acting as Bun), the video encoder when one was built
-# (enc/encoder.gz, scripts/build-ffmpeg.sh) and the driver (driver.js).
-# Then:
-# machines.py run-matrix payloads/gui/run.sh [IMAGE...].
+# build's executables of linux/amd64 and linux/arm64 for glibc and musl
+# (exe/, backend/scripts/build.ts, each with its GUI helper embedded), the
+# X program bundled (bin/xclient.js, e2e/fakes/xclient.ts), the video
+# encoder when one was built (enc/encoder-linux-<arch>.gz,
+# scripts/build-ffmpeg.sh) and the driver (driver.js).
+# MATRIX_ARCHS="amd64 arm64" (default: both) selects architectures.
+# Then: machines.py run-matrix payloads/gui/run.sh [IMAGE...].
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
 cd "$root"
-rm -rf "$here/exe" "$here/bin"
+rm -rf "$here/exe" "$here/bin" "$here/enc"
 mkdir -p "$here/exe" "$here/bin"
 bun -e "
   for (const [src, out] of [['$here/driver.ts', '$here/driver.js'], ['$root/e2e/fakes/xclient.ts', '$here/bin/xclient.js']]) {
@@ -21,15 +20,27 @@ bun -e "
     await Bun.write(out, await r.outputs[0].text());
   }
 "
+archs=${MATRIX_ARCHS:-"amd64 arm64"}
 slug=$(sed -n "s/^export const SLUG = '\\(.*\\)';$/\\1/p" backend/shared/lib/brand.ts)
-for k in linux-amd64:bun-linux-x64-baseline linux-amd64-musl:bun-linux-x64-musl-baseline; do
-  # No herdr-core: the display needs none.
-  bun backend/scripts/build.ts --out "$here/exe/$slug-${k%%:*}" --target "${k#*:}" --version matrix 2>&1 | grep -v 'no herdr-core' || true
-  [ -x "$here/exe/$slug-${k%%:*}" ]
+for a in $archs; do
+  case $a in
+  amd64|x64|x86_64)
+    a=amd64
+    pairs="linux-amd64:bun-linux-x64-baseline linux-amd64-musl:bun-linux-x64-musl-baseline"
+    ;;
+  arm64|aarch64)
+    a=arm64
+    pairs="linux-arm64:bun-linux-arm64 linux-arm64-musl:bun-linux-arm64-musl"
+    ;;
+  *) echo "unsupported arch: $a" >&2; exit 1 ;;
+  esac
+  for k in $pairs; do
+    # No herdr-core: the display needs none.
+    bun backend/scripts/build.ts --out "$here/exe/$slug-${k%%:*}" --target "${k#*:}" --version matrix 2>&1 | grep -v 'no herdr-core' || true
+    [ -x "$here/exe/$slug-${k%%:*}" ]
+  done
+  if [ -f "dist/ffmpeg/linux-$a/encoder.gz" ]; then
+    mkdir -p "$here/enc" && cp "dist/ffmpeg/linux-$a/encoder.gz" "$here/enc/encoder-linux-$a.gz"
+  fi
 done
-# The video encoder when scripts/build-ffmpeg.sh built it: run.sh then tries video.
-rm -rf "$here/enc"
-if [ -f dist/ffmpeg/linux-amd64/encoder.gz ]; then
-  mkdir -p "$here/enc" && cp dist/ffmpeg/linux-amd64/encoder.gz "$here/enc/"
-fi
-echo "built $here"
+echo "built $here ($archs)"

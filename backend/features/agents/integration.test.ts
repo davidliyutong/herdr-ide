@@ -19,7 +19,7 @@ import { machineOf, rig, type Rig } from '#machine/testing.ts';
 import { agentsMachine } from './machine.ts';
 import { agentsProtocol } from './protocol.ts';
 
-const bin = process.env.HC_TEST_BIN ?? '';
+const bin = process.env.HC_TEST_BIN || Bun.which('hc') || '';
 const SESSION = '5e551011-0000-4000-8000-000000000001';
 let r: Rig | undefined;
 let core: (...args: string[]) => { status: number | null; out: string };
@@ -59,11 +59,12 @@ afterAll(async () => {
  * progress, a permission dialog once "block" exists, its prompt once
  * "idle" does. */
 const FAKE_CLAUDE = String.raw`#!/bin/sh
+umask 077
 dir=$(pwd)
 esc=$(printf %s "$dir" | sed 's/[^A-Za-z0-9]/-/g')
 mkdir -p "$HOME/.claude/sessions" "$HOME/.claude/projects/$esc"
-printf '{"type":"user","message":{"role":"user","content":"hi"},"cwd":"%s","sessionId":"%s","timestamp":"2026-11-25T00:00:00.000Z"}\n' "$dir" "${SESSION}" >"$HOME/.claude/projects/$esc/${SESSION}.jsonl"
 printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":%s000}\n' $$ "${SESSION}" "$dir" "$(date +%s)" >"$HOME/.claude/sessions/$$.json"
+printf '{"type":"user","message":{"role":"user","content":"hi"},"cwd":"%s","sessionId":"%s","timestamp":"2026-11-25T00:00:00.000Z"}\n' "$dir" "${SESSION}" >"$HOME/.claude/projects/$esc/${SESSION}.jsonl"
 printf '\033[2J\033[H\342\234\273 Thinking\342\200\246 (3s \302\267 esc to interrupt)\n'
 while [ ! -e block ]; do sleep 0.1; done
 printf '\033[2J\033[H Do you want to proceed?\n \342\235\257 1. Yes\n   2. No\n'

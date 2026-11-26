@@ -18,6 +18,10 @@ case "$darch" in
   aarch64 | arm64) target=bun-linux-arm64 ;;
   *) echo "Docker on $darch: no GUI helper for it" >&2; exit 1 ;;
 esac
+if [[ ! -d backend/node_modules ]]; then
+  echo "backend/node_modules is missing; run 'make deps' or 'pnpm -C backend install'" >&2
+  exit 1
+fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/x" "$tmp/stage"
@@ -26,10 +30,20 @@ mkdir "$tmp/x" "$tmp/stage"
 (cd "$tmp/stage" && bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --target="$target" \
   "$root/e2e/fakes/xclient.ts" --outfile "$tmp/x/e2e-xclient" >/dev/null)
 image="${SLUG}-gui-it"
-docker build -q --label "${SLUG}.e2e=1" -t "$image" - >/dev/null <<'EOF'
+docker build -q --label "${SLUG}.gui-it=1" -t "$image" - >/dev/null <<'EOF'
 FROM oven/bun:1.4.5
 RUN apt-get update && apt-get install -y --no-install-recommends xvfb && rm -rf /var/lib/apt/lists/* \
   && useradd -m it
 EOF
-docker run --rm --label "${SLUG}.e2e=1" -v "$PWD:/w:ro" -v "$tmp/x:/x:ro" -e GUI_TEST_XCLIENT=/x/e2e-xclient -u it -w /w/backend "$image" \
-  bun test features/gui/integration.test.ts
+# On Linux match the host's non-root UID:GID so a restrictive home mode
+# (0700/0750) remains readable inside the container; macOS's VM maps it.
+user_args=(-u it)
+home_env=()
+if [[ "$(uname -s)" == Linux && "$(id -u)" != 0 ]]; then
+  user_args=(-u "$(id -u):$(id -g)")
+  home_env=(-e HOME=/tmp/it-home)
+fi
+docker run --rm --label "${SLUG}.gui-it=1" -v "$PWD:/w:ro" -v "$tmp/x:/x:ro" \
+  -e GUI_TEST_XCLIENT=/x/e2e-xclient "${home_env[@]+"${home_env[@]}"}" "${user_args[@]}" \
+  -w /w/backend "$image" \
+  sh -c 'mkdir -p "${HOME:-/tmp}" && exec bun test features/gui/integration.test.ts'

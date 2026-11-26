@@ -28,7 +28,7 @@ import { ensure } from './lifecycle.ts';
 import { FrameKind } from './messages.ts';
 import { errKind, TestClient } from './testing.ts';
 
-const HC = process.env.HC_TEST_BIN ?? '';
+const HC = process.env.HC_TEST_BIN || Bun.which('hc') || '';
 const INSTANCE = 'ts-term';
 const M = 'local';
 

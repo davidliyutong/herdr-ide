@@ -51,12 +51,21 @@ EOF
   tar -C dist/packages -czf "dist/release/$name.tar.gz" "$name"
   echo "    dist/release/$name.tar.gz"
 done
+# Portable SHA-256 command (Linux coreutils sha256sum, macOS shasum).
+sha256_cmd() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  else
+    shasum -a 256 "$@"
+  fi
+}
+
 # The archives and the executables in them.
 [[ -z "$packaged" ]] || (cd dist/release && {
-  shasum -a 256 ./*.tar.gz | sed 's| \./| |'
+  sha256_cmd ./*.tar.gz | sed 's| \./| |'
   for a in *.tar.gz; do
     n=${a%.tar.gz}
-    s=$(tar -xzf "$a" -O "$n/$SLUG" | shasum -a 256 | cut -d' ' -f1)
+    s=$(tar -xzf "$a" -O "$n/$SLUG" | sha256_cmd | cut -d' ' -f1)
     echo "$s  $n/$SLUG"
   done
 } > SHA256SUMS)
