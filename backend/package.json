@@ -14,13 +14,13 @@
     "registry": "bun scripts/registry.ts"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.322",
+    "@anthropic-ai/claude-agent-sdk": "0.3.330",
     "@types/bun": "1.4.5",
     "@types/node": "26.6.6",
     "@types/ws": "8.18.2",
     "@types/yauzl": "3.4.0",
     "@types/yazl": "3.3.1",
-    "prettier": "3.9.10",
+    "prettier": "3.10.1",
     "typescript": "7.0.2"
   },
   "packageManager": "pnpm@12.8.1",
@@ -32,13 +32,13 @@
     "#hosts/*": "./hosts/*"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "2.6.0",
+    "@agentclientprotocol/sdk": "2.9.1",
     "@modelcontextprotocol/server": "2.4.0",
     "@simplewebauthn/server": "14.1.0",
     "execa": "10.2.1",
     "hono": "4.13.21",
     "jsonc-parser": "3.3.1",
-    "re2js": "2.9.1",
+    "re2js": "2.10.0",
     "ssh-config": "5.3.1",
     "tar": "7.5.23",
     "ws": "8.23.0",
