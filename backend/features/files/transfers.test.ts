@@ -232,13 +232,16 @@ test('list', async () => {
   expect(r.status).toBe(404);
   expect(r.body.error).toContain('no such file or directory');
 
-  // An offline/disabled machine returns 409 rather than masquerading as 404.
+  // An offline/disabled machine returns 409 for /list and 502 for direct /file
+  // (never masquerading as 404).
   const offlineHub = testHub({
     features: [fileTransfersFeature()],
     machines: testMachines([sshSpec('off', 'off', 'off', false)]),
   });
   const offRes = await offlineHub.request('GET', '/api/m/off/list?path=/tmp');
   expect(offRes.status).toBe(409);
+  const offFile = await offlineHub.request('GET', '/api/m/off/file?path=/tmp/a.txt&max_size=1024');
+  expect(offFile.status).toBe(502);
 });
 
 describe('upload', () => {

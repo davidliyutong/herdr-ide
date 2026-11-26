@@ -63,7 +63,17 @@ export function MediaView({ m, path, shown = true }: { m: string; path: string; 
         (videoError ? (
           <div className="pad muted">{t('preview.videoUnsupported')}</div>
         ) : (
-          <video key={reloadKey} ref={videoRef} src={url} controls autoPlay={shown} loop muted playsInline onError={() => setVideoError(true)} />
+          <video
+            key={reloadKey}
+            ref={videoRef}
+            src={url}
+            controls
+            autoPlay={shown}
+            loop
+            muted
+            playsInline
+            onError={() => setVideoError(true)}
+          />
         ))}
       {audioExt.test(path) && <audio key={reloadKey} ref={audioRef} src={url} controls autoPlay={shown} />}
       {/\.pdf$/i.test(path) && <iframe key={reloadKey} className="pdf-frame" src={url} title={path} />}

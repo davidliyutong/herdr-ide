@@ -345,10 +345,10 @@ describe('FilesPanel', () => {
   const flush = () => act(async () => settle());
   /** Opens a tab of its own for a new terminal in cwd. */
   const openTab = async (id: string, cwd: string) => {
-    const terminals = hub.machines.get('m')!.terminals;
-    terminals.push(FakeHub.term(id, { cwd }));
+    const rec = FakeHub.term(id, { cwd });
+    hub.machines.get('m')!.terminals.push(rec);
     await act(async () => {
-      hub.push({ t: 'snapshot', m: 'm', terminals });
+      hub.event('m', 'created', id, rec);
       hub.model.mutate('m', (l) => {
         const ws = l.workspaces[0];
         return { ...l, workspaces: [{ ...ws, tabs: [...ws.tabs, { root: { terminal: id }, focused: id }], selected: ws.tabs.length }] };
