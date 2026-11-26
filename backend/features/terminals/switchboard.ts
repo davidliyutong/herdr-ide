@@ -67,6 +67,12 @@ export class Switchboard {
     this.backends.get(id)?.wakeUp();
   }
 
+  /** Clears a prior UI stop when a disabled machine is enabled again, and
+   * wakes its backend. */
+  enable(id: string): void {
+    this.backends.get(id)?.resetStopped();
+  }
+
   /** Adopts a channel of /api/v1/term. */
   connect(ch: Channel, who: Who): ChannelHandlers {
     const c = new TermClient(ch, who, { ...this.d, backend: (id) => this.backend(id) });

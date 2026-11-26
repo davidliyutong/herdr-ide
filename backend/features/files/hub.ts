@@ -173,7 +173,7 @@ export const fileTransfersFeature = (o: FileTransfersOptions = {}) =>
           rep = await c.var.machine.request({ op: Op.FsList, ...(path ? { path } : {}) }, { signal: c.req.raw.signal, timeoutMs: STAT_MS });
           if (!rep.stat) throw new Error('missing stat');
         } catch (e) {
-          throw prose(404, e);
+          throw prose(e instanceof Fail ? e.status : statStatus(e), e);
         }
         noStore(c);
         return c.json({ dir: rep.stat, entries: rep.entries ?? [] });

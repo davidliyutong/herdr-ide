@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { SLUG } from '#shared/lib/brand.ts';
 import { AgentError } from '#kernel/machines/transport/session.ts';
-import { sleep, TEST_INFO, waitFor } from '#kernel/testing.ts';
+import { sleep, sshSpec, TEST_INFO, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { offline } from '#kernel/fail.ts';
-import { statStatus } from './hub.ts';
+import { fileTransfersFeature, statStatus } from './hub.ts';
 import { serveFile, TransferFail } from './serve.ts';
 import { filesHub, testPage, type FilesHub } from './testdata/hub.ts';
 
@@ -231,6 +231,14 @@ test('list', async () => {
   // The UI matches the agent's text (dialog.ts folderProblem).
   expect(r.status).toBe(404);
   expect(r.body.error).toContain('no such file or directory');
+
+  // An offline/disabled machine returns 409 rather than masquerading as 404.
+  const offlineHub = testHub({
+    features: [fileTransfersFeature()],
+    machines: testMachines([sshSpec('off', 'off', 'off', false)]),
+  });
+  const offRes = await offlineHub.request('GET', '/api/m/off/list?path=/tmp');
+  expect(offRes.status).toBe(409);
 });
 
 describe('upload', () => {

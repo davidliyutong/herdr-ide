@@ -94,7 +94,7 @@ class Wake {
         this.wakeUp = null;
         resolve(why);
       };
-      const timer = setTimeout(() => done('timeout'), ms);
+      const timer = ms === Infinity ? undefined : setTimeout(() => done('timeout'), ms);
       const onAbort = () => done('aborted');
       signal.addEventListener('abort', onAbort, { once: true });
       this.wakeUp = () => done('woken');
@@ -235,6 +235,13 @@ export class Backend implements AgentHost {
     this.wakeup.wake();
   }
 
+  /** Clears a prior UI stop when a disabled machine is enabled again, and
+   * wakes the loop so the terminal core starts once the machine connects. */
+  resetStopped(): void {
+    this.stopped = false;
+    this.wakeup.wake();
+  }
+
   /** Drops the backend of a removed machine: its connection closes and its
    * clients no longer count it as subscribed. */
   close(): void {
@@ -316,12 +323,26 @@ export class Backend implements AgentHost {
     const t = this.d.timing;
     let backoff = t.backoffMinMs;
     while (!signal.aborted) {
+      const m = this.d.machines.get(this.id);
+      if (m && !m.spec().enabled) {
+        this.setState('error', Code.Offline);
+        await this.wakeup.until(Infinity, signal);
+        backoff = t.backoffMinMs;
+        continue;
+      }
       const started = Date.now();
       const code = await this.serve(signal).catch((e: Error) => {
         this.d.logger(`term ${this.id}: ${e.message}`);
         return Code.Lost;
       });
       if (signal.aborted) break;
+      const cur = this.d.machines.get(this.id);
+      if (cur && !cur.spec().enabled) {
+        this.setState('error', Code.Offline);
+        await this.wakeup.until(Infinity, signal);
+        backoff = t.backoffMinMs;
+        continue;
+      }
       this.setState('error', code);
       if (Date.now() - started > t.stableMs) backoff = t.backoffMinMs;
       const why = await this.wakeup.until(retryDelay(backoff), signal);

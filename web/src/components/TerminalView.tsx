@@ -161,15 +161,23 @@ export function TerminalView({ m, terminal, focused, onActivate, shown = true }:
 
   // A terminal that lost its agent with its core gets it back (restore.ts):
   // asked for while the pane is attached here, and in onAttached otherwise.
-  const resume = useTerms((s) => {
-    const layout = s.machines[m]?.layout;
+  // Also watches the live program and its foreground so a shell that ran
+  // startup commands during attach resumes once it returns to its prompt.
+  const resumeKey = useTerms((s) => {
+    const mt = s.machines[m];
+    const layout = mt?.layout;
     const leaf = layout && L.findLeaf(layout, terminal);
-    return leaf && L.isTerminalLeaf(leaf) && typeof leaf.resume === 'string' ? leaf.resume : undefined;
+    if (!leaf || !L.isTerminalLeaf(leaf) || typeof leaf.resume !== 'string') return undefined;
+    const r = mt?.terminals[terminal];
+    if (!r || !isLive(r) || typeof r.pid !== 'number') return undefined;
+    const fg = (r.foreground as { pid?: unknown } | null | undefined)?.pid;
+    if (typeof fg === 'number' && fg !== r.pid) return undefined;
+    return `${leaf.resume}\n${r.pid}`;
   });
   useEffect(() => {
     const pane = paneRef.current;
-    if (resume && pane?.attached) terms.resumeAgent(m, terminal, pane);
-  }, [resume, m, terminal]);
+    if (resumeKey && pane?.attached) terms.resumeAgent(m, terminal, pane);
+  }, [resumeKey, m, terminal]);
 
   // Appearance: colors, font and size, cursor, scrollback.
   useEffect(() => {

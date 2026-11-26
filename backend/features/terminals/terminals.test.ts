@@ -596,3 +596,35 @@ test('an idle backend closes its connection', async () => {
   c.send({ t: 'sub', m: 'x' });
   while ((await c.until('backend')).state !== 'ready');
 });
+
+// Disabling a machine whose terminal core was stopped rests its backend
+// without retry churn, and re-enabling the machine clears the stopped flag
+// so the terminal core starts automatically once the machine reconnects.
+test('disabling with a stopped core rests quietly and re-enabling starts the core again', async () => {
+  const r = await start({ options: { timing: { backoffMinMs: 20, backoffMaxMs: 40 } } });
+  const c = await r.client();
+  await c.ready();
+  const mc = r.machines.get('x')!;
+  await waitFor('ready', () => mc.state().hc?.state === 'ready');
+
+  // Stop core (as "Also stop terminal core" does before disable), then disable.
+  expect((await r.tc.request('POST', '/api/m/x/hc/stop')).status).toBe(200);
+  while ((await c.until('backend')).code !== 'stopped');
+  expect(r.backend().stopped).toBe(true);
+
+  r.machines.setEnabled('x', false);
+  await waitFor('disabled', () => mc.state().status === 'disabled');
+  while ((await c.until('backend')).code !== 'machine_offline');
+  const actionsWhileDisabled = r.sim.actions.length;
+  await sleep(100);
+  // Backend rests while disabled: no ensure/status churn.
+  expect(r.sim.actions.length).toBe(actionsWhileDisabled);
+
+  // Re-enabling clears stopped and brings the terminal core back automatically.
+  r.machines.setEnabled('x', true);
+  await waitFor('machine ready again', () => mc.state().status === 'ready');
+  await waitFor('terminal core ready again', () => mc.state().hc?.state === 'ready');
+  expect(r.backend().stopped).toBe(false);
+  while ((await c.until('backend')).state !== 'ready');
+  expect((await c.until('snapshot')).terminals).toHaveLength(1);
+});

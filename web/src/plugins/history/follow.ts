@@ -192,6 +192,11 @@ interface Saved {
 }
 
 interface Watched {
+  /** Whether the machine's backend was ready on the last sync. */
+  wasReady: boolean;
+  /** The cached list predates a disconnect/reconnect: keep shown preludes
+   * until the fresh post-reconnect list arrives. */
+  staleList: boolean;
   list?: HistoryList;
   /** The pids of the live terminals last seen. */
   pids: Map<string, number>;
@@ -227,6 +232,7 @@ let starts = 0;
 let stopFollowing: (() => void) | undefined;
 
 const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+const backendReady = (m: string) => useTerms.getState().machines[m]?.backend?.phase === 'ready';
 
 /** Codes of failures a later try may not have: the machine away or busy,
  * the network, a reply not understood, the hub's own failure. */
@@ -269,7 +275,7 @@ function snapshotKey(w: Watched, c: Choice): string {
  * while the page is hidden, once it is shown. */
 function askList(m: string, w: Watched) {
   w.due = true;
-  if (w.timer !== undefined || w.listing || hidden()) return;
+  if (w.timer !== undefined || w.listing || hidden() || !backendReady(m)) return;
   const wait = Math.max(LIST_SETTLE_MS, w.listedAt + LIST_GAP_MS - Date.now());
   w.timer = setTimeout(() => {
     w.timer = undefined;
@@ -279,7 +285,7 @@ function askList(m: string, w: Watched) {
 
 async function readList(m: string, w: Watched) {
   if (watched.get(m) !== w || !w.due || w.listing) return;
-  if (hidden()) return;
+  if (hidden() || !backendReady(m)) return;
   w.due = false;
   w.listing = true;
   w.listedAt = Date.now();
@@ -288,6 +294,7 @@ async function readList(m: string, w: Watched) {
     const list = await listHistory(m);
     if (watched.get(m) !== w) return;
     w.list = list;
+    w.staleList = false;
     w.failed.clear();
     ok = true;
   } catch {
@@ -298,7 +305,7 @@ async function readList(m: string, w: Watched) {
   }
   if (watched.get(m) !== w) return;
   if (ok) w.listFailures = 0;
-  else retryList(m, w);
+  else if (backendReady(m)) retryList(m, w);
   apply(m, w);
   if (w.due) askList(m, w);
 }
@@ -417,7 +424,7 @@ function adopt(m: string, w: Watched, leaf: L.TerminalLeaf, record: TerminalReco
  * machine's terminals are not known again yet) keeps what it shows. */
 function apply(m: string, w: Watched) {
   const mt = useTerms.getState().machines[m];
-  if (!w.list || !mt?.layout) return;
+  if (!w.list || w.staleList || !mt?.layout || mt.backend?.phase !== 'ready') return;
   const entries = new Map(w.list.terminals.map((e) => [e.terminal, e]));
   const want = new Map<string, Choice>();
   const keep = new Set<string>();
@@ -483,16 +490,29 @@ function awaitCapture(m: string, w: Watched, waiting: boolean) {
   );
 }
 
+/** Pauses timers and retries while a machine's backend is not ready (offline,
+ * rebooting, disabled), keeping shown preludes and cached bytes intact. */
+function pause(w: Watched) {
+  clearTimeout(w.timer);
+  w.timer = undefined;
+  clearTimeout(w.retryTimer);
+  w.retryTimer = undefined;
+  clearTimeout(w.waitTimer);
+  w.waitTimer = undefined;
+  for (const timer of w.readRetries.values()) clearTimeout(timer);
+  w.readRetries.clear();
+  for (const a of w.adoptions.values()) {
+    clearTimeout(a.timer);
+    a.timer = undefined;
+  }
+}
+
 /** Stops following machine m: its preludes go. */
 function forget(m: string) {
   const w = watched.get(m);
   if (!w) return;
   watched.delete(m);
-  clearTimeout(w.timer);
-  clearTimeout(w.retryTimer);
-  clearTimeout(w.waitTimer);
-  for (const timer of w.readRetries.values()) clearTimeout(timer);
-  for (const a of w.adoptions.values()) clearTimeout(a.timer);
+  pause(w);
   for (const address of [...w.shown.keys()]) setPrelude(m, address, undefined);
 }
 
@@ -502,13 +522,23 @@ function sync() {
   const values = useSettings.getState().values;
   for (const m of [...watched.keys()]) if (!machines[m] || !captureOn(m, values)) forget(m);
   for (const [m, mt] of Object.entries(machines)) {
-    // A machine whose terminals are not there (it is coming back) keeps
-    // what it shows.
-    if (!captureOn(m, values) || mt.backend?.phase !== 'ready') continue;
-    const pids = livePids(mt.terminals);
+    if (!captureOn(m, values)) continue;
+    const ready = mt.backend?.phase === 'ready';
     let w = watched.get(m);
+    if (!ready) {
+      // A machine whose terminals are not there (offline, rebooting or
+      // disabled) pauses its polling and keeps what it shows.
+      if (w && w.wasReady) {
+        w.wasReady = false;
+        pause(w);
+      }
+      continue;
+    }
+    const pids = livePids(mt.terminals);
     if (!w) {
       w = {
+        wasReady: true,
+        staleList: false,
         pids,
         listedAt: 0,
         due: false,
@@ -524,6 +554,22 @@ function sync() {
         adoptions: new Map(),
       };
       watched.set(m, w);
+      askList(m, w);
+    } else if (!w.wasReady) {
+      // Returned from offline/reboot/disable: clear back-off and mark any
+      // pre-disconnect list stale until refreshed.
+      w.wasReady = true;
+      w.staleList = w.list !== undefined;
+      w.listFailures = 0;
+      w.waits = 0;
+      w.listedAt = 0;
+      w.failed.clear();
+      w.readFailures.clear();
+      for (const a of w.adoptions.values()) a.failures = 0;
+      clearTimeout(w.retryTimer);
+      w.retryTimer = undefined;
+      clearTimeout(w.waitTimer);
+      w.waitTimer = undefined;
       askList(m, w);
     } else if (newPrograms(w.pids, pids)) {
       w.waits = 0;

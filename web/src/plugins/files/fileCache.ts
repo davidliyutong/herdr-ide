@@ -28,17 +28,26 @@ let totalBytes = 0;
 
 const cacheKey = (m: string, path: string) => `${m}\n${path}`;
 
-// When a machine leaves 'ready' (offline, disabled, reconnecting), mark its
-// cached files stale so reopening them revalidates in the background once back.
+// When a machine leaves or returns to 'ready' (offline, disabled, reconnecting),
+// mark its cached files stale so reopening revalidates once back, and drop any
+// stale in-flight cold loads so reconnect retries never attach to an offline fetch.
 let lastStatuses: Record<string, string> = {};
 useStore.subscribe((s) => {
   const next: Record<string, string> = {};
   for (const [id, st] of Object.entries(s.machines)) {
     next[id] = st.status;
-    if (lastStatuses[id] === 'ready' && st.status !== 'ready') invalidateMachineCache(id);
+    if (lastStatuses[id] === 'ready' && st.status !== 'ready') {
+      invalidateMachineCache(id);
+      dropMachineInflight(id);
+    } else if (lastStatuses[id] !== undefined && lastStatuses[id] !== 'ready' && st.status === 'ready') {
+      dropMachineInflight(id);
+    }
   }
   for (const id of Object.keys(lastStatuses)) {
-    if (!next[id]) dropMachineCache(id);
+    if (!next[id]) {
+      dropMachineCache(id);
+      dropMachineInflight(id);
+    }
   }
   lastStatuses = next;
 });
@@ -99,6 +108,19 @@ export function dropMachineCache(m: string) {
   const prefix = `${m}\n`;
   for (const k of [...cache.keys()]) {
     if (k.startsWith(prefix)) evictOne(k);
+  }
+}
+
+/** Drops a single in-flight load so a fresh retry will not reuse a stale request. */
+export function dropInflightFile(m: string, path: string) {
+  inflight.delete(cacheKey(m, path));
+}
+
+/** Drops all in-flight loads of machine m. */
+export function dropMachineInflight(m: string) {
+  const prefix = `${m}\n`;
+  for (const k of [...inflight.keys()]) {
+    if (k.startsWith(prefix)) inflight.delete(k);
   }
 }
 

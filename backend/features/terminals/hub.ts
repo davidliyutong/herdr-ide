@@ -169,14 +169,17 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
       ctx.onForget((id) => h.forget(id));
 
       ctx.service('backends', async (signal) => {
-        // A machine that connects (again) ends the wait of its backend.
-        const ready = new Map<string, boolean>();
+        // A machine that connects (again) ends the wait of its backend; a
+        // disabled machine that is enabled again starts its terminal core
+        // anew even if it was stopped before being disabled.
+        const status = new Map<string, string>(ctx.machines.states().map((st) => [st.id, st.status]));
         const unsubscribe = ctx.machines.subscribe({
           state: (st) => {
-            const now = st.status === 'ready';
-            const before = ready.get(st.id) ?? false;
-            ready.set(st.id, now);
-            if (now && !before) h.wakeUp(st.id);
+            const before = status.get(st.id);
+            status.set(st.id, st.status);
+            if (before === 'disabled' && st.status !== 'disabled') h.enable(st.id);
+            else if (st.status === 'ready' && before !== 'ready') h.wakeUp(st.id);
+            else if (st.status === 'disabled' && before !== 'disabled') h.wakeUp(st.id);
           },
         });
         await new Promise<void>((r) => (signal.aborted ? r() : signal.addEventListener('abort', () => r(), { once: true })));

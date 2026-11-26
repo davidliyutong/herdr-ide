@@ -100,6 +100,17 @@ export const historyFeature = (o: HistoryOptions = {}) =>
             .filter((m) => m.ready)
             .map((m) => m.id),
         onReadyChange: (wake) => ctx.machines.subscribe({ state: (st) => wake(st.id, st.status === 'ready') }),
+        onTerminalCoreReady: (wake) => {
+          const core = new Map<string, boolean>(ctx.machines.states().map((st) => [st.id, st.hc?.state === 'ready']));
+          return ctx.machines.subscribe({
+            state: (st) => {
+              const now = st.hc?.state === 'ready';
+              const before = core.get(st.id) ?? false;
+              core.set(st.id, now);
+              if (now && !before) wake(st.id);
+            },
+          });
+        },
         settings: ctx.settings,
         enabled: () => ctx.enabledFor('desktop') || ctx.enabledFor('browser'),
         switchKey: `plugins.${ctx.id}.enabled`,

@@ -232,7 +232,7 @@ function layoutOf(...leaves: TerminalLeaf[]): Layout {
 }
 
 /** Machine a's terminals and layout, as the page's model publishes them. */
-function machine(records: TerminalRecord[], layout: Layout, phase: 'ready' | 'starting' = 'ready') {
+function machine(records: TerminalRecord[], layout: Layout, phase: 'ready' | 'starting' | 'error' = 'ready') {
   const terminals: Record<string, TerminalRecord> = {};
   for (const r of records) terminals[r.address] = r;
   const a: MachineTerms = { backend: { phase, code: '', version: '' }, terminals, layout };
@@ -689,5 +689,68 @@ describe('the history plugin in the page', () => {
     expect(hub.adopts()).toHaveLength(3);
     expect(hub.list.terminals).toEqual([entry('t2', 0, 0, { pid: 100, at: 3000 })]);
     expect(text(preludeOf('a', 't2')?.bytes)).toBe('the old terminal');
+  });
+
+  it('pauses polling while offline or disabled, resets backoff, skips stale pre-reboot list reads, and shows fresh history immediately on reconnect', async () => {
+    restarted();
+    hub.failLists = 3;
+    stop = startHistory();
+    await settle();
+    // 3 failures ramp backoff up (2s, 4s, 8s...).
+    await vi.advanceTimersByTimeAsync(2000 + 4000);
+    expect(hub.lists()).toBe(3);
+
+    // Remote machine goes offline / is manually disabled for 10 minutes: ZERO list calls.
+    machine([], layoutOf({ terminal: 't1' }), 'error');
+    const listsBeforeOffline = hub.lists();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(hub.lists()).toBe(listsBeforeOffline);
+
+    // Machine reboots and is re-enabled: backoff resets and fresh list runs within LIST_SETTLE_MS.
+    hub.failLists = 0;
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 300, 9000, { pid: 200, at: 7000 })] };
+    hub.data.set('t1 previous', { bytes: enc('after reboot history'), pid: 200, at: 7000 });
+    machine([rec('t1', 300)], layoutOf({ terminal: 't1' }), 'ready');
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 20);
+    expect(hub.lists()).toBe(listsBeforeOffline + 1);
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('after reboot history');
+
+    // Second disconnect + reconnect with a stale pre-reboot list cached: does NOT
+    // read against the stale list before the fresh post-reboot list arrives.
+    const readsBefore = hub.reads().length;
+    machine([], layoutOf({ terminal: 't1' }), 'error');
+    // Prelude stays visible while away.
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('after reboot history');
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 400, 12000, { pid: 300, at: 10000 })] };
+    hub.data.set('t1 previous', { bytes: enc('second reboot history'), pid: 300, at: 10000 });
+    machine([rec('t1', 400)], layoutOf({ terminal: 't1' }), 'ready');
+    // Before LIST_SETTLE_MS fires the fresh list, no read against the stale list happened.
+    expect(hub.reads()).toHaveLength(readsBefore);
+    await vi.advanceTimersByTimeAsync(LIST_SETTLE_MS + 20);
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('second reboot history');
+  });
+
+  it('shows pre-boot history immediately on same-pid reboot when list beats capture and keeps it seamlessly after rotation', async () => {
+    capture(true);
+    // Pre-boot current snapshot reports pid 0 before capture rotates it, while kept t1 reused pid 100.
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 0, 3000)] };
+    hub.data.set('t1 current', { bytes: enc('pre-boot same pid'), pid: 0, at: 3000 });
+    machine([rec('t1', 100)], layoutOf({ terminal: 't1' }));
+    stop = startHistory();
+    await settle();
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('pre-boot same pid');
+    expect(hub.reads()).toHaveLength(1);
+
+    // Capture later rotates current -> previous (pid 0, at 3000) and writes post-reboot current (pid 100, at 9000).
+    const changed = vi.fn();
+    const off = onPrelude('a', 't1', changed);
+    hub.list = { restoreScreen: false, terminals: [entry('t1', 100, 9000, { pid: 0, at: 3000 })] };
+    // Advance past capture wait so follower re-lists: same (pid: 0, at: 3000) key means zero re-read and zero churn.
+    await vi.advanceTimersByTimeAsync(30_000 + LIST_GAP_MS + LIST_SETTLE_MS + 20);
+    expect(hub.lists()).toBe(2);
+    expect(hub.reads()).toHaveLength(1);
+    expect(changed).not.toHaveBeenCalled();
+    expect(text(preludeOf('a', 't1')?.bytes)).toBe('pre-boot same pid');
+    off();
   });
 });

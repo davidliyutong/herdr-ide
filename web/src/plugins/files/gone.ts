@@ -10,6 +10,7 @@
 
 import { useEffect } from 'react';
 import { create } from 'zustand';
+import { useStore } from '../../state/store';
 import { filesApi } from './api';
 import { startPolling } from './poller';
 
@@ -26,6 +27,7 @@ export const useGoneFiles = create<{ gone: Record<string, true> }>(() => ({ gone
 /** How many titles name each path. */
 const watched = new Map<string, number>();
 let stopPolling: (() => void) | undefined;
+let unwatchStore: (() => void) | undefined;
 
 /** Records whether path is on machine m now. */
 export function noteFile(m: string, path: string, exists: boolean) {
@@ -38,13 +40,17 @@ export function noteFile(m: string, path: string, exists: boolean) {
   useGoneFiles.setState({ gone: next });
 }
 
-/** Checks every path watched now (the explorer changed files). */
+/** Checks every path watched now (the explorer changed files). Skips machines
+ * known to be offline/disabled so they do not back off checks for ready ones. */
 export async function recheckGone(): Promise<void> {
+  const machines = useStore.getState().machines;
   const byMachine = new Map<string, string[]>();
   for (const k of watched.keys()) {
     // A machine's id has no newline; a path may.
     const at = k.indexOf('\n');
     const m = k.slice(0, at);
+    const ms = machines[m]?.status;
+    if (ms && ms !== 'ready') continue;
     byMachine.set(m, [...(byMachine.get(m) ?? []), k.slice(at + 1)]);
   }
   const asked = [...byMachine].flatMap(([m, paths]) => {
@@ -68,6 +74,18 @@ export function watchFile(m: string, path: string): () => void {
   const k = key(m, path);
   watched.set(k, (watched.get(k) ?? 0) + 1);
   stopPolling ??= startPolling(GONE_CHECK_MS, recheckGone);
+  unwatchStore ??= useStore.subscribe((st, prev) => {
+    if (st.machines === prev.machines) return;
+    for (const [id, info] of Object.entries(st.machines)) {
+      if (info.status !== 'ready' || prev.machines[id]?.status === 'ready') continue;
+      for (const wk of watched.keys()) {
+        if (wk.startsWith(`${id}\n`)) {
+          void recheckGone().catch(() => {});
+          return;
+        }
+      }
+    }
+  });
   return () => {
     const n = (watched.get(k) ?? 1) - 1;
     if (n > 0) return void watched.set(k, n);
@@ -81,6 +99,8 @@ export function watchFile(m: string, path: string): () => void {
     if (!watched.size) {
       stopPolling?.();
       stopPolling = undefined;
+      unwatchStore?.();
+      unwatchStore = undefined;
     }
   };
 }

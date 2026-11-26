@@ -166,6 +166,7 @@ export function rootFor(
 export function FilesPanel() {
   const m = useStore((s) => s.machineId);
   const home = useStore((s) => (s.machineId ? s.machines[s.machineId]?.info?.home : undefined));
+  const machineStatus = useStore((s) => (s.machineId ? s.machines[s.machineId]?.status : undefined));
   const readOnly = useStore((s) => s.readOnly);
   const layout = useTerms((s) => (m ? s.machines[m]?.layout : undefined));
   // Both stores: the focused pane is in the layout, the shown machine in the UI's.
@@ -228,8 +229,15 @@ export function FilesPanel() {
   }, [m, s.m, s.root, activeEditor]);
 
   // While the panel is shown and the page visible, the shown directories
-  // are checked for changes, one poll at a time.
+  // are checked for changes, one poll at a time. Refresh immediately when
+  // the shown machine returns from offline/reboot/disable.
   useEffect(() => startPolling(POLL_MS, poll), []);
+  const prevMachine = useRef({ m, status: machineStatus });
+  useEffect(() => {
+    const prev = prevMachine.current;
+    prevMachine.current = { m, status: machineStatus };
+    if (m && prev.m === m && prev.status !== 'ready' && machineStatus === 'ready') refresh();
+  }, [m, machineStatus]);
   // Whether its menus offer Reveal in Finder.
   useEffect(() => loadRevealable(m ?? undefined), [m]);
 

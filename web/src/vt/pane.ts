@@ -12,6 +12,7 @@
 // canvas.
 
 import type { AttachOptions, Display, StreamHandler } from '../term/connection';
+import { CORE_ENDED } from '../term/protocol';
 import { displayColors, type Appearance } from '../appearance';
 import { isCjkText } from '../terminal/fonts';
 import { loadVt, type Vt } from './module';
@@ -304,6 +305,12 @@ export class TermPane {
   /** The stream ended for good (the program's end): nothing attaches until
    * the terminal has another program (setProgram). */
   private closedFor = false;
+  /** The stream closed because the core or host ended (rather than the program
+   * exiting): after reconnect a restarted kept shell may reuse the same pid. */
+  private closedByCore = false;
+  /** The stream ended because the connection or backend dropped: waits for
+   * onConnection(true) rather than retrying on program updates while away. */
+  private disconnected = false;
   /** The pid of the terminal's program while its record says it is live
    * (setProgram); the program the stream was attached to; the one whose
    * stream ended for good. */
@@ -336,8 +343,14 @@ export class TermPane {
     this.offConnection = o.onConnection((up) => {
       if (!up) return;
       // The connection or the machine's terminals are back: a new round
-      // of attempts.
+      // of attempts. A pane closed by core/host shutdown forgets endedProgram
+      // so a restarted kept shell that reused the same pid still reopens.
+      this.disconnected = false;
+      if (this.closedFor && this.closedByCore) this.endedProgram = undefined;
       this.attachFailures = 0;
+      window.clearTimeout(this.attachTimer);
+      this.attachTimer = undefined;
+      this.reopen();
       this.attach();
     });
     this.offFind = useFind.subscribe((st, prev) => this.findChanged(st, prev));
@@ -455,6 +468,12 @@ export class TermPane {
     if (!this.o.readOnly()) this.term?.resize(cols, rows, m.cw, m.ch);
     if (changed && this.stream !== undefined && !this.o.readOnly()) this.o.connection.resize(this.stream, cols, rows);
     if (!this.term) this.attach();
+    else if (this.stream === undefined && !this.attaching && !this.closedFor && !this.disconnected && this.attachFailures > 0) {
+      this.attachFailures = 0;
+      window.clearTimeout(this.attachTimer);
+      this.attachTimer = undefined;
+      this.attach();
+    }
     this.schedule();
   }
 
@@ -498,12 +517,20 @@ export class TermPane {
     this.cursorAt = '';
     this.startBlink();
     this.renderer?.invalidate();
+    window.clearTimeout(this.paintTimer);
+    this.paintTimer = undefined;
     this.painting = true;
     this.preludeShown = preludeOf(this.o.m, this.o.address);
     if (this.preludeShown) this.replay(term, this.preludeShown);
-    const paintLimit = performance.now() + PAINT_MAX_MS;
     this.paintBytes = 0;
-    this.awaitPaint(paintLimit);
+    let paintLimit = 0;
+    const ensurePaintLimit = () => {
+      if (!paintLimit) {
+        paintLimit = performance.now() + PAINT_MAX_MS;
+        this.awaitPaint(paintLimit);
+      }
+      return paintLimit;
+    };
     const observe = this.o.readOnly();
     this.o.connection
       .attach(
@@ -522,13 +549,14 @@ export class TermPane {
             term.write(data);
             this.unacked += data.length;
             if (!this.painting) return this.schedule();
+            const limit = ensurePaintLimit();
             // Credit is returned at once: the rest of the paint waits for it.
             this.ack();
             this.paintBytes += data.length;
             const now = performance.now();
             // Bulk puts the end off; a program's own small output only brings it nearer.
             const quiet = now + (this.paintBytes > PAINT_ONE_CREDIT ? PAINT_QUIET_LONG_MS : PAINT_QUIET_MS);
-            this.awaitPaint(data.length >= PAINT_BULK ? Math.min(paintLimit, quiet) : Math.min(this.paintEnd, now + PAINT_QUIET_MS));
+            this.awaitPaint(data.length >= PAINT_BULK ? Math.min(limit, quiet) : Math.min(this.paintEnd, now + PAINT_QUIET_MS));
           },
           resized: (cols, rows) => {
             if (this.term !== term) return;
@@ -542,8 +570,12 @@ export class TermPane {
             this.dropQueue();
             const program = this.streamProgram ?? this.program;
             this.streamProgram = undefined;
-            if (reason === 'disconnected') return; // attached again when the connection is back
+            if (reason === 'disconnected') {
+              this.disconnected = true;
+              return; // attached again when the connection is back
+            }
             this.closedFor = true;
+            this.closedByCore = CORE_ENDED.has(reason);
             this.endedProgram = program;
             this.o.onClosed(reason, exitCode);
             // Another program may be known already.
@@ -555,9 +587,11 @@ export class TermPane {
         (s) => {
           this.attaching = false;
           if (this.disposed || this.term !== term) return this.o.connection.detach(s);
+          this.disconnected = false;
           this.attachFailures = 0;
           this.stream = s;
           this.streamProgram = this.program;
+          if (this.painting) ensurePaintLimit();
           if (!observe && (this.grid.cols !== term.cols || this.grid.rows !== term.rows))
             this.o.connection.resize(s, this.grid.cols, this.grid.rows);
           if (this.focused) this.o.connection.focus(s, true);
@@ -652,12 +686,14 @@ export class TermPane {
   }
 
   /** The last row of the screen with something on it (a character, or a
-   * background color), -1 for none. Read into the pane's frame, which is
-   * the emulator's new one: later updates go on from it. */
+   * background color), -1 for none. Uses a scratch frame sized to term's
+   * current grid so replaying a prelude at its saved size never mutates
+   * this.frame. */
   private lastContentRow(term: Terminal): number {
-    term.update(this.frame);
-    for (let y = this.frame.rows - 1; y >= 0; y--) {
-      const r = this.frame.lines[y];
+    const frame = newFrame(term.cols, term.rows);
+    term.update(frame);
+    for (let y = frame.rows - 1; y >= 0; y--) {
+      const r = frame.lines[y];
       for (let x = 0; x < r.codes.length; x++) if ((r.codes[x] !== 0 && r.codes[x] !== 32) || r.bg[x] !== -1) return y;
     }
     return -1;
@@ -700,13 +736,22 @@ export class TermPane {
     this.program = pid;
     // Attached before the record was known: the stream is the program's.
     if (pid !== undefined && this.stream !== undefined && this.streamProgram === undefined) this.streamProgram = pid;
-    this.reopen();
+    if (this.closedFor) return this.reopen();
+    // A kept terminal that answered unavailable while its shell restarted
+    // may have exhausted its attach retries before the new program arrived.
+    if (pid !== undefined && !this.disconnected && this.stream === undefined && !this.attaching && this.attachFailures > 0) {
+      this.attachFailures = 0;
+      window.clearTimeout(this.attachTimer);
+      this.attachTimer = undefined;
+      this.attach();
+    }
   }
 
   private reopen() {
     const pid = this.program;
     if (this.disposed || !this.closedFor || pid === undefined || pid === this.endedProgram) return;
     this.closedFor = false;
+    this.closedByCore = false;
     this.endedProgram = undefined;
     this.attachFailures = 0;
     this.o.onReopen?.();

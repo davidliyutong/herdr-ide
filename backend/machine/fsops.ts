@@ -110,7 +110,7 @@ export async function serveFS(conn: Conn, h: Header, path: string, fs: FsCalls =
       try {
         ents = await fsp.readdir(path, { withFileTypes: true });
       } catch (e) {
-        return writeLine(st, fail(e));
+        return writeLine(st, failFS(e));
       }
       const readEntry = async (e: Dirent) => {
         const full = join(path, e.name);

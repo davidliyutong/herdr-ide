@@ -108,4 +108,34 @@ describe('a terminal’s view', () => {
     expect(pane.programs).toEqual([200, undefined, 201]);
     root = createRoot(host);
   });
+
+  it('retries resumeAgent automatically when shell startup foreground returns to the shell prompt', async () => {
+    const pane = made[0] as unknown as { attached: boolean; type: ReturnType<typeof vi.fn> };
+    pane.attached = true;
+    const typed: string[] = [];
+    pane.type = vi.fn((text: string) => void typed.push(text));
+
+    // Shell is still running a startup child process (pid 201 !== shell pid 200).
+    hub.event('a', 'foreground', 't1', { pid: 201, name: 'git', argv: ['git'], cwd: '/home/u' });
+    const fm = hub.machines.get('a')!;
+    fm.layout = {
+      version: 2,
+      workspaces: [
+        { id: 'w1', name: '', cwd: '/home/u', tabs: [{ root: { terminal: 't1', resume: 'claude' }, focused: 't1' }], selected: 0 },
+      ],
+      selected: 0,
+    };
+    fm.version++;
+    hub.event('a', 'doc', '', { name: 'layout', version: fm.version });
+    await flush();
+    await flush();
+    // Must not type into the running startup command.
+    expect(typed).toEqual([]);
+
+    // Startup command exits and foreground returns to the shell itself (pid 200).
+    hub.event('a', 'foreground', 't1', { pid: 200, name: 'zsh', argv: ['zsh'], cwd: '/home/u' });
+    await flush();
+    await flush();
+    expect(typed).toEqual(['claude --continue\r']);
+  });
 });

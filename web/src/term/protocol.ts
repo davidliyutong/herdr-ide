@@ -59,6 +59,10 @@ export interface BackendState {
 /** A terminal as the hub reports it, with every field it sent. */
 export type TerminalRecord = Record<string, unknown> & { address: string };
 
+/** Reasons a terminal finished because its terminal core or host ended rather
+ * than its own program exiting. */
+export const CORE_ENDED: ReadonlySet<string> = new Set(['stopped_by_restart', 'holder_lost', 'server_stop', 'host_shutdown']);
+
 export function isLive(t: TerminalRecord): boolean {
   return t.state === 'live';
 }

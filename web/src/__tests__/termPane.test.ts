@@ -64,6 +64,7 @@ vi.mock('../vt/atlas', async (actual) => {
 import { vtFromBytes, type Vt } from '../vt/module';
 import { TermPane, type PaneOptions, type TermLink } from '../vt/pane';
 import { Terminal, newFrame } from '../vt/terminal';
+import { noteScroll } from '../vt/scrollMemory';
 import { hexColor } from '../vt/renderer';
 import { appearanceOf } from '../appearance';
 import { getPrefs } from '../prefs';
@@ -765,6 +766,104 @@ describe('a terminal’s pane', () => {
       ta.dispatchEvent(ev2);
       expect(ev2.defaultPrevented).toBe(true);
       expect(link.written).toEqual(['\x02']);
+    });
+
+    it('replays a prelude from another grid with styled ANSI output intact and without mutating the pane frame', async () => {
+      // Saved at 60x15 while the live pane is 100x25 (800x400 with 8x16 cells).
+      const ansi = '\x1b[32mBUILD OK\x1b[0m\r\n\x1b[31mWARN line\x1b[0m';
+      setPrelude('a', 't1', enc(ansi), '-- output saved earlier --', { cols: 60, rows: 15 });
+      const { p } = pane(800, 400);
+      await loadEmulator();
+      link.handler!.output(enc('\x1b[H\x1b[2J$ new-shell'));
+      await settle(700);
+      const term = p.term!;
+      expect([term.cols, term.rows]).toEqual([100, 25]);
+      // Live viewport shows the new shell cleanly on the live grid.
+      expect(p.screenText()).toContain('$ new-shell');
+      // Scrollback above the new shell preserves both the styled ANSI lines and the dim note.
+      const bar = term.scrollbar();
+      expect(bar.total).toBeGreaterThan(bar.len);
+      term.scroll(-bar.offset);
+      const top = newFrame(term.cols, term.rows);
+      term.update(top);
+      const text = top.lines.map((r) => String.fromCodePoint(...r.codes.filter((c) => c !== 0)).trimEnd()).join('\n');
+      expect(text).toContain('BUILD OK');
+      expect(text).toContain('WARN line');
+      expect(text).toContain('-- output saved earlier --');
+      // Foreground color of 'BUILD OK' (SGR 32 -> palette index 2) survived replay.
+      const buildRow = top.lines.find((r) => String.fromCodePoint(...r.codes.filter((c) => c !== 0)).includes('BUILD OK'))!;
+      expect(buildRow.fg[0]).toBe(hexColor(appearanceOf(getPrefs()).colors.palette[2]));
+    });
+
+    it('delays the first-paint timeout until a slow remote attach resolves so scroll restoration is not lost', async () => {
+      link.held = true;
+      noteScroll('a', 't1', { total: 40, offset: 5, len: 25, rows: ['line-005'] });
+      const { p } = pane(800, 400);
+      await loadEmulator();
+      // Attach RPC takes 900ms (> PAINT_MAX_MS = 600ms) over a slow remote link.
+      await settle(900);
+      expect(p.attached).toBe(false);
+      // Attach resolves and first paint streams scrollback containing line-005.
+      link.release!();
+      await settle(10);
+      let burst = '';
+      for (let i = 0; i < 40; i++) burst += `line-${String(i).padStart(3, '0')}\r\n`;
+      link.handler!.output(enc(burst));
+      await settle(700);
+      expect(p.attached).toBe(true);
+      // Scroll position was restored to line-005 rather than consumed while attaching.
+      expect(p.screenText()).toContain('line-005');
+      expect(p.term!.atBottom).toBe(false);
+    });
+
+    it('reattaches after exhausted attach retries on restarted program or tab reveal, and reopens core-ended pane on same-pid reboot', async () => {
+      let connection: (up: boolean) => void = () => {};
+      const onConnection = (fn: (up: boolean) => void) => ((connection = fn), () => {});
+      const reopened = vi.fn();
+      // Exhaust all 6 attach attempts (1 initial + 5 retries) while a kept terminal restarts.
+      link.held = true;
+      const { p, attached } = pane(800, 400, { onConnection, onReopen: reopened });
+      await loadEmulator();
+      for (let i = 0; i < 6; i++) {
+        link.refuse!();
+        await settle(1600);
+      }
+      expect(link.attaches).toHaveLength(6);
+      expect(p.attached).toBe(false);
+
+      // No further retry fires on its own, but setProgram(newPid) recovers immediately.
+      link.held = false;
+      p.setProgram(200);
+      await settle(50);
+      expect(link.attaches).toHaveLength(7);
+      expect(p.attached).toBe(true);
+      expect(attached).toHaveBeenCalledTimes(1);
+
+      // Core ends due to host reboot: stream closes with host_shutdown while pid was 200.
+      link.handler!.closed('host_shutdown');
+      expect(p.attached).toBe(false);
+      // After reboot, the restarted kept shell reuses the exact same pid (200).
+      connection(true);
+      await settle(50);
+      expect(reopened).toHaveBeenCalledTimes(1);
+      expect(link.attaches).toHaveLength(8);
+      expect(p.attached).toBe(true);
+
+      // Hidden kept tab whose retries exhausted recovers when shown again.
+      p.setShown(false);
+      link.handler!.closed('disconnected');
+      link.held = true;
+      connection(true);
+      await settle(10);
+      for (let i = 0; i < 6; i++) {
+        link.refuse!();
+        await settle(1600);
+      }
+      expect(p.attached).toBe(false);
+      link.held = false;
+      p.setShown(true);
+      await settle(50);
+      expect(p.attached).toBe(true);
     });
   });
 });

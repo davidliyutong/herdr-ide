@@ -34,7 +34,16 @@ import { useDecorationVersion } from './decorations';
 import { noteFile } from './gone';
 import { startPolling } from './poller';
 import { parentOf } from './tree';
-import { dedupLoad, dropCachedFile, getCachedFile, putCachedFile, resetFileCache, REVALIDATE_MS, touchCachedFile } from './fileCache';
+import {
+  dedupLoad,
+  dropCachedFile,
+  dropInflightFile,
+  getCachedFile,
+  putCachedFile,
+  resetFileCache,
+  REVALIDATE_MS,
+  touchCachedFile,
+} from './fileCache';
 import { isMediaPath, MediaView } from '../../components/PreviewPane';
 import { isMarkdownPath } from '../../markdown/links';
 import { Markdown } from '../../markdown/Markdown';
@@ -529,6 +538,11 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const pendingKept = useRef<KeptText | undefined>(undefined);
   const loadKeyRef = useRef('');
+  const [retry, setRetry] = useState(0);
+  const machineStatus = useStore((s) => s.machines[m]?.status);
+  const prevMachine = useRef({ m, status: machineStatus });
+  const paneShownRef = useRef(paneShown);
+  paneShownRef.current = paneShown;
 
   const markClean = () => {
     const e = ed.current?.editor;
@@ -661,6 +675,8 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
    * shows conflict bar if dirty and changed, never flashes "Loading...". */
   const checkDisk = useCallback(async () => {
     if (savingRef.current) return;
+    const ms = useStore.getState().machines[m]?.status;
+    if (ms && ms !== 'ready') return;
     const [e] = await filesApi.stat(m, [path]);
     if (loadKeyRef.current !== currentKey) return;
     if (!e || e.error) return;
@@ -785,7 +801,7 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
     };
     // hasLineTarget only affects the initial markdown mode when opening a path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [m, pane, path, currentKey, isMarkdown, checkDisk]);
+  }, [m, pane, path, currentKey, isMarkdown, checkDisk, retry]);
 
   const isCurrentLoaded = loadedKey === currentKey;
   const isTextReady = isCurrentLoaded && (status.kind === 'ready' || status.kind === 'conflict');
@@ -982,6 +998,25 @@ function TextEditor({ m, pane, view, focused, shown: paneShown = true }: PaneVie
   useEffect(() => {
     if (focused && paneShown && showEditor) ed.current?.editor.focus();
   }, [focused, paneShown, showEditor]);
+
+  // When the pane's machine returns from offline/reboot/disable, reload an
+  // editor stuck on an error or stale in-flight load (keeping saved view
+  // state and unsaved edits) or check disk state immediately if already open.
+  const checkDiskRef = useRef(checkDisk);
+  checkDiskRef.current = checkDisk;
+  useEffect(() => {
+    const prev = prevMachine.current;
+    prevMachine.current = { m, status: machineStatus };
+    if (prev.m !== m || prev.status === 'ready' || machineStatus !== 'ready') return;
+    if (statusRef.current.kind === 'error' || statusRef.current.kind === 'loading') {
+      dropInflightFile(m, path);
+      setStatus({ kind: 'loading' });
+      setRetry((n) => n + 1);
+    } else if (statusRef.current.kind === 'ready' || statusRef.current.kind === 'conflict') {
+      if (paneShownRef.current) void checkDiskRef.current().catch(() => {});
+      else lastChecked.current = 0;
+    }
+  }, [m, path, machineStatus]);
 
   // A change on disk: polled only while this pane is visible on screen (hidden
   // kept tabs pause polling and revalidate once when shown again).

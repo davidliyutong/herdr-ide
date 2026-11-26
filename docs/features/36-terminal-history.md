@@ -24,7 +24,7 @@ The hub asks the machine's agent to `capture {lines, maxTerminals, maxTotalBytes
 
 1. The node admits one capture at a time. The capture takes the snapshots' lease (another writer makes it answer `busy`) and prunes incomplete and expired generations.
 2. It drops snapshots of terminals that ended with their program (any reason but the core's own end). A terminal gone from the records keeps its snapshots for 2 minutes, so a page can hand them to the terminal that replaced it (adopt). Then the oldest-captured terminals go until the limits hold.
-3. For each live terminal, oldest-captured first: a new program (pid) turns the current generation into the previous one; an unchanged screen (a hash of `terminal.read` without lines) is skipped, as is one refused before with the same screen and limits; otherwise it attaches as an observer, reads the first paint (CAN up to `ESC[?9001`), asks again with half the lines (down to 100) when the paint was dropped or exceeds 2 MiB, and again with the new grid (at most 3 times) when the core repainted. Window titles are stripped and the generation written, marked `restored` when the paint shows herdr-core's restored-screen line.
+3. For each live terminal, oldest-captured first: a new program (pid, or a snapshot captured before the host's current boot time even if the restarted shell reused the same pid) turns the current generation into the previous one (clearing the rotated pid to `0` for pre-boot snapshots — and reporting `pid: 0` on pre-boot `current` snapshots in `list`, `read`, and `adopt` before the first post-reboot capture — so viewers immediately recognize prior-boot output and keep the same snapshot key once rotated); an unchanged screen (a hash of `terminal.read` without lines) is skipped, as is one refused before with the same screen and limits; otherwise it attaches as an observer, reads the first paint (CAN up to `ESC[?9001`), asks again with half the lines (down to 100) when the paint was dropped or exceeds 2 MiB, and again with the new grid (at most 3 times) when the core repainted. Window titles are stripped and the generation written, marked `restored` when the paint shows herdr-core's restored-screen line.
 
 The answer counts captured, skipped, failed (with codes such as `no_paint`, `too_large`, `repainted`, `limit`, `timeout`), evicted and removed terminals. One failure does not stop the others.
 
@@ -39,21 +39,21 @@ Snapshots live in the machine's database ([38](38-sqlite-state.md)), table `hist
 The node runs history requests and cleanup in its own history worker. SQLite lock waits and durable writes can hold that worker while the node continues serving its other streams. The node stops waiting when a request is canceled. The worker observes cancellation once any synchronous SQLite call in progress returns.
 Lease retries use an increasing delay with jitter within the request's deadline.
 
-| Limit | Setting (per machine) | Default | Hard bounds |
-| --- | --- | --- | --- |
-| Lines of history above the screen per snapshot | `history.lines` | 2000 | 100–10000 |
-| Bytes per generation | – | – | 2 MiB |
-| Generations per terminal | – | – | 2 |
-| Terminals with snapshots | `history.maxTerminals` | 32 | 1–128 |
-| Space of all snapshots | `history.maxTotalMB` | 64 | 1–512 MB |
-| Days a snapshot is kept | `history.days` | 7 | 1–30 |
-| Seconds between captures | `history.interval` | 30 | 10–600 |
+| Limit                                          | Setting (per machine)  | Default | Hard bounds |
+| ---------------------------------------------- | ---------------------- | ------- | ----------- |
+| Lines of history above the screen per snapshot | `history.lines`        | 2000    | 100–10000   |
+| Bytes per generation                           | –                      | –       | 2 MiB       |
+| Generations per terminal                       | –                      | –       | 2           |
+| Terminals with snapshots                       | `history.maxTerminals` | 32      | 1–128       |
+| Space of all snapshots                         | `history.maxTotalMB`   | 64      | 1–512 MB    |
+| Days a snapshot is kept                        | `history.days`         | 7       | 1–30        |
+| Seconds between captures                       | `history.interval`     | 30      | 10–600      |
 
 The agent clamps what the hub asks to these bounds (`agentproto.History*`).
 
 ### The scheduler (`backend/features/history/scheduler.ts`)
 
-A machine keeps snapshots while `history.capture` (off by default, per machine; `--history-capture`) and the plugin are on. The hub asks for a capture `history.interval` seconds after the last one ended, one at a time per machine. The scheduler waits for the next due capture or clear, settings changes, or machine readiness. A machine that no longer keeps snapshots is asked to clear them, retried with a jittered backoff whose base delay grows to an hour, and on reconnect. The clear is audited as `history.clear`. A `--read-only` hub asks its machines for nothing.
+A machine keeps snapshots while `history.capture` (off by default, per machine; `--history-capture`) and the plugin are on. The hub asks for a capture `history.interval` seconds after the last one ended, one at a time per machine. The scheduler waits for the next due capture or clear, settings changes, machine readiness, or the terminal core becoming ready (so a capture that hit `not_running` right after SSH connected retries immediately once herdr-core starts). A machine that no longer keeps snapshots is asked to clear them, retried with a jittered backoff whose base delay grows to an hour, and on reconnect. The clear is audited as `history.clear`. A `--read-only` hub asks its machines for nothing.
 
 ### Routes
 
@@ -71,7 +71,7 @@ The page lists the snapshots of each machine with `history.capture` on (`follow.
 - its own generation of the previous program (the current one until the new program is captured, then the previous one), except where herdr-core restored the screen itself (`restored`, or `restoreScreen` until the new program is captured);
 - else, for a leaf that replaced another terminal (`before`), that terminal's newest generation. A writable page then adopts it into the leaf's terminal once.
 
-The page reads the bytes once and hands them to the pane as its prelude (`state/preludes.ts`, [26](26-web-terminals.md)), with the note `-- output saved <time>; the program above has ended --`. The pane writes the prelude into each new emulator at the snapshot's grid, then a complete reset, the dim note and a blank screen, before the first byte of the stream; the emulator then returns to the pane's grid, so the saved lines are ordinary scrollback (find, selection, copy). The emulator's answers, titles, clipboard writes, bells and synchronized-output holds from the prelude are dropped. A prelude that changes re-attaches the pane once. Failed lists and reads retry with back-off; preludes stay while a machine reconnects.
+The page reads the bytes once and hands them to the pane as its prelude (`state/preludes.ts`, [26](26-web-terminals.md)), with the note `-- output saved <time>; the program above has ended --`. The pane writes the prelude into each new emulator at the snapshot's grid (using a scratch frame so replaying at another grid never mutates the pane's live frame), then a complete reset, the dim note and a blank screen, before the first byte of the stream; the emulator then returns to the pane's grid, so the saved lines are ordinary scrollback (find, selection, copy). The first-paint quiet window starts once the stream attach resolves or its first bytes arrive so slow remote attaches do not cut off painting or scroll restoration. The emulator's answers, titles, clipboard writes, bells and synchronized-output holds from the prelude are dropped. A prelude that changes re-attaches the pane once. While a machine's terminal backend is not ready (offline, rebooting or disabled), polling pauses and existing preludes stay; when it returns to `ready`, retry back-off resets and a fresh snapshot list is fetched immediately before reading or updating preludes.
 
 The plugin's settings page shows what the machine keeps, whether `restore_screen` is on, and **Clear Saved Output** (`SettingsExtra.tsx`).
 
@@ -81,15 +81,15 @@ Snapshots go when older than `history.days`, when their terminal ended with its 
 
 ## Alternatives considered
 
-| Option | Why not |
-| --- | --- |
-| herdr-core's `restore_screen` alone | The user's setting in a shared file this app does not write; off by default and empty after a power loss. The plugin reads it and leaves the terminals it restored to it. |
-| `terminal.read` text as the snapshot | No styles, and with history it scrolls alternate-screen programs for every viewer. It serves only to detect a changed screen. |
-| Recording every byte continuously | A stream per terminal at the busiest program's speed and an ever-growing file; a periodic snapshot is what an emulator would rebuild anyway. |
-| A separate viewer of saved output | It would sit apart from the terminal's scrollback, find and selection. |
-| Snapshots kept by the hub | Only machines connected while they run, sent at every capture; the machine keeps its own output. |
-| Snapshots on by default | Terminal output holds secrets; writing it to disk is the user's choice per machine. |
-| Waiting for output to pause after the paint | Made a capture of 20 terminals take seconds. |
+| Option                                      | Why not                                                                                                                                                                   |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| herdr-core's `restore_screen` alone         | The user's setting in a shared file this app does not write; off by default and empty after a power loss. The plugin reads it and leaves the terminals it restored to it. |
+| `terminal.read` text as the snapshot        | No styles, and with history it scrolls alternate-screen programs for every viewer. It serves only to detect a changed screen.                                             |
+| Recording every byte continuously           | A stream per terminal at the busiest program's speed and an ever-growing file; a periodic snapshot is what an emulator would rebuild anyway.                              |
+| A separate viewer of saved output           | It would sit apart from the terminal's scrollback, find and selection.                                                                                                    |
+| Snapshots kept by the hub                   | Only machines connected while they run, sent at every capture; the machine keeps its own output.                                                                          |
+| Snapshots on by default                     | Terminal output holds secrets; writing it to disk is the user's choice per machine.                                                                                       |
+| Waiting for output to pause after the paint | Made a capture of 20 terminals take seconds.                                                                                                                              |
 
 ## Failure modes
 

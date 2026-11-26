@@ -35,9 +35,20 @@ export const isMediaPath = (path: string) => mediaExt.test(path);
 /** An image, video, audio file or PDF of a machine, as large as fits. */
 export function MediaView({ m, path, shown = true }: { m: string; path: string; shown?: boolean }) {
   const [videoError, setVideoError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  useEffect(() => setVideoError(false), [path]);
+  const machineStatus = useStore((s) => s.machines[m]?.status);
+  const prevMachine = useRef({ m, status: machineStatus });
+  useEffect(() => setVideoError(false), [path, reloadKey]);
+  useEffect(() => {
+    const prev = prevMachine.current;
+    prevMachine.current = { m, status: machineStatus };
+    if (prev.m === m && prev.status !== 'ready' && machineStatus === 'ready') {
+      setVideoError(false);
+      setReloadKey((n) => n + 1);
+    }
+  }, [m, machineStatus]);
   useEffect(() => {
     if (!shown) {
       videoRef.current?.pause();
@@ -47,15 +58,15 @@ export function MediaView({ m, path, shown = true }: { m: string; path: string; 
   const url = fileUrl(m, path);
   return (
     <>
-      {imageExt.test(path) && <img src={url} alt={path} />}
+      {imageExt.test(path) && <img key={reloadKey} src={url} alt={path} />}
       {videoExt.test(path) &&
         (videoError ? (
           <div className="pad muted">{t('preview.videoUnsupported')}</div>
         ) : (
-          <video ref={videoRef} src={url} controls autoPlay={shown} loop muted playsInline onError={() => setVideoError(true)} />
+          <video key={reloadKey} ref={videoRef} src={url} controls autoPlay={shown} loop muted playsInline onError={() => setVideoError(true)} />
         ))}
-      {audioExt.test(path) && <audio ref={audioRef} src={url} controls autoPlay={shown} />}
-      {/\.pdf$/i.test(path) && <iframe className="pdf-frame" src={url} title={path} />}
+      {audioExt.test(path) && <audio key={reloadKey} ref={audioRef} src={url} controls autoPlay={shown} />}
+      {/\.pdf$/i.test(path) && <iframe key={reloadKey} className="pdf-frame" src={url} title={path} />}
     </>
   );
 }
@@ -86,8 +97,15 @@ export function PreviewPane({ m, pane, path, shown = true }: { m: string; pane: 
   // Whether a Markdown file shows rendered (per pane, not kept).
   const [rendered, setRendered] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
-  // Bumped when the file, gone, is there again: it is loaded again.
+  // Bumped when the file, gone, is there again or the machine reconnects: it is loaded again.
   const [loads, setLoads] = useState(0);
+  const machineStatus = useStore((s) => s.machines[m]?.status);
+  const prevMachine = useRef({ m, status: machineStatus });
+  useEffect(() => {
+    const prev = prevMachine.current;
+    prevMachine.current = { m, status: machineStatus };
+    if (prev.m === m && prev.status !== 'ready' && machineStatus === 'ready') setLoads((n) => n + 1);
+  }, [m, machineStatus]);
 
   const isMedia = mediaExt.test(path);
   const url = fileUrl(m, path);

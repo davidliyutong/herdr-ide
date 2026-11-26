@@ -75,6 +75,10 @@ export const TIMING: Timing = {
  * within one capture. */
 export const REPAINT_TRIES = 3;
 
+/** Margin subtracted from the host's estimated boot time so clock jitter
+ * or uptime rounding never triggers a false rotation on a live process. */
+export const BOOT_SKEW_MS = 5_000;
+
 /** What a capture works with. */
 export interface CaptureEnv {
   base: string;
@@ -83,6 +87,9 @@ export interface CaptureEnv {
   timing: Timing;
   /** The time, in ms since the epoch. */
   now: () => number;
+  /** Estimated host boot time in ms since the epoch; snapshots taken before
+   * boot rotate to previous even if the restarted shell reuses the same pid. */
+  bootedAt?: () => number | undefined;
 }
 
 /** The instance's terminal core cannot be reached. Its wording is fixed:
@@ -288,12 +295,15 @@ class Capturer {
     const mem = this.env.memory;
     const s = this.s;
     // The program was replaced (a new shell of a kept terminal, also one
-    // that is live again after the agent was away): what it held becomes
-    // the previous generation before anything else is written.
+    // that is live again after the agent was away or the host rebooted and
+    // reused the same pid): what it held becomes the previous generation
+    // before anything else is written.
     const before = s.terms.get(addr);
-    if (before?.cur && before.cur.pid !== pid) {
+    const boot = this.env.bootedAt?.();
+    const fromEarlierBoot = !!before?.cur && boot !== undefined && before.cur.at < boot - BOOT_SKEW_MS;
+    if (before?.cur && (before.cur.pid !== pid || fromEarlierBoot)) {
       try {
-        s.rotate(addr);
+        s.rotate(addr, { clearPid: fromEarlierBoot });
       } catch {
         return { code: 'write', evicted: 0 };
       }

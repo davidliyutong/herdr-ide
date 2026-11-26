@@ -272,7 +272,9 @@ export class ChatSourceImpl implements ChatSource {
       this.fail(new CommandError(code, error.message));
       return;
     }
-    this.live({ link: code === 'offline' || code === 'lost' ? 'offline' : 'failed', linkError: error });
+    const ms = useStore.getState().machines[this.m];
+    const transientCore = code === 'no_terminal_core' && !!ms && (ms.status !== 'ready' || ms.hc?.state === 'starting');
+    this.live({ link: code === 'offline' || code === 'lost' || transientCore ? 'offline' : 'failed', linkError: error });
     if (FINAL.has(code)) {
       this.fail(new CommandError(code, error.message));
       return;
@@ -282,6 +284,9 @@ export class ChatSourceImpl implements ChatSource {
     this.again = true;
     if (this.attachedAt !== undefined && performance.now() - this.attachedAt >= RETRY_RESET_MS) this.retry = RETRY_MIN_MS;
     this.attachedAt = undefined;
+    // Pause retry timers while the machine is disabled; re-enabling wakes held
+    // sources immediately via syncMachineWatch().
+    if (ms?.status === 'disabled') return;
     const wait = code === 'lost' && this.retry === RETRY_MIN_MS ? 0 : retryDelay(this.retry);
     this.retry = Math.min(this.retry * 2, RETRY_MAX_MS);
     this.retryTimer = setTimeout(() => {
@@ -396,6 +401,25 @@ interface Held {
 
 const held = new Map<string, Held>();
 const keyOf = (m: string, chat: string) => `${m}\n${chat}`;
+let unwatchMachines: (() => void) | undefined;
+
+function syncMachineWatch() {
+  if (held.size > 0) {
+    unwatchMachines ??= useStore.subscribe((st, prev) => {
+      if (st.machines === prev.machines) return;
+      for (const [m, info] of Object.entries(st.machines)) {
+        const was = prev.machines[m];
+        const machineUp = info.status === 'ready' && was?.status !== 'ready';
+        const hcUp = info.hc?.state === 'ready' && was?.hc?.state !== 'ready';
+        if (!machineUp && !hcUp) continue;
+        for (const h of held.values()) if (h.source.m === m) h.source.wake();
+      }
+    });
+  } else {
+    unwatchMachines?.();
+    unwatchMachines = undefined;
+  }
+}
 
 function drop(k: string) {
   const h = held.get(k);
@@ -403,6 +427,7 @@ function drop(k: string) {
   clearTimeout(h.timer);
   held.delete(k);
   h.source.stop();
+  syncMachineWatch();
 }
 
 /** Lets go of h: kept KEEP_MS, the sources kept longest going first past
@@ -423,6 +448,7 @@ export function chatSource(m: string, chat: string): ChatSourceImpl {
   if (!h) {
     h = { source: new ChatSourceImpl(m, chat), refs: 0, idleSince: Date.now() };
     held.set(k, h);
+    syncMachineWatch();
     idle(k, h);
   }
   return h.source;
