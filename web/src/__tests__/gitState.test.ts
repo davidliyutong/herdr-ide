@@ -25,6 +25,7 @@ import {
   ACTIVE_MS,
   ACTIVE_POLL_MS,
   ACTIVE_REFRESH_MS,
+  applyOptimisticStatus,
   changed,
   forgetInput,
   nudge,
@@ -34,6 +35,7 @@ import {
   REFRESH_MS,
   repoKey,
   RETRY_MS,
+  runGit,
   SLOW_FACTOR,
   useGit,
   useReposOf,
@@ -41,7 +43,7 @@ import {
   type RepoState,
 } from '../plugins/git/state';
 import { useTerms } from '../state/terms';
-import type { StatusFile } from '../plugins/git/api';
+import type { Status, StatusFile } from '../plugins/git/api';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -348,5 +350,73 @@ describe('following a repository', () => {
     expect(count('status', `${root}/sub`)).toBeGreaterThanOrEqual(1);
     await act(async () => useShownDirs.setState({ m: undefined, dirs: [] }));
     expect(leaseCount()).toEqual({ held: 0, watching: 0 });
+  });
+
+  it('discards an earlier in-flight status read that races with an optimistic stage', async () => {
+    files = [{ path: 'a.txt', x: '.', y: 'M', kind: 'changed' }];
+    await act(async () => void (await refresh('m', root)));
+    expect(state().status!.files).toEqual([{ path: 'a.txt', x: '.', y: 'M', kind: 'changed' }]);
+
+    // Start a slow background status read that still returns pre-stage files.
+    let releaseStale!: () => void;
+    statusHold = new Promise<void>((r) => (releaseStale = r));
+    const staleRead = refresh('m', root);
+
+    // Stage a.txt optimistically while the stale read is still in flight.
+    files = [{ path: 'a.txt', x: 'M', y: '.', kind: 'changed' }];
+    const stageDone = runGit('m', root, 'stage', { paths: ['a.txt'] });
+    expect(state().status!.files).toEqual([{ path: 'a.txt', x: 'M', y: '.', kind: 'changed' }]);
+
+    // Stale read finishes first -> must NOT revert a.txt back to unstaged.
+    statusHold = undefined;
+    releaseStale();
+    await act(async () => void (await staleRead));
+    expect(state().status!.files).toEqual([{ path: 'a.txt', x: 'M', y: '.', kind: 'changed' }]);
+
+    await act(async () => void (await stageDone));
+    expect(state().status!.files).toEqual([{ path: 'a.txt', x: 'M', y: '.', kind: 'changed' }]);
+  });
+
+  it('computes optimistic status transitions for stage, unstage and discard', () => {
+    const base: Status = {
+      branch: 'main',
+      head: 'h1',
+      ahead: 0,
+      behind: 0,
+      files: [
+        { path: 'mod.ts', x: '.', y: 'M', kind: 'changed', mtime: 10, size: 5 },
+        { path: 'both.ts', x: 'M', y: 'M', kind: 'changed', mtime: 10, size: 5 },
+        { path: 'new.ts', x: '?', y: '?', kind: 'untracked' },
+        { path: 'added.ts', x: 'A', y: '.', kind: 'changed' },
+        { path: 'ren.ts', orig: 'old.ts', x: 'R', y: '.', kind: 'renamed' },
+        { path: 'ign.log', x: '!', y: '!', kind: 'ignored' },
+      ],
+    };
+    const staged = applyOptimisticStatus(base, 'stage', { paths: ['mod.ts', 'new.ts'] });
+    expect(staged.files.find((f) => f.path === 'mod.ts')).toEqual({ path: 'mod.ts', x: 'M', y: '.', kind: 'changed' });
+    expect(staged.files.find((f) => f.path === 'new.ts')).toEqual({ path: 'new.ts', x: 'A', y: '.', kind: 'changed' });
+    expect(staged.files.find((f) => f.path === 'ign.log')).toEqual({ path: 'ign.log', x: '!', y: '!', kind: 'ignored' });
+
+    const stagedTracked = applyOptimisticStatus(base, 'stage', { all: true, tracked: true });
+    expect(stagedTracked.files.find((f) => f.path === 'mod.ts')).toEqual({ path: 'mod.ts', x: 'M', y: '.', kind: 'changed' });
+    expect(stagedTracked.files.find((f) => f.path === 'new.ts')).toEqual({ path: 'new.ts', x: '?', y: '?', kind: 'untracked' });
+
+    const unstaged = applyOptimisticStatus(base, 'unstage', { paths: ['added.ts', 'ren.ts', 'old.ts', 'both.ts'] });
+    expect(unstaged.files.find((f) => f.path === 'added.ts')).toEqual({ path: 'added.ts', x: '?', y: '?', kind: 'untracked' });
+    expect(unstaged.files.find((f) => f.path === 'ren.ts')).toEqual({ path: 'ren.ts', x: '?', y: '?', kind: 'untracked' });
+    expect(unstaged.files.find((f) => f.path === 'old.ts')).toEqual({ path: 'old.ts', x: '.', y: 'D', kind: 'changed' });
+    expect(unstaged.files.find((f) => f.path === 'both.ts')).toEqual({
+      path: 'both.ts',
+      x: '.',
+      y: 'M',
+      kind: 'changed',
+      mtime: 10,
+      size: 5,
+    });
+
+    const discarded = applyOptimisticStatus(base, 'discard', { paths: ['mod.ts', 'both.ts'], untracked: ['new.ts'] });
+    expect(discarded.files.find((f) => f.path === 'mod.ts')).toBeUndefined();
+    expect(discarded.files.find((f) => f.path === 'new.ts')).toBeUndefined();
+    expect(discarded.files.find((f) => f.path === 'both.ts')).toEqual({ path: 'both.ts', x: 'M', y: '.', kind: 'changed' });
   });
 });

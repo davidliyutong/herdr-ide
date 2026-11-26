@@ -23,6 +23,10 @@ export interface PanelMemory {
   /** The commit box's height as the user dragged it (CSS). */
   draftHeight?: string;
   amend: boolean;
+  /** What checking Amend auto-filled into the draft, so unchecking Amend
+   * without editing restores what was there before (and a HEAD move can
+   * refresh it). */
+  amendPrefill?: { head: string; filled: string; prior: string };
   /** The changes' scroll position. */
   scroll: number;
   history?: { commits: Commit[]; refs: Ref[]; more: boolean };
@@ -66,12 +70,14 @@ export function useKept<F extends Field>(
 ): [PanelMemory[F], (v: PanelMemory[F] | ((cur: PanelMemory[F]) => PanelMemory[F])) => void] {
   const [value, setValue] = useState<PanelMemory[F]>(() => panelMemory(m, root)[field]);
   const set = useCallback(
-    (v: PanelMemory[F] | ((cur: PanelMemory[F]) => PanelMemory[F])) =>
+    (v: PanelMemory[F] | ((cur: PanelMemory[F]) => PanelMemory[F])) => {
+      if (typeof v !== 'function') panelMemory(m, root)[field] = v;
       setValue((cur) => {
         const next = typeof v === 'function' ? (v as (cur: PanelMemory[F]) => PanelMemory[F])(cur) : v;
         panelMemory(m, root)[field] = next;
         return next;
-      }),
+      });
+    },
     [m, root, field],
   );
   return [value, set];

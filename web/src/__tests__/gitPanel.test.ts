@@ -137,9 +137,13 @@ describe('GitPanel', () => {
   /** The repository's remotes and the branch's upstream. */
   let remotes: string[];
   let upstream: string | undefined;
-  /** Answers log requests instead of the two pages below, when set. */
+  /** Answers log, show or POST requests instead of the defaults, when set. */
   let logImpl: ((q: URLSearchParams) => Promise<Response>) | undefined;
+  let showImpl: ((q: URLSearchParams) => Promise<Response>) | undefined;
+  let postImpl: ((action: string, body: Record<string, unknown>) => Promise<Response>) | undefined;
+  let head: string | undefined;
   const logs: URLSearchParams[] = [];
+  const shows: URLSearchParams[] = [];
   const flush = async () => {
     for (let i = 0; i < 4; i++) await act(async () => settle());
   };
@@ -150,12 +154,16 @@ describe('GitPanel', () => {
   beforeEach(async () => {
     posts.length = 0;
     logs.length = 0;
+    shows.length = 0;
     status = files.slice(0, 4);
     parents = undefined;
     nested = undefined;
     remotes = ['origin'];
     upstream = 'origin/main';
+    head = 'h1';
     logImpl = undefined;
+    showImpl = undefined;
+    postImpl = undefined;
     forgetRepos();
     forgetPanels();
     useGit.setState({ repos: {} });
@@ -163,7 +171,9 @@ describe('GitPanel', () => {
       const url = new URL(input, 'http://x');
       const action = url.pathname.split('/').pop()!;
       if (init?.method === 'POST') {
-        posts.push({ action, body: JSON.parse(String(init.body)) });
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push({ action, body });
+        if (postImpl) return postImpl(action, body);
         return new Response('{}');
       }
       switch (action) {
@@ -174,7 +184,7 @@ describe('GitPanel', () => {
               gitDir: ROOT + '/.git',
               commonDir: ROOT + '/.git',
               branch: 'main',
-              head: 'h1',
+              head,
               ahead: 1,
               behind: 0,
               upstream,
@@ -189,7 +199,7 @@ describe('GitPanel', () => {
           return new Response(
             JSON.stringify({
               branch: repo === ROOT ? 'main' : 'sub-branch',
-              head: 'h1',
+              head,
               upstream,
               ahead: 1,
               behind: 0,
@@ -213,6 +223,8 @@ describe('GitPanel', () => {
           );
         }
         case 'show':
+          shows.push(url.searchParams);
+          if (showImpl) return showImpl(url.searchParams);
           return new Response(
             JSON.stringify({ base: 'h0', target: 'h1', files: [{ path: 'src/a.ts', status: 'M', added: 3, deleted: 1 }] }),
           );
@@ -718,5 +730,285 @@ describe('GitPanel', () => {
     expect(ago(now - 2 * 86400, now)).toBe('2d');
     expect(ago(now - 30 * 86400, now)).toBe('4w');
     expect(ago(now - 800 * 86400, now)).toBe('2y');
+  });
+
+  describe('amend commit message prefill', () => {
+    const box = () => host.querySelector<HTMLTextAreaElement>('.git-message')!;
+    const amend = () => host.querySelector<HTMLInputElement>('.git-amend input')!;
+    const type = (text: string) =>
+      act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box(), text);
+        box().dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    const commitResp = (hash: string, message: string) =>
+      new Response(
+        JSON.stringify({
+          base: '',
+          target: hash,
+          files: [],
+          commit: {
+            hash,
+            parents: [],
+            author: 'A',
+            email: 'a@x',
+            date: 1,
+            committer: 'A',
+            committerEmail: 'a@x',
+            commitDate: 1,
+            subject: message.split('\n')[0],
+            message,
+          },
+        }),
+      );
+
+    it('prefills HEAD’s full message when empty and restores the prior draft when unchecked untouched', async () => {
+      const full = 'Fix parser\n\nHandle empty lines cleanly.';
+      showImpl = async (q) => {
+        expect(q.get('rev')).toBe('h1');
+        expect(q.get('noFiles')).toBe('1');
+        return commitResp('h1', full);
+      };
+      await act(async () => amend().click());
+      await flush();
+      expect(amend().checked).toBe(true);
+      expect(box().value).toBe(full);
+      // Unchecking without editing restores the empty box.
+      await act(async () => amend().click());
+      expect(amend().checked).toBe(false);
+      expect(box().value).toBe('');
+    });
+
+    it('preserves user edits when unchecking Amend after prefill', async () => {
+      showImpl = async () => commitResp('h1', 'Original subject\n\nBody');
+      await act(async () => amend().click());
+      await flush();
+      expect(box().value).toBe('Original subject\n\nBody');
+      await type('Edited subject\n\nBody');
+      await act(async () => amend().click());
+      expect(amend().checked).toBe(false);
+      expect(box().value).toBe('Edited subject\n\nBody');
+    });
+
+    it('does not clobber already-typed text when checking Amend', async () => {
+      showImpl = async () => commitResp('h1', 'HEAD message');
+      await type('My unsaved draft');
+      await act(async () => amend().click());
+      await flush();
+      expect(box().value).toBe('My unsaved draft');
+      expect(shows).toHaveLength(0);
+      await act(async () => amend().click());
+      expect(box().value).toBe('My unsaved draft');
+    });
+
+    it('ignores a late prefill if the user starts typing or unchecks Amend first', async () => {
+      let resolveShow!: (r: Response) => void;
+      showImpl = () => new Promise<Response>((r) => (resolveShow = r));
+      await act(async () => amend().click());
+      await type('Typed while loading');
+      await act(async () => resolveShow(commitResp('h1', 'Late HEAD message')));
+      await flush();
+      expect(box().value).toBe('Typed while loading');
+
+      // Also when Amend is unchecked before the fetch resolves.
+      await act(async () => amend().click());
+      await type('');
+      let resolveShow2!: (r: Response) => void;
+      showImpl = () => new Promise<Response>((r) => (resolveShow2 = r));
+      await act(async () => amend().click());
+      await act(async () => amend().click());
+      await act(async () => resolveShow2(commitResp('h1', 'Late HEAD message')));
+      await flush();
+      expect(amend().checked).toBe(false);
+      expect(box().value).toBe('');
+    });
+
+    it('skips prefill on an unborn repository without HEAD', async () => {
+      head = undefined;
+      await act(async () => button(t('git.refresh'))!.click());
+      await flush();
+      shows.length = 0;
+      await act(async () => amend().click());
+      await flush();
+      expect(amend().checked).toBe(true);
+      expect(box().value).toBe('');
+      expect(shows).toHaveLength(0);
+    });
+
+    it('refreshes untouched prefill when HEAD moves, and restores across remounts', async () => {
+      showImpl = async (q) => commitResp(q.get('rev')!, q.get('rev') === 'h2' ? 'Second commit' : 'First commit');
+      await act(async () => amend().click());
+      await flush();
+      expect(box().value).toBe('First commit');
+
+      // HEAD moves while Amend is checked and untouched -> refreshes to h2.
+      head = 'h2';
+      await act(async () => button(t('git.refresh'))!.click());
+      await flush();
+      expect(box().value).toBe('Second commit');
+
+      // Remount keeps both the prefill and the ability to restore when unchecked.
+      await act(async () => root.unmount());
+      root = createRoot(host);
+      await act(async () => root.render(createElement(GitPanel)));
+      await flush();
+      expect(amend().checked).toBe(true);
+      expect(box().value).toBe('Second commit');
+      await act(async () => amend().click());
+      expect(box().value).toBe('');
+    });
+  });
+
+  describe('smooth staging, unstaging and discarding without view jumps', () => {
+    it('updates rows optimistically on stage, unstage and discard without busy banner or button flash', async () => {
+      let releasePost!: () => void;
+      postImpl = async () => {
+        await new Promise<void>((r) => (releasePost = r));
+        return new Response('{}');
+      };
+      const logsBefore = logs.length;
+
+      // Stage old.txt: immediately moves to Staged Changes before POST finishes.
+      const oldRow = rowOf(t('git.group.changes'), 'old.txt');
+      await act(async () => button(t('git.stage'), oldRow)!.click());
+      expect(section(t('git.group.staged')).textContent).toContain('old.txt');
+      expect(section(t('git.group.changes')).textContent).not.toContain('old.txt');
+      // No layout-shifting busy banner and no disabled flash on Commit / Sync.
+      expect(host.querySelector('.git-busy')).toBeNull();
+      expect(button(t('git.commit.button'))!.disabled).toBe(false);
+      expect(host.querySelector<HTMLButtonElement>('.git-sync')!.disabled).toBe(false);
+      status = [files[0], files[1], { path: 'old.txt', x: 'D', y: '.', kind: 'changed' }, files[3]];
+      await act(async () => releasePost());
+      await flush();
+      expect(section(t('git.group.staged')).textContent).toContain('old.txt');
+      // Staging must not trigger unnecessary history reloads.
+      expect(logs.length).toBe(logsBefore);
+
+      // Unstage src/new.ts: immediately moves to Changes before POST finishes.
+      const newRow = rowOf(t('git.group.staged'), 'new.ts');
+      await act(async () => button(t('git.unstage'), newRow)!.click());
+      expect(section(t('git.group.staged')).textContent).not.toContain('new.ts');
+      expect(section(t('git.group.changes')).textContent).toContain('new.ts');
+      expect(host.querySelector('.git-busy')).toBeNull();
+      status = [
+        files[0],
+        { path: 'src/new.ts', x: '?', y: '?', kind: 'untracked' },
+        { path: 'old.txt', x: 'D', y: '.', kind: 'changed' },
+        files[3],
+      ];
+      await act(async () => releasePost());
+      await flush();
+      expect(section(t('git.group.changes')).textContent).toContain('new.ts');
+
+      // Discard notes/todo.md: immediately removed after confirm, before POST finishes.
+      const todoRow = rowOf(t('git.group.changes'), 'todo.md');
+      await act(async () => button(t('git.discard'), todoRow)!.click());
+      const req = useDialog.getState().current as { resolve(ok: boolean): void };
+      await act(async () => req.resolve(true));
+      expect(section(t('git.group.changes')).textContent).not.toContain('todo.md');
+      expect(host.querySelector('.git-busy')).toBeNull();
+      status = status.filter((f) => f.path !== 'notes/todo.md');
+      await act(async () => releasePost());
+      await flush();
+      expect(section(t('git.group.changes')).textContent).not.toContain('todo.md');
+    });
+
+    it('reconciles back cleanly if stage fails on the machine', async () => {
+      postImpl = async () => new Response(JSON.stringify({ error: 'git_failed', message: 'git_failed: locked' }), { status: 400 });
+      await act(async () => button(t('git.stage'), rowOf(t('git.group.changes'), 'old.txt'))!.click());
+      await flush();
+      // Server status still has old.txt unstaged, so the optimistic move rolled back.
+      expect(section(t('git.group.changes')).textContent).toContain('old.txt');
+      expect(section(t('git.group.staged')).textContent).not.toContain('old.txt');
+    });
+
+    it('serializes rapid consecutive stage clicks and reconciles once', async () => {
+      const resolvers: Array<() => void> = [];
+      const order: string[] = [];
+      postImpl = async (_action, body) => {
+        order.push(`start:${String((body.paths as string[])[0])}`);
+        await new Promise<void>((r) => resolvers.push(r));
+        order.push(`end:${String((body.paths as string[])[0])}`);
+        return new Response('{}');
+      };
+      await act(async () => button(t('git.stage'), rowOf(t('git.group.changes'), 'old.txt'))!.click());
+      await act(async () => button(t('git.stage'), rowOf(t('git.group.changes'), 'todo.md'))!.click());
+      // Both rows moved optimistically right away, while only the first POST started.
+      expect(section(t('git.group.staged')).textContent).toContain('old.txt');
+      expect(section(t('git.group.staged')).textContent).toContain('todo.md');
+      expect(order).toEqual(['start:old.txt']);
+      status = [
+        files[0],
+        files[1],
+        { path: 'old.txt', x: 'D', y: '.', kind: 'changed' },
+        { path: 'notes/todo.md', x: 'A', y: '.', kind: 'changed' },
+      ];
+      await act(async () => resolvers.shift()!());
+      await flush();
+      expect(order).toEqual(['start:old.txt', 'end:old.txt', 'start:notes/todo.md']);
+      await act(async () => resolvers.shift()!());
+      await flush();
+      expect(order).toEqual(['start:old.txt', 'end:old.txt', 'start:notes/todo.md', 'end:notes/todo.md']);
+      expect(section(t('git.group.staged')).textContent).toContain('old.txt');
+      expect(section(t('git.group.staged')).textContent).toContain('todo.md');
+    });
+
+    it('anchors scroll position and preserves list focus when staging grows Staged Changes above a scrolled Changes section', async () => {
+      // Simulate realistic section geometry: Staged grows from 72px to 96px when old.txt is staged.
+      const groupsEl = host.querySelector<HTMLElement>('.git-groups')!;
+      let stagedHeight = 72;
+      const attachGeometry = () => {
+        const stagedSec = host.querySelector<HTMLElement>('.git-section-staged');
+        const changesSec = host.querySelector<HTMLElement>('.git-section-changes');
+        if (stagedSec) {
+          Object.defineProperty(stagedSec, 'offsetTop', { configurable: true, get: () => 0 });
+          Object.defineProperty(stagedSec, 'offsetHeight', { configurable: true, get: () => stagedHeight });
+        }
+        if (changesSec) {
+          Object.defineProperty(changesSec, 'offsetTop', { configurable: true, get: () => stagedHeight });
+          Object.defineProperty(changesSec, 'offsetHeight', { configurable: true, get: () => 240 });
+        }
+      };
+      attachGeometry();
+      // Trigger a layout measurement pass at scrollTop = 120.
+      groupsEl.scrollTop = 120;
+      await act(async () => void groupsEl.dispatchEvent(new Event('scroll')));
+
+      let releasePost!: () => void;
+      postImpl = async () => {
+        await new Promise<void>((r) => (releasePost = r));
+        return new Response('{}');
+      };
+
+      const stageBtn = button(t('git.stage'), rowOf(t('git.group.changes'), 'old.txt'))!;
+      stageBtn.focus();
+      expect(document.activeElement).toBe(stageBtn);
+      // Staged Changes grows by +24px as old.txt moves into it.
+      stagedHeight = 96;
+      await act(async () => stageBtn.click());
+      // scrollTop shifted by +24px (120 -> 144) so Changes stays visually stationary.
+      expect(groupsEl.scrollTop).toBe(144);
+      // Focus was preserved on the list rather than dropping to document.body.
+      expect(document.activeElement).toBe(groupsEl);
+
+      status = [files[0], files[1], { path: 'old.txt', x: 'D', y: '.', kind: 'changed' }, files[3]];
+      await act(async () => releasePost());
+      await flush();
+      expect(groupsEl.scrollTop).toBe(144);
+    });
+
+    it('renders the busy indicator inside the toolbar for non-inline actions without shifting layout', async () => {
+      let releasePost!: () => void;
+      postImpl = async () => {
+        await new Promise<void>((r) => (releasePost = r));
+        return new Response('{}');
+      };
+      await act(async () => button(t('git.pull'))!.click());
+      const busyEl = host.querySelector('.git-busy');
+      expect(busyEl).not.toBeNull();
+      expect(busyEl!.closest('.git-toolbar')).not.toBeNull();
+      await act(async () => releasePost());
+      await flush();
+      expect(host.querySelector('.git-busy')).toBeNull();
+    });
   });
 });

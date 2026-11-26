@@ -118,8 +118,17 @@ test('change audit', async () => {
 });
 
 test('query params', () => {
-  const q = new URLSearchParams('repo=/r&skip=300&limit=10&branch=main&branch=dev&remotes=1&rev=abc&parent=2&other=x&path=');
-  expect(queryParams(q)).toEqual({ repo: '/r', skip: 300, limit: 10, branches: ['main', 'dev'], remotes: true, rev: 'abc', parent: 2 });
+  const q = new URLSearchParams('repo=/r&skip=300&limit=10&branch=main&branch=dev&remotes=1&noFiles=1&rev=abc&parent=2&other=x&path=');
+  expect(queryParams(q)).toEqual({
+    repo: '/r',
+    skip: 300,
+    limit: 10,
+    branches: ['main', 'dev'],
+    remotes: true,
+    noFiles: true,
+    rev: 'abc',
+    parent: 2,
+  });
   for (const bad of ['skip=a', 'limit=1.5', 'parent=99999999999999999999'])
     expect(() => queryParams(new URLSearchParams(bad))).toThrow(expect.objectContaining({ code: 'bad_request', status: 400 }));
 });

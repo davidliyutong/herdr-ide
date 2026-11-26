@@ -17,7 +17,7 @@ import { useTerms } from '../../state/terms';
 import { directoryOf, type TerminalRecord } from '../../term/protocol';
 import { t } from '../../i18n';
 import { refreshDecorations } from '../files/decorations';
-import { errorText, gitApi, GitError, noRepo, type RepoInfo, type Status, type Watch } from './api';
+import { errorText, gitApi, GitError, noRepo, type RepoInfo, type Status, type StatusFile, type Watch } from './api';
 
 /** How often a shown repository's watch token is read; ACTIVE_POLL_MS
  * while the repository is active. */
@@ -93,13 +93,146 @@ interface Track {
   activeAt: number;
   /** The status last read, to see whether the next one differs. */
   seen?: string;
+  /** Monotonic counter bumped when a UI mutation starts, so an earlier
+   * in-flight status read never overwrites an optimistic update. */
+  gen: number;
+  /** Number of UI mutations currently queued or running for this repo. */
+  pending: number;
+  /** Serializes mutations on the same repository so consecutive stage/unstage
+   * clicks never race on .git/index.lock. */
+  queue: Promise<void>;
 }
 const tracks = new Map<string, Track>();
 const track = (k: string): Track => {
   let tr = tracks.get(k);
-  if (!tr) tracks.set(k, (tr = { due: false, info: false, failures: 0, nextAt: 0, activeAt: 0 }));
+  if (!tr)
+    tracks.set(k, (tr = { due: false, info: false, failures: 0, nextAt: 0, activeAt: 0, gen: 0, pending: 0, queue: Promise.resolve() }));
   return tr;
 };
+
+/** Fast working-tree/index actions applied optimistically in place without
+ * toggling the panel's busy banner or disabling unrelated controls. */
+const INLINE_ACTIONS = new Set(['stage', 'unstage', 'discard']);
+
+/** Applies an optimistic stage, unstage or discard to status so rows move
+ * immediately while the machine runs git; the follow-up status read reconciles
+ * any nuance (renames, filters, failures). */
+export function applyOptimisticStatus(status: Status, action: string, params: Record<string, unknown>): Status {
+  if (action === 'stage') {
+    const all = !!params.all;
+    const tracked = !!params.tracked;
+    const paths = new Set(Array.isArray(params.paths) ? params.paths.map(String) : []);
+    if (!all && !paths.size) return status;
+    const files: StatusFile[] = [];
+    for (const f of status.files) {
+      if (f.kind === 'ignored') {
+        files.push(f);
+        continue;
+      }
+      const hit = all ? !tracked || f.kind !== 'untracked' : paths.has(f.path);
+      if (!hit) {
+        files.push(f);
+        continue;
+      }
+      if (f.kind === 'untracked') {
+        files.push({ path: f.path, x: 'A', y: '.', kind: 'changed', ...(f.submodule ? { submodule: true } : {}) });
+      } else if (f.kind === 'unmerged') {
+        if (!(f.x === 'D' && f.y === 'D')) {
+          files.push({ path: f.path, x: 'M', y: '.', kind: 'changed', ...(f.submodule ? { submodule: true } : {}) });
+        }
+      } else if (f.y === '.') {
+        files.push(f);
+      } else if (f.x === 'A' && f.y === 'D') {
+        // Added in the index and deleted in the working tree: staging removes it.
+      } else {
+        const nextX = f.x === '.' ? f.y : f.y === 'D' ? 'D' : f.x;
+        files.push({
+          path: f.path,
+          ...(f.orig ? { orig: f.orig } : {}),
+          x: nextX,
+          y: '.',
+          kind: f.kind,
+          ...(f.submodule ? { submodule: true } : {}),
+        });
+      }
+    }
+    return { ...status, files };
+  }
+  if (action === 'unstage') {
+    const all = !!params.all;
+    const paths = new Set(Array.isArray(params.paths) ? params.paths.map(String) : []);
+    if (!all && !paths.size) return status;
+    const raw: StatusFile[] = [];
+    for (const f of status.files) {
+      if (f.kind === 'ignored' || f.kind === 'untracked') {
+        raw.push(f);
+        continue;
+      }
+      const hit = all ? f.x !== '.' || f.kind === 'unmerged' : paths.has(f.path) || (!!f.orig && paths.has(f.orig));
+      if (!hit || f.kind === 'unmerged' || f.x === '.') {
+        raw.push(f);
+        continue;
+      }
+      if (f.kind === 'renamed') {
+        if (f.y !== 'D') {
+          raw.push({ path: f.path, x: '?', y: '?', kind: 'untracked', ...(f.submodule ? { submodule: true } : {}) });
+        }
+        if (f.orig) raw.push({ path: f.orig, x: '.', y: 'D', kind: 'changed' });
+      } else if (f.x === 'A') {
+        if (f.y !== 'D') {
+          raw.push({ path: f.path, x: '?', y: '?', kind: 'untracked', ...(f.submodule ? { submodule: true } : {}) });
+        }
+      } else {
+        const nextY = f.y === '.' ? f.x : f.y;
+        raw.push({
+          path: f.path,
+          x: '.',
+          y: nextY,
+          kind: 'changed',
+          ...(f.submodule ? { submodule: true } : {}),
+          ...(f.mtime !== undefined ? { mtime: f.mtime } : {}),
+          ...(f.size !== undefined ? { size: f.size } : {}),
+        });
+      }
+    }
+    const seen = new Set<string>();
+    const files: StatusFile[] = [];
+    for (const f of raw) {
+      if (seen.has(f.path)) continue;
+      seen.add(f.path);
+      files.push(f);
+    }
+    return { ...status, files };
+  }
+  if (action === 'discard') {
+    const tracked = new Set(Array.isArray(params.paths) ? params.paths.map(String) : []);
+    const untracked = new Set(Array.isArray(params.untracked) ? params.untracked.map(String) : []);
+    if (!tracked.size && !untracked.size) return status;
+    const files: StatusFile[] = [];
+    for (const f of status.files) {
+      if (f.kind === 'untracked') {
+        if (!untracked.has(f.path)) files.push(f);
+      } else if (f.kind === 'ignored') {
+        files.push(f);
+      } else if (tracked.has(f.path) && f.kind !== 'unmerged') {
+        if (f.x !== '.') {
+          files.push({
+            path: f.path,
+            ...(f.orig ? { orig: f.orig } : {}),
+            x: f.x,
+            y: '.',
+            kind: f.kind,
+            ...(f.submodule ? { submodule: true } : {}),
+          });
+        }
+      } else {
+        files.push(f);
+      }
+    }
+    return { ...status, files };
+  }
+  return status;
+}
 
 /** When keys or the pointer were last used in the page. */
 let inputAt = 0;
@@ -152,6 +285,8 @@ function start(m: string, root: string, info: boolean): Promise<void> {
 
 async function read(m: string, root: string, withInfo: boolean) {
   const k = repoKey(m, root);
+  const tr = track(k);
+  const gen = tr.gen;
   const t0 = Date.now();
   const needInfo = withInfo || !useGit.getState().repos[k]?.info;
   try {
@@ -162,17 +297,23 @@ async function read(m: string, root: string, withInfo: boolean) {
       gitApi.status(m, root),
     ]);
     paced(k, Date.now() - t0);
-    const tr = track(k);
+    // A status read that raced with a newer UI mutation must not overwrite
+    // the optimistic state with pre-mutation data.
+    if (tr.pending > 0 || tr.gen !== gen) {
+      if (info) patch(m, root, () => ({ info }));
+      return;
+    }
     const seen = JSON.stringify(status);
-    const same = tr.seen === seen;
-    if (tr.seen !== undefined && !same) tr.activeAt = Date.now();
+    if (tr.seen !== undefined && tr.seen !== seen) tr.activeAt = Date.now();
     tr.seen = seen;
     let kept = false;
     patch(m, root, (s) => {
       // Without a watch (it failed), HEAD's move is seen here.
       const moved = !!s.status && (s.status.head !== status.head || s.status.branch !== status.branch);
-      // The same status keeps its object: what is drawn of it stays.
-      kept = same && !!s.status;
+      // The same status keeps its object: what is drawn of it stays. Compare
+      // against s.status so a matching optimistic update avoids a redraw while
+      // a failed optimistic update always reconciles back to git's status.
+      kept = !!s.status && JSON.stringify(s.status) === seen;
       return {
         ...(info ? { info } : {}),
         status: kept ? s.status : status,
@@ -216,20 +357,20 @@ const tokensOf = (w: Watch) => ({ token: w.token, refsToken: w.refs ?? w.token, 
  * configuration did (or both with all, as Refresh asks). The tokens seen
  * become the polls' own, so they do not count the change again.
  */
-export async function changed(m: string, root: string, o: { all?: boolean } = {}) {
+export async function changed(m: string, root: string, o: { all?: boolean; indexOnly?: boolean } = {}) {
   let w: Watch | undefined;
   try {
     w = await gitApi.watch(m, root);
   } catch {
     // Without a token everything may have moved.
   }
-  let info = true;
+  let info = !o.indexOnly;
   track(repoKey(m, root)).activeAt = Date.now();
   patch(m, root, (s) => {
-    if (!w) return { version: s.version + 1, refs: s.refs + 1 };
+    if (!w) return { version: s.version + 1, refs: o.indexOnly ? s.refs : s.refs + 1 };
     const tk = tokensOf(w);
-    const refsMoved = !!o.all || tk.refsToken !== s.refsToken;
-    info = !!o.all || tk.configToken !== s.configToken;
+    const refsMoved = !!o.all || (!(o.indexOnly && s.refsToken === undefined) && tk.refsToken !== s.refsToken);
+    info = !!o.all || (!(o.indexOnly && s.configToken === undefined) && tk.configToken !== s.configToken);
     return { ...tk, version: s.version + 1, refs: refsMoved ? s.refs + 1 : s.refs };
   });
   return refresh(m, root, { fresh: true, info });
@@ -240,7 +381,7 @@ const visible = () => typeof document === 'undefined' || document.visibilityStat
 async function poll(m: string, root: string) {
   if (!visible()) return;
   const k = repoKey(m, root);
-  if (useGit.getState().repos[k]?.busy) return;
+  if (useGit.getState().repos[k]?.busy || track(k).pending > 0) return;
   let w: Watch | undefined;
   try {
     w = await gitApi.watch(m, root);
@@ -407,13 +548,37 @@ export function useRepo(m: string | undefined, root: string | undefined): RepoSt
 /**
  * Runs a change and reads the repository again; a failure is a toast
  * (auth_required suggests a terminal). Resolves with whether it worked.
+ * Fast index/working-tree actions (stage, unstage, discard) apply
+ * optimistically right away, serialize per repository so rapid clicks never
+ * race on git's index lock, and reconcile once the batch settles.
  */
 export async function runGit(m: string, root: string, action: string, params: Record<string, unknown> = {}): Promise<boolean> {
   if (useStore.getState().readOnly) {
     useStore.getState().toast(t('git.readOnly'));
     return false;
   }
-  patch(m, root, () => ({ busy: action }));
+  const k = repoKey(m, root);
+  const tr = track(k);
+  const inline = INLINE_ACTIONS.has(action);
+  tr.gen++;
+  tr.pending++;
+  if (inline) {
+    tr.seen = undefined;
+    let applied = false;
+    patch(m, root, (s) => {
+      if (!s.status) return {};
+      const next = applyOptimisticStatus(s.status, action, params);
+      if (next === s.status) return {};
+      applied = true;
+      return { status: next };
+    });
+    if (applied) refreshDecorations();
+  }
+  const prev = tr.queue;
+  let release!: () => void;
+  tr.queue = new Promise<void>((r) => (release = r));
+  await prev;
+  if (!inline) patch(m, root, () => ({ busy: action }));
   try {
     await gitApi.run(m, root, action, params);
     return true;
@@ -429,8 +594,13 @@ export async function runGit(m: string, root: string, action: string, params: Re
       );
     return false;
   } finally {
-    patch(m, root, () => ({ busy: undefined }));
-    await changed(m, root);
+    tr.pending--;
+    if (!inline) patch(m, root, () => ({ busy: undefined }));
+    const moreQueued = tr.pending > 0;
+    release();
+    if (!moreQueued || !inline) {
+      await changed(m, root, inline ? { indexOnly: true } : {});
+    }
   }
 }
 

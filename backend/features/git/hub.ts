@@ -36,6 +36,8 @@ export function queryParams(q: URLSearchParams): Params {
   }
   const remotes = q.get('remotes');
   if (remotes === '1' || remotes === 'true') p.remotes = true;
+  const noFiles = q.get('noFiles');
+  if (noFiles === '1' || noFiles === 'true') p.noFiles = true;
   const branches = q.getAll('branch');
   if (branches.length > 0) p.branches = branches;
   return p as Params;

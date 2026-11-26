@@ -204,8 +204,8 @@ export const gitApi = {
   status: (m: string, repo: string) => get<Status>(m, 'status', { repo }),
   log: (m: string, repo: string, o: { skip?: number; limit?: number; branches?: string[]; remotes?: boolean } = {}) =>
     get<LogPage>(m, 'log', { repo, skip: o.skip, limit: o.limit, branch: o.branches, remotes: o.remotes }),
-  show: (m: string, repo: string, rev: string, o: { parent?: number; rev2?: string } = {}) =>
-    get<Shown>(m, 'show', { repo, rev, parent: o.parent, rev2: o.rev2 }),
+  show: (m: string, repo: string, rev: string, o: { parent?: number; rev2?: string; noFiles?: boolean } = {}) =>
+    get<Shown>(m, 'show', { repo, rev, parent: o.parent, rev2: o.rev2, noFiles: o.noFiles }),
   blob: (m: string, repo: string, path: string, source: Source, parent?: number) => get<Blob>(m, 'blob', { repo, path, source, parent }),
   branches: (m: string, repo: string) => get<Branch[]>(m, 'branches', { repo }),
   tags: (m: string, repo: string) => get<Tag[]>(m, 'tags', { repo }),

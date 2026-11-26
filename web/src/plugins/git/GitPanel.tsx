@@ -389,11 +389,17 @@ function RepoView({
   const status = st?.status;
   const info = st?.info;
   const groups = useMemo(() => groupFiles(status?.files ?? [], separate), [status, separate]);
-  // The status has the branch (none when detached); the info only until
-  // the first status.
+  // The status has the branch and HEAD (none when detached/unborn); the info
+  // only until the first status.
   const branch = status ? status.branch : info?.branch;
+  const head = status ? status.head : info?.head;
   const busy = st?.busy;
   const view = useScrollView();
+  const [anchoredTop, setAnchoredTop] = useState<number>();
+  const scrollView = useMemo(
+    () => (anchoredTop !== undefined ? { top: anchoredTop, height: view.height } : view),
+    [anchoredTop, view.top, view.height],
+  );
   const list = useRef<HTMLDivElement | null>(null);
   // The list's scroll position, kept (memory.ts) and given back once.
   const scrolled = useRef(false);
@@ -408,6 +414,118 @@ function RepoView({
     },
     [m, root, view.ref],
   );
+  // Scroll anchoring & focus preservation across status updates (staging,
+  // unstaging, discarding, background polls): when a section above changes
+  // height while scrolled down, adjust scrollTop by the anchor section's shift
+  // before paint so the rows under the user's cursor stay put.
+  const anchorGroupRef = useRef<Group | undefined>(undefined);
+  const restoreFocusRef = useRef(false);
+  const prevStatusRef = useRef(status);
+  const prevLayoutRef = useRef<Partial<Record<Group, { top: number; height: number }>>>({});
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const cur: Partial<Record<Group, { top: number; height: number }>> = {};
+    for (const g of GROUPS) {
+      const sec = el.querySelector<HTMLElement>(`.git-section-${g}`);
+      if (sec) cur[g] = { top: sec.offsetTop, height: sec.offsetHeight };
+    }
+    if (prevStatusRef.current !== status) {
+      prevStatusRef.current = status;
+      const prev = prevLayoutRef.current;
+      const stTop = el.scrollTop;
+      const acted = anchorGroupRef.current;
+      anchorGroupRef.current = undefined;
+      if (stTop > 0) {
+        let anchor: Group | undefined = acted && prev[acted] && cur[acted] ? acted : undefined;
+        if (!anchor) {
+          for (const g of GROUPS) {
+            const p = prev[g];
+            if (p && cur[g] && p.top + p.height > stTop) {
+              anchor = g;
+              break;
+            }
+          }
+        }
+        if (anchor) {
+          const delta = cur[anchor]!.top - prev[anchor]!.top;
+          if (delta !== 0) {
+            el.scrollTop = Math.max(0, stTop + delta);
+            const actual = el.scrollTop;
+            panelMemory(m, root).scroll = actual;
+            setAnchoredTop(actual);
+          }
+        }
+      }
+      if (restoreFocusRef.current) {
+        restoreFocusRef.current = false;
+        if (!document.activeElement || document.activeElement === document.body) {
+          el.focus({ preventScroll: true });
+        }
+      }
+    }
+    prevLayoutRef.current = cur;
+  });
+
+  // Checking Amend prefills HEAD's full commit message when the draft is empty
+  // (never clobbering user-typed text) and restores the prior draft if Amend is
+  // unchecked before the user edits the prefilled message.
+  const prefillReq = useRef(0);
+  useEffect(
+    () => () => {
+      prefillReq.current++;
+    },
+    [],
+  );
+  const prefillAmend = useCallback(
+    (targetHead: string, expectedDraft: string, prior: string) => {
+      const req = ++prefillReq.current;
+      void gitApi
+        .show(m, root, targetHead, { noFiles: true })
+        .then((shown) => {
+          if (prefillReq.current !== req) return;
+          const mem = panelMemory(m, root);
+          if (!mem.amend || mem.draft !== expectedDraft) return;
+          const msg = shown.commit?.message;
+          if (!msg) return;
+          mem.amendPrefill = { head: targetHead, filled: msg, prior };
+          setDraft(msg);
+        })
+        .catch(() => undefined);
+    },
+    [m, root, setDraft],
+  );
+  const toggleAmend = (checked: boolean) => {
+    prefillReq.current++;
+    const mem = panelMemory(m, root);
+    if (checked) {
+      setAmend(true);
+      if (message.trim() === '') {
+        if (head) {
+          mem.amendPrefill = undefined;
+          prefillAmend(head, message, message);
+        } else {
+          // HEAD not loaded yet (or unborn repo): fill once HEAD appears if
+          // Amend is still checked and the box is still untouched.
+          mem.amendPrefill = { head: '', filled: message, prior: message };
+        }
+      } else {
+        mem.amendPrefill = undefined;
+      }
+    } else {
+      setAmend(false);
+      const prefill = mem.amendPrefill;
+      mem.amendPrefill = undefined;
+      if (prefill && message === prefill.filled) setDraft(prefill.prior);
+    }
+  };
+  useEffect(() => {
+    if (!amend || !head) return;
+    const mem = panelMemory(m, root);
+    const prefill = mem.amendPrefill;
+    if (!prefill || prefill.head === head || mem.draft !== prefill.filled) return;
+    prefillAmend(head, mem.draft, prefill.prior);
+  }, [m, root, amend, head, prefillAmend]);
   const typeahead = useMemo(() => new TypeAhead(), []);
 
   // The groups shown and whether each is open (only open groups' rows
@@ -447,6 +565,8 @@ function RepoView({
       if (!ok || !(await runGit(m, root, 'stage', { all: true }))) return;
     }
     if (await runGit(m, root, 'commit', { message, amend })) {
+      prefillReq.current++;
+      panelMemory(m, root).amendPrefill = undefined;
       setDraft('');
       setAmend(false);
     }
@@ -533,14 +653,30 @@ function RepoView({
   const targetsOf = (row: ChangeRow): ChangeRow[] =>
     selected.has(row.id) ? [row, ...navigable.filter((r) => r.id !== row.id && r.group === row.group && selected.has(r.id))] : [row];
 
-  const stage = (files: GroupedFile[]) => void runGit(m, root, 'stage', { paths: files.map((g) => g.file.path) });
-  const unstage = (files: GroupedFile[]) => void runGit(m, root, 'unstage', { paths: files.flatMap((g) => unstagePaths(g.file)) });
-  const discardFiles = (files: GroupedFile[]) =>
+  const prepareListAction = (group: Group, keepFocus: boolean) => {
+    anchorGroupRef.current = group;
+    if (keepFocus && list.current && document.activeElement instanceof Node && list.current.contains(document.activeElement)) {
+      restoreFocusRef.current = true;
+    }
+  };
+  const stage = (files: GroupedFile[], group: Group) => {
+    prepareListAction(group, true);
+    void runGit(m, root, 'stage', { paths: files.map((g) => g.file.path) });
+  };
+  const unstage = (files: GroupedFile[], group: Group) => {
+    prepareListAction(group, true);
+    void runGit(m, root, 'unstage', { paths: files.flatMap((g) => unstagePaths(g.file)) });
+  };
+  const discardFiles = (files: GroupedFile[], group: Group) => {
+    anchorGroupRef.current = group;
     void discard(
       m,
       root,
       files.map((g) => g.file),
-    );
+    ).then((done) => {
+      if (!done && anchorGroupRef.current === group) anchorGroupRef.current = undefined;
+    });
+  };
   /** Opens the diffs of files: one reuses Source Control's diff pane,
    * several open each in its own. back: the keyboard stays in the list. */
   const openDiffs = async (files: GroupedFile[], group: Group, back = false) => {
@@ -664,10 +800,10 @@ function RepoView({
       if (allRoots?.includes(subRoot)) git.push({ label: t('git.openRepo'), run: () => onOpenRepo(subRoot) });
     }
     if (own.length) git.push({ label: t('git.openDiff'), hint: '↵', run: () => void openDiffs(own, group) });
-    if (group === 'staged') git.push({ label: t('git.unstage'), disabled: readOnly, run: () => unstage(files) });
-    else git.push({ label: t('git.stage'), disabled: readOnly, run: () => stage(files) });
+    if (group === 'staged') git.push({ label: t('git.unstage'), disabled: readOnly, run: () => unstage(files, group) });
+    else git.push({ label: t('git.stage'), disabled: readOnly, run: () => stage(files, group) });
     if (group === 'changes' || group === 'untracked')
-      git.push({ label: t('git.discard'), danger: true, disabled: readOnly, run: () => discardFiles(files) });
+      git.push({ label: t('git.discard'), danger: true, disabled: readOnly, run: () => discardFiles(files, group) });
     // The explorer's file entries for the rows: files, submodules, and the tree's folders.
     const paths = targets.map((r) => entryPathOf(r.kind === 'dir' ? r.path : r.g.file.path));
     const dirs = new Set(
@@ -692,17 +828,17 @@ function RepoView({
     const act = (files: () => GroupedFile[]) => (
       <>
         {!readOnly && (group === 'changes' || group === 'untracked') && (
-          <button className="icon" title={t('git.discard')} aria-label={t('git.discard')} onClick={() => discardFiles(files())}>
+          <button className="icon" title={t('git.discard')} aria-label={t('git.discard')} onClick={() => discardFiles(files(), group)}>
             <Undo2 />
           </button>
         )}
         {!readOnly &&
           (group === 'staged' ? (
-            <button className="icon" title={t('git.unstage')} aria-label={t('git.unstage')} onClick={() => unstage(files())}>
+            <button className="icon" title={t('git.unstage')} aria-label={t('git.unstage')} onClick={() => unstage(files(), group)}>
               <Minus />
             </button>
           ) : (
-            <button className="icon" title={t('git.stage')} aria-label={t('git.stage')} onClick={() => stage(files())}>
+            <button className="icon" title={t('git.stage')} aria-label={t('git.stage')} onClick={() => stage(files(), group)}>
               <Plus />
             </button>
           ))}
@@ -775,7 +911,12 @@ function RepoView({
     return (
       <>
         {(group === 'changes' || group === 'untracked') && (
-          <button className="icon sm" title={t('git.discardAll')} aria-label={t('git.discardAll')} onClick={() => discardFiles(files)}>
+          <button
+            className="icon sm"
+            title={t('git.discardAll')}
+            aria-label={t('git.discardAll')}
+            onClick={() => discardFiles(files, group)}
+          >
             <Undo2 />
           </button>
         )}
@@ -784,7 +925,10 @@ function RepoView({
             className="icon sm"
             title={t('git.unstageAll')}
             aria-label={t('git.unstageAll')}
-            onClick={() => void runGit(m, root, 'unstage', groupAction(group, files, true))}
+            onClick={() => {
+              prepareListAction(group, true);
+              void runGit(m, root, 'unstage', groupAction(group, files, true));
+            }}
           >
             <Minus />
           </button>
@@ -793,7 +937,10 @@ function RepoView({
             className="icon sm"
             title={t('git.stageAll')}
             aria-label={t('git.stageAll')}
-            onClick={() => void runGit(m, root, 'stage', groupAction(group, files, whole, separate))}
+            onClick={() => {
+              prepareListAction(group, true);
+              void runGit(m, root, 'stage', groupAction(group, files, whole, separate));
+            }}
           >
             <Plus />
           </button>
@@ -838,6 +985,14 @@ function RepoView({
         <button className="icon" title={t('git.more')} aria-label={t('git.more')} onClick={moreMenu}>
           <Ellipsis />
         </button>
+        {busy && (
+          <div
+            className="git-busy"
+            role="status"
+            aria-label={t('git.running', { action: busy })}
+            title={t('git.running', { action: busy })}
+          />
+        )}
       </div>
       <div className="git-branch">
         <GitBranch />
@@ -900,7 +1055,6 @@ function RepoView({
       </div>
       {status?.state && <StateBanner m={m} root={root} state={status.state} />}
       {st?.error && <div className="git-error small">{st.error}</div>}
-      {busy && <div className="git-busy muted small">{t('git.running', { action: busy })}</div>}
       {!readOnly && (
         <div className="git-commit">
           <textarea
@@ -911,7 +1065,10 @@ function RepoView({
             spellCheck={false}
             value={message}
             placeholder={t('git.commit.placeholder', { branch: branch ?? 'HEAD', key: commitKey })}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              prefillReq.current++;
+              setDraft(e.target.value);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
@@ -922,7 +1079,7 @@ function RepoView({
           />
           <div className="git-commit-row">
             <label className="git-amend small">
-              <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} /> {t('git.commit.amend')}
+              <input type="checkbox" checked={amend} onChange={(e) => toggleAmend(e.target.checked)} /> {t('git.commit.amend')}
             </label>
             <span className="spacer" />
             <button className="primary" disabled={!!busy} onClick={() => void commit()}>
@@ -940,6 +1097,7 @@ function RepoView({
         aria-multiselectable
         onKeyDown={onKey}
         onScroll={(e) => {
+          setAnchoredTop(undefined);
           panelMemory(m, root).scroll = e.currentTarget.scrollTop;
           view.onScroll(e);
         }}
@@ -952,7 +1110,7 @@ function RepoView({
             count={groups[g].length}
             rows={rows[g]}
             actions={groupActions(g)}
-            view={view}
+            view={scrollView}
             rowH={rowH}
             drawRow={drawRow}
           />
@@ -998,7 +1156,7 @@ function ChangeSection(p: {
   const [first, end] = visibleRange(n, p.rowH, p.view.top - offset, p.view.height || n * p.rowH);
   const last = Math.max(first, end);
   return (
-    <Section id={`git.${p.group}`} title={t(GROUP_TITLE[p.group])} count={p.count} actions={p.actions}>
+    <Section id={`git.${p.group}`} className={`git-section-${p.group}`} title={t(GROUP_TITLE[p.group])} count={p.count} actions={p.actions}>
       <div ref={body} className="git-rows" style={{ height: n * p.rowH }}>
         {p.rows.slice(first, last).map((r, i) => p.drawRow(r, (first + i) * p.rowH))}
       </div>
