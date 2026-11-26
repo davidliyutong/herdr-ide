@@ -8,23 +8,20 @@ import { terms } from './state/terms';
 import { loadedVt } from './vt/module';
 import { useStore } from './state/store';
 import { APP_SLUG } from './brand';
-import { currentAppearance, initAppearance } from './appearance';
+import { initAppearance } from './appearance';
 import { applyTitlebar } from './desktop';
 import { desktopShell } from './shell';
-import { loadTermFont } from './terminal/fonts';
 import { initGuiAuto } from './gui/auto';
 import { initUpdateCheck } from './update';
 import { parseGuiPath, useGui } from './gui/state';
 import { conn } from './lib/conn';
 import { unlockAudio } from './sound';
 import { getPrefs } from './prefs';
-import { loadSettings } from './settings';
-import { setLocale } from './i18n';
-import { GuiWindowPage } from './gui/GuiWindowPage';
 import { refuseStrayFileDrops } from './drop';
 import { useFrames } from './codeFrames';
 import { actions } from './actions';
 import { guardImeKeys } from './ime';
+import { startBootstrap } from './bootstrap';
 
 // Debug handle for the browser console (also used by end-to-end tests).
 (window as unknown as Record<string, unknown>)[`__${APP_SLUG}`] = {
@@ -41,24 +38,22 @@ initAppearance();
 applyTitlebar();
 refuseStrayFileDrops();
 guardImeKeys();
-// The settings come from the hub; until it answers the built-in defaults
-// apply. The language must be known before anything is rendered.
-const settingsLoaded = loadSettings().then(() => {
-  setLocale(getPrefs().locale);
-});
 // A browser window showing one program window (see gui/).
 const guiPage = parseGuiPath(location.pathname);
 if (guiPage) {
-  void settingsLoaded.then(() => createRoot(document.getElementById('root')!).render(<GuiWindowPage m={guiPage.m} id={guiPage.id} />));
+  // Fetch settings and the GUI window page chunk in parallel.
+  const { settings } = startBootstrap({ preloadFont: false });
+  void Promise.all([settings, import('./gui/GuiWindowPage')]).then(([, { GuiWindowPage }]) =>
+    createRoot(document.getElementById('root')!).render(<GuiWindowPage m={guiPage.m} id={guiPage.id} />),
+  );
 } else {
+  // Fetch settings, keybindings, config and the bundled terminal font in
+  // parallel. Render as soon as settings (locale) resolve without waiting on
+  // font decoding; terminals adopt the bundled font once loaded (whenTermFont).
+  const { settings } = startBootstrap({ preloadFont: true });
   initGuiAuto();
   initUpdateCheck();
-  // Terminals measure their cells when they open: give the bundled font a
-  // moment to load (it comes from the hub). Terminals opened before it is
-  // loaded switch to it later.
-  const font = settingsLoaded.then(() => loadTermFont(currentAppearance().fontWeight));
-  void Promise.race([font, new Promise((r) => setTimeout(r, 1500))]).then(async () => {
-    await settingsLoaded;
+  void settings.then(() => {
     createRoot(document.getElementById('root')!).render(<App />);
     // Notification permission needs a user gesture (browsers only; Electron uses native notifications).
     if (!desktopShell?.notifications) window.addEventListener('pointerdown', () => void requestNotifyPermission(), { once: true });

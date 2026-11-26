@@ -3,7 +3,7 @@
 // shows what failed and Try Again in its place, and the rest of the page
 // goes on. Try Again, or a change of resetKey (another view, another
 // panel), draws it afresh.
-import { Component, Fragment, type ReactNode } from 'react';
+import { Component, Fragment, Suspense, type ReactNode } from 'react';
 import { RotateCcw, TriangleAlert } from 'lucide-react';
 import { t } from '../i18n';
 
@@ -40,7 +40,12 @@ export class PluginBoundary extends Component<Props, State> {
 
   render() {
     const { error, attempt } = this.state;
-    if (!error) return <Fragment key={attempt}>{this.props.children}</Fragment>;
+    if (!error)
+      return (
+        <Fragment key={attempt}>
+          <Suspense fallback={null}>{this.props.children}</Suspense>
+        </Fragment>
+      );
     const vars = { plugin: this.props.plugin, error: error.message || error.name };
     if (this.props.compact) {
       const label = `${t('plugins.crashedShort', vars)} ${t('plugins.retry')}`;

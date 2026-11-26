@@ -205,7 +205,9 @@ export class Settings<S extends Defs = Defs> {
   readonly #file: UserFile;
   readonly #sections: readonly Section[];
   readonly #defs: readonly Def[];
+  readonly #defsByName: readonly Def[];
   readonly #byKey: ReadonlyMap<string, Def>;
+  #defsJSON?: DefJSON[];
   readonly #flags = new Map<string, SettingValue>();
   readonly #subs = new Set<(changes: Change[]) => void>();
   readonly #pollMs: number;
@@ -226,6 +228,7 @@ export class Settings<S extends Defs = Defs> {
     const { sections, defs } = definitions(o.modules ?? []);
     this.#sections = sections;
     this.#defs = defs;
+    this.#defsByName = [...defs].sort((a, b) => byName(a.key, b.key));
     this.#byKey = new Map(defs.map((d) => [d.key, d]));
     for (const d of defs) {
       const text = d.flag ? o.flags?.[d.flag] : undefined;
@@ -262,7 +265,7 @@ export class Settings<S extends Defs = Defs> {
 
   /** The definitions for the API, in UI order. */
   definitions(): DefJSON[] {
-    return this.#defs.map((d) => ({
+    this.#defsJSON ??= this.#defs.map((d) => ({
       key: d.key,
       type: d.type,
       default: clone(d.default),
@@ -280,6 +283,7 @@ export class Settings<S extends Defs = Defs> {
       order: d.order,
       ...(d.flag ? { flag: d.flag } : {}),
     }));
+    return structuredClone(this.#defsJSON);
   }
 
   /** Reads the file (a missing one is empty); throws when it cannot be
@@ -373,7 +377,7 @@ export class Settings<S extends Defs = Defs> {
   state(): State {
     const values: Record<string, Value> = {};
     const machines = [...this.#values.machines.keys()].sort(byName);
-    for (const d of [...this.#defs].sort((a, b) => byName(a.key, b.key))) {
+    for (const d of this.#defsByName) {
       const [value, source] = this.#valueFor(d, '');
       const e: Value = { value: clone(value), source };
       if (d.scope !== 'app') {

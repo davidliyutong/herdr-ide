@@ -120,7 +120,7 @@ The user's **Performance** page shows, below `performance.keptTerminals` (how ma
 - **Color theme** (`appearance.colorTheme`): the chrome's accent, one of the design tokens' themes (Blue by default). Neutrals are the same in every theme. An unknown id (from a newer hub) shows the default.
 - **Terminal palettes**: the Default scheme is GitHub Dark Default on the UI's background, and GitHub Light Default with brighter yellows. Schemes and the user's colors replace them. The palette colors only what programs leave to the terminal (default and 16 ANSI colors). Programs that query the terminal's colors (OSC 10/11/4, `CSI ?996n`) get the current theme's, and keep them until they ask again.
 - **Terminal and UI fonts**: English/Latin and Chinese/CJK fonts are configured separately for both the interface (`appearance.uiFontFamily`, `appearance.uiCjkFontFamily`) and terminals/editors (`terminal.fontFamily`, `terminal.cjkFontFamily`). In terminals, JetBrains Mono (web fonts with their OFL license in `web/src/terminal/fonts/`) follows `terminal.fontFamily` for Latin/ASCII glyphs and cell metrics, while `terminal.cjkFontFamily` is placed after the Latin monospace stack (and prioritized directly for CJK glyphs in the glyph atlas and IME preedit) before system CJK fallbacks. In the UI, `appearance.uiCjkFontFamily` sits behind Latin-only system fonts (or `appearance.uiFontFamily`) so macOS `-apple-system` does not shadow a custom Chinese font. Weight is regular or medium (medium imitates native terminals' stroke thickening).
-- **Font loading**: a terminal measures its cell from the font, so `fonts.ts` loads the faces with the `FontFace` API and the page waits up to 1.5 s for them; a terminal shown earlier uses the fallbacks and re-measures when the faces arrive.
+- **Font loading**: a terminal measures its cell from the font, so `fonts.ts` loads the faces with the `FontFace` API in parallel with initial startup requests (preloading the last-used weight remembered in `localStorage`) without blocking first render; terminals render immediately with fallbacks and re-measure when the faces arrive.
 - **Sizes**: `appearance.uiFontSize` sets the root font size (the chrome is sized in `rem`); `window.zoom` (desktop app only) scales the whole window.
 - Every terminal setting applies at once in the browser's terminals ([26](26-web-terminals.md)).
 - `notifications.*` turn sounds, system notifications and the badge on or off and list silent agents ([07](07-agent-native-workflow.md)); `terminal.mathHover` turns the formula preview on or off ([19](19-formulas-in-panes.md)).
@@ -157,7 +157,7 @@ The user's **Performance** page shows, below `performance.keptTerminals` (how ma
 - **No VS Code window connected**: the theme is sent when one connects.
 - **Two clients choose different themes**: the setting is the hub's; the last change wins everywhere.
 - **A program derived its colors from the old theme**: it gets the new ones when it asks again or restarts.
-- **The terminal font loads slowly or not at all**: the page renders after 1.5 s with fallbacks and switches when the font arrives.
+- **The terminal font loads slowly or not at all**: the page renders immediately with fallbacks and switches when the font arrives.
 - **`GET /api/perf` fails**, or the browser has no script memory or WebGL: the row or value shows a dash.
 - **A page loaded before the hub was replaced** lacks labels for new settings; after a reconnect it compares its entry script with the hub's and offers to reload (`web/src/update.ts`).
 

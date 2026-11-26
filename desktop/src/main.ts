@@ -64,6 +64,7 @@ import {
 } from './policy';
 import { serveApp } from './protocol';
 import { bundleOf, privacyActions, terminalCoreExecutable } from './privacy';
+import { sameBindings, startupGate, type StartupGate } from './startup';
 import { macTrafficLightPosition, windowFrameOptions } from './titlebar';
 import { codeIdentity, instanceFiles, KEYCHAIN_RECORD, keychainMigration, runTool, safeStorageItem, securityKeychain } from './keychain';
 import { UNLOCK_FILE, unlockStore, type Prepared } from './unlockStore';
@@ -105,6 +106,8 @@ let guard: CloseGuard | undefined;
 const origin = APP_ORIGIN;
 // The hub served once: windows may open.
 let serving = false;
+// Coordinates parallel hub startup and first window paint (startup.ts).
+let bootGate: StartupGate | undefined;
 let quitting = false;
 // Quit was chosen while the main window was open: it closes first.
 let quitAfterClose = false;
@@ -172,9 +175,11 @@ function describe(error: unknown): string {
 async function fail(error: unknown) {
   if (reportingError || quitting) return;
   reportingError = true;
+  bootGate?.abort();
   console.error(error);
   // Stop before showing a modal dialog, including after a startup timeout.
   stopFollowing();
+  if (!serving && mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
   await hub?.stop();
   if (quitting) return;
   await dialog.showMessageBox({
@@ -253,6 +258,7 @@ function showMain() {
     if (serving && !quitting) createWindow();
     return;
   }
+  if (!serving) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -315,6 +321,7 @@ function applySettings(s: ShellSettings) {
 }
 
 function applyBindings(b: Binding[]) {
+  if (sameBindings(bindings, b)) return;
   bindings = b;
   buildMenu();
 }
@@ -562,7 +569,10 @@ function createWindow() {
       sendFullScreen(false);
     });
   }
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    if (bootGate) bootGate.windowReady();
+    else if (!reportingError && !quitting && !win.isDestroyed()) win.show();
+  });
   win.on('closed', () => {
     g.reset();
     if (guard === g) guard = undefined;
@@ -572,7 +582,7 @@ function createWindow() {
     notifications.setBadgeCount(0);
     mainWindow = undefined;
     // Program windows do not keep the app open.
-    if (quitAfterClose || quitsWithLastWindow(platform)) app.quit();
+    if (!reportingError && (quitAfterClose || quitsWithLastWindow(platform))) app.quit();
   });
   void win.loadURL(`${origin}/`).catch(fail);
 }
@@ -588,6 +598,7 @@ app.on('before-quit', (event) => {
     return;
   }
   quitting = true;
+  bootGate?.abort();
   stopFollowing();
   notifications.closeAll();
   if (stopped) return;
@@ -666,10 +677,6 @@ if (!app.requestSingleInstanceLock()) {
       powerMonitor.on('shutdown', () => {
         systemShutdown = true;
       });
-      if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'assets', 'icon.png'));
-      // Windows and Linux show these in About (macOS reads its bundle).
-      app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: app.getVersion() });
-      buildMenu();
       // The key of the system's prompts: to the hub in its start
       // message, and to nothing else.
       const key = verifyKey();
@@ -720,13 +727,28 @@ if (!app.requestSingleInstanceLock()) {
       });
       hub = host;
       (globalThis as { __hubPid?: () => number | undefined }).__hubPid = () => hub?.pid;
+      // Spawn the hub first so its process initialization overlaps setting up
+      // Electron sessions, menus and creating the main renderer window; any
+      // request or channel waits on HubHost.serving() until the hub is ready.
+      const starting = host.start();
       // The app's windows live in a session of their own, where the app's
-      // origin is the hub's: the handler is there before a page loads.
+      // origin is the hub's: protocol and permission handlers are installed
+      // before any window is created.
       const ses = session.fromPartition(APP_PARTITION);
       serveApp(ses, host);
-      await host.start();
-      serving = true;
-      if (quitting) return;
+      ses.setPermissionRequestHandler((contents, permission, callback, details) => {
+        callback(allowPermission(permission, details.requestingUrl, contents.getURL(), origin));
+      });
+      ses.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
+        return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
+      });
+      // The browser panes' guests live in their own partition, so they share
+      // nothing with the app, and the app's origin is not the hub's there.
+      // A guest gets no permission but full screen; downloads keep
+      // Electron's save dialog (no will-download handler saves by itself).
+      const guests = session.fromPartition(BROWSER_PARTITION);
+      guests.setPermissionRequestHandler((_contents, permission, callback) => callback(allowGuestPermission(permission)));
+      guests.setPermissionCheckHandler((_contents, permission) => allowGuestPermission(permission));
       verify = verifier(key, {
         platform,
         canPromptTouchID: () => platform === 'darwin' && systemPreferences.canPromptTouchID(),
@@ -743,21 +765,21 @@ if (!app.requestSingleInstanceLock()) {
         ...(platform === 'win32' && { helloKeys: helloKeysFor(runPowerShell) }),
         unlockStore: unlockStore(app.getPath('userData'), safeStorage, { prepare: keychainStep() }),
       });
-      ses.setPermissionRequestHandler((contents, permission, callback, details) => {
-        callback(allowPermission(permission, details.requestingUrl, contents.getURL(), origin));
+      if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'assets', 'icon.png'));
+      // Windows and Linux show these in About (macOS reads its bundle).
+      app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: app.getVersion() });
+      buildMenu();
+      const gate = startupGate(() => {
+        bootGate = undefined;
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
       });
-      ses.setPermissionCheckHandler((contents, permission, requestingOrigin) => {
-        return allowPermission(permission, requestingOrigin, contents?.getURL() || '', origin);
-      });
-      // The browser panes' guests live in their own partition, so they share
-      // nothing with the app, and the app's origin is not the hub's there.
-      // A guest gets no permission but full screen; downloads keep
-      // Electron's save dialog (no will-download handler saves by itself).
-      const guests = session.fromPartition(BROWSER_PARTITION);
-      guests.setPermissionRequestHandler((_contents, permission, callback) => callback(allowGuestPermission(permission)));
-      guests.setPermissionCheckHandler((_contents, permission) => allowGuestPermission(permission));
+      bootGate = gate;
       stopFollowing = followHub(host, keys, { bindings: applyBindings, settings: applySettings });
       createWindow();
+      await starting;
+      serving = true;
+      if (quitting || reportingError) return;
+      gate.hubReady();
     })
     .catch(fail);
 }

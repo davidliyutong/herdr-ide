@@ -23,6 +23,7 @@ const tests = [
   'privacy',
   'protocol',
   'relay',
+  'startup',
   'titlebar',
   'unlockStore',
   'verify',

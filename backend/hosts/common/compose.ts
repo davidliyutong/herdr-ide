@@ -153,6 +153,9 @@ export interface ComposeOptions {
   audit: Audit;
   readOnly: boolean;
   userHeader?: string;
+  /** Delay before running one-off old-database maintenance in a worker thread
+   * so it does not compete with startup I/O and CPU (default 5000 ms). */
+  maintenanceDelayMs?: number;
   logger: Logger;
 }
 
@@ -259,14 +262,36 @@ export function composeHub(o: ComposeOptions): Composed {
     settings,
     specs,
     async run(signal) {
-      const cleanup = new StateWorker<typeof maintenance>(() => hubWorker({ kind: 'maintenance' }), logger);
+      // Defer one-off database maintenance so spawning a worker thread and
+      // scanning SQLite files does not compete with initial UI hydration.
+      const delayMs = o.maintenanceDelayMs ?? 5_000;
       const tidying = settingsFile
-        ? cleanup
-            .request('tidy', signal, settingsFile)
-            .catch((e) => {
+        ? (async () => {
+            if (delayMs > 0) {
+              const aborted = await new Promise<boolean>((resolve) => {
+                if (signal.aborted) return resolve(true);
+                const onAbort = () => {
+                  clearTimeout(t);
+                  resolve(true);
+                };
+                const t = setTimeout(() => {
+                  signal.removeEventListener('abort', onAbort);
+                  resolve(false);
+                }, delayMs);
+                t.unref?.();
+                signal.addEventListener('abort', onAbort, { once: true });
+              });
+              if (aborted) return;
+            }
+            const cleanup = new StateWorker<typeof maintenance>(() => hubWorker({ kind: 'maintenance' }), logger);
+            try {
+              await cleanup.request('tidy', signal, settingsFile);
+            } catch (e) {
               if (!signal.aborted) logger(`databases of earlier releases or other hosts: ${(e as Error).message}`);
-            })
-            .finally(() => cleanup.close())
+            } finally {
+              await cleanup.close();
+            }
+          })()
         : undefined;
       // Edits of the files by hand apply without a restart.
       const watching = Promise.all([settings.watch(signal), keybindings.watch(signal)]).catch(() => {});

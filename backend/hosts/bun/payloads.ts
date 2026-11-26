@@ -8,26 +8,65 @@ import { openSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirFiles, layered, payloads, type Files, type Payloads } from '#kernel/payloads.ts';
 
+/** Characters with special meaning to Bun.Archive's glob matcher (including
+ * negation and extglob operators), or path traversal/control characters: none
+ * appears in built UI or payload paths. */
+const UNSAFE_ARCHIVE_PATH = /[*?[\]{}!()\\\0]/;
+
+function safeArchivePath(path: string): boolean {
+  if (!path || UNSAFE_ARCHIVE_PATH.test(path)) return false;
+  return !path.split('/').some((seg) => seg === '' || seg === '.' || seg === '..');
+}
+
+/** Lazy archive reader: reads each requested path once from the embedded tar
+ * archive without unpacking the entire UI (~20+ MB of Monaco, grammars and
+ * fonts) before the hub is ready. */
+export function archiveFiles(archive: Pick<Bun.Archive, 'files'>, o: { prefix?: string; cache?: boolean } = {}): Files {
+  const prefix = o.prefix ?? '';
+  const cache = o.cache === true ? new Map<string, Promise<Uint8Array | null>>() : null;
+  const read = async (full: string): Promise<Uint8Array | null> => {
+    const m = await archive.files(full);
+    const f = m.get(full);
+    return f ? await f.bytes() : null;
+  };
+  return {
+    get(path) {
+      if (!safeArchivePath(path)) return Promise.resolve(null);
+      const full = prefix ? `${prefix}${path}` : path;
+      if (!cache) return read(full);
+      let p = cache.get(full);
+      if (!p) {
+        p = read(full).then(
+          (bytes) => {
+            if (bytes === null) cache.delete(full);
+            return bytes;
+          },
+          (err) => {
+            cache.delete(full);
+            throw err;
+          },
+        );
+        cache.set(full, p);
+      }
+      return p;
+    },
+  };
+}
+
 /** The embedded archive's files; null when the executable has none (a
  * development run). */
-async function embedded(): Promise<{ files: Files; web: Files } | null> {
+function embedded(): { files: Files; web: Files } | null {
   if (!Bun.isStandaloneExecutable) return null;
   const blob = Bun.embeddedFiles.find((f) => (f as File).name?.startsWith('payload'));
   if (!blob) return null;
   const archive = new Bun.Archive(blob);
-  // The UI's files are served all the time: kept in memory (a few MB). The
-  // rest (machine builds, herdr-core) is read when a machine needs it.
-  const web = new Map<string, Uint8Array>();
-  for (const [path, file] of await archive.files('web/**')) web.set(path.slice('web/'.length), await file.bytes());
   return {
-    web: { get: async (p) => web.get(p) ?? null },
-    files: {
-      async get(path) {
-        const m = await archive.files(path);
-        const f = m.get(path);
-        return f ? await f.bytes() : null;
-      },
-    },
+    // Web UI files are read lazily on first request and cached in memory so
+    // cold startup does not page in unused chunks (Monaco, grammars, KaTeX).
+    web: archiveFiles(archive, { prefix: 'web/', cache: true }),
+    // Non-web payloads (encoders, VSIX, release metadata) are read when a
+    // machine needs them (kernel/payloads.ts caches parsed metadata & encoders).
+    files: archiveFiles(archive),
   };
 }
 
@@ -51,7 +90,7 @@ export async function openPayloads(o: {
   ownDigest?: boolean;
   logger?: (line: string) => void;
 }): Promise<Payloads> {
-  const e = await embedded();
+  const e = embedded();
   // --ext-dir holds <bridge>.vsix itself; the archive has it under ext/.
   const ext: Files | null = o.extDir
     ? { get: (p) => (p.startsWith('ext/') ? dirFiles(o.extDir).get(p.slice(4)) : Promise.resolve(null)) }

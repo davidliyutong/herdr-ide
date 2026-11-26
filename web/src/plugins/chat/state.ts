@@ -92,6 +92,11 @@ export function chatState(m: string, chat: string | undefined): ChatState | unde
   return chat === undefined ? undefined : useChats.getState().states[m]?.[chat];
 }
 
+/** A chat's directory: what its attached source states, else its state. */
+export function chatCwd(m: string, chat: string): string | undefined {
+  return useChats.getState().live[liveKey(m, chat)]?.info?.cwd || chatState(m, chat)?.cwd || undefined;
+}
+
 /** Whether a chat is no more: the host said so, a full list came without
  * it, or attaching it found none. */
 export function chatGone(s: ChatsState, m: string, chat: string): boolean {

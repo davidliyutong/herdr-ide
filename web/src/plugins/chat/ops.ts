@@ -20,7 +20,6 @@ import { ChatFailure, chatApi, failureText, permissionMode, type NewChatVault } 
 import { canContinueInTerminal, continueInTerminal } from './handoff';
 import { STATE_DELETED } from './protocol';
 import { applyStates, chatState, loadAgents, offeredKinds, upsertState, useChats } from './state';
-import { withSource } from './source';
 import { CHAT_PLUGIN, CHAT_VIEW, chatPane, chatRef } from './view';
 
 /** What the chat panes are asked from outside: the pane (machine and view
@@ -269,6 +268,7 @@ export async function deleteChat(m: string, chat: string): Promise<boolean> {
 /** Sets a chat's title; a failure is said in a toast. */
 export async function renameChat(m: string, chat: string, title: string) {
   try {
+    const { withSource } = await import('./source');
     await withSource(m, chat, (s) => s.rename(title));
   } catch (e) {
     toast(failureText(e, agentName(chatState(m, chat)?.kind), 'chat.renameFailed'));

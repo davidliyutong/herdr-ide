@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { BellOff, ChevronDown, Columns2, PanelLeft, Pin, Plus, X } from 'lucide-react';
 import { useStore } from '../state/store';
 import { terms, useTerms } from '../state/terms';
@@ -7,8 +7,9 @@ import { actions, paneRects, paneTitle, tabLabel, tabName, tabStatus } from '../
 import { TerminalView } from './TerminalView';
 import { PaneHeader } from './PaneHeader';
 import { CodeSlot } from './CodeLayer';
-import { PreviewPane } from './PreviewPane';
 import { FileTitle, LeafIcon, PluginPane, ViewTitle } from './PluginPane';
+
+const PreviewPane = lazy(() => import('./PreviewPane').then((m) => ({ default: m.PreviewPane })));
 import { describeView, newTabGroups, useActivePlugins, useViewStatusOf } from '../plugins/registry';
 import { StatusDot } from './StatusDot';
 import { codeText, shortPath, terminalTitle } from '../lib/machine';
@@ -541,7 +542,9 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
               ) : L.isPluginLeaf(leaf) ? (
                 <PluginPane m={m} pane={key} view={leaf.view} focused={focused} shown />
               ) : (
-                <PreviewPane m={m} pane={key} path={leaf.preview.path} shown />
+                <Suspense fallback={null}>
+                  <PreviewPane m={m} pane={key} path={leaf.preview.path} shown />
+                </Suspense>
               )}
             </div>
           );
@@ -572,7 +575,9 @@ function TabView({ m, ws, tab }: { m: string; ws: string; tab: L.Tab }) {
             {L.isPluginLeaf(k.leaf) ? (
               <PluginPane m={k.m} pane={k.pane} view={k.leaf.view} focused={false} shown={false} />
             ) : (
-              <PreviewPane m={k.m} pane={k.pane} path={k.leaf.preview.path} shown={false} />
+              <Suspense fallback={null}>
+                <PreviewPane m={k.m} pane={k.pane} path={k.leaf.preview.path} shown={false} />
+              </Suspense>
             )}
           </div>
         )),

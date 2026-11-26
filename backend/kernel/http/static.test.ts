@@ -70,4 +70,23 @@ describe('serveUI', () => {
     expect(res.headers.get('Referrer-Policy')).toBe('same-origin');
     expect(res.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
   });
+
+  test('asset requests do not read index.html', async () => {
+    const seen: string[] = [];
+    const tracked: Files = {
+      get: async (p) => {
+        seen.push(p);
+        return UI.get(p);
+      },
+    };
+    const t = hub(tracked);
+    const asset = await t.request('GET', '/assets/app-1.js');
+    expect(asset.status).toBe(200);
+    expect(seen).toEqual(['assets/app-1.js']);
+
+    seen.length = 0;
+    const spa = await t.request('GET', '/m/local/view');
+    expect(spa.status).toBe(200);
+    expect(seen).toEqual(['m/local/view', 'index.html']);
+  });
 });

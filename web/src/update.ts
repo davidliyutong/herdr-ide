@@ -15,6 +15,8 @@ export function initUpdateCheck() {
   if (!mine) return;
   let offered = false;
   let was = useStore.getState().connected;
+  // Only check after a reconnect (the page was just loaded with this script).
+  let seen = was;
   const check = async () => {
     try {
       const html = await (await fetch('/', { cache: 'no-store' })).text();
@@ -27,7 +29,8 @@ export function initUpdateCheck() {
     }
   };
   useStore.subscribe((s) => {
-    if (s.connected && !was) void check();
+    if (s.connected && !was && seen) void check();
+    if (s.connected) seen = true;
     was = s.connected;
   });
 }

@@ -33,16 +33,17 @@ export function serveUI(app: Hono<Env>, files: Files | null): void {
     }
     // An API path no route took is not a page of the UI.
     if (p === 'api' || p.startsWith('api/')) throw new Fail('not_found', 404, `no route for ${c.req.method} ${c.req.path}`);
-    const index = files ? await files.get('index.html') : null;
-    if (!files || !index) return c.text(`${SLUG}: the web UI is not built into this binary; run scripts/build.sh\n`);
-    c.header('Content-Security-Policy', appCSP(c.req.header('Host') ?? '', c.var.client === 'desktop'));
+    if (!files) return c.text(`${SLUG}: the web UI is not built into this binary; run scripts/build.sh\n`);
     let name = p === '' ? 'index.html' : p;
-    let body = name === 'index.html' ? index : await files.get(name);
+    let body = await files.get(name);
     if (!body) {
-      // Client-side routes fall back to the app shell.
-      body = index;
+      // Client-side routes fall back to the app shell (index.html); if the
+      // shell itself is missing, this build has no UI.
+      body = name === 'index.html' ? null : await files.get('index.html');
       name = 'index.html';
     }
+    if (!body) return c.text(`${SLUG}: the web UI is not built into this binary; run scripts/build.sh\n`);
+    c.header('Content-Security-Policy', appCSP(c.req.header('Host') ?? '', c.var.client === 'desktop'));
     c.header('Cache-Control', name.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
     c.header('Content-Type', getMimeType(name) ?? 'application/octet-stream');
     c.header('Content-Length', String(body.length));

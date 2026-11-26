@@ -502,4 +502,24 @@ describe('keybindings', () => {
     ];
     for (const commands of bad) expect(() => new Keybindings('', { commands }), commands[0].id).toThrow();
   });
+
+  test('cached state isolates callers and invalidates on write', () => {
+    const path = join(tempDir(), 'keybindings.json');
+    const s = new Keybindings(path);
+    s.load();
+    const first = s.state();
+    first.user.push({ key: 'ctrl+k z', command: 'tab.new' });
+    first.effective.mac.length = 0;
+
+    // Mutating the returned object must not corrupt the cached state.
+    const second = s.state();
+    expect(second.user).toEqual([]);
+    expect(effective(second, 'mac', 'tab.new')).toEqual(['cmd+t@terminal']);
+
+    // Writing new user bindings invalidates the cache immediately.
+    s.setUser([{ key: 'ctrl+k n', command: 'tab.new' }]);
+    const third = s.state();
+    expect(third.user).toEqual([{ key: 'ctrl+k n', command: 'tab.new' }]);
+    expect(effective(third, 'mac', 'tab.new')).toEqual(['cmd+t@terminal', 'ctrl+k n@terminal']);
+  });
 });

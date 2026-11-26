@@ -5,9 +5,17 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { Eye, Puzzle } from 'lucide-react';
 import { registerPane } from '../state/panes';
 import * as L from '../term/layout';
-import { allPlugins, findPanel, paneView, PANEL_VIEW, useActivePlugins } from '../plugins/registry';
+import {
+  allPlugins,
+  ensurePluginLoaded,
+  findPanel,
+  isPluginPending,
+  paneView,
+  PANEL_VIEW,
+  useActivePlugins,
+  usePluginList,
+} from '../plugins/registry';
 import type { PluginDef } from '../plugins/api';
-import { useSettings } from '../settings';
 import { t } from '../i18n';
 import { CodeIcon } from './icons';
 import { PluginBoundary } from './PluginBoundary';
@@ -32,8 +40,8 @@ export function PluginPane({
   shown?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Re-rendered when a plugin is turned on or off.
-  useSettings((s) => s.values);
+  // Re-rendered when a plugin is turned on or off, or finishes lazy-loading.
+  useActivePlugins();
   const { def, on } = paneView(view.plugin, view.kind);
   useEffect(
     () =>
@@ -46,13 +54,17 @@ export function PluginPane({
     [m, pane],
   );
   const Body = on ? def?.component : undefined;
+  const loading = on && !Body && isPluginPending(view.plugin);
+  useEffect(() => {
+    if (loading) void ensurePluginLoaded(view.plugin);
+  }, [loading, view.plugin]);
   return (
     <div ref={ref} className="plugin-pane" tabIndex={-1}>
       {Body ? (
         <PluginBoundary plugin={pluginName(view.plugin)} resetKey={JSON.stringify(view)}>
           <Body m={m} pane={pane} view={view} focused={focused} shown={shown} />
         </PluginBoundary>
-      ) : (
+      ) : loading ? null : (
         <div className="plugin-pane-off muted">{t(def ? 'plugins.paneOff' : 'plugins.paneUnknown', { plugin: view.plugin })}</div>
       )}
     </div>
@@ -71,6 +83,7 @@ interface TitleProps {
  * struck through while what it shows is gone (PaneViewDef.useGone), its
  * tooltip then saying so. */
 export function ViewTitle(p: TitleProps & { view: L.PluginView }) {
+  usePluginList((s) => s.list);
   const { def, on } = paneView(p.view.plugin, p.view.kind);
   const className = `${p.className} ${def?.preview?.(p.m, p.view) ? 'is-preview' : ''}`;
   const use = on ? def?.useGone : undefined;
@@ -84,9 +97,17 @@ export function ViewTitle(p: TitleProps & { view: L.PluginView }) {
 }
 
 /** The plugin that is on and says whether files are gone
- * (PluginDef.useFileGone), re-rendered when plugins are turned on or off. */
+ * (PluginDef.useFileGone), re-rendered when plugins are turned on or off.
+ * Triggers loading the lazy files plugin when a preview pane mounts before
+ * the Files panel or an editor has loaded it. */
 function useFileGoneSource(): PluginDef | undefined {
-  return useActivePlugins().find((x) => x.useFileGone);
+  const active = useActivePlugins();
+  const source = active.find((x) => x.useFileGone);
+  const pendingFiles = !source && active.some((x) => x.id === 'files' && isPluginPending('files'));
+  useEffect(() => {
+    if (pendingFiles) void ensurePluginLoaded('files');
+  }, [pendingFiles]);
+  return source;
 }
 
 /** The title of an app's pane that shows a file of machine m (a preview)

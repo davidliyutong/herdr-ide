@@ -24,8 +24,10 @@ import { RETRY_RESET_MS, retryDelay } from '../../lib/retry';
 import { useStore } from '../../state/store';
 import { chatApi } from './api';
 import { chatConnection, CLOSED, CommandError, readError, type ChatConnection, type Subscription } from './connection';
-import { chatState, liveKey, setLive, useChats, type LiveChat } from './state';
+import { chatCwd, setLive, type LiveChat } from './state';
 import type { Command, Event } from './protocol';
+
+export { chatCwd };
 
 /** How long a source no pane shows is kept. */
 export const KEEP_MS = 30_000;
@@ -382,11 +384,6 @@ export class ChatSourceImpl implements ChatSource {
     await this.ready();
     await this.conn.command(this.m, this.chat, cmd as Command);
   }
-}
-
-/** A chat's directory: what its attached source states, else its state. */
-export function chatCwd(m: string, chat: string): string | undefined {
-  return useChats.getState().live[liveKey(m, chat)]?.info?.cwd || chatState(m, chat)?.cwd || undefined;
 }
 
 // ---- the sources the page has ----

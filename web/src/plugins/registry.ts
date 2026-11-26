@@ -11,6 +11,44 @@ import type { PluginView } from '../term/layout';
 import type { CommandDef, NewTabItem, PaletteItem, PanelDef, PaneViewDef, PluginDef, TerminalHeaderProps, UnopenedAgent } from './api';
 
 let plugins: PluginDef[] = [];
+const pluginLoaders = new Map<string, () => Promise<PluginDef>>();
+const lazyStubs = new Map<string, PluginDef>();
+
+/** Registers the dynamic loader for a lazy plugin id (lazy.ts). */
+export function registerPluginLoader(id: string, load: () => Promise<PluginDef>, stub?: PluginDef) {
+  pluginLoaders.set(id, load);
+  if (stub) lazyStubs.set(id, stub);
+}
+
+/** Whether a registered plugin is still a lazy stub waiting to load. */
+export function isPluginPending(id: string): boolean {
+  const stub = lazyStubs.get(id);
+  return !!stub && plugins.some((p) => p === stub);
+}
+
+/** Triggers loading a registered lazy plugin by id (no-op if already eager or
+ * unknown). */
+export function ensurePluginLoaded(id: string): Promise<PluginDef | undefined> {
+  const load = pluginLoaders.get(id);
+  return load ? load() : Promise.resolve(plugins.find((p) => p.id === id));
+}
+
+/** Triggers loading all registered lazy plugins. */
+export function ensurePluginsLoaded(): Promise<void> {
+  const active = plugins.map((p) => pluginLoaders.get(p.id)).filter((fn): fn is () => Promise<PluginDef> => !!fn);
+  return Promise.all(active.map((fn) => fn().catch(() => undefined))).then(() => undefined);
+}
+
+/** Replaces a registered plugin by id (used by lazy.ts once a plugin module
+ * loads). When expected is given, replaces only if that exact stub is still
+ * registered so test suites swapping plugins via definePlugins are unaffected. */
+export function replacePlugin(id: string, next: PluginDef, expected?: PluginDef) {
+  if (!expected || lazyStubs.get(id) === expected) lazyStubs.delete(id);
+  const idx = plugins.findIndex((p) => p.id === id);
+  if (idx < 0 || (expected && plugins[idx] !== expected)) return;
+  plugins = [...plugins.slice(0, idx), next, ...plugins.slice(idx + 1)];
+  usePluginList.setState({ list: plugins });
+}
 
 /** Sets the app's plugins (index.ts; tests). */
 export function definePlugins(list: PluginDef[]) {

@@ -11,7 +11,7 @@
 // keys settings.<key>, settings.<key>.desc, settings.<key>.<option> and
 // settings.group.<id>; a setting without them shows its key.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, Copy as CopyIcon, Ellipsis, FileJson, Lock, Minus, Plus, Search, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../state/store';
@@ -46,7 +46,7 @@ import { PluginHeader, PluginsPage } from './settings/PluginsPage';
 import { Performance } from './settings/Performance';
 import { Picker, type PickerItem } from './Picker';
 import { useReturnFocus } from './useDismiss';
-import { acceptRisk, allPlugins, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
+import { acceptRisk, ensurePluginLoaded, pluginSwitch, sectionPlugin, usePluginList } from '../plugins/registry';
 import type { PluginDef, PluginSettingsDef } from '../plugins/api';
 
 export function settingLabel(key: string): string {
@@ -214,6 +214,10 @@ function SettingsModal({ page: askedPage, machine: askedMachine }: { page?: stri
   ];
   const current = pages.some((p) => p.id === page) ? page : pages[0]?.id;
   const currentPlugin = plugins.find((p) => p.id === pages.find((x) => x.id === current)?.plugin);
+  const currentPluginId = currentPlugin?.id;
+  useEffect(() => {
+    if (currentPluginId) void ensurePluginLoaded(currentPluginId);
+  }, [currentPluginId]);
   const CurrentExtra = currentPlugin?.settings?.section === current ? currentPlugin.settings.extra : undefined;
   const currentLayout = currentPlugin?.settings?.section === current ? currentPlugin.settings.layout : undefined;
   /** A page's name: its section's, else its plugin's (a page for extra alone). */
@@ -501,9 +505,15 @@ function SectionView({
         schemes.map((d) => (
           <ThemeColors key={d.key} theme={d.key.endsWith('.dark') ? 'dark' : 'light'} scheme={d} readOnly={readOnly} onError={setError} />
         ))}
-      {Layout ? <Layout readOnly={readOnly} defs={plain} rows={rowsOf} lead={header} visit={visit} /> : rowsOf(plain)}
+      {Layout ? (
+        <Suspense fallback={null}>
+          <Layout readOnly={readOnly} defs={plain} rows={rowsOf} lead={header} visit={visit} />
+        </Suspense>
+      ) : (
+        rowsOf(plain)
+      )}
       {fullDiskAccess && <FullDiskAccess readOnly={readOnly} />}
-      {footer}
+      {footer && <Suspense fallback={null}>{footer}</Suspense>}
       {id === 'gui' && machine && machine.kind !== 'local' && (
         <div className="setting">
           <div className="setting-head">
@@ -651,8 +661,14 @@ function Control({
   onChange(v: SettingValue): void;
 }) {
   // A plugin's own control for the setting (PluginSettingsDef.controls).
-  const Own = allPlugins().find((p) => p.settings?.controls?.[d.key])?.settings?.controls?.[d.key];
-  if (Own) return <Own d={d} value={value} disabled={disabled} onChange={onChange} />;
+  const plugins = usePluginList((s) => s.list);
+  const Own = plugins.find((p) => p.settings?.controls?.[d.key])?.settings?.controls?.[d.key];
+  if (Own)
+    return (
+      <Suspense fallback={null}>
+        <Own d={d} value={value} disabled={disabled} onChange={onChange} />
+      </Suspense>
+    );
   switch (d.type) {
     case 'bool':
       return (
