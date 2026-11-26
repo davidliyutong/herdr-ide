@@ -168,6 +168,14 @@ describe('the badge', () => {
     // Off, the plugin's panes count no more.
     setViewStatus('v1', 'blocked');
     expect(badge.at(-1)).toBe(2);
+    // Muting the tab with the blocked plugin view excludes it from the badge.
+    hub.model.mutate('m', (l) => L.muteTab(l, 'aaaaaaaa', 1, true));
+    await settle();
+    expect(badge.at(-1)).toBe('clear');
+    // Unmuting restores both blocked panes in tab 1 (t2 + v1).
+    hub.model.mutate('m', (l) => L.muteTab(l, 'aaaaaaaa', 1, false));
+    await settle();
+    expect(badge.at(-1)).toBe(2);
     useSettings.setState({ values: { 'plugins.dummy.enabled': { value: false, source: 'global' } } });
     expect(badge.at(-1)).toBe(1);
   });

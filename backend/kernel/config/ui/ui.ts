@@ -88,6 +88,8 @@ export const UI = defineModule({
     'appearance.colorTheme': enumOf([firstTheme!, ...otherThemes], { default: firstTheme!, section: 'appearance', order: 15 }),
     'appearance.language': enumOf(['auto', 'en', 'zh-CN'], { default: 'auto', section: 'appearance', order: 20 }),
     'appearance.uiFontSize': int({ default: 13, min: 11, max: 20, section: 'appearance', order: 30 }),
+    'appearance.uiFontFamily': text({ default: '', section: 'appearance', order: 31 }),
+    'appearance.uiCjkFontFamily': text({ default: '', section: 'appearance', order: 32 }),
     // The desktop app's windows, terminals included, in percent: its shell
     // applies it; browsers zoom pages themselves.
     'window.zoom': int({ default: 100, min: MIN_ZOOM, max: MAX_ZOOM, step: 10, section: 'appearance', order: 35 }),
@@ -97,6 +99,7 @@ export const UI = defineModule({
     'layout.undoClose': int({ default: 5, min: MIN_UNDO_CLOSE, max: MAX_UNDO_CLOSE, step: 1, section: 'layout', order: 10 }),
 
     'terminal.fontFamily': text({ default: '', section: 'terminal', group: 'text', order: 10 }),
+    'terminal.cjkFontFamily': text({ default: '', section: 'terminal', group: 'text', order: 15 }),
     'terminal.fontSize': number({ default: 13, min: 6, max: 40, step: 1, section: 'terminal', group: 'text', order: 20 }),
     'terminal.fontWeight': enumOf(['regular', 'medium'], { default: 'regular', section: 'terminal', group: 'text', order: 30 }),
     'terminal.lineHeight': number({ default: 1.05, min: 0.8, max: 2, step: 0.05, section: 'terminal', group: 'text', order: 40 }),

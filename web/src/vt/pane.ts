@@ -13,6 +13,7 @@
 
 import type { AttachOptions, Display, StreamHandler } from '../term/connection';
 import { displayColors, type Appearance } from '../appearance';
+import { isCjkText } from '../terminal/fonts';
 import { loadVt, type Vt } from './module';
 import { Terminal, newFrame, type Frame, type Row } from './terminal';
 import { createRenderer, replaceCanvas, lookOf, hexColor, type Cells, type Look, type Overlay, type Renderer } from './renderer';
@@ -1008,11 +1009,12 @@ export class TermPane {
     const c = this.frame.cursor;
     const a = this.appearance;
     el.textContent = text;
+    const family = m.cjkFamily && isCjkText(text) ? m.cjkFamily : m.family;
     Object.assign(el.style, {
       display: 'block',
       top: `${(c.y * m.ch) / this.dpr}px`,
       height: `${m.ch / this.dpr}px`,
-      font: `${m.weight} ${m.fontPx / this.dpr}px ${m.family}`,
+      font: `${m.weight} ${m.fontPx / this.dpr}px ${family}`,
       lineHeight: `${m.ch / this.dpr}px`,
       color: a.colors.foreground,
       background: a.colors.background,

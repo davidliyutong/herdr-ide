@@ -125,6 +125,7 @@ describe('unified notification dispatcher', () => {
   it('uses Electron native notifications when desktopShell.notifications is present and routes click targets', async () => {
     const shownNative: shellMod.DesktopNotificationOptions[] = [];
     const closedNative: string[] = [];
+    const badgeCounts: number[] = [];
     let clickCb: ((t: shellMod.NotificationTarget) => void) | undefined;
     const desktopNotifications: shellMod.DesktopNotifications = {
       supported: async () => true,
@@ -133,6 +134,7 @@ describe('unified notification dispatcher', () => {
         return true;
       },
       close: (tag) => closedNative.push(tag),
+      setBadgeCount: (count) => badgeCounts.push(count),
       onClick: (fn) => {
         clickCb = fn;
         return () => {
@@ -143,10 +145,15 @@ describe('unified notification dispatcher', () => {
     vi.spyOn(shellMod, 'desktopShell', 'get').mockReturnValue({ notifications: desktopNotifications } as shellMod.DesktopShell);
 
     const off = initNotifications();
+    expect(badgeCounts.at(-1)).toBe(0);
     // In Electron desktop, requestNotifyPermission does not trigger browser prompt.
     expect(notificationPermission()).toBe('desktop');
     expect(await requestNotifyPermission({ force: true })).toBe('granted');
     expect(requestCalls).toBe(0);
+
+    hub.event('m', 'agent', 't1', { agent_status: 'blocked' });
+    await settle();
+    expect(badgeCounts.at(-1)).toBe(1);
 
     notifyAgent('m', { terminal: 't1', agent: 'claude', agent_status: 'blocked', title: 'approve' }, false);
     await settle();
@@ -162,7 +169,20 @@ describe('unified notification dispatcher', () => {
       },
     ]);
 
-    // Focusing the notified pane when window becomes visible closes the stale native notification.
+    // Muting the tab immediately clears the native dock badge and closes the active notification.
+    hub.model.mutate('m', (l) => L.muteTab(l, 'aaaaaaaa', 0, true));
+    await settle();
+    expect(badgeCounts.at(-1)).toBe(0);
+    expect(closedNative).toEqual(['m|t1']);
+
+    // Unmuting the tab immediately restores the native dock badge count.
+    hub.model.mutate('m', (l) => L.muteTab(l, 'aaaaaaaa', 0, false));
+    await settle();
+    expect(badgeCounts.at(-1)).toBe(1);
+
+    // Focusing the notified pane when window becomes visible clears the next active notification.
+    notifyAgent('m', { terminal: 't1', agent: 'claude', agent_status: 'blocked', title: 'approve again' }, false);
+    await settle();
     setPageVisible(true);
     window.dispatchEvent(new Event('focus'));
     await settle();

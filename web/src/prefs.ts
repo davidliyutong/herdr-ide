@@ -24,7 +24,10 @@ export const prefKeys = {
   theme: 'appearance.theme',
   colorTheme: 'appearance.colorTheme',
   uiFontSize: 'appearance.uiFontSize',
+  uiFontFamily: 'appearance.uiFontFamily',
+  uiCjkFontFamily: 'appearance.uiCjkFontFamily',
   termFontFamily: 'terminal.fontFamily',
+  termCjkFontFamily: 'terminal.cjkFontFamily',
   termFontSize: 'terminal.fontSize',
   termFontWeight: 'terminal.fontWeight',
   termLineHeight: 'terminal.lineHeight',
@@ -53,7 +56,10 @@ export interface Prefs {
   theme: 'system' | 'dark' | 'light';
   colorTheme: string;
   uiFontSize: number;
+  uiFontFamily: string;
+  uiCjkFontFamily: string;
   termFontFamily: string;
+  termCjkFontFamily: string;
   termFontSize: number;
   termFontWeight: 'regular' | 'medium';
   termLineHeight: number;

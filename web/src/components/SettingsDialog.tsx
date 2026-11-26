@@ -34,7 +34,7 @@ import {
 } from '../settings';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { DeployProgress } from './DeployProgress';
-import { FontPicker } from './settings/FontPicker';
+import { FontPicker, type FontPickerKind } from './settings/FontPicker';
 import { desktopShell } from '../shell';
 import { notificationPermission, onPermissionChange, requestNotifyPermission } from '../notify';
 import { ZOOM_KEY } from '../zoom';
@@ -705,12 +705,19 @@ function Control({
       );
     case 'list':
       return <ListEditor d={d} value={value as string[]} disabled={disabled} onChange={onChange} />;
-    default:
-      return d.key === 'terminal.fontFamily' ? (
-        <FontPicker value={String(value)} disabled={disabled} onChange={onChange} />
+    default: {
+      const fontKind: Record<string, FontPickerKind> = {
+        'terminal.fontFamily': 'terminal',
+        'terminal.cjkFontFamily': 'terminal-cjk',
+        'appearance.uiFontFamily': 'ui',
+        'appearance.uiCjkFontFamily': 'ui-cjk',
+      };
+      return fontKind[d.key] ? (
+        <FontPicker kind={fontKind[d.key]} value={String(value)} disabled={disabled} onChange={onChange} />
       ) : (
         <TextInput d={d} value={String(value)} disabled={disabled} onChange={onChange} />
       );
+    }
   }
 }
 

@@ -5,7 +5,7 @@
 // WebGL tints white glyphs in its shader; the Canvas 2D one keeps a glyph per
 // color.
 
-import { termFontFamily, type TermFontWeight } from '../terminal/fonts';
+import { isCjkText, termCjkFontFamily, termFontFamily, type TermFontWeight } from '../terminal/fonts';
 
 /** Cell geometry in device pixels and the font it comes from. */
 export interface Metrics {
@@ -13,6 +13,8 @@ export interface Metrics {
   ch: number;
   fontPx: number;
   family: string;
+  /** Font stack prioritizing the configured CJK font for CJK glyphs, when set. */
+  cjkFamily?: string;
   weight: TermFontWeight;
   /** Baseline offset from a cell's top. */
   baseline: number;
@@ -23,10 +25,11 @@ export interface Metrics {
  * times lineHeight, in whole device pixels. */
 export function measureCell(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  o: { fontFamily: string; fontSize: number; fontWeight: TermFontWeight; lineHeight: number },
+  o: { fontFamily: string; cjkFontFamily?: string; fontSize: number; fontWeight: TermFontWeight; lineHeight: number },
   dpr: number,
 ): Metrics {
-  const family = termFontFamily(o.fontWeight, o.fontFamily);
+  const family = termFontFamily(o.fontWeight, o.fontFamily, o.cjkFontFamily);
+  const cjkFamily = termCjkFontFamily(o.fontWeight, o.fontFamily, o.cjkFontFamily);
   const fontPx = Math.round(o.fontSize * dpr);
   ctx.font = `${o.fontWeight} ${fontPx}px ${family}`;
   const m = ctx.measureText('W');
@@ -35,7 +38,7 @@ export function measureCell(
   const cw = Math.max(1, Math.round(m.width || fontPx * 0.6));
   const ch = Math.max(1, Math.round((ascent + descent) * o.lineHeight));
   const baseline = Math.round((ch - (ascent + descent)) / 2 + ascent);
-  return { cw, ch, fontPx, family, weight: o.fontWeight, baseline, dpr };
+  return { cw, ch, fontPx, family, ...(cjkFamily ? { cjkFamily } : {}), weight: o.fontWeight, baseline, dpr };
 }
 
 /** What a glyph is. */
@@ -381,7 +384,8 @@ export class Atlas {
     if (g.kind === 'shape') drawShape(ctx, g.text, x, y, span * m.cw, h);
     else if (g.kind === 'line' || g.kind === 'cursor') drawLine(ctx, g, x, y, span * m.cw, m);
     else {
-      ctx.font = `${g.italic ? 'italic ' : ''}${g.bold ? 700 : m.weight} ${m.fontPx}px ${m.family}`;
+      const fontFamily = m.cjkFamily && isCjkText(g.text) ? m.cjkFamily : m.family;
+      ctx.font = `${g.italic ? 'italic ' : ''}${g.bold ? 700 : m.weight} ${m.fontPx}px ${fontFamily}`;
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(g.text, x, y + m.baseline);
       // Emoji keep their own colors: any pixel that is not gray.

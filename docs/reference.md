@@ -108,9 +108,12 @@ Every setting is defined in the hub (`backend/kernel/config` and the features' `
 | `appearance.colorTheme` | `blue`, `vscode`, `teal`, `violet`, `rose`, `amber`, `graphite` | `"blue"` | – | – |
 | `appearance.language` | `auto`, `en`, `zh-CN` | `"auto"` | – | – |
 | `appearance.uiFontSize` | integer, 11–20 | `13` | – | – |
+| `appearance.uiFontFamily` | string | `""` | – | – |
+| `appearance.uiCjkFontFamily` | string | `""` | – | – |
 | `window.zoom` | integer, 50–300 | `100` | – | – |
 | `layout.undoClose` | integer, 3–120 | `5` | – | – |
 | `terminal.fontFamily` | string | `""` | – | – |
+| `terminal.cjkFontFamily` | string | `""` | – | – |
 | `terminal.fontSize` | number, 6–40 | `13` | – | – |
 | `terminal.fontWeight` | `regular`, `medium` | `"regular"` | – | – |
 | `terminal.lineHeight` | number, 0.8–2 | `1.05` | – | – |

@@ -270,7 +270,7 @@ describe('layout', () => {
     ]);
   });
 
-  it('names a workspace after its first pane, or its only one', () => {
+  it('names a workspace by manual name, then fixed path basename, then dynamic pane directory', () => {
     // A workspace without a directory takes its first pane's, once.
     let layout = openTerminal(createWorkspace(emptyLayout, 'w', ''), 't1');
     layout = adoptDirectory(layout, 't1', '/home/u/app');
@@ -285,12 +285,17 @@ describe('layout', () => {
     const ws = () => layout.workspaces[0];
     expect(soleLeaf(ws())).toBeNull();
     expect(workspaceTitle(ws(), '/home/u')).toBe('app');
-    // One pane left: its directory names the workspace.
+    // Fixed path takes priority over dynamic pane cwd even when one pane is left and it cds elsewhere.
     layout = closePane(layout, 't1');
     expect(soleLeaf(ws())).toEqual({ terminal: 't2' });
-    expect(workspaceTitle(ws(), '/home/u', '/home/u/lib')).toBe('lib');
-    expect(workspaceTitle(ws(), '/home/u', '/home/u')).toBe('~');
-    // The user's name wins.
+    expect(workspaceTitle(ws(), '/home/u', '/home/u/lib')).toBe('app');
+    expect(workspaceTitle(ws(), '/home/u', '/home/u')).toBe('app');
+    expect(workspaceTitle({ name: '', cwd: '/home/u/projects/veldr/' }, '/home/u', '/tmp/other')).toBe('veldr');
+    expect(workspaceTitle({ name: 'Workspace', cwd: '/home/u/projects/veldr' }, '/home/u', '/tmp/other')).toBe('veldr');
+    // Without a fixed path, the workspace follows the dynamic pane directory.
+    expect(workspaceTitle({ name: '', cwd: '' }, '/home/u', '/home/u/lib')).toBe('lib');
+    expect(workspaceTitle({ name: '', cwd: '' }, '/home/u', '/home/u')).toBe('~');
+    // Explicit manual name wins over both fixed path and dynamic directory.
     expect(workspaceTitle({ ...ws(), name: 'mine' }, '/home/u', '/home/u/lib')).toBe('mine');
   });
 

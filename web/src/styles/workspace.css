@@ -144,7 +144,7 @@
   color: var(--fg-mute);
   margin: 0 -2px;
 }
-/* A muted tab or workspace: no sounds or notifications. */
+/* A muted tab or workspace: no sounds, notifications, or badges. */
 .tab-muted.lucide,
 .ws-muted.lucide {
   width: 0.85rem;

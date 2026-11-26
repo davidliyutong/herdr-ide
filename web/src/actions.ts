@@ -37,26 +37,36 @@ export interface AttentionItem {
   status: AgentStatus;
 }
 
+/** Statuses that represent an unread / attention-requesting indicator badge
+ * (suppressed when a tab or workspace is muted). */
+const isAttentionStatus = (s: AgentStatus | undefined): boolean => s === 'blocked' || s === 'done';
+
 /** Terminals with an agent (or a status their program reports), the
  * plugins' panes with a status, and active/attention-needing plugin
  * conversations without an open pane on every machine followed, by how
  * much they need the user; terminals before panes, panes before unopened
- * chats within the same status. */
+ * chats within the same status. Muted panes' unread/attention statuses
+ * (blocked, done) are omitted. */
 export function attentionList(): AttentionItem[] {
   const s = useStore.getState();
   const tm = useTerms.getState().machines;
   const out: AttentionItem[] = [];
   for (const m of s.order) {
+    const layout = tm[m]?.layout;
     for (const r of Object.values(tm[m]?.terminals ?? {})) {
       const status = agentStatus(r);
-      if (isLive(r) && status && (agentOf(r) || status !== 'idle')) out.push({ m, terminal: r.address, record: r, status });
+      if (!isLive(r) || !status || (!agentOf(r) && status === 'idle')) continue;
+      if (isAttentionStatus(status) && layout && L.paneMuted(layout, r.address)) continue;
+      out.push({ m, terminal: r.address, record: r, status });
     }
   }
   for (const m of s.order) {
     const layout = tm[m]?.layout;
     for (const { key, view } of layout ? L.layoutViews(layout) : []) {
       const status = viewStatus(m, view);
-      if (status) out.push({ m, terminal: key, view, status });
+      if (!status) continue;
+      if (isAttentionStatus(status) && layout && L.paneMuted(layout, key)) continue;
+      out.push({ m, terminal: key, view, status });
     }
   }
   for (const m of s.order) {
@@ -91,14 +101,23 @@ export function paneStatus(m: string, leaf: L.Leaf): AgentStatus | undefined {
   return L.isPluginLeaf(leaf) ? viewStatus(m, leaf.view) : undefined;
 }
 
-/** The status a tab shows: the highest of its panes' (aggregate). */
-export function tabStatus(m: string, tab: L.Tab): AgentStatus | undefined {
-  return aggregate(L.leavesOf(tab.root).map((leaf) => paneStatus(m, leaf)));
+/** The status a tab shows: the highest of its panes' (aggregate), suppressing
+ * unread/attention statuses (blocked, done) when the tab or its workspace is
+ * muted. */
+export function tabStatus(m: string, tab: L.Tab, muted = false): AgentStatus | undefined {
+  const hideUnread = muted || !!tab.muted;
+  return aggregate(
+    L.leavesOf(tab.root).map((leaf) => {
+      const s = paneStatus(m, leaf);
+      return hideUnread && isAttentionStatus(s) ? undefined : s;
+    }),
+  );
 }
 
-/** The status a workspace shows: the highest of its tabs'. */
+/** The status a workspace shows: the highest of its tabs', suppressing
+ * unread/attention statuses from muted tabs or when the workspace is muted. */
 export function workspaceStatus(m: string, ws: L.Workspace): AgentStatus | undefined {
-  return aggregate(ws.tabs.map((tab) => tabStatus(m, tab)));
+  return aggregate(ws.tabs.map((tab) => tabStatus(m, tab, !!ws.muted)));
 }
 
 /** Each pane's share of its tab, from the split tree. */
@@ -1056,23 +1075,24 @@ export const actions = {
   },
 };
 
-/** A workspace's name as shown: the user's, else the folder of its only
- * pane (a terminal's current directory, a VS Code pane's folder) while it
- * has one pane, else its own directory (the folder its first pane started
- * in) or, without one, its focused pane's folder; the home directory of
- * its machine as "~". */
+/** A workspace's name as shown: the user's explicit name, else the basename of
+ * its configured fixed directory (ws.cwd) even when its panes navigate
+ * elsewhere, else the folder of its only or focused pane when it has no fixed
+ * directory; the home directory of its machine as "~". */
 export function workspaceTitle(m: string, ws: L.Workspace): string {
-  // Without a directory of its own, a workspace with several panes goes by
-  // its focused one's, where its new terminals start.
-  const leaf = L.soleLeaf(ws) ?? (ws.cwd ? null : L.focusedLeaf(ws));
+  const home = useStore.getState().machines[m]?.info?.home;
+  if (ws.cwd.trim()) return L.workspaceTitle(ws, home);
+  const leaf = L.soleLeaf(ws) ?? L.focusedLeaf(ws);
   const dir = !leaf
     ? undefined
     : L.isCodeLeaf(leaf)
       ? leaf.code.folder
       : L.isTerminalLeaf(leaf)
         ? terms.directory(m, leaf.terminal)
-        : undefined;
-  return L.workspaceTitle(ws, useStore.getState().machines[m]?.info?.home, dir);
+        : L.isPluginLeaf(leaf)
+          ? describeView(m, leaf.view).directory
+          : undefined;
+  return L.workspaceTitle(ws, home, dir);
 }
 
 /** A pane's title: a terminal's (terminalTitle), a VS Code pane's folder

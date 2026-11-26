@@ -18,6 +18,7 @@ import { usePrefs } from '../prefs';
 import { locale } from '../i18n';
 import { allowedLocales } from './monacoLocales';
 import { appearanceOf, resolveTheme, useSystemDark } from '../appearance';
+import { quoteFontFamily } from '../terminal/fonts';
 import { lineTokenizer, type LineTokenizer } from '../highlight/highlighter';
 import { LANGS, languageOf } from '../highlight/languages';
 import { ROLES, ROLE_STYLE, ROLE_TOKEN } from '../highlight/roles';
@@ -238,8 +239,12 @@ function followTheme(monaco: Monaco) {
 /** The editor's options that follow the settings: the terminal's font. */
 export function fontOptions(): MonacoNs.editor.IEditorOptions {
   const a = appearanceOf(usePrefs.getState().prefs);
+  const primary = a.fontFamily.trim();
+  const cjk = quoteFontFamily(a.cjkFontFamily);
   return {
-    fontFamily: `${a.fontFamily ? a.fontFamily + ', ' : ''}'JetBrains Mono', Menlo, monospace`,
+    fontFamily: [primary, "'JetBrains Mono'", 'Menlo', cjk, "'Noto Sans Mono CJK SC'", "'PingFang SC'", 'monospace']
+      .filter(Boolean)
+      .join(', '),
     fontSize: a.fontSize,
   };
 }

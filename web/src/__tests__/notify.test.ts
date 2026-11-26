@@ -145,4 +145,45 @@ describe('the page', () => {
     set('notifications.badge', true);
     expect(badge.at(-1)).toBe(2);
   });
+
+  it('excludes muted tabs and workspaces from the badge and updates immediately on mute toggle', () => {
+    const termsState = useTerms.getState().machines.m;
+    const base = L.parseLayout({
+      version: 2,
+      selected: 0,
+      workspaces: [
+        {
+          id: 'w1',
+          name: '',
+          cwd: '',
+          selected: 0,
+          tabs: [
+            { root: { terminal: 't1' }, focused: 't1' },
+            { root: { terminal: 't2' }, focused: 't2' },
+          ],
+        },
+      ],
+    });
+    useTerms.setState({ machines: { m: { ...termsState, layout: base } } });
+    expect(badge.at(-1)).toBe(2);
+    expect(document.title).toMatch(/^\(2\) /);
+
+    // Muting one tab immediately drops badge from 2 to 1.
+    const tabMuted = L.muteTab(base, 'w1', 0, true);
+    useTerms.setState({ machines: { m: { ...termsState, layout: tabMuted } } });
+    expect(badge.at(-1)).toBe(1);
+    expect(document.title).toMatch(/^\(1\) /);
+
+    // Muting the workspace immediately clears the badge to 0.
+    const wsMuted = L.muteWorkspace(base, 'w1', true);
+    useTerms.setState({ machines: { m: { ...termsState, layout: wsMuted } } });
+    expect(badge.at(-1)).toBe('clear');
+    expect(document.title).not.toMatch(/^\(/);
+
+    // Unmuting the workspace immediately restores the badge to 2.
+    const unmuted = L.muteWorkspace(wsMuted, 'w1', false);
+    useTerms.setState({ machines: { m: { ...termsState, layout: unmuted } } });
+    expect(badge.at(-1)).toBe(2);
+    expect(document.title).toMatch(/^\(2\) /);
+  });
 });

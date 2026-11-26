@@ -14,7 +14,7 @@ vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {} } }));
 
 import { usePrefs } from '../prefs';
 import { fakeSettingsApi } from './fakeSettings';
-import { appearanceOf, useSystemDark, useThemeKind } from '../appearance';
+import { appearanceOf, initAppearance, useSystemDark, useThemeKind } from '../appearance';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -56,5 +56,32 @@ describe('useThemeKind', () => {
     await act(async () => usePrefs.getState().setPref('theme', 'light'));
     await act(async () => useSystemDark.setState({ dark: true }));
     expect(host.textContent).toBe('light');
+  });
+
+  it('applies separate UI and monospace English/CJK font stacks to root CSS and clears on reset', async () => {
+    initAppearance();
+    await act(async () => {
+      usePrefs.getState().setPref('uiFontFamily', 'Inter');
+      usePrefs.getState().setPref('uiCjkFontFamily', 'LXGW WenKai');
+      usePrefs.getState().setPref('termFontFamily', 'Fira Code');
+      usePrefs.getState().setPref('termCjkFontFamily', 'Sarasa Mono SC');
+    });
+    const rootStyle = document.documentElement.style;
+    expect(rootStyle.fontFamily).toContain('Inter');
+    expect(rootStyle.fontFamily).toContain('LXGW WenKai');
+    expect(rootStyle.fontFamily.indexOf('Inter')).toBeLessThan(rootStyle.fontFamily.indexOf('LXGW WenKai'));
+    const mono = rootStyle.getPropertyValue('--mono');
+    expect(mono).toContain('Fira Code');
+    expect(mono).toContain('Sarasa Mono SC');
+    expect(mono.indexOf('Fira Code')).toBeLessThan(mono.indexOf('Sarasa Mono SC'));
+
+    await act(async () => {
+      usePrefs.getState().setPref('uiFontFamily', '');
+      usePrefs.getState().setPref('uiCjkFontFamily', '');
+      usePrefs.getState().setPref('termFontFamily', '');
+      usePrefs.getState().setPref('termCjkFontFamily', '');
+    });
+    expect(rootStyle.fontFamily).toBe('');
+    expect(rootStyle.getPropertyValue('--mono')).toBe('');
   });
 });

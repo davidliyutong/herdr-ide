@@ -36,6 +36,7 @@ describe('ui settings', () => {
     const theme: 'system' | 'light' | 'dark' = s.get('appearance.theme');
     const muted: string[] = s.get('notifications.mutedAgents');
     expect([size, theme, muted]).toEqual([13, 'system', ['droid']]);
+    expect([s.get('appearance.uiFontFamily'), s.get('appearance.uiCjkFontFamily'), s.get('terminal.cjkFontFamily')]).toEqual(['', '', '']);
     expect(s.bool('terminal.sshEnv', 'm')).toBe(true);
   });
 

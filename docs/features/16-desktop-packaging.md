@@ -103,7 +103,7 @@ A grant is tied to the program's designated requirement. An ad hoc signature mak
 ### Notifications, badge and icons
 
 - Notifications are native (`desktop/src/notifications.ts`): the page asks through the bridge, both sides validate and bound title, body, tag and click target (a pane, chat or panel), and active ones are deduplicated by tag and bounded. A click shows the main window (on macOS reopening it) and hands the target to the page, queued while it loads. Without native notifications the page falls back to the web Notification API ([07](07-agent-native-workflow.md)). Windows shows them only for the installed app (its Start menu shortcut carries the AppUserModelID); Linux needs a notification daemon.
-- The blocked-agent count uses the Badging API. Electron shows the badge on the Dock (macOS), as a taskbar overlay (Windows) and through the Unity launcher API (Linux).
+- The blocked-agent count (excluding muted tabs and workspaces) syncs natively through `desktopShell.notifications.setBadgeCount` (`app.setBadgeCount` and macOS `app.dock.setBadge`, cleared on navigation/close/quit) alongside the Badging API. Electron shows the badge on the Dock (macOS), as a taskbar overlay (Windows) and through the Unity launcher API (Linux).
 - The shell imports the web brand constants and message dictionaries; electron-builder's metadata reads the same brand file.
 - `desktop/assets/icon.svg` is the master icon and `web/public/icon.svg` a simplified version for small sizes. `make desktop-icons` (`scripts/icons.sh`) regenerates the committed PNG, ICNS and ICO; builds need no icon tools.
 

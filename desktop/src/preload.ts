@@ -14,7 +14,7 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'ele
 import type { DesktopEnroll, DesktopShell, DesktopUnlock, NotificationTarget, OpenedFolders, ProcessUsage } from '../../web/src/shell';
 import { channels } from './bridge';
 import { setUpFrame } from './frames';
-import { parseNotificationOptions, parseNotificationTarget, sanitizeTag } from './notifications';
+import { parseBadgeCount, parseNotificationOptions, parseNotificationTarget, sanitizeTag } from './notifications';
 import { MAC_TITLEBAR_INSET, MAC_TITLEBAR_MIN_HEIGHT, MAC_TITLEBAR_TOP_SPACE } from './titlebar';
 
 /** Listens on channel for payloads that pass valid; returns a function that
@@ -150,6 +150,10 @@ const shell: DesktopShell = {
     close(tag) {
       const valid = sanitizeTag(tag);
       if (valid) ipcRenderer.send(channels.notifyClose, valid);
+    },
+    setBadgeCount(count) {
+      const valid = parseBadgeCount(count);
+      if (valid !== undefined) ipcRenderer.send(channels.notifyBadge, valid);
     },
     onClick(fn) {
       const off = listen(

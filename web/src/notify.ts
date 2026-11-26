@@ -315,8 +315,22 @@ export function initNotifications(): () => void {
     lookedAt(tag);
     if (activeWeb.has(tag) || activeDesktopTags.has(tag)) closeNotification(tag);
   };
+  const clearMuted = () => {
+    const tm = useTerms.getState().machines;
+    for (const tag of new Set([...activeWeb.keys(), ...activeDesktopTags])) {
+      const sep = tag.indexOf('|');
+      if (sep <= 0) continue;
+      const m = tag.slice(0, sep);
+      const pane = tag.slice(sep + 1);
+      const layout = tm[m]?.layout;
+      if (layout && L.paneMuted(layout, pane)) closeNotification(tag);
+    }
+  };
   offs.push(
-    useTerms.subscribe(clearFocused),
+    useTerms.subscribe(() => {
+      clearFocused();
+      clearMuted();
+    }),
     useStore.subscribe((st, prev) => {
       if (st.machineId !== prev.machineId || st.zoomed !== prev.zoomed) clearFocused();
     }),
@@ -329,13 +343,15 @@ export function initNotifications(): () => void {
       document.removeEventListener('visibilitychange', clearFocused);
     });
   }
+  if (typeof document !== 'undefined') updateBadge(true);
   return () => {
     for (const off of offs) off();
   };
 }
 
 /** The count shown on the app's icon and in the title: the blocked agents
- * (terminals', plugins' panes', and unopened chats'), none when the setting is off. */
+ * (terminals', plugins' panes', and unopened chats'), excluding muted tabs
+ * and workspaces; none when the setting is off. */
 export function badgeCount(blocked: number, enabled: boolean): number {
   return enabled ? blocked : 0;
 }
@@ -344,20 +360,25 @@ type BadgeNavigator = Navigator & { setAppBadge?(n: number): Promise<void>; clea
 
 let shown = -1;
 
-export function updateBadge() {
+export function updateBadge(force = false) {
   const s = useStore.getState();
   let blocked = 0;
   const tm = useTerms.getState().machines;
   for (const id of s.order) {
-    for (const r of Object.values(tm[id]?.terminals ?? {})) if (agentStatus(r) === 'blocked') blocked++;
     const layout = tm[id]?.layout;
-    for (const { view } of layout ? L.layoutViews(layout) : []) if (viewStatus(id, view) === 'blocked') blocked++;
+    for (const r of Object.values(tm[id]?.terminals ?? {})) {
+      if (agentStatus(r) === 'blocked' && !(layout && L.paneMuted(layout, r.address))) blocked++;
+    }
+    for (const { key, view } of layout ? L.layoutViews(layout) : []) {
+      if (viewStatus(id, view) === 'blocked' && !(layout && L.paneMuted(layout, key))) blocked++;
+    }
     for (const item of viewUnopened(id)) if (item.status === 'blocked') blocked++;
   }
   const n = badgeCount(blocked, getPrefs().notifyBadge);
   document.title = n ? `(${n}) ${APP_NAME}` : APP_NAME;
-  if (n === shown) return;
+  if (!force && n === shown) return;
   shown = n;
+  desktopShell?.notifications?.setBadgeCount?.(n);
   const nav = navigator as BadgeNavigator;
   if (n) nav.setAppBadge?.(n).catch(() => {});
   else nav.clearAppBadge?.().catch(() => {});
@@ -366,6 +387,15 @@ export function updateBadge() {
 // Turning the badge off clears it at once, turning it on shows the count.
 usePrefs.subscribe((st, prev) => {
   if (st.prefs.notifyBadge !== prev.prefs.notifyBadge) updateBadge();
+});
+
+// Layout changes (including toggling mute on a workspace or tab) and terminal
+// or machine updates refresh the badge immediately.
+useTerms.subscribe((st, prev) => {
+  if (st.machines !== prev.machines && typeof document !== 'undefined') updateBadge();
+});
+useStore.subscribe((st, prev) => {
+  if (st.order !== prev.order && typeof document !== 'undefined') updateBadge();
 });
 
 // The plugins' panes change the count as terminals do (App.tsx updates it

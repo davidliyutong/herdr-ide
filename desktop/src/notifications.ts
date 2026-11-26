@@ -9,6 +9,13 @@ export const MAX_NOTIFY_TAG = 256;
 export const MAX_NOTIFY_ID = 256;
 export const MAX_NOTIFY_AGENT = 64;
 export const MAX_ACTIVE_NOTIFICATIONS = 100;
+export const MAX_BADGE_COUNT = 9999;
+
+/** Validates a non-negative integer badge count, clamped to MAX_BADGE_COUNT. */
+export function parseBadgeCount(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) return undefined;
+  return Math.min(v, MAX_BADGE_COUNT);
+}
 
 const URGENCIES = new Set(['normal', 'critical', 'low']);
 const OPTION_KEYS = new Set(['title', 'body', 'tag', 'silent', 'urgency', 'target']);
@@ -121,6 +128,7 @@ export interface NotificationDeps {
   isSupported(): boolean;
   create(opts: { title: string; body?: string; silent?: boolean; urgency?: 'normal' | 'critical' | 'low' }): NativeNotificationHandle;
   showMain(): void;
+  setBadgeCount?(count: number): void;
   maxActive?: number;
 }
 
@@ -224,6 +232,14 @@ export function createNotifications(deps: NotificationDeps) {
       } catch {}
     },
 
+    setBadgeCount(raw: unknown): void {
+      const count = parseBadgeCount(raw);
+      if (count === undefined) return;
+      try {
+        deps.setBadgeCount?.(count);
+      } catch {}
+    },
+
     closeAll(): void {
       const handles = [...active.values()];
       active.clear();
@@ -232,6 +248,9 @@ export function createNotifications(deps: NotificationDeps) {
           h.close();
         } catch {}
       }
+      try {
+        deps.setBadgeCount?.(0);
+      } catch {}
     },
 
     takenBy(send: ((target: NotificationTarget) => void) | undefined): void {

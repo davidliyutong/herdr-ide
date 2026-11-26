@@ -133,6 +133,10 @@ const notifications = createNotifications({
   isSupported: () => Notification.isSupported(),
   create: (opts) => new Notification(opts),
   showMain,
+  setBadgeCount: (count) => {
+    app.setBadgeCount(count);
+    if (platform === 'darwin') app.dock?.setBadge(count > 0 ? String(count) : '');
+  },
 });
 
 /** macOS: the step that gives safeStorage's keychain item to this build
@@ -362,6 +366,9 @@ ipcMain.handle(channels.notifyShow, (event, opts: unknown) => (fromMainPage(even
 ipcMain.on(channels.notifyClose, (event, tag: unknown) => {
   if (fromMainPage(event)) notifications.close(tag);
 });
+ipcMain.on(channels.notifyBadge, (event, count: unknown) => {
+  if (fromMainPage(event)) notifications.setBadgeCount(count);
+});
 ipcMain.on(channels.notifyClickWanted, (event, wanted: unknown) => {
   if (!fromMainPage(event)) return;
   const contents = event.sender;
@@ -503,6 +510,7 @@ function createWindow() {
     if (details.isMainFrame && !details.isSameDocument) {
       folders.takenBy(undefined);
       notifications.takenBy(undefined);
+      notifications.setBadgeCount(0);
     }
   });
   // What a page said of its unsaved changes goes with it, once another one
@@ -516,6 +524,7 @@ function createWindow() {
   win.webContents.on('render-process-gone', (_event, details) => {
     folders.takenBy(undefined);
     notifications.takenBy(undefined);
+    notifications.setBadgeCount(0);
     g.reset();
     if (!quitting) void fail(new DesktopError('desktop.rendererGone', details.reason));
   });
@@ -560,6 +569,7 @@ function createWindow() {
     nativeTheme.off('updated', onTheme);
     folders.takenBy(undefined);
     notifications.takenBy(undefined);
+    notifications.setBadgeCount(0);
     mainWindow = undefined;
     // Program windows do not keep the app open.
     if (quitAfterClose || quitsWithLastWindow(platform)) app.quit();

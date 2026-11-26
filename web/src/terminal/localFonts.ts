@@ -44,6 +44,76 @@ const known = [
   'Victor Mono',
 ];
 
+/** Common Chinese / CJK fonts, looked for when Local Font Access is unavailable. */
+const knownCjk = [
+  'Alibaba PuHuiTi',
+  'DengXian',
+  'FangSong',
+  'HarmonyOS Sans SC',
+  'Heiti SC',
+  'Hiragino Sans GB',
+  'KaiTi',
+  'Kaiti SC',
+  'LXGW WenKai',
+  'LXGW WenKai Mono',
+  'LXGW WenKai Screen',
+  'Maple Mono CN',
+  'Maple Mono NF CN',
+  'Microsoft JhengHei',
+  'Microsoft YaHei',
+  'MiSans',
+  'NSimSun',
+  'Noto Sans CJK SC',
+  'Noto Sans Mono CJK SC',
+  'Noto Sans SC',
+  'Noto Serif CJK SC',
+  'Noto Serif SC',
+  'PingFang SC',
+  'PingFang TC',
+  'STFangsong',
+  'STHeiti',
+  'STKaiti',
+  'STSong',
+  'Sarasa Gothic SC',
+  'Sarasa Mono SC',
+  'Sarasa UI SC',
+  'SimHei',
+  'SimSun',
+  'Songti SC',
+  'Source Han Sans CN',
+  'Source Han Sans SC',
+  'Source Han Serif CN',
+  'Source Han Serif SC',
+  'WenQuanYi Micro Hei',
+  'WenQuanYi Zen Hei',
+];
+
+const KNOWN_CJK_LOWER = new Set(knownCjk.map((f) => f.toLowerCase()));
+
+/** Common UI sans-serif / text fonts, looked for when Local Font Access is unavailable. */
+const knownUi = [
+  'Arial',
+  'Avenir Next',
+  'Cantarell',
+  'DejaVu Sans',
+  'DM Sans',
+  'Geist',
+  'Georgia',
+  'Helvetica Neue',
+  'IBM Plex Sans',
+  'Inter',
+  'Liberation Sans',
+  'Noto Sans',
+  'Plus Jakarta Sans',
+  'Roboto',
+  'SF Pro',
+  'SF Pro Text',
+  'Segoe UI',
+  'Source Sans 3',
+  'Ubuntu',
+  'Verdana',
+];
+
 let ctx: CanvasRenderingContext2D | null | undefined;
 
 function canvas(): CanvasRenderingContext2D | null {
@@ -111,6 +181,59 @@ export function fixedPitch(family: string, measure: Measure = canvasMeasure): bo
   );
 }
 
+/** Whether a family draws Latin text letters itself (proportional or
+ * fixed-pitch, excluding symbol fonts and uninstalled fallbacks). */
+export function isTextFont(family: string, measure: Measure = canvasMeasure): boolean {
+  const font = (fallback: string) => `${SIZE}px ${quote(family)}, ${fallback}`;
+  const sample = 'imW x0Hp_.@';
+  if (Math.abs(measure(font('serif'), sample).width - measure(font('monospace'), sample).width) > 0.5) return false;
+  const x = measure(font('serif'), 'x');
+  const p = measure(font('serif'), 'p');
+  const H = measure(font('serif'), 'H');
+  return (
+    x.width > 0 &&
+    x.ascent >= 0.25 * SIZE &&
+    Math.abs(x.descent) <= 0.1 * SIZE &&
+    p.descent >= 0.08 * SIZE &&
+    p.descent >= x.descent + 0.06 * SIZE &&
+    H.ascent >= 1.2 * x.ascent
+  );
+}
+
+const sameBox = (a: TextBox, b: TextBox) =>
+  Math.abs(a.width - b.width) <= 0.5 && Math.abs(a.ascent - b.ascent) <= 0.5 && Math.abs(a.descent - b.descent) <= 0.5;
+
+const CJK_SAMPLE = '永中文字国語';
+
+/** Whether a family draws CJK glyphs itself rather than falling back to
+ * generic system fonts. */
+export function hasCjkGlyphs(family: string, measure: Measure = canvasMeasure): boolean {
+  const font = (fallback: string) => `${SIZE}px ${quote(family)}, ${fallback}`;
+  const sSerif = measure(font('serif'), CJK_SAMPLE);
+  const sSans = measure(font('sans-serif'), CJK_SAMPLE);
+  const sMono = measure(font('monospace'), CJK_SAMPLE);
+  if (!(sSerif.width > 0)) return false;
+  // If generic fallbacks alter the metrics, this family does not own the glyphs.
+  if (!sameBox(sSerif, sSans) || !sameBox(sSerif, sMono)) return false;
+  const bSerif = measure(`${SIZE}px serif`, CJK_SAMPLE);
+  const bSans = measure(`${SIZE}px sans-serif`, CJK_SAMPLE);
+  const bMono = measure(`${SIZE}px monospace`, CJK_SAMPLE);
+  // Distinct system fallbacks collapsed to one box => the family itself drew them.
+  if (!sameBox(bSerif, bSans) || !sameBox(bSerif, bMono)) return true;
+  // Minimal systems where all generics share one CJK fallback: accept if the
+  // metrics differ from that fallback or it is a recognized CJK family name.
+  return !sameBox(sSerif, bSerif) || KNOWN_CJK_LOWER.has(family.trim().toLowerCase());
+}
+
+/** Whether a CJK family appears installed when measuring CJK glyphs against
+ * generic system fallbacks. */
+export function isCjkInstalled(family: string, measure: Measure = canvasMeasure): boolean {
+  const font = (fallback: string) => `${SIZE}px ${quote(family)}, ${fallback}`;
+  return (['serif', 'sans-serif', 'monospace'] as const).some(
+    (generic) => !sameBox(measure(font(generic), CJK_SAMPLE), measure(`${SIZE}px ${generic}`, CJK_SAMPLE)),
+  );
+}
+
 /** Whether a family's narrow and wide letters are equally wide (fixedPitch
  * with the page's canvas). */
 export function isMonospace(family: string): boolean {
@@ -171,6 +294,22 @@ export function pickMonospace(families: readonly string[], mono: (family: string
     .sort((a, b) => a.localeCompare(b));
 }
 
+/** The CJK-capable families of a list with printable names, each once,
+ * sorted alphabetically. */
+export function pickCjk(families: readonly string[], check: (family: string) => boolean = hasCjkGlyphs): string[] {
+  return uniqueNames(families)
+    .filter((f) => check(f))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/** The Latin text families of a list with printable names, each once, sorted
+ * alphabetically (for the UI font picker). */
+export function pickUiFonts(families: readonly string[], check: (family: string) => boolean = isTextFont): string[] {
+  return uniqueNames(families)
+    .filter((f) => check(f))
+    .sort((a, b) => a.localeCompare(b));
+}
+
 /** Loads the families by name, so that they are measured with their own
  * glyphs. */
 async function loadFamilies(families: readonly string[]) {
@@ -179,30 +318,71 @@ async function loadFamilies(families: readonly string[]) {
   await Promise.all(families.map((f) => fonts.load(`${SIZE}px ${quote(f)}`).catch(() => [])));
 }
 
-let listed: Promise<FontList> | undefined;
+let queried: Promise<{ families: string[]; complete: boolean }> | undefined;
+
+/** Queries Local Font Access once (cached on success; retries next time if refused). */
+function queryAllFamilies(): Promise<{ families: string[]; complete: boolean }> {
+  queried ??= (async () => {
+    const query = (globalThis as { queryLocalFonts?: QueryLocalFonts }).queryLocalFonts;
+    if (query) {
+      try {
+        const families = uniqueNames((await query()).map((f) => f.family));
+        if (families.length > 0) {
+          await loadFamilies(families);
+          return { families, complete: true };
+        }
+      } catch {
+        // Refused or unavailable: callers fall back to well-known lists.
+      }
+    }
+    queried = undefined;
+    return { families: [], complete: false };
+  })();
+  return queried;
+}
+
+let listedMono: Promise<FontList> | undefined;
+let listedCjk: Promise<FontList> | undefined;
+let listedUi: Promise<FontList> | undefined;
 
 /** The monospace families installed, sorted; asks for the Local Font Access
  * permission the first time (call it from a click). */
 export function monospaceFonts(): Promise<FontList> {
-  listed ??= (async () => {
-    const query = (globalThis as { queryLocalFonts?: QueryLocalFonts }).queryLocalFonts;
-    let families: string[] = [];
-    let complete = false;
-    if (query) {
-      try {
-        families = [...new Set((await query()).map((f) => f.family))];
-        complete = families.length > 0;
-      } catch {
-        // Refused or unavailable: the well-known families below.
-      }
+  listedMono ??= (async () => {
+    const all = await queryAllFamilies();
+    let families = all.families;
+    if (!all.complete) {
+      families = uniqueNames(known.filter(isInstalled));
+      await loadFamilies(families);
+      listedMono = undefined;
     }
-    if (!complete) families = known.filter(isInstalled);
-    families = uniqueNames(families);
-    await loadFamilies(families);
-    const out = pickMonospace(families);
-    // A refusal is asked again next time the picker opens.
-    if (!complete) listed = undefined;
-    return { families: out, complete };
+    return { families: pickMonospace(families), complete: all.complete };
   })();
-  return listed;
+  return listedMono;
+}
+
+/** The CJK-capable families installed, sorted. */
+export function cjkFonts(): Promise<FontList> {
+  listedCjk ??= (async () => {
+    const all = await queryAllFamilies();
+    if (all.complete) return { families: pickCjk(all.families), complete: true };
+    const families = uniqueNames(knownCjk.filter((f) => isCjkInstalled(f)));
+    await loadFamilies(families);
+    listedCjk = undefined;
+    return { families: pickCjk(families), complete: false };
+  })();
+  return listedCjk;
+}
+
+/** The UI text families installed, sorted. */
+export function uiFonts(): Promise<FontList> {
+  listedUi ??= (async () => {
+    const all = await queryAllFamilies();
+    if (all.complete) return { families: pickUiFonts(all.families), complete: true };
+    const families = uniqueNames(knownUi.filter(isInstalled));
+    await loadFamilies(families);
+    listedUi = undefined;
+    return { families: pickUiFonts(families), complete: false };
+  })();
+  return listedUi;
 }

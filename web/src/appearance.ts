@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import { getPrefs, usePrefs, type Prefs, type TermColors } from './prefs';
 import { conn } from './lib/conn';
-import type { TermFontWeight } from './terminal/fonts';
+import { monoCssFontFamily, uiCssFontFamily, type TermFontWeight } from './terminal/fonts';
 import type { Display } from './term/connection';
 import { accentAttribute } from './themes';
 
@@ -18,6 +18,7 @@ export interface Appearance {
   /** The resolved theme's terminal colors. */
   colors: TermColors;
   fontFamily: string;
+  cjkFontFamily: string;
   fontSize: number;
   fontWeight: TermFontWeight;
   /** Rows are this many times the font's own line height. */
@@ -84,6 +85,7 @@ export function appearanceOf(p: Prefs): Appearance {
     theme,
     colors: p.colors[theme],
     fontFamily: p.termFontFamily,
+    cjkFontFamily: p.termCjkFontFamily,
     fontSize: p.termFontSize,
     fontWeight: p.termFontWeight === 'medium' ? 500 : 400,
     lineHeight: p.termLineHeight,
@@ -108,6 +110,12 @@ function apply(p: Prefs) {
   if (accent) root.dataset.accent = accent;
   else delete root.dataset.accent;
   root.style.fontSize = `${p.uiFontSize}px`;
+  const uiFont = uiCssFontFamily(p.uiFontFamily, p.uiCjkFontFamily);
+  if (uiFont) root.style.fontFamily = uiFont;
+  else root.style.removeProperty('font-family');
+  const monoFont = monoCssFontFamily(p.termFontFamily, p.termCjkFontFamily);
+  if (monoFont) root.style.setProperty('--mono', monoFont);
+  else root.style.removeProperty('--mono');
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg').trim());
   conn.setTheme(kind);
 }

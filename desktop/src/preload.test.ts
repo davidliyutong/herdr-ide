@@ -304,7 +304,7 @@ test('browser.onOpen delivers http(s) addresses only, while it listens', () => {
 
 test('notifications validates options and targets in both directions', async () => {
   const notifications = shell.notifications!;
-  assert.deepEqual(Object.keys(notifications).sort(), ['close', 'onClick', 'show', 'supported']);
+  assert.deepEqual(Object.keys(notifications).sort(), ['close', 'onClick', 'setBadgeCount', 'show', 'supported']);
 
   answers.set(channels.notifySupported, true);
   assert.equal(await notifications.supported(), true);
@@ -358,7 +358,18 @@ test('notifications validates options and targets in both directions', async () 
   notifications.close('m|t1');
   notifications.close('bad\ntag');
   notifications.close('');
-  assert.deepEqual(sent, [{ channel: channels.notifyClose, value: 'm|t1' }]);
+  notifications.setBadgeCount!(3);
+  notifications.setBadgeCount!(0);
+  notifications.setBadgeCount!(50000);
+  notifications.setBadgeCount!(-1);
+  notifications.setBadgeCount!(1.5);
+  notifications.setBadgeCount!('2' as unknown as number);
+  assert.deepEqual(sent, [
+    { channel: channels.notifyClose, value: 'm|t1' },
+    { channel: channels.notifyBadge, value: 3 },
+    { channel: channels.notifyBadge, value: 0 },
+    { channel: channels.notifyBadge, value: 9999 },
+  ]);
 
   sent.length = 0;
   const clicks: unknown[] = [];

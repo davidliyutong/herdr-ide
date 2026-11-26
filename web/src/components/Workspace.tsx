@@ -132,7 +132,7 @@ export function Workspace() {
   // The new-tab menu follows the plugins that are on, the tabs' dots the
   // statuses of the plugins' panes (a chat's) as of terminals.
   useActivePlugins();
-  useViewStatusOf(() => ws?.tabs.map((tb) => tabStatus(m!, tb) ?? '').join());
+  useViewStatusOf(() => ws?.tabs.map((tb) => tabStatus(m!, tb, !!ws.muted) ?? '').join());
   const tabsRef = useRef<HTMLDivElement>(null);
   // One tab is the bar's tab stop: the one focused last, else the one shown.
   useEffect(() => ensureTabStop(tabsRef.current, '.tab.active'));
@@ -205,7 +205,7 @@ export function Workspace() {
           }}
         >
           {ws.tabs.map((tb, i) => {
-            const st = tabStatus(m, tb);
+            const st = tabStatus(m, tb, !!ws.muted);
             const id = `${ws.id}:${i}`;
             // A tab the user has not named shows its number, or, holding no
             // terminal, its VS Code's or preview's mark and name; the focused

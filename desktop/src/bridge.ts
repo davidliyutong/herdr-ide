@@ -59,6 +59,8 @@ export const channels = {
   notifyShow: 'desktop:notify-show',
   /** page → shell: closes an active native notification by tag. */
   notifyClose: 'desktop:notify-close',
+  /** page → shell: sets the OS app/dock badge count (non-negative integer, 0 clears). */
+  notifyBadge: 'desktop:notify-badge',
   /** shell → page: target of a clicked native notification (NotificationTarget). */
   notifyClick: 'desktop:notify-click',
   /** page → shell: whether the page takes notification click events. */

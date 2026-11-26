@@ -80,6 +80,8 @@ export interface DesktopNotifications {
   show(opts: DesktopNotificationOptions): Promise<boolean>;
   /** Closes an active notification by tag, if any. */
   close(tag: string): void;
+  /** Syncs the native app/dock badge count (0 clears it). */
+  setBadgeCount?(count: number): void;
   /** Calls fn when the user clicks a native notification; returns a
    * function that stops it. */
   onClick(fn: (target: NotificationTarget) => void): () => void;
