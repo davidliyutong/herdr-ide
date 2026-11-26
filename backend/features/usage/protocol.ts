@@ -105,6 +105,7 @@ export const limitsParams = z.object({
   skip: list,
   skipLocal: list,
   kimiRefresh: z.boolean().optional(),
+  force: z.boolean().optional(),
 });
 export type LimitsParams = z.input<typeof limitsParams>;
 
@@ -174,5 +175,16 @@ export const usageProtocol = defineProtocol('usage', {
   limits: { params: limitsParams, result: z.object({ accounts: zero(z.array(account), []) }), timeoutMs: LIMITS_MS },
   cost: { params: costParams, result: costReport, timeoutMs: COST_MS },
   setDeepseekKey: { params: z.object({ key: z.string() }), result: z.object({ set: optFlag }) },
-  session: { params: z.object({ kind: z.string(), session: z.string(), prices }), result: sessionUsage, timeoutMs: SESSION_MS },
+  session: {
+    params: z.object({
+      kind: z.string(),
+      session: z.string(),
+      cwd: z.string().optional(),
+      pid: z.number().int().positive().optional(),
+      codexHomes: list,
+      prices,
+    }),
+    result: sessionUsage,
+    timeoutMs: SESSION_MS,
+  },
 });

@@ -40,7 +40,20 @@ import { validPrices } from './machine/pricing.ts';
 import { CacheWorker } from './machine/cache-worker.ts';
 import { CostScanner } from './machine/scan.ts';
 import { Resolver } from '#machine/agents/sessions.ts';
-import { SESSION_LIMITS, SessionReader, sessionsLocator, type LocateSession, type SessionLimits } from './machine/session.ts';
+import {
+  CWD_START_SLACK_MS,
+  SESSION_LIMITS,
+  SESSION_PROVIDERS,
+  SessionReader,
+  locateCodexByCwd,
+  locateGrokSession,
+  locateKimiSession,
+  readAntigravitySessionUsage,
+  readOpenCodeSessionUsage,
+  sessionsLocator,
+  type LocateSession,
+  type SessionLimits,
+} from './machine/session.ts';
 import { usageProtocol } from './protocol.ts';
 
 export type { LocateSession, Transcript } from './machine/session.ts';
@@ -67,12 +80,23 @@ export interface UsageMachineOptions {
 
 const badPrices = () => new Fail('bad_params', 400, 'usage: a price that is not one of usage.prices');
 
-/** The provider whose prices a kind's sessions are priced with: an agent
- * whose transcripts are the logs the spend reads (Claude Code's, Codex's). */
+const OPENCODE_SESSION_ID = /^ses_[A-Za-z0-9_-]{4,128}$/;
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** The provider whose prices a kind's sessions are priced with: every
+ * coding agent whose logs or databases the spend reads. */
 function sessionProvider(kind: string): string | undefined {
-  const k = byId(kind);
-  const p = k?.usageProvider;
-  return p && (p === 'claude' || p === 'codex') && k.transcript === p ? p : undefined;
+  const p = byId(kind)?.usageProvider;
+  return p && SESSION_PROVIDERS.has(p) ? p : undefined;
+}
+
+function validUsageSessionId(kind: string, session: string): boolean {
+  if (validSessionId(session)) return true;
+  return kind === 'opencode' && OPENCODE_SESSION_ID.test(session);
+}
+
+function validSessionCwd(cwd: string): boolean {
+  return cwd.startsWith('/') && Buffer.byteLength(cwd) <= 4096 && !cwd.includes('\0') && !LONE_SURROGATE.test(cwd);
 }
 
 /** The code of a session that could not be read; its message names no
@@ -90,11 +114,13 @@ export function usageMachine(o: UsageMachineOptions = {}) {
     const now = o.now ?? Date.now;
     const memo = new Memo();
     const cache = new CacheWorker(env.base, env.signal);
-    const scanner = new CostScanner(env.base, { ...DB_LIMITS, ...o.dbLimits }, cache);
+    const dbLimits: DBLimits = { ...DB_LIMITS, ...o.dbLimits };
+    const scanner = new CostScanner(env.base, dbLimits, cache);
     const sessions = new SessionReader(scanner, { ...SESSION_LIMITS, ...o.sessionLimits });
     // The sessions' transcripts as the agents' sessions find them, in the
     // agent's home and environment (CLAUDE_CONFIG_DIR, CODEX_HOME).
-    const locate = o.locate ?? sessionsLocator(new Resolver({ home: env.home, getenv: (k) => (o.environ?.() ?? env.environ())[k] }));
+    const resolver = new Resolver({ home: env.home, getenv: (k) => (o.environ?.() ?? env.environ())[k], now });
+    const locate = o.locate ?? sessionsLocator(resolver);
     let shared: { client: string; params: string; at: number; accounts: Account[] } | null = null;
     const within = (signal: AbortSignal, ms: number) => AbortSignal.any([signal, AbortSignal.timeout(ms)]);
     const usageEnv = (signal: AbortSignal): UsageEnv => ({
@@ -115,8 +141,16 @@ export function usageMachine(o: UsageMachineOptions = {}) {
     return {
       actions: {
         async limits(p, ctx) {
-          const params = JSON.stringify(p);
-          if (ctx.client && shared && shared.client !== ctx.client && shared.params === params && now() - shared.at < t.limitsShareMs)
+          const { force, ...rest } = p;
+          const params = JSON.stringify(rest);
+          if (
+            !force &&
+            ctx.client &&
+            shared &&
+            shared.client !== ctx.client &&
+            shared.params === params &&
+            now() - shared.at < t.limitsShareMs
+          )
             return { accounts: shared.accounts };
           const signal = within(ctx.signal, t.limitsMs);
           const accounts = await limits(usageEnv(signal), p);
@@ -149,14 +183,56 @@ export function usageMachine(o: UsageMachineOptions = {}) {
 
         async session(p, ctx) {
           if (!validPrices(p.prices)) throw badPrices();
-          // Only a known kind and a session id reach the search for a file.
+          // Only a known kind and a valid session id (or absolute cwd) reach
+          // the search for a transcript or database.
           const provider = sessionProvider(p.kind);
-          if (!provider || !validSessionId(p.session))
-            throw new Fail('bad_params', 400, 'usage: not a session of an agent whose sessions are priced');
+          const hasSession = p.session !== '';
+          const hasCwd = typeof p.cwd === 'string' && p.cwd !== '';
+          const valid =
+            !!provider &&
+            ((hasSession && validUsageSessionId(p.kind, p.session) && (!hasCwd || validSessionCwd(p.cwd!))) ||
+              (!hasSession && hasCwd && validSessionCwd(p.cwd!)));
+          if (!valid) throw new Fail('bad_params', 400, 'usage: not a session of an agent whose sessions are priced');
           const signal = within(ctx.signal, t.sessionMs);
+          const e = usageEnv(signal);
           try {
-            const files = await locate(p.kind, p.session, signal);
-            return await sessions.cost(usageEnv(signal), provider, files, p.prices);
+            let sinceMs: number | undefined;
+            if (!hasSession && p.pid) {
+              const start = await resolver.startOf(p.pid);
+              if (start !== null) sinceMs = start - CWD_START_SLACK_MS;
+            }
+            if (provider === 'antigravity') {
+              return await readAntigravitySessionUsage(e, sessions, {
+                session: p.session,
+                cwd: p.cwd ?? '',
+                sinceMs,
+                own: p.prices,
+                dbLimits,
+              });
+            }
+            if (provider === 'opencode') {
+              return await readOpenCodeSessionUsage(e, sessions, {
+                session: p.session,
+                cwd: p.cwd ?? '',
+                sinceMs,
+                own: p.prices,
+                dbLimits,
+              });
+            }
+            let files;
+            if (o.locate && hasSession) {
+              files = await locate(p.kind, p.session, signal, p.codexHomes);
+            } else if (provider === 'grok') {
+              files = await locateGrokSession(e, p.session, p.cwd ?? '', sinceMs);
+            } else if (provider === 'kimi') {
+              files = await locateKimiSession(e, p.session, p.cwd ?? '', sinceMs);
+            } else if (provider === 'codex' && !hasSession) {
+              files = await locateCodexByCwd(e, resolver, p.cwd ?? '', sinceMs, p.codexHomes);
+            } else {
+              if (!hasSession) throw new Fail('not_found', 404, 'usage: no transcript of the session');
+              files = await locate(p.kind, p.session, signal, p.codexHomes);
+            }
+            return await sessions.cost(e, provider, files, p.prices);
           } catch (err) {
             throw sessionError(err, signal);
           }

@@ -37,6 +37,9 @@ export interface MachineCost {
   retries?: number;
   unpriced?: string[];
   failed?: string[];
+  /** True when the host is actively disabled by the user (cached data is
+   * kept without emitting read errors). */
+  disabled?: boolean;
 }
 
 /** GET /api/p/usage/cost. */
@@ -73,6 +76,8 @@ export interface SpendDeps {
   ready(): string[];
   /** Whether a machine is still configured (a removed one's report goes). */
   known(m: string): boolean;
+  /** Whether a machine is actively disabled by the user. */
+  disabled?(m: string): boolean;
   /** The providers on and the Codex homes. */
   options(): { providers: string[]; codexHomes: string[] };
   /** The user's prices and the key that tells them apart. */
@@ -168,17 +173,26 @@ export class Spend {
       recentSince,
       recent: [],
     };
-    const add = (m: string, r: CostReport) => {
-      rep.machines[m] = { files: r.files, retries: r.retries, unpriced: r.unpriced, failed: r.failed };
+    const isDisabled = (m: string) => this.d.disabled?.(m) === true;
+    const add = (m: string, r: CostReport, disabled = false) => {
+      rep.machines[m] = disabled
+        ? { files: r.files, retries: r.retries, unpriced: r.unpriced, disabled: true }
+        : { files: r.files, retries: r.retries, unpriced: r.unpriced, failed: r.failed };
       for (const row of r.rows) rep.rows.push({ ...row, machine: m });
       for (const s of r.recent ?? []) rep.recent.push({ ...s, machine: m });
     };
     await Promise.all(
       ready.map(async (m) => {
         try {
-          add(m, await this.machine(m, key, params, prices.key, signal));
+          add(m, await this.machine(m, key, params, prices.key, signal), isDisabled(m));
         } catch (e) {
-          rep.machines[m] = { error: codeOf(e), files: 0 };
+          if (isDisabled(m)) {
+            const r = this.cached(m, key, params, prices.key);
+            if (r) add(m, r, true);
+            else rep.machines[m] = { files: 0, disabled: true };
+          } else {
+            rep.machines[m] = { error: codeOf(e), files: 0 };
+          }
         }
       }),
     );
@@ -189,7 +203,7 @@ export class Spend {
       .sort();
     for (const m of others) {
       const r = this.cached(m, key, params, prices.key);
-      if (r) add(m, r);
+      if (r) add(m, r, isDisabled(m));
     }
     rep.machines = sortedKeys(rep.machines);
     rep.rows.sort(
@@ -324,6 +338,11 @@ export class Spend {
       })
       .finally(() => (this.loading = undefined));
     await this.loading;
+  }
+
+  /** Invalidates cached assembled reports (e.g. when a host is disabled). */
+  invalidate(): void {
+    this.cache.clear();
   }
 
   /** Drops what is kept of a removed machine. */

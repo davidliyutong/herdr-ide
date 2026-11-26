@@ -39,7 +39,12 @@ const usage = (key: string, type: SettingDef['type'], group: string, order: numb
 const defs: SettingDef[] = [
   usage('usage.refresh', 'enum', 'usageRefresh', 10, { enum: ['manual', 'adaptive'] }),
   usage('usage.statusBar', 'bool', 'usageAlerts', 18),
-  usage('usage.prices', 'list', 'usageSpend', 22, { item: 'string' }),
+  usage('usage.statusBarWindow', 'enum', 'usageAlerts', 19, { default: 'auto', enum: ['auto', '5h', '7d', 'both'] }),
+  usage('usage.statusBarProvider', 'enum', 'usageAlerts', 20, {
+    default: 'auto',
+    enum: ['auto', 'claude', 'codex', 'grok', 'antigravity', 'kimi'],
+  }),
+  usage('usage.prices', 'list', 'usageSpend', 24, { item: 'string' }),
   usage('usage.providers.claude', 'bool', 'usageClaude', 30),
   usage('usage.claudeKeychain', 'bool', 'usageClaude', 31),
   usage('usage.providers.codex', 'bool', 'usageCodex', 34),
@@ -107,7 +112,13 @@ describe('the AI usage settings page', () => {
     values['usage.providers.codex'] = { value: false, source: 'global' };
     values['usage.claudeKeychain'] = { value: false, source: 'global' };
     await open({ page: 'usage' }, values);
-    expect(shown('usage.refresh') && shown('usage.statusBar') && shown('usage.prices')).toBe(true);
+    expect(
+      shown('usage.refresh') &&
+        shown('usage.statusBar') &&
+        shown('usage.statusBarWindow') &&
+        shown('usage.statusBarProvider') &&
+        shown('usage.prices'),
+    ).toBe(true);
     // The providers' own settings are on their pages.
     expect(shown('usage.providers.claude') || shown('usage.claudeKeychain') || shown('usage.codexHomes')).toBe(false);
     const groups = [...host.querySelectorAll('.settings-group')].map((h) => h.textContent);

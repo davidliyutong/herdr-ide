@@ -60,7 +60,7 @@ export const find = (s: { accounts: View[] }, key: string) => s.accounts.find((a
 
 /** A scheduler of the machines ready (env.ready) whose agents answer with
  * f, its settings file in dir, at a clock that starts at T0. */
-export function testUsage(o: { ready?: string[]; dir?: string; known?: string[]; now?: number } = {}) {
+export function testUsage(o: { ready?: string[]; disabled?: string[]; dir?: string; known?: string[]; now?: number } = {}) {
   const dir = o.dir ?? tempDir();
   const st = new Settings(join(dir, 'settings-dev.json'), { modules: [settings] });
   const clock = { now: o.now ?? T0 * 1000 };
@@ -70,13 +70,14 @@ export function testUsage(o: { ready?: string[]; dir?: string; known?: string[];
     cost: () => report({}),
     status: () => Promise.reject(new Error('no status pages in tests')),
   };
-  const env = { ready: o.ready ?? ['local'], readOnly: false };
+  const env = { ready: o.ready ?? ['local'], disabled: o.disabled ?? [], readOnly: false };
   const u = new Usage({
     settings: st,
     limits: async (m, p) => f.limits(m, p),
     cost: async (m, p, signal) => f.cost(m, p, signal),
     ready: () => env.ready,
     known: (m) => (o.known ?? env.ready).includes(m),
+    disabled: (m) => env.disabled.includes(m),
     readOnly: () => env.readOnly,
     enabled: () => true,
     broadcast: (s) => void sent.push(s),

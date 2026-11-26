@@ -179,6 +179,9 @@ describe('the hubs of a node', () => {
     expect(api.hits.get('/user/balance')).toBe(2);
     await ask(b, ['deepseek', 'kimi']);
     expect(api.hits.get('/user/balance')).toBe(3);
+    // Explicit force bypasses the shared cache even from another hub within a minute.
+    await call(a, usageProtocol, 'limits', { providers: ['deepseek', 'kimi'], force: true });
+    expect(api.hits.get('/user/balance')).toBe(4);
   });
 });
 
@@ -188,7 +191,7 @@ describe('a session', () => {
 
   test('only a known kind and a session id; without a locator not found; with one its numbers', async () => {
     await start();
-    expect(await raw('session', { kind: 'grok', session })).toMatchObject({ code: 'bad_params' });
+    expect(await raw('session', { kind: 'gemini', session })).toMatchObject({ code: 'bad_params' });
     expect(await raw('session', { kind, session: '../../etc/passwd' })).toMatchObject({ code: 'bad_params' });
     expect(await raw('session', { kind, session })).toMatchObject({ code: 'not_found' });
     await r!.close();
@@ -251,5 +254,119 @@ describe('a session', () => {
     });
     write(join(s.home, 'big.jsonl'), 'x'.repeat(100));
     expect(await raw('session', { kind, session })).toMatchObject({ code: 'too_large' });
+  });
+
+  test('locates grok, kimi, opencode, and extra-home codex sessions by id or cwd', async () => {
+    const { home, m } = await start();
+    const cwd = '/work/app';
+    // Grok by cwd
+    write(
+      join(home, '.grok', 'sessions', encodeURIComponent(cwd), session, 'updates.jsonl'),
+      JSON.stringify({
+        method: 'session/update',
+        params: {
+          _meta: { agentTimestampMs: TEST_NOW - 1000 },
+          update: {
+            sessionUpdate: 'turn_completed',
+            usage: { modelUsage: { 'grok-4.6-0709': { modelCalls: 1, inputTokens: 2000, cachedReadTokens: 500, outputTokens: 100 } } },
+          },
+        },
+      }) + '\n',
+    );
+    expect(await call(m, usageProtocol, 'session', { kind: 'grok', session: '', cwd })).toMatchObject({
+      model: 'grok-4.6-0709',
+      input: 1500,
+      cached: 500,
+      output: 100,
+      requests: 1,
+      contextUsed: 2000,
+      priced: true,
+    });
+    // Kimi by cwd
+    write(join(home, '.kimi-code', 'sessions', 'ws1', `session_${session}`, 'state.json'), JSON.stringify({ cwd }));
+    write(
+      join(home, '.kimi-code', 'sessions', 'ws1', `session_${session}`, 'agents', 'main', 'wire.jsonl'),
+      JSON.stringify({
+        type: 'usage.record',
+        time: Math.floor(TEST_NOW / 1000) - 10,
+        model: 'kimi-code/k2.5',
+        usage: { inputOther: 1000, inputCacheRead: 200, inputCacheCreation: 50, output: 80 },
+      }) + '\n',
+    );
+    expect(await call(m, usageProtocol, 'session', { kind: 'kimi', session: '', cwd })).toMatchObject({
+      model: 'kimi-k2.5',
+      input: 1000,
+      cached: 200,
+      cacheWrite: 50,
+      output: 80,
+      requests: 1,
+      contextUsed: 1250,
+    });
+    // OpenCode by ses_* id and by cwd
+    const oc = join(home, '.local/share/opencode/opencode.db');
+    write(oc, '');
+    const d = new DatabaseSync(oc);
+    d.exec('CREATE TABLE session (id text PRIMARY KEY, parent_id text, directory text, time_created integer, time_updated integer)');
+    d.exec('CREATE TABLE message (id text PRIMARY KEY, session_id text, time_created integer, time_updated integer, data text)');
+    d.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?)').run('ses_alpha01', null, cwd, TEST_NOW - 1000, TEST_NOW);
+    d.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)').run(
+      'm1',
+      'ses_alpha01',
+      TEST_NOW - 500,
+      TEST_NOW - 500,
+      JSON.stringify({
+        role: 'assistant',
+        time: { created: TEST_NOW - 500 },
+        modelID: 'deepseek-v4-flash',
+        providerID: 'deepseek',
+        cost: 0.12,
+        tokens: { input: 300, output: 40, reasoning: 0, cache: { read: 100, write: 0 } },
+      }),
+    );
+    d.close();
+    expect(await call(m, usageProtocol, 'session', { kind: 'opencode', session: 'ses_alpha01' })).toMatchObject({
+      model: 'deepseek-v4-flash',
+      input: 300,
+      cached: 100,
+      output: 40,
+      cost: 0.12,
+      contextUsed: 400,
+      priced: true,
+    });
+    expect(await call(m, usageProtocol, 'session', { kind: 'opencode', session: '', cwd })).toMatchObject({
+      model: 'deepseek-v4-flash',
+      cost: 0.12,
+    });
+    // Codex in an extra configured codexHomes directory, located by cwd
+    const altCodex = join(home, 'codex-alt');
+    const dayDir = new Date(TEST_NOW).toISOString().slice(0, 10).replaceAll('-', '/');
+    write(
+      join(altCodex, 'sessions', dayDir, `rollout-2026-11-16T00-00-00-${session}.jsonl`),
+      JSON.stringify({
+        timestamp: new Date(TEST_NOW - 1000).toISOString(),
+        type: 'session_meta',
+        payload: { id: session, cwd, timestamp: new Date(TEST_NOW - 1000).toISOString() },
+      }) +
+        '\n' +
+        JSON.stringify({
+          timestamp: new Date(TEST_NOW - 500).toISOString(),
+          type: 'turn_context',
+          payload: { turn_id: 't1', model: 'gpt-5.3-codex', cwd },
+        }) +
+        '\n' +
+        JSON.stringify({
+          timestamp: new Date(TEST_NOW - 400).toISOString(),
+          type: 'token_usage_record',
+          payload: { turn_id: 't1', response_id: 'r1', usage: { input_tokens: 500, cached_input_tokens: 100, output_tokens: 20 } },
+        }) +
+        '\n',
+    );
+    expect(await call(m, usageProtocol, 'session', { kind: 'codex', session: '', cwd, codexHomes: [altCodex] })).toMatchObject({
+      model: 'gpt-5.3-codex',
+      input: 400,
+      cached: 100,
+      output: 20,
+      requests: 1,
+    });
   });
 });

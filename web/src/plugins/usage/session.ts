@@ -23,8 +23,14 @@ export interface SessionTarget {
   m: string;
   /** The agent's kind (a detector id, agentkinds). */
   kind: string;
-  /** Its session id (isSessionId). */
-  session: string;
+  /** Its session id (isSessionId), when known. */
+  session?: string;
+  /** Its working directory, for agents matched by cwd. */
+  cwd?: string;
+  /** The foreground process id (used on the machine to bound cwd matches). */
+  pid?: number;
+  /** The terminal address (disambiguates cached cwd entries). */
+  terminal?: string;
   status?: AgentStatus;
 }
 
@@ -45,6 +51,10 @@ export const SESSION_RETRY_MS = 10_000;
 
 /** The key of a session in useUsage.sessions. */
 export const sessionKey = (m: string, kind: string, session: string): string => JSON.stringify([m, kind, session]);
+
+/** The key of a SessionTarget (by session id when known, else cwd + pid/terminal). */
+export const targetKey = (t: Pick<SessionTarget, 'm' | 'kind' | 'session' | 'cwd' | 'pid' | 'terminal'>): string =>
+  t.session ? sessionKey(t.m, t.kind, t.session) : sessionKey(t.m, t.kind, `cwd:${t.cwd ?? ''}:${t.pid ?? t.terminal ?? ''}`);
 
 /** The reads of a session: when the last began (ms), whether one is under
  * way and another must follow it, whether one waits for the page to show,
@@ -98,7 +108,10 @@ function put(key: string, e: SessionEntry) {
  * answered. A failure without a code of its own (the machine offline, the
  * network, no answer within SESSION_TIMEOUT_MS) keeps what was known. */
 async function load(t: SessionTarget, key: string): Promise<boolean> {
-  const q = new URLSearchParams({ kind: t.kind, session: t.session });
+  const q = new URLSearchParams({ kind: t.kind });
+  if (t.session) q.set('session', t.session);
+  if (t.cwd) q.set('cwd', t.cwd);
+  if (t.pid) q.set('pid', String(t.pid));
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), SESSION_TIMEOUT_MS);
   try {
@@ -128,7 +141,7 @@ async function load(t: SessionTarget, key: string): Promise<boolean> {
  * it fails it is tried once more SESSION_RETRY_MS later (retry is that
  * try). */
 export function requestSession(t: SessionTarget, final = false, retry = false) {
-  const key = sessionKey(t.m, t.kind, t.session);
+  const key = targetKey(t);
   const s = slotOf(key);
   if (!shown()) {
     s.owed = true;
@@ -190,7 +203,7 @@ const unpriced = (key: string) => useUsage.getState().sessions[key]?.code === 'b
 /** Keeps the numbers of session t current while the status bar shows it,
  * as the module's comment says. */
 export function useSessionReads(t: SessionTarget | undefined) {
-  const key = t ? sessionKey(t.m, t.kind, t.session) : undefined;
+  const key = t ? targetKey(t) : undefined;
   const status = t?.status;
   const latest = useRef(t);
   latest.current = t;

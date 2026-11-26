@@ -6,12 +6,24 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { appendFileSync, utimesSync, writeFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { removeHomes, tempHome, testEnv, write } from '../testdata/machine.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { removeHomes, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
 import type { UsageEnv } from './env.ts';
 import { openRegular } from './logs.ts';
 import { modelPricing, tierCost, tierOf, type Tier } from './pricing.ts';
 import { CostScanner, type CostReport } from './scan.ts';
-import { SESSION_LIMITS, SessionReader, cutModel, type SessionLimits, type SessionUsage, type Transcript } from './session.ts';
+import {
+  SESSION_LIMITS,
+  SessionReader,
+  cutModel,
+  locateGrokSession,
+  locateKimiSession,
+  readAntigravitySessionUsage,
+  readOpenCodeSessionUsage,
+  type SessionLimits,
+  type SessionUsage,
+  type Transcript,
+} from './session.ts';
 
 afterAll(removeHomes);
 
@@ -337,7 +349,216 @@ describe('bounds and errors', () => {
     await expect(many.cost('claude', byName(join(many.home, 'c.jsonl')))).rejects.toMatchObject({ code: 'too_large' });
     await expect(many.cost('claude', byName(join(many.home, 'none.jsonl')))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(many.cost('claude', [])).rejects.toMatchObject({ code: 'not_found' });
-    await expect(many.cost('grok', byName(cp))).rejects.toMatchObject({ code: 'bad_params' });
+    await expect(many.cost('gemini', byName(cp))).rejects.toMatchObject({ code: 'bad_params' });
+  });
+
+  test('Grok, Kimi, OpenCode (with subagent), and Antigravity session usage', async () => {
+    const { home, e, reader, cost } = setup();
+    const sid = 'e6cdc860-1055-488f-9ed2-8b8019061bb9';
+    const cwd = '/work/demo';
+    // Grok
+    write(
+      join(home, '.grok/sessions', encodeURIComponent(cwd), sid, 'updates.jsonl'),
+      JSON.stringify({
+        method: 'session/update',
+        params: {
+          _meta: { agentTimestampMs: (testNowSec - 60) * 1000 },
+          update: {
+            sessionUpdate: 'turn_completed',
+            usage: { modelUsage: { 'grok-4.6-0709': { modelCalls: 2, inputTokens: 6000, cachedReadTokens: 1000, outputTokens: 200 } } },
+          },
+        },
+      }) + '\n',
+    );
+    const grokFiles = await locateGrokSession(e, '', cwd);
+    expect(await cost('grok', grokFiles)).toMatchObject({
+      model: 'grok-4.6-0709',
+      input: 5000,
+      cached: 1000,
+      output: 200,
+      requests: 2,
+      contextUsed: 3000,
+    });
+    // Kimi with main + subagent
+    write(join(home, '.kimi-code/sessions/ws/session_' + sid, 'state.json'), JSON.stringify({ cwd }));
+    write(
+      join(home, '.kimi-code/sessions/ws/session_' + sid, 'agents/main/wire.jsonl'),
+      JSON.stringify({
+        type: 'usage.record',
+        time: testNowSec - 30,
+        model: 'kimi-code/k2.5',
+        usage: { inputOther: 800, inputCacheRead: 200, inputCacheCreation: 0, output: 60 },
+      }) + '\n',
+    );
+    write(
+      join(home, '.kimi-code/sessions/ws/session_' + sid, 'agents/sub1/wire.jsonl'),
+      JSON.stringify({
+        type: 'usage.record',
+        time: testNowSec - 20,
+        model: 'kimi-code/k2.5',
+        usage: { inputOther: 400, inputCacheRead: 100, inputCacheCreation: 0, output: 30 },
+      }) + '\n',
+    );
+    const kimiFiles = await locateKimiSession(e, '', cwd);
+    expect(await cost('kimi', kimiFiles)).toMatchObject({
+      model: 'kimi-k2.5',
+      input: 1200,
+      cached: 300,
+      output: 90,
+      requests: 2,
+      contextUsed: 1000,
+    });
+    // OpenCode with child subagent session
+    const ocPath = join(home, '.local/share/opencode/opencode.db');
+    write(ocPath, '');
+    const oc = new DatabaseSync(ocPath);
+    oc.exec('CREATE TABLE session (id text PRIMARY KEY, parent_id text, directory text, time_created integer, time_updated integer)');
+    oc.exec('CREATE TABLE message (id text PRIMARY KEY, session_id text, time_created integer, time_updated integer, data text)');
+    oc.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?)').run('ses_parent1', null, cwd, (testNowSec - 100) * 1000, testNowSec * 1000);
+    oc.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?)').run(
+      'ses_child1',
+      'ses_parent1',
+      cwd,
+      (testNowSec - 50) * 1000,
+      testNowSec * 1000,
+    );
+    oc.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)').run(
+      'm1',
+      'ses_parent1',
+      (testNowSec - 40) * 1000,
+      (testNowSec - 40) * 1000,
+      JSON.stringify({
+        role: 'assistant',
+        time: { created: (testNowSec - 40) * 1000 },
+        modelID: 'deepseek-v4-flash',
+        providerID: 'deepseek',
+        cost: 0.2,
+        tokens: { input: 500, output: 50, reasoning: 0, cache: { read: 100, write: 0 } },
+      }),
+    );
+    oc.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)').run(
+      'm2',
+      'ses_child1',
+      (testNowSec - 20) * 1000,
+      (testNowSec - 20) * 1000,
+      JSON.stringify({
+        role: 'assistant',
+        time: { created: (testNowSec - 20) * 1000 },
+        modelID: 'deepseek-v4-flash',
+        providerID: 'deepseek',
+        cost: 0.1,
+        tokens: { input: 200, output: 20, reasoning: 0, cache: { read: 50, write: 0 } },
+      }),
+    );
+    oc.close();
+    const ocUsage = await readOpenCodeSessionUsage(e, reader, { session: 'ses_parent1', cwd: '' });
+    expect(ocUsage).toMatchObject({
+      model: 'deepseek-v4-flash',
+      input: 700,
+      cached: 150,
+      output: 70,
+      requests: 2,
+      contextUsed: 600,
+      priced: true,
+    });
+    expect(near(ocUsage.cost!, 0.3)).toBe(true);
+    // Antigravity conversation database located by workspace cwd
+    const varint = (v: number): number[] => {
+      const out: number[] = [];
+      for (;;) {
+        const b = v % 128;
+        v = Math.floor(v / 128);
+        if (v) out.push(b | 0x80);
+        else return [...out, b];
+      }
+    };
+    const field = (num: number, wt: 0 | 2, val: number | Uint8Array | string): Uint8Array => {
+      const tag = varint(num * 8 + wt);
+      if (wt === 0) return Uint8Array.from([...tag, ...varint(val as number)]);
+      const b = typeof val === 'string' ? Buffer.from(val) : (val as Uint8Array);
+      return Uint8Array.from([...tag, ...varint(b.length), ...b]);
+    };
+    const cat = (...parts: Uint8Array[]) => Uint8Array.from(parts.flatMap((p) => [...p]));
+    const agPath = join(home, '.gemini/antigravity/conversations', `${sid}.db`);
+    write(agPath, '');
+    const ag = new DatabaseSync(agPath);
+    ag.exec(`
+      CREATE TABLE trajectory_metadata_blob (id text DEFAULT 'main', data blob, PRIMARY KEY (id));
+      CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, metadata blob, step_payload blob, PRIMARY KEY (idx));
+      CREATE TABLE gen_metadata (idx integer, data blob, size integer NOT NULL DEFAULT 0, PRIMARY KEY (idx));
+    `);
+    ag.prepare("INSERT INTO trajectory_metadata_blob VALUES ('main', ?)").run(
+      cat(field(1, 2, field(1, 2, `file://${cwd}`)), field(2, 2, cat(field(1, 0, testNowSec - 60))), field(7, 2, `file://${cwd}`)),
+    );
+    const f4 = cat(field(2, 0, 1000), field(3, 0, 80), field(5, 0, 400));
+    const gen = cat(field(1, 2, cat(field(4, 2, f4), field(19, 2, 'claude-opus-4-6'))));
+    ag.prepare('INSERT INTO gen_metadata VALUES (1, ?, ?)').run(gen, gen.length);
+    ag.close();
+    const agUsage = await readAntigravitySessionUsage(e, reader, { session: '', cwd });
+    expect(agUsage).toMatchObject({
+      model: 'claude-opus-4-6',
+      input: 1000,
+      cached: 400,
+      output: 80,
+      requests: 1,
+      contextUsed: 1400,
+      priced: true,
+    });
+  });
+
+  test('SQLite-backed session reads share SessionReader’s parallel slot bound', async () => {
+    const { home, e, scanner } = setup();
+    const p = join(home, 's.jsonl');
+    write(p, claude2130());
+    const ocPath = join(home, '.local/share/opencode/opencode.db');
+    write(ocPath, '');
+    const oc = new DatabaseSync(ocPath);
+    oc.exec('CREATE TABLE session (id text PRIMARY KEY, parent_id text, directory text, time_created integer, time_updated integer)');
+    oc.exec('CREATE TABLE message (id text PRIMARY KEY, session_id text, time_created integer, time_updated integer, data text)');
+    oc.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?)').run(
+      'ses_slot01',
+      null,
+      '/work/slot',
+      (testNowSec - 20) * 1000,
+      testNowSec * 1000,
+    );
+    oc.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)').run(
+      'm1',
+      'ses_slot01',
+      (testNowSec - 10) * 1000,
+      (testNowSec - 10) * 1000,
+      JSON.stringify({
+        role: 'assistant',
+        time: { created: (testNowSec - 10) * 1000 },
+        modelID: 'deepseek-v4-flash',
+        providerID: 'deepseek',
+        cost: 0.05,
+        tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+    );
+    oc.close();
+
+    const reader = new SessionReader(scanner, { ...SESSION_LIMITS, parallel: 1 });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const held = reader.cost(e, 'claude', [{ path: p, open: async () => (await gate, openRegular(p)) }], undefined);
+    let dbSettled = false;
+    const queued = readOpenCodeSessionUsage(e, reader, { session: 'ses_slot01', cwd: '' }).then((u) => {
+      dbSettled = true;
+      return u;
+    });
+    // Aborted DB read waiting for slot fails without running or stealing the slot.
+    const ac = new AbortController();
+    const aborted = readOpenCodeSessionUsage({ ...e, signal: ac.signal }, reader, { session: 'ses_slot01', cwd: '' });
+    await Bun.sleep(30);
+    expect(dbSettled).toBe(false);
+    ac.abort(new Error('cancelled while queued'));
+    await expect(aborted).rejects.toThrow('cancelled while queued');
+    expect(dbSettled).toBe(false);
+    release();
+    await held;
+    expect(await queued).toMatchObject({ model: 'deepseek-v4-flash', requests: 1 });
+    expect(dbSettled).toBe(true);
   });
 
   test('the reads kept are bounded', async () => {

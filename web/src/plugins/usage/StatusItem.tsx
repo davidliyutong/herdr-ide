@@ -8,6 +8,7 @@
 // loaded.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Gauge } from 'lucide-react';
+import { useStore } from '../../state/store';
 import { useSettings } from '../../settings';
 import { togglePanel } from '../../components/RightBar';
 import { useHoverOpen } from '../../components/useHoverOpen';
@@ -16,15 +17,19 @@ import { fetchSnapshot, useUsage } from './state';
 import {
   costOf,
   duration,
+  is5hWindow,
+  is7dWindow,
+  isMergedAccount,
   money,
   parseThresholds,
+  previewAccounts,
   providerName,
-  sortAccounts,
-  tightest,
-  tightestFor,
+  statusBarSelection,
   tightestWindow,
   tokens,
   windowName,
+  type StatusBarProvider,
+  type StatusBarWindowMode,
   type UsageAccount,
   type UsageWindow,
 } from './model';
@@ -76,6 +81,7 @@ export function AccountLine({
   warnAt: number;
   nowSec: number;
 }) {
+  const merged = isMergedAccount(a);
   return (
     <div
       className={`usage-hover-row level-${levelOf(w.usedPct, warnAt) || 'ok'}`}
@@ -85,7 +91,8 @@ export function AccountLine({
       <div className="usage-hover-line">
         <ProviderLogo provider={a.provider} />
         <b className="ellipsis">{providerName(a.provider)}</b>
-        {a.email && email && <span className="muted ellipsis usage-hover-id">{a.email}</span>}
+        {merged && <span className="muted ellipsis usage-hover-id">{t('usage.accountCount', { n: a.accountCount })}</span>}
+        {!merged && a.email && email && <span className="muted ellipsis usage-hover-id">{a.email}</span>}
         <span className="spacer" />
         <b className="usage-pct">{pctText(w.usedPct, remaining)}</b>
       </div>
@@ -95,8 +102,47 @@ export function AccountLine({
         {w.resetsAt ? <span>{t('usage.resetsIn', { in: duration(w.resetsAt - nowSec) })}</span> : null}
       </div>
       <Bar w={w} remaining={remaining} small />
+      {merged && (
+        <div className="usage-hover-members">
+          {a.members.map((m) => {
+            const mw = tightestWindow(m, nowSec);
+            return (
+              <div key={m.key} className="usage-hover-sub muted" data-member={m.key}>
+                <span className="ellipsis">{m.email || m.plan || m.key}</span>
+                <span className="spacer" />
+                {mw && <span>{pctText(mw.usedPct, remaining)}</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
+}
+
+const VALID_WINDOWS = new Set<StatusBarWindowMode>(['auto', '5h', '7d', 'both']);
+const VALID_PROVIDERS = new Set<StatusBarProvider>(['auto', 'claude', 'codex', 'grok', 'antigravity', 'kimi']);
+
+/** Formats the status bar button label for the selected window(s) and mode. */
+export function formatStatusBarLabel(
+  primary: UsageWindow,
+  secondary: UsageWindow | undefined,
+  mode: StatusBarWindowMode,
+  remaining: boolean,
+): string {
+  const shown = (w: UsageWindow) => Math.round(remaining ? 100 - w.usedPct : w.usedPct);
+  if (mode === 'both' && secondary) {
+    return t(remaining ? 'usage.statusBar.bothLeft' : 'usage.statusBar.both', { p5: shown(primary), p7: shown(secondary) });
+  }
+  if (mode === '5h' || (mode === 'both' && is5hWindow(primary))) {
+    if (is5hWindow(primary))
+      return t('usage.statusBar.windowPct', { window: t('usage.window.short.5h'), pct: pctText(primary.usedPct, remaining) });
+  }
+  if (mode === '7d' || (mode === 'both' && is7dWindow(primary))) {
+    if (is7dWindow(primary))
+      return t('usage.statusBar.windowPct', { window: t('usage.window.short.7d'), pct: pctText(primary.usedPct, remaining) });
+  }
+  return pctText(primary.usedPct, remaining);
 }
 
 export function UsageStatusItem() {
@@ -105,6 +151,15 @@ export function UsageStatusItem() {
   const cost = useUsage((s) => s.cost);
   const warnAt = useWarnAt();
   const shown = useSettings((s) => s.values['usage.statusBar']?.value !== false);
+  const windowMode = useSettings((s) => {
+    const v = s.values['usage.statusBarWindow']?.value;
+    return typeof v === 'string' && VALID_WINDOWS.has(v as StatusBarWindowMode) ? (v as StatusBarWindowMode) : 'auto';
+  });
+  const defaultProvider = useSettings((s) => {
+    const v = s.values['usage.statusBarProvider']?.value;
+    return typeof v === 'string' && VALID_PROVIDERS.has(v as StatusBarProvider) ? (v as StatusBarProvider) : 'auto';
+  });
+  const machineId = useStore((s) => s.machineId);
   const [open, setOpen] = useState(false);
   const hover = useHoverOpen(open, setOpen);
   const id = useId();
@@ -117,17 +172,17 @@ export function UsageStatusItem() {
     hover.cancel();
     setOpen(false);
   }, [hover]);
-  // The window that counts the agent in the focused pane, its model's
-  // among the windows of models; else the tightest of all.
   const agent = useFocusedAgent();
-  const followed = agent && tightestFor(snapshot, agent.provider, agent.m, agent.model);
-  const top = followed ?? tightest(snapshot);
-  if (!top || !shown) return null;
-  const label = pctText(top.window.usedPct, remaining);
-  const level = levelOf(top.window.usedPct, warnAt);
-  const what = `${providerName(top.account.provider)} · ${windowName(top.window)}`;
   const nowSec = Date.now() / 1000;
-  const rows = sortAccounts(snapshot?.accounts ?? [])
+  const top = statusBarSelection(snapshot, { agent, defaultProvider, windowMode, machineId, now: nowSec });
+  if (!top || !shown) return null;
+  const label = formatStatusBarLabel(top.primary, top.secondary, windowMode, remaining);
+  const worstPct = top.secondary ? Math.max(top.primary.usedPct, top.secondary.usedPct) : top.primary.usedPct;
+  const level = levelOf(worstPct, warnAt);
+  const what = top.secondary
+    ? `${providerName(top.account.provider)} · ${windowName(top.primary)} / ${windowName(top.secondary)}`
+    : `${providerName(top.account.provider)} · ${windowName(top.primary)}`;
+  const rows = previewAccounts(snapshot?.accounts ?? [], nowSec)
     .filter((a) => tightestWindow(a, nowSec))
     .slice(0, MAX_ACCOUNTS);
   // The email tells apart accounts of one service only.
@@ -144,7 +199,7 @@ export function UsageStatusItem() {
           togglePanel('usage');
         }}
       >
-        {followed ? <ProviderLogo provider={top.account.provider} /> : <Gauge />}
+        {top.showLogo ? <ProviderLogo provider={top.account.provider} /> : <Gauge />}
         <span>{label}</span>
       </button>
       {open && (

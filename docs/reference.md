@@ -178,8 +178,10 @@ Every setting is defined in the hub (`backend/kernel/config` and the features' `
 | `usage.refreshIdle` | integer, 5–240 | `30` | – | – |
 | `usage.costRefresh` | integer, 1–1440 | `15` | – | – |
 | `usage.statusBar` | `true`, `false` | `true` | – | – |
-| `usage.alerts` | `true`, `false` | `true` | – | – |
+| `usage.statusBarWindow` | `auto`, `5h`, `7d`, `both` | `"auto"` | – | – |
 | `monitor.statusBar` | `true`, `false` | `true` | – | – |
+| `usage.statusBarProvider` | `auto`, `claude`, `codex`, `grok`, `antigravity`, `kimi` | `"auto"` | – | – |
+| `usage.alerts` | `true`, `false` | `true` | – | – |
 | `usage.thresholds` | list of strings | `["80","95"]` | – | – |
 | `usage.prices` | list of strings | `[]` | – | – |
 | `monitor.confirmKill` | `true`, `false` | `true` | – | – |

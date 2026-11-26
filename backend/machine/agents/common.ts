@@ -157,5 +157,14 @@ export function clean(p: string): string {
 /** Whether two directories are the same path once cleaned. */
 export const samePath = (a: string, b: string): boolean => a !== '' && b !== '' && clean(a) === clean(b);
 
+/** Whether two directories name the same location, resolving symlinks when
+ * cleaned paths differ (e.g. macOS /tmp vs /private/tmp). */
+export async function sameDir(files: Files, a: string, b: string): Promise<boolean> {
+  if (samePath(a, b)) return true;
+  if (a === '' || b === '') return false;
+  const [ra, rb] = await Promise.all([files.realpath(a), files.realpath(b)]);
+  return samePath(ra || a, rb || b);
+}
+
 /** The non-empty strings of s, without duplicates, in order. */
 export const uniq = (...s: string[]): string[] => [...new Set(s.filter((x) => x !== ''))];

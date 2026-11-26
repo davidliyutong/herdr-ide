@@ -45,42 +45,97 @@ export interface LSProcess {
   csrf: string;
 }
 
-/** The quotas of Antigravity's account on the machine; one the hub names
- * in skip (by the email's hash, known once the server answered) or
- * skipLocal is answered skipped. */
+/** The auth and state files that change when Antigravity switches accounts. */
+const ANTIGRAVITY_STATE_FILES = [
+  '.gemini/antigravity-cli/cli.log',
+  '.gemini/antigravity/cli.log',
+  '.gemini/antigravity/antigravity_state.pbtxt',
+  '.gemini/antigravity-cli/jetski_state.pbtxt',
+];
+
+/** A cheap fingerprint of Antigravity's auth/state files so account
+ * switches invalidate memoized LS endpoints and agy answers promptly. */
+async function antigravityAuthStamp(e: UsageEnv): Promise<string> {
+  const parts: string[] = [];
+  for (const rel of ANTIGRAVITY_STATE_FILES) {
+    try {
+      const st = await stat(posix.join(e.home, rel));
+      parts.push(`${rel}:${st.size}:${Math.trunc(st.mtimeMs)}`);
+    } catch {
+      // absent
+    }
+  }
+  return parts.join('|');
+}
+
+/** The quotas of Antigravity's accounts on the machine: every running
+ * user-owned language server is probed so multiple accounts on the same
+ * machine are all reported; one the hub names in skip (by the email's
+ * hash, known once the server answered) or skipLocal is answered skipped. */
 export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promise<Account[]> {
   e.signal.throwIfAborted();
   if (skips(o, 'antigravity')) return [skipped({ provider: 'antigravity', status: 'skipped' })];
-  const answered = (m: Record<string, unknown>): Account[] | null => {
+  const answered = (m: Record<string, unknown>): Account | null => {
     const a: Account = { provider: 'antigravity', source: 'ls', status: '' };
     if (!parseAntigravity(a, m)) return null;
-    if (skips(o, 'antigravity', a.id)) return [skipped(a)];
-    return [{ ...a, status: 'ok', asOf: nowSec(e) }];
+    if (a.id && skips(o, 'antigravity', a.id)) return skipped(a);
+    return { ...a, status: 'ok', asOf: nowSec(e) };
   };
-  const ep = e.memo.antigravityLS;
-  if (ep) {
-    const m = await userStatus(ep.port, ep.csrf, ep.scheme, e.signal);
-    const r = m && answered(m);
-    if (r) return r;
+  const dedupeAccounts = (list: Account[]): Account[] => {
+    const seen = new Set<string>();
+    const out: Account[] = [];
+    for (const a of list) {
+      const k = a.id || a.email?.toLowerCase() || '';
+      if (k && seen.has(k)) continue;
+      if (k) seen.add(k);
+      out.push(a);
+    }
+    return out;
+  };
+  const stamp = await antigravityAuthStamp(e);
+  const memo = e.memo.antigravityLS;
+  if (memo && !o.force && memo.stamp === stamp && e.now() - memo.at < e.t.agyEveryMs && memo.endpoints.length > 0) {
+    const accs: Account[] = [];
+    let allOk = true;
+    for (const ep of memo.endpoints) {
+      const m = await userStatus(ep.port, ep.csrf, ep.scheme, e.signal);
+      const r = m && answered(m);
+      if (!r) {
+        allOk = false;
+        break;
+      }
+      accs.push(r);
+    }
+    if (allOk && accs.length > 0) return dedupeAccounts(accs);
     e.memo.antigravityLS = null;
   }
   const procs = await languageServers(e);
+  const endpoints: { port: number; csrf: string; scheme: 'https' | 'http' }[] = [];
+  const found: Account[] = [];
   for (const p of procs) {
+    let matched = false;
     for (const port of await listeningPorts(e, p.pid)) {
       for (const scheme of ['https', 'http'] as const) {
         const m = await userStatus(port, p.csrf, scheme, e.signal);
         if (!m) continue;
         const r = answered(m);
         if (r) {
-          e.memo.antigravityLS = { port, csrf: p.csrf, scheme };
-          return r;
+          endpoints.push({ port, csrf: p.csrf, scheme });
+          found.push(r);
+          matched = true;
         }
         break;
       }
+      if (matched) break;
     }
   }
+  if (found.length > 0) {
+    if (!e.signal.aborted) e.memo.antigravityLS = { endpoints, stamp, at: e.now() };
+    return dedupeAccounts(found);
+  }
+  e.memo.antigravityLS = null;
   e.signal.throwIfAborted();
-  const a = await agyUsage(e);
+  const a = await agyUsage(e, o, stamp);
   if (a) return [a.id && skips(o, 'antigravity', a.id) ? skipped(a) : a];
   if (procs.length) return [{ provider: 'antigravity', status: 'error', code: 'no_answer' }];
   return [{ provider: 'antigravity', status: 'missing', code: 'not_running' }];
@@ -276,14 +331,21 @@ async function lookPath(e: UsageEnv, name: string): Promise<string | null> {
 }
 
 /** agy's answer: within agyEveryMs of a run that answered, or agyBackoffMs
- * of one that failed, that run's answer again instead of running agy;
- * null when there is no agy. */
-async function agyUsage(e: UsageEnv): Promise<Account | null> {
+ * of one that failed, that run's answer again instead of running agy
+ * unless forced or auth state changed; null when there is no agy. */
+async function agyUsage(e: UsageEnv, o: LimitsOptions, stamp: string): Promise<Account | null> {
   const bin = await lookPath(e, 'agy');
   if (!bin) return null;
   const now = e.now();
   const last = e.memo.agy.get(bin);
-  if (last && now >= last.at && now - last.at < (last.a.status === 'ok' ? e.t.agyEveryMs : e.t.agyBackoffMs)) return copyAccount(last.a);
+  if (
+    last &&
+    !o.force &&
+    last.stamp === stamp &&
+    now >= last.at &&
+    now - last.at < (last.a.status === 'ok' ? e.t.agyEveryMs : e.t.agyBackoffMs)
+  )
+    return copyAccount(last.a);
   let out = '';
   let ok = false;
   try {
@@ -313,7 +375,7 @@ async function agyUsage(e: UsageEnv): Promise<Account | null> {
     }
   }
   // A run the poll cut short says nothing about agy.
-  if (!e.signal.aborted) e.memo.agy.set(bin, { a: copyAccount(a), at: e.now() });
+  if (!e.signal.aborted) e.memo.agy.set(bin, { a: copyAccount(a), at: e.now(), stamp });
   return a;
 }
 

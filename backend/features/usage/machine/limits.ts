@@ -272,7 +272,7 @@ async function codexAccount(e: UsageEnv, o: LimitsOptions, home: string, label: 
   if (!access) {
     // An API key alone has no subscription windows; a log may still have
     // them.
-    return (await codexFromLog(e, home)) ?? { ...a, status: 'missing' };
+    return (await codexFromLog(e, home, o.force)) ?? { ...a, status: 'missing' };
   }
   a.id = str(tokens.account_id);
   const id = jwtClaims(str(tokens.id_token));
@@ -286,7 +286,7 @@ async function codexAccount(e: UsageEnv, o: LimitsOptions, home: string, label: 
   }
   if (skips(o, 'codex', a.id, label)) return skipped(a);
   const fromLog = async (code?: string): Promise<Account | null> => {
-    const log = await codexFromLog(e, home);
+    const log = await codexFromLog(e, home, o.force);
     if (!log) return null;
     return { ...log, id: a.id, email: a.email, plan: firstNonEmpty(log.plan ?? '', a.plan ?? ''), ...(code ? { code } : {}) };
   };
@@ -365,7 +365,7 @@ function codexWindows(rl: Record<string, unknown>, label: string): Window[] {
  * event), as a stale account; null when there is none. The newest log is
  * read backwards from its end until a line has them, and what it said is
  * kept (Memo) while it does not change: a rollout is tens of MB. */
-async function codexFromLog(e: UsageEnv, home: string): Promise<Account | null> {
+async function codexFromLog(e: UsageEnv, home: string, force = false): Promise<Account | null> {
   let newest: { path: string; size: number; mtime: number } | null = null;
   for (const d of ['sessions', 'archived_sessions']) {
     const root = posix.join(home, d);
@@ -379,7 +379,7 @@ async function codexFromLog(e: UsageEnv, home: string): Promise<Account | null> 
     }
   }
   if (!newest) return null;
-  const kept = e.memo.codexLog.get(home);
+  const kept = !force ? e.memo.codexLog.get(home) : undefined;
   if (kept && kept.path === newest.path && kept.size === newest.size && kept.mtime === newest.mtime) return kept.a && copyAccount(kept.a);
   let rl: Record<string, unknown> | null = null;
   let ts = 0;

@@ -141,12 +141,15 @@ beforeEach(() => {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const u = new URL(String(url), 'http://hub');
     if (u.pathname === '/api/m/local/p/usage/session') {
-      const session = u.searchParams.get('session')!;
-      reads.push(session);
+      const session = u.searchParams.get('session') ?? '';
+      const cwd = u.searchParams.get('cwd') ?? '';
+      const kind = u.searchParams.get('kind') ?? '';
+      const key = session || `${kind}:${cwd}`;
+      reads.push(key);
       if (hang)
         await new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
       if (hold) await hold;
-      const a = answers.get(session) ?? { status: 200, body: usage() };
+      const a = answers.get(key) ?? { status: 200, body: usage() };
       return { ok: a.status < 300, status: a.status, json: async () => a.body };
     }
     return { ok: false, status: 404, json: async () => ({}) };
@@ -357,6 +360,103 @@ describe('usage window in the status bar', () => {
     // Codex: its own account.
     await set(() => show([rec('t2', { agent: 'codex', agent_session: S3 })], 't2'));
     expect(limit()!.textContent!.trim()).toBe('10% used');
+    // Antigravity with model-only windows: followed even without a matching model name.
+    useUsage.setState((s) => ({
+      ...s,
+      snapshot: snap([
+        ...(s.snapshot?.accounts ?? []),
+        account('antigravity:a1', ['local'], [], {
+          email: 'a1@example.com',
+          windows: [{ kind: 'model', label: 'Gemini 3 Pro', usedPct: 60, resetsAt: now + 3600 }],
+        }),
+        account('antigravity:a2', ['local'], [], {
+          email: 'a2@example.com',
+          windows: [{ kind: 'model', label: 'Gemini 3 Pro', usedPct: 20, resetsAt: now + 7200 }],
+        }),
+      ]),
+    }));
+    await set(() => show([rec('t3', { agent: 'agy', agent_session: undefined, cwd: '/work/ag' })], 't3'));
+    expect(limit()!.textContent!.trim()).toBe('40% used');
+    // Hovering the status bar item shows merged Antigravity with per-account breakdown.
+    const statusAnchor = limit()!.parentElement!;
+    const hoverEvt = new MouseEvent('pointerover', { bubbles: true });
+    Object.defineProperty(hoverEvt, 'pointerType', { value: 'mouse' });
+    await set(() => void statusAnchor.dispatchEvent(hoverEvt));
+    await advance(HOVER_OPEN_MS);
+    const mergedLine = host.querySelector<HTMLElement>('.usage-hover [data-account="antigravity:merged"]')!;
+    expect(mergedLine.textContent).toContain('2 accounts');
+    expect(mergedLine.textContent).toContain('40% used');
+    expect([...mergedLine.querySelectorAll('.usage-hover-sub')].map((el) => el.textContent)).toEqual([
+      'a1@example.com60% used',
+      'a2@example.com20% used',
+    ]);
+    // Focused Chat pane: status bar window follows its agent without rendering terminal UsageSessionItem.
+    const chatLayout: L.Layout = {
+      version: 2,
+      selected: 0,
+      workspaces: [
+        {
+          id: 'w',
+          name: '',
+          cwd: '',
+          selected: 0,
+          tabs: [{ root: { view: { id: 'p1', plugin: 'chat', kind: 'chat', agent: 'codex', chat: S1 } }, focused: 'view:p1' }],
+        },
+      ],
+    };
+    await set(() => useTerms.setState({ machines: { local: { terminals: {}, layout: chatLayout } } }));
+    expect(limit()!.textContent!.trim()).toBe('10% used');
+    expect(item()).toBeNull();
+  });
+
+  it('resolves session usage by cwd for grok, kimi, opencode, agy and codex when unambiguous', async () => {
+    answers.set('grok:/work/repo', {
+      status: 200,
+      body: usage({ model: 'grok-4.6', cost: 0.42, contextUsed: 10_000, contextSize: 100_000 }),
+    });
+    show(
+      [rec('t1', { agent: 'grok', agent_session: undefined, agent_session_source: undefined, cwd: '/work/repo', foreground: { pid: 99 } })],
+      't1',
+    );
+    await render();
+    expect(reads).toEqual(['grok:/work/repo']);
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$0.42');
+    expect(item()!.querySelector('.usage-session-ctx')!.textContent).toBe('10% ctx');
+    // Two live terminals of the same agent in the same cwd: ambiguous, do not fetch or misattribute.
+    reads = [];
+    await set(() =>
+      show(
+        [
+          rec('t1', { agent: 'kimi', agent_session: undefined, agent_session_source: undefined, cwd: '/work/shared' }),
+          rec('t2', { agent: 'kimi', agent_session: undefined, agent_session_source: undefined, cwd: '/work/shared' }),
+        ],
+        't1',
+      ),
+    );
+    expect(reads).toEqual([]);
+    expect(item()).toBeNull();
+  });
+
+  it('accepts confirmed OpenCode ses_* session ids and rejects guessed or malformed ones', async () => {
+    answers.set('ses_alpha123', {
+      status: 200,
+      body: usage({ model: 'deepseek-v4-flash', cost: 0.35, contextUsed: 5000, contextSize: 0 }),
+    });
+    show([rec('t1', { agent: 'opencode', agent_session: 'ses_alpha123', agent_session_source: 'pid', cwd: '/work/oc' })], 't1');
+    await render();
+    expect(reads).toEqual(['ses_alpha123']);
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$0.35');
+    expect(item()!.querySelector('.usage-session-ctx')!.textContent).toBe('5k ctx');
+    // Guessed or malformed ses_* is never queried (and does not fall back to cwd).
+    reads = [];
+    for (const bad of [
+      { agent_session: 'ses_beta456', agent_session_source: 'guess' },
+      { agent_session: 'ses_../bad', agent_session_source: 'pid' },
+    ]) {
+      await set(() => show([rec('t1', { agent: 'opencode', cwd: '/work/oc', ...bad })], 't1'));
+      expect(reads).toEqual([]);
+      expect(item()).toBeNull();
+    }
   });
 });
 

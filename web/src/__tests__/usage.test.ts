@@ -15,16 +15,20 @@ import { useStore } from '../state/store';
 import { useSettings } from '../settings';
 import type { MachineState } from '../lib/machine';
 import { groupWindows, UsagePanel } from '../plugins/usage/UsagePanel';
-import { UsageStatusItem } from '../plugins/usage/StatusItem';
+import { formatStatusBarLabel, UsageStatusItem } from '../plugins/usage/StatusItem';
 import { applySnapshot, costStale, fetchCost, fetchSnapshot, setView, useUsage } from '../plugins/usage/state';
 import {
   costOf,
   daily,
   dailyDetails,
   equivalents,
+  isMergedAccount,
+  mergeAntigravityAccounts,
+  previewAccounts,
   rank,
   rankTokens,
   sortAccounts,
+  statusBarSelection,
   modelBreakdown,
   shortModel,
   tightest,
@@ -821,5 +825,153 @@ describe('usage panel and status item', () => {
     await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
     expect(host.querySelector('.usage-machines')!.textContent).toContain('Disabled GPU');
     useStore.getState().setMachines([]);
+  });
+
+  it('shows a subtle note instead of error alerts for actively disabled hosts while keeping alerts for enabled ones', async () => {
+    useStore
+      .getState()
+      .setMachines([
+        { id: 'local', label: 'This Mac', kind: 'local', enabled: true, status: 'ready', updated_at: now } as MachineState,
+        { id: 'gpu', label: 'Disabled GPU', kind: 'ssh', enabled: false, status: 'disabled', updated_at: now } as MachineState,
+      ]);
+    useUsage.setState({
+      snapshot: {
+        ...snapshot([
+          account('claude:b', [40], {
+            machines: ['local', 'gpu'],
+            issues: [{ machine: 'gpu', status: 'error', code: 'offline' }],
+          }),
+        ]),
+        machines: {
+          local: { status: 'ok', at: now },
+          gpu: { status: 'disabled', at: now },
+        },
+      },
+      cost: {
+        generatedAt: now,
+        days: 30,
+        weekHours: 168,
+        monthHours: 750,
+        machines: { local: { files: 1 }, gpu: { files: 2, error: 'offline', failed: ['claude:read'], disabled: true } },
+        rows: [],
+      },
+    });
+    await act(async () => root.render(createElement(UsagePanel)));
+    expect(host.querySelector('.callout.error')).toBeNull();
+    expect(host.querySelector('.usage-disabled-note')?.textContent).toContain('Disabled GPU');
+    await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
+    expect(host.querySelector('.usage-issues')).toBeNull();
+    // An enabled host that fails still surfaces the error callout.
+    useStore
+      .getState()
+      .setMachines([
+        { id: 'local', label: 'This Mac', kind: 'local', enabled: true, status: 'ready', updated_at: now } as MachineState,
+        { id: 'gpu', label: 'Active GPU', kind: 'ssh', enabled: true, status: 'error', updated_at: now } as MachineState,
+      ]);
+    useUsage.setState((s) => ({
+      ...s,
+      cost: { ...s.cost!, machines: { local: { files: 1 }, gpu: { files: 2, error: 'offline' } } },
+    }));
+    await act(async () => setView({ tab: 'overview' }));
+    expect(host.querySelector('.callout.error')?.textContent).toContain('Active GPU');
+    useStore.getState().setMachines([]);
+  });
+
+  it('supports customizable status bar window display and default provider', async () => {
+    const claudeAcc = account('claude:a', [30, 65], {
+      windows: [
+        { kind: 'session', usedPct: 30, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', usedPct: 65, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const codexAcc = account('codex:b', [15, 45], {
+      windows: [
+        { kind: 'session', usedPct: 15, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', usedPct: 45, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const s = snapshot([claudeAcc, codexAcc]);
+    useUsage.setState({ snapshot: s, remaining: false });
+    // Pure model checks for all window modes and default provider selection.
+    const selAuto = statusBarSelection(s, { defaultProvider: 'auto', windowMode: 'auto', now })!;
+    expect([selAuto.account.key, selAuto.primary.usedPct, selAuto.showLogo]).toEqual(['claude:a', 65, false]);
+    const sel5h = statusBarSelection(s, { defaultProvider: 'codex', windowMode: '5h', now })!;
+    expect([sel5h.account.key, sel5h.primary.usedPct, sel5h.showLogo]).toEqual(['codex:b', 15, true]);
+    expect(formatStatusBarLabel(sel5h.primary, sel5h.secondary, '5h', false)).toBe('5h · 15% used');
+    const sel7d = statusBarSelection(s, { defaultProvider: 'codex', windowMode: '7d', now })!;
+    expect(formatStatusBarLabel(sel7d.primary, sel7d.secondary, '7d', true)).toBe('7d · 55% left');
+    const selBoth = statusBarSelection(s, { defaultProvider: 'codex', windowMode: 'both', now })!;
+    expect(formatStatusBarLabel(selBoth.primary, selBoth.secondary, 'both', false)).toBe('5h 15% · 7d 45%');
+    expect(formatStatusBarLabel(selBoth.primary, selBoth.secondary, 'both', true)).toBe('5h 85% · 7d 55% left');
+    // Fallback when default provider has no active windows.
+    const selFallback = statusBarSelection(s, { defaultProvider: 'grok', windowMode: 'auto', now })!;
+    expect([selFallback.account.key, selFallback.showLogo]).toEqual(['claude:a', false]);
+    // Active focused agent overrides defaultProvider.
+    const selAgent = statusBarSelection(s, {
+      agent: { provider: 'claude', m: 'local' },
+      defaultProvider: 'codex',
+      windowMode: 'both',
+      now,
+    })!;
+    expect([selAgent.account.key, selAgent.primary.usedPct, selAgent.secondary?.usedPct]).toEqual(['claude:a', 30, 65]);
+    // Rendered StatusItem reflects settings.
+    useSettings.setState({
+      values: {
+        'usage.statusBar': { value: true, source: 'global' },
+        'usage.statusBarWindow': { value: 'both', source: 'global' },
+        'usage.statusBarProvider': { value: 'codex', source: 'global' },
+      } as never,
+    });
+    await act(async () => root.render(createElement(UsageStatusItem)));
+    const btn = host.querySelector<HTMLButtonElement>('.usage-status-item')!;
+    expect(btn.textContent?.trim()).toBe('5h 15% · 7d 45%');
+    expect(btn.querySelector('.ai-logo')).not.toBeNull();
+  });
+
+  it('aggregates multiple Antigravity accounts in previews while preserving per-account breakdown', async () => {
+    const ag1 = account('antigravity:a1', [], {
+      email: 'one@example.com',
+      windows: [
+        { kind: 'model', label: 'Gemini 3 Pro', usedPct: 80, resetsAt: now + 3600 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 60, resetsAt: now + 7200, windowSec: 604800 },
+      ],
+    });
+    const ag2 = account('antigravity:a2', [], {
+      email: 'two@example.com',
+      windows: [
+        // Past reset counts as 0% used alongside active ag1 -> (80 + 0) / 2 = 40%
+        { kind: 'model', label: 'Gemini 3 Pro', usedPct: 90, resetsAt: now - 60 },
+        { kind: 'weekly', label: 'Gemini Models', usedPct: 20, resetsAt: now + 5400, windowSec: 604800 },
+      ],
+    });
+    const claudeAcc = account('claude:c1', [50]);
+    const merged = mergeAntigravityAccounts([ag1, ag2], now)!;
+    expect(isMergedAccount(merged)).toBe(true);
+    expect(merged.accountCount).toBe(2);
+    expect(merged.members.map((m) => m.email)).toEqual(['one@example.com', 'two@example.com']);
+    expect(merged.windows.find((w) => w.label === 'Gemini 3 Pro')).toMatchObject({ usedPct: 40, resetsAt: now + 3600 });
+    expect(merged.windows.find((w) => w.label === 'Gemini Models')).toMatchObject({ usedPct: 40, resetsAt: now + 5400 });
+    const preview = previewAccounts([ag1, ag2, claudeAcc], now);
+    expect(preview.map((a) => a.key)).toEqual(['claude:c1', 'antigravity:merged']);
+
+    useUsage.setState({ snapshot: snapshot([ag1, ag2, claudeAcc]), remaining: false });
+    await act(async () => setView({ tab: 'overview', remaining: false }));
+    await act(async () => root.render(createElement(UsagePanel)));
+    // Tile shows merged remaining % (100 - 40 = 60% left), not ag1's 20% left.
+    const tile = host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="antigravity"]')!;
+    expect(tile.title).toContain('60%');
+    expect(tile.querySelector<HTMLElement>('.usage-tile-meter i')?.style.width).toBe('60%');
+    // Overview shows one merged row (2 accounts) plus 2 per-account subrows.
+    const overviewRow = host.querySelector('.usage-row[data-account="antigravity:merged"]')!;
+    expect(overviewRow.textContent).toContain('2 accounts');
+    expect(overviewRow.textContent).toContain('40%');
+    const subrows = [...host.querySelectorAll('.usage-subrow')].map((el) => el.textContent);
+    expect(subrows).toHaveLength(2);
+    expect(subrows[0]).toContain('one@example.com');
+    expect(subrows[1]).toContain('two@example.com');
+    // Antigravity provider tab renders merged summary card above both per-account cards.
+    await act(async () => tile.click());
+    const cards = [...host.querySelectorAll<HTMLElement>('.usage-card')].map((c) => c.dataset.account);
+    expect(cards).toEqual(['antigravity:merged', 'antigravity:a1', 'antigravity:a2']);
   });
 });

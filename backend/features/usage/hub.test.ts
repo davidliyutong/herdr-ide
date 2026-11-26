@@ -35,13 +35,14 @@ test('guards', async () => {
 });
 
 test('the kinds whose sessions are priced', () => {
-  expect(['claude', 'codex', 'opencode', 'gemini', 'kimi', 'grok', 'Claude', ''].map(sessionProvider)).toEqual([
+  expect(['claude', 'codex', 'opencode', 'gemini', 'kimi', 'grok', 'agy', 'Claude', ''].map(sessionProvider)).toEqual([
     'claude',
     'codex',
+    'opencode',
     undefined,
-    undefined,
-    undefined,
-    undefined,
+    'kimi',
+    'grok',
+    'antigravity',
     undefined,
     undefined,
   ]);
@@ -198,16 +199,16 @@ test('a session’s numbers', async () => {
   ]);
 });
 
-// Only a kind whose sessions are priced and a session id reach the machine.
+// Only a kind whose sessions are priced and a valid session id (or absolute cwd) reach the machine.
 test('a session’s params', async () => {
-  const { request, of } = await withHub(answers, true);
+  const { request, of, st } = await withHub(answers, true);
   for (const [kind, id] of [
     ['', SESSION],
     ['nope', SESSION],
     ['Claude', SESSION],
     ['gemini', SESSION],
-    ['opencode', SESSION],
     ['claude', ''],
+    ['claude', 'ses_abc1234'],
     ['claude', '../x'],
     ['claude', SESSION.toUpperCase()],
     ['claude', SESSION.slice(0, 35)],
@@ -218,12 +219,27 @@ test('a session’s params', async () => {
     const res = await session(request, kind!, id!);
     expect([kind, id, res.status, ((await res.json()) as { error: string }).error]).toEqual([kind, id, 400, 'bad_request']);
   }
+  // Relative cwd or invalid pid is refused before reaching the machine.
+  for (const qs of ['kind=grok&cwd=relative/path', 'kind=grok&cwd=/work&pid=-1', 'kind=grok&cwd=/work&pid=abc']) {
+    const res = await request('GET', `/api/m/box/p/usage/session?${qs}`);
+    expect([qs, res.status, ((await res.json()) as { error: string }).error]).toEqual([qs, 400, 'bad_request']);
+  }
   expect(of('session')).toEqual([]);
   // Valid ones are asked, also of a read-only hub.
-  for (const kind of ['claude', 'codex']) expect((await session(request, kind, SESSION)).status).toBe(200);
+  for (const kind of ['claude', 'codex', 'grok', 'kimi', 'agy']) expect((await session(request, kind, SESSION)).status).toBe(200);
+  expect((await session(request, 'opencode', 'ses_test1234')).status).toBe(200);
+  expect((await request('GET', '/api/m/box/p/usage/session?kind=grok&cwd=/work/repo&pid=42')).status).toBe(200);
+  st.set('usage.codexHomes', '', ['/srv/codex-alt']);
+  expect((await request('GET', '/api/m/box/p/usage/session?kind=codex&cwd=/work/repo')).status).toBe(200);
   expect(of('session')).toEqual([
     { kind: 'claude', session: SESSION },
     { kind: 'codex', session: SESSION },
+    { kind: 'grok', session: SESSION },
+    { kind: 'kimi', session: SESSION },
+    { kind: 'agy', session: SESSION },
+    { kind: 'opencode', session: 'ses_test1234' },
+    { kind: 'grok', session: '', cwd: '/work/repo', pid: 42 },
+    { kind: 'codex', session: '', cwd: '/work/repo', codexHomes: ['/srv/codex-alt'] },
   ]);
 });
 

@@ -136,12 +136,29 @@ export interface CostReport {
   weekHours: number;
   monthHours: number;
   /** failed: the logs a machine could not read, provider:code. */
-  machines: Record<string, { error?: string; files: number; unpriced?: string[]; failed?: string[] }>;
+  machines: Record<string, { error?: string; files: number; unpriced?: string[]; failed?: string[]; disabled?: boolean }>;
   rows: CostRow[];
   /** The quarters of an hour with spend since recentSince (Unix seconds),
    * for the spend of a subscription's window. */
   recentSince?: number;
   recent?: CostSlot[];
+}
+
+/** Which rate-limit window(s) the status bar item shows. */
+export type StatusBarWindowMode = 'auto' | '5h' | '7d' | 'both';
+
+/** The default provider the status bar shows when no agent pane is active. */
+export type StatusBarProvider = 'auto' | 'claude' | 'codex' | 'grok' | 'antigravity' | 'kimi';
+
+/** A synthesized multi-account summary (e.g. Antigravity across 2+ accounts)
+ * that aggregates quotas while keeping every member for per-account breakdown. */
+export interface MergedUsageAccount extends UsageAccount {
+  accountCount: number;
+  members: UsageAccount[];
+}
+
+export function isMergedAccount(a: UsageAccount): a is MergedUsageAccount {
+  return 'accountCount' in a && typeof (a as MergedUsageAccount).accountCount === 'number' && (a as MergedUsageAccount).accountCount > 1;
 }
 
 /** In the hub's order (usage.Providers); OpenCode has spend only. */
@@ -162,13 +179,105 @@ export function tightestWindow(a: UsageAccount, now = Date.now() / 1000): UsageW
 }
 
 /** Accounts, the tightest first; those without windows last. */
-export function sortAccounts(list: UsageAccount[]): UsageAccount[] {
+export function sortAccounts<T extends UsageAccount>(list: T[], now = Date.now() / 1000): T[] {
   return [...list].sort((a, b) => {
-    const wa = tightestWindow(a)?.usedPct ?? -1;
-    const wb = tightestWindow(b)?.usedPct ?? -1;
+    const wa = tightestWindow(a, now)?.usedPct ?? -1;
+    const wb = tightestWindow(b, now)?.usedPct ?? -1;
     if (wa !== wb) return wb - wa;
     return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
   });
+}
+
+const statusPriority: Record<UsageAccount['status'], number> = { ok: 0, stale: 1, error: 2, unauth: 3 };
+
+/** Merges multiple Antigravity accounts into one aggregated summary whose
+ * windows average quota usage across accounts (treating past-reset windows as
+ * 0% used when another account in the same bucket is active) and report the
+ * earliest upcoming reset. Undefined when fewer than 2 Antigravity accounts
+ * are present. */
+export function mergeAntigravityAccounts(accounts: UsageAccount[], now = Date.now() / 1000): MergedUsageAccount | undefined {
+  const ag = accounts.filter((a) => a.provider === 'antigravity');
+  if (ag.length < 2) return undefined;
+  const members = sortAccounts(ag, now);
+  const buckets = new Map<string, { sample: UsageWindow; items: UsageWindow[] }>();
+  for (const a of members) {
+    for (const w of a.windows ?? []) {
+      const k = `${w.kind}\0${w.label ?? ''}\0${w.windowSec ?? 0}`;
+      const b = buckets.get(k);
+      if (b) b.items.push(w);
+      else buckets.set(k, { sample: w, items: [w] });
+    }
+  }
+  const windows: UsageWindow[] = [];
+  for (const { sample, items } of buckets.values()) {
+    const active = items.filter((w) => !pastReset(w, now));
+    if (active.length > 0) {
+      // Past-reset entries have replenished (0% used) while active entries carry current usage.
+      const totalUsed = items.reduce((sum, w) => sum + (pastReset(w, now) ? 0 : w.usedPct), 0);
+      const usedPct = Math.round((totalUsed / items.length) * 100) / 100;
+      const usedActive = active.filter((w) => w.usedPct > 0 && w.resetsAt);
+      const resetPool = usedActive.length ? usedActive : active.filter((w) => w.resetsAt);
+      const resetsAt = resetPool.length ? Math.min(...resetPool.map((w) => w.resetsAt!)) : undefined;
+      windows.push({
+        id: sample.id,
+        kind: sample.kind,
+        label: sample.label,
+        usedPct,
+        resetsAt,
+        windowSec: sample.windowSec,
+      });
+    } else {
+      const totalUsed = items.reduce((sum, w) => sum + w.usedPct, 0);
+      const usedPct = Math.round((totalUsed / items.length) * 100) / 100;
+      const resets = items.map((w) => w.resetsAt).filter((r): r is number => !!r);
+      windows.push({
+        id: sample.id,
+        kind: sample.kind,
+        label: sample.label,
+        usedPct,
+        resetsAt: resets.length ? Math.max(...resets) : undefined,
+        windowSec: sample.windowSec,
+      });
+    }
+  }
+  const status = members.reduce<UsageAccount['status']>(
+    (best, a) => (statusPriority[a.status] < statusPriority[best] ? a.status : best),
+    members[0].status,
+  );
+  const machines = [...new Set(members.flatMap((a) => a.machines ?? []))].sort();
+  const fetchedAt = members.reduce((m, a) => Math.max(m, a.fetchedAt ?? 0), 0) || undefined;
+  const seenAt = members.reduce((m, a) => Math.max(m, a.seenAt), 0);
+  return {
+    key: 'antigravity:merged',
+    provider: 'antigravity',
+    status,
+    windows,
+    machines,
+    fetchedAt,
+    seenAt,
+    accountCount: members.length,
+    members,
+  };
+}
+
+/** Preview account list: replaces 2+ Antigravity accounts with their merged
+ * summary so tiles, overview, status bar and hover previews reflect the
+ * combined quota across all accounts. */
+export function previewAccounts(accounts: UsageAccount[], now = Date.now() / 1000): (UsageAccount | MergedUsageAccount)[] {
+  const merged = mergeAntigravityAccounts(accounts, now);
+  if (!merged) return sortAccounts(accounts, now);
+  const rest = accounts.filter((a) => a.provider !== 'antigravity');
+  return sortAccounts([...rest, merged], now);
+}
+
+/** Whether w is a 5-hour / session rate-limit window. */
+export function is5hWindow(w: UsageWindow): boolean {
+  return w.kind === 'session' || w.windowSec === 18000;
+}
+
+/** Whether w is a 7-day / weekly rate-limit window. */
+export function is7dWindow(w: UsageWindow): boolean {
+  return w.kind === 'weekly' || w.windowSec === 604800;
 }
 
 /** A name reduced to its letters and digits, lower case, to compare a
@@ -183,10 +292,41 @@ export function windowApplies(w: UsageWindow, model?: string): boolean {
   return !!model && !!w.label && bare(model).includes(bare(w.label));
 }
 
+/** Picks the primary (and for 'both', secondary) active window(s) of an
+ * account according to mode and optional model. When filterByModel is true
+ * (a focused agent pane), per-model windows are restricted to those matching
+ * model, falling back to all active windows when the account reports only
+ * per-model windows. */
+export function pickAccountWindows(
+  a: UsageAccount,
+  mode: StatusBarWindowMode = 'auto',
+  model?: string,
+  now = Date.now() / 1000,
+  filterByModel = false,
+): { primary: UsageWindow; secondary?: UsageWindow; matched: boolean } | undefined {
+  const active = (a.windows ?? []).filter((w) => !pastReset(w, now));
+  if (!active.length) return undefined;
+  const filtered = filterByModel ? active.filter((w) => windowApplies(w, model)) : active;
+  // Providers whose accounts report only per-model windows (e.g. Antigravity LS)
+  // fall back to all active windows when the active model is unknown or unmatched.
+  const pool = filtered.length ? filtered : active;
+  const maxOf = (ws: UsageWindow[]) => ws.reduce<UsageWindow | undefined>((b, w) => (!b || w.usedPct > b.usedPct ? w : b), undefined);
+  const tight = maxOf(pool)!;
+  if (mode === 'auto') return { primary: tight, matched: true };
+  const w5 = maxOf(pool.filter(is5hWindow));
+  const w7 = maxOf(pool.filter(is7dWindow));
+  if (mode === '5h') return w5 ? { primary: w5, matched: true } : { primary: tight, matched: false };
+  if (mode === '7d') return w7 ? { primary: w7, matched: true } : { primary: tight, matched: false };
+  if (w5 && w7) return { primary: w5, secondary: w7, matched: true };
+  if (w5 || w7) return { primary: (w5 ?? w7)!, matched: true };
+  return { primary: tight, matched: false };
+}
+
 /** The tightest window that counts what the coding agent in the focused
  * pane does: of its service's accounts read on its machine (any of the
  * service's when none was), those of its model among the windows of
- * models; undefined when no such account has one. */
+ * models (falling back to all windows when the service reports model
+ * windows only); merges multiple Antigravity accounts. */
 export function tightestFor(
   s: UsageSnapshot | undefined,
   provider: string,
@@ -196,14 +336,63 @@ export function tightestFor(
 ): { account: UsageAccount; window: UsageWindow } | undefined {
   const all = (s?.accounts ?? []).filter((a) => a.provider === provider);
   const here = all.filter((a) => (a.machines ?? []).includes(m));
+  const raw = here.length ? here : all;
+  const merged = provider === 'antigravity' ? mergeAntigravityAccounts(raw, now) : undefined;
+  const pool = merged ? [merged] : raw;
   let best: { account: UsageAccount; window: UsageWindow } | undefined;
-  for (const a of here.length ? here : all) {
-    for (const w of a.windows ?? []) {
-      if (pastReset(w, now) || !windowApplies(w, model)) continue;
-      if (!best || w.usedPct > best.window.usedPct) best = { account: a, window: w };
-    }
+  for (const a of pool) {
+    const picked = pickAccountWindows(a, 'auto', model, now, true);
+    if (!picked) continue;
+    if (!best || picked.primary.usedPct > best.window.usedPct) best = { account: a, window: picked.primary };
   }
   return best;
+}
+
+/** Resolves what the status bar displays given the optional focused agent,
+ * configured default provider, and window display mode. */
+export function statusBarSelection(
+  s: UsageSnapshot | undefined,
+  opts: {
+    agent?: { provider: string; m: string; model?: string };
+    defaultProvider?: StatusBarProvider;
+    windowMode?: StatusBarWindowMode;
+    machineId?: string;
+    now?: number;
+  } = {},
+): { account: UsageAccount | MergedUsageAccount; primary: UsageWindow; secondary?: UsageWindow; showLogo: boolean } | undefined {
+  const now = opts.now ?? Date.now() / 1000;
+  const mode = opts.windowMode ?? 'auto';
+  const pickFrom = (list: (UsageAccount | MergedUsageAccount)[], model?: string, filterByModel = false) => {
+    let bestMatched:
+      { account: UsageAccount | MergedUsageAccount; primary: UsageWindow; secondary?: UsageWindow; score: number } | undefined;
+    let bestAny: { account: UsageAccount | MergedUsageAccount; primary: UsageWindow; secondary?: UsageWindow; score: number } | undefined;
+    for (const a of list) {
+      const p = pickAccountWindows(a, mode, model, now, filterByModel);
+      if (!p) continue;
+      const score = Math.max(p.primary.usedPct, p.secondary?.usedPct ?? -1);
+      const cand = { account: a, primary: p.primary, secondary: p.secondary, score };
+      if (!bestAny || cand.score > bestAny.score) bestAny = cand;
+      if (p.matched && (!bestMatched || cand.score > bestMatched.score)) bestMatched = cand;
+    }
+    return bestMatched ?? bestAny;
+  };
+  const poolFor = (provider: string, machine?: string) => {
+    const all = (s?.accounts ?? []).filter((a) => a.provider === provider);
+    const here = machine ? all.filter((a) => (a.machines ?? []).includes(machine)) : [];
+    const raw = here.length ? here : all;
+    const merged = provider === 'antigravity' ? mergeAntigravityAccounts(raw, now) : undefined;
+    return merged ? [merged] : raw;
+  };
+  if (opts.agent) {
+    const hit = pickFrom(poolFor(opts.agent.provider, opts.agent.m), opts.agent.model, true);
+    if (hit) return { account: hit.account, primary: hit.primary, secondary: hit.secondary, showLogo: true };
+  }
+  if (opts.defaultProvider && opts.defaultProvider !== 'auto') {
+    const hit = pickFrom(poolFor(opts.defaultProvider, opts.machineId));
+    if (hit) return { account: hit.account, primary: hit.primary, secondary: hit.secondary, showLogo: true };
+  }
+  const hit = pickFrom(previewAccounts(s?.accounts ?? [], now));
+  return hit ? { account: hit.account, primary: hit.primary, secondary: hit.secondary, showLogo: false } : undefined;
 }
 
 /** What a window of an account has cost so far at API prices. */
@@ -249,10 +438,14 @@ export function windowSpend(
   return out;
 }
 
-/** The tightest window of all accounts, for the status bar. */
-export function tightest(s: UsageSnapshot | undefined): { account: UsageAccount; window: UsageWindow } | undefined {
-  const first = sortAccounts(s?.accounts ?? []).find((a) => tightestWindow(a));
-  return first ? { account: first, window: tightestWindow(first)! } : undefined;
+/** The tightest window of all accounts (merging multi-account Antigravity),
+ * for the status bar. */
+export function tightest(
+  s: UsageSnapshot | undefined,
+  now = Date.now() / 1000,
+): { account: UsageAccount; window: UsageWindow } | undefined {
+  const first = previewAccounts(s?.accounts ?? [], now).find((a) => tightestWindow(a, now));
+  return first ? { account: first, window: tightestWindow(first, now)! } : undefined;
 }
 
 /** A duration in days and hours, hours and minutes, or minutes. */

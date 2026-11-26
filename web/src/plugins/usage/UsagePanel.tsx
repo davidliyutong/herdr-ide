@@ -20,9 +20,12 @@ import {
   dayOf,
   duration,
   equivalents,
+  isMergedAccount,
+  mergeAntigravityAccounts,
   money,
   parseThresholds,
   pastReset,
+  previewAccounts,
   PROVIDERS,
   providerName,
   rank,
@@ -35,6 +38,7 @@ import {
   modelBreakdown,
   type CostReport,
   type CostRow,
+  type MergedUsageAccount,
   type RankBy,
   type TokenKinds,
   type UsageAccount,
@@ -119,9 +123,14 @@ export function UsagePanel() {
 }
 
 /** The tiles: the overview and each service, its bar what is left of its
- * tightest window. */
+ * tightest window (aggregated across accounts for multi-account Antigravity). */
 function Tiles({ providers, accounts, shown }: { providers: string[]; accounts: UsageAccount[]; shown: UsageTab }) {
+  const mergedAg = mergeAntigravityAccounts(accounts);
   const left = (p: string) => {
+    if (p === 'antigravity' && mergedAg) {
+      const w = tightestWindow(mergedAg);
+      return w ? 100 - w.usedPct : undefined;
+    }
     let min: number | undefined;
     for (const a of accounts) {
       if (a.provider !== p) continue;
@@ -241,8 +250,11 @@ function Meta() {
 function Overview({ accounts }: { accounts: UsageAccount[] }) {
   const snapshot = useUsage((s) => s.snapshot);
   const readOnly = useSettings((s) => s.readOnly);
+  const now = useNow();
   const deepseekOn = useSettings((s) => s.values['usage.providers.deepseek']?.value !== false);
   const noDeepseek = deepseekOn && !readOnly && !accounts.some((a) => a.provider === 'deepseek');
+  const rows = useMemo(() => previewAccounts(accounts, now), [accounts, now]);
+  const shared = useMemo(() => new Set(rows.map((a) => a.provider).filter((p, i, all) => all.indexOf(p) !== i)), [rows]);
   return (
     <>
       <Spend />
@@ -252,12 +264,12 @@ function Overview({ accounts }: { accounts: UsageAccount[] }) {
           {t('usage.deepseek.add')}
         </button>
       )}
-      {accounts.length > 0 && (
+      {rows.length > 0 && (
         <section className="usage-section">
           <h4 className="usage-heading">{t('usage.accounts')}</h4>
           <div className="usage-rows">
-            {accounts.map((a) => (
-              <AccountRow key={a.key} account={a} />
+            {rows.map((a) => (
+              <AccountRow key={a.key} account={a} showEmail={shared.has(a.provider)} />
             ))}
           </div>
         </section>
@@ -266,43 +278,79 @@ function Overview({ accounts }: { accounts: UsageAccount[] }) {
   );
 }
 
-/** An account in the overview: its service, plan and tightest window; a
+/** An account in the overview: its service, plan and tightest window (plus
+ * per-account breakdown subrows for merged multi-account Antigravity); a
  * click shows its service. */
-function AccountRow({ account: a }: { account: UsageAccount }) {
+function AccountRow({ account: a, showEmail = false }: { account: UsageAccount | MergedUsageAccount; showEmail?: boolean }) {
   const remaining = useUsage((s) => s.remaining);
   const now = useNow();
-  const w = tightestWindow(a);
+  const merged = isMergedAccount(a);
+  const w = tightestWindow(a, now);
   const shown = w ? (remaining ? 100 - w.usedPct : w.usedPct) : undefined;
   return (
-    <button
-      className={`usage-row level-${w ? level(w) : 'none'}`}
-      data-account={a.key}
-      style={{ '--brand': providerColor(a.provider) } as React.CSSProperties}
-      onClick={() => setView({ tab: a.provider })}
-    >
-      <ProviderLogo provider={a.provider} />
-      <span className="usage-row-text">
-        <span className="usage-row-title">
-          <b>{providerName(a.provider)}</b>
-          {a.plan && <span className="muted">{a.plan}</span>}
-          {a.status !== 'ok' && (
-            <span className={`tag usage-status ${a.status}`}>{t(`usage.status.${a.status}` as 'usage.status.stale')}</span>
+    <>
+      <button
+        className={`usage-row level-${w ? level(w) : 'none'}`}
+        data-account={a.key}
+        style={{ '--brand': providerColor(a.provider) } as React.CSSProperties}
+        onClick={() => setView({ tab: a.provider })}
+      >
+        <ProviderLogo provider={a.provider} />
+        <span className="usage-row-text">
+          <span className="usage-row-title">
+            <b>{providerName(a.provider)}</b>
+            {merged && <span className="muted">{t('usage.accountCount', { n: a.accountCount })}</span>}
+            {!merged && a.email && showEmail && <span className="muted ellipsis">{a.email}</span>}
+            {!merged && a.plan && <span className="muted">{a.plan}</span>}
+            {a.status !== 'ok' && (
+              <span className={`tag usage-status ${a.status}`}>{t(`usage.status.${a.status}` as 'usage.status.stale')}</span>
+            )}
+          </span>
+          {w && (
+            <span className="usage-row-window muted ellipsis">
+              {windowLabel(w)}
+              {w.resetsAt ? ` · ${t('usage.resetsIn', { in: duration(w.resetsAt - now) })}` : ''}
+            </span>
           )}
         </span>
-        {w && (
-          <span className="usage-row-window muted ellipsis">
-            {windowLabel(w)}
-            {w.resetsAt ? ` · ${t('usage.resetsIn', { in: duration(w.resetsAt - now) })}` : ''}
+        {shown !== undefined && (
+          <span className="usage-row-meter">
+            <span className="usage-row-pct">{Math.round(shown)}%</span>
+            <Bar w={w!} remaining={remaining} small />
           </span>
         )}
-      </span>
-      {shown !== undefined && (
-        <span className="usage-row-meter">
-          <span className="usage-row-pct">{Math.round(shown)}%</span>
-          <Bar w={w!} remaining={remaining} small />
-        </span>
+      </button>
+      {merged && (
+        <div className="usage-subrows" style={{ '--brand': providerColor(a.provider) } as React.CSSProperties}>
+          {a.members.map((m) => {
+            const mw = tightestWindow(m, now);
+            const mShown = mw ? (remaining ? 100 - mw.usedPct : mw.usedPct) : undefined;
+            return (
+              <button
+                key={m.key}
+                className={`usage-subrow level-${mw ? level(mw) : 'none'}`}
+                data-account={m.key}
+                onClick={() => setView({ tab: a.provider })}
+              >
+                <span className="usage-subrow-id ellipsis">
+                  {m.email || m.plan || m.key}
+                  {m.status !== 'ok' && (
+                    <span className={`tag usage-status ${m.status}`}>{t(`usage.status.${m.status}` as 'usage.status.stale')}</span>
+                  )}
+                </span>
+                <span className="spacer" />
+                {mShown !== undefined && (
+                  <span className="usage-subrow-meter">
+                    <span className="usage-row-pct">{Math.round(mShown)}%</span>
+                    <Bar w={mw!} remaining={remaining} small />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       )}
-    </button>
+    </>
   );
 }
 
@@ -310,8 +358,11 @@ function AccountRow({ account: a }: { account: UsageAccount }) {
 
 function Provider({ provider, accounts }: { provider: string; accounts: UsageAccount[] }) {
   const readOnly = useSettings((s) => s.readOnly);
+  const now = useNow();
+  const merged = provider === 'antigravity' ? mergeAntigravityAccounts(accounts, now) : undefined;
   return (
     <div className="usage-provider" style={{ '--brand': providerColor(provider) } as React.CSSProperties}>
+      {merged && <MergedAccountCard account={merged} />}
       {accounts.map((a) => (
         <AccountCard key={a.key} account={a} />
       ))}
@@ -321,12 +372,58 @@ function Provider({ provider, accounts }: { provider: string; accounts: UsageAcc
   );
 }
 
-function AccountCard({ account: a }: { account: UsageAccount }) {
+/** Aggregated multi-account summary card shown at the top of the Antigravity
+ * tab above each individual account's breakdown card. */
+function MergedAccountCard({ account: a }: { account: MergedUsageAccount }) {
   const labels = useStore(useShallow((s) => Object.fromEntries(Object.entries(s.machines).map(([id, st]) => [id, st.label]))));
+  const now = useNow();
+  const groups = groupWindows(a.windows ?? []);
+  return (
+    <section className="usage-card usage-card-merged" data-account={a.key}>
+      <header className="usage-card-head">
+        <ProviderLogo provider={a.provider} className="lg" />
+        <div className="usage-card-title">
+          <div className="usage-card-line">
+            <b className="usage-provider-name">{providerName(a.provider)}</b>
+            <span className="spacer" />
+            <span className="usage-email ellipsis">{t('usage.allAccounts', { n: a.accountCount })}</span>
+          </div>
+          <div className="usage-card-line muted">
+            <span>{a.fetchedAt ? t('usage.updated', { ago: duration(now - a.fetchedAt) }) : ''}</span>
+          </div>
+        </div>
+      </header>
+      {groups.map((g) => (
+        <div key={g.label ?? ''} className="usage-group">
+          {g.label && <div className="usage-group-label">{g.label}</div>}
+          {g.windows.map((w) => (
+            <WindowRow key={w.id ?? `${w.kind}|${w.label ?? ''}`} account={a} w={w} grouped={!!g.label} now={now} />
+          ))}
+        </div>
+      ))}
+      {a.machines.length > 0 && (
+        <div className="usage-machines muted">{t('usage.seenOn', { machines: a.machines.map((m) => labels[m] ?? m).join(', ') })}</div>
+      )}
+    </section>
+  );
+}
+
+function AccountCard({ account: a }: { account: UsageAccount }) {
+  const machines = useStore((s) => s.machines);
+  const snapMachines = useUsage((s) => s.snapshot?.machines);
   const incident = useUsage((s) => s.snapshot?.status[a.provider]);
   const now = useNow();
+  const labelOf = (m: string) => machines[m]?.label ?? m;
+  const isDisabled = (m: string) => {
+    const st = machines[m];
+    if (st) return st.status === 'disabled' || st.enabled === false;
+    return snapMachines?.[m]?.status === 'disabled';
+  };
+  const allDisabled = a.machines.length > 0 && a.machines.every(isDisabled);
   const bad = incident?.indicator && incident.indicator !== 'none';
   const groups = groupWindows(a.windows ?? []);
+  const activeIssues = (a.issues ?? []).filter((i) => !isDisabled(i.machine));
+  const disabledIssueMachines = [...new Set((a.issues ?? []).filter((i) => isDisabled(i.machine)).map((i) => i.machine))];
   return (
     <section className="usage-card" data-account={a.key}>
       <header className="usage-card-head">
@@ -361,7 +458,12 @@ function AccountCard({ account: a }: { account: UsageAccount }) {
               {incident.description || t('usage.incident')}
             </a>
           )}
-          {a.status !== 'ok' && (
+          {a.status !== 'ok' && allDisabled && (
+            <p className="usage-footnote muted usage-disabled-note">
+              {t('usage.account.disabledHosts', { machines: a.machines.map(labelOf).join(', ') })}
+            </p>
+          )}
+          {a.status !== 'ok' && !allDisabled && (
             <div className={`callout ${a.status === 'stale' ? 'warning' : 'error'} usage-hint`}>
               <span>
                 <b>{t(`usage.status.${a.status}` as 'usage.status.stale')}</b> · {hint(a)}
@@ -380,14 +482,19 @@ function AccountCard({ account: a }: { account: UsageAccount }) {
       ))}
       <Money account={a} />
       {a.machines.length > 0 && (
-        <div className="usage-machines muted">{t('usage.seenOn', { machines: a.machines.map((m) => labels[m] ?? m).join(', ') })}</div>
+        <div className="usage-machines muted">{t('usage.seenOn', { machines: a.machines.map(labelOf).join(', ') })}</div>
       )}
-      {issueGroups(a).map(([reason, ms]) => (
+      {issueGroups(activeIssues).map(([reason, ms]) => (
         <div key={reason} className="usage-issues">
           <AlertTriangle />
-          <span>{t('usage.issues', { machines: ms.map((m) => labels[m] ?? m).join(', '), reason })}</span>
+          <span>{t('usage.issues', { machines: ms.map(labelOf).join(', '), reason })}</span>
         </div>
       ))}
+      {!allDisabled && disabledIssueMachines.length > 0 && (
+        <p className="usage-footnote muted usage-disabled-note">
+          {t('usage.issues.disabled', { machines: disabledIssueMachines.map(labelOf).join(', ') })}
+        </p>
+      )}
     </section>
   );
 }
@@ -421,9 +528,9 @@ function windowLabel(w: UsageWindow, grouped = false): string {
 }
 
 /** The machines that could not read an account, by why. */
-function issueGroups(a: UsageAccount): [string, string[]][] {
+function issueGroups(issues: NonNullable<UsageAccount['issues']>): [string, string[]][] {
   const by = new Map<string, string[]>();
-  for (const i of a.issues ?? []) {
+  for (const i of issues) {
     const reason =
       i.status === 'stale' ? t('usage.issue.expired') : i.status === 'unauth' ? t('usage.issue.unauth') : t('usage.issue.error');
     by.set(reason, [...(by.get(reason) ?? []), i.machine]);
@@ -646,10 +753,23 @@ function ModelBreakdown({ rows, days, isTokens }: { rows: CostRow[]; days: numbe
 
 /** The overview's spend: the days chosen, all services. */
 function Spend() {
-  const { cost, costLoading, costError, costDays, metric } = useUsage(
-    useShallow((s) => ({ cost: s.cost, costLoading: s.costLoading, costError: s.costError, costDays: s.costDays, metric: s.metric })),
+  const { cost, costLoading, costError, costDays, metric, snapMachines } = useUsage(
+    useShallow((s) => ({
+      cost: s.cost,
+      costLoading: s.costLoading,
+      costError: s.costError,
+      costDays: s.costDays,
+      metric: s.metric,
+      snapMachines: s.snapshot?.machines,
+    })),
   );
-  const labels = useStore(useShallow((s) => Object.fromEntries(Object.entries(s.machines).map(([id, st]) => [id, st.label]))));
+  const machines = useStore((s) => s.machines);
+  const labelOf = (m: string) => machines[m]?.label ?? m;
+  const isDisabled = (m: string) => {
+    const st = machines[m];
+    if (st) return st.status === 'disabled' || st.enabled === false;
+    return cost?.machines[m]?.disabled === true || snapMachines?.[m]?.status === 'disabled';
+  };
   const [by, setBy] = useState<RankBy>('model');
   const today = new Date();
   const isTokens = metric === 'tokens';
@@ -681,13 +801,17 @@ function Spend() {
           const total = costOf(rows, costDays, today);
           const kinds = tokenKinds(rows, costDays, today);
           const eq = equivalents(isTokens ? kinds.total : total, costDays, cost.weekHours, cost.monthHours);
-          const label = (r: CostRow) => (by === 'machine' ? (labels[r.machine] ?? r.machine) : (r[by] ?? ''));
+          const label = (r: CostRow) => (by === 'machine' ? labelOf(r.machine) : (r[by] ?? ''));
           const ranking = isTokens
             ? rankTokens(rows, by, costDays, today, label).slice(0, 8)
             : rank(rows, by, costDays, today, label)
                 .slice(0, 8)
                 .map((r) => ({ ...r, unpriced: false }));
-          const failed = Object.entries(cost.machines).filter(([, m]) => m.error);
+          const failed = Object.entries(cost.machines).filter(([m, x]) => x.error && !isDisabled(m));
+          const logsFailed = Object.entries(cost.machines).filter(([m, x]) => x.failed?.length && !isDisabled(m));
+          const disabledHosts = [...new Set([...Object.keys(machines), ...Object.keys(cost.machines)].filter(isDisabled))].sort((a, b) =>
+            labelOf(a).localeCompare(labelOf(b)),
+          );
           const unpriced = [...new Set(Object.values(cost.machines).flatMap((m) => m.unpriced ?? []))];
           const main = (r: (typeof ranking)[number]) => (isTokens ? r.tokens : r.cost);
           return (
@@ -754,18 +878,21 @@ function Spend() {
                   </button>
                 </p>
               )}
+              {disabledHosts.length > 0 && (
+                <p className="usage-footnote muted usage-disabled-note">
+                  {t('usage.disabledHosts', { machines: disabledHosts.map(labelOf).join(', ') })}
+                </p>
+              )}
               {failed.map(([m, x]) => (
                 <div key={m} className="callout error">
-                  {t('usage.cost.machineFailed', { m: labels[m] ?? m, code: x.error ?? '' })}
+                  {t('usage.cost.machineFailed', { m: labelOf(m), code: x.error ?? '' })}
                 </div>
               ))}
-              {Object.entries(cost.machines)
-                .filter(([, x]) => x.failed?.length)
-                .map(([m, x]) => (
-                  <div key={`${m}-logs`} className="callout error">
-                    {t('usage.cost.logsFailed', { m: labels[m] ?? m, logs: x.failed!.map(failedLog).join(', ') })}
-                  </div>
-                ))}
+              {logsFailed.map(([m, x]) => (
+                <div key={`${m}-logs`} className="callout error">
+                  {t('usage.cost.logsFailed', { m: labelOf(m), logs: x.failed!.map(failedLog).join(', ') })}
+                </div>
+              ))}
             </>
           );
         })()}

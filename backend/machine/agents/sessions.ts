@@ -183,9 +183,9 @@ export class Resolver {
    * remembered (TIMING): a transcript made meanwhile is found within
    * missRecheckMs of a caller asking again, one that existed before only
    * after missTtlMs. */
-  async locate(kind: string, id: string): Promise<SessionFile> {
+  async locate(kind: string, id: string, extraCodexHomes?: readonly string[]): Promise<SessionFile> {
     const f = this.check(kind, id);
-    return this.fileOf(f, id, await this.locateIn(f, id));
+    return this.fileOf(f, id, await this.locateIn(f, id, extraCodexHomes));
   }
 
   /** locate and SessionFile.open in one: the session's transcript, open as
@@ -244,8 +244,9 @@ export class Resolver {
   /** Finds a session's transcript of format f; an earlier answer is used
    * again while it still names, through no link, the file found, and an
    * earlier miss while it is remembered. */
-  private async locateIn(f: Format, id: string): Promise<Location> {
-    const key = `${f}/${id}`;
+  private async locateIn(f: Format, id: string, extraCodexHomes?: readonly string[]): Promise<Location> {
+    const extraKey = f === Format.Codex && extraCodexHomes?.length ? `|${extraCodexHomes.join('\0')}` : '';
+    const key = `${f}/${id}${extraKey}`;
     const known = this.located.get(key);
     if (known) {
       if ((await this.files.realpath(known.file)) === known.file) {
@@ -261,7 +262,7 @@ export class Resolver {
     const s = new Search();
     if (f === Format.Claude) await searchClaude(this, s, id);
     // While a miss is remembered, only where a new rollout is made.
-    else await searchCodex(this, s, id, now, !missed);
+    else await searchCodex(this, s, id, now, !missed, extraCodexHomes);
     if (!s.best) {
       const err = new SessionError(s.compressed ? 'compressed' : 'not_found');
       if (!m) m = { err, at: now, checked: now };
@@ -356,10 +357,11 @@ export class Resolver {
     return uniq(this.expand(this.getenv('CLAUDE_CONFIG_DIR'), h), under(h, '.claude'), under(h, '.config/claude'));
   }
 
-  /** The agent's user's Codex homes: $CODEX_HOME and ~/.codex. */
-  codexHomes(): string[] {
+  /** The agent's user's Codex homes: $CODEX_HOME, ~/.codex, and any
+   * configured extra homes. */
+  codexHomes(extra?: readonly string[]): string[] {
     const h = this.home();
-    return uniq(this.expand(this.getenv('CODEX_HOME'), h), under(h, '.codex'));
+    return uniq(this.expand(this.getenv('CODEX_HOME'), h), under(h, '.codex'), ...(extra ?? []).map((x) => this.expand(x.trim(), h)));
   }
 
   /** Whether a configuration directory a process's environment names

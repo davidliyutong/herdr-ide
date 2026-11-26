@@ -370,6 +370,16 @@ describe('Claude Code', () => {
       const f = (await e.r.resolve('claude', p))!;
       expect(await e.r.stamp('claude', p, f)).toBe(s1);
     });
+    test('symlinked working directory matches real path', async () => {
+      const e = setup();
+      const base = e.tempDir();
+      const real = posix.join(base, 'real-proj');
+      const link = posix.join(base, 'link-proj');
+      mkdirSync(real, { recursive: true });
+      symlinkSync(real, link);
+      e.claudeTranscript('', real, sid(1), start, start + MIN);
+      expect(await e.r.resolve('claude', { pid: 100, argv: ['claude'], cwd: link })).toEqual(guess(sid(1)));
+    });
   });
 
   test('escaped directory names', () => {
@@ -537,6 +547,31 @@ describe('Codex', () => {
     unlinkSync(f);
     symlinkSync(posix.join(e.home, 'elsewhere.jsonl'), f);
     expect(await e.r.resolve('codex', p)).toBeNull();
+  });
+
+  test('symlinked working directory and codex resume --last fallback', async () => {
+    const e = setup();
+    const base = e.tempDir();
+    const real = posix.join(base, 'real-codex');
+    const link = posix.join(base, 'link-codex');
+    mkdirSync(real, { recursive: true });
+    symlinkSync(real, link);
+    e.rollout('', sid(1), real, start + 10_000, start + MIN);
+    expect(await e.r.resolve('codex', { pid: 100, argv: ['codex'], cwd: link })).toEqual(found(sid(1), SessionFrom.Start));
+    // codex resume --last updates an older rollout created before process start.
+    const e2 = setup();
+    e2.rollout('', sid(2), real, start - 2 * HOUR, start + MIN);
+    expect(await e2.r.resolve('codex', { pid: 100, argv: ['codex', 'resume', '--last'], cwd: link })).toEqual(
+      found(sid(2), SessionFrom.Start),
+    );
+  });
+
+  test('locate accepts extra Codex homes', async () => {
+    const e = setup();
+    const alt = posix.join(e.tempDir(), 'codex-extra');
+    const f = e.rollout(alt, sid(3), cwd, start, start);
+    expect(await code(e.r.locate('codex', sid(3)))).toBe('not_found');
+    expect((await e.r.locate('codex', sid(3), [alt])).path).toBe(f);
   });
 
   test('the stamp', async () => {

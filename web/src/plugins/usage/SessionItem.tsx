@@ -25,7 +25,7 @@ import {
   tokens,
   type SessionUsage,
 } from './model';
-import { sessionKey, useSessionReads, type SessionTarget } from './session';
+import { targetKey, useSessionReads, type SessionTarget } from './session';
 import { AccountLine, useCardOnScreen, useWarnAt } from './StatusItem';
 import { ProviderLogo } from './logos';
 
@@ -33,8 +33,11 @@ import { ProviderLogo } from './logos';
  * (useFocusedAgent); undefined without one. */
 function useFocusedSession(): { target: SessionTarget; provider: string } | undefined {
   const a = useFocusedAgent();
-  if (!a?.session) return undefined;
-  return { target: { m: a.m, kind: a.kind, session: a.session, status: a.status }, provider: a.provider };
+  if (!a || a.source !== 'terminal' || (!a.session && !a.cwd)) return undefined;
+  return {
+    target: { m: a.m, kind: a.kind, session: a.session, cwd: a.cwd, pid: a.pid, terminal: a.terminal, status: a.status },
+    provider: a.provider,
+  };
 }
 
 /** The context in use in words: of the window and its share, else the
@@ -58,7 +61,7 @@ export function UsageSessionItem() {
   const focused = useFocusedSession();
   const target = focused?.target;
   useSessionReads(target);
-  const key = target ? sessionKey(target.m, target.kind, target.session) : undefined;
+  const key = target ? targetKey(target) : undefined;
   const entry = useUsage((s) => (key ? s.sessions[key] : undefined));
   const snapshot = useUsage((s) => s.snapshot);
   const remaining = useUsage((s) => s.remaining);

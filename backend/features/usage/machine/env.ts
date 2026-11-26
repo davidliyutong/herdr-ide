@@ -145,10 +145,10 @@ export interface UsageEnv {
  * changes), the last Antigravity language server that answered; and the
  * one Kimi Code renewal running at a time. */
 export class Memo {
-  readonly agy = new Map<string, { a: Account; at: number }>();
+  readonly agy = new Map<string, { a: Account; at: number; stamp: string }>();
   readonly codexLog = new Map<string, { path: string; size: number; mtime: number; a: Account | null }>();
   readonly kimiRefused = new Map<string, string>();
-  antigravityLS: { port: number; csrf: string; scheme: 'https' | 'http' } | null = null;
+  antigravityLS: { endpoints: { port: number; csrf: string; scheme: 'https' | 'http' }[]; stamp: string; at: number } | null = null;
   private renewal: Promise<unknown> = Promise.resolve();
 
   /** Runs f after the renewal before it ended. */
@@ -287,6 +287,10 @@ export interface LimitsOptions {
    * or provider:home for a Codex home other than the default. */
   skipLocal?: string[];
   kimiRefresh?: boolean;
+  /** Manual refresh: bypasses short-lived machine caches (shared limits,
+   * Antigravity LS/CLI memos, Codex log memo) so account switches show at
+   * once. */
+  force?: boolean;
 }
 
 /** Whether an account is not to be asked: by its id, or, for one without

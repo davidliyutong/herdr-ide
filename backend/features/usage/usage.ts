@@ -149,6 +149,8 @@ export interface UsageDeps {
   ready(): string[];
   /** Whether a machine is configured. */
   known(m: string): boolean;
+  /** Whether a machine is actively disabled by the user. */
+  disabled?(m: string): boolean;
   readOnly(): boolean;
   /** Whether the feature is on. */
   enabled(): boolean;
@@ -179,6 +181,7 @@ export class Usage {
   /** machine|terminal of the coding agents working. */
   readonly working = new Set<string>();
   private refreshPending = false;
+  private forceRefresh = false;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   /** The machines connected, and those that connected since the last
    * poll, asked on their own at the next tick. */
@@ -197,6 +200,7 @@ export class Usage {
       cost: d.cost,
       ready: d.ready,
       known: d.known,
+      disabled: d.disabled,
       options: () => this.options(),
       prices: () => this.prices(),
       store: d.store,
@@ -285,6 +289,7 @@ export class Usage {
     if (this.polling) at = now + MIN_REFRESH_GAP;
     else if (this.lastPoll > 0 && this.lastPoll + MIN_REFRESH_GAP > now) at = this.lastPoll + MIN_REFRESH_GAP;
     this.refreshPending = true;
+    this.forceRefresh = true;
     if (at > now) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = setTimeout(() => this.wake(), at - now);
@@ -314,6 +319,16 @@ export class Usage {
     this.readyNow.delete(st.id);
     this.joined.delete(st.id);
     this.dropAgents(st.id);
+    if (st.status === 'disabled') {
+      this.machines.set(st.id, { status: 'disabled', at: this.sec() });
+      for (const a of this.accounts.values()) {
+        if (!a.issues) continue;
+        const left = a.issues.filter((i) => i.machine !== st.id);
+        a.issues = left.length ? left : undefined;
+      }
+      this.spend.invalidate();
+      if (this.updatedAt > 0) this.broadcast();
+    }
   }
 
   /** An agent event: which coding agents work (the adaptive cadence). */
@@ -398,9 +413,11 @@ export class Usage {
     const joined = only !== undefined;
     let now = this.now();
     const showStart = this.updatedAt === 0 || this.refreshPending || (this.lastWatch > 0 && now - this.lastWatch < WATCH_FOR);
+    const force = !joined && this.forceRefresh;
     const ready = only ?? this.d.ready();
     if (!joined) {
       this.refreshPending = false;
+      this.forceRefresh = false;
       this.joined.clear();
     }
     if (ready.length === 0) return;
@@ -426,11 +443,19 @@ export class Usage {
       const o = this.options();
       const seen = new Map<string, string[]>();
       const results = new Map<string, MachineView>();
+      // Providers definitively reported by each machine that answered ok:
+      // any non-error account, or a missing status that is not a transient
+      // absence (not_running / keychain). Used to evict switched-out accounts.
+      const reportedProviders = new Map<string, Set<string>>();
       // fresh: the answers with something to show; named: every answer
       // that names its account (an id), skipped ones too.
       const fresh: [string, Account][] = [];
       const named: [string, Account][] = [];
       for (const m of ready) {
+        if (this.d.disabled?.(m)) {
+          results.set(m, { status: 'disabled', at: this.sec() });
+          continue;
+        }
         const params: LimitsParams = {
           providers: o.providers,
           codexHomes: o.codexHomes.length ? o.codexHomes : undefined,
@@ -438,17 +463,35 @@ export class Usage {
           skip: skip.length ? [...skip] : undefined,
           skipLocal: local.get(m),
           kimiRefresh: o.kimiRefresh || undefined,
+          ...(force ? { force: true } : {}),
         };
         let accounts: Account[];
         try {
           accounts = await this.d.limits(m, params, signal);
         } catch (e) {
-          results.set(m, { status: 'error', code: codeOf(e), at: this.sec() });
+          results.set(
+            m,
+            this.d.disabled?.(m) ? { status: 'disabled', at: this.sec() } : { status: 'error', code: codeOf(e), at: this.sec() },
+          );
+          continue;
+        }
+        if (this.d.disabled?.(m)) {
+          results.set(m, { status: 'disabled', at: this.sec() });
           continue;
         }
         results.set(m, { status: 'ok', at: this.sec() });
+        const provs = new Set<string>();
+        const ambiguous = new Set<string>();
         for (const a of accounts) {
-          if (a.status === 'missing') continue;
+          if (a.status === 'missing') {
+            if (a.code !== 'not_running' && a.code !== 'keychain') provs.add(a.provider);
+            continue;
+          }
+          if (a.status === 'error' || (!a.id && (a.status === 'stale' || a.status === 'unauth'))) {
+            ambiguous.add(a.provider);
+          } else {
+            provs.add(a.provider);
+          }
           const k = keyOf(a, m);
           seen.set(k, [...(seen.get(k) ?? []), m]);
           if (a.id) named.push([m, a]);
@@ -456,18 +499,21 @@ export class Usage {
           fresh.push([m, a]);
           if (a.id && (a.status === 'ok' || (a.retryAfter ?? 0) > 0)) skip.push(k);
         }
+        for (const p of ambiguous) provs.delete(p);
+        reportedProviders.set(m, provs);
       }
 
       now = this.now();
       const nowSec = Math.floor(now / 1000);
       // Per account the best answer of this poll counts, whatever the
       // order the machines answered in; machines whose answer was not ok
-      // are the account's issues.
+      // are the account's issues (unless the machine is actively disabled).
       const best = new Map<string, [string, Account]>();
       const issues = new Map<string, Issue[]>();
       for (const [m, a] of fresh) {
         const k = keyOf(a, m);
-        if (a.status !== 'ok') issues.set(k, [...(issues.get(k) ?? []), { machine: m, status: a.status, code: a.code }]);
+        if (a.status !== 'ok' && !this.d.disabled?.(m))
+          issues.set(k, [...(issues.get(k) ?? []), { machine: m, status: a.status, code: a.code }]);
         const b = best.get(k);
         if (!b || rank(a) < rank(b[1])) best.set(k, [m, a]);
       }
@@ -495,14 +541,36 @@ export class Usage {
         const stand = keyOf({ ...a, id: undefined }, m);
         if (!seen.has(stand)) this.accounts.delete(stand);
       }
+      // A machine that answered ok and definitively reported a provider no
+      // longer hosts any other account of that provider: remove it from
+      // stale accounts immediately so account switches take effect at once.
+      for (const [k, a] of this.accounts) {
+        const before = a.machines.length;
+        const next = a.machines.filter(
+          (m) => !(results.get(m)?.status === 'ok' && reportedProviders.get(m)?.has(a.account.provider) && !seen.get(k)?.includes(m)),
+        );
+        if (next.length !== before) {
+          if (next.length === 0) {
+            this.accounts.delete(k);
+            continue;
+          }
+          a.machines = next;
+          if (a.issues) {
+            const left = a.issues.filter((i) => next.includes(i.machine));
+            a.issues = left.length ? left : undefined;
+          }
+        }
+      }
       for (const [k, a] of this.accounts) if (nowSec - a.seenAt > FORGET_AFTER) this.accounts.delete(k);
       for (const [m, v] of results) this.machines.set(m, v);
-      if (!joined) for (const [m, v] of this.machines) if (!ready.includes(m)) this.machines.set(m, { status: 'offline', at: v.at });
+      if (!joined)
+        for (const [m, v] of this.machines)
+          if (!ready.includes(m)) this.machines.set(m, { status: this.d.disabled?.(m) ? 'disabled' : 'offline', at: v.at });
       this.history.record(this.accounts, read, nowSec);
       if (this.alertsOn()) {
         const ths = thresholds(this.listSetting('usage.thresholds'));
         this.recent.push(...fireAlerts(this.accounts, read, prev, this.history, ths, nowSec));
-        this.recent = this.recent.filter((a) => nowSec - a.at <= ALERT_KEEP);
+        this.recent = this.recent.filter((a) => nowSec - a.at <= ALERT_KEEP && this.accounts.has(a.key));
       }
       this.updatedAt = now;
       if (!joined) this.lastPoll = now;

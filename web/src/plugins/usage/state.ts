@@ -95,11 +95,12 @@ function loadShown(): Record<string, number> {
 
 /** Takes a snapshot of the hub and shows the alerts it carries that this
  * browser has not shown. */
-export function applySnapshot(s: UsageSnapshot) {
+export function applySnapshot(s: UsageSnapshot, etag?: string) {
   if (!s || !Array.isArray(s.accounts)) return;
   const prev = useUsage.getState().snapshot;
   // An answer that started before a newer message arrived.
   if (prev && s.updatedAt < prev.updatedAt) return;
+  snapshotEtag = etag;
   useUsage.setState({ snapshot: s });
   if (Array.isArray(s.alerts) && s.alerts.length) showAlerts(s.alerts);
 }
@@ -153,8 +154,7 @@ export async function fetchSnapshot(watch = false): Promise<void> {
     const r = await fetch(`/api/p/usage${watch ? '?watch=1' : ''}`, Object.keys(headers).length ? { headers } : undefined);
     if (r.status === 304) return;
     if (r.ok) {
-      snapshotEtag = r.headers?.get('ETag') ?? undefined;
-      applySnapshot((await r.json()) as UsageSnapshot);
+      applySnapshot((await r.json()) as UsageSnapshot, r.headers?.get('ETag') ?? undefined);
     }
   } catch {
     /* the hub is unreachable: the next message brings it */

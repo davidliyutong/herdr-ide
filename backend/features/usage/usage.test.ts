@@ -6,7 +6,7 @@ import { statSync } from 'node:fs';
 import { Fail, offline } from '#kernel/fail.ts';
 import { COST_FRESH } from './cost.ts';
 import { pace, windowIDs } from './history.ts';
-import type { CostParams } from './protocol.ts';
+import type { Account, CostParams } from './protocol.ts';
 import { parsePrices, PROVIDERS } from './settings.ts';
 import { hubDBFile } from './store.ts';
 import { acc, DAY, find, HOUR, MIN, removeTempDirs, report, T0, tempDir, testUsage, win } from './testing.ts';
@@ -679,4 +679,143 @@ test('the spend of machines not connected', async () => {
   // Removed: its spend goes.
   q.u.forget('box');
   expect((await q.report(30, 0)).rep.rows.map((r) => r.machine)).toEqual(['local']);
+});
+
+// Actively disabled hosts: never reported as error/offline or account issues,
+// and their cached spend is marked disabled without error/failed banners.
+test('disabled hosts emit disabled status instead of error or account issues', async () => {
+  const t = testUsage({ ready: ['local', 'box'], known: ['local', 'box'], now: Date.UTC(2026, 10, 16, 12) });
+  let failBox = false;
+  t.f.limits = (m) => {
+    if (m === 'box' && failBox) return [acc({ provider: 'claude', id: 'c1', status: 'error', code: 'network' })];
+    return [acc({ provider: 'claude', id: 'c1', status: 'ok', asOf: t.sec(), windows: [win('weekly', 40)] })];
+  };
+  t.f.cost = (m) => {
+    if (m === 'box' && failBox) throw new Error('offline');
+    return report({
+      etag: `${m}-1`,
+      files: m === 'box' ? 2 : 1,
+      failed: m === 'box' ? ['claude:read'] : undefined,
+      rows: [{ day: '2026-11-16', provider: 'claude', model: 'claude-opus-4-6', cost: m === 'box' ? 2.5 : 1, requests: 1, priced: true }],
+    });
+  };
+  await t.poll();
+  expect((await t.report(30, 0)).rep.machines.box).toEqual({ files: 2, failed: ['claude:read'] });
+  // Box fails once while enabled -> issue recorded on account.
+  failBox = true;
+  t.clock.now += HOUR;
+  await t.poll();
+  expect(find(t.snap(), 'claude:c1')?.issues).toEqual([{ machine: 'box', status: 'error', code: 'network' }]);
+  // User actively disables box: status becomes 'disabled', issues drop box, cached spend has disabled: true and no error/failed.
+  t.env.ready = ['local'];
+  t.env.disabled = ['box'];
+  t.u.onMachine({ id: 'box', status: 'disabled', label: 'Box', kind: 'ssh', enabled: false, updated_at: t.sec() } as never);
+  expect(t.snap().machines.box?.status).toBe('disabled');
+  expect(find(t.snap(), 'claude:c1')?.issues).toBeUndefined();
+  const rep = (await t.report(30, 0)).rep;
+  expect(rep.rows).toHaveLength(2);
+  expect(rep.machines.box).toEqual({ files: 2, disabled: true });
+  // Even if box is still transiently in ready when a scan/poll races with disable, no error is emitted.
+  t.env.ready = ['local', 'box'];
+  t.clock.now += COST_FRESH + 1000;
+  await t.poll();
+  expect(t.snap().machines.box?.status).toBe('disabled');
+  expect(find(t.snap(), 'claude:c1')?.issues).toBeUndefined();
+  const rep2 = (await t.report(30, 0)).rep;
+  expect(rep2.machines.box).toEqual({ files: 2, disabled: true });
+});
+
+// Switching accounts on a machine evicts the prior account immediately for
+// that machine (while keeping other machines' accounts and ignoring transient
+// failures); refresh() sends force: true on the next poll.
+test('account switches evict stale accounts immediately and refresh forces probing', async () => {
+  const t = testUsage({ ready: ['local', 'box'] });
+  let localAg: Account[] = [
+    acc({ provider: 'antigravity', id: 'a1', email: 'a1@example.com', status: 'ok', asOf: t.sec(), windows: [win('weekly', 30)] }),
+  ];
+  let boxAg: Account[] = [
+    acc({ provider: 'antigravity', id: 'a1', email: 'a1@example.com', status: 'ok', asOf: t.sec(), windows: [win('weekly', 30)] }),
+  ];
+  let localClaude: Account[] = [acc({ provider: 'claude', id: 'c1', status: 'ok', asOf: t.sec(), windows: [win('weekly', 20)] })];
+  const forces: (boolean | undefined)[] = [];
+  t.f.limits = (m, p) => {
+    forces.push(p.force);
+    return m === 'local' ? [...localAg, ...localClaude] : boxAg;
+  };
+  await t.poll();
+  expect(find(t.snap(), 'antigravity:a1')?.machines).toEqual(['local', 'box']);
+  expect(forces).toEqual([undefined, undefined]);
+
+  // local switches from a1 -> a2 while box still has a1.
+  localAg = [
+    acc({ provider: 'antigravity', id: 'a2', email: 'a2@example.com', status: 'ok', asOf: t.sec() + 60, windows: [win('weekly', 10)] }),
+  ];
+  t.clock.now += HOUR;
+  await t.poll();
+  expect(find(t.snap(), 'antigravity:a1')?.machines).toEqual(['box']);
+  expect(find(t.snap(), 'antigravity:a2')?.machines).toEqual(['local']);
+
+  // box also switches to a2 -> a1 is evicted immediately instead of lingering for 7 days.
+  boxAg = [
+    acc({ provider: 'antigravity', id: 'a2', email: 'a2@example.com', status: 'ok', asOf: t.sec() + 60, windows: [win('weekly', 10)] }),
+  ];
+  t.clock.now += HOUR;
+  await t.poll();
+  expect(find(t.snap(), 'antigravity:a1')).toBeUndefined();
+  expect(find(t.snap(), 'antigravity:a2')?.machines).toEqual(['local', 'box']);
+
+  // Signing out of Claude (non-transient missing) evicts claude:c1 immediately;
+  // transient not_running or error for Antigravity does NOT evict a2.
+  localClaude = [acc({ provider: 'claude', status: 'missing', code: 'no_credentials' })];
+  localAg = [acc({ provider: 'antigravity', status: 'missing', code: 'not_running' })];
+  boxAg = [acc({ provider: 'antigravity', status: 'error', code: 'network' })];
+  t.clock.now += HOUR;
+  await t.poll();
+  expect(find(t.snap(), 'claude:c1')).toBeUndefined();
+  expect(find(t.snap(), 'antigravity:a2')).toBeDefined();
+
+  // Manual refresh sets force: true for the next poll only.
+  forces.length = 0;
+  t.clock.now += HOUR;
+  t.u.refresh();
+  await t.poll();
+  expect(forces).toEqual([true, true]);
+  forces.length = 0;
+  t.clock.now += HOUR;
+  await t.poll();
+  expect(forces).toEqual([undefined, undefined]);
+});
+
+// An unnamed stale/unauth/error response (e.g. expired token before profile
+// lookup or Kimi lock_busy) must NOT evict a previously cached named account.
+test('unnamed stale or unauth poll does not evict a cached named account', async () => {
+  const t = testUsage({ ready: ['local'] });
+  let resp: Account[] = [
+    acc({
+      provider: 'claude',
+      id: 'uuid-1',
+      email: 'u@example.com',
+      plan: 'Max',
+      status: 'ok',
+      asOf: t.sec(),
+      windows: [win('weekly', 42)],
+    }),
+  ];
+  t.f.limits = () => resp;
+  await t.poll();
+  expect(find(t.snap(), 'claude:uuid-1')?.windows[0]?.usedPct).toBe(42);
+
+  // Token expires and profile id is unavailable: unnamed stale keeps claude:uuid-1 intact.
+  resp = [acc({ provider: 'claude', id: '', status: 'stale', code: 'token_expired' })];
+  t.clock.now += HOUR;
+  await t.poll();
+  const kept = find(t.snap(), 'claude:uuid-1');
+  expect(kept).toBeDefined();
+  expect([kept?.plan, kept?.windows[0]?.usedPct]).toEqual(['Max', 42]);
+
+  // Same for unnamed unauth.
+  resp = [acc({ provider: 'claude', id: '', status: 'unauth', code: 'unauthorized' })];
+  t.clock.now += HOUR;
+  await t.poll();
+  expect(find(t.snap(), 'claude:uuid-1')?.windows[0]?.usedPct).toBe(42);
 });

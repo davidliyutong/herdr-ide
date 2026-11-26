@@ -12,6 +12,13 @@ export const PROVIDERS = ['claude', 'codex', 'grok', 'antigravity', 'kimi', 'dee
  * adaptive (the cadences of usage.refreshOpen, refreshWorking, refreshIdle). */
 export const REFRESH_MODES = ['manual', '1', '2', '5', '15', '30', '60', 'adaptive'] as const;
 
+/** Which rate-limit window(s) the status bar item shows. */
+export const STATUS_BAR_WINDOWS = ['auto', '5h', '7d', 'both'] as const;
+
+/** The default provider the status bar item shows when no agent pane is
+ * active (auto: the tightest across all accounts). */
+export const STATUS_BAR_PROVIDERS = ['auto', 'claude', 'codex', 'grok', 'antigravity', 'kimi'] as const;
+
 const section = 'usage';
 
 /** A price of the user's, in USD per million tokens (Go's usage.Tier as
@@ -79,18 +86,20 @@ export const settings = defineModule({
      * open, and the status bar item. */
     'usage.costRefresh': int({ default: 15, min: 1, max: 1440, section, group: 'usageRefresh', order: 15 }),
     'usage.statusBar': bool({ default: true, section, group: 'usageAlerts', order: 18 }),
-    'usage.alerts': bool({ default: true, section, group: 'usageAlerts', order: 19 }),
+    'usage.statusBarWindow': enumOf(STATUS_BAR_WINDOWS, { default: 'auto', section, group: 'usageAlerts', order: 19 }),
+    'usage.statusBarProvider': enumOf(STATUS_BAR_PROVIDERS, { default: 'auto', section, group: 'usageAlerts', order: 20 }),
+    'usage.alerts': bool({ default: true, section, group: 'usageAlerts', order: 21 }),
     'usage.thresholds': stringList({
       default: ['80', '95'],
       options: ['50', '80', '90', '95'],
       section,
       group: 'usageAlerts',
-      order: 20,
+      order: 22,
       check: validThresholds,
     }),
     /** The user's prices, for models the price table does not know yet or
      * prices it has wrong (parsePrices). */
-    'usage.prices': stringList({ default: [], section, group: 'usageSpend', order: 22, check: validPrices }),
+    'usage.prices': stringList({ default: [], section, group: 'usageSpend', order: 24, check: validPrices }),
     // One group per provider: its switch, then its own options.
     ...Object.fromEntries(
       PROVIDERS.flatMap((p, i): [string, Setting][] => {
