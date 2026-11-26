@@ -261,9 +261,17 @@ class FrameReader {
   }
 }
 
-function streamClosed(s: NodeJS.ReadableStream | NodeJS.WritableStream): boolean {
-  const st = s as { destroyed?: boolean; readableEnded?: boolean; writableEnded?: boolean };
-  return Boolean(st.destroyed || st.readableEnded || st.writableEnded);
+// Each end is judged by its own direction only: a child's stdin is a Socket
+// whose (unused) readable side has already ended (Node 24, Electron 45), and
+// a child's stdout likewise for its writable side.
+function readableClosed(s: NodeJS.ReadableStream): boolean {
+  const st = s as { destroyed?: boolean; readableEnded?: boolean };
+  return Boolean(st.destroyed || st.readableEnded);
+}
+
+function writableClosed(s: NodeJS.WritableStream): boolean {
+  const st = s as { destroyed?: boolean; writableEnded?: boolean };
+  return Boolean(st.destroyed || st.writableEnded);
 }
 
 function makeEndpoint(
@@ -343,7 +351,7 @@ function makeEndpoint(
   readable.on('error', finish);
   writable.on('close', finish);
   writable.on('error', finish);
-  if (streamClosed(readable) || streamClosed(writable)) {
+  if (readableClosed(readable) || writableClosed(writable)) {
     ended = true;
     if (opts.onDisconnect) queueMicrotask(opts.onDisconnect);
   }

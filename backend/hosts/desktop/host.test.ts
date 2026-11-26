@@ -272,6 +272,21 @@ describe('requests of the app over stdio mux', () => {
     expect(() => u.fetch('/api/p/probe/who')).toThrow('stdio mux closed');
     expect(() => u.stop()).toThrow('stdio mux closed');
   });
+
+  test("a child's stdin whose unused readable side has ended is open", async () => {
+    // Electron 45's Node gives a spawned child's stdin readableEnded: true.
+    const toChild = new PassThrough();
+    toChild.push(null);
+    toChild.resume();
+    await Bun.sleep(0);
+    expect(toChild.readableEnded).toBe(true);
+    const written: Buffer[] = [];
+    toChild.write = ((chunk: Buffer) => (written.push(chunk), true)) as typeof toChild.write;
+    const parent = muxParent(new PassThrough(), toChild);
+    expect(parent.closed).toBe(false);
+    parent.send({ t: 'stop' });
+    expect(written.length).toBeGreaterThan(0);
+  });
 });
 
 describe('channels of the app over stdio mux', () => {
