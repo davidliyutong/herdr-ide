@@ -150,11 +150,57 @@ export type StatusBarWindowMode = 'auto' | '5h' | '7d' | 'both';
 /** The default provider the status bar shows when no agent pane is active. */
 export type StatusBarProvider = 'auto' | 'claude' | 'codex' | 'grok' | 'antigravity' | 'kimi';
 
-/** A synthesized multi-account summary (e.g. Antigravity across 2+ accounts)
- * that aggregates quotas while keeping every member for per-account breakdown. */
+/** Monetary-value-based estimate of one account's quota capacity and
+ * remaining availability (in USD when plan tier or explicit USD credits
+ * are known). */
+export interface AccountValueEstimate {
+  /** Total estimated capacity in USD (subscription tier + enabled USD extra
+   * usage, or explicit credit limit); undefined when neither plan nor
+   * explicit USD limit is known. */
+  capacityUsd?: number;
+  /** Subscription tier capacity in USD alone (used to weight rate-limit
+   * window buckets separately from extra pay-as-you-go credit limits). */
+  subscriptionUsd?: number;
+  /** Estimated available / remaining value in USD (also set for balance-only
+   * accounts such as DeepSeek). */
+  availableUsd?: number;
+  /** Estimated used value in USD (capacityUsd - availableUsd when bounded). */
+  usedUsd?: number;
+  /** Effective used percentage (0..100) of this account; undefined when the
+   * account has neither active/replenished windows nor bounded credits. */
+  usedPct?: number;
+  /** How capacity was estimated. */
+  basis: 'explicit' | 'plan' | 'hybrid' | 'unknown';
+}
+
+/** Combined approximate usage across 2+ accounts of one provider, weighted
+ * by estimated total available monetary value (falling back to equal weight
+ * when no account's monetary capacity is known). */
+export interface MergedQuotaSummary {
+  /** Overall merged used percentage (0..100); undefined when no member has
+   * measurable quota or bounded credits. */
+  usedPct?: number;
+  /** Overall merged remaining percentage (100 - usedPct). */
+  remainingPct?: number;
+  /** Sum of estimated available USD across accounts (or prepaid balances). */
+  availableUsd?: number;
+  /** Sum of estimated capacity USD across accounts with bounded quota. */
+  capacityUsd?: number;
+  /** Sum of estimated used USD (capacityUsd - availableUsd). */
+  usedUsd?: number;
+  /** Whether percentages were weighted by estimated monetary value or fell
+   * back to an equal-weight average across accounts. */
+  weighting: 'value' | 'equal';
+  /** Earliest upcoming reset among active windows contributing to the merge. */
+  resetsAt?: number;
+}
+
+/** A synthesized multi-account summary for any provider with 2+ accounts
+ * that aggregates quotas while keeping every member for per-account views. */
 export interface MergedUsageAccount extends UsageAccount {
   accountCount: number;
   members: UsageAccount[];
+  summary: MergedQuotaSummary;
 }
 
 export function isMergedAccount(a: UsageAccount): a is MergedUsageAccount {
@@ -178,11 +224,268 @@ export function tightestWindow(a: UsageAccount, now = Date.now() / 1000): UsageW
   return best;
 }
 
-/** Accounts, the tightest first; those without windows last. */
+/** Monthly subscription value estimates (USD) by provider and plan tier,
+ * used as capacity weights when merging heterogeneous accounts of the same
+ * provider. Free tiers carry a nominal $4 value (~1/5 of a $20 Pro plan). */
+const PLAN_USD: Record<string, [RegExp, number][]> = {
+  claude: [
+    [/\bmax\b.*\b20x\b|\b20x\b/i, 200],
+    [/\bteam\b.*\bpremium\b/i, 150],
+    [/\bmax\b.*\b5x\b|\b5x\b|\bmax\b/i, 100],
+    [/\benterprise\b/i, 60],
+    [/\bteam\b/i, 30],
+    [/\bpro\b/i, 20],
+    [/\bfree\b/i, 4],
+  ],
+  codex: [
+    [/\bpro\b/i, 200],
+    [/\benterprise\b/i, 60],
+    [/\b(team|business)\b/i, 30],
+    [/\bedu\b/i, 25],
+    [/\bplus\b/i, 20],
+    [/\bgo\b/i, 8],
+    [/\bfree\b/i, 4],
+  ],
+  grok: [
+    [/\bheavy\b/i, 300],
+    [/premium\s*\+|premium\s+plus/i, 40],
+    [/\bsuper\s*grok\b|\bpro\b/i, 30],
+    [/\bpremium\b/i, 8],
+    [/\b(free|basic)\b/i, 4],
+  ],
+  antigravity: [
+    [/\bultra\b/i, 250],
+    [/\benterprise\b/i, 60],
+    [/\b(team|business)\b/i, 30],
+    [/\bpro\b/i, 20],
+    [/\b(free|standard|individual)\b/i, 4],
+  ],
+  kimi: [
+    [/\bvivace\b/i, 199],
+    [/\ballegro\b/i, 99],
+    [/\ballegretto\b/i, 39],
+    [/\b(moderato|pro|plus)\b/i, 19],
+    [/\b(andante|basic)\b/i, 10],
+    [/\bfree\b/i, 4],
+  ],
+};
+
+/** Baseline monthly plan value (USD) used for an untagged sibling account
+ * ONLY when another account of the same provider has a known monetary value. */
+const PROVIDER_BASELINE_USD: Record<string, number> = {
+  claude: 20,
+  codex: 20,
+  grok: 30,
+  antigravity: 20,
+  kimi: 19,
+};
+
+/** Approximate FX rates to normalize non-USD credit/balance currencies onto
+ * a common USD scale when combining accounts. */
+const CURRENCY_TO_USD: Record<string, number> = {
+  usd: 1,
+  usdt: 1,
+  cny: 1 / 7.2,
+  rmb: 1 / 7.2,
+  eur: 1.08,
+  gbp: 1.27,
+  jpy: 1 / 155,
+};
+
+const round2 = (v: number) => Math.round(v * 100) / 100;
+const clampPct = (v: number) => round2(Math.min(100, Math.max(0, v)));
+const finiteNonNeg = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+
+/** Estimates the monthly USD value of a subscription plan tier, or undefined
+ * when the plan is absent or unrecognized. */
+export function estimatePlanUsd(provider: string, plan?: string): number | undefined {
+  if (!plan) return undefined;
+  const norm = plan.trim().toLowerCase().replace(/[_-]+/g, ' ');
+  if (!norm) return undefined;
+  const rules = PLAN_USD[provider.toLowerCase()];
+  if (rules) {
+    for (const [re, usd] of rules) if (re.test(norm)) return usd;
+  }
+  const explicit = /\$\s*(\d+(?:\.\d+)?)/.exec(norm);
+  if (explicit) {
+    const n = Number(explicit[1]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return undefined;
+}
+
+interface ExplicitMoney {
+  /** Bounded USD credit capacity (e.g. limit or balance + used). */
+  capacityUsd?: number;
+  /** Remaining USD value of bounded credits. */
+  availableUsd?: number;
+  /** Used USD value of bounded credits. */
+  usedUsd?: number;
+  /** Remaining USD of unbounded prepaid balances/wallets (no limit/used). */
+  prepaidUsd?: number;
+}
+
+/** Extracts explicit dollar balances/limits from an account's credits and
+ * prepaid balances. Non-monetary units (e.g. abstract "credits"), disabled
+ * extra usage, and unlimited credits are excluded from bounded USD totals. */
+function explicitMoneyOf(a: UsageAccount): ExplicitMoney {
+  const out: ExplicitMoney = {};
+  const c = a.credits;
+  if (c && c.enabled !== false && !c.unlimited) {
+    const fx = CURRENCY_TO_USD[(c.unit ?? 'usd').toLowerCase()];
+    if (fx !== undefined) {
+      const limit = finiteNonNeg(c.limit);
+      const used = finiteNonNeg(c.used);
+      const balance = finiteNonNeg(c.balance);
+      if (limit !== undefined && limit > 0) {
+        const cap = limit * fx;
+        if (used !== undefined) {
+          const u = Math.min(cap, used * fx);
+          out.capacityUsd = cap;
+          out.usedUsd = u;
+          out.availableUsd = Math.max(0, cap - u);
+        } else if (balance !== undefined) {
+          const av = Math.min(cap, balance * fx);
+          out.capacityUsd = cap;
+          out.availableUsd = av;
+          out.usedUsd = Math.max(0, cap - av);
+        }
+      } else if (balance !== undefined) {
+        if (used !== undefined && balance + used > 0) {
+          const av = balance * fx;
+          const u = used * fx;
+          out.capacityUsd = av + u;
+          out.availableUsd = av;
+          out.usedUsd = u;
+        } else if (balance > 0) {
+          out.prepaidUsd = (out.prepaidUsd ?? 0) + balance * fx;
+        }
+      }
+    }
+  }
+  if (a.balances?.length) {
+    let bal = 0;
+    let found = false;
+    for (const b of a.balances) {
+      const fx = CURRENCY_TO_USD[b.currency.toLowerCase()];
+      const total = finiteNonNeg(b.total);
+      if (fx === undefined || total === undefined) continue;
+      found = true;
+      bal += (a.available === false ? 0 : total) * fx;
+    }
+    if (found) out.prepaidUsd = (out.prepaidUsd ?? 0) + bal;
+  }
+  return out;
+}
+
+/** Synthetic extra-usage monthly window emitted beside Claude's extra_usage
+ * USD credits; excluded from subscription windows to avoid double-counting. */
+const isExtraCreditWindow = (w: UsageWindow) => w.kind === 'monthly' && (w.label ?? '').trim().toLowerCase() === 'extra';
+
+/** Subscription windows of an account (excluding synthetic Extra credit window
+ * when explicit USD credit limits already account for extra usage). */
+function subWindowsOf(a: UsageAccount, hasExplicitCreditCap: boolean): UsageWindow[] {
+  const ws = a.windows ?? [];
+  if (!hasExplicitCreditCap) return ws;
+  const filtered = ws.filter((w) => !isExtraCreditWindow(w));
+  return filtered.length ? filtered : [];
+}
+
+/** Estimates an account's monetary capacity, available value, and effective
+ * used percentage from explicit USD credits/balances and/or its plan tier. */
+export function estimateAccountValue(
+  a: UsageAccount,
+  now = Date.now() / 1000,
+  opts: { treatAllPastResetAsReplenished?: boolean; fallbackPlanUsd?: number } = {},
+): AccountValueEstimate {
+  const moneyInfo = explicitMoneyOf(a);
+  const hasExplicitCap = (moneyInfo.capacityUsd ?? 0) > 0;
+  const subWindows = subWindowsOf(a, hasExplicitCap);
+  const activeSub = subWindows.filter((w) => !pastReset(w, now));
+  let subUsedPct: number | undefined;
+  if (activeSub.length > 0) {
+    subUsedPct = clampPct(Math.max(...activeSub.map((w) => w.usedPct)));
+  } else if (subWindows.length > 0 && opts.treatAllPastResetAsReplenished) {
+    subUsedPct = 0;
+  }
+
+  const planUsd = subUsedPct !== undefined ? (estimatePlanUsd(a.provider, a.plan) ?? opts.fallbackPlanUsd) : undefined;
+  let capacityUsd = 0;
+  let availableUsd = 0;
+  let hasCap = false;
+  let hasAvail = false;
+
+  if (planUsd !== undefined && planUsd > 0 && subUsedPct !== undefined) {
+    capacityUsd += planUsd;
+    availableUsd += planUsd * (1 - subUsedPct / 100);
+    hasCap = true;
+    hasAvail = true;
+  }
+
+  if (hasExplicitCap) {
+    capacityUsd += moneyInfo.capacityUsd!;
+    availableUsd += moneyInfo.availableUsd!;
+    hasCap = true;
+    hasAvail = true;
+  }
+
+  if (moneyInfo.prepaidUsd !== undefined) {
+    if (hasCap) {
+      // An enabled prepaid balance/wallet beside a subscription or bounded
+      // credit limit adds remaining monetary capacity on top.
+      if (moneyInfo.prepaidUsd > 0) {
+        capacityUsd += moneyInfo.prepaidUsd;
+        availableUsd += moneyInfo.prepaidUsd;
+      }
+    } else {
+      availableUsd += moneyInfo.prepaidUsd;
+      hasAvail = true;
+    }
+  }
+
+  if (hasCap && capacityUsd > 0) {
+    const usedUsd = Math.max(0, capacityUsd - availableUsd);
+    const usedPct = clampPct((usedUsd / capacityUsd) * 100);
+    const basis: AccountValueEstimate['basis'] = planUsd !== undefined && hasExplicitCap ? 'hybrid' : hasExplicitCap ? 'explicit' : 'plan';
+    return {
+      capacityUsd: round2(capacityUsd),
+      subscriptionUsd: planUsd !== undefined ? round2(planUsd) : undefined,
+      availableUsd: round2(availableUsd),
+      usedUsd: round2(usedUsd),
+      usedPct,
+      basis,
+    };
+  }
+
+  if (subUsedPct !== undefined) {
+    return {
+      usedPct: subUsedPct,
+      availableUsd: hasAvail ? round2(availableUsd) : undefined,
+      basis: 'unknown',
+    };
+  }
+
+  return {
+    availableUsd: hasAvail ? round2(availableUsd) : undefined,
+    basis: hasAvail ? 'explicit' : 'unknown',
+  };
+}
+
+/** Headline used percentage (0..100) for an account or merged provider
+ * summary: uses the value-weighted merged summary when merged, the tightest
+ * active window for a single subscription account, else bounded USD credits. */
+export function accountUsedPct(a: UsageAccount | MergedUsageAccount, now = Date.now() / 1000): number | undefined {
+  if (isMergedAccount(a)) return a.summary.usedPct;
+  const w = tightestWindow(a, now);
+  if (w) return w.usedPct;
+  return estimateAccountValue(a, now).usedPct;
+}
+
+/** Accounts, the tightest first; those without measurable usage last. */
 export function sortAccounts<T extends UsageAccount>(list: T[], now = Date.now() / 1000): T[] {
   return [...list].sort((a, b) => {
-    const wa = tightestWindow(a, now)?.usedPct ?? -1;
-    const wb = tightestWindow(b, now)?.usedPct ?? -1;
+    const wa = accountUsedPct(a, now) ?? -1;
+    const wb = accountUsedPct(b, now) ?? -1;
     if (wa !== wb) return wb - wa;
     return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
   });
@@ -190,34 +493,106 @@ export function sortAccounts<T extends UsageAccount>(list: T[], now = Date.now()
 
 const statusPriority: Record<UsageAccount['status'], number> = { ok: 0, stale: 1, error: 2, unauth: 3 };
 
-/** Merges multiple Antigravity accounts into one aggregated summary whose
- * windows average quota usage across accounts (treating past-reset windows as
- * 0% used when another account in the same bucket is active) and report the
- * earliest upcoming reset. Undefined when fewer than 2 Antigravity accounts
- * are present. */
-export function mergeAntigravityAccounts(accounts: UsageAccount[], now = Date.now() / 1000): MergedUsageAccount | undefined {
-  const ag = accounts.filter((a) => a.provider === 'antigravity');
-  if (ag.length < 2) return undefined;
-  const members = sortAccounts(ag, now);
-  const buckets = new Map<string, { sample: UsageWindow; items: UsageWindow[] }>();
-  for (const a of members) {
+/** Merges 2+ accounts of a provider into one aggregated summary whose overall
+ * usage percentage and per-window buckets are weighted by estimated total
+ * available monetary value (falling back cleanly to equal-weight average when
+ * no account has a known plan tier or explicit USD limit). Returns undefined
+ * when fewer than 2 accounts of that provider are present. */
+export function mergeProviderAccounts(accounts: UsageAccount[], provider: string, now = Date.now() / 1000): MergedUsageAccount | undefined {
+  const matching = accounts.filter((a) => a.provider === provider);
+  if (matching.length < 2) return undefined;
+  const members = sortAccounts(matching, now);
+
+  const anyActiveSubWindow = members.some((a) => {
+    const hasExplicitCap = (explicitMoneyOf(a).capacityUsd ?? 0) > 0;
+    return subWindowsOf(a, hasExplicitCap).some((w) => !pastReset(w, now));
+  });
+
+  const rawEstimates = members.map((a) => estimateAccountValue(a, now, { treatAllPastResetAsReplenished: anyActiveSubWindow }));
+  const knownCaps = rawEstimates.map((e) => e.capacityUsd).filter((v): v is number => v !== undefined && v > 0);
+  const useMonetaryWeight = knownCaps.length > 0;
+  const fallbackPlanUsd = useMonetaryWeight
+    ? (PROVIDER_BASELINE_USD[provider.toLowerCase()] ?? knownCaps.reduce((s, v) => s + v, 0) / knownCaps.length)
+    : undefined;
+  const estimates = useMonetaryWeight
+    ? members.map((a, i) =>
+        rawEstimates[i].subscriptionUsd !== undefined
+          ? rawEstimates[i]
+          : estimateAccountValue(a, now, { treatAllPastResetAsReplenished: anyActiveSubWindow, fallbackPlanUsd }),
+      )
+    : rawEstimates;
+
+  // Overall approximate merged summary weighted by estimated monetary value
+  // (or equal-weight fallback when plan values are unknown for all accounts).
+  let totalCap = 0;
+  let totalAvail = 0;
+  let hasPrepaidAvail = false;
+  let prepaidAvail = 0;
+  const equalPcts: number[] = [];
+  for (const e of estimates) {
+    if (useMonetaryWeight && e.capacityUsd !== undefined && e.capacityUsd > 0 && e.availableUsd !== undefined) {
+      totalCap += e.capacityUsd;
+      totalAvail += e.availableUsd;
+    } else if (!useMonetaryWeight && e.usedPct !== undefined) {
+      equalPcts.push(e.usedPct);
+    }
+    if (e.capacityUsd === undefined && e.availableUsd !== undefined) {
+      hasPrepaidAvail = true;
+      prepaidAvail += e.availableUsd;
+    }
+  }
+
+  let summaryUsedPct: number | undefined;
+  let summaryRemainingPct: number | undefined;
+  let summaryCapUsd: number | undefined;
+  let summaryAvailUsd: number | undefined;
+  let summaryUsedUsd: number | undefined;
+  const weighting: MergedQuotaSummary['weighting'] = useMonetaryWeight && totalCap > 0 ? 'value' : 'equal';
+
+  if (weighting === 'value') {
+    if (hasPrepaidAvail && prepaidAvail > 0) {
+      totalCap += prepaidAvail;
+      totalAvail += prepaidAvail;
+    }
+    const used = Math.max(0, totalCap - totalAvail);
+    summaryCapUsd = round2(totalCap);
+    summaryAvailUsd = round2(totalAvail);
+    summaryUsedUsd = round2(used);
+    summaryUsedPct = clampPct((used / totalCap) * 100);
+    summaryRemainingPct = clampPct(100 - summaryUsedPct);
+  } else {
+    if (equalPcts.length > 0) {
+      summaryUsedPct = clampPct(equalPcts.reduce((s, v) => s + v, 0) / equalPcts.length);
+      summaryRemainingPct = clampPct(100 - summaryUsedPct);
+    }
+    if (hasPrepaidAvail) summaryAvailUsd = round2(prepaidAvail);
+  }
+
+  // Per-window buckets weighted by each account's subscription capacity (or
+  // total capacity / equal weight) for status bar 5h / 7d / model-specific views.
+  const buckets = new Map<string, { sample: UsageWindow; items: { w: UsageWindow; weight: number }[] }>();
+  members.forEach((a, idx) => {
+    const est = estimates[idx];
+    const weight = weighting === 'value' ? (est.subscriptionUsd ?? est.capacityUsd ?? fallbackPlanUsd ?? 1) : 1;
     for (const w of a.windows ?? []) {
       const k = `${w.kind}\0${w.label ?? ''}\0${w.windowSec ?? 0}`;
       const b = buckets.get(k);
-      if (b) b.items.push(w);
-      else buckets.set(k, { sample: w, items: [w] });
+      if (b) b.items.push({ w, weight });
+      else buckets.set(k, { sample: w, items: [{ w, weight }] });
     }
-  }
+  });
+
   const windows: UsageWindow[] = [];
   for (const { sample, items } of buckets.values()) {
-    const active = items.filter((w) => !pastReset(w, now));
+    const active = items.filter(({ w }) => !pastReset(w, now));
+    const totalW = items.reduce((s, x) => s + x.weight, 0);
     if (active.length > 0) {
       // Past-reset entries have replenished (0% used) while active entries carry current usage.
-      const totalUsed = items.reduce((sum, w) => sum + (pastReset(w, now) ? 0 : w.usedPct), 0);
-      const usedPct = Math.round((totalUsed / items.length) * 100) / 100;
-      const usedActive = active.filter((w) => w.usedPct > 0 && w.resetsAt);
-      const resetPool = usedActive.length ? usedActive : active.filter((w) => w.resetsAt);
-      const resetsAt = resetPool.length ? Math.min(...resetPool.map((w) => w.resetsAt!)) : undefined;
+      const weightedUsed = items.reduce((sum, { w, weight }) => sum + weight * (pastReset(w, now) ? 0 : w.usedPct), 0);
+      const usedPct = totalW > 0 ? clampPct(weightedUsed / totalW) : 0;
+      const usedActive = active.filter(({ w }) => w.usedPct > 0 && w.resetsAt);
+      const resetPool = usedActive.length ? usedActive : active.filter(({ w }) => w.resetsAt);
+      const resetsAt = resetPool.length ? Math.min(...resetPool.map(({ w }) => w.resetsAt!)) : undefined;
       windows.push({
         id: sample.id,
         kind: sample.kind,
@@ -227,9 +602,9 @@ export function mergeAntigravityAccounts(accounts: UsageAccount[], now = Date.no
         windowSec: sample.windowSec,
       });
     } else {
-      const totalUsed = items.reduce((sum, w) => sum + w.usedPct, 0);
-      const usedPct = Math.round((totalUsed / items.length) * 100) / 100;
-      const resets = items.map((w) => w.resetsAt).filter((r): r is number => !!r);
+      const weightedUsed = items.reduce((sum, { w, weight }) => sum + weight * w.usedPct, 0);
+      const usedPct = totalW > 0 ? clampPct(weightedUsed / totalW) : 0;
+      const resets = items.map(({ w }) => w.resetsAt).filter((r): r is number => !!r);
       windows.push({
         id: sample.id,
         kind: sample.kind,
@@ -240,6 +615,12 @@ export function mergeAntigravityAccounts(accounts: UsageAccount[], now = Date.no
       });
     }
   }
+
+  const activeAll = members.flatMap((a) => (a.windows ?? []).filter((w) => !pastReset(w, now) && w.resetsAt));
+  const usedResets = activeAll.filter((w) => w.usedPct > 0);
+  const resetSource = usedResets.length ? usedResets : activeAll;
+  const summaryResetsAt = resetSource.length ? Math.min(...resetSource.map((w) => w.resetsAt!)) : undefined;
+
   const status = members.reduce<UsageAccount['status']>(
     (best, a) => (statusPriority[a.status] < statusPriority[best] ? a.status : best),
     members[0].status,
@@ -247,9 +628,10 @@ export function mergeAntigravityAccounts(accounts: UsageAccount[], now = Date.no
   const machines = [...new Set(members.flatMap((a) => a.machines ?? []))].sort();
   const fetchedAt = members.reduce((m, a) => Math.max(m, a.fetchedAt ?? 0), 0) || undefined;
   const seenAt = members.reduce((m, a) => Math.max(m, a.seenAt), 0);
+
   return {
-    key: 'antigravity:merged',
-    provider: 'antigravity',
+    key: `${provider}:merged`,
+    provider,
     status,
     windows,
     machines,
@@ -257,17 +639,35 @@ export function mergeAntigravityAccounts(accounts: UsageAccount[], now = Date.no
     seenAt,
     accountCount: members.length,
     members,
+    summary: {
+      usedPct: summaryUsedPct,
+      remainingPct: summaryRemainingPct,
+      availableUsd: summaryAvailUsd,
+      capacityUsd: summaryCapUsd,
+      usedUsd: summaryUsedUsd,
+      weighting,
+      resetsAt: summaryResetsAt,
+    },
   };
 }
 
-/** Preview account list: replaces 2+ Antigravity accounts with their merged
- * summary so tiles, overview, status bar and hover previews reflect the
- * combined quota across all accounts. */
+/** Preview account list: replaces 2+ accounts of ANY provider with their
+ * value-weighted merged summary so tiles, overview, status bar and hover
+ * previews reflect combined capacity across all accounts of each provider. */
 export function previewAccounts(accounts: UsageAccount[], now = Date.now() / 1000): (UsageAccount | MergedUsageAccount)[] {
-  const merged = mergeAntigravityAccounts(accounts, now);
-  if (!merged) return sortAccounts(accounts, now);
-  const rest = accounts.filter((a) => a.provider !== 'antigravity');
-  return sortAccounts([...rest, merged], now);
+  const byProvider = new Map<string, UsageAccount[]>();
+  for (const a of accounts) {
+    const list = byProvider.get(a.provider);
+    if (list) list.push(a);
+    else byProvider.set(a.provider, [a]);
+  }
+  const out: (UsageAccount | MergedUsageAccount)[] = [];
+  for (const [provider, list] of byProvider) {
+    const merged = list.length >= 2 ? mergeProviderAccounts(list, provider, now) : undefined;
+    if (merged) out.push(merged);
+    else out.push(...list);
+  }
+  return sortAccounts(out, now);
 }
 
 /** Whether w is a 5-hour / session rate-limit window. */
@@ -292,11 +692,28 @@ export function windowApplies(w: UsageWindow, model?: string): boolean {
   return !!model && !!w.label && bare(model).includes(bare(w.label));
 }
 
+/** Formatted monetary value summary for a merged multi-account provider
+ * (used in tiles, overview row, provider detail bar, and status bar hover). */
+export function mergedValueText(a: MergedUsageAccount, remaining: boolean): string | undefined {
+  const { summary } = a;
+  if (summary.capacityUsd !== undefined && summary.availableUsd !== undefined) {
+    return remaining
+      ? t('usage.merged.valueLeft', { avail: money(summary.availableUsd), total: money(summary.capacityUsd) })
+      : t('usage.merged.valueUsed', { used: money(summary.usedUsd ?? 0), total: money(summary.capacityUsd) });
+  }
+  if (summary.availableUsd !== undefined) return t('usage.merged.balance', { avail: money(summary.availableUsd) });
+  return undefined;
+}
+
+/** Whether a window is a synthesized combined multi-account summary entry. */
+export const SUMMARY_WINDOW_ID = '__merged_summary__';
+
 /** Picks the primary (and for 'both', secondary) active window(s) of an
- * account according to mode and optional model. When filterByModel is true
- * (a focused agent pane), per-model windows are restricted to those matching
- * model, falling back to all active windows when the account reports only
- * per-model windows. */
+ * account according to mode and optional model. For merged multi-account
+ * summaries in 'auto' mode (when not filtering to a focused agent's model),
+ * reports the combined value-weighted summary so the status bar matches
+ * tiles, overview, hover preview and detail summary bar; explicit 5h/7d/both
+ * modes and model-filtered agent panes use the weighted per-window buckets. */
 export function pickAccountWindows(
   a: UsageAccount,
   mode: StatusBarWindowMode = 'auto',
@@ -304,8 +721,25 @@ export function pickAccountWindows(
   now = Date.now() / 1000,
   filterByModel = false,
 ): { primary: UsageWindow; secondary?: UsageWindow; matched: boolean } | undefined {
+  if (isMergedAccount(a) && mode === 'auto' && !filterByModel && a.summary.usedPct !== undefined) {
+    return {
+      primary: { id: SUMMARY_WINDOW_ID, kind: 'monthly', usedPct: a.summary.usedPct, resetsAt: a.summary.resetsAt },
+      matched: true,
+    };
+  }
   const active = (a.windows ?? []).filter((w) => !pastReset(w, now));
-  if (!active.length) return undefined;
+  if (!active.length) {
+    // Pure USD-credit accounts (or merged credit-only accounts) without rate-limit windows.
+    const usedPct = accountUsedPct(a, now);
+    if (usedPct === undefined) return undefined;
+    const synthetic: UsageWindow = {
+      id: isMergedAccount(a) ? SUMMARY_WINDOW_ID : undefined,
+      kind: 'monthly',
+      usedPct,
+      resetsAt: isMergedAccount(a) ? a.summary.resetsAt : undefined,
+    };
+    return { primary: synthetic, matched: mode === 'auto' };
+  }
   const filtered = filterByModel ? active.filter((w) => windowApplies(w, model)) : active;
   // Providers whose accounts report only per-model windows (e.g. Antigravity LS)
   // fall back to all active windows when the active model is unknown or unmatched.
@@ -326,7 +760,7 @@ export function pickAccountWindows(
  * pane does: of its service's accounts read on its machine (any of the
  * service's when none was), those of its model among the windows of
  * models (falling back to all windows when the service reports model
- * windows only); merges multiple Antigravity accounts. */
+ * windows only); merges 2+ accounts of any provider. */
 export function tightestFor(
   s: UsageSnapshot | undefined,
   provider: string,
@@ -337,7 +771,7 @@ export function tightestFor(
   const all = (s?.accounts ?? []).filter((a) => a.provider === provider);
   const here = all.filter((a) => (a.machines ?? []).includes(m));
   const raw = here.length ? here : all;
-  const merged = provider === 'antigravity' ? mergeAntigravityAccounts(raw, now) : undefined;
+  const merged = mergeProviderAccounts(raw, provider, now);
   const pool = merged ? [merged] : raw;
   let best: { account: UsageAccount; window: UsageWindow } | undefined;
   for (const a of pool) {
@@ -380,7 +814,7 @@ export function statusBarSelection(
     const all = (s?.accounts ?? []).filter((a) => a.provider === provider);
     const here = machine ? all.filter((a) => (a.machines ?? []).includes(machine)) : [];
     const raw = here.length ? here : all;
-    const merged = provider === 'antigravity' ? mergeAntigravityAccounts(raw, now) : undefined;
+    const merged = mergeProviderAccounts(raw, provider, now);
     return merged ? [merged] : raw;
   };
   if (opts.agent) {
@@ -438,14 +872,27 @@ export function windowSpend(
   return out;
 }
 
-/** The tightest window of all accounts (merging multi-account Antigravity),
- * for the status bar. */
+/** The tightest window of all accounts (merging multi-account providers
+ * using their value-weighted summary), for the status bar. */
 export function tightest(
   s: UsageSnapshot | undefined,
   now = Date.now() / 1000,
 ): { account: UsageAccount; window: UsageWindow } | undefined {
-  const first = previewAccounts(s?.accounts ?? [], now).find((a) => tightestWindow(a, now));
-  return first ? { account: first, window: tightestWindow(first, now)! } : undefined;
+  for (const a of previewAccounts(s?.accounts ?? [], now)) {
+    if (isMergedAccount(a) && a.summary.usedPct !== undefined) {
+      return {
+        account: a,
+        window: { id: SUMMARY_WINDOW_ID, kind: 'monthly', usedPct: a.summary.usedPct, resetsAt: a.summary.resetsAt },
+      };
+    }
+    const w = tightestWindow(a, now);
+    if (w) return { account: a, window: w };
+    const pct = accountUsedPct(a, now);
+    if (pct !== undefined) {
+      return { account: a, window: { kind: 'monthly', usedPct: pct } };
+    }
+  }
+  return undefined;
 }
 
 /** A duration in days and hours, hours and minutes, or minutes. */

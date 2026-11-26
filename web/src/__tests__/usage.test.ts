@@ -16,14 +16,26 @@ import { useSettings } from '../settings';
 import type { MachineState } from '../lib/machine';
 import { groupWindows, UsagePanel } from '../plugins/usage/UsagePanel';
 import { formatStatusBarLabel, UsageStatusItem } from '../plugins/usage/StatusItem';
-import { applySnapshot, costStale, fetchCost, fetchSnapshot, setView, useUsage } from '../plugins/usage/state';
 import {
+  COLLAPSED_ACCOUNTS_KEY,
+  accountCollapseKey,
+  applySnapshot,
+  costStale,
+  fetchCost,
+  fetchSnapshot,
+  setView,
+  useUsage,
+} from '../plugins/usage/state';
+import {
+  accountUsedPct,
   costOf,
   daily,
   dailyDetails,
   equivalents,
+  estimateAccountValue,
+  estimatePlanUsd,
   isMergedAccount,
-  mergeAntigravityAccounts,
+  mergeProviderAccounts,
   previewAccounts,
   rank,
   rankTokens,
@@ -364,6 +376,7 @@ describe('usage panel and status item', () => {
     });
     useSettings.setState({ values: {}, readOnly: false });
     useUsage.setState({ snapshot: undefined, cost: undefined });
+    storage.remove(COLLAPSED_ACCOUNTS_KEY);
     setView({ tab: 'overview', remaining: false, costDays: 30, metric: 'spend' });
     useStore.getState().setPanel(undefined);
     host = document.createElement('div');
@@ -928,7 +941,184 @@ describe('usage panel and status item', () => {
     expect(btn.querySelector('.ai-logo')).not.toBeNull();
   });
 
-  it('aggregates multiple Antigravity accounts in previews while preserving per-account breakdown', async () => {
+  it('merges multi-account providers across all services with monetary-value weighting and clean equal-weight fallback', () => {
+    expect(estimatePlanUsd('claude', 'Pro')).toBe(20);
+    expect(estimatePlanUsd('claude', 'Max 5x')).toBe(100);
+    expect(estimatePlanUsd('claude', 'Max 20x')).toBe(200);
+    expect(estimatePlanUsd('codex', 'Plus')).toBe(20);
+    expect(estimatePlanUsd('codex', 'Pro')).toBe(200);
+    expect(estimatePlanUsd('antigravity', 'Free')).toBe(4);
+    expect(estimatePlanUsd('antigravity', 'Google AI Pro')).toBe(20);
+    expect(estimatePlanUsd('antigravity', 'Google One AI Ultra')).toBe(250);
+    expect(estimatePlanUsd('grok', 'SuperGrok')).toBe(30);
+    expect(estimatePlanUsd('grok', 'SuperGrok Heavy')).toBe(300);
+    expect(estimatePlanUsd('claude', 'UnknownTier')).toBeUndefined();
+
+    // Claude Pro ($20, tightest 80% used -> $4 avail) + Max 20x ($200, tightest 20% used -> $160 avail)
+    // Total capacity $220, available $164, used $56 -> 74.55% left / 25.45% used.
+    const cPro = account('claude:pro', [], {
+      plan: 'Pro',
+      email: 'pro@example.com',
+      windows: [
+        { kind: 'session', usedPct: 80, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', usedPct: 50, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const cMax = account('claude:max', [], {
+      plan: 'Max 20x',
+      email: 'max@example.com',
+      windows: [
+        { kind: 'session', usedPct: 10, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'weekly', usedPct: 20, resetsAt: now + 86400, windowSec: 604800 },
+      ],
+    });
+    const mergedClaude = mergeProviderAccounts([cPro, cMax], 'claude', now)!;
+    expect(isMergedAccount(mergedClaude)).toBe(true);
+    expect(mergedClaude.key).toBe('claude:merged');
+    expect(mergedClaude.accountCount).toBe(2);
+    expect(mergedClaude.summary.weighting).toBe('value');
+    expect(mergedClaude.summary.capacityUsd).toBe(220);
+    expect(mergedClaude.summary.availableUsd).toBe(164);
+    expect(mergedClaude.summary.usedUsd).toBe(56);
+    expect(mergedClaude.summary.usedPct).toBeCloseTo(25.45, 1);
+    expect(mergedClaude.summary.remainingPct).toBeCloseTo(74.55, 1);
+    // Per-window buckets are also weighted by subscription tier ($20 vs $200).
+    expect(mergedClaude.windows.find((w) => w.kind === 'session')?.usedPct).toBeCloseTo(16.36, 1);
+    expect(mergedClaude.windows.find((w) => w.kind === 'weekly')?.usedPct).toBeCloseTo(22.73, 1);
+
+    // Codex Plus ($20, 100% used -> $0 avail) + Pro ($200, 20% used -> $160 avail)
+    // Total capacity $220, available $160 -> 72.73% left / 27.27% used.
+    const xPlus = account('codex:plus', [100], { plan: 'Plus', email: 'plus@example.com' });
+    const xPro = account('codex:pro', [20], { plan: 'Pro', email: 'pro@example.com' });
+    const mergedCodex = mergeProviderAccounts([xPlus, xPro], 'codex', now)!;
+    expect(mergedCodex.summary).toMatchObject({ weighting: 'value', capacityUsd: 220, availableUsd: 160, usedUsd: 60 });
+    expect(mergedCodex.summary.usedPct).toBeCloseTo(27.27, 1);
+    expect(mergedCodex.summary.remainingPct).toBeCloseTo(72.73, 1);
+
+    // Antigravity Free ($4, 100% used) + Pro ($20, 50% used) + Ultra ($250, 10% used)
+    // Capacity $274, available $0 + $10 + $225 = $235 -> 14.23% used / 85.77% left.
+    const agFree = account('antigravity:f', [100], { plan: 'Free' });
+    const agPro = account('antigravity:p', [50], { plan: 'Pro' });
+    const agUltra = account('antigravity:u', [10], { plan: 'Ultra' });
+    const mergedAg = mergeProviderAccounts([agFree, agPro, agUltra], 'antigravity', now)!;
+    expect(mergedAg.summary).toMatchObject({ weighting: 'value', capacityUsd: 274, availableUsd: 235, usedUsd: 39 });
+    expect(mergedAg.summary.usedPct).toBeCloseTo(14.23, 1);
+
+    // Grok SuperGrok ($30, 90% used -> $3) + SuperGrok Heavy ($300, 10% used -> $270)
+    const g1 = account('grok:1', [90], { plan: 'SuperGrok' });
+    const g2 = account('grok:2', [10], { plan: 'SuperGrok Heavy' });
+    const mergedGrok = mergeProviderAccounts([g1, g2], 'grok', now)!;
+    expect(mergedGrok.summary).toMatchObject({ weighting: 'value', capacityUsd: 330, availableUsd: 273, usedUsd: 57 });
+    expect(mergedGrok.summary.usedPct).toBeCloseTo(17.27, 1);
+
+    // Explicit dollar balances / limits without subscription windows.
+    const cr1 = account('claude:cr1', [], { credits: { unit: 'usd', balance: 80, limit: 100, enabled: true } });
+    const cr2 = account('claude:cr2', [], { credits: { unit: 'usd', used: 15, limit: 20, enabled: true } });
+    const mergedCredits = mergeProviderAccounts([cr1, cr2], 'claude', now)!;
+    expect(mergedCredits.summary).toMatchObject({ weighting: 'value', capacityUsd: 120, availableUsd: 85, usedUsd: 35 });
+    expect(mergedCredits.summary.usedPct).toBeCloseTo(29.17, 1);
+
+    // Hybrid: subscription + enabled USD extra usage (synthetic Extra window not double-counted);
+    // disabled extra usage is ignored.
+    const hybrid = account('claude:hyb', [], {
+      plan: 'Pro',
+      windows: [
+        { kind: 'session', usedPct: 100, resetsAt: now + 3600, windowSec: 18000 },
+        { kind: 'monthly', label: 'Extra', usedPct: 50 },
+      ],
+      credits: { unit: 'usd', enabled: true, limit: 30, used: 15 },
+    });
+    const max5 = account('claude:m5', [50], {
+      plan: 'Max 5x',
+      credits: { unit: 'usd', enabled: false, limit: 100, used: 0 },
+    });
+    expect(estimateAccountValue(hybrid, now)).toMatchObject({ capacityUsd: 50, availableUsd: 15, usedUsd: 35, basis: 'hybrid' });
+    expect(estimateAccountValue(max5, now)).toMatchObject({ capacityUsd: 100, availableUsd: 50, usedUsd: 50, basis: 'plan' });
+    const mergedHybrid = mergeProviderAccounts([hybrid, max5], 'claude', now)!;
+    expect(mergedHybrid.summary).toMatchObject({ weighting: 'value', capacityUsd: 150, availableUsd: 65, usedUsd: 85 });
+    expect(mergedHybrid.summary.usedPct).toBeCloseTo(56.67, 1);
+
+    // Mixed known + unknown plan: unknown sibling falls back to provider baseline ($20 for Claude).
+    const cUnknown = account('claude:unk', [90]);
+    const mergedMixed = mergeProviderAccounts([cMax, cUnknown], 'claude', now)!;
+    expect(mergedMixed.summary).toMatchObject({ weighting: 'value', capacityUsd: 220, availableUsd: 162, usedUsd: 58 });
+
+    // Unknown plan + explicit USD credits alongside sibling with windows (e.g. Kimi Code with boosterWallet):
+    // subscription windows are NOT dropped, and bucket weights use subscriptionUsd ($19) rather than wallet size.
+    const kimiBoost = account('kimi:boost', [90], {
+      credits: { unit: 'usd', enabled: true, limit: 20, used: 0 },
+    });
+    const kimiPlain = account('kimi:plain', [20]);
+    const mergedKimiBoost = mergeProviderAccounts([kimiBoost, kimiPlain], 'kimi', now)!;
+    // kimiBoost: $19 sub (90% used -> $1.90 avail) + $20 wallet ($20 avail) = $21.90 / $39
+    // kimiPlain: $19 sub (20% used -> $15.20 avail) = $15.20 / $19
+    // Total: $37.10 avail / $58 cap -> $20.90 used -> 36.03% used.
+    expect(mergedKimiBoost.summary).toMatchObject({ weighting: 'value', capacityUsd: 58, availableUsd: 37.1, usedUsd: 20.9 });
+    expect(mergedKimiBoost.summary.usedPct).toBeCloseTo(36.03, 1);
+    // Session bucket uses equal $19 subscription weights -> (90 + 20) / 2 = 55%, not weighted by $39 vs $19.
+    expect(mergedKimiBoost.windows.find((w) => w.kind === 'session')?.usedPct).toBe(55);
+
+    // Prepaid balance mixed with bounded account: prepaid balance is preserved in both single-account and merged totals.
+    const boundedAndPrepaid = account('claude:bp', [], {
+      credits: { unit: 'usd', enabled: true, limit: 100, used: 40 },
+      balances: [{ currency: 'USD', total: 20 }],
+    });
+    expect(estimateAccountValue(boundedAndPrepaid, now)).toMatchObject({ capacityUsd: 120, availableUsd: 80, usedUsd: 40 });
+    const boundedOnly = account('claude:bo', [], {
+      credits: { unit: 'usd', enabled: true, limit: 100, used: 40 },
+    });
+    const prepaidOnly = account('claude:po', [], {
+      balances: [{ currency: 'USD', total: 20 }],
+    });
+    const mergedPrepaidMix = mergeProviderAccounts([boundedOnly, prepaidOnly], 'claude', now)!;
+    expect(mergedPrepaidMix.summary).toMatchObject({ weighting: 'value', capacityUsd: 120, availableUsd: 80, usedUsd: 40 });
+    expect(mergedPrepaidMix.summary.usedPct).toBeCloseTo(33.33, 1);
+
+    // All plans unknown and no explicit USD limits: clean equal-weight fallback.
+    const k1 = account('kimi:k1', [80]);
+    const k2 = account('kimi:k2', [20]);
+    const mergedKimi = mergeProviderAccounts([k1, k2], 'kimi', now)!;
+    expect(mergedKimi.summary).toEqual({
+      usedPct: 50,
+      remainingPct: 50,
+      availableUsd: undefined,
+      capacityUsd: undefined,
+      usedUsd: undefined,
+      weighting: 'equal',
+      resetsAt: now + 3600,
+    });
+
+    // Prepaid balance-only accounts (DeepSeek): sums available balance without inventing a %.
+    const ds1 = account('deepseek:d1', [], { balances: [{ currency: 'USD', total: 10 }] });
+    const ds2 = account('deepseek:d2', [], { balances: [{ currency: 'USD', total: 25 }] });
+    const mergedDs = mergeProviderAccounts([ds1, ds2], 'deepseek', now)!;
+    expect(mergedDs.summary.usedPct).toBeUndefined();
+    expect(mergedDs.summary.capacityUsd).toBeUndefined();
+    expect(mergedDs.summary.availableUsd).toBe(35);
+
+    // previewAccounts merges every 2+ account provider and leaves singletons untouched.
+    const singleGrok = account('grok:solo', [40]);
+    const preview = previewAccounts([cPro, cMax, xPlus, xPro, k1, k2, singleGrok], now);
+    expect(preview.map((a) => a.key)).toEqual(['kimi:merged', 'grok:solo', 'codex:merged', 'claude:merged']);
+    expect(accountUsedPct(mergedClaude, now)).toBeCloseTo(25.45, 1);
+
+    // Status bar selection and tightestFor merge 2+ accounts for non-Antigravity providers too.
+    const snapMulti = snapshot([cPro, cMax, xPlus, xPro]);
+    const sbClaude = statusBarSelection(snapMulti, { defaultProvider: 'claude', windowMode: 'both', now })!;
+    expect(sbClaude.account.key).toBe('claude:merged');
+    expect(sbClaude.primary.usedPct).toBeCloseTo(16.36, 1);
+    expect(sbClaude.secondary?.usedPct).toBeCloseTo(22.73, 1);
+    const sbCodex = statusBarSelection(snapMulti, { agent: { provider: 'codex', m: 'local' }, windowMode: 'auto', now })!;
+    expect(sbCodex.account.key).toBe('codex:merged');
+    expect(sbCodex.primary.usedPct).toBeCloseTo(27.27, 1);
+    const tf = tightestFor(snapMulti, 'claude', 'local', undefined, now)!;
+    expect(tf.account.key).toBe('claude:merged');
+    expect(tf.window.usedPct).toBeCloseTo(22.73, 1);
+  });
+
+  it('shows only merged approximate usage in overview/tiles and one compact summary bar in provider detail (no bulky merged card)', async () => {
+    const cPro = account('claude:pro', [80], { plan: 'Pro', email: 'pro@example.com' });
+    const cMax = account('claude:max', [10], { plan: 'Max 20x', email: 'max@example.com' });
     const ag1 = account('antigravity:a1', [], {
       email: 'one@example.com',
       windows: [
@@ -939,39 +1129,208 @@ describe('usage panel and status item', () => {
     const ag2 = account('antigravity:a2', [], {
       email: 'two@example.com',
       windows: [
-        // Past reset counts as 0% used alongside active ag1 -> (80 + 0) / 2 = 40%
+        // Past reset counts as replenished (0% used) in the Gemini 3 Pro bucket; tightest active is 20%.
         { kind: 'model', label: 'Gemini 3 Pro', usedPct: 90, resetsAt: now - 60 },
         { kind: 'weekly', label: 'Gemini Models', usedPct: 20, resetsAt: now + 5400, windowSec: 604800 },
       ],
     });
-    const claudeAcc = account('claude:c1', [50]);
-    const merged = mergeAntigravityAccounts([ag1, ag2], now)!;
-    expect(isMergedAccount(merged)).toBe(true);
-    expect(merged.accountCount).toBe(2);
-    expect(merged.members.map((m) => m.email)).toEqual(['one@example.com', 'two@example.com']);
-    expect(merged.windows.find((w) => w.label === 'Gemini 3 Pro')).toMatchObject({ usedPct: 40, resetsAt: now + 3600 });
-    expect(merged.windows.find((w) => w.label === 'Gemini Models')).toMatchObject({ usedPct: 40, resetsAt: now + 5400 });
-    const preview = previewAccounts([ag1, ag2, claudeAcc], now);
-    expect(preview.map((a) => a.key)).toEqual(['claude:c1', 'antigravity:merged']);
+    const soloCodex = account('codex:solo', [35], { plan: 'Plus', email: 'solo@example.com' });
 
-    useUsage.setState({ snapshot: snapshot([ag1, ag2, claudeAcc]), remaining: false });
+    useUsage.setState({ snapshot: snapshot([cPro, cMax, ag1, ag2, soloCodex]), remaining: false });
     await act(async () => setView({ tab: 'overview', remaining: false }));
     await act(async () => root.render(createElement(UsagePanel)));
-    // Tile shows merged remaining % (100 - 40 = 60% left), not ag1's 20% left.
-    const tile = host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="antigravity"]')!;
-    expect(tile.title).toContain('60%');
-    expect(tile.querySelector<HTMLElement>('.usage-tile-meter i')?.style.width).toBe('60%');
-    // Overview shows one merged row (2 accounts) plus 2 per-account subrows.
-    const overviewRow = host.querySelector('.usage-row[data-account="antigravity:merged"]')!;
-    expect(overviewRow.textContent).toContain('2 accounts');
-    expect(overviewRow.textContent).toContain('40%');
-    const subrows = [...host.querySelectorAll('.usage-subrow')].map((el) => el.textContent);
-    expect(subrows).toHaveLength(2);
-    expect(subrows[0]).toContain('one@example.com');
-    expect(subrows[1]).toContain('two@example.com');
-    // Antigravity provider tab renders merged summary card above both per-account cards.
-    await act(async () => tile.click());
-    const cards = [...host.querySelectorAll<HTMLElement>('.usage-card')].map((c) => c.dataset.account);
-    expect(cards).toEqual(['antigravity:merged', 'antigravity:a1', 'antigravity:a2']);
+
+    // Tiles show value-weighted remaining % for Claude (~84% left) and equal-weight remaining % for Antigravity (~50% left).
+    const claudeTile = host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!;
+    expect(claudeTile.title).toContain('84%');
+    expect(claudeTile.title).toContain('$184');
+    expect(claudeTile.querySelector<HTMLElement>('.usage-tile-meter i')?.style.width).toBe('83.64%');
+    const agTile = host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="antigravity"]')!;
+    expect(agTile.title).toContain('50%');
+    expect(agTile.querySelector<HTMLElement>('.usage-tile-meter i')?.style.width).toBe('50%');
+
+    // Overview displays ONLY merged rows for multi-account providers — NO nested per-account subrows.
+    expect(host.querySelectorAll('.usage-subrow')).toHaveLength(0);
+    const overviewRows = [...host.querySelectorAll<HTMLElement>('.usage-row')];
+    expect(overviewRows.map((r) => r.dataset.account)).toEqual(['antigravity:merged', 'codex:solo', 'claude:merged']);
+    const claudeRow = host.querySelector<HTMLElement>('.usage-row[data-account="claude:merged"]')!;
+    expect(claudeRow.textContent).toContain('2 accounts');
+    expect(claudeRow.textContent).toContain('~16%');
+    expect(claudeRow.textContent).toContain('$36.00 / $220');
+    expect(claudeRow.title).toContain('$184');
+    // Equal-weight merged row shows combined estimate subtitle, never a single bucket's window label.
+    const agRow = host.querySelector<HTMLElement>('.usage-row[data-account="antigravity:merged"]')!;
+    expect(agRow.textContent).toContain('~50%');
+    expect(agRow.textContent).toContain('Combined estimate');
+    expect(agRow.textContent).not.toContain('Gemini 3 Pro');
+
+    // Toggling to Remaining keeps overview row and tile consistent (100 - 16.36 = 83.64 -> ~84%).
+    const remBtn = [...host.querySelectorAll<HTMLButtonElement>('.usage-meta [role=radio]')].find((b) => b.textContent === 'Remaining')!;
+    await act(async () => remBtn.click());
+    expect(claudeRow.textContent).toContain('~84%');
+    expect(claudeRow.textContent).toContain('$184 / $220');
+
+    // Provider detail tab: NO bulky MergedAccountCard; ONLY one compact summary progress bar above individual account cards.
+    await act(async () => claudeTile.click());
+    expect(host.querySelector('.usage-card-merged')).toBeNull();
+    expect(host.querySelector('.usage-card[data-account="claude:merged"]')).toBeNull();
+    const summaryBar = host.querySelector<HTMLElement>('.usage-summary-bar[data-merged-summary="claude"]')!;
+    expect(summaryBar).not.toBeNull();
+    expect(summaryBar.querySelectorAll('[role="meter"]')).toHaveLength(1);
+    expect(summaryBar.querySelectorAll('.usage-window')).toHaveLength(0);
+    expect(summaryBar.textContent).toContain('Combined (2 accounts)');
+    expect(summaryBar.textContent).toContain('~84% left');
+    expect(summaryBar.textContent).toContain('$184 / $220');
+    expect(summaryBar.title).toContain('$184');
+
+    // Switching back to Used mode updates the summary bar consistently (~16% used).
+    const usedBtn = [...host.querySelectorAll<HTMLButtonElement>('.usage-meta [role=radio]')].find((b) => b.textContent === 'Used')!;
+    await act(async () => usedBtn.click());
+    expect(summaryBar.textContent).toContain('~16% used');
+    expect(summaryBar.textContent).toContain('$36.00 / $220');
+
+    // Individual account cards are listed without a synthetic merged card.
+    const cards = [...host.querySelectorAll<HTMLElement>('.usage-card[data-account]')].map((c) => c.dataset.account);
+    expect(cards).toEqual(['claude:pro', 'claude:max']);
+
+    // Single-account provider tab has no summary bar and no collapsible toggle button.
+    await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="codex"]')!.click());
+    expect(host.querySelector('.usage-summary-bar')).toBeNull();
+    expect(host.querySelector('.usage-card-toggle')).toBeNull();
+  });
+
+  it('makes multi-account detail cards collapsible with header summaries and persists layout across tab switches and remounts', async () => {
+    const c1 = account('claude:a1', [85], { plan: 'Pro', email: 'alpha@example.com', status: 'stale', code: 'token_expired' });
+    const c2 = account('claude:a2', [25], { plan: 'Max 20x', email: 'beta@example.com' });
+    const x1 = account('codex:x1', [60], { plan: 'Plus', email: 'x1@example.com' });
+    const x2 = account('codex:x2', [15], { plan: 'Pro', email: 'x2@example.com' });
+    useUsage.setState({ snapshot: snapshot([c1, c2, x1, x2]), remaining: false });
+    setView({ tab: 'claude', remaining: false });
+
+    await act(async () => root.render(createElement(UsagePanel)));
+
+    const card1 = () => host.querySelector<HTMLElement>('.usage-card[data-account="claude:a1"]')!;
+    const card2 = () => host.querySelector<HTMLElement>('.usage-card[data-account="claude:a2"]')!;
+    const toggle1 = () => card1().querySelector<HTMLButtonElement>('.usage-card-toggle')!;
+    const toggle2 = () => card2().querySelector<HTMLButtonElement>('.usage-card-toggle')!;
+
+    // Expanded by default.
+    expect(toggle1().getAttribute('aria-expanded')).toBe('true');
+    expect(toggle2().getAttribute('aria-expanded')).toBe('true');
+    expect(card1().querySelectorAll('.usage-window')).toHaveLength(1);
+
+    // Collapse first account card: hides windows/body but retains compact header summary (name, plan, status, headline %).
+    await act(async () => toggle1().click());
+    expect(toggle1().getAttribute('aria-expanded')).toBe('false');
+    expect(card1().classList.contains('collapsed')).toBe(true);
+    expect(card1().querySelectorAll('.usage-window')).toHaveLength(0);
+    expect(toggle1().textContent).toContain('alpha@example.com');
+    expect(toggle1().textContent).toContain('Pro');
+    expect(toggle1().textContent).toContain('Stale');
+    expect(toggle1().textContent).toContain('85% used');
+    // Second card stays expanded.
+    expect(toggle2().getAttribute('aria-expanded')).toBe('true');
+    expect(card2().querySelectorAll('.usage-window')).toHaveLength(1);
+
+    // Persisted via brand storage wrapper.
+    const saved = JSON.parse(storage.get(COLLAPSED_ACCOUNTS_KEY) ?? '{}') as Record<string, boolean>;
+    expect(saved[accountCollapseKey('claude', 'claude:a1')]).toBe(true);
+
+    // Switch to Codex tab, collapse x2, then switch back to Claude: both providers keep their own state.
+    await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="codex"]')!.click());
+    const x2Toggle = host.querySelector<HTMLButtonElement>('.usage-card[data-account="codex:x2"] .usage-card-toggle')!;
+    expect(x2Toggle.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => x2Toggle.click());
+    expect(x2Toggle.getAttribute('aria-expanded')).toBe('false');
+
+    await act(async () => host.querySelector<HTMLButtonElement>('.usage-tile[data-provider="claude"]')!.click());
+    expect(toggle1().getAttribute('aria-expanded')).toBe('false');
+    expect(toggle2().getAttribute('aria-expanded')).toBe('true');
+
+    // Simulate closing/reopening panel or reloading the app: unmount and remount fresh root.
+    act(() => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(UsagePanel)));
+    expect(toggle1().getAttribute('aria-expanded')).toBe('false');
+    expect(card1().querySelectorAll('.usage-window')).toHaveLength(0);
+    expect(toggle2().getAttribute('aria-expanded')).toBe('true');
+    expect(card2().querySelectorAll('.usage-window')).toHaveLength(1);
+
+    // Re-expanding updates storage and restores card body.
+    await act(async () => toggle1().click());
+    expect(toggle1().getAttribute('aria-expanded')).toBe('true');
+    expect(card1().querySelectorAll('.usage-window')).toHaveLength(1);
+    const after = JSON.parse(storage.get(COLLAPSED_ACCOUNTS_KEY) ?? '{}') as Record<string, boolean>;
+    expect(after[accountCollapseKey('claude', 'claude:a1')]).toBe(false);
+    expect(after[accountCollapseKey('codex', 'codex:x2')]).toBe(true);
+  });
+
+  it('merges non-Antigravity providers in the status bar button and hover preview with matching summary percentages and subtitles', async () => {
+    vi.useFakeTimers();
+    try {
+      // Multi-window Claude accounts whose tightest windows differ (Pro 5h=80%/7d=50% -> $4/$20; Max 20x 5h=10%/7d=20% -> $160/$200)
+      // => summary = 25.45% used ($56/$220), while merged buckets max is 22.73% (7d).
+      const cPro = account('claude:pro', [], {
+        plan: 'Pro',
+        email: 'pro@example.com',
+        windows: [
+          { kind: 'session', usedPct: 80, resetsAt: now + 3600, windowSec: 18000 },
+          { kind: 'weekly', usedPct: 50, resetsAt: now + 86400, windowSec: 604800 },
+        ],
+      });
+      const cMax = account('claude:max', [], {
+        plan: 'Max 20x',
+        email: 'max@example.com',
+        windows: [
+          { kind: 'session', usedPct: 10, resetsAt: now + 3600, windowSec: 18000 },
+          { kind: 'weekly', usedPct: 20, resetsAt: now + 86400, windowSec: 604800 },
+        ],
+      });
+      // Hybrid subscription (100% used on $20 Pro) + untouched $50 extra USD credits => 28.57% used ($20/$70) alongside $20 Pro (0% used) => 22.22% used ($20/$90).
+      const hyb1 = account('codex:hyb1', [], {
+        plan: 'Plus',
+        email: 'hyb1@example.com',
+        windows: [{ kind: 'session', usedPct: 100, resetsAt: now + 3600, windowSec: 18000 }],
+        credits: { unit: 'usd', enabled: true, limit: 50, used: 0 },
+      });
+      const hyb2 = account('codex:hyb2', [], {
+        plan: 'Plus',
+        email: 'hyb2@example.com',
+        windows: [{ kind: 'session', usedPct: 0, resetsAt: now + 3600, windowSec: 18000 }],
+      });
+      useUsage.setState({ snapshot: snapshot([cPro, cMax, hyb1, hyb2]), remaining: false });
+      useSettings.setState({
+        values: {
+          'usage.statusBar': { value: true, source: 'global' },
+          'usage.statusBarProvider': { value: 'auto', source: 'global' },
+          'usage.statusBarWindow': { value: 'auto', source: 'global' },
+        } as never,
+      });
+      await act(async () => root.render(createElement(UsageStatusItem)));
+      const btn = host.querySelector<HTMLButtonElement>('.usage-status-item')!;
+      // Button in auto mode matches summary.usedPct: Claude 25.45% (25%) > Codex hybrid 22.22% (22%) — NOT Codex's raw 50% session bucket!
+      expect(btn.textContent?.trim()).toBe('25% used');
+      expect(btn.getAttribute('aria-label')).toContain('Combined (2 accounts)');
+      const anchor = btn.parentElement!;
+      const hoverEvt = new MouseEvent('pointerover', { bubbles: true });
+      Object.defineProperty(hoverEvt, 'pointerType', { value: 'mouse' });
+      await act(async () => void anchor.dispatchEvent(hoverEvt));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      const claudeHover = host.querySelector<HTMLElement>('.usage-hover [data-account="claude:merged"]')!;
+      const codexHover = host.querySelector<HTMLElement>('.usage-hover [data-account="codex:merged"]')!;
+      // Hover card matches button % and displays combined value summary instead of a single window's name.
+      expect(claudeHover.textContent).toContain('2 accounts');
+      expect(claudeHover.textContent).toContain('25% used');
+      expect(claudeHover.textContent).toContain('$56.00 / $220');
+      expect(claudeHover.textContent).not.toContain('Weekly');
+      expect(codexHover.textContent).toContain('2 accounts');
+      expect(codexHover.textContent).toContain('22% used');
+      expect(codexHover.textContent).toContain('$20.00 / $90.00');
+      expect(codexHover.textContent).not.toContain('Session');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

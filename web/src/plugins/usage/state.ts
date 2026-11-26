@@ -74,6 +74,37 @@ export function setView(v: View) {
   savePref(VIEW, { remaining: s.remaining, metric: s.metric, tab: s.tab, costDays: s.costDays });
 }
 
+/** Collapsed/expanded account cards in provider detail views, persisted per
+ * browser via the brand-namespaced storage wrapper. */
+export const COLLAPSED_ACCOUNTS_KEY = 'usage.collapsedAccounts';
+
+/** Stable key per provider + account for persisted collapse state. */
+export function accountCollapseKey(provider: string, accountKey: string): string {
+  return accountKey.startsWith(`${provider}:`) ? accountKey : `${provider}:${accountKey}`;
+}
+
+/** Reads the persisted collapsed state map from localStorage. */
+export function loadCollapsedAccounts(): Record<string, boolean> {
+  try {
+    const raw = storage.get(COLLAPSED_ACCOUNTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'boolean') out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Persists the collapsed state map to localStorage via brand storage. */
+export function saveCollapsedAccounts(map: Record<string, boolean>): void {
+  storage.set(COLLAPSED_ACCOUNTS_KEY, JSON.stringify(map));
+}
+
 /** The alerts shown in this browser, by id, with when they fired. */
 const SHOWN = 'usage.alerts';
 

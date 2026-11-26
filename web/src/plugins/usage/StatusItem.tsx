@@ -15,11 +15,14 @@ import { useHoverOpen } from '../../components/useHoverOpen';
 import { t } from '../../i18n';
 import { fetchSnapshot, useUsage } from './state';
 import {
+  SUMMARY_WINDOW_ID,
+  accountUsedPct,
   costOf,
   duration,
   is5hWindow,
   is7dWindow,
   isMergedAccount,
+  mergedValueText,
   money,
   parseThresholds,
   previewAccounts,
@@ -28,6 +31,7 @@ import {
   tightestWindow,
   tokens,
   windowName,
+  type MergedUsageAccount,
   type StatusBarProvider,
   type StatusBarWindowMode,
   type UsageAccount,
@@ -82,6 +86,8 @@ export function AccountLine({
   nowSec: number;
 }) {
   const merged = isMergedAccount(a);
+  const isSummary = merged && w.id === SUMMARY_WINDOW_ID;
+  const subtitle = isSummary ? (mergedValueText(a, remaining) ?? t('usage.merged.combined')) : windowName(w);
   return (
     <div
       className={`usage-hover-row level-${levelOf(w.usedPct, warnAt) || 'ok'}`}
@@ -97,20 +103,20 @@ export function AccountLine({
         <b className="usage-pct">{pctText(w.usedPct, remaining)}</b>
       </div>
       <div className="usage-hover-line muted">
-        <span className="ellipsis">{windowName(w)}</span>
+        <span className="ellipsis">{subtitle}</span>
         <span className="spacer" />
         {w.resetsAt ? <span>{t('usage.resetsIn', { in: duration(w.resetsAt - nowSec) })}</span> : null}
       </div>
-      <Bar w={w} remaining={remaining} small />
+      <Bar w={w} remaining={remaining} small label={isSummary ? t('usage.allAccounts', { n: a.accountCount }) : undefined} />
       {merged && (
         <div className="usage-hover-members">
           {a.members.map((m) => {
-            const mw = tightestWindow(m, nowSec);
+            const mPct = accountUsedPct(m, nowSec);
             return (
               <div key={m.key} className="usage-hover-sub muted" data-member={m.key}>
                 <span className="ellipsis">{m.email || m.plan || m.key}</span>
                 <span className="spacer" />
-                {mw && <span>{pctText(mw.usedPct, remaining)}</span>}
+                {mPct !== undefined && <span>{pctText(mPct, remaining)}</span>}
               </div>
             );
           })}
@@ -179,14 +185,28 @@ export function UsageStatusItem() {
   const label = formatStatusBarLabel(top.primary, top.secondary, windowMode, remaining);
   const worstPct = top.secondary ? Math.max(top.primary.usedPct, top.secondary.usedPct) : top.primary.usedPct;
   const level = levelOf(worstPct, warnAt);
+  const primaryName =
+    isMergedAccount(top.account) && top.primary.id === SUMMARY_WINDOW_ID
+      ? t('usage.allAccounts', { n: top.account.accountCount })
+      : windowName(top.primary);
   const what = top.secondary
-    ? `${providerName(top.account.provider)} · ${windowName(top.primary)} / ${windowName(top.secondary)}`
-    : `${providerName(top.account.provider)} · ${windowName(top.primary)}`;
+    ? `${providerName(top.account.provider)} · ${primaryName} / ${windowName(top.secondary)}`
+    : `${providerName(top.account.provider)} · ${primaryName}`;
+  const hoverWindow = (a: UsageAccount | MergedUsageAccount): UsageWindow | undefined => {
+    if (isMergedAccount(a) && a.summary.usedPct !== undefined) {
+      return { id: SUMMARY_WINDOW_ID, kind: 'monthly', usedPct: a.summary.usedPct, resetsAt: a.summary.resetsAt };
+    }
+    const w = tightestWindow(a, nowSec);
+    if (w) return w;
+    const pct = accountUsedPct(a, nowSec);
+    return pct !== undefined ? { kind: 'monthly', usedPct: pct } : undefined;
+  };
   const rows = previewAccounts(snapshot?.accounts ?? [], nowSec)
-    .filter((a) => tightestWindow(a, nowSec))
+    .map((account) => ({ account, window: hoverWindow(account) }))
+    .filter((entry): entry is { account: UsageAccount | MergedUsageAccount; window: UsageWindow } => !!entry.window)
     .slice(0, MAX_ACCOUNTS);
   // The email tells apart accounts of one service only.
-  const shared = new Set(rows.map((a) => a.provider).filter((p, i, all) => all.indexOf(p) !== i));
+  const shared = new Set(rows.map((r) => r.account.provider).filter((p, i, all) => all.indexOf(p) !== i));
   const today = cost ? t('usage.hover.today', { cost: money(costOf(cost.rows, 1)), tokens: tokens(tokensOf(cost.rows, 1)) }) : '';
   return (
     <span className="gui-menu-anchor" {...hover.anchor}>
@@ -204,11 +224,11 @@ export function UsageStatusItem() {
       </button>
       {open && (
         <div ref={card} id={id} className="gui-menu usage-hover" role="tooltip">
-          {rows.map((a) => (
+          {rows.map(({ account: a, window: w }) => (
             <AccountLine
               key={a.key}
               account={a}
-              window={tightestWindow(a, nowSec)!}
+              window={w}
               email={shared.has(a.provider)}
               remaining={remaining}
               warnAt={warnAt}

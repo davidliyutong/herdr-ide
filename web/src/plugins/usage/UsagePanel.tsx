@@ -8,20 +8,36 @@
 // balances, incidents of its status page and the machines it was seen on,
 // and its own spend.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../state/store';
 import { setSetting, useSettings } from '../../settings';
 import { t } from '../../i18n';
-import { type Metric, costStale, fetchCost, fetchSnapshot, refreshNow, setDeepseekKey, setView, useUsage, type UsageTab } from './state';
 import {
+  type Metric,
+  accountCollapseKey,
+  costStale,
+  fetchCost,
+  fetchSnapshot,
+  loadCollapsedAccounts,
+  refreshNow,
+  saveCollapsedAccounts,
+  setDeepseekKey,
+  setView,
+  useUsage,
+  type UsageTab,
+} from './state';
+import {
+  accountUsedPct,
   costOf,
   dailyDetails,
   dayOf,
   duration,
   equivalents,
+  estimateAccountValue,
   isMergedAccount,
-  mergeAntigravityAccounts,
+  mergeProviderAccounts,
+  mergedValueText,
   money,
   parseThresholds,
   pastReset,
@@ -116,29 +132,35 @@ export function UsagePanel() {
       {shown === 'overview' ? (
         <Overview accounts={accounts} />
       ) : (
-        <Provider provider={shown} accounts={accounts.filter((a) => a.provider === shown)} />
+        <Provider key={shown} provider={shown} accounts={accounts.filter((a) => a.provider === shown)} />
       )}
     </div>
   );
 }
 
+/** Concise tooltip explaining how a merged provider's percentage was computed. */
+function mergedTooltip(a: MergedUsageAccount): string {
+  const { summary, accountCount } = a;
+  if (summary.weighting === 'value' && summary.capacityUsd !== undefined && summary.availableUsd !== undefined) {
+    return t('usage.merged.tooltipValue', {
+      avail: money(summary.availableUsd),
+      total: money(summary.capacityUsd),
+      n: accountCount,
+    });
+  }
+  return t('usage.merged.tooltipEqual', { n: accountCount });
+}
+
 /** The tiles: the overview and each service, its bar what is left of its
- * tightest window (aggregated across accounts for multi-account Antigravity). */
+ * tightest window (or the value-weighted merged availability across accounts
+ * when a provider has 2+ accounts). */
 function Tiles({ providers, accounts, shown }: { providers: string[]; accounts: UsageAccount[]; shown: UsageTab }) {
-  const mergedAg = mergeAntigravityAccounts(accounts);
-  const left = (p: string) => {
-    if (p === 'antigravity' && mergedAg) {
-      const w = tightestWindow(mergedAg);
-      return w ? 100 - w.usedPct : undefined;
-    }
-    let min: number | undefined;
-    for (const a of accounts) {
-      if (a.provider !== p) continue;
-      const w = tightestWindow(a);
-      if (w) min = Math.min(min ?? 100, 100 - w.usedPct);
-    }
-    return min;
-  };
+  const now = useNow();
+  const byProvider = useMemo(() => {
+    const map = new Map<string, UsageAccount | MergedUsageAccount>();
+    for (const entry of previewAccounts(accounts, now)) map.set(entry.provider, entry);
+    return map;
+  }, [accounts, now]);
   return (
     <div className="usage-tiles" role="tablist" aria-label={t('usage.title')}>
       <button
@@ -152,7 +174,19 @@ function Tiles({ providers, accounts, shown }: { providers: string[]; accounts: 
         <span className="usage-tile-meter" />
       </button>
       {providers.map((p) => {
-        const l = left(p);
+        const entry = byProvider.get(p);
+        const used = entry ? accountUsedPct(entry, now) : undefined;
+        const l = used !== undefined ? Math.max(0, Math.min(100, 100 - used)) : undefined;
+        let title = providerName(p);
+        if (entry && isMergedAccount(entry)) {
+          const parts = [providerName(p), t('usage.accountCount', { n: entry.accountCount })];
+          if (l !== undefined) parts.push(t('usage.merged.pctLeft', { pct: Math.round(l) }));
+          const val = mergedValueText(entry, true);
+          if (val) parts.push(val);
+          title = parts.join(' · ');
+        } else if (l !== undefined) {
+          title = `${providerName(p)} · ${t('usage.pctLeft', { pct: Math.round(l) })}`;
+        }
         return (
           <button
             key={p}
@@ -161,7 +195,7 @@ function Tiles({ providers, accounts, shown }: { providers: string[]; accounts: 
             className={`usage-tile ${shown === p ? 'on' : ''}`}
             data-provider={p}
             style={{ '--brand': providerColor(p) } as React.CSSProperties}
-            title={l === undefined ? providerName(p) : `${providerName(p)} · ${t('usage.pctLeft', { pct: Math.round(l) })}`}
+            title={title}
             onClick={() => setView({ tab: p })}
           >
             <ProviderLogo provider={p} />
@@ -278,79 +312,58 @@ function Overview({ accounts }: { accounts: UsageAccount[] }) {
   );
 }
 
-/** An account in the overview: its service, plan and tightest window (plus
- * per-account breakdown subrows for merged multi-account Antigravity); a
- * click shows its service. */
+/** An account (or merged multi-account summary) in the overview: shows only
+ * the merged approximate usage for providers with 2+ accounts; a click opens
+ * the provider's detail tab. */
 function AccountRow({ account: a, showEmail = false }: { account: UsageAccount | MergedUsageAccount; showEmail?: boolean }) {
   const remaining = useUsage((s) => s.remaining);
   const now = useNow();
   const merged = isMergedAccount(a);
   const w = tightestWindow(a, now);
-  const shown = w ? (remaining ? 100 - w.usedPct : w.usedPct) : undefined;
+  const usedPct = accountUsedPct(a, now);
+  const shown = usedPct !== undefined ? (remaining ? 100 - usedPct : usedPct) : undefined;
+  const valText = merged ? mergedValueText(a, remaining) : undefined;
+  const resetAt = merged ? a.summary.resetsAt : w?.resetsAt;
+  const subtitle = merged
+    ? [
+        valText ?? (usedPct !== undefined ? t('usage.merged.combined') : undefined),
+        resetAt ? t('usage.resetsIn', { in: duration(resetAt - now) }) : undefined,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : w
+      ? `${windowLabel(w)}${w.resetsAt ? ` · ${t('usage.resetsIn', { in: duration(w.resetsAt - now) })}` : ''}`
+      : undefined;
+  const barWindow: UsageWindow | undefined =
+    usedPct !== undefined ? (merged ? { kind: 'session', usedPct } : (w ?? { kind: 'monthly', usedPct })) : undefined;
   return (
-    <>
-      <button
-        className={`usage-row level-${w ? level(w) : 'none'}`}
-        data-account={a.key}
-        style={{ '--brand': providerColor(a.provider) } as React.CSSProperties}
-        onClick={() => setView({ tab: a.provider })}
-      >
-        <ProviderLogo provider={a.provider} />
-        <span className="usage-row-text">
-          <span className="usage-row-title">
-            <b>{providerName(a.provider)}</b>
-            {merged && <span className="muted">{t('usage.accountCount', { n: a.accountCount })}</span>}
-            {!merged && a.email && showEmail && <span className="muted ellipsis">{a.email}</span>}
-            {!merged && a.plan && <span className="muted">{a.plan}</span>}
-            {a.status !== 'ok' && (
-              <span className={`tag usage-status ${a.status}`}>{t(`usage.status.${a.status}` as 'usage.status.stale')}</span>
-            )}
-          </span>
-          {w && (
-            <span className="usage-row-window muted ellipsis">
-              {windowLabel(w)}
-              {w.resetsAt ? ` · ${t('usage.resetsIn', { in: duration(w.resetsAt - now) })}` : ''}
-            </span>
+    <button
+      className={`usage-row level-${usedPct !== undefined ? levelPct(usedPct) : 'none'}`}
+      data-account={a.key}
+      style={{ '--brand': providerColor(a.provider) } as React.CSSProperties}
+      title={merged ? mergedTooltip(a) : undefined}
+      onClick={() => setView({ tab: a.provider })}
+    >
+      <ProviderLogo provider={a.provider} />
+      <span className="usage-row-text">
+        <span className="usage-row-title">
+          <b>{providerName(a.provider)}</b>
+          {merged && <span className="muted">{t('usage.accountCount', { n: a.accountCount })}</span>}
+          {!merged && a.email && showEmail && <span className="muted ellipsis">{a.email}</span>}
+          {!merged && a.plan && <span className="muted">{a.plan}</span>}
+          {a.status !== 'ok' && (
+            <span className={`tag usage-status ${a.status}`}>{t(`usage.status.${a.status}` as 'usage.status.stale')}</span>
           )}
         </span>
-        {shown !== undefined && (
-          <span className="usage-row-meter">
-            <span className="usage-row-pct">{Math.round(shown)}%</span>
-            <Bar w={w!} remaining={remaining} small />
-          </span>
-        )}
-      </button>
-      {merged && (
-        <div className="usage-subrows" style={{ '--brand': providerColor(a.provider) } as React.CSSProperties}>
-          {a.members.map((m) => {
-            const mw = tightestWindow(m, now);
-            const mShown = mw ? (remaining ? 100 - mw.usedPct : mw.usedPct) : undefined;
-            return (
-              <button
-                key={m.key}
-                className={`usage-subrow level-${mw ? level(mw) : 'none'}`}
-                data-account={m.key}
-                onClick={() => setView({ tab: a.provider })}
-              >
-                <span className="usage-subrow-id ellipsis">
-                  {m.email || m.plan || m.key}
-                  {m.status !== 'ok' && (
-                    <span className={`tag usage-status ${m.status}`}>{t(`usage.status.${m.status}` as 'usage.status.stale')}</span>
-                  )}
-                </span>
-                <span className="spacer" />
-                {mShown !== undefined && (
-                  <span className="usage-subrow-meter">
-                    <span className="usage-row-pct">{Math.round(mShown)}%</span>
-                    <Bar w={mw!} remaining={remaining} small />
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {subtitle && <span className="usage-row-window muted ellipsis">{subtitle}</span>}
+      </span>
+      {shown !== undefined && barWindow && (
+        <span className="usage-row-meter">
+          <span className="usage-row-pct">{merged ? `~${Math.round(shown)}%` : `${Math.round(shown)}%`}</span>
+          <Bar w={barWindow} remaining={remaining} small label={merged ? t('usage.allAccounts', { n: a.accountCount }) : undefined} />
+        </span>
       )}
-    </>
+    </button>
   );
 }
 
@@ -359,59 +372,79 @@ function AccountRow({ account: a, showEmail = false }: { account: UsageAccount |
 function Provider({ provider, accounts }: { provider: string; accounts: UsageAccount[] }) {
   const readOnly = useSettings((s) => s.readOnly);
   const now = useNow();
-  const merged = provider === 'antigravity' ? mergeAntigravityAccounts(accounts, now) : undefined;
+  const merged = mergeProviderAccounts(accounts, provider, now);
+  const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>(() => loadCollapsedAccounts());
+  const toggleAccount = (accountKey: string) => {
+    const k = accountCollapseKey(provider, accountKey);
+    setCollapsedMap((prev) => {
+      const next = { ...loadCollapsedAccounts(), [k]: !prev[k] };
+      saveCollapsedAccounts(next);
+      return next;
+    });
+  };
+  const collapsible = accounts.length > 1;
   return (
     <div className="usage-provider" style={{ '--brand': providerColor(provider) } as React.CSSProperties}>
-      {merged && <MergedAccountCard account={merged} />}
-      {accounts.map((a) => (
-        <AccountCard key={a.key} account={a} />
-      ))}
+      {merged && <MergedSummaryBar account={merged} />}
+      {accounts.map((a) => {
+        const k = accountCollapseKey(provider, a.key);
+        return (
+          <AccountCard
+            key={a.key}
+            account={a}
+            collapsible={collapsible}
+            collapsed={collapsible && !!collapsedMap[k]}
+            onToggle={() => toggleAccount(a.key)}
+          />
+        );
+      })}
       <ProviderSpend provider={provider} />
       {provider === 'deepseek' && !readOnly && <DeepseekKey />}
     </div>
   );
 }
 
-/** Aggregated multi-account summary card shown at the top of the Antigravity
- * tab above each individual account's breakdown card. */
-function MergedAccountCard({ account: a }: { account: MergedUsageAccount }) {
-  const labels = useStore(useShallow((s) => Object.fromEntries(Object.entries(s.machines).map(([id, st]) => [id, st.label]))));
-  const now = useNow();
-  const groups = groupWindows(a.windows ?? []);
+/** Single compact summary progress bar shown at the top of a multi-account
+ * provider detail tab, weighted by estimated total available monetary value. */
+function MergedSummaryBar({ account: a }: { account: MergedUsageAccount }) {
+  const remaining = useUsage((s) => s.remaining);
+  useSettings((s) => s.values['usage.thresholds']);
+  const usedPct = a.summary.usedPct;
+  const shown = usedPct !== undefined ? (remaining ? 100 - usedPct : usedPct) : undefined;
+  const lvl = usedPct !== undefined ? levelPct(usedPct) : 'ok';
+  const valText = mergedValueText(a, remaining);
+  const label = t('usage.allAccounts', { n: a.accountCount });
   return (
-    <section className="usage-card usage-card-merged" data-account={a.key}>
-      <header className="usage-card-head">
-        <ProviderLogo provider={a.provider} className="lg" />
-        <div className="usage-card-title">
-          <div className="usage-card-line">
-            <b className="usage-provider-name">{providerName(a.provider)}</b>
-            <span className="spacer" />
-            <span className="usage-email ellipsis">{t('usage.allAccounts', { n: a.accountCount })}</span>
-          </div>
-          <div className="usage-card-line muted">
-            <span>{a.fetchedAt ? t('usage.updated', { ago: duration(now - a.fetchedAt) }) : ''}</span>
-          </div>
-        </div>
-      </header>
-      {groups.map((g) => (
-        <div key={g.label ?? ''} className="usage-group">
-          {g.label && <div className="usage-group-label">{g.label}</div>}
-          {g.windows.map((w) => (
-            <WindowRow key={w.id ?? `${w.kind}|${w.label ?? ''}`} account={a} w={w} grouped={!!g.label} now={now} />
-          ))}
-        </div>
-      ))}
-      {a.machines.length > 0 && (
-        <div className="usage-machines muted">{t('usage.seenOn', { machines: a.machines.map((m) => labels[m] ?? m).join(', ') })}</div>
-      )}
-    </section>
+    <div className={`usage-summary-bar level-${lvl}`} data-merged-summary={a.provider} title={mergedTooltip(a)}>
+      <div className="usage-summary-head">
+        <span className="usage-summary-label ellipsis">{label}</span>
+        {valText && <span className="usage-summary-val muted ellipsis">{valText}</span>}
+        <span className="spacer" />
+        {shown !== undefined && (
+          <b className="usage-pct">{t(remaining ? 'usage.merged.pctLeft' : 'usage.merged.pctUsed', { pct: Math.round(shown) })}</b>
+        )}
+      </div>
+      {usedPct !== undefined && <Bar w={{ kind: 'session', usedPct }} remaining={remaining} label={label} />}
+    </div>
   );
 }
 
-function AccountCard({ account: a }: { account: UsageAccount }) {
+function AccountCard({
+  account: a,
+  collapsible = false,
+  collapsed = false,
+  onToggle,
+}: {
+  account: UsageAccount;
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
   const machines = useStore((s) => s.machines);
   const snapMachines = useUsage((s) => s.snapshot?.machines);
+  const remaining = useUsage((s) => s.remaining);
   const incident = useUsage((s) => s.snapshot?.status[a.provider]);
+  useSettings((s) => s.values['usage.thresholds']);
   const now = useNow();
   const labelOf = (m: string) => machines[m]?.label ?? m;
   const isDisabled = (m: string) => {
@@ -424,76 +457,125 @@ function AccountCard({ account: a }: { account: UsageAccount }) {
   const groups = groupWindows(a.windows ?? []);
   const activeIssues = (a.issues ?? []).filter((i) => !isDisabled(i.machine));
   const disabledIssueMachines = [...new Set((a.issues ?? []).filter((i) => isDisabled(i.machine)).map((i) => i.machine))];
+  const headlineUsed = accountUsedPct(a, now);
+  const headlineShown = headlineUsed !== undefined ? (remaining ? 100 - headlineUsed : headlineUsed) : undefined;
+  const headlineLevel = headlineUsed !== undefined ? levelPct(headlineUsed) : 'none';
+  const balanceAvail = headlineUsed === undefined ? estimateAccountValue(a, now).availableUsd : undefined;
+  const accountLabel = a.email || (a.home ? `${providerName(a.provider)} (${a.home})` : providerName(a.provider));
   return (
-    <section className="usage-card" data-account={a.key}>
-      <header className="usage-card-head">
-        <ProviderLogo provider={a.provider} className="lg" />
-        <div className="usage-card-title">
-          <div className="usage-card-line">
-            <b className="usage-provider-name">{providerName(a.provider)}</b>
-            <span className="spacer" />
-            {a.email && <span className="usage-email ellipsis">{a.email}</span>}
-          </div>
-          <div className="usage-card-line muted">
-            <span>
-              {a.fetchedAt ? t('usage.updated', { ago: duration(now - a.fetchedAt) }) : ''}
-              {a.status !== 'ok' && a.fetchedAt ? ` · ${t('usage.asOf', { ago: duration(now - a.fetchedAt) })}` : ''}
-            </span>
-            <span className="spacer" />
-            {a.plan && <span className="usage-plan">{a.plan}</span>}
-          </div>
-        </div>
-      </header>
-      {(bad || a.status !== 'ok') && (
-        <div className="usage-notes">
-          {bad && (
-            <a
-              className={`usage-incident ${incident.indicator}`}
-              href={incident.url}
-              target="_blank"
-              rel="noreferrer"
-              title={incident.description}
-            >
-              <AlertTriangle />
-              {incident.description || t('usage.incident')}
-            </a>
-          )}
-          {a.status !== 'ok' && allDisabled && (
-            <p className="usage-footnote muted usage-disabled-note">
-              {t('usage.account.disabledHosts', { machines: a.machines.map(labelOf).join(', ') })}
-            </p>
-          )}
-          {a.status !== 'ok' && !allDisabled && (
-            <div className={`callout ${a.status === 'stale' ? 'warning' : 'error'} usage-hint`}>
+    <section className={`usage-card${collapsible ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}`} data-account={a.key}>
+      {collapsible ? (
+        <header className="usage-card-head collapsible">
+          <button
+            type="button"
+            className="usage-card-toggle"
+            aria-expanded={!collapsed}
+            aria-label={t(collapsed ? 'usage.account.expand' : 'usage.account.collapse', { name: accountLabel })}
+            onClick={onToggle}
+          >
+            {collapsed ? <ChevronRight className="usage-card-chevron" /> : <ChevronDown className="usage-card-chevron" />}
+            <ProviderLogo provider={a.provider} className={collapsed ? undefined : 'lg'} />
+            <div className="usage-card-title">
+              <div className="usage-card-line">
+                <b className="usage-account-name ellipsis">{accountLabel}</b>
+                {a.plan && <span className="usage-plan muted">{a.plan}</span>}
+                {a.status !== 'ok' && (
+                  <span className={`tag usage-status ${a.status}`}>{t(`usage.status.${a.status}` as 'usage.status.stale')}</span>
+                )}
+                <span className="spacer" />
+                {headlineShown !== undefined ? (
+                  <b className={`usage-card-pct level-${headlineLevel}`}>
+                    {t(remaining ? 'usage.pctLeft' : 'usage.pctUsed', { pct: Math.round(headlineShown) })}
+                  </b>
+                ) : balanceAvail !== undefined ? (
+                  <span className="usage-card-pct muted">{money(balanceAvail)}</span>
+                ) : null}
+              </div>
+              {!collapsed && a.fetchedAt && (
+                <div className="usage-card-line muted">
+                  <span>
+                    {t('usage.updated', { ago: duration(now - a.fetchedAt) })}
+                    {a.status !== 'ok' ? ` · ${t('usage.asOf', { ago: duration(now - a.fetchedAt) })}` : ''}
+                  </span>
+                </div>
+              )}
+            </div>
+          </button>
+        </header>
+      ) : (
+        <header className="usage-card-head">
+          <ProviderLogo provider={a.provider} className="lg" />
+          <div className="usage-card-title">
+            <div className="usage-card-line">
+              <b className="usage-provider-name">{providerName(a.provider)}</b>
+              <span className="spacer" />
+              {a.email && <span className="usage-email ellipsis">{a.email}</span>}
+            </div>
+            <div className="usage-card-line muted">
               <span>
-                <b>{t(`usage.status.${a.status}` as 'usage.status.stale')}</b> · {hint(a)}
+                {a.fetchedAt ? t('usage.updated', { ago: duration(now - a.fetchedAt) }) : ''}
+                {a.status !== 'ok' && a.fetchedAt ? ` · ${t('usage.asOf', { ago: duration(now - a.fetchedAt) })}` : ''}
               </span>
+              <span className="spacer" />
+              {a.plan && <span className="usage-plan">{a.plan}</span>}
+            </div>
+          </div>
+        </header>
+      )}
+      {!collapsed && (
+        <>
+          {(bad || a.status !== 'ok') && (
+            <div className="usage-notes">
+              {bad && (
+                <a
+                  className={`usage-incident ${incident.indicator}`}
+                  href={incident.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={incident.description}
+                >
+                  <AlertTriangle />
+                  {incident.description || t('usage.incident')}
+                </a>
+              )}
+              {a.status !== 'ok' && allDisabled && (
+                <p className="usage-footnote muted usage-disabled-note">
+                  {t('usage.account.disabledHosts', { machines: a.machines.map(labelOf).join(', ') })}
+                </p>
+              )}
+              {a.status !== 'ok' && !allDisabled && (
+                <div className={`callout ${a.status === 'stale' ? 'warning' : 'error'} usage-hint`}>
+                  <span>
+                    <b>{t(`usage.status.${a.status}` as 'usage.status.stale')}</b> · {hint(a)}
+                  </span>
+                </div>
+              )}
             </div>
           )}
-        </div>
-      )}
-      {groups.map((g) => (
-        <div key={g.label ?? ''} className="usage-group">
-          {g.label && <div className="usage-group-label">{g.label}</div>}
-          {g.windows.map((w) => (
-            <WindowRow key={w.id ?? `${w.kind}|${w.label ?? ''}`} account={a} w={w} grouped={!!g.label} now={now} />
+          {groups.map((g) => (
+            <div key={g.label ?? ''} className="usage-group">
+              {g.label && <div className="usage-group-label">{g.label}</div>}
+              {g.windows.map((w) => (
+                <WindowRow key={w.id ?? `${w.kind}|${w.label ?? ''}`} account={a} w={w} grouped={!!g.label} now={now} />
+              ))}
+            </div>
           ))}
-        </div>
-      ))}
-      <Money account={a} />
-      {a.machines.length > 0 && (
-        <div className="usage-machines muted">{t('usage.seenOn', { machines: a.machines.map(labelOf).join(', ') })}</div>
-      )}
-      {issueGroups(activeIssues).map(([reason, ms]) => (
-        <div key={reason} className="usage-issues">
-          <AlertTriangle />
-          <span>{t('usage.issues', { machines: ms.map(labelOf).join(', '), reason })}</span>
-        </div>
-      ))}
-      {!allDisabled && disabledIssueMachines.length > 0 && (
-        <p className="usage-footnote muted usage-disabled-note">
-          {t('usage.issues.disabled', { machines: disabledIssueMachines.map(labelOf).join(', ') })}
-        </p>
+          <Money account={a} />
+          {a.machines.length > 0 && (
+            <div className="usage-machines muted">{t('usage.seenOn', { machines: a.machines.map(labelOf).join(', ') })}</div>
+          )}
+          {issueGroups(activeIssues).map(([reason, ms]) => (
+            <div key={reason} className="usage-issues">
+              <AlertTriangle />
+              <span>{t('usage.issues', { machines: ms.map(labelOf).join(', '), reason })}</span>
+            </div>
+          ))}
+          {!allDisabled && disabledIssueMachines.length > 0 && (
+            <p className="usage-footnote muted usage-disabled-note">
+              {t('usage.issues.disabled', { machines: disabledIssueMachines.map(labelOf).join(', ') })}
+            </p>
+          )}
+        </>
       )}
     </section>
   );
@@ -549,10 +631,15 @@ function hint(a: UsageAccount): string {
   return t('usage.hint.error', { code: a.code ?? a.status });
 }
 
+/** A used percentage's level: over the first threshold, out, or fine. */
+function levelPct(usedPct: number): 'out' | 'warn' | 'ok' {
+  const th = parseThresholds(useSettings.getState().values['usage.thresholds']?.value)[0] ?? 80;
+  return usedPct >= 100 ? 'out' : usedPct >= th ? 'warn' : 'ok';
+}
+
 /** A window's level: over the first threshold, out, or fine. */
 function level(w: UsageWindow): 'out' | 'warn' | 'ok' {
-  const th = parseThresholds(useSettings.getState().values['usage.thresholds']?.value)[0] ?? 80;
-  return w.usedPct >= 100 ? 'out' : w.usedPct >= th ? 'warn' : 'ok';
+  return levelPct(w.usedPct);
 }
 
 /** What a window has cost so far at API prices, and the whole window at
@@ -604,7 +691,7 @@ function WindowRow({ account, w, grouped, now }: { account: UsageAccount; w: Usa
 
 /** A window's bar in its service's color (the warning and error colors over
  * the threshold and out), with quarter marks and the even pace's mark. */
-export function Bar({ w, remaining, small }: { w: UsageWindow; remaining: boolean; small?: boolean }) {
+export function Bar({ w, remaining, small, label }: { w: UsageWindow; remaining: boolean; small?: boolean; label?: string }) {
   const shown = Math.min(100, Math.max(0, remaining ? 100 - w.usedPct : w.usedPct));
   // The even pace's mark, once the window is under way.
   const pace =
@@ -616,7 +703,7 @@ export function Bar({ w, remaining, small }: { w: UsageWindow; remaining: boolea
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(shown)}
-      aria-label={windowLabel(w)}
+      aria-label={label ?? windowLabel(w)}
     >
       <div className="usage-bar-fill" style={{ width: `${shown}%` }} />
       {!small && <div className="usage-bar-ticks" />}
