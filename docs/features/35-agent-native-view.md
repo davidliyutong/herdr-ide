@@ -2,18 +2,19 @@
 
 ## Context
 
-Claude Code and Codex run as programs in the machines' terminals ([21](21-terminal-core.md)). Agent detection ([25](25-agent-detection.md)) tells which agent runs and what it does, but not which conversation it is in, so a restore could only continue the directory's latest one ([33](33-workspace-restore.md)).
+Claude Code, Codex and Antigravity (`agy`) run as programs in the machines' terminals ([21](21-terminal-core.md)). Agent detection ([25](25-agent-detection.md)) tells which agent runs and what it does, but not which conversation it is in, so a restore could only continue the directory's latest one ([33](33-workspace-restore.md)).
 
-Both agents keep each session as a JSON-lines transcript on the machine, named by a UUID (measured with Claude Code 2.1.330 and Codex CLI 0.170.0):
+These agents keep each session on disk on the machine, named by a UUID (measured with Claude Code 2.1.330, Codex CLI 0.170.0 and Antigravity CLI 1.5.18):
 
 - Claude Code writes a record `<config dir>/sessions/<pid>.json` (`pid`, `sessionId`, `cwd`, `startedAt`) while it runs, rewritten on `/clear`; `claude --session-id <uuid>` chooses the id. The transcript, `<config dir>/projects/<escaped directory>/<id>.jsonl`, appears at the first prompt; most of its lines are the program's own state, not conversation. A Claude Code started with `CLAUDE_CODE_CHILD_SESSION` in its environment writes neither file.
 - Codex writes `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl` at the first prompt and does not keep it open; its first line is `session_meta` (`id`, `cwd`, `timestamp`). A subagent's thread (a review, a spawned agent; Codex 0.171.0) has a rollout of its own, whose `session_meta` names its session as `parent_thread_id` and `session_id` and whose `source` is `{"subagent": …}`.
+- Antigravity (`agy`) keeps per-conversation SQLite databases under `<gemini dir>/<app data dir>/conversations/<id>.db` and an index `conversation_summaries.db` (recording workspace URIs, subagent parent links and status).
 
 ## Goals / non-goals
 
-Goals: find the session each agent terminal runs, without changing the agents' configuration; resume it after the terminal core started again once the machine confirms it ([33](33-workspace-restore.md)); show its usage in the status bar ([29](29-ai-usage.md)); add a kind of agent by a row of a registry; map Claude Code's transcripts on the machine to events shaped as the Agent Client Protocol's; a conversation view the chat panes draw ([37](37-agent-chats.md)).
+Goals: find the session each agent terminal runs, without changing the agents' configuration; resume it after the terminal core started again once the machine confirms it ([33](33-workspace-restore.md)); show its live usage and context window fill in the status bar ([29](29-ai-usage.md)); add a kind of agent by a row of a registry; map Claude Code's transcripts on the machine to events shaped as the Agent Client Protocol's; a conversation view the chat panes draw ([37](37-agent-chats.md)).
 
-Non-goals: hooks in the agents' configuration; compressed transcripts; sessions of agents other than Claude Code and Codex. Running agents headless is [37](37-agent-chats.md).
+Non-goals: hooks in the agents' configuration; compressed transcripts. Running agents headless is [37](37-agent-chats.md).
 
 ## Design
 
@@ -25,6 +26,7 @@ The registry of the coding agents: per kind its `id` (the detector's manifest id
 | --- | --- | --- | --- | --- | --- | --- |
 | `claude` | `claude` | `--session-id {id}` | `claude --continue` | `claude --resume {id}` | `claude` | `claude` |
 | `codex` | `codex` | – | `codex resume --last` | `codex resume {id}` | `codex` | `codex` |
+| `agy` | `agy` | – | `agy --continue` | `agy --resume {id}` | `agy` | `acp` |
 | `kimi`, `grok` | its id | – | – | – | – | `acp` |
 | `gemini`, `opencode`, `cursor`, `copilot`, `qwen`, `amp` | its id | – | – | – | – | – |
 | the other kinds the detector knows | – | – | – | – | – | – |
@@ -37,21 +39,22 @@ The `Resolver` (`backend/machine/agents/sessions.ts`) reads everything asynchron
 
 `Resolver.resolve(kind, {pid, argv, cwd})` answers the session id of a terminal's foreground program and a source word. Candidates are the program and a bounded set of its descendants (wrappers, npm's launcher).
 
-- **Claude Code**: `argv` (`--session-id`, or `--resume`/`-r` without `--fork-session`); else `pid`: its record in the process's own `CLAUDE_CONFIG_DIR` (Linux) or the user's configuration directories, believed only when the directory is not writable by others, the file is a small regular file of the user's opened without following links, its `pid` matches and its `startedAt` is within 60 s of the process's start (a reused pid has an old record); a record naming another session than the command line wins (`/clear`). Else `guess`: when no other terminal runs Claude Code in the directory, the newest transcript of the directory written since the process started that no running record names.
+- **Claude Code**: `argv` (`--session-id`, or `--resume`/`-r` without `--fork-session`); else `pid`: its record in the process's own `CLAUDE_CONFIG_DIR` (Linux) or the user's configuration directories, believed only when the directory is not writable by others (on non-Linux, `realpath(dir)` is verified against the opened private directory's `(dev, ino)` so symlinked config directories work while symlinked record files remain refused), the file is a small regular file of the user's opened without following links, its `pid` matches and its `startedAt` is within 60 s of the process's start (a reused pid has an old record); a record naming another session than the command line wins (`/clear`). Else `guess`: when no other terminal runs Claude Code in the directory, the newest transcript of the directory written since the process started that no running record names.
 - **Codex**: `argv` (`resume <id>`); else `fd` (Linux): an open rollout (a subagent's stands for its session, and the session's own wins); else `start`/`guess`: when no other terminal runs Codex in the directory, the rollouts made since the process started whose `session_meta` records the directory, subagents' left out (one is `start`, the newest of several a `guess`).
+- **Antigravity (`agy`)**: `argv` (`--conversation`/`--resume`/`-r`); else `fd` (Linux): an open `conversations/<uuid>.db*` descriptor (mapping subagents to their root parent conversation); else `start`/`guess` from a read-only lookup of `conversation_summaries.db` matching the terminal's working directory (skipping subagent and killed rows, with `--continue` resumed fallback).
 
-On Linux, Codex's process is checked for an open rollout before looking up its descendants. Process start times share the boot time read from `/proc/stat`. Lookups that need the process table share one scan and reuse it briefly.
+On Linux, Codex's and Antigravity's processes are checked for an open session file before looking up descendants. Process start times share the boot time read from `/proc/stat`. Lookups that need the process table share one scan and reuse it briefly.
 Metadata readers stop after the first line. A Codex session from explicit arguments needs no date-directory fingerprint; a session from an open rollout follows that process's file descriptors.
 
-A guess is never remembered in the layout nor shown as the session's usage. `Stamp` is a cheap fingerprint of what `Resolve` reads, polled to know when to resolve again.
+A guess is never remembered in the layout for restores. In the bottom status bar (`web/src/plugins/usage/SessionItem.tsx`), a terminal with an active agent session (or an unambiguous working-directory match, including Claude Code, Codex and Antigravity with two-pass resumed-session fallback and periodic re-poll when `not_found`) displays the live session's cost, context token fill (`% ctx` from `spec/pricing/pricing.json` `contextWindow`) and short session ID on hover. `Stamp` is a cheap fingerprint of what `Resolve` reads, polled to know when to resolve again.
 
-`locate(kind, id)` finds a transcript inside the kind's root (Claude Code's `projects/*/`, Codex's dated `sessions` and `archived_sessions`) and its subagents' (Claude Code's `<session>/subagents/*.jsonl`; Codex's rollouts naming the session as their parent, in its rollout's directory and the dated ones from the session's start to now, at most 256 first lines read); the id must be a lower-case UUID before it reaches a path. `openLocated` opens it without following any link (`O_NOFOLLOW_ANY` on macOS, on Linux `O_NOFOLLOW` and the descriptor refused before any read when `/proc/self/fd` names another path) and checks it is a regular file of the user's with one link and the identity `locate` saw. Searches for unknown ids are rate-limited and the resolver's maps bounded.
+`locate(kind, id)` finds a session's files inside the kind's root (Claude Code's `projects/*/`, Codex's dated `sessions` and `archived_sessions`, Antigravity's `conversations/<id>.db`) and its subagents' (Claude Code's `<session>/subagents/*.jsonl`; Codex's rollouts naming the session as their parent, in its rollout's directory and the dated ones from the session's start to now, at most 256 first lines read); the id must be a lower-case UUID before it reaches a path. `openLocated` opens it without following any link (`O_NOFOLLOW_ANY` on macOS, on Linux `O_NOFOLLOW` and the descriptor refused before any read when `/proc/self/fd` names another path) and checks it is a regular file of the user's with one link and the identity `locate` saw. Searches for unknown ids are rate-limited and the resolver's maps bounded.
 
 ### The detector's part
 
 With the agents plugin on, the hub opens the detect stream ([25](25-agent-detection.md)) with `Header.Sessions`; without it the agent reads no session file. For each terminal whose agent's transcripts are read, a follower resolves after the startup grace, retries with back-off while nothing is found, and resolves again when the stamp, the foreground pid or its command line changes (`followSession` of `backend/features/agents/machine/detector.ts`).
 
-The hub accepts only a lower-case UUID with a known source and keeps it in the terminal record as `agent_session` and `agent_session_source` ([22](22-terminal-protocol.md)). The `agent` event always carries both (`null` when unknown), so a page loses a session that ended. A change of the session alone sends no `/ws` message, sound or notification.
+The hub accepts only a lower-case UUID with a known source and keeps it in the terminal record as `agent_session` and `agent_session_source` ([22](22-terminal-protocol.md)). The `agent` event always carries both (`null` when unknown), so a page loses a session that ended. A change of the session alone (with status unchanged, or already-seen `done` on an `idle` terminal) sends no `/ws` message, sound or notification; combined session and status transitions update both and notify `/ws`.
 
 ### The terminal leaf
 
@@ -77,7 +80,7 @@ Transcripts are parsed as hostile input within bounds: 256 KiB of text an event 
 
 `model.ts` reduces events to items (prompts, messages, thoughts, tool calls, the plan, notices, usage, title): duplicate `seq`s are skipped, chunks join by message, tool calls merge by `toolCallId`, earlier pages go before the items. Events come from a machine and are type-checked member by member; malformed ones are counted as not shown. `Conversation.tsx` draws the last 300 items (more on request), follows the end while the user is there, and renders messages, thoughts, plans, question previews and prose tool results through the unified `web/src/markdown` component in `compact` mode (GFM tables, task lists, GitHub alerts, hidden HTML comments, strictly sanitized safe HTML such as `<details>`/`<summary>` and `<kbd>`, KaTeX with LaTeX `\[…\]`/`\(…\)` and one-line `$$…$$` display math, highlighted code with copy, streaming block memoization via `StreamMarkdown`, and safe relative file links/images when `base` is provided, with YAML frontmatter off by default), tool calls with their command, output and diff, the plan as a checklist and the context's use as a meter.
 
-The view knows its events only through `ChatSource` (`web/src/conversation/source.ts`: `subscribe`, `loadEarlier`, `send`, `cancel`, `respond`, `answer`, `setConfig`, `cancelQueued`, `compact`, `suggestFiles`, `trust`, `untrust`). The chat panes implement it with the chat host's events, which add permissions, questions, queued messages and live increments that stored events replace ([37](37-agent-chats.md)).
+The view knows its events only through `ChatSource` (`web/src/conversation/source.ts`: `subscribe`, `loadEarlier`, `send`, `cancel`, `respond`, `answer`, `setConfig`, `cancelQueued`, `steerQueued`, `compact`, `stopTask`, `rewind`, `suggestFiles`, `trust`, `untrust`). The chat panes implement it with the chat host's events, which add permissions, questions (including async Codex questions), queued messages, live background tasks and live increments that stored events replace ([37](37-agent-chats.md)).
 
 ## Alternatives considered
 

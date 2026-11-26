@@ -10,13 +10,13 @@
 // read-only.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, createElement } from 'react';
+import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { placeConfigMenu } from '../conversation/Composer';
+import { Composer, placeConfigMenu, UsageLine, type ComposerProps } from '../conversation/Composer';
 import { errorText } from '../conversation/parts';
 import { Conversation } from '../conversation/Conversation';
 import { MAX_IMAGE, type ChatEvent, type ContentBlock, type SourceEvent } from '../conversation/model';
-import type { ChatSource, FileSuggestion } from '../conversation/source';
+import type { ChatSource, Delivery, FileSuggestion } from '../conversation/source';
 import { setLocale, t } from '../i18n';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,13 +25,14 @@ class FakeSource implements ChatSource {
   readOnly?: boolean;
   events: SourceEvent[] = [];
   subs = new Set<(ev: SourceEvent) => void>();
-  send = vi.fn(async (_content: ContentBlock[], _clientId: string) => {});
+  send = vi.fn(async (_content: ContentBlock[], _clientId: string, _delivery?: Delivery) => {});
   cancel = vi.fn(async () => {});
   respond = vi.fn(async () => {});
   answer = vi.fn(async () => {});
   setConfig = vi.fn(async (_id: string, _value: string) => {});
   cancelQueued = vi.fn(async (_message: string) => {});
-  compact = vi.fn(async () => {});
+  steerQueued?: ReturnType<typeof vi.fn<(message: string, delivery?: 'steer' | 'interrupt') => Promise<void>>>;
+  compact = vi.fn(async (_instructions?: string) => {});
   suggestFiles?: (query: string) => Promise<FileSuggestion[]>;
   subscribe(fn: (ev: SourceEvent) => void) {
     this.subs.add(fn);
@@ -505,13 +506,14 @@ describe('a message sent while a turn runs', () => {
     expect(field().placeholder).toBe(t('conversation.composer.queuePlaceholder', { agent: 'Claude Code' }));
     await type('and also this');
     await key({ key: 'Enter' });
-    const [content, clientId] = s.send.mock.calls[0];
+    const [content, clientId, delivery] = s.send.mock.calls[0];
     expect(content).toEqual([{ type: 'text', text: 'and also this' }]);
+    expect(delivery).toBe('queue');
     await emit(s, { seq: next(), t: 'queued', message: 'q1', clientId, state: 'queued', content });
     const items = qa('.conv-queued-item');
     expect(items).toHaveLength(1);
     expect(items[0].querySelector('.conv-queued-text')?.textContent).toBe('and also this');
-    await click(items[0].querySelector('button'));
+    await click(items[0].querySelector('button[data-action="withdraw"]'));
     expect(s.cancelQueued).toHaveBeenCalledWith('q1');
     await emit(s, { seq: next(), t: 'queued', message: 'q1', state: 'cancelled' });
     expect(qa('.conv-queued-item')).toHaveLength(0);
@@ -663,5 +665,350 @@ describe('a read-only composer', () => {
     await paste([png('a.png')]);
     await settle(20);
     expect(qa('.conv-attachment')).toHaveLength(0);
+  });
+});
+
+async function renderComposer(overrides: Partial<ComposerProps> & { source: ChatSource }) {
+  const inputRef = createRef<HTMLTextAreaElement>();
+  const props: ComposerProps = {
+    agent: 'Claude Code',
+    kind: 'claude',
+    queued: [],
+    working: false,
+    waiting: false,
+    readOnly: false,
+    allowFull: true,
+    onShowWaiting: () => {},
+    inputRef,
+    ...overrides,
+  };
+  await act(async () => root.render(createElement(Composer, props)));
+  await settle();
+  return props;
+}
+
+describe('Composer enhancements (#1, #3, #4, #5, #7, #8, #9)', () => {
+  it('#1 hides quota/rate limits in UsageLine while keeping context and cost', async () => {
+    await act(async () =>
+      root.render(
+        createElement(UsageLine, {
+          usage: {
+            used: 60_000,
+            size: 200_000,
+            cost: { amount: 0.75, currency: 'USD' },
+            limits: [{ id: '5h', label: '5h', usedPercent: 95, resetsAt: Math.round(Date.now() / 1000) + 3600 }],
+          },
+        }),
+      ),
+    );
+    expect(q('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('30');
+    expect(q('.conv-usage-cost')?.textContent).toBe('$0.75');
+    expect(q('.conv-usage-limit')).toBeNull();
+  });
+
+  it('#3 filters model picker options by visibleModels, preserves currentValue, and exposes Manage models', async () => {
+    const s = new FakeSource();
+    const onManageModels = vi.fn();
+    const modelOption = {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select' as const,
+      currentValue: 'claude-haiku-5-5',
+      options: [
+        { value: 'claude-haiku-5-5', name: 'Haiku' },
+        { value: 'claude-sonnet-5-5', name: 'Sonnet' },
+        { value: 'claude-opus-5-5', name: 'Opus' },
+      ],
+    };
+    await renderComposer({
+      source: s,
+      chat: { config: [modelOption], commands: [], capabilities: caps({ model: true }) },
+      modelPicker: { visibleModels: ['claude-opus-5-5'], onManageModels },
+    });
+    const btn = q<HTMLButtonElement>('button.conv-select[data-config="model"]')!;
+    await click(btn);
+    const menu = document.body.querySelector<HTMLElement>('.conv-select-menu[data-config="model"]')!;
+    const labels = Array.from(menu.querySelectorAll<HTMLElement>('[role="option"]')).map((o) => o.dataset.value);
+    // Current model (Haiku) stays visible alongside the allowlisted Opus; Sonnet is hidden.
+    expect(labels).toEqual(['claude-haiku-5-5', 'claude-opus-5-5']);
+    const manage = menu.querySelector<HTMLButtonElement>('.conv-select-manage')!;
+    expect(manage.textContent).toContain(t('conversation.config.manageModels'));
+    await click(manage);
+    expect(onManageModels).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector('.conv-select-menu')).toBeNull();
+  });
+
+  it('#4 supports Slack-style queue edit, steer, clear-all, and explicit steer/interrupt while working', async () => {
+    const s = new FakeSource();
+    s.steerQueued = vi.fn(async () => {});
+    const queued = [
+      {
+        message: 'q1',
+        content: [
+          { type: 'resource_link' as const, uri: 'file:///w/src/a.ts', name: 'src/a.ts' },
+          { type: 'text' as const, text: 'first queued' },
+        ],
+      },
+      { message: 'q2', content: [{ type: 'text' as const, text: 'second queued' }] },
+    ];
+    await renderComposer({
+      source: s,
+      working: true,
+      queued,
+      chat: { config: [], commands: [], capabilities: caps({ queue: true, cancelQueued: true, steer: true }) },
+    });
+    expect(q('.conv-queued-head')?.textContent).toContain(t('conversation.queued.heading', { n: 2 }));
+    expect(q('.conv-queued-chip')?.textContent).toContain('a.ts');
+
+    // Steer a queued item immediately.
+    await click(q('.conv-queued-item[data-message="q2"] button[data-action="steer"]'));
+    expect(s.steerQueued).toHaveBeenCalledWith('q2', 'steer');
+
+    // Edit moves queued text + file link back into composer after withdrawing.
+    await click(q('.conv-queued-item[data-message="q1"] button[data-action="edit"]'));
+    await settle();
+    expect(s.cancelQueued).toHaveBeenCalledWith('q1');
+    expect(field().value).toBe('first queued');
+    expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['src/a.ts']);
+
+    // Clear all withdraws every queued message.
+    s.cancelQueued.mockClear();
+    await click(q('.conv-queued-clear'));
+    await settle();
+    expect(s.cancelQueued).toHaveBeenCalledWith('q1');
+    expect(s.cancelQueued).toHaveBeenCalledWith('q2');
+
+    // Explicit steer button & Cmd+Enter send with delivery 'steer'.
+    await click(q('.conv-steer'));
+    await settle();
+    expect(s.send.mock.calls[0][2]).toBe('steer');
+    expect(s.send.mock.calls[0][0]).toEqual([
+      { type: 'resource_link', uri: 'file:///w/src/a.ts', name: 'src/a.ts' },
+      { type: 'text', text: 'first queued' },
+    ]);
+
+    await type('urgent change');
+    await key({ key: 'Enter', metaKey: true });
+    expect(s.send.mock.calls[1][2]).toBe('steer');
+  });
+
+  it('#4 preserves image attachments alongside text and file links when editing a queued message', async () => {
+    const s = new FakeSource();
+    const imgBlock = { type: 'image' as const, mimeType: 'image/png', data: 'AAAAAAAAAAA=' };
+    const queued = [
+      {
+        message: 'q-img',
+        content: [
+          imgBlock,
+          { type: 'resource_link' as const, uri: 'file:///w/src/a.ts', name: 'src/a.ts' },
+          { type: 'text' as const, text: 'check screenshot' },
+        ],
+      },
+      {
+        message: 'q-img-only',
+        content: [{ type: 'image' as const, mimeType: 'image/jpeg', data: 'BBBB' }],
+      },
+    ];
+    await renderComposer({
+      source: s,
+      working: true,
+      queued,
+      chat: { config: [], commands: [], capabilities: caps({ queue: true, cancelQueued: true, images: true }) },
+    });
+
+    await click(q('.conv-queued-item[data-message="q-img"] button[data-action="edit"]'));
+    await settle();
+    expect(s.cancelQueued).toHaveBeenCalledWith('q-img');
+    expect(field().value).toBe('check screenshot');
+    expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['src/a.ts']);
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.src)).toEqual(['data:image/png;base64,AAAAAAAAAAA=']);
+
+    // Image-only queued message also restores without inserting empty newlines.
+    await click(q('.conv-queued-item[data-message="q-img-only"] button[data-action="edit"]'));
+    await settle();
+    expect(field().value).toBe('check screenshot');
+    expect(qa<HTMLImageElement>('.conv-attachment img').map((i) => i.src)).toEqual([
+      'data:image/jpeg;base64,BBBB',
+      'data:image/png;base64,AAAAAAAAAAA=',
+    ]);
+
+    // Re-sending includes the restored images, file chip, and text.
+    await key({ key: 'Enter' });
+    expect(s.send.mock.calls[0][0]).toEqual([
+      { type: 'image', mimeType: 'image/jpeg', data: 'BBBB' },
+      imgBlock,
+      { type: 'resource_link', uri: 'file:///w/src/a.ts', name: 'src/a.ts' },
+      { type: 'text', text: 'check screenshot' },
+    ]);
+  });
+
+  it('#4 falls back to interrupt delivery when steer is unsupported', async () => {
+    const s = new FakeSource();
+    await renderComposer({
+      source: s,
+      working: true,
+      chat: { config: [], commands: [], capabilities: caps({ queue: true, steer: false }) },
+    });
+    await type('stop and do this');
+    const steerBtn = q<HTMLButtonElement>('.conv-steer')!;
+    expect(steerBtn.dataset.delivery).toBe('interrupt');
+    await click(steerBtn);
+    await settle();
+    expect(s.send.mock.calls[0][2]).toBe('interrupt');
+  });
+
+  it('#5 drills into directories on @ autocomplete, attaches space-containing paths as chips, and opens FilePicker without images cap', async () => {
+    const s = new FakeSource();
+    s.suggestFiles = vi.fn(async (query: string) => {
+      if (query === 's') {
+        return [
+          { path: '/w/src', label: 'src/', isDir: true },
+          { path: '/w/my doc.md', label: 'my doc.md' },
+        ];
+      }
+      if (query === 'src/') {
+        return [{ path: '/w/src/index.ts', label: 'src/index.ts' }];
+      }
+      return [];
+    });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ dir: { name: 'w' }, entries: [{ name: 'notes.md', is_dir: false, size: 12 }] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await renderComposer({
+        source: s,
+        base: { m: 'local', dir: '/w' },
+        chat: { config: [], commands: [], capabilities: caps({ images: false }) },
+      });
+
+      // Directory selection inserts @src/ without trailing space and drills down.
+      await type('@s');
+      await until(() => options().length === 2);
+      await key({ key: 'Enter' });
+      expect(field().value).toBe('@src/');
+      await until(() => options().length === 1 && options()[0] === 'src/index.ts');
+
+      // Space-containing path from @ becomes a removable file chip instead of broken @ text.
+      await type('check @s');
+      await until(() => options().length === 2);
+      await key({ key: 'ArrowDown' });
+      await key({ key: 'Enter' });
+      expect(field().value).toBe('check ');
+      expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['my doc.md']);
+
+      // Attach-file button works even when caps.images is false.
+      const pickBtn = q<HTMLButtonElement>('.conv-attach-file')!;
+      expect(pickBtn).not.toBeNull();
+      await click(pickBtn);
+      await until(() => document.body.querySelector('.file-picker-row[data-path="/w/notes.md"]'));
+      await click(document.body.querySelector('.file-picker-row[data-path="/w/notes.md"]'));
+      await click(document.body.querySelector('.file-picker-foot .primary'));
+      await settle();
+      expect(qa('.conv-file-chip').map((c) => c.textContent)).toEqual(['my doc.md', 'notes.md']);
+
+      await key({ key: 'Enter' });
+      expect(s.send.mock.calls[0][0]).toEqual([
+        { type: 'resource_link', uri: 'file:///w/my%20doc.md', name: 'my doc.md' },
+        { type: 'resource_link', uri: 'file:///w/notes.md', name: 'notes.md' },
+        { type: 'text', text: 'check' },
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('#7 supports Markdown list continuation on Shift+Enter, bold shortcut, and Write/Preview toggle', async () => {
+    const s = new FakeSource();
+    await renderComposer({ source: s });
+    await type('- first item');
+    field().setSelectionRange(12, 12);
+    const ev = await key({ key: 'Enter', shiftKey: true });
+    expect(ev.defaultPrevented).toBe(true);
+    expect(field().value).toBe('- first item\n- ');
+
+    // Bold shortcut wraps selected word.
+    await type('hello world');
+    field().setSelectionRange(6, 11);
+    await key({ key: 'b', ctrlKey: true });
+    expect(field().value).toBe('hello **world**');
+
+    // Toggle Markdown preview.
+    const toggle = q<HTMLButtonElement>('.conv-preview-toggle')!;
+    await click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(field().hidden).toBe(true);
+    expect(q('.conv-composer-preview')).not.toBeNull();
+    await click(toggle);
+    expect(field().hidden).toBe(false);
+    expect(q('.conv-composer-preview')).toBeNull();
+  });
+
+  it('#8 renders the agent kind icon and name at the bottom-left of the composer footer', async () => {
+    const s = new FakeSource();
+    await renderComposer({
+      source: s,
+      kind: 'agy',
+      agent: 'Antigravity',
+      agentIcon: createElement('span', { className: 'test-agy-logo' }, 'AGY'),
+    });
+    const badge = q('.conv-foot .conv-agent-badge')!;
+    expect(badge.getAttribute('data-kind')).toBe('agy');
+    expect(badge.querySelector('.test-agy-logo')?.textContent).toBe('AGY');
+    expect(badge.querySelector('.conv-agent-badge-name')?.textContent).toBe('Antigravity');
+  });
+
+  it('#9 compacts context via clicking the context meter popover and via /compact instructions', async () => {
+    const s = new FakeSource();
+    await renderComposer({
+      source: s,
+      usage: { used: 100_000, size: 200_000 },
+      chat: { config: [], commands: [], capabilities: caps({ compact: true }) },
+    });
+    const btn = q<HTMLButtonElement>('.conv-compact-btn')!;
+    expect(btn.disabled).toBe(false);
+    expect(btn.title).toContain(t('conversation.compact.clickHint'));
+    await click(btn);
+    const pop = document.body.querySelector<HTMLElement>('.conv-compact-popover')!;
+    expect(pop).not.toBeNull();
+    const input = pop.querySelector<HTMLInputElement>('.conv-compact-input')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'keep tests');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // IME composition Enter must not submit compaction prematurely.
+    await act(async () => {
+      const ime = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      Object.defineProperty(ime, 'isComposing', { value: true });
+      input.dispatchEvent(ime);
+    });
+    expect(s.compact).not.toHaveBeenCalled();
+    expect(document.body.querySelector('.conv-compact-popover')).not.toBeNull();
+    await click(pop.querySelector('.conv-compact-actions .primary'));
+    await settle();
+    expect(s.compact).toHaveBeenCalledWith('keep tests');
+    expect(document.body.querySelector('.conv-compact-popover')).toBeNull();
+
+    // While compacting: spinner & running label shown, button disabled.
+    await renderComposer({
+      source: s,
+      usage: { used: 100_000, size: 200_000 },
+      activity: 'compacting',
+      chat: { config: [], commands: [], capabilities: caps({ compact: true }) },
+    });
+    expect(q<HTMLButtonElement>('.conv-compact-btn')!.disabled).toBe(true);
+    expect(q('.conv-compact-btn')?.textContent).toContain(t('conversation.compact.running'));
+
+    // Slash command with instructions forwards them too.
+    s.compact.mockClear();
+    await renderComposer({
+      source: s,
+      chat: { config: [], commands: [], capabilities: caps({ compact: true }) },
+    });
+    await type('/compact preserve diff');
+    await key({ key: 'Enter' });
+    expect(s.compact).toHaveBeenCalledWith('preserve diff');
   });
 });

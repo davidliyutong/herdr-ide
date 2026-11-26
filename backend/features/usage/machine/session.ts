@@ -20,6 +20,8 @@ import {
   LIMITS,
   SessionError,
   TIMING,
+  claudeInfoOf,
+  claudeProjectDirs,
   clean,
   codexDays,
   mtimeOf,
@@ -34,6 +36,7 @@ import {
   DBError,
   dbFiles,
   readAntigravitySession,
+  readAntigravitySummaries,
   readAntigravityTrajectory,
   readOpenCodeSession,
   type DBLimits,
@@ -644,17 +647,21 @@ async function ownRegularIn(root: string, p: string, uid: number): Promise<{ pat
 
 const notFound = () => new Fail(TranscriptCode.NotFound, 404, 'usage: no transcript of the session');
 
-/** Locates a Grok session's updates.jsonl by UUID or cwd (newest modified
- * since sinceMs when a process start time is known). */
+/** Locates a Grok session's updates.jsonl by UUID or cwd (preferring
+ * sessions modified since sinceMs, falling back to the newest matching cwd
+ * session for resumed sessions prior to their first new write). */
 export async function locateGrokSession(e: UsageEnv, session: string, cwd: string, sinceMs?: number): Promise<Transcript[]> {
   const root = await resolvedDir(posix.join(grokHome(e), 'sessions'));
   if (!root) throw notFound();
-  let best: { path: string; mtimeMs: number } | null = null;
+  let bestFresh: { path: string; mtimeMs: number } | null = null;
+  let bestAny: { path: string; mtimeMs: number } | null = null;
   const consider = async (p: string) => {
     const hit = await ownRegularIn(root, p, e.uid);
     if (!hit) return;
-    if (sinceMs !== undefined && !session && hit.mtimeMs < sinceMs) return;
-    if (!best || hit.mtimeMs > best.mtimeMs) best = hit;
+    if (!bestAny || hit.mtimeMs > bestAny.mtimeMs) bestAny = hit;
+    if (sinceMs === undefined || session || hit.mtimeMs >= sinceMs) {
+      if (!bestFresh || hit.mtimeMs > bestFresh.mtimeMs) bestFresh = hit;
+    }
   };
   if (session) {
     if (!validSessionId(session)) throw new Fail('bad_params', 400, 'usage: not a session id');
@@ -691,6 +698,7 @@ export async function locateGrokSession(e: UsageEnv, session: string, cwd: strin
       }
     }
   }
+  const best = bestFresh ?? bestAny;
   if (!best) throw notFound();
   const chosen = (best as { path: string; mtimeMs: number }).path;
   return [{ path: chosen, open: () => openRegular(chosen) }];
@@ -740,7 +748,8 @@ async function kimiSessionCwd(root: string, sessionDir: string, uid: number): Pr
   }
 }
 
-/** Locates a Kimi Code session's wire logs by UUID or cwd. */
+/** Locates a Kimi Code session's wire logs by UUID or cwd (preferring
+ * sessions modified since sinceMs, falling back to newest matching cwd). */
 export async function locateKimiSession(e: UsageEnv, session: string, cwd: string, sinceMs?: number): Promise<Transcript[]> {
   const root = await resolvedDir(posix.join(kimiHome(e), 'sessions'));
   if (!root) throw notFound();
@@ -751,7 +760,8 @@ export async function locateKimiSession(e: UsageEnv, session: string, cwd: strin
     throw notFound();
   }
   const wants = new Set(await cwdVariants(cwd));
-  let best: { paths: string[]; mtimeMs: number } | null = null;
+  let bestFresh: { paths: string[]; mtimeMs: number } | null = null;
+  let bestAny: { paths: string[]; mtimeMs: number } | null = null;
   let nWs = 0;
   for (const ws of workspaces) {
     e.signal.throwIfAborted();
@@ -761,7 +771,7 @@ export async function locateKimiSession(e: UsageEnv, session: string, cwd: strin
     if (session) {
       for (const name of [`session_${session}`, session]) {
         const found = await kimiWireLogs(root, posix.join(wsDir, name), e.uid);
-        if (found && (!best || found.mtimeMs > best.mtimeMs)) best = found;
+        if (found && (!bestFresh || found.mtimeMs > bestFresh.mtimeMs)) bestFresh = found;
       }
       continue;
     }
@@ -779,21 +789,75 @@ export async function locateKimiSession(e: UsageEnv, session: string, cwd: strin
       const sDir = posix.join(wsDir, s.name);
       const found = await kimiWireLogs(root, sDir, e.uid);
       if (!found) continue;
-      if (sinceMs !== undefined && found.mtimeMs < sinceMs) continue;
-      if (best && found.mtimeMs <= best.mtimeMs) continue;
+      const isFresh = sinceMs === undefined || found.mtimeMs >= sinceMs;
+      if (isFresh && bestFresh && found.mtimeMs <= bestFresh.mtimeMs) continue;
+      if (!isFresh && (bestFresh || (bestAny && found.mtimeMs <= bestAny.mtimeMs))) continue;
       const dir = await kimiSessionCwd(root, sDir, e.uid);
       if (!dir) continue;
       const dirVariants = await cwdVariants(dir);
       if (!dirVariants.some((v) => wants.has(v))) continue;
-      best = found;
+      if (isFresh) bestFresh = found;
+      if (!bestAny || found.mtimeMs > bestAny.mtimeMs) bestAny = found;
     }
   }
+  const best = bestFresh ?? bestAny;
   if (!best) throw notFound();
   return best.paths.map((p) => ({ path: p, open: () => openRegular(p) }));
 }
 
+/** Locates a Claude Code session by cwd (preferring transcripts modified
+ * since sinceMs, falling back to the newest matching cwd transcript for
+ * resumed or idle sessions). */
+export async function locateClaudeByCwd(e: UsageEnv, r: Resolver, cwd: string, sinceMs: number | undefined): Promise<Transcript[]> {
+  if (!cwd) throw notFound();
+  const cands: Array<{ id: string; file: string; mod: number }> = [];
+  for (const d of r.claudeDirs()) {
+    for (const dir of await claudeProjectDirs(r, posix.join(d, 'projects'), cwd)) {
+      for (const ent of await r.files.readDir(dir, LIMITS.entries)) {
+        e.signal.throwIfAborted();
+        const id = ent.name.endsWith('.jsonl') ? ent.name.slice(0, -'.jsonl'.length) : '';
+        if (!validSessionId(id) || !ent.isFile()) continue;
+        const file = posix.join(dir, ent.name);
+        const st = await r.files.lstat(file);
+        if (!st) continue;
+        cands.push({ id, file, mod: mtimeOf(st) });
+      }
+    }
+  }
+  if (!cands.length) throw notFound();
+  cands.sort((a, b) => b.mod - a.mod);
+  const pick = async (list: typeof cands): Promise<string | null> => {
+    let tried = 0;
+    for (const c of list) {
+      if (tried >= LIMITS.confirm || e.signal.aborted) break;
+      tried++;
+      let fh: FileHandle;
+      try {
+        fh = await r.files.openNoFollow(c.file);
+      } catch {
+        continue;
+      }
+      try {
+        if (await sameDir(r.files, (await claudeInfoOf(fh)).cwd, cwd)) return c.id;
+      } finally {
+        await fh.close().catch(() => {});
+      }
+    }
+    return null;
+  };
+  let chosen: string | null = null;
+  if (sinceMs !== undefined) {
+    const fresh = cands.filter((c) => c.mod >= sinceMs);
+    if (fresh.length) chosen = await pick(fresh);
+  }
+  if (!chosen) chosen = await pick(sinceMs !== undefined ? cands.filter((c) => c.mod < sinceMs) : cands);
+  if (!chosen) throw notFound();
+  return sessionsLocator(r)('claude', chosen, e.signal);
+}
+
 /** Locates a Codex session by cwd (including extra configured Codex homes
- * and resumed rollouts modified since sinceMs). */
+ * and resumed rollouts: prefers rollouts modified since sinceMs, falling
+ * back to the newest matching cwd rollout). */
 export async function locateCodexByCwd(
   e: UsageEnv,
   r: Resolver,
@@ -802,8 +866,10 @@ export async function locateCodexByCwd(
   extraCodexHomes: readonly string[] | undefined,
 ): Promise<Transcript[]> {
   const homes = r.codexHomes(extraCodexHomes);
-  const days = codexDays(sinceMs ?? e.now() - 7 * 86_400_000, e.now());
+  const lookback = Math.min(sinceMs ?? e.now(), e.now() - 7 * 86_400_000);
+  const days = codexDays(lookback, e.now());
   let bestFresh: { id: string; mod: number } | null = null;
+  let bestSince: { id: string; mod: number } | null = null;
   let bestAny: { id: string; mod: number } | null = null;
   let reads = 0;
   for (const h of homes) {
@@ -818,22 +884,30 @@ export async function locateCodexByCwd(
         const st = await r.files.lstat(p);
         if (!st) continue;
         const mod = mtimeOf(st);
-        if (sinceMs !== undefined && mod < sinceMs) continue;
+        const isSince = sinceMs === undefined || mod >= sinceMs;
+        // Skip older candidates once a fresh match is already found.
+        if (!isSince && (bestFresh || bestSince || (bestAny && mod <= bestAny.mod))) continue;
         if (reads >= LIMITS.metaReads || e.signal.aborted) break;
         reads++;
         const m = await r.rolloutMeta(p);
         if (!m || m.id !== id || m.parent !== '' || !(await sameDir(r.files, m.cwd, cwd))) continue;
-        if (sinceMs === undefined || m.started >= sinceMs) {
-          if (!bestFresh || mod > bestFresh.mod) bestFresh = { id, mod };
+        if (isSince) {
+          if (sinceMs === undefined || m.started >= sinceMs) {
+            if (!bestFresh || mod > bestFresh.mod) bestFresh = { id, mod };
+          }
+          if (!bestSince || mod > bestSince.mod) bestSince = { id, mod };
         }
         if (!bestAny || mod > bestAny.mod) bestAny = { id, mod };
       }
     }
   }
-  const chosen = bestFresh ?? bestAny;
+  const chosen = bestFresh ?? bestSince ?? bestAny;
   if (!chosen) throw notFound();
   return sessionsLocator(r)('codex', chosen.id, e.signal, extraCodexHomes);
 }
+
+/** Antigravity conversation_summaries.db paths (CLI first, then desktop/IDE). */
+const ANTIGRAVITY_DIRS = ['.gemini/antigravity-cli', '.gemini/antigravity', '.gemini/antigravity-ide'] as const;
 
 /** Reads and prices one Antigravity conversation database (by UUID or cwd)
  * inside the reader's shared concurrency slot. */
@@ -867,31 +941,98 @@ export async function readAntigravitySessionUsage(
         }
       } else if (opts.cwd) {
         const wants = new Set(await cwdVariants(opts.cwd));
-        const cands: { path: string; mtimeMs: number; mtimeSec: number }[] = [];
+        const dbByPath = new Set(dbs);
+        const dbsById = new Map<string, string[]>();
         for (const p of dbs) {
+          const base = posix.basename(p);
+          if (!base.endsWith('.db')) continue;
+          const id = base.slice(0, -3);
+          const list = dbsById.get(id);
+          if (list) list.push(p);
+          else dbsById.set(id, [p]);
+        }
+        // Primary lookup: conversation_summaries.db (reliable for agy CLI
+        // conversations whose trajectory_metadata_blob may be empty).
+        let bestSumFresh: { path: string; mtimeMs: number; mtimeSec: number; active: boolean } | null = null;
+        let bestSumAny: { path: string; mtimeMs: number; mtimeSec: number; active: boolean } | null = null;
+        for (const sub of ANTIGRAVITY_DIRS) {
           e.signal.throwIfAborted();
+          const dir = posix.join(e.home, sub);
+          const sumPath = posix.join(dir, 'conversation_summaries.db');
+          let summaries;
           try {
-            const st = await dbFiles(p, e.uid);
-            const mtimeMs = st.mtime / 1e6;
-            if (opts.sinceMs !== undefined && mtimeMs < opts.sinceMs) continue;
-            cands.push({ path: p, mtimeMs, mtimeSec: Math.floor(st.mtime / 1e9) });
+            summaries = await readAntigravitySummaries(sumPath, db);
           } catch {
-            // skip
+            continue;
+          }
+          for (const s of summaries) {
+            e.signal.throwIfAborted();
+            let matched = false;
+            for (const ws of s.workspaces) {
+              const wsVariants = await cwdVariants(ws);
+              if (wsVariants.some((v) => wants.has(v))) {
+                matched = true;
+                break;
+              }
+            }
+            if (!matched) continue;
+            const preferred = posix.join(dir, 'conversations', `${s.id}.db`);
+            const candidates = dbByPath.has(preferred) ? [preferred] : (dbsById.get(s.id) ?? []);
+            for (const p of candidates) {
+              try {
+                const st = await dbFiles(p, e.uid);
+                const fileMs = st.mtime / 1e6;
+                const mtimeMs = Math.max(fileMs, s.modifiedMs);
+                const cand = { path: p, mtimeMs, mtimeSec: Math.floor(st.mtime / 1e9), active: s.active };
+                const better = (a: typeof cand, b: typeof cand | null) => !b || (a.active !== b.active ? a.active : a.mtimeMs > b.mtimeMs);
+                if (opts.sinceMs === undefined || mtimeMs >= opts.sinceMs || s.active) {
+                  if (better(cand, bestSumFresh)) bestSumFresh = cand;
+                }
+                if (better(cand, bestSumAny)) bestSumAny = cand;
+              } catch {
+                // skip unreadable/link
+              }
+            }
           }
         }
-        cands.sort((a, b) => b.mtimeMs - a.mtimeMs);
-        for (const c of cands.slice(0, MAX_AG_CANDIDATES)) {
-          e.signal.throwIfAborted();
-          try {
-            const traj = await readAntigravityTrajectory(c.path, db);
-            if (!traj?.workspace) continue;
-            const wsVariants = await cwdVariants(traj.workspace);
-            if (wsVariants.some((v) => wants.has(v))) {
-              target = { path: c.path, mtimeSec: c.mtimeSec };
-              break;
+        const sumChosen = bestSumFresh ?? bestSumAny;
+        if (sumChosen) {
+          target = { path: sumChosen.path, mtimeSec: sumChosen.mtimeSec };
+        } else {
+          // Fallback: scan trajectory_metadata_blob (two-pass: prefer >= sinceMs,
+          // then fall back to the newest matching cwd conversation).
+          const allCands: { path: string; mtimeMs: number; mtimeSec: number }[] = [];
+          for (const p of dbs) {
+            e.signal.throwIfAborted();
+            try {
+              const st = await dbFiles(p, e.uid);
+              allCands.push({ path: p, mtimeMs: st.mtime / 1e6, mtimeSec: Math.floor(st.mtime / 1e9) });
+            } catch {
+              // skip
             }
-          } catch {
-            // skip damaged/busy candidate
+          }
+          allCands.sort((a, b) => b.mtimeMs - a.mtimeMs);
+          const scanTraj = async (list: typeof allCands) => {
+            for (const c of list.slice(0, MAX_AG_CANDIDATES)) {
+              e.signal.throwIfAborted();
+              try {
+                const traj = await readAntigravityTrajectory(c.path, db);
+                if (!traj?.workspace) continue;
+                const wsVariants = await cwdVariants(traj.workspace);
+                if (wsVariants.some((v) => wants.has(v))) {
+                  return { path: c.path, mtimeSec: c.mtimeSec };
+                }
+              } catch {
+                // skip damaged/busy candidate
+              }
+            }
+            return null;
+          };
+          if (opts.sinceMs !== undefined) {
+            target = await scanTraj(allCands.filter((c) => c.mtimeMs >= opts.sinceMs!));
+            if (!target) target = await scanTraj(allCands.filter((c) => c.mtimeMs < opts.sinceMs!));
+          } else {
+            target = await scanTraj(allCands);
           }
         }
       }

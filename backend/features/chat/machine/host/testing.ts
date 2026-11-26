@@ -12,10 +12,15 @@ import type { ChatSpec } from '#shared/agents/kinds.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import type {
   Adapter,
+  ForkParams,
+  ForkResult,
   HistoryParams,
+  ModelsParams,
   PermissionAnswer,
   PromptParams,
   QuestionAnswer,
+  RewindParams,
+  RewindResult,
   Session,
   SessionsParams,
   Sink,
@@ -178,14 +183,29 @@ export class FakeSession implements Session {
     this.calls.push(`cancel_queued:${message}`);
   }
 
+  async steerQueued(message: string, delivery: 'steer' | 'interrupt'): Promise<void> {
+    this.calls.push(`steer_queued:${message}:${delivery}`);
+  }
+
   async setConfig(id: string, value: string): Promise<void> {
     this.calls.push(`set_config:${id}=${value}`);
     if (this.a.setConfigErr) throw new chat.ChatProtoError(this.a.setConfigErr);
   }
 
-  async compact(): Promise<void> {
-    this.calls.push('compact');
+  async compact(_signal: AbortSignal, instructions?: string): Promise<void> {
+    this.calls.push(instructions ? `compact:${instructions}` : 'compact');
     if (this.a.compactGate) await this.a.compactGate;
+  }
+
+  async stopTask(taskId: string): Promise<void> {
+    this.calls.push(`stop_task:${taskId}`);
+  }
+
+  async rewind(p: RewindParams): Promise<RewindResult> {
+    this.calls.push(`rewind:${p.beforeTurnId ?? p.userMessageId ?? ''}:${p.restoreFiles ? 'files' : 'conv'}`);
+    this.a.rewinds.push(p);
+    if (this.a.rewindErr) throw new chat.ChatProtoError(this.a.rewindErr);
+    return this.a.rewindSessionId ? { sessionId: this.a.rewindSessionId } : {};
   }
 
   async close(signal: AbortSignal): Promise<void> {
@@ -247,6 +267,33 @@ export class FakeSession implements Session {
       )
       .catch((e: chat.ChatProtoError) => e.error);
   }
+
+  /** Asks a non-blocking async question (survives Turn.End, does not set State.Waiting). */
+  asyncQuestion(
+    opts: { item?: string; autoResolutionMs?: number; optional?: boolean } = {},
+    signal = new AbortController().signal,
+  ): Promise<QuestionAnswer | chat.ChatError> {
+    return this.sink
+      .question(
+        {
+          questions: [
+            {
+              id: 'follow',
+              question: 'Next step?',
+              options: [{ label: 'Ship' }, { label: 'Wait' }],
+              allowOther: true,
+              ...(opts.optional ? { optional: true } : {}),
+            },
+          ],
+          parent: '',
+          async: true,
+          ...(opts.item ? { item: opts.item } : {}),
+          ...(opts.autoResolutionMs ? { autoResolutionMs: opts.autoResolutionMs } : {}),
+        },
+        signal,
+      )
+      .catch((e: chat.ChatProtoError) => e.error);
+  }
 }
 
 /** An adapter whose sessions the test drives. With proc, each session runs
@@ -299,6 +346,17 @@ export class FakeAdapter implements Adapter {
   historyGate: Promise<void> | null = null;
   histories: HistoryParams[] = [];
   sessionsP: SessionsParams[] = [];
+  modelsList: chat.ModelOption[] = [
+    { value: 'small', name: 'Small' },
+    { value: 'large', name: 'Large', efforts: ['low', 'high'], defaultEffort: 'high', images: true },
+  ];
+  modelsCalls: ModelsParams[] = [];
+  forkCalls: ForkParams[] = [];
+  forkErr: chat.ChatError | null = null;
+  forkSessionId = 'forked-sess-1';
+  rewinds: RewindParams[] = [];
+  rewindErr: chat.ChatError | null = null;
+  rewindSessionId = '';
   /** Held, the listings and the compactions wait for it. */
   sessionsGate: Promise<void> | null = null;
   compactGate: Promise<void> | null = null;
@@ -356,6 +414,17 @@ export class FakeAdapter implements Adapter {
 
   async inTerminal(p: HistoryParams): Promise<chat.ChatError | null> {
     return this.running.has(p.sessionId) ? { code: chat.Code.InTerminal, message: 'runs in a terminal' } : null;
+  }
+
+  async models(p: ModelsParams): Promise<chat.ModelOption[]> {
+    this.modelsCalls.push(p);
+    return this.modelsList.map((m) => ({ ...m }));
+  }
+
+  async fork(p: ForkParams): Promise<ForkResult> {
+    this.forkCalls.push(p);
+    if (this.forkErr) throw new chat.ChatProtoError(this.forkErr);
+    return { sessionId: this.forkSessionId };
   }
 
   session(): Promise<FakeSession> {

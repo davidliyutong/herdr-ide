@@ -28,67 +28,67 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "1\n2\n3\n4",
-     "type": "text"
+     "type": "text",
+     "text": "1\n2\n3\n4"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
    "t": "queued",
-   "content": [
-    {
-     "text": "When you are done, reply with the word NEXT.",
-     "type": "text"
-    }
-   ],
-   "clientId": "c2",
+   "state": "queued",
    "message": "m2",
-   "state": "queued"
+   "content": [
+    {
+     "type": "text",
+     "text": "When you are done, reply with the word NEXT."
+    }
+   ],
+   "clientId": "c2"
   },
   {
    "t": "queued",
-   "content": [
-    {
-     "text": "Then reply with the word PLAIN.",
-     "type": "text"
-    }
-   ],
-   "clientId": "c3",
+   "state": "queued",
    "message": "m3",
-   "state": "queued"
-  },
-  {
-   "t": "queued",
    "content": [
     {
-     "text": "Reply with the word CANCELLED.",
-     "type": "text"
+     "type": "text",
+     "text": "Then reply with the word PLAIN."
     }
    ],
-   "clientId": "c4",
-   "message": "m4",
-   "state": "queued"
+   "clientId": "c3"
   },
   {
    "t": "queued",
-   "clientId": "c4",
+   "state": "queued",
    "message": "m4",
-   "state": "cancelled"
+   "content": [
+    {
+     "type": "text",
+     "text": "Reply with the word CANCELLED."
+    }
+   ],
+   "clientId": "c4"
+  },
+  {
+   "t": "queued",
+   "state": "cancelled",
+   "message": "m4",
+   "clientId": "c4"
   },
   {
    "t": "update",
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n5\n6\n7\n8",
-     "type": "text"
+     "type": "text",
+     "text": "\n5\n6\n7\n8"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -96,12 +96,12 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n9\n10\n11\n12",
-     "type": "text"
+     "type": "text",
+     "text": "\n9\n10\n11\n12"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -109,12 +109,12 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n13\n14\n15\n16",
-     "type": "text"
+     "type": "text",
+     "text": "\n13\n14\n15\n16"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -122,12 +122,12 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n17\n18\n19\n20",
-     "type": "text"
+     "type": "text",
+     "text": "\n17\n18\n19\n20"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -135,12 +135,12 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n21\n22\n23\n24",
-     "type": "text"
+     "type": "text",
+     "text": "\n21\n22\n23\n24"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -148,12 +148,12 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n25\n26\n27\n28",
-     "type": "text"
+     "type": "text",
+     "text": "\n25\n26\n27\n28"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -161,12 +161,12 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n29\n30\n31\n32",
-     "type": "text"
+     "type": "text",
+     "text": "\n29\n30\n31\n32"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -174,12 +174,12 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n33\n34\n35\n36",
-     "type": "text"
+     "type": "text",
+     "text": "\n33\n34\n35\n36"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
@@ -187,30 +187,31 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "\n37\n38\n39\n40",
-     "type": "text"
+     "type": "text",
+     "text": "\n37\n38\n39\n40"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
    "t": "update",
-   "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40"
+    },
+    "messageId": "msg_0001",
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40",
-     "type": "text"
-    },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0001/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000031"
   },
   {
    "t": "turn",
@@ -223,39 +224,43 @@
   },
   {
    "t": "queued",
+   "state": "taken",
+   "message": "m2",
    "content": [
     {
-     "text": "When you are done, reply with the word NEXT.",
-     "type": "text"
+     "type": "text",
+     "text": "When you are done, reply with the word NEXT."
     }
    ],
    "clientId": "c2",
-   "message": "m2",
-   "state": "taken"
+   "item": "00000000-0000-4000-8000-000000000015",
+   "entryUuid": "00000000-0000-4000-8000-000000000015"
   },
   {
    "t": "queued",
+   "state": "taken",
+   "message": "m3",
    "content": [
     {
-     "text": "Then reply with the word PLAIN.",
-     "type": "text"
+     "type": "text",
+     "text": "Then reply with the word PLAIN."
     }
    ],
    "clientId": "c3",
-   "message": "m3",
-   "state": "taken"
+   "item": "00000000-0000-4000-8000-000000000016",
+   "entryUuid": "00000000-0000-4000-8000-000000000016"
   },
   {
    "t": "update",
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "NEXT\nPLA",
-     "type": "text"
+     "type": "text",
+     "text": "NEXT\nPLA"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -263,30 +268,31 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "IN",
-     "type": "text"
+     "type": "text",
+     "text": "IN"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
    "t": "update",
-   "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "NEXT\nPLAIN"
+    },
+    "messageId": "msg_0002",
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "NEXT\nPLAIN",
-     "type": "text"
-    },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0002/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000045"
   },
   {
    "t": "turn",
@@ -563,15 +569,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -591,7 +597,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 0,

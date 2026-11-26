@@ -220,26 +220,36 @@ export function checkContent(content: unknown): boolean {
 
 /** Checks answers to questions: each names a question, its options by
  * label, or the user's own words where the question allows them, one for a
- * question that is not multiple choice. Throws a ChatProtoError. */
+ * question that is not multiple choice. Optional questions may have an empty
+ * answer array or be omitted. Throws a ChatProtoError. */
 export function checkAnswers(qs: readonly chat.Question[], answers: unknown): Record<string, string[]> {
   const refuse = (code: string, message: string) => new chat.ChatProtoError({ code, message });
-  if (!answers || typeof answers !== 'object' || Array.isArray(answers) || Object.keys(answers).length === 0)
-    throw refuse(chat.Code.BadRequest, 'no answers');
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) throw refuse(chat.Code.BadRequest, 'no answers');
+  const entries = Object.entries(answers as Record<string, unknown>);
+  const allOptional = qs.length > 0 && qs.every((q) => q.optional);
+  if (entries.length === 0 && !allOptional) throw refuse(chat.Code.BadRequest, 'no answers');
   let size = 0;
-  for (const [id, vs] of Object.entries(answers as Record<string, unknown>)) {
+  const out: Record<string, string[]> = {};
+  for (const [id, vs] of entries) {
     const q = qs.find((x) => x.id === id);
     if (!q) throw refuse(chat.Code.BadRequest, 'an answer to no question of it');
-    if (!Array.isArray(vs) || vs.length === 0 || (!q.multiSelect && vs.length > 1))
+    if (!Array.isArray(vs)) throw refuse(chat.Code.BadRequest, 'not as many answers as the question takes');
+    if (vs.length === 0) {
+      if (q.optional) continue;
       throw refuse(chat.Code.BadRequest, 'not as many answers as the question takes');
+    }
+    if (!q.multiSelect && vs.length > 1) throw refuse(chat.Code.BadRequest, 'not as many answers as the question takes');
     for (const v of vs) {
       if (typeof v !== 'string' || v === '' || !isWellFormed(v)) throw refuse(chat.Code.BadRequest, 'not an option of the question');
       size += bytes(v);
       const known = (q.options ?? []).some((o) => o.label === v);
       if (!known && !q.allowOther) throw refuse(chat.Code.BadRequest, 'not an option of the question');
     }
+    out[id] = vs as string[];
   }
+  if (Object.keys(out).length === 0 && !allOptional) throw refuse(chat.Code.BadRequest, 'no answers');
   if (size > MAX_ANSWER_BYTES) throw refuse(chat.Code.TooLarge, 'answers of more than 64 KiB');
-  return answers as Record<string, string[]>;
+  return out;
 }
 
 /** The most bytes of a question's answers. */

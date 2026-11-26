@@ -32,6 +32,7 @@ import {
   type Fill,
 } from './machine/save.ts';
 import { Stater } from './machine/stat.ts';
+import { findFiles } from './machine/find.ts';
 import { trash } from './machine/trash.ts';
 import { copyTree, exists, moveNoReplace, removeTree } from './machine/tree.ts';
 
@@ -138,6 +139,8 @@ export const filesMachine = (o: FilesOptions = {}) =>
       housekeep: (now) => pruneStaged(env.base, now, o.stagingRetentionMs ?? STAGING_RETENTION_MS),
       actions: {
         stat: (p, ctx) => stater.stat(p.paths, (x) => ctx.expand(x), ctx.signal),
+
+        find: (p, ctx) => findFiles({ dir: ctx.expand(p.dir), query: p.query, limit: p.limit, signal: ctx.signal }),
 
         mkdir: (p, ctx) => {
           // A taken name fails, or with unique the folder gets the first

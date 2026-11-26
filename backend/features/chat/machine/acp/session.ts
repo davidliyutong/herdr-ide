@@ -10,6 +10,7 @@
 // from the turns' ends and from the session's methods. So the host has a
 // tool call's stored event before the permission request for it, and every
 // event of the session before done settles.
+import { Notice, noticeMethod } from '#shared/proto/agentproto/index.ts';
 import {
   ChatProtoError,
   Code,
@@ -146,8 +147,13 @@ export function startError(signal: AbortSignal, err: unknown): ChatError {
     };
   if (err instanceof RequestError) {
     if (err.code === RpcCode.AuthRequired) return { code: Code.AuthRequired, message: err.message };
-    // The session to take up is not there.
-    if (err.code === RpcCode.ResourceNotFound) return { code: Code.NotFound, message: err.message };
+    // The session to take up is not there (some agents like agy report
+    // missing sessions as -32603 InternalError).
+    if (
+      err.code === RpcCode.ResourceNotFound ||
+      (err.code === RpcCode.InternalError && /not found|failed to read session|no such session|does not exist/i.test(err.message))
+    )
+      return { code: Code.NotFound, message: err.message };
     return { code: Code.StartFailed, message: err.message };
   }
   const reason: unknown = signal.reason;
@@ -208,7 +214,16 @@ export class AcpSession implements Session {
   private readonly ac = new AbortController();
 
   private sid = '';
-  private caps: AgentCapabilities = { loadSession: false, image: false, audio: false, embeddedContext: false, list: false, resume: false };
+  private caps: AgentCapabilities = {
+    loadSession: false,
+    image: false,
+    audio: false,
+    embeddedContext: false,
+    list: false,
+    resume: false,
+    close: false,
+    fork: false,
+  };
   private readonly it: Items;
   private turn: Turn | null = null;
   private queue: Queued[] = [];
@@ -319,6 +334,11 @@ export class AcpSession implements Session {
     return cloneConfig(this.config);
   }
 
+  /** Whether the agent advertises a /compact slash command. */
+  private hasCompactCommand(): boolean {
+    return this.commands.some((c) => c.name === 'compact');
+  }
+
   /** Speaks the protocol up to the session, and sets what the chat starts
    * with. */
   async open(p: StartParams, signal: AbortSignal): Promise<void> {
@@ -327,6 +347,17 @@ export class AcpSession implements Session {
     const meta = p.newSessionMeta ? { _meta: p.newSessionMeta } : {};
     let res: unknown;
     let id = p.resume;
+    const loadSession = async () => {
+      // The agent replays the session before it answers: the chat's log has
+      // all of it.
+      this.sid = id;
+      this.replaying = true;
+      try {
+        return await this.conn.call('session/load', { sessionId: id, cwd: p.cwd, mcpServers: [], ...meta }, { ms: this.t.load, signal });
+      } finally {
+        this.replaying = false;
+      }
+    };
     if (p.resume === '') {
       res = await this.conn.call('session/new', { cwd: p.cwd, mcpServers: [], ...meta }, { ms: this.t.session, signal });
       if (!isObj(res) || typeof res.sessionId !== 'string' || res.sessionId === '')
@@ -334,17 +365,26 @@ export class AcpSession implements Session {
       id = res.sessionId;
     } else if (this.caps.resume) {
       this.sid = id;
-      res = await this.conn.call('session/resume', { sessionId: id, cwd: p.cwd, mcpServers: [], ...meta }, { ms: this.t.session, signal });
-    } else if (this.caps.loadSession) {
-      // The agent replays the session before it answers: the chat's log has
-      // all of it.
-      this.sid = id;
-      this.replaying = true;
       try {
-        res = await this.conn.call('session/load', { sessionId: id, cwd: p.cwd, mcpServers: [], ...meta }, { ms: this.t.load, signal });
-      } finally {
-        this.replaying = false;
+        res = await this.conn.call(
+          'session/resume',
+          { sessionId: id, cwd: p.cwd, mcpServers: [], ...meta },
+          { ms: this.t.session, signal },
+        );
+      } catch (err) {
+        if (
+          this.caps.loadSession &&
+          err instanceof RequestError &&
+          err.code === RpcCode.InternalError &&
+          /session\/load|failed to read session/i.test(err.message)
+        ) {
+          res = await loadSession();
+        } else {
+          throw err;
+        }
       }
+    } else if (this.caps.loadSession) {
+      res = await loadSession();
     } else {
       throw perr(Code.Unsupported, 'the agent cannot take up a session');
     }
@@ -352,13 +392,18 @@ export class AcpSession implements Session {
     const version = clip(init.version, MAX_NAME);
     const caps: chat.Capabilities = {
       images: this.caps.image,
-      compact: false,
+      compact: this.hasCompactCommand(),
       queue: true,
       plan: false,
       questions: false,
       effort: false,
       model: false,
       cancelQueued: true,
+      steer: false,
+      stopTask: false,
+      fork: this.caps.fork,
+      rewind: false,
+      rewindFiles: false,
     };
     this.sid = id;
     this.sizes = contextSizes(r.models);
@@ -436,9 +481,11 @@ export class AcpSession implements Session {
         if (cmds && !sameCommands(cmds, this.commands)) {
           this.commands = cmds;
           const cp = cmds.map((c) => ({ ...c }));
+          const compact = this.hasCompactCommand();
           this.sink.update((c) => {
             if (cp.length > 0) c.commands = cp;
             else delete c.commands;
+            c.capabilities.compact = compact;
           });
         }
         return;
@@ -524,15 +571,26 @@ export class AcpSession implements Session {
 
   /** Starts a turn with the user's message, or queues it while one runs:
    * the protocol has a turn per prompt, and the message is sent once the
-   * turn ended (a queued event waiting, then taken). A message that starts
-   * a turn the host did not record is told here (its user event). */
+   * turn ended (a queued event waiting, then taken). With delivery
+   * "interrupt", the prompt is placed ahead of unrelated queued messages and
+   * only the active turn is cancelled. A message that starts a turn the host
+   * did not record is told here (its user event). */
   async prompt(p: PromptParams): Promise<void> {
     this.checkContent(p.content);
     const e = this.usable();
     if (e) throw e;
     if (this.turn || this.queue.length > 0) {
+      if (p.delivery === chat.Delivery.Steer) {
+        throw perr(Code.Unsupported, 'the agent does not support mid-turn steering');
+      }
       if (this.queue.length >= MAX_QUEUE) throw perr(Code.Busy, 'too many messages wait for the turn');
       const q: Queued = { message: p.message, clientId: p.clientId, content: [...p.content] };
+      if (p.delivery === chat.Delivery.Interrupt) {
+        this.queue.unshift(q);
+        this.emit(queuedEvent(QueuedState.Waiting, q, true));
+        await this.cancel(undefined, { keepQueue: true });
+        return;
+      }
       this.queue.push(q);
       this.emit(queuedEvent(QueuedState.Waiting, q, true));
       return;
@@ -540,7 +598,12 @@ export class AcpSession implements Session {
     // Not recorded: the host saw a turn run, which ended meanwhile.
     const user: Event | undefined = p.recorded
       ? undefined
-      : { t: EventType.User, content: [...p.content], ...(p.clientId ? { clientId: p.clientId } : {}) };
+      : {
+          t: EventType.User,
+          content: [...p.content],
+          ...(p.clientId ? { clientId: p.clientId } : {}),
+          ...(p.uuid ? { item: p.uuid } : {}),
+        };
     this.startTurn([...p.content], user);
   }
 
@@ -641,11 +704,12 @@ export class AcpSession implements Session {
   }
 
   /** Cancels the running turn: the agent is told, the permissions it asks
-   * are answered as cancelled, and the queued messages are withdrawn. */
-  async cancel(): Promise<void> {
+   * are answered as cancelled, and (unless opts.keepQueue is true) the
+   * queued messages are withdrawn. */
+  async cancel(_signal?: AbortSignal, opts?: { keepQueue?: boolean }): Promise<void> {
     const e = this.usable();
     if (e) throw e;
-    this.dropQueue();
+    if (!opts?.keepQueue) this.dropQueue();
     const t = this.turn;
     if (!t) return;
     t.ac.abort();
@@ -669,6 +733,21 @@ export class AcpSession implements Session {
     if (i < 0) throw perr(Code.NotFound, 'no such message waits');
     const [q] = this.queue.splice(i, 1);
     this.emit(queuedEvent(QueuedState.Cancelled, q!, false));
+  }
+
+  /** Promotes a queued message to run immediately by cancelling only the
+   * active turn (delivery "interrupt"); mid-turn steering is unsupported. */
+  async steerQueued(message: string, delivery: 'steer' | 'interrupt', _signal?: AbortSignal): Promise<void> {
+    const e = this.usable();
+    if (e) throw e;
+    if (delivery !== 'interrupt') throw perr(Code.Unsupported, 'the agent does not support mid-turn steering');
+    const i = this.queue.findIndex((q) => q.message === message);
+    if (i < 0) throw perr(Code.NotFound, 'no such message waits');
+    if (i > 0) {
+      const [q] = this.queue.splice(i, 1);
+      this.queue.unshift(q!);
+    }
+    await this.cancel(undefined, { keepQueue: true });
   }
 
   /** Sets a configuration option: through session/set_mode for the option
@@ -716,17 +795,33 @@ export class AcpSession implements Session {
     }
   }
 
-  /** The protocol has no way to compact; an agent's own command (/compact)
-   * is a prompt. */
-  async compact(): Promise<void> {
-    throw perr(Code.Unsupported, 'the agent compacts by its own command only');
+  /** Compacts the conversation via the agent's advertised /compact slash
+   * command when idle; unsupported if the agent did not advertise compact. */
+  async compact(_signal?: AbortSignal, instructions?: string): Promise<void> {
+    const e = this.usable();
+    if (e) throw e;
+    if (!this.hasCompactCommand()) throw perr(Code.Unsupported, 'the agent compacts by its own command only');
+    if (this.turn || this.queue.length > 0) throw perr(Code.Busy, 'a turn is running');
+    const extra = instructions?.trim();
+    const text = extra ? `/compact ${extra}` : '/compact';
+    this.emit({ t: EventType.Notice, method: noticeMethod(Notice.Command), params: { name: '/compact' } });
+    this.startTurn([{ type: 'text', text }], undefined);
   }
 
-  /** Ends the agent gracefully: its input closes, SIGTERM follows after a
-   * grace period and SIGKILL after another one. Resolves once the agent is
-   * gone or signal ends. */
+  /** Ends the agent gracefully: calls session/close (bounded by 2s) when
+   * supported so the agent flushes state and releases locks, then closes its
+   * input, with SIGTERM after a grace period and SIGKILL after another one.
+   * Resolves once the agent is gone or signal ends. */
   async close(signal?: AbortSignal): Promise<void> {
+    const first = !this.closing;
     this.closing = true;
+    if (first && this.caps.close && this.sid !== '' && !this.ended && !this.conn.ended) {
+      try {
+        await this.conn.call('session/close', { sessionId: this.sid }, { ms: Math.min(this.t.grace, 2000), signal });
+      } catch {
+        // proceed to stop the process on timeout, abort or error
+      }
+    }
     void this.proc.stop(this.t);
     if (!signal) {
       await this.done;

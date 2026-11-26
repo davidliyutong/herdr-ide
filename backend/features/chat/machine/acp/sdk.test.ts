@@ -45,7 +45,7 @@ describe('the SDK', () => {
           const { dir, msg } = JSON.parse(l) as { dir: string; msg: { method?: string; params?: unknown } };
           if (dir === 'in' && msg.method === 'session/update') params.push(msg.params);
         }
-    expect(params.length).toBe(629);
+    expect(params.length).toBe(635);
     expect(await takenBySDK(params)).toBe(params.length);
   });
 

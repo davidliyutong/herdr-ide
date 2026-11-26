@@ -45,11 +45,16 @@ describe('routes', () => {
       'GET /api/m/:id/p/chat/trusted',
       'POST /api/m/:id/p/chat/trusted',
       'POST /api/m/:id/p/chat/host/stop',
+      'GET /api/m/:id/p/chat/models',
+      'POST /api/m/:id/p/chat/models',
+      'POST /api/m/:id/p/chat/fork',
+      'POST /api/m/:id/p/chat/switch',
+      'GET /api/m/:id/p/chat/export',
     ]);
     const ro = await start({ readOnly: true });
     const { problems, checked } = await checkGuarded(r as unknown as TestHub, ro as unknown as TestHub, { machine: 'gpu' });
     expect(problems).toEqual([]);
-    expect(checked.length).toBe(13);
+    expect(checked.length).toBe(16);
     // Off, every route answers plugin_disabled.
     r.settings.set('plugins.chat.enabled', '', false);
     expect(await r.call('GET', '/api/p/chat/states')).toEqual([404, { error: 'plugin_disabled', message: 'plugin_disabled' }]);
@@ -481,5 +486,77 @@ describe('routes', () => {
     expect(code2).toBe(200);
     expect(body2.vault).toEqual({ injected: 0, locked: true });
     expect(r.host.requests.filter((q) => q.op === chat.Op.New).at(-1)!.env).toBeUndefined();
+  });
+
+  test('models, fork, switch and export routes', async () => {
+    const r = await start();
+    const f = r.host;
+    f.modelsByKind.set('claude', {
+      models: [{ value: 'claude-sonnet-4-6', name: 'Sonnet 4.6' }],
+      fetchedAt: '2026-01-02T03:04:05Z',
+    });
+
+    // GET /models validates kind and does not start host when stopped.
+    f.running = false;
+    expect((await r.call('GET', m('models?kind=nope')))[0]).toBe(400);
+    expect(await r.call('GET', m('models?kind=claude'))).toMatchObject([409, { error: 'not_running' }]);
+    expect(f.running).toBe(false);
+
+    // POST /models starts host, ensures Claude SDK, refreshes models and audits.
+    let [code, out] = await r.call('POST', m('models'), JSON.stringify({ kind: 'claude', cwd: '/w' }));
+    expect(code).toBe(200);
+    expect(out).toEqual({
+      models: [{ value: 'claude-sonnet-4-6', name: 'Sonnet 4.6' }],
+      fetchedAt: '2026-01-02T03:04:05Z',
+    });
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Models, kind: 'claude', cwd: '/w', refresh: true });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.models', kind: 'claude', cwd: '/w', refresh: true, status: 200 });
+
+    // GET /models now reads cached list from the running host.
+    [code, out] = await r.call('GET', m('models?kind=claude'));
+    expect(code).toBe(200);
+    expect(out.models).toEqual([{ value: 'claude-sonnet-4-6', name: 'Sonnet 4.6' }]);
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Models, kind: 'claude', refresh: false });
+
+    // Create a chat, then fork, switch, and export it.
+    const [, created] = await r.call('POST', m('new'), JSON.stringify({ kind: 'claude', cwd: '/w' }));
+    const srcId = (created.chat as chat.Chat).id;
+
+    expect((await r.call('POST', m('fork'), JSON.stringify({ chat: 'bad' })))[0]).toBe(400);
+    [code, out] = await r.call('POST', m('fork'), JSON.stringify({ chat: srcId, upToSeq: 4, title: 'Branch A' }));
+    expect(code).toBe(200);
+    const forkedId = (out.chat as chat.Chat).id;
+    expect(chat.validChatID(forkedId)).toBe(true);
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Fork, chat: srcId, upToSeq: 4, title: 'Branch A' });
+    expect(r.lastAudit()).toMatchObject({ event: 'chat.fork', chat: srcId, upToSeq: 4, forked_chat: forkedId, status: 200 });
+
+    expect((await r.call('POST', m('switch'), JSON.stringify({ chat: srcId, targetKind: 'nope' })))[0]).toBe(400);
+    [code, out] = await r.call(
+      'POST',
+      m('switch'),
+      JSON.stringify({ chat: srcId, targetKind: 'codex', options: { model: 'gpt-5', mode: 'plan' } }),
+    );
+    expect(code).toBe(200);
+    const switchedId = (out.chat as chat.Chat).id;
+    expect((out.chat as chat.Chat).kind).toBe('codex');
+    expect(f.requests.at(-1)).toEqual({
+      op: chat.Op.Switch,
+      chat: srcId,
+      targetKind: 'codex',
+      options: { model: 'gpt-5', mode: 'plan' },
+    });
+    expect(r.lastAudit()).toMatchObject({
+      event: 'chat.switch',
+      chat: srcId,
+      targetKind: 'codex',
+      mode: 'plan',
+      switched_chat: switchedId,
+      status: 200,
+    });
+
+    f.exportedMarkdown = '# Conversation Handoff\n\n### User\n\nhi';
+    [code, out] = await r.call('GET', m(`export?chat=${srcId}&upToSeq=2`));
+    expect([code, out]).toEqual([200, { markdown: '# Conversation Handoff\n\n### User\n\nhi' }]);
+    expect(f.requests.at(-1)).toEqual({ op: chat.Op.Export, chat: srcId, upToSeq: 2 });
   });
 });

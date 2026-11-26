@@ -105,6 +105,27 @@ const newBody = z.object({
   options: z.object({ model: opt, effort: opt, mode: opt }).nullish(),
 });
 
+const optSeq = z.number().int().positive().nullish();
+
+const modelsBody = z.object({
+  kind: opt,
+  cwd: opt,
+  refresh: z.boolean().nullish(),
+});
+
+const forkBody = z.object({
+  chat: opt,
+  upToSeq: optSeq,
+  title: opt,
+});
+
+const switchBody = z.object({
+  chat: opt,
+  targetKind: opt,
+  upToSeq: optSeq,
+  options: z.object({ model: opt, effort: opt, mode: opt }).nullish(),
+});
+
 export interface WorkspaceEnvLookup {
   (
     machine: string,
@@ -325,6 +346,161 @@ export function routes(ctx: FeatureContext, board: ChatSwitchboard, timing: Timi
   api.post('/host/stop', ctx.mutating('host_stop'), async (c) => {
     await ask(c, { op: chat.Op.Shutdown }, { start: false });
     return c.json(OK);
+  });
+
+  /** Cached models for a provider kind (never starts host or probes agent). */
+  api.get('/models', async (c) => {
+    const kind = query(c, 'kind');
+    if (!chatKinds().includes(kind)) throw badRequest('kind: an agent kind with a chat');
+    const res = await ask(c, { op: chat.Op.Models, kind, refresh: false }, { start: false });
+    return c.json({ models: res.models ?? [], ...(res.fetchedAt ? { fetchedAt: res.fetchedAt } : {}) });
+  });
+
+  /** Refreshes (or fetches) models for a provider kind, starting the host and
+   * ensuring the Claude SDK if needed. Accepts JSON body or query params. */
+  api.post('/models', ctx.mutating('models'), async (c) => {
+    let b: z.output<typeof modelsBody> = { kind: '', cwd: '', refresh: undefined };
+    const raw = Buffer.from(await readBody(c.req.raw, MAX_BODY))
+      .toString('utf8')
+      .trim();
+    if (raw) {
+      try {
+        const r = modelsBody.safeParse(JSON.parse(raw));
+        if (!r.success) throw r.error;
+        b = r.data;
+      } catch {
+        throw badRequest('the body: {kind, cwd?, refresh?}');
+      }
+    }
+    const kind = b.kind || query(c, 'kind');
+    const cwd = b.cwd || query(c, 'cwd');
+    const refresh = b.refresh ?? query(c, 'refresh') !== '0';
+    if (!chatKinds().includes(kind)) throw badRequest('kind: an agent kind with a chat');
+    if (cwd && !validCwd(cwd)) throw badRequest('cwd: a clean absolute path');
+    c.var.audit.kind = kind;
+    if (cwd) c.var.audit.cwd = auditText(cwd);
+    c.var.audit.refresh = refresh;
+    try {
+      await board.ensureSdk(c.var.machine.id, kind, bounded(c, timing.sdkMs), {
+        retry: true,
+        audit: (event, fields) => ctx.audit.log(c.var.who, event, fields),
+      });
+    } catch (e) {
+      throw failOf(e);
+    }
+    const res = await ask(
+      c,
+      { op: chat.Op.Models, kind, ...(cwd ? { cwd } : {}), refresh },
+      { ms: timing.sessionsMs, start: true, agent: true },
+    );
+    return c.json({ models: res.models ?? [], ...(res.fetchedAt ? { fetchedAt: res.fetchedAt } : {}) });
+  });
+
+  /** Forks a chat (optionally up to upToSeq) into a new chat. */
+  api.post('/fork', ctx.mutating('fork'), async (c) => {
+    let b: z.output<typeof forkBody> = { chat: '', upToSeq: undefined, title: '' };
+    const raw = Buffer.from(await readBody(c.req.raw, MAX_BODY))
+      .toString('utf8')
+      .trim();
+    if (raw) {
+      try {
+        const r = forkBody.safeParse(JSON.parse(raw));
+        if (!r.success) throw r.error;
+        b = r.data;
+      } catch {
+        throw badRequest('the body: {chat, upToSeq?, title?}');
+      }
+    }
+    const id = b.chat || query(c, 'chat');
+    if (!chat.validChatID(id)) throw badRequest("chat: a chat's id");
+    const upToSeq = b.upToSeq ?? undefined;
+    const title = b.title ? b.title.trim() : '';
+    if (title && Buffer.byteLength(title) > 512) throw badRequest('title: too long');
+    c.var.audit.chat = id;
+    if (upToSeq) c.var.audit.upToSeq = upToSeq;
+    const known = board.watch.snapshot().machines[c.var.machine.id]?.states.find((s) => s.id === id);
+    if (known?.kind) {
+      try {
+        await board.ensureSdk(c.var.machine.id, known.kind, bounded(c, timing.sdkMs), {
+          retry: true,
+          audit: (event, fields) => ctx.audit.log(c.var.who, event, fields),
+        });
+      } catch (e) {
+        throw failOf(e);
+      }
+    }
+    const res = await ask(
+      c,
+      { op: chat.Op.Fork, chat: id, ...(upToSeq ? { upToSeq } : {}), ...(title ? { title } : {}) },
+      { ms: timing.sessionsMs, start: true, agent: true },
+    );
+    const newId = res.chat?.id;
+    if (typeof newId !== 'string' || !chat.validChatID(newId)) throw failOf(protocolError("the chat host's answer has no chat"));
+    c.var.audit.forked_chat = newId;
+    return c.json({ chat: res.chat });
+  });
+
+  /** Exports conversation context from a chat and creates a new chat of targetKind. */
+  api.post('/switch', ctx.mutating('switch'), async (c) => {
+    let b: z.output<typeof switchBody>;
+    try {
+      const r = switchBody.safeParse(JSON.parse(Buffer.from(await readBody(c.req.raw, MAX_BODY)).toString('utf8')));
+      if (!r.success) throw r.error;
+      b = r.data;
+    } catch {
+      throw badRequest('the body: {chat, targetKind, options?, upToSeq?}');
+    }
+    if (!chat.validChatID(b.chat)) throw badRequest("chat: a chat's id");
+    if (!chatKinds().includes(b.targetKind)) throw badRequest('targetKind: an agent kind with a chat');
+    const o = b.options;
+    if (o && (!validOption(o.model) || !validOption(o.effort) || (o.mode && !(chat.MODES as readonly string[]).includes(o.mode))))
+      throw badRequest('options: model, effort and a mode');
+    c.var.audit.chat = b.chat;
+    c.var.audit.targetKind = b.targetKind;
+    if (b.upToSeq) c.var.audit.upToSeq = b.upToSeq;
+    if (o?.mode) c.var.audit.mode = o.mode;
+    const options = o && {
+      ...(o.model ? { model: o.model } : {}),
+      ...(o.effort ? { effort: o.effort } : {}),
+      ...(o.mode ? { mode: o.mode } : {}),
+    };
+    try {
+      await board.ensureSdk(c.var.machine.id, b.targetKind, bounded(c, timing.sdkMs), {
+        retry: true,
+        audit: (event, fields) => ctx.audit.log(c.var.who, event, fields),
+      });
+    } catch (e) {
+      throw failOf(e);
+    }
+    const res = await ask(
+      c,
+      {
+        op: chat.Op.Switch,
+        chat: b.chat,
+        targetKind: b.targetKind,
+        ...(b.upToSeq ? { upToSeq: b.upToSeq } : {}),
+        ...(options ? { options } : {}),
+      },
+      { ms: timing.sessionsMs, start: true, agent: true },
+    );
+    const newId = res.chat?.id;
+    if (typeof newId !== 'string' || !chat.validChatID(newId)) throw failOf(protocolError("the chat host's answer has no chat"));
+    c.var.audit.switched_chat = newId;
+    return c.json({ chat: res.chat });
+  });
+
+  /** Exports a chat's conversation as a bounded Markdown digest. */
+  api.get('/export', async (c) => {
+    const id = chatParam(c);
+    const rawSeq = query(c, 'upToSeq');
+    let upToSeq: number | undefined;
+    if (rawSeq !== '') {
+      const n = Number(rawSeq);
+      if (!/^[1-9][0-9]*$/.test(rawSeq) || !Number.isSafeInteger(n)) throw badRequest('upToSeq: a positive sequence number');
+      upToSeq = n;
+    }
+    const res = await ask(c, { op: chat.Op.Export, chat: id, ...(upToSeq ? { upToSeq } : {}) }, { start: false });
+    return c.json({ markdown: res.markdown ?? '' });
   });
 
   ctx.api.get('/hosts', async (c) => c.json({ hosts: await overviews(board, c.req.raw.signal, timing.overviewMs) }));

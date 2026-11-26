@@ -140,7 +140,10 @@ export function prepare(lines: FixtureLine[]): ScriptLine[] {
   const out: ScriptLine[] = [];
   if (!hasInit)
     out.push(
-      { dir: 'in', msg: { type: 'control_request', request_id: 'req_init', request: { subtype: 'initialize' } } },
+      {
+        dir: 'in',
+        msg: { type: 'control_request', request_id: 'req_init', request: { subtype: 'initialize', perTaskStopAffordance: true } },
+      },
       {
         dir: 'out',
         msg: { type: 'control_response', response: { subtype: 'success', request_id: 'req_init', response: canned().initialize } },
@@ -159,6 +162,7 @@ export function prepare(lines: FixtureLine[]): ScriptLine[] {
         b.updatedPermissions = b.updatedPermissions.filter((p) => (p as Msg).type === 'addRules');
     }
     const req = m.request as Msg | undefined;
+    if (l.dir === 'in' && m.type === 'control_request' && req?.subtype === 'initialize') req.perTaskStopAffordance = true;
     if (m.type === 'control_request' && req?.subtype === 'set_model') {
       const r = ms.get(String(req.model));
       if (r) req.model = r;
@@ -286,14 +290,20 @@ export class FakeRun {
   private wake: (() => void) | null = null;
   private readonly server: Server;
   private readonly full: boolean;
+  private readonly rewindScript: boolean;
+  private readonly freshScript: boolean;
 
-  constructor(sc: Script, full?: Script) {
+  constructor(sc: Script, full?: Script, extra?: { rewind?: Script; fresh?: Script }) {
     this.full = !!full;
+    this.rewindScript = !!extra?.rewind;
+    this.freshScript = !!extra?.fresh;
     this.dir = tempDir('cf');
     this.home = tempDir('ch');
     mkdirSync(join(this.home, '.claude'), { recursive: true });
     writeFileSync(join(this.dir, 'script.json'), JSON.stringify(sc), { mode: 0o600 });
     if (full) writeFileSync(join(this.dir, 'full.json'), JSON.stringify(full), { mode: 0o600 });
+    if (extra?.rewind) writeFileSync(join(this.dir, 'rewind.json'), JSON.stringify(extra.rewind), { mode: 0o600 });
+    if (extra?.fresh) writeFileSync(join(this.dir, 'fresh.json'), JSON.stringify(extra.fresh), { mode: 0o600 });
     this.logPath = join(this.dir, 'log.jsonl');
     writeFileSync(this.logPath, '', { mode: 0o600 });
     this.server = createServer((c) => {
@@ -329,6 +339,8 @@ export class FakeRun {
         CLAUDE_CODE_ENTRYPOINT: 'sdk-ts',
         FAKE_CLAUDE_SCRIPT: join(this.dir, 'script.json'),
         ...(this.full ? { FAKE_CLAUDE_FULL_SCRIPT: join(this.dir, 'full.json') } : {}),
+        ...(this.rewindScript ? { FAKE_CLAUDE_REWIND_SCRIPT: join(this.dir, 'rewind.json') } : {}),
+        ...(this.freshScript ? { FAKE_CLAUDE_FRESH_SCRIPT: join(this.dir, 'fresh.json'), FAKE_CLAUDE_INITIAL_SESSION: TEST_SESSION } : {}),
         FAKE_CLAUDE_SOCK: join(this.dir, 's'),
         FAKE_CLAUDE_LOG: this.logPath,
       },
@@ -455,9 +467,21 @@ export async function act(s: Session, l: ScriptLine, uuids: Map<string, string>)
     const msg = m.message as Msg;
     if (msg.content === '/compact') return s.compact(signal());
     const id = String(uuids.size + 1);
+    const uuid = typeof m.uuid === 'string' && m.uuid !== '' ? m.uuid : undefined;
     uuids.set(String(m.uuid), 'm' + id);
-    // The host records a prompt it sees start a turn.
-    return s.prompt({ content: acpContent(msg.content), message: 'm' + id, clientId: 'c' + id, recorded: !cs.turnRuns }, signal());
+    // The host records a prompt it sees start a turn. Recordings that write a
+    // user frame mid-turn exercise Delivery.Steer (direct stdin delivery).
+    return s.prompt(
+      {
+        content: acpContent(msg.content),
+        message: 'm' + id,
+        clientId: 'c' + id,
+        recorded: !cs.turnRuns,
+        ...(uuid ? { uuid } : {}),
+        ...(cs.turnRuns ? { delivery: chat.Delivery.Steer } : {}),
+      },
+      signal(),
+    );
   }
   if (m.type !== 'control_request') return;
   const req = m.request as Msg;

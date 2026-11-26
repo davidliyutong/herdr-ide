@@ -155,11 +155,12 @@ function GoneTitle(p: Omit<TitleProps, 'm'> & { useGone(): string | undefined })
 }
 
 /** The icon of a pane that is not a terminal: VS Code, a preview, or its plugin's. */
-export function LeafIcon({ leaf, className }: { m: string; leaf: L.Leaf; className?: string }) {
+export function LeafIcon({ m, leaf, className }: { m: string; leaf: L.Leaf; className?: string }) {
   if (L.isCodeLeaf(leaf)) return <CodeIcon className={className} />;
   if (L.isPluginLeaf(leaf)) {
     const v = leaf.view;
-    const Icon = (v.kind === PANEL_VIEW ? findPanel(v.plugin, v.panel)?.icon : undefined) ?? paneView(v.plugin, v.kind).def?.icon ?? Puzzle;
+    const def = paneView(v.plugin, v.kind).def;
+    const Icon = (v.kind === PANEL_VIEW ? findPanel(v.plugin, v.panel)?.icon : undefined) ?? def?.iconFor?.(m, v) ?? def?.icon ?? Puzzle;
     return <Icon className={className} />;
   }
   return <Eye className={className} />;

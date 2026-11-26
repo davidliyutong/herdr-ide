@@ -54,6 +54,7 @@ describe('replays', () => {
           const env = r.records()[0]!.env as Record<string, string>;
           expect(env).toEqual({
             CLAUDE_AGENT_SDK_VERSION: SDK_VERSION,
+            CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: 'true',
             CLAUDE_CODE_ENTRYPOINT: SLUG,
             CLAUDE_CODE_SDK_READS_SESSION_STATE: '1',
             KEEP_ME: '1',

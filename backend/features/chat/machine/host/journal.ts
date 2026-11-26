@@ -500,6 +500,105 @@ export class Journal {
     return { deleted: n, done: false };
   }
 
+  /** The stored events of a chat, oldest first, optionally bounded by seq <= upToSeq. */
+  async allEvents(chatId: string, upToSeq?: number): Promise<Stored[]> {
+    const rows =
+      upToSeq !== undefined
+        ? await this.all('SELECT seq, t, item, at, json FROM events WHERE chat = ? AND seq <= ? ORDER BY seq', chatId, upToSeq)
+        : await this.all('SELECT seq, t, item, at, json FROM events WHERE chat = ? ORDER BY seq', chatId);
+    return rows.map((r) => ({
+      seq: num(r.seq!),
+      t: text(r.t!),
+      item: text(r.item!),
+      at: num(r.at!),
+      line: text(r.json!),
+    }));
+  }
+
+  /** Copies stored events from srcChatId (up to upToSeq, or all) into
+   * dstChatId, re-numbered contiguously from 1, and updates dstChatId's
+   * sequence/bytes/turn_end/history_after columns atomically. */
+  async copyEventsUpTo(
+    srcChatId: string,
+    dstChatId: string,
+    upToSeq?: number,
+  ): Promise<{ seq: number; bytes: number; turnEnd: number; historyAfter: string; lastAt: number }> {
+    const src = await this.allEvents(srcChatId, upToSeq);
+    if (src.length === 0) return { seq: 0, bytes: 0, turnEnd: 0, historyAfter: '', lastAt: 0 };
+    const steps: Step[] = [];
+    let seq = 0;
+    let totalBytes = 0;
+    let turnEnd = 0;
+    let historyAfter = '';
+    let lastAt = 0;
+    for (const row of src) {
+      seq++;
+      const parsed = parse<chat.Event | null>(row.line, null);
+      let lineStr = row.line;
+      if (parsed) {
+        parsed.seq = seq;
+        const s = JSON.stringify(parsed);
+        if (s) lineStr = s;
+        if (parsed.t === chat.EventType.Turn && (parsed.state === chat.TurnState.End || parsed.state === chat.TurnState.Error)) {
+          turnEnd = seq;
+        }
+        if (parsed.item && !parsed.parent) historyAfter = parsed.item;
+      } else if (row.item) {
+        historyAfter = row.item;
+      }
+      const b = Buffer.from(lineStr, 'utf8');
+      totalBytes += b.length;
+      if (row.at > lastAt) lastAt = row.at;
+      steps.push({
+        sql: 'INSERT INTO events (chat, seq, t, item, at, json) VALUES (?, ?, ?, ?, ?, ?)',
+        params: [dstChatId, seq, row.t, row.item, row.at, b],
+      });
+    }
+    steps.push({
+      sql: 'UPDATE chats SET seq = ?, bytes = ?, turn_end = ?, history_after = ?, updated = MAX(updated, ?), fresh = 0 WHERE id = ?',
+      params: [seq, totalBytes, turnEnd, historyAfter, lastAt, dstChatId],
+    });
+    await this.tx(...steps);
+    return { seq, bytes: totalBytes, turnEnd, historyAfter, lastAt };
+  }
+
+  /** Removes every stored event of chatId with seq > beforeSeq and
+   * recomputes its row metadata atomically (used by CommandOp.Rewind). */
+  async truncateAfter(
+    chatId: string,
+    beforeSeq: number,
+  ): Promise<{ seq: number; bytes: number; turnEnd: number; historyAfter: string; first: number; updated: number }> {
+    const kept = await this.allEvents(chatId, beforeSeq);
+    let seq = 0;
+    let bytes = 0;
+    let turnEnd = 0;
+    let historyAfter = '';
+    let first = 0;
+    let updated = 0;
+    for (const row of kept) {
+      if (first === 0) first = row.seq;
+      seq = row.seq;
+      bytes += Buffer.byteLength(row.line, 'utf8');
+      if (row.at > updated) updated = row.at;
+      const ev = parse<chat.Event | null>(row.line, null);
+      if (ev) {
+        if (ev.t === chat.EventType.Turn && (ev.state === chat.TurnState.End || ev.state === chat.TurnState.Error)) turnEnd = row.seq;
+        if (ev.item && !ev.parent) historyAfter = ev.item;
+      } else if (row.item) {
+        historyAfter = row.item;
+      }
+    }
+    const ts = updated || Date.now();
+    await this.tx(
+      { sql: 'DELETE FROM events WHERE chat = ? AND seq > ?', params: [chatId, beforeSeq] },
+      {
+        sql: 'UPDATE chats SET seq = ?, bytes = ?, turn_end = ?, history_after = ?, seen = MIN(seen, ?), updated = ?, fresh = ? WHERE id = ?',
+        params: [seq, bytes, turnEnd, historyAfter, seq, ts, seq === 0 ? 1 : 0, chatId],
+      },
+    );
+    return { seq, bytes, turnEnd, historyAfter, first, updated: ts };
+  }
+
   /** Forgets a chat and its events, the events a batch at a time. */
   async deleteChat(chatId: string): Promise<void> {
     for (;;) {
@@ -509,7 +608,10 @@ export class Journal {
       });
       if ((n ?? 0) < DELETE_BATCH) break;
     }
-    await this.tx({ sql: 'DELETE FROM chats WHERE id = ?', params: [chatId] });
+    await this.tx(
+      { sql: 'DELETE FROM chats WHERE id = ?', params: [chatId] },
+      { sql: 'DELETE FROM settings WHERE key = ?', params: [`seed:${chatId}`] },
+    );
   }
 
   /** Returns a bounded number of free pages after deletions. */
@@ -534,6 +636,25 @@ export class Journal {
       sql: 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
       params: ['host', jsonText(s)],
     });
+  }
+
+  /** Reads a JSON value from the settings table by key; undefined when absent. */
+  async getSetting<T>(key: string): Promise<T | undefined> {
+    const [r] = await this.all('SELECT value FROM settings WHERE key = ?', key);
+    return r ? parse<T | undefined>(text(r.value!), undefined) : undefined;
+  }
+
+  /** Persists a JSON value in the settings table under key. */
+  async putSetting(key: string, value: unknown): Promise<void> {
+    await this.tx({
+      sql: 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
+      params: [key, jsonText(value)],
+    });
+  }
+
+  /** Removes a key from the settings table. */
+  async deleteSetting(key: string): Promise<void> {
+    await this.tx({ sql: 'DELETE FROM settings WHERE key = ?', params: [key] });
   }
 
   /** Adds a directory to the trusted list, with the device and inode it

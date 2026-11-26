@@ -137,16 +137,15 @@ describe('stickToEnd', () => {
 });
 
 describe('the conversation view’s messages', () => {
-  it('shows the user’s text as typed and the agent’s as Markdown with tables and formulas', async () => {
+  it('shows the user’s prompt and the agent’s reply as compact Markdown with tables and formulas', async () => {
     const s = new FakeSource();
     s.emit(
       prompt('a **table**\nand a formula'),
       say('| Name | Value |\n| --- | --- |\n| a | 1 |\n\nand $$E=mc^2$$ here\n\n$$\nx^2\n$$', 'm1'),
     );
     await show(s);
-    const user = q('.conv-user-text')!;
-    expect(user.textContent).toBe('a **table**\nand a formula');
-    expect(user.querySelector('strong')).toBeNull();
+    await until(() => q('.conv-user-text strong'));
+    expect(q('.conv-user-text strong')?.textContent).toBe('table');
     await until(() => q('.conv-agent table'));
     expect(qa('.conv-agent th').map((th) => th.textContent)).toEqual(['Name', 'Value']);
     expect(qa('.conv-agent td').map((td) => td.textContent)).toEqual(['a', '1']);
@@ -308,6 +307,11 @@ describe('the conversation view’s messages', () => {
       notice(CHAT_NOTICES.restarted, { mode: 'full' }),
       notice(CHAT_NOTICES.restarted, { mode: 'yolo' }),
       notice(CHAT_NOTICES.handedOff),
+      notice(CHAT_NOTICES.forked),
+      notice(CHAT_NOTICES.switched, { fromKind: 'claude' }),
+      notice(CHAT_NOTICES.switched),
+      notice(CHAT_NOTICES.rewound),
+      notice(CHAT_NOTICES.rewound, { restoreFiles: true }),
     );
     await show(s);
     expect(qa('.conv-notice-text').map((n) => n.textContent)).toEqual([
@@ -322,6 +326,11 @@ describe('the conversation view’s messages', () => {
       t('conversation.notice.restartedFor', { mode: t('conversation.mode.full') }),
       t('conversation.notice.restartedFor', { mode: 'yolo' }),
       t('conversation.notice.handedOff'),
+      t('conversation.notice.forked'),
+      t('conversation.notice.switchedFrom', { agent: 'Claude Code' }),
+      t('conversation.notice.switched'),
+      t('conversation.notice.rewound'),
+      t('conversation.notice.rewoundFiles'),
     ]);
     expect(qa('.conv-notice.error')).toHaveLength(1);
     expect(q('.conv-notice .conv-pre')).toBeNull();
@@ -737,7 +746,7 @@ describe('the conversation view’s composer', () => {
     expect(q<HTMLTextAreaElement>('textarea')!.value).toBe('');
   });
 
-  it('shows how much of the context the session uses, its cost and the tightest limit', async () => {
+  it('shows how much of the context the session uses and its cost, without rate-limit windows', async () => {
     const s = new FakeSource();
     s.emit(update({ sessionUpdate: 'usage_update', used: 50_000, size: 200_000 }));
     await show(s);
@@ -761,15 +770,11 @@ describe('the conversation view’s composer', () => {
         },
       },
     });
-    // No size: tokens.
+    // No size: tokens; rate-limit windows are rendered in the status bar by the AI Usage plugin, not here (#1).
     expect(q('[role="meter"]')).toBeNull();
     expect(q('.conv-usage-tokens')?.textContent).toBe(t('conversation.usage.tokens', { n: '1k' }));
     expect(q('.conv-usage-cost')?.textContent).toBe('$1.50');
-    const limit = q('.conv-usage-limit')!;
-    expect(limit.dataset.level).toBe('high');
-    expect(limit.textContent).toContain(t('conversation.usage.limit', { window: '7d', pct: 91 }));
-    expect(limit.textContent).toContain('in 2 hours');
-    expect(limit.title).toContain(t('conversation.usage.limit', { window: '5h', pct: 40 }));
+    expect(q('.conv-usage-limit')).toBeNull();
     // The agent's own measure.
     await emit(s, { seq: next(), t: 'info', chat: { usage: { used: 1000, size: 0, percentage: 12 } } });
     expect(q('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('12');
@@ -901,7 +906,84 @@ describe('the conversation view’s list', () => {
     const s = new FakeSource();
     s.emit(prompt('old'));
     await show(s);
-    await emit(s, { t: 'reset' }, prompt('new'));
+    await emit(s, { t: 'reset', seq: 99 }, prompt('new'));
     expect(qa('.conv-user-text').map((e) => e.textContent)).toEqual(['new']);
+  });
+});
+
+describe('user message edit & rewind and fork-from-here (#6)', () => {
+  it('offers Edit & Rewind (with optional restoreFiles) and Fork from here when idle and capable', async () => {
+    const s = new FakeSource();
+    const rewind = vi.fn(async () => {});
+    const onFork = vi.fn(async () => {});
+    Object.assign(s, { rewind });
+    const first = prompt('original prompt');
+    s.emit(
+      { seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: true, rewindFiles: true, fork: true } } },
+      first,
+      say('answer'),
+    );
+    await show(s, { onFork });
+
+    const editBtn = q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.editRewind')}"]`)!;
+    const forkBtn = q<HTMLButtonElement>(`button[aria-label="${t('conversation.user.forkHere')}"]`)!;
+    expect(editBtn).not.toBeNull();
+    expect(forkBtn).not.toBeNull();
+
+    // Fork-from-here passes the message seq.
+    await click(forkBtn);
+    expect(onFork).toHaveBeenCalledWith(first.seq);
+
+    // Clicking Edit & Rewind opens inline editor with warning and restoreFiles checkbox.
+    await click(editBtn);
+    const input = q<HTMLTextAreaElement>('.conv-edit-input')!;
+    expect(input.value).toBe('original prompt');
+    expect(q('.conv-edit-warn')?.textContent).toContain(t('conversation.rewind.warning'));
+    const restoreBox = q<HTMLInputElement>('.conv-edit-check input[type="checkbox"]')!;
+    expect(restoreBox.checked).toBe(false);
+    await click(restoreBox);
+    expect(restoreBox.checked).toBe(true);
+    await act(async () => setValue(input, 'edited prompt'));
+    await click(q('.conv-edit-actions .primary'));
+    await settle();
+
+    expect(rewind).toHaveBeenCalledWith(first.seq, {
+      content: [text('edited prompt')],
+      clientId: expect.any(String),
+      restoreFiles: true,
+    });
+    expect(q('.conv-user-edit')).toBeNull();
+  });
+
+  it('hides restoreFiles when caps.rewindFiles is false, reports rewind errors, and hides actions while working or read-only', async () => {
+    const s = new FakeSource();
+    const rewind = vi.fn(async () => {
+      throw Object.assign(new Error('offline'), { code: 'offline' });
+    });
+    const onFork = vi.fn();
+    Object.assign(s, { rewind });
+    s.emit({ seq: next(), t: 'info', chat: { state: 'idle', capabilities: { rewind: true, rewindFiles: false } } }, prompt('try edit'));
+    await show(s, { onFork });
+
+    await click(q(`button[aria-label="${t('conversation.user.editRewind')}"]`));
+    expect(q('.conv-edit-check')).toBeNull();
+    await click(q('.conv-edit-actions .primary'));
+    await settle();
+    expect(q('.conv-user-edit [role="alert"]')?.textContent).toBe(t('conversation.error.offline'));
+
+    // Escape closes editor.
+    await act(async () => {
+      q<HTMLTextAreaElement>('.conv-edit-input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(q('.conv-user-edit')).toBeNull();
+
+    // Hidden while working.
+    await emit(s, { seq: next(), t: 'state', state: 'working' });
+    expect(q('.conv-user-actions')).toBeNull();
+
+    // Hidden when readOnly.
+    await emit(s, { seq: next(), t: 'state', state: 'idle' });
+    await show(s, { onFork, readOnly: true });
+    expect(q('.conv-user-actions')).toBeNull();
   });
 });

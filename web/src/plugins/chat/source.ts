@@ -18,7 +18,7 @@
 // its chat as it was), at most KEEP_IDLE of them.
 import { useEffect, useMemo } from 'react';
 import { readChat, readUsage, type ContentBlock, type SourceEvent, type Usage } from '../../conversation/model';
-import type { ChatSource, FileSuggestion, PermissionReply, QuestionReply } from '../../conversation/source';
+import type { ChatSource, Delivery, FileSuggestion, PermissionReply, QuestionReply, RewindOptions } from '../../conversation/source';
 import { listDir } from '../../lib/files';
 import { RETRY_RESET_MS, retryDelay } from '../../lib/retry';
 import { useStore } from '../../state/store';
@@ -81,6 +81,10 @@ export class ChatSourceImpl implements ChatSource {
   private usage?: Usage;
   /** Its next subscription attaches again (a reattach first). */
   private again = false;
+  /** Number of commands currently awaiting an ack on this subscription. */
+  private inFlight = 0;
+  /** A reset event arrived while a command (e.g. rewind) was awaiting its ack. */
+  private deferredReset = false;
 
   constructor(
     readonly m: string,
@@ -103,8 +107,8 @@ export class ChatSourceImpl implements ChatSource {
     return () => void this.fns.delete(fn);
   }
 
-  send(content: ContentBlock[], clientId: string): Promise<void> {
-    return this.command({ op: 'prompt', content, clientId });
+  send(content: ContentBlock[], clientId: string, delivery?: Delivery): Promise<void> {
+    return this.command({ op: 'prompt', content, clientId, ...(delivery ? { delivery } : {}) });
   }
   cancel(): Promise<void> {
     return this.command({ op: 'cancel' });
@@ -129,8 +133,23 @@ export class ChatSourceImpl implements ChatSource {
   cancelQueued(message: string): Promise<void> {
     return this.command({ op: 'cancel_queued', message });
   }
-  compact(): Promise<void> {
-    return this.command({ op: 'compact' });
+  steerQueued(message: string, delivery: 'steer' | 'interrupt' = 'steer'): Promise<void> {
+    return this.command({ op: 'steer_queued', message, delivery });
+  }
+  compact(instructions?: string): Promise<void> {
+    return this.command({ op: 'compact', ...(instructions ? { instructions } : {}) });
+  }
+  stopTask(taskId: string): Promise<void> {
+    return this.command({ op: 'stop_task', task: taskId });
+  }
+  rewind(seq: number, opts: RewindOptions = {}): Promise<void> {
+    return this.command({
+      op: 'rewind',
+      seq,
+      ...(opts.content ? { content: opts.content } : {}),
+      ...(opts.clientId ? { clientId: opts.clientId } : {}),
+      ...(opts.restoreFiles ? { restoreFiles: true } : {}),
+    });
   }
   /** Sets the chat's title. */
   rename(title: string): Promise<void> {
@@ -156,13 +175,33 @@ export class ChatSourceImpl implements ChatSource {
   }
 
   /** The files and folders of the chat's directory that match what the
-   * user typed after `@`: a path relative to it, whose last part is
-   * matched against the names of the folder before it (names that start
-   * with it first). Names with white space cannot be written after `@`
-   * and are left out. */
+   * user typed after `@`. For non-empty relative queries that do not end in
+   * `/`, tries the machine's recursive `/p/files/find` endpoint first and
+   * falls back gracefully to `listDir` on the folder before the last `/`. */
   async suggestFiles(query: string): Promise<FileSuggestion[]> {
     const cwd = chatCwd(this.m, this.chat);
     if (!cwd?.startsWith('/') || /\s/.test(query)) return [];
+    if (query !== '' && !query.startsWith('/') && !query.endsWith('/')) {
+      try {
+        const params = new URLSearchParams({ dir: cwd, query, limit: '50' });
+        const r = await fetch(`/api/m/${encodeURIComponent(this.m)}/p/files/find?${params}`, { cache: 'no-store' });
+        if (r.ok) {
+          const j: unknown = await r.json();
+          if (isObject(j) && Array.isArray(j.matches)) {
+            const out: FileSuggestion[] = [];
+            for (const m of j.matches.slice(0, 50)) {
+              if (!isObject(m) || typeof m.path !== 'string' || !m.path || typeof m.rel !== 'string' || !m.rel) continue;
+              const isDir = m.is_dir === true;
+              const label = isDir && !m.rel.endsWith('/') ? `${m.rel}/` : m.rel;
+              out.push(isDir ? { path: m.path, label, isDir: true } : { path: m.path, label });
+            }
+            return out;
+          }
+        }
+      } catch {
+        // Fall through to directory listing.
+      }
+    }
     const cut = query.lastIndexOf('/');
     const head = cut >= 0 ? query.slice(0, cut + 1) : '';
     const tail = (cut >= 0 ? query.slice(cut + 1) : query).toLowerCase();
@@ -177,6 +216,7 @@ export class ChatSourceImpl implements ChatSource {
     return [...starts, ...within].slice(0, 50).map((e) => ({
       path: base + e.name,
       label: head + e.name + (e.is_dir ? '/' : ''),
+      ...(e.is_dir ? { isDir: true } : {}),
     }));
   }
 
@@ -193,6 +233,7 @@ export class ChatSourceImpl implements ChatSource {
   /** Ends the subscription for good. */
   stop() {
     this.stopped = true;
+    this.deferredReset = false;
     clearTimeout(this.retryTimer);
     this.cur?.sub?.detach();
     this.cur = undefined;
@@ -297,7 +338,35 @@ export class ChatSourceImpl implements ChatSource {
     }, wait);
   }
 
+  private performReset() {
+    const prev = this.cur;
+    this.stored = [];
+    this.liveEvents = [];
+    this.last = 0;
+    this.attachedNow = false;
+    this.emit({ t: 'reset' });
+    this.cur = undefined;
+    queueMicrotask(() => {
+      prev?.sub?.detach();
+      if (!this.stopped && !this.cur) this.attach();
+    });
+  }
+
   private event(ev: Event) {
+    // Rewind broadcasts a reset event whose seq is the new truncated head
+    // (lower than this.last): clear local log and re-attach from 0 so live
+    // subscribers reload the truncated history cleanly. Guard against replaying
+    // a stored reset immediately after attach from 0, and defer detaching while
+    // an in-flight command (such as rewind itself) is still awaiting its ack.
+    if ((ev as { t: string }).t === 'reset') {
+      if (this.last === 0 && this.stored.length <= 1 && ev.live !== true) return;
+      if (this.inFlight > 0) {
+        this.deferredReset = true;
+        return;
+      }
+      this.performReset();
+      return;
+    }
     const stored = ev.live !== true && typeof ev.seq === 'number';
     if (stored) {
       if (ev.seq! <= this.last) return;
@@ -382,7 +451,16 @@ export class ChatSourceImpl implements ChatSource {
   private async command(cmd: Omit<Command, 'id'>): Promise<void> {
     if (this.readOnly) throw new CommandError('read_only');
     await this.ready();
-    await this.conn.command(this.m, this.chat, cmd as Command);
+    this.inFlight++;
+    try {
+      await this.conn.command(this.m, this.chat, cmd as Command);
+    } finally {
+      this.inFlight--;
+      if (this.inFlight === 0 && this.deferredReset && !this.stopped) {
+        this.deferredReset = false;
+        this.performReset();
+      }
+    }
   }
 }
 

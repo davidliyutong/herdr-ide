@@ -38,10 +38,11 @@
    "t": "notice",
    "method": "_veldr/compacted",
    "params": {
-    "postTokens": 13001,
+    "trigger": "manual",
     "preTokens": 41753,
-    "trigger": "manual"
-   }
+    "postTokens": 13001
+   },
+   "entryUuid": "00000000-0000-4000-8000-000000000022"
   },
   {
    "t": "turn",
@@ -248,15 +249,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -276,7 +277,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 0,

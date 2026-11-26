@@ -223,6 +223,11 @@ Every setting is defined in the hub (`backend/kernel/config` and the features' `
 | `chat.retentionDays` | integer, 1–365 | `30` | – | per machine |
 | `chat.maxTotalMB` | integer, 64–2048 | `512` | – | per machine |
 | `chat.maxChatMB` | integer, 8–256 | `64` | – | per machine |
+| `chat.visibleModels.claude` | list of strings | `[]` | – | – |
+| `chat.visibleModels.codex` | list of strings | `[]` | – | – |
+| `chat.visibleModels.agy` | list of strings | `[]` | – | – |
+| `chat.visibleModels.kimi` | list of strings | `[]` | – | – |
+| `chat.visibleModels.grok` | list of strings | `[]` | – | – |
 | `performance.keptTerminals` | integer, 0–64 | `12` | – | – |
 | `machines.download` | `true`, `false` | `true` | `--machine-download` | per machine |
 
@@ -408,6 +413,7 @@ Plugin routes answer `404 plugin_disabled` while their plugin is off; changes ar
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
 | `POST /api/m/{id}/p/files/stat` | – | State of 1–200 paths (`{"paths"}`) for the explorer's poll; a POST only for size ([28](features/28-file-explorer.md)). |
+| `GET /api/m/{id}/p/files/find` | – | Bounded recursive file and directory search below `?dir=` (`&query=`, `&limit=` 1–200, default 50) for `@` path completion; respects `.gitignore`, never follows symlinks, capped at 2000 entries / 2 s on the machine. |
 | `POST /api/m/{id}/p/files/{action}` | writes | `mkdir` (`"unique"`), `mkdirs`, `create`, `rename`, `move`, `copy`, `trash`, `remove`; never replaces existing names. |
 | `POST /api/m/{id}/p/files/write` | writes | Saves the body (≤ 8 MiB) to `?path=` if it still has `&mtime=&size=` (`&new=1`, `&force=1`); else `409 conflict`. |
 | `POST /api/m/{id}/p/files/upload` | writes | Writes the body (≤ 4 GiB) to `?path=` under a free name, or over it with `&replace=1`. |
@@ -442,9 +448,14 @@ The chat plugin ([37](features/37-agent-chats.md)). GETs never start a machine's
 | --- | --- | --- |
 | `GET /api/m/{id}/p/chat/agents` | – | Agent kinds the chat host can start, with version or reason (`not_found`, `unsupported`). |
 | `POST /api/m/{id}/p/chat/agents` | writes | The same, starting the host. |
+| `GET /api/m/{id}/p/chat/models` | – | Cached model list for an agent kind (`?kind=`), starting no host or agent. |
+| `POST /api/m/{id}/p/chat/models` | writes | Refreshes or fetches the model list for an agent kind (`{kind, cwd?, refresh?}`), starting the host and probing the agent. |
 | `GET /api/m/{id}/p/chat/chats` | – | The machine's chats, latest first. |
 | `POST /api/m/{id}/p/chat/sessions` | writes | A page of an agent's sessions for a directory (`?kind=&cwd=&cursor=`); a change because listing may run the agent. |
 | `POST /api/m/{id}/p/chat/new` | writes | A new chat (`{kind, cwd, resume?, import?, options?: {model?, effort?, mode?}, workspace?}`). When `workspace` has linked vault presets and the vault is unlocked, injects resolved preset env vars into the new agent process (never persisted to disk) and returns an optional non-secret `vault` summary. |
+| `POST /api/m/{id}/p/chat/fork` | writes | Forks a chat (`{chat, upToSeq?, title?}`) into a new chat using native session fork where supported or a context-seeded fallback. |
+| `POST /api/m/{id}/p/chat/switch` | writes | Exports a chat's conversation digest and creates a new chat of `targetKind` (`{chat, targetKind, options?, upToSeq?}`) seeded once with that context. |
+| `GET /api/m/{id}/p/chat/export` | – | Bounded Markdown digest of a chat's conversation (`?chat=`, optional `&upToSeq=`). |
 | `POST /api/m/{id}/p/chat/close` | writes | Ends a chat's agent, keeping the chat (`?chat=`). |
 | `DELETE /api/m/{id}/p/chat/chat` | writes | Forgets a chat and its log; the agent's own session stays. |
 | `POST /api/m/{id}/p/chat/archive` | writes | Ends the agent and keeps the chat archived. |

@@ -293,3 +293,62 @@ export function contextSizes(raw: unknown): Map<string, number> {
   }
   return out;
 }
+
+/** Extracts available models for Op.Models from a session/new response's
+ * configOptions (category "model") with fallback to legacy
+ * models.availableModels, enriching effort metadata where available. */
+export function modelOptions(rawConfig: unknown, rawModels: unknown, images: boolean): chat.ModelOption[] {
+  const effortsByModel = new Map<string, { efforts: string[]; defaultEffort?: string }>();
+  const legacy: chat.ModelOption[] = [];
+  if (isObj(rawModels) && Array.isArray(rawModels.availableModels)) {
+    for (const m of rawModels.availableModels) {
+      if (!isObj(m) || typeof m.modelId !== 'string' || m.modelId === '') continue;
+      if (legacy.length >= MAX_CONFIG_VALUES) break;
+      const name = typeof m.name === 'string' && m.name ? clip(m.name, MAX_NAME) : clip(m.modelId, MAX_NAME);
+      const description = typeof m.description === 'string' && m.description ? clip(m.description, MAX_TEXT) : undefined;
+      let efforts: string[] | undefined;
+      let defaultEffort: string | undefined;
+      if (isObj(m._meta) && Array.isArray(m._meta.reasoningEfforts)) {
+        const vals: string[] = [];
+        for (const e of m._meta.reasoningEfforts) {
+          if (!isObj(e)) continue;
+          const v = typeof e.value === 'string' && e.value ? e.value : typeof e.id === 'string' ? e.id : '';
+          if (!v) continue;
+          vals.push(v);
+          if (e.default === true && !defaultEffort) defaultEffort = v;
+        }
+        if (vals.length > 0) {
+          efforts = vals;
+          if (!defaultEffort && typeof m._meta.reasoningEffort === 'string' && vals.includes(m._meta.reasoningEffort)) {
+            defaultEffort = m._meta.reasoningEffort;
+          }
+          effortsByModel.set(m.modelId, { efforts, ...(defaultEffort ? { defaultEffort } : {}) });
+        }
+      }
+      legacy.push({
+        value: m.modelId,
+        name,
+        ...(description ? { description } : {}),
+        ...(efforts ? { efforts } : {}),
+        ...(defaultEffort ? { defaultEffort } : {}),
+        ...(images ? { images: true } : {}),
+      });
+    }
+  }
+  const cfg = configOptions(rawConfig);
+  const modelOpt = cfg ? optionOf(cfg, chat.Category.Model) : undefined;
+  if (modelOpt?.options?.length) {
+    return modelOpt.options.map((v) => {
+      const eff = effortsByModel.get(v.value);
+      return {
+        value: v.value,
+        name: v.name || v.value,
+        ...(v.description ? { description: v.description } : {}),
+        ...(eff?.efforts ? { efforts: eff.efforts } : {}),
+        ...(eff?.defaultEffort ? { defaultEffort: eff.defaultEffort } : {}),
+        ...(images ? { images: true } : {}),
+      };
+    });
+  }
+  return legacy;
+}

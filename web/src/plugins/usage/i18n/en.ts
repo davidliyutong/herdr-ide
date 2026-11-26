@@ -132,6 +132,7 @@ export const en = {
   'usage.session.label': 'AI usage of the {agent} session: {cost}',
   'usage.session.labelContext': 'AI usage of the {agent} session: {cost}, context {context}',
   'usage.session.context.short': '{context} ctx',
+  'usage.session.session': 'Session',
   'usage.session.model': 'Model',
   'usage.session.cost': 'Cost at API prices',
   'usage.session.noPrice': 'a model has no price',

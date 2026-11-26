@@ -63,6 +63,15 @@ describe('wire', () => {
     const m = clientMessage.parse({ op: 'command', id: 'p1', m: 'gpu', chat: 'c1', cmd: { op: 'cancel', id: 'x', extra: 1, title: null } });
     expect(m).toMatchObject({ op: 'command', id: 'p1', m: 'gpu', chat: 'c1', sub: '', from: 0 });
     expect(commandLine(m.cmd!, 'k1')).toBe('{"op":"cancel","id":"k1"}\n');
+    // Empty answers ({}) on CommandOp.Answer is preserved for all-optional questions.
+    const emptyAns = clientMessage.parse({
+      op: 'command',
+      id: 'p2',
+      m: 'gpu',
+      chat: 'c1',
+      cmd: { op: chat.CommandOp.Answer, id: 'x', request: 'q1', answers: {} },
+    });
+    expect(commandLine(emptyAns.cmd!, 'k2')).toBe('{"op":"answer","id":"k2","request":"q1","answers":{}}\n');
     const p = clientMessage.parse({
       op: 'command',
       cmd: {
@@ -183,7 +192,17 @@ describe('settings', () => {
   test('host settings', () => {
     const st = new Settings('', { modules: [settings] });
     expect(hostSettings(st, 'm')).toEqual(chat.defaultHostSettings());
-    for (const d of st.defs()) expect([d.key, d.scope, d.section]).toEqual([d.key, 'machine', 'chat']);
+    for (const d of st.defs()) {
+      const wantScope = d.key.startsWith('chat.visibleModels.') ? 'app' : 'machine';
+      expect([d.key, d.scope, d.section]).toEqual([d.key, wantScope, 'chat']);
+    }
+    // Per-provider visible model allowlists default to empty (= show all).
+    for (const k of ['claude', 'codex', 'agy', 'kimi', 'grok']) {
+      expect(st.get(`chat.visibleModels.${k}`, '')).toEqual([]);
+    }
+    st.set('chat.visibleModels.claude', '', ['claude-sonnet-4-6', 'claude-opus-4-6']);
+    expect(st.get('chat.visibleModels.claude', '')).toEqual(['claude-sonnet-4-6', 'claude-opus-4-6']);
+    expect(() => st.set('chat.visibleModels.claude', '', [''])).toThrow();
     st.set('chat.permissionMode', 'gpu', chat.Mode.Full);
     expect(hostSettings(st, 'gpu')).toEqual(chat.defaultHostSettings());
     st.set('chat.allowFullAccess', 'gpu', true);

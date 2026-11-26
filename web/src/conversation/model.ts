@@ -13,7 +13,17 @@
 // here: the reducer checks the type of every member it keeps, and the view
 // reads text through asText.
 import { APP_SLUG } from '../brand';
-import type { Capabilities, ConfigOption, ConfigValue, Limit, SlashCommand } from '../plugins/chat/protocol';
+import type {
+  BackgroundTask,
+  Capabilities,
+  ConfigOption,
+  ConfigValue,
+  Limit,
+  SlashCommand,
+  TaskKind,
+  TaskStatus,
+} from '../plugins/chat/protocol';
+import type { TaskMeta } from './source';
 
 // ---- ACP v1 ----
 
@@ -276,6 +286,8 @@ export interface Question {
   allowOther?: boolean;
   /** The answer is not shown as typed. */
   secret?: boolean;
+  /** Submitting without answering this question is allowed. */
+  optional?: boolean;
   options?: QuestionOption[];
 }
 
@@ -342,6 +354,10 @@ export interface ChatEvent {
   by?: string;
   /** question: what is asked. */
   questions?: Question[];
+  /** question: non-blocking async question that survives turn end. */
+  async?: boolean;
+  /** question: auto-resolution timeout in ms, when the agent reports one. */
+  autoResolutionMs?: number;
   /** question_done: the answers by question id (option labels or the
    * user's own words); none when it was skipped or cancelled. */
   answers?: Record<string, string[]>;
@@ -353,9 +369,10 @@ export interface ChatEvent {
 }
 
 /** What a source says when what it gave so far no longer holds (another
- * file, another session): the view starts over. */
+ * file, another session, or a rewind reset): the view starts over. */
 export interface ResetEvent {
   t: 'reset';
+  seq?: number;
 }
 /** What a source says when it attached again after losing its connection:
  * the stored events it gives next follow those it gave, but live increments
@@ -420,6 +437,12 @@ export const CHAT_NOTICES = {
   /** The chat had full access, which the machine's settings no longer
    * allow: its agent started in the default mode (params: {mode}). */
   fullAccessOff: noticeMethod('full_access_off'),
+  /** The chat was forked from an earlier conversation. */
+  forked: noticeMethod('forked'),
+  /** The chat was switched from another agent with exported context (params: {fromKind?, fromChat?}). */
+  switched: noticeMethod('switched'),
+  /** The conversation was rewound to an earlier user turn (params: {restoreFiles?}). */
+  rewound: noticeMethod('rewound'),
 } as const;
 
 /** The notice the view adds when a turn ends for another reason than the
@@ -431,11 +454,24 @@ export const NOTABLE_STOPS = ['cancelled', 'max_tokens', 'max_turn_requests', 'r
 
 // ---- the conversation ----
 
+/** An async follow-up question attached to an agent message (Codex
+ * AgentMessageThreadItem.questions, stored in `_meta.<slug>.questions`). */
+export interface AsyncFollowUpQuestion {
+  title: string;
+  options?: string[];
+}
+
 export interface MessageItem {
   kind: 'message';
   id: string;
   role: 'user' | 'agent';
   content: ContentBlock[];
+  /** Journal sequence number of a stored user message (for rewind / fork-from-here). */
+  seq?: number;
+  /** Message delivery mode when annotated by the adapter (e.g. 'async'). */
+  delivery?: string;
+  /** Follow-up questions attached to an agent message for history replay. */
+  followUpQuestions?: AsyncFollowUpQuestion[];
   /** Its text is still arriving (live increments): the view draws it a
    * part at a time until its stored event gives it whole. */
   live?: boolean;
@@ -510,6 +546,12 @@ export interface QuestionItem {
   request: string;
   questions: Question[];
   parent?: string;
+  /** Non-blocking async question (stays interactive across turn end without blocking composer). */
+  async?: boolean;
+  /** Auto-resolution timeout in ms, when reported by the agent. */
+  autoResolutionMs?: number;
+  /** Correlated agent message item key (`ev.item`) to suppress duplicate inline follow-up questions. */
+  sourceItem?: string;
   /** Answered or skipped (question_done). */
   done?: boolean;
   /** The answers by question id; none when skipped or cancelled. */
@@ -552,6 +594,7 @@ export interface ChatInfo {
   config: ConfigOption[];
   commands: SlashCommand[];
   usage?: Usage;
+  tasks?: BackgroundTask[];
   capabilities: Capabilities;
 }
 
@@ -565,6 +608,11 @@ export const NO_CAPABILITIES: Capabilities = Object.freeze({
   effort: false,
   model: false,
   cancelQueued: false,
+  steer: false,
+  stopTask: false,
+  fork: false,
+  rewind: false,
+  rewindFiles: false,
 });
 
 export interface Conversation {
@@ -685,7 +733,39 @@ const count = (v: unknown): number | undefined => (typeof v === 'number' && Numb
 /** The most of a list a machine sends the view keeps: configuration
  * options, their values, commands, limit windows, questions and their
  * options, permission options, queued messages. */
-const MAX_LIST = { config: 64, values: 256, commands: 500, limits: 16, questions: 16, options: 64, queued: 100 } as const;
+const MAX_LIST = { config: 64, values: 256, commands: 500, limits: 16, questions: 16, options: 64, queued: 100, tasks: 64 } as const;
+
+const TASK_KINDS_SET: ReadonlySet<string> = new Set(['shell', 'subagent', 'monitor', 'workflow', 'other']);
+const TASK_STATUSES_SET: ReadonlySet<string> = new Set(['running', 'pending', 'completed', 'failed', 'stopped']);
+
+function readTask(v: unknown): BackgroundTask | undefined {
+  if (!isObject(v) || !nonEmpty(v.id)) return undefined;
+  const kind: TaskKind = typeof v.kind === 'string' && TASK_KINDS_SET.has(v.kind) ? (v.kind as TaskKind) : 'other';
+  const status: TaskStatus = typeof v.status === 'string' && TASK_STATUSES_SET.has(v.status) ? (v.status as TaskStatus) : 'running';
+  const out: BackgroundTask = { id: v.id as string, kind, status, description: asText(v.description) ?? '' };
+  const command = nonEmpty(v.command);
+  if (command) out.command = command;
+  const agentType = nonEmpty(v.agentType);
+  if (agentType) out.agentType = agentType;
+  const toolCallId = nonEmpty(v.toolCallId);
+  if (toolCallId) out.toolCallId = toolCallId;
+  const parentTaskId = nonEmpty(v.parentTaskId);
+  if (parentTaskId) out.parentTaskId = parentTaskId;
+  const pid = count(v.pid);
+  if (pid !== undefined && pid > 0 && Number.isInteger(pid)) out.pid = pid;
+  if (v.backgrounded === true) out.backgrounded = true;
+  if (v.stoppable === true) out.stoppable = true;
+  else if (v.stoppable === false) out.stoppable = false;
+  const startedAt = nonEmpty(v.startedAt);
+  if (startedAt) out.startedAt = startedAt;
+  const tokens = count(v.tokens);
+  if (tokens !== undefined) out.tokens = tokens;
+  const toolUses = count(v.toolUses);
+  if (toolUses !== undefined) out.toolUses = toolUses;
+  const durationMs = count(v.durationMs);
+  if (durationMs !== undefined) out.durationMs = durationMs;
+  return out;
+}
 
 function readError(e: unknown): ChatError | undefined {
   if (!isObject(e)) return undefined;
@@ -790,6 +870,10 @@ export function readChat(chat: unknown): ChatInfo | undefined {
   if (chat.handedOff === true) out.handedOff = true;
   const usage = readUsage(chat.usage);
   if (usage) out.usage = usage;
+  if (Array.isArray(chat.tasks)) {
+    const tasks = chat.tasks.slice(0, MAX_LIST.tasks).flatMap((t) => readTask(t) ?? []);
+    if (tasks.length) out.tasks = tasks;
+  }
   return out;
 }
 
@@ -805,13 +889,16 @@ export function configOf(chat: ChatInfo | undefined, category: string): ConfigOp
 const questionId = (id: unknown): id is string => !!nonEmpty(id) && !Object.hasOwn(Object.prototype, id as string);
 
 function readQuestion(q: unknown): Question | undefined {
-  if (!isObject(q) || !questionId(q.id) || !nonEmpty(q.question)) return undefined;
-  const out: Question = { id: q.id as string, question: q.question as string };
-  const header = asText(q.header);
-  if (header) out.header = header;
+  if (!isObject(q) || !questionId(q.id)) return undefined;
+  const text = nonEmpty(q.question);
+  const header = nonEmpty(q.header);
+  if (!text && !header) return undefined;
+  const out: Question = { id: q.id as string, question: text ?? header! };
+  if (header && text) out.header = header;
   if (q.multiSelect === true) out.multiSelect = true;
   if (q.allowOther === true) out.allowOther = true;
   if (q.secret === true) out.secret = true;
+  if (q.optional === true) out.optional = true;
   if (Array.isArray(q.options)) {
     const options = q.options.slice(0, MAX_LIST.options).flatMap((o): QuestionOption[] => {
       if (!isObject(o) || !nonEmpty(o.label)) return [];
@@ -1010,6 +1097,93 @@ export function ownMeta(x: unknown): Record<string, unknown> | undefined {
   return isObject(own) ? own : undefined;
 }
 
+/** Merges two `_meta` records without losing earlier fields under the
+ * product's slug (e.g. `task_started` metadata preserved across `task_progress`
+ * updates). */
+function mergeMeta(prev: Record<string, unknown> | undefined, next: Record<string, unknown>): Record<string, unknown> {
+  if (!prev) return { ...next };
+  const out: Record<string, unknown> = { ...prev, ...next };
+  const prevOwn = isObject(prev[APP_SLUG]) ? (prev[APP_SLUG] as Record<string, unknown>) : undefined;
+  const nextOwn = isObject(next[APP_SLUG]) ? (next[APP_SLUG] as Record<string, unknown>) : undefined;
+  if (prevOwn && nextOwn) {
+    const mergedOwn: Record<string, unknown> = { ...prevOwn, ...nextOwn };
+    if (isObject(prevOwn.task) && isObject(nextOwn.task)) {
+      mergedOwn.task = { ...(prevOwn.task as Record<string, unknown>), ...(nextOwn.task as Record<string, unknown>) };
+    }
+    if (isObject(prevOwn.subagent) && isObject(nextOwn.subagent)) {
+      mergedOwn.subagent = { ...(prevOwn.subagent as Record<string, unknown>), ...(nextOwn.subagent as Record<string, unknown>) };
+    }
+    out[APP_SLUG] = mergedOwn;
+  }
+  return out;
+}
+
+/** Structured task / subagent / background-process metadata extracted from a
+ * tool call's `_meta.<slug>` and `rawInput`. */
+export function taskMeta(item: ToolItem): TaskMeta | undefined {
+  const own = ownMeta({ _meta: item.meta });
+  const rawTask = isObject(own?.task) ? (own.task as Record<string, unknown>) : undefined;
+  const rawSub = isObject(own?.subagent) ? (own.subagent as Record<string, unknown>) : undefined;
+  const processId = nonEmpty(own?.processId);
+  const rawInput = isObject(item.rawInput) ? item.rawInput : undefined;
+  const runInBg = rawInput?.run_in_background === true || rawInput?.runInBackground === true;
+  const codexAgentPath = nonEmpty(rawInput?.agentPath) ?? nonEmpty(rawSub?.agentPath);
+  const codexThreadId = nonEmpty(rawSub?.threadId);
+  const codexCollabTool = nonEmpty(rawSub?.tool) ?? (rawInput?.tool === 'spawnAgent' ? 'spawnAgent' : undefined);
+  if (!rawTask && !rawSub && !processId && !runInBg && !codexAgentPath && !codexCollabTool) return undefined;
+
+  const out: TaskMeta = {};
+  const taskId = nonEmpty(rawTask?.taskId) ?? nonEmpty(rawTask?.task_id) ?? nonEmpty(rawTask?.id) ?? codexThreadId ?? processId;
+  if (taskId) out.taskId = taskId;
+  const type = nonEmpty(rawTask?.type) ?? (runInBg ? 'local_bash' : rawSub || codexAgentPath || codexCollabTool ? 'subagent' : undefined);
+  if (type) out.type = type;
+  const description = nonEmpty(rawTask?.description);
+  if (description) out.description = description;
+  const lastTool = nonEmpty(rawTask?.lastTool) ?? nonEmpty(rawTask?.last_tool_name);
+  if (lastTool) out.lastTool = lastTool;
+  const tokens = count(rawTask?.tokens);
+  if (tokens !== undefined && tokens > 0) out.tokens = tokens;
+  const toolUses = count(rawTask?.toolUses);
+  if (toolUses !== undefined && toolUses > 0) out.toolUses = toolUses;
+  const durationMs = count(rawTask?.durationMs);
+  if (durationMs !== undefined && durationMs > 0) out.durationMs = durationMs;
+  const summary = nonEmpty(rawTask?.summary);
+  if (summary) out.summary = summary;
+  if (rawTask?.backgrounded === true || rawTask?.is_backgrounded === true || type === 'local_bash' || runInBg || processId !== undefined) {
+    out.backgrounded = true;
+  }
+  if (rawTask?.stoppable === true) out.stoppable = true;
+  else if (rawTask?.stoppable === false) out.stoppable = false;
+  const subagentType =
+    nonEmpty(rawTask?.subagentType) ?? nonEmpty(rawTask?.subagent_type) ?? codexAgentPath ?? (codexCollabTool ? 'subagent' : undefined);
+  if (subagentType) out.subagentType = subagentType;
+  const parentTaskId = nonEmpty(rawTask?.parentTaskId) ?? nonEmpty(rawTask?.parent_task_id);
+  if (parentTaskId) out.parentTaskId = parentTaskId;
+  const error = nonEmpty(rawTask?.error);
+  if (error) out.error = error;
+  if (processId) out.processId = processId;
+  return out;
+}
+
+/** Reads well-formed async follow-up questions from `_meta.<slug>.questions`. */
+function readFollowUpQuestions(v: unknown): AsyncFollowUpQuestion[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: AsyncFollowUpQuestion[] = [];
+  for (const raw of v.slice(0, MAX_LIST.questions)) {
+    if (!isObject(raw)) continue;
+    const title = asText(raw.title)?.trim();
+    if (!title) continue;
+    const options = Array.isArray(raw.options)
+      ? raw.options
+          .slice(0, MAX_LIST.options)
+          .map((o) => (typeof o === 'string' ? o.trim() : ''))
+          .filter(Boolean)
+      : [];
+    out.push(options.length ? { title, options } : { title });
+  }
+  return out.length ? out : undefined;
+}
+
 const withAt = <T extends Item>(item: T, at: unknown): T => (typeof at === 'string' && at ? { ...item, at } : item);
 
 /** An item without its live mark. */
@@ -1034,20 +1208,30 @@ function chunk(w: Work, ev: ChatEvent, u: MessageChunk) {
   const meta = (u as { _meta?: unknown })._meta;
   const block = marked(u.content, meta);
   const live = ev.live === true;
+  const own = isObject(meta) && isObject(meta[APP_SLUG]) ? (meta[APP_SLUG] as Record<string, unknown>) : undefined;
+  const delivery = kind === 'message' && role === 'agent' ? nonEmpty(own?.delivery) : undefined;
+  const followUp = kind === 'message' && role === 'agent' ? readFollowUpQuestions(own?.questions) : undefined;
   // A thought's estimate: the latest an increment gives, the one its
   // stored state gives.
   const estimate = kind === 'thought' ? estimatedTokens(meta) : undefined;
-  const estimated = <T extends MessageItem | ThoughtItem>(it: T, whole: boolean): T => {
-    if (it.kind !== 'thought' || (estimate === undefined && !(whole && it.estimatedTokens !== undefined))) return it;
-    const out = { ...it };
-    if (estimate === undefined) delete (out as ThoughtItem).estimatedTokens;
-    else (out as ThoughtItem).estimatedTokens = estimate;
-    return out;
+  const annotate = <T extends MessageItem | ThoughtItem>(it: T, whole: boolean): T => {
+    if (it.kind === 'thought') {
+      if (estimate === undefined && !(whole && it.estimatedTokens !== undefined)) return it;
+      const out = { ...it };
+      if (estimate === undefined) delete (out as ThoughtItem).estimatedTokens;
+      else (out as ThoughtItem).estimatedTokens = estimate;
+      return out;
+    }
+    if (delivery === undefined && followUp === undefined) return it;
+    const out: MessageItem = { ...it };
+    if (delivery !== undefined) out.delivery = delivery;
+    if (followUp !== undefined) out.followUpQuestions = followUp;
+    return out as T;
   };
   const make = (id: string): MessageItem | ThoughtItem => {
     const it: MessageItem | ThoughtItem = kind === 'thought' ? { kind, id, content: [block] } : { kind, id, role, content: [block] };
     if (live) it.live = true;
-    return estimated(withAt(it, ev.at), true);
+    return annotate(withAt(it, ev.at), true);
   };
   const key = nonEmpty(ev.item);
   if (key !== undefined) {
@@ -1057,12 +1241,12 @@ function chunk(w: Work, ev: ChatEvent, u: MessageChunk) {
     if (prev && !same(prev)) return unknown(w);
     if (live) {
       remember(w, id, prev);
-      if (i !== undefined && prev) put(w, i, estimated({ ...prev, content: appendBlock(prev.content, block), live: true }, false));
+      if (i !== undefined && prev) put(w, i, annotate({ ...prev, content: appendBlock(prev.content, block), live: true }, false));
       else add(w, make(id));
       return;
     }
     forget(w, id);
-    if (i !== undefined && prev) put(w, i, estimated(settledItem({ ...prev, content: [block] }), true));
+    if (i !== undefined && prev) put(w, i, annotate(settledItem({ ...prev, content: [block] }), true));
     else add(w, make(id));
     return;
   }
@@ -1084,7 +1268,7 @@ function chunk(w: Work, ev: ChatEvent, u: MessageChunk) {
   const prev = i === undefined ? undefined : c.items[i];
   if (live) remember(w, id, prev);
   if (i !== undefined && same(prev)) {
-    const next = estimated(withAt({ ...prev, content: appendBlock(prev.content, block) }, prev.at ?? ev.at), false);
+    const next = annotate(withAt({ ...prev, content: appendBlock(prev.content, block) }, prev.at ?? ev.at), false);
     put(w, i, live ? { ...next, live: true } : next);
     return;
   }
@@ -1133,7 +1317,7 @@ function applyTool(prev: ToolItem | undefined, id: string, u: ToolCall | ToolCal
   if (u.rawInput !== undefined) next.rawInput = u.rawInput;
   if (u.rawOutput !== undefined) next.rawOutput = u.rawOutput;
   const meta = (u as { _meta?: unknown })._meta;
-  if (isObject(meta)) next.meta = { ...prev?.meta, ...meta };
+  if (isObject(meta)) next.meta = mergeMeta(prev?.meta, meta);
   return next;
 }
 
@@ -1226,11 +1410,21 @@ const clientItem = (clientId: string) => `message:user:c:${clientId}`;
 const queuedItem = (message: string) => `message:user:q:${message}`;
 
 /** A user's message the agent took: once, by the page's id of it. */
-function userMessage(w: Work, id: string, content: ContentBlock[], at: unknown) {
+function userMessage(w: Work, id: string, content: ContentBlock[], at: unknown, seq?: number) {
   const i = indexOf(w.c, id);
-  if (i === undefined) return add(w, withAt({ kind: 'message', id, role: 'user', content }, at));
+  if (i === undefined) {
+    const item: MessageItem = { kind: 'message', id, role: 'user', content };
+    if (typeof seq === 'number') item.seq = seq;
+    return add(w, withAt(item, at));
+  }
   const prev = w.c.items[i];
-  if (prev.kind === 'message' && content.length && !sameText(prev, content)) put(w, i, { ...prev, content });
+  if (prev.kind === 'message') {
+    const needContent = content.length && !sameText(prev, content);
+    const needSeq = typeof seq === 'number' && prev.seq === undefined;
+    if (needContent || needSeq) {
+      put(w, i, { ...prev, ...(needContent ? { content } : {}), ...(needSeq ? { seq } : {}) });
+    }
+  }
 }
 
 /** A prompt of the user. One a page named (clientId) is taken once; one
@@ -1239,12 +1433,18 @@ function userMessage(w: Work, id: string, content: ContentBlock[], at: unknown) 
 function user(w: Work, ev: ChatEvent) {
   const c = w.c;
   const content = (Array.isArray(ev.content) ? ev.content : []).filter(isBlock);
+  const seq = typeof ev.seq === 'number' && ev.live !== true ? ev.seq : undefined;
   const client = nonEmpty(ev.clientId);
-  if (client !== undefined) return userMessage(w, clientItem(client), content, ev.at);
+  if (client !== undefined) return userMessage(w, clientItem(client), content, ev.at, seq);
   const last = c.items.length - 1;
   const prev = c.items[last];
-  if (isUserMessage(prev) && last >= (c.turnStart ?? 0) && sameText(prev, content)) return;
-  add(w, withAt({ kind: 'message', id: fresh(c, `message:user:${ev.seq ?? c.items.length}`), role: 'user', content }, ev.at));
+  if (isUserMessage(prev) && last >= (c.turnStart ?? 0) && sameText(prev, content)) {
+    if (seq !== undefined && prev.seq === undefined) put(w, last, { ...prev, seq });
+    return;
+  }
+  const item: MessageItem = { kind: 'message', id: fresh(c, `message:user:${ev.seq ?? c.items.length}`), role: 'user', content };
+  if (seq !== undefined) item.seq = seq;
+  add(w, withAt(item, ev.at));
 }
 
 /** A message sent while a turn ran: waiting in the queue, then taken (a
@@ -1269,7 +1469,8 @@ function queued(w: Work, ev: ChatEvent) {
   if (at < 0 && !c.dequeued?.includes(message)) c.dequeued = [...(c.dequeued ?? []), message].slice(-MAX_LIST.queued);
   if (ev.state === 'cancelled') return;
   const blocks = content.length ? content : at >= 0 ? list[at].content : [];
-  userMessage(w, client ? clientItem(client) : queuedItem(message), blocks, ev.at);
+  const seq = typeof ev.seq === 'number' && ev.live !== true ? ev.seq : undefined;
+  userMessage(w, client ? clientItem(client) : queuedItem(message), blocks, ev.at, seq);
 }
 
 function noticeItem(w: Work, ev: ChatEvent, method: string, params: unknown): NoticeItem {
@@ -1353,6 +1554,9 @@ const NOTICE_METHODS: readonly string[] = [
   CHAT_NOTICES.imported,
   CHAT_NOTICES.untrustedFolder,
   CHAT_NOTICES.fullAccessOff,
+  CHAT_NOTICES.forked,
+  CHAT_NOTICES.switched,
+  CHAT_NOTICES.rewound,
   STOPPED,
 ];
 
@@ -1437,11 +1641,22 @@ function question(w: Work, ev: ChatEvent) {
   const item: QuestionItem = { kind: 'question', id, request, questions };
   const parent = nonEmpty(ev.parent);
   if (parent) item.parent = parent;
+  if (ev.async === true) item.async = true;
+  const autoMs = count(ev.autoResolutionMs);
+  if (autoMs !== undefined && autoMs > 0) item.autoResolutionMs = autoMs;
+  const srcItem = nonEmpty(ev.item);
+  if (srcItem) item.sourceItem = srcItem;
   const i = indexOf(w.c, id);
   if (i === undefined) return add(w, withAt(item, ev.at));
   const prev = w.c.items[i];
   if (prev.kind !== 'question') return unknown(w);
-  put(w, i, { ...prev, questions });
+  put(w, i, {
+    ...prev,
+    questions,
+    ...(item.async ? { async: true } : {}),
+    ...(item.autoResolutionMs ? { autoResolutionMs: item.autoResolutionMs } : {}),
+    ...(item.sourceItem ? { sourceItem: item.sourceItem } : {}),
+  });
 }
 
 function questionDone(w: Work, ev: ChatEvent) {
@@ -1697,14 +1912,23 @@ function merge(a: Item, b: Item): Item {
     const out: ToolItem = { ...a, ...b, title: b.title || a.title };
     if (!b.content.length) out.content = a.content;
     if (!b.locations.length) out.locations = a.locations;
-    if (a.meta || b.meta) out.meta = { ...a.meta, ...b.meta };
+    if (a.meta && b.meta) out.meta = mergeMeta(a.meta, b.meta);
+    else if (a.meta || b.meta) out.meta = { ...(a.meta ?? b.meta) };
     if (a.sub && b.sub) out.sub = join(a.sub, b.sub);
     else if (a.sub) out.sub = a.sub;
     if (a.at) out.at = a.at;
     return out;
   }
-  if ((a.kind === 'message' && b.kind === 'message' && a.role === b.role) || (a.kind === 'thought' && b.kind === 'thought'))
-    return { ...a, content: concat(a.content, b.content) };
+  if (a.kind === 'message' && b.kind === 'message' && a.role === b.role) {
+    return {
+      ...a,
+      content: concat(a.content, b.content),
+      ...(a.seq === undefined && b.seq !== undefined ? { seq: b.seq } : {}),
+      ...(b.delivery ? { delivery: b.delivery } : {}),
+      ...(b.followUpQuestions ? { followUpQuestions: b.followUpQuestions } : {}),
+    };
+  }
+  if (a.kind === 'thought' && b.kind === 'thought') return { ...a, content: concat(a.content, b.content) };
   return b;
 }
 
@@ -1853,14 +2077,37 @@ export function take(state: Conversation, events: readonly SourceEvent[]): Conve
   return c;
 }
 
-/** The permissions and questions of the current turn that wait for the
- * user (their items' ids, in order): one of an earlier turn no longer
- * waits, whether or not its answer was taken. */
-export function waitingItems(c: Conversation): string[] {
+/** The blocking permissions and questions of the current turn that wait for
+ * the user (excludes non-blocking async questions). If the chat host states it
+ * is waiting after a reconnect whose turnStart moved past an unresolved card,
+ * recovers the latest unresolved blocking card. */
+export function blockingWaitingItems(c: Conversation): string[] {
+  const start = c.turnStart ?? 0;
   const out: string[] = [];
-  for (let i = c.turnStart ?? 0; i < c.items.length; i++) {
+  for (let i = start; i < c.items.length; i++) {
     const it = c.items[i];
-    if ((it.kind === 'permission' && !it.outcome) || (it.kind === 'question' && !it.done)) out.push(it.id);
+    if ((it.kind === 'permission' && !it.outcome) || (it.kind === 'question' && !it.done && !it.async)) out.push(it.id);
+  }
+  if (!out.length && c.state === 'waiting' && start > 0) {
+    for (let i = start - 1; i >= 0; i--) {
+      const it = c.items[i];
+      if ((it.kind === 'permission' && !it.outcome) || (it.kind === 'question' && !it.done && !it.async)) {
+        out.push(it.id);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** Every unresolved card that can be answered: the current turn's blocking
+ * permissions and questions, plus any unresolved non-blocking async questions
+ * (which survive turn completion and reconnects). */
+export function waitingItems(c: Conversation): string[] {
+  const blocking = new Set(blockingWaitingItems(c));
+  const out: string[] = [];
+  for (const it of c.items) {
+    if (blocking.has(it.id) || (it.kind === 'question' && !it.done && it.async === true)) out.push(it.id);
   }
   return out;
 }

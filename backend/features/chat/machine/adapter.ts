@@ -101,6 +101,12 @@ export interface Adapter {
    * p.sessionId; null when none does, or when it cannot be told. Its start
    * refuses such a session too. */
   inTerminal?(p: HistoryParams, signal: AbortSignal): Promise<chat.ChatError | null>;
+  /** Lists the models the agent kind offers, reusing a live connection or
+   * running a short-lived probe. */
+  models?(p: ModelsParams, signal: AbortSignal): Promise<chat.ModelOption[]>;
+  /** Forks an existing session on disk or through the agent's protocol,
+   * optionally slicing up to a turn/message boundary. */
+  fork?(p: ForkParams, signal: AbortSignal): Promise<ForkResult>;
 }
 
 /** An agent process running one session. */
@@ -112,21 +118,30 @@ export interface Session {
    * agent outlives close()'s grace, SIGTERM and then SIGKILL when it is
    * told to stop at once (a signal of the terminal core). */
   readonly pid: number;
-  /** Starts a turn with p.content, or, while one runs, queues it for the
-   * agent or steers it into the running turn (a queued event under
-   * p.message tells which, and when the agent took it). */
+  /** Starts a turn with p.content, or, while one runs, queues, steers or
+   * interrupts according to p.delivery (a queued event under p.message tells
+   * which, and when the agent took it). */
   prompt(p: PromptParams, signal: AbortSignal): Promise<void>;
   /** Cancels the running turn; what waits on the agent's side (its
-   * permission requests) ends with it. */
-  cancel(signal: AbortSignal): Promise<void>;
+   * permission requests) ends with it. When opts.keepQueue is true, queued
+   * messages wait for the next turn instead of being cancelled. */
+  cancel(signal: AbortSignal, opts?: { keepQueue?: boolean }): Promise<void>;
   /** Withdraws the queued message of that id (a PromptParams.message)
    * before the agent took it. */
   cancelQueued(message: string, signal: AbortSignal): Promise<void>;
+  /** Promotes the queued message of that id to steer into the active turn or
+   * interrupt the active turn and run immediately. */
+  steerQueued?(message: string, delivery: 'steer' | 'interrupt', signal: AbortSignal): Promise<void>;
   /** Sets the configuration option id (a ConfigOption of the chat) to value,
    * one of its values. */
   setConfig(id: string, value: string, signal: AbortSignal): Promise<void>;
-  /** Compacts the conversation's context. */
-  compact(signal: AbortSignal): Promise<void>;
+  /** Compacts the conversation's context, optionally guided by instructions. */
+  compact(signal: AbortSignal, instructions?: string): Promise<void>;
+  /** Terminates a running background task or subagent by its BackgroundTask.id. */
+  stopTask?(taskId: string, signal: AbortSignal): Promise<void>;
+  /** Rewinds an idle session to just before the named message/turn boundary,
+   * optionally reverting file edits when capabilities.rewindFiles is true. */
+  rewind?(p: RewindParams, signal: AbortSignal): Promise<RewindResult>;
   /** Ends the agent process gracefully; resolves once it is gone or signal
    * ends. */
   close(signal: AbortSignal): Promise<void>;
@@ -219,13 +234,56 @@ export interface HistoryParams extends RunParams {
   after: string;
 }
 
+/** What models probes. */
+export interface ModelsParams extends RunParams {
+  client: ClientInfo;
+}
+
+/** What fork clones. */
+export interface ForkParams extends RunParams {
+  /** Source session id to fork from. */
+  sessionId: string;
+  /** True when forking strictly before the end of the source chat (partial slice). */
+  partial?: boolean;
+  /** Optional native message id (inclusive) to slice up to (Claude upToMessageId). */
+  upToMessageId?: string;
+  /** Optional native turn id immediately after the last kept turn (Codex beforeTurnId). */
+  beforeTurnId?: string;
+  /** Optional native turn id of the last kept turn (Codex lastTurnId). */
+  lastTurnId?: string;
+  /** Optional title for the forked session. */
+  title?: string;
+  client: ClientInfo;
+}
+
+export interface ForkResult {
+  sessionId: string;
+}
+
+/** What rewind rolls back. */
+export interface RewindParams {
+  /** Native message uuid of the user turn being rewound/replaced (Claude rewindFiles). */
+  userMessageId?: string;
+  /** Native message uuid of the last message before the rewound turn (Claude resumeSessionAt). */
+  resumeBeforeId?: string;
+  /** Native turn id of the turn being rewound/replaced (Codex thread/revert beforeTurnId). */
+  beforeTurnId?: string;
+  /** Also restore file checkpoints from userMessageId onward when supported. */
+  restoreFiles?: boolean;
+}
+
+export interface RewindResult {
+  /** New session id if rewinding branched to a new session id. */
+  sessionId?: string;
+}
+
 /** A message of the user. */
 export interface PromptParams {
   /** ACP content blocks (text, image, resource_link), checked by the host
    * against MAX_PROMPT and MAX_IMAGE. */
   content: unknown[];
-  /** The host's id of the message, which queued events and cancelQueued
-   * name. */
+  /** The host's id of the message, which queued events, cancelQueued and
+   * steerQueued name. */
   message: string;
   /** The page's id of the message, for the user and queued events; "" for
    * none. */
@@ -236,6 +294,10 @@ export interface PromptParams {
    * adapter that finds none emits the user event (content, clientId)
    * itself, before the turn's start. */
   recorded: boolean;
+  /** Delivery mode when a turn is already active (default: Delivery.Queue). */
+  delivery?: chat.Delivery;
+  /** Stable UUIDv4 matching EventType.User.item for native rewind/fork mapping. */
+  uuid?: string;
 }
 
 /** A permission the agent asks. */
@@ -261,6 +323,12 @@ export interface QuestionRequest {
   /** The tool call that asks, as an ACP ToolCall, when there is one. */
   toolCall?: unknown;
   parent: string;
+  /** Non-blocking question: does not hold chat in State.Waiting and survives Turn.End. */
+  async?: boolean;
+  /** Optional auto-resolution timeout in milliseconds (Codex non-blocking requestUserInput). */
+  autoResolutionMs?: number;
+  /** Correlating item id (e.g. agentMessage itemId) for deduplicating inline vs card UI. */
+  item?: string;
 }
 
 /** The user's answers by Question.id (option labels or the user's own

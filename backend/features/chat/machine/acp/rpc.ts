@@ -224,10 +224,12 @@ export interface AgentCapabilities {
   image: boolean;
   audio: boolean;
   embeddedContext: boolean;
-  /** session/list and session/resume (sessionCapabilities: any value but
-   * null and false). */
+  /** session/list, session/resume, session/close and session/fork
+   * (sessionCapabilities: any value but null and false). */
   list: boolean;
   resume: boolean;
+  close: boolean;
+  fork: boolean;
 }
 
 /** The agent spoke another protocol version: the one it named. */
@@ -278,6 +280,8 @@ export async function initialize(
       embeddedContext: flag(prompt.embeddedContext),
       list: supported(session.list),
       resume: supported(session.resume),
+      close: supported(session.close),
+      fork: supported(session.fork),
     },
     version,
   };

@@ -51,10 +51,35 @@ const paths = z.array(z.string());
 /** A change of large trees (a copy, a removal) answers after its work. */
 const CHANGE_MS = 10 * 60_000;
 
+export const findMatch = z.object({
+  path: z.string(),
+  rel: z.string(),
+  name: z.string(),
+  is_dir: z.boolean().optional(),
+});
+export type FindMatch = z.infer<typeof findMatch>;
+
+export const findResult = z.object({
+  matches: z.array(findMatch),
+  truncated: z.boolean().optional(),
+});
+export type FindResult = z.infer<typeof findResult>;
+
 export const filesProtocol = defineProtocol('files', {
   /** The state of paths, in their order. The agent waits at most 10 s for
    * them (a dead mount) and runs at most 8 stats at once. */
   stat: { params: z.object({ paths: paths.max(MAX_STAT) }), result: z.array(entry), timeoutMs: 20_000 },
+  /** Bounded recursive file/dir search under dir for @ autocomplete (read-only,
+   * .gitignore-aware, capped at 2000 visited entries and 2s on the machine). */
+  find: {
+    params: z.object({
+      dir: path,
+      query: z.string().max(256).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+    }),
+    result: findResult,
+    timeoutMs: 5_000,
+  },
   /** A folder; a taken name fails (exists), or with unique the folder takes
    * the first free name-1, name-2… */
   mkdir: { params: z.object({ path, unique: z.boolean().optional() }), result, timeoutMs: CHANGE_MS },

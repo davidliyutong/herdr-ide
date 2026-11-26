@@ -393,6 +393,33 @@ export const filesFeature = (o: FilesOptions = {}) =>
         return c.json({ entries });
       });
 
+      // Bounded recursive file/dir search under ?dir= for @ path completion
+      // (read-only safe, .gitignore-aware, capped on the machine).
+      api.get('/find', async (c) => {
+        const q = queryOf(c);
+        const dir = q.get('dir') ?? '';
+        if (!dir || Buffer.byteLength(dir) > 4096 || dir.includes('\0')) throw new Fail('bad_request', 400, 'dir required');
+        const query = q.get('query') ?? '';
+        if (Buffer.byteLength(query) > 256 || /[\0\r\n]/.test(query)) throw new Fail('bad_request', 400, 'invalid query');
+        const limitRaw = q.get('limit');
+        let limit: number | undefined;
+        if (limitRaw !== null && limitRaw !== '') {
+          if (!/^\d+$/.test(limitRaw)) throw new Fail('bad_request', 400, 'limit must be an integer');
+          const n = Number(limitRaw);
+          if (n < 1 || n > 200) throw new Fail('bad_request', 400, 'limit must be between 1 and 200');
+          limit = n;
+        }
+        const res = await ctx.call(
+          c.var.machine,
+          filesProtocol,
+          'find',
+          { dir, ...(query ? { query } : {}), ...(limit !== undefined ? { limit } : {}) },
+          { signal: c.req.raw.signal },
+        );
+        noStore(c);
+        return c.json(res);
+      });
+
       // The changes: their JSON is the action's parameters.
       const change = <K extends Change>(action: K) =>
         api.post(`/${action}`, ctx.mutating(action), jsonBody(filesProtocol.actions[action].params, { limit: MAX_BODY }), async (c) => {

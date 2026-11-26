@@ -5,7 +5,7 @@
 // text diff's comparison, the input as JSON) is made when it is opened, so
 // that a long conversation of closed calls costs little to draw.
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useContext, useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowRightLeft,
   Ban,
@@ -25,9 +25,10 @@ import {
 import { Markdown } from '../markdown/Markdown';
 import { t } from '../i18n';
 import { diffStat, hunks, lineDiff, patchLines, type DiffRow, type LineDiff, type Patch } from './diff';
-import { commandOf, exitCodeOf, inputText, interrupted, jsonText, plainOutput, splitPath, subjectOf } from './format';
-import { asText, isDiffV2, type ToolCallContent, type ToolDiff, type ToolItem, type ToolKind } from './model';
-import { Blocks, isShortened, type ItemContext } from './parts';
+import { commandOf, exitCodeOf, formatTokens, inputText, interrupted, jsonText, plainOutput, splitPath, subjectOf } from './format';
+import { asText, isDiffV2, taskMeta, type ToolCallContent, type ToolDiff, type ToolItem, type ToolKind } from './model';
+import { Blocks, formatDuration, isShortened, TaskStopButton, TimelineActionsContext, type ItemContext } from './parts';
+import type { TaskMeta } from './source';
 
 const KIND_ICONS: Record<ToolKind, typeof Wrench> = {
   read: FileText,
@@ -280,6 +281,46 @@ export function Section({ title, children }: { title: string; children: ReactNod
   );
 }
 
+/** Live background task metadata & stop button for a tool call; mounted only
+ * while running or when task metadata exists so completed normal calls do not
+ * subscribe to TimelineActionsContext. */
+function ToolTaskControls({
+  toolCallId,
+  tm,
+  status,
+  label,
+  agent,
+}: {
+  toolCallId: string;
+  tm?: TaskMeta;
+  status: string;
+  label: string;
+  agent: string;
+}) {
+  const actions = useContext(TimelineActionsContext);
+  const liveTask = actions.tasksByToolCall.get(toolCallId);
+  const isBg = liveTask?.backgrounded === true || tm?.backgrounded === true || liveTask?.kind === 'shell';
+  const taskId = liveTask?.id ?? tm?.taskId;
+  const durationMs = liveTask?.durationMs ?? tm?.durationMs;
+  const tokens = liveTask?.tokens ?? tm?.tokens;
+  const stoppable = status === 'in_progress' && !!actions.stopTask && !!taskId && liveTask?.stoppable !== false && tm?.stoppable !== false;
+
+  if (!isBg && !tm?.lastTool && !durationMs && !tokens && !stoppable) return null;
+  return (
+    <>
+      {isBg && <span className="conv-badge conv-bg-badge">{t('conversation.task.background')}</span>}
+      {status === 'in_progress' && tm?.lastTool && (
+        <span className="conv-task-live">{t('conversation.task.runningTool', { tool: tm.lastTool })}</span>
+      )}
+      {tokens !== undefined && tokens > 0 && (
+        <span className="conv-task-stat">{t('conversation.task.tokens', { tokens: formatTokens(tokens) })}</span>
+      )}
+      {durationMs !== undefined && durationMs > 0 && <span className="conv-task-stat">{formatDuration(durationMs)}</span>}
+      {stoppable && <TaskStopButton taskId={taskId} name={label} agent={agent} stopTask={actions.stopTask!} />}
+    </>
+  );
+}
+
 export function ToolCallView({ item, ctx }: { item: ToolItem; ctx: ItemContext }) {
   const [open, setOpen] = useState(false);
   const kind: ToolKind = item.toolKind ?? 'other';
@@ -290,6 +331,8 @@ export function ToolCallView({ item, ctx }: { item: ToolItem; ctx: ItemContext }
   const command = kind === 'execute' ? commandOf(item.rawInput) : undefined;
   const code = kind === 'execute' ? exitCodeOf(item) : undefined;
   const stopped = kind === 'execute' && interrupted(item);
+  const tm = useMemo(() => taskMeta(item), [item]);
+  const rawToolCallId = item.id.startsWith('tool:') ? item.id.slice(5) : item.id;
   const kindLabel = t(`conversation.toolKind.${kind}`);
   const title = item.title.trim();
 
@@ -312,8 +355,18 @@ export function ToolCallView({ item, ctx }: { item: ToolItem; ctx: ItemContext }
   const longCommand = !!command && (command.includes('\n') || command.length > 80);
   const hasInput = kind === 'other' && item.rawInput !== undefined;
   const rawInput = open && hasInput ? jsonText(item.rawInput) : undefined;
+  const hasSummary = !!tm?.summary && results.length === 0;
+  const hasError = !!tm?.error;
   const hasBody =
-    results.length > 0 || changes.length > 0 || !!prompt || !!plan || longCommand || hasInput || (kind === 'execute' && code !== undefined);
+    results.length > 0 ||
+    changes.length > 0 ||
+    !!prompt ||
+    !!plan ||
+    longCommand ||
+    hasInput ||
+    hasSummary ||
+    hasError ||
+    (kind === 'execute' && code !== undefined);
 
   const statusLabel = t(`conversation.toolStatus.${status}`);
   const meta: ReactNode[] = [];
@@ -338,6 +391,7 @@ export function ToolCallView({ item, ctx }: { item: ToolItem; ctx: ItemContext }
       </span>,
     );
   if (status === 'cancelled') meta.push(<span key="cancelled">{statusLabel}</span>);
+  const watchTask = status === 'in_progress' || !!tm;
 
   const head = (
     <>
@@ -350,7 +404,7 @@ export function ToolCallView({ item, ctx }: { item: ToolItem; ctx: ItemContext }
   );
 
   return (
-    <div className="conv-item conv-quiet conv-tool" data-kind={kind} data-status={status}>
+    <div className="conv-item conv-quiet conv-tool" data-item={item.id} data-kind={kind} data-status={status} tabIndex={-1}>
       <div className="conv-row">
         {hasBody ? (
           <button type="button" className="conv-toggle" aria-expanded={open} title={subject ?? title} onClick={() => setOpen((o) => !o)}>
@@ -365,7 +419,14 @@ export function ToolCallView({ item, ctx }: { item: ToolItem; ctx: ItemContext }
           <PathButton key={i} path={l.path} line={l.line} ctx={ctx} />
         ))}
         {paths.length > shownPaths.length && <span className="conv-more">+{paths.length - shownPaths.length}</span>}
-        {meta.length > 0 && <span className="conv-meta">{meta}</span>}
+        {(meta.length > 0 || watchTask) && (
+          <span className="conv-meta">
+            {watchTask && (
+              <ToolTaskControls toolCallId={rawToolCallId} tm={tm} status={status} label={subject ?? label} agent={ctx.agent} />
+            )}
+            {meta}
+          </span>
+        )}
       </div>
       {open && hasBody && (
         <div className="conv-tool-body">
@@ -392,6 +453,12 @@ export function ToolCallView({ item, ctx }: { item: ToolItem; ctx: ItemContext }
             ) : (
               <Results content={results} kind={kind} ctx={ctx} />
             ))}
+          {hasSummary && (
+            <Section title={t('conversation.tool.result')}>
+              <Markdown text={tm!.summary!} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-tool-md" />
+            </Section>
+          )}
+          {hasError && <div className="conv-ask-error">{tm!.error}</div>}
           {kind === 'execute' && !results.length && status === 'completed' && (
             <div className="conv-note">{t('conversation.tool.noOutput')}</div>
           )}

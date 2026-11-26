@@ -48,6 +48,27 @@
       }
     },
     {
+      "id": "agy",
+      "title": "Antigravity",
+      "usageProvider": "antigravity",
+      "start": [
+        "agy"
+      ],
+      "continueLatest": [
+        "agy",
+        "--continue"
+      ],
+      "resumeById": [
+        "agy",
+        "--resume",
+        "{id}"
+      ],
+      "transcript": "agy",
+      "chat": {
+        "adapter": "acp"
+      }
+    },
+    {
       "id": "gemini",
       "title": "Gemini CLI",
       "start": [
@@ -111,11 +132,6 @@
       "start": [
         "amp"
       ]
-    },
-    {
-      "id": "agy",
-      "title": "Antigravity",
-      "usageProvider": "antigravity"
     },
     {
       "id": "cline",
@@ -640,6 +656,11 @@
     "settings.chat.permissionMode.full",
     "settings.chat.permissionMode.plan",
     "settings.chat.retentionDays",
+    "settings.chat.visibleModels.agy",
+    "settings.chat.visibleModels.claude",
+    "settings.chat.visibleModels.codex",
+    "settings.chat.visibleModels.grok",
+    "settings.chat.visibleModels.kimi",
     "settings.codeServer.install",
     "settings.codeServer.install.download",
     "settings.codeServer.install.existing",
@@ -672,6 +693,7 @@
     "settings.git.untrackedChanges.mixed",
     "settings.git.untrackedChanges.separate",
     "settings.group.behavior",
+    "settings.group.chatModels",
     "settings.group.clipboard",
     "settings.group.cursor",
     "settings.group.text",
@@ -1603,6 +1625,11 @@
     "chat.maxTotalMB": 512,
     "chat.permissionMode": "default",
     "chat.retentionDays": 30,
+    "chat.visibleModels.agy": [],
+    "chat.visibleModels.claude": [],
+    "chat.visibleModels.codex": [],
+    "chat.visibleModels.grok": [],
+    "chat.visibleModels.kimi": [],
     "codeServer.install": "push",
     "codeServer.path": "",
     "files.confirmTrash": false,

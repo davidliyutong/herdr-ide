@@ -11,6 +11,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 vi.mock('../lib/conn', () => ({ conn: { setTheme: () => {}, retry: vi.fn() } }));
+vi.mock('../components/TerminalView', () => ({ TerminalView: () => null }));
 
 import { CHAT_NOTICES } from '../conversation/model';
 import { chatPlugin } from '../plugins/chat';
@@ -25,6 +26,9 @@ import { definePlugins } from '../plugins/registry';
 import { useSettings } from '../settings';
 import { useStore } from '../state/store';
 import { useDialog } from '../dialog';
+import { isItem, useMenu, closeMenu } from '../contextMenu';
+import { LeafIcon } from '../components/PluginPane';
+import { Workspace } from '../components/Workspace';
 import { setLocale, t } from '../i18n';
 import type { MachineState } from '../lib/machine';
 import * as L from '../term/layout';
@@ -117,6 +121,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  closeMenu(false);
   useDialog.setState({ current: undefined });
   useChatUi.setState({ renaming: undefined });
   dropSources();
@@ -263,7 +268,102 @@ describe('the chat pane', () => {
     await pane(view(A));
     await act(async () => q('.chat-title')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
     expect(q('.chat-title-edit')).toBeNull();
+    expect(q('.chat-action-fork')).toBeNull();
+    expect(q('.chat-action-switch')).toBeNull();
     await vi.waitFor(() => expect(q<HTMLTextAreaElement>('textarea')?.disabled).toBe(true));
+  });
+
+  it('forks the chat and switches agent from the header actions', async () => {
+    const E = 'c00000000000000e5';
+    const F = 'c00000000000000f6';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET';
+        calls.push({ url: String(url), method });
+        if (String(url) === '/api/m/m/p/chat/agents') {
+          return new Response(
+            JSON.stringify({
+              agents: [
+                { kind: 'claude', available: true },
+                { kind: 'codex', available: true },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (String(url) === '/api/m/m/p/chat/fork' && method === 'POST') {
+          return new Response(JSON.stringify({ chat: st(E, { kind: 'claude', title: 'Forked' }) }), { status: 200 });
+        }
+        if (String(url) === '/api/m/m/p/chat/switch' && method === 'POST') {
+          return new Response(JSON.stringify({ chat: st(F, { kind: 'codex', title: 'Switched' }) }), { status: 200 });
+        }
+        return new Response('{}', { status: 200 });
+      }),
+    );
+    chats.chat(A, { kind: 'claude', title: 'Orig', cwd: '/home/u/proj', state: 'idle' });
+    await pane(view(A));
+    await act(async () => q<HTMLButtonElement>('.chat-action-fork')!.click());
+    await tick();
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/fork')).toBe(true);
+    expect(useChats.getState().states.m?.[E]?.title).toBe('Forked');
+
+    await act(async () => q<HTMLButtonElement>('.chat-action-switch')!.click());
+    const codexItem = (useMenu.getState().menu?.entries ?? []).find((e) => isItem(e) && e.label === 'Codex');
+    expect(codexItem && isItem(codexItem)).toBe(true);
+    await act(async () => {
+      if (codexItem && isItem(codexItem)) codexItem.run?.();
+    });
+    await tick();
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/m/m/p/chat/switch')).toBe(true);
+    expect(useChats.getState().states.m?.[F]?.kind).toBe('codex');
+  });
+
+  it('renders each agent kind’s brand icon in LeafIcon and on custom-named chat tabs', async () => {
+    // Also register an Antigravity chat in state so agy resolves before and after make tokens.
+    applyStates('m', [st(C, { kind: 'agy' })], false);
+    for (const [leafView, colorVar] of [
+      [view(A, { agent: 'claude' }), 'var(--usage-claude)'],
+      [view(A, { agent: 'codex' }), 'var(--usage-codex)'],
+      [view(C, { agent: 'agy' }), 'var(--usage-antigravity)'],
+    ] as const) {
+      await act(async () => root.render(createElement(LeafIcon, { m: 'm', leaf: { view: leafView }, className: 'tab-kind' })));
+      const logo = q<HTMLElement>('.tab-kind.ai-logo');
+      expect(logo, String(leafView.agent)).not.toBeNull();
+      expect(logo!.style.color, String(leafView.agent)).toBe(colorVar);
+    }
+
+    // Custom-named chat tabs in Workspace still render their agent brand icon alongside the custom label.
+    const codexView = view(A, { agent: 'codex', title: 'Codex task' });
+    const agyView = view(C, { agent: 'agy', title: 'Agy task' });
+    chats.chat(A, { kind: 'codex', title: 'Codex task', state: 'idle' });
+    chats.chat(C, { kind: 'agy', title: 'Agy task', state: 'idle' });
+    await act(async () =>
+      hub.model.mutate('m', () => ({
+        version: 2,
+        workspaces: [
+          {
+            id: 'w1w1w1w1',
+            name: 'one',
+            cwd: '/src',
+            tabs: [
+              { root: { view: codexView }, focused: L.viewKey(codexView.id) },
+              { name: 'My Review', root: { view: agyView }, focused: L.viewKey(agyView.id) },
+            ],
+            selected: 1,
+          },
+        ],
+        selected: 0,
+      })),
+    );
+    await tick();
+    await act(async () => root.render(createElement(Workspace, { m: 'm' })));
+    await tick();
+    const tabs = qa('.tab[role="tab"]');
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0].querySelector<HTMLElement>('.tab-kind.ai-logo')?.style.color).toBe('var(--usage-codex)');
+    expect(tabs[1].querySelector('.tab-label')?.textContent).toBe('My Review');
+    expect(tabs[1].querySelector<HTMLElement>('.tab-kind.ai-logo')?.style.color).toBe('var(--usage-antigravity)');
   });
 
   it('says that a chat is no more, and offers to close its pane', async () => {
@@ -454,7 +554,7 @@ describe('the Chats panel', () => {
 });
 
 describe('the status bar’s chat usage', () => {
-  it('shows the focused chat’s cost, context and tightest limit', async () => {
+  it('shows the focused chat’s cost and context without duplicating rate limits', async () => {
     const usage = {
       used: 37_000,
       size: 100_000,
@@ -474,11 +574,18 @@ describe('the status bar’s chat usage', () => {
     expect(Array.from(item.querySelectorAll('.chat-usage-part')).map((e) => e.textContent)).toEqual([
       '$0.50',
       t('chat.usage.context', { pct: 37 }),
-      t('chat.usage.limit', { window: '5h', pct: 80 }),
     ]);
-    expect(item.className).toContain('warn');
+    expect(item.className).not.toContain('warn');
+    // Only limits (no cost/context): renders nothing (AI Usage plugin displays quotas).
+    await act(async () => {
+      useChats.setState({ live: { [liveKey('m', B)]: { link: 'attached', usage: { used: 0, size: 0, limits: usage.limits } } } });
+    });
+    expect(q('.chat-usage-item')).toBeNull();
     // Another pane focused: nothing.
-    await act(async () => hub.model.mutate('m', (l) => L.selectTab(l, 'w1w1w1w1', 0)));
+    await act(async () => {
+      useChats.setState({ live: { [liveKey('m', B)]: { link: 'attached', usage } } });
+      hub.model.mutate('m', (l) => L.selectTab(l, 'w1w1w1w1', 0));
+    });
     await tick();
     expect(q('.chat-usage-item')).toBeNull();
   });

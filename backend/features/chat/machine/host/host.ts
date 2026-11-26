@@ -41,7 +41,7 @@ import { connect, type Server, type Socket } from 'node:net';
 import { posix } from 'node:path';
 import { Reader } from '#shared/lib/streamio.ts';
 import type { Logger } from '#shared/lib/log.ts';
-import { VERSION } from '#shared/proto/agentproto/index.ts';
+import { Notice, VERSION, noticeMethod } from '#shared/proto/agentproto/index.ts';
 import type { ChatSpec } from '#shared/agents/kinds.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { closeQuietly, tryLock } from '#machine/sys/fs.ts';
@@ -49,8 +49,10 @@ import { inode, listenUnix } from '#machine/sockets.ts';
 import { rmSync, lstatSync, openSync, statSync, constants as fsc } from 'node:fs';
 import type { Adapter, Adapters, ClientInfo, Session } from '../adapter.ts';
 import { AgentProcesses, signalGroup } from '../agentproc.ts';
-import { Chat, SESSION_ID, errorOf, now, perr, validOption } from './chat.ts';
+import { Chat, SESSION_ID, errorOf, isUserTurn, now, perr, transcriptUuid, turnBoundaryIdx, validOption } from './chat.ts';
 import { Environment, agentEnv, isDir, lookPath, userHome, type Env } from './env.ts';
+import { AGENT_TITLE_RUNES, clip } from './events.ts';
+import { exportMarkdown } from './export.ts';
 import { Journal, timeOf, type Row, emptyCapabilities } from './journal.ts';
 import { parseCommand, parseRequest, type Request } from './requests.ts';
 import { Subscriber, SUBSCRIBER_LIMITS, type SubscriberLimits } from './subscriber.ts';
@@ -248,6 +250,8 @@ export class Host {
   private enforcing: Promise<void> | null = null;
   private enforceAgain = false;
   private lastSignal: (() => void) | null = null;
+  /** Per-kind cached model lists (backed by journal settings table models:<kind>). */
+  private readonly modelCache = new Map<string, { models: chat.ModelOption[]; fetchedAt: string }>();
 
   constructor(o: HostOptions) {
     this.opts = o;
@@ -554,6 +558,14 @@ export class Host {
         return void (await this.reply(sock, await this.listTrusted()));
       case chat.Op.HostStatus:
         return void (await this.reply(sock, this.hostStatus()));
+      case chat.Op.Models:
+        return void (await this.reply(sock, await this.models(req)));
+      case chat.Op.Fork:
+        return void (await this.reply(sock, await this.forkChat(req)));
+      case chat.Op.Switch:
+        return void (await this.reply(sock, await this.switchChat(req)));
+      case chat.Op.Export:
+        return void (await this.reply(sock, await this.exportChat(req)));
     }
     await this.reply(sock, refusal(chat.Code.BadRequest, 'unknown op'));
   }
@@ -990,14 +1002,40 @@ export class Host {
       case chat.CommandOp.CancelQueued:
         call = () => c.cancelQueued(cmd.message);
         break;
+      case chat.CommandOp.SteerQueued:
+        call = () => c.steerQueued(cmd.message, cmd.delivery);
+        break;
       case chat.CommandOp.Compact:
-        call = () => c.compact();
+        call = () => c.compact(cmd.instructions);
         break;
       case chat.CommandOp.Rename:
         return s.ack(cmd.id, c.rename(cmd.title));
       case chat.CommandOp.Handoff:
         call = () => c.handoff();
         break;
+      case chat.CommandOp.StopTask:
+        call = () => c.stopTask(cmd.task);
+        break;
+      case chat.CommandOp.Rewind: {
+        if (calls.n >= MAX_CALLS) return s.ack(cmd.id, perr(chat.Code.Busy, 'too many commands wait for the agent'));
+        calls.n++;
+        this.track(
+          (async () => {
+            let afterAck: (() => Promise<void>) | undefined;
+            try {
+              const res = await c.rewind(cmd);
+              afterAck = res.afterAck;
+              s.ack(cmd.id, res.err);
+            } catch (e) {
+              s.ack(cmd.id, errorOf(e));
+            } finally {
+              calls.n--;
+            }
+            if (afterAck) await afterAck();
+          })(),
+        );
+        return;
+      }
       default:
         return s.ack(cmd.id, perr(chat.Code.BadRequest, 'unknown op'));
     }
@@ -1331,6 +1369,373 @@ export class Host {
         sessions,
       },
     };
+  }
+
+  /** Lists or refreshes the models available for req.kind. */
+  private async models(req: Request): Promise<chat.Response> {
+    const found = this.spec(req.kind);
+    if ('code' in found) return { error: found };
+    const kind = req.kind!;
+    const key = `models:${kind}`;
+    if (!req.refresh) {
+      let cached = this.modelCache.get(kind);
+      if (!cached) {
+        const stored = await this.journal.getSetting<{ models?: chat.ModelOption[]; fetchedAt?: string }>(key).catch(() => undefined);
+        if (stored && Array.isArray(stored.models)) {
+          cached = { models: stored.models, fetchedAt: typeof stored.fetchedAt === 'string' ? stored.fetchedAt : '' };
+          this.modelCache.set(kind, cached);
+        }
+      }
+      return { ok: true, models: cached?.models ?? [], ...(cached?.fetchedAt ? { fetchedAt: cached.fetchedAt } : {}) };
+    }
+    if (this.probes >= MAX_PROBES) return refusal(chat.Code.Busy, 'too many probes run');
+    const cwd = req.cwd || userHome(this.opts.hostEnv ?? (process.env as Env));
+    const bad = await this.checkCwd(cwd);
+    if (bad) return { error: bad };
+    this.probes++;
+    try {
+      const signal = AbortSignal.any([this.signal, AbortSignal.timeout(this.o.startTimeout)]);
+      let list: chat.ModelOption[];
+      if (found.adapter.models) {
+        const env = agentEnv(await this.env(signal), found.spec.env, cwd);
+        const path = await lookPath(found.spec.argv[0]!, env);
+        if (!path) return refusal(chat.Code.NotFound, `${found.spec.argv[0]} is not in the user's PATH`);
+        try {
+          list = await found.adapter.models(
+            {
+              kind,
+              argv: [path, ...found.spec.argv.slice(1)],
+              env,
+              cwd,
+              procs: this.procs,
+              logger: this.logger,
+              client: this.client,
+            },
+            signal,
+          );
+        } catch (e) {
+          return { error: errorOf(e, signal) };
+        }
+      } else {
+        // Fallback: read from a live chat of this kind if any has discovered models.
+        const live = [...this.chats.values()].find((c) => !c.deleted && c.r.chat.kind === kind && c.r.chat.config?.length);
+        const opt = live?.r.chat.config?.find((o) => o.category === chat.Category.Model);
+        if (!opt?.options?.length) return refusal(chat.Code.Unsupported, 'the adapter does not list models');
+        list = opt.options.map((v) => ({ value: v.value, name: v.name, ...(v.description ? { description: v.description } : {}) }));
+      }
+      const fetchedAt = timeOf(now());
+      const entry = { models: list, fetchedAt };
+      this.modelCache.set(kind, entry);
+      await this.journal.putSetting(key, entry).catch((e: Error) => this.logf(`save models ${kind}: ${e.message}`));
+      for (const c of this.chats.values()) if (!c.deleted && c.r.chat.kind === kind && c.sess) c.updateModels(list);
+      return { ok: true, models: list, fetchedAt };
+    } finally {
+      this.probes--;
+    }
+  }
+
+  /** Forks a chat (optionally up to req.upToSeq) using native adapter.fork
+   * where supported and falling back to a context-seeded session otherwise. */
+  private async forkChat(req: Request): Promise<chat.Response> {
+    const src = this.lookup(req.chat);
+    if (!src || src.deleted) return refusal(chat.Code.UnknownChat, 'no such chat');
+    if (src.starting || src.held || src.busy()) return refusal(chat.Code.Busy, 'a turn runs');
+    if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
+    const found = this.spec(src.r.chat.kind);
+    if ('code' in found) return { error: found };
+    await src.flush();
+    const upToSeq = req.upToSeq;
+    if (upToSeq !== undefined && (upToSeq < 1 || upToSeq > src.r.chat.seq)) return refusal(chat.Code.BadRequest, 'upToSeq out of range');
+
+    const storedAll = await this.journal.allEvents(src.id);
+    const parsedAll: chat.Event[] = [];
+    for (const row of storedAll) {
+      try {
+        parsedAll.push(JSON.parse(row.line) as chat.Event);
+      } catch {
+        // skip
+      }
+    }
+    const lastSeq = parsedAll.at(-1)?.seq ?? src.r.chat.seq;
+    // Normalize upToSeq: when pointing at a user turn (User or Queued(taken)),
+    // extend to the end of that turn (right before the next user turn, or full
+    // session if it is the last turn) so journal and native session stay aligned.
+    let resolvedUpToSeq = upToSeq;
+    if (resolvedUpToSeq !== undefined) {
+      const targetIdx = parsedAll.findIndex((e) => e.seq === resolvedUpToSeq);
+      if (targetIdx >= 0 && isUserTurn(parsedAll[targetIdx]!)) {
+        let nextUserIdx = -1;
+        for (let i = targetIdx + 1; i < parsedAll.length; i++) {
+          if (isUserTurn(parsedAll[i]!)) {
+            nextUserIdx = i;
+            break;
+          }
+        }
+        if (nextUserIdx < 0) {
+          resolvedUpToSeq = lastSeq;
+        } else {
+          const nextBoundary = turnBoundaryIdx(parsedAll, nextUserIdx);
+          const endIdx = Math.max(targetIdx, nextBoundary - 1);
+          resolvedUpToSeq = parsedAll[endIdx]!.seq ?? resolvedUpToSeq;
+        }
+      }
+    }
+
+    const partial = resolvedUpToSeq !== undefined && resolvedUpToSeq < lastSeq;
+    const kept = partial ? parsedAll.filter((e) => (e.seq ?? 0) <= resolvedUpToSeq!) : parsedAll;
+
+    // Extract native turn/message boundary hints for partial forks.
+    let upToMessageId: string | undefined;
+    let lastTurnId: string | undefined;
+    let beforeTurnId: string | undefined;
+    if (partial) {
+      for (let i = kept.length - 1; i >= 0; i--) {
+        const ev = kept[i]!;
+        if (ev.parent) continue;
+        if (!upToMessageId) {
+          const uid = transcriptUuid(ev);
+          if (uid) upToMessageId = uid;
+        }
+        if (!lastTurnId && ev.t === chat.EventType.Turn && ev.item) lastTurnId = ev.item;
+        if (upToMessageId && lastTurnId) break;
+      }
+      for (const ev of parsedAll) {
+        if ((ev.seq ?? 0) <= resolvedUpToSeq! || ev.parent || !ev.item) continue;
+        if (ev.t === chat.EventType.Turn) {
+          beforeTurnId = ev.item;
+          break;
+        }
+      }
+    }
+
+    const customTitle = req.title ? clip(req.title, AGENT_TITLE_RUNES).trim() : '';
+    const title = customTitle || (src.r.chat.title ? clip(`${src.r.chat.title} (fork)`, AGENT_TITLE_RUNES) : '');
+
+    let nativeSessionId = '';
+    const hasNativeSlice =
+      !partial ||
+      (found.spec.adapter === 'claude'
+        ? !!upToMessageId
+        : found.spec.adapter === 'codex'
+          ? !!(beforeTurnId || lastTurnId)
+          : !!(upToMessageId || beforeTurnId || lastTurnId));
+    if (found.adapter.fork && src.r.chat.sessionId !== '' && !src.r.fresh && hasNativeSlice) {
+      const signal = AbortSignal.any([this.signal, AbortSignal.timeout(this.o.startTimeout)]);
+      const env = agentEnv(await this.env(signal), found.spec.env, src.r.chat.cwd);
+      const path = await lookPath(found.spec.argv[0]!, env);
+      if (path) {
+        try {
+          const res = await found.adapter.fork(
+            {
+              kind: src.r.chat.kind,
+              argv: [path, ...found.spec.argv.slice(1)],
+              env,
+              cwd: src.r.chat.cwd,
+              sessionId: src.r.chat.sessionId,
+              ...(partial ? { partial: true } : {}),
+              ...(upToMessageId ? { upToMessageId } : {}),
+              ...(lastTurnId ? { lastTurnId } : {}),
+              ...(beforeTurnId ? { beforeTurnId } : {}),
+              ...(title ? { title } : {}),
+              procs: this.procs,
+              logger: this.logger,
+              client: this.client,
+            },
+            signal,
+          );
+          if (res?.sessionId && SESSION_ID.test(res.sessionId)) nativeSessionId = res.sessionId;
+        } catch (e) {
+          const ce = errorOf(e, signal);
+          if (ce.code !== chat.Code.Unsupported) return { error: ce };
+        }
+      }
+    }
+
+    const native = nativeSessionId !== '';
+    const turn = this.newTurn.then(async (): Promise<chat.Response> => {
+      const room = await this.roomForChat();
+      if (room) return { error: room };
+      if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
+      const t = timeOf(now());
+      const newId = chat.newChatID();
+      const opts: chat.Options = { ...src.r.options };
+      if (opts.mode === chat.Mode.Full && !this.current.allowFull) opts.mode = chat.Mode.Default;
+      const r: Row = {
+        chat: {
+          id: newId,
+          kind: src.r.chat.kind,
+          title,
+          cwd: src.r.chat.cwd,
+          sessionId: nativeSessionId,
+          state: chat.State.Starting,
+          status: chat.Status.Idle,
+          created: t,
+          updated: t,
+          seq: 0,
+          seen: 0,
+          capabilities: emptyCapabilities(),
+        },
+        turnEnd: 0,
+        options: opts,
+        historyAfter: '',
+        bytes: 0,
+        fresh: !native,
+        renamed: !!(customTitle || src.r.renamed || title),
+        untrustedTold: false,
+      };
+      try {
+        await this.journal.insertChat(r);
+        const copied = await this.journal.copyEventsUpTo(src.id, newId, partial ? resolvedUpToSeq : undefined);
+        r.chat.seq = copied.seq;
+        r.chat.seen = copied.seq;
+        r.bytes = copied.bytes;
+        r.turnEnd = copied.turnEnd;
+        r.historyAfter = copied.historyAfter;
+        if (copied.lastAt) r.chat.updated = timeOf(copied.lastAt);
+        await this.journal.saveChat(r);
+      } catch (e) {
+        this.logf(`fork chat ${src.id}: ${(e as Error).message}`);
+        await this.journal.deleteChat(newId).catch(() => {});
+        return refusal(chat.Code.Failed, 'the journal did not fork the chat');
+      }
+      const c = new Chat(this, r, false, src.envOverrides());
+      c.first = 1;
+      if (!native && kept.length > 0) {
+        const seed = exportMarkdown(kept, { title: src.r.chat.title, kind: src.r.chat.kind, cwd: src.r.chat.cwd });
+        c.setSeed(seed);
+        await this.journal.putSetting(`seed:${newId}`, seed).catch(() => {});
+      }
+      this.chats.set(newId, c);
+      c.emit({
+        t: chat.EventType.Notice,
+        method: noticeMethod(Notice.Forked),
+        params: { fromChat: src.id, native, ...(partial ? { upToSeq: resolvedUpToSeq } : {}) },
+      });
+      c.r.chat.seen = c.madeSeq();
+      const st = c.beginStart();
+      const view = c.snapshot();
+      c.save();
+      c.notify();
+      this.pokeQuiet();
+      this.track(c.launch(st, nativeSessionId));
+      return { ok: true, chat: view };
+    });
+    this.newTurn = turn.catch(() => {});
+    return turn;
+  }
+
+  /** Exports conversation context from req.chat and creates a new chat of
+   * req.targetKind in the same cwd seeded with that handoff. */
+  private async switchChat(req: Request): Promise<chat.Response> {
+    const src = this.lookup(req.chat);
+    if (!src || src.deleted) return refusal(chat.Code.UnknownChat, 'no such chat');
+    const found = this.spec(req.targetKind);
+    if ('code' in found) return { error: found };
+    const opts: chat.Options = {};
+    if (req.options?.model) opts.model = req.options.model;
+    if (req.options?.effort) opts.effort = req.options.effort;
+    if (req.options?.mode) opts.mode = req.options.mode;
+    if (
+      !validOption(opts.model ?? '') ||
+      !validOption(opts.effort ?? '') ||
+      (opts.mode !== undefined && !(chat.MODES as readonly string[]).includes(opts.mode))
+    )
+      return refusal(chat.Code.BadRequest, 'options out of their bounds');
+    if (opts.mode === chat.Mode.Full && !this.current.allowFull)
+      return refusal(chat.Code.NotAllowed, 'full access is not allowed on this machine');
+    if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
+    await src.flush();
+    const upToSeq = req.upToSeq;
+    if (upToSeq !== undefined && (upToSeq < 1 || upToSeq > src.r.chat.seq)) return refusal(chat.Code.BadRequest, 'upToSeq out of range');
+    const stored = await this.journal.allEvents(src.id, upToSeq);
+    const parsed: chat.Event[] = [];
+    for (const row of stored) {
+      try {
+        parsed.push(JSON.parse(row.line) as chat.Event);
+      } catch {
+        // skip
+      }
+    }
+    const seed = exportMarkdown(parsed, { title: src.r.chat.title, kind: src.r.chat.kind, cwd: src.r.chat.cwd });
+
+    const turn = this.newTurn.then(async (): Promise<chat.Response> => {
+      const room = await this.roomForChat();
+      if (room) return { error: room };
+      if (this.stopping) return refusal(chat.Code.Ended, 'the host stops');
+      const t = timeOf(now());
+      const newId = chat.newChatID();
+      const title = src.r.chat.title;
+      const r: Row = {
+        chat: {
+          id: newId,
+          kind: req.targetKind!,
+          title,
+          cwd: src.r.chat.cwd,
+          sessionId: '',
+          state: chat.State.Starting,
+          status: chat.Status.Idle,
+          created: t,
+          updated: t,
+          seq: 0,
+          seen: 0,
+          capabilities: emptyCapabilities(),
+        },
+        turnEnd: 0,
+        options: opts,
+        historyAfter: '',
+        bytes: 0,
+        fresh: true,
+        renamed: !!title,
+        untrustedTold: false,
+      };
+      try {
+        await this.journal.insertChat(r);
+        await this.journal.putSetting(`seed:${newId}`, seed);
+      } catch (e) {
+        this.logf(`switch chat ${src.id}: ${(e as Error).message}`);
+        await this.journal.deleteChat(newId).catch(() => {});
+        return refusal(chat.Code.Failed, 'the journal did not create the switched chat');
+      }
+      const c = new Chat(this, r, false, src.envOverrides());
+      c.first = 1;
+      c.setSeed(seed);
+      this.chats.set(newId, c);
+      c.emit({
+        t: chat.EventType.Notice,
+        method: noticeMethod(Notice.Switched),
+        params: { fromChat: src.id, fromKind: src.r.chat.kind, ...(upToSeq !== undefined ? { upToSeq } : {}) },
+      });
+      c.r.chat.seen = c.madeSeq();
+      const st = c.beginStart();
+      const view = c.snapshot();
+      c.save();
+      c.notify();
+      this.pokeQuiet();
+      this.track(c.launch(st, ''));
+      return { ok: true, chat: view };
+    });
+    this.newTurn = turn.catch(() => {});
+    return turn;
+  }
+
+  /** Exports req.chat's conversation up to optional req.upToSeq as Markdown. */
+  private async exportChat(req: Request): Promise<chat.Response> {
+    const src = this.lookup(req.chat);
+    if (!src || src.deleted) return refusal(chat.Code.UnknownChat, 'no such chat');
+    await src.flush();
+    const upToSeq = req.upToSeq;
+    if (upToSeq !== undefined && (upToSeq < 1 || upToSeq > src.r.chat.seq)) return refusal(chat.Code.BadRequest, 'upToSeq out of range');
+    const stored = await this.journal.allEvents(src.id, upToSeq);
+    const parsed: chat.Event[] = [];
+    for (const row of stored) {
+      try {
+        parsed.push(JSON.parse(row.line) as chat.Event);
+      } catch {
+        // skip
+      }
+    }
+    const markdown = exportMarkdown(parsed, { title: src.r.chat.title, kind: src.r.chat.kind, cwd: src.r.chat.cwd });
+    return { ok: true, markdown };
   }
 
   // ---- bounds

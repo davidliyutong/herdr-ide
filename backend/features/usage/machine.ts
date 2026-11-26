@@ -45,6 +45,7 @@ import {
   SESSION_LIMITS,
   SESSION_PROVIDERS,
   SessionReader,
+  locateClaudeByCwd,
   locateCodexByCwd,
   locateGrokSession,
   locateKimiSession,
@@ -228,6 +229,8 @@ export function usageMachine(o: UsageMachineOptions = {}) {
               files = await locateKimiSession(e, p.session, p.cwd ?? '', sinceMs);
             } else if (provider === 'codex' && !hasSession) {
               files = await locateCodexByCwd(e, resolver, p.cwd ?? '', sinceMs, p.codexHomes);
+            } else if (provider === 'claude' && !hasSession) {
+              files = await locateClaudeByCwd(e, resolver, p.cwd ?? '', sinceMs);
             } else {
               if (!hasSession) throw new Fail('not_found', 404, 'usage: no transcript of the session');
               files = await locate(p.kind, p.session, signal, p.codexHomes);

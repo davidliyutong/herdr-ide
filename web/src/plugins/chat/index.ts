@@ -11,7 +11,14 @@
 import { ChatPane } from './ChatPane';
 import { ChatsPanel } from './ChatsPanel';
 import { ChatSettingsExtra } from './SettingsExtra';
+import { ChatSettingsPage } from './SettingsPage';
 import { ChatUsageItem } from './UsageItem';
 import { makeChatPlugin } from './plugin';
 
-export const chatPlugin = makeChatPlugin({ ChatPane, ChatsPanel, ChatSettingsExtra, ChatUsageItem });
+export const chatPlugin = makeChatPlugin({
+  ChatPane,
+  ChatsPanel,
+  ChatSettingsLayout: ChatSettingsPage,
+  ChatSettingsExtra,
+  ChatUsageItem,
+});

@@ -47,6 +47,13 @@ export function auditOf(m: string, id: string, cmd: PageCommand): AuditRecord | 
       break;
     case chat.CommandOp.Handoff:
       break;
+    case chat.CommandOp.StopTask:
+      fields.task = auditText(cmd.task);
+      break;
+    case chat.CommandOp.Rewind:
+      fields.seq = cmd.seq;
+      if (cmd.restoreFiles) fields.restoreFiles = true;
+      break;
     default:
       return undefined;
   }

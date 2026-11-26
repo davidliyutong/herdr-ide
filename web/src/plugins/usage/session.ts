@@ -49,6 +49,10 @@ export const SESSION_TIMEOUT_MS = 15_000;
 /** How long after a final read failed it is tried again, once (ms). */
 export const SESSION_RETRY_MS = 10_000;
 
+/** How often a focused session whose transcript was not found yet is checked
+ * again while its agent stays idle/unknown (ms). */
+export const SESSION_NOT_FOUND_RECHECK_MS = 15_000;
+
 /** The key of a session in useUsage.sessions. */
 export const sessionKey = (m: string, kind: string, session: string): string => JSON.stringify([m, kind, session]);
 
@@ -216,9 +220,10 @@ export function useSessionReads(t: SessionTarget | undefined) {
     if (!cur || !key || unpriced(key)) return;
     const e = useUsage.getState().sessions[key];
     if (before.key !== key) {
-      // Another pane or session: its numbers, unless the machine had none
-      // and its agent did nothing since.
-      if (!(e?.code === 'not_found' && e.status === status)) requestSession(cur);
+      // Another pane or session: its numbers, unless the machine recently had
+      // none and its agent did nothing since.
+      const freshMiss = e?.code === 'not_found' && e.status === status && Date.now() - e.at < SESSION_NOT_FOUND_RECHECK_MS;
+      if (!freshMiss) requestSession(cur);
     } else if (before.status !== status) {
       if (status === 'done' || status === 'idle') requestSession(cur, true);
       else if (e?.code) requestSession(cur);
@@ -229,6 +234,7 @@ export function useSessionReads(t: SessionTarget | undefined) {
   // come. A tick reads when it worked since the last one, so that one
   // blocked for long is not read again and again.
   const inTurn = status === 'working' || status === 'blocked';
+  const notFound = useUsage((s) => (key ? s.sessions[key]?.code === 'not_found' : false));
   const worked = useRef(false);
   useEffect(() => {
     if (status === 'working') worked.current = true;
@@ -245,6 +251,18 @@ export function useSessionReads(t: SessionTarget | undefined) {
     }, SESSION_WORKING_EVERY);
     return () => clearInterval(id);
   }, [key, inTurn]);
+  // A focused terminal whose transcript was not written yet: re-check
+  // periodically so fast turns or resumed sessions show up without waiting for
+  // a status transition.
+  useEffect(() => {
+    if (!key || !notFound || inTurn) return;
+    const id = setInterval(() => {
+      const cur = latest.current;
+      if (!cur || unpriced(key)) return;
+      requestSession(cur);
+    }, SESSION_NOT_FOUND_RECHECK_MS);
+    return () => clearInterval(id);
+  }, [key, notFound, inTurn]);
   // A read owed while the page was hidden.
   useEffect(() => {
     if (!key) return;

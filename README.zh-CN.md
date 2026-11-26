@@ -26,10 +26,11 @@
   每台机器只开一条 ssh 连接，在上面运行一个静态 agent，所有通信都在这条连接里多路复用；机器上不监听任何端口。
   共用同一个主目录（NFS）的集群节点仍是各自独立的机器，各有自己的 socket、终端核心和文件（[40](docs/features/40-shared-homes.md)）。
 - **为 agent 设计**：汇总所有机器上 blocked 和 done 的 agent，并发通知、播放提示音。
-  每台机器都能识别 Claude Code、Codex、Gemini、OpenCode 等，以及它们是在工作、等待还是已完成。
-  还能找出 Claude Code 和 Codex 正在使用的会话（[35](docs/features/35-agent-native-view.md)）。
-- **智能体对话**：标签页可以是与 Claude Code、Codex、Kimi Code 或 Grok 的对话，智能体在任意机器上不经终端运行。
-  文字边生成边显示，权限请求、提问和计划在卡片里回答；每个对话可选模型、思考强度和模式（只有机器允许时才能完全访问），支持图片、排队消息，并显示花费、上下文和限额。
+  每台机器都能识别 Claude Code、Codex、Antigravity、Gemini、OpenCode 等，以及它们是在工作、等待还是已完成。
+  还能找出 Claude Code、Codex 和 Antigravity 正在使用的会话，并在状态栏显示实时上下文用量（[35](docs/features/35-agent-native-view.md)）。
+- **智能体对话**：标签页可以是与 Claude Code、Codex、Antigravity（ACP）、Kimi Code 或 Grok 的对话，智能体在任意机器上不经终端运行。
+  文字边生成边显示，权限请求、提问和计划在卡片里回答；支持按服务商筛选可见模型、切换思考强度和模式（只有机器允许时才能完全访问）。
+  输入框支持图片、递归 `@` 文件补全与文件选择器、Markdown 编辑辅助与预览、可逐条撤回与显式打断/引导的排队消息，以及点击上下文用量手动压缩、后台任务与子智能体控制，还有分叉、编辑回退与跨智能体切换。
   每台机器上的对话宿主在断线后保留对话（上限由你设定），并停止空闲的智能体；对话计入智能体列表。
   会话可以在终端和对话之间双向切换（[37](docs/features/37-agent-chats.md)）。
 - **终端历史**：为某台机器打开后（终端输出里可能有机密，默认关闭），机器会保存有上限的终端输出快照。

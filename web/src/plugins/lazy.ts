@@ -23,7 +23,8 @@ import type { PluginView } from '../term/layout';
 import { registerPluginLoader, replacePlugin } from './registry';
 
 const Empty: ComponentType<Record<string, never>> = () => null;
-const EmptyLayout: ComponentType<PluginSettingsLayoutProps> = ({ defs, rows, lead }) => createElement('div', null, lead, rows(defs));
+const EmptyLayout: ComponentType<PluginSettingsLayoutProps> = ({ defs, rows, lead, footer }) =>
+  createElement('div', null, lead, rows(defs), footer);
 
 export interface LazyPanelStub {
   id: string;
@@ -34,6 +35,7 @@ export interface LazyPanelStub {
 
 export interface LazyPaneViewStub {
   icon: IconComponent;
+  iconFor?(m: string, view: PluginView): IconComponent | undefined;
   title(m: string, view: PluginView): string;
   path?(m: string, view: PluginView): string | undefined;
   directory?(m: string, view: PluginView): string | undefined;
@@ -132,6 +134,7 @@ export function lazyPlugin(stub: LazyPluginStub, load: () => Promise<PluginDef>)
           });
           const viewDef: PaneViewDef = {
             icon: v.icon,
+            ...(v.iconFor ? { iconFor: (m, view) => loaded?.paneViews?.[kind]?.iconFor?.(m, view) ?? v.iconFor!(m, view) } : {}),
             title: (m, view) => loaded?.paneViews?.[kind]?.title(m, view) ?? v.title(m, view),
             ...(v.path ? { path: (m, view) => loaded?.paneViews?.[kind]?.path?.(m, view) ?? v.path!(m, view) } : {}),
             ...(v.directory ? { directory: (m, view) => loaded?.paneViews?.[kind]?.directory?.(m, view) ?? v.directory!(m, view) } : {}),

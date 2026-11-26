@@ -48,6 +48,12 @@ function contextLong(u: SessionUsage): string {
   return u.contextUsed > 0 ? tokens(u.contextUsed) : '—';
 }
 
+/** A session id shortened for the hover card (8 hex chars for UUIDs). */
+function shortSessionId(id: string): string {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)) return id.slice(0, 8);
+  return id.length > 14 ? `${id.slice(0, 12)}…` : id;
+}
+
 function Fact({ name, children }: { name: string; children: React.ReactNode }) {
   return (
     <>
@@ -122,6 +128,13 @@ export function UsageSessionItem() {
             <span className="muted">{t('usage.session.heading')}</span>
           </div>
           <dl className="usage-session-facts">
+            {target.session && (
+              <Fact name={t('usage.session.session')}>
+                <span className="mono" title={target.session}>
+                  {shortSessionId(target.session)}
+                </span>
+              </Fact>
+            )}
             {u.model && <Fact name={t('usage.session.model')}>{u.model}</Fact>}
             <Fact name={t('usage.session.cost')}>
               {cost}

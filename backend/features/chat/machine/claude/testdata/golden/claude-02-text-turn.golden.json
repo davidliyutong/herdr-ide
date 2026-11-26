@@ -28,65 +28,67 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": {
+     "type": "text",
+     "text": ""
+    },
+    "messageId": "msg_0001",
     "_meta": {
      "veldr": {
       "estimatedTokens": 50
      }
-    },
-    "content": {
-     "text": "",
-     "type": "text"
-    },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_thought_chunk"
+    }
    }
   },
   {
    "t": "update",
-   "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": {
+     "type": "text",
+     "text": ""
+    },
+    "messageId": "msg_0001",
     "_meta": {
      "veldr": {
       "estimatedTokens": 50
      }
-    },
-    "content": {
-     "text": "",
-     "type": "text"
-    },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_thought_chunk"
-   }
+    }
+   },
+   "item": "msg_0001/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000020"
   },
   {
    "t": "update",
    "live": true,
    "item": "msg_0001/1",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "hi",
-     "type": "text"
+     "type": "text",
+     "text": "hi"
     },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0001"
    }
   },
   {
    "t": "update",
-   "item": "msg_0001/1",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "hi"
+    },
+    "messageId": "msg_0001",
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "hi",
-     "type": "text"
-    },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0001/1",
+   "entryUuid": "00000000-0000-4000-8000-000000000024"
   },
   {
    "t": "turn",
@@ -293,15 +295,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -335,7 +337,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 0,

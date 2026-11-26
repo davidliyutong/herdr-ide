@@ -94,6 +94,24 @@ test('agent sessions', async () => {
   wantEventSession(d, S2, SessionFrom.PID);
   expect(r.ws.length).toBe(3);
 
+  // A genuine status change arriving with a new session updates BOTH status
+  // and session and still notifies /ws.
+  b.agents.apply(ev('claude', 'working', S1, SessionFrom.PID));
+  d = await c.agentData();
+  expect(d.agent_status).toBe('working');
+  wantEventSession(d, S1, SessionFrom.PID);
+  expect(r.ws.length).toBe(4);
+  expect(r.ws[3]).toMatchObject({ agent_status: 'working' });
+  b.agents.apply(ev('claude', 'done', S2, SessionFrom.PID));
+  d = await c.agentData();
+  expect(d.agent_status).toBe('done');
+  wantEventSession(d, S2, SessionFrom.PID);
+  expect(r.ws.length).toBe(5);
+  expect(r.ws[4]).toMatchObject({ agent_status: 'done' });
+  b.seen('t1');
+  expect((await c.agentData()).agent_status).toBe('idle');
+  expect(r.ws.length).toBe(6);
+
   // A record the core replaces gets the session again right behind.
   r.sim.core!.event('labels', 't1', {
     labels: { a: 'b' },
@@ -115,7 +133,7 @@ test('agent sessions', async () => {
     b.agents.apply(ev('claude', 'done', S2, SessionFrom.PID));
     wantEventSession(await c.agentData(), S2, SessionFrom.PID);
   }
-  expect(r.ws.length).toBe(3);
+  expect(r.ws.length).toBe(6);
 
   // The agent leaves: no session either.
   b.agents.apply(ev('claude', 'idle', S1, SessionFrom.Argv));

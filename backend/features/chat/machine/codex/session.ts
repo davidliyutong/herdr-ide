@@ -35,6 +35,8 @@ import {
   type PermissionAnswer,
   type PromptParams,
   type QuestionAnswer,
+  type RewindParams,
+  type RewindResult,
   type Session,
   type Sink,
   type StartParams,
@@ -48,6 +50,7 @@ import type {
   ServerNotificationMethod,
   ServerNotifications,
   ServerRequests,
+  ThreadBackgroundTerminal,
   ThreadItem,
   Turn,
   TurnError,
@@ -61,6 +64,8 @@ import {
   Mapper,
   SubAgent,
   Tool,
+  asyncQuestions,
+  callWithStatus,
   cancelledCall,
   chunk,
   collabCall,
@@ -82,6 +87,7 @@ import {
   updateEvent,
   userContent,
   MAX_TITLE,
+  type AsyncQuestion,
   type Obj,
 } from './mapping.ts';
 import { AbortedError, ClosedError, Conn, METHOD_NOT_FOUND, RpcError, type ServerRequest } from './rpc.ts';
@@ -239,8 +245,8 @@ export async function initialize(c: Conn, client: ClientInfo, signal: AbortSigna
 }
 
 /** The models model/list offers (the hidden ones left out); none when it
- * fails. */
-async function listModels(c: Conn, signal: AbortSignal, logf: (l: string) => void): Promise<Models> {
+ * fails unless strict is true (Op.Models). */
+export async function listModels(c: Conn, signal: AbortSignal, logf: (l: string) => void, strict = false): Promise<Models> {
   const out: Model[] = [];
   let cursor = '';
   for (let page = 0; page < 10; page++) {
@@ -248,6 +254,7 @@ async function listModels(c: Conn, signal: AbortSignal, logf: (l: string) => voi
     try {
       res = await c.call('model/list', modelListParams(cursor), signal);
     } catch (e) {
+      if (strict) throw e;
       logf(`model/list: ${(e as Error).message}`);
       break;
     }
@@ -313,11 +320,15 @@ interface OpenItem {
   shown: boolean;
 }
 
-/** A subagent's thread: the tool call that started it. */
+/** A subagent's thread: the tool call that started it and its live run state. */
 interface Child {
   call: string;
   parent: string;
   state: Obj;
+  agentPath: string;
+  turnId: string;
+  running: boolean;
+  startedAt?: string;
 }
 
 /** A request of the app-server that waits for the user. */
@@ -325,6 +336,8 @@ interface Pending {
   ac: AbortController;
   /** The app-server settled it on its own (serverRequest/resolved). */
   resolved: boolean;
+  /** Non-blocking requestUserInput: survives Turn.End and does not block. */
+  async?: boolean;
 }
 
 /** A plan's approval being asked, after the end of the turn that made the
@@ -458,8 +471,16 @@ export class CodexSession implements Session {
   private queue: Message[] = [];
   private readonly items = new Map<string, OpenItem>();
   private readonly children = new Map<string, Child>();
+  private readonly bgTerminals = new Map<string, ThreadBackgroundTerminal>();
+  private hasProcessIds = false;
+  private bgSyncing = false;
+  private bgSyncAgain = false;
+  private lastTasksJson = '';
+  private keepQueueOnInterrupt = false;
+  private drainOnInterrupt = false;
   private plan = { id: '', text: '' };
   private ask: PlanAsk | null = null;
+  private asyncAsk: PlanAsk | null = null;
   private readonly pending = new Map<string, Pending>();
   private usage: Usage = { used: 0, size: 0 };
   private readonly limits = new Map<string, chat.Limit[]>();
@@ -618,6 +639,7 @@ export class CodexSession implements Session {
       this.ask.ac.abort();
     }
     this.ask = null;
+    this.supersedeAsyncAsk();
     if (this.active) {
       evs.push(
         err === undefined
@@ -630,8 +652,21 @@ export class CodexSession implements Session {
     for (const m of this.queue) evs.push(queuedEvent(m, QueuedState.Cancelled, false));
     this.steers = [];
     this.queue = [];
+    this.keepQueueOnInterrupt = false;
+    this.drainOnInterrupt = false;
     this.active = false;
     this.turn = '';
+    this.bgTerminals.clear();
+    for (const ch of this.children.values()) {
+      ch.running = false;
+      ch.turnId = '';
+    }
+    if (this.lastTasksJson !== '') {
+      this.lastTasksJson = '';
+      this.sink.update((c) => {
+        delete c.tasks;
+      });
+    }
     const pend = this.takePending();
     for (const p of pend) p.ac.abort();
     this.ac.abort();
@@ -640,11 +675,29 @@ export class CodexSession implements Session {
     this.forget(this);
   }
 
-  /** Empties the requests that wait. */
-  private takePending(): Pending[] {
-    const out = [...this.pending.values()];
-    this.pending.clear();
+  /** Empties the requests that wait (or only blocking ones when blockingOnly). */
+  private takePending(blockingOnly = false): Pending[] {
+    if (!blockingOnly) {
+      const out = [...this.pending.values()];
+      this.pending.clear();
+      return out;
+    }
+    const out: Pending[] = [];
+    for (const [k, p] of this.pending) {
+      if (p.async) continue;
+      this.pending.delete(k);
+      out.push(p);
+    }
     return out;
+  }
+
+  /** Supersedes an open non-blocking async question ask, if any. */
+  private supersedeAsyncAsk(): void {
+    const a = this.asyncAsk;
+    if (!a) return;
+    a.superseded = true;
+    a.ac.abort(chat.By.Superseded);
+    this.asyncAsk = null;
   }
 
   /** Ends the app-server and starts another on the session's thread: Codex
@@ -700,21 +753,24 @@ export class CodexSession implements Session {
 
   // ---- Session ----
 
-  /** Starts a turn; while one runs, it steers the message into it
-   * (turn/steer), or queues it for the turn's end where the turn takes no
-   * steering (a compaction); a prompt while a plan waits for its approval
-   * keeps planning with it. A prompt that starts a turn is the host's to
-   * tell (its user event) when it recorded it, else told here before the
-   * turn starts; one sent while a turn runs or a permission waits is told
-   * here: queued, then taken once the agent took it (the user's message
-   * from then on), or cancelled. */
+  /** Starts a turn; while one runs, p.delivery selects FIFO queuing (default,
+   * withdrawable via cancelQueued), mid-turn steering (turn/steer), or
+   * interrupting the active turn while preserving unrelated queued messages.
+   * A prompt while a plan waits for its approval keeps planning with it. A
+   * prompt that starts a turn is the host's to tell (its user event) when it
+   * recorded it, else told here before the turn starts; one sent while a turn
+   * runs or a permission waits is told here: queued, then taken once the
+   * agent took it (the user's message from then on), or cancelled. */
   async prompt(p: PromptParams, signal: AbortSignal): Promise<void> {
     if (isCompact(p.content)) return this.compact(signal);
     const input = toUserInput(p.content);
+    const delivery = p.delivery ?? chat.Delivery.Queue;
     const msg: Message = { content: p.content, message: p.message || newID(), clientId: p.clientId };
+    let doInterrupt = false;
     if (!(await this.lock.acquire(signal))) throw new ChatProtoError(callError(new AbortedError(signal.reason)));
     try {
       if (this.ended || this.closing) throw errEnded();
+      this.supersedeAsyncAsk();
       const a = this.ask;
       if (a) {
         // The host saw a permission waiting: the message is told as queued
@@ -736,44 +792,73 @@ export class CodexSession implements Session {
         return await this.startTold(input, msg.message, signal);
       }
       if (this.queue.length + this.steers.length >= MAX_QUEUE) throw perr(Code.Busy, 'too many messages wait for the turn');
-      if (this.turn === '' || this.compacting) {
+      if (delivery === chat.Delivery.Interrupt) {
+        this.queue.unshift(msg);
+        this.emit(queuedEvent(msg, QueuedState.Waiting, true));
+        this.keepQueueOnInterrupt = true;
+        this.drainOnInterrupt = true;
+        doInterrupt = true;
+      } else if (delivery === chat.Delivery.Steer && this.turn !== '' && !this.compacting) {
+        return await this.steerMessage(msg, input, true, signal);
+      } else {
         this.queue.push(msg);
         this.emit(queuedEvent(msg, QueuedState.Waiting, true));
         return;
       }
-      const c = this.c!;
-      const params: ClientRequests['turn/steer']['params'] = {
-        threadId: this.thread,
-        expectedTurnId: this.turn,
-        clientUserMessageId: msg.message,
-        input,
-      };
-      this.emit(queuedEvent(msg, QueuedState.Waiting, true));
-      this.steers.push(msg);
-      try {
-        await c.conn.call('turn/steer', params, signal);
-        return;
-      } catch (err) {
-        const taken = !this.steers.some((m) => m.message === msg.message);
-        this.steers = this.steers.filter((m) => m.message !== msg.message);
-        // The turn ended meanwhile and told it taken.
-        if (taken) return;
-        if (err instanceof RpcError && err.message.startsWith('no active turn')) {
-          // The turn ended before the message reached it: it starts the
-          // next, which this session told as its message.
-          this.emit(queuedEvent(msg, QueuedState.Taken, false));
-          return await this.startTold(input, msg.message, signal);
-        }
-        if (err instanceof RpcError && this.active) {
-          // The turn takes no steering: the message waits for its end.
-          this.queue.push(msg);
-          return;
-        }
-        this.emit(queuedEvent(msg, QueuedState.Cancelled, false));
-        throw new ChatProtoError(callError(err));
-      }
     } finally {
       this.lock.release();
+    }
+    if (doInterrupt) {
+      for (const pend of this.takePending(true)) pend.ac.abort();
+      await this.interruptActiveTurn(signal);
+    }
+  }
+
+  /** Steers msg into the active turn via turn/steer; the lock is held. When
+   * restoreAt is set (steerQueued), an active-turn RPC rejection puts msg
+   * back into this.queue and throws; otherwise (prompt delivery: steer) it
+   * falls back to waiting in this.queue. */
+  private async steerMessage(
+    msg: Message,
+    input: UserInput[],
+    emitWaiting: boolean,
+    signal: AbortSignal,
+    restoreAt?: number,
+  ): Promise<void> {
+    const c = this.c!;
+    const params: ClientRequests['turn/steer']['params'] = {
+      threadId: this.thread,
+      expectedTurnId: this.turn,
+      clientUserMessageId: msg.message,
+      input,
+    };
+    if (emitWaiting) this.emit(queuedEvent(msg, QueuedState.Waiting, true));
+    this.steers.push(msg);
+    try {
+      await c.conn.call('turn/steer', params, signal);
+      return;
+    } catch (err) {
+      const taken = !this.steers.some((m) => m.message === msg.message);
+      this.steers = this.steers.filter((m) => m.message !== msg.message);
+      // The turn ended meanwhile and told it taken.
+      if (taken) return;
+      if (err instanceof RpcError && err.message.startsWith('no active turn')) {
+        // The turn ended before the message reached it: it starts the
+        // next, which this session told as its message.
+        this.emit(queuedEvent(msg, QueuedState.Taken, false));
+        return await this.startTold(input, msg.message, signal);
+      }
+      if (err instanceof RpcError && this.active) {
+        if (restoreAt !== undefined) {
+          this.queue.splice(Math.min(restoreAt, this.queue.length), 0, msg);
+          throw new ChatProtoError(callError(err));
+        }
+        // The turn takes no steering: the message waits for its end.
+        this.queue.push(msg);
+        return;
+      }
+      this.emit(queuedEvent(msg, QueuedState.Cancelled, false));
+      throw new ChatProtoError(callError(err));
     }
   }
 
@@ -849,26 +934,42 @@ export class CodexSession implements Session {
   }
 
   /** Interrupts the running turn; the permissions and questions that wait
-   * and the queued messages go with it. A command the turn started still
-   * runs after the interrupt: the app-server is started again if one does
-   * interruptGrace later. */
-  async cancel(signal: AbortSignal): Promise<void> {
+   * go with it, and the queued messages too unless opts.keepQueue is true.
+   * A command the turn started still runs after the interrupt: the app-server
+   * is started again if one does interruptGrace later. */
+  async cancel(signal: AbortSignal, opts?: { keepQueue?: boolean }): Promise<void> {
     if (this.ended) return;
+    const keepQueue = opts?.keepQueue === true;
     const ask = this.ask;
-    const queue = this.queue;
-    this.queue = [];
-    const pend = this.takePending();
+    this.supersedeAsyncAsk();
+    let queue: Message[] = [];
+    if (!keepQueue) {
+      queue = this.queue;
+      this.queue = [];
+      this.keepQueueOnInterrupt = false;
+      this.drainOnInterrupt = false;
+    } else {
+      this.keepQueueOnInterrupt = true;
+      this.drainOnInterrupt = false;
+    }
+    const pend = this.takePending(keepQueue);
     const active = this.active;
-    this.emit(...queue.map((m) => queuedEvent(m, QueuedState.Cancelled, false)));
+    if (queue.length > 0) this.emit(...queue.map((m) => queuedEvent(m, QueuedState.Cancelled, false)));
     for (const p of pend) p.ac.abort();
     ask?.ac.abort();
     if (!active) return;
+    await this.interruptActiveTurn(signal);
+  }
+
+  /** Sends turn/interrupt for the active turn and arms the interruptGrace
+   * restart fallback if a shell command outlives the interrupt. */
+  private async interruptActiveTurn(signal: AbortSignal): Promise<void> {
     // The turn's id comes with turn/start's answer (or turn/started, for a
     // compaction).
-    while (this.turn === '' && this.active) await sleep(20, signal);
+    while (this.turn === '' && this.active && !this.ended && !this.closing) await sleep(20, signal);
     const turn = this.turn;
     const c = this.c;
-    if (turn === '' || !c) return;
+    if (!this.active || turn === '' || !c) return;
     let err: unknown;
     try {
       await c.conn.call('turn/interrupt', { threadId: this.thread, turnId: turn }, signal);
@@ -876,7 +977,7 @@ export class CodexSession implements Session {
       err = e;
     }
     const timer = setTimeout(() => {
-      if (!this.ended && !this.closing && this.commandRuns()) void this.restart();
+      if (!this.ended && !this.closing && !this.active && this.commandRuns()) void this.restart();
     }, this.t.interruptGrace);
     timer.unref?.();
     if (err !== undefined) throw new ChatProtoError(callError(err));
@@ -889,6 +990,124 @@ export class CodexSession implements Session {
     if (i < 0) throw perr(Code.NotFound, 'no such queued message');
     const [m] = this.queue.splice(i, 1);
     this.emit(queuedEvent(m!, QueuedState.Cancelled, false));
+  }
+
+  /** Promotes an already-queued message to steer into the active turn or
+   * interrupt the active turn and run next while keeping other queued
+   * messages in order. */
+  async steerQueued(message: string, delivery: 'steer' | 'interrupt', signal: AbortSignal): Promise<void> {
+    let doInterrupt = false;
+    if (!(await this.lock.acquire(signal))) throw new ChatProtoError(callError(new AbortedError(signal.reason)));
+    try {
+      if (this.ended || this.closing) throw errEnded();
+      const i = this.queue.findIndex((m) => m.message === message);
+      if (i < 0) throw perr(Code.NotFound, 'no such queued message');
+      const [msg] = this.queue.splice(i, 1);
+      const input = toUserInput(msg!.content);
+      if (!this.active) {
+        this.emit(queuedEvent(msg!, QueuedState.Taken, false));
+        return await this.startTold(input, msg!.message, signal);
+      }
+      if (delivery === chat.Delivery.Interrupt) {
+        this.queue.unshift(msg!);
+        this.keepQueueOnInterrupt = true;
+        this.drainOnInterrupt = true;
+        doInterrupt = true;
+      } else {
+        if (this.turn === '' || this.compacting) {
+          this.queue.splice(i, 0, msg!);
+          throw perr(Code.Busy, 'the active turn cannot be steered right now');
+        }
+        return await this.steerMessage(msg!, input, false, signal, i);
+      }
+    } finally {
+      this.lock.release();
+    }
+    if (doInterrupt) {
+      for (const pend of this.takePending(true)) pend.ac.abort();
+      await this.interruptActiveTurn(signal);
+    }
+  }
+
+  /** Replaces the session's cached model catalog after an Op.Models refresh. */
+  updateModels(ms: Models): void {
+    if (this.ended || this.closing) return;
+    this.models = ms;
+    this.st.effort = this.models.effortFor(this.st.model, this.st.effort, '');
+    this.sink.update(this.chatUpdate());
+  }
+
+  /** Rewinds an idle thread to just before p.beforeTurnId via thread/revert. */
+  async rewind(p: RewindParams, signal: AbortSignal): Promise<RewindResult> {
+    if (!(await this.lock.acquire(signal))) throw new ChatProtoError(callError(new AbortedError(signal.reason)));
+    try {
+      if (this.ended || this.closing) throw errEnded();
+      if (this.active || this.ask) throw perr(Code.Busy, 'a turn runs');
+      if (!p.beforeTurnId) throw perr(Code.BadRequest, 'codex: beforeTurnId is required for rewind');
+      const c = this.c!;
+      try {
+        await c.conn.call('thread/revert', { threadId: this.thread, beforeTurnId: p.beforeTurnId }, signal);
+      } catch (e) {
+        throw new ChatProtoError(callError(e));
+      }
+      this.plan = { id: '', text: '' };
+      this.supersedeAsyncAsk();
+      for (const pend of this.takePending()) pend.ac.abort();
+      this.items.clear();
+      this.children.clear();
+      this.bgTerminals.clear();
+      this.publishTasks();
+      return { sessionId: this.thread };
+    } finally {
+      this.lock.release();
+    }
+  }
+
+  /** Terminates a running background terminal (by processId) or interrupts a
+   * running subagent thread (by agentThreadId). */
+  async stopTask(taskId: string, signal: AbortSignal): Promise<void> {
+    if (this.ended || this.closing) throw errEnded();
+    if (!taskId) throw perr(Code.BadRequest, 'codex: empty task id');
+    const c = this.c!;
+    if (this.bgTerminals.has(taskId)) {
+      let res: ClientRequests['thread/backgroundTerminals/terminate']['result'];
+      try {
+        res = await c.conn.call('thread/backgroundTerminals/terminate', { threadId: this.thread, processId: taskId }, signal);
+      } catch (e) {
+        throw new ChatProtoError(callError(e));
+      }
+      if (!res?.terminated) {
+        void this.syncBackgroundTerminals();
+        throw perr(Code.NotFound, 'no such background terminal');
+      }
+      this.bgTerminals.delete(taskId);
+      this.publishTasks();
+      void this.syncBackgroundTerminals();
+      return;
+    }
+    const ch = this.children.get(taskId);
+    if (ch) {
+      if (!ch.running) throw perr(Code.NotFound, 'subagent is no longer running');
+      if (!ch.turnId) throw perr(Code.Busy, 'subagent turn is not ready to interrupt');
+      try {
+        await c.conn.call('turn/interrupt', { threadId: taskId, turnId: ch.turnId }, signal);
+      } catch (e) {
+        throw new ChatProtoError(callError(e));
+      }
+      return;
+    }
+    if (this.hasProcessIds) {
+      try {
+        const res = await c.conn.call('thread/backgroundTerminals/terminate', { threadId: this.thread, processId: taskId }, signal);
+        if (res?.terminated) {
+          void this.syncBackgroundTerminals();
+          return;
+        }
+      } catch (e) {
+        if (!(e instanceof RpcError)) throw new ChatProtoError(callError(e));
+      }
+    }
+    throw perr(Code.NotFound, 'no such running task');
   }
 
   /** Sets the model, the effort or the permission mode of the turns to
@@ -964,6 +1183,7 @@ export class CodexSession implements Session {
     if (this.ended) return;
     this.closing = true;
     this.ask?.ac.abort();
+    this.supersedeAsyncAsk();
     if (!this.c) return this.finish(undefined);
     void this.c.proc.stop(this.t);
     if (!signal) {
@@ -996,7 +1216,7 @@ export class CodexSession implements Session {
       return;
     }
     const evs: Event[] = [];
-    let after: (() => void) | null = null;
+    const afters: Array<() => void> = [];
     switch (method) {
       case 'turn/started': {
         const n = params as ServerNotifications['turn/started'];
@@ -1004,6 +1224,13 @@ export class CodexSession implements Session {
           this.active = true;
           this.turn = n.turn.id;
           evs.push({ t: EventType.Turn, ...(timeOf(at) ? { at: timeOf(at) } : {}), item: n.turn.id, state: TurnState.Start });
+        } else if (typeof n.threadId === 'string' && isObj(n.turn) && typeof n.turn.id === 'string' && n.turn.id !== '') {
+          const ch = this.children.get(n.threadId);
+          if (ch) {
+            ch.turnId = n.turn.id;
+            ch.running = true;
+            afters.push(() => this.publishTasks());
+          }
         }
         break;
       }
@@ -1012,13 +1239,19 @@ export class CodexSession implements Session {
         if (this.parentOf(n.threadId).main && isObj(n.turn)) {
           const r = this.turnCompleted(n.turn, at);
           evs.push(...r.evs);
-          after = r.after;
+          afters.push(r.after);
+        } else if (typeof n.threadId === 'string') {
+          const ch = this.children.get(n.threadId);
+          if (ch) {
+            ch.turnId = '';
+            afters.push(() => this.publishTasks());
+          }
         }
         break;
       }
       case 'item/started':
       case 'item/completed':
-        evs.push(...this.itemEvent(srv, params as ItemCompletedNotification, method === 'item/completed', at));
+        evs.push(...this.itemEvent(srv, params as ItemCompletedNotification, method === 'item/completed', at, afters));
         break;
       case 'item/agentMessage/delta':
       case 'item/plan/delta':
@@ -1026,6 +1259,15 @@ export class CodexSession implements Session {
       case 'item/reasoning/summaryPartAdded':
       case 'item/commandExecution/outputDelta':
         evs.push(...this.delta(method, params, at));
+        break;
+      case 'item/commandExecution/terminalInteraction':
+        this.hasProcessIds = true;
+        afters.push(() => void this.syncBackgroundTerminals());
+        break;
+      case 'process/exited':
+        if (this.bgTerminals.size > 0) afters.push(() => void this.syncBackgroundTerminals());
+        break;
+      case 'thread/reverted':
         break;
       case 'thread/tokenUsage/updated': {
         const n = params as ServerNotifications['thread/tokenUsage/updated'];
@@ -1037,7 +1279,8 @@ export class CodexSession implements Session {
           delete this.usage.percentage;
           if (this.usage.size > 0) this.usage.percentage = (this.usage.used * 100) / this.usage.size;
           this.dirty = true;
-          after = this.flushUsage(false);
+          const flush = this.flushUsage(false);
+          if (flush) afters.push(flush);
         }
         break;
       }
@@ -1045,7 +1288,8 @@ export class CodexSession implements Session {
         const n = params as ServerNotifications['account/rateLimits/updated'];
         if (isObj(n.rateLimits)) {
           this.rateLimits(n.rateLimits);
-          after = this.flushUsage(false);
+          const flush = this.flushUsage(false);
+          if (flush) afters.push(flush);
         }
         break;
       }
@@ -1054,7 +1298,7 @@ export class CodexSession implements Session {
         if (n.threadId === this.thread && typeof n.threadName === 'string') {
           const name = cutText(n.threadName, 512);
           evs.push(updateEvent('', '', false, { sessionUpdate: 'session_info_update', title: name }, at));
-          after = () => this.sink.update((c) => void (c.title = name));
+          afters.push(() => this.sink.update((c) => void (c.title = name)));
         }
         break;
       }
@@ -1081,11 +1325,11 @@ export class CodexSession implements Session {
         if (!QUIET.has(method)) srv.conn.passedOver(method);
     }
     this.emit(...evs);
-    after?.();
+    for (const fn of afters) fn();
   }
 
   /** The events of an item/started or item/completed. */
-  private itemEvent(srv: AppServer, n: ItemCompletedNotification, completed: boolean, at: number): Event[] {
+  private itemEvent(srv: AppServer, n: ItemCompletedNotification, completed: boolean, at: number, afters: Array<() => void>): Event[] {
     const it = n.item as ThreadItem | undefined;
     if (!isObj(it) || typeof it.id !== 'string' || it.id === '') {
       const type = isObj(it) && typeof it.type === 'string' ? it.type : '';
@@ -1093,18 +1337,53 @@ export class CodexSession implements Session {
       return [];
     }
     const { parent, main } = this.parentOf(n.threadId);
+    if (!main && typeof n.threadId === 'string' && typeof n.turnId === 'string' && n.turnId !== '') {
+      const ch = this.children.get(n.threadId);
+      if (ch && ch.turnId !== n.turnId) {
+        ch.turnId = n.turnId;
+        ch.running = true;
+        afters.push(() => this.publishTasks());
+      }
+    }
     switch (it.type) {
       case ItemType.UserMessage:
         return completed ? this.userMessage(it, parent, main, at) : [];
       case ItemType.SubAgent:
-        return this.subAgent(it, parent, completed, at);
+        return this.subAgent(it, parent, completed, at, afters);
       case ItemType.CollabTool:
-        if (it.tool === 'spawnAgent')
-          for (const t of Array.isArray(it.receiverThreadIds) ? it.receiverThreadIds : [])
-            if (!this.children.has(t)) setBounded(this.children, t, { call: it.id, parent, state: collabCall(it) });
+        if (it.tool === 'spawnAgent') {
+          let changed = false;
+          for (const t of Array.isArray(it.receiverThreadIds) ? it.receiverThreadIds : []) {
+            if (!this.children.has(t)) {
+              setBounded(this.children, t, {
+                call: it.id,
+                parent,
+                state: collabCall(it),
+                agentPath: strOf(it.prompt) || 'subagent',
+                turnId: '',
+                running: it.status === 'inProgress',
+                startedAt: timeOf(itemTime(it, at)),
+              });
+              changed = true;
+            }
+          }
+          if (changed) afters.push(() => this.publishTasks());
+        }
         break;
       case ItemType.Plan:
         if (completed && main) this.plan = { id: it.id, text: strOf(it.text) };
+        break;
+      case ItemType.AgentMessage:
+        if (completed && !this.closing) {
+          const qs = asyncQuestions(it.questions);
+          if (qs.length > 0) afters.push(() => this.startAsyncAsk(qs, it.id, parent));
+        }
+        break;
+      case ItemType.Command:
+        if (strOf(it.processId) !== '') {
+          this.hasProcessIds = true;
+          afters.push(() => void this.syncBackgroundTerminals());
+        }
         break;
     }
     const evs = this.m.itemEvents(it, completed, parent, at);
@@ -1154,21 +1433,41 @@ export class CodexSession implements Session {
 
   /** A subagent's activity: its start is a tool call its thread's events
    * belong to, which its end completes. */
-  private subAgent(it: Extract<ThreadItem, { type: 'subAgentActivity' }>, parent: string, completed: boolean, fallback: number): Event[] {
+  private subAgent(
+    it: Extract<ThreadItem, { type: 'subAgentActivity' }>,
+    parent: string,
+    completed: boolean,
+    fallback: number,
+    afters: Array<() => void>,
+  ): Event[] {
     const at = itemTime(it, fallback);
     switch (it.kind) {
       case SubAgent.Started: {
         if (this.children.has(it.agentThreadId) && completed) return [];
         const u = subAgentCall(it, Tool.InProgress);
-        if (it.agentThreadId) setBounded(this.children, it.agentThreadId, { call: it.id, parent, state: u });
+        if (it.agentThreadId) {
+          const existing = this.children.get(it.agentThreadId);
+          setBounded(this.children, it.agentThreadId, {
+            call: it.id,
+            parent,
+            state: u,
+            agentPath: strOf(it.agentPath),
+            turnId: existing?.turnId ?? '',
+            running: true,
+            startedAt: existing?.startedAt ?? timeOf(at),
+          });
+          afters.push(() => this.publishTasks());
+        }
         return [updateEvent(it.id, parent, false, u, at)];
       }
       case SubAgent.Completed:
       case SubAgent.Stopped: {
         const ch = this.children.get(it.agentThreadId);
         if (!completed || !ch) return [];
-        const u = cancelledCall(ch.state);
-        u.status = it.kind === SubAgent.Stopped ? Tool.Cancelled : Tool.Completed;
+        const u = callWithStatus(ch.state, it.kind === SubAgent.Stopped ? Tool.Cancelled : Tool.Completed);
+        ch.running = false;
+        ch.turnId = '';
+        afters.push(() => this.publishTasks());
         return [updateEvent(ch.call, ch.parent, false, u, at)];
       }
     }
@@ -1227,8 +1526,22 @@ export class CodexSession implements Session {
     }
     const plan = this.plan;
     this.plan = { id: '', text: '' };
-    const queue = this.queue;
-    this.queue = [];
+    const keep = this.keepQueueOnInterrupt;
+    const drain = this.drainOnInterrupt;
+    this.keepQueueOnInterrupt = false;
+    this.drainOnInterrupt = false;
+    let cancelledQueue: Message[] = [];
+    let next: Message | undefined;
+    if (t.status === 'interrupted') {
+      if (!keep) {
+        cancelledQueue = this.queue;
+        this.queue = [];
+      } else if (drain) {
+        next = this.queue.shift();
+      }
+    } else {
+      next = this.queue.shift();
+    }
     const lastErr = this.lastErr;
     this.active = false;
     this.turn = '';
@@ -1238,7 +1551,7 @@ export class CodexSession implements Session {
     this.lastErr = null;
     const flush = this.flushUsage(true)!;
     evs.push(turnEnd(t, lastErr, at));
-    if (t.status === 'completed' && plan.text !== '' && this.st.mode === Mode.Plan && queue.length === 0 && !this.closing) {
+    if (t.status === 'completed' && plan.text !== '' && this.st.mode === Mode.Plan && !next && this.queue.length === 0 && !this.closing) {
       // The turn ends first: its end cancels what was asked in it.
       let resolve!: () => void;
       const a: PlanAsk = { ac: new AbortController(), done: new Promise((r) => (resolve = r)), superseded: false };
@@ -1247,6 +1560,7 @@ export class CodexSession implements Session {
         evs,
         after: () => {
           flush();
+          if (this.hasProcessIds || this.bgTerminals.size > 0) void this.syncBackgroundTerminals();
           void this.askPlan(a, resolve, plan.id, plan.text);
         },
       };
@@ -1255,14 +1569,171 @@ export class CodexSession implements Session {
       evs,
       after: () => {
         flush();
-        if (queue.length === 0) return;
-        if (t.status === 'interrupted') {
-          this.emit(...queue.map((m) => queuedEvent(m, QueuedState.Cancelled, false)));
+        if (this.hasProcessIds || this.bgTerminals.size > 0) void this.syncBackgroundTerminals();
+        if (cancelledQueue.length > 0) {
+          this.emit(...cancelledQueue.map((m) => queuedEvent(m, QueuedState.Cancelled, false)));
           return;
         }
-        void this.sendQueued(queue);
+        if (next) void this.sendQueued([next]);
       },
     };
+  }
+
+  /** Launches a non-blocking question ask for an agentMessage's async
+   * questions; supersedes any prior unanswered async question ask. */
+  private startAsyncAsk(qs: AsyncQuestion[], itemId: string, parent: string): void {
+    if (this.ended || this.closing || qs.length === 0) return;
+    this.supersedeAsyncAsk();
+    let resolve!: () => void;
+    const a: PlanAsk = { ac: new AbortController(), done: new Promise((r) => (resolve = r)), superseded: false };
+    this.asyncAsk = a;
+    void this.askAsyncQuestions(a, resolve, qs, itemId, parent);
+  }
+
+  /** Presents agentMessage.questions as a non-blocking question card and,
+   * once answered by the user, dispatches the formatted answers as a user
+   * prompt (or queues them if a turn is running). */
+  private async askAsyncQuestions(a: PlanAsk, settle: () => void, qs: AsyncQuestion[], itemId: string, parent: string): Promise<void> {
+    const chatQuestions: chat.Question[] = qs.map((q, i) => ({
+      id: `q${i + 1}`,
+      question: q.title,
+      allowOther: true,
+      ...(q.options && q.options.length > 0 ? { options: q.options.map((label) => ({ label })) } : {}),
+    }));
+    let ans: QuestionAnswer;
+    try {
+      ans = await this.sink.question(
+        { questions: chatQuestions, parent, async: true, item: itemId },
+        AbortSignal.any([a.ac.signal, this.ac.signal]),
+      );
+    } catch {
+      ans = { cancelled: true };
+    }
+    a.ac.abort();
+    if (this.asyncAsk === a) this.asyncAsk = null;
+    settle();
+    if (ans.cancelled || a.superseded) return;
+    const lines: string[] = [];
+    for (const q of chatQuestions) {
+      const vals = (ans.answers[q.id] ?? []).map((v) => v.trim()).filter((v) => v !== '');
+      if (vals.length === 0) continue;
+      lines.push(`${q.question}: ${vals.join(', ')}`);
+    }
+    const reply = lines.join('\n');
+    if (reply === '') return;
+    if (!(await this.lock.acquire(this.ac.signal))) return;
+    try {
+      if (this.ended || this.closing || a.superseded) return;
+      const content = [textBlock(reply)];
+      const msg: Message = { content, message: newID(), clientId: '' };
+      const input = toUserInput(content);
+      if (this.active) {
+        if (this.queue.length + this.steers.length < MAX_QUEUE) {
+          this.queue.push(msg);
+          this.emit(queuedEvent(msg, QueuedState.Waiting, true));
+        }
+        return;
+      }
+      this.emit(userEvent(msg));
+      try {
+        await this.startTurn(input, msg.message, this.ac.signal);
+      } catch (e) {
+        const message = callError(e).message;
+        this.logf(`sending async question answer: ${message}`);
+        this.emit(noticeEvent(Notice.Error, '', { message }));
+      }
+    } finally {
+      this.lock.release();
+    }
+  }
+
+  /** Queries thread/backgroundTerminals/list (coalescing concurrent calls)
+   * and updates Chat.tasks. Best-effort: older app-servers or recordings
+   * without this RPC are ignored quietly. */
+  private async syncBackgroundTerminals(): Promise<void> {
+    if (this.ended || this.closing || this.thread === '' || !this.c) return;
+    if (this.bgSyncing) {
+      this.bgSyncAgain = true;
+      return;
+    }
+    this.bgSyncing = true;
+    try {
+      const c = this.c;
+      if (!c || this.ended || this.closing) return;
+      const found = new Map<string, ThreadBackgroundTerminal>();
+      let cursor = '';
+      const signal = AbortSignal.any([this.ac.signal, AbortSignal.timeout(5000)]);
+      for (let page = 0; page < 10; page++) {
+        const res = await c.conn.call(
+          'thread/backgroundTerminals/list',
+          { threadId: this.thread, limit: 100, ...(cursor ? { cursor } : {}) },
+          signal,
+        );
+        for (const t of Array.isArray(res?.data) ? res.data : []) {
+          if (isObj(t) && typeof t.processId === 'string' && t.processId !== '') found.set(t.processId, t);
+        }
+        if (!res?.nextCursor) break;
+        cursor = res.nextCursor;
+      }
+      if (this.ended || this.closing || this.c !== c) return;
+      this.bgTerminals.clear();
+      for (const [k, v] of found) this.bgTerminals.set(k, v);
+      this.publishTasks();
+    } catch {
+      // Best-effort: app-servers without backgroundTerminals/list or closed connections.
+    } finally {
+      this.bgSyncing = false;
+      if (this.bgSyncAgain && !this.ended && !this.closing) {
+        this.bgSyncAgain = false;
+        void this.syncBackgroundTerminals();
+      } else {
+        this.bgSyncAgain = false;
+      }
+    }
+  }
+
+  /** Publishes the current live set of background terminals and running
+   * subagents to Chat.tasks when it changed. */
+  private publishTasks(): void {
+    if (this.ended || this.closing) return;
+    const tasks: chat.BackgroundTask[] = [];
+    for (const term of this.bgTerminals.values()) {
+      const cmd = cutText(shellScript(term.command, null) || strOf(term.command), MAX_TITLE);
+      tasks.push({
+        id: term.processId,
+        kind: chat.TaskKind.Shell,
+        status: chat.TaskStatus.Running,
+        description: cmd || term.processId,
+        ...(cmd ? { command: cmd } : {}),
+        ...(strOf(term.itemId) ? { toolCallId: term.itemId } : {}),
+        ...(typeof term.osPid === 'number' && term.osPid > 0 ? { pid: term.osPid } : {}),
+        backgrounded: true,
+        stoppable: true,
+      });
+    }
+    for (const [threadId, ch] of this.children) {
+      if (!ch.running) continue;
+      const desc = cutText(ch.agentPath || 'subagent', MAX_TITLE);
+      tasks.push({
+        id: threadId,
+        kind: chat.TaskKind.Subagent,
+        status: chat.TaskStatus.Running,
+        description: desc,
+        agentType: desc,
+        toolCallId: ch.call,
+        backgrounded: true,
+        stoppable: ch.turnId !== '',
+        ...(ch.startedAt ? { startedAt: ch.startedAt } : {}),
+      });
+    }
+    const json = tasks.length > 0 ? JSON.stringify(tasks) : '';
+    if (json === this.lastTasksJson) return;
+    this.lastTasksJson = json;
+    if (tasks.length > 0) this.sink.update((c) => void (c.tasks = tasks));
+    else
+      this.sink.update((c) => {
+        delete c.tasks;
+      });
   }
 
   /** Asks to approve the plan of the turn that just ended. Approved, the
@@ -1445,12 +1916,17 @@ export class CodexSession implements Session {
     r.reply({ decision });
   }
 
-  /** Asks the user the questions of request_user_input (plan mode's);
-   * skipped, they are answered with no answers. A question without options
-   * takes the user's own words, whatever its isOther says: it could not be
-   * answered otherwise. */
+  /** Asks the user the questions of request_user_input (plan mode's or
+   * non-blocking async questions); skipped, they are answered with no
+   * answers. A question without options takes the user's own words, whatever
+   * its isOther says: it could not be answered otherwise. */
   private async askQuestions(r: ServerRequest, p: Pending): Promise<void> {
     const params = (isObj(r.params) ? r.params : {}) as Partial<ServerRequests[typeof M.RequestUserInput]['params']>;
+    const isAsync = params.isBlocking === false;
+    p.async = isAsync;
+    const autoResolutionMs =
+      typeof params.autoResolutionMs === 'number' && params.autoResolutionMs > 0 ? params.autoResolutionMs : undefined;
+    const item = typeof params.itemId === 'string' && params.itemId !== '' ? params.itemId : undefined;
     const qs: chat.Question[] = [];
     const ids = new Set<string>();
     for (const q of Array.isArray(params.questions) ? params.questions : []) {
@@ -1467,7 +1943,16 @@ export class CodexSession implements Session {
     const { parent } = this.parentOf(params.threadId);
     let ans: QuestionAnswer;
     try {
-      ans = await this.sink.question({ questions: qs, parent }, this.waitSignal(p));
+      ans = await this.sink.question(
+        {
+          questions: qs,
+          parent,
+          ...(isAsync ? { async: true } : {}),
+          ...(autoResolutionMs !== undefined ? { autoResolutionMs } : {}),
+          ...(item ? { item } : {}),
+        },
+        this.waitSignal(p),
+      );
     } catch {
       ans = { cancelled: true };
     }

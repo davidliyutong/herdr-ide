@@ -9,8 +9,8 @@ import { actions } from '../../actions';
 import { openMenu } from '../../contextMenu';
 import { t } from '../../i18n';
 import { useStore } from '../../state/store';
-import type { PaneViewProps, PluginDef, PluginSettingsProps } from '../api';
-import { agentName, chatMenu, kindIcon, kindsMenu, newChat, newTabTitle } from './ops';
+import type { PaneViewProps, PluginDef, PluginSettingsLayoutProps, PluginSettingsProps } from '../api';
+import { agentName, brandKindIcon, chatMenu, kindIcon, kindsMenu, newChat, newTabTitle } from './ops';
 import { chatViewStatus } from './status';
 import { applyMessage, chatCwd, chatGone, follow, loadAgents, offeredKinds, useChats } from './state';
 import { watchHosts } from './hostReminder';
@@ -19,6 +19,7 @@ import { CHAT_PLUGIN, CHAT_VIEW, chatRef } from './view';
 export interface ChatPluginComponents {
   ChatPane: ComponentType<PaneViewProps>;
   ChatsPanel: ComponentType;
+  ChatSettingsLayout?: ComponentType<PluginSettingsLayoutProps>;
   ChatSettingsExtra: ComponentType<PluginSettingsProps>;
   ChatUsageItem: ComponentType;
 }
@@ -49,11 +50,16 @@ export function makeChatPlugin(ui: ChatPluginComponents): PluginDef {
     title: 'chat.title',
     description: 'chat.description',
     icon: BotMessageSquare,
-    settings: { section: 'chat', extra: ui.ChatSettingsExtra },
+    settings: { section: 'chat', ...(ui.ChatSettingsLayout ? { layout: ui.ChatSettingsLayout } : {}), extra: ui.ChatSettingsExtra },
     panels: [{ id: CHAT_PLUGIN, title: 'chat.panel.chats', icon: MessagesSquare, component: ui.ChatsPanel }],
     paneViews: {
       [CHAT_VIEW]: {
         icon: BotMessageSquare,
+        iconFor(m, v) {
+          const ref = chatRef(v);
+          const kind = ref.agent ?? (ref.chat ? useChats.getState().states[m]?.[ref.chat]?.kind : undefined);
+          return kind ? brandKindIcon(kind) : undefined;
+        },
         title(m, v) {
           const ref = chatRef(v);
           const st = ref.chat ? useChats.getState().states[m]?.[ref.chat] : undefined;

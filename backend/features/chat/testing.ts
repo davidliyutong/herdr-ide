@@ -84,6 +84,8 @@ export class FakeChatHost {
   states: chat.ChatState[] = [];
   readonly agents = new Map<string, boolean>();
   sessions: chat.Session[] = [];
+  modelsByKind = new Map<string, { models: chat.ModelOption[]; fetchedAt: string }>();
+  exportedMarkdown = '# Conversation Handoff\n';
   trusted: chat.TrustedFolder[] = [];
   hostStatus: chat.HostStatus | undefined;
   /** Refuses the requests of an op; answers the commands of an op with an
@@ -157,6 +159,46 @@ export class FakeChatHost {
         const ch = testChat({ id: chat.newChatID(), kind: req.kind ?? '', cwd: req.cwd ?? '', state: chat.State.Starting });
         this.chats.set(ch.id, ch);
         return void (await c.write({ ok: true, chat: ch }));
+      }
+      case chat.Op.Models: {
+        const k = req.kind ?? '';
+        const entry = this.modelsByKind.get(k);
+        return void (await c.write({
+          ok: true,
+          models: entry?.models ?? [],
+          ...(entry?.fetchedAt ? { fetchedAt: entry.fetchedAt } : {}),
+        }));
+      }
+      case chat.Op.Fork: {
+        const src = this.chats.get(req.chat ?? '');
+        if (!src) return void (await c.write({ error: { code: chat.Code.UnknownChat, message: 'no such chat' } }));
+        const forked = testChat({
+          id: chat.newChatID(),
+          kind: src.kind,
+          cwd: src.cwd,
+          title: req.title || `${src.title} (fork)`,
+          state: chat.State.Starting,
+        });
+        this.chats.set(forked.id, forked);
+        return void (await c.write({ ok: true, chat: forked }));
+      }
+      case chat.Op.Switch: {
+        const src = this.chats.get(req.chat ?? '');
+        if (!src) return void (await c.write({ error: { code: chat.Code.UnknownChat, message: 'no such chat' } }));
+        const switched = testChat({
+          id: chat.newChatID(),
+          kind: req.targetKind ?? 'codex',
+          cwd: src.cwd,
+          title: src.title,
+          state: chat.State.Starting,
+        });
+        this.chats.set(switched.id, switched);
+        return void (await c.write({ ok: true, chat: switched }));
+      }
+      case chat.Op.Export: {
+        const src = this.chats.get(req.chat ?? '');
+        if (!src) return void (await c.write({ error: { code: chat.Code.UnknownChat, message: 'no such chat' } }));
+        return void (await c.write({ ok: true, markdown: this.exportedMarkdown }));
       }
       case chat.Op.Trusted:
         return void (await c.write({ ok: true, trusted: [...this.trusted] }));

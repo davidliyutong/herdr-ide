@@ -337,16 +337,26 @@ export function readOpenCodeSession(
       if (!hasSession || !sessCols.includes('directory')) return null;
       const timeCol = sessCols.includes('time_updated') ? 'time_updated' : sessCols.includes('time_created') ? 'time_created' : '0';
       const whereParent = hasParent ? `WHERE parent_id IS NULL OR parent_id = ''` : '';
+      let fallbackId = '';
+      let fallbackAt = 0;
       await r.rows(`SELECT id, directory, ${timeCol} AS t FROM session ${whereParent} ORDER BY ${timeCol} DESC LIMIT 64`, [], (row) => {
         if (rootId) return;
         const sid = typeof row.id === 'string' ? row.id : '';
         const dir = typeof row.directory === 'string' ? row.directory : '';
         if (!sid || !dir || !wants.has(cleanDir(dir))) return;
         const tsMs = normMs(int(row.t));
+        if (!fallbackId) {
+          fallbackId = sid;
+          fallbackAt = tsMs;
+        }
         if (opts.sinceMs && tsMs > 0 && tsMs < opts.sinceMs) return;
         rootId = sid;
         updatedAt = tsMs;
       });
+      if (!rootId && fallbackId) {
+        rootId = fallbackId;
+        updatedAt = fallbackAt;
+      }
       if (!rootId) return null;
     } else if (hasSession) {
       let exists = false;
@@ -621,6 +631,85 @@ export function parseStepTime(b: Uint8Array): number {
 
 const bytesOf = (v: SQLValue | undefined): Uint8Array =>
   v instanceof Uint8Array ? v : typeof v === 'string' ? Buffer.from(v) : new Uint8Array();
+
+/** One root conversation entry from Antigravity's conversation_summaries.db. */
+export interface AntigravitySummary {
+  id: string;
+  workspaces: string[];
+  modifiedMs: number;
+  active: boolean;
+}
+
+const AG_MAX_SUMMARIES = 512;
+
+function parseSummaryTime(v: SQLValue | undefined): number {
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v < 1e12 ? Math.trunc(v * 1000) : Math.trunc(v);
+  if (typeof v === 'bigint') {
+    const n = Number(v);
+    if (n > 0) return n < 1e12 ? Math.trunc(n * 1000) : Math.trunc(n);
+  }
+  if (typeof v !== 'string') return 0;
+  const s = v.trim();
+  if (!s) return 0;
+  let iso = s.includes(' ') && !s.includes('T') ? s.replace(' ', 'T') : s;
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) iso += 'Z';
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
+/** Reads root conversations from Antigravity's conversation_summaries.db
+ * (read-only via SQLiteWorker), most recently modified first. */
+export function readAntigravitySummaries(p: string, o: DBRead): Promise<AntigravitySummary[]> {
+  return readDB(p, o, async (r) => {
+    const cols = await r.columns('conversation_summaries');
+    if (!cols.includes('conversation_id') || !cols.includes('workspace_uris')) return [];
+    const sel = [
+      'conversation_id',
+      'workspace_uris',
+      cols.includes('parent_conversation_id') ? 'parent_conversation_id' : "'' AS parent_conversation_id",
+      cols.includes('nesting_depth') ? 'nesting_depth' : '0 AS nesting_depth',
+      cols.includes('status') ? 'status' : "'' AS status",
+      cols.includes('not_fully_idle') ? 'not_fully_idle' : '0 AS not_fully_idle',
+      cols.includes('killed') ? 'killed' : '0 AS killed',
+      cols.includes('last_modified_time') ? 'last_modified_time' : 'NULL AS last_modified_time',
+    ].join(', ');
+    const order = cols.includes('last_modified_time') ? ' ORDER BY last_modified_time DESC' : '';
+    const out: AntigravitySummary[] = [];
+    await r.rows(`SELECT ${sel} FROM conversation_summaries${order} LIMIT ?`, [AG_MAX_SUMMARIES], (row) => {
+      const id = typeof row.conversation_id === 'string' ? row.conversation_id : '';
+      if (!id) return;
+      const parent = typeof row.parent_conversation_id === 'string' ? row.parent_conversation_id : '';
+      const depth = int(row.nesting_depth);
+      const killed = row.killed === 1 || row.killed === 1n || row.killed === '1' || row.killed === 'true';
+      if (parent || depth > 0 || killed) return;
+      const rawWs = typeof row.workspace_uris === 'string' ? row.workspace_uris : '';
+      let workspaces: string[] = [];
+      if (rawWs) {
+        try {
+          const parsed: unknown = JSON.parse(rawWs);
+          if (Array.isArray(parsed)) {
+            workspaces = parsed
+              .filter((x): x is string => typeof x === 'string')
+              .map((u) => uriPath(u))
+              .filter(Boolean);
+          }
+        } catch {
+          // malformed JSON
+        }
+      }
+      if (!workspaces.length) return;
+      const status = typeof row.status === 'string' ? row.status : '';
+      const notIdle = row.not_fully_idle === 1 || row.not_fully_idle === 1n || row.not_fully_idle === '1' || row.not_fully_idle === 'true';
+      out.push({
+        id,
+        workspaces,
+        modifiedMs: parseSummaryTime(row.last_modified_time),
+        active: status === 'CASCADE_RUN_STATUS_RUNNING' || notIdle,
+      });
+    });
+    return out;
+  });
+}
 
 /** Reads only trajectory_metadata_blob from an Antigravity conversation
  * database to match a conversation to a workspace directory. */

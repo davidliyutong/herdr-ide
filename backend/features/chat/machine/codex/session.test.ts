@@ -7,6 +7,7 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { extended } from '#shared/testdata/extended.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { NAME } from '#shared/lib/brand.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { ChatProtoError, type Event } from '#shared/proto/chatproto/index.ts';
 import { OPTION_ALLOW_ONCE, OPTION_REJECT_ONCE } from '../adapter.ts';
@@ -24,6 +25,7 @@ import {
   agentMessage,
   fixture,
   invalid,
+  policyProblems,
   resultOf,
   tempDir,
   turnEnds,
@@ -51,8 +53,17 @@ async function start(f: FakeRun, options: chat.Options = {}, resume = ''): Promi
 
 const text = (s: string): unknown[] => [{ type: 'text', text: s }];
 
-async function prompt(s: CodexSession, msg: string, body: string): Promise<void> {
-  await s.prompt({ content: text(body), message: msg, clientId: 'c-' + msg, recorded: !s.busy }, AbortSignal.timeout(PATIENCE));
+async function prompt(s: CodexSession, msg: string, body: string, delivery?: chat.Delivery): Promise<void> {
+  await s.prompt(
+    {
+      content: text(body),
+      message: msg,
+      clientId: 'c-' + msg,
+      recorded: !s.busy,
+      ...(delivery ? { delivery } : {}),
+    },
+    AbortSignal.timeout(PATIENCE),
+  );
 }
 
 async function codeOf(p: Promise<unknown>): Promise<string> {
@@ -476,7 +487,12 @@ describe('prompts, queues and plans', () => {
       await prompt(s, 'm1', 'go');
       await k.wait("the turn's start", (k) => state(s).turn === 't1' && k.count((ev) => ev.t === chat.EventType.Turn) === 1);
       expect(
-        await codeOf(s.prompt({ content: text('more'), message: 'm2', clientId: 'c-m2', recorded: false }, AbortSignal.timeout(5000))),
+        await codeOf(
+          s.prompt(
+            { content: text('more'), message: 'm2', clientId: 'c-m2', recorded: false, delivery: chat.Delivery.Steer },
+            AbortSignal.timeout(5000),
+          ),
+        ),
       ).toBe(chat.Code.Failed);
       expect(turnStates(k)).toEqual(['start', 'queued:m2', 'taken:m2', 'error']);
     }
@@ -497,7 +513,7 @@ describe('prompts, queues and plans', () => {
       const { s, k } = await start(f);
       await prompt(s, 'm1', 'go');
       await k.wait("the turn's start", () => state(s).turn === 't1');
-      await prompt(s, 'm2', 'more');
+      await prompt(s, 'm2', 'more', chat.Delivery.Steer);
       await s.done;
       expect(queued(k)).toEqual(['queued:m2', 'taken:m2']);
     }
@@ -734,5 +750,538 @@ describe('history', () => {
     const { f, evs } = await run(sc, 'turn1');
     expect(f.requests(1, 'thread/turns/list').map((p) => p.cursor)).toEqual([undefined, 'middle', 'anchor', 'middle']);
     expect(evs.filter((e) => e.t === chat.EventType.User).map((e) => e.item)).toEqual(['u2', 'u3']);
+  });
+});
+
+describe('async questions, models, FIFO queue/steer/interrupt, fork/rewind, and background tasks', () => {
+  test('non-blocking item/tool/requestUserInput forwards async, autoResolutionMs and item, and survives turn completion', async () => {
+    const sc = new Script();
+    sc.begin();
+    const turn = sc.request('turn/start');
+    sc.reply(turn, inProgress('t1'));
+    sc.turnStarted('t1');
+    sc.line({
+      dir: 'in',
+      msg: {
+        id: 77,
+        method: 'item/tool/requestUserInput',
+        params: {
+          threadId: THREAD,
+          turnId: 't1',
+          itemId: 'q-async-1',
+          isBlocking: false,
+          autoResolutionMs: 30_000,
+          questions: [
+            {
+              id: 'env',
+              header: 'Environment',
+              question: 'Target environment?',
+              isOther: true,
+              isSecret: false,
+              options: [{ label: 'staging', description: '' }],
+            },
+          ],
+        },
+      },
+    });
+    sc.turnCompleted('t1', 'completed');
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const { s, k } = await start(f);
+    let resolveQ!: (a: { answers: Record<string, string[]> }) => void;
+    const origQuestion = k.question.bind(k);
+    k.question = async (r, sig) => {
+      k.questions.push(r);
+      return await new Promise((resolve) => {
+        resolveQ = resolve;
+        sig.addEventListener('abort', () => resolve({ cancelled: true }), { once: true });
+      });
+    };
+    await prompt(s, 'm1', 'deploy');
+    await k.wait("the turn's end and async question", (sink) => turnEnds(1)(sink) && sink.questions.length === 1);
+    expect(k.questions[0]!.async).toBe(true);
+    expect(k.questions[0]!.autoResolutionMs).toBe(30_000);
+    expect(k.questions[0]!.item).toBe('q-async-1');
+    // Still open after turn completed; user answers now.
+    resolveQ({ answers: { env: ['staging'] } });
+    await k.wait('reply sent', () => f.replies(1).has('77'));
+    expect(f.replies(1).get('77')!.result).toEqual({ answers: { env: { answers: ['staging'] } } });
+    k.question = origQuestion;
+  });
+
+  test('agentMessage with async questions launches non-blocking question card, sends answer turn, and is superseded by manual prompt', async () => {
+    // 1. User answers async question -> dispatched as a new turn.
+    {
+      const sc = new Script();
+      sc.begin();
+      const t1 = sc.request('turn/start');
+      sc.reply(t1, inProgress('t1'));
+      sc.turnStarted('t1');
+      sc.item(false, {
+        type: 'agentMessage',
+        id: 'am-1',
+        text: 'Which DB should we use?',
+        phase: 'final_answer',
+        delivery: 'async',
+        questions: [{ title: 'Database', options: ['SQLite', 'Postgres'] }],
+      });
+      sc.turnCompleted('t1', 'completed');
+      const t2 = sc.request('turn/start');
+      sc.reply(t2, inProgress('t2'));
+      sc.turnStarted('t2');
+      sc.turnCompleted('t2', 'completed');
+      const f = new FakeRun('', HANDSHAKE, sc.file());
+      const { s, k } = await start(f);
+      k.questAns = [{ answers: { q1: ['Postgres'] } }];
+      await prompt(s, 'm1', 'start');
+      await k.wait('second turn from async answer', turnEnds(2));
+      expect(k.questions.length).toBe(1);
+      expect(k.questions[0]!.async).toBe(true);
+      expect(k.questions[0]!.item).toBe('am-1');
+      expect(k.questions[0]!.questions[0]!.allowOther).toBe(true);
+      const starts = f.requests(1, 'turn/start');
+      expect(starts.length).toBe(2);
+      expect(starts[1]!.input).toEqual([{ type: 'text', text: 'Database: Postgres', text_elements: [] }]);
+      expect(policyProblems(f)).toEqual([]);
+    }
+    // 2. Manual prompt supersedes open async question without blocking.
+    {
+      const sc = new Script();
+      sc.begin();
+      const t1 = sc.request('turn/start');
+      sc.reply(t1, inProgress('t1'));
+      sc.turnStarted('t1');
+      sc.item(false, {
+        type: 'agentMessage',
+        id: 'am-2',
+        text: 'Follow up?',
+        delivery: 'async',
+        questions: [{ title: 'Continue?', options: ['Yes', 'No'] }],
+      });
+      sc.turnCompleted('t1', 'completed');
+      const t2 = sc.request('turn/start');
+      sc.reply(t2, inProgress('t2'));
+      sc.turnStarted('t2');
+      sc.turnCompleted('t2', 'completed');
+      const f = new FakeRun('', HANDSHAKE, sc.file());
+      const { s, k } = await start(f);
+      let abortReason: unknown = 'not-aborted';
+      const origQ = k.question.bind(k);
+      k.question = async (r, sig) => {
+        sig.addEventListener('abort', () => (abortReason = sig.reason), { once: true });
+        return origQ(r, sig);
+      };
+      await prompt(s, 'm1', 'start');
+      await k.wait('async question asked', (sink) => turnEnds(1)(sink) && sink.questions.length === 1);
+      // Async question does NOT make the session busy.
+      expect(s.busy).toBe(false);
+      await prompt(s, 'm2', 'manual override');
+      await k.wait('second turn completed', turnEnds(2));
+      expect(abortReason).toBe(chat.By.Superseded);
+      const starts = f.requests(1, 'turn/start');
+      expect(starts[1]!.input).toEqual([{ type: 'text', text: 'manual override', text_elements: [] }]);
+    }
+  });
+
+  test('models() lists models via probe when idle and reuses live app-server while updating live session models', async () => {
+    // 1. Standalone probe when no session is running.
+    {
+      const sc = new Script();
+      sc.reply(sc.request('initialize'), { userAgent: 'codex/0.171.0' });
+      const f = new FakeRun('', HANDSHAKE, sc.file());
+      const ms = await adapter().models!(
+        {
+          kind: 'codex',
+          argv: f.argv,
+          env: f.env,
+          cwd: tempDir(),
+          procs: f.procs,
+          logger: f.log.logger,
+          client: { name: NAME, version: '1.0' },
+        },
+        AbortSignal.timeout(PATIENCE),
+      );
+      expect(ms.length).toBeGreaterThan(0);
+      expect(ms.find((m) => m.value === 'gpt-6-luna')).toMatchObject({
+        value: 'gpt-6-luna',
+        name: 'GPT-6-Luna',
+        defaultEffort: 'medium',
+        images: true,
+      });
+      expect(f.events(1)).toEqual(['eof']);
+    }
+    // 2. Reuses live app-server and updates live session models so setConfig accepts newly refreshed model.
+    {
+      const sc = new Script();
+      sc.reply(sc.request('initialize'), { userAgent: 'codex/0.171.0 (test)' });
+      sc.reply(sc.request('model/list'), {
+        data: [
+          {
+            id: 'gpt-6-luna',
+            model: 'gpt-6-luna',
+            displayName: 'GPT-6-Luna',
+            hidden: false,
+            defaultReasoningEffort: 'low',
+            supportedReasoningEfforts: [{ reasoningEffort: 'low', description: 'Low' }],
+            inputModalities: ['text', 'image'],
+          },
+        ],
+        nextCursor: null,
+      });
+      sc.reply(sc.request('thread/start'), { thread: { id: Script.THREAD }, model: 'gpt-6-luna', reasoningEffort: 'low' });
+      sc.reply(sc.request('model/list'), {
+        data: [
+          {
+            id: 'gpt-7-fresh',
+            model: 'gpt-7-fresh',
+            displayName: 'GPT-7 Fresh',
+            description: 'Freshly added model',
+            hidden: false,
+            defaultReasoningEffort: 'high',
+            supportedReasoningEfforts: [{ reasoningEffort: 'high', description: 'High' }],
+            inputModalities: ['text'],
+          },
+        ],
+        nextCursor: null,
+      });
+      const f = new FakeRun('', HANDSHAKE, sc.file());
+      const a = adapter();
+      const k = new TestSink();
+      const s = (await a.start(f.params(tempDir()), k, AbortSignal.timeout(PATIENCE))) as CodexSession;
+      cleanups.push(() => s.close(AbortSignal.timeout(5000)));
+      const ms = await a.models!(
+        {
+          kind: 'codex',
+          argv: ['/nonexistent'],
+          env: {},
+          cwd: tempDir(),
+          procs: f.procs,
+          logger: f.log.logger,
+          client: { name: NAME, version: '1.0' },
+        },
+        AbortSignal.timeout(PATIENCE),
+      );
+      expect(f.started()).toBe(1);
+      expect(ms).toEqual([
+        {
+          value: 'gpt-7-fresh',
+          name: 'GPT-7 Fresh',
+          description: 'Freshly added model',
+          efforts: ['high'],
+          defaultEffort: 'high',
+          images: false,
+        },
+      ]);
+      await s.setConfig(Opt.Model, 'gpt-7-fresh');
+      expect(s.st.model).toBe('gpt-7-fresh');
+      expect(s.st.effort).toBe('high');
+    }
+  });
+
+  test('default prompts queue FIFO one-by-one, support per-message withdrawal, and never auto-steer', async () => {
+    const sc = new Script();
+    sc.begin();
+    const t1 = sc.request('turn/start');
+    sc.reply(t1, inProgress('t1'));
+    sc.turnStarted('t1');
+    sc.line({ dir: 'in', sleep: 250 });
+    sc.turnCompleted('t1', 'completed');
+    const t2 = sc.request('turn/start');
+    sc.reply(t2, inProgress('t2'));
+    sc.turnStarted('t2');
+    sc.line({ dir: 'in', sleep: 150 });
+    sc.turnCompleted('t2', 'completed');
+    const t3 = sc.request('turn/start');
+    sc.reply(t3, inProgress('t3'));
+    sc.turnStarted('t3');
+    sc.turnCompleted('t3', 'completed');
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const { s, k } = await start(f);
+    await prompt(s, 'm1', 'first');
+    await k.wait('t1 started', () => state(s).turn === 't1');
+    await prompt(s, 'm2', 'second');
+    await prompt(s, 'm3', 'withdrawn');
+    await prompt(s, 'm4', 'fourth');
+    // Withdraw m3 before t1 finishes.
+    await s.cancelQueued('m3');
+    expect(f.requests(1, 'turn/steer').length).toBe(0);
+    // Wait for t2 to start; m4 should STILL be queued (not concatenated into t2!).
+    await k.wait('t2 started', () => state(s).turn === 't2');
+    expect(k.events.filter((ev) => ev.t === chat.EventType.Queued).map((ev) => `${ev.state}:${ev.message}`)).toEqual([
+      'queued:m2',
+      'queued:m3',
+      'queued:m4',
+      'cancelled:m3',
+      'taken:m2',
+    ]);
+    await k.wait('t3 completed', turnEnds(3));
+    const starts = f.requests(1, 'turn/start');
+    expect(starts.map((x) => x.clientUserMessageId)).toEqual(['m1', 'm2', 'm4']);
+    expect(f.requests(1, 'turn/steer').length).toBe(0);
+  });
+
+  test('steerQueued promotes a queued message via turn/steer; delivery interrupt & cancel(keepQueue) preserve unrelated queued items', async () => {
+    // 1. steerQueued(..., 'steer')
+    {
+      const sc = new Script();
+      sc.begin();
+      const t1 = sc.request('turn/start');
+      sc.reply(t1, inProgress('t1'));
+      sc.turnStarted('t1');
+      sc.reply(sc.request('turn/steer'), { turnId: 't1' });
+      sc.item(false, { type: 'userMessage', id: 'u2', clientId: 'm2', content: [{ type: 'text', text: 'steer me', text_elements: [] }] });
+      sc.turnCompleted('t1', 'completed');
+      const f = new FakeRun('', HANDSHAKE, sc.file());
+      const { s, k } = await start(f);
+      await prompt(s, 'm1', 'first');
+      await k.wait('t1 started', () => state(s).turn === 't1');
+      await prompt(s, 'm2', 'steer me');
+      await s.steerQueued('m2', chat.Delivery.Steer, AbortSignal.timeout(5000));
+      await k.wait('t1 completed', turnEnds(1));
+      expect(f.requests(1, 'turn/steer').length).toBe(1);
+      expect(f.requests(1, 'turn/steer')[0]!.clientUserMessageId).toBe('m2');
+      // Only one queued:m2 event (no duplicate on promotion), followed by taken:m2.
+      expect(k.events.filter((ev) => ev.t === chat.EventType.Queued).map((ev) => `${ev.state}:${ev.message}`)).toEqual([
+        'queued:m2',
+        'taken:m2',
+      ]);
+      expect(await codeOf(s.steerQueued('missing', chat.Delivery.Steer, AbortSignal.timeout(5000)))).toBe(chat.Code.NotFound);
+    }
+    // 2. delivery: 'interrupt' interrupts t1, runs interrupting message first, then drains preserved queued item.
+    {
+      const sc = new Script();
+      sc.begin();
+      const t1 = sc.request('turn/start');
+      sc.reply(t1, inProgress('t1'));
+      sc.turnStarted('t1');
+      sc.reply(sc.request('turn/interrupt'), {});
+      sc.turnCompleted('t1', 'interrupted');
+      const t2 = sc.request('turn/start');
+      sc.reply(t2, inProgress('t2'));
+      sc.turnStarted('t2');
+      sc.turnCompleted('t2', 'completed');
+      const t3 = sc.request('turn/start');
+      sc.reply(t3, inProgress('t3'));
+      sc.turnStarted('t3');
+      sc.turnCompleted('t3', 'completed');
+      const f = new FakeRun('', HANDSHAKE, sc.file());
+      const { s, k } = await start(f);
+      await prompt(s, 'm1', 'slow');
+      await k.wait('t1 started', () => state(s).turn === 't1');
+      await prompt(s, 'm2', 'queued-first');
+      await prompt(s, 'm3', 'urgent-interrupt', chat.Delivery.Interrupt);
+      await k.wait('all 3 turns settled', turnEnds(3));
+      expect(f.requests(1, 'turn/interrupt').length).toBe(1);
+      expect(f.requests(1, 'turn/start').map((x) => x.clientUserMessageId)).toEqual(['m1', 'm3', 'm2']);
+    }
+    // 3. cancel(signal, { keepQueue: true }) preserves queued messages until next prompt.
+    {
+      const sc = new Script();
+      sc.begin();
+      const t1 = sc.request('turn/start');
+      sc.reply(t1, inProgress('t1'));
+      sc.turnStarted('t1');
+      sc.reply(sc.request('turn/interrupt'), {});
+      sc.turnCompleted('t1', 'interrupted');
+      const t2 = sc.request('turn/start');
+      sc.reply(t2, inProgress('t2'));
+      sc.turnStarted('t2');
+      sc.turnCompleted('t2', 'completed');
+      const t3 = sc.request('turn/start');
+      sc.reply(t3, inProgress('t3'));
+      sc.turnStarted('t3');
+      sc.turnCompleted('t3', 'completed');
+      const f = new FakeRun('', HANDSHAKE, sc.file());
+      const { s, k } = await start(f);
+      await prompt(s, 'm1', 'slow');
+      await k.wait('t1 started', () => state(s).turn === 't1');
+      await prompt(s, 'm2', 'kept-in-queue');
+      await s.cancel(AbortSignal.timeout(5000), { keepQueue: true });
+      await k.wait('t1 interrupted', turnEnds(1));
+      // m2 is NOT cancelled and NOT prematurely drained before m3 starts.
+      expect(k.events.filter((ev) => ev.t === chat.EventType.Queued).map((ev) => `${ev.state}:${ev.message}`)).toEqual(['queued:m2']);
+      await prompt(s, 'm3', 'replacement');
+      await k.wait('m3 and kept m2 completed', turnEnds(3));
+      expect(f.requests(1, 'turn/start').map((x) => x.clientUserMessageId)).toEqual(['m1', 'm3', 'm2']);
+    }
+  });
+
+  test('adapter.fork calls thread/fork read-only and session.rewind calls thread/revert', async () => {
+    const sc = new Script();
+    sc.begin();
+    sc.reply(sc.request('thread/fork'), { thread: { id: '00000000-0000-7000-8000-0000000000bb' } });
+    sc.reply(sc.request('thread/revert'), { thread: { id: THREAD } });
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const a = adapter();
+    const k = new TestSink();
+    const cwd = tempDir();
+    const s = (await a.start(f.params(cwd), k, AbortSignal.timeout(PATIENCE))) as CodexSession;
+    cleanups.push(() => s.close(AbortSignal.timeout(5000)));
+    const forked = await a.fork!(
+      {
+        kind: 'codex',
+        argv: f.argv,
+        env: f.env,
+        cwd,
+        procs: f.procs,
+        logger: f.log.logger,
+        sessionId: THREAD,
+        beforeTurnId: 'turn-2',
+        client: { name: NAME, version: '1.0' },
+      },
+      AbortSignal.timeout(PATIENCE),
+    );
+    expect(forked).toEqual({ sessionId: '00000000-0000-7000-8000-0000000000bb' });
+    const fp = f.requests(1, 'thread/fork')[0]!;
+    expect(fp).toMatchObject({
+      threadId: THREAD,
+      cwd,
+      sandbox: 'read-only',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      excludeTurns: true,
+      beforeTurnId: 'turn-2',
+    });
+
+    expect(await codeOf(s.rewind({}, AbortSignal.timeout(5000)))).toBe(chat.Code.BadRequest);
+    const rev = await s.rewind({ beforeTurnId: 'turn-2' }, AbortSignal.timeout(5000));
+    expect(rev).toEqual({ sessionId: THREAD });
+    expect(f.requests(1, 'thread/revert')).toEqual([{ threadId: THREAD, beforeTurnId: 'turn-2' }]);
+    expect(policyProblems(f)).toEqual([]);
+  });
+
+  test('rewind cancels open async requestUserInput entries in pending and supersedes active asyncAsk', async () => {
+    const sc = new Script();
+    sc.begin();
+    const t1 = sc.request('turn/start');
+    sc.reply(t1, inProgress('t1'));
+    sc.turnStarted('t1');
+    sc.line({
+      dir: 'in',
+      msg: {
+        id: 88,
+        method: 'item/tool/requestUserInput',
+        params: {
+          threadId: THREAD,
+          turnId: 't1',
+          itemId: 'q-async-rewind',
+          isBlocking: false,
+          questions: [{ id: 'pick', header: 'Pick', question: 'Which option?', isOther: true, isSecret: false, options: null }],
+        },
+      },
+    });
+    sc.item(false, {
+      type: 'agentMessage',
+      id: 'am-rewind',
+      text: 'Also follow up?',
+      delivery: 'async',
+      questions: [{ title: 'Follow up', options: ['A', 'B'] }],
+    });
+    sc.turnCompleted('t1', 'completed');
+    sc.reply(sc.request('thread/revert'), { thread: { id: THREAD } });
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const { s, k } = await start(f);
+    const aborted: Array<{ item?: string; reason: unknown }> = [];
+    const origQ = k.question.bind(k);
+    k.question = async (r, sig) => {
+      sig.addEventListener('abort', () => aborted.push({ item: r.item, reason: sig.reason }), { once: true });
+      return origQ(r, sig);
+    };
+    await prompt(s, 'm1', 'start');
+    await k.wait('both async questions open after turn end', (sink) => turnEnds(1)(sink) && sink.questions.length === 2);
+    expect(state(s).pending.size).toBe(1);
+    await s.rewind({ beforeTurnId: 't1' }, AbortSignal.timeout(5000));
+    expect(state(s).pending.size).toBe(0);
+    await k.wait('cancelled reply sent for async requestUserInput', () => f.replies(1).has('88'));
+    expect(f.replies(1).get('88')!.result).toEqual({ answers: {} });
+    expect(aborted.find((a) => a.item === 'q-async-rewind')).toBeDefined();
+    expect(aborted.find((a) => a.item === 'am-rewind')?.reason).toBe(chat.By.Superseded);
+    expect(policyProblems(f)).toEqual([]);
+  });
+
+  test('background terminals and subagents populate Chat.tasks and stopTask terminates each', async () => {
+    const sc = new Script();
+    sc.begin();
+    const t1 = sc.request('turn/start');
+    sc.reply(t1, inProgress('t1'));
+    sc.turnStarted('t1');
+    sc.item(true, {
+      type: 'commandExecution',
+      id: 'exec-bg-1',
+      command: "/bin/zsh -lc 'python3 -m http.server'",
+      cwd: '/work',
+      processId: 'pty-99',
+      source: 'unifiedExecStartup',
+      status: 'inProgress',
+      commandActions: [],
+    });
+    sc.reply(sc.request('thread/backgroundTerminals/list'), {
+      data: [
+        {
+          command: "/bin/zsh -lc 'python3 -m http.server'",
+          cwd: '/work',
+          itemId: 'exec-bg-1',
+          processId: 'pty-99',
+          osPid: 4242,
+        },
+      ],
+      nextCursor: null,
+    });
+    sc.item(true, {
+      type: 'subAgentActivity',
+      id: 'sa-1',
+      kind: 'started',
+      agentThreadId: 'th-sub-1',
+      agentPath: '/root/worker',
+      model: 'gpt-6-luna',
+    });
+    sc.notify('turn/started', { threadId: 'th-sub-1', turn: { id: 'sub-turn-1', status: 'inProgress', items: [] } });
+    sc.reply(sc.request('thread/backgroundTerminals/terminate'), { terminated: true });
+    sc.reply(sc.request('thread/backgroundTerminals/list'), { data: [], nextCursor: null });
+    sc.reply(sc.request('turn/interrupt'), {});
+    sc.item(false, {
+      type: 'subAgentActivity',
+      id: 'sa-1-end',
+      kind: 'interrupted',
+      agentThreadId: 'th-sub-1',
+      agentPath: '/root/worker',
+    });
+    sc.turnCompleted('t1', 'completed');
+    const f = new FakeRun('', HANDSHAKE, sc.file());
+    const { s, k } = await start(f);
+    await prompt(s, 'm1', 'run server and worker');
+    await k.wait('both tasks published', (sink) => (sink.chat.tasks?.length ?? 0) === 2 && sink.chat.tasks!.every((t) => t.stoppable));
+    expect(k.chat.tasks).toMatchObject([
+      {
+        id: 'pty-99',
+        kind: chat.TaskKind.Shell,
+        status: chat.TaskStatus.Running,
+        description: 'python3 -m http.server',
+        command: 'python3 -m http.server',
+        toolCallId: 'exec-bg-1',
+        pid: 4242,
+        backgrounded: true,
+        stoppable: true,
+      },
+      {
+        id: 'th-sub-1',
+        kind: chat.TaskKind.Subagent,
+        status: chat.TaskStatus.Running,
+        description: '/root/worker',
+        agentType: '/root/worker',
+        toolCallId: 'sa-1',
+        backgrounded: true,
+        stoppable: true,
+      },
+    ]);
+    expect(typeof k.chat.tasks![1]!.startedAt).toBe('string');
+    // Stop background terminal -> thread/backgroundTerminals/terminate.
+    await s.stopTask('pty-99', AbortSignal.timeout(5000));
+    expect(f.requests(1, 'thread/backgroundTerminals/terminate')).toEqual([{ threadId: THREAD, processId: 'pty-99' }]);
+    // Stop subagent -> turn/interrupt on child thread.
+    await s.stopTask('th-sub-1', AbortSignal.timeout(5000));
+    expect(f.requests(1, 'turn/interrupt')).toEqual([{ threadId: 'th-sub-1', turnId: 'sub-turn-1' }]);
+    await k.wait('turn ended and tasks cleared', (sink) => turnEnds(1)(sink) && sink.chat.tasks === undefined);
+    expect(await codeOf(s.stopTask('unknown-task', AbortSignal.timeout(5000)))).toBe(chat.Code.NotFound);
+    expect(policyProblems(f)).toEqual([]);
   });
 });

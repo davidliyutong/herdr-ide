@@ -28,45 +28,60 @@
    "live": true,
    "item": "toolu_0001",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0001",
     "title": "Bash",
-    "toolCallId": "toolu_0001"
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0001",
+    "title": "Print hi to stdout",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "echo hi",
      "description": "Print hi to stdout"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Print hi to stdout",
-    "toolCallId": "toolu_0001"
-   }
+    }
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000020"
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "hi",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "hi"
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
+    ]
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000024"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "`echo hi` print"
+    },
+    "messageId": "msg_0002"
    }
   },
   {
@@ -74,43 +89,31 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "`echo hi` print",
-     "type": "text"
+     "type": "text",
+     "text": "ed `hi`."
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ed `hi`.",
-     "type": "text"
+     "type": "text",
+     "text": "`echo hi` printed `hi`."
     },
     "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0002/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "`echo hi` printed `hi`.",
-     "type": "text"
-    },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0002/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000030"
   },
   {
    "t": "turn",
@@ -126,45 +129,60 @@
    "live": true,
    "item": "toolu_0002",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0002",
     "title": "Bash",
-    "toolCallId": "toolu_0002"
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0002",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0002",
+    "title": "Print second to stdout",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "echo second",
      "description": "Print second to stdout"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Print second to stdout",
-    "toolCallId": "toolu_0002"
-   }
-  },
-  {
-   "t": "update",
+    }
+   },
    "item": "toolu_0002",
+   "entryUuid": "00000000-0000-4000-8000-000000000050"
+  },
+  {
+   "t": "update",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0002",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "second",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "second"
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0002"
+    ]
+   },
+   "item": "toolu_0002",
+   "entryUuid": "00000000-0000-4000-8000-000000000054"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "`echo second` printed `"
+    },
+    "messageId": "msg_0004"
    }
   },
   {
@@ -172,43 +190,31 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "`echo second` printed `",
-     "type": "text"
+     "type": "text",
+     "text": "second`."
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "second`.",
-     "type": "text"
+     "type": "text",
+     "text": "`echo second` printed `second`."
     },
     "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0004/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "`echo second` printed `second`.",
-     "type": "text"
-    },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0004/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000060"
   },
   {
    "t": "turn",
@@ -224,45 +230,60 @@
    "live": true,
    "item": "toolu_0003",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0003",
     "title": "Bash",
-    "toolCallId": "toolu_0003"
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0003",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0003",
+    "title": "Print third to stdout",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "echo third",
      "description": "Print third to stdout"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Print third to stdout",
-    "toolCallId": "toolu_0003"
-   }
+    }
+   },
+   "item": "toolu_0003",
+   "entryUuid": "00000000-0000-4000-8000-000000000080"
   },
   {
    "t": "update",
-   "item": "toolu_0003",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0003",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "third",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "third"
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0003"
+    ]
+   },
+   "item": "toolu_0003",
+   "entryUuid": "00000000-0000-4000-8000-000000000084"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "`echo third` printed `"
+    },
+    "messageId": "msg_0006"
    }
   },
   {
@@ -270,43 +291,31 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "`echo third` printed `",
-     "type": "text"
+     "type": "text",
+     "text": "third`."
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "third`.",
-     "type": "text"
+     "type": "text",
+     "text": "`echo third` printed `third`."
     },
     "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0006/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "`echo third` printed `third`.",
-     "type": "text"
-    },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0006/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000090"
   },
   {
    "t": "turn",
@@ -322,45 +331,60 @@
    "live": true,
    "item": "toolu_0004",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0004",
     "title": "Bash",
-    "toolCallId": "toolu_0004"
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0004",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0004",
+    "title": "Print third to stdout",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "echo third",
      "description": "Print third to stdout"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Print third to stdout",
-    "toolCallId": "toolu_0004"
-   }
+    }
+   },
+   "item": "toolu_0004",
+   "entryUuid": "00000000-0000-4000-8000-000000000110"
   },
   {
    "t": "update",
-   "item": "toolu_0004",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0004",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "third",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "third"
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0004"
+    ]
+   },
+   "item": "toolu_0004",
+   "entryUuid": "00000000-0000-4000-8000-000000000114"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "`echo third` printed `"
+    },
+    "messageId": "msg_0008"
    }
   },
   {
@@ -368,43 +392,31 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "`echo third` printed `",
-     "type": "text"
+     "type": "text",
+     "text": "third` again."
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "third` again.",
-     "type": "text"
+     "type": "text",
+     "text": "`echo third` printed `third` again."
     },
     "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0008/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "`echo third` printed `third` again.",
-     "type": "text"
-    },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0008/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000120"
   },
   {
    "t": "turn",
@@ -689,15 +701,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -717,7 +729,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 0,

@@ -106,6 +106,50 @@
   display: flex;
   justify-content: flex-end;
 }
+.conv-user-wrap {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.conv-user-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.conv-user:hover .conv-user-actions,
+.conv-user:focus-within .conv-user-actions {
+  opacity: 1;
+}
+.conv-user-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-mute);
+  cursor: pointer;
+}
+.conv-user-action:hover:not(:disabled) {
+  border-color: var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.conv-user-action > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
 .conv-bubble {
   display: flex;
   flex-direction: column;
@@ -120,13 +164,119 @@
 }
 .conv-user-text {
   max-width: 100%;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.conv-user-md > :first-child {
+  margin-top: 0;
+}
+.conv-user-md > :last-child {
+  margin-bottom: 0;
 }
 .conv-user-text.clamped {
   max-height: calc(1.5em * 12);
   overflow: hidden;
   mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+.conv-user-edit {
+  width: min(100%, 44rem);
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+}
+.conv-edit-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 3.5rem;
+  max-height: 20rem;
+  padding: 6px 8px;
+  resize: vertical;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.45;
+}
+.conv-edit-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.conv-edit-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--warning);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.conv-edit-warn > .lucide {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  margin-top: 2px;
+}
+.conv-edit-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.conv-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.conv-edit-actions button > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+
+/* ---- follow-up questions replayed on an agent message ---- */
+.conv-followup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+.conv-followup-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.conv-followup-head > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+.conv-followup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.conv-followup-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.conv-followup-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 /* ---- the agent's messages (compact Markdown styling lives in markdown.css) ---- */
@@ -280,10 +430,74 @@ button.conv-path:hover .conv-path-name {
 .conv-meta {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: none;
   color: var(--fg-mute);
   font-size: var(--fs-sm);
+}
+.conv-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--bg-1);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.conv-bg-badge {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+.conv-model-badge {
+  color: var(--fg-mute);
+}
+.conv-task-live {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--working);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.conv-task-stat {
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.conv-task-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-mute);
+  cursor: pointer;
+}
+.conv-task-stop:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+}
+.conv-task-stop:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+.conv-task-stop > .lucide {
+  width: 11px;
+  height: 11px;
+}
+.conv-task-stop > svg:not(.conv-spin) {
+  fill: currentColor;
 }
 .conv-stat {
   font-family: var(--mono);
@@ -847,6 +1061,29 @@ button.conv-stop > .lucide {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.conv-ask[data-async='true'][data-state='waiting'] {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.conv-ask[data-async='true'][data-state='waiting'] .conv-ask-head > .lucide {
+  color: var(--accent);
+}
+.conv-ask-badge {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.conv-ask[data-state='done'] .conv-ask-badge,
+.conv-ask[data-state='stale'] .conv-ask-badge {
+  border-color: var(--line-2);
+  background: transparent;
+  color: var(--fg-mute);
+}
 .conv-ask-from {
   color: var(--fg-mute);
   font-size: var(--fs-sm);
@@ -947,12 +1184,28 @@ button.conv-stop > .lucide {
   padding: 0;
   line-height: 1.45;
 }
+.conv-q-text {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+}
+.conv-q-text > :first-child {
+  margin-top: 0;
+}
+.conv-q-text > :last-child {
+  margin-bottom: 0;
+}
 .conv-q-header {
   padding: 0 6px;
   border: 1px solid var(--line-2);
   border-radius: 999px;
   color: var(--fg-dim);
   font-size: var(--fs-xs);
+}
+.conv-q-optional {
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  font-weight: 400;
 }
 .conv-q-options {
   display: flex;
@@ -971,6 +1224,9 @@ button.conv-stop > .lucide {
 .conv-q-option:hover {
   background: var(--bg-2);
 }
+.conv-q-option.selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
 .conv-q-desc {
   grid-column: 2;
   color: var(--fg-mute);
@@ -978,8 +1234,20 @@ button.conv-stop > .lucide {
   line-height: 1.4;
 }
 .conv-q-other {
-  grid-template-columns: auto auto minmax(0, 1fr);
+  display: flex;
   align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+.conv-q-other-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  cursor: pointer;
+}
+.conv-q-other .conv-q-input {
+  flex: 1;
 }
 .conv-q-input {
   min-width: 0;
@@ -1265,11 +1533,150 @@ button.conv-stop > .lucide {
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
-.conv-usage-limit[data-level='mid'] {
-  color: var(--warning);
+
+/* ---- collapsible background tasks & subagents tray (#10) ---- */
+.conv-tasks {
+  flex: none;
+  width: 100%;
+  max-width: calc(56rem - 36px);
+  margin: 4px auto 0;
+  padding: 0 18px;
+  box-sizing: border-box;
 }
-.conv-usage-limit[data-level='high'] {
+.conv-tasks-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--h-row);
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.conv-tasks-head:hover {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.conv-tasks-head[aria-expanded='true'] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.conv-tasks-head .conv-chevron {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-mute);
+  transition: transform 0.12s;
+}
+.conv-tasks-head[aria-expanded='true'] .conv-chevron {
+  transform: rotate(90deg);
+}
+.conv-tasks-spin {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--working);
+}
+.conv-tasks-count {
+  flex: none;
+  font-weight: 500;
+}
+.conv-tasks-preview {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+}
+.conv-tasks-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  border-inline: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--error) 8%, var(--bg-1));
   color: var(--error);
+  font-size: var(--fs-xs);
+}
+.conv-tasks-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 11rem;
+  overflow-y: auto;
+  border: 1px solid var(--line-2);
+  border-top: none;
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  background: var(--bg-1);
+}
+.conv-task-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: var(--h-row);
+  padding: 2px 8px;
+  font-size: var(--fs-sm);
+}
+.conv-task-row:hover {
+  background: var(--bg-2);
+}
+.conv-task-icon {
+  flex: none;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  color: var(--fg-mute);
+}
+.conv-task-jump,
+.conv-task-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+.conv-task-jump {
+  min-height: 0;
+  height: auto;
+  padding: 1px 4px;
+  margin: 0 -4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.conv-task-jump:hover .conv-task-title {
+  text-decoration: underline;
+}
+.conv-task-agent {
+  flex: none;
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+.conv-task-title {
+  min-width: 0;
+}
+.conv-task-title.mono {
+  font-family: var(--mono);
+  font-size: 0.95em;
+}
+.conv-task-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
 }
 
 /* A narrow pane. */
@@ -1277,10 +1684,16 @@ button.conv-stop > .lucide {
   .conv-list {
     padding: 10px 12px 14px;
   }
+  .conv-tasks {
+    padding: 0 10px;
+  }
   .conv-composer {
     padding: 4px 10px 10px;
   }
   .conv-bubble {
     max-width: 92%;
+  }
+  .conv-user-actions {
+    opacity: 1;
   }
 }

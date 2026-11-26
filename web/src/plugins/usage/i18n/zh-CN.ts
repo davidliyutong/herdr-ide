@@ -130,6 +130,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'usage.session.label': '{agent} 会话的 AI 用量：{cost}',
   'usage.session.labelContext': '{agent} 会话的 AI 用量：{cost}，上下文 {context}',
   'usage.session.context.short': '上下文 {context}',
+  'usage.session.session': '会话',
   'usage.session.model': '模型',
   'usage.session.cost': '按 API 价格的费用',
   'usage.session.noPrice': '有模型没有价格',

@@ -507,13 +507,23 @@ function SectionView({
         ))}
       {Layout ? (
         <Suspense fallback={null}>
-          <Layout readOnly={readOnly} defs={plain} rows={rowsOf} lead={header} visit={visit} />
+          <Layout
+            readOnly={readOnly}
+            defs={plain}
+            rows={rowsOf}
+            lead={header}
+            footer={footer ? <Suspense fallback={null}>{footer}</Suspense> : undefined}
+            machine={machine?.id}
+            visit={visit}
+          />
         </Suspense>
       ) : (
-        rowsOf(plain)
+        <>
+          {rowsOf(plain)}
+          {footer && <Suspense fallback={null}>{footer}</Suspense>}
+        </>
       )}
       {fullDiskAccess && <FullDiskAccess readOnly={readOnly} />}
-      {footer && <Suspense fallback={null}>{footer}</Suspense>}
       {id === 'gui' && machine && machine.kind !== 'local' && (
         <div className="setting">
           <div className="setting-head">

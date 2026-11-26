@@ -20,6 +20,7 @@ import {
   type ChatHostSession,
   type ChatState,
   type HostSettings,
+  type ModelOption,
   type Options,
   type Session,
   type TrustedFolder,
@@ -54,6 +55,9 @@ const query = (o: Record<string, string>) => new URLSearchParams(o).toString();
 export const MAX_AGENTS = 64;
 export const MAX_CHATS = 2000;
 export const MAX_SESSION_PAGE = 200;
+export const MAX_MODELS = 256;
+/** Chat agent kinds that have per-provider visible model settings, in UI order. */
+export const CHAT_PROVIDERS = ['claude', 'codex', 'agy', 'kimi', 'grok'] as const;
 /** The most characters of a title, and of a path, kept; the longest
  * session id taken. */
 const MAX_TITLE = 500;
@@ -63,6 +67,22 @@ const MAX_SESSION_ID = 256;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v: unknown, max = MAX_TITLE): string => (typeof v === 'string' ? v.slice(0, max) : '');
 const seq = (v: unknown): number => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+
+/** A model offered by an agent kind, read; undefined for invalid entries. */
+export function readModelOption(v: unknown): ModelOption | undefined {
+  if (!isObject(v) || typeof v.value !== 'string' || !v.value.trim()) return undefined;
+  const value = v.value.slice(0, 256);
+  const name = typeof v.name === 'string' && v.name.trim() ? v.name.slice(0, 256) : value;
+  const out: ModelOption = { value, name };
+  if (typeof v.description === 'string' && v.description) out.description = v.description.slice(0, 500);
+  if (Array.isArray(v.efforts)) {
+    const efforts = v.efforts.filter((e): e is string => typeof e === 'string' && !!e).slice(0, 16);
+    if (efforts.length) out.efforts = efforts;
+  }
+  if (typeof v.defaultEffort === 'string' && v.defaultEffort) out.defaultEffort = v.defaultEffort.slice(0, 64);
+  if (typeof v.images === 'boolean') out.images = v.images;
+  return out;
+}
 
 /** An agent's status, read; undefined for what is none. */
 export function readAgent(v: unknown): AgentStatus | undefined {
@@ -329,6 +349,44 @@ export const chatApi = {
   /** Stops a machine's headless chat host cleanly (refused with busy while
    * any chat is working, waiting or starting). */
   stopHost: (m: string) => send<unknown>(`${base(m)}/host/stop`, { method: 'POST' }).then(() => {}),
+  /** Cached models for an agent kind from a running host (never starts host/agent). */
+  async models(m: string, kind: string): Promise<{ models: ModelOption[]; fetchedAt?: string }> {
+    const r = await send<{ models?: unknown; fetchedAt?: unknown }>(`${base(m)}/models?${query({ kind })}`, { cache: 'no-store' });
+    const models = list(r.models, MAX_MODELS, readModelOption);
+    const fetchedAt = typeof r.fetchedAt === 'string' && r.fetchedAt ? r.fetchedAt.slice(0, 64) : undefined;
+    return fetchedAt ? { models, fetchedAt } : { models };
+  },
+  /** Probes an agent kind on machine m for its latest model list (starts host if needed). */
+  async refreshModels(m: string, kind: string, cwd?: string): Promise<{ models: ModelOption[]; fetchedAt?: string }> {
+    const r = await send<{ models?: unknown; fetchedAt?: unknown }>(
+      `${base(m)}/models`,
+      jsonInit('POST', { kind, ...(cwd ? { cwd } : {}), refresh: true }),
+    );
+    const models = list(r.models, MAX_MODELS, readModelOption);
+    const fetchedAt = typeof r.fetchedAt === 'string' && r.fetchedAt ? r.fetchedAt.slice(0, 64) : undefined;
+    return fetchedAt ? { models, fetchedAt } : { models };
+  },
+  /** Forks an existing chat (up to upToSeq, or its end) into a new chat. */
+  async fork(m: string, body: { chat: string; upToSeq?: number; title?: string }): Promise<ChatState> {
+    const r = await send<{ chat?: unknown }>(`${base(m)}/fork`, jsonInit('POST', body));
+    const chat = readState(r.chat);
+    if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
+    return chat;
+  },
+  /** Exports context from a chat and starts a new chat with targetKind in the same directory. */
+  async switchChat(m: string, body: { chat: string; targetKind: string; options?: Options; upToSeq?: number }): Promise<ChatState> {
+    const r = await send<{ chat?: unknown }>(`${base(m)}/switch`, jsonInit('POST', body));
+    const chat = readState(r.chat);
+    if (!chat) throw new ChatFailure('protocol', 'no chat in the answer');
+    return chat;
+  },
+  /** Exports a chat's conversation as a bounded Markdown digest. */
+  async exportMarkdown(m: string, chat: string, upToSeq?: number): Promise<string> {
+    const q: Record<string, string> = { chat };
+    if (upToSeq !== undefined) q.upToSeq = String(upToSeq);
+    const r = await send<{ markdown?: unknown }>(`${base(m)}/export?${query(q)}`, { cache: 'no-store' });
+    return typeof r.markdown === 'string' ? r.markdown : '';
+  },
 };
 
 type Values = Record<string, { value?: unknown; machines?: Record<string, unknown> } | undefined>;
@@ -337,6 +395,14 @@ type Values = Record<string, { value?: unknown; machines?: Record<string, unknow
  * built-in default. */
 const valueFor = (values: Values, key: string, m: string): unknown =>
   values[key]?.machines?.[m] ?? values[key]?.value ?? builtinDefaults[key];
+
+/** Visible model ID allowlist for an agent kind (empty = show all models). */
+export function visibleModelsFor(values: Values, kind: string | undefined): string[] {
+  if (!kind) return [];
+  const key = `chat.visibleModels.${kind}`;
+  const raw = values[key]?.value ?? builtinDefaults[key];
+  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+}
 
 /** Whether machine m's chats may give an agent full access: its setting
  * chat.allowFullAccess (off by default). */

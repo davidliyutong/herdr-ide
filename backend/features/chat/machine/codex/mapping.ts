@@ -9,7 +9,15 @@ import { formatRFC3339 } from '#shared/lib/gotime.ts';
 import { noticeMethod, Notice } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { ChatProtoError, Code, EventType, type ChatError, type Event } from '#shared/proto/chatproto/index.ts';
-import type { CodexErrorInfo, CommandAction, FileUpdateChange, ThreadItem, TurnError, UserInput } from './appserver.gen.ts';
+import type {
+  AsyncUserInputQuestion,
+  CodexErrorInfo,
+  CommandAction,
+  FileUpdateChange,
+  ThreadItem,
+  TurnError,
+  UserInput,
+} from './appserver.gen.ts';
 
 /** An ACP value as the adapter builds it. */
 export type Obj = Record<string, unknown>;
@@ -160,6 +168,27 @@ export function isTool(t: string): boolean {
 
 type ItemOf<T extends ThreadItem['type']> = Extract<ThreadItem, { type: T }>;
 
+/** A normalized async user-input question attached to an agentMessage item. */
+export interface AsyncQuestion {
+  title: string;
+  options?: string[];
+}
+
+/** Extracts well-formed async questions from an agentMessage item. */
+export function asyncQuestions(raw: AsyncUserInputQuestion[] | null | undefined): AsyncQuestion[] {
+  const out: AsyncQuestion[] = [];
+  for (const q of arrOf(raw)) {
+    if (!isObj(q)) continue;
+    const title = strOf(q.title).trim();
+    if (title === '') continue;
+    const options = arrOf(q.options)
+      .map((o) => (typeof o === 'string' ? o.trim() : ''))
+      .filter((o) => o !== '');
+    out.push(options.length > 0 ? { title, options } : { title });
+  }
+  return out;
+}
+
 /** Turns Codex's items into chat events. It keeps no state: the session
  * adds what depends on the conversation so far. */
 export class Mapper {
@@ -191,6 +220,9 @@ export class Mapper {
         if (!completed) return [];
         const u = chunk(AGENT_MESSAGE_CHUNK, strOf(it.text), it.id);
         if (strOf(it.phase)) setMeta(u, 'phase', it.phase);
+        if (strOf(it.delivery)) setMeta(u, 'delivery', it.delivery);
+        const qs = asyncQuestions(it.questions);
+        if (qs.length > 0) setMeta(u, 'questions', qs);
         return one(u);
       }
       case ItemType.Plan: {
@@ -242,6 +274,7 @@ export class Mapper {
     u.rawInput = input;
     if (strOf(it.aggregatedOutput)) u.content = [{ type: 'content', content: textBlock(strOf(it.aggregatedOutput)) }];
     if (typeof it.exitCode === 'number') setMeta(u, 'exitCode', it.exitCode);
+    if (strOf(it.processId)) setMeta(u, 'processId', it.processId);
     if (it.status === 'declined') setMeta(u, 'declined', true);
     return u;
   }
@@ -322,14 +355,25 @@ function mcpCall(it: ItemOf<'mcpToolCall'>): Obj {
 export function collabCall(it: ItemOf<'collabAgentToolCall'>): Obj {
   const tool = strOf(it.tool);
   const think = ['spawnAgent', 'sendInput', 'sendMessage', 'followupTask', 'resumeAgent'].includes(tool);
-  const u = toolCall(it.id, tool, think ? 'think' : 'other', toolStatus(it.status));
+  const status = toolStatus(it.status);
+  const u = toolCall(it.id, tool, think ? 'think' : 'other', status);
   const input: Obj = { tool };
-  if (arrOf(it.receiverThreadIds).length > 0) input.receiverThreadIds = it.receiverThreadIds;
+  const receivers = arrOf(it.receiverThreadIds).filter((id): id is string => typeof id === 'string' && id !== '');
+  if (receivers.length > 0) input.receiverThreadIds = receivers;
   if (strOf(it.prompt)) {
     input.prompt = it.prompt;
     u.title = cutText(`${tool}: ${it.prompt}`, MAX_TITLE);
   }
   if (strOf(it.model)) input.model = it.model;
+  if (think) {
+    input.agent_type = 'subagent';
+    const sub: Obj = { tool, status };
+    if (receivers.length > 0) {
+      sub.threadId = receivers[0];
+      sub.receiverThreadIds = receivers;
+    }
+    setMeta(u, 'subagent', sub);
+  }
   u.rawInput = input;
   return u;
 }
@@ -337,11 +381,16 @@ export function collabCall(it: ItemOf<'collabAgentToolCall'>): Obj {
 /** The tool call of a subagent Codex started (a subAgentActivity of kind
  * started): what its thread does belongs to it. */
 export function subAgentCall(it: ItemOf<'subAgentActivity'>, status: string): Obj {
-  const u = toolCall(it.id, strOf(it.agentPath), 'think', status);
-  const input: Obj = { agentPath: strOf(it.agentPath) };
+  const agentPath = strOf(it.agentPath);
+  const u = toolCall(it.id, agentPath, 'think', status);
+  const input: Obj = { agentPath, agent_type: agentPath || 'subagent' };
   if (strOf(it.model)) input.model = it.model;
   if (strOf(it.reasoningEffort)) input.reasoningEffort = it.reasoningEffort;
   u.rawInput = input;
+  const sub: Obj = { status };
+  if (strOf(it.agentThreadId)) sub.threadId = it.agentThreadId;
+  if (agentPath) sub.agentPath = agentPath;
+  setMeta(u, 'subagent', sub);
   return u;
 }
 
@@ -362,10 +411,24 @@ function webSearchCall(it: ItemOf<'webSearch'>, completed: boolean): Obj {
   return u;
 }
 
+/** The stored state of a tool call with an updated status, cloning any
+ * subagent metadata so callers never mutate a stored snapshot in place. */
+export function callWithStatus(last: Obj, status: string): Obj {
+  const next: Obj = { ...last, sessionUpdate: 'tool_call', status };
+  if (isObj(last._meta) && isObj(last._meta[SLUG]) && isObj((last._meta[SLUG] as Obj).subagent)) {
+    const own = last._meta[SLUG] as Obj;
+    next._meta = {
+      ...last._meta,
+      [SLUG]: { ...own, subagent: { ...(own.subagent as Obj), status } },
+    };
+  }
+  return next;
+}
+
 /** The stored state of a tool call that will not complete: its last state
  * with the status cancelled. */
 export function cancelledCall(last: Obj): Obj {
-  return { ...last, sessionUpdate: 'tool_call', status: Tool.Cancelled };
+  return callWithStatus(last, Tool.Cancelled);
 }
 
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish']);

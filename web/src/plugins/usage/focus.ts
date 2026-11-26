@@ -7,14 +7,14 @@ import * as L from '../../term/layout';
 import { directoryOf, isLive, type TerminalRecord } from '../../term/protocol';
 import { agentOf, agentStatus, type AgentStatus } from '../../lib/machine';
 import { rememberedSession } from '../../restore';
-import { chatAdapter, usageProvider } from '../../conversation/kinds';
+import { chatAdapter, isSessionId, usageProvider } from '../../conversation/kinds';
 import { useUsage } from './state';
 import { targetKey } from './session';
 
 /** Agent kinds whose session usage can be matched by working directory when
- * the detector has no confirmed UUID session (Grok, Kimi Code, OpenCode,
- * Antigravity, plus Codex for extra Codex homes / resumed sessions). */
-const CWD_SESSION_KINDS = new Set(['grok', 'kimi', 'opencode', 'agy', 'codex']);
+ * the detector has no confirmed UUID session (Claude Code, Grok, Kimi Code,
+ * OpenCode, Antigravity, plus Codex for extra Codex homes / resumed sessions). */
+const CWD_SESSION_KINDS = new Set(['claude', 'grok', 'kimi', 'opencode', 'agy', 'codex']);
 const OPENCODE_SESSION_ID = /^ses_[A-Za-z0-9_-]{4,128}$/;
 const CONFIRMED_SOURCES: ReadonlySet<string> = new Set(['argv', 'pid', 'fd', 'start', 'hook']);
 
@@ -96,9 +96,13 @@ export function useFocusedAgent(): FocusedAgent | undefined {
 
   const kind = chatKind ?? agentOf(record);
   const rawSession = record?.agent_session;
-  const hasRawSession = rawSession !== undefined && rawSession !== null && rawSession !== '';
+  const hasRawSession = typeof rawSession === 'string' && rawSession !== '';
   const session = hasRawSession ? confirmedUsageSession(kind, record) : undefined;
-  const rawCwd = !hasRawSession && record && kind && CWD_SESSION_KINDS.has(kind) ? directoryOf(record) : undefined;
+  // A detector guess is not trusted as a session id, but still falls back to
+  // an unambiguous cwd match; a malformed or unknown-source id blocks both.
+  const validRawFormat = !hasRawSession || isSessionId(rawSession) || (kind === 'opencode' && OPENCODE_SESSION_ID.test(rawSession));
+  const allowCwd = !session && (!hasRawSession || (record?.agent_session_source === 'guess' && validRawFormat));
+  const rawCwd = allowCwd && record && kind && CWD_SESSION_KINDS.has(kind) ? directoryOf(record) : undefined;
   const cwd = rawCwd && rawCwd.startsWith('/') && peerCount(terminals, record!.address, kind!, rawCwd) === 0 ? rawCwd : undefined;
   const pid = cwd ? foregroundPid(record) : undefined;
   const terminal = record?.address;

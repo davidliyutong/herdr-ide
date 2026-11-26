@@ -28,91 +28,94 @@
    "live": true,
    "item": "toolu_0001",
    "update": {
-    "kind": "other",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0001",
     "title": "AskUserQuestion",
-    "toolCallId": "toolu_0001"
+    "kind": "other",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0001",
+    "title": "AskUserQuestion",
     "kind": "other",
+    "status": "pending",
     "rawInput": {
      "questions": [
       {
+       "question": "请选择一种颜色：红色还是蓝色？",
        "header": "Color",
        "multiSelect": false,
        "options": [
         {
-         "description": "红色",
-         "label": "red"
+         "label": "red",
+         "description": "红色"
         },
         {
-         "description": "蓝色",
-         "label": "blue"
+         "label": "blue",
+         "description": "蓝色"
         }
-       ],
-       "question": "请选择一种颜色：红色还是蓝色？"
+       ]
       }
      ]
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "AskUserQuestion",
-    "toolCallId": "toolu_0001"
-   }
+    }
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000028"
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "The user answered: \"请选择一种颜色：红色还是蓝色？\"=\"Blue\". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "The user answered: \"请选择一种颜色：红色还是蓝色？\"=\"Blue\". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say."
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
-   }
+    ]
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000035"
   },
   {
    "t": "update",
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "Blue",
-     "type": "text"
+     "type": "text",
+     "text": "Blue"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
    "t": "update",
-   "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "Blue"
+    },
+    "messageId": "msg_0002",
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "Blue",
-     "type": "text"
-    },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0002/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000040"
   },
   {
    "t": "turn",
@@ -128,60 +131,75 @@
    "live": true,
    "item": "toolu_0002",
    "update": {
-    "kind": "other",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0002",
     "title": "AskUserQuestion",
-    "toolCallId": "toolu_0002"
+    "kind": "other",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0002",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0002",
+    "title": "AskUserQuestion",
     "kind": "other",
+    "status": "pending",
     "rawInput": {
      "questions": [
       {
+       "question": "请再次选择一种颜色：红色还是蓝色？",
        "header": "Color",
        "multiSelect": false,
        "options": [
         {
-         "description": "红色",
-         "label": "red"
+         "label": "red",
+         "description": "红色"
         },
         {
-         "description": "蓝色",
-         "label": "blue"
+         "label": "blue",
+         "description": "蓝色"
         }
-       ],
-       "question": "请再次选择一种颜色：红色还是蓝色？"
+       ]
       }
      ]
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "AskUserQuestion",
-    "toolCallId": "toolu_0002"
-   }
+    }
+   },
+   "item": "toolu_0002",
+   "entryUuid": "00000000-0000-4000-8000-000000000080"
   },
   {
    "t": "update",
-   "item": "toolu_0002",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0002",
+    "status": "failed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "The user skipped this question. Do not ask again; wait for their next message.",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "The user skipped this question. Do not ask again; wait for their next message."
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "failed",
-    "toolCallId": "toolu_0002"
+    ]
+   },
+   "item": "toolu_0002",
+   "entryUuid": "00000000-0000-4000-8000-000000000087"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "You sk"
+    },
+    "messageId": "msg_0004"
    }
   },
   {
@@ -189,12 +207,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "You sk",
-     "type": "text"
+     "type": "text",
+     "text": "ipped the question, so I won"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -202,12 +220,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ipped the question, so I won",
-     "type": "text"
+     "type": "text",
+     "text": "'t ask again."
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -215,12 +233,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "'t ask again.",
-     "type": "text"
+     "type": "text",
+     "text": " Your earlier answ"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -228,12 +246,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " Your earlier answ",
-     "type": "text"
+     "type": "text",
+     "text": "er was blue."
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -241,12 +259,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "er was blue.",
-     "type": "text"
+     "type": "text",
+     "text": " T"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -254,12 +272,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " T",
-     "type": "text"
+     "type": "text",
+     "text": "ell me when"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -267,12 +285,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ell me when",
-     "type": "text"
+     "type": "text",
+     "text": " you want to contin"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -280,43 +298,31 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " you want to contin",
-     "type": "text"
+     "type": "text",
+     "text": "ue."
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ue.",
-     "type": "text"
+     "type": "text",
+     "text": "You skipped the question, so I won't ask again. Your earlier answer was blue. Tell me when you want to continue."
     },
     "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0004/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "You skipped the question, so I won't ask again. Your earlier answer was blue. Tell me when you want to continue.",
-     "type": "text"
-    },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0004/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000100"
   },
   {
    "t": "turn",
@@ -686,15 +692,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -714,7 +720,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 2,

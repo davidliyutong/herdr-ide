@@ -319,6 +319,30 @@ describe('chatproto', () => {
       ['compact', { op: CommandOp.Compact, id: 'k7' } satisfies Command, '{"op":"compact","id":"k7"}'],
       ['rename', { op: CommandOp.Rename, id: 'k8', title: 'New' } satisfies Command, '{"op":"rename","id":"k8","title":"New"}'],
       ['handoff', { op: CommandOp.Handoff, id: 'k9' } satisfies Command, '{"op":"handoff","id":"k9"}'],
+      [
+        'steer_queued',
+        { op: CommandOp.SteerQueued, id: 'k10', message: 'm1', delivery: 'interrupt' } satisfies Command,
+        '{"op":"steer_queued","id":"k10","message":"m1","delivery":"interrupt"}',
+      ],
+      ['stop_task', { op: CommandOp.StopTask, id: 'k11', task: 'bg-1' } satisfies Command, '{"op":"stop_task","id":"k11","task":"bg-1"}'],
+      [
+        'rewind',
+        { op: CommandOp.Rewind, id: 'k12', seq: 4, restoreFiles: true, content: [{ type: 'text', text: 'edited' }] } satisfies Command,
+        '{"op":"rewind","id":"k12","seq":4,"restoreFiles":true,"content":[{"type":"text","text":"edited"}]}',
+      ],
+      ['models', { op: Op.Models, kind: 'claude', refresh: true } satisfies Request, '{"op":"models","kind":"claude","refresh":true}'],
+      [
+        'fork',
+        { op: Op.Fork, chat: 'c1', upToSeq: 5, title: 'Branch' } satisfies Request,
+        '{"op":"fork","chat":"c1","upToSeq":5,"title":"Branch"}',
+      ],
+      [
+        'switch',
+        { op: Op.Switch, chat: 'c1', targetKind: 'codex', upToSeq: 5 } satisfies Request,
+        '{"op":"switch","chat":"c1","targetKind":"codex","upToSeq":5}',
+      ],
+      ['export', { op: Op.Export, chat: 'c1' } satisfies Request, '{"op":"export","chat":"c1"}'],
+      ['reset', { t: EventType.Reset, seq: 3 } satisfies Event, '{"t":"reset","seq":3}'],
       ['trust', { op: Op.Trust, cwd: '/w' } satisfies Request, '{"op":"trust","cwd":"/w"}'],
       [
         'attach without catch-up',
@@ -512,11 +536,13 @@ describe('chatproto', () => {
     expect(Object.values(PermissionKind).join(' ')).toBe('tool command file plan mcp other');
     expect(MODES.join(' ')).toBe('default acceptEdits plan full');
     expect(Object.values(Op).join(' ')).toBe(
-      'agents chats new attach close delete archive unarchive sessions watch seen configure shutdown trust untrust trusted host_status',
+      'agents chats new attach close delete archive unarchive sessions watch seen configure shutdown trust untrust trusted host_status models fork switch export',
     );
-    expect(Object.values(CommandOp).join(' ')).toBe('prompt cancel permission answer set_config cancel_queued compact rename handoff');
+    expect(Object.values(CommandOp).join(' ')).toBe(
+      'prompt cancel permission answer set_config cancel_queued steer_queued compact rename handoff stop_task rewind',
+    );
     expect(Object.values(EventType).join(' ')).toBe(
-      'update user turn permission permission_done question question_done queued state info notice ack',
+      'update user turn permission permission_done question question_done queued state info notice ack reset',
     );
     expect(errorText({ code: Code.Busy, message: 'a turn runs' })).toBe('busy: a turn runs');
   });

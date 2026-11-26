@@ -1,9 +1,23 @@
 // Codex's items, commands and prompts as the adapter maps them.
 import { describe, expect, test } from 'bun:test';
+import { SLUG } from '#shared/lib/brand.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { ChatProtoError } from '#shared/proto/chatproto/index.ts';
 import type { ThreadItem } from './appserver.gen.ts';
-import { Mapper, cutText, filePath, shellScript, toUserInput, turnErrorOf, userContent } from './mapping.ts';
+import {
+  Mapper,
+  Tool,
+  asyncQuestions,
+  callWithStatus,
+  collabCall,
+  cutText,
+  filePath,
+  shellScript,
+  subAgentCall,
+  toUserInput,
+  turnErrorOf,
+  userContent,
+} from './mapping.ts';
 import { agentVersion } from './session.ts';
 import { canonical } from './testing.ts';
 
@@ -130,5 +144,100 @@ describe('the mapping', () => {
 
   test('an item of a type the adapter does not map is none', () => {
     expect(new Mapper('/w').itemEvents({ type: 'enteredReviewMode', id: 'x', review: 'r' }, true, '')).toBeNull();
+  });
+
+  test('agentMessage preserves async delivery and questions metadata', () => {
+    const m = new Mapper('/w');
+    const it: ThreadItem = {
+      type: 'agentMessage',
+      id: 'am1',
+      text: 'I can proceed two ways.',
+      phase: 'final_answer',
+      delivery: 'async',
+      questions: [
+        { title: 'Pick a database', options: ['SQLite', 'Postgres', '  '] },
+        { title: 'Any constraints?', options: null },
+        { title: '   ', options: ['ignored'] },
+      ],
+    };
+    const evs = m.itemEvents(it, true, '');
+    expect(evs?.length).toBe(1);
+    const meta = ((evs![0]!.update as Record<string, unknown>)._meta as Record<string, Record<string, unknown>>)[SLUG];
+    expect(meta).toEqual({
+      phase: 'final_answer',
+      delivery: 'async',
+      questions: [{ title: 'Pick a database', options: ['SQLite', 'Postgres'] }, { title: 'Any constraints?' }],
+    });
+    expect(asyncQuestions(null)).toEqual([]);
+  });
+
+  test('commandCall preserves processId and subAgentCall/collabCall expose agent_type and subagent meta', () => {
+    const m = new Mapper('/w');
+    const cmdEv = m.itemEvents(
+      {
+        type: 'commandExecution',
+        id: 'cmd1',
+        command: "/bin/zsh -lc 'npm run dev'",
+        commandActions: [],
+        cwd: '/w',
+        status: 'inProgress',
+        processId: 'pty-42',
+      },
+      false,
+      '',
+    );
+    const cmdMeta = ((cmdEv![0]!.update as Record<string, unknown>)._meta as Record<string, Record<string, unknown>>)[SLUG];
+    expect(cmdMeta).toEqual({ processId: 'pty-42' });
+
+    const sub = subAgentCall(
+      {
+        type: 'subAgentActivity',
+        id: 'sa1',
+        kind: 'started',
+        agentThreadId: 'th-child',
+        agentPath: '/root/helper',
+        model: 'gpt-6-luna',
+      },
+      Tool.InProgress,
+    );
+    expect(sub.rawInput).toEqual({ agentPath: '/root/helper', agent_type: '/root/helper', model: 'gpt-6-luna' });
+    expect((sub._meta as Record<string, Record<string, unknown>>)[SLUG]).toEqual({
+      subagent: { status: Tool.InProgress, threadId: 'th-child', agentPath: '/root/helper' },
+    });
+    const done = callWithStatus(sub, Tool.Completed);
+    expect((done._meta as Record<string, Record<string, unknown>>)[SLUG]).toEqual({
+      subagent: { status: Tool.Completed, threadId: 'th-child', agentPath: '/root/helper' },
+    });
+    // Original snapshot is not mutated.
+    expect(((sub._meta as Record<string, Record<string, unknown>>)[SLUG]!.subagent as Record<string, unknown>).status).toBe(
+      Tool.InProgress,
+    );
+
+    const spawn = collabCall({
+      type: 'collabAgentToolCall',
+      id: 'col1',
+      tool: 'spawnAgent',
+      status: 'inProgress',
+      senderThreadId: 'th-main',
+      receiverThreadIds: ['th-child'],
+      agentsStates: {},
+      prompt: 'check logs',
+    });
+    expect((spawn.rawInput as Record<string, unknown>).agent_type).toBe('subagent');
+    expect((spawn._meta as Record<string, Record<string, unknown>>)[SLUG]).toEqual({
+      subagent: { tool: 'spawnAgent', status: Tool.InProgress, threadId: 'th-child', receiverThreadIds: ['th-child'] },
+    });
+
+    const wait = collabCall({
+      type: 'collabAgentToolCall',
+      id: 'col2',
+      tool: 'wait',
+      status: 'inProgress',
+      senderThreadId: 'th-main',
+      receiverThreadIds: [],
+      agentsStates: {},
+    });
+    expect(wait.kind).toBe('other');
+    expect(wait._meta).toBeUndefined();
   });
 });

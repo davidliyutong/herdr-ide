@@ -39,6 +39,9 @@ export interface PaneViewProps {
  * kind, ...}}, whose other fields are the plugin's. */
 export interface PaneViewDef {
   icon: IconComponent;
+  /** An icon chosen for this pane's view (e.g. a chat's agent brand mark);
+   * falls back to `icon` when omitted or returning undefined. */
+  iconFor?(m: string, view: PluginView): IconComponent | undefined;
   /** The pane's title, for its header and tab. */
   title(m: string, view: PluginView): string;
   /** A path the pane is about (header, status bar), if any. */
@@ -100,6 +103,11 @@ export interface PluginSettingsLayoutProps extends PluginSettingsProps {
   /** The plugin and its switch, which a page shows before its settings:
    * the layout draws it on its first page. */
   lead?: ReactNode;
+  /** The plugin's extra section (SettingsDef.extra), which a layout with
+   * sub-pages draws on its first page only. */
+  footer?: ReactNode;
+  /** The machine id when viewing a machine's scope; undefined in user scope. */
+  machine?: string;
   /** Counts the times the page was chosen in the dialog's list: a layout
    * with pages of its own shows its first one again when it changes. */
   visit: number;

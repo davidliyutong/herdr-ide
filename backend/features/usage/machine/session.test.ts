@@ -10,12 +10,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { removeHomes, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
 import type { UsageEnv } from './env.ts';
 import { openRegular } from './logs.ts';
-import { modelPricing, tierCost, tierOf, type Tier } from './pricing.ts';
+import { contextWindow, modelPricing, tierCost, tierOf, type Tier } from './pricing.ts';
 import { CostScanner, type CostReport } from './scan.ts';
 import {
   SESSION_LIMITS,
   SessionReader,
   cutModel,
+  locateClaudeByCwd,
+  locateCodexByCwd,
   locateGrokSession,
   locateKimiSession,
   readAntigravitySessionUsage,
@@ -24,6 +26,7 @@ import {
   type SessionUsage,
   type Transcript,
 } from './session.ts';
+import { Resolver } from '#machine/agents/sessions.ts';
 
 afterAll(removeHomes);
 
@@ -627,5 +630,215 @@ describe('bounds and errors', () => {
     const ac = new AbortController();
     ac.abort(new Error('the hub stopped waiting'));
     await expect(cost('claude', byName(p), undefined, { ...e, signal: ac.signal })).rejects.toThrow('the hub stopped waiting');
+  });
+
+  test('pricing table provides contextWindow for all supported providers', () => {
+    expect(contextWindow('claude', 'claude-opus-5-5')).toBe(1000000);
+    expect(contextWindow('claude', 'claude-opus-4-5')).toBe(200000);
+    expect(contextWindow('claude', 'claude-haiku-5-5')).toBe(200000);
+    expect(contextWindow('antigravity', 'gemini-4-neon')).toBe(1048576);
+    expect(contextWindow('antigravity', 'gemini-3.8-flash')).toBe(1048576);
+    expect(contextWindow('grok', 'grok-4.6-0709')).toBe(256000);
+    expect(contextWindow('kimi', 'kimi-k3.1-pro')).toBe(262144);
+    expect(contextWindow('codex', 'gpt-6.1-sol')).toBe(1000000);
+  });
+
+  test('Antigravity conversation_summaries.db locates CLI conversations with empty trajectory_metadata_blob and supports resumed sinceMs fallback', async () => {
+    const { home, e, reader } = setup();
+    const sid = 'a1cdc860-1055-488f-9ed2-8b8019061bb9';
+    const cwd = '/work/cli-proj';
+    const varint = (v: number): number[] => {
+      const out: number[] = [];
+      for (;;) {
+        const b = v % 128;
+        v = Math.floor(v / 128);
+        if (v) out.push(b | 0x80);
+        else return [...out, b];
+      }
+    };
+    const field = (num: number, wt: 0 | 2, val: number | Uint8Array | string): Uint8Array => {
+      const tag = varint(num * 8 + wt);
+      if (wt === 0) return Uint8Array.from([...tag, ...varint(val as number)]);
+      const b = typeof val === 'string' ? Buffer.from(val) : (val as Uint8Array);
+      return Uint8Array.from([...tag, ...varint(b.length), ...b]);
+    };
+    const cat = (...parts: Uint8Array[]) => Uint8Array.from(parts.flatMap((p) => [...p]));
+    // Conversation DB with EMPTY trajectory_metadata_blob (like real agy CLI DBs).
+    const agPath = join(home, '.gemini/antigravity-cli/conversations', `${sid}.db`);
+    write(agPath, '');
+    const ag = new DatabaseSync(agPath);
+    ag.exec(`
+      CREATE TABLE trajectory_metadata_blob (id text DEFAULT 'main', data blob, PRIMARY KEY (id));
+      CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, metadata blob, step_payload blob, PRIMARY KEY (idx));
+      CREATE TABLE gen_metadata (idx integer, data blob, size integer NOT NULL DEFAULT 0, PRIMARY KEY (idx));
+    `);
+    const f4 = cat(field(2, 0, 20000), field(3, 0, 500), field(5, 0, 100000));
+    const gen = cat(field(1, 2, cat(field(4, 2, f4), field(19, 2, 'gemini-4-neon'))));
+    ag.prepare('INSERT INTO gen_metadata VALUES (1, ?, ?)').run(gen, gen.length);
+    ag.close();
+    const oldTime = new Date((testNowSec - 3600) * 1000);
+    utimesSync(agPath, oldTime, oldTime);
+
+    // conversation_summaries.db provides workspace_uris for the CLI conversation.
+    const sumPath = join(home, '.gemini/antigravity-cli/conversation_summaries.db');
+    write(sumPath, '');
+    const sum = new DatabaseSync(sumPath);
+    sum.exec(`
+      CREATE TABLE conversation_summaries (
+        conversation_id text PRIMARY KEY,
+        workspace_uris text NOT NULL,
+        parent_conversation_id text NOT NULL DEFAULT '',
+        nesting_depth integer NOT NULL DEFAULT 0,
+        status text NOT NULL DEFAULT '',
+        not_fully_idle numeric NOT NULL DEFAULT 0,
+        killed numeric NOT NULL DEFAULT 0,
+        last_modified_time datetime NOT NULL
+      )
+    `);
+    sum
+      .prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(sid, JSON.stringify([`file://${cwd}`]), '', 0, 'CASCADE_RUN_STATUS_IDLE', 0, 0, oldTime.toISOString().replace('T', ' '));
+    sum.close();
+
+    // Even when sinceMs is AFTER the conversation's mtime (resumed session before first new write),
+    // two-pass fallback finds the conversation and reports 1M contextSize from pricing.json.
+    const usage = await readAntigravitySessionUsage(e, reader, {
+      session: '',
+      cwd,
+      sinceMs: testNowSec * 1000,
+    });
+    expect(usage).toMatchObject({
+      model: 'gemini-4-neon',
+      input: 20000,
+      cached: 100000,
+      output: 500,
+      contextUsed: 120000,
+      contextSize: 1048576,
+      requests: 1,
+      priced: true,
+    });
+  });
+
+  test('two-pass sinceMs fallback locates resumed Claude, Codex, Grok, Kimi and OpenCode sessions by cwd', async () => {
+    const { home, e, reader, cost } = setup();
+    const sid = 'b2cdc860-1055-488f-9ed2-8b8019061bb9';
+    const cwd = '/work/resumed';
+    const oldSec = testNowSec - 7200;
+    const oldDate = new Date(oldSec * 1000);
+    const futureSinceMs = (testNowSec + 60) * 1000;
+    const r = new Resolver({ home, now: e.now });
+
+    // Claude by cwd
+    const claudePath = join(home, '.claude/projects/-work-resumed', `${sid}.jsonl`);
+    write(
+      claudePath,
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: oldDate.toISOString(),
+        cwd,
+        message: {
+          role: 'assistant',
+          id: 'm1',
+          model: 'claude-opus-5-5',
+          usage: { input_tokens: 50, cache_read_input_tokens: 950, output_tokens: 20 },
+        },
+      }) + '\n',
+    );
+    utimesSync(claudePath, oldDate, oldDate);
+    const cFiles = await locateClaudeByCwd(e, r, cwd, futureSinceMs);
+    expect(await cost('claude', cFiles)).toMatchObject({ model: 'claude-opus-5-5', contextUsed: 1000, contextSize: 1000000 });
+
+    // Codex by cwd
+    const dayDir = oldDate.toISOString().slice(0, 10).replaceAll('-', '/');
+    const codexPath = join(home, '.codex/sessions', dayDir, `rollout-2026-11-16T00-00-00-${sid}.jsonl`);
+    write(
+      codexPath,
+      JSON.stringify({
+        timestamp: oldDate.toISOString(),
+        type: 'session_meta',
+        payload: { id: sid, cwd, timestamp: oldDate.toISOString() },
+      }) +
+        '\n' +
+        JSON.stringify({ timestamp: oldDate.toISOString(), type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-6.1-sol', cwd } }) +
+        '\n' +
+        JSON.stringify({
+          timestamp: oldDate.toISOString(),
+          type: 'token_usage_record',
+          payload: { turn_id: 't1', response_id: 'r1', usage: { input_tokens: 400, cached_input_tokens: 100, output_tokens: 30 } },
+        }) +
+        '\n',
+    );
+    utimesSync(codexPath, oldDate, oldDate);
+    const xFiles = await locateCodexByCwd(e, r, cwd, futureSinceMs, undefined);
+    expect(await cost('codex', xFiles)).toMatchObject({ model: 'gpt-6.1-sol', contextSize: 1000000, requests: 1 });
+
+    // Grok by cwd
+    const grokPath = join(home, '.grok/sessions', encodeURIComponent(cwd), sid, 'updates.jsonl');
+    write(
+      grokPath,
+      JSON.stringify({
+        method: 'session/update',
+        params: {
+          _meta: { agentTimestampMs: oldSec * 1000 },
+          update: {
+            sessionUpdate: 'turn_completed',
+            usage: { modelUsage: { 'grok-4.6-0709': { modelCalls: 1, inputTokens: 1000, cachedReadTokens: 200, outputTokens: 50 } } },
+          },
+        },
+      }) + '\n',
+    );
+    utimesSync(grokPath, oldDate, oldDate);
+    expect(await cost('grok', await locateGrokSession(e, '', cwd, futureSinceMs))).toMatchObject({
+      model: 'grok-4.6-0709',
+      contextUsed: 1000,
+      contextSize: 256000,
+    });
+
+    // Kimi by cwd
+    write(join(home, '.kimi-code/sessions/ws', `session_${sid}`, 'state.json'), JSON.stringify({ cwd }));
+    const kimiPath = join(home, '.kimi-code/sessions/ws', `session_${sid}`, 'wire.jsonl');
+    write(
+      kimiPath,
+      JSON.stringify({
+        type: 'usage.record',
+        time: oldSec,
+        model: 'kimi-code/k3.1-pro',
+        usage: { inputOther: 500, inputCacheRead: 500, inputCacheCreation: 0, output: 40 },
+      }) + '\n',
+    );
+    utimesSync(kimiPath, oldDate, oldDate);
+    expect(await cost('kimi', await locateKimiSession(e, '', cwd, futureSinceMs))).toMatchObject({
+      model: 'kimi-k3.1-pro',
+      contextUsed: 1000,
+      contextSize: 262144,
+    });
+
+    // OpenCode by cwd
+    const ocPath = join(home, '.local/share/opencode/opencode.db');
+    write(ocPath, '');
+    const oc = new DatabaseSync(ocPath);
+    oc.exec('CREATE TABLE session (id text PRIMARY KEY, parent_id text, directory text, time_created integer, time_updated integer)');
+    oc.exec('CREATE TABLE message (id text PRIMARY KEY, session_id text, time_created integer, time_updated integer, data text)');
+    oc.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?)').run('ses_old1', null, cwd, oldSec * 1000, oldSec * 1000);
+    oc.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)').run(
+      'm1',
+      'ses_old1',
+      oldSec * 1000,
+      oldSec * 1000,
+      JSON.stringify({
+        role: 'assistant',
+        time: { created: oldSec * 1000 },
+        modelID: 'claude-opus-5-5',
+        providerID: 'anthropic',
+        cost: 0,
+        tokens: { input: 300, output: 20, reasoning: 0, cache: { read: 700, write: 0 } },
+      }),
+    );
+    oc.close();
+    expect(await readOpenCodeSessionUsage(e, reader, { session: '', cwd, sinceMs: futureSinceMs })).toMatchObject({
+      model: 'claude-opus-5-5',
+      contextUsed: 1000,
+      contextSize: 1000000,
+    });
   });
 });

@@ -28,100 +28,113 @@
    "live": true,
    "item": "toolu_0001",
    "update": {
-    "kind": "think",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0001",
     "title": "Agent",
-    "toolCallId": "toolu_0001"
+    "kind": "think",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0001",
+    "title": "Run echo sub",
     "kind": "think",
+    "status": "pending",
     "rawInput": {
      "description": "Run echo sub",
      "prompt": "Use the Bash tool to run `echo sub`, then report the exact output it printed. Reply with only that output.",
-     "run_in_background": false,
-     "subagent_type": "general-purpose"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Run echo sub",
-    "toolCallId": "toolu_0001"
-   }
+     "subagent_type": "general-purpose",
+     "run_in_background": false
+    }
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000031"
   },
   {
    "t": "update",
    "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
+    "status": "in_progress",
     "_meta": {
      "veldr": {
       "task": {
+       "taskId": "a0000000000000001",
+       "type": "local_agent",
        "description": "Run echo sub",
-       "type": "local_agent"
+       "subagentType": "general-purpose"
       }
      }
-    },
-    "sessionUpdate": "tool_call_update",
-    "status": "in_progress",
-    "toolCallId": "toolu_0001"
+    }
    }
   },
   {
    "t": "update",
    "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
     "_meta": {
      "veldr": {
       "task": {
        "description": "Running Print sub via echo",
-       "durationMs": 1007,
        "lastTool": "Bash",
        "tokens": 22004,
-       "toolUses": 1
+       "toolUses": 1,
+       "durationMs": 1007,
+       "taskId": "a0000000000000001"
       }
      }
-    },
-    "sessionUpdate": "tool_call_update",
-    "toolCallId": "toolu_0001"
+    }
    }
   },
   {
    "t": "update",
-   "item": "toolu_0002",
-   "parent": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0002",
+    "title": "Print sub via echo",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "echo sub",
      "description": "Print sub via echo"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Print sub via echo",
-    "toolCallId": "toolu_0002"
-   }
+    }
+   },
+   "parent": "toolu_0001",
+   "item": "toolu_0002"
   },
   {
    "t": "update",
-   "item": "toolu_0002",
-   "parent": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0002",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "sub",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "sub"
+      }
      }
-    ],
+    ]
+   },
+   "parent": "toolu_0001",
+   "item": "toolu_0002"
+  },
+  {
+   "t": "update",
+   "item": "toolu_0001",
+   "update": {
     "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0002"
+    "toolCallId": "toolu_0001",
+    "status": "completed"
    }
   },
   {
@@ -129,45 +142,51 @@
    "item": "toolu_0001",
    "update": {
     "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
     "status": "completed",
-    "toolCallId": "toolu_0001"
-   }
-  },
-  {
-   "t": "update",
-   "item": "toolu_0001",
-   "update": {
     "_meta": {
      "veldr": {
       "task": {
-       "durationMs": 1824,
        "summary": "sub",
+       "taskId": "a0000000000000001",
        "tokens": 27002,
-       "toolUses": 1
+       "toolUses": 1,
+       "durationMs": 1824
       }
      }
-    },
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
+    }
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "sub",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "sub"
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
+    ]
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000042"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0003/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "The subagent reported that"
+    },
+    "messageId": "msg_0003"
    }
   },
   {
@@ -175,12 +194,12 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "The subagent reported that",
-     "type": "text"
+     "type": "text",
+     "text": " `"
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
@@ -188,12 +207,12 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " `",
-     "type": "text"
+     "type": "text",
+     "text": "echo sub` printed `"
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
@@ -201,43 +220,31 @@
    "live": true,
    "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "echo sub` printed `",
-     "type": "text"
+     "type": "text",
+     "text": "sub`."
     },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0003"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0003/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "sub`.",
-     "type": "text"
+     "type": "text",
+     "text": "The subagent reported that `echo sub` printed `sub`."
     },
     "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0003/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "The subagent reported that `echo sub` printed `sub`.",
-     "type": "text"
-    },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0003/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000050"
   },
   {
    "t": "turn",
@@ -444,15 +451,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -472,7 +479,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 0,

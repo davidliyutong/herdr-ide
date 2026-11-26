@@ -368,5 +368,29 @@ describe('a session', () => {
       output: 20,
       requests: 1,
     });
+    // Claude Code located by cwd when no session id is known
+    write(
+      join(home, '.claude', 'projects', '-work-app', `${session}.jsonl`),
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: new Date(TEST_NOW - 1000).toISOString(),
+        cwd,
+        message: {
+          role: 'assistant',
+          id: 'm-cwd',
+          model: 'claude-opus-5-5',
+          usage: { input_tokens: 1200, cache_read_input_tokens: 800, output_tokens: 50 },
+        },
+      }) + '\n',
+    );
+    expect(await call(m, usageProtocol, 'session', { kind: 'claude', session: '', cwd })).toMatchObject({
+      model: 'claude-opus-5-5',
+      input: 1200,
+      cached: 800,
+      output: 50,
+      contextUsed: 2000,
+      contextSize: 1000000,
+      requests: 1,
+    });
   });
 });

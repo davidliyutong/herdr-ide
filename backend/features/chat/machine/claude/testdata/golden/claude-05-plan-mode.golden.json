@@ -28,265 +28,288 @@
    "live": true,
    "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": {
+     "type": "text",
+     "text": ""
+    },
+    "messageId": "msg_0001",
     "_meta": {
      "veldr": {
       "estimatedTokens": 50
      }
-    },
-    "content": {
-     "text": "",
-     "type": "text"
-    },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_thought_chunk"
+    }
    }
   },
   {
    "t": "update",
-   "item": "msg_0001/0",
    "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": {
+     "type": "text",
+     "text": ""
+    },
+    "messageId": "msg_0001",
     "_meta": {
      "veldr": {
       "estimatedTokens": 50
      }
-    },
-    "content": {
-     "text": "",
-     "type": "text"
-    },
-    "messageId": "msg_0001",
-    "sessionUpdate": "agent_thought_chunk"
-   }
+    }
+   },
+   "item": "msg_0001/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000020"
   },
   {
    "t": "update",
    "live": true,
    "item": "toolu_0001",
    "update": {
-    "kind": "edit",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0001",
     "title": "Write",
-    "toolCallId": "toolu_0001"
+    "kind": "edit",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
-    "content": [
-     {
-      "newText": "Create `hello.txt` in the current directory containing `hi`.\n",
-      "oldText": null,
-      "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
-      "type": "diff"
-     }
-    ],
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0001",
+    "title": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
     "kind": "edit",
+    "status": "pending",
+    "rawInput": {
+     "file_path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
+     "content": "Create `hello.txt` in the current directory containing `hi`.\n"
+    },
     "locations": [
      {
       "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
      }
     ],
-    "rawInput": {
-     "content": "Create `hello.txt` in the current directory containing `hi`.\n",
-     "file_path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
-    "toolCallId": "toolu_0001"
-   }
-  },
-  {
-   "t": "update",
-   "live": true,
-   "item": "toolu_0002",
-   "update": {
-    "kind": "other",
-    "rawInput": {},
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "ToolSearch",
-    "toolCallId": "toolu_0002"
-   }
-  },
-  {
-   "t": "update",
-   "item": "toolu_0001",
-   "update": {
     "content": [
      {
-      "newText": "Create `hello.txt` in the current directory containing `hi`.\n",
-      "oldText": null,
+      "type": "diff",
       "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
-      "type": "diff"
+      "newText": "Create `hello.txt` in the current directory containing `hi`.\n",
+      "oldText": null
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
-   }
+    ]
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000024"
   },
   {
    "t": "update",
+   "live": true,
    "item": "toolu_0002",
    "update": {
-    "kind": "other",
-    "rawInput": {
-     "max_results": 1,
-     "query": "select:ExitPlanMode"
-    },
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0002",
     "title": "ToolSearch",
-    "toolCallId": "toolu_0002"
+    "kind": "other",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0002",
    "update": {
     "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0001",
     "status": "completed",
-    "toolCallId": "toolu_0002"
-   }
+    "content": [
+     {
+      "type": "diff",
+      "path": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md",
+      "newText": "Create `hello.txt` in the current directory containing `hi`.\n",
+      "oldText": null
+     }
+    ]
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000028"
+  },
+  {
+   "t": "update",
+   "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0002",
+    "title": "ToolSearch",
+    "kind": "other",
+    "status": "pending",
+    "rawInput": {
+     "query": "select:ExitPlanMode",
+     "max_results": 1
+    }
+   },
+   "item": "toolu_0002",
+   "entryUuid": "00000000-0000-4000-8000-000000000033"
+  },
+  {
+   "t": "update",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0002",
+    "status": "completed"
+   },
+   "item": "toolu_0002",
+   "entryUuid": "00000000-0000-4000-8000-000000000035"
   },
   {
    "t": "update",
    "live": true,
    "item": "toolu_0003",
    "update": {
-    "kind": "switch_mode",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0003",
     "title": "ExitPlanMode",
-    "toolCallId": "toolu_0003"
+    "kind": "switch_mode",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0003",
    "update": {
-    "content": [
-     {
-      "content": {
-       "text": "Create `hello.txt` in the current directory containing `hi`.\n",
-       "type": "text"
-      },
-      "type": "content"
-     }
-    ],
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0003",
+    "title": "ExitPlanMode",
     "kind": "switch_mode",
+    "status": "pending",
     "rawInput": {
      "plan": "Create `hello.txt` in the current directory containing `hi`.\n",
      "planFilePath": "/home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md"
     },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "ExitPlanMode",
-    "toolCallId": "toolu_0003"
-   }
-  },
-  {
-   "t": "update",
+    "content": [
+     {
+      "type": "content",
+      "content": {
+       "type": "text",
+       "text": "Create `hello.txt` in the current directory containing `hi`.\n"
+      }
+     }
+    ]
+   },
    "item": "toolu_0003",
+   "entryUuid": "00000000-0000-4000-8000-000000000042"
+  },
+  {
+   "t": "update",
    "update": {
-    "content": [
-     {
-      "content": {
-       "text": "User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\nYour plan has been saved to: /home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md\nYou can refer back to it if needed during implementation.\n\n## Approved Plan:\nCreate `hello.txt` in the current directory containing `hi`.\n",
-       "type": "text"
-      },
-      "type": "content"
-     }
-    ],
     "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0003",
     "status": "completed",
-    "toolCallId": "toolu_0003"
-   }
-  },
-  {
-   "t": "update",
-   "live": true,
-   "item": "msg_0003/0",
-   "update": {
-    "_meta": {
-     "veldr": {
-      "estimatedTokens": 50
-     }
-    },
-    "content": {
-     "text": "",
-     "type": "text"
-    },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_thought_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0003/0",
-   "update": {
-    "_meta": {
-     "veldr": {
-      "estimatedTokens": 50
-     }
-    },
-    "content": {
-     "text": "",
-     "type": "text"
-    },
-    "messageId": "msg_0003",
-    "sessionUpdate": "agent_thought_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "live": true,
-   "item": "toolu_0004",
-   "update": {
-    "kind": "execute",
-    "rawInput": {},
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Bash",
-    "toolCallId": "toolu_0004"
-   }
-  },
-  {
-   "t": "update",
-   "item": "toolu_0004",
-   "update": {
-    "kind": "execute",
-    "rawInput": {
-     "command": "printf 'hi' \u003e hello.txt \u0026\u0026 cat hello.txt \u0026\u0026 echo \u0026\u0026 pwd \u0026\u0026 ls -l hello.txt",
-     "description": "Create hello.txt with hi and verify contents"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Create hello.txt with hi and verify contents",
-    "toolCallId": "toolu_0004"
-   }
-  },
-  {
-   "t": "update",
-   "item": "toolu_0004",
-   "update": {
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "Do not create the file yet. Stop and wait for my next message.",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\nYour plan has been saved to: /home/user/.claude/plans/plan-creating-hello-txt-containing-floofy-lemur.md\nYou can refer back to it if needed during implementation.\n\n## Approved Plan:\nCreate `hello.txt` in the current directory containing `hi`.\n"
+      }
      }
-    ],
+    ]
+   },
+   "item": "toolu_0003",
+   "entryUuid": "00000000-0000-4000-8000-000000000050"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0003/0",
+   "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": {
+     "type": "text",
+     "text": ""
+    },
+    "messageId": "msg_0003",
+    "_meta": {
+     "veldr": {
+      "estimatedTokens": 50
+     }
+    }
+   }
+  },
+  {
+   "t": "update",
+   "update": {
+    "sessionUpdate": "agent_thought_chunk",
+    "content": {
+     "type": "text",
+     "text": ""
+    },
+    "messageId": "msg_0003",
+    "_meta": {
+     "veldr": {
+      "estimatedTokens": 50
+     }
+    }
+   },
+   "item": "msg_0003/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000059"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "toolu_0004",
+   "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0004",
+    "title": "Bash",
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
+   }
+  },
+  {
+   "t": "update",
+   "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0004",
+    "title": "Create hello.txt with hi and verify contents",
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {
+     "command": "printf 'hi' > hello.txt && cat hello.txt && echo && pwd && ls -l hello.txt",
+     "description": "Create hello.txt with hi and verify contents"
+    }
+   },
+   "item": "toolu_0004",
+   "entryUuid": "00000000-0000-4000-8000-000000000074"
+  },
+  {
+   "t": "update",
+   "update": {
     "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0004",
     "status": "failed",
-    "toolCallId": "toolu_0004"
+    "content": [
+     {
+      "type": "content",
+      "content": {
+       "type": "text",
+       "text": "Do not create the file yet. Stop and wait for my next message."
+      }
+     }
+    ]
+   },
+   "item": "toolu_0004",
+   "entryUuid": "00000000-0000-4000-8000-000000000081"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "Understood. I've"
+    },
+    "messageId": "msg_0004"
    }
   },
   {
@@ -294,12 +317,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "Understood. I've",
-     "type": "text"
+     "type": "text",
+     "text": " stopped and ha"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -307,12 +330,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " stopped and ha",
-     "type": "text"
+     "type": "text",
+     "text": "ven't created `hello.tx"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -320,12 +343,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ven't created `hello.tx",
-     "type": "text"
+     "type": "text",
+     "text": "t`. The pl"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -333,12 +356,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "t`. The pl",
-     "type": "text"
+     "type": "text",
+     "text": "an was approved, but you"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -346,12 +369,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "an was approved, but you",
-     "type": "text"
+     "type": "text",
+     "text": "'ve"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -359,12 +382,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "'ve",
-     "type": "text"
+     "type": "text",
+     "text": " as"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -372,12 +395,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " as",
-     "type": "text"
+     "type": "text",
+     "text": "ked me to wait,"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -385,12 +408,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ked me to wait,",
-     "type": "text"
+     "type": "text",
+     "text": " so I'll hold until"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -398,43 +421,31 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " so I'll hold until",
-     "type": "text"
+     "type": "text",
+     "text": " your next message."
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " your next message.",
-     "type": "text"
+     "type": "text",
+     "text": "Understood. I've stopped and haven't created `hello.txt`. The plan was approved, but you've asked me to wait, so I'll hold until your next message."
     },
     "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0004/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "Understood. I've stopped and haven't created `hello.txt`. The plan was approved, but you've asked me to wait, so I'll hold until your next message.",
-     "type": "text"
-    },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0004/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000095"
   },
   {
    "t": "turn",
@@ -450,45 +461,60 @@
    "live": true,
    "item": "toolu_0005",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0005",
     "title": "Bash",
-    "toolCallId": "toolu_0005"
-   }
-  },
-  {
-   "t": "update",
-   "item": "toolu_0005",
-   "update": {
     "kind": "execute",
-    "rawInput": {
-     "command": "printf 'hi' \u003e hello.txt \u0026\u0026 cat hello.txt \u0026\u0026 echo \u0026\u0026 pwd \u0026\u0026 ls -l hello.txt",
-     "description": "Create hello.txt with hi and verify contents"
-    },
-    "sessionUpdate": "tool_call",
     "status": "pending",
-    "title": "Create hello.txt with hi and verify contents",
-    "toolCallId": "toolu_0005"
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0005",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0005",
+    "title": "Create hello.txt with hi and verify contents",
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {
+     "command": "printf 'hi' > hello.txt && cat hello.txt && echo && pwd && ls -l hello.txt",
+     "description": "Create hello.txt with hi and verify contents"
+    }
+   },
+   "item": "toolu_0005",
+   "entryUuid": "00000000-0000-4000-8000-000000000122"
+  },
+  {
+   "t": "update",
+   "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0005",
+    "status": "completed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "hi\n/work\n-rw-r--r--@ 1 user  wheel  2 11月 22 19:38 hello.txt",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "hi\n/work\n-rw-r--r--@ 1 user  wheel  2 11月 22 19:38 hello.txt"
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0005"
+    ]
+   },
+   "item": "toolu_0005",
+   "entryUuid": "00000000-0000-4000-8000-000000000126"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "I created `hello.txt"
+    },
+    "messageId": "msg_0006"
    }
   },
   {
@@ -496,12 +522,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "I created `hello.txt",
-     "type": "text"
+     "type": "text",
+     "text": "` in the current directory (`"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -509,12 +535,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "` in the current directory (`",
-     "type": "text"
+     "type": "text",
+     "text": "/work"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -522,12 +548,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "/work",
-     "type": "text"
+     "type": "text",
+     "text": "`). It"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -535,12 +561,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "`). It",
-     "type": "text"
+     "type": "text",
+     "text": " contains `hi` with no"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -548,12 +574,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " contains `hi` with no",
-     "type": "text"
+     "type": "text",
+     "text": " trailing newline, and it"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -561,12 +587,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " trailing newline, and it",
-     "type": "text"
+     "type": "text",
+     "text": " is"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -574,12 +600,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " is",
-     "type": "text"
+     "type": "text",
+     "text": " 2 bytes. I"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -587,12 +613,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " 2 bytes. I",
-     "type": "text"
+     "type": "text",
+     "text": " confirmed the contents by"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -600,12 +626,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " confirmed the contents by",
-     "type": "text"
+     "type": "text",
+     "text": " reading the file back"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -613,43 +639,31 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " reading the file back",
-     "type": "text"
+     "type": "text",
+     "text": "."
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": ".",
-     "type": "text"
+     "type": "text",
+     "text": "I created `hello.txt` in the current directory (`/work`). It contains `hi` with no trailing newline, and it is 2 bytes. I confirmed the contents by reading the file back."
     },
     "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0006/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "I created `hello.txt` in the current directory (`/work`). It contains `hi` with no trailing newline, and it is 2 bytes. I confirmed the contents by reading the file back.",
-     "type": "text"
-    },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0006/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000143"
   },
   {
    "t": "turn",
@@ -703,7 +717,7 @@
    "ToolCall": {
     "kind": "execute",
     "rawInput": {
-     "command": "printf 'hi' \u003e hello.txt \u0026\u0026 cat hello.txt \u0026\u0026 echo \u0026\u0026 pwd \u0026\u0026 ls -l hello.txt",
+     "command": "printf 'hi' > hello.txt && cat hello.txt && echo && pwd && ls -l hello.txt",
      "description": "Create hello.txt with hi and verify contents"
     },
     "status": "pending",
@@ -1012,15 +1026,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -1040,7 +1054,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 2,

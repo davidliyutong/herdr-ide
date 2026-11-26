@@ -38,13 +38,13 @@ export class SessionError extends Error {
 }
 
 /** The transcript formats with sessions (Kind.transcript). */
-export const Format = { Claude: 'claude', Codex: 'codex' } as const;
+export const Format = { Claude: 'claude', Codex: 'codex', Agy: 'agy' } as const;
 export type Format = (typeof Format)[keyof typeof Format];
 
 /** The format of a kind with sessions; null for any other kind. */
 export function formatOf(kind: string): Format | null {
   const t = byId(kind)?.transcript;
-  return t === Format.Claude || t === Format.Codex ? t : null;
+  return t === Format.Claude || t === Format.Codex || t === Format.Agy ? t : null;
 }
 
 /** Bounds of what one call reads. */

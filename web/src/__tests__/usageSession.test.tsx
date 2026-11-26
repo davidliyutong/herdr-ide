@@ -23,6 +23,7 @@ import { UsageStatusItem } from '../plugins/usage/StatusItem';
 import {
   resetSessionReads,
   SESSION_KEEP,
+  SESSION_NOT_FOUND_RECHECK_MS,
   SESSION_RETRY_MS,
   SESSION_TIMEOUT_MS,
   SESSION_WORKING_EVERY,
@@ -285,6 +286,7 @@ describe('usage session item', () => {
     expect(item()!.getAttribute('aria-describedby')).toBe(card.id);
     const facts = [...card.querySelectorAll('dt')].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
     expect(facts).toEqual([
+      ['Session', S1.slice(0, 8)],
       ['Model', 'claude-opus-4-6'],
       ['Cost at API prices', '$1.23'],
       ['Context', '84.0k of 200.0k (42%)'],
@@ -447,16 +449,34 @@ describe('usage window in the status bar', () => {
     expect(reads).toEqual(['ses_alpha123']);
     expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$0.35');
     expect(item()!.querySelector('.usage-session-ctx')!.textContent).toBe('5k ctx');
-    // Guessed or malformed ses_* is never queried (and does not fall back to cwd).
+    // Guessed ses_* falls back to cwd when unambiguous; malformed ses_* is never queried and never falls back to cwd.
+    answers.set('opencode:/work/oc', {
+      status: 200,
+      body: usage({ model: 'deepseek-v4-flash', cost: 0.7, contextUsed: 8000, contextSize: 0 }),
+    });
     reads = [];
-    for (const bad of [
-      { agent_session: 'ses_beta456', agent_session_source: 'guess' },
-      { agent_session: 'ses_../bad', agent_session_source: 'pid' },
-    ]) {
-      await set(() => show([rec('t1', { agent: 'opencode', cwd: '/work/oc', ...bad })], 't1'));
-      expect(reads).toEqual([]);
-      expect(item()).toBeNull();
-    }
+    await set(() =>
+      show([rec('t1', { agent: 'opencode', cwd: '/work/oc', agent_session: 'ses_beta456', agent_session_source: 'guess' })], 't1'),
+    );
+    expect(reads).toEqual(['opencode:/work/oc']);
+    expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$0.70');
+    reads = [];
+    await set(() =>
+      show([rec('t1', { agent: 'opencode', cwd: '/work/oc', agent_session: 'ses_../bad', agent_session_source: 'pid' })], 't1'),
+    );
+    expect(reads).toEqual([]);
+    expect(item()).toBeNull();
+    // Claude Code with a guessed session falls back to cwd when unambiguous.
+    answers.set('claude:/work/claude-proj', {
+      status: 200,
+      body: usage({ model: 'claude-sonnet-4-6', cost: 0.9, contextUsed: 50_000, contextSize: 200_000 }),
+    });
+    reads = [];
+    await set(() =>
+      show([rec('t1', { agent: 'claude', cwd: '/work/claude-proj', agent_session: S1, agent_session_source: 'guess' })], 't1'),
+    );
+    expect(reads).toEqual(['claude:/work/claude-proj']);
+    expect(item()!.querySelector('.usage-session-ctx')!.textContent).toBe('25% ctx');
   });
 });
 
@@ -548,7 +568,7 @@ describe('usage session reads', () => {
     );
   });
 
-  it('shows nothing for a session without a transcript yet, and asks again at its agent’s next status change', async () => {
+  it('shows nothing for a session without a transcript yet, re-checks periodically, and asks at its agent’s next status change', async () => {
     answers.set(S1, { status: 404, body: { error: 'not_found' } });
     const both = (focused: string, status = 'idle') =>
       show([rec('t1', { agent_status: status }), rec('t2', { agent_session: S2 })], focused);
@@ -556,17 +576,20 @@ describe('usage session reads', () => {
     await render();
     expect(reads).toEqual([S1]);
     expect(item()).toBeNull();
-    // Focused again later, its agent as it was: not asked.
-    await advance(20_000);
+    // Focused again within SESSION_NOT_FOUND_RECHECK_MS, its agent as it was: not asked again yet.
+    await advance(5_000);
     await set(() => both('t2'));
-    await advance(20_000);
+    await advance(5_000);
     await set(() => both('t1'));
     expect(reads).toEqual([S1, S2]);
     expect(item()).toBeNull();
+    // While focused and still not_found, re-checks after SESSION_NOT_FOUND_RECHECK_MS.
+    await advance(SESSION_NOT_FOUND_RECHECK_MS);
+    expect(reads).toEqual([S1, S2, S1]);
     // Its agent works: asked, and the transcript is there.
     answers.delete(S1);
-    await set(() => both('t1', 'working'));
-    expect(reads).toEqual([S1, S2, S1]);
+    await advance(SESSION_NOT_FOUND_RECHECK_MS);
+    expect(reads).toEqual([S1, S2, S1, S1]);
     expect(item()!.querySelector('.usage-session-cost')!.textContent).toBe('$1.23');
   });
 

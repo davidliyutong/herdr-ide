@@ -28,36 +28,51 @@
    "live": true,
    "item": "toolu_0001",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0001",
     "title": "Bash",
-    "toolCallId": "toolu_0001"
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0001",
+    "title": "Create empty one.txt in current directory",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "touch one.txt",
      "description": "Create empty one.txt in current directory"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Create empty one.txt in current directory",
-    "toolCallId": "toolu_0001"
-   }
+    }
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000021"
   },
   {
    "t": "update",
-   "item": "toolu_0001",
    "update": {
     "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0001"
+    "toolCallId": "toolu_0001",
+    "status": "completed"
+   },
+   "item": "toolu_0001",
+   "entryUuid": "00000000-0000-4000-8000-000000000029"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0002/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "I ran `touch one."
+    },
+    "messageId": "msg_0002"
    }
   },
   {
@@ -65,12 +80,12 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "I ran `touch one.",
-     "type": "text"
+     "type": "text",
+     "text": "txt` in the current directory"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -78,12 +93,12 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "txt` in the current directory",
-     "type": "text"
+     "type": "text",
+     "text": "."
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -91,12 +106,12 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": ".",
-     "type": "text"
+     "type": "text",
+     "text": " It completed without output"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -104,12 +119,12 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " It completed without output",
-     "type": "text"
+     "type": "text",
+     "text": ", so `one.txt`"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -117,12 +132,12 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": ", so `one.txt`",
-     "type": "text"
+     "type": "text",
+     "text": " should"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -130,12 +145,12 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " should",
-     "type": "text"
+     "type": "text",
+     "text": " now"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -143,12 +158,12 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " now",
-     "type": "text"
+     "type": "text",
+     "text": " exist as an empty file."
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -156,12 +171,12 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " exist as an empty file.",
-     "type": "text"
+     "type": "text",
+     "text": " I didn't check that with"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -169,12 +184,12 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " I didn't check that with",
-     "type": "text"
+     "type": "text",
+     "text": " a separate command"
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
@@ -182,43 +197,31 @@
    "live": true,
    "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " a separate command",
-     "type": "text"
+     "type": "text",
+     "text": "."
     },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0002"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0002/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": ".",
-     "type": "text"
+     "type": "text",
+     "text": "I ran `touch one.txt` in the current directory. It completed without output, so `one.txt` should now exist as an empty file. I didn't check that with a separate command."
     },
     "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0002/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "I ran `touch one.txt` in the current directory. It completed without output, so `one.txt` should now exist as an empty file. I didn't check that with a separate command.",
-     "type": "text"
-    },
-    "messageId": "msg_0002",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0002/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000044"
   },
   {
    "t": "turn",
@@ -234,45 +237,60 @@
    "live": true,
    "item": "toolu_0002",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0002",
     "title": "Bash",
-    "toolCallId": "toolu_0002"
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0002",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0002",
+    "title": "Create empty two.txt in current directory",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "touch two.txt",
      "description": "Create empty two.txt in current directory"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Create empty two.txt in current directory",
-    "toolCallId": "toolu_0002"
-   }
+    }
+   },
+   "item": "toolu_0002",
+   "entryUuid": "00000000-0000-4000-8000-000000000066"
   },
   {
    "t": "update",
-   "item": "toolu_0002",
    "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_0002",
+    "status": "failed",
     "content": [
      {
+      "type": "content",
       "content": {
-       "text": "The user declined to run this command.",
-       "type": "text"
-      },
-      "type": "content"
+       "type": "text",
+       "text": "The user declined to run this command."
+      }
      }
-    ],
-    "sessionUpdate": "tool_call_update",
-    "status": "failed",
-    "toolCallId": "toolu_0002"
+    ]
+   },
+   "item": "toolu_0002",
+   "entryUuid": "00000000-0000-4000-8000-000000000073"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0004/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "You"
+    },
+    "messageId": "msg_0004"
    }
   },
   {
@@ -280,12 +298,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "You",
-     "type": "text"
+     "type": "text",
+     "text": " declined the"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -293,12 +311,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " declined the",
-     "type": "text"
+     "type": "text",
+     "text": " `"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -306,12 +324,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " `",
-     "type": "text"
+     "type": "text",
+     "text": "touch two.txt` command"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -319,12 +337,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "touch two.txt` command",
-     "type": "text"
+     "type": "text",
+     "text": ", so I didn't create"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -332,12 +350,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": ", so I didn't create",
-     "type": "text"
+     "type": "text",
+     "text": " the"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -345,12 +363,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " the",
-     "type": "text"
+     "type": "text",
+     "text": " file. I"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -358,12 +376,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " file. I",
-     "type": "text"
+     "type": "text",
+     "text": " haven't ret"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -371,12 +389,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " haven't ret",
-     "type": "text"
+     "type": "text",
+     "text": "ried it."
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -384,12 +402,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ried it.",
-     "type": "text"
+     "type": "text",
+     "text": " Tell me if you want me to"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -397,12 +415,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " Tell me if you want me to",
-     "type": "text"
+     "type": "text",
+     "text": " run it another"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -410,12 +428,12 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " run it another",
-     "type": "text"
+     "type": "text",
+     "text": " way"
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
@@ -423,43 +441,31 @@
    "live": true,
    "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " way",
-     "type": "text"
+     "type": "text",
+     "text": "."
     },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0004"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0004/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": ".",
-     "type": "text"
+     "type": "text",
+     "text": "You declined the `touch two.txt` command, so I didn't create the file. I haven't retried it. Tell me if you want me to run it another way."
     },
     "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0004/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "You declined the `touch two.txt` command, so I didn't create the file. I haven't retried it. Tell me if you want me to run it another way.",
-     "type": "text"
-    },
-    "messageId": "msg_0004",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0004/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000090"
   },
   {
    "t": "turn",
@@ -475,36 +481,51 @@
    "live": true,
    "item": "toolu_0003",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0003",
     "title": "Bash",
-    "toolCallId": "toolu_0003"
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0003",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0003",
+    "title": "Create empty three.txt in current directory",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "touch three.txt",
      "description": "Create empty three.txt in current directory"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Create empty three.txt in current directory",
-    "toolCallId": "toolu_0003"
-   }
+    }
+   },
+   "item": "toolu_0003",
+   "entryUuid": "00000000-0000-4000-8000-000000000112"
   },
   {
    "t": "update",
-   "item": "toolu_0003",
    "update": {
     "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0003"
+    "toolCallId": "toolu_0003",
+    "status": "completed"
+   },
+   "item": "toolu_0003",
+   "entryUuid": "00000000-0000-4000-8000-000000000120"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0006/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "I ran `touch three."
+    },
+    "messageId": "msg_0006"
    }
   },
   {
@@ -512,12 +533,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "I ran `touch three.",
-     "type": "text"
+     "type": "text",
+     "text": "txt` in the current directory"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -525,12 +546,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "txt` in the current directory",
-     "type": "text"
+     "type": "text",
+     "text": ". It completed without output, so"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -538,12 +559,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": ". It completed without output, so",
-     "type": "text"
+     "type": "text",
+     "text": " `three.txt` should now"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -551,12 +572,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " `three.txt` should now",
-     "type": "text"
+     "type": "text",
+     "text": " exist as an empty file."
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -564,12 +585,12 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " exist as an empty file.",
-     "type": "text"
+     "type": "text",
+     "text": " I didn't ver"
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
@@ -577,43 +598,31 @@
    "live": true,
    "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " I didn't ver",
-     "type": "text"
+     "type": "text",
+     "text": "ify that with a separate command."
     },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0006"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0006/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ify that with a separate command.",
-     "type": "text"
+     "type": "text",
+     "text": "I ran `touch three.txt` in the current directory. It completed without output, so `three.txt` should now exist as an empty file. I didn't verify that with a separate command."
     },
     "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0006/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "I ran `touch three.txt` in the current directory. It completed without output, so `three.txt` should now exist as an empty file. I didn't verify that with a separate command.",
-     "type": "text"
-    },
-    "messageId": "msg_0006",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0006/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000131"
   },
   {
    "t": "turn",
@@ -629,36 +638,51 @@
    "live": true,
    "item": "toolu_0004",
    "update": {
-    "kind": "execute",
-    "rawInput": {},
     "sessionUpdate": "tool_call",
-    "status": "pending",
+    "toolCallId": "toolu_0004",
     "title": "Bash",
-    "toolCallId": "toolu_0004"
+    "kind": "execute",
+    "status": "pending",
+    "rawInput": {}
    }
   },
   {
    "t": "update",
-   "item": "toolu_0004",
    "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_0004",
+    "title": "Update timestamp of three.txt in current directory",
     "kind": "execute",
+    "status": "pending",
     "rawInput": {
      "command": "touch three.txt",
      "description": "Update timestamp of three.txt in current directory"
-    },
-    "sessionUpdate": "tool_call",
-    "status": "pending",
-    "title": "Update timestamp of three.txt in current directory",
-    "toolCallId": "toolu_0004"
-   }
+    }
+   },
+   "item": "toolu_0004",
+   "entryUuid": "00000000-0000-4000-8000-000000000153"
   },
   {
    "t": "update",
-   "item": "toolu_0004",
    "update": {
     "sessionUpdate": "tool_call_update",
-    "status": "completed",
-    "toolCallId": "toolu_0004"
+    "toolCallId": "toolu_0004",
+    "status": "completed"
+   },
+   "item": "toolu_0004",
+   "entryUuid": "00000000-0000-4000-8000-000000000158"
+  },
+  {
+   "t": "update",
+   "live": true,
+   "item": "msg_0008/0",
+   "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "I ran `touch three."
+    },
+    "messageId": "msg_0008"
    }
   },
   {
@@ -666,12 +690,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "I ran `touch three.",
-     "type": "text"
+     "type": "text",
+     "text": "txt` again. It completed"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -679,12 +703,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "txt` again. It completed",
-     "type": "text"
+     "type": "text",
+     "text": " without output. Since `tou"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -692,12 +716,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " without output. Since `tou",
-     "type": "text"
+     "type": "text",
+     "text": "ch` only"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -705,12 +729,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ch` only",
-     "type": "text"
+     "type": "text",
+     "text": " updates the file"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -718,12 +742,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " updates the file",
-     "type": "text"
+     "type": "text",
+     "text": "'s timestamp when"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -731,12 +755,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "'s timestamp when",
-     "type": "text"
+     "type": "text",
+     "text": " the"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -744,12 +768,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " the",
-     "type": "text"
+     "type": "text",
+     "text": " file already exists, `"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -757,12 +781,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " file already exists, `",
-     "type": "text"
+     "type": "text",
+     "text": "three.txt` is"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -770,12 +794,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "three.txt` is",
-     "type": "text"
+     "type": "text",
+     "text": " still an"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -783,12 +807,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " still an",
-     "type": "text"
+     "type": "text",
+     "text": " empty file and"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -796,12 +820,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " empty file and",
-     "type": "text"
+     "type": "text",
+     "text": " its mod"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -809,12 +833,12 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": " its mod",
-     "type": "text"
+     "type": "text",
+     "text": "ification time is now upd"
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
@@ -822,43 +846,31 @@
    "live": true,
    "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ification time is now upd",
-     "type": "text"
+     "type": "text",
+     "text": "ated."
     },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
+    "messageId": "msg_0008"
    }
   },
   {
    "t": "update",
-   "live": true,
-   "item": "msg_0008/0",
    "update": {
+    "sessionUpdate": "agent_message_chunk",
     "content": {
-     "text": "ated.",
-     "type": "text"
+     "type": "text",
+     "text": "I ran `touch three.txt` again. It completed without output. Since `touch` only updates the file's timestamp when the file already exists, `three.txt` is still an empty file and its modification time is now updated."
     },
     "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
-   }
-  },
-  {
-   "t": "update",
-   "item": "msg_0008/0",
-   "update": {
     "_meta": {
      "veldr": {
       "model": "claude-haiku-5-5"
      }
-    },
-    "content": {
-     "text": "I ran `touch three.txt` again. It completed without output. Since `touch` only updates the file's timestamp when the file already exists, `three.txt` is still an empty file and its modification time is now updated.",
-     "type": "text"
-    },
-    "messageId": "msg_0008",
-    "sessionUpdate": "agent_message_chunk"
-   }
+    }
+   },
+   "item": "msg_0008/0",
+   "entryUuid": "00000000-0000-4000-8000-000000000176"
   },
   {
    "t": "turn",
@@ -1290,15 +1302,15 @@
   "commands": [
    {
     "name": "user-skill-1",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-2",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    },
    {
     "name": "user-skill-3",
-    "description": "\u003credacted\u003e"
+    "description": "<redacted>"
    }
   ],
   "usage": {
@@ -1332,7 +1344,12 @@
    "questions": true,
    "effort": true,
    "model": true,
-   "cancelQueued": true
+   "cancelQueued": true,
+   "steer": true,
+   "stopTask": true,
+   "fork": true,
+   "rewind": true,
+   "rewindFiles": true
   }
  },
  "echoes": 3,

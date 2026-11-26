@@ -54,6 +54,14 @@ async function main(): Promise<void> {
   let file = process.env.FAKE_CLAUDE_SCRIPT ?? '';
   if (args.includes('--allow-dangerously-skip-permissions') && process.env.FAKE_CLAUDE_FULL_SCRIPT)
     file = process.env.FAKE_CLAUDE_FULL_SCRIPT;
+  if (args.some((a) => a.startsWith('--resume-session-at=')) && process.env.FAKE_CLAUDE_REWIND_SCRIPT)
+    file = process.env.FAKE_CLAUDE_REWIND_SCRIPT;
+  if (
+    process.env.FAKE_CLAUDE_FRESH_SCRIPT &&
+    process.env.FAKE_CLAUDE_INITIAL_SESSION &&
+    args.some((a) => a.startsWith('--session-id=') && a !== `--session-id=${process.env.FAKE_CLAUDE_INITIAL_SESSION}`)
+  )
+    file = process.env.FAKE_CLAUDE_FRESH_SCRIPT;
   let sc: Script;
   try {
     sc = JSON.parse(readFileSync(file, 'utf8')) as Script;
@@ -67,6 +75,7 @@ async function main(): Promise<void> {
   for (const k of [
     'CLAUDE_CODE_ENTRYPOINT',
     'CLAUDE_CODE_SDK_READS_SESSION_STATE',
+    'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING',
     'CLAUDE_AGENT_SDK_VERSION',
     'NODE_OPTIONS',
     'DEBUG',
@@ -145,6 +154,8 @@ async function main(): Promise<void> {
     else if (sub === 'set_model') resp = { model: req.model };
     else if (sub === 'interrupt') resp = { still_queued: [] };
     else if (sub === 'cancel_async_message') resp = { cancelled: true, message_uuid: req.message_uuid };
+    else if (sub === 'stop_task') resp = {};
+    else if (sub === 'rewind_files') resp = { canRewind: true, filesChanged: [] };
     if (sc.canned && sub in sc.canned) resp = sc.canned[sub];
     write(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: r.request_id, response: resp } }));
     return true;

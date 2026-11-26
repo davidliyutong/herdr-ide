@@ -201,9 +201,19 @@ export class Files {
     this.onOpen(dir);
     const dh = await open(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NONBLOCK);
     try {
-      if (!this.private(await dh.stat({ bigint: true }))) throw new FileRefused('not_own');
+      const dst = await dh.stat({ bigint: true });
+      if (!this.private(dst)) throw new FileRefused('not_own');
+      let openDir = dir;
+      if (process.platform !== 'linux') {
+        const real = await this.realpath(dir);
+        if (real) {
+          const rst = await this.lstat(real);
+          if (!rst || !sameFile(dst, rst)) throw new FileRefused('not_own');
+          openDir = real;
+        }
+      }
       this.onOpen(posix.join(dir, name));
-      const fh = await openAtAsync(dh, dir, name, FILE_FLAGS);
+      const fh = await openAtAsync(dh, openDir, name, FILE_FLAGS);
       try {
         const st = await fh.stat({ bigint: true });
         if (!st.isFile() || Number(st.uid) !== this.uid) throw new FileRefused('not_own');

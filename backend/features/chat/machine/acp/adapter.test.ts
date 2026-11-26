@@ -206,13 +206,18 @@ describe('the ACP adapter', () => {
     expect([c.usage?.used, c.usage?.size]).toEqual([25008, 256000]);
     expect(c.capabilities).toEqual({
       images: true,
-      compact: false,
+      compact: true,
       queue: true,
       plan: false,
       questions: false,
       effort: true,
       model: true,
       cancelQueued: true,
+      steer: false,
+      stopTask: false,
+      fork: false,
+      rewind: false,
+      rewindFiles: false,
     });
     expect(c.agentVersion).toBeTruthy();
     h.golden('grok-session');
@@ -669,6 +674,218 @@ describe('the ACP adapter', () => {
     };
     await h.turn(s, promptOf(write));
     expect(before).toBeGreaterThan(0);
+    await h.close(s);
+  });
+
+  test('Antigravity (agy) ACP: config options, dynamic thought_level, auto marked full, 1M context, /compact, and session/close', async () => {
+    const h = new Harness();
+    const steps = h.rec('agy', '01-initialize').concat(h.rec('agy', '02-session-new'), h.rec('agy', '03-prompt-and-config'));
+    const p = h.params(steps);
+    p.kind = 'agy';
+    const s = await h.start(p);
+    expect(s.id).toBe('00000000-0000-4000-8000-0000000000a1');
+    // agy emits available_commands_update and usage_update right after session/new returns.
+    for (let i = 0; i < 200 && (!h.host.chat.capabilities.compact || h.host.chat.usage?.size !== 1048576); i++) {
+      await Bun.sleep(5);
+    }
+    const c = h.host.chat;
+    expect(c.agentVersion).toBe('1.5.18');
+    expect(c.capabilities).toEqual({
+      images: true,
+      compact: true,
+      queue: true,
+      plan: false,
+      questions: false,
+      effort: true,
+      model: true,
+      cancelQueued: true,
+      steer: false,
+      stopTask: false,
+      fork: false,
+      rewind: false,
+      rewindFiles: false,
+    });
+    const modeOpt = optionOf(c.config ?? [], chat.Category.Mode)!;
+    expect(modeOpt.options?.find((o) => o.value === 'auto')?.full).toBe(true);
+    for (const safe of ['default', 'accept-edits', 'plan']) {
+      expect(modeOpt.options?.find((o) => o.value === safe)?.full).toBeUndefined();
+    }
+    expect([c.usage?.used, c.usage?.size]).toEqual([0, 1048576]);
+
+    // Turn 1: prompt + thought + reply + usage update.
+    expect((await h.turn(s, [{ type: 'text', text: 'Reply with hi' }])).stopReason).toBe('end_turn');
+    expect([h.host.chat.usage?.used, h.host.chat.usage?.size]).toEqual([12400, 1048576]);
+
+    // Switching model dynamically updates thought_level options.
+    await s.setConfig('model', 'claude-opus-5-5', never());
+    expect(optionOf(h.host.chat.config ?? [], chat.Category.Model)?.currentValue).toBe('claude-opus-5-5');
+    expect(optionOf(h.host.chat.config ?? [], chat.Category.ThoughtLevel)?.options?.map((o) => o.value)).toEqual(['low', 'medium', 'high']);
+
+    // Manual /compact with custom instructions emits Notice.Command and runs a turn.
+    await s.compact(never(), 'keep decisions');
+    expect((await h.host.await("compact turn's end", turnOver)).stopReason).toBe('end_turn');
+    expect(h.host.events.some((ev) => ev.t === chat.EventType.Notice && ev.method === noticeMethod(Notice.Command))).toBe(true);
+    expect(h.host.chat.usage?.used).toBe(4200);
+
+    // Graceful close calls session/close (checked strictly by fakeagent script).
+    await h.close(s);
+  });
+
+  test('Antigravity (agy) session/list filters out sessions from other workspaces', async () => {
+    const h = new Harness();
+    const steps = h.rec('agy', '01-initialize').concat(h.rec('agy', '04-list'));
+    const { sessions, next } = await h.a.sessions({ ...h.params(steps), kind: 'agy', cursor: '' }, never());
+    expect(next).toBe('');
+    expect(sessions.map((s) => `${s.sessionId} ${s.title}`)).toEqual([
+      '00000000-0000-4000-8000-0000000000a1 Work session newer',
+      '00000000-0000-4000-8000-0000000000a3 Work session older',
+    ]);
+  });
+
+  test('models() probes ACP models from configOptions and closes cleanly; enriches Grok efforts', async () => {
+    const h = new Harness();
+    const agySteps = h
+      .rec('agy', '01-initialize')
+      .concat(h.rec('agy', '02-session-new').slice(0, 2))
+      .concat([
+        msgLine('out', `{"jsonrpc":"2.0","id":3,"method":"session/close","params":{"sessionId":"00000000-0000-4000-8000-0000000000a1"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+      ]);
+    const agyModels = await h.a.models!({ ...h.params(agySteps), kind: 'agy' }, never());
+    expect(agyModels).toEqual([
+      { value: 'gemini-4-neon', name: 'Gemini 4 Neon', images: true },
+      { value: 'claude-opus-5-5', name: 'Claude Opus 5.5', images: true },
+      { value: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B', images: true },
+    ]);
+
+    const h2 = new Harness();
+    const grokSteps = h2.rec('grok', '01-initialize').concat(h2.rec('grok', '02-session-new-yolo-off'));
+    // Strip _meta from session/new expectation since models() sends empty mcpServers without newSessionMeta.
+    edit(grokSteps, (m) => {
+      if (m.method !== 'session/new') return false;
+      delete (m.params as Record<string, unknown>)._meta;
+      return true;
+    });
+    const grokModels = await h2.a.models!({ ...h2.params(grokSteps), kind: 'grok' }, never());
+    expect(grokModels.length).toBeGreaterThan(0);
+    expect(grokModels[0]?.images).toBe(true);
+  });
+
+  test('session/resume -32603 hinting session/load falls back to session/load; missing session maps to not_found', async () => {
+    const h = new Harness();
+    const sid = '00000000-0000-4000-8000-0000000000a9';
+    const fallbackSteps = h
+      .rec('agy', '01-initialize')
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":2,"method":"session/resume","params":{"sessionId":"${sid}","cwd":"${h.dir}","mcpServers":[]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Failed to read session ${sid}; retry, or load it with session/load"}}`,
+        ),
+        msgLine('out', `{"jsonrpc":"2.0","id":3,"method":"session/load","params":{"sessionId":"${sid}","cwd":"${h.dir}","mcpServers":[]}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+      ]);
+    const p = h.params(fallbackSteps);
+    p.resume = sid;
+    const s = await h.start(p);
+    expect(s.id).toBe(sid);
+    await h.close(s);
+
+    const h2 = new Harness();
+    const missingSteps = h2
+      .rec('agy', '01-initialize')
+      .concat([
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":2,"method":"session/resume","params":{"sessionId":"${sid}","cwd":"${h2.dir}","mcpServers":[]}}`,
+        ),
+        msgLine(
+          'in',
+          `{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Failed to read session ${sid}; retry, or load it with session/load"}}`,
+        ),
+        msgLine(
+          'out',
+          `{"jsonrpc":"2.0","id":3,"method":"session/load","params":{"sessionId":"${sid}","cwd":"${h2.dir}","mcpServers":[]}}`,
+        ),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Failed to read session ${sid}"}}`),
+      ]);
+    const p2 = h2.params(missingSteps);
+    p2.resume = sid;
+    expect((await rejects(h2.a.start(p2, h2.host, AbortSignal.timeout(PATIENCE)))).code).toBe(chat.Code.NotFound);
+  });
+
+  test('fork() calls session/fork when advertised and rejects unsupported otherwise', async () => {
+    const h = new Harness();
+    const forkedId = 'session_00000000-0000-4000-8000-000000000099';
+    const forkSteps = h
+      .rec('kimi', '01-initialize')
+      .concat([
+        msgLine('out', `{"jsonrpc":"2.0","id":2,"method":"session/fork","params":{"sessionId":"${SID}","cwd":"${h.dir}","mcpServers":[]}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":2,"result":{"sessionId":"${forkedId}"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":3,"method":"session/close","params":{"sessionId":"${forkedId}"}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":3,"result":{}}`),
+      ]);
+    expect(await h.a.fork!({ ...h.params(forkSteps), sessionId: SID }, never())).toEqual({ sessionId: forkedId });
+
+    const h2 = new Harness();
+    const noFork = h2.rec('agy', '01-initialize');
+    expect((await rejects(h2.a.fork!({ ...h2.params(noFork), sessionId: SID }, never()))).code).toBe(chat.Code.Unsupported);
+
+    // Partial forks must throw Unsupported without spawning an agent so the
+    // host falls back to a consistent context-seeded fork.
+    const h3 = new Harness();
+    const base = { ...h3.params([]), sessionId: SID };
+    for (const partial of [{ partial: true }, { upToMessageId: 'u1' }, { beforeTurnId: 't2' }, { lastTurnId: 't1' }]) {
+      expect((await rejects(h3.a.fork!({ ...base, ...partial }, never()))).code).toBe(chat.Code.Unsupported);
+    }
+  });
+
+  test('delivery interrupt cancels only the active turn and preserves unrelated queued messages; steer is unsupported', async () => {
+    const h = new Harness();
+    const run = h.rec('kimi', '05-execute-permission');
+    const upTo: Step[] = [];
+    for (const st of run) {
+      upTo.push(st);
+      if (st.msg?.method === 'session/request_permission') break;
+    }
+    const sid = `"sessionId":"${SID}"`;
+    const steps = h
+      .rec('kimi', '01-initialize')
+      .concat(h.rec('kimi', '02-session-new'), upTo)
+      .concat([
+        msgLine('out', `{"jsonrpc":"2.0","method":"session/cancel","params":{${sid}}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":1,"result":{"outcome":{"outcome":"cancelled"}}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":5,"result":{"stopReason":"cancelled"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":6,"method":"session/prompt","params":{${sid},"prompt":[{"type":"text","text":"urgent"}]}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}`),
+        msgLine('out', `{"jsonrpc":"2.0","id":7,"method":"session/prompt","params":{${sid},"prompt":[{"type":"text","text":"later"}]}}`),
+        msgLine('in', `{"jsonrpc":"2.0","id":7,"result":{"stopReason":"end_turn"}}`),
+      ]);
+    const s = await h.start(h.params(steps));
+    await s.prompt(prompt(s, promptOf(run)));
+    await h.host.permissionAfter(0);
+    await s.prompt(prompt(s, [{ type: 'text', text: 'later' }], 'q1', 'c1'));
+    expect(
+      (await rejects(s.prompt({ ...prompt(s, [{ type: 'text', text: 'nope' }], 'q-steer'), delivery: chat.Delivery.Steer }))).code,
+    ).toBe(chat.Code.Unsupported);
+    expect((await rejects(s.steerQueued('q1', 'steer', never()))).code).toBe(chat.Code.Unsupported);
+    await s.prompt({ ...prompt(s, [{ type: 'text', text: 'urgent' }], 'q-int', 'c-int'), delivery: chat.Delivery.Interrupt });
+    expect((await h.host.await('cancelled active turn', turnOver)).stopReason).toBe('cancelled');
+    const taken1 = await h.host.await(
+      'interrupt prompt taken first',
+      (ev) => ev.t === chat.EventType.Queued && ev.state === chat.QueuedState.Taken,
+    );
+    expect(taken1.message).toBe('q-int');
+    expect((await h.host.await('interrupt turn end', turnOver)).stopReason).toBe('end_turn');
+    const taken2 = await h.host.await(
+      'unrelated queued prompt preserved',
+      (ev) => ev.t === chat.EventType.Queued && ev.state === chat.QueuedState.Taken,
+    );
+    expect(taken2.message).toBe('q1');
+    expect((await h.host.await('queued turn end', turnOver)).stopReason).toBe('end_turn');
     await h.close(s);
   });
 });

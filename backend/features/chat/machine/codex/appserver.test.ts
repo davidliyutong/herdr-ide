@@ -14,7 +14,7 @@ import { NAME } from '#shared/lib/brand.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
 import { MODES } from '#shared/proto/chatproto/index.ts';
 import { CODEX_VERSION, SCHEMA_SHA256 } from './appserver.gen.ts';
-import { modelListParams, policy, threadParams, turnParams } from './config.ts';
+import { forkParams, modelListParams, policy, threadParams, turnParams } from './config.ts';
 import { toUserInput } from './mapping.ts';
 import { ServerRequest, type Conn } from './rpc.ts';
 import { initialize, refuse } from './session.ts';
@@ -125,7 +125,14 @@ describe("Codex's app-server schema", () => {
     for (const model of ['', 'm']) {
       expect(request('thread/start', threadParams('', '/w', model))).toBe('');
       expect(request('thread/resume', threadParams('t', '/w', model))).toBe('');
+      expect(request('thread/fork', forkParams('t', '/w', { model }))).toBe('');
     }
+    expect(request('thread/fork', forkParams('t', '/w', { beforeTurnId: 'u' }))).toBe('');
+    expect(request('thread/fork', forkParams('t', '/w', { lastTurnId: 'u' }))).toBe('');
+    expect(request('thread/revert', { threadId: 't', beforeTurnId: 'u' })).toBe('');
+    expect(request('thread/backgroundTerminals/list', { threadId: 't', limit: 50 })).toBe('');
+    expect(request('thread/backgroundTerminals/terminate', { threadId: 't', processId: 'p1' })).toBe('');
+    expect(request('thread/backgroundTerminals/clean', { threadId: 't' })).toBe('');
     expect(request('turn/steer', { threadId: 't', expectedTurnId: 'u', clientUserMessageId: 'm', input })).toBe('');
     expect(request('turn/interrupt', { threadId: 't', turnId: 'u' })).toBe('');
     expect(request('thread/compact/start', { threadId: 't' })).toBe('');

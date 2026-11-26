@@ -63,6 +63,10 @@ const request = z.object({
   seq: seq,
   cursor: str,
   settings: settings.nullish().transform((v) => v ?? undefined),
+  refresh: bool,
+  upToSeq: seq,
+  title: str,
+  targetKind: str,
 });
 
 const command = z.object({
@@ -89,7 +93,12 @@ const command = z.object({
   config: str,
   value: str,
   message: str,
+  delivery: str,
   title: str,
+  task: str,
+  seq: seq,
+  restoreFiles: bool,
+  instructions: str,
 });
 
 export type Request = z.output<typeof request>;

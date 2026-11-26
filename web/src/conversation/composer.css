@@ -1,0 +1,474 @@
+/* Composer-specific styles (web/src/conversation/Composer.tsx and
+   web/src/components/FilePicker.tsx), imported by Composer.tsx. */
+
+/* ---- Slack-style queued messages stack (#4) ---- */
+.conv-queued {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: calc(56rem - 36px);
+  margin: 0 auto 6px;
+}
+.conv-queued-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+}
+.conv-queued-head > .lucide {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.conv-queued-clear {
+  margin-left: auto;
+  height: 20px;
+  min-height: 0;
+  padding: 0 6px;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+}
+.conv-queued-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--line-2);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  color: var(--fg);
+  font-size: var(--fs-sm);
+}
+.conv-queued-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.conv-queued-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+}
+.conv-queued-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.conv-queued-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 14rem;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+}
+.conv-queued-chip > .lucide {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+.conv-queued-aside {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.conv-queued-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--fg-mute);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.conv-queued-tag[data-steering] {
+  color: var(--accent);
+}
+.conv-queued-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.72;
+  transition: opacity 0.12s;
+}
+.conv-queued-item:hover .conv-queued-actions,
+.conv-queued-item:focus-within .conv-queued-actions {
+  opacity: 1;
+}
+
+/* ---- Attached workspace file chips (#5) ---- */
+.conv-file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 10px 0;
+}
+.conv-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 18rem;
+  height: 24px;
+  padding: 0 4px 0 7px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: var(--fs-xs);
+}
+.conv-file-chip .file-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+.conv-file-chip-label {
+  min-width: 0;
+  font-family: var(--mono);
+}
+.conv-file-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-mute);
+}
+.conv-file-chip-remove:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.conv-file-chip-remove > .lucide {
+  width: 11px;
+  height: 11px;
+}
+
+/* ---- @ autocomplete icon & dir styling (#5) ---- */
+.conv-menu-item > .file-icon {
+  flex: none;
+  align-self: center;
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+
+/* ---- Markdown preview pane (#7) ---- */
+.conv-composer-preview {
+  min-height: 44px;
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+.conv-composer-preview-empty {
+  color: var(--fg-mute);
+  font-style: italic;
+}
+.conv-preview-toggle[aria-pressed='true'] {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+
+/* ---- Bottom-left agent kind badge (#8) ---- */
+.conv-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: var(--ctl-sm);
+  padding: 0 6px 0 4px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  user-select: none;
+}
+.conv-agent-badge-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.conv-agent-badge-icon .ai-logo,
+.conv-agent-badge-icon svg {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  display: block;
+}
+.conv-agent-badge-name {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Model picker "Manage models…" footer (#3) ---- */
+.conv-select-footer {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid var(--line);
+}
+.conv-select-manage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--h-row);
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.conv-select-manage:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.conv-select-manage > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+  flex: none;
+}
+
+/* ---- Explicit steer / interrupt-send button (#4) ---- */
+.conv-steer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: var(--ctl-sm);
+  min-height: var(--ctl-sm);
+  padding: 0 8px;
+  font-size: var(--fs-sm);
+}
+.conv-steer > .lucide {
+  width: var(--ic-sm);
+  height: var(--ic-sm);
+}
+
+/* ---- Interactive context compact button & confirm popover (#9) ---- */
+.conv-compact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: auto;
+  min-height: 0;
+  padding: 2px 6px;
+  margin: -2px -4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.conv-compact-btn:hover:not(:disabled),
+.conv-compact-btn[aria-expanded='true'] {
+  border-color: var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.conv-compact-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.conv-compact-btn > .lucide {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.conv-compact-popover {
+  position: fixed;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 280px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+.conv-compact-title {
+  font-weight: 600;
+  font-size: var(--fs-md);
+}
+.conv-compact-desc {
+  color: var(--fg-dim);
+  line-height: 1.4;
+}
+.conv-compact-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: var(--ctl-sm);
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.conv-compact-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.conv-compact-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* ---- Reusable FilePicker popover (#5) ---- */
+.conv-file-picker-popover {
+  position: fixed;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: calc(100vw - 16px);
+  max-height: 360px;
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.file-picker {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: inherit;
+  color: var(--fg);
+  font-size: var(--fs-sm);
+}
+.file-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.file-picker-crumbs {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 2px;
+}
+.file-picker-crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex: none;
+}
+.file-picker-sep {
+  color: var(--fg-mute);
+}
+.file-picker-crumb {
+  height: 22px;
+  min-height: 0;
+  max-width: 9rem;
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  cursor: pointer;
+}
+.file-picker-crumb:hover,
+.file-picker-crumb[aria-current='location'] {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.file-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.file-picker-search-ic {
+  width: 13px;
+  height: 13px;
+  color: var(--fg-mute);
+  flex: none;
+}
+.file-picker-filter {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.file-picker-list {
+  flex: 1;
+  min-height: 120px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.file-picker-row {
+  position: relative;
+  cursor: pointer;
+}
+.file-picker-check {
+  flex: none;
+  margin: 0 2px 0 0;
+  cursor: pointer;
+}
+.file-picker-note {
+  padding: 12px;
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+.file-picker-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.file-picker-count {
+  margin-right: auto;
+}
+
+/* Narrow panes collapse agent badge text to icon-only when an icon is shown. */
+@container (max-width: 520px) {
+  .conv-agent-badge:has(.conv-agent-badge-icon) .conv-agent-badge-name {
+    display: none;
+  }
+}

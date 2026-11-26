@@ -31,6 +31,7 @@ import { createHash } from 'node:crypto';
 import { stat, type FileHandle } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { validSessionId } from '#shared/agents/kinds.ts';
+import { agyInfo, agyStamp, resolveAgy, searchAgy } from './agy.ts';
 import { claudeInfoOf, claudeStamp, claudeSubagents, resolveClaude, searchClaude } from './claude.ts';
 import { codexStamp, codexSubagents, decodeSessionMeta, rolloutMeta, resolveCodex, searchCodex, type RolloutMeta } from './codex.ts';
 import { Files, readMetadata, sameFile, type FileId } from './files.ts';
@@ -53,7 +54,8 @@ import {
 } from './common.ts';
 
 export * from './common.ts';
-export { CLAUDE_MAX_NAME, claudeArgv, claudeEscape, claudeProjectDirs } from './claude.ts';
+export { agyArgv, agyConvId, agyResumedArgv } from './agy.ts';
+export { CLAUDE_MAX_NAME, claudeArgv, claudeEscape, claudeInfoOf, claudeProjectDirs } from './claude.ts';
 export { codexArgv, codexDays, decodeSessionMeta, rolloutId, uuidTime, type RolloutMeta } from './codex.ts';
 
 interface Miss {
@@ -150,6 +152,8 @@ export class Resolver {
         return resolveClaude(this, kind, p, signal);
       case Format.Codex:
         return resolveCodex(this, kind, p, signal);
+      case Format.Agy:
+        return resolveAgy(this, kind, p, signal);
     }
     return null;
   }
@@ -157,8 +161,9 @@ export class Resolver {
   /** Something cheap that changes when resolve's answer may have changed
    * (the mtime and size of Claude Code's <pid>.json and of its sessions
    * directory; for Codex the newest rollout's name in the dated
-   * directories resolve reads, and its mtime when last is a guess); "" for
-   * a kind without sessions. */
+   * directories resolve reads, and its mtime when last is a guess; for
+   * Antigravity its summary index and conversations directory); "" for a
+   * kind without sessions. */
   async stamp(kind: string, p: Proc, last: Found): Promise<string> {
     const out: string[] = [];
     switch (formatOf(kind)) {
@@ -167,6 +172,9 @@ export class Resolver {
         break;
       case Format.Codex:
         await codexStamp(this, p, last, out);
+        break;
+      case Format.Agy:
+        await agyStamp(this, p, last, out);
         break;
       default:
         return '';
@@ -203,10 +211,14 @@ export class Resolver {
   }
 
   /** What a transcript says of itself without its conversation: Claude
-   * Code's first conversation line, Codex's session_meta; empty when it
-   * does not say (yet). */
+   * Code's first conversation line, Codex's session_meta, or Antigravity's
+   * summary/trajectory metadata; empty when it does not say (yet). */
   async describe(kind: string, id: string): Promise<Info> {
     const f = this.check(kind, id);
+    if (f === Format.Agy) {
+      const loc = await this.locateIn(f, id);
+      return agyInfo(this, id, loc.file);
+    }
     const { fh } = await this.open(f, id);
     try {
       if (f === Format.Claude) return await claudeInfoOf(fh);
@@ -225,7 +237,7 @@ export class Resolver {
   }
 
   private async fileOf(f: Format, id: string, loc: Location): Promise<SessionFile> {
-    const subs = f === Format.Claude ? await claudeSubagents(this, loc) : await codexSubagents(this, loc, id);
+    const subs = f === Format.Claude ? await claudeSubagents(this, loc) : f === Format.Codex ? await codexSubagents(this, loc, id) : [];
     return new SessionFile(this.files, loc, subs);
   }
 
@@ -261,12 +273,13 @@ export class Resolver {
     if (m && missed && now - m.checked < TIMING.missRecheckMs && !(now < m.checked)) throw m.err;
     const s = new Search();
     if (f === Format.Claude) await searchClaude(this, s, id);
+    else if (f === Format.Agy) await searchAgy(this, s, id);
     // While a miss is remembered, only where a new rollout is made.
     else await searchCodex(this, s, id, now, !missed, extraCodexHomes);
     if (!s.best) {
       const err = new SessionError(s.compressed ? 'compressed' : 'not_found');
       if (!m) m = { err, at: now, checked: now };
-      if (!missed || f === Format.Claude) m.at = now;
+      if (!missed || f !== Format.Codex) m.at = now;
       m.err = err;
       m.checked = now;
       this.rememberMiss(key, m, now);
@@ -362,6 +375,13 @@ export class Resolver {
   codexHomes(extra?: readonly string[]): string[] {
     const h = this.home();
     return uniq(this.expand(this.getenv('CODEX_HOME'), h), under(h, '.codex'), ...(extra ?? []).map((x) => this.expand(x.trim(), h)));
+  }
+
+  /** The agent's user's Antigravity data directories (CLI first, then
+   * desktop and IDE). */
+  agyDirs(): string[] {
+    const h = this.home();
+    return uniq(under(h, '.gemini/antigravity-cli'), under(h, '.gemini/antigravity'), under(h, '.gemini/antigravity-ide'));
   }
 
   /** Whether a configuration directory a process's environment names

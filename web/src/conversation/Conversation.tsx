@@ -1,8 +1,9 @@
 // A chat with a coding agent as a native view: the chat's events from a
 // source (source.ts) reduced to items (model.ts) and drawn as a list that
 // keeps to its end while the user is there, the cards that answer the
-// agent at the places it asked, and a composer (Composer.tsx) that hands
-// the user's messages and commands to the source.
+// agent at the places it asked, an active background tasks bar, and a
+// composer (Composer.tsx) that hands the user's messages and commands to
+// the source.
 // The list draws the last SHOWN_ITEMS items; earlier ones, and then the
 // source's earlier pages, come on request. Stored events are drawn as they
 // come; live increments (text as the agent writes it) at most once a frame.
@@ -11,13 +12,25 @@ import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, 
 import { ArrowDown, MessagesSquare } from 'lucide-react';
 import { t } from '../i18n';
 import type { MarkdownBase } from '../markdown/links';
+import { activeBackgroundTasks, BackgroundTasksBar } from './BackgroundTasksBar';
 import { Composer } from './Composer';
 import { spokenText } from './format';
 import { ItemView } from './items';
 import { agentKind } from './kinds';
-import { blocksText, emptyConversation, hasClientMessage, take, waitingItems, type Conversation as State, type SourceEvent } from './model';
-import { answeredOf, AnsweringContext, type Answering, type ItemContext } from './parts';
-import type { ChatSource } from './source';
+import {
+  blockingWaitingItems,
+  blocksText,
+  emptyConversation,
+  hasClientMessage,
+  itemById,
+  NO_CAPABILITIES,
+  take,
+  waitingItems,
+  type Conversation as State,
+  type SourceEvent,
+} from './model';
+import { answeredOf, AnsweringContext, TimelineActionsContext, type Answering, type ItemContext, type TimelineActions } from './parts';
+import type { BackgroundTask, ChatSource, ConversationExtras } from './source';
 import './conversation.css';
 
 /** What a parent may do with the view. */
@@ -26,7 +39,7 @@ export interface ConversationHandle {
   focus(): void;
 }
 
-export interface ConversationProps {
+export interface ConversationProps extends ConversationExtras {
   source: ChatSource;
   /** The agent's kind (kinds.ts), whose title the view names it by. */
   kind: string;
@@ -150,7 +163,18 @@ function useConversation(source: ChatSource, onTaken: (what: Taken) => void) {
   return shown.source === source ? shown.conv : EMPTY;
 }
 
-export function Conversation({ source, kind, base, readOnly: readOnlyProp, allowFull = true, onOpenFile, ref }: ConversationProps) {
+export function Conversation({
+  source,
+  kind,
+  base,
+  readOnly: readOnlyProp,
+  allowFull = true,
+  onOpenFile,
+  agentIcon,
+  modelPicker,
+  onFork,
+  ref,
+}: ConversationProps) {
   const agent = agentKind(kind)?.title ?? t('conversation.agent');
   const readOnly = !!readOnlyProp || !!source.readOnly;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -176,6 +200,8 @@ export function Conversation({ source, kind, base, readOnly: readOnlyProp, allow
     if ('reset' in what) {
       setLimit(SHOWN_ITEMS);
       setEarlier('idle');
+      atEnd.current = true;
+      setAway(false);
       return;
     }
     keep();
@@ -198,9 +224,9 @@ export function Conversation({ source, kind, base, readOnly: readOnlyProp, allow
 
   // What the items call: the same functions for the view's life, calling
   // the parent's latest ones.
-  const latest = useRef({ onOpenFile, source });
+  const latest = useRef({ onOpenFile, onFork, source });
   useLayoutEffect(() => {
-    latest.current = { onOpenFile, source };
+    latest.current = { onOpenFile, onFork, source };
   });
   const canOpen = !!onOpenFile;
   const canTrust = !readOnly && !!source.trust;
@@ -220,24 +246,70 @@ export function Conversation({ source, kind, base, readOnly: readOnlyProp, allow
   );
 
   const state = conv.state;
+  const caps = conv.chat?.capabilities ?? NO_CAPABILITIES;
   const working = state === 'working' || state === 'waiting' || (state === undefined && conv.turn === 'working');
-  /** A card that waits may be answered while the chat's turn runs. */
+  /** A blocking card that waits may be answered while the chat's turn runs. */
   const open = !readOnly && (state === undefined || state === 'working' || state === 'waiting');
+  /** An async question stays answerable across turn end unless closed/failed. */
+  const openAsync = !readOnly && state !== 'closed' && state !== 'failed';
   // The cards that wait: the same set while they are the same.
   const waitingKey = useMemo(() => waitingItems(conv).join('\n'), [conv]);
   const waitingSet = useMemo(() => new Set(waitingKey ? waitingKey.split('\n') : []), [waitingKey]);
+  const blockingKey = useMemo(() => blockingWaitingItems(conv).join('\n'), [conv]);
+  const blockingSet = useMemo(() => new Set(blockingKey ? blockingKey.split('\n') : []), [blockingKey]);
   const answering = useMemo<Answering>(
     () => ({
       open,
+      openAsync,
       waiting: waitingSet,
       readOnly,
       answered: answeredOf(source),
       respond: (permission, reply) => latest.current.source.respond(permission, reply),
       answer: (question, reply) => latest.current.source.answer(question, reply),
     }),
-    [open, waitingSet, readOnly, source],
+    [open, openAsync, waitingSet, readOnly, source],
   );
-  const waiting = open && waitingSet.size > 0;
+  // Only blocking permissions/questions trigger the composer waiting banner.
+  const waiting = open && blockingSet.size > 0;
+
+  const canRewind = !readOnly && !working && !!caps.rewind && !!source.rewind;
+  const rewindFiles = !!caps.rewindFiles;
+  const canFork = !readOnly && !working && !!onFork;
+  const canStopTask = !readOnly && !!caps.stopTask && !!source.stopTask;
+
+  const tasksByToolCall = useMemo<ReadonlyMap<string, BackgroundTask>>(() => {
+    const map = new Map<string, BackgroundTask>();
+    for (const task of conv.chat?.tasks ?? []) {
+      if (task.toolCallId) map.set(task.toolCallId, task);
+    }
+    return map;
+  }, [conv.chat?.tasks]);
+
+  const questionSourceKey = useMemo(() => {
+    const ids: string[] = [];
+    for (const it of conv.items) {
+      if (it.kind === 'question' && it.sourceItem) ids.push(`message:agent:item:${it.sourceItem}`);
+    }
+    return ids.join('\n');
+  }, [conv.items]);
+  const questionSourceItems = useMemo<ReadonlySet<string>>(
+    () => new Set(questionSourceKey ? questionSourceKey.split('\n') : []),
+    [questionSourceKey],
+  );
+
+  const timelineActions = useMemo<TimelineActions>(
+    () => ({
+      rewind: canRewind ? (seq, opts) => latest.current.source.rewind!(seq, opts) : undefined,
+      rewindFiles,
+      fork: canFork ? (upToSeq) => latest.current.onFork?.(upToSeq) : undefined,
+      stopTask: canStopTask ? (taskId) => latest.current.source.stopTask!(taskId) : undefined,
+      tasksByToolCall,
+      questionSourceItems,
+    }),
+    [canRewind, rewindFiles, canFork, canStopTask, tasksByToolCall, questionSourceItems],
+  );
+
+  const activeTasks = useMemo(() => activeBackgroundTasks(conv), [conv]);
   const delivered = useCallback((clientId: string) => hasClientMessage(conv, clientId), [conv]);
 
   useImperativeHandle(
@@ -262,25 +334,31 @@ export function Conversation({ source, kind, base, readOnly: readOnlyProp, allow
   const hidden = Math.max(0, conv.items.length - limit);
   const shown = hidden ? conv.items.slice(hidden) : conv.items;
 
-  /** Shows the card that waits for the user, and gives it the keyboard. */
-  const showWaiting = () => {
-    const id = Array.from(waitingSet).at(-1);
-    if (id === undefined) return;
+  const focusReveal = () => {
+    const id = reveal.current;
+    const list = listRef.current;
+    if (!id || !list) return;
+    const targetItem = Array.from(list.querySelectorAll<HTMLElement>('[data-item]')).find((el) => el.getAttribute('data-item') === id);
+    if (!targetItem) return;
+    reveal.current = undefined;
+    targetItem.scrollIntoView?.({ block: 'center' });
+    const target = targetItem.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled)') ?? targetItem;
+    target.focus();
+  };
+
+  /** Shows and focuses an item in the timeline, expanding hidden items if needed. */
+  const jumpToItem = (id: string) => {
     const at = conv.items.findIndex((it) => it.id === id);
     if (at >= 0 && at < hidden) setLimit(conv.items.length - at);
     reveal.current = id;
     focusReveal();
   };
-  const focusReveal = () => {
-    const id = reveal.current;
-    const list = listRef.current;
-    if (!id || !list) return;
-    const card = Array.from(list.querySelectorAll<HTMLElement>('[data-item]')).find((el) => el.getAttribute('data-item') === id);
-    if (!card) return;
-    reveal.current = undefined;
-    card.scrollIntoView?.({ block: 'center' });
-    const target = card.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled)') ?? card;
-    target.focus();
+
+  /** Shows the card that waits for the user, and gives it the keyboard. */
+  const showWaiting = () => {
+    const id = Array.from(blockingSet).at(-1) ?? Array.from(waitingSet).at(-1);
+    if (id === undefined) return;
+    jumpToItem(id);
   };
 
   // After each change: back to where the user was when items came before
@@ -379,9 +457,11 @@ export function Conversation({ source, kind, base, readOnly: readOnlyProp, allow
               <div className="conv-unknown">{t('conversation.unknown', { n: conv.unknown })}</div>
             )}
             <AnsweringContext.Provider value={answering}>
-              {shown.map((it) => (
-                <ItemView key={it.id} item={it} ctx={ctx} />
-              ))}
+              <TimelineActionsContext.Provider value={timelineActions}>
+                {shown.map((it) => (
+                  <ItemView key={it.id} item={it} ctx={ctx} />
+                ))}
+              </TimelineActionsContext.Provider>
             </AnsweringContext.Provider>
             {(working || state === 'starting') && (
               <div className="conv-working" role="status">
@@ -409,10 +489,24 @@ export function Conversation({ source, kind, base, readOnly: readOnlyProp, allow
       <div className="conv-sr" aria-live="polite">
         {spoken}
       </div>
+      <BackgroundTasksBar
+        tasks={activeTasks}
+        agent={agent}
+        readOnly={readOnly}
+        canStop={canStopTask}
+        onStopTask={canStopTask ? (taskId) => latest.current.source.stopTask!(taskId) : undefined}
+        onJumpToItem={jumpToItem}
+        hasItem={(id) => itemById(conv, id) !== undefined}
+      />
       <Composer
         key={sourceKey(source)}
         source={source}
+        kind={kind}
         agent={agent}
+        agentIcon={agentIcon}
+        base={stableBase}
+        activity={conv.activity}
+        modelPicker={modelPicker}
         chat={conv.chat}
         usage={conv.usage}
         queued={conv.queued ?? []}

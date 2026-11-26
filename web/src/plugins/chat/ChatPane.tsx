@@ -2,27 +2,29 @@
 // conversation view (conversation/Conversation.tsx) from the chat's source
 // (source.ts). Above it a line says which agent it is, the chat's title
 // (renamed in place: a double click, or Rename in the pane's menu), its
-// directory and its state; below that what keeps the chat from going on:
-// it is no more, the page or the machine is not connected, the hub
-// refused it, or its agent failed (with what the agent wrote to its error
-// output). The composer says the rest (closed, handed off to a terminal,
-// sleeping agents start again with a message).
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { BotMessageSquare, TriangleAlert, WifiOff } from 'lucide-react';
+// directory, quick actions (Fork, Switch Agent) and its state; below that what
+// keeps the chat from going on: it is no more, the page or the machine is not
+// connected, the hub refused it, or its agent failed (with what the agent wrote
+// to its error output). The composer says the rest (closed, handed off to a
+// terminal, sleeping agents start again with a message).
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { ArrowLeftRight, BotMessageSquare, GitFork, TriangleAlert, WifiOff } from 'lucide-react';
 import { actions } from '../../actions';
 import { InlineEdit } from '../../components/InlineEdit';
+import { openMenu } from '../../contextMenu';
 import { Conversation, type ConversationHandle } from '../../conversation/Conversation';
 import { chatAdapter } from '../../conversation/kinds';
+import type { ModelPickerConfig } from '../../conversation/source';
 import { t, type MessageKey } from '../../i18n';
 import { shortPath } from '../../lib/machine';
+import { useSettings } from '../../settings';
 import { useStore } from '../../state/store';
 import { terms } from '../../state/terms';
 import * as L from '../../term/layout';
 import type { PluginView } from '../../term/layout';
 import type { PaneViewProps } from '../api';
-import { useSettings } from '../../settings';
-import { failureText, fullAccessAllowed } from './api';
-import { agentName, kindIcon, renameChat, useChatUi } from './ops';
+import { failureText, fullAccessAllowed, visibleModelsFor } from './api';
+import { agentName, brandKindIcon, forkChat, renameChat, switchAgentMenu, useChatUi } from './ops';
 import { CHAT_STATES } from './protocol';
 import { useChatSource } from './source';
 import { chatGone, follow, liveKey, useChats } from './state';
@@ -65,6 +67,7 @@ function ChatBody({ m, pane, view, chat }: { m: string; pane: string; view: Plug
   const gone = useChats((s) => chatGone(s, m, chat));
   const readOnly = useStore((s) => s.readOnly);
   const allowFull = useSettings((s) => fullAccessAllowed(s.values, m));
+  const visibleModels = useSettings((s) => (kind ? s.values[`chat.visibleModels.${kind}`] : undefined));
   const home = useStore((s) => s.machines[m]?.info?.home);
   const renaming = useChatUi((s) => s.renaming === `${m}\n${view.id}`);
   const conv = useRef<ConversationHandle>(null);
@@ -76,21 +79,63 @@ function ChatBody({ m, pane, view, chat }: { m: string; pane: string; view: Plug
   const status = st?.status;
   const offline = live?.link === 'offline' || (!!st?.stale && st.state !== 'closed');
   const label = gone ? t('chat.state.deleted') : stateLabel(state, { handedOff: live?.info?.handedOff, offline });
-  const Icon = kind ? kindIcon(kind) : BotMessageSquare;
+  const Icon = kind ? brandKindIcon(kind) : BotMessageSquare;
   const failed = !gone && live?.link === 'failed' ? live.linkError : undefined;
   const stderr = state === 'failed' ? live?.error?.stderr : undefined;
 
-  // The leaf keeps the chat's title, which the pane's header and tab show
-  // before the chats' states come (a page loaded again) and redraw with
-  // the layout.
+  // Keep the leaf's title and agent kind up to date so tabs and headers render
+  // the right label and brand icon immediately after reload.
   useEffect(() => {
-    if (title && !readOnly && !gone && view.title !== title) terms.mutate(m, (l) => L.setViewFields(l, pane, { title }));
-  }, [m, pane, title, view.title, readOnly, gone]);
+    if (readOnly || gone) return;
+    const patch: Record<string, unknown> = {};
+    if (title && view.title !== title) patch.title = title;
+    if (kind && view.agent !== kind) patch.agent = kind;
+    if (Object.keys(patch).length) terms.mutate(m, (l) => L.setViewFields(l, pane, patch));
+  }, [m, pane, title, kind, view.title, view.agent, readOnly, gone]);
 
   const doneRenaming = (value: string | undefined) => {
     useChatUi.setState({ renaming: undefined });
     if (value !== undefined && value !== title && !readOnly) void renameChat(m, chat, value);
   };
+
+  const agentIcon = useMemo(() => (kind ? createElement(brandKindIcon(kind), { className: 'conv-agent-logo' }) : undefined), [kind]);
+
+  const modelPicker = useMemo<ModelPickerConfig | undefined>(() => {
+    if (!kind) return undefined;
+    const list = visibleModelsFor({ [`chat.visibleModels.${kind}`]: visibleModels }, kind);
+    return {
+      visibleModels: list,
+      onManageModels: () => useStore.getState().openSettings({ page: 'chat', row: `chat.visibleModels.${kind}` }),
+    };
+  }, [kind, visibleModels]);
+
+  const onFork = useCallback(
+    (upToSeq?: number) => {
+      void forkChat(m, chat, { upToSeq, from: pane });
+    },
+    [m, chat, pane],
+  );
+
+  const onSwitchClick = useCallback(
+    (e: MouseEvent<HTMLButtonElement>) => {
+      const entries = switchAgentMenu(m, chat, kind, pane);
+      if (!entries.length) {
+        useStore.getState().toast(t('chat.switchAgentNone'), undefined, undefined, 'info');
+        return;
+      }
+      const r = e.currentTarget.getBoundingClientRect();
+      openMenu(
+        {
+          clientX: r.left,
+          clientY: r.bottom + 2,
+          preventDefault: () => e.preventDefault(),
+          stopPropagation: () => e.stopPropagation(),
+        },
+        entries,
+      );
+    },
+    [m, chat, kind, pane],
+  );
 
   return (
     <div className="chat-pane" data-state={state} data-link={live?.link}>
@@ -111,6 +156,28 @@ function ChatBody({ m, pane, view, chat }: { m: string; pane: string; view: Plug
         {cwd && (
           <span className="chat-cwd ellipsis" title={cwd}>
             {shortPath(cwd, home)}
+          </span>
+        )}
+        {!readOnly && !gone && (
+          <span className="chat-head-actions">
+            <button
+              type="button"
+              className="icon sm chat-action-fork"
+              title={t('chat.forkHint')}
+              aria-label={t('chat.fork')}
+              onClick={() => void forkChat(m, chat, { from: pane })}
+            >
+              <GitFork aria-hidden />
+            </button>
+            <button
+              type="button"
+              className="icon sm chat-action-switch"
+              title={t('chat.switchAgentHint')}
+              aria-label={t('chat.switchAgent')}
+              onClick={onSwitchClick}
+            >
+              <ArrowLeftRight aria-hidden />
+            </button>
           </span>
         )}
         {label && (
@@ -163,6 +230,9 @@ function ChatBody({ m, pane, view, chat }: { m: string; pane: string; view: Plug
             base={mdBase}
             readOnly={readOnly}
             allowFull={allowFull}
+            agentIcon={agentIcon}
+            modelPicker={modelPicker}
+            onFork={readOnly ? undefined : onFork}
             onOpenFile={(path, line) => void actions.openPath(m, path, line, undefined, pane)}
           />
         </div>

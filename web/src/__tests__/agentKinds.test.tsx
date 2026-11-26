@@ -24,6 +24,7 @@ import * as L from '../term/layout';
 const PINNED = [
   { id: 'start:claude', label: 'New Agent: claude (Split Right)', argv: ['claude'] },
   { id: 'start:codex', label: 'New Agent: codex (Split Right)', argv: ['codex'] },
+  { id: 'start:agy', label: 'New Agent: agy (Split Right)', argv: ['agy'] },
   { id: 'start:gemini', label: 'New Agent: gemini (Split Right)', argv: ['gemini'] },
   { id: 'start:opencode', label: 'New Agent: opencode (Split Right)', argv: ['opencode'] },
   { id: 'start:kimi', label: 'New Agent: kimi (Split Right)', argv: ['kimi'] },

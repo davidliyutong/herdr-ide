@@ -1,25 +1,45 @@
-// The items of a conversation as the view draws them: the user's prompts as
-// typed, the agent's messages as Markdown (tables, formulas, code; while
-// one streams, a block at a time), its thoughts and tool calls as quiet
-// rows that open, a subagent's call with the subagent's own items nested in
-// it (closed at first, with their count), the turn's plan as a checklist,
-// notices as thin separators, and the cards that answer the agent (cards.tsx).
-// An item is drawn again only when it changed (the reducer replaces only
-// the items an event changes).
+// The items of a conversation as the view draws them: the user's prompts
+// (as compact Markdown, with hover actions for edit/rewind and fork-from-here),
+// the agent's messages as Markdown (tables, formulas, code; while one streams,
+// a block at a time; plus follow-up questions in history replay), its thoughts
+// and tool calls as quiet rows that open, a subagent's call with the subagent's
+// own items nested in it (closed at first, with its live progress and stop
+// control), the turn's plan as a checklist, notices as thin separators, and the
+// cards that answer the agent (cards.tsx). An item is drawn again only when it
+// changed (the reducer replaces only the items an event changes).
 
-import { memo, useState } from 'react';
-import { Bot, Brain, ChevronRight, Circle, CircleCheck, CircleDot, ListTodo, SquareSlash } from 'lucide-react';
+import { memo, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  Bot,
+  Brain,
+  ChevronRight,
+  Circle,
+  CircleCheck,
+  CircleDot,
+  GitFork,
+  ListTodo,
+  MessageCircleQuestion,
+  Pencil,
+  RotateCcw,
+  SquareSlash,
+  TriangleAlert,
+} from 'lucide-react';
 import type { MarkdownBase } from '../markdown/links';
+import { Markdown } from '../markdown/Markdown';
 import { StreamMarkdown as SharedStreamMarkdown } from '../markdown/StreamMarkdown';
 import { hasMessage, t } from '../i18n';
 import { PermissionCard, PlanCard, QuestionCard } from './cards';
 import { formatTokens, inputText, plainOutput } from './format';
+import { agentKind } from './kinds';
 import {
   asText,
   blocksText,
   CHAT_NOTICES,
   NOTICES,
   STOPPED,
+  taskMeta,
+  type AsyncFollowUpQuestion,
+  type ContentBlock,
   type Item,
   type MessageItem,
   type NoticeItem,
@@ -27,7 +47,16 @@ import {
   type ThoughtItem,
   type ToolItem,
 } from './model';
-import { Blocks, errorText, isShortened, Shortened, type ItemContext } from './parts';
+import {
+  Blocks,
+  errorText,
+  formatDuration,
+  isShortened,
+  Shortened,
+  TaskStopButton,
+  TimelineActionsContext,
+  type ItemContext,
+} from './parts';
 import { Results, Section, StatusIcon, ToolCallView } from './ToolCall';
 
 /** A user's prompt longer than this (characters or lines) shows its start
@@ -41,25 +70,182 @@ function when(at: string | undefined): string | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d.toLocaleString();
 }
 
+function newClientId(): string {
+  const c = globalThis.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return `m${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+}
+
 function UserMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
+  const actions = useContext(TimelineActionsContext);
   const text = blocksText(item.content);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [restoreFiles, setRestoreFiles] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [forking, setForking] = useState(false);
+  const [failed, setFailed] = useState<string | undefined>(undefined);
+  const editRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      const el = editRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+    }
+  }, [editing]);
+
   let lines = 1;
   for (let i = text.indexOf('\n'); i >= 0 && lines <= LONG_PROMPT_LINES; i = text.indexOf('\n', i + 1)) lines++;
   const long = text.length > LONG_PROMPT || lines > LONG_PROMPT_LINES;
+
+  const canRewind = item.seq !== undefined && !!actions.rewind;
+  const canFork = item.seq !== undefined && !!actions.fork;
+  const nonTextBlocks = useMemo(() => item.content.filter((b) => b.type !== 'text'), [item.content]);
+
+  const startEdit = () => {
+    setDraft(text);
+    setRestoreFiles(false);
+    setFailed(undefined);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    if (saving) return;
+    setEditing(false);
+    setFailed(undefined);
+  };
+
+  const submitEdit = () => {
+    if (saving || item.seq === undefined || !actions.rewind) return;
+    const trimmed = draft.trim();
+    if (!trimmed && !nonTextBlocks.length) return;
+    const content: ContentBlock[] = [...nonTextBlocks, ...(trimmed ? [{ type: 'text' as const, text: draft }] : [])];
+    setSaving(true);
+    setFailed(undefined);
+    actions
+      .rewind(item.seq, {
+        content,
+        clientId: newClientId(),
+        ...(actions.rewindFiles && restoreFiles ? { restoreFiles: true } : {}),
+      })
+      .then(
+        () => {
+          setSaving(false);
+          setEditing(false);
+        },
+        (e: unknown) => {
+          setSaving(false);
+          setFailed(errorText(e, ctx.agent, 'conversation.commandFailed'));
+        },
+      );
+  };
+
+  const onEditKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEdit();
+    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      submitEdit();
+    }
+  };
+
+  const triggerFork = () => {
+    if (forking || item.seq === undefined || !actions.fork) return;
+    setForking(true);
+    Promise.resolve(actions.fork(item.seq)).finally(() => setForking(false));
+  };
+
   return (
-    <div className="conv-item conv-user">
-      <div className="conv-bubble" title={when(item.at)}>
-        <span className="conv-sr">{t('conversation.you')}: </span>
-        {text && <div className={long && !open ? 'conv-user-text clamped' : 'conv-user-text'}>{text}</div>}
-        <Blocks blocks={item.content} ctx={ctx} />
-        {item.content.some(isShortened) && <Shortened />}
-        {long && (
-          <button type="button" className="conv-link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-            {open ? t('conversation.showLess') : t('conversation.showMore')}
-          </button>
-        )}
-      </div>
+    <div className="conv-item conv-user" data-item={item.id} data-seq={item.seq}>
+      {editing ? (
+        <div className="conv-bubble conv-user-edit">
+          <span className="conv-sr">{t('conversation.you')}: </span>
+          <textarea
+            ref={editRef}
+            className="conv-edit-input"
+            value={draft}
+            rows={Math.min(10, Math.max(2, draft.split('\n').length))}
+            disabled={saving}
+            aria-label={t('conversation.user.editRewind')}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onEditKeyDown}
+          />
+          <div className="conv-edit-warn" role="note">
+            <TriangleAlert aria-hidden />
+            <span>{t('conversation.rewind.warning')}</span>
+          </div>
+          {actions.rewindFiles && (
+            <label className="conv-edit-check">
+              <input type="checkbox" checked={restoreFiles} disabled={saving} onChange={(e) => setRestoreFiles(e.target.checked)} />
+              <span>{t('conversation.rewind.restoreFiles')}</span>
+            </label>
+          )}
+          {failed && (
+            <div className="conv-ask-error" role="alert">
+              {failed}
+            </div>
+          )}
+          <div className="conv-edit-actions">
+            <button type="button" className="primary sm" disabled={saving || (!draft.trim() && !nonTextBlocks.length)} onClick={submitEdit}>
+              <RotateCcw aria-hidden />
+              {t('conversation.rewind.submit')}
+            </button>
+            <button type="button" className="sm" disabled={saving} onClick={cancelEdit}>
+              {t('conversation.rewind.cancel')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="conv-user-wrap">
+          {(canRewind || canFork) && (
+            <div className="conv-user-actions" role="toolbar" aria-label={t('conversation.you')}>
+              {canRewind && (
+                <button
+                  type="button"
+                  className="conv-user-action"
+                  aria-label={t('conversation.user.editRewind')}
+                  title={t('conversation.user.editRewindHint')}
+                  onClick={startEdit}
+                >
+                  <Pencil aria-hidden />
+                </button>
+              )}
+              {canFork && (
+                <button
+                  type="button"
+                  className="conv-user-action"
+                  aria-label={t('conversation.user.forkHere')}
+                  title={t('conversation.user.forkHereHint')}
+                  disabled={forking}
+                  onClick={triggerFork}
+                >
+                  <GitFork aria-hidden />
+                </button>
+              )}
+            </div>
+          )}
+          <div className="conv-bubble" title={when(item.at)}>
+            <span className="conv-sr">{t('conversation.you')}: </span>
+            {text && (
+              <div className={long && !open ? 'conv-user-text clamped' : 'conv-user-text'}>
+                <Markdown text={text} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-user-md" />
+              </div>
+            )}
+            <Blocks blocks={item.content} ctx={ctx} />
+            {item.content.some(isShortened) && <Shortened />}
+            {long && (
+              <button type="button" className="conv-link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+                {open ? t('conversation.showLess') : t('conversation.showMore')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -93,13 +279,49 @@ export function StreamMarkdown({
   );
 }
 
+/** Read-only follow-up questions attached to a Codex AgentMessage during
+ * history replay; suppresses itself when an interactive QuestionCard already
+ * correlates to this message (`questionSourceItems`). Kept in a separate child
+ * so normal AgentMessage components never subscribe to TimelineActionsContext. */
+function FollowUpQuestions({ itemId, questions, ctx }: { itemId: string; questions: readonly AsyncFollowUpQuestion[]; ctx: ItemContext }) {
+  const { questionSourceItems } = useContext(TimelineActionsContext);
+  if (questionSourceItems.has(itemId)) return null;
+  return (
+    <div className="conv-followup" role="region" aria-label={t('conversation.question.followUp')}>
+      <div className="conv-followup-head">
+        <MessageCircleQuestion aria-hidden />
+        <span>{t('conversation.question.followUp')}</span>
+      </div>
+      <ul className="conv-followup-list">
+        {questions.map((q, i) => (
+          <li key={i} className="conv-followup-item">
+            <Markdown text={q.title} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-q-text" />
+            {q.options && q.options.length > 0 && (
+              <div className="conv-followup-options">
+                {q.options.map((opt, j) => (
+                  <span key={j} className="conv-badge">
+                    {opt}
+                  </span>
+                ))}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function AgentMessage({ item, ctx }: { item: MessageItem; ctx: ItemContext }) {
   const text = blocksText(item.content);
   return (
-    <div className="conv-item conv-agent" aria-busy={item.live || undefined}>
+    <div className="conv-item conv-agent" data-item={item.id} aria-busy={item.live || undefined}>
       <span className="conv-sr">{ctx.agent}: </span>
       {text.trim() && <StreamMarkdown text={text} live={item.live} base={ctx.base} onOpenPath={ctx.openFile} className="conv-md" />}
       <Blocks blocks={item.content} ctx={ctx} />
+      {item.followUpQuestions && item.followUpQuestions.length > 0 && (
+        <FollowUpQuestions itemId={item.id} questions={item.followUpQuestions} ctx={ctx} />
+      )}
       {item.content.some(isShortened) && <Shortened />}
     </div>
   );
@@ -227,6 +449,18 @@ function Notice({ item, ctx }: { item: NoticeItem; ctx: ItemContext }) {
     case CHAT_NOTICES.fullAccessOff:
       text = t('conversation.notice.fullAccessOff');
       break;
+    case CHAT_NOTICES.forked:
+      text = t('conversation.notice.forked');
+      break;
+    case CHAT_NOTICES.switched: {
+      const fromKind = str(p.fromKind);
+      const fromAgent = fromKind ? (agentKind(fromKind)?.title ?? fromKind) : undefined;
+      text = fromAgent ? t('conversation.notice.switchedFrom', { agent: fromAgent }) : t('conversation.notice.switched');
+      break;
+    }
+    case CHAT_NOTICES.rewound:
+      text = t(p.restoreFiles === true || p.restoredFiles === true ? 'conversation.notice.rewoundFiles' : 'conversation.notice.rewound');
+      break;
     case NOTICES.command: {
       const name = str(p.name);
       command = name ? (name.startsWith('/') ? name : `/${name}`) : undefined;
@@ -298,26 +532,92 @@ function TrustButton({ cwd, ctx, trusting, set }: { cwd: string; ctx: ItemContex
 }
 
 /** The kind of subagent a call runs (its type), when it says. */
-const subagentType = (item: ToolItem) => inputText(item.rawInput, 'subagent_type', 'agent_type', 'agentType', 'agent');
+export function subagentType(item: ToolItem): string | undefined {
+  const fromInput = inputText(item.rawInput, 'subagent_type', 'agent_type', 'agentType', 'agent', 'agentPath');
+  if (fromInput) return fromInput;
+  const tm = taskMeta(item);
+  if (tm?.subagentType) return tm.subagentType;
+  if (inputText(item.rawInput, 'tool') === 'spawnAgent') return 'subagent';
+  return undefined;
+}
 
-/** Whether a call runs a subagent: it has the subagent's items, or names
- * a subagent's type. */
-export const isSubagent = (item: ToolItem) => !!item.sub || subagentType(item) !== undefined;
+/** Whether a call runs a subagent: it has the subagent's items, names a
+ * subagent's type/path/spawnAgent, or carries subagent task metadata. */
+export function isSubagent(item: ToolItem): boolean {
+  if (item.sub || subagentType(item) !== undefined) return true;
+  const tm = taskMeta(item);
+  return tm?.type === 'local_agent' || tm?.type === 'in_process_teammate' || tm?.type === 'subagent';
+}
 
-/** A subagent's call: its type and what it was asked to do, its status
- * and how many items it has; opened, its prompt, its items as the view
- * draws the agent's own, and its result. */
+/** Live task badges, stats and inline stop button for a SubagentView row. */
+function SubagentTaskMeta({
+  item,
+  status,
+  steps,
+  label,
+  agent,
+}: {
+  item: ToolItem;
+  status: NonNullable<ToolItem['status']>;
+  steps: number;
+  label: string;
+  agent: string;
+}) {
+  const actions = useContext(TimelineActionsContext);
+  const tm = useMemo(() => taskMeta(item), [item]);
+  const rawToolCallId = item.id.startsWith('tool:') ? item.id.slice(5) : item.id;
+  const liveTask = actions.tasksByToolCall.get(rawToolCallId);
+  const isBg = liveTask?.backgrounded === true || tm?.backgrounded === true;
+  const taskId = liveTask?.id ?? tm?.taskId;
+  const model = inputText(item.rawInput, 'model');
+  const stepCount = steps > 0 ? steps : (liveTask?.toolUses ?? tm?.toolUses ?? 0);
+  const tokens = liveTask?.tokens ?? tm?.tokens;
+  const durationMs = liveTask?.durationMs ?? tm?.durationMs;
+  const stoppable = status === 'in_progress' && !!actions.stopTask && !!taskId && liveTask?.stoppable !== false && tm?.stoppable !== false;
+  const statusLabel = t(`conversation.toolStatus.${status}`);
+
+  return (
+    <span className="conv-meta">
+      {isBg && <span className="conv-badge conv-bg-badge">{t('conversation.task.background')}</span>}
+      {model && <span className="conv-badge conv-model-badge mono">{model}</span>}
+      {status === 'in_progress' && tm?.lastTool && (
+        <span className="conv-task-live">{t('conversation.task.runningTool', { tool: tm.lastTool })}</span>
+      )}
+      <span className="conv-subagent-count">{t('conversation.subagent.steps', { n: stepCount })}</span>
+      {tokens !== undefined && tokens > 0 && (
+        <span className="conv-task-stat">{t('conversation.task.tokens', { tokens: formatTokens(tokens) })}</span>
+      )}
+      {durationMs !== undefined && durationMs > 0 && <span className="conv-task-stat">{formatDuration(durationMs)}</span>}
+      {(status === 'failed' || status === 'cancelled') && (
+        <span className={status === 'failed' ? 'conv-bad' : undefined}>{statusLabel}</span>
+      )}
+      {stoppable && <TaskStopButton taskId={taskId} name={label} agent={agent} stopTask={actions.stopTask!} />}
+    </span>
+  );
+}
+
+/** A subagent's call: its type and what it was asked to do, its status,
+ * live progress, and how many items it has; opened, its prompt, its items as
+ * the view draws the agent's own, and its result. */
 function SubagentView({ item, ctx }: { item: ToolItem; ctx: ItemContext }) {
   const [open, setOpen] = useState(false);
   const status = item.status ?? 'pending';
+  const tm = useMemo(() => taskMeta(item), [item]);
   const type = subagentType(item);
-  const description = inputText(item.rawInput, 'description') ?? (item.title.trim() || undefined);
+  const description = inputText(item.rawInput, 'description') ?? tm?.description ?? (item.title.trim() || undefined);
   const prompt = inputText(item.rawInput, 'prompt');
   const items = item.sub?.items ?? [];
   const results = item.content.filter((c) => c.type !== 'diff');
   const statusLabel = t(`conversation.toolStatus.${status}`);
+  const rowLabel = type ?? t('conversation.subagent.label');
   return (
-    <div className="conv-item conv-quiet conv-tool conv-subagent" data-kind={item.toolKind ?? 'think'} data-status={status}>
+    <div
+      className="conv-item conv-quiet conv-tool conv-subagent"
+      data-item={item.id}
+      data-kind={item.toolKind ?? 'think'}
+      data-status={status}
+      tabIndex={-1}
+    >
       <div className="conv-row">
         <button type="button" className="conv-toggle" aria-expanded={open} title={description} onClick={() => setOpen((o) => !o)}>
           <ChevronRight className="conv-chevron" aria-hidden />
@@ -326,16 +626,11 @@ function SubagentView({ item, ctx }: { item: ToolItem; ctx: ItemContext }) {
           ) : (
             <Bot className="conv-kind-icon" aria-hidden />
           )}
-          <span className="conv-tool-label">{type ?? t('conversation.subagent.label')}</span>
+          <span className="conv-tool-label">{rowLabel}</span>
           {description && <span className="conv-tool-subject conv-subagent-desc">{description.split('\n')[0]}</span>}
           <span className="conv-sr">, {statusLabel}</span>
         </button>
-        <span className="conv-meta">
-          <span className="conv-subagent-count">{t('conversation.subagent.steps', { n: items.length })}</span>
-          {(status === 'failed' || status === 'cancelled') && (
-            <span className={status === 'failed' ? 'conv-bad' : undefined}>{statusLabel}</span>
-          )}
-        </span>
+        <SubagentTaskMeta item={item} status={status} steps={items.length} label={description ?? rowLabel} agent={ctx.agent} />
       </div>
       {open && (
         <div className="conv-tool-body conv-subagent-body">
@@ -345,11 +640,7 @@ function SubagentView({ item, ctx }: { item: ToolItem; ctx: ItemContext }) {
             </Section>
           )}
           {items.length > 0 && (
-            <div
-              className="conv-subagent-items"
-              role="list"
-              aria-label={t('conversation.subagent.items', { type: type ?? t('conversation.subagent.label') })}
-            >
+            <div className="conv-subagent-items" role="list" aria-label={t('conversation.subagent.items', { type: rowLabel })}>
               {items.map((it) => (
                 <div role="listitem" key={it.id}>
                   <ItemView item={it} ctx={ctx} />
@@ -362,6 +653,12 @@ function SubagentView({ item, ctx }: { item: ToolItem; ctx: ItemContext }) {
               <Results content={results} kind="think" ctx={ctx} />
             </Section>
           )}
+          {results.length === 0 && tm?.summary && (
+            <Section title={t('conversation.tool.result')}>
+              <Markdown text={tm.summary} variant="compact" base={ctx.base} onOpenPath={ctx.openFile} className="conv-md conv-tool-md" />
+            </Section>
+          )}
+          {tm?.error && <div className="conv-ask-error">{tm.error}</div>}
         </div>
       )}
     </div>

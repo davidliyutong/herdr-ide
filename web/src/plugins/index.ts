@@ -194,6 +194,7 @@ function ChatUsageGate() {
 const chatPlugin = makeChatPlugin({
   ChatPane: lazy(() => import('./chat/ChatPane').then((m) => ({ default: m.ChatPane }))),
   ChatsPanel: lazy(() => import('./chat/ChatsPanel').then((m) => ({ default: m.ChatsPanel }))),
+  ChatSettingsLayout: lazy(() => import('./chat/SettingsPage').then((m) => ({ default: m.ChatSettingsPage }))),
   ChatSettingsExtra: lazy(() => import('./chat/SettingsExtra').then((m) => ({ default: m.ChatSettingsExtra }))),
   ChatUsageItem: ChatUsageGate,
 });

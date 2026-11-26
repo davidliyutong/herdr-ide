@@ -8,6 +8,7 @@
 // at the caret, a message's content and limits, usage for people.
 import { describe, expect, it } from 'vitest';
 import {
+  blockingWaitingItems,
   CATEGORY_MODE,
   CATEGORY_MODEL,
   CATEGORY_THOUGHT_LEVEL,
@@ -28,6 +29,7 @@ import {
   reduce,
   reduceAll,
   take,
+  taskMeta,
   toolItemId,
   waitingItems,
   withoutLive,
@@ -679,6 +681,11 @@ describe('what the chat states', () => {
       effort: false,
       model: false,
       cancelQueued: false,
+      steer: false,
+      stopTask: false,
+      fork: false,
+      rewind: false,
+      rewindFiles: false,
     });
     expect(info.usage).toEqual({
       used: 50_000,
@@ -778,8 +785,190 @@ describe('what the chat states', () => {
       imported: `_${APP_SLUG}/imported`,
       untrustedFolder: `_${APP_SLUG}/untrusted_folder`,
       fullAccessOff: `_${APP_SLUG}/full_access_off`,
+      forked: `_${APP_SLUG}/forked`,
+      switched: `_${APP_SLUG}/switched`,
+      rewound: `_${APP_SLUG}/rewound`,
     });
     expect([NOTICES.compacted, NOTICES.command, NOTICES.error]).toEqual(['compacted', 'command', 'error'].map((n) => `_${APP_SLUG}/${n}`));
+  });
+
+  it('parses background tasks in chat info, deep-merges tool task metadata, and handles Codex/Claude task fields', () => {
+    const info = readChat({
+      state: 'working',
+      capabilities: { stopTask: true, fork: true, rewind: true, rewindFiles: true, steer: true },
+      tasks: [
+        {
+          id: 't1',
+          kind: 'shell',
+          status: 'running',
+          description: 'Build project',
+          command: 'bun run build',
+          toolCallId: 'call-1',
+          pid: 4321,
+          backgrounded: true,
+          stoppable: true,
+          tokens: 1200,
+          toolUses: 3,
+          durationMs: 4500,
+        },
+        { id: '', kind: 'shell', status: 'running' },
+        { id: 't2', kind: 'unknown', status: 'completed', description: 'Done' },
+      ],
+    })!;
+    expect(info.capabilities).toMatchObject({ stopTask: true, fork: true, rewind: true, rewindFiles: true, steer: true });
+    expect(info.tasks).toEqual([
+      {
+        id: 't1',
+        kind: 'shell',
+        status: 'running',
+        description: 'Build project',
+        command: 'bun run build',
+        toolCallId: 'call-1',
+        pid: 4321,
+        backgrounded: true,
+        stoppable: true,
+        tokens: 1200,
+        toolUses: 3,
+        durationMs: 4500,
+      },
+      { id: 't2', kind: 'other', status: 'completed', description: 'Done' },
+    ]);
+
+    // Deep _meta merge preserves taskId/backgrounded/type across incremental task_progress updates.
+    const c = run([
+      toolEv(1, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-1',
+        title: 'Run tests',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'npm test', run_in_background: true },
+        _meta: { [APP_SLUG]: { task: { taskId: 'bg-1', type: 'local_bash', backgrounded: true, description: 'Run tests' } } },
+      }),
+      toolEv(2, {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'call-1',
+        _meta: { [APP_SLUG]: { task: { lastTool: 'Bash', tokens: 900, toolUses: 2, durationMs: 3200 } } },
+      }),
+      toolEv(3, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'codex-cmd',
+        title: 'Dev server',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'vite' },
+        _meta: { [APP_SLUG]: { processId: 'proc-9' } },
+      }),
+      toolEv(4, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'codex-sub',
+        title: 'Investigate',
+        kind: 'think',
+        status: 'in_progress',
+        rawInput: { agent_type: 'reviewer', agentPath: '/root/reviewer' },
+        _meta: { [APP_SLUG]: { subagent: { threadId: 'thr-2', agentPath: '/root/reviewer', tool: 'spawnAgent', status: 'running' } } },
+      }),
+    ]);
+
+    expect(taskMeta(tool(c, 'call-1'))).toEqual({
+      taskId: 'bg-1',
+      type: 'local_bash',
+      description: 'Run tests',
+      lastTool: 'Bash',
+      tokens: 900,
+      toolUses: 2,
+      durationMs: 3200,
+      backgrounded: true,
+    });
+    expect(taskMeta(tool(c, 'codex-cmd'))).toEqual({
+      taskId: 'proc-9',
+      processId: 'proc-9',
+      backgrounded: true,
+    });
+    expect(taskMeta(tool(c, 'codex-sub'))).toEqual({
+      taskId: 'thr-2',
+      type: 'subagent',
+      subagentType: '/root/reviewer',
+    });
+  });
+
+  it('tracks async questions across turn boundaries without blocking, supports header-only & optional questions, and extracts follow-up questions', () => {
+    let c = run([
+      { seq: 1, t: 'turn', state: 'start' },
+      {
+        seq: 2,
+        t: 'update',
+        item: 'am-1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: text('Choose how to proceed:'),
+          _meta: {
+            [APP_SLUG]: {
+              delivery: 'final_answer',
+              questions: [{ title: 'Deploy now?', options: ['Yes', 'Wait'] }],
+            },
+          },
+        } as ChatEvent['update'],
+      },
+      {
+        seq: 3,
+        t: 'question',
+        id: 'aq1',
+        async: true,
+        autoResolutionMs: 30_000,
+        item: 'am-1',
+        questions: [{ id: 'q1', header: 'Deployment', question: '', optional: true, options: [{ label: 'Yes' }, { label: 'Wait' }] }],
+      },
+      { seq: 4, t: 'turn', state: 'end', stopReason: 'end_turn' },
+    ]);
+
+    const agentMsg = msg(c, 'message:agent:item:am-1');
+    expect(agentMsg.delivery).toBe('final_answer');
+    expect(agentMsg.followUpQuestions).toEqual([{ title: 'Deploy now?', options: ['Yes', 'Wait'] }]);
+
+    const q = itemById(c, 'question:aq1') as QuestionItem;
+    expect(q.async).toBe(true);
+    expect(q.autoResolutionMs).toBe(30_000);
+    expect(q.sourceItem).toBe('am-1');
+    expect(q.questions).toEqual([{ id: 'q1', question: 'Deployment', optional: true, options: [{ label: 'Yes' }, { label: 'Wait' }] }]);
+    // Async question remains in waitingItems after turn end, while blockingWaitingItems is empty.
+    expect(waitingItems(c)).toEqual(['question:aq1']);
+    expect(blockingWaitingItems(c)).toEqual([]);
+
+    // A blocking question in a new turn enters both lists.
+    c = reduceAll(c, [
+      { seq: 5, t: 'turn', state: 'start' },
+      { seq: 6, t: 'question', id: 'bq1', questions: [{ id: 'x', question: 'Blocking?' }] },
+    ]);
+    expect(waitingItems(c)).toEqual(['question:aq1', 'question:bq1']);
+    expect(blockingWaitingItems(c)).toEqual(['question:bq1']);
+
+    // Superseding the async question resolves it cleanly.
+    c = reduce(c, { seq: 7, t: 'question_done', id: 'aq1', by: 'superseded' });
+    expect((itemById(c, 'question:aq1') as QuestionItem).by).toBe('superseded');
+    expect(waitingItems(c)).toEqual(['question:bq1']);
+  });
+
+  it('stores seq on user messages, supports fork/switch/rewind notices, and resets cleanly on EventType.Reset', () => {
+    let c = run([
+      { seq: 10, t: 'user', clientId: 'c1', content: [text('first prompt')] },
+      { seq: 11, t: 'notice', method: CHAT_NOTICES.forked },
+      { seq: 12, t: 'notice', method: CHAT_NOTICES.switched, params: { fromKind: 'claude' } },
+      { seq: 13, t: 'notice', method: CHAT_NOTICES.rewound, params: { restoreFiles: true } },
+    ]);
+    expect((c.items[0] as MessageItem).seq).toBe(10);
+    expect(c.items.slice(1).map((i) => i.kind === 'notice' && i.method)).toEqual([
+      CHAT_NOTICES.forked,
+      CHAT_NOTICES.switched,
+      CHAT_NOTICES.rewound,
+    ]);
+    for (const k of ['forked', 'switched', 'switchedFrom', 'rewound', 'rewoundFiles'])
+      expect(hasMessage(`conversation.notice.${k}`), k).toBe(true);
+
+    // EventType.Reset clears conversation state cleanly.
+    c = reduce(c, { t: 'reset', seq: 14 });
+    expect(c.items).toEqual([]);
+    expect(c.last).toBeUndefined();
   });
 
   it('of an earlier page gives way to a later page’s', () => {

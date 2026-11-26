@@ -35,9 +35,22 @@ import { formatRFC3339 } from '#shared/lib/gotime.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { ChatProtoError, Code, EventType, type Event } from '#shared/proto/chatproto/index.ts';
-import type { Adapter, HistoryParams, RunParams, Session, SessionsParams, Sink, StartParams } from '../adapter.ts';
+import type {
+  Adapter,
+  ClientInfo,
+  ForkParams,
+  ForkResult,
+  HistoryParams,
+  ModelsParams,
+  RunParams,
+  Session,
+  SessionsParams,
+  Sink,
+  StartParams,
+} from '../adapter.ts';
 import type { AgentProcess } from '../agentproc.ts';
 import type { ClientRequests, ThreadItem, Turn } from './appserver.gen.ts';
+import { forkParams } from './config.ts';
 import {
   ItemType,
   Mapper,
@@ -56,7 +69,7 @@ import {
   type Obj,
 } from './mapping.ts';
 import { ClosedError, Conn } from './rpc.ts';
-import { CODEX_TIMING, CodexSession, callError, initialize, refuse, startError, type CodexTiming } from './session.ts';
+import { CODEX_TIMING, CodexSession, callError, initialize, listModels, refuse, startError, type CodexTiming } from './session.ts';
 
 export { CODEX_TIMING, type CodexTiming } from './session.ts';
 
@@ -91,7 +104,7 @@ export function codexAdapter(o: CodexAdapterOptions = {}): Adapter {
   const live = new Set<CodexSession>();
 
   /** An app-server started to answer questions, which done ends. */
-  async function probe(p: RunParams, signal: AbortSignal): Promise<Client> {
+  async function probe(p: RunParams, signal: AbortSignal, clientInfo?: ClientInfo): Promise<Client> {
     if (p.argv.length === 0 || !p.argv[0]!.startsWith('/'))
       throw new ChatProtoError({ code: Code.StartFailed, message: 'codex: no command' });
     // The directory is a parameter of the questions: a process for them runs
@@ -114,7 +127,7 @@ export function codexAdapter(o: CodexAdapterOptions = {}): Adapter {
       conn.close();
     };
     try {
-      await initialize(conn, { name: NAME, version: VERSION }, AbortSignal.any([signal, AbortSignal.timeout(t.start)]));
+      await initialize(conn, clientInfo ?? { name: NAME, version: VERSION }, AbortSignal.any([signal, AbortSignal.timeout(t.start)]));
     } catch (e) {
       await done();
       throw new ChatProtoError(startError(proc, e));
@@ -123,24 +136,30 @@ export function codexAdapter(o: CodexAdapterOptions = {}): Adapter {
   }
 
   /** A running chat's app-server, else one started for the question. */
-  async function client(p: RunParams, signal: AbortSignal): Promise<Client> {
+  async function client(p: RunParams, signal: AbortSignal, clientInfo?: ClientInfo): Promise<Client> {
     for (const s of live) {
       const conn = s.liveConn;
       if (conn) return { conn, done: async () => {} };
     }
-    return probe(p, signal);
+    return probe(p, signal, clientInfo);
   }
 
   /** Asks c, or a probe when the running chat whose app-server c is ended
    * meanwhile (a question asked whole: the probe's answer is the one). */
-  async function ask<T>(p: RunParams, signal: AbortSignal, c: Client, f: (conn: Conn) => Promise<T>): Promise<{ v: T; c: Client }> {
+  async function ask<T>(
+    p: RunParams,
+    signal: AbortSignal,
+    c: Client,
+    f: (conn: Conn) => Promise<T>,
+    clientInfo?: ClientInfo,
+  ): Promise<{ v: T; c: Client }> {
     try {
       return { v: await f(c.conn), c };
     } catch (e) {
       if (!(e instanceof ClosedError)) throw e;
     }
     await c.done();
-    const pc = await probe(p, signal);
+    const pc = await probe(p, signal, clientInfo);
     try {
       return { v: await f(pc.conn), c: pc };
     } catch (e) {
@@ -222,6 +241,47 @@ export function codexAdapter(o: CodexAdapterOptions = {}): Adapter {
         } catch (e) {
           throw e instanceof ChatProtoError ? e : new ChatProtoError(callError(e));
         }
+      } finally {
+        await c.done();
+      }
+    },
+
+    /** Lists the models Codex offers (model/list, hidden ones left out),
+     * reusing a live app-server or running a short probe; also updates any
+     * live sessions so setConfig accepts newly refreshed models. */
+    async models(p: ModelsParams, signal: AbortSignal): Promise<chat.ModelOption[]> {
+      const log = logger(p.logger);
+      let c = await client(p, signal, p.client);
+      try {
+        let ms;
+        try {
+          ({ v: ms, c } = await ask(p, signal, c, (conn) => listModels(conn, signal, (l) => log(`codex: ${l}`), true), p.client));
+        } catch (e) {
+          throw e instanceof ChatProtoError ? e : new ChatProtoError(callError(e));
+        }
+        if (ms.length > 0) for (const s of live) s.updateModels(ms);
+        return ms.toModelOptions();
+      } finally {
+        await c.done();
+      }
+    },
+
+    /** Forks an existing thread natively via thread/fork (always read-only
+     * and asking the user, never writing ~/.codex/config.toml). */
+    async fork(p: ForkParams, signal: AbortSignal): Promise<ForkResult> {
+      if (!p.sessionId) throw new ChatProtoError({ code: Code.BadRequest, message: 'codex: no session to fork' });
+      const params = forkParams(p.sessionId, p.cwd, { beforeTurnId: p.beforeTurnId, lastTurnId: p.lastTurnId });
+      let c = await client(p, signal, p.client);
+      try {
+        let res: ClientRequests['thread/fork']['result'];
+        try {
+          ({ v: res, c } = await ask(p, signal, c, (conn) => conn.call('thread/fork', params, signal), p.client));
+        } catch (e) {
+          throw e instanceof ChatProtoError ? e : new ChatProtoError(callError(e));
+        }
+        const id = isObj(res) && isObj(res.thread) && typeof res.thread.id === 'string' ? res.thread.id : '';
+        if (id === '') throw new ChatProtoError({ code: Code.Failed, message: 'codex: thread/fork answered no thread' });
+        return { sessionId: id };
       } finally {
         await c.done();
       }

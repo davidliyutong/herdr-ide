@@ -145,15 +145,17 @@ export class Agents {
     }
     const prev = this.byTerminal.get(ev.terminal);
     let quiet = false;
+    const sessionChanged =
+      !!prev &&
+      prev.agent === ev.agent &&
+      ((prev.session ?? '') !== (ev.session ?? '') || (prev.session_source ?? '') !== (ev.session_source ?? ''));
+    const sameOrSeenStatus = !!prev && (ev.status === prev.status || (prev.status === 'idle' && ev.status === 'done'));
     if (!ev.agent) {
       if (!prev) return;
       this.byTerminal.delete(ev.terminal);
-    } else if (
-      prev &&
-      prev.agent === ev.agent &&
-      ((prev.session ?? '') !== (ev.session ?? '') || (prev.session_source ?? '') !== (ev.session_source ?? ''))
-    ) {
-      // The status stays the core's (a done may have been seen since).
+    } else if (sessionChanged && sameOrSeenStatus) {
+      // Session-only update (or already-seen done carried on a session change):
+      // keep the hub's status and notify only terminal subscribers.
       const next: DetectEvent = { ...prev };
       delete next.session;
       delete next.session_source;

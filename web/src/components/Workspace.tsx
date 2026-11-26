@@ -217,7 +217,8 @@ export function Workspace() {
             const editing = renaming?.m === m && renaming.id === id;
             const key = tabId(tb);
             const count = L.tabPanes(tb).length;
-            const view = !tb.name && !L.tabTerminals(tb).length && focusedLeaf && !L.isTerminalLeaf(focusedLeaf) ? focusedLeaf : undefined;
+            const leafView = !L.tabTerminals(tb).length && focusedLeaf && !L.isTerminalLeaf(focusedLeaf) ? focusedLeaf : undefined;
+            const view = !tb.name ? leafView : undefined;
             const about = [
               tb.name && tb.name !== title ? `${tb.name} · ${title}` : title,
               count > 1 && t('workspace.paneCount', { n: count }),
@@ -283,7 +284,12 @@ export function Workspace() {
                     }}
                   />
                 ) : tb.name ? (
-                  <span className="tab-label ellipsis">{tb.name}</span>
+                  <>
+                    {leafView && L.isPluginLeaf(leafView) && leafView.view.plugin === 'chat' && (
+                      <LeafIcon m={m} leaf={leafView} className="tab-kind" />
+                    )}
+                    <span className="tab-label ellipsis">{tb.name}</span>
+                  </>
                 ) : view ? (
                   <>
                     <LeafIcon m={m} leaf={view} className="tab-kind" />

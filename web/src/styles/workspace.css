@@ -131,8 +131,10 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-/* A tab of VS Code or a preview alone: its mark before its name. */
-.tab-kind.lucide {
+/* A tab of VS Code, a chat, or a preview alone: its mark before its name. */
+.tab-kind.lucide,
+.tab-kind.ai-logo {
+  flex: none;
   width: var(--ic-sm);
   height: var(--ic-sm);
   margin-right: -2px;
@@ -473,8 +475,10 @@
 .pane-header.focused {
   color: var(--fg);
 }
-/* What a pane other than a terminal is: VS Code's mark, a preview's eye. */
-.pane-kind.lucide {
+/* What a pane other than a terminal is: VS Code's mark, a chat's agent logo, a preview's eye. */
+.pane-kind.lucide,
+.pane-kind.ai-logo {
+  flex: none;
   width: var(--ic-sm);
   height: var(--ic-sm);
   margin-right: -2px;

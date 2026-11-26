@@ -2,10 +2,21 @@
 // what the machine's chat host runs and keeps (chatproto's host settings,
 // whose bounds these are), and reach each machine's host with Op.Configure
 // (hostSettings).
-import { bool, defineModule, enumOf, int, type Store } from '#kernel/config/settings/index.ts';
+import { bool, defineModule, enumOf, int, stringList, type Setting, type Store } from '#kernel/config/settings/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 
 const section = 'chat';
+
+/** The chat agent kinds with per-provider visible model settings, in UI order. */
+export const CHAT_PROVIDERS = ['claude', 'codex', 'agy', 'kimi', 'grok'] as const;
+export type ChatProvider = (typeof CHAT_PROVIDERS)[number];
+
+function validModelList(list: string[]): string | undefined {
+  for (const s of list) {
+    if (s.trim() === '' || Buffer.byteLength(s) > 256) return 'model ids must be non-empty strings of at most 256 bytes';
+  }
+  return undefined;
+}
 
 const number = (def: number, min: number, max: number, step: number, order: number) =>
   int({ default: def, min, max, step, scope: 'machine', section, order });
@@ -30,6 +41,13 @@ export const settings = defineModule({
     'chat.maxTotalMB': number(chat.MAX_TOTAL_MB_DEFAULT, chat.MAX_TOTAL_MB_MIN, chat.MAX_TOTAL_MB_MAX, 64, 60),
     /** The most megabytes of one chat's log. */
     'chat.maxChatMB': number(chat.MAX_CHAT_MB_DEFAULT, chat.MAX_CHAT_MB_MIN, chat.MAX_CHAT_MB_MAX, 8, 70),
+    /** Per-provider model allowlists for the composer picker (empty = show all). */
+    ...Object.fromEntries(
+      CHAT_PROVIDERS.map((k, i): [string, Setting] => [
+        `chat.visibleModels.${k}`,
+        stringList({ default: [], scope: 'app', section, group: 'chatModels', order: 100 + i, check: validModelList }),
+      ]),
+    ),
   },
 });
 

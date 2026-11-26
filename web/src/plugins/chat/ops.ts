@@ -4,7 +4,7 @@
 // renaming, closing, archiving, restoring and deleting one, and the menus
 // that offer these.
 import { createElement, type ComponentType } from 'react';
-import { CirclePower, Pencil, SquareTerminal, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, CirclePower, GitFork, Pencil, SquareTerminal, Trash2 } from 'lucide-react';
 import { create } from 'zustand';
 import { actions } from '../../actions';
 import { agentKind, chatAdapter, usageProvider } from '../../conversation/kinds';
@@ -30,14 +30,26 @@ export const useChatUi = create<{ renaming?: string }>(() => ({}));
 export const agentName = (kind: string | undefined): string => agentKind(kind)?.title || kind || t('chat.pane');
 
 const icons = new Map<string, ComponentType<{ className?: string }>>();
+const brandIcons = new Map<string, ComponentType<{ className?: string }>>();
 
-/** The mark of an agent's service, drawn as an icon. */
+/** The mark of an agent's service, drawn as a plain monochrome icon. */
 export function kindIcon(kind: string): ComponentType<{ className?: string }> {
   let icon = icons.get(kind);
   if (!icon) {
     const provider = usageProvider(kind) ?? kind;
     icon = ({ className }) => createElement(ProviderLogo, { provider, plain: true, className });
     icons.set(kind, icon);
+  }
+  return icon;
+}
+
+/** The mark of an agent's service in its brand color (tabs, pane headers, composer badge). */
+export function brandKindIcon(kind: string): ComponentType<{ className?: string }> {
+  let icon = brandIcons.get(kind);
+  if (!icon) {
+    const provider = usageProvider(kind) ?? kind;
+    icon = ({ className }) => createElement(ProviderLogo, { provider, className });
+    brandIcons.set(kind, icon);
   }
   return icon;
 }
@@ -291,12 +303,81 @@ export function kindsMenu(m: string, o: { cwd?: string } = {}): MenuEntry[] {
   }));
 }
 
+/** Forks an existing chat (up to upToSeq, or its end) into a new chat tab. */
+export async function forkChat(
+  m: string,
+  chat: string,
+  o: { upToSeq?: number; title?: string; from?: string } = {},
+): Promise<string | undefined> {
+  if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
+  const st = chatState(m, chat);
+  let forked;
+  try {
+    forked = await chatApi.fork(m, {
+      chat,
+      ...(o.upToSeq !== undefined ? { upToSeq: o.upToSeq } : {}),
+      ...(o.title ? { title: o.title } : {}),
+    });
+  } catch (e) {
+    toast(failureText(e, agentName(st?.kind), 'chat.forkFailed'));
+    return undefined;
+  }
+  upsertState(m, forked);
+  return openChat(m, forked.id, forked.kind, o.from);
+}
+
+/** Exports context from a chat and opens a new chat tab with targetKind in the same directory. */
+export async function switchChatAgent(
+  m: string,
+  chat: string,
+  targetKind: string,
+  o: { upToSeq?: number; from?: string } = {},
+): Promise<string | undefined> {
+  if (useStore.getState().readOnly) return void toast(t('conversation.error.read_only'));
+  const targetName = agentName(targetKind);
+  const mode = permissionMode(useSettings.getState().values, m);
+  let switched;
+  try {
+    switched = await chatApi.switchChat(m, {
+      chat,
+      targetKind,
+      ...(mode ? { options: { mode } } : {}),
+      ...(o.upToSeq !== undefined ? { upToSeq: o.upToSeq } : {}),
+    });
+  } catch (e) {
+    toast(failureText(e, targetName, 'chat.switchAgentFailed'));
+    return undefined;
+  }
+  upsertState(m, switched);
+  return openChat(m, switched.id, switched.kind, o.from);
+}
+
+/** Menu items for switching a chat to another available agent on machine m. */
+export function switchAgentMenu(m: string, chat: string, currentKind: string | undefined, from?: string): MenuEntry[] {
+  void loadAgents(m);
+  return offeredKinds(m)
+    .filter((k) => k.id !== currentKind)
+    .map((k) => ({
+      label: agentName(k.id),
+      icon: createElement(brandKindIcon(k.id)),
+      run: () => void switchChatAgent(m, chat, k.id, { from }),
+    }));
+}
+
 /** What a chat pane's header and tab menus start with. */
 export function chatMenu(m: string, view: L.PluginView): MenuEntry[] {
-  const chat = chatRef(view).chat;
+  const ref = chatRef(view);
+  const chat = ref.chat;
   if (!chat || useStore.getState().readOnly) return [];
   const st = chatState(m, chat);
-  const out: MenuEntry[] = [{ label: t('chat.rename'), icon: createElement(Pencil), run: () => startRename(m, view.id) }];
+  const kind = ref.agent ?? st?.kind;
+  const from = L.viewKey(view.id);
+  const out: MenuEntry[] = [
+    { label: t('chat.rename'), icon: createElement(Pencil), run: () => startRename(m, view.id) },
+    { label: t('chat.fork'), icon: createElement(GitFork), run: () => void forkChat(m, chat, { from }) },
+  ];
+  const others = switchAgentMenu(m, chat, kind, from);
+  if (others.length) out.push({ label: t('chat.switchAgent'), icon: createElement(ArrowLeftRight), submenu: others });
   if (canContinueInTerminal(m, view))
     out.push({
       label: t('chat.continueInTerminal'),
@@ -310,7 +391,7 @@ export function chatMenu(m: string, view: L.PluginView): MenuEntry[] {
     danger: true,
     run: () =>
       void deleteChat(m, chat).then((done) => {
-        if (done) void actions.closePane(m, L.viewKey(view.id));
+        if (done) void actions.closePane(m, from);
       }),
   });
   return out;
