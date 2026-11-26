@@ -52,7 +52,7 @@ async function setup(a: Agents, o: { readOnly?: boolean } = {}) {
   const machines = testMachines([sshSpec('box'), sshSpec('gpu'), sshSpec('far', 'far', 'far', false)], {
     dial: async (spec) => {
       const d = agentDialer({ serve: serve(spec.id) });
-      return d(spec, new AbortController().signal);
+      return d(spec, new AbortController().signal, () => {});
     },
   });
   const tc = testHub({ features: [agentsFeature()], machines, readOnly: o.readOnly, settings: { 'plugins.agents.enabled': true } });

@@ -192,6 +192,11 @@ export const zhCN: Messages = {
   'machine.auth_required': '需要登录',
   'machine.error': '出错',
   'machine.disabled': '已禁用',
+  'machine.deploy.probe': '正在检查机器…',
+  'machine.deploy.download': '机器正在下载 node…',
+  'machine.deploy.upload': '正在上传 node：{sent} / {total}',
+  'machine.deploy.install': '正在机器上安装 node…',
+  'machine.deploy.start': '正在启动 node…',
 
   'machine.enableFailed': '无法更改机器：{detail}',
   'machine.removed': '已移除 {machine}。',

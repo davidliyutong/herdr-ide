@@ -9,11 +9,12 @@ import { offline } from '../fail.ts';
 import { AuthRequiredError } from './transport/ssh.ts';
 import { deployCode } from './transport/errors.ts';
 import { closeStream, type AgentStream, type Session } from './transport/session.ts';
-import { Unusable, validTarget, type HCState, type Spec, type State, type Status } from './spec.ts';
+import { Unusable, validTarget, type Deploy, type HCState, type Spec, type State, type Status } from './spec.ts';
 
 /** Connects to the agent of a spec: the session and the platform
- * ("os/arch", "" when the dial does not know it). */
-export type Dialer = (spec: Spec, signal: AbortSignal) => Promise<{ session: Session; platform: string }>;
+ * ("os/arch", "" when the dial does not know it); progress reports what it
+ * is doing (State.deploy). */
+export type Dialer = (spec: Spec, signal: AbortSignal, progress: (d: Deploy) => void) => Promise<{ session: Session; platform: string }>;
 
 /** Serves a stream the agent opened towards the hub, after its header. */
 export type StreamHandler = (m: Machine, conn: AgentStream, h: Header) => void;
@@ -45,6 +46,10 @@ export const DEFAULT_TIMING: Timing = {
 };
 
 const STABLE_SESSION_MS = 30_000;
+
+/** How often the bytes of an upload are published at most (a new step is
+ * published at once). */
+export const DEPLOY_PUBLISH_MS = 250;
 
 export interface MachineDeps {
   dial: Dialer;
@@ -176,11 +181,35 @@ export class Machine {
     this.deps.publish(this.state());
   }
 
+  /** Publishes what a dial is doing while the machine connects: a new step
+   * at once, the bytes of the same step at most every DEPLOY_PUBLISH_MS;
+   * nothing once the dial ended. */
+  private deployProgress(): { report: (d: Deploy) => void; end: () => void } {
+    let live = true;
+    let last: Deploy | undefined;
+    let at = 0;
+    return {
+      report: (d) => {
+        if (!live || this.st.status !== 'connecting') return;
+        const now = performance.now();
+        const done = d.total !== undefined && d.sent === d.total;
+        if (last?.step === d.step && !done && now - at < DEPLOY_PUBLISH_MS) return;
+        last = d;
+        at = now;
+        this.update((st) => (st.deploy = { ...d }));
+      },
+      end: () => {
+        live = false;
+      },
+    };
+  }
+
   private setStatus(status: Status, err?: unknown): void {
     this.update((st) => {
       st.status = status;
       if (err === undefined) delete st.error;
       else st.error = errorText(err);
+      delete st.deploy;
       // Why the machine build could not be deployed, which the UI explains.
       const failure = err === undefined ? undefined : deployCode(err);
       if (failure) st.failure = failure;
@@ -283,6 +312,7 @@ export class Machine {
       st.enabled = false;
       st.status = 'disabled';
       delete st.error;
+      delete st.deploy;
     });
   }
 
@@ -294,9 +324,11 @@ export class Machine {
       this.readyAt = undefined;
       this.setStatus('connecting');
       let dialed: { session: Session; platform: string };
+      const progress = this.deployProgress();
       try {
-        dialed = await this.deps.dial(this.spec(), signal);
+        dialed = await this.deps.dial(this.spec(), signal, progress.report);
       } catch (e) {
+        progress.end();
         if (signal.aborted) return;
         let wait = backoff;
         if (e instanceof AuthRequiredError) {
@@ -311,6 +343,7 @@ export class Machine {
         if ((await this.retry.until(wait, signal)) === 'woken') backoff = t.backoffMinMs;
         continue;
       }
+      progress.end();
       if (signal.aborted) {
         // The dial ended after the machine was stopped: not ready.
         dialed.session.close();
@@ -352,7 +385,8 @@ export class Machine {
       if (why === 'ended') throw sess.err ?? new Error('session ended');
       let next: { session: Session; platform: string };
       try {
-        next = await this.deps.dial(this.spec(), signal);
+        // The machine stays ready meanwhile: no progress to show.
+        next = await this.deps.dial(this.spec(), signal, () => {});
       } catch (e) {
         this.deps.logger(`machine ${this.label}: its node drains; connecting again failed: ${errorText(e)}`);
         drained = new Promise(() => {});
@@ -394,6 +428,7 @@ export class Machine {
       st.status = 'ready';
       delete st.error;
       delete st.failure;
+      delete st.deploy;
     });
   }
 

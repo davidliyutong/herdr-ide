@@ -34,6 +34,16 @@ export interface HCState {
   version?: string;
 }
 
+/** What a connecting machine's dial is doing (dialSSH): probing the
+ * machine, the machine downloading its build itself, the hub uploading it
+ * (sent of total bytes read into ssh), the machine installing what was
+ * uploaded, starting its node. */
+export interface Deploy {
+  step: 'probe' | 'download' | 'upload' | 'install' | 'start';
+  sent?: number;
+  total?: number;
+}
+
 /** What the pages see of one machine (the /ws machine messages). */
 export interface State extends Spec {
   status: Status;
@@ -45,6 +55,8 @@ export interface State extends Spec {
    * DeployCode: platform_unsupported, cpu_unsupported, libs_missing,
    * build_unavailable), with error; the machine is dialed again. */
   failure?: string;
+  /** What its dial is doing, while connecting. */
+  deploy?: Deploy;
   platform?: string;
   info?: Info;
   hc?: HCState;

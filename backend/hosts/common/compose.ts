@@ -211,7 +211,7 @@ export function composeHub(o: ComposeOptions): Composed {
     specs,
     registry,
     logger,
-    dial: async (spec, signal) => {
+    dial: async (spec, signal, progress) => {
       if (spec.kind === 'local') {
         const session = await dialNode({ instance: nodeInstance, builds, sshConnection: process.env.SSH_CONNECTION, logger, signal });
         return { session, platform: `${process.platform}/${process.arch === 'x64' ? 'amd64' : process.arch}` };
@@ -225,6 +225,7 @@ export function composeHub(o: ComposeOptions): Composed {
           instance: nodeInstance,
           machineDownload: settings.bool(DOWNLOAD, spec.id),
           downloadFailures,
+          progress,
         },
         signal,
       );

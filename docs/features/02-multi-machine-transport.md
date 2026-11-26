@@ -59,7 +59,7 @@ Paths on machines are POSIX, so the hub handles them with `node:path`'s `posix`,
 `backend/kernel/machines/machine.ts` runs one `Machine` per machine:
 
 - *disabled* until enabled;
-- *connecting* while it dials;
+- *connecting* while it dials, with `deploy`, what the dial is doing: `probe`, `download` (the machine fetches its build), `upload` (`sent` of `total` bytes ssh has read from the hub), `install` (the machine checks and unpacks the upload), `start` (its node); a new step is published at once, an upload's bytes at most every 250 ms (`DEPLOY_PUBLISH_MS`), and the field is gone once the machine leaves *connecting*. The sidebar and the machine's settings show the step and a bar, filled by an upload, moving otherwise;
 - *auth_required* when the dial needs a login (retried periodically);
 - *error* on any other failure, with ssh's message (retried with exponential backoff);
 - *ready* once its agent answers `hello`, whose reply carries the host's platform and directories.

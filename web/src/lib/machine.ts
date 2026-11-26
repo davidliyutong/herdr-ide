@@ -4,6 +4,7 @@
 import { hasMessage, t, type MessageKey } from '../i18n';
 import { displayName, statusOf, type TerminalRecord } from '../term/protocol';
 import { isSessionId } from '../conversation/kinds';
+import { formatSize } from './files';
 
 /** What a coding agent in a terminal is doing (docs/features/25-agent-detection.md). */
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
@@ -28,6 +29,29 @@ export interface MachineHC {
   version?: string;
 }
 
+/** What a connecting machine's dial is doing (the hub's State.deploy):
+ * probing it, the machine downloading its build, the hub uploading it
+ * (sent of total bytes), the machine installing it, starting its node. */
+export interface MachineDeploy {
+  step: 'probe' | 'download' | 'upload' | 'install' | 'start';
+  sent?: number;
+  total?: number;
+}
+
+/** The share of an upload done, 0-100; undefined for a step whose length
+ * is not known. */
+export function deployPercent(d: MachineDeploy): number | undefined {
+  if (d.step !== 'upload' || !d.total) return undefined;
+  return Math.min(100, Math.max(0, Math.floor(((d.sent ?? 0) / d.total) * 100)));
+}
+
+/** What a deploy step says; an unknown step (a newer hub) says nothing. */
+export function deployText(d: MachineDeploy): string {
+  if (d.step === 'upload' && d.total) return t('machine.deploy.upload', { sent: formatSize(d.sent ?? 0), total: formatSize(d.total) });
+  const key = `machine.deploy.${d.step}`;
+  return hasMessage(key) ? t(key as MessageKey) : '';
+}
+
 export interface MachineState {
   id: string;
   label: string;
@@ -45,6 +69,8 @@ export interface MachineState {
    * cpu_unsupported, libs_missing, build_unavailable); the hub tries
    * again. */
   failure?: string;
+  /** What its dial is doing, while connecting. */
+  deploy?: MachineDeploy;
   platform?: string;
   info?: AgentInfo;
   hc?: MachineHC;

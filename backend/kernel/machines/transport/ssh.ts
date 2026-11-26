@@ -4,7 +4,7 @@
 // system's own, with a ControlMaster per instance (controldir.ts).
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { Duplex, PassThrough } from 'node:stream';
+import { Duplex, PassThrough, Readable } from 'node:stream';
 import { execa } from 'execa';
 import { AGENT_DIR, HUB_BIN, NAME } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
@@ -23,6 +23,7 @@ import { MAX_ARCHIVE, MAX_EXECUTABLE } from './release.ts';
 import type { OpenStream } from './tunnel.ts';
 import { DeployCode, deployCode } from './errors.ts';
 import { CLIENT_ID, Session } from './session.ts';
+import type { Deploy } from '../spec.ts';
 
 /** ssh could not authenticate without the user. */
 export class AuthRequiredError extends Error {
@@ -44,6 +45,8 @@ export interface SSHOptions {
   /** The machines whose own download failed lately (shared by a hub's
    * connections): the hub uploads to them at once. */
   downloadFailures?: DownloadFailures;
+  /** What the dial is doing (State.deploy). */
+  progress?: (d: Deploy) => void;
 }
 
 /** The machines (by target) whose own download of a build failed (no curl
@@ -226,11 +229,11 @@ const SSH_OPTIONS = { windowsHide: true, reject: false, stripFinalNewline: false
 export async function run(
   o: SSHOptions,
   script: string,
-  opts: { stdin?: Buffer; timeoutMs: number; signal?: AbortSignal },
+  opts: { stdin?: Buffer; onSent?: (sent: number) => void; timeoutMs: number; signal?: AbortSignal },
 ): Promise<string> {
   const r = await execa('ssh', runArgs(o, script), {
     ...SSH_OPTIONS,
-    input: opts.stdin ?? '',
+    input: opts.stdin && opts.onSent ? counted(opts.stdin, opts.onSent) : (opts.stdin ?? ''),
     timeout: opts.timeoutMs,
     cancelSignal: opts.signal,
   });
@@ -240,6 +243,21 @@ export async function run(
   if (r.exitCode === 255) return Promise.reject(classifySSHError(r.stderr, new Error(`exit status ${r.exitCode}`)));
   if (r.exitCode === undefined) throw new Error(`ssh: ${r.shortMessage}`);
   throw new Error(`remote command failed: exit status ${r.exitCode}: ${r.stderr.trim()}`);
+}
+
+/** bytes as a stream of chunks, reporting how many ssh has read (the
+ * pipe's backpressure paces it): after each chunk is taken, and all of
+ * them once the last one was. */
+export function counted(bytes: Buffer, onSent: (sent: number) => void, chunk = 64 << 10): Readable {
+  return Readable.from(
+    (function* () {
+      for (let i = 0; i < bytes.length; i += chunk) {
+        yield bytes.subarray(i, i + chunk);
+        onSent(Math.min(i + chunk, bytes.length));
+      }
+    })(),
+    { objectMode: false },
+  );
 }
 
 /** Tells the target's control master to take no new sessions (`ssh -O
@@ -454,6 +472,7 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
   const canDownload = !!(b.url && archive && allowed);
   /** The machine's own download; whether it put the build in place. */
   const download = async (): Promise<boolean> => {
+    o.progress?.({ step: 'download' });
     o.logger(`ssh ${o.target}: the machine downloads its build ${version} (${platform.os}/${platform.arch}) from ${b.url}`);
     let out: string;
     try {
@@ -492,6 +511,8 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
   o.logger(
     `ssh ${o.target}: uploading the machine build ${version} (${platform.os}/${platform.arch}, ${p.kind === 'archive' ? 'the release archive' : 'the executable'}, ${p.bytes.length} bytes)`,
   );
+  const total = p.bytes.length;
+  o.progress?.({ step: 'upload', sent: 0, total });
   let out: string;
   try {
     out = await run(
@@ -499,6 +520,8 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
       `${installScript({ dir, name: HUB_BIN, exe: d.exe, ...(p.kind === 'archive' && archive ? { archive } : {}) })}\n${PRUNE}`,
       {
         stdin: p.bytes,
+        // Once ssh took all of it, the machine checks and unpacks it.
+        onSent: (sent) => o.progress?.(sent < total ? { step: 'upload', sent, total } : { step: 'install' }),
         timeoutMs: 10 * 60_000,
         signal,
       },
@@ -513,6 +536,7 @@ async function installTS(o: SSHOptions, b: TSBuild, platform: Platform, signal?:
 /** Probes the remote platform, uploads the matching machine build if
  * missing and reaches the machine's node of that build over ssh stdio. */
 export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ session: Session; platform: Platform }> {
+  o.progress?.({ step: 'probe' });
   let out: string;
   try {
     out = await run(o, PROBE_SCRIPT, { timeoutMs: 30_000, signal });
@@ -538,6 +562,7 @@ export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ se
     });
   }
   const remotePath = await installTS(o, build, platform, signal);
+  o.progress?.({ step: 'start' });
 
   const p = execa(
     'ssh',

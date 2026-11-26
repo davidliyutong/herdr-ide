@@ -21,6 +21,7 @@ import { t, type MessageKey } from '../i18n';
 import { withKey } from '../keymap';
 import { APP_NAME, storage } from '../brand';
 import { InlineEdit } from './InlineEdit';
+import { DeployProgress } from './DeployProgress';
 import { startMachineDrag, startWorkspaceDrag } from '../reorderDrag';
 import { openMenu } from '../contextMenu';
 import { machineMenu, machinesMenu, sidebarMenu, workspaceMenu, workspacesMenu } from '../menus';
@@ -498,6 +499,7 @@ function MachineItem({ m }: { m: MachineState }) {
           {m.status !== 'ready' && (
             <div className={`machine-status ms-${m.status}`}>
               {t(`machine.${m.status}` as MessageKey)}
+              {m.status === 'connecting' && m.deploy && <DeployProgress deploy={m.deploy} />}
               {m.code && <div className="small">{codeText(m.code)}</div>}
               {m.failure && <div className="small">{failureText(m.failure)}</div>}
               {m.error && <div className="small ellipsis2">{m.error}</div>}

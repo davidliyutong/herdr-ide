@@ -8,7 +8,7 @@ import { agentDialer, localSpec, running, sleep, sshSpec, testMachines, waitFor,
 import { Op, readLine, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { Machine, type Dialer, type StreamHandler } from './machine.ts';
 import { Registry } from './registry.ts';
-import { LOCAL_ID, loadSpecs, sortByOrder, validTarget, type Spec, type State } from './spec.ts';
+import { LOCAL_ID, loadSpecs, sortByOrder, validTarget, type Deploy, type Spec, type State } from './spec.ts';
 
 const tempFile = () => join(mkdtempSync(join(tmpdir(), 'machines-')), 'machines.json');
 
@@ -302,6 +302,41 @@ describe('machines', () => {
     await done;
   });
 
+  // What the dial does is published while connecting: each step at once,
+  // the bytes of an upload at a bounded rate, nothing once it ended.
+  test('deploy progress while connecting', async () => {
+    const agent = agentDialer();
+    let late: ((d: Deploy) => void) | undefined;
+    const dial: Dialer = async (spec, signal, progress) => {
+      progress({ step: 'probe' });
+      progress({ step: 'upload', sent: 0, total: 1000 });
+      for (let sent = 1; sent < 1000; sent++) progress({ step: 'upload', sent, total: 1000 });
+      progress({ step: 'install' });
+      progress({ step: 'start' });
+      late = progress;
+      return agent(spec, signal, progress);
+    };
+    const states: State[] = [];
+    const m = new Machine(sshSpec('x'), {
+      dial,
+      logger: () => {},
+      publish: (st) => void states.push(st),
+      streams: () => undefined,
+      localSupported: true,
+    });
+    const ac = new AbortController();
+    const done = m.run(ac.signal);
+    await waitFor('ready', () => m.ready);
+    const steps = states.filter((st) => st.deploy).map((st) => st.deploy!.step);
+    expect([...new Set(steps)]).toEqual(['probe', 'upload', 'install', 'start']);
+    expect(steps.filter((s) => s === 'upload').length).toBeLessThan(5);
+    expect(m.state().deploy).toBeUndefined();
+    late!({ step: 'probe' });
+    expect(m.state().deploy).toBeUndefined();
+    ac.abort();
+    await done;
+  });
+
   // A machine is ready once its agent answers, quietly.
   test('ready when the agent answers', async () => {
     const logs: string[] = [];
@@ -385,9 +420,9 @@ describe('machines', () => {
     const dial = agentDialer();
     let fail = false;
     const m = new Machine(sshSpec('x'), {
-      dial: async (s, signal) => {
+      dial: async (s, signal, progress) => {
         if (fail) throw new Error('refused');
-        return dial(s, signal);
+        return dial(s, signal, progress);
       },
       logger: () => {},
       publish: () => {},

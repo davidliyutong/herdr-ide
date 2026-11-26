@@ -33,6 +33,7 @@ import {
   type SettingValue,
 } from '../settings';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
+import { DeployProgress } from './DeployProgress';
 import { FontPicker } from './settings/FontPicker';
 import { desktopShell } from '../shell';
 import { notificationPermission, onPermissionChange, requestNotifyPermission } from '../notify';
@@ -1060,6 +1061,7 @@ function MachinePage({ m, readOnly }: { m: MachineState; readOnly: boolean }) {
             <button onClick={() => void actions.setMachineEnabled(m.id, false)}>{t('menu.disableMachine')}</button>
           )}
         </div>
+        {m.status === 'connecting' && m.deploy && <DeployProgress deploy={m.deploy} />}
         {m.code && <div className="setting-desc">{codeText(m.code)}</div>}
         {m.failure && <div className="setting-desc">{failureText(m.failure)}</div>}
       </div>

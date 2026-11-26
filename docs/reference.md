@@ -359,7 +359,7 @@ Every endpoint passes the same guards (Host, Origin, proxy secret, [SECURITY.md]
 
 | Endpoint | Writes | Purpose |
 | --- | --- | --- |
-| `GET /api/machines` | – | Every machine's state, agent info and terminal core state; never-connected machines carry `code` `invalid_target` or `local_unsupported`, machines whose build could not be deployed `failure` (`platform_unsupported`, `cpu_unsupported`, `libs_missing`, `build_unavailable`) with `error`. |
+| `GET /api/machines` | – | Every machine's state, agent info and terminal core state; never-connected machines carry `code` `invalid_target` or `local_unsupported`, machines whose build could not be deployed `failure` (`platform_unsupported`, `cpu_unsupported`, `libs_missing`, `build_unavailable`) with `error`; a connecting machine `deploy`, what its dial is doing (`step`: `probe`, `download`, `upload` with `sent` and `total` bytes, `install`, `start`). |
 | `POST /api/machines` | writes | Adds and stores an SSH machine (`{"target", "label"}`). |
 | `PUT /api/machines/order` | writes | Stores the machines' order (`{"order": [ids]}`, each once). |
 | `GET /api/ssh/hosts` | writes | Host aliases of the hub host's ssh configuration not yet machines (`[{"alias", "hostname"?, "user"?}]`) ([02](features/02-multi-machine-transport.md)). |

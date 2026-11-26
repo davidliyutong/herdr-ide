@@ -198,6 +198,11 @@ export const en = {
   'machine.auth_required': 'Sign-in required',
   'machine.error': 'Error',
   'machine.disabled': 'Disabled',
+  'machine.deploy.probe': 'Checking the machine…',
+  'machine.deploy.download': 'The machine is downloading its node…',
+  'machine.deploy.upload': 'Uploading the node: {sent} of {total}',
+  'machine.deploy.install': 'Installing the node on the machine…',
+  'machine.deploy.start': 'Starting the node…',
 
   'machine.enableFailed': 'Could not change the machine: {detail}',
   'machine.removed': 'Removed {machine}.',

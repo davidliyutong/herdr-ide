@@ -208,6 +208,25 @@ describe('Sidebar machines', () => {
     expect(host.querySelector('.machine-body')).toBeNull();
   });
 
+  it('shows what a connecting machine is doing, with a bar its upload fills', async () => {
+    const set = (deploy: MachineState['deploy']) =>
+      act(async () =>
+        useStore
+          .getState()
+          .setMachines([{ id: 'gpu', label: 'gpu', kind: 'ssh', status: 'connecting', deploy } as unknown as MachineState]),
+      );
+    const bar = () => host.querySelector<HTMLElement>('.machine-status [role=progressbar]');
+    await set({ step: 'probe' });
+    expect(host.textContent).toContain('Checking the machine…');
+    expect(bar()?.classList.contains('indeterminate')).toBe(true);
+    await set({ step: 'upload', sent: 3 << 20, total: 12 << 20 });
+    expect(host.textContent).toContain('Uploading the node: 3.0 MB of 12.0 MB');
+    expect(bar()?.getAttribute('aria-valuenow')).toBe('25');
+    expect((bar()!.firstElementChild as HTMLElement).style.width).toBe('25%');
+    await set(undefined);
+    expect(bar()).toBeNull();
+  });
+
   it('shows why a machine with a refused target is never connected, without a retry', async () => {
     await act(async () =>
       useStore

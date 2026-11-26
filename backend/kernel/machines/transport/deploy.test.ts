@@ -48,6 +48,7 @@ import {
   DownloadFailures,
   PROBE_SCRIPT,
   checkRuntimeRuns,
+  counted,
   dialSSH,
   installScript,
   parseProbe,
@@ -336,6 +337,15 @@ test('the probe reports the C library, its C++ runtime and SSE4.2; a machine Bun
   }
 });
 
+test('an upload reports the bytes ssh has read, ending with all of them', async () => {
+  const bytes = Buffer.alloc(100_000, 3);
+  const sent: number[] = [];
+  const chunks: Buffer[] = [];
+  for await (const c of counted(bytes, (n) => sent.push(n), 30_000)) chunks.push(c as Buffer);
+  expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
+  expect(sent).toEqual([30_000, 60_000, 90_000, 100_000]);
+});
+
 extendedDescribe.skipIf(!supported)('the TypeScript build over ssh', () => {
   test("the hub fetches the manifest, the machine downloads the release's archive and checks it; nothing is uploaded; its node answers", async () => {
     reset();
@@ -372,10 +382,12 @@ extendedDescribe.skipIf(!supported)('the TypeScript build over ssh', () => {
       serve.hostArchive = hostArchive;
       const home = machine(path);
       const b = build();
-      const { session } = await dialSSH(options(b, { machineDownload: download }));
+      const steps: string[] = [];
+      const { session } = await dialSSH(options(b, { machineDownload: download, progress: (d) => void steps.push(d.step) }));
       try {
         expect((await session.request({ op: Op.Hello })).ok).toBe(true);
         expect(b.loads, why).toBe(1);
+        expect([...new Set(steps)], why).toEqual(['probe', ...(download ? ['download'] : []), 'upload', 'install', 'start']);
         expect(saw(b, 'the release archive'), why).toBe(true);
         expect(saw(b, 'downloads its build'), why).toBe(download);
         expect(readFileSync(join(installed(home), HUB_BIN)).equals(exe)).toBe(true);
