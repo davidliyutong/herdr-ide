@@ -64,6 +64,7 @@ export function UsageSessionItem() {
   const key = target ? targetKey(target) : undefined;
   const entry = useUsage((s) => (key ? s.sessions[key] : undefined));
   const snapshot = useUsage((s) => s.snapshot);
+  const costReport = useUsage((s) => s.cost);
   const remaining = useUsage((s) => s.remaining);
   const warnAt = useWarnAt();
   const [open, setOpen] = useState(false);
@@ -91,7 +92,7 @@ export function UsageSessionItem() {
   const cost = sessionCost(u);
   const ctx = contextShort(u);
   const nowSec = Date.now() / 1000;
-  const counted = tightestFor(snapshot, provider, target.m, u.model, nowSec);
+  const counted = tightestFor(snapshot, provider, target.m, u.model, nowSec, costReport);
   const account = counted?.account ?? sessionAccount(snapshot, provider, target.m);
   const limit = counted?.window ?? (account && tightestWindow(account, nowSec));
   const accounts = (snapshot?.accounts ?? []).filter((a) => a.provider === provider).length;

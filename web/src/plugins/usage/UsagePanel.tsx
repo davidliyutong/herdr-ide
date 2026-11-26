@@ -127,40 +127,62 @@ export function UsagePanel() {
   const shown: UsageTab = tab === 'overview' || providers.includes(tab) || (tab === 'deepseek' && deepseekOn) ? tab : 'overview';
   return (
     <div className="usage-panel">
-      <Tiles providers={providers} accounts={accounts} shown={shown} />
+      <Tiles providers={providers} accounts={accounts} cost={cost} shown={shown} />
       <Meta />
       {shown === 'overview' ? (
-        <Overview accounts={accounts} />
+        <Overview accounts={accounts} cost={cost} />
       ) : (
-        <Provider key={shown} provider={shown} accounts={accounts.filter((a) => a.provider === shown)} />
+        <Provider key={shown} provider={shown} accounts={accounts.filter((a) => a.provider === shown)} cost={cost} />
       )}
     </div>
   );
 }
 
-/** Concise tooltip explaining how a merged provider's percentage was computed. */
+/** Concise tooltip explaining how a merged provider's percentage and cycle
+ * equivalent API value were computed. */
 function mergedTooltip(a: MergedUsageAccount): string {
   const { summary, accountCount } = a;
-  if (summary.weighting === 'value' && summary.capacityUsd !== undefined && summary.availableUsd !== undefined) {
-    return t('usage.merged.tooltipValue', {
+  if (summary.weighting === 'api' && summary.capacityUsd !== undefined && summary.availableUsd !== undefined) {
+    return t('usage.merged.tooltipApi', {
+      used: money(summary.usedUsd ?? 0),
+      total: money(summary.capacityUsd),
+      avail: money(summary.availableUsd),
+      n: accountCount,
+    });
+  }
+  if (summary.weighting === 'explicit' && summary.capacityUsd !== undefined && summary.availableUsd !== undefined) {
+    return t('usage.merged.tooltipExplicit', {
       avail: money(summary.availableUsd),
       total: money(summary.capacityUsd),
       n: accountCount,
     });
   }
+  if (summary.weighting === 'tier') {
+    return t('usage.merged.tooltipTier', { n: accountCount });
+  }
   return t('usage.merged.tooltipEqual', { n: accountCount });
 }
 
 /** The tiles: the overview and each service, its bar what is left of its
- * tightest window (or the value-weighted merged availability across accounts
- * when a provider has 2+ accounts). */
-function Tiles({ providers, accounts, shown }: { providers: string[]; accounts: UsageAccount[]; shown: UsageTab }) {
+ * tightest window (or the merged availability across accounts when a provider
+ * has 2+ accounts). */
+function Tiles({
+  providers,
+  accounts,
+  cost,
+  shown,
+}: {
+  providers: string[];
+  accounts: UsageAccount[];
+  cost?: CostReport;
+  shown: UsageTab;
+}) {
   const now = useNow();
   const byProvider = useMemo(() => {
     const map = new Map<string, UsageAccount | MergedUsageAccount>();
-    for (const entry of previewAccounts(accounts, now)) map.set(entry.provider, entry);
+    for (const entry of previewAccounts(accounts, now, cost)) map.set(entry.provider, entry);
     return map;
-  }, [accounts, now]);
+  }, [accounts, now, cost]);
   return (
     <div className="usage-tiles" role="tablist" aria-label={t('usage.title')}>
       <button
@@ -281,13 +303,13 @@ function Meta() {
 
 // ---- overview ----
 
-function Overview({ accounts }: { accounts: UsageAccount[] }) {
+function Overview({ accounts, cost }: { accounts: UsageAccount[]; cost?: CostReport }) {
   const snapshot = useUsage((s) => s.snapshot);
   const readOnly = useSettings((s) => s.readOnly);
   const now = useNow();
   const deepseekOn = useSettings((s) => s.values['usage.providers.deepseek']?.value !== false);
   const noDeepseek = deepseekOn && !readOnly && !accounts.some((a) => a.provider === 'deepseek');
-  const rows = useMemo(() => previewAccounts(accounts, now), [accounts, now]);
+  const rows = useMemo(() => previewAccounts(accounts, now, cost), [accounts, now, cost]);
   const shared = useMemo(() => new Set(rows.map((a) => a.provider).filter((p, i, all) => all.indexOf(p) !== i)), [rows]);
   return (
     <>
@@ -323,10 +345,12 @@ function AccountRow({ account: a, showEmail = false }: { account: UsageAccount |
   const usedPct = accountUsedPct(a, now);
   const shown = usedPct !== undefined ? (remaining ? 100 - usedPct : usedPct) : undefined;
   const valText = merged ? mergedValueText(a, remaining) : undefined;
+  const cycleText = merged && a.summary.window ? windowLabel(a.summary.window) : undefined;
   const resetAt = merged ? a.summary.resetsAt : w?.resetsAt;
   const subtitle = merged
     ? [
-        valText ?? (usedPct !== undefined ? t('usage.merged.combined') : undefined),
+        cycleText,
+        valText ?? (!cycleText && usedPct !== undefined ? t('usage.merged.combined') : undefined),
         resetAt ? t('usage.resetsIn', { in: duration(resetAt - now) }) : undefined,
       ]
         .filter(Boolean)
@@ -369,10 +393,10 @@ function AccountRow({ account: a, showEmail = false }: { account: UsageAccount |
 
 // ---- a service ----
 
-function Provider({ provider, accounts }: { provider: string; accounts: UsageAccount[] }) {
+function Provider({ provider, accounts, cost }: { provider: string; accounts: UsageAccount[]; cost?: CostReport }) {
   const readOnly = useSettings((s) => s.readOnly);
   const now = useNow();
-  const merged = mergeProviderAccounts(accounts, provider, now);
+  const merged = mergeProviderAccounts(accounts, provider, now, cost);
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>(() => loadCollapsedAccounts());
   const toggleAccount = (accountKey: string) => {
     const k = accountCollapseKey(provider, accountKey);
@@ -405,7 +429,8 @@ function Provider({ provider, accounts }: { provider: string; accounts: UsageAcc
 }
 
 /** Single compact summary progress bar shown at the top of a multi-account
- * provider detail tab, weighted by estimated total available monetary value. */
+ * provider detail tab, showing the combined cycle usage and equivalent API
+ * value (or explicit credits) when available. */
 function MergedSummaryBar({ account: a }: { account: MergedUsageAccount }) {
   const remaining = useUsage((s) => s.remaining);
   useSettings((s) => s.values['usage.thresholds']);
@@ -413,12 +438,14 @@ function MergedSummaryBar({ account: a }: { account: MergedUsageAccount }) {
   const shown = usedPct !== undefined ? (remaining ? 100 - usedPct : usedPct) : undefined;
   const lvl = usedPct !== undefined ? levelPct(usedPct) : 'ok';
   const valText = mergedValueText(a, remaining);
+  const cycleText = a.summary.window ? windowLabel(a.summary.window) : undefined;
+  const detailText = [cycleText, valText].filter(Boolean).join(' · ');
   const label = t('usage.allAccounts', { n: a.accountCount });
   return (
     <div className={`usage-summary-bar level-${lvl}`} data-merged-summary={a.provider} title={mergedTooltip(a)}>
       <div className="usage-summary-head">
         <span className="usage-summary-label ellipsis">{label}</span>
-        {valText && <span className="usage-summary-val muted ellipsis">{valText}</span>}
+        {detailText && <span className="usage-summary-val muted ellipsis">{detailText}</span>}
         <span className="spacer" />
         {shown !== undefined && (
           <b className="usage-pct">{t(remaining ? 'usage.merged.pctLeft' : 'usage.merged.pctUsed', { pct: Math.round(shown) })}</b>

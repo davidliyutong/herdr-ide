@@ -341,10 +341,10 @@ describe('usage window in the status bar', () => {
         account('codex:c', ['local'], [10]),
       ]),
     });
-    // No agent: the tightest across preview accounts (claude:a 99% and claude:b 95% merge to 97%).
+    // No agent: the tightest across preview accounts (claude:a 5h=40% and claude:b 5h=95% merge on the shared 5h cycle to 67.5% -> 68%).
     show([{ address: 't0' }], 't0');
     await set(() => root.render(createElement('div', null, createElement(UsageStatusItem), createElement(UsageSessionItem))));
-    expect(limit()!.textContent!.trim()).toBe('97% used');
+    expect(limit()!.textContent!.trim()).toBe('68% used');
     expect(limit()!.querySelector('.ai-logo')).toBeNull();
     // Claude Code on this machine with Opus: its account's weekly window,
     // not Sonnet's; the session item names the model.

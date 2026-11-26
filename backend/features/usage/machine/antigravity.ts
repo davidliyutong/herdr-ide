@@ -423,7 +423,8 @@ export function parseAgy(a: Account, out: string): boolean {
   // agy 1.5: {status, response (a table), command: {name: "usage", data:
   // {groups: [{name, buckets: [{name, window: weekly|5h,
   // remaining_fraction, reset_time}]}]}}}.
-  const groups = arr(obj(obj(obj(v).command).data).groups);
+  const cmdData = obj(obj(v).command).data;
+  const groups = arr(obj(cmdData).groups);
   for (const g of groups) {
     const go = obj(g);
     const group = str(go.name);
@@ -439,7 +440,10 @@ export function parseAgy(a: Account, out: string): boolean {
       windows.push(win(kind, clampPct((1 - r) * 100), timeOf(bo.reset_time), sec, label));
     }
   }
-  if (windows.length) return true;
+  if (windows.length) {
+    if (!a.plan) a.plan = str(first(obj(cmdData), 'plan', 'planName', 'tier')) || str(first(obj(v), 'plan', 'planName', 'tier'));
+    return true;
+  }
   if (isObj(v)) {
     let m = v;
     const r = first(m, 'result', 'usage', 'data');

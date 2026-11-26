@@ -296,12 +296,13 @@ describe('agy', () => {
 
   test('agy 1.5’s groups of buckets', () => {
     const out =
-      '{"conversation_id":"","status":"SUCCESS","response":"Gemini Models\\tWeekly Limit Remaining\\t85%\\n","command":{"name":"usage","data":{"groups":[' +
+      '{"conversation_id":"","status":"SUCCESS","response":"Gemini Models\\tWeekly Limit Remaining\\t85%\\n","command":{"name":"usage","data":{"plan":"Google AI Pro","groups":[' +
       '{"name":"Gemini Models","buckets":[{"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.85,"reset_time":"2026-11-21T06:22:44Z"},' +
       '{"id":"gemini-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":0.65,"reset_time":"2026-11-15T19:55:53Z"}]},' +
       '{"name":"Gemini 4 Argon","buckets":[{"id":"argon-weekly","name":"Gemini 4 Argon Weekly Limit","window":"monthly-ish","remaining_fraction":1,"reset_time":"2026-11-22T19:48:33Z"}]}]}}}';
     const a: Account = { provider: 'antigravity', status: '' };
     expect(parseAgy(a, out + '\ntrailing text')).toBe(true);
+    expect(a.plan).toBe('Google AI Pro');
     expect(a.windows).toEqual([
       { kind: 'weekly', label: 'Gemini Models', usedPct: 15, resetsAt: 1795242164, windowSec: 7 * 86400 },
       { kind: 'session', label: 'Gemini Models', usedPct: 35, resetsAt: Date.UTC(2026, 10, 15, 19, 55, 53) / 1000, windowSec: 5 * 3600 },
