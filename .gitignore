@@ -28,3 +28,4 @@ TODO.md
 .env.local
 .env.*.local
 /.machines-work/
+.wrangler/

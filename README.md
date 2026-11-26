@@ -102,7 +102,14 @@ A terminal-first, multi-machine, agent-native web IDE built on the [herdr-core](
 
 ## Quick start
 
-Requirements:
+Install the CLI on Linux or macOS (`~/.local/bin/veldr`, verified against the release's `SHA256SUMS`):
+
+```bash
+curl -fsSL https://veldr.app/cli/install.sh | sh
+veldr
+```
+
+Or build from source:
 
 - an OpenSSH client with working access to the machines you want to use (this host needs none);
 - to build: Bun 1.4.5 (the hub, its machine side and the build's tools), Node.js 22.12+ and pnpm (`corepack enable` picks the pinned version).

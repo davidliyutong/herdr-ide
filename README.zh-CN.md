@@ -123,7 +123,14 @@
 
 ## 快速开始
 
-需要：
+在 Linux 或 macOS 上一键安装 CLI（默认安装到 `~/.local/bin/veldr`，并校验发布包的 `SHA256SUMS`）：
+
+```bash
+curl -fsSL https://veldr.app/cli/install.sh | sh
+veldr
+```
+
+或从源码构建：
 
 - 能正常连到要使用的机器的 OpenSSH 客户端（只用本机时不需要）；
 - 构建需要：Bun 1.4.5（hub 程序、其机器端和构建工具）、Node.js 22.12+ 和 pnpm（`corepack enable` 会使用固定的版本）。

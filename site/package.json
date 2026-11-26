@@ -1,0 +1,23 @@
+{
+  "name": "veldr-site",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cloudflare Workers + Static Assets project for veldr.app (/cli/install.sh and landing page)",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20250906.0",
+    "@types/bun": "1.4.5",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2",
+    "wrangler": "4.87.0"
+  }
+}

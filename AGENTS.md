@@ -30,6 +30,7 @@ The hub (`backend/`, TypeScript, built with Bun into one executable per platform
 | Stage 2 desktop app (macOS, Windows, Linux): bundles this system's Stage 1 Bun hub executable and all 6 Stage 1 machine archives (`machines/*.tar.gz` + `SHA256SUMS`) into unpacked app / installers (DMG and zip, NSIS setup, AppImage and deb) | `make desktop-app` / `make desktop-dist` (`scripts/desktop.sh app` / `dist` in Git Bash on Windows) |
 | macOS: build the `.app` and install it into `/Applications` | `make desktop-install` |
 | Isolated desktop development (runs Stage 1 full build, then Electron spawning the compiled hub binary with all 6 machine archives) | `make dev-desktop` |
+| Site Worker & static pages for `veldr.app` (`site/`, serving `/cli/install.sh` from shared `scripts/install.sh`) | `make site-dev` / `make site-deploy` |
 | Run for development: runs Stage 1 full build, then runs the compiled host binary on instance `dev` with `--agent-dir dist/release`, alongside Vite | `make dev-hub` and `make dev-web` |
 
 ## Tests: standard and extended, by group

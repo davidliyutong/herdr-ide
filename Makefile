@@ -6,7 +6,7 @@ SLUG := $(shell sed -n "s/^export const SLUG = '\(.*\)';$$/\1/p" backend/shared/
 HOST_PLATFORM := $(shell scripts/platform.sh)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test test-extended test-linux test-win test-remote check tokens it e2e screenshots ci-local test-doctor test-clean dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test test-extended test-linux test-win test-remote check tokens it e2e screenshots ci-local test-doctor test-clean dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop site-dev site-deploy clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
@@ -18,6 +18,7 @@ deps:
 	pnpm -C desktop install --frozen-lockfile
 	pnpm -C e2e install --frozen-lockfile
 	pnpm -C backend install --frozen-lockfile
+	pnpm -C site install --frozen-lockfile
 	bun backend/scripts/fetch-deps.ts
 
 build:
@@ -27,6 +28,7 @@ test:
 	pnpm -C backend test
 	pnpm -C web test
 	pnpm -C desktop test
+	pnpm -C site test
 
 # The extended tests of every suite (backend/shared/testdata/extended.ts,
 # web/src/__tests__/extended.ts, desktop/src/extended.ts), which make test
@@ -49,6 +51,8 @@ check:
 	pnpm -C e2e format:check
 	pnpm -C backend typecheck
 	pnpm -C backend format:check
+	pnpm -C site typecheck
+	pnpm -C site format:check
 
 # The design tokens of the web UI and the hub's terminal color defaults,
 # from spec/tokens.json; then what the clients take from the registered
@@ -132,5 +136,11 @@ desktop-icons:
 dev-desktop:
 	scripts/desktop.sh dev
 
+site-dev:
+	pnpm -C site dev
+
+site-deploy:
+	pnpm -C site deploy
+
 clean:
-	rm -rf dist desktop/dist web/dist/assets
+	rm -rf dist desktop/dist web/dist/assets site/.wrangler

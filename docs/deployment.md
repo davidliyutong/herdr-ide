@@ -12,6 +12,17 @@ veldr runs on one host (your laptop or an always-on machine) and is used from br
 
 ## Local use
 
+Install the latest CLI release on Linux or macOS (`~/.local/bin/veldr`; pass `-- --version vX.Y.Z` or `--bin-dir DIR` to customize):
+
+```bash
+curl -fsSL https://veldr.app/cli/install.sh | sh
+veldr    # http://127.0.0.1:7780
+```
+
+`https://veldr.app/cli/install.sh` is served by the Cloudflare Worker in `site/` (`make site-deploy`) from the shared `scripts/install.sh`: it detects the OS, CPU architecture and C library (`glibc` or `musl`), fetches the release's `SHA256SUMS`, and verifies both the archive and the extracted executable before installing atomically.
+
+Or build from source:
+
 ```bash
 scripts/build.sh
 cd dist/packages/veldr-$(scripts/platform.sh)
