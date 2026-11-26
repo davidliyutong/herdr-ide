@@ -58,6 +58,7 @@ module.exports = {
     'dist/preload.cjs',
     'dist/frames.cjs',
     'dist/hub.mjs',
+    'dist/hub-state-worker.mjs',
     'assets/icon.png',
     'package.json',
     // node-pty's sources and the libraries it is built from.
@@ -65,7 +66,7 @@ module.exports = {
   ],
   // The utility process's entry and node-pty (its library, and the helper
   // it spawns on macOS) as files, outside the archive.
-  asarUnpack: ['dist/hub.mjs', 'node_modules/node-pty/**'],
+  asarUnpack: ['dist/hub.mjs', 'dist/hub-state-worker.mjs', 'node_modules/node-pty/**'],
   extraMetadata: {
     name: `${slug}-desktop`,
     // Release tags (vX.Y.Z) stay as is in the hub; app metadata takes semver.

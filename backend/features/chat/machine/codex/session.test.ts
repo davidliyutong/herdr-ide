@@ -723,4 +723,16 @@ describe('history', () => {
     expect(await since('turn2')).toEqual(['turn:turn3', 'user:u3', 'update:r3', 'update:c3', 'update:m3', 'turn:turn3']);
     expect(await since('nowhere')).toEqual([]);
   });
+
+  test('catch-up reuses page cursors and emits each newer turn in order', async () => {
+    const sc = new Script();
+    sc.reply(sc.request('initialize'), { userAgent: 'x/1' });
+    sc.reply(sc.request('thread/turns/list'), { data: [turnOf(3, 'completed')], nextCursor: 'middle' });
+    sc.reply(sc.request('thread/turns/list'), { data: [turnOf(2, 'completed')], nextCursor: 'anchor' });
+    sc.reply(sc.request('thread/turns/list'), { data: [turnOf(1, 'completed')], nextCursor: null });
+    sc.reply(sc.request('thread/turns/list'), { data: [turnOf(2, 'completed')], nextCursor: 'anchor' });
+    const { f, evs } = await run(sc, 'turn1');
+    expect(f.requests(1, 'thread/turns/list').map((p) => p.cursor)).toEqual([undefined, 'middle', 'anchor', 'middle']);
+    expect(evs.filter((e) => e.t === chat.EventType.User).map((e) => e.item)).toEqual(['u2', 'u3']);
+  });
 });

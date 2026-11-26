@@ -33,7 +33,7 @@ import { posix } from 'node:path';
 import { validSessionId } from '#shared/agents/kinds.ts';
 import { claudeInfoOf, claudeStamp, claudeSubagents, resolveClaude, searchClaude } from './claude.ts';
 import { codexStamp, codexSubagents, decodeSessionMeta, rolloutMeta, resolveCodex, searchCodex, type RolloutMeta } from './codex.ts';
-import { Files, readHead, sameFile, type FileId } from './files.ts';
+import { Files, readMetadata, sameFile, type FileId } from './files.ts';
 import { systemProcs, type ProcEntry, type ProcSource } from './procs.ts';
 import {
   Format,
@@ -210,7 +210,7 @@ export class Resolver {
     const { fh } = await this.open(f, id);
     try {
       if (f === Format.Claude) return await claudeInfoOf(fh);
-      const m = decodeSessionMeta(await readHead(fh, LIMITS.metaLine));
+      const m = await readMetadata(fh, LIMITS.metaLine, decodeSessionMeta);
       return m ? { cwd: m.cwd, started: m.started } : { cwd: '', started: null };
     } finally {
       await fh.close().catch(() => {});
@@ -272,7 +272,7 @@ export class Resolver {
       throw err;
     }
     this.misses.delete(key);
-    if (this.located.size >= LIMITS.remembered) this.located.clear();
+    if (this.located.size >= LIMITS.remembered) this.located.delete(this.located.keys().next().value!);
     this.located.set(key, s.best);
     return s.best;
   }
@@ -397,8 +397,12 @@ export class Resolver {
     const me = table.find((e) => e.pid === pid);
     if (!me) return out;
     const children = new Map<number, number[]>();
-    for (const e of table)
-      if (e.pgid === me.pgid && e.pid !== pid && e.pid > 0) children.set(e.ppid, [...(children.get(e.ppid) ?? []), e.pid]);
+    for (const e of table) {
+      if (e.pgid !== me.pgid || e.pid === pid || e.pid <= 0) continue;
+      const siblings = children.get(e.ppid);
+      if (siblings) siblings.push(e.pid);
+      else children.set(e.ppid, [e.pid]);
+    }
     const seen = new Set([pid]);
     let level = [pid];
     for (let depth = 0; depth < LIMITS.depth && level.length > 0; depth++) {
@@ -454,7 +458,7 @@ export class Resolver {
       this.records.delete(pid);
       return;
     }
-    if (this.records.size >= LIMITS.remembered) this.records.clear();
+    if (this.records.size >= LIMITS.remembered) this.records.delete(this.records.keys().next().value!);
     this.records.set(pid, record);
   }
 

@@ -108,12 +108,14 @@ export class Router {
       }
       case 'gone':
         this.windows.delete(ev.id);
+        this.acked.delete(ev.id);
         this.video.delete(ev.id);
         this.codecs.delete(ev.id);
         for (const [id, l] of this.layers) if (l.window === ev.id) this.layers.delete(id);
         this.stopClosing(ev.id);
         changed = true;
         targets = this.viewersOf(ev.id);
+        for (const v of targets) v.restart();
         break;
       case 'layer':
         if (ev.layer) {
@@ -169,6 +171,7 @@ export class Router {
     } catch {
       return;
     }
+    if (!this.windows.has(h.window)) return;
     const video = h.enc === GUIEnc.Video || h.enc === GUIEnc.VideoKey;
     const now = this.d.now();
     const acked = this.acked.get(h.window) ?? 0;

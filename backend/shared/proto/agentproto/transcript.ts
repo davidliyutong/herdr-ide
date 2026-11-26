@@ -66,12 +66,6 @@ export const TranscriptCode = {
   BadRequest: 'bad_request',
 } as const;
 
-export interface ResolveRequest {
-  kind: string;
-  session: string;
-  cwd: string;
-}
-
 export interface ResolveReply {
   ok: boolean;
   code?: string;

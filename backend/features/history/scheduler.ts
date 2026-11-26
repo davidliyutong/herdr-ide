@@ -10,15 +10,13 @@
 // again. Nothing is asked of a machine while the hub is read-only.
 import type { HistoryCaptureParams } from '#shared/proto/agentproto/index.ts';
 import type { Logger } from '#shared/lib/log.ts';
+import { retryDelay } from '#shared/lib/wait.ts';
 import type { Audit } from '#kernel/audit.ts';
 import type { Change, Settings } from '#kernel/config/settings/index.ts';
 import { Fail } from '#kernel/fail.ts';
 import { LIMITS } from './settings.ts';
 
 export interface Timing {
-  /** How often the scheduler looks whether something is due
-   * (history.interval is at least 10 s). */
-  tickMs: number;
   /** Bound one capture and one clear of a machine. */
   captureMs: number;
   clearMs: number;
@@ -29,7 +27,6 @@ export interface Timing {
 }
 
 export const TIMING: Timing = {
-  tickMs: 5_000,
   captureMs: 30_000,
   clearMs: 45_000,
   clearRetryMs: 30_000,
@@ -46,6 +43,8 @@ export interface SchedulerOptions {
   calls: Calls;
   /** The machines connected now. */
   ready: () => string[];
+  /** Wakes the scheduler when a machine becomes ready or stops being ready. */
+  onReadyChange?: (wake: (machine: string, ready: boolean) => void) => () => void;
   settings: Settings;
   /** Whether the feature is on (for any client), and the setting that
    * switches it. */
@@ -60,7 +59,6 @@ export interface SchedulerOptions {
 
 /** A machine's history settings. */
 interface MachineSettings {
-  capture: boolean;
   everyMs: number;
   params: HistoryCaptureParams;
 }
@@ -110,9 +108,14 @@ export class Scheduler {
   /** Runs until signal ends; what it started ends with it. */
   async run(signal: AbortSignal): Promise<void> {
     const off = this.o.settings.onChange((c) => this.settingsChanged(c));
+    const unwatch = this.o.onReadyChange?.((m, ready) => {
+      if (ready === this.connected.has(m)) return;
+      if (!ready) this.connected.delete(m);
+      this.wake?.();
+    });
     try {
       while (!signal.aborted) {
-        this.step(signal);
+        const due = this.step(signal);
         await new Promise<void>((resolve) => {
           const done = () => {
             clearTimeout(timer);
@@ -120,13 +123,15 @@ export class Scheduler {
             this.wake = undefined;
             resolve();
           };
-          const timer = setTimeout(done, this.t.tickMs);
+          const timer = due === undefined ? undefined : setTimeout(done, Math.max(0, due - this.now()));
           signal.addEventListener('abort', done, { once: true });
           this.wake = done;
+          if (signal.aborted) done();
         });
       }
     } finally {
       off();
+      unwatch?.();
       await this.idle();
     }
   }
@@ -140,6 +145,7 @@ export class Scheduler {
   forget(m: string): void {
     for (const s of [this.next, this.on, this.clearing, this.failed]) s.delete(m);
     this.connected.delete(m);
+    this.wake?.();
   }
 
   private settingsOf(m: string): MachineSettings {
@@ -149,7 +155,6 @@ export class Scheduler {
       return Math.max(lo, Math.min(v, hi));
     };
     return {
-      capture: this.keeps(m),
       everyMs: int('history.interval', LIMITS.interval) * 1000,
       params: {
         lines: int('history.lines', LIMITS.lines),
@@ -195,28 +200,37 @@ export class Scheduler {
    * snapshots are to go, else a capture when its interval passed since its
    * last one ended; one at a time per machine. A machine that connected
    * again is asked for its pending clear at once. */
-  step(signal: AbortSignal): void {
+  step(signal: AbortSignal): number | undefined {
     const ms = this.o.ready();
     const readOnly = this.o.readOnly();
-    const all = new Map(ms.map((m) => [m, this.settingsOf(m)]));
     const now = this.now();
     const connected = new Set<string>();
+    let due: number | undefined;
     for (const m of ms) {
       connected.add(m);
-      const s = all.get(m)!;
-      this.observe(m, s.capture);
+      const keeps = this.keeps(m);
+      this.observe(m, keeps);
       const clearing = this.clearing.has(m);
       if (clearing && !this.connected.has(m) && !this.busy.has(m)) this.next.delete(m);
-      if (readOnly || this.busy.has(m) || now < (this.next.get(m) ?? -Infinity)) continue;
+      if (readOnly || this.busy.has(m) || (!clearing && !keeps)) continue;
+      const next = this.next.get(m);
+      if (next !== undefined && now < next) {
+        due = due === undefined ? next : Math.min(due, next);
+        continue;
+      }
       if (clearing) this.track(m, this.clear(signal, m));
-      else if (s.capture) this.track(m, this.capture(signal, m, s));
+      else this.track(m, this.capture(signal, m, this.settingsOf(m)));
     }
     this.connected = connected;
+    return due;
   }
 
   private track(m: string, run: (done: () => void) => Promise<void>): void {
     this.busy.add(m);
-    const p: Promise<void> = run(() => this.busy.delete(m)).finally(() => this.tasks.delete(p));
+    const p: Promise<void> = run(() => this.busy.delete(m)).finally(() => {
+      this.tasks.delete(p);
+      this.wake?.();
+    });
     this.tasks.add(p);
   }
 
@@ -275,7 +289,7 @@ export class Scheduler {
       }
       pc.failures++;
       this.clearing.set(m, pc);
-      this.next.set(m, this.now() + clearWait(pc.failures, this.t));
+      this.next.set(m, this.now() + retryDelay(clearWait(pc.failures, this.t)));
     };
   }
 }

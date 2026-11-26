@@ -6,8 +6,10 @@ import { mkdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { discard } from '#shared/lib/log.ts';
 import { openShared } from '#shared/store/index.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { History, type Kept } from './history.ts';
 import { hubDBFile, keptJSON, Store } from './store.ts';
+import { WorkerStore } from './store-worker.ts';
 import { acc, removeTempDirs, T0, tempDir, testUsage, win } from './testing.ts';
 
 afterAll(removeTempDirs);
@@ -40,6 +42,29 @@ const seedAccount = (): Kept => ({
   notBefore: 0,
 });
 
+extended('a blocked usage transaction leaves the hub thread free to release the writer', async () => {
+  const dir = tempDir();
+  seed(dir);
+  const file = dbOf(dir);
+  const store = new WorkerStore(file, discard);
+  const db = openShared(file);
+  try {
+    const loaded = await store.readHistory();
+    expect(loaded?.stored.accounts).toHaveLength(1);
+    const history = loaded!.stored.history;
+    history.windows.set('claude:acc-2', new Map([['session|', [[1800000000, 5]]]]));
+    db.exec('BEGIN IMMEDIATE');
+    const saving = store.writeHistory(history, loaded!.stored.accounts);
+    await Bun.sleep(100);
+    db.exec('COMMIT');
+    await saving;
+    expect((await store.readHistory())?.stored.history.windows.get('claude:acc-2')?.get('session|')).toEqual([[1800000000, 5]]);
+  } finally {
+    db.close();
+    await store.close();
+  }
+});
+
 const dbOf = (dir: string) => hubDBFile(join(dir, 'settings-dev.json'));
 
 /** The rows of the history's tables in dir's hub database. */
@@ -66,7 +91,7 @@ test('the rows are Go’s', () => {
 // A save before the history was read back (the read failed) does not
 // remove what it did not read: it reads it first, and writes nothing while
 // it cannot; once read, what was recorded meanwhile joins it.
-test('a save after a failed read', () => {
+test('a save after a failed read', async () => {
   const dir = tempDir();
   seed(dir);
   const file = dbOf(dir);
@@ -76,13 +101,13 @@ test('a save after a failed read', () => {
   rmSync(file + '-shm', { force: true });
   mkdirSync(file, { mode: 0o700 });
   const q = testUsage({ dir, ready: [] });
-  q.u.loadHistory();
+  await q.u.loadHistory();
   q.u.history.windows.set('claude:acc-2', new Map([['session|', [[1800000100, 5]]]]));
-  q.u.save(); // cannot read: writes nothing
+  await q.u.save(); // cannot read: writes nothing
   rmSync(file, { recursive: true });
   renameSync(file + '.away', file);
   expect(rowsIn(dir)).toEqual([1, 1, 1]);
-  q.u.save();
+  await q.u.save();
   expect(rowsIn(dir)).toEqual([2, 1, 1]);
   expect([q.u.history.windows.get('claude:acc-1')?.get('weekly|')?.length, q.snap().accounts.length]).toEqual([2, 1]);
 });
@@ -134,32 +159,32 @@ test('merge', () => {
 });
 
 // A save writes what changed and removes what memory no longer has.
-test('a save removes what is gone', () => {
+test('a save removes what is gone', async () => {
   const dir = tempDir();
   seed(dir);
   const p = testUsage({ dir, ready: [] });
-  p.u.loadHistory();
+  await p.u.loadHistory();
   p.u.history.windows.set('claude:acc-2', new Map([['session|', [[1800000000, 5]]]]));
   p.u.accounts.clear();
   p.u.history.alerts.clear();
-  p.u.save();
+  await p.u.save();
   expect(rowsIn(dir)).toEqual([2, 0, 0]);
   const q = testUsage({ dir, ready: [] });
-  q.u.loadHistory();
+  await q.u.loadHistory();
   expect(q.u.history.windows.get('claude:acc-2')?.get('session|')).toEqual([[1800000000, 5]]);
 });
 
 // Tables of a newer version are read, not written.
-test('a newer version', () => {
+test('a newer version', async () => {
   const dir = tempDir();
   seed(dir);
   const db = openShared(dbOf(dir));
   db.run("UPDATE store_features SET version = version + 1 WHERE feature = 'usage'");
   db.close();
   const q = testUsage({ dir, ready: [] });
-  q.u.loadHistory();
+  await q.u.loadHistory();
   expect(q.snap().accounts).toHaveLength(1);
   q.u.accounts.clear();
-  q.u.save();
+  await q.u.save();
   expect(rowsIn(dir)[1]).toBe(1);
 });

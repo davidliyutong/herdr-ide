@@ -86,17 +86,18 @@ export class AgentSession implements MachineSession {
     return p ? { ...p } : { open: 0, last: 0 };
   }
 
-  /** Counts a pipe to path opened; the function returned counts it closed. */
-  piped(path: string): () => void {
+  /** Counts the pipe while it connects and runs. The bridge's last
+   * connection time advances only when the dial succeeds. */
+  piping(path: string): { opened(): void; closed(): void } {
     const p = this.pipes.get(path) ?? { open: 0, last: 0 };
     p.open++;
-    p.last = performance.now();
     this.pipes.set(path, p);
-    let done = false;
-    return () => {
-      if (done) return;
-      done = true;
-      p.open--;
+    return {
+      opened: () => (p.last = performance.now()),
+      closed: () => {
+        p.open--;
+        if (p.open === 0 && p.last === 0) this.pipes.delete(path);
+      },
     };
   }
 
@@ -429,7 +430,12 @@ export class Agent {
       closeStream(conn.stream);
       return;
     }
-    await pipeUnix(conn, path, () => s.piped(path));
+    const pipe = s.piping(path);
+    try {
+      await pipeUnix(conn, path, pipe.opened);
+    } finally {
+      pipe.closed();
+    }
   }
 }
 

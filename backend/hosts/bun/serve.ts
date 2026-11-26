@@ -4,7 +4,7 @@
 // end-to-end tests) owns it: the hub answers a ready line on stdout and
 // stops when stdin closes. The desktop app runs the hub in process
 // instead (hosts/electron).
-import { appendFileSync, openSync, readFileSync, closeSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import type { Server, ServerWebSocket } from 'bun';
 import { HUB_BIN, NAME, validInstance } from '#shared/lib/brand.ts';
@@ -13,7 +13,7 @@ import { other as otherLoopback, inUse } from '#shared/host/loopback.ts';
 import { VERSION } from '#shared/proto/agentproto/index.ts';
 import { parseDuration } from '#shared/lib/gotime.ts';
 import { downloadURLRefusal } from '#shared/lib/urls.ts';
-import { auditLog, noAudit } from '#kernel/audit.ts';
+import { noAudit } from '#kernel/audit.ts';
 import type { Channel, ChannelHandlers, ChannelOpen, Message } from '#kernel/channel.ts';
 import { hubModules } from '#kernel/config/registry.ts';
 import { settingFlags } from '#kernel/config/settings/index.ts';
@@ -25,6 +25,7 @@ import { controlDir as makeControlDir } from '#kernel/machines/transport/control
 import { composeHub, hubFeatures } from '#hosts/common/compose.ts';
 import { openPayloads } from './payloads.ts';
 import { abortable } from './abortable.ts';
+import { auditFile } from './audit-file.ts';
 import { bunPty } from './pty.ts';
 
 /** The flags of serve besides the settings' (settingFlags). */
@@ -182,12 +183,7 @@ export async function serve(argv: string[]): Promise<void> {
       );
   }
 
-  let audit = noAudit;
-  if (f['audit-log']) {
-    closeSync(openSync(f['audit-log'], 'a', 0o600));
-    const path = f['audit-log'];
-    audit = auditLog((line) => appendFileSync(path, line));
-  }
+  const audit = f['audit-log'] ? await auditFile(f['audit-log'], logger) : undefined;
   const guard = new Guard({ allowedOrigins: f['allowed-origin'], proxySecret: secret, logger });
   const { hub, specs, run } = composeHub({
     instance,
@@ -200,7 +196,7 @@ export async function serve(argv: string[]): Promise<void> {
     ssh: f.ssh,
     only: f.machine,
     guard,
-    audit,
+    audit: audit?.audit ?? noAudit,
     readOnly: f['read-only'],
     userHeader: f['user-header'],
     logger,
@@ -280,5 +276,6 @@ export async function serve(argv: string[]): Promise<void> {
   void server.stop(true);
   void o.other?.stop(true);
   await running;
+  await audit?.close();
   process.exit(0);
 }

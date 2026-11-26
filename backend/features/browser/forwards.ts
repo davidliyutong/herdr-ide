@@ -151,12 +151,19 @@ class Entry {
 
 const key = (m: string, port: number) => `${m}\n${port}`;
 
+interface PendingForward {
+  m: string;
+  port: number;
+  cancel: AbortController;
+  result: Promise<Entry>;
+}
+
 export class Forwards {
   private readonly o: ForwardsOptions;
   private readonly now: () => number;
   private readonly entries = new Map<string, Entry>();
   /** Forwards being made: a second ask waits for the first. */
-  private readonly making = new Map<string, Promise<Entry>>();
+  private readonly making = new Map<string, PendingForward>();
   private closed = false;
 
   constructor(o: ForwardsOptions) {
@@ -171,7 +178,10 @@ export class Forwards {
     const k = key(m, port);
     // One forward per port: a second ask waits for the one being made, and
     // makes it itself only when that failed.
-    for (let pending = this.making.get(k); pending; pending = this.making.get(k)) await pending.catch(() => undefined);
+    for (let pending = this.making.get(k); pending; pending = this.making.get(k)) {
+      await pending.result.catch(() => undefined);
+      if (pending.cancel.signal.aborted) throw new Fail('listen', 400, 'the forward was stopped');
+    }
     const have = this.entries.get(k);
     if (have) {
       have.used = this.now();
@@ -180,25 +190,28 @@ export class Forwards {
     if (this.closed) throw new Fail('listen', 400, 'the hub is stopping');
     const max = this.o.maxForwards ?? MAX_FORWARDS;
     if (this.entries.size + this.making.size >= max) throw new Fail('too_many', 400, `at most ${max} forwards`);
-    const making = this.make(m, port);
-    this.making.set(k, making);
+    const cancel = new AbortController();
+    const result = this.make(m, port, cancel.signal);
+    this.making.set(k, { m, port, cancel, result });
     try {
-      return (await making).public();
+      const entry = await result;
+      if (cancel.signal.aborted) throw new Fail('listen', 400, 'the forward was stopped');
+      return entry.public();
     } finally {
       this.making.delete(k);
     }
   }
 
-  private async make(m: string, port: number): Promise<Entry> {
+  private async make(m: string, port: number, signal: AbortSignal): Promise<Entry> {
     let l: Listening;
     try {
       l = await (this.o.listen ?? listenLoopback)(port);
     } catch (e) {
       throw new Fail('listen', 400, e instanceof Error ? e.message : String(e));
     }
-    if (this.closed) {
+    if (signal.aborted) {
       for (const s of l.servers) s.close();
-      throw new Fail('listen', 400, 'the hub is stopping');
+      throw new Fail('listen', 400, 'the forward was stopped');
     }
     const f = new Entry(m, port, l, this.now());
     this.entries.set(key(m, port), f);
@@ -220,13 +233,20 @@ export class Forwards {
   }
 
   /** Ends the forwards match picks; how many. */
-  closeWhere(match: (f: { m: string; port: number }) => boolean): number {
+  closeWhere(match: (f: { m: string; port: number; used?: number }) => boolean): number {
+    let cancelled = 0;
+    for (const [k, pending] of this.making) {
+      if (!pending.cancel.signal.aborted && match(pending)) {
+        pending.cancel.abort();
+        if (!this.entries.has(k)) cancelled++;
+      }
+    }
     const gone = [...this.entries].filter(([, f]) => match(f));
     for (const [k, f] of gone) {
       this.entries.delete(k);
       f.end();
     }
-    return gone.length;
+    return gone.length + cancelled;
   }
 
   /** Ends the forward of port on machine m; whether there was one. */
@@ -240,7 +260,7 @@ export class Forwards {
    * connection open cannot keep a way into the machine. */
   reap(idleMs: number, off = false): void {
     const now = this.now();
-    this.closeWhere((f) => off || (idleMs > 0 && now - (f as Entry).used > idleMs));
+    this.closeWhere((f) => off || (idleMs > 0 && f.used !== undefined && now - f.used > idleMs));
   }
 
   /** Ends every forward and makes no more. */

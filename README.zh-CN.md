@@ -7,7 +7,7 @@
 > 英文版 README 为主版本，本文与其保持相同的章节结构。
 > 参数、快捷键等参考资料统一维护在英文文档 [docs/reference.md](docs/reference.md) 中。
 
-![一个标签页里的两台 SSH 机器：agent 收件箱里 Claude Code 在等待确认、codex 已完成，分屏里是 git 历史和 GPU 监控](docs/images/overview.zh-CN.png)
+![一个标签页里的工作站和 GPU 服务器：agent 收件箱里 Claude Code 在等待处理，分屏里是智能体对话和终端，旁边是 GPU 监控](docs/images/overview.zh-CN.png)
 
 ## 功能
 
@@ -59,16 +59,67 @@
 **VS Code 就在终端旁边**：agent 输出里的 `路径:行号` 会在窗格所在机器的 VS Code 里打开；
 窗格标题栏上的按钮可以打开它的文件夹、diff 或 Git Graph。
 
-![左边是 Claude Code 对改动的说明，右边 VS Code 里是这处改动的 diff 和 Git Graph](docs/images/vscode.zh-CN.png)
+![固定的 nanoGPT 项目，VS Code 窗格中打开了 train.py](docs/images/vscode.zh-CN.png)
 
 **程序窗口**：远端 Linux 机器上 matplotlib 打开的窗口，会出现在单独的浏览器窗口里，支持鼠标和键盘。
 
-![workstation 上的 matplotlib 动画显示在单独的浏览器窗口里，下面是启动它的窗格](docs/images/windows.zh-CN.png)
+![GPU 服务器上固定的双源干涉图，合成在启动它的终端画面上](docs/images/windows.zh-CN.png)
 
-**快速查看**：在终端里右键或 ⌘/Ctrl+点击路径即可预览；
-用箭头可以翻看同一目录下的其他文件。
+**快速查看**：不用离开工作区即可预览图片、视频、音频、PDF、代码、Markdown 或目录。
 
-![从文件列表里预览一张训练 loss 曲线](docs/images/quicklook.zh-CN.png)
+![从文件资源管理器里预览一张训练 loss 曲线](docs/images/quicklook.zh-CN.png)
+
+**智能体对话**：不经终端运行的智能体把 Markdown、公式、工具结果和 diff 流式写入与终端相同的布局，权限请求在卡片中回答。
+
+![训练审查对话，包含 diff 和修改文件的权限请求](docs/images/chat.zh-CN.png)
+
+**文件资源管理器**：跟随当前终端的目录，在编辑器中安全保存，不覆盖机器上同时发生的修改。
+
+![nanoGPT 文件树和编辑器里的 train.py](docs/images/files.zh-CN.png)
+
+**Git**：不用 VS Code 也能使用源代码管理、分支与标签图和 Monaco diff。
+
+![源代码管理面板、固定的提交图和 train.py 的 diff](docs/images/git.zh-CN.png)
+
+**系统监控与任务管理器**：实时机器资源和可搜索的进程树显示在同一个窗格里。
+
+![GPU 服务器的 CPU、内存、两块 GPU、网络、磁盘和训练进程](docs/images/monitor.zh-CN.png)
+
+**设置**：搜索设置，选择外观和主题，配置插件和快捷键。
+
+![外观设置里的配色主题，以及插件和快捷键导航](docs/images/settings.zh-CN.png)
+
+**明确的浏览器安全确认**：在浏览器中启用 VS Code 前，需要确认其扩展和 webview 能访问什么。
+
+![VS Code 浏览器风险确认，已勾选了解风险](docs/images/security.zh-CN.png)
+
+**浏览器与端口转发**：通过回环端口转发打开机器 localhost 上的服务，并查看监听和已转发的端口。
+
+![浏览器窗格里的远端训练仪表盘和端口转发列表](docs/images/browser.zh-CN.png)
+
+**项目搜索**：使用筛选条件搜索，并在编辑器里打开匹配项。
+
+![Python 文件中的 learning_rate 搜索结果和匹配的源码](docs/images/search.zh-CN.png)
+
+**变量库**：加密保存变量并按机器授权，变量值保持隐藏。
+
+![已解锁的变量库，包含三个演示变量，未显示变量值](docs/images/vault.zh-CN.png)
+
+**AI 用量**：比较不同服务商和机器上的订阅窗口、重置时间、余额和按 API 价格折算的费用。
+
+![固定的 Claude、Codex、Kimi Code 和 Grok 用量，以及每日费用图](docs/images/usage.zh-CN.png)
+
+**终端历史**：恢复的工作区保留分屏布局，并在每个新 shell 上方显示保存的输出。
+
+![两个恢复后的终端，以及保存的训练和 GPU 输出](docs/images/terminal-history.zh-CN.png)
+
+**公式**：鼠标停在终端里的 LaTeX 公式上，即可查看排版并复制源码。
+
+![终端里的学习率公式和 KaTeX 弹出预览](docs/images/formula.zh-CN.png)
+
+**桌面应用**：同一套工作区和功能在 Electron 外壳中运行，hub 在应用内运行。
+
+![隔离的桌面应用，显示终端、文件资源管理器和 train.py](docs/images/desktop.zh-CN.png)
 
 ## 快速开始
 

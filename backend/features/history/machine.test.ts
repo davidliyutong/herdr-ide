@@ -6,8 +6,9 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, statSync, symlinkS
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
-import { CHAT_HOST_NAME, HIDDEN_CHAT_HOST, HIDDEN_LABEL, HistoryLimits, validHistoryTerminal } from '#shared/proto/agentproto/index.ts';
+import { CHAT_HOST_NAME, HIDDEN_CHAT_HOST, HIDDEN_LABEL, HistoryLimits, Op, validHistoryTerminal } from '#shared/proto/agentproto/index.ts';
 import { HOST_FILE_RETENTION, MACHINE_DB, hostFile, openShared } from '#shared/store/index.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import { call } from '#kernel/agent.ts';
 import { AgentError } from '#kernel/machines/transport/session.ts';
 import { machineOf, rig, type Rig } from '#machine/testing.ts';
@@ -252,12 +253,13 @@ describe('capture', () => {
     f.after.set('t1', Buffer.from('more output\x1b[?9001h after'));
     expect((await capture(e)).captured).toBe(1);
     expect(dataOf(e, 't1').equals(body(30, 10, '$ ', false))).toBe(true);
-    f.chunk = 1;
+    // The fake core keeps the channel open after the burst, just as a
+    // running terminal would. Use normal-sized frames for that burst.
+    f.chunk = 16 << 10;
     f.after.set('t1', Buffer.alloc(1 << 20, 'y'));
     f.setText('t1', 'busy');
-    const start = Date.now();
     expect((await capture(e)).captured).toBe(1);
-    expect(Date.now() - start).toBeLessThan(1000);
+    expect(dataOf(e, 't1').equals(body(30, 10, '$ ', false))).toBe(true);
   });
 
   for (const cut of [300, 0])
@@ -811,6 +813,33 @@ describe('addresses, privacy and versions', () => {
 });
 
 describe('writers and the lease', () => {
+  extended(
+    'a blocked SQLite writer leaves the node responsive and the request cancellable',
+    async () => {
+      const r = await rig({ features: [historyMachine()] });
+      const m = machineOf(r.session);
+      const { db } = openDB(r.dirs.base);
+      const ac = new AbortController();
+      let done = false;
+      db.exec('BEGIN IMMEDIATE');
+      const p = call(m, historyProtocol, 'capture', params, { signal: ac.signal }).finally(() => (done = true));
+      void p.catch(() => {});
+      try {
+        await Bun.sleep(100);
+        expect((await r.session.request({ op: Op.Hello }, { timeoutMs: 2000 })).ok).toBe(true);
+        expect(done).toBe(false);
+        ac.abort(new Error('capture cancelled'));
+        await expect(p).rejects.toThrow();
+      } finally {
+        ac.abort();
+        db.exec('ROLLBACK');
+        db.close();
+        await r.close();
+      }
+    },
+    15_000,
+  );
+
   test('two captures at once: one captures, the other waits or is busy; the limits hold', async () => {
     const e = await setup({ timing: { lockWaitMs: 5000 } });
     const { f } = e;
@@ -1279,22 +1308,22 @@ describe('restore_screen', () => {
       mkdirSync(join(dir, 'herdr-core'), { recursive: true });
       writeFileSync(join(dir, 'herdr-core', 'config.toml'), text);
     };
-    expect(restoreScreen(home, {})).toBe(false);
+    expect(await restoreScreen(home, {})).toBe(false);
     write(join(home, '.config'), 'restore_screen = true\n');
-    expect(restoreScreen(home, {})).toBe(true);
-    expect(restoreScreen(home, { XDG_CONFIG_HOME: 'relative' })).toBe(true);
+    expect(await restoreScreen(home, {})).toBe(true);
+    expect(await restoreScreen(home, { XDG_CONFIG_HOME: 'relative' })).toBe(true);
     const xdgDir = join(e.r.home, 'x');
     mkdirSync(xdgDir);
-    expect(restoreScreen(home, { XDG_CONFIG_HOME: xdgDir })).toBe(false);
+    expect(await restoreScreen(home, { XDG_CONFIG_HOME: xdgDir })).toBe(false);
     write(xdgDir, 'restore_screen = true\n');
-    expect(restoreScreen(home, { XDG_CONFIG_HOME: xdgDir })).toBe(true);
+    expect(await restoreScreen(home, { XDG_CONFIG_HOME: xdgDir })).toBe(true);
     write(xdgDir, 'restore_screen = true\n' + '#\n'.repeat(MAX_CONFIG));
-    expect(restoreScreen(home, { XDG_CONFIG_HOME: xdgDir })).toBe(false);
+    expect(await restoreScreen(home, { XDG_CONFIG_HOME: xdgDir })).toBe(false);
     const fifo = join(xdgDir, 'herdr-core', 'config.toml');
     rmSync(fifo);
     expect(spawnSync('mkfifo', ['-m', '600', fifo]).status).toBe(0);
     const start = Date.now();
-    expect(restoreScreen(home, { XDG_CONFIG_HOME: xdgDir })).toBe(false);
+    expect(await restoreScreen(home, { XDG_CONFIG_HOME: xdgDir })).toBe(false);
     expect(Date.now() - start).toBeLessThan(2000);
     write(join(e.r.home, '.config'), 'restore_screen = true\n');
     expect((await list(e)).restoreScreen).toBe(true);

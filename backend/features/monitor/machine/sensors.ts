@@ -74,10 +74,12 @@ async function numbered(io: Bounded, root: string, prefix: string, ms: number): 
 }
 
 /** N of a file <kind>N_input. */
-function sensorIndex(name: string, kind: string): number | null {
-  const m = new RegExp(`^${kind}(\\d+)_input$`).exec(name);
+function sensorIndex(name: string, pattern: RegExp): number | null {
+  const m = pattern.exec(name);
   return m ? Number(m[1]) : null;
 }
+const TEMP_INPUT = /^temp(\d+)_input$/;
+const FAN_INPUT = /^fan(\d+)_input$/;
 
 /** The temperatures and fans of the hwmon class under sysRoot (normally
  * /sys): hwmon*\/name names the chip (a second chip of one driver is told
@@ -85,8 +87,10 @@ function sensorIndex(name: string, kind: string): number | null {
  * tempN_label, _max and _crit, fanN_input in RPM with fanN_label, _min and
  * _max; without a temperature there, the thermal zones' (thermal_zone*\/type
  * and temp, their hot or passive and critical trip points). */
-export async function sysfsSensors(io: Bounded, sysRoot: string, ms: number): Promise<Sensors | undefined> {
+export async function sysfsSensors(io: Bounded, sysRoot: string, ms: number, signal?: AbortSignal): Promise<Sensors | undefined> {
+  signal?.throwIfAborted();
   const text = async (p: string) => {
+    signal?.throwIfAborted();
     const s = await io.text(p, ms);
     return s === null ? '' : truncateBytes(s.trim(), 64);
   };
@@ -103,6 +107,7 @@ export async function sysfsSensors(io: Bounded, sysRoot: string, ms: number): Pr
   const hwmon = join(sysRoot, 'class', 'hwmon');
   const seen = new Map<string, number>();
   for (const d of await numbered(io, hwmon, 'hwmon', ms)) {
+    signal?.throwIfAborted();
     const dir = join(hwmon, d);
     let chip = (await text(join(dir, 'name'))) || d;
     seen.set(chip, (seen.get(chip) ?? 0) + 1);
@@ -110,11 +115,11 @@ export async function sysfsSensors(io: Bounded, sysRoot: string, ms: number): Pr
     const names = await io.names(dir, ms);
     if (!names) continue;
     const ts = names
-      .map((n) => sensorIndex(n, 'temp'))
+      .map((n) => sensorIndex(n, TEMP_INPUT))
       .filter((n): n is number => n !== null)
       .sort((a, b) => a - b);
     const fs = names
-      .map((n) => sensorIndex(n, 'fan'))
+      .map((n) => sensorIndex(n, FAN_INPUT))
       .filter((n): n is number => n !== null)
       .sort((a, b) => a - b);
     for (const n of ts) {
@@ -143,6 +148,7 @@ export async function sysfsSensors(io: Bounded, sysRoot: string, ms: number): Pr
     }
   }
   if (!temps.length) {
+    signal?.throwIfAborted();
     const thermal = join(sysRoot, 'class', 'thermal');
     for (const d of await numbered(io, thermal, 'thermal_zone', ms)) {
       if (temps.length >= MAX_SENSORS) break;

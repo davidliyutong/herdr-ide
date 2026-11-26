@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { redactURLs, shownURL, downloadURLRefusal } from '#shared/lib/urls.ts';
+import { waitForResult } from '#shared/lib/wait.ts';
 import { ChunkWriter, readLine } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import { closeStream } from '#shared/proto/yamux.ts';
@@ -201,12 +202,14 @@ export class SdkProvision {
    * said; without retry, a failure on the same agent session within
    * SDK_FAILURE_MS fails again without asking. */
   async ensure(m: Machine, signal: AbortSignal, o: EnsureOptions = {}): Promise<void> {
+    signal.throwIfAborted();
     const s = this.state(m.id);
     const before = s.lock;
     let release!: () => void;
     s.lock = new Promise((r) => (release = r));
-    await before;
     try {
+      await waitForResult(before, signal);
+      signal.throwIfAborted();
       const sess = m.connected ? m.live() : null;
       if (sess && s.session === sess && this.now - s.at < SDK_RECHECK_MS) return;
       const f = s.failure;
@@ -222,7 +225,8 @@ export class SdkProvision {
       s.at = this.now;
       s.failure = null;
     } finally {
-      release();
+      // A cancelled waiter must leave the next caller behind its predecessor.
+      void before.then(release);
     }
   }
 
@@ -299,6 +303,7 @@ export class SdkProvision {
   /** The tarball as the hub has it: from a seed directory, its cache or
    * its own download, checked against the pinned integrity. */
   tarball(reasons: string[] = [], signal?: AbortSignal): Promise<HubTarball> {
+    if (signal?.aborted) return Promise.reject(signal.reason);
     if (!this.load) {
       // Shared: no one machine's signal ends it, its own bound does.
       const p = this.resolve(reasons);
@@ -315,12 +320,7 @@ export class SdkProvision {
         if (this.load === bounded) this.load = null;
       });
     }
-    const p = this.load;
-    if (!signal) return p;
-    return Promise.race([
-      p,
-      new Promise<never>((_, rej) => signal.addEventListener('abort', () => rej(signal.reason as Error), { once: true })),
-    ]);
+    return waitForResult(this.load, signal);
   }
 
   private async resolve(reasons: string[]): Promise<HubTarball> {

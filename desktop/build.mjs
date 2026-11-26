@@ -65,8 +65,12 @@ const notShipped = {
   },
 };
 await build({
-  entryPoints: ['../backend/hosts/electron/main.ts'],
-  outfile: 'dist/hub.mjs',
+  entryPoints: [
+    { in: '../backend/hosts/electron/main.ts', out: 'hub' },
+    { in: '../backend/hosts/common/hub-state-worker.ts', out: 'hub-state-worker' },
+  ],
+  outdir: 'dist',
+  outExtension: { '.js': '.mjs' },
   bundle: true,
   platform: 'node',
   target: 'node24',
@@ -81,12 +85,14 @@ await build({
   logLevel: 'warning',
 });
 const loaded = new Set(
-  [...readFileSync('dist/hub.mjs', 'utf8').matchAll(/\b(?:require|__require|createRequire\([^()]*\))\(\s*["'`]([^"'`]+)["'`]\s*\)/g)].map(
-    (m) => m[1],
+  ['dist/hub.mjs', 'dist/hub-state-worker.mjs'].flatMap((path) =>
+    [...readFileSync(path, 'utf8').matchAll(/\b(?:require|__require|createRequire\([^()]*\))\(\s*["'`]([^"'`]+)["'`]\s*\)/g)].map(
+      (m) => m[1],
+    ),
   ),
 );
 const foreign = [...loaded].filter((m) => !isBuiltin(m) && !SHIPPED.has(m));
-if (foreign.length) throw new Error(`dist/hub.mjs loads modules the app does not carry: ${foreign.join(', ')}`);
+if (foreign.length) throw new Error(`the hub loads modules the app does not carry: ${foreign.join(', ')}`);
 
 // macOS: the Secure Enclave helper (helper/build.mjs), which the packaged app
 // carries in Contents/Helpers and the development run finds here. Without

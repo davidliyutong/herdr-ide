@@ -17,6 +17,7 @@
 // server's to the byte: a call with arguments a tool does not take is
 // refused with "invalid params" (-32602), never run.
 import { connect, type Socket } from 'node:net';
+import { once } from 'node:events';
 import type { Readable, Writable } from 'node:stream';
 import { ProtocolError, ProtocolErrorCode, Server, type CallToolResult, type Tool } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
@@ -92,23 +93,19 @@ export interface McpOptions {
 
 /** A connection to the socket at path. */
 export function dialSocket(path: string): (signal: AbortSignal) => Promise<Socket> {
-  return (signal) =>
-    new Promise((resolve, reject) => {
-      const c = connect(path);
-      const fail = (e: Error) => {
-        c.destroy();
-        reject(e);
-      };
-      const abort = () => fail(new Error('cancelled'));
-      signal.addEventListener('abort', abort, { once: true });
-      c.once('error', fail);
-      c.once('connect', () => {
-        signal.removeEventListener('abort', abort);
-        c.off('error', fail);
-        c.on('error', () => {});
-        resolve(c);
-      });
-    });
+  return async (signal) => {
+    signal.throwIfAborted();
+    const c = connect(path);
+    c.on('error', () => {});
+    try {
+      await once(c, 'connect', { signal });
+      signal.throwIfAborted();
+      return c;
+    } catch (e) {
+      c.destroy();
+      throw e;
+    }
+  };
 }
 
 class Refused extends Error {}
@@ -127,6 +124,7 @@ export async function ask(o: McpOptions, req: VaultRequest, signal: AbortSignal)
   const end = () => c.destroy();
   signal.addEventListener('abort', end, { once: true });
   try {
+    signal.throwIfAborted();
     await writeLine(c, req);
     let line: string;
     try {

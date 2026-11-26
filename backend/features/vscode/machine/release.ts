@@ -60,22 +60,33 @@ export function download(
 export const unpack = (tarball: string, dest: string, maxUnpacked = RELEASE_LIMITS.maxUnpacked): Promise<void> =>
   unpackTar(tarball, dest, maxUnpacked);
 
+interface InstallOptions {
+  expected?: string;
+  what?: string;
+  env: Record<string, string>;
+  logger: Logger;
+  limits?: Partial<ReleaseLimits>;
+  now?: Date;
+  join?: (digest: string, stage: () => Promise<void>) => Promise<void>;
+  promote?: (publish: () => Promise<void>) => Promise<void>;
+}
+
 /** Installs the staged tarball as release version: checked against expected
  * (the digest the hub knows; none when it knows none) before anything is
  * unpacked, unpacked beside the releases, accepted when it holds
  * bin/code-server and its Node runs here, then put in place of what was
  * there. Other releases unused for long go. The staged file stays the
  * caller's. */
-export async function install(
-  l: Layout,
-  version: string,
-  tarball: Staged,
-  o: { expected?: string; what?: string; env: Record<string, string>; logger: Logger; limits?: Partial<ReleaseLimits>; now?: Date },
-): Promise<void> {
-  const lim = { ...RELEASE_LIMITS, ...o.limits };
+export async function install(l: Layout, version: string, tarball: Staged, o: InstallOptions): Promise<void> {
   const want = (o.expected ?? '').toLowerCase();
   if (want && tarball.digest !== want)
     throw new Error(`${o.what ?? 'the tarball'}: sha256 ${tarball.digest} does not match expected ${want}`);
+  const stage = () => installVerified(l, version, tarball, o);
+  return o.join ? o.join(tarball.digest, stage) : stage();
+}
+
+async function installVerified(l: Layout, version: string, tarball: Staged, o: InstallOptions): Promise<void> {
+  const lim = { ...RELEASE_LIMITS, ...o.limits };
   const tmp = staged(l, 'install');
   await mkdir(tmp, { mode: 0o755 });
   try {
@@ -88,17 +99,26 @@ export async function install(
     const now = o.now ?? new Date();
     await utimes(tmp, now, now);
     const final = releaseDir(l, version);
-    const old = staged(l, 'old');
-    let moved = false;
-    try {
-      await rename(final, old);
-      moved = true;
-    } catch {
-      // none there
-    }
-    await rename(tmp, final);
-    if (moved) await rm(old, { recursive: true, force: true });
-    await pruneReleases(l, posix.basename(final), now, o.logger);
+    const publish = async () => {
+      const old = staged(l, 'old');
+      let moved = false;
+      try {
+        await rename(final, old);
+        moved = true;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+      }
+      try {
+        await rename(tmp, final);
+      } catch (e) {
+        if (moved) await rename(old, final);
+        throw e;
+      }
+      if (moved) await rm(old, { recursive: true, force: true });
+      await pruneReleases(l, posix.basename(final), now, o.logger);
+    };
+    if (o.promote) await o.promote(publish);
+    else await publish();
   } finally {
     await rm(tmp, { recursive: true, force: true, maxRetries: 3 });
   }

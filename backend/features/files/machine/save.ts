@@ -15,24 +15,8 @@
 // (partial_write). Through a symbolic link the link's target is written
 // (the caller resolves it); the link stays.
 import { randomBytes } from 'node:crypto';
-import {
-  chmodSync,
-  closeSync,
-  constants,
-  fstatSync,
-  fsyncSync,
-  ftruncateSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  read,
-  readdirSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  write,
-  type Stats,
-} from 'node:fs';
+import { close, constants, fstat, fstatSync, fsync, ftruncate, lstatSync, read, unlinkSync, write, type Stats } from 'node:fs';
+import { chmod, lstat, mkdir, open, readdir, realpath, stat, unlink, type FileHandle } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { promisify } from 'node:util';
 import { Fail } from '#shared/lib/fail.ts';
@@ -43,7 +27,28 @@ import { codeOf, entryOf, errCode } from './guard.ts';
 
 const { basename, dirname, join } = posix;
 const writeAsync = promisify(write);
+const syncAsync = promisify(fsync);
 const readAsync = promisify(read);
+const fstatAsync = promisify(fstat);
+const truncateAsync = promisify(ftruncate);
+const closeAsync = promisify(close);
+const saving = new Map<string, Promise<unknown>>();
+
+/** A save rechecks the descriptor after earlier writes to the same inode,
+ * including writes through another hard link. */
+async function withFileWrite<T>(path: string, fd: number, write: () => Promise<T>): Promise<T> {
+  const file = await fstatAsync(fd);
+  if (!file.isFile()) throw notRegular(path);
+  const key = `${file.dev}:${file.ino}`;
+  const previous = saving.get(key);
+  const run = (previous?.catch(() => {}) ?? Promise.resolve()).then(write);
+  saving.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (saving.get(key) === run) saving.delete(key);
+  }
+}
 
 /** The private directory (0700) of the data directory an upload is
  * received into before it is written to its file. */
@@ -113,9 +118,9 @@ export function conflict(p: string, fi: Stats | null): Fail {
   return new Fail('conflict', 409, JSON.stringify(e));
 }
 
-const lstatOrNull = (p: string): Stats | null => {
+const lstatOrNull = async (p: string): Promise<Stats | null> => {
   try {
-    return lstatSync(p);
+    return await lstat(p);
   } catch {
     return null;
   }
@@ -132,11 +137,11 @@ export function expected(p: string, fi: Stats, w: Expect): void {
 
 /** Checks the file at p before the text is received; the save checks it
  * again on the file it opens. */
-export function precondition(p: string, w: Expect): void {
+export async function precondition(p: string, w: Expect): Promise<void> {
   if (w.force) return;
   let fi: Stats;
   try {
-    fi = statSync(p);
+    fi = await stat(p);
   } catch (e) {
     if (errCode(e) !== 'ENOENT') throw codeOf(e);
     if (w.expect?.exists) throw conflict(p, null);
@@ -148,11 +153,11 @@ export function precondition(p: string, w: Expect): void {
 
 /** The file a symbolic link at p names (which may not exist yet): p's real
  * path, or p itself when nothing is there. */
-export function target(p: string): string {
+export async function target(p: string): Promise<string> {
   try {
-    return realpathSync(p);
+    return await realpath(p);
   } catch (e) {
-    if (errCode(e) === 'ENOENT' && !lstatOrNull(p)) return p; // a new file
+    if (errCode(e) === 'ENOENT' && !(await lstatOrNull(p))) return p; // a new file
     throw codeOf(e);
   }
 }
@@ -166,7 +171,7 @@ export function target(p: string): string {
  * conflict, also when forced), without blocking (a FIFO) and without
  * becoming a controlling terminal, and must be a regular file. */
 export async function writeFile(p: string, src: Source, w: Expect, fill: Fill = copyInto, mayCreate = true): Promise<Entry> {
-  const lfi = lstatOrNull(p);
+  const lfi = await lstatOrNull(p);
   // A device or a FIFO is never opened.
   if (lfi && !lfi.isFile() && !lfi.isSymbolicLink()) throw notRegular(p);
   if (!lfi) {
@@ -184,7 +189,7 @@ export async function writeFile(p: string, src: Source, w: Expect, fill: Fill = 
       case 'ELOOP':
         // A link since the caller resolved the path: the pane says the
         // file changed.
-        throw conflict(p, lstatOrNull(p));
+        throw conflict(p, await lstatOrNull(p));
       case 'EISDIR':
       case 'ENXIO':
         throw notRegular(p);
@@ -192,18 +197,20 @@ export async function writeFile(p: string, src: Source, w: Expect, fill: Fill = 
     throw codeOf(e);
   }
   try {
-    const fi = fstatSync(fd);
-    if (!fi.isFile()) throw notRegular(p);
-    expected(p, fi, w);
-    try {
-      ftruncateSync(fd, 0);
-    } catch (e) {
-      throw codeOf(e); // nothing changed
-    }
-    await fillSynced(fd, src, fill);
-    return entryOf(p, fstatSync(fd));
+    return await withFileWrite(p, fd, async () => {
+      const fi = await fstatAsync(fd);
+      if (!fi.nlink) throw conflict(p, await lstatOrNull(p));
+      expected(p, fi, w);
+      try {
+        await truncateAsync(fd, 0);
+      } catch (e) {
+        throw codeOf(e); // nothing changed
+      }
+      await fillSynced(fd, src, fill);
+      return entryOf(p, await fstatAsync(fd));
+    });
   } finally {
-    closeQuietlyOr(fd);
+    await closeAsync(fd).catch(() => {});
   }
 }
 
@@ -216,7 +223,7 @@ export async function createFile(p: string, src: Source, w: Expect, fill: Fill =
   if (!w.force && w.expect?.exists) throw conflict(p, null); // removed since it was loaded
   let dir: string;
   try {
-    dir = realpathSync(dirname(p));
+    dir = await realpath(dirname(p));
   } catch (e) {
     throw codeOf(e);
   }
@@ -231,39 +238,33 @@ export async function createFile(p: string, src: Source, w: Expect, fill: Fill =
           const entry = await writeFile(real, src, { force: true }, fill, false);
           return { ...entry, path: p };
         }
-        throw conflict(p, lstatOrNull(real));
+        throw conflict(p, await lstatOrNull(real));
       case 'ELOOP':
-        throw conflict(p, lstatOrNull(real)); // a directory became a link
+        throw conflict(p, await lstatOrNull(real)); // a directory became a link
     }
     throw codeOf(e);
   }
   try {
-    try {
-      await fillSynced(fd, src, fill);
-    } catch (e) {
-      removeOwn(real, fd);
-      throw codeOf(e instanceof PartialError ? e.cause : e);
-    }
-    return entryOf(p, fstatSync(fd));
+    return await withFileWrite(p, fd, async () => {
+      try {
+        await fillSynced(fd, src, fill);
+      } catch (e) {
+        removeOwn(real, fd);
+        throw codeOf(e instanceof PartialError ? e.cause : e);
+      }
+      return entryOf(p, await fstatAsync(fd));
+    });
   } finally {
-    closeQuietlyOr(fd);
+    await closeAsync(fd).catch(() => {});
   }
 }
 
 async function fillSynced(fd: number, src: Source, fill: Fill): Promise<void> {
   try {
     await fill(fd, src);
-    fsyncSync(fd);
+    await syncAsync(fd);
   } catch (e) {
     throw new PartialError(e);
-  }
-}
-
-function closeQuietlyOr(fd: number): void {
-  try {
-    closeSync(fd);
-  } catch {
-    // closed
   }
 }
 
@@ -272,7 +273,7 @@ function removeOwn(p: string, fd: number): void {
   try {
     const o = fstatSync(fd, { bigint: true });
     const l = lstatSync(p, { bigint: true });
-    if (o.dev === l.dev && o.ino === l.ino) rmSync(p, { force: true });
+    if (o.dev === l.dev && o.ino === l.ino) unlinkSync(p);
   } catch {
     // gone
   }
@@ -314,21 +315,22 @@ export async function receiveText(chunks: ChunkReader, limit: number): Promise<B
 export async function staged<T>(base: string, chunks: ChunkReader, limit: number, use: (src: Source) => Promise<T>): Promise<T> {
   if (!base) throw new Fail('denied', 403, 'no data directory');
   const d = join(base, STAGING_DIR);
-  mkdirSync(d, { recursive: true, mode: 0o700 });
-  const fi = lstatSync(d);
+  await mkdir(d, { recursive: true, mode: 0o700 });
+  const fi = await lstat(d);
   if (!fi.isDirectory()) throw new Fail('failed', 500, `${d} is not a directory`);
-  if ((fi.mode & 0o777) !== 0o700) chmodSync(d, 0o700);
+  if ((fi.mode & 0o777) !== 0o700) await chmod(d, 0o700);
   let path = '';
-  let fd = -1;
-  for (let i = 0; i < 100 && fd < 0; i++) {
+  let stagedFile: FileHandle | undefined;
+  for (let i = 0; i < 100 && !stagedFile; i++) {
     path = join(d, `upload-${randomBytes(4).toString('hex')}`);
     try {
-      fd = openSync(path, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL, 0o600);
+      stagedFile = await open(path, 'wx+', 0o600);
     } catch (e) {
       if (errCode(e) !== 'EEXIST') throw codeOf(e);
     }
   }
-  if (fd < 0) throw new Fail('exists', 409, `no free name in ${d}`);
+  if (!stagedFile) throw new Fail('exists', 409, `no free name in ${d}`);
+  const fd = stagedFile.fd;
   try {
     let size = 0;
     await receive(chunks, limit, async (b) => {
@@ -337,19 +339,19 @@ export async function staged<T>(base: string, chunks: ChunkReader, limit: number
     });
     return await use(fileSource(fd, size));
   } finally {
-    closeQuietlyOr(fd);
-    rmSync(path, { force: true });
+    await stagedFile.close().catch(() => {});
+    await unlink(path).catch(() => {});
   }
 }
 
 /** Removes the files uploads were received into (in the data directory
  * base) more than retention before now: left only when the agent ended
  * during an upload (a crash, a kill). */
-export function pruneStaged(base: string, now: Date, retention = STAGING_RETENTION_MS): void {
+export async function pruneStaged(base: string, now: Date, retention = STAGING_RETENTION_MS): Promise<void> {
   const d = join(base, STAGING_DIR);
   let names: string[];
   try {
-    names = readdirSync(d);
+    names = await readdir(d);
   } catch {
     return;
   }
@@ -357,8 +359,8 @@ export function pruneStaged(base: string, now: Date, retention = STAGING_RETENTI
   for (const name of names) {
     const p = join(d, name);
     try {
-      const fi = lstatSync(p);
-      if (!fi.isDirectory() && fi.mtimeMs <= cutoff) rmSync(p, { force: true });
+      const fi = await lstat(p);
+      if (!fi.isDirectory() && fi.mtimeMs <= cutoff) await unlink(p);
     } catch {
       // gone
     }

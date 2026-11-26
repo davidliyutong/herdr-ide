@@ -73,6 +73,7 @@ export const CLAUDE_TIMING: ClaudeTiming = {
  * its subagents' events: beyond it they start over (an event of an older
  * subagent then has no parent). */
 const MAX_TRACKED = 4096;
+const MAX_PENDING_PROMPTS = 16;
 /** The most kinds of what is passed over a session logs (once each). */
 const MAX_UNKNOWN = 64;
 
@@ -535,6 +536,8 @@ export class ClaudeSession implements Session {
     this.ended = true;
     if (this.closing) err = undefined;
     for (const u of [...this.sent.keys()].sort()) this.withdrawn(u);
+    this.sent.clear();
+    this.byMessage.clear();
     const e = err ?? gone().error;
     const error: ChatError = { code: Code.Ended, message: e.message };
     if (e.stderr) error.stderr = e.stderr;
@@ -614,6 +617,7 @@ export class ClaudeSession implements Session {
 
   private endTurn(ev: Event): void {
     if (!this.inTurn) return;
+    for (const m of this.sent.values()) if (!m.queued || m.taken) this.forget(m);
     this.inTurn = false;
     this.stream = noStream();
     this.emit(ev);
@@ -682,6 +686,7 @@ export class ClaudeSession implements Session {
   private streamEvent(m: Obj): void {
     // Subagents do not stream; their messages come whole.
     if (str(m.parent_tool_use_id) !== '') return;
+    this.taken(this.sent.get(str(m.user_message_uuid)));
     const ev = m.event;
     if (!isObj(ev)) return this.pass('a stream_event of another shape');
     const st = this.stream;
@@ -742,7 +747,10 @@ export class ClaudeSession implements Session {
   private assistant(m: Obj): void {
     const parent = str(m.parent_tool_use_id);
     if (m.error === 'authentication_failed') this.authFailed = true;
-    if (parent === '') this.ensureTurn();
+    if (parent === '') {
+      this.ensureTurn();
+      this.taken(this.sent.get(str(m.user_message_uuid)));
+    }
     const fr = frameOf(m);
     this.unknown += fr.unknown;
     const st = this.stream;
@@ -775,6 +783,7 @@ export class ClaudeSession implements Session {
 
   private user(m: Obj): void {
     // Echoes of the user's messages, and the summary of a compaction.
+    if (m.isSynthetic !== true) this.taken(this.sent.get(str(m.uuid)));
     if (m.isReplay === true || m.isSynthetic === true) return;
     const parent = str(m.parent_tool_use_id);
     const fr = frameOf(m);
@@ -932,6 +941,10 @@ export class ClaudeSession implements Session {
   /** Ends the turn: its stop reason, or its error; the chat's cost and
    * context are what the result and then get_context_usage say. */
   private result(run: Run, r: Obj): void {
+    if (Array.isArray(r.user_message_uuids)) {
+      for (const uuid of r.user_message_uuids.slice(0, 64)) this.taken(this.sent.get(str(uuid)));
+    }
+    this.taken(this.sent.get(str(r.user_message_uuid)));
     const subtype = str(r.subtype);
     let ev: Event;
     if (str(r.terminal_reason).startsWith('aborted')) {
@@ -987,12 +1000,7 @@ export class ClaudeSession implements Session {
         return;
       case 'started':
         this.ensureTurn();
-        if (m && m.queued && !m.taken) {
-          m.taken = true;
-          // The message is the user's prompt from now on.
-          this.emit(this.queuedEvent(QueuedState.Taken, m, true));
-        }
-        return;
+        return this.taken(m);
       case 'completed':
         if (m) this.forget(m);
         return;
@@ -1036,6 +1044,14 @@ export class ClaudeSession implements Session {
     if (this.byMessage.get(m.message) === m.uuid) this.byMessage.delete(m.message);
   }
 
+  private taken(m: Sent | undefined): void {
+    if (!m?.queued || m.taken) return;
+    this.ensureTurn();
+    m.taken = true;
+    this.emit(this.queuedEvent(QueuedState.Taken, m, true));
+    m.content = [];
+  }
+
   /** Tells that the queued message uuid will not run. */
   private withdrawn(uuid: string): void {
     const m = this.sent.get(uuid);
@@ -1063,13 +1079,21 @@ export class ClaudeSession implements Session {
    * while one runs a queued message (the program takes it into the running
    * turn after a tool's result, or as the next turn). */
   async prompt(p: PromptParams, signal: AbortSignal): Promise<void> {
-    const content = claudeContent(p.content, this.p.cwd);
     const run = this.current();
-    const m: Sent = { uuid: randomUUID(), message: p.message, clientId: p.clientId, content: p.content, queued: false, taken: false };
+    signal.throwIfAborted();
+    if (this.sent.size >= MAX_PENDING_PROMPTS) throw busy();
+    const content = claudeContent(p.content, this.p.cwd);
+    const m: Sent = {
+      uuid: randomUUID(),
+      message: p.message,
+      clientId: p.clientId,
+      content: this.inTurn ? p.content : [],
+      queued: this.inTurn,
+      taken: false,
+    };
     this.sent.set(m.uuid, m);
     if (p.message) this.byMessage.set(p.message, m.uuid);
-    if (this.inTurn) {
-      m.queued = true;
+    if (m.queued) {
       this.emit(this.queuedEvent(QueuedState.Waiting, m, true));
     } else {
       // The host saw a turn run, which ended meanwhile.
@@ -1245,7 +1269,8 @@ export class ClaudeSession implements Session {
    * Refused while a turn runs. */
   async compact(signal: AbortSignal): Promise<void> {
     const run = this.current();
-    if (this.inTurn) throw busy();
+    signal.throwIfAborted();
+    if (this.inTurn || this.sent.size >= MAX_PENDING_PROMPTS) throw busy();
     const m: Sent = { uuid: randomUUID(), message: '', clientId: '', content: [], queued: false, taken: false };
     this.sent.set(m.uuid, m);
     this.startTurn();

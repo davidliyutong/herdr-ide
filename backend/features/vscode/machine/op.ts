@@ -49,9 +49,12 @@ export async function serveCodeServer(cs: CodeServer, conn: Conn, h: Header, ctx
   const st = conn.stream;
   const reply = (r: Reply) => writeLine(st, r);
   const ok = async () => reply({ ok: true, cs: await cs.status(h) });
-  if (!validVersion(h.version)) return reply(failed('code-server: bad version'));
+  const version = h.version;
+  if (!validVersion(version)) return reply(failed('code-server: bad version'));
   const l = cs.layout;
   const limits = { ...RELEASE_LIMITS, ...o.limits };
+  const join = (digest: string, stage: () => Promise<void>) => cs.joinInstall(version, digest, stage);
+  const promote = (publish: () => Promise<void>) => cs.promoteRelease(version, publish);
   try {
     switch (h.action) {
       case 'status':
@@ -63,12 +66,14 @@ export async function serveCodeServer(cs: CodeServer, conn: Conn, h: Header, ctx
         let tarball: Staged | null = null;
         try {
           tarball = await download(l, h.url ?? '', { env: ctx.environ(), signal: ac.signal, limits });
-          await install(l, h.version, tarball, {
+          await install(l, version, tarball, {
             expected: h.digest,
             what: shownURL(h.url ?? ''),
             env: ctx.environ(),
             logger: o.logger,
             limits,
+            join,
+            promote,
           });
         } finally {
           ac.abort();
@@ -86,7 +91,7 @@ export async function serveCodeServer(cs: CodeServer, conn: Conn, h: Header, ctx
           throw e;
         }
         try {
-          await install(l, h.version, tarball, { expected: h.digest, env: ctx.environ(), logger: o.logger, limits });
+          await install(l, version, tarball, { expected: h.digest, env: ctx.environ(), logger: o.logger, limits, join, promote });
         } finally {
           await rm(tarball.file, { force: true });
         }
@@ -100,7 +105,7 @@ export async function serveCodeServer(cs: CodeServer, conn: Conn, h: Header, ctx
         return await ok();
       case 'release':
         // A hub's idle end: another hub's VS Code windows keep it.
-        if (!ctx.sessions().some((s) => s !== ctx.session && s.dialed(l.socket).open > 0)) await cs.stop();
+        await cs.stop(() => ctx.sessions().some((s) => s !== ctx.session && s.dialed(l.socket).open > 0));
         return await ok();
       case 'install-ext': {
         await reply({ ok: true });

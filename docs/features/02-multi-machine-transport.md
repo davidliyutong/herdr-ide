@@ -36,6 +36,8 @@ The agent runs on Linux and macOS only (unix sockets with peer checks, process g
 
 One yamux session per machine carries every stream; each stream starts with a JSON header and reply ([architecture](../architecture.md#hub--agent-protocol-backendsharedprotoagentproto)). This avoids sshd's `MaxSessions` and any dependence on `AllowStreamLocalForwarding`. Every ssh command puts `--` before the target.
 
+Concurrent deployments share manifest verification and in-flight archive loads. Each caller can stop waiting for the manifest independently, and verified archives are reused from the disk cache after the load completes. Failed dials and short-lived sessions retry with increasing, randomized delays.
+
 ### ssh options and login
 
 `sshArgs` uses `BatchMode=yes`, keepalives (`ServerAliveInterval=15`, `ServerAliveCountMax=4`) and a ControlMaster (`ControlPersist=600`) in a private control directory `/tmp/veldr-<uid>/s`, one per instance (`s-<instance>`, a hash for names over 16 characters; `controldir.ts`).
@@ -62,7 +64,7 @@ Paths on machines are POSIX, so the hub handles them with `node:path`'s `posix`,
 - *error* on any other failure, with ssh's message (retried with exponential backoff);
 - *ready* once its agent answers `hello`, whose reply carries the host's platform and directories.
 
-A session that ends turns *error* and reconnects with the backoff reset. The authentication terminal closing and **Retry** end a wait at once. Read-only browsers cannot retry, since an attempt may start an ssh login. Every state change goes to every `/ws` client.
+A session that ends turns *error* and reconnects, with the backoff reset after a stable session. The authentication terminal closing and **Retry** end a wait at once. Read-only browsers cannot retry, since an attempt may start an ssh login. Every state change goes to every `/ws` client. Browser event, terminal, chat and GUI channels retry with jittered backoff and reset their delay after a connection stays open for 30 s. The browser's event channel keeps at most 256 messages or 256 Ki UTF-16 code units while disconnected, dropping the oldest messages when it reaches either bound.
 
 ### The machines file
 

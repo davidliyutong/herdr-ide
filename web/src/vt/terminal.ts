@@ -18,7 +18,6 @@ export const F_OVERLINE = 128;
 /** Underline style in bits 8-10: 0 none, 1 single, 2 double, 3 curly, 4 dotted, 5 dashed. */
 export const UNDERLINE_SHIFT = 8;
 
-export const WIDE_NARROW = 0;
 export const WIDE_WIDE = 1;
 /** The cell after a wide character, covered by it. */
 export const WIDE_TAIL = 2;

@@ -46,10 +46,13 @@ export const MAX_PENDING = 64;
 const CATCH_UP_MS = 10_000;
 /** How many of a chat's last prompts a prompt with the page's id of one of
  * them is known by: it was taken already, and is not sent again. */
-export const MAX_CLIENT_IDS = 256;
+const MAX_CLIENT_IDS = 256;
 /** The most bytes of events a host's journal may have waiting: past it a
  * chat whose event comes fails (the journal does not keep up). */
 export const MAX_BACKLOG = 64 << 20;
+/** Disposable streaming increments waiting behind journal writes. */
+const MAX_LIVE_EVENTS = 2048;
+const MAX_LIVE_BYTES = 8 << 20;
 
 /** The form of an agent's session id the host takes: what the agents make
  * (UUIDs, their own ids), and nothing that could read as more than one
@@ -171,6 +174,7 @@ interface Out {
   seq?: number;
   done: boolean;
   epoch: number;
+  liveBytes?: number;
 }
 
 /** What the chat's row says of its last event: as stored, and as made. */
@@ -261,20 +265,38 @@ export class Chat {
   private untrustedGen = 0;
 
   /** The chat's way to its connections, in the order events were made. */
-  private flow: Out[] = [];
+  private flow: (Out | undefined)[] = [];
+  private flowHead = 0;
+  private liveCount = 0;
+  private liveBytes = 0;
   private epoch = 0;
   /** The last event made (stored or on its way). */
   private made: Mark;
   private trimming = false;
+  private restoreClientIDs: boolean;
+  private loadClientIDs?: Promise<void>;
 
-  constructor(h: Host, r: Row) {
+  constructor(h: Host, r: Row, restoreClientIDs = false) {
     this.h = h;
     this.r = r;
+    this.restoreClientIDs = restoreClientIDs;
     this.made = { seq: r.chat.seq, historyAfter: r.historyAfter, turnEnd: r.turnEnd };
   }
 
   get id(): string {
     return this.r.chat.id;
+  }
+
+  private async restorePromptIDs(): Promise<void> {
+    if (!this.restoreClientIDs) return;
+    this.loadClientIDs ??= this.h.journal
+      .clientIDs(this.id, MAX_CLIENT_IDS)
+      .then((ids) => {
+        for (const id of ids) this.tookClient(id);
+        this.restoreClientIDs = false;
+      })
+      .finally(() => (this.loadClientIDs = undefined));
+    await this.loadClientIDs;
   }
 
   /** The sequence number of the last event made, stored or on its way:
@@ -439,8 +461,10 @@ export class Chat {
   private refused(o: Out, err: Error): void {
     if (o.epoch !== this.epoch) return;
     this.epoch++;
-    const i = this.flow.indexOf(o);
-    if (i >= 0) this.flow.splice(i);
+    const i = this.flow.indexOf(o, this.flowHead);
+    if (i >= 0) {
+      for (const entry of this.flow.splice(i)) if (entry) this.takeLive(entry);
+    }
     this.made = { seq: this.r.chat.seq, historyAfter: this.r.historyAfter, turnEnd: this.r.turnEnd };
     this.logf(`store event ${o.seq}: ${err.message}`);
     this.journalFailed(err);
@@ -449,12 +473,26 @@ export class Chat {
   /** Hands what is ready of the chat's way to its connections: up to the
    * first stored event the journal has not taken yet. */
   private pump(): void {
-    while (this.flow.length > 0) {
-      const o = this.flow[0]!;
-      if (o.seq !== undefined && !o.done) return;
-      this.flow.shift();
+    while (this.flowHead < this.flow.length) {
+      const o = this.flow[this.flowHead]!;
+      if (!o.done) break;
+      this.flow[this.flowHead++] = undefined;
+      this.takeLive(o);
       this.fanOut(o.line);
     }
+    if (this.flowHead === this.flow.length) {
+      this.flow = [];
+      this.flowHead = 0;
+    } else if (this.flowHead >= 1024 && this.flowHead * 2 >= this.flow.length) {
+      this.flow = this.flow.slice(this.flowHead);
+      this.flowHead = 0;
+    }
+  }
+
+  private takeLive(o: Out): void {
+    if (o.liveBytes === undefined) return;
+    this.liveCount--;
+    this.liveBytes -= o.liveBytes;
   }
 
   /** Fails the chat whose event the journal did not take: its agent ends,
@@ -477,7 +515,7 @@ export class Chat {
 
   /** Hands a streaming increment to the attached connections. */
   live(ev: chat.Event): void {
-    if (this.deleted || this.subs.size === 0) return;
+    if (this.deleted || this.subs.size === 0 || this.liveCount >= MAX_LIVE_EVENTS) return;
     const e: chat.Event = { ...ev, live: true };
     delete e.seq;
     let l: string;
@@ -486,8 +524,16 @@ export class Chat {
     } catch {
       return;
     }
-    if (Buffer.byteLength(l) > chat.MAX_LINE + 1) return;
-    this.flow.push({ line: l, done: true, epoch: this.epoch });
+    const n = Buffer.byteLength(l);
+    if (n > chat.MAX_LINE + 1) return;
+    if (this.flowHead === this.flow.length) {
+      this.fanOut(l);
+      return;
+    }
+    if (this.liveBytes + n > MAX_LIVE_BYTES) return;
+    this.liveCount++;
+    this.liveBytes += n;
+    this.flow.push({ line: l, done: true, epoch: this.epoch, liveBytes: n });
     this.pump();
   }
 
@@ -1018,6 +1064,11 @@ export class Chat {
     const clientId = cmd.clientId ?? '';
     if (typeof clientId !== 'string' || clientId.length > 256) return perr(chat.Code.BadRequest, 'clientId too long');
     if (clientId !== '' && !this.deleted) {
+      try {
+        await this.restorePromptIDs();
+      } catch (e) {
+        return errorOf(e);
+      }
       if (this.clients.has(clientId) || this.storing.has(clientId)) {
         this.logf('a prompt it took already came again');
         return undefined;

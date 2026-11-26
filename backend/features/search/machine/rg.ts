@@ -242,6 +242,7 @@ export async function runRg(bin: string, q: Query, env: Record<string, string>, 
         resolve(code);
       }, WAIT_DELAY_MS).unref();
     });
+    if (stop.signal.aborted) kill();
   });
   stop.signal.removeEventListener('abort', kill);
   parser.end();

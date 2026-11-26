@@ -103,6 +103,7 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   mkdir -p "$OUT/fakebin"
   fake acp "$OUT/fakebin/kimi" "$os-$arch"
   fake codex "$OUT/fakebin/codex" "$os-$arch"
+  fake claude "$OUT/fakebin/claude" "$os-$arch"
   if [[ -n "$darch" ]]; then
     # The SSH machine's (Alpine: musl), which the harness copies into its
     # container.
@@ -110,6 +111,7 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
     mkdir -p "$OUT/linux-$darch"
     fake acp "$OUT/linux-$darch/kimi" "linux-$darch-musl"
     fake xclient "$OUT/linux-$darch/e2e-xclient" "linux-$darch-musl"
+    fake http "$OUT/linux-$darch/e2e-http" "linux-$darch-musl"
   fi
   echo "==> machine builds"
   (cd backend && pnpm install --frozen-lockfile >/dev/null)

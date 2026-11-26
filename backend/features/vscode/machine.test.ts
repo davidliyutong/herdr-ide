@@ -44,7 +44,7 @@ import { bridgeSession } from './machine/bridge.ts';
 import { goPlatform, layoutOf, releaseDir, type Layout } from './machine/layout.ts';
 import { alive } from './machine/process.ts';
 import { entryMode, pruneReleases, refusal, RELEASE_RETENTION_MS, STAGING_RETENTION_MS, unpack } from './machine/release.ts';
-import { serveArgs } from './machine/server.ts';
+import { CodeServer, serveArgs } from './machine/server.ts';
 
 // Each test starts Bun processes (the stand-in) and runs real tools.
 setDefaultTimeout(30_000);
@@ -266,6 +266,22 @@ extendedDescribe('code-server listens on its socket only', () => {
     });
     expect(releaseDir(l, '4.144.0')).toBe(`/h/${DATA_DIR_NAME}/code-server/4.144.0-linux-amd64`);
   });
+});
+
+test('overlapping installs share staging and later installs can replace it', async () => {
+  const home = tempDir();
+  const cs = new CodeServer(layoutOf({ home, run: home, host: home }), { home, logger: () => {}, environ: () => ({}) });
+  const pending = Promise.withResolvers<void>();
+  const staged: string[] = [];
+  const first = cs.joinInstall(VERSION, 'one', () => {
+    staged.push('first');
+    return pending.promise;
+  });
+  const overlap = cs.joinInstall(VERSION, 'one', async () => void staged.push('overlap'));
+  pending.resolve();
+  await Promise.all([first, overlap]);
+  await cs.joinInstall(VERSION, 'one', async () => void staged.push('again'));
+  expect(staged).toEqual(['first', 'again']);
 });
 
 extendedDescribe('releases', () => {

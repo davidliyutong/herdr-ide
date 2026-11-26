@@ -28,6 +28,7 @@ import {
   type Command,
   type Event,
 } from './protocol';
+import { RETRY_RESET_MS, retryDelay } from '../../lib/retry';
 import { openChannel } from '../../lib/transport';
 
 /** The part of WebSocket the connection uses, so tests can supply their own. */
@@ -236,9 +237,7 @@ export class ChatConnection {
   }
 
   private start(): void {
-    if (this.socket || this.closed) return;
-    clearTimeout(this.retryTimer);
-    this.retryTimer = undefined;
+    if (this.socket || this.closed || this.retryTimer !== undefined) return;
     let socket: Socket;
     try {
       socket = this.open();
@@ -247,10 +246,11 @@ export class ChatConnection {
       return;
     }
     this.socket = socket;
+    let openedAt: number | undefined;
     socket.onopen = () => {
       if (socket !== this.socket) return;
       this.up = true;
-      this.retry = RETRY_MIN_MS;
+      openedAt = performance.now();
       for (const sub of this.subs.values()) this.sendAttach(sub);
       for (const p of this.pending.values()) {
         if (p.msg === undefined) continue;
@@ -262,6 +262,7 @@ export class ChatConnection {
     };
     socket.onclose = () => {
       if (socket !== this.socket) return;
+      if (openedAt !== undefined && performance.now() - openedAt >= RETRY_RESET_MS) this.retry = RETRY_MIN_MS;
       this.socket = null;
       this.dropped();
       this.again();
@@ -289,7 +290,10 @@ export class ChatConnection {
   private again(): void {
     if (this.closed || (!this.subs.size && !this.pending.size)) return;
     clearTimeout(this.retryTimer);
-    this.retryTimer = setTimeout(() => this.start(), this.retry);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      if (this.subs.size || this.pending.size) this.start();
+    }, retryDelay(this.retry));
     this.retry = Math.min(this.retry * 2, RETRY_MAX_MS);
   }
 

@@ -172,14 +172,6 @@ export class Vt {
     if (ptr && size > 0) this.fn('ghostty_wasm_free')(ptr, size);
   }
 
-  /** Allocates zeroed storage of a struct's size. */
-  allocStruct(type: string): number {
-    const size = this.size(type);
-    const p = this.alloc(size);
-    this.u8().fill(0, p, p + size);
-    return p;
-  }
-
   /** Runs a constructor taking an out-pointer to a handle; returns the handle. */
   handle(make: (slot: number) => number): number {
     const slot = this.fn('ghostty_wasm_alloc_opaque')();

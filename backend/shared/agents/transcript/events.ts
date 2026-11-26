@@ -6,7 +6,7 @@
 import { SLUG } from '#shared/lib/brand.ts';
 import { formatRFC3339, parseRFC3339 } from '#shared/lib/gotime.ts';
 import { Transcript, TranscriptLimits, noticeMethod, type TranscriptEvent } from '#shared/proto/agentproto/index.ts';
-import { Decoder, MAX_LINE_NODES, valid } from './json.ts';
+import { Decoder, MAX_LINE_NODES, wellFormed } from './json.ts';
 
 /** A JSON object as the events are built. */
 export type Obj = Record<string, unknown>;
@@ -115,16 +115,50 @@ export class LineOut {
     if (d) this.at = formatRFC3339(d);
   }
 
-  /** The value of valid JSON raw within the line's budget of values; ok is
-   * false when raw is no JSON value or holds a number a double does not
-   * hold (Go's decoder fails on those too). */
+  /** Decodes a field of an already validated JSON line within the line's budget. */
   decode(raw: string | undefined): { v: unknown; ok: boolean } {
-    const s = (raw ?? '').trim();
-    if (s === '' || !valid(s)) return { v: null, ok: false };
+    if (!raw) return { v: null, ok: false };
     const d = new Decoder(this.nodes, DECODE_DEPTH);
-    const [v] = d.value(s, 0, 0);
+    const [v] = d.value(raw, 0, 0);
     this.cut ||= d.cut;
     return { v, ok: !d.bad };
+  }
+
+  /** Applies the same budget to values the SDK already decoded. */
+  decoded(raw: unknown): { v: unknown; ok: boolean } {
+    let ok = true;
+    const copy = (v: unknown, depth: number): unknown => {
+      if (this.nodes.nodes <= 0 || depth > DECODE_DEPTH) {
+        this.cut = true;
+        return null;
+      }
+      this.nodes.nodes--;
+      if (typeof v === 'string') return wellFormed(v);
+      if (typeof v === 'number' && !Number.isFinite(v)) {
+        ok = false;
+        return null;
+      }
+      if (Array.isArray(v)) {
+        const a: unknown[] = [];
+        for (let i = 0; i < v.length && this.nodes.nodes > 0; i++) a.push(copy(v[i], depth + 1));
+        this.cut ||= a.length < v.length;
+        return a;
+      }
+      if (isObj(v)) {
+        const m: Obj = {};
+        for (const k in v) {
+          if (!Object.hasOwn(v, k)) continue;
+          if (this.nodes.nodes <= 0) {
+            this.cut = true;
+            break;
+          }
+          Object.defineProperty(m, wellFormed(k), { value: copy(v[k], depth + 1), enumerable: true, configurable: true });
+        }
+        return m;
+      }
+      return v;
+    };
+    return { v: copy(raw, 0), ok };
   }
 
   /** The text of a message or a thought, cut to the limit. */

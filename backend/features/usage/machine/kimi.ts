@@ -20,7 +20,7 @@
 //   - Under the lock the file is read again and renewed only if the token
 //     still needs it (the CLI may just have).
 //   - Refresh: POST https://auth.kimi.com/api/oauth/token, the CLI's form
-//     and identity headers; 3 attempts, 1 s and 2 s apart, for network
+//     and identity headers; 3 attempts with base waits of 1 s and 2 s and jitter, for network
 //     errors and 429/5xx; 401, 403 or invalid_grant is a refusal, not
 //     tried again until the file changes.
 //   - The file: JSON.stringify(…, null, 2) and a newline, the CLI's members
@@ -32,6 +32,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmod, mkdir, open, readdir, readFile, rename, rm, rmdir, stat, utimes, type FileHandle } from 'node:fs/promises';
 import * as os from 'node:os';
 import { posix } from 'node:path';
+import { retryDelay } from '#shared/lib/wait.ts';
 import {
   MONTHLY,
   SESSION,
@@ -324,7 +325,7 @@ async function refresh(e: UsageEnv, token: string): Promise<Answer> {
   const headers = await kimiHeaders(e);
   let last: unknown = new HttpError('network');
   for (let n = 0; n < ATTEMPTS; n++) {
-    if (n > 0) await sleep(e.t.kimiBackoffMs * 2 ** (n - 1), e.signal);
+    if (n > 0) await sleep(retryDelay(e.t.kimiBackoffMs * 2 ** (n - 1)), e.signal);
     if (e.signal.aborted) throw last;
     let r: { status: number; body: Record<string, unknown> };
     try {

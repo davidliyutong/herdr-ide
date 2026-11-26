@@ -19,6 +19,8 @@ desktop app (Electron shell) ──MessagePorts, no TCP──▶  ├─ kernel:
 
 Each machine's agent sessions are served by its node (`veldr node`), a process of its own listening on a socket in the instance's runtime directory on that host (`backend/shared/host/hostdirs.ts`; a home several hosts share keeps each host's sockets, locks and executables apart, [40](features/40-shared-homes.md)): the hub reaches the local machine's node through that socket, a remote machine's over ssh with `node dial`, so both paths run the same code ([39](features/39-nodes.md)). The agent builds for Linux and macOS only. A hub on Windows (the desktop app's) lists its local machine with the code `local_unsupported` and reaches SSH machines only ([02](features/02-multi-machine-transport.md)).
 
+The node starts separate in-process workers for terminal history and the AI usage cost cache. The hub uses workers for usage history, the vault's access log and startup cleanup. Calls to the shared databases run on those threads while the node and hub serve their streams ([38](features/38-sqlite-state.md)).
+
 ## Code map
 
 The hub is TypeScript under `backend/` (its [README](../backend/README.md) has the layers and their rules), built with Bun into one executable per platform, which is the hub and the TypeScript machine side (`backend/machine`, `backend/hosts/machine`, the features' `machine.ts`) of its platform (the machine build): machines download their platform's from the hub's release, checked against its `SHA256SUMS`, or the hub uploads it ([42](features/42-typescript-backend.md)). A node of this build takes over from a node of an earlier release still running on a machine.
@@ -47,7 +49,7 @@ The Electron shell (`desktop/src/main.ts`) runs the hub in a utility process (`b
 
 - The hub starts with a message on its parent port: the instance, the payloads' directories (the app's resources) and the verify key, which signs the user's system prompt answers (Touch ID, Windows Hello) for the vault and never leaves the shell's main process otherwise ([30](features/30-variable-vault.md)).
 - The app's windows load `https://<slug>.localhost/`, which their session intercepts: each request goes to the hub over a MessagePort (`backend/hosts/electron/bridge.ts`), its body and the response's in chunks with credit both ways. WebSockets are channels, MessagePorts the main process makes for a frame of that origin (`desktopChannels`; the web UI's `openChannel`, VS Code's frames' WebSocket). Requests in process are the desktop client's; their Origin is the one Electron reports for the frame or worker that made them (`initiatorOrigin`), so the hub's guard refuses a page of another origin in the app's session.
-- A crashed hub is started again with the windows kept (at most 3 times a minute); quitting asks it to stop, and kills it after 20 s.
+- A crashed hub is started again with the windows kept, with an increasing delay (at most 3 restarts a minute). Requests wait for the pending restart. Quitting asks it to stop, and kills it after 20 s.
 
 The shell is a client of its hub, reached directly: it follows settings and keybindings over `/ws` for the title bar theme, menu language, zoom and the menu's keys. The renderer is the web UI, sandboxed, with no Node APIs; its preload exposes `desktopShell` to the main window's page and `desktopChannels` to each frame of the app's origin. On macOS the menu acts only on keys the page did not handle; on Windows and Linux every key goes to the page ([04](features/04-layout-and-keyboard.md)). Packaging, menus and the preload's surface are in [16](features/16-desktop-packaging.md).
 
@@ -64,7 +66,7 @@ One yamux session per machine over ssh stdio and `node dial`, or the local node'
 | `fs.archive` | hub → agent | A zip of `Paths`, streamed. |
 | `dial-unix` | hub → agent | Raw pipe to a socket in the agent's run directory. |
 | `code-server` | hub → agent | `status`, `install` (with the `digest` the hub verified the release by, which the TypeScript machine side checks before unpacking it), `download` (checked against the hub's `digest`), `start`, `stop`, `release` (stops it unless another hub's session has a connection to it), `install-ext`, `marker`. |
-| `hc` | hub → agent | Terminal core `status`, `install` (digest-checked), `install-embedded` (the herdr-core the machine build carries, whose digest `status` reports as `embedded`, which the hub holds to the digest its build recorded), `start`, `restart`, `stop` of the agent's instance. |
+| `hc` | hub → agent | Terminal core `status` and `ensure`, which checks the expected digest, installs if needed and starts or restarts under one lock. A reply with `hc_upload` requests a chunked executable, with a final reply after the upload. Separate `install`, `install-embedded`, `start`, `restart` and `stop` actions are also supported. |
 | `hc-api` | hub → agent | Raw pipe to the terminal core's API socket; starts nothing. |
 | `detect` | hub → agent | Stream of `DetectEvent {terminal, agent, status}` lines, with the agent's `session` when asked ([25](features/25-agent-detection.md)). |
 | `privacy` | hub → agent | macOS Full Disk Access of the agent and the terminal core. |
@@ -79,6 +81,7 @@ Rules:
 - Headers and replies are bounded to 1 MiB. Payloads over 32 KiB (`MaxInline`) follow the line with a length field, at most 64 MiB.
 - The hub waits for a reply until the request's deadline, else 60 s (`transport.ReplyTimeout`). A plugin stream stays bound to the caller's context after the reply.
 - yamux streams cannot be half-closed, so uploads use `ChunkWriter` framing (`[u32 length][data]…[0]`).
+- The yamux receiver checks each data frame's declared size against the stream-window limit before allocating its body. An outgoing stream's open timer ends with its acknowledgement, a reset or a local close of the write side.
 - Hub and agent come from the same build (the agent is installed by content hash), so there is no version negotiation. Extend by adding fields and ops; never reuse them.
 - A node of this build takes over from a node of an earlier release still running on a machine. It answers an op or plugin it does not serve as an unknown plugin (`unknown_plugin`).
 

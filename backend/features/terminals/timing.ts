@@ -7,8 +7,6 @@ export interface Timing extends DetectTiming {
   /** The first wait after a backend failed; it doubles up to backoffMaxMs. */
   backoffMinMs: number;
   backoffMaxMs: number;
-  /** A connection that lasted this long starts the backoff afresh. */
-  stableMs: number;
   /** Bounds bringing a machine's terminal core up (status, install, start). */
   ensureMs: number;
   /** Bounds connecting to it and subscribing to its events. */
@@ -42,6 +40,6 @@ export const DEFAULT_TIMING: Timing = {
   statusMs: 30_000,
   actionMs: 180_000,
   detectRetryMs: 5000,
-  detectPollMs: 1000,
+  detectRetryMaxMs: 60_000,
   redetectGraceMs: 10_000,
 };

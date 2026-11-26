@@ -4,7 +4,7 @@ import { connect, type Socket } from 'node:net';
 import { Fail } from '#shared/lib/fail.ts';
 import { HCCode, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { closeStream } from '#shared/proto/yamux.ts';
-import type { TerminalCore } from './hc.ts';
+import { validDigest, type TerminalCore } from './hc.ts';
 import type { Conn } from './stream.ts';
 
 /** Serves op hc. Before a start or restart the executable is hashed again:
@@ -12,29 +12,39 @@ import type { Conn } from './stream.ts';
  * executable the hub carries and installed; empty when it carries none). */
 export async function serveHC(conn: Conn, h: Header, hc: TerminalCore, signal: AbortSignal): Promise<void> {
   const st = conn.stream;
-  const failed = async (code: string, e: unknown) =>
-    writeLine(st, { ok: false, error: (e as Error)?.message ?? String(e), code, hc: await hc.status(signal) } satisfies Reply);
+  const failed = async (code: string, e: unknown, extra: Pick<Reply, 'hc_installed'> = {}) =>
+    writeLine(st, { ok: false, error: (e as Error)?.message ?? String(e), code, hc: await hc.status(signal), ...extra } satisfies Reply);
   if (h.action === 'status') return writeLine(st, { ok: true, hc: await hc.status(signal) } satisfies Reply);
   return hc.serialized(async () => {
+    signal.throwIfAborted();
+    if (h.action === 'ensure') {
+      await ensureHC(conn, h, hc, signal, failed);
+      return;
+    }
     if ((h.action === 'start' || h.action === 'restart') && h.digest) {
-      const got = hc.digest(true);
+      const got = await hc.digest(true);
       if (got === '') return failed(HCCode.NotInstalled, new Error('herdr-core is not installed'));
       if (got !== h.digest) return failed(HCCode.BadDigest, new Error(`herdr-core's sha256 ${got} does not match expected ${h.digest}`));
     }
     switch (h.action) {
-      case 'install':
+      case 'install': {
+        const before = await hc.status(signal);
         await writeLine(st, { ok: true } satisfies Reply);
         try {
           await hc.install(h.digest ?? '', conn.reader);
         } catch (e) {
           return failed(HCCode.BadDigest, e);
         }
+        if (before.running && h.digest && before.digest !== h.digest) hc.pendingRestart = h.digest;
         break;
+      }
       case 'install-embedded':
         // The herdr-core this build carries, when it is the one the hub
         // expects (the digest this build reported).
         try {
+          const before = await hc.status(signal);
           await hc.installEmbedded(h.digest ?? '');
+          if (before.running && h.digest && before.digest !== h.digest) hc.pendingRestart = h.digest;
         } catch (e) {
           return failed((e as { code?: string }).code ?? HCCode.BadDigest, e);
         }
@@ -43,28 +53,75 @@ export async function serveHC(conn: Conn, h: Header, hc: TerminalCore, signal: A
       case 'restart':
         // herdr-core starts the core detached from the agent (a user service
         // or launchd job); a restart's successor adopts the programs.
-        if (hc.digest() === '') return failed(HCCode.NotInstalled, new Error('herdr-core is not installed'));
+        if (!h.digest && (await hc.digest()) === '') return failed(HCCode.NotInstalled, new Error('herdr-core is not installed'));
         try {
           await hc.run(['server', h.action, '--json'], signal);
         } catch (e) {
           return failed(HCCode.StartFailed, e);
         }
-        hc.privateSocket();
+        await hc.privateSocket();
+        hc.pendingRestart = '';
         break;
       case 'stop':
         // Ends the session's programs.
-        if (hc.digest() === '') return failed(HCCode.NotInstalled, new Error('herdr-core is not installed'));
+        if ((await hc.digest()) === '') return failed(HCCode.NotInstalled, new Error('herdr-core is not installed'));
         try {
           await hc.run(['server', 'stop', '--json'], signal);
         } catch (e) {
           return failed(HCCode.StopFailed, e);
         }
+        hc.pendingRestart = '';
         break;
       default:
         return writeLine(st, { ok: false, error: `hc: unknown action ${JSON.stringify(h.action ?? '')}` } satisfies Reply);
     }
     return writeLine(st, { ok: true, hc: await hc.status(signal) } satisfies Reply);
   });
+}
+
+/** Rechecks the status while holding the lifecycle lock, through any upload
+ * and through starting the core. Concurrent hubs see the completed state. */
+async function ensureHC(
+  conn: Conn,
+  h: Header,
+  hc: TerminalCore,
+  signal: AbortSignal,
+  failed: (code: string, error: unknown, extra?: Pick<Reply, 'hc_installed'>) => Promise<void>,
+): Promise<void> {
+  const before = await hc.status(signal);
+  const expected = h.digest ?? '';
+  let installed = false;
+  if (expected && before.digest !== expected) {
+    try {
+      signal.throwIfAborted();
+      if (before.embedded) await hc.installEmbedded(expected);
+      else {
+        if (!validDigest(expected)) throw new Error('bad digest');
+        await writeLine(conn.stream, { ok: true, hc_upload: true } satisfies Reply);
+        await hc.install(expected, conn.reader);
+      }
+      installed = true;
+      if (before.running) hc.pendingRestart = expected;
+    } catch (e) {
+      return failed(HCCode.InstallFailed, e);
+    }
+  }
+  const digest = expected || before.digest || '';
+  const action = !before.running ? 'start' : h.restart || (digest && hc.pendingRestart === digest) ? 'restart' : undefined;
+  if (!action) return writeLine(conn.stream, { ok: true, hc: before, hc_installed: installed } satisfies Reply);
+  if (!digest) return failed(HCCode.NotInstalled, new Error('herdr-core is not installed'));
+  const extra = { hc_installed: installed };
+  if ((await hc.digest(true)) !== digest) return failed(HCCode.BadDigest, new Error("herdr-core's executable changed"), extra);
+  try {
+    signal.throwIfAborted();
+    await hc.run(['server', action, '--json'], signal);
+  } catch (e) {
+    return failed(HCCode.StartFailed, e, extra);
+  }
+  await hc.privateSocket();
+  const now = await hc.status(signal);
+  if (now.running) hc.pendingRestart = '';
+  await writeLine(conn.stream, { ok: true, hc: now, hc_installed: installed, hc_action: action } satisfies Reply);
 }
 
 /** Connects to the unix socket at path within 5 s. */
@@ -89,9 +146,8 @@ export function dialSocket(path: string, timeoutMs = 5000): Promise<Socket> {
 
 /** Pipes conn's stream (after its header) to the unix socket at path: the
  * reply, then bytes both ways until either side ends, when both are closed
- * and the promise resolves. opened runs once the pipe is open, and what it
- * returns once it ended. */
-export async function pipeUnix(conn: Conn, path: string, opened?: () => () => void): Promise<void> {
+ * and the promise resolves. opened runs once the pipe is open. */
+export async function pipeUnix(conn: Conn, path: string, opened?: () => void): Promise<void> {
   const st = conn.stream;
   let c: Socket;
   try {
@@ -110,12 +166,8 @@ export async function pipeUnix(conn: Conn, path: string, opened?: () => () => vo
     closeStream(st);
     return;
   }
-  const ended = opened?.();
-  try {
-    await pipe(conn, c);
-  } finally {
-    ended?.();
-  }
+  opened?.();
+  await pipe(conn, c);
 }
 
 /** Copies both ways and closes both ends once either side ends. */

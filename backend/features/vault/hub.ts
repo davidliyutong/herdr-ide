@@ -192,7 +192,7 @@ export function vaultFeature(opts: VaultOptions = {}) {
           if (!(await v.verified(c, s, f, { for: For.Reveal, request: name }))) v.needFresh(c);
         }
         const value = await s.value(name);
-        if (!v.record(c, 'vault.revealed', v.pageAccess(c, 'reveal', [name], Result.Revealed))) v.failLog();
+        if (!(await v.record(c, 'vault.revealed', v.pageAccess(c, 'reveal', [name], Result.Revealed)))) v.failLog();
         return c.json({ value });
       });
 
@@ -651,7 +651,7 @@ export function vaultFeature(opts: VaultOptions = {}) {
         return c.json({ ok: true });
       });
 
-      api.get('/log', gatedRead, (c) => c.json({ log: v.accessLog().list() }));
+      api.get('/log', gatedRead, async (c) => c.json({ log: await v.accessLog().list() }));
 
       transferRoutes(ctx, v, gatedPassphrase);
 
@@ -659,7 +659,7 @@ export function vaultFeature(opts: VaultOptions = {}) {
       ctx.onForget((id) => void v.forgetMachine(id));
       ctx.service('timers', async (signal) => {
         await new Promise((r) => (signal.aborted ? r(null) : signal.addEventListener('abort', r, { once: true })));
-        v.stop();
+        await v.stop();
       });
     },
   });
@@ -746,7 +746,7 @@ function transferRoutes(ctx: FeatureContext, v: Vault, gatedPassphrase: Middlewa
     });
     c.var.audit.count = names.length;
     // The file leaves only once its record is written.
-    if (!v.record(c, 'vault.exported', v.pageAccess(c, 'export', names, Result.Exported))) v.failLog();
+    if (!(await v.record(c, 'vault.exported', v.pageAccess(c, 'export', names, Result.Exported)))) v.failLog();
     const d = new Date();
     const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     return c.body(new Uint8Array(file), 200, {

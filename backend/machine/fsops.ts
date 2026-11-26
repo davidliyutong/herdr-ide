@@ -107,8 +107,7 @@ export async function serveFS(conn: Conn, h: Header, path: string, fs: FsCalls =
       } catch (e) {
         return writeLine(st, fail(e));
       }
-      const out: Stat[] = [];
-      for (const e of ents.slice(0, MAX_LIST)) {
+      const readEntry = async (e: Dirent) => {
         const full = join(path, e.name);
         let fi: Stats;
         try {
@@ -117,14 +116,22 @@ export async function serveFS(conn: Conn, h: Header, path: string, fs: FsCalls =
           try {
             fi = await fs.lstat(full);
           } catch {
-            continue;
+            return null;
           }
         }
         const s = statOf('', fi, e.isSymbolicLink());
         s.name = e.name;
-        out.push(s);
+        return { stat: s, name: Buffer.from(e.name) };
+      };
+      const entries = [];
+      const count = Math.min(ents.length, MAX_LIST);
+      for (let i = 0; i < count; i += 16) {
+        if (st.destroyed) return;
+        const batch = await Promise.all(ents.slice(i, Math.min(i + 16, count)).map(readEntry));
+        for (const entry of batch) if (entry) entries.push(entry);
       }
-      out.sort((a, b) => (a.is_dir !== b.is_dir ? (a.is_dir ? -1 : 1) : Buffer.compare(Buffer.from(a.name), Buffer.from(b.name))));
+      entries.sort((a, b) => Number(b.stat.is_dir) - Number(a.stat.is_dir) || Buffer.compare(a.name, b.name));
+      const out = entries.map((e) => e.stat);
       const rep: Reply = { ok: true, stat: { name: basename(path) || path, path, size: 0, mode: 0, mtime: 0, is_dir: true } };
       // A directory of thousands of names (an archive just unpacked) is more
       // than the line may hold: the entries follow it.
@@ -292,6 +299,14 @@ export async function serveArchive(conn: Conn, h: Header, expand: (p: string) =>
   await writeLine(st, { ok: true });
   const zip = new ZipFile();
   const output = zip.outputStream as Readable;
+  const ac = new AbortController();
+  const stop = () => {
+    ac.abort();
+    output.destroy();
+  };
+  st.once('close', stop);
+  output.once('close', () => ac.abort());
+  if (st.destroyed) stop();
   let failed: unknown = null;
   const out = (async () => {
     const cw = h.chunked ? new ChunkWriter(st) : null;
@@ -310,15 +325,20 @@ export async function serveArchive(conn: Conn, h: Header, expand: (p: string) =>
     failed ??= e;
     output.destroy(e as Error);
   });
-  const names = archiveNames(roots);
-  for (let i = 0; i < roots.length && !failed; i++) await addTree(zip, roots[i], names[i], () => !!failed);
-  zip.end();
-  await out;
-  if (failed) throw failed;
+  try {
+    const names = archiveNames(roots);
+    for (let i = 0; i < roots.length && !ac.signal.aborted; i++) await addTree(zip, roots[i], names[i], ac.signal);
+    if (!ac.signal.aborted) zip.end();
+    await out;
+    if (failed) throw failed;
+  } finally {
+    st.off('close', stop);
+    stop();
+  }
 }
 
-/** Adds root and everything below it under name, until stopped(). */
-async function addTree(zip: ZipFile, root: string, name: string, stopped: () => boolean): Promise<void> {
+/** Adds root and everything below it under name, until signal ends. */
+async function addTree(zip: ZipFile, root: string, name: string, signal: AbortSignal): Promise<void> {
   let walkRoot = root;
   try {
     walkRoot = await fsp.realpath(root);
@@ -326,7 +346,7 @@ async function addTree(zip: ZipFile, root: string, name: string, stopped: () => 
     // as named
   }
   const visit = async (p: string, entry: string, fi: Stats): Promise<void> => {
-    if (stopped()) return;
+    if (signal.aborted) return;
     const mtime = fi.mtime;
     if (fi.isDirectory()) {
       zip.addEmptyDirectory(entry + '/', { mtime, mode: fi.mode });
@@ -337,6 +357,7 @@ async function addTree(zip: ZipFile, root: string, name: string, stopped: () => 
         return; // unreadable: left out
       }
       for (const c of names) {
+        if (signal.aborted) return;
         const cp = join(p, c);
         let cfi: Stats;
         try {
@@ -355,7 +376,7 @@ async function addTree(zip: ZipFile, root: string, name: string, stopped: () => 
       }
       zip.addBuffer(Buffer.from(target), entry, { mtime, mode: fi.mode, compress: false });
     } else if (fi.isFile()) {
-      zip.addReadStreamLazy(entry, { mtime, mode: fi.mode, compressionLevel: 1 }, (cb) => cb(null, readQuietly(p)));
+      zip.addReadStreamLazy(entry, { mtime, mode: fi.mode, compressionLevel: 1 }, (cb) => cb(null, readQuietly(p, signal)));
     }
   };
   let fi: Stats;
@@ -370,11 +391,17 @@ async function addTree(zip: ZipFile, root: string, name: string, stopped: () => 
 /** A file's bytes; one that cannot be read, or is no longer a regular file
  * (a FIFO swapped in), ends early instead of failing the archive (the
  * entry is cut short). */
-function readQuietly(p: string): Readable {
+function readQuietly(p: string, signal: AbortSignal): Readable {
   const out = new PassThrough();
+  if (signal.aborted) return out.end();
+  const stop = () => out.destroy();
+  signal.addEventListener('abort', stop, { once: true });
+  out.once('close', () => signal.removeEventListener('abort', stop));
   openRegular(p).then(
     ({ fh }) => {
+      if (signal.aborted || out.destroyed) return void fh.close().catch(() => {});
       const r = fh.createReadStream({ highWaterMark: 256 << 10 });
+      out.once('close', () => r.destroy());
       r.on('error', () => out.end());
       r.pipe(out);
     },

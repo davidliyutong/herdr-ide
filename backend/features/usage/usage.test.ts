@@ -166,7 +166,7 @@ test('history', async () => {
   // A restart shows the accounts again, with their history (the pace from
   // it).
   const q = testUsage({ dir: t.dir, ready: [], now: t.clock.now });
-  q.u.loadHistory();
+  await q.u.loadHistory();
   const s2 = q.snap();
   expect(s2.accounts).toHaveLength(1);
   expect(s2.accounts[0]!.windows[0]!.pace).toEqual(w.pace!);

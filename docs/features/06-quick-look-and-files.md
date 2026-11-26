@@ -46,7 +46,7 @@ Non-goals: browsing, changing and editing files. The file explorer ([28](28-file
 - The pane menu offers **Download <name>** for the path under the pointer (checked with `HEAD` first) and **Download files…**, a chooser over the pane's working directory with a filter and Shift ranges. Neither is shown for the desktop app's own machine, whose files are already local.
 - The page starts the download with a same-origin link, so the browser (or the desktop app's save dialog) saves it like any download. Nothing is held in the page's memory.
 - The agent sends the archive in chunks (`agentproto.ChunkWriter`) and marks its end. When the machine's connection drops, yamux ends streams as if complete; a stream without the end mark is therefore a truncated archive, and the hub aborts the response so the browser reports a failure instead of saving a broken zip.
-- A download that ends early stops the hub reading the agent's stream and closes it, which ends the agent's walk.
+- A download that ends early closes the hub's stream to the agent. The agent stops walking the directory and closes the archive's active file reader.
 - The agent follows the named paths when they are symlinks but stores links below them as links. It skips sockets, devices, FIFOs and unreadable entries, writes nothing on the machine, and uses the fastest deflate level.
 - VS Code's explorer downloads through the same endpoint ([05](05-vscode-panes.md)).
 

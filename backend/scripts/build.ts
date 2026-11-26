@@ -133,11 +133,20 @@ try {
     '--minify-syntax',
     '--no-compile-autoload-dotenv',
     '--no-compile-autoload-bunfig',
+    '--entry-naming=[name].[ext]',
     '--asset-naming=[name].[ext]',
     `--define=BUILD_VERSION=${JSON.stringify(o.version)}`,
   ];
   if (o.target) args.push(`--target=${o.target}`);
-  args.push(join(import.meta.dir, '..', 'hosts', 'bun', 'main.ts'), ...files, '--outfile', resolve(o.out));
+  const hosts = join(import.meta.dir, '..', 'hosts', 'bun');
+  args.push(
+    join(hosts, 'main.ts'),
+    join(hosts, 'state-worker.ts'),
+    join(hosts, '..', 'common', 'hub-state-worker.ts'),
+    ...files,
+    '--outfile',
+    resolve(o.out),
+  );
   const p = Bun.spawnSync([process.execPath, ...args], { cwd: stage, stdout: 'inherit', stderr: 'inherit' });
   if (p.exitCode !== 0) process.exit(p.exitCode ?? 1);
   // Anthropic's Agent SDK is fetched by the machines that use it, never

@@ -173,6 +173,7 @@ const ACTIVE_WRITER = ['already has an active writer', 'already has a live local
  * oldest goes. A call forgotten is not marked cancelled at its turn's end
  * nor given its output's increments; a thread forgotten is its own parent. */
 export const MAX_TRACKED = 4096;
+const MAX_QUEUE = 16;
 
 /** Sets k to v in m, the oldest entry going when m holds MAX_TRACKED. */
 function setBounded<K, V>(m: Map<K, V>, k: K, v: V): void {
@@ -734,6 +735,7 @@ export class CodexSession implements Session {
         this.emit(userEvent(msg));
         return await this.startTold(input, msg.message, signal);
       }
+      if (this.queue.length + this.steers.length >= MAX_QUEUE) throw perr(Code.Busy, 'too many messages wait for the turn');
       if (this.turn === '' || this.compacting) {
         this.queue.push(msg);
         this.emit(queuedEvent(msg, QueuedState.Waiting, true));

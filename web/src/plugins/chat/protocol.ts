@@ -342,14 +342,6 @@ export type ClientMessage =
   | { op: 'detach'; sub: string }
   | { op: 'command'; id: string; m: string; chat: string; cmd: Command };
 
-/** A message of the hub: a subscription's chat and lowest stored seq, an
- * event of it, its end, and a command's answer. */
-export type ServerMessage =
-  | { t: 'attached'; sub: string; chat: Chat; first?: number }
-  | { t: 'event'; sub: string; ev: ChatEvent }
-  | { t: 'detached'; sub: string; error?: ChatError }
-  | { t: 'ack'; id: string; error?: ChatError };
-
 /** The chat host's error codes (chatproto.Code*): sleeping, a command
  * that needs the agent of a chat that has none (a prompt starts it);
  * not_allowed, full access while the machine's chat.allowFullAccess is

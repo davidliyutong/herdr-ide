@@ -49,6 +49,7 @@ export interface LSProcess {
  * in skip (by the email's hash, known once the server answered) or
  * skipLocal is answered skipped. */
 export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promise<Account[]> {
+  e.signal.throwIfAborted();
   if (skips(o, 'antigravity')) return [skipped({ provider: 'antigravity', status: 'skipped' })];
   const answered = (m: Record<string, unknown>): Account[] | null => {
     const a: Account = { provider: 'antigravity', source: 'ls', status: '' };
@@ -58,7 +59,7 @@ export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promis
   };
   const ep = e.memo.antigravityLS;
   if (ep) {
-    const m = await userStatus(ep.port, ep.csrf, ep.scheme);
+    const m = await userStatus(ep.port, ep.csrf, ep.scheme, e.signal);
     const r = m && answered(m);
     if (r) return r;
     e.memo.antigravityLS = null;
@@ -67,7 +68,7 @@ export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promis
   for (const p of procs) {
     for (const port of await listeningPorts(e, p.pid)) {
       for (const scheme of ['https', 'http'] as const) {
-        const m = await userStatus(port, p.csrf, scheme);
+        const m = await userStatus(port, p.csrf, scheme, e.signal);
         if (!m) continue;
         const r = answered(m);
         if (r) {
@@ -78,6 +79,7 @@ export async function antigravityAccounts(e: UsageEnv, o: LimitsOptions): Promis
       }
     }
   }
+  e.signal.throwIfAborted();
   const a = await agyUsage(e);
   if (a) return [a.id && skips(o, 'antigravity', a.id) ? skipped(a) : a];
   if (procs.length) return [{ provider: 'antigravity', status: 'error', code: 'no_answer' }];
@@ -212,12 +214,19 @@ export async function procPorts(root: string, pid: number): Promise<number[]> {
 
 /** GetUserStatus of the language server on port over scheme; null when it
  * does not answer with an object. */
-async function userStatus(port: number, csrf: string, scheme: 'https' | 'http'): Promise<Record<string, unknown> | null> {
+async function userStatus(
+  port: number,
+  csrf: string,
+  scheme: 'https' | 'http',
+  signal: AbortSignal,
+): Promise<Record<string, unknown> | null> {
   const headers = { 'X-Codeium-Csrf-Token': csrf, 'Connect-Protocol-Version': '1', 'Content-Type': 'application/json' };
   for (const body of ['{"metadata":{"ideName":"antigravity","extensionName":"antigravity","locale":"en"}}', '{}']) {
+    signal.throwIfAborted();
     try {
-      return await localPost(port, scheme, STATUS_PATH, headers, body, LOCAL_MS);
+      return await localPost(port, scheme, STATUS_PATH, headers, body, LOCAL_MS, signal);
     } catch (err) {
+      signal.throwIfAborted();
       if (err instanceof HttpError && err.code === 'network') break;
     }
   }

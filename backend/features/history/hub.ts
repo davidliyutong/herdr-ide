@@ -99,6 +99,7 @@ export const historyFeature = (o: HistoryOptions = {}) =>
             .list()
             .filter((m) => m.ready)
             .map((m) => m.id),
+        onReadyChange: (wake) => ctx.machines.subscribe({ state: (st) => wake(st.id, st.status === 'ready') }),
         settings: ctx.settings,
         enabled: () => ctx.enabledFor('desktop') || ctx.enabledFor('browser'),
         switchKey: `plugins.${ctx.id}.enabled`,

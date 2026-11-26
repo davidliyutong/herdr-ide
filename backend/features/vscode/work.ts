@@ -69,18 +69,35 @@ export class Work {
 /** VS Code's use of each machine, so that an idle code-server is released:
  * its open WebSockets and when it was last used. */
 export class Activity {
-  private readonly open = new Map<string, number>();
-  private readonly last = new Map<string, number>();
+  private readonly uses = new Map<string, { open: number; last: number }>();
   private readonly now: () => number;
 
   constructor(now: () => number = Date.now) {
     this.now = now;
   }
 
-  /** A request (delta 0) or a WebSocket that opened (1) or closed (-1). */
-  touch(machine: string, delta: number): void {
-    this.open.set(machine, (this.open.get(machine) ?? 0) + delta);
-    this.last.set(machine, this.now());
+  private use(machine: string): { open: number; last: number } {
+    const a = this.uses.get(machine) ?? { open: 0, last: 0 };
+    a.last = this.now();
+    this.uses.set(machine, a);
+    return a;
+  }
+
+  touch(machine: string): void {
+    this.use(machine);
+  }
+
+  /** A WebSocket keeps this instance active until its disposer runs. */
+  connected(machine: string): () => void {
+    const a = this.use(machine);
+    a.open++;
+    let closed = false;
+    return () => {
+      if (closed || this.uses.get(machine) !== a) return;
+      closed = true;
+      a.open--;
+      a.last = this.now();
+    };
   }
 
   /** The machines among running whose code-server had no open connection
@@ -89,14 +106,14 @@ export class Activity {
   idleAmong(running: readonly string[], ms: number): string[] {
     const out: string[] = [];
     for (const id of running) {
-      const last = this.last.get(id);
-      if (last === undefined) {
-        this.last.set(id, this.now());
+      const a = this.uses.get(id);
+      if (!a) {
+        this.use(id);
         continue;
       }
-      if ((this.open.get(id) ?? 0) === 0 && this.now() - last > ms) {
+      if (a.open === 0 && this.now() - a.last > ms) {
         out.push(id);
-        this.last.delete(id);
+        this.uses.delete(id);
       }
     }
     return out;
@@ -104,11 +121,10 @@ export class Activity {
 
   /** For tests: when the machine was last used. */
   setLast(machine: string, at: number): void {
-    this.last.set(machine, at);
+    this.use(machine).last = at;
   }
 
   forget(machine: string): void {
-    this.open.delete(machine);
-    this.last.delete(machine);
+    this.uses.delete(machine);
   }
 }

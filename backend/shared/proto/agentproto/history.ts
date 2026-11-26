@@ -76,33 +76,9 @@ export interface HistoryListResult {
   restoreScreen: boolean;
 }
 
-export interface HistoryReadParams {
-  terminal: string;
-  generation: string;
-}
-
-/** One generation's bytes (base64 in JSON, as Go's []byte). */
-export interface HistoryData extends HistorySnapshot {
-  terminal: string;
-  generation: string;
-  data: string;
-}
-
-export interface HistoryClearParams {
-  terminal?: string;
-}
-
-export interface HistoryClearResult {
-  removed: number;
-}
-
 export interface HistoryAdoptParams {
   from: string;
   to: string;
-}
-
-export interface HistoryAdoptResult {
-  adopted: boolean;
 }
 
 const historyTerminal = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;

@@ -49,7 +49,7 @@ import { inode, listenUnix } from '#machine/sockets.ts';
 import { rmSync, lstatSync, openSync, statSync, constants as fsc } from 'node:fs';
 import type { Adapter, Adapters, ClientInfo, Session } from '../adapter.ts';
 import { AgentProcesses, signalGroup } from '../agentproc.ts';
-import { Chat, MAX_CLIENT_IDS, SESSION_ID, errorOf, now, perr, validOption } from './chat.ts';
+import { Chat, SESSION_ID, errorOf, now, perr, validOption } from './chat.ts';
 import { Environment, agentEnv, isDir, lookPath, userHome, type Env } from './env.ts';
 import { Journal, timeOf, type Row, emptyCapabilities } from './journal.ts';
 import { parseCommand, parseRequest, type Request } from './requests.ts';
@@ -103,6 +103,7 @@ export const HOST_TIMING: HostTiming = {
 
 /** The connections served at a time. */
 const MAX_CONNS = 256;
+const MAX_REFUSING = 8;
 /** The session listings that may run at a time, and the commands one
  * attached connection may have waiting for an agent. */
 const MAX_PROBES = 4;
@@ -209,6 +210,7 @@ export class Host {
   /** The connections served: true for one attached to a chat or watching,
    * which ends when it wrote what it still had. */
   private readonly conns = new Map<Socket, boolean>();
+  private readonly refusing = new Set<Socket>();
   private quietSince = 0;
   private quietTimer: ReturnType<typeof setTimeout> | null = null;
   private quietPoke = false;
@@ -268,11 +270,18 @@ export class Host {
     const o = this.opts;
     const path = posix.join(o.run, chat.SOCKET_NAME);
     // Connections wait until the journal is read: the hello comes then.
-    let ready!: (ok: boolean) => void;
-    const loaded = new Promise<boolean>((r) => (ready = r));
+    let loaded = false;
+    const starting = new Set<Socket>();
     const served = await listen(o.run, path, (c) => {
       c.on('error', () => {});
-      void loaded.then((ok) => (ok ? this.accept(c) : c.destroy()));
+      if (loaded) {
+        this.accept(c);
+      } else if (starting.size >= MAX_CONNS) {
+        c.destroy();
+      } else {
+        starting.add(c);
+        c.once('close', () => starting.delete(c));
+      }
     });
     const removeSocket = () => {
       // The socket goes first: a host that starts now finds the path free.
@@ -291,7 +300,8 @@ export class Host {
       if (o.settings) this.current = o.settings as chat.ClampedHostSettings;
       await this.load();
     } catch (e) {
-      ready(false);
+      for (const conn of starting) conn.destroy();
+      starting.clear();
       served.server.close();
       removeSocket();
       if (this.journal) await this.journal.close();
@@ -299,7 +309,9 @@ export class Host {
     }
     this.logf(`serving ${path} for ${o.base} (version ${VERSION}, pid ${process.pid}, ${this.chats.size} chats)`);
     o.onHost?.(this);
-    ready(true);
+    loaded = true;
+    for (const conn of starting) if (!conn.destroyed) this.accept(conn);
+    starting.clear();
 
     const enforcer = setInterval(() => this.enforceSoon(), this.o.enforceEvery);
     this.enforceSoon();
@@ -332,6 +344,7 @@ export class Host {
     await this.stopAgents(this.fast);
     this.abort.abort();
     if (this.quietTimer) clearTimeout(this.quietTimer);
+    for (const conn of this.refusing) conn.destroy();
     for (const [conn, attached] of this.conns) {
       // An attached one is told how its chat ended, if it reads that soon.
       if (attached) setTimeout(() => conn.destroy(), this.o.stopFlush).unref?.();
@@ -376,10 +389,8 @@ export class Host {
    * in an error. */
   private async load(): Promise<void> {
     for (const r of await this.journal.loadChats()) {
-      const c = new Chat(this, r);
-      const first = await this.journal.first(r.chat.id);
-      c.first = first === 0 ? r.chat.seq + 1 : first;
-      for (const id of await this.journal.clientIDs(r.chat.id, MAX_CLIENT_IDS)) c.tookClient(id);
+      const c = new Chat(this, r, true);
+      c.first = r.first === 0 ? r.chat.seq + 1 : r.first;
       this.chats.set(r.chat.id, c);
       switch (r.chat.state) {
         case chat.State.Starting:
@@ -406,10 +417,19 @@ export class Host {
       return;
     }
     if (this.conns.size >= MAX_CONNS) {
+      if (this.refusing.size >= MAX_REFUSING) {
+        sock.destroy();
+        return;
+      }
+      this.refusing.add(sock);
       this.track(
         (async () => {
-          if (await this.hello(sock)) await this.reply(sock, refusal(chat.Code.TooMany, 'too many connections'));
-          sock.destroy();
+          try {
+            if (await this.hello(sock)) await this.reply(sock, refusal(chat.Code.TooMany, 'too many connections'));
+          } finally {
+            this.refusing.delete(sock);
+            sock.destroy();
+          }
         })(),
       );
       return;
@@ -1025,6 +1045,7 @@ export class Host {
       this.logf(`chat ${c.id}: delete: ${(e as Error).message}`);
       return refusal(chat.Code.Failed, 'the journal did not delete the chat');
     }
+    this.enforceSoon();
     return { ok: true };
   }
 
@@ -1303,6 +1324,7 @@ export class Host {
         this.enforceAgain = false;
         try {
           await this.enforceBounds();
+          await this.journal.reclaim();
         } catch (e) {
           this.logf(`bounds: ${(e as Error).message}`);
         }

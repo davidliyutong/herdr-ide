@@ -8,6 +8,7 @@
 // left (the terminal core and its programs keep running).
 import type { Duplex } from 'node:stream';
 import type { Logger } from '#shared/lib/log.ts';
+import { retryDelay } from '#shared/lib/wait.ts';
 import { isChatHostName, Op } from '#shared/proto/agentproto/index.ts';
 import { Conn, type CoreInfo, type Events, type Hello, type Notification, type Stream, type Subscribed } from '#shared/proto/hc/index.ts';
 import { pairDuplex } from '#shared/proto/yamux.ts';
@@ -15,7 +16,7 @@ import type { Machine } from '#kernel/machines/machine.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
 import type { HCState } from '#kernel/machines/spec.ts';
 import { Agents, followAgents, type AgentHost } from './agents.ts';
-import { ensure, type LifecycleDeps } from './lifecycle.ts';
+import { ensure, hcAction, type LifecycleDeps } from './lifecycle.ts';
 import { Code, type BackendState } from './messages.ts';
 import { hiddenRecord, indexTerminals, isObject, localName, otherMachine, visibleList, type Rec } from './records.ts';
 import type { Timing } from './timing.ts';
@@ -47,6 +48,7 @@ export interface BackendDeps extends LifecycleDeps {
   /** Whether the machines resolve the sessions of the agents in their
    * terminals. */
   sessions: () => boolean;
+  onSessionsChange: (changed: () => void) => () => void;
   /** Told whether the machine's terminal core is ready, at each state. */
   onReady?: (m: Machine, ready: boolean) => void;
   timing: Timing;
@@ -114,6 +116,7 @@ export class Backend implements AgentHost {
    * added again under the same id has a backend of its own). */
   private gone = false;
   private conn: Conn | null = null;
+  private coreOps: Promise<unknown> = Promise.resolve();
   /** Counts the connections that became ready, so that what one started
    * (its agent detection) changes nothing of the next. */
   private generation = 0;
@@ -248,9 +251,26 @@ export class Backend implements AgentHost {
   /** Brings the machine's terminal core up from the UI (lifecycle.ensure);
    * "" or the code of why not. */
   ensure(restart: boolean, signal: AbortSignal): Promise<string> {
-    const m = this.d.machines.get(this.id);
-    if (!m) return Promise.resolve(Code.Offline);
-    return ensure(m, { restart, stopped: () => this.stopped, id: this.id, signal, timeoutMs: this.d.timing.ensureMs }, this.d);
+    return this.coreAction(async () => {
+      const m = this.d.machines.get(this.id);
+      if (!m || signal.aborted) return Code.Offline;
+      return ensure(m, { restart, stopped: () => this.stopped, id: this.id, signal, timeoutMs: this.d.timing.ensureMs }, this.d);
+    });
+  }
+
+  async stopCore(signal: AbortSignal): Promise<void> {
+    await this.coreAction(async () => {
+      signal.throwIfAborted();
+      const m = this.d.machines.get(this.id);
+      if (!m) throw new Error('the machine is offline');
+      await hcAction(m, 'stop', '', signal, this.d.timing.actionMs);
+    });
+  }
+
+  private coreAction<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.coreOps.then(fn);
+    this.coreOps = result.catch(() => {});
+    return result;
   }
 
   /** Shows the backend's state in its machine's state. */
@@ -304,7 +324,7 @@ export class Backend implements AgentHost {
       if (signal.aborted) break;
       this.setState('error', code);
       if (Date.now() - started > t.stableMs) backoff = t.backoffMinMs;
-      const why = await this.wakeup.until(backoff, signal);
+      const why = await this.wakeup.until(retryDelay(backoff), signal);
       if (why === 'woken') backoff = t.backoffMinMs;
       else if (why === 'timeout') backoff = Math.min(backoff * 2, t.backoffMaxMs);
     }
@@ -324,7 +344,7 @@ export class Backend implements AgentHost {
     const m = this.d.machines.get(this.id);
     if (!m) return Code.Offline;
     this.setState('starting', '');
-    const code = await ensure(m, { restart: false, stopped: () => this.stopped, id: this.id, signal, timeoutMs: t.ensureMs }, this.d);
+    const code = await this.ensure(false, signal);
     if (code || signal.aborted) return code;
     const dial = AbortSignal.any([signal, AbortSignal.timeout(t.dialMs)]);
     let rw: Duplex;
@@ -376,6 +396,7 @@ export class Backend implements AgentHost {
       const gen = ++this.generation;
       void followAgents(m, this.agents, {
         sessions: this.d.sessions,
+        onSessionsChange: this.d.onSessionsChange,
         signal: AbortSignal.any([signal, detect.signal]),
         current: () => this.generation === gen && !this.gone,
         timing: t,
@@ -607,6 +628,7 @@ export class Backend implements AgentHost {
       return;
     }
     const old = this.parked.get(terminal);
+    st.discardOutput();
     this.parked.set(terminal, st);
     old?.close();
   }

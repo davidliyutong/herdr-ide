@@ -448,6 +448,39 @@ describe('agents', () => {
 });
 
 describe('the last viewer', () => {
+  test('a pending attach ends when the client stops following its machine', async () => {
+    const r = await start();
+    const core = r.sim.core!;
+    const client = await r.client();
+    const entered = Promise.withResolvers<void>();
+    const reply = Promise.withResolvers<void>();
+    core.beforeAttach = () => {
+      entered.resolve();
+      return reply.promise;
+    };
+    try {
+      client.send({ t: 'sub', m: 'x' });
+      await client.until('snapshot');
+      client.send({ t: 'attach', rid: 1, m: 'x', terminal: 't1', cols: 80, rows: 24 });
+      await entered.promise;
+      client.send({ t: 'unsub', m: 'x' });
+      client.send({ t: 'sub', m: 'x' });
+      let subscribed = false;
+      let cancelled = false;
+      while (!subscribed || !cancelled) {
+        const event = await client.next();
+        if (event.t === 'snapshot') subscribed = true;
+        if (event.t === 'res') {
+          expect(event).toMatchObject({ rid: 1, error: { kind: 'unavailable' } });
+          cancelled = true;
+        }
+      }
+    } finally {
+      reply.resolve();
+    }
+    await waitFor('the late core stream is closed', () => core.closes === 1);
+  });
+
   // A terminal's size is its last active viewer's: the stream of the last
   // viewer that sets the size stays attached until another has attached or
   // the terminal ends. Any other viewer's stream is closed when it leaves,

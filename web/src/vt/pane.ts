@@ -256,6 +256,7 @@ export class TermPane {
   private blinkTimer?: number;
   private held = false;
   private heldSince = 0;
+  private holdTimer?: number;
   /** An attach's first paint is on its way: nothing is drawn. */
   private painting = false;
   /** The emulator's first paint is over and the view went back where it
@@ -467,6 +468,8 @@ export class TermPane {
     // history, and the view goes back where it was (scrollMemory.ts).
     this.noteScroll();
     this.viewed = false;
+    this.held = false;
+    this.cancelHoldTimer();
     this.term?.dispose();
     // What a prelude written into it would answer, report or ring is dropped.
     const term = new Terminal(this.vt, this.grid.cols, this.grid.rows, {
@@ -478,16 +481,21 @@ export class TermPane {
       clipboard: (text) => !this.replaying && !this.o.readOnly() && programCopied(this.o.m, text),
       dark: () => this.appearance.theme === 'dark',
       hold: (held) => {
-        if (this.replaying) return;
+        if (this.replaying || this.held === held) return;
         this.held = held;
         this.heldSince = performance.now();
-        if (!held) this.schedule();
+        if (!held) {
+          this.cancelHoldTimer();
+          this.schedule();
+        }
       },
     });
     if (this.metrics) term.resize(this.grid.cols, this.grid.rows, this.metrics.cw, this.metrics.ch);
     this.configure(term);
     this.term = term;
     this.frame = newFrame(this.grid.cols, this.grid.rows);
+    this.cursorAt = '';
+    this.startBlink();
     this.renderer?.invalidate();
     this.painting = true;
     this.preludeShown = preludeOf(this.o.m, this.o.address);
@@ -751,7 +759,9 @@ export class TermPane {
   setShown(shown: boolean) {
     if (this.hidden === !shown || this.disposed) return;
     this.hidden = !shown;
+    this.startBlink();
     if (shown) return this.setAppearance(this.appearance);
+    this.cancelHoldTimer();
     this.hideMath();
     if (this.renderer) {
       this.renderer.dispose();
@@ -772,10 +782,29 @@ export class TermPane {
 
   private schedule() {
     if (this.raf !== undefined || this.disposed) return;
+    if (!this.hidden && !this.painting && this.renderer && this.waitForHold()) return;
     this.raf = requestAnimationFrame(() => {
       this.raf = undefined;
       this.draw();
     });
+  }
+
+  private cancelHoldTimer() {
+    window.clearTimeout(this.holdTimer);
+    this.holdTimer = undefined;
+  }
+
+  /** A held screen needs one deadline. Output still returns credit. */
+  private waitForHold(): boolean {
+    if (!this.held) return false;
+    const left = HOLD_MS - (performance.now() - this.heldSince);
+    if (left <= 0) return false;
+    this.ack();
+    this.holdTimer ??= window.setTimeout(() => {
+      this.holdTimer = undefined;
+      this.schedule();
+    }, Math.ceil(left));
+    return true;
   }
 
   private draw() {
@@ -786,15 +815,7 @@ export class TermPane {
     if (this.painting || this.hidden) return this.ack();
     const r = this.renderer;
     if (!r) return;
-    if (this.held && performance.now() - this.heldSince < HOLD_MS) {
-      // The program holds the screen: draw once it lets go.
-      this.ack();
-      this.raf = requestAnimationFrame(() => {
-        this.raf = undefined;
-        this.draw();
-      });
-      return;
-    }
+    if (this.waitForHold()) return;
     const changed = term.update(this.frame);
     this.cursorMoved();
     if (changed && useFind.getState().terminal === this.o.address && useFind.getState().m === this.o.m && this.findQuery) {
@@ -854,23 +875,21 @@ export class TermPane {
    * arrow key, or followed while typing, never goes dark. */
   private cursorMoved() {
     const c = this.frame.cursor;
-    const at = `${c.x} ${c.y} ${c.visible}`;
+    const at = `${c.x} ${c.y} ${c.visible} ${c.blinking}`;
     if (at === this.cursorAt) return;
     this.cursorAt = at;
-    if (!this.focused || !c.blinking) return;
     this.startBlink();
     this.frame.dirty.add(c.y);
   }
 
   private startBlink() {
     window.clearInterval(this.blinkTimer);
+    this.blinkTimer = undefined;
     this.blinkOn = true;
-    if (!this.focused) return;
+    const c = this.frame.cursor;
+    if (!this.focused || this.hidden || !c.visible || !c.blinking) return;
     this.blinkTimer = window.setInterval(() => {
-      if (!this.frame.cursor.blinking) {
-        if (this.blinkOn) return;
-        this.blinkOn = true;
-      } else this.blinkOn = !this.blinkOn;
+      this.blinkOn = !this.blinkOn;
       this.frame.dirty.add(this.frame.cursor.y);
       this.schedule();
     }, 600);
@@ -1515,6 +1534,7 @@ export class TermPane {
     this.ro.disconnect();
     this.dprQuery?.removeEventListener('change', this.onDprChange);
     if (this.raf !== undefined) cancelAnimationFrame(this.raf);
+    this.cancelHoldTimer();
     window.clearInterval(this.blinkTimer);
     window.clearTimeout(this.mathTimer);
     window.clearTimeout(this.autoTimer);

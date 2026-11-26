@@ -425,6 +425,7 @@ describe('terminal connection', () => {
     const pending = conn.call('x', 'terminal.list');
     // The wait before connecting again passes on a fake clock.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     s.onclose!();
     await expect(pending).rejects.toMatchObject({ kind: 'unavailable' });
     expect(events[3]).toBe('closed:disconnected:undefined');
@@ -433,6 +434,7 @@ describe('terminal connection', () => {
     vi.advanceTimersByTime(499);
     expect(sockets.length).toBe(1);
     vi.advanceTimersByTime(1);
+    random.mockRestore();
     expect(sockets.length).toBe(2);
     sockets[1].onopen!();
     expect(sockets[1].sent).toEqual([

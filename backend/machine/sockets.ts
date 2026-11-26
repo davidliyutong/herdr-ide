@@ -3,9 +3,11 @@
 // that closes (Bun removes the path it bound) never removes a socket
 // another agent put at the path since.
 import { chmodSync, lstatSync, renameSync, rmSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { posix } from 'node:path';
 import type { Logger } from '#shared/lib/log.ts';
+import { UNIX_PATH_BYTES } from '#shared/host/hostdirs.ts';
 
 /** How often an agent checks that the socket it serves is still its own,
  * or, its socket taken over, whether the path is free again. */
@@ -24,8 +26,10 @@ export function inode(path: string): bigint | null {
  * another agent's, which this one takes over); the server and the
  * socket's inode. */
 export async function listenUnix(path: string, accept: (c: Socket) => void): Promise<{ server: Server; ino: bigint }> {
-  const tmp = posix.join(posix.dirname(path), `.${posix.basename(path)}.${process.pid}`);
-  rmSync(tmp, { force: true });
+  const dir = posix.dirname(path);
+  const available = UNIX_PATH_BYTES - Buffer.byteLength(dir) - 1;
+  if (Buffer.byteLength(path) > UNIX_PATH_BYTES || available < 3) throw new Error(`unix socket path is too long: ${path}`);
+  const tmp = posix.join(dir, ('.' + randomBytes(7).toString('hex')).slice(0, available));
   const server = createServer({ pauseOnConnect: true }, accept);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

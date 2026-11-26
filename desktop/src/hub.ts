@@ -10,11 +10,10 @@
 import { randomBytes } from 'node:crypto';
 import { posix } from 'node:path';
 import {
-  ABNORMAL,
   channelClient,
+  refuseChannel,
   request,
   type ChannelClient,
-  type ChannelControl,
   type ChannelHead,
   type HubStart,
   type FromHub,
@@ -134,6 +133,7 @@ export class HubHost {
   private stopping = false;
   private gone = false;
   private stopped?: Promise<void>;
+  private restart?: () => void;
   private crashes: number[] = [];
   private stderr = '';
 
@@ -148,10 +148,14 @@ export class HubHost {
 
   /** Starts the hub; resolves once it serves, rejects when it could not
    * start (then it is not started again). */
-  start(): Promise<void> {
-    return this.launch().then(() => {
+  async start(): Promise<void> {
+    try {
+      await this.launch();
       this.started = true;
-    });
+    } catch (e) {
+      this.gone = true;
+      throw e;
+    }
   }
 
   private launch(): Promise<void> {
@@ -202,23 +206,36 @@ export class HubHost {
       return;
     }
     this.o.log?.(`hub exited (${code}); starting it again\n`);
-    void this.launch().catch(() => {});
+    this.child = undefined;
+    const delay = Math.min(100 * 2 ** (this.crashes.length - 1), 2000) * (0.8 + Math.random() * 0.4);
+    this.ready = new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        this.restart = undefined;
+        resolve();
+      };
+      const timer = setTimeout(finish, delay);
+      this.restart = finish;
+    }).then(() => {
+      if (this.stopping || this.gone) throw new DesktopError('desktop.hubLost');
+      return this.launch();
+    });
+    this.ready.catch(() => {});
   }
 
   /** Waits until the hub serves (also through a restart). */
   private async serving(): Promise<HubChild> {
-    const deadline = (this.o.now ?? Date.now)() + (this.o.startMs ?? 30_000) * 2;
     for (;;) {
       if (this.stopping || this.gone) throw new DesktopError('desktop.hubLost');
       const r = this.ready;
       try {
         await r;
-        if (this.child) return this.child;
       } catch (e) {
-        if (this.ready === r && (this.o.now ?? Date.now)() > deadline) throw e;
-        // A restart is on its way: wait for it.
-        if (this.ready === r) await new Promise((ok) => setTimeout(ok, 50));
+        if (this.ready === r) throw e;
       }
+      if (this.ready !== r) continue;
+      if (this.child && !this.ended.has(this.child)) return this.child;
+      throw new DesktopError('desktop.hubLost');
     }
   }
 
@@ -262,14 +279,13 @@ export class HubHost {
     try {
       child = await this.serving();
     } catch {
-      const port = this.o.spawner.port(end);
-      port.post({ t: 'close', code: ABNORMAL, reason: 'the hub is not running' } satisfies ChannelControl);
+      refuseChannel(this.o.spawner.port(end), 'the hub is not running');
       return;
     }
     try {
       child.postMessage({ t: 'channel', head }, [end]);
     } catch {
-      this.o.spawner.port(end).post({ t: 'close', code: ABNORMAL, reason: 'the hub is not running' } satisfies ChannelControl);
+      refuseChannel(this.o.spawner.port(end), 'the hub is not running');
     }
   }
 
@@ -297,6 +313,7 @@ export class HubHost {
   stop(deadline = 20_000): Promise<void> {
     if (this.stopped) return this.stopped;
     this.stopping = true;
+    this.restart?.();
     const child = this.child;
     if (!child || this.ended.has(child)) return Promise.resolve();
     this.stopped = new Promise<void>((resolve) => {

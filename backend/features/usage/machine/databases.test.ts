@@ -24,6 +24,7 @@ import {
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { extended } from '../../../shared/testdata/extended.ts';
 import { removeHomes, tempHome, testEnv, testNowSec, write } from '../testdata/machine.ts';
 import { DB_LIMITS, parseGen, parseStepTime, parseTrajectory, protoFields, readAntigravity, readOpenCode } from './databases.ts';
 import { NO_ANSWER, SQLiteWorker } from './sqlworker.ts';
@@ -304,26 +305,15 @@ describe('OpenCode', () => {
     await expect(readOpenCode(p, since, { signal, uid })).rejects.toMatchObject({ code: 'unreadable' });
   });
 
-  test('a FIFO swapped in after the check holds the worker, never the node: no answer in time, the worker ended', async () => {
+  extended('a FIFO swapped in after the check holds the worker, never the node: no answer in time, the worker ended', async () => {
     const home = tempHome();
-    const p = join(home, 'a.db');
-    const db = new DatabaseSync(p);
-    db.exec('PRAGMA journal_mode = WAL');
-    db.exec('CREATE TABLE message (id text, time_created integer, data text)');
-    db.close();
-    // As if swapped in after it was looked at: SQLite opens it by name.
-    rmSync(`${p}-wal`, { force: true });
-    rmSync(`${p}-shm`, { force: true });
-    const fifo = `${p}-wal`;
+    // The database itself is opened read-only. SQLite may ignore an empty WAL.
+    const fifo = join(home, 'a.db');
     execFileSync('/usr/bin/mkfifo', [fifo]);
     const worker = new SQLiteWorker(500);
     const signal = new AbortController().signal;
     try {
-      const r = await meanwhile(async () => {
-        const opened = await worker.request({ op: 'open', path: p }, signal);
-        if (!opened.ok) return opened;
-        return worker.request({ op: 'all', sql: 'SELECT count(*) AS n FROM message', params: [] }, signal);
-      });
+      const r = await meanwhile(() => worker.request({ op: 'open', path: fifo }, signal));
       expect(r.out).toEqual({ ok: false, errcode: NO_ANSWER });
       expect(r.ticks).toBeGreaterThan(10);
       expect(worker.running).toBe(false);

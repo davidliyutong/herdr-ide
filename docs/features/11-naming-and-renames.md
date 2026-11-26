@@ -17,7 +17,7 @@ Non-goals: carrying state from a previous name (the renamed version starts with 
 ## Design
 
 - **Definitions**:
-  - hub and machine side: `backend/shared/lib/brand.ts` (`NAME`, `SLUG`, `DOMAIN`, `ENV_PREFIX`, `dataDir(instance)`, `AGENT_DIR`, `BRIDGE_EXT_ID`, …);
+  - hub and machine side: `backend/shared/lib/brand.ts` (`NAME`, `SLUG`, `DOMAIN`, `ENV_PREFIX`, `dataDir(instance)`, `AGENT_DIR`, …);
   - web UI: `web/src/brand.ts` (`APP_NAME`, `APP_SLUG`, `APP_DOMAIN`, namespaced `storage`).
 
   The domain (`veldr.app`), reversed, begins the desktop app's id (`app.veldr.desktop`): macOS's bundle identifier, Windows's AppUserModelID, the Linux desktop entry. A new id is a new app to macOS: its Full Disk Access, notification permission and keychain access are granted again;

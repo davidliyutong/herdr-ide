@@ -185,6 +185,7 @@ export class CodeServer {
   private readonly t: ServerTiming;
   /** Starting, ending and the pid file's changes, one at a time. */
   private queue: Promise<unknown> = Promise.resolve();
+  private readonly installing = new Map<string, Promise<void>>();
 
   constructor(layout: Layout, o: ServerOptions) {
     this.layout = layout;
@@ -256,10 +257,33 @@ export class CodeServer {
   }
 
   /** Ends code-server (a hub asked, or let it go). */
-  stop(): Promise<void> {
+  stop(inUse?: () => boolean): Promise<void> {
     return this.locked(async () => {
       const p = await this.readPid();
-      if (p) await this.kill(p);
+      if (p && !inUse?.()) await this.kill(p);
+    });
+  }
+
+  /** Shares staging and publication among overlapping installs of identical bytes. */
+  async joinInstall(version: string, digest: string, stage: () => Promise<void>): Promise<void> {
+    const key = `${version}:${digest}`;
+    const previous = this.installing.get(key);
+    if (previous) return previous;
+    const next = stage();
+    this.installing.set(key, next);
+    try {
+      await next;
+    } finally {
+      this.installing.delete(key);
+    }
+  }
+
+  /** Makes a staged release visible under the same lock as start and stop. */
+  promoteRelease(version: string, publish: () => Promise<void>): Promise<void> {
+    return this.locked(async () => {
+      const p = await this.readPid();
+      if (p?.version === version && alive(p.pid) && (await isExecutable(releaseBin(this.layout, version))) && (await this.serves())) return;
+      await publish();
     });
   }
 

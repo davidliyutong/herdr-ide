@@ -26,7 +26,7 @@ export const paths = {
    * (scripts/e2e.sh). */
   newerVersion: 'dev-e2e-newer',
   /** A directory with the fake coding agents (kimi: e2e/fakes/acp.ts;
-   * codex: e2e/fakes/codex.ts). */
+   * codex: e2e/fakes/codex.ts; claude: e2e/fakes/claude.ts). */
   fakeBin: join(dir, 'fakebin'),
   /** The machine builds the hub uploads to SSH machines (--agent-dir):
    * those of the hub's version with their SHA256SUMS (agentsOf: those of
@@ -46,10 +46,12 @@ export const paths = {
   /** The X program of the program window tests (e2e/fakes/xclient.ts), for
    * an SSH machine's Linux. */
   linuxXClient: (arch: string) => join(dir, `linux-${arch}`, 'e2e-xclient'),
+  /** The loopback static server of the browser-pane screenshots. */
+  linuxHttp: (arch: string) => join(dir, `linux-${arch}`, 'e2e-http'),
 };
 
 export function checkBuilt() {
-  for (const p of [paths.hub, join(paths.fakeBin, 'kimi'), join(paths.fakeBin, 'codex')]) {
+  for (const p of [paths.hub, join(paths.fakeBin, 'kimi'), join(paths.fakeBin, 'codex'), join(paths.fakeBin, 'claude')]) {
     if (!existsSync(p)) throw new Error(`${p} is missing: run make e2e (scripts/e2e.sh builds it)`);
   }
 }

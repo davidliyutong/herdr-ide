@@ -12,6 +12,7 @@ import { posix } from 'node:path';
 import { ENV_PREFIX } from '#shared/lib/brand.ts';
 import { AGENT_SESSION_VARS } from '#machine/env.ts';
 import type { Logger } from '#shared/lib/log.ts';
+import { waitForResult } from '#shared/lib/wait.ts';
 import type { AgentProcesses } from '../agentproc.ts';
 
 /** The times and bounds of the login shell. */
@@ -227,14 +228,18 @@ export class Environment {
    * shell did not tell. One shell runs at a time; the callers that come
    * meanwhile get its answer. */
   async get(signal: AbortSignal): Promise<Env> {
+    if (signal.aborted) return this.o.hostEnv;
     const now = (this.o.now ?? Date.now)();
-    const stamps = await fileStamps(startupFiles(this.o.home, this.o.hostEnv, this.env));
-    if (this.env && now - this.at < this.keep && stamps === this.stamps) return this.env;
-    this.asking ??= this.ask(stamps).finally(() => (this.asking = null));
-    return Promise.race([
-      this.asking,
-      new Promise<Env>((resolve) => signal.addEventListener('abort', () => resolve(this.o.hostEnv), { once: true })),
-    ]);
+    try {
+      const stamps = await waitForResult(fileStamps(startupFiles(this.o.home, this.o.hostEnv, this.env)), signal);
+      if (signal.aborted) return this.o.hostEnv;
+      if (this.env && now - this.at < this.keep && stamps === this.stamps) return this.env;
+      this.asking ??= this.ask(stamps).finally(() => (this.asking = null));
+      return await waitForResult(this.asking, signal);
+    } catch (e) {
+      if (signal.aborted) return this.o.hostEnv;
+      throw e;
+    }
   }
 
   private async ask(stamps: string): Promise<Env> {

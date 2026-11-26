@@ -16,6 +16,7 @@
 // and on /ws the theme pages choose, which VS Code's windows follow; the
 // agents' bridge streams (op bridge); idle code-servers released after
 // --code-server-idle.
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createMiddleware } from 'hono/factory';
 import { Op } from '#shared/proto/agentproto/index.ts';
 import { defineFeature, enableSetting, type FeatureContext, type FeatureDef } from '#kernel/feature.ts';
@@ -172,10 +173,8 @@ export function vscodeFeatures(o: VSCodeOptions = {}): FeatureDef[] {
       ctx.service('idle code-servers', async (signal) => {
         if (timing.idleMs <= 0) return;
         while (!signal.aborted) {
-          await new Promise<void>((r) => {
-            const t = setTimeout(r, timing.idleCheckMs);
-            signal.addEventListener('abort', () => (clearTimeout(t), r()), { once: true });
-          });
+          await sleep(timing.idleCheckMs, undefined, { signal }).catch(() => {});
+          if (signal.aborted) break;
           for (const id of activity.idleAmong(cs.running(), timing.idleMs)) {
             const m = ctx.machines.get(id);
             if (!m || signal.aborted) continue;
@@ -309,7 +308,7 @@ export function vscodeFeatures(o: VSCodeOptions = {}): FeatureDef[] {
           // An open WebSocket keeps the machine's code-server from being
           // released as idle.
           if (!c.env.upgrade) throw new Fail('upgrade_required', 426);
-          activity.touch(m.id, 1);
+          const disconnected = activity.connected(m.id);
           const dialing = both(c.req.raw.signal, own);
           try {
             const sock = await proxy.dial(dialing);
@@ -327,14 +326,14 @@ export function vscodeFeatures(o: VSCodeOptions = {}): FeatureDef[] {
               handshakeMs: timing.handshakeMs,
               upgrade: c.env.upgrade,
               signal: own,
-              ended: () => activity.touch(m.id, -1),
+              ended: disconnected,
             });
           } catch (e) {
-            activity.touch(m.id, -1);
+            disconnected();
             return failed(e, dialing);
           }
         }
-        activity.touch(m.id, 0);
+        activity.touch(m.id);
         const signal = both(c.req.raw.signal, own);
         try {
           return await proxy.request({ ...inbound, method: c.req.method, path: below + url.search, body: c.req.raw.body }, signal);

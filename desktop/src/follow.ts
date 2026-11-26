@@ -64,7 +64,8 @@ export interface HubLink {
 export function followHub(hub: HubLink, platform: string, on: Follower): () => void {
   let stopped = false;
   let channel: { close(): void } | undefined;
-  let delay = 500;
+  const minDelay = 500;
+  let delay = minDelay;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const read = async (path: string, apply: (reply: unknown) => void) => {
     try {
@@ -83,9 +84,10 @@ export function followHub(hub: HubLink, platform: string, on: Follower): () => v
     if (s) on.settings(s);
   };
   const connect = () => {
+    let openedAt: number | undefined;
     channel = hub.channel('/ws', {
       open() {
-        delay = 500;
+        openedAt = performance.now();
         void read('/api/settings', values);
         void read('/api/keybindings', keys);
       },
@@ -102,7 +104,8 @@ export function followHub(hub: HubLink, platform: string, on: Follower): () => v
       },
       close() {
         if (stopped) return;
-        timer = setTimeout(connect, delay);
+        if (openedAt !== undefined && performance.now() - openedAt >= 30_000) delay = minDelay;
+        timer = setTimeout(connect, Math.round(delay * (0.8 + Math.random() * 0.4)));
         delay = Math.min(delay * 2, 8000);
       },
     });

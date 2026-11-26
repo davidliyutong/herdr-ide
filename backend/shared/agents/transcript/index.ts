@@ -10,7 +10,7 @@
 // the length of a line (longer ones are skipped with a notice), the events
 // and the decoded values of a line; and it ends with its signal.
 import type { TranscriptEvent } from '#shared/proto/agentproto/index.ts';
-import { parseClaude } from './claude.ts';
+import { parseClaude, parseClaudeSDK } from './claude.ts';
 import { LineOut, NOTICE_SKIPPED, bounds, type Limits } from './events.ts';
 
 export { cutText, type Limits } from './events.ts';
@@ -54,6 +54,13 @@ export function claudeFrame(line: Uint8Array | string, lim?: Limits): Frame {
   const bytes = typeof line === 'string' ? Buffer.byteLength(line) : line.length;
   if (bytes > MAX_LINE) o.notice(NOTICE_SKIPPED, { bytes });
   else if (bytes > 0) parseClaude(typeof line === 'string' ? line : decoder.decode(line), o);
+  return frameOf(o);
+}
+
+/** The equivalent mapping for an already parsed SDK message. */
+export function claudeSDKFrame(message: unknown, lim?: Limits): Frame {
+  const o = new LineOut(bounds(lim));
+  parseClaudeSDK(message, o);
   return frameOf(o);
 }
 

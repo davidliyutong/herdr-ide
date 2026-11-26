@@ -20,7 +20,7 @@ import {
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { ABNORMAL, electronPort, type ChannelControl, type ElectronPort } from '../../backend/hosts/electron/bridge';
+import { electronPort, refuseChannel, type ElectronPort } from '../../backend/hosts/electron/bridge';
 import registry from '../../spec/generated/registry.json';
 import tokens from '../../spec/tokens.json';
 import { APP_NAME, APP_SLUG } from '../../web/src/brand';
@@ -451,7 +451,7 @@ ipcMain.on(channels.openChannel, (event, id: unknown, path: unknown, protocols: 
   const head = channelHead(frame.origin, path, protocols);
   const { port1, port2 } = new MessageChannelMain();
   if (head && hub) void hub.connect(head, port1);
-  else electronPort(port1).post({ t: 'close', code: ABNORMAL, reason: 'refused' } satisfies ChannelControl);
+  else refuseChannel(electronPort(port1), 'refused');
   frame.postMessage(channels.channelPort, id, [port2]);
 });
 

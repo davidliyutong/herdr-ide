@@ -18,23 +18,21 @@ export interface StatFS {
 
 /** What runs a sample's reads; one per agent. */
 export class Bounded {
-  private readonly pending = new Set<string>();
+  private readonly pending = new Map<string, Promise<unknown>>();
 
-  /** Runs f for key unless a run of key is still pending; its result, or
-   * null when it fails, is pending, or takes longer than ms. */
-  async run<T>(key: string, ms: number, f: () => Promise<T>): Promise<T | null> {
-    if (this.pending.has(key)) return null;
-    this.pending.add(key);
-    const p = f().finally(() => this.pending.delete(key));
-    p.catch(() => {});
+  /** Shares a read of key and its deadline. A timed-out read still blocks
+   * a new one until its underlying operation completes. */
+  run<T>(key: string, ms: number, f: () => Promise<T>): Promise<T | null> {
+    const pending = this.pending.get(key);
+    if (pending) return pending as Promise<T | null>;
+    const p = Promise.resolve()
+      .then(f)
+      .catch(() => null)
+      .finally(() => this.pending.delete(key));
     let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([p, new Promise<null>((r) => (timer = setTimeout(() => r(null), ms)))]);
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
+    const result = Promise.race([p, new Promise<null>((r) => (timer = setTimeout(() => r(null), ms)))]).finally(() => clearTimeout(timer));
+    this.pending.set(key, result);
+    return result;
   }
 
   /** Whether a run of key is pending (a read that did not answer). */
@@ -44,12 +42,12 @@ export class Bounded {
 
   /** A file's text, null when it cannot be read within ms. */
   text(path: string, ms: number): Promise<string | null> {
-    return this.run(`read:${path}`, ms, () => readFile(path, 'utf8'));
+    return this.run(`text:${path}`, ms, () => readFile(path, 'utf8'));
   }
 
   /** A file's bytes, null when it cannot be read within ms. */
   bytes(path: string, ms: number): Promise<Buffer | null> {
-    return this.run(`read:${path}`, ms, () => readFile(path));
+    return this.run(`bytes:${path}`, ms, () => readFile(path));
   }
 
   /** A directory's names, null when it cannot be read within ms. */

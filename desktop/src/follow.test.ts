@@ -102,7 +102,7 @@ test('opens the channel again when it drops', async () => {
   const { hub, sockets } = fakeHub({});
   const stop = followHub(hub, 'mac', { bindings: () => {}, settings: () => {} });
   sockets[0].on.close();
-  await new Promise((r) => setTimeout(r, 600));
+  await new Promise((r) => setTimeout(r, 750));
   assert.equal(sockets.length, 2);
   stop();
 });

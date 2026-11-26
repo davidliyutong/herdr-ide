@@ -10,6 +10,7 @@
 // subscription) makes a watch due again.
 import * as agentkinds from '#shared/agents/kinds.ts';
 import type { Logger } from '#shared/lib/log.ts';
+import { retryDelay } from '#shared/lib/wait.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 import type { AgentEvent, Machines } from '#kernel/machines/manager.ts';
 import type { Configurer } from './configure.ts';
@@ -22,6 +23,7 @@ import { chatState, DATA_STATES, stateOf, type StatesData, type StatesSnapshot }
 /** How many watches in a row may fail before the hub waits for the next
  * use of the host, or the machine to connect again. */
 export const MAX_FAILURES = 6;
+const STABLE_WATCH_MS = 30_000;
 
 /** The wait after the n-th failure in a row: first, doubled each time, at
  * most 5 minutes. */
@@ -398,15 +400,16 @@ export class Watcher {
       }
     } else if (code === 'unknown_plugin' || code === chat.Code.Unsupported) {
       w.noChat = true;
-    } else if (wasUp) {
+    } else if (wasUp && now - w.since >= STABLE_WATCH_MS) {
       // The host ended or the stream broke: look again soon.
       w.due = true;
-      w.retryAt = now + this.o.timing.againMs;
+      w.failures = 0;
+      w.retryAt = now + retryDelay(this.o.timing.againMs);
     } else {
       w.failures++;
       if (w.failures < MAX_FAILURES) {
         w.due = true;
-        w.retryAt = now + backoff(this.o.timing.retryMs, w.failures);
+        w.retryAt = now + retryDelay(backoff(this.o.timing.retryMs, w.failures));
       }
       if (code !== 'offline') this.o.logger(`chat: watch of ${w.id}: ${asChatError(err).message}`);
     }
@@ -449,7 +452,7 @@ export class Watcher {
       if (this.publishes(w, st, prev.get(st.id), initial, !initial)) notes.push(st);
     }
     for (const id of w.published.keys()) if (!w.states.has(id)) w.published.delete(id);
-    Object.assign(w, { known: true, stale: false, up: true, since: this.o.now(), failures: 0, hostVersion: host.version });
+    Object.assign(w, { known: true, stale: false, up: true, since: this.o.now(), hostVersion: host.version });
     w.rev++;
     this.tell(w.id, this.data(w, sorted(w.states.values()), true), notes);
     return true;

@@ -52,6 +52,7 @@ export const PROC_LIMITS = {
 /** The unit of /proc's times (USER_HZ), 100 on every architecture Linux
  * reports them for. */
 const CLOCK_TICKS = 100;
+const TABLE_TTL_MS = 500;
 
 /** The processes of this system: /proc on Linux, sysctl on macOS. */
 export function systemProcs(files: Files): ProcSource {
@@ -79,7 +80,7 @@ export function procfs(root: string, files: Files): ProcSource {
     }
     return parseStat(b.toString('latin1'));
   };
-  const boot = async (): Promise<number | null> => {
+  const readBoot = async (): Promise<number | null> => {
     let b: Buffer;
     try {
       b = await files.readSmall(posix.join(root, 'stat'), PROC_LIMITS.stat);
@@ -91,23 +92,37 @@ export function procfs(root: string, files: Files): ProcSource {
     const sec = Number(m[1].trim());
     return sec > 0 ? sec * 1000 : null;
   };
+  let boot: Promise<number | null> | undefined;
+  let table: Promise<ProcEntry[]> | undefined;
+  let tableUntil = 0;
+  const readTable = async (): Promise<ProcEntry[]> => {
+    const names = (await files.readDir(root, PROC_LIMITS.procs)).map((e) => e.name).filter((n) => /^[1-9]\d*$/.test(n));
+    const out: ProcEntry[] = [];
+    // A few at a time: thousands of small reads.
+    for (let i = 0; i < names.length; i += 32) {
+      const batch = await Promise.all(names.slice(i, i + 32).map(async (n) => ({ pid: Number(n), st: await stat(Number(n)) })));
+      for (const { pid, st } of batch) if (st) out.push({ pid, ppid: st.ppid, pgid: st.pgid });
+    }
+    return out;
+  };
   return {
     readsFiles: true,
     async table() {
-      const names = (await files.readDir(root, PROC_LIMITS.procs)).map((e) => e.name).filter((n) => /^[1-9]\d*$/.test(n));
-      const out: ProcEntry[] = [];
-      // A few at a time: thousands of small reads.
-      for (let i = 0; i < names.length; i += 32) {
-        const batch = await Promise.all(names.slice(i, i + 32).map(async (n) => ({ pid: Number(n), st: await stat(Number(n)) })));
-        for (const { pid, st } of batch) if (st) out.push({ pid, ppid: st.ppid, pgid: st.pgid });
+      if (!table || performance.now() >= tableUntil) {
+        tableUntil = Infinity;
+        table = readTable().finally(() => (tableUntil = performance.now() + TABLE_TTL_MS));
       }
-      return out;
+      return (await table).slice();
     },
     async start(pid) {
       if (pid <= 0) return null;
       const st = await stat(pid);
       if (!st) return null;
-      const b = await boot();
+      boot ??= readBoot().then((time) => {
+        if (time === null) boot = undefined;
+        return time;
+      });
+      const b = await boot;
       if (b === null) return null;
       return b + Math.floor(st.start / CLOCK_TICKS) * 1000 + ((st.start % CLOCK_TICKS) * 1000) / CLOCK_TICKS;
     },

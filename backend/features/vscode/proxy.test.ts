@@ -115,16 +115,26 @@ test('paths', () => {
 test('idle tracking', () => {
   let now = 0;
   const a = new Activity(() => now);
-  a.touch('m1', 1); // an open VS Code connection
+  const disconnected = a.connected('m1');
   now = 3600_000;
   expect(a.idleAmong(['m1'], 60_000)).toEqual([]);
-  a.touch('m1', -1);
+  disconnected();
   a.setLast('m1', 0);
   expect(a.idleAmong(['m1'], 60_000)).toEqual(['m1']);
   // A machine without traffic yet gets a grace period.
   expect(a.idleAmong(['m2'], 60_000)).toEqual([]);
   now += 61_000;
   expect(a.idleAmong(['m2'], 60_000)).toEqual(['m2']);
+
+  const oldConnection = a.connected('m1');
+  a.forget('m1');
+  const newConnection = a.connected('m1');
+  oldConnection();
+  now += 61_000;
+  expect(a.idleAmong(['m1'], 60_000)).toEqual([]);
+  newConnection();
+  now += 61_000;
+  expect(a.idleAmong(['m1'], 60_000)).toEqual(['m1']);
 });
 
 /** Waits until code-server is ready on the hub's local machine. */

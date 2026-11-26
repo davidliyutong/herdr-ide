@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discard } from '#shared/lib/log.ts';
+import { extended } from '#shared/testdata/extended.ts';
 import {
   Artifacts,
   DEFAULT_VERSION,
@@ -122,6 +123,45 @@ test('a corrupt cached file is downloaded again', async () => {
   } finally {
     m.stop();
   }
+});
+
+test('an unrelated cache hit completes while a download is pending', async () => {
+  const asset = 'macos-arm64';
+  const file = tarballFile('9.9.9', asset);
+  const cache = join(dir, 'cache');
+  mkdirSync(cache);
+  writeFileSync(join(cache, file), 'cached');
+  const downloading = Promise.withResolvers<void>();
+  const response = Promise.withResolvers<Response>();
+  const a = artifacts({
+    pinned: { [file]: sum('cached') },
+    fetch: Object.assign(() => {
+      downloading.resolve();
+      return response.promise;
+    }, fetch),
+  });
+  const first = a.tarball('linux-amd64');
+  await downloading.promise;
+  try {
+    expect(await a.tarball(asset, { signal: AbortSignal.timeout(2000) })).toBe(join(cache, file));
+  } finally {
+    response.resolve(new Response('downloaded'));
+    await first;
+  }
+});
+
+extended('transient download failures are retried and the verified retry is cached', async () => {
+  const asset = 'linux-amd64';
+  const file = tarballFile('9.9.9', asset);
+  let requests = 0;
+  const a = artifacts({
+    pinned: { [file]: sum('downloaded') },
+    fetch: Object.assign(async () => (++requests === 1 ? new Response('retry', { status: 503 }) : new Response('downloaded')), fetch),
+  });
+  const path = await a.tarball(asset);
+  expect(await sha256File(path)).toBe(sum('downloaded'));
+  expect(await a.tarball(asset)).toBe(path);
+  expect(requests).toBe(2);
 });
 
 test('downloads record their digest, fetch-assets copies with sidecars', async () => {

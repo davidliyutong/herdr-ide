@@ -114,6 +114,19 @@ describe('Linux', () => {
     };
   }
 
+  test('concurrent readers share samples and both kinds can read /proc together', async () => {
+    const root = tree({ ...proc(0), mounts: '' });
+    const a = await start({ platform: 'linux', procRoot: root, sysRoot: root, passwd: join(root, 'passwd'), cpuGapMs: 0 });
+    const [m1, m2, p1, p2] = await Promise.all([a.metrics(), a.metrics(), a.processes(), a.processes()]);
+    expect(m1).toEqual(m2);
+    expect(p1).toEqual(p2);
+    expect(m1.memory.totalBytes).toBe(1024e6);
+    expect(p1.memTotalBytes).toBe(1024e6);
+    expect(p1.total).toBe(1);
+    writeFileSync(join(root, 'uptime'), '2000.50 1900.00\n');
+    expect(await a.metrics()).toEqual(m1);
+  });
+
   test('metrics from /proc and /sys: CPU between samples (twice on the first), memory, rates, disks, GPUs, sensors', async () => {
     const root = tree(Object.fromEntries(Object.entries(proc(0)).map(([k, v]) => [`proc/${k}`, v])));
     const sys = tree({
@@ -132,7 +145,7 @@ describe('Linux', () => {
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
     try {
-      const a = await start({ platform: 'linux', procRoot: join(root, 'proc'), sysRoot: sys, cpuGapMs: 1 });
+      const a = await start({ platform: 'linux', procRoot: join(root, 'proc'), sysRoot: sys, cpuGapMs: 1, sampleTtlMs: 0 });
       // The first sample reads the CPU twice; between the same ticks: 0 %.
       const m = await a.metrics();
       expect(m.os).toBe('linux');
@@ -187,7 +200,7 @@ describe('Linux', () => {
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
     try {
-      const a = await start({ platform: 'linux', procRoot: join(root, 'proc'), passwd: join(root, 'passwd') });
+      const a = await start({ platform: 'linux', procRoot: join(root, 'proc'), passwd: join(root, 'passwd'), sampleTtlMs: 0 });
       const p = await a.processes();
       expect(p).toMatchObject({ total: 1, memTotalBytes: 1024e6 });
       // 300 ticks (3 s) over the 500.5 s since it started at 500 s.

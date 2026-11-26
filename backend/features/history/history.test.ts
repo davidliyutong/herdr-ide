@@ -23,7 +23,7 @@ import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, memoryAudit, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { historyFeature, type HistoryOptions } from './hub.ts';
-import { Scheduler, TIMING } from './scheduler.ts';
+import { clearWait, Scheduler, TIMING } from './scheduler.ts';
 import { LIMITS, settings } from './settings.ts';
 
 const SWITCH = 'plugins.history.enabled';
@@ -306,9 +306,14 @@ describe('scheduler', () => {
       if (clears() > at.length) at.push(f.now - start);
       f.now += 30_000;
     }
-    expect(at.slice(0, 4)).toEqual([0, 30_000, 90_000, 210_000]);
+    expect(at[0]).toBe(0);
     expect(at.length).toBeGreaterThanOrEqual(12);
-    expect(at.at(-1)! - at.at(-2)!).toBe(TIMING.clearRetryMaxMs);
+    for (let i = 1; i < at.length; i++) {
+      const actual = at[i] - at[i - 1];
+      const base = clearWait(i, TIMING);
+      expect(actual).toBeGreaterThanOrEqual(base * 0.8);
+      expect(actual).toBeLessThan(base * 1.2 + 30_000);
+    }
     // Away and back: asked at once.
     f.ready = [];
     await step();
@@ -372,7 +377,7 @@ async function withMachine(
     logger: discard,
     machines,
     settings: newSettings(),
-    features: [historyFeature({ ...o, timing: { tickMs: 20, ...o.timing } })],
+    features: [historyFeature(o)],
   });
   stops.push(running(hub));
   await waitFor('x ready', () => machines.get('x')!.ready);

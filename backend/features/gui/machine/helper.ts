@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm, stat, utimes } from 'node:fs/promises';
 import { posix } from 'node:path';
+import type { Writable } from 'node:stream';
 import { HUB_BIN } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { Reader, write } from '#shared/lib/streamio.ts';
@@ -57,6 +58,8 @@ const KIND: Record<string, number> = { avc1: 1, vp8: 2 };
 export const JOB_LEN = 29;
 /** The most jobs of one batch (proto.zig max_jobs). */
 export const MAX_JOBS = 1024;
+/** The most pixels of one batch (proto.zig max_batch_pixels). */
+export const MAX_BATCH_PIXELS = 256 << 20;
 /** The longest message the helper takes. */
 export const MAX_IN = 1 << 20;
 /** The longest message the helper sends: a frame of a whole window. */
@@ -110,6 +113,52 @@ export function message(type: number, payload: Uint8Array = Buffer.alloc(0)): Bu
   h.writeUInt32LE(payload.length + 1, 0);
   h[4] = type;
   return Buffer.concat([h, payload]);
+}
+
+/** Keeps one pointer update while the helper is busy. Commands that must
+ * arrive in order are queued up to a hard limit, then the helper ends. */
+export class HelperInput {
+  private pointer?: Buffer;
+  private waiting = false;
+  private readonly pipe: Writable;
+  private readonly full: () => void;
+
+  constructor(pipe: Writable, full: () => void) {
+    this.pipe = pipe;
+    this.full = full;
+  }
+
+  send(b: Buffer): void {
+    if (this.pipe.destroyed || this.pipe.writableEnded) return;
+    if (b[4] === In.Pointer && this.pipe.writableNeedDrain) {
+      this.pointer = b;
+      if (!this.waiting) {
+        this.waiting = true;
+        this.pipe.once('drain', this.flush);
+      }
+      return;
+    }
+    if (b[4]! <= In.Release) this.pointer = undefined;
+    if (this.pipe.writableLength + b.length > 2 * MAX_IN) {
+      this.close();
+      this.full();
+      return;
+    }
+    this.pipe.write(b);
+  }
+
+  private readonly flush = () => {
+    const b = this.pointer;
+    this.pointer = undefined;
+    this.waiting = false;
+    if (b) this.send(b);
+  };
+
+  close(): void {
+    this.pointer = undefined;
+    this.waiting = false;
+    this.pipe.off('drain', this.flush);
+  }
 }
 
 const u32s = (...v: number[]) => {

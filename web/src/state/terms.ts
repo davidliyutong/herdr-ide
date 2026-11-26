@@ -149,7 +149,7 @@ export class TermModel {
     if (this.subscribed.has(m)) return;
     this.subscribed.add(m);
     this.connection.subscribe(m);
-    this.publish();
+    this.publish(m);
   }
 
   isSubscribed(m: string): boolean {
@@ -177,7 +177,7 @@ export class TermModel {
     this.dirty.delete(m);
     this.store.forget(m);
     this.trackPlaces(m);
-    this.publish();
+    this.publish(m);
   }
 
   /** A machine's layout, once read. */
@@ -193,18 +193,29 @@ export class TermModel {
     return this.connection.call(m, method, params);
   }
 
-  private publish() {
-    const machines: Record<string, MachineTerms> = {};
-    const ids = new Set([...this.subscribed, ...this.store.backends.keys()]);
+  private publish(machine?: string, placeChanged = false) {
     const prev = useTerms.getState().machines;
+    const machines = { ...prev };
+    let changed = placeChanged;
+    const ids = machine === undefined ? new Set([...this.subscribed, ...this.store.backends.keys(), ...Object.keys(prev)]) : [machine];
     for (const m of ids) {
+      const old = Object.hasOwn(prev, m) ? prev[m] : undefined;
+      const backend = this.store.backends.get(m);
+      if (!this.subscribed.has(m) && !backend) {
+        if (old) {
+          delete machines[m];
+          changed = true;
+        }
+        continue;
+      }
       const terminals: Record<string, TerminalRecord> = {};
       for (const r of this.store.terminals(m)) terminals[r.address] = r;
-      const next: MachineTerms = { backend: this.store.backends.get(m), terminals, layout: this.layout(m) };
-      const old = prev[m];
-      machines[m] = old && old.backend === next.backend && old.layout === next.layout && sameRecords(old.terminals, terminals) ? old : next;
+      const layout = this.layout(m);
+      if (old && old.backend === backend && old.layout === layout && sameRecords(old.terminals, terminals)) continue;
+      Object.defineProperty(machines, m, { value: { backend, terminals, layout }, enumerable: true, configurable: true });
+      changed = true;
     }
-    useTerms.setState({ machines });
+    if (changed) useTerms.setState({ machines });
   }
 
   private message(msg: Record<string, unknown>) {
@@ -237,7 +248,7 @@ export class TermModel {
       }
     }
     this.remember(m);
-    this.publish();
+    this.publish(m);
   }
 
   /** A machine whose layout was never written starts with a workspace to
@@ -284,7 +295,7 @@ export class TermModel {
         if (!L.sameLayout(layout, read)) this.save(m);
         for (const a of back) this.restore(m, a);
         this.remember(m);
-        this.publish();
+        this.publish(m);
         done?.();
       },
       () => {},
@@ -361,7 +372,7 @@ export class TermModel {
     if (L.sameLayout(after, before)) return false;
     this.layouts.set(m, after);
     this.save(m);
-    this.publish();
+    this.publish(m);
     return true;
   }
 
@@ -611,7 +622,7 @@ export class TermModel {
             const next = p && settled(p, Date.now());
             if (!p || next === p) return;
             this.places.set(key, next!);
-            this.publish();
+            this.publish(m, true);
           },
           Math.max(0, place.seen.at + SETTLE_MS - now),
         ),

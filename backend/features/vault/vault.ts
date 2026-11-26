@@ -29,7 +29,8 @@ import {
   type VaultResponse,
   type VaultRun,
 } from '#shared/proto/agentproto/index.ts';
-import { AccessLog, hubDBBeside, noisy, released, Result, type Access, type AccessLogOptions } from './accesslog.ts';
+import { hubDBBeside, noisy, released, Result, type Access, type AccessLogOptions } from './accesslog.ts';
+import { WorkerAccessLog } from './accesslog-worker.ts';
 import { b64url, isCode, Mutex, unb64, unb64url, VaultError } from './crypto.ts';
 import { desktopOf, proofMessage, relayAD, type Desktop } from './desktop.ts';
 import { Gate, since, type Nonce, type Purpose, type Stamp } from './gate.ts';
@@ -160,7 +161,7 @@ export class Vault {
    * unlock and the session it opens, a lock and the end of every session. */
   readonly keyMu = new Mutex();
   #store: Store | undefined;
-  #alog: AccessLog | undefined;
+  #alog: WorkerAccessLog | undefined;
   #pending = new Map<string, Pending>();
   #noisy = new Map<
     string,
@@ -215,8 +216,8 @@ export class Vault {
     return this.#store;
   }
 
-  accessLog(): AccessLog {
-    this.#alog ??= new AccessLog({ db: hubDBBeside(this.path()), logger: this.ctx.logger, ...this.o.accessLog });
+  accessLog(): WorkerAccessLog {
+    this.#alog ??= new WorkerAccessLog({ db: hubDBBeside(this.path()), logger: this.ctx.logger, ...this.o.accessLog });
     return this.#alog;
   }
 
@@ -831,7 +832,7 @@ export class Vault {
     };
     const [resp, result] = await this.#answer(m, req, process, rec, gone);
     rec.result = result;
-    if (!this.record(null, 'vault.access', rec))
+    if (!(await this.record(null, 'vault.access', rec)))
       return { ok: false, code: Result.LogFailed, error: 'the access could not be recorded, so the values were not released' };
     if (released(result)) {
       this.touch();
@@ -1005,9 +1006,9 @@ export class Vault {
    * page's request). A release's record is committed first: false when it
    * could not be, and the values must not leave. Lists and refusals are
    * merged and rate-limited. */
-  record(c: Ctx | null, event: string, rec: Omit<Access, 'id'>): boolean {
+  async record(c: Ctx | null, event: string, rec: Omit<Access, 'id'>): Promise<boolean> {
     const quiet = noisy(rec.result);
-    const { kept, ok } = this.accessLog().add(rec, quiet, released(rec.result));
+    const { kept, ok } = await this.accessLog().add(rec, quiet, released(rec.result));
     const fields = accessFields(kept);
     if (!quiet || this.#auditNoisy(`${kept.m}\x00${kept.result}`, fields)) this.audit(c, event, fields);
     if (!quiet) this.#changedThrottled();
@@ -1124,13 +1125,13 @@ export class Vault {
   }
 
   /** Ends the timers (the hub stops). */
-  stop(): void {
+  async stop(): Promise<void> {
     this.#stopped = true;
     if (this.#lockTimer) clearTimeout(this.#lockTimer);
     if (this.#changedLater) clearTimeout(this.#changedLater);
     for (const na of this.#noisy.values()) if (na.flush) clearTimeout(na.flush);
     this.#lockTimer = this.#changedLater = null;
-    this.#alog?.close();
+    await this.#alog?.close();
   }
 }
 

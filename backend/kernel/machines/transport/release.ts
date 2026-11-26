@@ -29,13 +29,14 @@
 // executable for a machine of its platform, a download of the archive from
 // the release (then cached). Each is checked against the manifest's digest
 // (the own executable is the running one) before it is used or cached.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { createGunzip, gzip } from 'node:zlib';
+import { waitForResult } from '#shared/lib/wait.ts';
 import { archiveMember, archiveName, bareName, type TSDigests, type TSPayload } from './builds.ts';
 import { DeployCode, Unsupported } from './errors.ts';
 import { tunnelGet, type OpenStream } from './tunnel.ts';
@@ -126,17 +127,28 @@ export interface OwnExecutable {
  * so a file put at its path since (an upgrade in place) is not taken for
  * it. Read through the descriptor from its start each time. */
 export function ownFile(key: string, fd: number): OwnExecutable {
-  const read = () => collect(createReadStream('', { fd, start: 0, autoClose: false }), MAX_EXECUTABLE, 'the own executable');
+  const stream = () => createReadStream('', { fd, start: 0, autoClose: false });
   let d: Promise<string> | undefined;
   return {
     key,
-    digest: () => (d ??= read().then((r) => r.digest)),
+    digest: () => (d ??= hashOwnFile(stream())),
     gz: async () => {
-      const r = await read();
+      const r = await collect(stream(), MAX_EXECUTABLE, 'the own executable');
       if (r.digest !== (await (d ??= Promise.resolve(r.digest)))) throw new Error('the own executable changed');
       return gzipAsync(r.bytes, { level: 6 });
     },
   };
+}
+
+async function hashOwnFile(chunks: AsyncIterable<Buffer>): Promise<string> {
+  const h = createHash('sha256');
+  let n = 0;
+  for await (const chunk of chunks) {
+    n += chunk.length;
+    if (n > MAX_EXECUTABLE) throw new Error(`the own executable is larger than ${MAX_EXECUTABLE} bytes`);
+    h.update(chunk);
+  }
+  return h.digest('hex');
 }
 
 /** The own executable gzip-compressed (the desktop app carries it so). */
@@ -239,6 +251,11 @@ export interface Manifest {
   source: string;
 }
 
+interface Discovery {
+  m: Manifest | null;
+  reasons: string[];
+}
+
 export interface ReleaseOptions {
   /** The hub's version (the cache's key). */
   version: string;
@@ -264,7 +281,9 @@ export interface ReleaseOptions {
 
 /** A hub's release: its manifest and the archives of every platform. */
 export class Release {
-  private manifestP?: Promise<Manifest | null>;
+  private verified?: Manifest;
+  private direct?: Promise<Discovery & { viaTunnel: boolean }>;
+  private forwarded?: { tunnel: OpenStream; result: Promise<Discovery> };
   private unreachableAt = -Infinity;
   private readonly loads = new Map<string, Promise<TSPayload>>();
   private ownChecked = false;
@@ -303,38 +322,55 @@ export class Release {
       throw new Error(`${SUMS} of another build: it names ${archiveMember(own.key)} ${line ?? 'not at all'}, this hub is ${mine}`);
   }
 
-  /** The manifest from the directory, the cache or the release (fetched
-   * by the hub, directly or, when the release is unreachable, through
-   * tunnel); null when none has it. reasons gets what each source said. */
-  private async find(reasons: string[], signal?: AbortSignal, tunnel?: OpenStream): Promise<Manifest | null> {
-    const parse = async (text: string, source: string, label: string): Promise<Manifest | null> => {
-      try {
-        const sums = parseSums(text);
-        await this.ofThisBuild(sums, label);
-        return { sums, source };
-      } catch (e) {
-        reasons.push(`${label}: ${(e as Error).message}`);
-        this.log(`${source}: refused: ${(e as Error).message}`);
-        return null;
-      }
-    };
+  private async parse(text: string, source: string, label: string, reasons: string[]): Promise<Manifest | null> {
+    try {
+      const sums = parseSums(text);
+      await this.ofThisBuild(sums, label);
+      return { sums, source };
+    } catch (e) {
+      reasons.push(`${label}: ${(e as Error).message}`);
+      this.log(`${source}: refused: ${(e as Error).message}`);
+      return null;
+    }
+  }
+
+  private async keep(file: string, content: string | Buffer): Promise<void> {
+    await mkdir(this.o.cacheDir, { recursive: true, mode: 0o700 });
+    const tmp = `${file}.${process.pid}.${randomUUID()}`;
+    try {
+      await writeFile(tmp, content, { mode: 0o600, flag: 'wx' });
+      await rename(tmp, file);
+    } finally {
+      await rm(tmp, { force: true });
+    }
+  }
+
+  /** Checks sources available to the hub itself. A tunnel is allowed
+   * only when the release is unreachable. */
+  private async find(reasons: string[]): Promise<Manifest | null | 'tunnel'> {
     if (this.o.sums) {
-      const m = await parse(this.o.sums, `this build's ${SUMS}`, `this build's ${SUMS}`);
+      const m = await this.parse(this.o.sums, `this build's ${SUMS}`, `this build's ${SUMS}`, reasons);
       if (m) return m;
     }
     if (this.o.dir) {
       const p = join(this.o.dir, SUMS);
       if (await exists(p)) {
-        const m = await parse((await collect(createReadStream(p), MAX_SUMS, p)).bytes.toString('utf8'), p, `--agent-dir's ${SUMS}`);
+        const m = await this.parse(
+          (await collect(createReadStream(p), MAX_SUMS, p)).bytes.toString('utf8'),
+          p,
+          `--agent-dir's ${SUMS}`,
+          reasons,
+        );
         if (m) return m;
       }
     }
     const cached = this.cacheSums();
     if (await exists(cached)) {
-      const m = await parse(
+      const m = await this.parse(
         (await collect(createReadStream(cached), MAX_SUMS, cached)).bytes.toString('utf8'),
         cached,
         `the cache's ${SUMS}`,
+        reasons,
       );
       if (m) {
         await utimes(cached, new Date(this.now()), new Date(this.now())).catch(() => {});
@@ -347,21 +383,15 @@ export class Release {
       reasons.push('this build has no release to download it from');
       return null;
     }
-    const keep = async (text: string) => {
-      await mkdir(this.o.cacheDir, { recursive: true, mode: 0o700 });
-      await writeFile(`${cached}.${process.pid}`, text, { mode: 0o600 });
-      await rename(`${cached}.${process.pid}`, cached);
-    };
     // The hub's own fetch, not again for a while once the release was
     // unreachable.
     if (this.now() - this.unreachableAt >= FETCH_RETRY_MS) {
       try {
-        const text = (await download(url, MAX_SUMS, SUMS_TIMEOUT_MS, signal)).bytes.toString('utf8');
-        const m = await parse(text, url, `the release's ${SUMS}`);
-        if (m) await keep(text);
+        const text = (await download(url, MAX_SUMS, SUMS_TIMEOUT_MS)).bytes.toString('utf8');
+        const m = await this.parse(text, url, `the release's ${SUMS}`, reasons);
+        if (m) await this.keep(cached, text);
         return m;
       } catch (e) {
-        if (signal?.aborted) throw e;
         const why = errorText(e);
         this.log(`the hub could not download ${url}: ${why}`);
         if (!unreachable(e)) {
@@ -374,40 +404,61 @@ export class Release {
         reasons.push(`the hub cannot reach ${url} (${why})`);
       }
     } else reasons.push(`the hub could not reach ${url} lately`);
-    if (!tunnel) return null;
+    return 'tunnel';
+  }
+
+  private async findForwarded(tunnel: OpenStream): Promise<Discovery> {
+    const url = this.url(SUMS)!;
+    const reasons: string[] = [];
     try {
       const text = (
         await tunnelGet(url, tunnel, {
           max: MAX_SUMS,
           timeoutMs: 60_000,
-          ...(signal ? { signal } : {}),
           ...(this.o.tunnelCA ? { ca: this.o.tunnelCA } : {}),
         })
       ).toString('utf8');
-      const m = await parse(text, `${url} (through the machine)`, `the release's ${SUMS} through the machine`);
-      if (m) await keep(text);
-      return m;
+      const m = await this.parse(text, `${url} (through the machine)`, `the release's ${SUMS} through the machine`, reasons);
+      if (m) await this.keep(this.cacheSums(), text);
+      return { m, reasons };
     } catch (e) {
-      if (signal?.aborted) throw e;
       const why = errorText(e);
       reasons.push(`the hub could not download ${url} through the machine either: ${why}`);
       this.log(
         `the hub could not download ${url} through the machine (ssh -W; a machine whose sshd forbids forwarding, AllowTcpForwarding no, cannot carry it: give the hub a route to the release, or --agent-dir with the release's files): ${why}`,
       );
-      return null;
+      return { m: null, reasons };
     }
   }
 
   /** The manifest, or null with the reasons; a found one is kept. */
-  async manifest(signal?: AbortSignal, tunnel?: OpenStream): Promise<{ m: Manifest | null; reasons: string[] }> {
+  async manifest(signal?: AbortSignal, tunnel?: OpenStream): Promise<Discovery> {
+    signal?.throwIfAborted();
+    if (this.verified) return { m: this.verified, reasons: [] };
     const reasons: string[] = [];
-    if (this.manifestP) {
-      const m = await this.manifestP;
-      if (m) return { m, reasons };
+    this.direct ??= this.find(reasons)
+      .then((r) => {
+        if (r && r !== 'tunnel') this.verified = r;
+        return { m: this.verified ?? null, reasons, viaTunnel: r === 'tunnel' };
+      })
+      .finally(() => (this.direct = undefined));
+    const direct = await waitForResult(this.direct, signal);
+    if (direct.m || !direct.viaTunnel || !tunnel) return direct;
+    while (!this.verified) {
+      signal?.throwIfAborted();
+      const shared: NonNullable<Release['forwarded']> = (this.forwarded ??= {
+        tunnel,
+        result: this.findForwarded(tunnel)
+          .then((r) => {
+            if (r.m) this.verified = r.m;
+            return r;
+          })
+          .finally(() => (this.forwarded = undefined)),
+      });
+      const r = await waitForResult(shared.result, signal);
+      if (r.m || shared.tunnel === tunnel) return { m: r.m, reasons: [...direct.reasons, ...r.reasons] };
     }
-    const p = this.find(reasons, signal, tunnel);
-    this.manifestP = p.catch(() => null);
-    return { m: await p, reasons };
+    return { m: this.verified, reasons: [] };
   }
 
   /** The digests of key's build. */
@@ -427,15 +478,13 @@ export class Release {
   }
 
   /** What the hub uploads for key's build of digests d (one load per
-   * build, shared by the machines that wait for it; a failure is tried
-   * again). */
+   * build at a time, shared by the machines that wait for it). */
   load(key: string, d: TSDigests): Promise<TSPayload> {
-    const id = `${key}:${d.exe}`;
+    const id = `${key}:${d.exe}:${d.archive ?? ''}`;
     let p = this.loads.get(id);
     if (!p) {
       // Shared: no one machine's signal ends it.
-      p = this.resolve(key, d);
-      p.catch(() => this.loads.delete(id));
+      p = this.resolve(key, d).finally(() => this.loads.delete(id));
       this.loads.set(id, p);
     }
     return p;
@@ -515,9 +564,7 @@ export class Release {
         `no machine build for ${key} (${reasons.join('; ')}); put ${archiveName(key)} of the release into the hub's --agent-dir, or let the hub or the machine reach ${url}`,
       );
     }
-    await mkdir(this.o.cacheDir, { recursive: true, mode: 0o700 });
-    await writeFile(`${file}.${process.pid}`, r.bytes, { mode: 0o600 });
-    await rename(`${file}.${process.pid}`, file);
+    await this.keep(file, r.bytes);
     return { kind: 'archive', bytes: r.bytes };
   }
 }

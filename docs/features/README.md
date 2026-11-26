@@ -2,6 +2,8 @@
 
 One document per feature. Each records why the feature exists, how it works, which alternatives were rejected and why, how it fails, and how it is tested. [architecture.md](../architecture.md) is the map of components and protocols; these documents are the reasoning behind them. Reference material (flags, shortcuts, paths) lives in [reference.md](../reference.md).
 
+The [screenshot gallery](../../README.md#screenshots) shows every user-facing feature and representative results of the underlying ones. [The generator's manifest](../../e2e/screenshots/manifest.ts) maps every feature number here to a reproducible scene; internal transport, storage and lifecycle guarantees remain behavior tested by their suites rather than claimed by an image.
+
 | # | Feature | Summary |
 | --- | --- | --- |
 | 02 | [Multi-machine transport](02-multi-machine-transport.md) | One ssh session per machine running a static agent; yamux multiplexing; platform detection and upload. |

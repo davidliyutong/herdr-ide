@@ -7,8 +7,9 @@
 // gui's integration test (make it).
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { gzipSync } from 'node:zlib';
 import type { ChildProcess } from 'node:child_process';
 import { Reader } from '#shared/lib/streamio.ts';
@@ -16,7 +17,35 @@ import { GUIMessage, readGUI, writeGUI, type GUIEvent } from '#shared/proto/agen
 import { machineOf, rig, until, type Rig } from '#machine/testing.ts';
 import { machineAgent } from './agent.ts';
 import { guiMachine, parseCommand } from './machine.ts';
-import { In, JOB_LEN, Out, type Proc } from './machine/helper.ts';
+import { HelperInput, In, input, JOB_LEN, Out, type Proc } from './machine/helper.ts';
+
+test('helper input coalesces pointer motion while the pipe is full', async () => {
+  const sent: Buffer[] = [];
+  let written: (() => void) | undefined;
+  const pipe = new Writable({
+    highWaterMark: 1,
+    write(data: Buffer, _, done) {
+      sent.push(data);
+      if (sent.length === 1) written = done;
+      else done();
+    },
+  });
+  const sink = new HelperInput(pipe, () => {
+    throw new Error('unexpected helper overflow');
+  });
+  const first = input.pointer(5, 1, 1);
+  const latest = input.pointer(5, 3, 3);
+  sink.send(first);
+  sink.send(input.pointer(5, 2, 2));
+  sink.send(latest);
+  expect(sent).toEqual([first]);
+  const drained = once(pipe, 'drain');
+  written!();
+  await drained;
+  expect(sent).toEqual([first, latest]);
+  sink.close();
+  pipe.end();
+});
 
 /** A fake helper: what the node sends it, and messages it sends. */
 function fakeHelper() {

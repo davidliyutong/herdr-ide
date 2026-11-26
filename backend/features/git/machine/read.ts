@@ -338,17 +338,26 @@ export async function status(r: Repo, state: GitState): Promise<Obj> {
 /** Gives the files whose working tree side differs from the index the
  * modification time and size of that side (no contents are read). */
 async function stamp(root: string, files: Obj[]): Promise<void> {
-  for (const f of files) {
-    if (f.y === '.' || f.y === 'D') continue;
+  const read = async (f: Obj) => {
     try {
       const st = await lstat(posix.join(root, (f.path as string).replace(/\/$/, '')));
       f.mtime = millis(st.mtimeMs);
       f.size = st.isDirectory() ? 0 : st.size;
     } catch {
-      continue;
+      return;
     }
     omitEmpty(f, ['mtime', 'size']);
+  };
+  const pending: Promise<void>[] = [];
+  for (const f of files) {
+    if (f.y === '.' || f.y === 'D') continue;
+    pending.push(read(f));
+    if (pending.length === 16) {
+      await Promise.all(pending);
+      pending.length = 0;
+    }
   }
+  await Promise.all(pending);
 }
 
 const file = (v: Obj): Obj => omitEmpty(v, ['orig', 'submodule']);
@@ -870,12 +879,18 @@ export async function watch(root: string): Promise<Obj> {
     if (b) refsHash.update(`${d} ${createHash('sha256').update(b).digest('hex')}\n`);
   }
   let n = 0;
-  const walk = async (p: string): Promise<boolean> => {
+  const walk = async (p: string, root = false): Promise<boolean> => {
     if (++n > MAX_WATCHED) return false;
-    await add(refsHash, p);
     let names: string[];
     try {
-      if (!(await lstat(p)).isDirectory()) return true;
+      const st = await lstat(p, { bigint: true, throwIfNoEntry: false });
+      if (!st) {
+        if (!root) refsHash.update(`${p} -\n`);
+        return true;
+      }
+      if (st.isSymbolicLink()) await add(refsHash, p);
+      else refsHash.update(`${p} ${st.mtimeNs} ${st.size}\n`);
+      if (!st.isDirectory()) return true;
       names = (await readdir(p)).sort();
     } catch {
       return true;
@@ -883,12 +898,7 @@ export async function watch(root: string): Promise<Obj> {
     for (const name of names) if (!(await walk(posix.join(p, name)))) return false;
     return true;
   };
-  try {
-    await lstat(posix.join(common, 'refs'));
-    await walk(posix.join(common, 'refs'));
-  } catch {
-    // no refs directory (reftable)
-  }
+  await walk(posix.join(common, 'refs'), true);
   const refsSum = refsHash.digest();
   const configHash = createHash('sha256');
   await add(configHash, posix.join(common, 'config'));

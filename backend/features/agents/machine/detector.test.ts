@@ -435,6 +435,14 @@ test('the product’s helpers are not watched', async () => {
   expect(d.peers('claude', '/w')).toBe(1);
   d.event({ ...ev('', ''), method: 'missed', terminals: [helper('t1', 1), labeled, helper('t4', 4)] });
   await evs.none();
+  d.event(ev('created', 't5', { ...helper('t5', 5), labels: null }));
+  want(await evs.next(), 'claude', 'idle');
+  d.event(statusEvent('t5', 'working'));
+  want(await evs.next(), 'claude', 'working');
+  d.event(ev('labels', 't5', { labels: { [HIDDEN_LABEL]: HIDDEN_CHAT_HOST } }));
+  want(await evs.next(), '', '');
+  d.event(ev('labels', 't5', { labels: {} }));
+  expect(d.peers('claude', '/w')).toBe(1);
 });
 
 test('an agent replacing another, finished, lost, removed and missed', async () => {

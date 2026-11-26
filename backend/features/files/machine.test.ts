@@ -7,7 +7,6 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   readlinkSync,
@@ -345,7 +344,8 @@ describe('stat', () => {
       expect(es[1].error).toBeTruthy();
       codes[es[0].error!] = (codes[es[0].error!] ?? 0) + 1;
     }
-    expect(codes).toEqual({ busy: 3, timeout: 7 });
+    // The shared second path starts alongside the first, using one of the slots.
+    expect(codes).toEqual({ busy: 4, timeout: 6 });
     expect(calls.get(join(f.home, 'dead'))).toBe(1);
     expect(calls.size).toBe(8);
     // Once the mount answers the places are free again.
@@ -587,7 +587,7 @@ describe('uploads', () => {
     }
   });
 
-  test("old files of broken-off uploads go; recent ones and other directories' files stay", () => {
+  test("old files of broken-off uploads go; recent ones and other directories' files stay", async () => {
     const t = tempHome();
     try {
       const d = join(t.home, STAGING_DIR);
@@ -602,9 +602,9 @@ describe('uploads', () => {
       const elsewhere = join(t.home, 'keep');
       write(elsewhere, 'z');
       utimesSync(elsewhere, past, past);
-      pruneStaged(t.home, now);
+      await pruneStaged(t.home, now);
       expect([existsSync(old), existsSync(recent), existsSync(elsewhere)]).toEqual([false, true, true]);
-      pruneStaged(mkdtempSync('/tmp/hm-none-'), now);
+      await pruneStaged(join(t.home, 'missing-staging'), now);
     } finally {
       t.remove();
     }

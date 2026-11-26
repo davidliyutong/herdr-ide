@@ -21,6 +21,7 @@ export interface SwitchboardDeps {
   paneEnv: (m: Machine) => Record<string, string> | undefined;
   sshEnv: (m: Machine) => Record<string, string> | null;
   sessions: () => boolean;
+  onSessionsChange: (changed: () => void) => () => void;
   onReady?: (m: Machine, ready: boolean) => void;
   timing: Timing;
   maxBuffered: number;

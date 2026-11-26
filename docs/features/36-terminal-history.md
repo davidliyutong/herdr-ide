@@ -22,7 +22,7 @@ Non-goals: a continuous record of every byte; snapshots while no hub is connecte
 
 The hub asks the machine's agent to `capture {lines, maxTerminals, maxTotalBytes, days}` (within 25 s); the agent snapshots the live terminals of its instance's own terminal core, never the user's:
 
-1. It takes the snapshots' lease (another writer makes it answer `busy`) and prunes incomplete and expired generations.
+1. The node admits one capture at a time. The capture takes the snapshots' lease (another writer makes it answer `busy`) and prunes incomplete and expired generations.
 2. It drops snapshots of terminals that ended with their program (any reason but the core's own end). A terminal gone from the records keeps its snapshots for 2 minutes, so a page can hand them to the terminal that replaced it (adopt). Then the oldest-captured terminals go until the limits hold.
 3. For each live terminal, oldest-captured first: a new program (pid) turns the current generation into the previous one; an unchanged screen (a hash of `terminal.read` without lines) is skipped, as is one refused before with the same screen and limits; otherwise it attaches as an observer, reads the first paint (CAN up to `ESC[?9001`), asks again with half the lines (down to 100) when the paint was dropped or exceeds 2 MiB, and again with the new grid (at most 3 times) when the core repainted. Window titles are stripped and the generation written, marked `restored` when the paint shows herdr-core's restored-screen line.
 
@@ -35,6 +35,9 @@ A terminal has a current generation (the running program's) and at most one prev
 ### Storage and limits
 
 Snapshots live in the machine's database ([38](38-sqlite-state.md)), table `history_snapshots`, one row per generation with its description and bytes. Each change is its own durable transaction, so readers take no lock. Writers hold a lease (`history_lease`) shared by the agents of an instance; it ends when the writer closes, its process is gone, or a minute after its last renewal.
+
+The node runs history requests and cleanup in its own history worker. SQLite lock waits and durable writes can hold that worker while the node continues serving its other streams. The node stops waiting when a request is canceled. The worker observes cancellation once any synchronous SQLite call in progress returns.
+Lease retries use an increasing delay with jitter within the request's deadline.
 
 | Limit | Setting (per machine) | Default | Hard bounds |
 | --- | --- | --- | --- |
@@ -50,7 +53,7 @@ The agent clamps what the hub asks to these bounds (`agentproto.History*`).
 
 ### The scheduler (`backend/features/history/scheduler.ts`)
 
-A machine keeps snapshots while `history.capture` (off by default, per machine; `--history-capture`) and the plugin are on. The hub asks for a capture `history.interval` seconds after the last one ended, one at a time per machine. A machine that no longer keeps snapshots is asked to clear them, retried with back-off up to an hour and on reconnect; the clear is audited as `history.clear`. A `--read-only` hub asks its machines for nothing.
+A machine keeps snapshots while `history.capture` (off by default, per machine; `--history-capture`) and the plugin are on. The hub asks for a capture `history.interval` seconds after the last one ended, one at a time per machine. The scheduler waits for the next due capture or clear, settings changes, or machine readiness. A machine that no longer keeps snapshots is asked to clear them, retried with a jittered backoff whose base delay grows to an hour, and on reconnect. The clear is audited as `history.clear`. A `--read-only` hub asks its machines for nothing.
 
 ### Routes
 

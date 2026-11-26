@@ -344,7 +344,7 @@ class Capturer {
     const room = s.makeRoom(addr, data.length, this.lim.terminals, this.lim.total, this.written);
     if (!room.ok) return { code: refuse('limit'), evicted: room.evicted };
     const cur = s.terms.get(addr)?.cur;
-    const restored = restoredByCore(data) || (!!cur && cur.pid === pid && cur.restored);
+    const restored = (!!cur && cur.pid === pid && cur.restored) || restoredByCore(data);
     const m: Meta = {
       terminal: addr,
       hash,

@@ -156,6 +156,7 @@ export function localPost(
   headers: Record<string, string>,
   body: string,
   ms: number,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const o: https.RequestOptions = {
@@ -166,6 +167,7 @@ export function localPost(
       headers: { Accept: 'application/json', 'User-Agent': 'usage-monitor', ...headers, 'Content-Length': Buffer.byteLength(body) },
       agent: false,
       timeout: ms,
+      signal,
     };
     let settled = false;
     const done = (f: () => void) => {

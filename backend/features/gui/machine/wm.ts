@@ -35,7 +35,19 @@ import type { GUICommand } from '#shared/proto/agentproto/index.ts';
 import { GUIEnc, GUIMessage, marshalFrameHeader } from '#shared/proto/agentproto/index.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { Flow, NO_RECT, after, clip, isEmpty, tiles, union, type Rect } from './flow.ts';
-import { Enc, In, Out, encodeJobs, input, message, type HFrame, type HelperMessage, type Job } from './helper.ts';
+import {
+  Enc,
+  In,
+  MAX_BATCH_PIXELS,
+  MAX_JOBS,
+  Out,
+  encodeJobs,
+  input,
+  message,
+  type HFrame,
+  type HelperMessage,
+  type Job,
+} from './helper.ts';
 
 /** The shortest interval between frames (60 per second). */
 export const TICK = 16;
@@ -278,6 +290,7 @@ export class Client {
 /** A capture taken this tick. */
 export interface Capture {
   window: number;
+  owner?: Win;
   layer: number;
   r: Rect;
   lossless: boolean;
@@ -295,6 +308,7 @@ export interface Capture {
 /** What capturing and encoding one frame took (the helper's frame). */
 export interface FrameCost {
   window: number;
+  owner?: Win;
   captureUs: number;
   convertUs: number;
   encodeUs: number;
@@ -350,7 +364,8 @@ export class WindowManager {
   /** The encoder the helper was told to start streams with. */
   private encoder = '';
   private ended_ = false;
-  private readonly endWaiters: Array<() => void> = [];
+  private pumpWait?: { idle: boolean; finish: () => void };
+  private captureWindows?: MapIterator<Win>;
   private readonly now: () => number;
   /** The jobs of the batch the helper works on, and its frames' costs. */
   private batch: { jobs: Capture[]; next: number; costs: FrameCost[]; done: () => void } | null = null;
@@ -373,7 +388,7 @@ export class WindowManager {
     this.ended_ = true;
     for (const c of [...this.clients]) c.close();
     this.batch?.done();
-    for (const f of this.endWaiters.splice(0)) f();
+    this.pumpWait?.finish();
   }
 
   private send(b: Buffer): void {
@@ -405,6 +420,7 @@ export class WindowManager {
         w.pid = m.pid;
         w.transient = m.transient;
         this.emit(windowEvent(w));
+        if (w.watched) this.wakePump();
         return;
       }
       case Out.Gone: {
@@ -419,7 +435,13 @@ export class WindowManager {
           const l = this.layers.get(id);
           if (l) l.owner = 0;
         }
+        for (const c of this.clients) {
+          c.watched.delete(m.id);
+          c.stale.delete(m.id);
+          c.from.delete(m.id);
+        }
         this.emit({ ev: 'gone', id: m.id });
+        if (this.retired.length) this.wakePump();
         return;
       }
       case Out.Layer: {
@@ -436,6 +458,7 @@ export class WindowManager {
           if (resized) l.dirty = l.all();
         }
         this.emitLayer(l);
+        if (this.wins.get(l.owner)?.watched) this.wakePump();
         return;
       }
       case Out.LayerGone: {
@@ -456,6 +479,8 @@ export class WindowManager {
           if (!w) continue;
           w.dirty = union(w.dirty, { x: d.x, y: d.y, w: d.w, h: d.h });
           w.changed = now;
+          const window = w instanceof Layer ? this.wins.get(w.owner) : w;
+          if (window instanceof Win && window.watched) this.wakePump();
         }
         return;
       }
@@ -578,6 +603,8 @@ export class WindowManager {
     }
     m.watched = watched;
     m.codecs = codecs;
+    if (!watched) this.stopVideo(m);
+    this.wakePump();
   }
 
   /** The client whose acknowledgements pace window m: the controller while
@@ -630,10 +657,13 @@ export class WindowManager {
   /** Queues a frame for its targets: the pacer waits for room, another
    * client that has none misses it and is sent the window again later. */
   private async deliver(w: number, ts: Array<{ c: Client; pace: boolean }>, msgs: Msg[]): Promise<void> {
+    const owner = this.wins.get(w);
+    const ended = () => this.ended_ || this.wins.get(w) !== owner;
     for (const t of ts) {
       for (const msg of msgs) {
+        if (ended()) return;
         if (t.pace) {
-          if (!(await t.c.put(msg, () => this.ended_))) break;
+          if (!(await t.c.put(msg, ended))) break;
           continue;
         }
         if (!t.c.offer(msg)) {
@@ -747,6 +777,7 @@ export class WindowManager {
         this.emitLayer(l);
       }
     }
+    if (m.watched) this.wakePump();
   }
 
   /** Takes the frames up to seq off the inflight list, measuring the round
@@ -782,23 +813,47 @@ export class WindowManager {
 
   // The pump.
 
-  /** Sends changed areas of watched windows at most every TICK until the
-   * window manager ends. */
+  private wakePump(): void {
+    if (this.pumpWait?.idle) this.pumpWait.finish();
+  }
+
+  private pausePump(ms?: number): Promise<void> {
+    return new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        this.pumpWait = undefined;
+        resolve();
+      };
+      const timer = ms === undefined ? undefined : setTimeout(finish, ms);
+      this.pumpWait = { idle: ms === undefined, finish };
+    });
+  }
+
+  private pendingCapture(): boolean {
+    const pending = (w: XWin) => !isEmpty(clip(w.dirty, w.w, w.h)) || !isEmpty(clip(w.lossy, w.w, w.h));
+    for (const m of this.wins.values()) {
+      if (!m.watched) continue;
+      if (m.vid || m.motion || pending(m) || this.clients.some((c) => c.stale.has(m.id))) return true;
+      for (const id of m.layers) {
+        const l = this.layers.get(id);
+        if (l && pending(l)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Sends changed areas of watched windows at most every TICK and sleeps
+   * while there is no work to do. */
   async pump(): Promise<void> {
     while (!this.ended_) {
       const start = this.now();
       const jobs = this.collect(start);
       if (jobs.length > 0) await this.sendBatch(jobs);
       this.closeRetired();
+      if (this.ended_) break;
       const wait = TICK - (this.now() - start);
-      if (wait > 0 && !this.ended_)
-        await new Promise<void>((r) => {
-          const t = setTimeout(r, wait);
-          this.endWaiters.push(() => {
-            clearTimeout(t);
-            r();
-          });
-        });
+      if (!jobs.length && !this.pendingCapture()) await this.pausePump();
+      else if (wait > 0) await this.pausePump(wait);
     }
     for (const m of this.wins.values())
       if (m.vid) {
@@ -856,6 +911,7 @@ export class WindowManager {
     }
     const cost: FrameCost = {
       window: j.window,
+      owner: j.owner,
       captureUs: f.captureUs,
       convertUs: 0,
       encodeUs: f.encodeUs,
@@ -868,10 +924,12 @@ export class WindowManager {
       if (f.started) cost.started = { id: f.stream, w: j.r.w, h: j.r.h, kinds: j.kinds ?? [], name: f.started.name };
       if (f.error) cost.vidErr = f.error;
     } else if (f.error) this.o.logger(`gui: window ${f.window}: ${f.error}`);
-    this.encoded(j, f.enc === Enc.None ? null : f.data.length, f.enc);
-    if (f.enc !== Enc.None) {
-      const ts = this.targets(j.window, j.seq);
-      if (ts.length > 0) await this.deliver(j.window, ts, this.frameMsgs(j, f));
+    if (!j.owner || this.wins.get(j.window) === j.owner) {
+      this.encoded(j, f.enc === Enc.None ? null : f.data.length, f.enc);
+      if (f.enc !== Enc.None) {
+        const ts = this.targets(j.window, j.seq);
+        if (ts.length > 0) await this.deliver(j.window, ts, this.frameMsgs(j, f));
+      }
     }
     if (cost.enc !== Enc.None || cost.vidErr || cost.started) b.costs.push(cost);
   }
@@ -919,7 +977,8 @@ export class WindowManager {
    * watched windows every STATS_EVERY. */
   account(costs: readonly FrameCost[], now: number): void {
     for (const c of costs) {
-      const m = this.wins.get(c.window) ?? null;
+      let m = this.wins.get(c.window) ?? null;
+      if (c.owner && c.owner !== m) m = null;
       this.videoResult(m, c, now);
       if (!m || c.enc === Enc.None) continue;
       const st = m.stats;
@@ -968,7 +1027,10 @@ export class WindowManager {
   /** Decides what each watched window sends this tick. */
   collect(now: number): Capture[] {
     const jobs: Capture[] = [];
-    for (const m of this.wins.values()) {
+    let pixelsLeft = MAX_BATCH_PIXELS;
+    // Resume after the last window served when a batch fills, so windows
+    // later in the map still get their turn under constant damage.
+    for (const m of (this.captureWindows ??= this.wins.values())) {
       if (!m.watched) {
         this.stopVideo(m);
         continue;
@@ -986,6 +1048,7 @@ export class WindowManager {
       const take = (j: Capture, est: number) => {
         m.seq = (m.seq + 1) >>> 0;
         j.seq = m.seq;
+        j.owner = m;
         // After a pause the rate is measured from now, not from the last
         // acknowledgement.
         let from = f.ackedAt;
@@ -1000,11 +1063,17 @@ export class WindowManager {
         room -= est;
         slots--;
         jobs.push(j);
+        pixelsLeft -= j.r.w * j.r.h;
       };
       let sent = false;
       let ws: XWin[] = [m];
       const v = this.videoJob(m, now);
       if (v) {
+        if (v.r.w * v.r.h > pixelsLeft) return jobs;
+        m.keyWanted = false;
+        m.lastVideo = now;
+        m.dirty = NO_RECT;
+        m.lossy = m.all(); // sent again as PNG once the window settles
         take(v, Math.max(f.videoBytes, 1));
         sent = true;
         m.stats.updates++;
@@ -1015,7 +1084,7 @@ export class WindowManager {
         if (l) ws.push(l);
       }
       for (const w of ws) {
-        if (room <= 0 || slots <= 0) break;
+        if (room <= 0 || slots <= 0 || jobs.length === MAX_JOBS) break;
         let r = clip(w.dirty, w.w, w.h);
         let lossless = false;
         if (isEmpty(r)) {
@@ -1034,8 +1103,10 @@ export class WindowManager {
         }
         // What does not fit is sent at a later tick.
         let rest = NO_RECT;
+        let full = false;
         for (const t of tiles(r)) {
-          if (room <= 0 || slots <= 0) {
+          full ||= jobs.length === MAX_JOBS || t.w * t.h > pixelsLeft;
+          if (room <= 0 || slots <= 0 || full) {
             rest = union(rest, t);
             continue;
           }
@@ -1044,8 +1115,11 @@ export class WindowManager {
         }
         if (lossless) w.lossy = rest;
         else w.dirty = rest;
+        if (full) return jobs;
       }
+      if (jobs.length === MAX_JOBS || pixelsLeft === 0) return jobs;
     }
+    this.captureWindows = undefined;
     return jobs;
   }
 
@@ -1124,11 +1198,6 @@ export class WindowManager {
       kinds,
       key: m.keyWanted || !m.vid,
     };
-    m.keyWanted = false;
-    m.lastVideo = now;
-    // Sent again as PNG once the window settles.
-    m.dirty = NO_RECT;
-    m.lossy = m.all();
     return j;
   }
 

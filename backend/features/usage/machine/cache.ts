@@ -9,9 +9,8 @@
 // instance sees either save whole; tables of a newer version are read and
 // not written (the cache then stays in memory).
 //
-// node:sqlite is synchronous: a load parses its entries a slice at a time
-// between yields, and a save writes only what changed since the last, so
-// neither holds the node's thread long.
+// These operations run on the machine's state worker. The scanner sends
+// only changed entries, unless the worker needs to replace the cache.
 import { createHash } from 'node:crypto';
 import { DB, MACHINE_DB, NewerError, exists, hostFile, openShared } from '#shared/store/index.ts';
 import { rec, type Entry, type Rec } from './parsers.ts';
@@ -118,41 +117,70 @@ export function entryJSON(e: Entry): string {
 }
 
 const yieldNow = () => new Promise<void>((r) => setImmediate(r));
+const CACHE_BATCH_BYTES = 1 << 20;
+
+interface CacheBatch {
+  gen: number;
+  files: [string, Entry][];
+  reset?: boolean;
+}
+
+const emptyBatch = (): CacheBatch => ({ gen: 0, files: [], reset: true });
 
 /** The cache saved below base and its generation: empty when there is
  * none, it is of another version or larger than MAX_CACHE_BYTES. Entries
  * that do not parse are left out. */
 export async function loadCache(base: string): Promise<{ files: Map<string, Entry>; gen: number }> {
   const files = new Map<string, Entry>();
-  if (!exists(cacheDB(base))) return { files, gen: 0 };
+  const batches = cacheBatches(base);
+  for (;;) {
+    const { value, done } = await batches.next();
+    if (value.reset) files.clear();
+    for (const [path, entry] of value.files) files.set(path, entry);
+    if (done) return { files, gen: value.gen };
+    await yieldNow();
+  }
+}
+
+/** Reads entries in batches. The receiver pulls one batch at a time so
+ * a large cache does not require one structured clone of the whole map. */
+async function* cacheBatches(base: string): AsyncGenerator<CacheBatch, CacheBatch> {
+  if (!exists(cacheDB(base))) return emptyBatch();
   let db: DB;
   try {
     ({ db } = openDB(base));
   } catch {
-    return { files, gen: 0 };
+    return emptyBatch();
   }
   try {
     const s = stateOf(db);
-    if (!s) return { files, gen: 0 };
+    if (!s) return emptyBatch();
     const total = Number(db.get<{ n: number | bigint }>('SELECT coalesce(sum(length(entry)), 0) AS n FROM usage_cost_files')?.n ?? 0);
-    if (s.version !== CACHE_VERSION || total > MAX_CACHE_BYTES) return { files, gen: s.gen };
+    if (s.version !== CACHE_VERSION || total > MAX_CACHE_BYTES) return { files: [], gen: s.gen };
     const it = db.prepare('SELECT path, entry FROM usage_cost_files').iterate() as IterableIterator<{
       path: string;
       entry: Uint8Array | string;
     }>;
-    let n = 0;
+    let files: CacheBatch['files'] = [];
+    let bytes = 0;
+    let rows = 0;
     for (const r of it) {
       try {
         const e = entryOf(JSON.parse(typeof r.entry === 'string' ? r.entry : Buffer.from(r.entry).toString('utf8')));
-        if (e) files.set(r.path, e);
+        if (e) files.push([r.path, e]);
       } catch {
         // left out
       }
-      if (++n % 512 === 0) await yieldNow();
+      bytes += r.path.length + (typeof r.entry === 'string' ? Buffer.byteLength(r.entry) : r.entry.byteLength);
+      if (++rows >= 512 || bytes >= CACHE_BATCH_BYTES) {
+        yield { files, gen: s.gen };
+        files = [];
+        rows = bytes = 0;
+      }
     }
     return { files, gen: s.gen };
   } catch {
-    return { files: new Map(), gen: 0 };
+    return emptyBatch();
   } finally {
     db.close();
   }
@@ -170,12 +198,24 @@ export function saveCache(
   removed: Iterable<string>,
   savedMs: number,
 ): number | false {
+  return writeCache(base, files, changed, removed, savedMs, false) as number | false;
+}
+
+function writeCache(
+  base: string,
+  files: Map<string, Entry>,
+  changed: Iterable<string>,
+  removed: Iterable<string>,
+  savedMs: number,
+  partial: boolean,
+): number | false | 'replace' {
   const { db, writable } = openDB(base);
   try {
     if (!writable) return false;
     const gen = db.update(() => {
       const s = stateOf(db);
       const whole = !s || s.version !== CACHE_VERSION;
+      if (whole && partial) return 'replace';
       if (whole) db.run('DELETE FROM usage_cost_files');
       const write = (p: string) => {
         const e = files.get(p);
@@ -203,11 +243,49 @@ export function saveCache(
       );
       return gen;
     });
-    db.reclaim();
+    if (gen !== 'replace') db.reclaim();
     return gen;
   } finally {
     db.close();
   }
+}
+
+export function cacheOperations(base: string) {
+  let loading: { id: number; batches: ReturnType<typeof cacheBatches> } | undefined;
+  const finishLoad = async (id: number) => {
+    if (loading?.id !== id) return;
+    const { batches } = loading;
+    loading = undefined;
+    await batches.return(emptyBatch());
+  };
+  return {
+    state(signal: AbortSignal) {
+      signal.throwIfAborted();
+      return cacheState(base);
+    },
+    async load(signal: AbortSignal, id: number, first: boolean) {
+      signal.throwIfAborted();
+      if (first) {
+        if (loading) await finishLoad(loading.id);
+        loading = { id, batches: cacheBatches(base) };
+      }
+      if (loading?.id !== id) throw new Error('usage: the cache read has ended');
+      const batch = await loading.batches.next();
+      if (batch.done && loading?.id === id) loading = undefined;
+      return batch;
+    },
+    async finishLoad(_signal: AbortSignal, id: number) {
+      await finishLoad(id);
+    },
+    save(signal: AbortSignal, files: Map<string, Entry>, removed: string[], savedMs: number, partial: boolean, changed?: string[]) {
+      signal.throwIfAborted();
+      return writeCache(base, files, changed ?? files.keys(), removed, savedMs, partial);
+    },
+    sweep(signal: AbortSignal, cutoffMs: number) {
+      signal.throwIfAborted();
+      dropStale(base, cutoffMs);
+    },
+  };
 }
 
 /** Drops the cache below base when it was last saved before cutoffMs: no

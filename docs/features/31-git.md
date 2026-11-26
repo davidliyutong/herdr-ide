@@ -36,7 +36,7 @@ Reads:
 | Read | Answers |
 | --- | --- |
 | `repo` | Top level, git directories, branch and HEAD, upstream with ahead/behind, an operation in progress, remotes with fetch URLs (user information, query and fragment stripped, since tokens live there), enclosing (`parents`) and nested repositories or submodules (`nested`). |
-| `status` | `status --porcelain=v2 --untracked-files=all --ignored=matching`: changes, renames, conflicts, branch and upstream; ignored paths apart (an ignored directory as one entry, at most 20 000); `lstat` size and time of changed files so a re-edit is noticed. git before 2.16 is asked without `--ignored=matching`. |
+| `status` | `status --porcelain=v2 --untracked-files=all --ignored=matching`: changes, renames, conflicts, branch and upstream; ignored paths apart (an ignored directory as one entry, at most 20 000); `lstat` size and time of changed files in batches of up to 16 so a re-edit is noticed. git before 2.16 is asked without `--ignored=matching`. |
 | `log` | `log --date-order` of branches, tags and HEAD (optionally remote branches, or named refs), pages of up to 1000; with the first page the refs, stashes and HEAD. |
 | `show` | A commit's message and files against a parent, or the files between two commits. |
 | `blob` | A file at the working tree, index, HEAD or a revision; `binary` and `tooLarge` (8 MiB) flags. The working tree is read inside the repository only: no link out of it, no FIFOs or devices. |

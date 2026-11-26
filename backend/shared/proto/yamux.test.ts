@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, connect, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Duplex } from 'node:stream';
 import { INITIAL_WINDOW, Session, Stream } from './yamux.ts';
 import { Reader } from '#shared/lib/streamio.ts';
 import { extended } from '#shared/testdata/extended.ts';
@@ -151,6 +152,26 @@ async function pair(serverConfig = {}, clientConfig = {}): Promise<[Session, Ses
 }
 
 describe('TypeScript to TypeScript', () => {
+  test('the receive limit is checked as soon as the data header is complete', () => {
+    const conn = new Duplex({
+      read() {},
+      write(_chunk, _encoding, cb) {
+        cb();
+      },
+    });
+    const session = new Session(conn, false, { maxStreamWindow: INITIAL_WINDOW, keepAliveMs: 0 });
+    let closed: Error | undefined;
+    session.onClose((err) => (closed = err));
+    const h = Buffer.alloc(12);
+    h.writeUInt32BE(1, 4);
+    h.writeUInt32BE(INITIAL_WINDOW + 1, 8);
+    conn.emit('data', h.subarray(0, 5));
+    expect(session.closed).toBe(false);
+    conn.emit('data', h.subarray(5));
+    expect(closed).toMatchObject({ code: 'EPROTO' });
+    expect(session.closed).toBe(true);
+  });
+
   test('a reader that takes the whole buffer at once keeps the window open', async () => {
     // Reader.exactly reads with read() and no size: it takes everything
     // buffered, a full window's worth, after Node already called _read.
@@ -218,6 +239,31 @@ describe('TypeScript to TypeScript', () => {
     streams[2].write('x');
     expect(((await err) as NodeJS.ErrnoException).code).toBe('ECONNRESET');
     client.close();
+  });
+
+  extended('destroy, reset and half-close before ACK keep the session open', async () => {
+    const [client, server] = await pair({ acceptBacklog: 1 }, { streamOpenTimeoutMs: 500 });
+    try {
+      const cancelled = await client.open();
+      cancelled.destroy();
+      await client.ping(); // the server has handled the SYN and RST
+      expect(server.numStreams).toBe(0);
+
+      const waiting = await client.open();
+      const refused = await client.open();
+      const error = await new Promise<NodeJS.ErrnoException>((r) => refused.once('error', r));
+      expect(error.code).toBe('ECONNRESET');
+      expect((await server.accept()).id).toBe(waiting.id);
+      await client.ping(); // the ACK reached the remaining stream
+
+      const halfClosed = await client.open();
+      halfClosed.end('request'); // the peer never accepts or acknowledges it
+      await Bun.sleep(600);
+      expect(await client.ping()).toBeGreaterThanOrEqual(0);
+      expect(server.numStreams).toBe(2);
+    } finally {
+      client.close();
+    }
   });
 
   test('closing the session ends the streams and fails new ones', async () => {

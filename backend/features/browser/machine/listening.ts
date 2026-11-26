@@ -3,7 +3,7 @@
 // Linux: the kernel's tables (/proc/net/tcp, tcp6), the programs named by
 // finding the sockets among the descriptors of the user's processes;
 // macOS: lsof.
-import { readFileSync, readdirSync, readlinkSync, statSync } from 'node:fs';
+import { opendir, readFile, readlink, stat } from 'node:fs/promises';
 import { isIPv4, isIPv6 } from 'node:net';
 import { execa } from 'execa';
 
@@ -69,61 +69,48 @@ export function listeners(table: string, uid: string, inodes: Map<string, number
 
 /** The programs holding the sockets of these inodes, by inode: the user's
  * processes' descriptors, at most MAX_FDS of them, until signal ends. */
-function processes(inodes: Map<string, number>, signal: AbortSignal, uid: number): Map<string, string> {
+async function processes(inodes: Map<string, number>, signal: AbortSignal, uid: number): Promise<Map<string, string>> {
   const names = new Map<string, string>();
   if (inodes.size === 0) return names;
-  let pids: string[] = [];
-  try {
-    pids = readdirSync('/proc').filter((d) => /^\d+$/.test(d));
-  } catch {
-    return names;
-  }
+  const pids = await opendir('/proc').catch(() => null);
+  if (!pids) return names;
   let seen = 0;
-  for (const pid of pids) {
-    if (signal.aborted || names.size === inodes.size || seen > MAX_FDS) break;
-    const dir = `/proc/${pid}`;
+  for await (const pid of pids) {
+    if (signal.aborted || names.size === inodes.size || seen >= MAX_FDS) break;
+    if (!/^\d+$/.test(pid.name)) continue;
+    const dir = `/proc/${pid.name}`;
+    if ((await stat(dir).catch(() => null))?.uid !== uid || signal.aborted) continue;
+    const fds = await opendir(`${dir}/fd`).catch(() => null);
+    if (!fds) continue;
     try {
-      if (statSync(dir).uid !== uid) continue;
-    } catch {
-      continue;
-    }
-    let fds: string[] = [];
-    try {
-      fds = readdirSync(`${dir}/fd`);
+      for await (const fd of fds) {
+        if (signal.aborted || names.size === inodes.size || seen >= MAX_FDS) break;
+        seen++;
+        const link = await readlink(`${dir}/fd/${fd.name}`).catch(() => '');
+        const m = /^socket:\[(\d+)\]$/.exec(link);
+        if (!m || !inodes.has(m[1]) || names.has(m[1]) || signal.aborted) continue;
+        const name = await readFile(`${dir}/comm`, { encoding: 'utf8', signal }).catch(() => '');
+        if (name) names.set(m[1], name.trim());
+      }
     } catch {
       // gone, or not ours to read
-    }
-    for (const fd of fds) {
-      seen++;
-      let link: string;
-      try {
-        link = readlinkSync(`${dir}/fd/${fd}`);
-      } catch {
-        continue;
-      }
-      const m = /^socket:\[(\d+)\]$/.exec(link);
-      if (!m || !inodes.has(m[1]) || names.get(m[1])) continue;
-      try {
-        names.set(m[1], readFileSync(`${dir}/comm`, 'utf8').trim());
-      } catch {
-        // gone
-      }
     }
   }
   return names;
 }
 
-function listeningLinux(signal: AbortSignal): Port[] {
+async function listeningLinux(signal: AbortSignal): Promise<Port[]> {
   const uid = process.getuid!();
   const inodes = new Map<string, number>();
   for (const name of ['/proc/net/tcp', '/proc/net/tcp6']) {
+    if (signal.aborted) break;
     try {
-      listeners(readFileSync(name, 'utf8'), String(uid), inodes);
+      listeners(await readFile(name, { encoding: 'utf8', signal }), String(uid), inodes);
     } catch {
       // no IPv6, or no /proc
     }
   }
-  const names = processes(inodes, signal, uid);
+  const names = signal.aborted ? new Map<string, string>() : await processes(inodes, signal, uid);
   return [...inodes].map(([inode, port]) => ({ port, ...(names.get(inode) ? { process: names.get(inode) } : {}) }));
 }
 

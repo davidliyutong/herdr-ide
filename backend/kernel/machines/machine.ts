@@ -3,6 +3,7 @@
 // towards the hub.
 import { Op, readLine, writeLine, type Header, type Reply } from '#shared/proto/agentproto/index.ts';
 import { Reader } from '#shared/lib/streamio.ts';
+import { retryDelay } from '#shared/lib/wait.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { offline } from '../fail.ts';
 import { AuthRequiredError } from './transport/ssh.ts';
@@ -42,6 +43,8 @@ export const DEFAULT_TIMING: Timing = {
   drainGraceMs: 2000,
   headerTimeoutMs: 15_000,
 };
+
+const STABLE_SESSION_MS = 30_000;
 
 export interface MachineDeps {
   dial: Dialer;
@@ -100,6 +103,7 @@ export class Machine {
 
   private st: State;
   private session: Session | null = null;
+  private readyAt?: number;
   /** What the agent said of its ssh session in its last hello (not part of
    * State, which the pages see). */
   private ssh = '';
@@ -287,6 +291,7 @@ export class Machine {
     const t = this.timing;
     let backoff = t.backoffMinMs;
     while (!signal.aborted) {
+      this.readyAt = undefined;
       this.setStatus('connecting');
       let dialed: { session: Session; platform: string };
       try {
@@ -301,6 +306,7 @@ export class Machine {
           this.setStatus('error', e);
           backoff = Math.min(backoff * 2, t.backoffMaxMs);
         }
+        wait = retryDelay(wait);
         this.deps.logger(`machine ${this.label}: ${errorText(e)} (retry in ${wait / 1000}s)`);
         if ((await this.retry.until(wait, signal)) === 'woken') backoff = t.backoffMinMs;
         continue;
@@ -310,7 +316,6 @@ export class Machine {
         dialed.session.close();
         return;
       }
-      backoff = t.backoffMinMs;
       let err: unknown;
       try {
         await this.serve(dialed.session, dialed.platform, signal);
@@ -323,7 +328,10 @@ export class Machine {
       if (signal.aborted) return;
       this.setStatus('error', err ?? new Error('session ended'));
       this.deps.logger(`machine ${this.label}: session ended: ${errorText(err)}`);
-      await this.retry.until(t.sessionRetryMs, signal);
+      const stable = this.readyAt !== undefined && performance.now() - this.readyAt >= STABLE_SESSION_MS;
+      const delay = stable ? t.sessionRetryMs : Math.max(t.sessionRetryMs, backoff);
+      backoff = stable ? t.backoffMinMs : Math.min(delay * 2, t.backoffMaxMs);
+      if ((await this.retry.until(retryDelay(delay), signal)) === 'woken') backoff = t.backoffMinMs;
     }
   }
 
@@ -376,6 +384,7 @@ export class Machine {
       throw new Error(`hello: ${errorText(e)}`);
     }
     this.session = sess;
+    this.readyAt = performance.now();
     this.ssh = rep.ssh ?? '';
     this.update((st) => {
       if (rep.info) st.info = rep.info;

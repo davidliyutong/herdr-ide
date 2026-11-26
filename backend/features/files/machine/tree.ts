@@ -3,8 +3,8 @@
 // (machine/sys openDirAt), links are removed as links, so a link swapped
 // in meanwhile leads nowhere outside the tree. Copies and removals check
 // their signal before each entry and chunk: one the hub gave up on stops.
-import { constants, closeSync, lstatSync, openSync, realpathSync, rmSync, type Stats } from 'node:fs';
-import { lstat, mkdir, open, readdir, readlink, symlink } from 'node:fs/promises';
+import { constants, closeSync, lstatSync, openSync, realpathSync, type Stats } from 'node:fs';
+import { lstat, mkdir, open, readdir, readlink, rm, symlink } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { AT_REMOVEDIR, closeQuietly, openDirAt, readDirAt, renameNoReplace, unlinkAt } from '#machine/sys/fs.ts';
 import { errCode } from './guard.ts';
@@ -88,7 +88,7 @@ export async function moveNoReplace(signal: AbortSignal, src: string, dst: strin
   }
   const { made, error } = await copyTree(signal, src, dst);
   if (error) {
-    if (made) rmSync(dst, { recursive: true, force: true });
+    if (made) await rm(dst, { recursive: true, force: true });
     throw error;
   }
   // Copied: the source goes whole, whatever the hub does meanwhile.

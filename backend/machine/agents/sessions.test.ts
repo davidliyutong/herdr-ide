@@ -1224,7 +1224,8 @@ describe('processes', () => {
     expect(await new Resolver({ procs: ps }).candidates(42)).toEqual([42, 43]);
     // A stat without btime, a stat line cut short.
     writeFileSync(posix.join(fs.root, 'stat'), 'cpu 1 2\n');
-    expect(await ps.start(42)).toBeNull();
+    expect(await ps.start(42)).toBe(start); // the boot time is read once
+    expect(await procfs(fs.root, files).start(42)).toBeNull();
     writeFileSync(posix.join(fs.root, '43', 'stat'), '43 (sh) S 42 40');
     expect(parseStat('43 (sh) S 42 40')).toBeNull();
   });

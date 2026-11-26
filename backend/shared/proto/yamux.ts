@@ -2,9 +2,9 @@
 // wire protocol of hashicorp/yamux v0.1.x (its spec.md) with the same
 // semantics: a stream's Close is a half-close (FIN; the closer still reads),
 // the first window update rides on SYN/ACK and grows the window to
-// maxStreamWindow, pings carry SYN and are answered with ACK, a stream not
-// ACKed within the open timeout or a keepalive not answered closes the
-// session. Node APIs only: it runs under Bun and in Electron.
+// maxStreamWindow, pings carry SYN and are answered with ACK. An active
+// stream not ACKed within the open timeout or an unanswered keepalive
+// closes the session. Node APIs only: it runs under Bun and in Electron.
 import { Duplex } from 'node:stream';
 
 const VERSION = 0;
@@ -80,8 +80,8 @@ export class Stream extends Duplex {
   private queued = 0;
   private reading = false;
   private sendWaiters: Array<() => void> = [];
+  private openTimer?: NodeJS.Timeout;
   private closeTimer?: NodeJS.Timeout;
-  established?: () => void;
 
   readonly session: Session;
   readonly id: number;
@@ -91,6 +91,14 @@ export class Stream extends Duplex {
     this.session = session;
     this.id = id;
     this.state = state;
+    if (state === 'init' && session.config.streamOpenTimeoutMs > 0) {
+      this.openTimer = setTimeout(() => session.openTimedOut(), session.config.streamOpenTimeoutMs);
+    }
+  }
+
+  private clearOpenTimer(): void {
+    clearTimeout(this.openTimer);
+    this.openTimer = undefined;
   }
 
   // Flags for the next frame: SYN on the first of an opened stream, ACK on
@@ -200,6 +208,7 @@ export class Stream extends Duplex {
       default:
         return;
     }
+    this.clearOpenTimer();
     if (!done && this.session.config.streamCloseTimeoutMs > 0)
       this.closeTimer = setTimeout(() => this.forceClose(), this.session.config.streamCloseTimeoutMs);
     // sendClose runs after the state changed, so it carries FIN alone (the
@@ -210,6 +219,7 @@ export class Stream extends Duplex {
   }
 
   override _destroy(err: Error | null, cb: (err?: Error | null) => void): void {
+    this.clearOpenTimer();
     clearTimeout(this.closeTimer);
     if (this.state !== 'closed' && this.state !== 'reset' && this.state !== 'localClose' && !this.session.closed) {
       // Abandoned while open: reset it so the other end stops.
@@ -232,8 +242,7 @@ export class Stream extends Duplex {
   processFlags(flags: number): void {
     if (flags & ACK) {
       if (this.state === 'synSent') this.state = 'established';
-      this.established?.();
-      this.established = undefined;
+      this.clearOpenTimer();
       this.session.establish(this.id);
     }
     if (flags & FIN) {
@@ -245,6 +254,7 @@ export class Stream extends Duplex {
           break;
         case 'localClose':
           this.state = 'closed';
+          this.clearOpenTimer();
           clearTimeout(this.closeTimer);
           this.session.forget(this.id);
           break;
@@ -256,10 +266,12 @@ export class Stream extends Duplex {
     }
     if (flags & RST) {
       this.state = 'reset';
+      this.clearOpenTimer();
       clearTimeout(this.closeTimer);
+      const unaccepted = this.session.discardUnaccepted(this);
       this.session.forget(this.id);
       this.wake();
-      this.destroy(errReset());
+      this.destroy(unaccepted ? undefined : errReset());
     }
   }
 
@@ -283,6 +295,7 @@ export class Stream extends Duplex {
   forceClose(): void {
     if (this.state === 'reset') return;
     this.state = 'closed';
+    this.clearOpenTimer();
     clearTimeout(this.closeTimer);
     this.session.forget(this.id);
     this.wake();
@@ -300,9 +313,11 @@ export class Session {
   private nextId: number;
   private acceptQueue: Stream[] = [];
   private acceptWaiters: Array<{ res: (s: Stream) => void; rej: (e: Error) => void }> = [];
-  private localGoAway = false;
   private remoteGoAway = false;
-  private buf: Buffer = Buffer.alloc(0);
+  private readonly recvHeader = Buffer.alloc(HEADER);
+  private headerBytes = 0;
+  private recvBody?: Buffer;
+  private bodyBytes = 0;
   private drainWaiters: Array<() => void> = [];
   private blocked = false;
   private pings = new Map<number, () => void>();
@@ -353,8 +368,19 @@ export class Session {
   async sendData(h: Buffer, body: Buffer): Promise<void> {
     while (this.blocked && !this.closed) await this.waitDrain();
     if (this.closed) throw errSessionShutdown();
-    const ok = this.conn.write(Buffer.concat([h, body]));
-    if (!ok) this.blocked = true;
+    // Queue the whole frame before another stream can write. Keep the
+    // caller's buffer until the transport has finished writing it.
+    const written = new Promise<void>((resolve, reject) => {
+      this.conn.cork();
+      try {
+        this.sendControl(h);
+        if (!this.conn.write(body, (e) => (e ? reject(e) : resolve()))) this.blocked = true;
+      } finally {
+        this.conn.uncork();
+      }
+    });
+    if (this.blocked) await Promise.all([written, this.waitDrain()]);
+    else await written;
   }
 
   private waitDrain(): Promise<void> {
@@ -382,13 +408,12 @@ export class Session {
     const s = new Stream(this, id, 'init');
     this.streams.set(id, s);
     this.inflight.add(id);
-    if (this.config.streamOpenTimeoutMs > 0) {
-      const t = setTimeout(() => this.shutdown(new YamuxError('stream open timeout', 'ETIMEDOUT')), this.config.streamOpenTimeoutMs);
-      s.established = () => clearTimeout(t);
-      this.onClose(() => clearTimeout(t));
-    }
     s.sendWindowUpdate();
     return s;
+  }
+
+  openTimedOut(): void {
+    this.shutdown(new YamuxError('stream open timeout', 'ETIMEDOUT'));
   }
 
   accept(): Promise<Stream> {
@@ -418,10 +443,11 @@ export class Session {
     this.establish(id);
   }
 
-  /** Refuse new streams from the other end (hashicorp GoAway). */
-  goAway(): void {
-    this.localGoAway = true;
-    this.sendControl(header(T_GOAWAY, 0, 0, GOAWAY_NORMAL));
+  discardUnaccepted(stream: Stream): boolean {
+    const index = this.acceptQueue.indexOf(stream);
+    if (index < 0) return false;
+    this.acceptQueue.splice(index, 1);
+    return true;
   }
 
   async ping(): Promise<number> {
@@ -458,6 +484,7 @@ export class Session {
     if (this.closed) return;
     this.closed = true;
     this.closeErr = err;
+    this.recvBody = undefined;
     clearTimeout(this.keepAliveTimer);
     this.conn.destroy();
     for (const s of [...this.streams.values()]) s.forceClose();
@@ -474,23 +501,37 @@ export class Session {
   // Receiving.
 
   private onData(chunk: Buffer): void {
-    this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
     try {
-      while (this.buf.length >= HEADER && !this.closed) {
-        const version = this.buf.readUInt8(0);
-        const type = this.buf.readUInt8(1);
-        const flags = this.buf.readUInt16BE(2);
-        const id = this.buf.readUInt32BE(4);
-        const length = this.buf.readUInt32BE(8);
-        if (version !== VERSION) throw new YamuxError(`invalid protocol version ${version}`, 'EPROTO');
-        let body: Buffer | undefined;
-        if (type === T_DATA) {
-          if (this.buf.length < HEADER + length) break;
-          body = Buffer.from(this.buf.subarray(HEADER, HEADER + length));
-          this.buf = this.buf.subarray(HEADER + length);
-        } else {
-          this.buf = this.buf.subarray(HEADER);
+      let off = 0;
+      const h = this.recvHeader;
+      while (off < chunk.length && !this.closed) {
+        if (this.headerBytes < HEADER) {
+          const n = chunk.copy(h, this.headerBytes, off, Math.min(chunk.length, off + HEADER - this.headerBytes));
+          off += n;
+          this.headerBytes += n;
+          if (this.headerBytes < HEADER) return;
+          const version = h.readUInt8(0);
+          if (version !== VERSION) throw new YamuxError(`invalid protocol version ${version}`, 'EPROTO');
+          if (h.readUInt8(1) === T_DATA) {
+            const length = h.readUInt32BE(8);
+            if (length > this.config.maxStreamWindow) throw new YamuxError('data frame exceeds the maximum stream window', 'EPROTO');
+            this.recvBody = Buffer.allocUnsafe(length);
+            this.bodyBytes = 0;
+          }
         }
+        const body = this.recvBody;
+        if (body) {
+          const n = chunk.copy(body, this.bodyBytes, off, Math.min(chunk.length, off + body.length - this.bodyBytes));
+          off += n;
+          this.bodyBytes += n;
+          if (this.bodyBytes < body.length) return;
+        }
+        const type = h.readUInt8(1);
+        const flags = h.readUInt16BE(2);
+        const id = h.readUInt32BE(4);
+        const length = h.readUInt32BE(8);
+        this.headerBytes = 0;
+        this.recvBody = undefined;
         switch (type) {
           case T_DATA:
           case T_WINDOW:
@@ -527,10 +568,6 @@ export class Session {
   }
 
   private incoming(id: number): void {
-    if (this.localGoAway) {
-      this.sendControl(header(T_WINDOW, RST, id, 0));
-      return;
-    }
     if (this.streams.has(id)) throw new YamuxError('duplicate stream declared', 'EPROTO');
     const s = new Stream(this, id, 'synReceived');
     this.streams.set(id, s);
@@ -565,8 +602,7 @@ export function pairDuplex(readable: NodeJS.ReadableStream, writable: NodeJS.Wri
       readable.resume();
     },
     write(chunk, _enc, cb) {
-      if (writable.write(chunk)) cb();
-      else writable.once('drain', () => cb());
+      writable.write(chunk, cb);
     },
     final(cb) {
       writable.end();

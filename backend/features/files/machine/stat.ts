@@ -6,6 +6,7 @@
 // unknown (busy, timeout), not gone.
 import type { Stats } from 'node:fs';
 import { Fail } from '#shared/lib/fail.ts';
+import { waitForResult } from '#shared/lib/wait.ts';
 import type { Entry } from '../protocol.ts';
 import { entryOf, errCode } from './guard.ts';
 
@@ -42,34 +43,37 @@ export class Stater {
       f.catch(() => {});
       this.flights.set(p, f);
     }
-    return new Promise((resolve, reject) => {
-      const onAbort = () => reject(signal.reason);
-      signal.addEventListener('abort', onAbort, { once: true });
-      f.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
-    });
+    return waitForResult(f, signal);
   }
 
   /** The entries of paths, in their order, each as given; expand makes a
    * path absolute (a path it refuses is not there). */
   async stat(paths: string[], expand: (p: string) => string, signal: AbortSignal): Promise<Entry[]> {
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(this.o.waitMs)]);
-    const out: Entry[] = [];
-    for (const p of paths) {
+    const out: Entry[] = new Array(paths.length);
+    let next = 0;
+    const read = async (p: string): Promise<Entry> => {
       let abs: string;
       try {
         abs = expand(p);
       } catch {
-        out.push({ path: p, exists: false, size: 0, mtime: 0 });
-        continue;
+        return { path: p, exists: false, size: 0, mtime: 0 };
       }
       try {
-        out.push(entryOf(p, await this.shared(abs, bounded)));
+        return entryOf(p, await this.shared(abs, bounded));
       } catch (e) {
         const code = errCode(e);
-        if (code === 'ENOENT' || code === 'ENOTDIR') out.push({ path: p, exists: false, size: 0, mtime: 0 });
-        else out.push({ path: p, exists: false, size: 0, mtime: 0, error: statCode(e, bounded) });
+        const error = code === 'ENOENT' || code === 'ENOTDIR' ? undefined : statCode(e, bounded);
+        return { path: p, exists: false, size: 0, mtime: 0, ...(error ? { error } : {}) };
       }
-    }
+    };
+    const worker = async () => {
+      while (next < paths.length) {
+        const i = next++;
+        out[i] = await read(paths[i]);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(Math.max(1, this.o.max), paths.length) }, worker));
     return out;
   }
 }

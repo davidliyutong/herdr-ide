@@ -3,7 +3,7 @@
 // the stats of a watched window, when a window becomes video and goes back
 // to pictures.
 import { describe, expect, test } from 'bun:test';
-import { Enc, In, Out } from './helper.ts';
+import { Enc, In, MAX_BATCH_PIXELS, MAX_JOBS, Out } from './helper.ts';
 import { MIN_BUDGET, RTT_PROBE, TILE, Flow, tiles } from './flow.ts';
 import {
   Client,
@@ -29,6 +29,40 @@ function wmWith(w: number, h: number, o: { tools?: () => { bin: string; kinds: s
 }
 
 describe('capture', () => {
+  test.each([
+    [1, MAX_JOBS],
+    [TILE, MAX_BATCH_PIXELS / (TILE * TILE)],
+  ])('bounds the batch and serves the remaining window (tile side %i)', (side, limit) => {
+    const wm = new WindowManager({ send: () => {}, logger: () => {} });
+    for (let id = 1; id <= limit + 1; id++) {
+      const window = new Win(id, side, side);
+      window.watched = true;
+      window.dirty = window.all();
+      wm.wins.set(id, window);
+    }
+    const batch = wm.collect(0);
+    expect(batch).toHaveLength(limit);
+    expect(wm.collect(TICK).map((job) => job.window)).toEqual([limit + 1]);
+  });
+
+  test('the idle pump wakes for a watch and ends while waiting for the helper', async () => {
+    let capture!: (frame: Buffer) => void;
+    const sent = new Promise<Buffer>((r) => (capture = r));
+    let reads = 0;
+    const wm = new WindowManager({ send: capture, logger: () => {}, now: () => (reads++, 0) });
+    const pumping = wm.pump();
+    const c = testClient().c;
+    const attached = wm.attach(c);
+    wm.onHelper({ t: Out.Window, id: 10, w: 32, h: 32, pid: 0, transient: 0, title: '', terminal: '' });
+    const beforeWatch = reads;
+    await Promise.resolve();
+    expect(reads).toBe(beforeWatch);
+    wm.command(c, { cmd: 'watch', id: 10 });
+    expect((await sent)[4]).toBe(In.Capture);
+    wm.end();
+    await Promise.all([pumping, attached]);
+  });
+
   // A huge window is captured in bounded tiles, no more per tick than its
   // budget allows; the rest follows once frames are acknowledged.
   test('tiles within the budget', () => {

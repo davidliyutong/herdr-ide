@@ -71,7 +71,7 @@ export const Op = {
   /** Opened by the agent towards the hub for each VS Code bridge connection. */
   Bridge: 'bridge',
   GUI: 'gui',
-  /** The agent's own herdr-core: status, install, start, restart, stop. */
+  /** The agent's own herdr-core: status, ensure, install, start, restart, stop. */
   HC: 'hc',
   /** Pipes raw bytes to the terminal core's socket; starts nothing. */
   HCAPI: 'hc-api',
@@ -150,6 +150,8 @@ export interface Header {
   bin?: string;
   url?: string;
   digest?: string;
+  /** hc ensure: restart a core even when its build is already installed. */
+  restart?: boolean;
   // plugin
   plugin?: string;
   params?: unknown;
@@ -175,6 +177,10 @@ export interface Reply {
   bridge?: BridgeInfo;
   gui?: import('./gui.ts').GUIStatus;
   hc?: HCStatus;
+  /** hc ensure: interim reply, asking the hub for a chunked executable. */
+  hc_upload?: boolean;
+  hc_installed?: boolean;
+  hc_action?: 'start' | 'restart';
   privacy?: PrivacyStatus;
   plugin?: unknown;
   plugin_length?: number;
@@ -230,6 +236,8 @@ export interface CSStatus {
 }
 
 export interface HCStatus {
+  /** The node can install and start or restart under one lock. */
+  atomic_ensure?: boolean;
   digest?: string;
   /** The SHA-256 of the herdr-core the machine build carries, which action
    * install-embedded installs (the TypeScript machine build); absent when
@@ -243,6 +251,7 @@ export interface HCStatus {
 
 /** Codes of failed OpHC actions. */
 export const HCCode = {
+  InstallFailed: 'install_failed',
   NotInstalled: 'not_installed',
   BadDigest: 'bad_digest',
   StartFailed: 'start_failed',

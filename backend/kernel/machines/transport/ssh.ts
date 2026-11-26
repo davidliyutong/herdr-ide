@@ -9,6 +9,7 @@ import { execa } from 'execa';
 import { AGENT_DIR, HUB_BIN, NAME } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { UNSET_FOREIGN_RUNTIME_VARS } from '#shared/lib/bunenv.ts';
+import { pairDuplex } from '#shared/proto/yamux.ts';
 import {
   archiveMember,
   tsVersion,
@@ -553,7 +554,8 @@ export async function dialSSH(o: SSHOptions, signal?: AbortSignal): Promise<{ se
   const stderr = new LineLogger(o.logger, `ssh ${o.target}: `);
   p.stderr.setEncoding('utf8').on('data', (c: string) => stderr.write(c));
   const exited = p.then((r) => r.exitCode ?? null);
-  const conn = p.duplex();
+  // Wait for the pipe's write callback before releasing borrowed frame bytes.
+  const conn = pairDuplex(p.stdout, p.stdin);
   const closer = () => {
     p.stdin.end();
     p.kill();

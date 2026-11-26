@@ -234,24 +234,51 @@ export async function sessionsOf(
   return { sessions, next };
 }
 
-/** The events of a transcript, with their index, in order: its turns end
+interface Checkpoint {
+  offset: number;
+  /** Events in the matching line through the item. */
+  skip: number;
+  open: boolean;
+  blocks: Map<string, number>;
+}
+
+/** The events of a transcript in order: its turns end
  * once each (a turn that ends without a line saying so at the next prompt
  * or the transcript's end), the usage of each response left out, items
  * named as the live session names them. */
-async function walk(fh: FileHandle, size: number, fn: (i: number, ev: Event) => void, signal: AbortSignal): Promise<void> {
-  const start = Math.max(size - MAX_HISTORY, 0);
-  let n = 0;
-  const put = (ev: Event) => fn(n++, ev);
-  if (start > 0) put({ t: EventType.Notice, method: noticeMethod(Notice.Skipped), params: { bytes: start } });
-  let open = false;
-  const blocks = new Map<string, number>();
+async function walk(
+  fh: FileHandle,
+  size: number,
+  emit: (ev: Event) => void,
+  signal: AbortSignal,
+  { after = '', resume }: { after?: string; resume?: Checkpoint } = {},
+): Promise<Checkpoint | undefined> {
+  const start = resume?.offset ?? Math.max(size - MAX_HISTORY, 0);
+  if (!resume && start > 0) emit({ t: EventType.Notice, method: noticeMethod(Notice.Skipped), params: { bytes: start } });
+  let open = resume?.open ?? false;
+  const blocks = resume?.blocks ?? new Map<string, number>();
+  let checkpoint: Checkpoint | undefined;
+  // Keep the original value of counts changed since the last match. This
+  // restores the start of its line without copying the whole map per match.
+  const changed = new Map<string, number | undefined>();
   await eachClaude(
     fh,
     start,
     size,
     {},
-    (_off, fr) => {
-      let base = blocks.get(fr.message) ?? 0;
+    (off, fr) => {
+      const wasOpen = open;
+      let ordinal = 0;
+      const put = (ev: Event) => {
+        ordinal++;
+        if (after && ev.item === after) {
+          checkpoint = { offset: off, skip: ordinal, open: wasOpen, blocks };
+          changed.clear();
+        }
+        if (!resume || off !== resume.offset || ordinal > resume.skip) emit(ev);
+      };
+      const previous = blocks.get(fr.message);
+      let base = previous ?? 0;
       if (fr.first >= 0) base = fr.first;
       fr.events.forEach((tev, k) => {
         const ev = eventOf(tev);
@@ -276,12 +303,23 @@ async function walk(fh: FileHandle, size: number, fn: (i: number, ev: Event) => 
         }
         put(ev);
       });
-      if (fr.message !== '') blocks.set(fr.message, Math.max(blocks.get(fr.message) ?? 0, base + fr.count));
+      if (fr.message !== '') {
+        const count = Math.max(previous ?? 0, base + fr.count);
+        if (count !== previous) {
+          if (checkpoint && !changed.has(fr.message)) changed.set(fr.message, previous);
+          blocks.set(fr.message, count);
+        }
+      }
       return true;
     },
     signal,
   );
-  if (open) put({ t: EventType.Turn, state: TurnState.End });
+  if (open) emit({ t: EventType.Turn, state: TurnState.End });
+  for (const [message, count] of changed) {
+    if (count === undefined) blocks.delete(message);
+    else blocks.set(message, count);
+  }
+  return checkpoint;
 }
 
 /** Emits the stored events of a session's conversation from its
@@ -309,25 +347,23 @@ export async function historyOf(
     const st = await fh.stat();
     const info = await describeOpen(fh, st.size);
     if (info && info.cwd !== '' && p.cwd !== '' && info.cwd !== clean(p.cwd)) throw badRequest('the session ran in another directory');
-    let from = -1;
+    let resume: Checkpoint | undefined;
     if (p.after !== '') {
-      let last = -1;
-      await walk(fh, st.size, (i, ev) => ev.item === p.after && (last = i), signal);
-      if (last < 0) throw new ChatProtoError({ code: Code.NotFound, message: 'claude: the transcript has no item ' + p.after });
-      from = last;
+      resume = await walk(fh, st.size, () => {}, signal, { after: p.after });
+      if (!resume) throw new ChatProtoError({ code: Code.NotFound, message: 'claude: the transcript has no item ' + p.after });
     } else if (info && info.agentTitle !== '') emit({ t: EventType.Info, chat: { title: info.agentTitle } as chat.Chat });
     // The turn's end the chat has after the item already.
-    let skipping = from >= 0;
+    let skipping = !!resume;
     await walk(
       fh,
       st.size,
-      (i, ev) => {
-        if (i <= from) return;
+      (ev) => {
         if (skipping && ev.t === EventType.Turn && ev.state !== TurnState.Start) return;
         skipping = false;
         emit(ev);
       },
       signal,
+      { resume },
     );
   } finally {
     await fh.close().catch(() => {});

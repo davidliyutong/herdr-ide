@@ -25,6 +25,8 @@ export interface MonitorOptions {
   statfsMs: number;
   /** How long one read of /proc or /sys may take. */
   readMs: number;
+  /** How long a completed sample is reused. */
+  sampleTtlMs: number;
   /** The system sampled ('linux' or 'darwin'; others answer what is known
    * everywhere). */
   platform: string;
@@ -39,6 +41,7 @@ export const MONITOR_DEFAULTS: MonitorOptions = {
   cpuGapMs: 100,
   statfsMs: 2000,
   readMs: 2000,
+  sampleTtlMs: 750,
   platform: process.platform,
 };
 
@@ -48,7 +51,7 @@ export interface Sampling {
   o: MonitorOptions;
   /** The environment of the helper programs. */
   env: Record<string, string>;
-  /** Ends when the hub gives up on the action. */
+  /** Ends when the node shuts down. */
   signal: AbortSignal;
 }
 

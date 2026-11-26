@@ -24,9 +24,11 @@ The hub and the machine side (the agent, the chat host) open their databases wit
 
 `DB.update` runs a transaction; `DB.durable` one that is on disk when it returns (`synchronous` FULL), for the vault's release records and the history's snapshots. `DB.reclaim` returns free pages once they are at least 8 MiB and a quarter of the file.
 
+The node uses a worker thread for terminal history and another for the AI usage cost cache. Their SQLite opens, lock waits, transactions and page reclamation run on those threads. The chat host's worker opens and migrates its journal and serves its queries. The CLI and desktop hubs also open and query SQLite in workers for usage history, the vault's access log and startup cleanup. Secret releases still wait for their access record's durable commit.
+
 ### Shared databases
 
-The hub's and a machine's database hold several features of one owner. `openShared(path)` hands out handles of one connection pool per file and process (reopened when the file was replaced). Each feature brings its own prefixed tables to its own version with `DB.migrate(feature, steps)`, recorded in `store_features`; a feature a newer program migrated further is read, not written (`NewerError`). `store_features` is the store's own table, versioned by the database's `user_version`; the layout's first step also creates a table `store_imports`, unused, which its second step drops (applied steps never change). A shared database's directory may be a link of the user's to a directory of the user's (dotfile managers); `open` alone refuses links.
+The hub's and a machine's database hold several features of one owner. `openShared(path)` hands out handles of one connection pool per file and thread (reopened when the file was replaced). Threads and processes sharing a file use SQLite's locks. Each feature brings its own prefixed tables to its own version with `DB.migrate(feature, steps)`, recorded in `store_features`; a feature a newer program migrated further is read, not written (`NewerError`). `store_features` is the store's own table, versioned by the database's `user_version`; the layout's first step also creates a table `store_imports`, unused, which its second step drops (applied steps never change). A shared database's directory may be a link of the user's to a directory of the user's (dotfile managers); `open` alone refuses links.
 
 ### What lives where
 
@@ -36,7 +38,7 @@ The hub's and a machine's database hold several features of one owner. `openShar
 | `machine-<host>[-<id>].db` | the machine's agent | the instance's data directory on the machine (`~/.veldr[-<instance>]/`) | terminal history snapshots and their writers' lease, the AI usage cost cache |
 | `chat-<host>[-<id>].db` | the chat host | the same data directory | chats, events, trusted folders, the host's settings ([37](37-agent-chats.md)); opened with `open`, not shared |
 
-The hub keeps its database open while it runs (none without a settings file). No two processes of different roles write one database; two agents of one instance share the machine's, and the history's writers take turns through its lease.
+The hub's workers open its database when they use it. A hub without a settings file keeps its state in memory. No two processes of different roles write one database; two agents of one instance share the machine's, and the history's writers take turns through its lease.
 
 ### Per-host names
 

@@ -18,7 +18,8 @@ import type { Session } from '#kernel/machines/transport/session.ts';
 import { machineAgent, type DisplayAgent } from './agent.ts';
 import { Display, sessionOf } from './display.ts';
 import { enableShells, type EnableResult, type Shells } from './enable.ts';
-import { afterAttach, plan, retryDelay, wantKind } from './plan.ts';
+import { retryDelay } from '#shared/lib/wait.ts';
+import { afterAttach, plan, retryDelay as prepareBackoff, wantKind } from './plan.ts';
 import { Key } from './settings.ts';
 import { displayEnv, Phase, stateOf, vulkanGPU, type PhaseName, type State } from './state.ts';
 import { AttachStream } from './stream.ts';
@@ -177,7 +178,7 @@ export class Manager {
    * on the same connection. */
   private retryLater(d: Display, sess: Session): void {
     if (d.gone) return;
-    const delay = retryDelay(d.failures, this.timing);
+    const delay = retryDelay(prepareBackoff(d.failures, this.timing));
     d.failures++;
     clearTimeout(d.retry);
     d.retry = setTimeout(() => {

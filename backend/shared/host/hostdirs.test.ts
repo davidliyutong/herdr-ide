@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import * as brand from '#shared/lib/brand.ts';
-import { HOSTS_DIR, dirsFor, dirsOf, makeDirs, makeRun, runDir, setUserRuntimeRoot } from './hostdirs.ts';
+import { HOSTS_DIR, UNIX_PATH_BYTES, dirsFor, dirsOf, makeDirs, makeRun, runDir, setUserRuntimeRoot } from './hostdirs.ts';
 import * as hostid from './hostid.ts';
 
 const dirs: string[] = [];
@@ -68,6 +68,22 @@ describe.skipIf(process.platform === 'win32')('unix', () => {
     const run = join(temp(), 'run');
     symlinkSync(target, run);
     expect(() => makeRun(run)).toThrow();
+  });
+
+  test('long or multibyte socket paths use a private short directory', () => {
+    withRuntimeRoot(join(temp(), 'none'));
+    const home = temp();
+    const name = `.app-${'é'.repeat(60)}`;
+    const dir = runDir(join(home, name));
+    expect(dirname(dir)).toBe('/tmp');
+    expect(Buffer.byteLength(join(dir, 'bridge.sock'))).toBeLessThanOrEqual(UNIX_PATH_BYTES);
+    expect(runDir(join(home, name + 'x'))).not.toBe(dir);
+    const link = join(temp(), 'home');
+    symlinkSync(home, link);
+    expect(runDir(join(link, name))).toBe(dir);
+    makeRun(dir);
+    dirs.push(dir);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
   });
 });
 

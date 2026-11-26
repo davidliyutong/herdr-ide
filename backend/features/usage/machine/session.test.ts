@@ -357,6 +357,23 @@ describe('bounds and errors', () => {
     expect(cutModel('short')).toBe('short');
   });
 
+  test('a cancelled waiting read passes the slot to the next request', async () => {
+    const { home, e, scanner } = setup();
+    const p = join(home, 's.jsonl');
+    write(p, claude2130());
+    const reader = new SessionReader(scanner, { ...SESSION_LIMITS, parallel: 1 });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const active = reader.cost(e, 'claude', [{ path: p, open: async () => (await gate, openRegular(p)) }], undefined);
+    const ac = new AbortController();
+    const cancelled = reader.cost({ ...e, signal: ac.signal }, 'claude', byName(p), undefined);
+    const next = reader.cost(e, 'claude', byName(p), undefined);
+    ac.abort(new Error('the hub stopped waiting'));
+    await expect(cancelled).rejects.toThrow('the hub stopped waiting');
+    release();
+    expect(await next).toEqual(await active);
+  });
+
   test('two reads at once; the others wait their turn; a read ends with its request', async () => {
     const { home, e, cost } = setup();
     const p = join(home, 's.jsonl');

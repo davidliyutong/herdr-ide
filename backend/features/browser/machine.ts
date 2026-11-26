@@ -20,6 +20,7 @@ export interface BrowserMachineOptions {
 
 /** Connects to port of host within timeoutMs. */
 function dialTCP(host: string, port: number, timeoutMs: number, signal: AbortSignal): Promise<Socket> {
+  signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const c = connect({ host, port });
     const fail = (e: Error) => {
@@ -56,6 +57,7 @@ export function browserMachine(o: BrowserMachineOptions = {}) {
             c = await dialTCP(host, p.port, o.dialMs ?? 5000, ctx.signal);
             break;
           } catch (e) {
+            ctx.signal.throwIfAborted();
             last = e;
           }
         }
@@ -72,6 +74,10 @@ export function browserMachine(o: BrowserMachineOptions = {}) {
           sock.destroy();
           closeStream(s.stream);
         };
+        if (ctx.signal.aborted) {
+          end();
+          return;
+        }
         ctx.signal.addEventListener('abort', end, { once: true });
         try {
           await pipe(s, sock);

@@ -50,7 +50,7 @@ function probe(): { arch?: string; reason?: string } {
   if (info.status !== 0) return { reason: 'Docker is not available (SSH machine tests need it)' };
   const arch = { x86_64: 'amd64', amd64: 'amd64', aarch64: 'arm64', arm64: 'arm64' }[info.stdout.trim()];
   if (!arch) return { reason: `no machine build for Docker's architecture ${info.stdout.trim()}` };
-  for (const f of [paths.sshMachineBuild(arch), paths.linuxFake(arch), paths.linuxXClient(arch)]) {
+  for (const f of [paths.sshMachineBuild(arch), paths.linuxFake(arch), paths.linuxXClient(arch), paths.linuxHttp(arch)]) {
     if (!existsSync(f)) return { reason: `${f} is missing: run make e2e with Docker running` };
   }
   if (spawnSync('docker', ['image', 'inspect', IMAGE], { stdio: 'ignore' }).status !== 0) {
@@ -88,7 +88,10 @@ export class SSHMachine {
   port = 0;
   private removed = false;
 
-  private constructor(private inst: Instance) {
+  private constructor(
+    private inst: Instance,
+    private image = IMAGE,
+  ) {
     const id = randomBytes(4).toString('hex');
     this.container = `${paths.slug}-e2e-${id}`;
     this.hostname = `sshd-${id}`;
@@ -96,9 +99,9 @@ export class SSHMachine {
 
   /** Starts a container for the instance and writes the instance's ssh
    * setup for it; answers once ssh signs in. */
-  static async start(inst: Instance): Promise<SSHMachine> {
+  static async start(inst: Instance, options: { image?: string } = {}): Promise<SSHMachine> {
     sshUnavailable();
-    const m = new SSHMachine(inst);
+    const m = new SSHMachine(inst, options.image);
     try {
       await m.launch();
     } catch (e) {
@@ -135,7 +138,7 @@ export class SSHMachine {
           `127.0.0.1:${this.port}:22`,
           '-e',
           `E2E_AUTHORIZED_KEY=${pub}`,
-          IMAGE,
+          this.image,
         );
         break;
       } catch (e) {
@@ -143,10 +146,11 @@ export class SSHMachine {
         if (attempt >= 2 || !/port is already allocated|address already in use/i.test(String(e))) throw e;
       }
     }
-    // The fake coding agent and the test X program, in the PATH of the
-    // machine's login shells.
+    // The fake coding agent, test X program and loopback HTTP server, in
+    // the PATH of the machine's login shells.
     await docker('cp', paths.linuxFake(probed!.arch!), `${this.container}:/usr/local/bin/kimi`);
     await docker('cp', paths.linuxXClient(probed!.arch!), `${this.container}:/usr/local/bin/e2e-xclient`);
+    await docker('cp', paths.linuxHttp(probed!.arch!), `${this.container}:/usr/local/bin/e2e-http`);
     await waitFor(async () => (await this.root('test -f /run/e2e-ready && echo ok')).trim() === 'ok', {
       what: 'sshd in the container',
       timeout: 20_000,

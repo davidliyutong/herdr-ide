@@ -15,6 +15,7 @@ import { xKeycode } from './keycodes';
 import type { GuiWindow } from './state';
 import { FrameStats, type StatsView } from './stats';
 import { videoCodecs, VideoStream, type VideoConfig } from './video';
+import { RETRY_RESET_MS, retryDelay } from '../lib/retry';
 import { openChannel } from '../lib/transport';
 
 interface Layer {
@@ -47,12 +48,13 @@ const ENC_VIDEO_KEY = 4;
 const WHEEL_STEP = 50;
 // Browser buttons (0 main, 1 middle, 2 secondary, 3 back, 4 forward) to X.
 const BUTTONS = [1, 2, 3, 8, 9];
+const BACKOFF_MIN_MS = 500;
 
 export class GuiSession {
   private ws?: WebSocket;
   private disposed = false;
   private gone = false;
-  private backoff = 500;
+  private backoff = BACKOFF_MIN_MS;
   private retry?: number;
   private stage: HTMLDivElement;
   private base: HTMLCanvasElement;
@@ -121,15 +123,17 @@ export class GuiSession {
     const ws = openChannel(`/m/${encodeURIComponent(this.m)}/gui/${this.id}/ws${query}`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
+    let openedAt: number | undefined;
     ws.onopen = () => {
-      this.backoff = 500;
+      openedAt = performance.now();
       this.stats.reconnected();
     };
     ws.onmessage = (e) => this.message(e);
     ws.onclose = () => {
       if (this.disposed || this.gone) return;
+      if (openedAt !== undefined && performance.now() - openedAt >= RETRY_RESET_MS) this.backoff = BACKOFF_MIN_MS;
       this.on.status('reconnecting');
-      this.retry = window.setTimeout(() => !this.disposed && void this.connect(), this.backoff);
+      this.retry = window.setTimeout(() => !this.disposed && void this.connect(), retryDelay(this.backoff));
       this.backoff = Math.min(this.backoff * 2, 5000);
     };
   }

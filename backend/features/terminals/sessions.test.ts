@@ -252,9 +252,7 @@ async function redetected(c: TestClient): Promise<Record<string, unknown>> {
 // a /ws message; switching sessions off opens the stream again without
 // them, and the record loses it.
 test('sessions from the machine', async () => {
-  let sessions = true;
   const r = await start({
-    options: { sessions: () => sessions },
     sim: (s) =>
       (s.onDetect = (h) => (h.sessions ? [ev('claude', 'idle'), ev('claude', 'idle', S1, SessionFrom.PID)] : [ev('claude', 'idle')])),
   });
@@ -270,7 +268,7 @@ test('sessions from the machine', async () => {
   expect(r.ws.length).toBe(1);
   expect(r.sim.detects.map((x) => x.sessions)).toEqual([true]);
 
-  sessions = false;
+  r.tc.setSetting('plugins.agents.enabled', false);
   d = await redetected(c);
   expect(d.agent).toBe('claude');
   wantEventSession(d, '', '');
@@ -282,19 +280,34 @@ test('sessions from the machine', async () => {
 // Switching sessions off and on again makes the machine detect the agent
 // again, whose turn's end the clients were told of once only.
 test('a switch notifies once', async () => {
-  let sessions = true;
-  const r = await start({ options: { sessions: () => sessions }, sim: (s) => (s.onDetect = () => [ev('claude', 'done')]) });
+  const r = await start({ sim: (s) => (s.onDetect = () => [ev('claude', 'done')]) });
   const c = await r.client();
   await c.ready();
   expect(await c.agentData()).toMatchObject({ agent: 'claude', agent_status: 'done' });
   for (const [i, on] of [false, true].entries()) {
-    sessions = on;
+    r.tc.setSetting('plugins.agents.enabled', on);
     expect(await redetected(c)).toMatchObject({ agent: 'claude', agent_status: 'done' });
     expect((await record(r)).agent_status).toBe('done');
     await Bun.sleep(100);
     const done = r.ws.filter((x) => (x as { agent_status: unknown }).agent_status === 'done').length;
     expect([i, done, r.ws.length]).toEqual([i, 1, 2 + i]);
   }
+});
+
+test('changing the plugin interrupts a detect retry delay', async () => {
+  const r = await start({
+    options: { timing: { detectRetryMs: 60_000 } },
+    sim: (s) => (s.onDetect = () => [ev('claude', 'idle')]),
+  });
+  const c = await r.client();
+  await c.ready();
+  expect(await c.agentData()).toMatchObject({ agent: 'claude' });
+  r.sim.detects[0].send({ terminal: 123 });
+  expect(await c.agentData()).toMatchObject({ agent: null });
+  expect(r.sim.detects).toHaveLength(1);
+  r.tc.setSetting('plugins.agents.enabled', false);
+  expect(await c.agentData()).toMatchObject({ agent: 'claude' });
+  expect(r.sim.detects.map((x) => x.sessions)).toEqual([true, false]);
 });
 
 // A lost connection clears the agents it detected, telling the clients.

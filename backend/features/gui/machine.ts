@@ -37,7 +37,7 @@ import { defineMachine, type ActionContext, type MachineEnv } from '#machine/fea
 import type { Conn } from '#machine/stream.ts';
 import { Display, keeperFree, linux } from './machine/display.ts';
 import type { GPUPaths } from './machine/gpu.ts';
-import { HelperFile, lastLine, messages, Out, pruneHelpers, startHelper, type Carried, type Proc } from './machine/helper.ts';
+import { HelperFile, HelperInput, lastLine, messages, Out, pruneHelpers, startHelper, type Carried, type Proc } from './machine/helper.ts';
 import { Pick } from './machine/pick.ts';
 import { Video } from './machine/video.ts';
 import { Client, WindowManager } from './machine/wm.ts';
@@ -119,7 +119,8 @@ export class GUI {
   private readonly helper: HelperFile;
   private running: Running | null = null;
   private keepTimer: ReturnType<typeof setTimeout> | null = null;
-  private wmChain: Promise<unknown> = Promise.resolve();
+  private attaching = 0;
+  private closing = false;
 
   private readonly env: MachineEnv;
   private readonly o: GUIMachineOptions;
@@ -150,6 +151,7 @@ export class GUI {
    * The display, its compositor and the keeper stay: they outlive the
    * agent, as programs on the display do. */
   close(): void {
+    this.closing = true;
     if (this.keepTimer) clearTimeout(this.keepTimer);
     this.endWM();
   }
@@ -158,6 +160,8 @@ export class GUI {
    * so that the next node's can take the display (one client may manage
    * it); the hubs attach to that one. */
   handOver(): void {
+    this.closing = true;
+    if (this.keepTimer) clearTimeout(this.keepTimer);
     this.endWM();
   }
 
@@ -180,7 +184,7 @@ export class GUI {
         case 'status':
           break;
         case 'install':
-          await this.display.install(ctx.signal);
+          await this.display.locked(() => this.display.install(ctx.signal));
           break;
         case 'start':
           await this.display.start(h.args?.[0] ?? GUIDisplay.Auto);
@@ -206,7 +210,13 @@ export class GUI {
           await this.keep();
           break;
         case 'attach':
-          return await this.attach(conn, ctx);
+          this.attaching++;
+          try {
+            return await this.attach(conn, ctx);
+          } finally {
+            this.attaching--;
+            if (this.attaching === 0 && this.running?.wm.idle) this.endWM();
+          }
         default:
           return fail(`gui: unknown action ${JSON.stringify(h.action ?? '')}`);
       }
@@ -243,7 +253,7 @@ export class GUI {
    * be about to leave (the terminal core was gone for its grace) as the
    * request comes: then it is tried once more after KEEP_RETRY_MS. */
   async keep(): Promise<void> {
-    if (await this.startKeeper()) return;
+    if (this.closing || (await this.startKeeper()) || this.closing) return;
     if (this.keepTimer) clearTimeout(this.keepTimer);
     this.keepTimer = setTimeout(() => {
       this.keepTimer = null;
@@ -263,6 +273,7 @@ export class GUI {
     const log = openSync(posix.join(this.env.host, 'gui-keep.log'), constants.O_CREAT | constants.O_WRONLY | constants.O_TRUNC, 0o600);
     try {
       const args = ['gui-keep', '--socket', d.xSocket(st.display), '--pid', String(st.pid), '--xauth', await d.serverAuth()];
+      if (this.closing) return true;
       args.push('--hc-socket', this.env.hcSocket, '--lock', lock, '--display', `:${st.display}`);
       // Its own session: it outlives the agent and the ssh connection.
       const child = spawn(bin, args, { env: this.env.environ(), cwd: this.env.home, detached: true, stdio: ['ignore', log, log] });
@@ -276,17 +287,9 @@ export class GUI {
 
   // The window manager.
 
-  /** The display's running window manager, starting one; it ends when its
-   * last client leaves or the display goes away. */
-  private windowManager(n: number): Promise<WindowManager> {
-    // One at a time: attaches that come together share the one started.
-    const run = () => this.startWindowManager(n);
-    const p = this.wmChain.then(run, run);
-    this.wmChain = p.catch(() => {});
-    return p;
-  }
-
+  /** Gets or starts the window manager under the display's lock. */
   private async startWindowManager(n: number): Promise<WindowManager> {
+    if (this.closing) throw new Error('gui: the node is closing');
     const r = this.running;
     if (r && !r.wm.ended) {
       await r.ready;
@@ -295,13 +298,20 @@ export class GUI {
     const st = await this.display.readState();
     const args = ['gui-wm', '--socket', this.display.xSocket(n), '--pid', String(st.pid ?? 0), '--xauth', await this.display.serverAuth()];
     args.push('--hc-socket', this.env.hcSocket, '--name', NAME);
+    const bin = this.o.startWM ? '' : await this.helper.path();
+    if (this.closing) throw new Error('gui: the node is closing');
     const proc = this.o.startWM
       ? this.o.startWM(args)
-      : startHelper(await this.helper.path(), args, { env: this.env.environ(), cwd: this.env.home, logger: this.env.logger });
+      : startHelper(bin, args, { env: this.env.environ(), cwd: this.env.home, logger: this.env.logger });
+    const input =
+      proc.child.stdin &&
+      new HelperInput(proc.child.stdin, () => {
+        this.env.logger('gui: the window manager input backlog is full');
+        wm.end();
+        proc.kill();
+      });
     const wm = new WindowManager({
-      send: (b) => {
-        if (proc.child.stdin && !proc.child.stdin.destroyed) proc.child.stdin.write(b);
-      },
+      send: (b) => input?.send(b),
       tools: () => this.video.tools(),
       logger: this.env.logger,
     });
@@ -319,13 +329,18 @@ export class GUI {
       }
       wm.end();
     })();
-    void proc.exited.then(() => wm.end());
+    void proc.exited.then(() => {
+      input?.close();
+      wm.end();
+    });
     const failed = proc.exited.then(() => {
       throw new Error(this.helperError(proc.stderr(), n));
     });
-    const timeout = new Promise<never>((_, rej) =>
-      setTimeout(() => rej(new Error('the window manager did not start')), WM_START_MS).unref?.(),
-    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, rej) => {
+      timer = setTimeout(() => rej(new Error('the window manager did not start')), WM_START_MS);
+      timer.unref?.();
+    });
     const entry: Running = { wm, proc, ready: Promise.race([readyP, failed, timeout]) };
     this.running = entry;
     try {
@@ -335,6 +350,8 @@ export class GUI {
       wm.end();
       if (this.running === entry) this.running = null;
       throw e;
+    } finally {
+      clearTimeout(timer);
     }
     void wm.pump().catch((e) => this.env.logger(`gui: window manager: ${(e as Error).message}`));
     return wm;
@@ -353,22 +370,32 @@ export class GUI {
   private async attach(conn: Conn, ctx: ActionContext): Promise<void> {
     const st = conn.stream;
     let wm: WindowManager;
+    let status: GUIStatus;
     try {
-      const n = await this.display.locked(() => this.display.display());
-      wm = await this.windowManager(n);
+      status = await this.display.status();
+      ctx.signal.throwIfAborted();
+      wm = await this.display.locked(async () => {
+        ctx.signal.throwIfAborted();
+        return this.startWindowManager(await this.display.display());
+      });
+      ctx.signal.throwIfAborted();
+      if (wm.ended || this.closing) throw new Error('gui: the window manager ended');
     } catch (e) {
       await writeLine(st, { ok: false, error: (e as Error).message } satisfies Reply);
       return;
     }
-    await writeLine(st, { ok: true, gui: await this.display.status() } satisfies Reply);
+    const hello = Promise.withResolvers<boolean>();
     const client = new Client(ctx.session.id, ctx.client, {
-      write: (m) => writeGUI(st, m.kind, ...m.parts),
+      write: async (m) => {
+        if (await hello.promise) await writeGUI(st, m.kind, ...m.parts);
+      },
       close: () => closeStream(st),
     });
-    // A window manager that ended as the stream came ends the stream; the
-    // hub attaches again and starts the next one.
     const served = wm.attach(client);
     try {
+      if (client.closed) return;
+      await writeLine(st, { ok: true, gui: status } satisfies Reply);
+      hello.resolve(true);
       while (!client.closed) {
         const { kind, payload } = await readGUI(conn.reader);
         if (kind !== GUIMessage.JSON) continue;
@@ -377,11 +404,11 @@ export class GUI {
       }
     } catch {
       // the stream ended
+    } finally {
+      hello.resolve(false);
+      client.close();
+      await served;
     }
-    client.close();
-    await served;
-    // The last client left: the window manager ends with its helper.
-    if (wm.idle && this.running?.wm === wm) this.endWM();
   }
 
   /** The retention of what the feature put on the machine: the helpers of

@@ -40,6 +40,7 @@ export class Instance {
   private stopped?: Promise<void>;
   baseURL = '';
   private proc?: ChildProcess;
+  private readonly codeServerSeed?: string;
   private log: string[] = [];
   private exited?: Promise<void>;
 
@@ -47,9 +48,10 @@ export class Instance {
    * terminal core and home to the first. */
   private readonly shares: boolean;
 
-  private constructor(of?: Instance) {
+  private constructor(of?: Instance, options: { settings?: Record<string, unknown>; codeServerSeed?: string } = {}) {
     this.shares = !!of;
-    this.h = of?.h ?? new TestHome();
+    this.h = of?.h ?? new TestHome(options.settings);
+    this.codeServerSeed = options.codeServerSeed ?? of?.codeServerSeed;
     this.name = this.h.name;
     this.home = this.h.dir;
     this.work = this.h.work;
@@ -73,8 +75,8 @@ export class Instance {
   }
 
   /** Starts a hub on a new instance and waits until its terminal core runs. */
-  static async start(): Promise<Instance> {
-    const inst = new Instance();
+  static async start(options: { settings?: Record<string, unknown>; codeServerSeed?: string } = {}): Promise<Instance> {
+    const inst = new Instance(undefined, options);
     try {
       await inst.launch();
       await inst.ready();
@@ -90,6 +92,7 @@ export class Instance {
     // test adds while the hub runs connect. --agent-dir holds the Linux
     // machine build they get (scripts/e2e.sh).
     const args = ['--instance', this.name, '--listen', '127.0.0.1:0', '--parent-stdio', '--agent-dir', paths.agentsOf(exe)];
+    if (this.codeServerSeed) args.push('--seed-dir', this.codeServerSeed);
     if (!stored) args.push('--local-only');
     const proc = spawn(exe, args, {
       cwd: this.home,

@@ -6,8 +6,8 @@
 // and showing a path in the system's file manager. Every path goes through
 // the agent's expansion, and nothing touches the root, the home directory
 // or what holds it, or the agent's data directory (machine/guard.ts).
-import { closeSync, lstatSync, mkdirSync, openSync, rmSync, statSync, type Stats } from 'node:fs';
-import { stat as statAsync } from 'node:fs/promises';
+import { closeSync, lstatSync, mkdirSync, openSync, statSync, type Stats } from 'node:fs';
+import { rm, stat as statAsync } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { Fail } from '#shared/lib/fail.ts';
 import { ChunkReader, writeLine, type Reply } from '#shared/proto/agentproto/index.ts';
@@ -204,7 +204,7 @@ export const filesMachine = (o: FilesOptions = {}) =>
             const { made: was, error } = await copyTree(ctx.signal, src, dst);
             if (error) {
               // The partial copy, never what was there.
-              if (was) rmSync(dst, { recursive: true, force: true });
+              if (was) await rm(dst, { recursive: true, force: true });
               throw codeOf(error);
             }
             return dst;
@@ -236,9 +236,9 @@ export const filesMachine = (o: FilesOptions = {}) =>
           // link its target is written (the link stays). The text is
           // received in full, then written into the file in place.
           const g = guardOf(ctx);
-          const abs = g.resolve(target(g.resolve(p.path)));
+          const abs = g.resolve(await target(g.resolve(p.path)));
           const w = { expect: p.expect, force: p.force };
-          precondition(abs, w);
+          await precondition(abs, w);
           await s.reply();
           let text: Buffer;
           try {
@@ -263,7 +263,7 @@ export const filesMachine = (o: FilesOptions = {}) =>
           // nothing there.
           const g = guardOf(ctx);
           let abs = g.resolve(p.path);
-          if (p.replace) abs = g.resolve(target(abs));
+          if (p.replace) abs = g.resolve(await target(abs));
           await s.reply();
           let e: Entry;
           try {

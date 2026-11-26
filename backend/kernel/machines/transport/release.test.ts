@@ -128,6 +128,30 @@ async function tlsRelease(files: Record<string, string>) {
 }
 
 describe('the manifest', () => {
+  test('one caller can give up while the shared manifest is verified for the other', async () => {
+    let reading!: () => void;
+    let finish!: () => void;
+    const opened = new Promise<void>((r) => (reading = r));
+    const gate = new Promise<void>((r) => (finish = r));
+    const own: OwnExecutable = {
+      key: OTHER,
+      digest: async () => (reading(), await gate, sha256(OWN_EXE)),
+      gz: async () => gzipSync(OWN_EXE),
+    };
+    const rel = new Release({ version: 'v1', sums: sums({ ownExe: sha256(OWN_EXE) }), cacheDir: temp(), own });
+    const ac = new AbortController();
+    const cancelled = rel.digests(KEY, { signal: ac.signal });
+    const next = rel.digests(KEY);
+    try {
+      await opened;
+      ac.abort(new Error('the machine disconnected'));
+      await expect(cancelled).rejects.toThrow('the machine disconnected');
+    } finally {
+      finish();
+    }
+    expect((await next).exe).toBe(sha256(EXE));
+  });
+
   test("is the release's, fetched by the hub and cached per version; the next hub reads the cache", async () => {
     const r = await release({ [SUMS]: sums() });
     const cacheDir = temp();
@@ -373,6 +397,8 @@ describe('what the hub uploads', () => {
     for (const l of loads) expect(gunzipSync(l.bytes)).toEqual(OWN_EXE);
     // One read for the digest, one for the upload.
     expect(reads).toBe(2);
+    expect(gunzipSync((await rel.load(OTHER, od)).bytes)).toEqual(OWN_EXE);
+    expect(reads).toBe(3);
     const e = await rel.load(OTHER, { exe: 'f'.repeat(64), source: 'test' }).catch((x) => x as Error);
     expect((e as Error).message).toContain("the hub's own executable: sha256");
   });

@@ -20,6 +20,7 @@ import { useEffect, useMemo } from 'react';
 import { readChat, readUsage, type ContentBlock, type SourceEvent, type Usage } from '../../conversation/model';
 import type { ChatSource, FileSuggestion, PermissionReply, QuestionReply } from '../../conversation/source';
 import { listDir } from '../../lib/files';
+import { RETRY_RESET_MS, retryDelay } from '../../lib/retry';
 import { useStore } from '../../state/store';
 import { chatApi } from './api';
 import { chatConnection, CLOSED, CommandError, readError, type ChatConnection, type Subscription } from './connection';
@@ -70,6 +71,7 @@ export class ChatSourceImpl implements ChatSource {
   private attachedNow = false;
   private waiters: Array<{ resolve(): void; reject(e: CommandError): void; timer: ReturnType<typeof setTimeout> }> = [];
   private retry = RETRY_MIN_MS;
+  private attachedAt?: number;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
   /** The hub said there is no such chat. */
@@ -230,7 +232,7 @@ export class ChatSourceImpl implements ChatSource {
 
   private attached(cur: { sub?: Subscription }, chat: Record<string, unknown>, first: number | undefined, again: boolean) {
     this.again = false;
-    this.retry = RETRY_MIN_MS;
+    this.attachedAt = performance.now();
     const seq = typeof chat.seq === 'number' ? chat.seq : undefined;
     const gap = first !== undefined && this.last > 0 && first > this.last + 1;
     if ((again && seq !== undefined && seq < this.last) || gap) {
@@ -278,7 +280,9 @@ export class ChatSourceImpl implements ChatSource {
     // The events after the last one taken come again; increments may
     // have been lost meanwhile.
     this.again = true;
-    const wait = code === 'lost' ? 0 : this.retry;
+    if (this.attachedAt !== undefined && performance.now() - this.attachedAt >= RETRY_RESET_MS) this.retry = RETRY_MIN_MS;
+    this.attachedAt = undefined;
+    const wait = code === 'lost' && this.retry === RETRY_MIN_MS ? 0 : retryDelay(this.retry);
     this.retry = Math.min(this.retry * 2, RETRY_MAX_MS);
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;

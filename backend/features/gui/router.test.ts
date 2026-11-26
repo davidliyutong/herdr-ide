@@ -51,6 +51,23 @@ function recorder(codecs: string[] = []) {
 const frame = (seq: number, enc: number = GUIEnc.PNG) => marshalFrameHeader({ window: 7, layer: 7, x: 0, y: 0, w: 1, h: 1, enc, seq });
 
 describe('routing', () => {
+  test('a reused window id starts its acknowledgements again', () => {
+    const t = attached();
+    const { v } = recorder();
+    t.r.attach(7, v);
+    t.next();
+    t.r.frame(frame(100));
+    t.r.command(7, v, { cmd: 'ack', id: 7, seq: 100 }, true);
+    t.next();
+    t.r.frame(frame(101));
+    t.ev({ ev: 'gone', id: 7 });
+    t.ev({ ev: 'window', window: { id: 7, title: 'new', w: 640, h: 480 } });
+    expect(t.next().cmd).toBe('watch');
+    t.r.frame(frame(1));
+    t.r.command(7, v, { cmd: 'ack', id: 7, seq: 1 }, true);
+    expect(t.next()).toEqual({ cmd: 'ack', id: 7, seq: 1 });
+  });
+
   // The fastest viewer paces the agent; a viewer that falls behind skips
   // frames and gets the whole window once it caught up.
   test('frames', () => {

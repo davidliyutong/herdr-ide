@@ -23,6 +23,7 @@ const probe = defineFeature({
   toggle: false,
   setup(ctx) {
     ctx.api.get('/who', (c) => c.json({ client: c.var.client, sameHost: c.var.sameHost, trustedOrigin: c.var.trustedOrigin }));
+    ctx.api.get('/empty', () => new Response(null, { status: 200 }));
     ctx.api.post('/echo', async (c) => c.body(await c.req.arrayBuffer()));
     ctx.api.get('/broken', () => {
       const body = new ReadableStream<Uint8Array>({
@@ -165,6 +166,15 @@ describe('requests of the app', () => {
     const got = new Uint8Array(await res.arrayBuffer());
     expect(got.length).toBe(chunks * (64 << 10));
     expect(got[(64 << 10) * 7 + 5]).toBe(7);
+  });
+
+  test('an empty 200 response ends its body', async () => {
+    const u = utility();
+    u.start();
+    const res = await u.fetch('/api/p/probe/empty');
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('');
+    u.stop();
   });
 
   test('a response that breaks off fails, not ends short', async () => {

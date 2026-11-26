@@ -41,6 +41,7 @@ A call or attach that names one (as `terminal`, `caller` or `parent`) is answere
 
 **Streams.** `attach` opens a herdr-core attach and answers `attached` with a stream number; the reply is queued before the stream's first frame. Output arrives as binary frames: the first paint, then the program's bytes.
 
+- A client can have 16 attaches and 64 calls pending. Requests above those limits receive `busy`. Unsubscribing cancels pending attaches for that subscription, and a stream opened by a late reply is closed.
 - **Credit.** The client sends `ack {s, n}` for bytes it has drawn; the hub forwards it as herdr-core credit, capped at what it actually sent. So at most 256 KiB is in flight per terminal, and a client 4 MiB behind gets a repaint instead of the backlog.
 - **Input** is kind 0, or kind 6 for answers the client's emulator produces itself. `resize`, `focus` and `facts` pass through.
 - **Display facts.** herdr-core answers color queries (OSC 10/11, mode 2031), device attributes and size reports itself, from the facts of the viewer active last. So the page sends its theme colors and cell size as `display` with each attach and `terminal.run`, and `facts` when they change.
@@ -51,7 +52,7 @@ A call or attach that names one (as `terminal`, `caller` or `parent`) is answere
 
 So when a client lets go of the last size-setting stream of a live terminal, the hub keeps it attached but unread (`parked`):
 
-- it tells herdr-core the viewer lost focus (if it had it) and stops forwarding output;
+- it tells herdr-core the viewer lost focus (if it had it), discards any queued output and drops subsequent bytes without returning credit;
 - herdr-core sends it at most its remaining credit, then drops the backlog for a repaint as for any slow viewer;
 - it belongs to no client: no input, size, focus or credit reaches it;
 - it closes once the next size-setting viewer has attached, when the terminal ends or is removed, or with the backend's connection (10 s after the last subscriber).

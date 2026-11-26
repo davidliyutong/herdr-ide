@@ -37,6 +37,7 @@ import {
 } from './machine/env.ts';
 import { BadKey, limits, setDeepseekKey } from './machine/limits.ts';
 import { validPrices } from './machine/pricing.ts';
+import { CacheWorker } from './machine/cache-worker.ts';
 import { CostScanner } from './machine/scan.ts';
 import { Resolver } from '#machine/agents/sessions.ts';
 import { SESSION_LIMITS, SessionReader, sessionsLocator, type LocateSession, type SessionLimits } from './machine/session.ts';
@@ -88,7 +89,8 @@ export function usageMachine(o: UsageMachineOptions = {}) {
     const t: UsageTiming = { ...USAGE_TIMING, ...o.timing };
     const now = o.now ?? Date.now;
     const memo = new Memo();
-    const scanner = new CostScanner(env.base, { ...DB_LIMITS, ...o.dbLimits });
+    const cache = new CacheWorker(env.base, env.signal);
+    const scanner = new CostScanner(env.base, { ...DB_LIMITS, ...o.dbLimits }, cache);
     const sessions = new SessionReader(scanner, { ...SESSION_LIMITS, ...o.sessionLimits });
     // The sessions' transcripts as the agents' sessions find them, in the
     // agent's home and environment (CLAUDE_CONFIG_DIR, CODEX_HOME).
@@ -163,9 +165,8 @@ export function usageMachine(o: UsageMachineOptions = {}) {
 
       /** The cost cache of a data directory no scan saved for the
        * retention (the feature off there) goes. */
-      housekeep(when: Date) {
-        scanner.housekeep(when.getTime());
-      },
+      housekeep: (when) => scanner.housekeep(when.getTime()),
+      close: () => cache.close(),
     };
   });
 }

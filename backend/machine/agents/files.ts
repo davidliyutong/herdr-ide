@@ -243,3 +243,25 @@ export async function readHead(fh: FileHandle, n: number): Promise<Buffer> {
   }
   return b.subarray(0, got);
 }
+
+/** Reads the first line in growing prefixes until its leading metadata is
+ * available. The last prefix is bounded even for a very large first line. */
+export async function readMetadata<T>(fh: FileHandle, max: number, decode: (head: Buffer) => T | null): Promise<T | null> {
+  let data = Buffer.allocUnsafe(Math.min(max, 16 << 10));
+  let got = 0;
+  for (;;) {
+    const from = got;
+    while (got < data.length) {
+      const { bytesRead } = await fh.read(data, got, data.length - got, got);
+      if (!bytesRead) break;
+      got += bytesRead;
+      const newline = data.subarray(from, got).indexOf(10);
+      if (newline >= 0) return decode(data.subarray(0, from + newline));
+    }
+    const found = decode(data.subarray(0, got));
+    if (found || got < data.length || data.length === max) return found;
+    const more = Buffer.allocUnsafe(Math.min(max, data.length * 2));
+    data.copy(more);
+    data = more;
+  }
+}

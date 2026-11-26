@@ -4,10 +4,10 @@
 // programs). The agent hashes the executable again and runs it only when
 // it is the build's.
 import type { Logger } from '#shared/lib/log.ts';
-import { ChunkWriter, Op, readLine, type HCStatus, type Reply } from '#shared/proto/agentproto/index.ts';
+import { ChunkWriter, HCCode, Op, readLine, type HCStatus, type Reply } from '#shared/proto/agentproto/index.ts';
 import type { Audit } from '#kernel/audit.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
-import { AgentError, closeStream } from '#kernel/machines/transport/session.ts';
+import { AgentError, closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { Code } from './messages.ts';
 
 /** herdr-core for a platform (Go's os/arch names): gzip-compressed, and
@@ -46,9 +46,15 @@ export async function hcAction(m: Machine, action: string, digest: string, signa
  * agent's first reply, and returns its second reply. */
 async function install(m: Machine, gz: Uint8Array, digest: string, signal: AbortSignal, timeoutMs: number): Promise<Reply> {
   const { conn } = await m.open({ op: Op.HC, action: 'install', digest }, { signal, timeoutMs });
+  return sendExecutable(conn, gz, signal);
+}
+
+async function sendExecutable(conn: AgentStream, gz: Uint8Array | null, signal: AbortSignal): Promise<Reply> {
   const stop = () => conn.stream.destroy(new Error('aborted'));
   signal.addEventListener('abort', stop, { once: true });
   try {
+    signal.throwIfAborted();
+    if (!gz) throw new Error('the hub has no terminal core to upload');
     const cw = new ChunkWriter(conn.stream);
     await cw.write(gz);
     await cw.finish();
@@ -105,6 +111,8 @@ export async function ensure(m: Machine, o: EnsureOptions, d: LifecycleDeps): Pr
     } catch {
       // none in this build for the machine's platform
     }
+  if (!d.readOnly && o.stopped()) return st.running ? '' : Code.Stopped;
+  if (!d.readOnly && st.atomic_ensure) return ensureAtomically(m, o, d, signal, digest, gz);
   let installed = false;
   if (digest && (gz || st.embedded) && st.digest !== digest && !d.readOnly) {
     let r: Reply | undefined;
@@ -145,4 +153,45 @@ export async function ensure(m: Machine, o: EnsureOptions, d: LifecycleDeps): Pr
   }
   d.audit.log(null, `term.${action}`, { machine: o.id, version: rep.hc.version ?? '' });
   return '';
+}
+
+/** A current node serializes the entire ensure, including its own status
+ * check, any upload and a start or restart. */
+async function ensureAtomically(
+  m: Machine,
+  o: EnsureOptions,
+  d: LifecycleDeps,
+  signal: AbortSignal,
+  digest: string,
+  gz: Uint8Array | null,
+): Promise<string> {
+  let rep: Reply | undefined;
+  let err: unknown;
+  let uploading = false;
+  try {
+    const { conn, reply } = await m.open(
+      { op: Op.HC, action: 'ensure', ...(digest ? { digest } : {}), ...(o.restart ? { restart: true } : {}) },
+      { signal, timeoutMs: o.timeoutMs },
+    );
+    if (reply.hc_upload) {
+      uploading = true;
+      rep = await sendExecutable(conn, gz, signal);
+    } else {
+      conn.reader.release();
+      closeStream(conn.stream);
+      rep = reply;
+    }
+  } catch (e) {
+    err = e;
+    if (e instanceof AgentError) rep = e.reply;
+  }
+  if (rep?.hc_installed) d.audit.log(null, 'term.install', { machine: o.id, digest });
+  if (rep?.ok && rep.hc?.running) {
+    if (rep.hc_action) d.audit.log(null, `term.${rep.hc_action}`, { machine: o.id, version: rep.hc.version ?? '' });
+    return '';
+  }
+  d.logger(`term ${o.id}: ensure: ${err ? (err as Error).message : (rep?.error ?? '')}`);
+  if (rep?.code === HCCode.NotInstalled) return Code.NotBundled;
+  if (rep?.code === HCCode.InstallFailed || (uploading && !rep)) return Code.Install;
+  return Code.Start;
 }

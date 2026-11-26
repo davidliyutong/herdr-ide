@@ -30,7 +30,7 @@ Non-goals: sharing a namespace's terminals or code-server between hosts (each ho
 | Persistent, this host's | `<data>/hosts/<hostid.key>/` | the terminal core's executable, code-server's user data and extensions, logs of node, code-server and displays; in `~/.veldr/hosts/<hostid.key>/xvfb/`, Xvfb packages for the host's instances |
 | Shared | `<data>/` and `~/.veldr/` | databases named per host ([38](38-sqlite-state.md)), agent builds by content hash, code-server per version, system and architecture, uploads with unique names, the vault's MCP command |
 
-The runtime directory's name carries a hash of the data directory's real path, so another home (a test's `HOME`) never meets it. `/run/user/<uid>` is looked for itself, not through `XDG_RUNTIME_DIR`, which processes not started by a login lack; it must be the user's and private, or the data directory's is used. A lingering user keeps `/run/user/<uid>` as long as the terminal core's service runs.
+The runtime directory's name carries a hash of the data directory's real path, so another home (a test's `HOME`) never meets it. `/run/user/<uid>` is looked for itself, not through `XDG_RUNTIME_DIR`, which processes not started by a login lack; it must be the user's and private, or the data directory's is used. If those paths would exceed the Unix socket address limit, the instance uses a short, private 0700 directory directly below `/tmp` keyed by the user, host and data directory. A lingering user keeps `/run/user/<uid>` as long as the terminal core's service runs.
 
 **The terminal core's session** is `veldr[-<instance>]-<hostid.id>`: herdr-core's state directory and service are per host.
 

@@ -47,6 +47,10 @@ Turning a switch off also ends running work: the client kind's proxied requests 
 
 `download` and `existing` fall back to `push`; `--offline` skips `download`. A change applies the next time code-server starts.
 
+The hub resolves and verifies each artifact independently. Concurrent requests for the same file serialize, and transient HTTP and transfer failures are retried up to twice within the original download deadline.
+
+The node publishes staged releases under its code-server lifecycle lock. A healthy server using the same installed release keeps its files while it runs. Overlapping installs of identical archives share unpacking and publication. A later reinstall can replace the stopped server's files. Idle release checks for other hubs' open or connecting sockets under the same lock immediately before stopping the server.
+
 The bundled Node is run once after unpacking; if it fails (old glibc), the error is reported and the rest of the product keeps working. An archive with an entry that would leave the release (an absolute path, `..`, a link pointing out) is refused whole; unpacking it does not hold the node's one thread ([42](42-typescript-backend.md#the-machine-side)). Extensions (the bridge extension and the defaults, Git Graph) are installed from VSIX files uploaded by the hub.
 
 code-server listens only on a unix socket (`--socket-mode 600`) with `--auth none` (the socket directory is private) and `--disable-proxy`; telemetry, update checks and workspace trust are off, and it exits by itself after an hour unused (`--idle-timeout-seconds`).

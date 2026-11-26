@@ -200,29 +200,38 @@ export async function claudeProjectDirs(r: Resolver, projects: string, cwd: stri
  * LIMITS.headLine (attachments) are passed over. */
 export async function claudeInfoOf(fh: FileHandle): Promise<Info> {
   const none: Info = { cwd: '', started: null };
-  // A line that starts within LIMITS.head is read whole when it is no
-  // longer than LIMITS.headLine.
+  // A line starting before head may extend past it by one bounded line.
   const max = LIMITS.head + LIMITS.headLine;
-  const buf = Buffer.allocUnsafe(max);
-  let got = 0;
-  while (got < max) {
-    const { bytesRead } = await fh.read(buf, got, max - got, got);
-    if (bytesRead === 0) break;
-    got += bytesRead;
+  let parts: Buffer[] = [];
+  let length = 0;
+  let lines = 0;
+  const readLine = () => {
+    if (!parts.length) return null;
+    const line = parts.length === 1 ? parts[0] : Buffer.concat(parts, length);
+    return line.includes('"cwd"') ? conversationLine(line.toString('utf8')) : null;
+  };
+  for (let offset = 0; offset < max;) {
+    const buf = Buffer.allocUnsafe(Math.min(16 << 10, max - offset));
+    const { bytesRead } = await fh.read(buf, 0, buf.length, offset);
+    if (!bytesRead) break;
+    const data = buf.subarray(0, bytesRead);
+    for (let at = 0; at < data.length;) {
+      const newline = data.indexOf(10, at);
+      const end = newline < 0 ? data.length : newline + 1;
+      length += end - at;
+      if (length <= LIMITS.headLine) parts.push(data.subarray(at, end));
+      else if (parts.length) parts = [];
+      if (newline < 0) break;
+      const found = readLine();
+      if (found) return found;
+      if (++lines >= LIMITS.headLines || offset + end >= LIMITS.head) return none;
+      parts = [];
+      length = 0;
+      at = end;
+    }
+    offset += bytesRead;
   }
-  const data = buf.subarray(0, got);
-  let off = 0;
-  for (let n = 0; n < LIMITS.headLines && off < LIMITS.head && off < data.length; n++) {
-    const nl = data.indexOf(10, off);
-    const end = nl < 0 ? data.length : nl + 1;
-    const line = data.subarray(off, end);
-    off = end;
-    if (line.length > LIMITS.headLine) continue;
-    if (!line.includes('"cwd"')) continue;
-    const info = conversationLine(line.toString('utf8'));
-    if (info) return info;
-  }
-  return none;
+  return readLine() ?? none;
 }
 
 /** The directory and time a line of a transcript gives when it is a

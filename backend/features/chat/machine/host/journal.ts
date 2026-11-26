@@ -9,22 +9,16 @@
 // a write that waits (a data directory on a network mount that stopped
 // answering, a checkpoint's sync on a slow disk) would otherwise stop the
 // host's one thread: every chat, every agent's output and every
-// connection. The database is opened and migrated on the host's thread
-// once, before the host serves (#shared/store's open: a private directory
-// and file of the user's, not links, a newer host's database refused);
-// from then on the worker has the only connection. It runs one request at a
-// time in the order they were made, each change a transaction of its own,
-// and answers each; the host goes on meanwhile. What a write that waits
-// holds is the journal: the chats' stored events wait for it in order
-// (chat.ts sends an event to its clients only once it is stored), never the
-// host's thread.
-//
-// The worker is a script of its own, without imports but node:sqlite,
-// started from a Blob: it needs no entrypoint of its own in the compiled
-// executable. It knows no table: the host sends it the statements.
+// connection. The same worker opens and migrates the database under
+// the shared store's file guards, then runs one request at a time in the
+// order they were made, each change a transaction of its own. Clients see
+// a chat's events once the journal stores them.
+import type { Worker } from 'node:worker_threads';
+import { machineWorker } from '#machine/state-worker.ts';
 import { formatRFC3339, parseRFC3339 } from '#shared/lib/gotime.ts';
-import { NewerError, hostFile, open, pruneHostFiles } from '#shared/store/index.ts';
+import { NewerError, hostFile } from '#shared/store/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
+import type { Param, Reply, Request, SQLRow, Step } from './journal-worker.ts';
 import type { FileID } from './trust.ts';
 
 /** The name of the host's database in the instance's data directory, which
@@ -165,81 +159,6 @@ export class JournalError extends Error {
   }
 }
 
-type Param = null | number | bigint | string | Uint8Array;
-type SQLRow = Record<string, Param>;
-interface Step {
-  sql: string;
-  params: Param[];
-  /** The changes the statement must make; another number rolls the
-   * transaction back (a gap). */
-  expect?: number;
-}
-type Request =
-  | { op: 'open'; path: string; pragmas: string[] }
-  | { op: 'tx'; steps: Step[] }
-  | { op: 'all'; sql: string; params: Param[] }
-  | { op: 'close' };
-type Reply = { id: number; ok: true; changes?: number[]; rows?: SQLRow[] } | { id: number; ok: false; gap?: boolean; message: string };
-
-/** The worker's script. */
-const SOURCE = `
-const { DatabaseSync } = require('node:sqlite');
-let db = null;
-const stmts = new Map();
-const prep = (sql) => {
-  let s = stmts.get(sql);
-  if (!s) {
-    if (stmts.size >= 128) stmts.clear();
-    s = db.prepare(sql);
-    stmts.set(sql, s);
-  }
-  return s;
-};
-self.onmessage = (ev) => {
-  const m = ev.data;
-  let out;
-  try {
-    if (m.op === 'open') {
-      db = new DatabaseSync(m.path);
-      for (const p of m.pragmas) db.exec(p);
-      out = { ok: true };
-    } else if (m.op === 'tx') {
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        const changes = [];
-        for (const s of m.steps) {
-          const r = prep(s.sql).run(...s.params);
-          if (s.expect !== undefined && Number(r.changes) !== s.expect) {
-            const e = new Error('the chat\\'s log would have a gap');
-            e.gap = true;
-            throw e;
-          }
-          changes.push(Number(r.changes));
-        }
-        db.exec('COMMIT');
-        out = { ok: true, changes };
-      } catch (e) {
-        try { db.exec('ROLLBACK'); } catch {}
-        throw e;
-      }
-    } else if (m.op === 'all') out = { ok: true, rows: prep(m.sql).all(...m.params) };
-    else if (m.op === 'close') {
-      stmts.clear();
-      if (db) db.close();
-      db = null;
-      out = { ok: true };
-    } else out = { ok: false, message: 'unknown op' };
-  } catch (e) {
-    out = { ok: false, gap: !!(e && e.gap), message: String((e && e.message) || e) };
-  }
-  postMessage({ id: m.id, ...out });
-};
-`;
-
-let source: string | undefined;
-/** The worker's script as a URL (one per process). */
-const sourceURL = () => (source ??= URL.createObjectURL(new Blob([SOURCE], { type: 'application/javascript' })));
-
 /** A time as the wire has it (RFC 3339, as Go writes it); Go's zero time for
  * 0. */
 export const timeOf = (t: number): string => (t ? formatRFC3339(new Date(t)) : '0001-01-01T00:00:00Z');
@@ -290,47 +209,42 @@ export class Journal {
   private failed: string | null = null;
   /** The bytes of the events whose appends wait. */
   private queued = 0;
+  private reclaimAfter = 0;
   /** The next appends the worker refuses as a write that failed (tests). */
   failAppends = 0;
 
   private constructor(path: string) {
     this.path = path;
-    this.w = new Worker(sourceURL());
-    this.w.onmessage = (ev: MessageEvent<Reply>) => {
-      const f = this.waiting.get(ev.data.id);
-      this.waiting.delete(ev.data.id);
-      f?.(ev.data);
-    };
-    this.w.onerror = (ev) => this.fail(`the journal's worker failed: ${(ev as ErrorEvent).message ?? 'unknown'}`);
-    // The host ends by itself; a worker does not hold its process.
-    (this.w as unknown as { unref?: () => void }).unref?.();
+    this.w = machineWorker({ kind: 'journal' });
+    this.w.on('message', (r: Reply) => {
+      const f = this.waiting.get(r.id);
+      this.waiting.delete(r.id);
+      f?.(r);
+    });
+    this.w.on('error', (e) => this.fail(`the journal's worker failed: ${(e as Error).message}`));
+    this.w.on('exit', () => this.fail('the journal worker stopped'));
+    this.w.unref();
   }
 
-  /** Opens this host's database in base: checked and migrated on this
-   * thread, then served by the worker. A database a newer host wrote is not
-   * used: NewerError. The other hosts' databases of a shared home nobody
-   * used for 30 days go (logged by the caller from pruned). */
+  /** Opens and migrates the journal on its worker thread. The other
+   * hosts' unused journals are pruned on that thread too. */
   static async open(o: JournalOptions): Promise<{ journal: Journal; pruned: string[]; pruneError?: Error }> {
     const path = hostFile(o.base, DB_NAME);
-    const db = open(path, { migrations: MIGRATIONS, busyTimeout: o.busyTimeout });
-    const newer = db.newer;
-    db.close();
-    if (newer) throw newer;
-    let pruned: string[] = [];
-    let pruneError: Error | undefined;
+    const journal = new Journal(path);
     try {
-      pruned = pruneHostFiles(o.base, DB_NAME);
+      const r = await journal.request({
+        op: 'open',
+        base: o.base,
+        path,
+        name: DB_NAME,
+        migrations: MIGRATIONS,
+        busyTimeout: o.busyTimeout,
+      });
+      return { journal, pruned: r.pruned ?? [], ...(r.pruneMessage ? { pruneError: new Error(r.pruneMessage) } : {}) };
     } catch (e) {
-      pruneError = e as Error;
+      journal.terminate();
+      throw e;
     }
-    const j = new Journal(path);
-    const busy = o.busyTimeout && o.busyTimeout > 0 ? o.busyTimeout : 5000;
-    await j.request({
-      op: 'open',
-      path,
-      pragmas: [`PRAGMA busy_timeout = ${busy}`, 'PRAGMA journal_mode = WAL', 'PRAGMA foreign_keys = ON', 'PRAGMA synchronous = NORMAL'],
-    });
-    return { journal: j, pruned, ...(pruneError ? { pruneError } : {}) };
   }
 
   private fail(why: string): void {
@@ -343,8 +257,17 @@ export class Journal {
     if (this.failed) return Promise.reject(new JournalError(this.failed));
     const id = this.next++;
     return new Promise((resolve, reject) => {
-      this.waiting.set(id, (r) => (r.ok ? resolve(r) : reject(new JournalError(r.message, r.gap === true))));
-      this.w.postMessage({ ...m, id });
+      this.waiting.set(id, (r) => {
+        if (r.ok) resolve(r);
+        else if (r.newer !== undefined) reject(new NewerError(`${r.newer}, the code knows ${MIGRATIONS.length}`, r.newer));
+        else reject(new JournalError(r.message, r.gap === true));
+      });
+      try {
+        this.w.postMessage({ ...m, id });
+      } catch (e) {
+        this.waiting.delete(id);
+        reject(e);
+      }
     });
   }
 
@@ -442,10 +365,11 @@ export class Journal {
   }
 
   /** Reads every chat. */
-  async loadChats(): Promise<Row[]> {
+  async loadChats(): Promise<(Row & { first: number })[]> {
     const rows = await this.all(`SELECT id, kind, title, cwd, session_id, state, error, created, updated, seq, seen,
 		closed, handed_off, agent_version, config, commands, usage, capabilities, turn_end, options, history_after, bytes,
-		fresh, renamed, untrusted_told, archived FROM chats`);
+		fresh, renamed, untrusted_told, archived,
+		(SELECT MIN(seq) FROM events WHERE chat = chats.id) AS first FROM chats`);
     return rows.map((r) => {
       const c: chat.Chat = {
         id: text(r.id!),
@@ -477,6 +401,7 @@ export class Journal {
       if (usage) c.usage = usage;
       return {
         chat: c,
+        first: num(r.first ?? 0),
         turnEnd: num(r.turn_end!),
         options: parse<chat.Options>(text(r.options!), {}),
         historyAfter: text(r.history_after!),
@@ -587,6 +512,16 @@ export class Journal {
     await this.tx({ sql: 'DELETE FROM chats WHERE id = ?', params: [chatId] });
   }
 
+  /** Returns a bounded number of free pages after deletions. */
+  async reclaim(): Promise<void> {
+    const now = performance.now();
+    if (now < this.reclaimAfter) return;
+    const [r] = await this.all('PRAGMA freelist_count');
+    if (num(r?.freelist_count ?? 0) < 256) return;
+    this.reclaimAfter = now + 60_000;
+    await this.all('PRAGMA incremental_vacuum(4096)');
+  }
+
   /** The settings the hub gave last; undefined when none. */
   async settings(): Promise<chat.HostSettings | undefined> {
     const [r] = await this.all('SELECT value FROM settings WHERE key = ?', 'host');
@@ -659,13 +594,13 @@ export class Journal {
     } catch {
       // ended all the same
     }
-    this.w.terminate();
+    void this.w.terminate().catch(() => {});
     this.fail('the journal is closed');
   }
 
   /** Ends the worker at once (a host that did not stop in time). */
   terminate(): void {
-    this.w.terminate();
+    void this.w.terminate().catch(() => {});
     this.fail('the journal is closed');
   }
 }

@@ -24,7 +24,6 @@ export const FAST: Partial<Timing> = {
   backoffMinMs: 20,
   backoffMaxMs: 100,
   detectRetryMs: 50,
-  detectPollMs: 20,
 };
 
 /** A call the fake core got: its method, params as sent, the raw request. */
@@ -65,6 +64,7 @@ export class FakeHC {
   snap: unknown[] | null = null;
   recs = new Map<string, unknown>();
   attachedRecs = new Map<string, unknown>();
+  beforeAttach?: () => Promise<void>;
   anyTerminal = true;
   list: unknown = { terminals: [], hidden_finished: 0 };
   /** The calls it got, events.subscribe and the hello aside. */
@@ -148,6 +148,7 @@ export class FakeHC {
           break;
         }
         case 'terminal.attach': {
+          await this.beforeAttach?.();
           const rec =
             this.attachedRecs.get(terminal) ??
             this.recs.get(terminal) ??
@@ -468,7 +469,7 @@ export interface RigOptions {
 }
 
 export interface Rig {
-  tc: TestHub;
+  tc: ReturnType<typeof testHub>;
   feature: TerminalsFeature;
   sim: AgentSim;
   machines: Machines;

@@ -17,8 +17,8 @@
 import { RE2JS } from 're2js';
 import { trimSpace } from '#shared/lib/gostrings.ts';
 import { Notice, Transcript, Turn } from '#shared/proto/agentproto/index.ts';
-import { MAX_BLOCKS, MAX_ITEMS, MAX_TITLE, cutText, imageBlock, setMeta, type LineOut, type Obj } from './events.ts';
-import { elements, member, memberString, pick, present, unquote, valid } from './json.ts';
+import { MAX_BLOCKS, MAX_ITEMS, MAX_TITLE, cutMiddle, cutText, imageBlock, setMeta, type LineOut, type Obj } from './events.ts';
+import { elements, member, memberString, pick, unquote, valid, wellFormed } from './json.ts';
 
 // ---- the members of a line, typed as Go's decoder reads them ----
 
@@ -27,35 +27,61 @@ import { elements, member, memberString, pick, present, unquote, valid } from '.
  * (WRONG). */
 const WRONG = Symbol('wrong');
 type Field<T> = T | typeof WRONG;
+type Value = string | { decoded: unknown };
+type Members = Map<string, string> | Obj;
 
-function str(raw: string | undefined): Field<string> {
-  if (raw === undefined || raw === 'null') return '';
-  return raw[0] === '"' ? unquote(raw) : WRONG;
+function field(m: Members | null, k: string): Value | undefined {
+  if (m instanceof Map) return m.get(k);
+  if (m && Object.hasOwn(m, k)) return { decoded: m[k] };
 }
 
-function bool(raw: string | undefined): Field<boolean> {
-  if (raw === undefined || raw === 'null' || raw === 'false') return false;
-  return raw === 'true' ? true : WRONG;
+function present(v: Value | undefined): v is Value {
+  return typeof v === 'string' ? v !== 'null' : v?.decoded != null;
+}
+
+function str(v: Value | undefined): Field<string> {
+  if (!present(v)) return '';
+  if (typeof v === 'string') return v[0] === '"' ? unquote(v) : WRONG;
+  return typeof v.decoded === 'string' ? wellFormed(v.decoded) : WRONG;
+}
+
+function bool(v: Value | undefined): Field<boolean> {
+  if (!present(v)) return false;
+  if (typeof v !== 'string') return typeof v.decoded === 'boolean' ? v.decoded : WRONG;
+  if (v === 'false') return false;
+  return v === 'true' ? true : WRONG;
 }
 
 /** An integer as Go reads one into an int64: integer syntax only. */
-function int(raw: string | undefined): Field<number | null> {
-  if (raw === undefined || raw === 'null') return null;
-  return /^-?\d+$/.test(raw) ? Number(raw) : WRONG;
+function int(v: Value | undefined): Field<number | null> {
+  if (!present(v)) return null;
+  if (typeof v === 'string') return /^-?\d+$/.test(v) ? Number(v) : WRONG;
+  const n = v.decoded;
+  return typeof n === 'number' && Number.isInteger(n) ? n : WRONG;
 }
 
 /** An object's members (keys), or null for null; WRONG for another type. */
-function obj(raw: string | undefined, ...keys: string[]): Field<Map<string, string> | null> {
-  if (raw === undefined || raw === 'null') return null;
-  return raw[0] === '{' ? (pick(raw, ...keys) ?? WRONG) : WRONG;
+function obj(v: Value | undefined, ...keys: string[]): Field<Members | null> {
+  if (!present(v)) return null;
+  if (typeof v === 'string') return pick(v, ...keys) ?? WRONG;
+  return isObj(v.decoded) ? v.decoded : WRONG;
+}
+
+function array(v: Value, limit: number, fn: (v: Value) => boolean): { more: boolean; ok: boolean } {
+  if (typeof v === 'string') return elements(v, limit, fn);
+  if (!Array.isArray(v.decoded)) return { more: false, ok: false };
+  for (let i = 0; i < Math.min(limit, v.decoded.length); i++) {
+    if (!fn({ decoded: v.decoded[i] })) return { more: false, ok: true };
+  }
+  return { more: v.decoded.length > limit, ok: true };
 }
 
 /** Reads fields from a decoded object strictly: any of the wrong type
  * makes the whole decode fail, as Go's json.Unmarshal into a struct. */
 class Strict {
   failed = false;
-  private readonly m: Map<string, string>;
-  constructor(m: Map<string, string>) {
+  private readonly m: Members;
+  constructor(m: Members) {
     this.m = m;
   }
   private take<T>(v: Field<T>, zero: T): T {
@@ -66,53 +92,53 @@ class Strict {
     return v;
   }
   str(k: string): string {
-    return this.take(str(this.m.get(k)), '');
+    return this.take(str(this.raw(k)), '');
   }
   bool(k: string): boolean {
-    return this.take(bool(this.m.get(k)), false);
+    return this.take(bool(this.raw(k)), false);
   }
   int(k: string): number | null {
-    return this.take(int(this.m.get(k)), null);
+    return this.take(int(this.raw(k)), null);
   }
   obj(k: string, ...keys: string[]): Strict | null {
-    const m = this.take(obj(this.m.get(k), ...keys), null);
+    const m = this.take(obj(this.raw(k), ...keys), null);
     if (!m) return null;
     const s = new Strict(m);
     return s;
   }
-  raw(k: string): string | undefined {
-    return this.m.get(k);
+  raw(k: string): Value | undefined {
+    return field(this.m, k);
   }
 }
 
 /** Reads fields leniently: one of the wrong type is its zero value, as
  * Go's json.Unmarshal fills the others when the error is ignored. */
 class Lenient {
-  private readonly m: Map<string, string>;
-  constructor(m: Map<string, string> | null) {
-    this.m = m ?? new Map();
+  private readonly m: Members | null;
+  constructor(m: Members | null) {
+    this.m = m;
   }
   str(k: string): string {
-    const v = str(this.m.get(k));
+    const v = str(this.raw(k));
     return v === WRONG ? '' : v;
   }
   bool(k: string): boolean {
-    const v = bool(this.m.get(k));
+    const v = bool(this.raw(k));
     return v === WRONG ? false : v;
   }
   int(k: string): number | null {
-    const v = int(this.m.get(k));
+    const v = int(this.raw(k));
     return v === WRONG ? null : v;
   }
   obj(k: string, ...keys: string[]): Lenient {
-    const v = obj(this.m.get(k), ...keys);
+    const v = obj(this.raw(k), ...keys);
     return new Lenient(v === WRONG ? null : v);
   }
   has(k: string): boolean {
-    return this.m.has(k);
+    return this.raw(k) !== undefined;
   }
-  raw(k: string): string | undefined {
-    return this.m.get(k);
+  raw(k: string): Value | undefined {
+    return field(this.m, k);
   }
 }
 
@@ -123,21 +149,18 @@ interface Block {
   thinking: string;
   id: string;
   name: string;
-  input?: string;
+  input?: Value;
   toolUseId: string;
-  content?: string;
+  content?: Value;
   isError: boolean;
 }
 
 /** A block as Go decodes one; null when raw is no block (not valid JSON, a
  * member of the wrong type). */
-function blockOf(raw: string): Block | null {
-  if (!valid(raw)) return null;
-  const t = raw.trim();
-  if (t === 'null') return { type: '', text: '', thinking: '', id: '', name: '', toolUseId: '', isError: false };
-  const m = pick(t, 'type', 'text', 'thinking', 'id', 'name', 'input', 'tool_use_id', 'content', 'is_error');
-  if (!m) return null;
-  const s = new Strict(m);
+function blockOf(raw: Value): Block | null {
+  const m = obj(raw, 'type', 'text', 'thinking', 'id', 'name', 'input', 'tool_use_id', 'content', 'is_error');
+  if (m === WRONG) return null;
+  const s = new Strict(m ?? {});
   const b: Block = {
     type: s.str('type'),
     text: s.str('text'),
@@ -153,10 +176,10 @@ function blockOf(raw: string): Block | null {
 }
 
 /** A string value as Go decodes one into a string; null when it is none. */
-function jsonString(raw: string | undefined): string | null {
-  const t = (raw ?? '').trim();
-  if (t[0] !== '"' || !valid(t)) return null;
-  return unquote(t);
+function jsonString(v: Value | undefined): string | null {
+  if (!present(v)) return null;
+  const t = str(v);
+  return t === WRONG ? null : t;
 }
 
 // ---- lines ----
@@ -195,7 +218,21 @@ export function parseClaude(line: string, o: LineOut): void {
       // lines newer versions add: no conversation.
       return;
   }
-  const d = lineOf(line);
+  const fields = valid(line) ? pick(line, ...LINE_FIELDS) : null;
+  conversation(typ, fields, o);
+}
+
+/** Maps the SDK's already-decoded assistant or user message. */
+export function parseClaudeSDK(frame: unknown, o: LineOut): void {
+  if (!isObj(frame) || (frame.type !== 'assistant' && frame.type !== 'user')) {
+    o.unknown++;
+    return;
+  }
+  conversation(frame.type, frame, o);
+}
+
+function conversation(typ: string, fields: Members | null, o: LineOut): void {
+  const d = fields ? lineOf(fields) : null;
   if (!d) {
     o.unknown++;
     return;
@@ -220,46 +257,44 @@ interface Line {
   isVisibleInTranscriptOnly: boolean;
   isApiErrorMessage: boolean;
   message: Message | null;
-  toolUseResult?: string;
+  toolUseResult?: Value;
   /** The SDK protocol's name of toolUseResult. */
-  toolUseResultSDK?: string;
+  toolUseResultSDK?: Value;
   /** The index in its message of an assistant line's content block. */
   apiBlockIndex: number | null;
   /** A system line's (local_command). */
-  content?: string;
+  content?: Value;
   compact: { trigger: string; preTokens: number } | null;
 }
 
 interface Message {
   id: string;
   model: string;
-  content?: string;
+  content?: Value;
   /** Why the response ended (the API's); "" while it runs. */
   stopReason: string;
   usage: { input: number; cacheRead: number; cacheCreation: number } | null;
 }
 
+const LINE_FIELDS = [
+  'type',
+  'subtype',
+  'timestamp',
+  'isSidechain',
+  'isMeta',
+  'isCompactSummary',
+  'isVisibleInTranscriptOnly',
+  'isApiErrorMessage',
+  'message',
+  'toolUseResult',
+  'tool_use_result',
+  'apiBlockIndex',
+  'content',
+  'compactMetadata',
+];
+
 /** A conversation line as Go decodes it; null when it is not one. */
-function lineOf(line: string): Line | null {
-  if (!valid(line)) return null;
-  const m = pick(
-    line,
-    'type',
-    'subtype',
-    'timestamp',
-    'isSidechain',
-    'isMeta',
-    'isCompactSummary',
-    'isVisibleInTranscriptOnly',
-    'isApiErrorMessage',
-    'message',
-    'toolUseResult',
-    'tool_use_result',
-    'apiBlockIndex',
-    'content',
-    'compactMetadata',
-  );
-  if (!m) return null;
+function lineOf(m: Members): Line | null {
   const s = new Strict(m);
   const msg = s.obj('message', 'id', 'model', 'content', 'stop_reason', 'usage');
   let message: Message | null = null;
@@ -335,26 +370,22 @@ function claudeUser(d: Line, o: LineOut): void {
     o.unknown++;
     return;
   }
-  const c = (d.message.content ?? '').trim();
-  if (c[0] === '"') {
-    const s = jsonString(c);
-    if (s === null) {
-      o.unknown++;
-      return;
-    }
+  const c = d.message.content;
+  const s = jsonString(c);
+  if (s !== null) {
     claudePromptText(s, true, o);
     return;
   }
-  if (c === 'null' || c === '') {
-    if (c === '') o.unknown++;
+  if (!present(c)) {
+    if (c === undefined) o.unknown++;
     return;
   }
   // The blocks are read one at a time: a line of many blocks takes no more
   // than the events it may make.
   let results = 0;
   if (
-    !elements(c, MAX_BLOCKS, (raw) => {
-      if (memberString(raw, 'type') === 'tool_result') results++;
+    !array(c, MAX_BLOCKS, (raw) => {
+      if ((typeof raw === 'string' ? memberString(raw, 'type') : isObj(raw.decoded) && raw.decoded.type) === 'tool_result') results++;
       return results < 2;
     }).ok
   ) {
@@ -363,7 +394,7 @@ function claudeUser(d: Line, o: LineOut): void {
   }
   const prompt: Obj[] = [];
   let stopped = false;
-  const { more } = elements(c, MAX_BLOCKS, (raw) => {
+  const { more } = array(c, MAX_BLOCKS, (raw) => {
     const b = blockOf(raw);
     if (!b) {
       o.unknown++;
@@ -371,7 +402,7 @@ function claudeUser(d: Line, o: LineOut): void {
     }
     switch (b.type) {
       case 'tool_result': {
-        let res: string | undefined;
+        let res: Value | undefined;
         if (results === 1) res = present(d.toolUseResult) ? d.toolUseResult : d.toolUseResultSDK;
         claudeToolResult(b, res, o);
         break;
@@ -445,20 +476,16 @@ function claudeAttachment(line: string, o: LineOut): void {
     return;
   }
   o.setTime(top.str('timestamp'));
-  const c = (a.raw('prompt') ?? '').trim();
-  if (c[0] === '"') {
-    const s = jsonString(c);
-    if (s === null) {
-      o.unknown++;
-      return;
-    }
+  const c = a.raw('prompt') ?? '';
+  const s = jsonString(c);
+  if (s !== null) {
     claudePromptText(s, false, o);
     return;
   }
   // A message with pasted images: text and image blocks, read one at a
   // time.
   const prompt: Obj[] = [];
-  const r = elements(c, MAX_BLOCKS, (raw) => {
+  const r = array(c, MAX_BLOCKS, (raw) => {
     const b = blockOf(raw);
     if (!b) {
       o.unknown++;
@@ -505,14 +532,19 @@ function commandNotice(s: string, o: LineOut): boolean {
     params.args = o.text(cmd)[0];
   }
   const out: string[] = [];
+  let clipped = false;
   for (const tag of ['local-command-stdout', 'local-command-stderr', 'bash-stdout', 'bash-stderr']) {
     const x = tagged(t, tag);
-    if (x !== null && trimSpace(x) !== '') out.push(plain(x));
+    if (x !== null && trimSpace(x) !== '') {
+      const [head, cut] = cutText(x, o.lim.text * 4);
+      clipped ||= cut;
+      out.push(plain(head));
+    }
   }
   if (out.length > 0) {
     const [x, cut] = o.text(out.join('\n'));
     params.output = x;
-    if (cut) setMeta(params, 'truncated', true);
+    if (cut || clipped) setMeta(params, 'truncated', true);
   }
   // A caveat or another record of the program's own: nothing to show.
   if (Object.keys(params).length === 0) return true;
@@ -528,19 +560,15 @@ function claudeAssistant(d: Line, o: LineOut): void {
   }
   let blocks: Block[] = [];
   let more = false;
-  const c = (m.content ?? '').trim();
-  if (c[0] === '"') {
-    const s = jsonString(c);
-    if (s === null) {
-      o.unknown++;
-      return;
-    }
+  const c = m.content;
+  const s = jsonString(c);
+  if (s !== null) {
     blocks = [{ type: 'text', text: s, thinking: '', id: '', name: '', toolUseId: '', isError: false }];
-  } else if (c !== 'null' && c !== '') {
+  } else if (present(c)) {
     // At most MAX_BLOCKS of them, one at a time; a block that is no block
     // makes the line one not read, as a decode of all would.
     let failed = false;
-    const r = elements(c, MAX_BLOCKS, (raw) => {
+    const r = array(c, MAX_BLOCKS, (raw) => {
       const b = blockOf(raw);
       if (!b) {
         failed = true;
@@ -554,7 +582,7 @@ function claudeAssistant(d: Line, o: LineOut): void {
       return;
     }
     more = r.more;
-  } else if (c === '') {
+  } else if (c === undefined) {
     o.unknown++;
     return;
   }
@@ -717,7 +745,7 @@ function claudeTitle(name: string, input: Obj): string {
 }
 
 function claudeToolUse(b: Block, o: LineOut): void {
-  const { v, ok } = o.decode(b.input);
+  const { v, ok } = typeof b.input === 'string' || b.input === undefined ? o.decode(b.input) : o.decoded(b.input.decoded);
   const input = isObj(v) ? v : {};
   if (b.name === 'TodoWrite') {
     const entries = planEntries(input.todos, 'content', o);
@@ -799,16 +827,16 @@ function planEntries(items: unknown, key: string, o: LineOut): Obj[] | undefined
 
 /** The text of a tool result's content (a string or blocks) and how many
  * images it holds. */
-function resultText(raw: string | undefined): [string, number] {
-  const t = (raw ?? '').trim();
-  if (t === '') return ['', 0];
-  if (t[0] === '"') return [jsonString(t) ?? '', 0];
+function resultText(raw: Value | undefined): [string, number] {
+  if (!present(raw)) return ['', 0];
+  const text = jsonString(raw);
+  if (text !== null) return [text, 0];
   // One block at a time, at most MAX_BLOCKS; any that is no block makes no
   // text, as a decode of all would.
   const texts: string[] = [];
   let images = 0;
   let failed = false;
-  const r = elements(t, MAX_BLOCKS, (v) => {
+  const r = array(raw, MAX_BLOCKS, (v) => {
     const b = blockOf(v);
     if (!b) {
       failed = true;
@@ -828,7 +856,7 @@ const toolError = (s: string): string => tagged(s, 'tool_use_error') ?? s;
 /** The update of a tool call from its result; res is the line's
  * toolUseResult when the line has this result only, which tells the tool
  * by its shape. */
-function claudeToolResult(b: Block, res: string | undefined, o: LineOut): void {
+function claudeToolResult(b: Block, res: Value | undefined, o: LineOut): void {
   const u: Obj = { sessionUpdate: 'tool_call_update', toolCallId: b.toolUseId, status: b.isError ? 'failed' : 'completed' };
   let [text, images] = resultText(b.content);
   if (b.isError) {
@@ -838,54 +866,50 @@ function claudeToolResult(b: Block, res: string | undefined, o: LineOut): void {
     if (code !== null) setMeta(u, 'exitCode', code);
   }
   // The members that tell the tool, without decoding the others.
-  const resRaw = (res ?? '').trim();
-  const r =
-    resRaw === ''
-      ? null
-      : pick(
-          resRaw,
-          'newTodos',
-          'oldString',
-          'newString',
-          'edits',
-          'file',
-          'stdout',
-          'stderr',
-          'filePath',
-          'content',
-          'originalFile',
-          'agentId',
-        );
-  const field = (k: string): string | null => {
-    const v = r?.get(k);
-    return present(v) ? jsonString(v) : null;
-  };
+  const members = obj(
+    res,
+    'newTodos',
+    'oldString',
+    'newString',
+    'edits',
+    'file',
+    'stdout',
+    'stderr',
+    'filePath',
+    'content',
+    'originalFile',
+    'agentId',
+    'type',
+    'interrupted',
+    'isImage',
+    'exitCode',
+  );
+  const r = new Lenient(members === WRONG ? null : members);
+  const textOf = (k: string): string | null => jsonString(r.raw(k));
   let content: Obj[] | undefined;
-  if (r === null) {
-    // no result's shape
-  } else if (r.has('newTodos')) {
+  if (r.has('newTodos')) {
     // TodoWrite's: its plan was the update.
     return;
   } else if (r.has('agentId') && r.has('content')) {
     // A subagent's (Agent, Task): its report, without the words to the
     // model Claude Code wraps it in.
-    const [report, n] = resultText(r.get('content'));
+    const [report, n] = resultText(r.raw('content'));
     if (report !== '' || n > 0) [text, images] = [report, n];
   } else if (r.has('oldString') || r.has('newString')) {
-    content = [o.diff(u, field('filePath') ?? '', field('oldString') ?? '', field('newString') ?? '', true)];
+    content = [o.diff(u, textOf('filePath') ?? '', textOf('oldString') ?? '', textOf('newString') ?? '', true)];
   } else if (r.has('edits')) {
-    const path = field('filePath') ?? '';
+    const path = textOf('filePath') ?? '';
     const diffs: Obj[] = [];
-    elements(r.get('edits')!, MAX_ITEMS, (v) => {
-      const e = new Lenient(valid(v) ? pick(v.trim(), 'old_string', 'new_string') : null);
+    array(r.raw('edits')!, MAX_ITEMS, (v) => {
+      const m = obj(v, 'old_string', 'new_string');
+      const e = new Lenient(m === WRONG ? null : m);
       diffs.push(o.diff(u, path, e.str('old_string'), e.str('new_string'), true));
       return true;
     });
     if (diffs.length > 0) content = diffs;
   } else if (r.has('file')) {
-    const f = new Lenient(valid(resRaw) ? pick(resRaw, 'type', 'file') : null);
-    const file = f.obj('file', 'filePath', 'numLines', 'startLine');
-    if (f.str('type') === 'image') content = [{ type: 'content', content: imageBlock() }];
+    const file = r.obj('file', 'filePath', 'numLines', 'startLine');
+    if (r.str('type') === 'image') content = [{ type: 'content', content: imageBlock() }];
     const filePath = file.str('filePath');
     if (filePath !== '') {
       const loc: Obj = { path: filePath };
@@ -898,30 +922,31 @@ function claudeToolResult(b: Block, res: string | undefined, o: LineOut): void {
     // The file's text is not repeated.
     [text, images] = ['', 0];
   } else if (r.has('stdout') || r.has('stderr')) {
-    const sh = new Lenient(valid(resRaw) ? pick(resRaw, 'stdout', 'stderr', 'interrupted', 'isImage', 'exitCode') : null);
     // A background shell's (BashOutput).
-    const code = sh.int('exitCode');
+    const code = r.int('exitCode');
     if (code !== null) setMeta(u, 'exitCode', code);
-    if (sh.bool('interrupted')) setMeta(u, 'interrupted', true);
-    if (sh.bool('isImage')) [text, images] = ['', 1];
+    if (r.bool('interrupted')) setMeta(u, 'interrupted', true);
+    if (r.bool('isImage')) [text, images] = ['', 1];
     else {
-      text = sh.str('stdout').replace(/\n+$/, '');
-      const e = sh.str('stderr').replace(/\n+$/, '');
+      text = r.str('stdout').replace(/\n+$/, '');
+      const e = r.str('stderr').replace(/\n+$/, '');
       if (e !== '') text = text !== '' ? text + '\n' + e : e;
     }
   } else {
-    const path = field('filePath');
-    const newText = field('content');
+    const path = textOf('filePath');
+    const newText = textOf('content');
     if (path !== null && newText !== null) {
       // Write's: a new file, or a file written over.
       const d = o.diff(u, path, '', newText, false);
-      const old = field('originalFile');
+      const old = textOf('originalFile');
       if (old !== null) d.oldText = cutText(old, o.lim.text)[0];
       content = [d];
     }
   }
   if (!content) {
-    content = o.output(u, plain(text));
+    const [sample, cut] = cutMiddle(text, o.lim.tool * 4);
+    if (cut) setMeta(u, 'truncated', true);
+    content = o.output(u, plain(sample));
     for (let i = 0; i < Math.min(images, MAX_ITEMS); i++) (content ??= []).push({ type: 'content', content: imageBlock() });
   }
   if (content) u.content = content;

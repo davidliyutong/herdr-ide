@@ -66,9 +66,16 @@ function parse<T extends z.ZodType>(t: T, v: unknown): z.output<T> | undefined {
 
 /** What a history read back holds. */
 export interface Stored {
-  history: History;
+  history: HistoryRecords;
   accounts: Kept[];
 }
+
+export type HistoryRecords = Pick<History, 'windows' | 'alerts'>;
+
+type StoreMethods = Pick<Store, 'readHistory' | 'writeHistory' | 'readMachineCosts' | 'saveMachineCost' | 'deleteMachineCosts'>;
+export type UsageStore = { file: string } & {
+  [K in keyof StoreMethods]: (...args: Parameters<StoreMethods[K]>) => ReturnType<StoreMethods[K]> | Promise<ReturnType<StoreMethods[K]>>;
+};
 
 /** The account as the Go hub kept it: its windows with an empty id. */
 export const keptJSON = (a: Kept) => {
@@ -153,7 +160,7 @@ export class Store {
   }
 
   /** Writes the rows that changed and removes those gone from memory. */
-  writeHistory(history: History, accounts: Iterable<Kept>): void {
+  writeHistory(history: HistoryRecords, accounts: Iterable<Kept>): void {
     const windows = new Map<string, Buffer>();
     for (const [k, ws] of history.windows) for (const [id, pts] of ws) windows.set(`${k}\0${id}`, json(pts));
     const views = new Map<string, Buffer>();

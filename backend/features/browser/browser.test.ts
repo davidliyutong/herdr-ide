@@ -16,7 +16,7 @@ import { Guard } from '#kernel/http/guard.ts';
 import { closeStream, type AgentStream } from '#kernel/machines/transport/session.ts';
 import { agentDialer, checkGuarded, localSpec, memoryAudit, running, sshSpec, testHub, testMachines, waitFor } from '#kernel/testing.ts';
 import { browserFeature, type BrowserOptions } from './hub.ts';
-import { Forwards, listenLoopback, MAX_FORWARDS, temporary } from './forwards.ts';
+import { Forwards, listenLoopback, MAX_FORWARDS, temporary, type Listening } from './forwards.ts';
 import { DEFAULT_IDLE, settings } from './settings.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -250,6 +250,29 @@ test('one forward per port', async () => {
   const made = await Promise.all([ask(), ask(), ask()]);
   expect(new Set(made.map((r) => r.body.local)).size).toBe(1);
   expect(t.forwards.list().length).toBe(1);
+});
+
+test('forgetting a machine cancels requests sharing an unfinished listener', async () => {
+  const binding = Promise.withResolvers<Listening>();
+  const forwards = new Forwards({
+    logger: () => {},
+    dial: async () => {
+      throw new Error('no connection expected');
+    },
+    listen: () => binding.promise,
+  });
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  cleanups.push(() => {
+    if (server.listening) server.close();
+  });
+  const port = (server.address() as AddressInfo).port;
+  const requests = Promise.allSettled([forwards.ensure('x', port), forwards.ensure('x', port)]);
+  expect(forwards.closeWhere((f) => f.m === 'x')).toBe(1);
+  binding.resolve({ local: port, servers: [server] });
+  expect((await requests).map((r) => r.status)).toEqual(['rejected', 'rejected']);
+  expect(forwards.list()).toEqual([]);
+  expect(server.listening).toBe(false);
 });
 
 // Forwards are for clients on the hub's host and for other machines'

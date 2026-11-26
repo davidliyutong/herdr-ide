@@ -80,7 +80,15 @@ export class Video {
 
   /** Writes the gzip-compressed encoder read from chunks, checks its digest
    * and moves it into place. */
-  async install(digest: string, chunks: AsyncIterable<Buffer> | Iterable<Buffer>): Promise<void> {
+  install(digest: string, chunks: AsyncIterable<Buffer> | Iterable<Buffer>): Promise<void> {
+    const run = this.installing.then(() => this.place(digest, chunks));
+    this.installing = run.catch(() => {});
+    return run;
+  }
+
+  private installing: Promise<void> = Promise.resolve();
+
+  private async place(digest: string, chunks: AsyncIterable<Buffer> | Iterable<Buffer>): Promise<void> {
     if (!validDigest(digest)) throw new Error('gui: bad encoder digest');
     if (await this.ready(digest)) {
       for await (const _ of chunks) {

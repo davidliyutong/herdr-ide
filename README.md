@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 A terminal-first, multi-machine, agent-native web IDE built on the [herdr-core](https://github.com/herdrdev/herdr-core) terminal core: the workspaces and terminals of every machine in one browser tab, with VS Code (code-server) one click away.
 
-![Two SSH machines in one tab: Claude Code waiting for confirmation and codex done in the agent inbox, with git history and a GPU monitor in split panes](docs/images/overview.png)
+![A workstation and GPU server in one tab: Claude Code waiting in the agent inbox, with an agent chat and terminal in split panes and a GPU monitor](docs/images/overview.png)
 
 ## Features
 
@@ -38,15 +38,67 @@ A terminal-first, multi-machine, agent-native web IDE built on the [herdr-core](
 
 **VS Code beside the terminals.** An agent's `path:line` opens in VS Code on the machine where the pane runs; the pane header opens its folder, its diff or Git Graph.
 
-![codex's review in a pane, with model.py opened at the line it names in VS Code](docs/images/vscode.png)
+![The fixed nanoGPT project with train.py open in a VS Code pane](docs/images/vscode.png)
 
 **Program windows.** A matplotlib window on a remote Linux machine opens in a browser window of its own, with mouse and keyboard.
 
-![An animated matplotlib plot from the workstation in its own browser window, over the pane that started it](docs/images/windows.png)
+![A fixed two-source interference plot from the GPU server, composed over the terminal that started it](docs/images/windows.png)
 
-**Quick Look.** Right-click or ⌘/Ctrl-click a path in a terminal to preview it; the arrows step through the other files of the folder.
+**Quick Look.** Preview images, video, audio, PDFs, code, Markdown or directories without leaving the workspace.
 
-![A training loss curve previewed from a file listing](docs/images/quicklook.png)
+![A training loss curve previewed from the file explorer](docs/images/quicklook.png)
+
+**Agent chats.** Headless agents stream Markdown, formulas, tool results and diffs into the same layout as the terminals, with permissions answered in cards.
+
+![A training review with a diff and a file-change permission request in an agent chat](docs/images/chat.png)
+
+**File explorer.** Follow the focused terminal's directory and edit code with conflict-safe saves.
+
+![The nanoGPT file tree beside train.py in the editor](docs/images/files.png)
+
+**Git.** Source Control, a branch and tag graph, and Monaco diffs work without VS Code.
+
+![Source Control beside a fixed commit graph and a train.py diff](docs/images/git.png)
+
+**System monitor and task manager.** Live machine resources and a searchable process tree share a pane.
+
+![CPU, memory, two GPUs, network, disk and training processes on the GPU server](docs/images/monitor.png)
+
+**Settings.** Search settings, choose appearance and themes, and configure plugins and keybindings.
+
+![The appearance settings with color themes and the plugin and keyboard navigation](docs/images/settings.png)
+
+**Explicit browser security.** Enabling VS Code in a browser requires acknowledging what its extensions and webviews can access.
+
+![The VS Code browser risk confirmation with its acknowledgement checked](docs/images/security.png)
+
+**Browser and port forwards.** Open a machine's localhost service through a loopback forward and inspect its listening and forwarded ports.
+
+![The remote training dashboard in a browser pane with its port-forward list](docs/images/browser.png)
+
+**Project search.** Search with filters and open a match in the editor.
+
+![learning_rate results in Python files beside the matched source](docs/images/search.png)
+
+**Variable vault.** Keep encrypted variables with per-machine access while their values stay hidden.
+
+![The unlocked variable vault with three demonstration variables and no values shown](docs/images/vault.png)
+
+**AI usage.** Compare subscription windows, resets, balances and API-equivalent spend across providers and machines.
+
+![Fixed Claude, Codex, Kimi Code and Grok usage with daily cost charts](docs/images/usage.png)
+
+**Terminal history.** Restored workspaces keep their split layout and show saved output above each new shell.
+
+![Two restored terminals with their saved training and GPU output](docs/images/terminal-history.png)
+
+**Formulas.** Rest the pointer on a LaTeX formula in a terminal to see it typeset and copy its source.
+
+![A learning-rate formula in a terminal with its KaTeX popover](docs/images/formula.png)
+
+**Desktop app.** The same workspaces and features run in the Electron shell with an in-process hub.
+
+![The isolated desktop app showing a terminal, the file explorer and train.py](docs/images/desktop.png)
 
 ## Quick start
 

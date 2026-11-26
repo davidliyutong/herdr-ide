@@ -146,6 +146,6 @@ test('kept across restarts', async () => {
   const first = alertRun(undefined, false, dir);
   expect(await first.poll(0, win('weekly', 85, T0 + 86400, 604800))).toEqual(['threshold:80']);
   const again = alertRun(undefined, false, dir);
-  again.t.u.loadHistory();
+  await again.t.u.loadHistory();
   expect(await again.poll(7200, win('weekly', 85, T0 + 86400, 604800))).toEqual([]);
 });

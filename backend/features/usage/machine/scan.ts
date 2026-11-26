@@ -15,18 +15,16 @@
 // when a scan is cut short, so a scan never starts over.
 //
 // One scan runs at a time per agent. Its work is reading files with
-// fs/promises in chunks and SQLite a slice of rows at a time, parsing the
-// lines of each chunk in between: the node's other sessions get the
-// thread between chunks, and the summing yields every few milliseconds. A
-// Worker would also take the parsing off the thread, but needs its own
-// entrypoint in the compiled executable, its own copy of the cache and a
-// protocol to the node, for a feature whose scans run a few times an hour.
+// fs/promises in chunks and SQLite in worker threads, parsing lines in
+// between. The node's other sessions get the thread between chunks, and
+// the summing yields every few milliseconds.
 import { randomBytes, createHash } from 'node:crypto';
 import { readdir, stat, type FileHandle } from 'node:fs/promises';
 import { posix } from 'node:path';
 import type { z } from 'zod';
 import type { costReport } from '../protocol.ts';
 import { cacheState, dropStale, loadCache, saveCache } from './cache.ts';
+import type { CacheWorker } from './cache-worker.ts';
 import { DB_LIMITS, DBError, dbFiles, readAntigravity, readOpenCode, type DBLimits, type DBRead } from './databases.ts';
 import { SQLiteWorker } from './sqlworker.ts';
 import { expand, getenv, type UsageEnv } from './env.ts';
@@ -322,10 +320,12 @@ export class CostScanner {
   private readonly nonce = randomBytes(8).toString('hex');
   private readonly base: string;
   private readonly limits: DBLimits;
+  private readonly cache?: CacheWorker;
 
-  constructor(base: string, limits: DBLimits = DB_LIMITS) {
+  constructor(base: string, limits: DBLimits = DB_LIMITS, cache?: CacheWorker) {
     this.base = base;
     this.limits = limits;
+    this.cache = cache;
   }
 
   /** Scans for o, after the scan before ended. */
@@ -350,8 +350,12 @@ export class CostScanner {
 
   /** The cache of a data directory no scan saved for RETENTION goes (the
    * feature is off there). */
-  housekeep(nowMs: number): void {
-    if (this.base && posix.isAbsolute(this.base) && !this.scanning) dropStale(this.base, nowMs - RETENTION * 1000);
+  async housekeep(nowMs: number): Promise<void> {
+    if (this.base && posix.isAbsolute(this.base) && !this.scanning) {
+      const cutoff = nowMs - RETENTION * 1000;
+      if (this.cache) await this.cache.sweep(cutoff);
+      else dropStale(this.base, cutoff);
+    }
   }
 
   private get dirty(): boolean {
@@ -360,24 +364,34 @@ export class CostScanner {
 
   /** The cache in memory, or the database's when another agent saved it
    * since. */
-  private async acquire(): Promise<Map<string, Entry>> {
+  private async acquire(signal: AbortSignal): Promise<Map<string, Entry>> {
     if (!this.base) return (this.files ??= new Map());
-    if (this.files && (cacheState(this.base)?.gen ?? 0) === this.dbGen) return this.files;
-    const { files, gen } = await loadCache(this.base);
-    this.files = files;
-    this.dbGen = gen;
-    this.gen++;
-    this.changed.clear();
-    this.removed.clear();
-    return files;
+    try {
+      if (this.files) {
+        const saved = this.cache ? await this.cache.state(signal) : cacheState(this.base);
+        if ((saved?.gen ?? 0) === this.dbGen) return this.files;
+      }
+      const { files, gen } = await (this.cache ? this.cache.load(signal) : loadCache(this.base));
+      this.files = files;
+      this.dbGen = gen;
+      this.gen++;
+      this.changed.clear();
+      this.removed.clear();
+      return files;
+    } catch {
+      signal.throwIfAborted();
+      return (this.files ??= new Map());
+    }
   }
 
   /** Saves what changed since the last save (at the wall clock's time: the
    * pace of the saves is the machine's, not the records'). */
-  private save(): void {
+  private async save(): Promise<void> {
     if (!this.base || !this.files || !this.dirty) return;
     try {
-      const g = saveCache(this.base, this.files, this.changed, this.removed, Date.now());
+      const g = this.cache
+        ? await this.cache.save(this.files, this.changed, this.removed, Date.now())
+        : saveCache(this.base, this.files, this.changed, this.removed, Date.now());
       if (g === false) return;
       this.dbGen = g;
       this.changed.clear();
@@ -389,15 +403,25 @@ export class CostScanner {
 
   /** Whether a scan that changed the cache and read n bytes writes it:
    * none written yet, the last save is old enough, or it read enough. */
-  private persistDue(e: UsageEnv, n: number): boolean {
-    const s = cacheState(this.base);
-    return !s || Date.now() - s.savedMs >= e.t.costPersistEveryMs || n >= e.t.costPersistBytes;
+  private async persistDue(e: UsageEnv, n: number): Promise<boolean> {
+    if (n >= e.t.costPersistBytes) return true;
+    try {
+      const s = this.cache ? await this.cache.state(e.signal) : cacheState(this.base);
+      return !s || Date.now() - s.savedMs >= e.t.costPersistEveryMs;
+    } catch {
+      e.signal.throwIfAborted();
+      return true;
+    }
   }
 
   private async run(e: UsageEnv, o: CostOptions): Promise<CostReport> {
     this.scanning = true;
     try {
       return await this.scanNow(e, o);
+    } catch (err) {
+      // Cut short: what was read stays, saved now.
+      await this.save();
+      throw err;
     } finally {
       this.scanning = false;
     }
@@ -407,7 +431,7 @@ export class CostScanner {
     const cutoff = Math.floor(e.now() / 1000) - RETENTION;
     o = { ...o, since: Math.max(o.since, cutoff) };
     if (o.recentSince) o.recentSince = Math.max(o.recentSince, cutoff);
-    const files = await this.acquire();
+    const files = await this.acquire(e.signal);
     const seen = new Set<string>();
     const failed = new Set<string>();
     let read = 0;
@@ -419,7 +443,7 @@ export class CostScanner {
       for (const lf of logs) {
         e.signal.throwIfAborted();
         if (this.dirty && performance.now() - lastSave >= e.t.costSaveEveryMs) {
-          this.save();
+          await this.save();
           lastSave = performance.now();
         }
         const st = await stampOf(lf, e.uid);
@@ -441,10 +465,6 @@ export class CostScanner {
         this.removed.delete(lf.path);
         this.gen++;
       }
-    } catch (err) {
-      // Cut short: what was read stays, saved now.
-      this.save();
-      throw err;
     } finally {
       db.worker!.close();
     }
@@ -467,7 +487,7 @@ export class CostScanner {
       }
       if (slicer.due()) await slicer.pause();
     }
-    if (this.dirty && this.base && this.persistDue(e, read)) this.save();
+    if (this.dirty && this.base && (await this.persistDue(e, read))) await this.save();
     const fails = [...failed].sort();
     const etag = this.etag(o, fails);
     if (this.base && o.ifNoneMatch && o.ifNoneMatch === etag) return { since: o.since, rows: null, files: 0, etag, notModified: true };

@@ -530,7 +530,7 @@ Build scripts and tests:
 
 ## Files and directories
 
-On every machine (the agent's `$HOME`); `<data>` is `~/.veldr[-<instance>]`, `<host>` the host's key: its name and a hash of its machine id (data directories may be on a home several hosts share, [40](features/40-shared-homes.md)); `<host id>` the hash alone (the host's name without a machine id). `<run>` is the namespace's runtime directory on this host: `/run/user/<uid>/veldr[-<instance>]-<hash of the data directory's path>` when `/run/user/<uid>` exists, is the user's and 0700, else `<data>/run-<host id>`. Retention is summarized in [deployment](deployment.md#remote-resources).
+On every machine (the agent's `$HOME`); `<data>` is `~/.veldr[-<instance>]`, `<host>` the host's key: its name and a hash of its machine id (data directories may be on a home several hosts share, [40](features/40-shared-homes.md)); `<host id>` the hash alone (the host's name without a machine id). `<run>` is the namespace's runtime directory on this host: `/run/user/<uid>/veldr[-<instance>]-<hash of the data directory's path>` when `/run/user/<uid>` exists, is the user's and 0700, else `<data>/run-<host id>`. If the usual path would exceed the Unix socket address limit, a private directory under `/tmp` serves as `<run>`. Retention is summarized in [deployment](deployment.md#remote-resources).
 
 | Path | Content | Lifetime |
 | --- | --- | --- |

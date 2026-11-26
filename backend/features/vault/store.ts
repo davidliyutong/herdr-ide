@@ -80,7 +80,6 @@ const KDF_BOUNDS = { salt: 16, maxTime: 10, minMemory: 8 << 10, maxMemory: 1 << 
 
 export const MIN_PASSPHRASE_DAYS = 1;
 export const MAX_PASSPHRASE_DAYS = 90;
-export const DEFAULT_PASSPHRASE_DAYS = 14;
 
 const GUARD_AD = '#guard';
 const CHECK_AD = '#check';

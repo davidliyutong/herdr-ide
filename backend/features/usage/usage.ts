@@ -15,7 +15,7 @@ import { codeOf, jsonETag, Spend, type SpendDeps } from './cost.ts';
 import { History, pace, windowIDs, type Issue, type Kept, type WindowView } from './history.ts';
 import type { Account, LimitsParams, Window } from './protocol.ts';
 import { parsePrices, PROVIDERS, REFRESH_MODES } from './settings.ts';
-import { keptJSON, type Store } from './store.ts';
+import { keptJSON, type UsageStore } from './store.ts';
 
 /** How often the scheduler looks whether a poll is due, in ms. */
 export const TICK = 10_000;
@@ -154,7 +154,7 @@ export interface UsageDeps {
   enabled(): boolean;
   broadcast(s: Snapshot): void;
   log: Logger;
-  store: Store;
+  store: UsageStore;
   now?: () => number;
   status?: (url: string, signal: AbortSignal) => Promise<unknown>;
   /** How often the scheduler looks whether a poll is due (TICK). */
@@ -188,6 +188,7 @@ export class Usage {
   private woken = false;
   private readonly life = new AbortController();
   private readonly tasks = new Set<Promise<void>>();
+  private loadingHistory?: Promise<void>;
 
   constructor(d: UsageDeps) {
     this.d = d;
@@ -339,7 +340,7 @@ export class Usage {
 
   /** Runs the scheduler until signal ends. */
   async run(signal: AbortSignal): Promise<void> {
-    if (this.d.store.file) this.loadHistory();
+    if (this.d.store.file) await this.loadHistory();
     for (const m of this.d.ready()) this.readyNow.add(m);
     let lastStatus = -Infinity;
     try {
@@ -508,7 +509,7 @@ export class Usage {
     } finally {
       this.polling = false;
     }
-    this.save();
+    await this.save();
     this.broadcast();
   }
 
@@ -634,28 +635,33 @@ export class Usage {
 
   /** Reads the history and the accounts the hub's database keeps into
    * what memory has; a read that failed is tried again by the next save. */
-  loadHistory(): void {
+  async loadHistory(): Promise<void> {
+    if (this.history.loaded) return;
     if (!this.d.store.file) {
       this.history.loaded = true;
       return;
     }
-    const r = this.d.store.readHistory();
-    if (!r) return;
-    const now = this.sec();
-    this.history.merge(r.stored.history);
-    this.history.prune(now);
-    this.history.loaded = true;
-    for (const a of r.stored.accounts) {
-      if (!a.key || now - a.seenAt > FORGET_AFTER || this.accounts.has(a.key)) continue;
-      this.accounts.set(a.key, a);
-    }
+    this.loadingHistory ??= Promise.resolve(this.d.store.readHistory())
+      .then((r) => {
+        if (!r) return;
+        const now = this.sec();
+        this.history.merge(r.stored.history);
+        this.history.prune(now);
+        this.history.loaded = true;
+        for (const a of r.stored.accounts) {
+          if (!a.key || now - a.seenAt > FORGET_AFTER || this.accounts.has(a.key)) continue;
+          this.accounts.set(a.key, a);
+        }
+      })
+      .finally(() => (this.loadingHistory = undefined));
+    await this.loadingHistory;
   }
 
   /** Writes the history into the hub's database, once it was read back
    * from there. */
-  save(): void {
+  async save(): Promise<void> {
     if (!this.d.store.file) return;
-    if (!this.history.loaded) this.loadHistory();
-    if (this.history.loaded) this.d.store.writeHistory(this.history, this.accounts.values());
+    if (!this.history.loaded) await this.loadHistory();
+    if (this.history.loaded) await this.d.store.writeHistory(this.history, this.accounts.values());
   }
 }

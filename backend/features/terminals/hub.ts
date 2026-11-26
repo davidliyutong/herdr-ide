@@ -12,7 +12,7 @@ import type { Machine } from '#kernel/machines/machine.ts';
 import { SSH_ENV } from '#kernel/config/ui/index.ts';
 import { Backend } from './backend.ts';
 import { Switchboard } from './switchboard.ts';
-import { hcAction, hcStatus, online, type HCSource } from './lifecycle.ts';
+import { hcStatus, online, type HCSource } from './lifecycle.ts';
 import { Code } from './messages.ts';
 import { shells, type Shells } from './shells.ts';
 import { sshEnv } from './sshenv.ts';
@@ -30,10 +30,6 @@ export interface TerminalsOptions {
   /** The variables of a machine's virtual display that new terminals get
    * (program windows, feature 14); none by default. */
   paneEnv?: (m: Machine) => Record<string, string> | undefined;
-  /** Whether the machines resolve the sessions of the agents in their
-   * terminals: while the agents feature is on (plugins.agents.enabled; on
-   * when no such setting is registered). */
-  sessions?: () => boolean;
   /** Told whether a machine's terminal core is ready, at each change of
    * the backend's state (program windows follow it). */
   onReady?: (m: Machine, ready: boolean) => void;
@@ -87,7 +83,11 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
         // SSH_CONNECTION and SSH_CLIENT as the ssh session of the agent of
         // an ssh machine has them (sshenv.ts).
         sshEnv: (m) => (m.local || !setting(SSH_ENV, m.id) ? null : sshEnv(m.sshConnection)),
-        sessions: o.sessions ?? (() => setting('plugins.agents.enabled')),
+        sessions: () => setting('plugins.agents.enabled'),
+        onSessionsChange: (changed) =>
+          ctx.settings.onChange((changes) => {
+            if (changes.some((c) => c.key === 'plugins.agents.enabled' && c.machine === '')) changed();
+          }),
         onReady: o.onReady,
         timing,
         maxBuffered: o.maxBuffered ?? 64 << 20,
@@ -130,7 +130,7 @@ export function terminalsFeature(o: TerminalsOptions = {}): TerminalsFeature {
         let code = '';
         if (action === 'stop') {
           try {
-            await hcAction(m, 'stop', '', signal, timing.actionMs);
+            await b.stopCore(signal);
           } catch {
             code = 'transport';
           }

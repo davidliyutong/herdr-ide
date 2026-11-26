@@ -34,6 +34,16 @@ type Behavior = (req: Request, upgrade: Upgrade) => Promise<Response>;
 
 /** The page's window, the shell's channels and the hub behind them. */
 function desktop(behave: Behavior) {
+  // The Electron renderer has CloseEvent, while Node 22's EventTarget does not.
+  vi.stubGlobal(
+    'CloseEvent',
+    class extends Event {
+      constructor(type: string, init: CloseEventInit) {
+        super(type, init);
+        Object.assign(this, init);
+      }
+    },
+  );
   const win = new EventTarget();
   const opened: Array<{ path: string; protocols: string[]; hub: MessagePort }> = [];
   let n = 0;

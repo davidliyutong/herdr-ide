@@ -27,7 +27,8 @@ import { readBody } from '#kernel/http/app.ts';
 import type { Ctx } from '#kernel/http/env.ts';
 import { usageProtocol } from './protocol.ts';
 import { settings } from './settings.ts';
-import { hubDBFile, Store } from './store.ts';
+import { hubDBFile } from './store.ts';
+import { WorkerStore } from './store-worker.ts';
 import { Usage, type UsageDeps } from './usage.ts';
 
 /** The session reads a machine serves at once: each holds a stream of its
@@ -61,6 +62,7 @@ export const usageFeature = (o: UsageOptions = {}) =>
         if (!m) throw offline();
         return m;
       };
+      const store = new WorkerStore(hubDBFile(ctx.settings.path), ctx.logger);
       const usage = new Usage({
         settings: ctx.settings,
         limits: async (m, p, signal) => (await ctx.call(machine(m), usageProtocol, 'limits', p, { signal })).accounts,
@@ -74,7 +76,7 @@ export const usageFeature = (o: UsageOptions = {}) =>
         enabled: () => ctx.enabledFor('desktop') || ctx.enabledFor('browser'),
         broadcast: (s) => ctx.broadcast(s),
         log: ctx.logger,
-        store: new Store(hubDBFile(ctx.settings.path), ctx.logger),
+        store,
         now: o.now,
         tickMs: o.tickMs,
         status: o.status,
@@ -85,6 +87,7 @@ export const usageFeature = (o: UsageOptions = {}) =>
           await usage.run(signal);
         } finally {
           off();
+          await store.close();
         }
       });
       ctx.onForget((m) => usage.forget(m));
@@ -97,8 +100,9 @@ export const usageFeature = (o: UsageOptions = {}) =>
         return c.json(body);
       };
 
-      ctx.api.get('/', (c) => {
+      ctx.api.get('/', async (c) => {
         if (query(c).get('watch') === '1') usage.watch();
+        await usage.loadHistory();
         const s = usage.snapshot();
         return tagged(c, s, Usage.etag(s));
       });

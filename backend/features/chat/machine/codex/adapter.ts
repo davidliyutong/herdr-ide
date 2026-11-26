@@ -282,32 +282,46 @@ export class History {
     }
   }
 
-  /** Emits what came after the turn or the item after: the turns are read
-   * newest first until the one that has it. */
+  /** Finds the anchor newest first, keeping only page cursors and the
+   * newest page. Replays newer pages in chronological order. */
   async since(c: Conn, thread: string, after: string, log: Logger, signal: AbortSignal): Promise<void> {
-    const later: Turn[] = [];
+    const pages: string[] = [];
+    let newest: Turn[] = [];
     let cursor = '';
     for (let i = 0; i < HISTORY_PAGES; i++) {
       const res = await this.page(c, thread, 'desc', cursor, signal);
-      for (const t of res.data) {
-        if (t.id === after) return this.replay(later, '');
-        if (hasItem(t, after)) return this.replay([...later, t], after);
-        later.push(t);
+      for (let j = 0; j < res.data.length; j++) {
+        const turn = res.data[j]!;
+        const wholeTurn = turn.id === after;
+        if (!wholeTurn && !hasItem(turn, after)) continue;
+        if (!wholeTurn) {
+          if (turn.status === 'inProgress') return;
+          this.turn(turn, after);
+        }
+        if (!this.replay(res.data, j)) return;
+        for (let k = pages.length - 1; k >= 0; k--) {
+          const page = await this.page(c, thread, 'desc', pages[k]!, signal);
+          if (!this.replay(page.data)) return;
+        }
+        this.replay(newest);
+        return;
       }
-      if (res.next === '') break;
+      if (res.next === '' || res.next.length > 4096 || res.next === cursor) break;
+      if (i === 0) newest = res.data;
+      else pages.push(cursor);
       cursor = res.next;
     }
     log(`codex: history of ${thread}: ${JSON.stringify(cutText(after, 64))} is not in the thread; nothing emitted`);
   }
 
-  /** Emits turns read newest first, oldest first; the oldest from after its
-   * item after when after is not "". */
-  private replay(newestFirst: Turn[], after: string): void {
-    for (let i = newestFirst.length - 1; i >= 0; i--) {
+  /** Emits the first n turns of a descending page in chronological order. */
+  private replay(newestFirst: Turn[], n = newestFirst.length): boolean {
+    for (let i = n - 1; i >= 0; i--) {
       const t = newestFirst[i]!;
-      if (t.status === 'inProgress') return;
-      this.turn(t, i === newestFirst.length - 1 ? after : '');
+      if (t.status === 'inProgress') return false;
+      this.turn(t, '');
     }
+    return true;
   }
 
   /** Emits a turn: its start, its items (those after the item after, when

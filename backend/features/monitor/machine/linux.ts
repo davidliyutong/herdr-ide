@@ -5,7 +5,7 @@
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import { NVIDIA_APPS, NVIDIA_GPUS, drmGPUs, parseNvidiaApps, parseNvidiaGPUs } from './gpu.ts';
-import { mapLimit, onPath, runCmd } from './io.ts';
+import { mapLimit, onPath, runCmd, type Bounded } from './io.ts';
 import { clampPct, fields, parseInt10, parseNum, parseUint, round1, truncateBytes } from './num.ts';
 import { cpuDeltaPct, type Ticks } from './rates.ts';
 import { sysfsSensors } from './sensors.ts';
@@ -249,25 +249,80 @@ export function pageSizeOf(auxv: Buffer | null): number {
   return 4096;
 }
 
-/** One sample of a Linux machine's metrics. On the very first (no previous
- * CPU ticks), the CPU is sampled twice cpuGapMs apart, so the first view
- * shows live usage. */
+interface LinuxFacts {
+  pageSize?: number;
+  users?: { until: number; names: Map<number, string> };
+  nvidia?: { path: string | undefined; until: number; found: Promise<boolean | null> };
+}
+const facts = new WeakMap<Bounded, LinuxFacts>();
+const FACT_TTL_MS = 60_000;
+
+function factsOf(io: Bounded): LinuxFacts {
+  let f = facts.get(io);
+  if (!f) facts.set(io, (f = {}));
+  return f;
+}
+
+function hasNvidia(s: Sampling): Promise<boolean | null> {
+  const f = factsOf(s.io);
+  const path = s.env.PATH;
+  const now = performance.now();
+  if (!f.nvidia || f.nvidia.path !== path || f.nvidia.until <= now) {
+    f.nvidia = {
+      path,
+      until: now + FACT_TTL_MS,
+      found: s.io.run(`which:nvidia-smi:${path ?? ''}`, s.o.readMs, () => onPath('nvidia-smi', path)),
+    };
+  }
+  return f.nvidia.found;
+}
+
+/** One sample of a Linux machine's independent counters and devices. */
 export async function linuxMetrics(s: Sampling): Promise<Metrics> {
   const { io, rates, o } = s;
   const proc = (p: string) => io.text(join(o.procRoot, p), o.readMs);
-  const now = Date.now();
-  const m = baseMetrics(now, 'linux');
-  const gpus = linuxGPUs(s);
-  const sensors = io.run('sensors', o.sensorsBudgetMs, () => sysfsSensors(io, o.sysRoot, o.readMs));
+  const m = baseMetrics(Date.now(), 'linux');
+  const sensorSignal = AbortSignal.any([s.signal, AbortSignal.timeout(o.sensorsBudgetMs)]);
+  const sensors = io.run('sensors', o.sensorsBudgetMs, () => sysfsSensors(io, o.sysRoot, o.readMs, sensorSignal));
+  const stamped = (path: string) => proc(path).then((data) => ({ data, at: Date.now() }));
+  const [load, up, mem, net, disk, disks, gpus, sensed] = await Promise.all([
+    proc('loadavg'),
+    proc('uptime'),
+    proc('meminfo'),
+    stamped('net/dev'),
+    stamped('diskstats'),
+    linuxDisks(s),
+    linuxGPUs(s),
+    sensors,
+    linuxCPU(s, m),
+  ]);
+  const avg = parseLoadavg(load ?? '');
+  if (avg) [m.cpu.load1, m.cpu.load5, m.cpu.load15] = avg;
+  const uptime = parseUptime(up ?? '');
+  if (uptime > 0) m.uptimeSec = Math.floor(uptime);
+  if (mem !== null) m.memory = parseMeminfo(mem);
+  if (net.data !== null) m.network = rates.network(net.at, parseNetDev(net.data));
+  if (disk.data !== null) {
+    const d = parseDiskstats(disk.data);
+    m.diskIO = rates.diskIO(disk.at, d.read, d.write);
+  }
+  m.disks = disks;
+  m.gpus = gpus;
+  if (sensed) m.sensors = sensed;
+  return m;
+}
 
-  const stat = parseProcStat((await proc('stat')) ?? '');
+/** The first metrics request samples the CPU twice to show live usage. */
+async function linuxCPU(s: Sampling, m: Metrics): Promise<void> {
+  const { o, rates } = s;
+  const stat = parseProcStat((await s.io.text(join(o.procRoot, 'stat'), o.readMs)) ?? '');
   if (stat) {
     let prev = rates.cpu;
     let cur = stat;
     rates.cpu = cur;
     if (!prev) {
       await new Promise((r) => setTimeout(r, o.cpuGapMs));
-      const again = s.signal.aborted ? null : parseProcStat((await proc('stat')) ?? '');
+      const again = s.signal.aborted ? null : parseProcStat((await s.io.text(join(o.procRoot, 'stat'), o.readMs)) ?? '');
       if (again) {
         prev = cur;
         cur = again;
@@ -278,24 +333,6 @@ export async function linuxMetrics(s: Sampling): Promise<Metrics> {
     if (cur.cores.length > 0 && cur.cores.length === prev.cores.length)
       m.cpu.perCore = cur.cores.map((c, i) => cpuDeltaPct(prev.cores[i], c));
   }
-  const load = parseLoadavg((await proc('loadavg')) ?? '');
-  if (load) [m.cpu.load1, m.cpu.load5, m.cpu.load15] = load;
-  const up = parseUptime((await proc('uptime')) ?? '');
-  if (up > 0) m.uptimeSec = Math.floor(up);
-  const mem = await proc('meminfo');
-  if (mem !== null) m.memory = parseMeminfo(mem);
-  const net = await proc('net/dev');
-  if (net !== null) m.network = rates.network(Date.now(), parseNetDev(net));
-  const disk = await proc('diskstats');
-  if (disk !== null) {
-    const d = parseDiskstats(disk);
-    m.diskIO = rates.diskIO(Date.now(), d.read, d.write);
-  }
-  m.disks = await linuxDisks(s);
-  m.gpus = await gpus;
-  const sens = await sensors;
-  if (sens) m.sensors = sens;
-  return m;
 }
 
 /** The file systems of /proc/mounts with their usage (statfs); one whose
@@ -329,7 +366,7 @@ async function linuxDisks(s: Sampling): Promise<Disk[] | null> {
 /** NVIDIA's GPUs (nvidia-smi on PATH) and the DRM class's after them. */
 async function linuxGPUs(s: Sampling): Promise<GPU[]> {
   const out: GPU[] = [];
-  if (await onPath('nvidia-smi', s.env.PATH)) {
+  if (await hasNvidia(s)) {
     const raw = await runCmd('nvidia-smi', NVIDIA_GPUS, { env: s.env, ms: s.o.cmdTimeoutMs, signal: s.signal });
     if (raw !== null) out.push(...parseNvidiaGPUs(raw));
   }
@@ -344,15 +381,24 @@ export async function linuxProcesses(s: Sampling): Promise<Processes> {
   const { io, rates, o } = s;
   const now = Date.now();
   const gpuMem = (async () => {
-    if (!(await onPath('nvidia-smi', s.env.PATH))) return null;
+    if (!(await hasNvidia(s))) return null;
     const raw = await runCmd('nvidia-smi', NVIDIA_APPS, { env: s.env, ms: o.cmdTimeoutMs, signal: s.signal });
     return raw === null ? null : parseNvidiaApps(raw);
   })();
-  const memTotal = parseMeminfo((await io.text(join(o.procRoot, 'meminfo'), o.readMs)) ?? '').totalBytes;
-  const uptime = parseUptime((await io.text(join(o.procRoot, 'uptime'), o.readMs)) ?? '');
-  const pageSize = pageSizeOf(await io.bytes(join(o.procRoot, 'self', 'auxv'), o.readMs));
-  const users = parsePasswd((await io.text(o.passwd, o.readMs)) ?? '');
-  const names = await io.names(o.procRoot, o.readMs);
+  const f = factsOf(io);
+  const [memory, up, auxv, passwd, names] = await Promise.all([
+    io.text(join(o.procRoot, 'meminfo'), o.readMs),
+    io.text(join(o.procRoot, 'uptime'), o.readMs),
+    f.pageSize === undefined ? io.bytes(join(o.procRoot, 'self', 'auxv'), o.readMs) : null,
+    !f.users || f.users.until <= performance.now() ? io.text(o.passwd, o.readMs) : null,
+    io.names(o.procRoot, o.readMs),
+  ]);
+  if (auxv) f.pageSize = pageSizeOf(auxv);
+  if (passwd !== null) f.users = { names: parsePasswd(passwd), until: performance.now() + FACT_TTL_MS };
+  const memTotal = parseMeminfo(memory ?? '').totalBytes;
+  const uptime = parseUptime(up ?? '');
+  const pageSize = f.pageSize ?? pageSizeOf(null);
+  const users = f.users?.names;
   if (names === null) throw new Error(`cannot list ${o.procRoot}`);
   const pids = names.map((n) => parseUint(n)).filter((p): p is number => p !== null && p > 0);
 
@@ -375,14 +421,13 @@ export async function linuxProcesses(s: Sampling): Promise<Processes> {
       if (age > 0.5) cpuPct = round1((t / CLK_TCK / age) * 100);
     }
     const rss = st.rssPages * pageSize;
-    const cmd = await io.bytes(join(dir, 'cmdline'), o.readMs);
-    const uid = await io.uid(dir, o.readMs);
+    const [cmd, uid] = await Promise.all([io.bytes(join(dir, 'cmdline'), o.readMs), io.uid(dir, o.readMs)]);
     return {
       pid,
       ppid: st.ppid,
       name: st.comm,
       command: truncateBytes(cmd && cmd.length ? formatCmdline(cmd) : st.comm, MAX_COMMAND),
-      user: uid === null ? '' : (users.get(uid) ?? String(uid)),
+      user: uid === null ? '' : (users?.get(uid) ?? String(uid)),
       cpuPct,
       memPct: memTotal > 0 ? round1((rss / memTotal) * 100) : 0,
       rssBytes: rss,

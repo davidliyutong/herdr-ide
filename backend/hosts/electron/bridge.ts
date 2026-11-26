@@ -445,8 +445,12 @@ export async function serveRequest(port: Port, head: RequestHead, handle: (req: 
   });
   for (const c of res.headers.getSetCookie()) headers.push(['set-cookie', c]);
   port.post({ t: 'head', head: { status: res.status, statusText: res.statusText, headers } } satisfies Frame);
-  if (!res.body || head.method === 'HEAD' || NULL_BODY.has(res.status)) {
+  if (head.method === 'HEAD' || NULL_BODY.has(res.status)) {
     void res.body?.cancel().catch(() => {});
+    return;
+  }
+  if (!res.body) {
+    port.post({ t: 'end' } satisfies Frame);
     return;
   }
   try {
@@ -516,6 +520,17 @@ export type Upgrade = (open: (ch: HubChannel) => HubChannelHandlers, opts?: { co
  * closes the port itself. */
 const CLOSE_WAIT_MS = 5000;
 
+/** Gives the peer time to receive a refusal before releasing this port. */
+export function refuseChannel(port: Port, reason: string): void {
+  try {
+    port.post({ t: 'close', code: ABNORMAL, reason } satisfies ChannelControl);
+  } catch {
+    port.close();
+    return;
+  }
+  later(() => port.close(), CLOSE_WAIT_MS);
+}
+
 /** The utility process's side of a channel on port: the request with the
  * channel's head as handle gets it, with the upgrade that adopts port as
  * the channel. A request the hub answers without upgrading is refused:
@@ -562,8 +577,7 @@ export async function serveChannel(
     } catch {
       // no JSON answer
     }
-    port.post({ t: 'close', code: ABNORMAL, reason: reason.slice(0, 120) } satisfies ChannelControl);
-    later(() => port.close(), CLOSE_WAIT_MS);
+    refuseChannel(port, reason.slice(0, 120));
     return;
   }
   let sent = 0;

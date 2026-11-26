@@ -2,7 +2,7 @@
 // tool calls as the transcript's mapping makes them
 // (#shared/agents/transcript, the one imports use too).
 import { SLUG } from '#shared/lib/brand.ts';
-import { claudeFrame, type Frame } from '#shared/agents/transcript/index.ts';
+import { claudeSDKFrame } from '#shared/agents/transcript/index.ts';
 import type { TranscriptEvent } from '#shared/proto/agentproto/index.ts';
 import * as chat from '#shared/proto/chatproto/index.ts';
 
@@ -56,7 +56,7 @@ export function withMeta(u: unknown, key: string, v: unknown): unknown {
 
 /** The Frame of a message of Claude Code's protocol (the transcript's
  * mapping reads its lines). */
-export const frameOf = (m: unknown): Frame => claudeFrame(JSON.stringify(m));
+export const frameOf = claudeSDKFrame;
 
 /** The ACP tool_call of a tool use, as the transcript's mapping makes it
  * (title, kind, the input, diffs of the change it makes); null for a tool

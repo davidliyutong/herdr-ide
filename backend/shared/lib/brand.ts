@@ -17,8 +17,6 @@ export const ENV_PREFIX = 'VELDR_';
 export const HUB_BIN = SLUG;
 /** The VS Code bridge extension's name; its publisher is SLUG. */
 export const BRIDGE_EXT = `${SLUG}-bridge`;
-/** The extension's identifier (publisher.name) in code-server. */
-export const BRIDGE_EXT_ID = `${SLUG}.${BRIDGE_EXT}`;
 /** The per-machine state directory below $HOME. */
 export const DATA_DIR_NAME = `.${SLUG}`;
 /** Uploaded agents (shared by instances; one directory per build), relative to $HOME. */

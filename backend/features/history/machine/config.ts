@@ -3,7 +3,8 @@
 // stop of the terminal core but not after the machine lost its power. The
 // answer is advisory: a page uses it only until a capture of the new
 // shell tells (the generation's restored).
-import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { trimSpace as goTrim } from '#shared/host/hostid.ts';
 
@@ -27,34 +28,30 @@ export function configPath(home: string, environ: Record<string, string>): strin
  * read, as a regular file of at most MAX_CONFIG bytes, never written. A
  * link is followed: the user's dotfiles may link it, and herdr-core reads
  * it so. */
-export function restoreScreen(home: string, environ: Record<string, string>): boolean {
+export async function restoreScreen(home: string, environ: Record<string, string>): Promise<boolean> {
   const p = configPath(home, environ);
   if (p === '') return false;
-  const b = readSmallFile(p, MAX_CONFIG);
+  const b = await readSmallFile(p, MAX_CONFIG);
   return b ? parseRestoreScreen(b) : false;
 }
 
 /** A regular file of at most max bytes; null for anything else. It does
  * not wait on a special file: opened O_NONBLOCK, a FIFO answers at once
  * and is then refused. */
-export function readSmallFile(p: string, max: number): Buffer | null {
-  let fd: number;
+async function readSmallFile(p: string, max: number): Promise<Buffer | null> {
+  const f = await open(p, constants.O_RDONLY | constants.O_NONBLOCK).catch(() => null);
+  if (!f) return null;
   try {
-    fd = openSync(p, constants.O_RDONLY | constants.O_NONBLOCK);
-  } catch {
-    return null;
-  }
-  try {
-    const st = fstatSync(fd);
+    const st = await f.stat();
     if (!st.isFile() || st.size > max) return null;
     const buf = Buffer.alloc(max + 1);
     let n = 0;
-    for (let r; n <= max && (r = readSync(fd, buf, n, buf.length - n, null)) > 0;) n += r;
+    for (let r; n <= max && (r = (await f.read(buf, n, buf.length - n, null)).bytesRead) > 0;) n += r;
     return n > max ? null : buf.subarray(0, n);
   } catch {
     return null;
   } finally {
-    closeSync(fd);
+    await f.close().catch(() => {});
   }
 }
 

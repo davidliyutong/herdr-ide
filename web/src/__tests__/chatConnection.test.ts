@@ -24,6 +24,7 @@ const chatId = (n: number) => `c${n.toString(16).padStart(16, '0')}`;
 
 let hub: FakeChatHub;
 beforeEach(() => {
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
   hub = new FakeChatHub();
   hub.install();
   useStore.getState().setReadOnly(false);
@@ -34,6 +35,7 @@ afterEach(() => {
   hub.conn.close();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function handler(from = 0) {
@@ -197,7 +199,9 @@ describe('the chat connection', () => {
     // A command sent while it is down waits for it.
     hub.drop();
     const queued = hub.conn.command('m', A, { op: 'compact' });
-    await vi.advanceTimersByTimeAsync(RETRY_MIN_MS * 2);
+    await vi.advanceTimersByTimeAsync(RETRY_MIN_MS);
+    expect(hub.sockets).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(RETRY_MIN_MS);
     hub.open();
     const cmd = hub.ops('command').at(-1)!;
     expect(cmd.cmd).toEqual({ op: 'compact' });

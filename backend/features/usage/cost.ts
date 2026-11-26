@@ -13,7 +13,7 @@ import pricing from '../../../spec/pricing/pricing.json' with { type: 'json' };
 import { formatRFC3339, parseRFC3339 } from '#shared/lib/gotime.ts';
 import { Fail } from '#kernel/fail.ts';
 import { costReport, COST_MS, type CostParams, type CostReport, type CostRow, type CostSlot } from './protocol.ts';
-import type { Store } from './store.ts';
+import type { UsageStore } from './store.ts';
 
 /** How long a report is served again, in ms. */
 export const COST_FRESH = 60_000;
@@ -77,7 +77,7 @@ export interface SpendDeps {
   options(): { providers: string[]; codexHomes: string[] };
   /** The user's prices and the key that tells them apart. */
   prices(): { own?: CostParams['prices']; key: string };
-  store: Store;
+  store: UsageStore;
   now(): number;
   /** Ends the scans when the hub stops. */
   life: AbortSignal;
@@ -122,6 +122,7 @@ export class Spend {
   private readonly cache = new Map<string, { at: number; rep: Report; etag: string }>();
   private readonly entries = new Map<string, Entry>();
   private loaded = false;
+  private loading?: Promise<void>;
   private readOnly = false;
   /** The scans under way, by machine. */
   readonly flights = new Map<string, { key: string; done: Promise<CostReport> }>();
@@ -134,7 +135,7 @@ export class Spend {
    * its ETag. A request that gives up (signal) gets what arrived by then,
    * which is not served to others. */
   async report(days: number, tz: number, signal: AbortSignal): Promise<{ rep: Report; etag: string }> {
-    this.load();
+    await this.load();
     const prices = this.d.prices();
     const o = this.d.options();
     const key = [days, tz, [...o.providers].sort().join(','), [...o.codexHomes].sort().join('\0'), prices.key].join('|');
@@ -266,7 +267,7 @@ export class Spend {
       this.entries.delete(k);
       evicted.push(k);
     }
-    if ((!got.notModified || !prev) && !this.readOnly) this.d.store.saveMachineCost(mcKey, m, entryJSON(entry), evicted);
+    if ((!got.notModified || !prev) && !this.readOnly) await this.d.store.saveMachineCost(mcKey, m, entryJSON(entry), evicted);
     return rep;
   }
 
@@ -305,27 +306,31 @@ export class Spend {
   }
 
   /** Reads the kept reports once (newer ones of memory stay). */
-  private load(): void {
+  private async load(): Promise<void> {
     if (this.loaded || !this.d.store.file) {
       this.loaded = true;
       return;
     }
-    const r = this.d.store.readMachineCosts();
-    if (!r) return;
-    for (const [k, raw] of r.entries) {
-      const e = entryOf(raw);
-      const cur = this.entries.get(k);
-      if (e && (!cur || e.at > cur.at)) this.entries.set(k, e);
-    }
-    this.readOnly = !r.writable;
-    this.loaded = true;
+    this.loading ??= Promise.resolve(this.d.store.readMachineCosts())
+      .then((r) => {
+        if (!r) return;
+        for (const [k, raw] of r.entries) {
+          const e = entryOf(raw);
+          const cur = this.entries.get(k);
+          if (e && this.d.known(e.machine) && (!cur || e.at > cur.at)) this.entries.set(k, e);
+        }
+        this.readOnly = !r.writable;
+        this.loaded = true;
+      })
+      .finally(() => (this.loading = undefined));
+    await this.loading;
   }
 
   /** Drops what is kept of a removed machine. */
   forget(m: string): void {
     for (const [k, e] of this.entries) if (e.machine === m) this.entries.delete(k);
     this.cache.clear();
-    if (!this.readOnly) this.d.store.deleteMachineCosts(m);
+    if (!this.readOnly) void this.d.store.deleteMachineCosts(m);
   }
 }
 

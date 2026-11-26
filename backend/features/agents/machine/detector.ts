@@ -98,6 +98,8 @@ interface Watched {
   stop: AbortController | null;
   /** Output chunks the observing attach saw. */
   output: number;
+  screenWake?: Wake;
+  concealed?: boolean;
   /** The session last found; every event of the agent carries it. */
   session: Found;
   /** Tells the agent's session follower that its status or its process
@@ -252,6 +254,13 @@ export class Detector {
       case 'status':
         this.update(n.terminal, (r) => (r.status = isObj(data.status) ? (data.status as unknown as Status) : null));
         break;
+      case 'labels':
+        this.update(n.terminal, (r) => {
+          const labelled = isObj(data.record) ? data.record : data;
+          if (typeof labelled.name === 'string') r.name = labelled.name;
+          if (isObj(labelled.labels)) r.labels = labelled.labels as Terminal['labels'];
+        });
+        break;
       case 'title':
         this.update(n.terminal, (r) => (r.title = typeof data.title === 'string' ? data.title : ''));
         break;
@@ -300,13 +309,16 @@ export class Detector {
    * clear, the terminal has no agent (an event without agent, status and
    * session). */
   private leave(addr: string, w: Watched, clear: boolean): void {
-    const [status, changed] = w.tracker!.exit();
-    if (changed) this.send(this.eventOf(addr, w, status));
+    if (!w.concealed) {
+      const [status, changed] = w.tracker!.exit();
+      if (changed) this.send(this.eventOf(addr, w, status));
+    }
     w.stop?.abort();
     w.agent = '';
     w.tracker = null;
     w.stop = null;
     w.wake = null;
+    w.screenWake = undefined;
     w.session = NO_SESSION;
     if (clear) this.send({ terminal: addr, agent: '', status: '' });
   }
@@ -320,10 +332,12 @@ export class Detector {
       this.terms.set(addr, w);
     }
     const before = w.rec.foreground ?? null;
+    const title = w.rec.title;
     change(w.rec);
     w.rec.address = addr;
+    if (hidden(w.rec.name ?? '', w.rec.labels?.[HIDDEN_LABEL] ?? '')) w.concealed = true;
     const fg = w.rec.foreground ?? null;
-    const agent = watchable(w.rec) ? identify(fg!.name, fg!.argv) : '';
+    const agent = !w.concealed && watchable(w.rec) ? identify(fg!.name, fg!.argv) : '';
     if (agent !== w.agent) {
       // An agent that replaces another needs no event without agent
       // between them.
@@ -333,12 +347,21 @@ export class Detector {
     }
     if (!agent) return;
     const state = stateOf(w.rec);
-    if (state !== '' || w.tracker!.selfReported()) {
+    const reported = w.tracker!.selfReported();
+    if (state !== '' || reported) {
       const [status, changed] = w.tracker!.report(state);
       if (changed) {
         this.send(this.eventOf(addr, w, status));
         w.wake?.poke();
       }
+      if (reported !== w.tracker!.selfReported()) {
+        w.output++;
+        w.screenWake?.poke();
+      }
+    }
+    if (title !== w.rec.title && !w.tracker!.selfReported()) {
+      w.output++;
+      w.screenWake?.poke();
     }
     if (!sameProc(before, fg)) w.wake?.poke();
   }
@@ -350,9 +373,10 @@ export class Detector {
     w.agent = agent;
     w.tracker = tracker;
     w.stop = stop;
+    w.screenWake = new Wake();
     if (w.rec.status) tracker.report(stateOf(w.rec));
     this.send(this.eventOf(addr, w, tracker.status()));
-    void this.follow(addr, w, tracker, stop.signal);
+    void this.follow(addr, w, tracker, w.screenWake, stop.signal);
     if (this.resolver && hasSessions(agent)) {
       w.wake = new Wake();
       void this.followSession(addr, w, tracker, w.wake, stop.signal);
@@ -361,7 +385,7 @@ export class Detector {
 
   /** Waits ms on the detector's clock, or until signal ends or wake is
    * poked: which of them came first. */
-  private sleep(ms: number, what: 'screen' | 'session', signal: AbortSignal, wake?: Wake): Promise<'time' | 'wake' | 'abort'> {
+  private sleep(ms: number | undefined, what: 'screen' | 'session', signal: AbortSignal, wake?: Wake): Promise<'time' | 'wake' | 'abort'> {
     return new Promise((resolve) => {
       if (signal.aborted) return resolve('abort');
       let settled = false;
@@ -378,7 +402,7 @@ export class Detector {
       cleanup.push(() => signal.removeEventListener('abort', onAbort));
       // A poke made while nobody waited wins over the time.
       if (wake) keep(wake.on(() => done('wake')));
-      if (!settled) keep(this.clock.timer(ms, () => done('time'), what));
+      if (!settled && ms !== undefined) keep(this.clock.timer(ms, () => done('time'), what));
     });
   }
 
@@ -387,7 +411,7 @@ export class Detector {
    * idleRecheckMs while an idle reading waits for confirmation, never
    * during the startup grace or while the program reports its own
    * status. */
-  private async follow(addr: string, w: Watched, tracker: Tracker, signal: AbortSignal): Promise<void> {
+  private async follow(addr: string, w: Watched, tracker: Tracker, wake: Wake, signal: AbortSignal): Promise<void> {
     const cols = Math.max(w.rec.cols ?? 0, 1);
     const rows = Math.max(w.rec.rows ?? 0, 1);
     let always = false;
@@ -401,12 +425,15 @@ export class Detector {
             if ('data' in o && o.data.length > 0) {
               stream.ack(o.data.length);
               w.output++;
+              if (!tracker.selfReported()) wake.poke();
             }
           }
         } catch {
           // ended
         } finally {
           stream.close();
+          always = true;
+          wake.poke();
         }
       })();
     } catch {
@@ -414,18 +441,18 @@ export class Detector {
       always = true;
     }
     let read = -1; // read once the grace is over
-    for (;;) {
+    const t = this.timing;
+    let next = this.clock.now() + (tracker.graceLeft(this.clock.now()) || t.pollMs);
+    while (!signal.aborted) {
+      if (tracker.selfReported() || (!tracker.pending() && !always && read === w.output)) {
+        await this.sleep(undefined, 'screen', signal, wake);
+        continue;
+      }
       const now = this.clock.now();
-      let wait = tracker.pending() ? this.timing.idleRecheckMs : this.timing.pollMs;
-      const left = tracker.graceLeft(now);
-      if (left > 0) wait = left;
-      const pending = tracker.pending();
-      const self = tracker.selfReported();
-      if ((await this.sleep(wait, 'screen', signal)) === 'abort') return;
-      if (self) continue;
-      const out = w.output;
-      if (out === read && !pending && !always) continue;
-      read = out;
+      const wait = Math.max(tracker.graceLeft(now), next - now);
+      if (wait > 0 && (await this.sleep(wait, 'screen', signal)) === 'abort') return;
+      if (tracker.selfReported()) continue;
+      read = w.output;
       let text: string;
       try {
         const sig = AbortSignal.any([signal, AbortSignal.timeout(this.timing.readMs)]);
@@ -433,10 +460,12 @@ export class Detector {
         text = typeof res?.text === 'string' ? res.text : '';
       } catch {
         if (signal.aborted) return;
+        next = this.clock.now() + t.pollMs;
         continue;
       }
       if (w.tracker !== tracker) return; // another agent took over meanwhile
       const [status, changed] = tracker.observe(this.clock.now(), { screen: text, title: w.rec.title ?? '' });
+      next = this.clock.now() + (tracker.pending() ? t.idleRecheckMs : t.pollMs);
       if (changed) {
         this.send(this.eventOf(addr, w, status));
         w.wake?.poke();

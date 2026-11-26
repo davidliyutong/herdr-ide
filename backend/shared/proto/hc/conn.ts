@@ -15,6 +15,8 @@ import {
 } from './types.ts';
 import { GENERATION, Kind, MAX_HELLO, MAX_PAYLOAD, MAX_QUEUED, encodeFrame, readFrame, u32le } from './wire.ts';
 
+const MAX_PENDING_CALLS = 1024;
+
 /** The error of calls and streams of a connection that was closed here. */
 export const ERR_CLOSED = new Error('hc: connection closed');
 
@@ -237,11 +239,13 @@ export class Conn {
   private callWith(method: string, params: unknown, signal: AbortSignal | undefined, open?: (result: unknown) => number): Promise<unknown> {
     if (this.failure) return Promise.reject(this.failure);
     if (signal?.aborted) return Promise.reject(aborted(signal));
+    if (this.calls!.size >= MAX_PENDING_CALLS) return Promise.reject(new Error('hc: too many pending calls'));
     const id = this.nextID++;
     return new Promise((resolve, reject) => {
       const onAbort = () => {
         const k = this.calls?.get(id);
         if (!k) return; // answered at the same moment
+        done();
         if (open)
           k.abandoned = true; // its reply still has to close the channel
         else this.calls!.delete(id);
@@ -330,6 +334,7 @@ interface Item {
 export class Queue {
   private items: Item[] = [];
   private bytes = 0;
+  private discarding = false;
   exit: Exit | null = null;
   /** Set once the channel is over: null for the core's close (EOF). */
   ended: { err: Error | null } | null = null;
@@ -346,10 +351,17 @@ export class Queue {
   push(it: Item): boolean {
     if (this.ended) return true;
     if (this.bytes + it.payload.length > MAX_QUEUED) return false;
-    this.items.push(it);
     this.bytes += it.payload.length;
+    if (this.discarding) return true;
+    this.items.push(it);
     this.wake();
     return true;
+  }
+
+  /** Keep accounting for received credit without storing frames. */
+  discard(): void {
+    this.discarding = true;
+    this.items = [];
   }
 
   /** Marks the channel over. What is queued is still received first when
@@ -432,6 +444,11 @@ export class Stream {
    * sends as fast as the slowest hop takes them. */
   ack(n: number): void {
     if (n > 0) this.c.send(this.channel, Kind.Credit, u32le(n));
+  }
+
+  /** Keeps a size-holding viewer attached without buffering or crediting its output. */
+  discardOutput(): void {
+    this.q.discard();
   }
 
   /** How the program ended, once recv returned null; null before, and when

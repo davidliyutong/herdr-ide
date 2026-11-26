@@ -546,6 +546,24 @@ describe('requests', () => {
     );
     expect(got.join(' ')).toBe('turn:start turn:end user:c-two turn:start queued:queued:c-three turn:end');
   }, 30_000);
+
+  extended(
+    'completed turns release prompt slots even without command_lifecycle',
+    async () => {
+      const prompts = Array.from({ length: 17 }, (_, i) => `prompt ${i}`);
+      const { r, s } = await started([
+        ...initLines(),
+        ...prompts.flatMap((p, i) => [userIn(p), stateOut('running'), textOut(`msg_${i}`, p), resultOut(), stateOut('idle')]),
+      ]);
+      for (const [i, prompt] of prompts.entries()) {
+        await r.until(s, 2 + i * 5);
+        await s.prompt({ content: text(prompt), message: `m-${i}`, clientId: `c-${i}`, recorded: true }, sig());
+      }
+      await r.until(s, -1);
+      expect(r.eventsOf(EventType.Turn).filter((e) => e.state === 'end')).toHaveLength(prompts.length);
+    },
+    30_000,
+  );
 });
 
 describe('trust', () => {

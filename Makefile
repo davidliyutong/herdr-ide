@@ -6,7 +6,7 @@ SLUG := $(shell sed -n "s/^export const SLUG = '\(.*\)';$$/\1/p" backend/shared/
 HOST_PLATFORM := $(shell scripts/platform.sh)
 EXT  := extensions/$(SLUG)-bridge
 
-.PHONY: deps build test test-extended check tokens vt-wasm gpupick gui-helper it e2e dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
+.PHONY: deps build test test-extended check tokens vt-wasm gpupick gui-helper it e2e screenshots dev-hub dev-web desktop-app desktop-dist desktop-install desktop-icons dev-desktop clean
 
 # Electron's binary runs the desktop app in development; checks and the
 # launcher tests need only its types (ELECTRON_SKIP_BINARY_DOWNLOAD=1, as CI
@@ -86,6 +86,12 @@ it:
 # Arguments for Playwright: make e2e E2E_ARGS='tests/chat.spec.ts'.
 e2e:
 	scripts/e2e.sh $(E2E_ARGS)
+
+# Documentation screenshots of every feature, in English and Chinese, from
+# fixed demo data on isolated instances and Docker SSH machines (e2e/screenshots).
+# SCREENSHOT_ONLY=overview,git selects scenes; SCREENSHOT_DIR changes the output.
+screenshots:
+	SCREENSHOT_ONLY="$(SCREENSHOT_ONLY)" SCREENSHOT_DIR="$(SCREENSHOT_DIR)" SKIP_BUILD="$(SKIP_BUILD)" E2E_CODE_SERVER_SEED="$(E2E_CODE_SERVER_SEED)" E2E_REQUIRE_DOCKER=1 scripts/e2e.sh --config=playwright.screenshots.config.ts
 
 # The hub from its sources (bun) on the dev instance. Its machine side is
 # this host's TypeScript executable, built into dist/dev with the pinned

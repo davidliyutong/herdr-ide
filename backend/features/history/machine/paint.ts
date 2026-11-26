@@ -48,16 +48,17 @@ export const restoredByCore = (b: Buffer): boolean => paintText(b).includes(REST
 /** b without escape sequences (CSI, OSC and the other strings, two- and
  * three-byte escapes) and control characters. */
 export function paintText(b: Buffer): Buffer {
-  const out: number[] = [];
+  const out = Buffer.allocUnsafe(b.length);
+  let n = 0;
   for (let i = 0; i < b.length;) {
     const c = b[i];
     if (c === 0x1b && i + 1 < b.length) i = escapeEnd(b, i);
     else {
-      if (c >= 0x20 && c !== 0x7f) out.push(c);
+      if (c >= 0x20 && c !== 0x7f) out[n++] = c;
       i++;
     }
   }
-  return Buffer.from(out);
+  return out.subarray(0, n);
 }
 
 /** Where the escape sequence at b[i] (an ESC with a byte after it) ends. */

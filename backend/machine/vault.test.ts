@@ -176,7 +176,8 @@ describe("the MCP command's link", () => {
     const t = tmp();
     try {
       const dir = join(t, 'bin');
-      await linkMCP(dir, programAt(t, 'old'));
+      const old = programAt(t, 'old');
+      await Promise.all([linkMCP(dir, old), linkMCP(dir, old), linkMCP(dir, old)]);
       const newer = programAt(t, 'new');
       await linkMCP(dir, newer);
       expect(readlinkSync(hostLink(dir))).toBe(newer);

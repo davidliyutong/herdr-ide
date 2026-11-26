@@ -9,7 +9,7 @@ import { Reader } from '#shared/lib/streamio.ts';
 import { Op, readLine, writeLine, type Header, type Info, type Reply } from '#shared/proto/agentproto/index.ts';
 import { Session as Yamux, type Stream } from '#shared/proto/yamux.ts';
 import { auditLog } from './audit.ts';
-import type { Store as Settings } from './config/settings/index.ts';
+import type { Change, Store as Settings } from './config/settings/index.ts';
 import { createHub, type Hub } from './hub.ts';
 import type { FeatureDef } from './feature.ts';
 import type { Peer } from './http/env.ts';
@@ -34,8 +34,18 @@ export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 /** Settings whose booleans are the members of values (false when absent);
  * a test changes values to switch features. Only bool is served. */
 export function fakeSettings(values: Record<string, boolean> = {}): Settings {
+  const subs = new Set<(changes: Change[]) => void>();
   return {
     bool: (key: string) => values[key] ?? false,
+    onChange: (fn: (changes: Change[]) => void) => {
+      subs.add(fn);
+      return () => subs.delete(fn);
+    },
+    set: (key: string, machine: string, value: boolean) => {
+      if (values[key] === value) return;
+      values[key] = value;
+      for (const fn of subs) fn([{ key, machine }]);
+    },
   } as unknown as Settings;
 }
 
@@ -210,22 +220,24 @@ export interface TestHub {
 
 /** A hub of features over machines that do not connect (the local
  * machine only by default). */
-export function testHub(o: TestHubOptions): TestHub {
+export function testHub(o: TestHubOptions): TestHub & { setSetting(key: string, value: boolean): void } {
   const audit = memoryAudit();
   const settings = o.settings ?? {};
+  const store = fakeSettings(settings);
   const hub = createHub({
     guard: new Guard(o.guard),
     audit: audit.audit,
     readOnly: o.readOnly ?? false,
     logger: discard,
     machines: o.machines ?? testMachines([localSpec()]),
-    settings: fakeSettings(settings),
+    settings: store,
     features: o.features,
   });
   return {
     hub,
     settings,
     audit,
+    setSetting: (key, value) => store.set(key, '', value),
     request(method, path, r = {}) {
       const host = r.host ?? '127.0.0.1:7780';
       const headers = new Headers(r.headers);

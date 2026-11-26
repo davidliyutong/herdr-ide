@@ -69,6 +69,13 @@ interface TermStream extends ClientStream {
 /** A params object whose JSON is null: the core gets null, as the client
  * sent it. */
 const NULL_PARAMS = { toJSON: () => null };
+const MAX_PENDING_CALLS = 64;
+const MAX_PENDING_ATTACHES = 16;
+
+interface Subscription {
+  b: Backend;
+  pending: AbortController;
+}
 
 export class TermClient implements Subscriber {
   private readonly ch: Channel;
@@ -76,7 +83,9 @@ export class TermClient implements Subscriber {
   private readonly d: ClientDeps;
   private readonly life = new AbortController();
   private readonly attached = new Map<number, TermStream>();
-  private readonly subs = new Map<string, Backend>();
+  private readonly subs = new Map<string, Subscription>();
+  private pendingCalls = 0;
+  private pendingAttaches = 0;
   private next = 0;
   private closed = false;
   private overflowed = false;
@@ -114,7 +123,7 @@ export class TermClient implements Subscriber {
   }
 
   dropped(machine: string, b: Backend): void {
-    if (this.subs.get(machine) === b) this.subs.delete(machine);
+    if (this.subs.get(machine)?.b === b) this.unsubscribe(machine);
   }
 
   private sendJSON(v: object): void {
@@ -144,7 +153,7 @@ export class TermClient implements Subscriber {
     this.attached.clear();
     this.subs.clear();
     for (const ts of streams) this.release(ts);
-    for (const b of subs) b.unsubscribe(this);
+    for (const { b } of subs) b.unsubscribe(this);
     this.audit('term.disconnect');
   }
 
@@ -180,24 +189,14 @@ export class TermClient implements Subscriber {
       case 'sub': {
         if (!this.d.machines.get(m.m) || this.subs.has(m.m)) return;
         const b = this.d.backend(m.m);
-        this.subs.set(m.m, b);
+        this.subs.set(m.m, { b, pending: new AbortController() });
         return b.subscribe(this);
       }
-      case 'unsub': {
-        const b = this.subs.get(m.m);
-        this.subs.delete(m.m);
-        return b?.unsubscribe(this);
-      }
+      case 'unsub':
+        return this.unsubscribe(m.m)?.unsubscribe(this);
       case 'call':
-        return void this.call(m).catch((e: Error) => {
-          this.d.logger(`term: call ${m.method}: ${e.message}`);
-          this.fail(m.rid, 'unavailable');
-        });
       case 'attach':
-        return void this.attach(m).catch((e: Error) => {
-          this.d.logger(`term: attach: ${e.message}`);
-          this.fail(m.rid, 'unavailable');
-        });
+        return void this.request(m);
       case 'ack': {
         // Credit for output the client was sent and has not returned yet,
         // no more: a client cannot make the terminal core send ahead of
@@ -220,7 +219,7 @@ export class TermClient implements Subscriber {
         const ts = this.attached.get(m.s);
         if (!ts || ts.observe) return;
         ts.focused = m.focused;
-        const b = this.subs.get(ts.machine);
+        const b = this.subs.get(ts.machine)?.b;
         this.quietly(() => ts.stream.focus(m.focused));
         // Looking at a terminal whose turn ended has seen it.
         if (m.focused) b?.seen(ts.terminal);
@@ -238,6 +237,29 @@ export class TermClient implements Subscriber {
         return;
       }
     }
+  }
+
+  private async request(m: Inbound): Promise<void> {
+    const attach = m.t === 'attach';
+    if (attach ? this.pendingAttaches >= MAX_PENDING_ATTACHES : this.pendingCalls >= MAX_PENDING_CALLS) return this.fail(m.rid, 'busy');
+    if (attach) this.pendingAttaches++;
+    else this.pendingCalls++;
+    try {
+      await (attach ? this.attach(m) : this.call(m));
+    } catch (e) {
+      this.d.logger(`term: ${attach ? 'attach' : m.method}: ${(e as Error).message}`);
+      this.fail(m.rid, 'unavailable');
+    } finally {
+      if (attach) this.pendingAttaches--;
+      else this.pendingCalls--;
+    }
+  }
+
+  private unsubscribe(machine: string): Backend | undefined {
+    const sub = this.subs.get(machine);
+    this.subs.delete(machine);
+    sub?.pending.abort();
+    return sub?.b;
   }
 
   /** Runs a stream's write, whose failure (the connection ended) the
@@ -265,10 +287,10 @@ export class TermClient implements Subscriber {
 
   /** The backend of a machine the client subscribed to and its connection
    * when it is ready. */
-  private subscribed(machine: string): { b: Backend; conn: Conn } | null {
-    const b = this.subs.get(machine);
-    const conn = b?.connection();
-    return b && conn ? { b, conn } : null;
+  private subscribed(machine: string): (Subscription & { conn: Conn }) | null {
+    const sub = this.subs.get(machine);
+    const conn = sub?.b.connection();
+    return sub && conn ? { ...sub, conn } : null;
   }
 
   /** Answers a call or an attach that names a terminal that is none of the
@@ -398,7 +420,7 @@ export class TermClient implements Subscriber {
     const sub = this.subscribed(m.m);
     if (!sub) return this.fail(m.rid, 'unavailable');
     const { b, conn } = sub;
-    const signal = AbortSignal.any([this.life.signal, AbortSignal.timeout(this.d.timing.attachMs)]);
+    const signal = AbortSignal.any([this.life.signal, sub.pending.signal, AbortSignal.timeout(this.d.timing.attachMs)]);
     // The terminal by its address (Backend.resolve): a name, or an address
     // the backend does not know yet, is looked up first.
     let addr: string;
@@ -438,16 +460,15 @@ export class TermClient implements Subscriber {
       stream.close();
       return this.noTerminal(m, 'terminal.attach', 'terminal', m.terminal, new NotClients('hidden'));
     }
-    const now = this.subs.get(m.m);
     // The terminal has this viewer now: the one kept for its size ends. It
     // is counted before the client has the stream, so that a client leaving
     // meanwhile hands back one that is counted.
-    const sizing = !observe && now ? now : null;
+    const sizing = observe ? null : b;
     sizing?.joined(conn, addr);
-    if (this.closed) {
+    if (signal.aborted) {
       if (sizing) sizing.left(conn, addr, stream, true);
       else stream.close();
-      return;
+      return this.fail(m.rid, 'unavailable');
     }
     const id = ++this.next;
     // The stream is of the terminal's address, whatever the client named:

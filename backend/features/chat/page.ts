@@ -78,10 +78,8 @@ export class ChatPage {
   closed = false;
   private closeCode: number = CloseCode.GoingAway;
   private closeWhy = '';
-  /** While the channel holds too much to take more: since when, and the
-   * timer that looks again. */
-  private blockedSince = 0;
-  private poll: ReturnType<typeof setInterval> | undefined;
+  /** A deadline for the current stretch without send progress. */
+  private blockedTimer: ReturnType<typeof setTimeout> | undefined;
   /** Per audit event, when a refusal of it was last written and how many
    * came since. */
   private readonly refused = new Map<string, { at: number; n: number }>();
@@ -220,7 +218,7 @@ export class ChatPage {
         this.ctrlBytes -= e.n;
       }
       this.ch.send(e.text);
-      this.blockedSince = 0;
+      if (this.blockedTimer) this.unblocked();
     }
     this.out = [];
     this.head = 0;
@@ -231,26 +229,24 @@ export class ChatPage {
     }
   }
 
-  /** The channel holds as much as it may: look again until it takes more,
-   * or disconnect a page that took nothing for pageWriteMs. */
+  /** Drain resumes sending. Disconnect a page that took nothing for
+   * pageWriteMs. */
   private blocked(): void {
     if (this.head > 1024 && this.head * 2 > this.out.length) {
       this.out = this.out.slice(this.head);
       this.head = 0;
     }
-    if (!this.blockedSince) this.blockedSince = Date.now();
-    if (this.poll) return;
-    const every = Math.max(1, Math.min(100, this.d.timing.pageWriteMs / 4));
-    this.poll = setInterval(() => {
-      if (Date.now() - this.blockedSince > this.d.timing.pageWriteMs) this.abort(TRY_AGAIN_LATER, 'too slow');
-      else this.flush();
-    }, every);
+    if (this.blockedTimer) return;
+    const timer = setTimeout(() => {
+      this.flush();
+      if (this.blockedTimer === timer) this.abort(TRY_AGAIN_LATER, 'too slow');
+    }, this.d.timing.pageWriteMs);
+    this.blockedTimer = timer;
   }
 
   private unblocked(): void {
-    this.blockedSince = 0;
-    if (this.poll) clearInterval(this.poll);
-    this.poll = undefined;
+    clearTimeout(this.blockedTimer);
+    this.blockedTimer = undefined;
   }
 
   private attach(m: ClientMessage): void {

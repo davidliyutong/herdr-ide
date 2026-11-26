@@ -1,4 +1,5 @@
 import { decodeFrame, encodeFrame, frameGrid, FRAME_AUTOMATIC, FRAME_DATA, TermError } from './protocol';
+import { RETRY_RESET_MS, retryDelay } from '../lib/retry';
 import { openChannel } from '../lib/transport';
 
 /** What a stream delivers to the pane that attached it, in the order the hub sent it. */
@@ -43,6 +44,8 @@ export interface Socket {
   close(): void;
 }
 
+const RETRY_MIN_MS = 500;
+
 type Reply = { resolve: (v: Record<string, unknown>) => void; reject: (e: TermError) => void };
 
 /**
@@ -60,7 +63,7 @@ export class TermConnection {
   private up = false;
   private closed = false;
   private rid = 1;
-  private retry = 500;
+  private retry = RETRY_MIN_MS;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly replies = new Map<number, Reply>();
   private readonly attaching = new Map<number, StreamHandler>();
@@ -80,18 +83,22 @@ export class TermConnection {
 
   start(): void {
     if (this.socket || this.closed) return;
+    clearTimeout(this.timer);
     const socket = this.open();
     this.socket = socket;
     socket.binaryType = 'arraybuffer';
+    let openedAt: number | undefined;
     socket.onopen = () => {
       if (socket !== this.socket) return;
       this.up = true;
-      this.retry = 500;
+      openedAt = performance.now();
       for (const m of this.machines) this.send({ t: 'sub', m });
       this.onConnection(true);
     };
     socket.onclose = () => {
-      if (socket === this.socket) this.dropped();
+      if (socket !== this.socket) return;
+      if (openedAt !== undefined && performance.now() - openedAt >= RETRY_RESET_MS) this.retry = RETRY_MIN_MS;
+      this.dropped();
     };
     socket.onmessage = (ev) => {
       if (socket !== this.socket) return;
@@ -122,7 +129,7 @@ export class TermConnection {
     for (const s of open) s.closed('disconnected');
     if (wasUp) this.onConnection(false);
     if (this.closed) return;
-    this.timer = setTimeout(() => this.start(), this.retry);
+    this.timer = setTimeout(() => this.start(), retryDelay(this.retry));
     this.retry = Math.min(this.retry * 2, 8000);
   }
 

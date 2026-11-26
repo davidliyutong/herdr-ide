@@ -62,11 +62,6 @@ export function withView(m: string, pane: string, fn: (h: ViewHandle) => void, m
   }, ms);
 }
 
-/** Runs fn with a terminal once it is on screen; gives up after ms. */
-export function withPane(m: string, terminal: string, fn: (h: PaneHandle) => void, ms = 5000) {
-  withView(m, terminal, (h) => isTerminal(h) && fn(h), ms);
-}
-
 /** A pane with changes that are not saved (an editor): its file's name, and
  * how to save them (true once saved). */
 export interface UnsavedGuard {

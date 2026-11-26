@@ -5,23 +5,14 @@
 // user's account, not to the agent: it and its programs keep running when
 // the agent exits, until the stop action, which only an instance's own
 // command gives (`node stop --terminal-core`, op hc stop).
-import { createHash } from 'node:crypto';
-import {
-  chmodSync,
-  closeSync,
-  createWriteStream,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readSync,
-  renameSync,
-  rmSync,
-  statSync,
-} from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { constants, createWriteStream } from 'node:fs';
+import { chmod, lstat, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { connect } from 'node:net';
 import { join } from 'node:path';
-import { createGunzip, gunzipSync } from 'node:zlib';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { createGunzip } from 'node:zlib';
 import { execa } from 'execa';
 import { SLUG } from '#shared/lib/brand.ts';
 import { Fail } from '#shared/lib/fail.ts';
@@ -53,9 +44,11 @@ export const validDigest = (d: string | undefined): d is string => !!d && /^[0-9
 export class TerminalCore {
   readonly instance: string;
   private readonly dirs: Dirs;
-  private hashed: { size: number; mtimeMs: number; digest: string } | null = null;
+  private hashed: { dev: number; ino: number; size: number; ctimeMs: number; mtimeMs: number; digest: string } | null = null;
   /** Installs, starts and stops run one at a time. */
   private op: Promise<unknown> = Promise.resolve();
+  /** A new executable has replaced the running core's and needs a restart. */
+  pendingRestart = '';
 
   /** Gives the herdr-core this build carries (tests give another). */
   private readonly carry?: () => { gz: Buffer; digest: string } | null;
@@ -88,39 +81,34 @@ export class TerminalCore {
     return { ...cleanEnv(), HC_SESSION: this.session, HC_SOCKET: this.socket };
   }
 
-  /** The SHA-256 of the installed executable, "" without one; without
-   * fresh a digest of the same size and modification time is reused. */
-  digest(fresh = false): string {
-    let st;
-    try {
-      st = lstatSync(this.bin);
-    } catch {
-      return '';
-    }
-    if (!st.isFile() || (st.mode & 0o100) === 0) return '';
+  /** The SHA-256 of the installed executable, "" without one. A fresh
+   * check reads the file again even when its metadata matches. */
+  async digest(fresh = false): Promise<string> {
+    const st = await lstat(this.bin).catch(() => null);
+    if (!st?.isFile() || (st.mode & 0o100) === 0 || st.size > MAX_BINARY) return '';
+    const same = (f: { dev: number; ino: number; size: number; ctimeMs: number; mtimeMs: number }) =>
+      f.dev === st.dev && f.ino === st.ino && f.size === st.size && f.ctimeMs === st.ctimeMs && f.mtimeMs === st.mtimeMs;
     const h = this.hashed;
-    if (!fresh && h && h.size === st.size && h.mtimeMs === st.mtimeMs) return h.digest;
-    let fd: number;
+    if (!fresh && h && same(h)) return h.digest;
+    const f = await open(this.bin, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW).catch(() => null);
+    if (!f) return '';
     try {
-      fd = openSync(this.bin, 'r');
-    } catch {
-      return '';
-    }
-    try {
+      if (!same(await f.stat())) return '';
       const hash = createHash('sha256');
       const buf = Buffer.allocUnsafe(1 << 20);
       let total = 0;
-      for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) {
+      for (let n; (n = (await f.read(buf, 0, buf.length, null)).bytesRead) > 0;) {
         total += n;
         if (total > MAX_BINARY) return '';
         hash.update(buf.subarray(0, n));
       }
-      this.hashed = { size: st.size, mtimeMs: st.mtimeMs, digest: hash.digest('hex') };
+      if (!same(await lstat(this.bin))) return '';
+      this.hashed = { dev: st.dev, ino: st.ino, size: st.size, ctimeMs: st.ctimeMs, mtimeMs: st.mtimeMs, digest: hash.digest('hex') };
       return this.hashed.digest;
     } catch {
       return '';
     } finally {
-      closeSync(fd);
+      await f.close().catch(() => {});
     }
   }
 
@@ -136,7 +124,8 @@ export class TerminalCore {
   async status(signal?: AbortSignal): Promise<HCStatus> {
     const carried = await this.embedded();
     const st: HCStatus = {
-      digest: this.digest() || undefined,
+      atomic_ensure: true,
+      digest: (await this.digest()) || undefined,
       ...(carried ? { embedded: carried.digest } : {}),
       running: false,
       session: this.session,
@@ -196,53 +185,41 @@ export class TerminalCore {
   /** Writes the gzip-compressed executable of chunks, checked by digest. */
   private async installGz(digest: string, chunks: AsyncIterable<Buffer> | Iterable<Buffer>): Promise<void> {
     if (!validDigest(digest)) throw new Fail(HCCode.BadDigest, 400, 'bad digest');
-    if (this.digest() === digest) {
+    if ((await this.digest()) === digest) {
       for await (const _ of chunks) {
         // drained
       }
       return;
     }
-    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    await mkdir(this.dir, { recursive: true, mode: 0o700 });
     try {
-      for (const e of readdirSync(this.dir)) {
+      for (const e of await readdir(this.dir)) {
         if (!e.startsWith('.fetch-')) continue;
         const p = join(this.dir, e);
-        if (Date.now() - statSync(p).mtimeMs > STAGING_RETENTION_MS) rmSync(p, { force: true });
+        if (Date.now() - (await stat(p)).mtimeMs > STAGING_RETENTION_MS) await rm(p, { force: true });
       }
     } catch {
       // nothing to prune
     }
-    const tmp = join(this.dir, `.fetch-${process.pid}-${Date.now()}`);
+    const tmp = join(this.dir, `.fetch-${process.pid}-${randomUUID()}`);
     try {
       const hash = createHash('sha256');
       let n = 0;
-      await new Promise<void>((resolve, reject) => {
-        const gunzip = createGunzip();
-        const out = createWriteStream(tmp, { mode: 0o700 });
-        gunzip.on('data', (b: Buffer) => {
+      const check = new Transform({
+        transform(b: Buffer, _encoding, cb) {
           n += b.length;
-          if (n > MAX_BINARY) gunzip.destroy(new Error('executable too large'));
-          else hash.update(b);
-        });
-        gunzip.on('error', reject);
-        out.on('error', reject);
-        out.on('finish', resolve);
-        gunzip.pipe(out);
-        void (async () => {
-          try {
-            for await (const b of chunks) if (!gunzip.write(b)) await new Promise((r) => gunzip.once('drain', r));
-            gunzip.end();
-          } catch (e) {
-            gunzip.destroy(e as Error);
-          }
-        })();
+          if (n > MAX_BINARY) return cb(new Error('executable too large'));
+          hash.update(b);
+          cb(null, b);
+        },
       });
-      chmodSync(tmp, 0o700);
+      await pipeline(Readable.from(chunks), createGunzip(), check, createWriteStream(tmp, { flags: 'wx', mode: 0o700 }));
+      await chmod(tmp, 0o700);
       const got = hash.digest('hex');
       if (got !== digest) throw new Error(`sha256 ${got} does not match expected ${digest}`);
-      renameSync(tmp, this.bin);
+      await rename(tmp, this.bin);
     } finally {
-      rmSync(tmp, { force: true });
+      await rm(tmp, { force: true });
     }
   }
 
@@ -286,16 +263,16 @@ export class TerminalCore {
       });
     });
     if (!answers) return false;
-    if (this.digest() === '') throw new Error('a terminal core answers but its executable is gone');
+    if ((await this.digest()) === '') throw new Error('a terminal core answers but its executable is gone');
     await this.run(['server', 'stop', '--json'], signal);
     return true;
   }
 
   /** herdr-core relies on the socket's directory for privacy (the run
    * directory is 0700); the socket itself is made private as well. */
-  privateSocket(): void {
+  async privateSocket(): Promise<void> {
     try {
-      chmodSync(this.socket, 0o600);
+      await chmod(this.socket, 0o600);
     } catch {
       // not there
     }
@@ -310,5 +287,15 @@ async function carriedHC(): Promise<{ gz: Buffer; digest: string } | null> {
   const f = Bun.embeddedFiles.find((b) => (b as File).name === 'herdr-core.gz') as File | undefined;
   if (!f) return null;
   const gz = Buffer.from(await f.bytes());
-  return gz.length ? { gz, digest: createHash('sha256').update(gunzipSync(gz)).digest('hex') } : null;
+  if (!gz.length) return null;
+  const hash = createHash('sha256');
+  let n = 0;
+  await pipeline(Readable.from([gz]), createGunzip(), async (chunks) => {
+    for await (const chunk of chunks) {
+      n += chunk.length;
+      if (n > MAX_BINARY) throw new Error('executable too large');
+      hash.update(chunk);
+    }
+  });
+  return { gz, digest: hash.digest('hex') };
 }

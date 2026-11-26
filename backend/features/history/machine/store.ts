@@ -22,6 +22,7 @@
 import { randomBytes } from 'node:crypto';
 import { hostname as osHostname } from 'node:os';
 import { isAbsolute } from 'node:path';
+import { retryDelay } from '#shared/lib/wait.ts';
 import { HistoryLimits, validHistoryTerminal, type HistorySnapshot } from '#shared/proto/agentproto/index.ts';
 import { DB, MACHINE_DB, NewerError, exists, hostFile, openShared } from '#shared/store/index.ts';
 import type { Memory } from './memory.ts';
@@ -246,6 +247,7 @@ export class Store {
     memory: Memory,
     o: { wait: boolean; signal?: AbortSignal; retryMs?: number },
   ): Promise<{ store: Store; removed: number }> {
+    o.signal?.throwIfAborted();
     const { db, newer } = openDB(base);
     if (newer) {
       db.close();
@@ -260,6 +262,7 @@ export class Store {
     }
     let removed: number;
     try {
+      o.signal?.throwIfAborted();
       removed = s.load();
     } catch (e) {
       s.close();
@@ -290,12 +293,14 @@ export class Store {
   }
 
   private async lock(wait: boolean, signal: AbortSignal | undefined, retryMs: number): Promise<void> {
+    let pause = retryMs;
     for (;;) {
+      signal?.throwIfAborted();
       if (this.tryLease()) return;
       if (!wait) throw new BusyError();
       if (signal?.aborted) throw signal.reason ?? new BusyError();
       await new Promise<void>((resolve) => {
-        const t = setTimeout(done, retryMs);
+        const t = setTimeout(done, retryDelay(pause));
         function done() {
           clearTimeout(t);
           signal?.removeEventListener('abort', done);
@@ -303,7 +308,7 @@ export class Store {
         }
         signal?.addEventListener('abort', done, { once: true });
       });
-      if (signal?.aborted) throw signal.reason ?? new BusyError();
+      pause = Math.min(pause * 2, Math.max(retryMs, 500));
     }
   }
 

@@ -24,9 +24,11 @@ import { constants, type ReadStream } from 'node:fs';
 import { copyFile, mkdir, open, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { SLUG } from '#shared/lib/brand.ts';
 import type { Logger } from '#shared/lib/log.ts';
 import { shownURL } from '#shared/lib/urls.ts';
+import { retryDelay, waitForResult } from '#shared/lib/wait.ts';
 import { DEFAULT_TIMING } from './timing.ts';
 
 /** The code-server release installed on machines. */
@@ -75,6 +77,8 @@ export function platformAsset(os: string, arch: string): string {
 
 /** Offline, a file is neither seeded nor cached. */
 export class MissingArtifact extends Error {}
+
+class RetryDownload extends Error {}
 
 /** The user's cache directory as Go's os.UserCacheDir has it. */
 export function userCacheDir(): string {
@@ -164,8 +168,8 @@ export class Artifacts {
   private readonly pinned: Readonly<Record<string, string>>;
   private readonly downloadMs: number;
   private readonly fetch: typeof fetch;
-  /** One resolution at a time: a download is not made twice. */
-  private queue: Promise<unknown> = Promise.resolve();
+  /** Each artifact has its own queue so a download cannot block other cache hits. */
+  private readonly queues = new Map<string, Promise<string>>();
 
   constructor(o: ArtifactsOptions) {
     this.logger = o.logger;
@@ -235,11 +239,15 @@ export class Artifacts {
 
   /** Records a digest learnt on first use as a sidecar in the cache. */
   async recordDigest(file: string, digest: string): Promise<void> {
+    const tmp = join(this.cacheDir, `.digest-${randomBytes(8).toString('hex')}`);
     try {
       await mkdir(this.cacheDir, { recursive: true, mode: 0o755 });
-      await writeFile(join(this.cacheDir, `${file}.sha256`), sidecar(digest, file), { mode: 0o644 });
+      await writeFile(tmp, sidecar(digest, file), { flag: 'wx', mode: 0o644 });
+      await rename(tmp, join(this.cacheDir, `${file}.sha256`));
     } catch {
       // the next download learns it again
+    } finally {
+      await rm(tmp, { force: true }).catch(() => {});
     }
   }
 
@@ -259,9 +267,15 @@ export class Artifacts {
     url: string,
     o: { progress?: (done: number, total: number) => void; signal?: AbortSignal },
   ): Promise<string> {
-    const run = this.queue.then(() => this.resolve(file, url, o));
-    this.queue = run.catch(() => {});
-    return run;
+    if (o.signal?.aborted) return Promise.reject(o.signal.reason);
+    const previous = this.queues.get(file);
+    const run = (previous?.catch(() => {}) ?? Promise.resolve()).then(() => this.resolve(file, url, o));
+    this.queues.set(file, run);
+    const clear = () => {
+      if (this.queues.get(file) === run) this.queues.delete(file);
+    };
+    void run.then(clear, clear);
+    return waitForResult(run, o.signal);
   }
 
   private async resolve(
@@ -306,40 +320,70 @@ export class Artifacts {
     o: { progress?: (done: number, total: number) => void; signal?: AbortSignal },
   ): Promise<string> {
     await mkdir(this.cacheDir, { recursive: true, mode: 0o755 });
-    this.logger(`downloading ${shownURL(url)}`);
     const signal = AbortSignal.any([AbortSignal.timeout(this.downloadMs), ...(o.signal ? [o.signal] : [])]);
+    for (let attempt = 0; ; attempt++) {
+      signal.throwIfAborted();
+      this.logger(`downloading ${shownURL(url)}`);
+      try {
+        return await this.downloadOnce(file, url, signal, o.progress);
+      } catch (e) {
+        signal.throwIfAborted();
+        if (!(e instanceof RetryDownload) || attempt >= 2) throw e;
+        this.logger(`retrying download: ${e.message}`);
+        await delay(retryDelay(250 * 2 ** attempt), undefined, { signal });
+      }
+    }
+  }
+
+  private async downloadOnce(
+    file: string,
+    url: string,
+    signal: AbortSignal,
+    progress?: (done: number, total: number) => void,
+  ): Promise<string> {
     // The file as it is: a decoded body would not match its digest.
-    const res = await this.fetch(url, { signal, redirect: 'follow', headers: { 'Accept-Encoding': 'identity' } });
+    const res = await this.fetch(url, { signal, redirect: 'follow', headers: { 'Accept-Encoding': 'identity' } }).catch((cause) => {
+      throw new RetryDownload(`GET ${shownURL(url)} failed`, { cause });
+    });
     if (res.status !== 200 || !res.body) {
       await res.body?.cancel().catch(() => {});
-      throw new Error(`GET ${shownURL(url)}: ${res.status} ${res.statusText}`);
+      const message = `GET ${shownURL(url)}: ${res.status} ${res.statusText}`;
+      throw res.status === 408 || res.status === 429 || res.status >= 500 ? new RetryDownload(message) : new Error(message);
     }
     const total = Number(res.headers.get('Content-Length') ?? -1);
     const tmp = join(this.cacheDir, `.dl-${randomBytes(6).toString('hex')}`);
     const h = createHash('sha256');
-    const f = await open(tmp, 'wx', 0o644);
+    let f: FileHandle | undefined;
+    const reader = res.body.getReader();
     try {
+      f = await open(tmp, 'wx', 0o644);
       let done = 0;
-      const reader = res.body.getReader();
       for (;;) {
-        const { done: end, value } = await reader.read();
+        const { done: end, value } = await reader.read().catch((cause) => {
+          throw new RetryDownload(`GET ${shownURL(url)}: response ended early`, { cause });
+        });
         if (end) break;
+        signal.throwIfAborted();
         await f.write(value);
         h.update(value);
         done += value.length;
-        o.progress?.(done, Number.isFinite(total) && total >= 0 ? total : -1);
+        progress?.(done, Number.isFinite(total) && total >= 0 ? total : -1);
       }
       await f.close();
+      if (total >= 0 && done !== total) throw new RetryDownload(`GET ${shownURL(url)}: response had ${done} of ${total} bytes`);
       const got = h.digest('hex');
       const want = await this.expected(this.cacheDir, file);
+      signal.throwIfAborted();
       if (want && got !== want) throw new Error(`${file}: downloaded sha256 ${got} does not match expected ${want}`);
       if (!want) this.logger(`warning: no pinned checksum for ${file}; recorded sha256 ${got} (trust on first use)`);
       const path = join(this.cacheDir, file);
       await rename(tmp, path);
-      await writeFile(`${path}.sha256`, sidecar(got, file), { mode: 0o644 }).catch(() => {});
+      await this.recordDigest(file, got);
       return path;
     } finally {
-      await f.close().catch(() => {});
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+      await f?.close().catch(() => {});
       await rm(tmp, { force: true });
     }
   }

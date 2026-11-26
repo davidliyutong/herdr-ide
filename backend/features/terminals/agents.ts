@@ -6,7 +6,9 @@
 // an agent message, which notifications and sounds follow. A turn that
 // ended (done) counts as seen (idle) once a client has the terminal
 // focused, and that outlives the terminal core through a label.
+import { setTimeout as delay } from 'node:timers/promises';
 import { validSessionId } from '#shared/agents/kinds.ts';
+import { retryDelay } from '#shared/lib/wait.ts';
 import { Op, readLine, SessionFrom, type DetectEvent } from '#shared/proto/agentproto/index.ts';
 import type { Machine } from '#kernel/machines/machine.ts';
 import { closeStream } from '#kernel/machines/transport/session.ts';
@@ -287,19 +289,20 @@ export class Agents {
 }
 
 export interface DetectTiming {
-  /** The wait before a failed detect stream is opened again. */
+  /** The first wait before a failed detect stream is opened again. */
   detectRetryMs: number;
-  /** How often an open stream checks whether sessions were switched. */
-  detectPollMs: number;
+  /** The longest base delay for repeated detect stream failures. */
+  detectRetryMaxMs: number;
+  /** A connection that lasted this long resets the retry delay. */
+  stableMs: number;
   /** How long after a stream opened again because sessions were switched
    * its events are compared with what the clients were told before. */
   redetectGraceMs: number;
 }
 
 /** Follows the coding agents in the machine's terminals through its agent
- * (op detect) until signal ends, opening the stream again after
- * detectRetryMs when it fails, and at once when sessions() changes (the
- * agents plugin was switched). A switch makes the machine detect every
+ * (op detect) until signal ends, opening the stream again with backoff
+ * when it fails, and at once when the agents plugin is switched. A switch makes the machine detect every
  * agent again: what the clients were told of each terminal before is kept
  * (Agents.applyDetected), so that the agents found again do not notify
  * again of a turn's end, or a block, that they were told of, nor bring back
@@ -308,59 +311,66 @@ export interface DetectTiming {
 export async function followAgents(
   m: Machine,
   agents: Agents,
-  o: { sessions: () => boolean; signal: AbortSignal; current: () => boolean; timing: DetectTiming },
+  o: {
+    sessions: () => boolean;
+    onSessionsChange: (changed: () => void) => () => void;
+    signal: AbortSignal;
+    current: () => boolean;
+    timing: DetectTiming;
+  },
 ): Promise<void> {
   const { signal, timing } = o;
   let told: Map<string, DetectEvent> | null = null;
+  let retry = timing.detectRetryMs;
   while (!signal.aborted) {
     const sessions = o.sessions();
-    let switched = false;
+    const change = new AbortController();
+    const attempt = AbortSignal.any([signal, change.signal]);
+    const unsubscribe = o.onSessionsChange(() => {
+      if (o.sessions() !== sessions) change.abort();
+    });
     try {
-      const { conn } = await m.open({ op: Op.Detect, ...(sessions ? { sessions } : {}) }, { signal });
-      const until = Date.now() + timing.redetectGraceMs;
-      const end = () => conn.stream.destroy();
-      signal.addEventListener('abort', end, { once: true });
-      if (signal.aborted) end();
-      const poll = setInterval(() => {
-        if (o.sessions() !== sessions) {
-          switched = true;
-          end();
-        }
-      }, timing.detectPollMs);
+      let openedAt: number | undefined;
       try {
-        for (;;) {
-          const ev = detectEvent(await readLine<unknown>(conn.reader));
-          if (!ev) break;
-          if (told && Date.now() > until) told = null;
-          if (o.current()) agents.applyDetected(ev, told);
+        const { conn } = await m.open({ op: Op.Detect, ...(sessions ? { sessions } : {}) }, { signal: attempt });
+        openedAt = performance.now();
+        const until = Date.now() + timing.redetectGraceMs;
+        const end = () => conn.stream.destroy();
+        attempt.addEventListener('abort', end, { once: true });
+        if (attempt.aborted) end();
+        try {
+          while (!attempt.aborted) {
+            const ev = detectEvent(await readLine<unknown>(conn.reader));
+            if (!ev || attempt.aborted) break;
+            if (told && Date.now() > until) told = null;
+            if (o.current()) agents.applyDetected(ev, told);
+          }
+        } finally {
+          attempt.removeEventListener('abort', end);
+          conn.reader.release();
+          closeStream(conn.stream);
         }
       } catch {
-        // the stream ended
-      } finally {
-        clearInterval(poll);
-        signal.removeEventListener('abort', end);
-        conn.reader.release();
-        closeStream(conn.stream);
+        // The stream ended or could not open.
       }
-    } catch {
-      // the agent did not open the stream
+      // What the stream said no longer holds: a new one says it again.
+      if (!change.signal.aborted) told = null;
+      else told ??= new Map();
+      if (o.current()) {
+        for (const [addr, ev] of agents.entries()) {
+          told?.set(addr, ev);
+          agents.apply({ terminal: addr, agent: '', status: '' });
+        }
+      }
+      if (change.signal.aborted || (openedAt !== undefined && performance.now() - openedAt >= timing.stableMs)) {
+        retry = timing.detectRetryMs;
+      }
+      if (!attempt.aborted) {
+        await delay(retryDelay(retry), undefined, { signal: attempt }).catch(() => {});
+        retry = change.signal.aborted ? timing.detectRetryMs : Math.min(retry * 2, timing.detectRetryMaxMs);
+      }
+    } finally {
+      unsubscribe();
     }
-    // What the stream said no longer holds: a new one says it again.
-    told = switched ? new Map() : null;
-    if (o.current())
-      for (const [addr, ev] of agents.entries()) {
-        told?.set(addr, ev);
-        agents.apply({ terminal: addr, agent: '', status: '' });
-      }
-    if (switched) continue;
-    await new Promise<void>((r) => {
-      const t = setTimeout(done, timing.detectRetryMs);
-      function done() {
-        clearTimeout(t);
-        signal.removeEventListener('abort', done);
-        r();
-      }
-      signal.addEventListener('abort', done, { once: true });
-    });
   }
 }

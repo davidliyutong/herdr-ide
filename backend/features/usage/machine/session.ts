@@ -177,25 +177,31 @@ export class SessionReader {
     try {
       return await this.read(e, provider, kind, files, own);
     } finally {
-      this.running--;
-      this.waiting.shift()?.();
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.running--;
     }
   }
 
   private async slot(signal: AbortSignal): Promise<void> {
-    while (this.running >= this.l.parallel) {
-      signal.throwIfAborted();
-      await new Promise<void>((resolve) => {
-        const go = () => {
-          signal.removeEventListener('abort', go);
-          resolve();
-        };
-        this.waiting.push(go);
-        signal.addEventListener('abort', go, { once: true });
-      });
-    }
     signal.throwIfAborted();
-    this.running++;
+    if (this.running < this.l.parallel) {
+      this.running++;
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const grant = () => {
+        signal.removeEventListener('abort', abort);
+        resolve();
+      };
+      const abort = () => {
+        const i = this.waiting.indexOf(grant);
+        if (i >= 0) this.waiting.splice(i, 1);
+        reject(signal.reason);
+      };
+      this.waiting.push(grant);
+      signal.addEventListener('abort', abort, { once: true });
+    });
   }
 
   private async read(

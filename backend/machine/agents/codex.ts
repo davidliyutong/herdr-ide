@@ -8,9 +8,18 @@ import { validSessionId } from '#shared/agents/kinds.ts';
 import { parseRFC3339 } from '#shared/lib/gotime.ts';
 import { SessionFrom } from '#shared/proto/agentproto/index.ts';
 import { resolvedRoot } from './claude.ts';
-import { readHead, type FileId } from './files.ts';
+import { readMetadata, type FileId } from './files.ts';
 import { LIMITS, Search, TIMING, mtimeOf, samePath, uniq, type Found, type Location, type Proc } from './common.ts';
 import type { Resolver } from './sessions.ts';
+
+/** The process whose open rollout identified this result, including a child. */
+const fileOwners = new WeakMap<Found, number>();
+
+function fromFile(id: string, pid: number): Found {
+  const found = { id, source: SessionFrom.FD };
+  fileOwners.set(found, pid);
+  return found;
+}
 
 /** The command line, then the rollout a candidate process holds open
  * (Linux; a subagent's rollout stands for its parent session, and the
@@ -26,20 +35,33 @@ export async function resolveCodex(r: Resolver, kind: string, p: Proc, signal: A
   if (r.procs.readsFiles) {
     const sessions = await codexSessionDirs(r, homes);
     let parent = '';
-    for (const c of await r.candidates(p.pid)) {
+    let parentPID = 0;
+    const fromFD = async (pid: number): Promise<Found | null> => {
       if (signal.aborted) return null;
-      for (const t of (await r.procs.fds(c)) ?? []) {
+      for (const t of (await r.procs.fds(pid)) ?? []) {
         const id = openRollout(t, sessions);
         if (!id) continue;
         const m = await r.rolloutMeta(t);
         if (m && m.parent !== '') {
-          if (parent === '' && validSessionId(m.parent)) parent = m.parent;
+          if (parent === '' && validSessionId(m.parent)) {
+            parent = m.parent;
+            parentPID = pid;
+          }
           continue;
         }
-        return { id, source: SessionFrom.FD };
+        return fromFile(id, pid);
       }
+      return null;
+    };
+    const direct = await fromFD(p.pid);
+    if (direct || signal.aborted) return direct;
+    for (const c of await r.candidates(p.pid)) {
+      if (signal.aborted) return null;
+      if (c === p.pid) continue;
+      const found = await fromFD(c);
+      if (found) return found;
     }
-    if (parent !== '') return { id: parent, source: SessionFrom.FD };
+    if (parent !== '') return fromFile(parent, parentPID);
   }
   if (p.cwd === '') return null;
   const start = await r.startOf(p.pid);
@@ -182,20 +204,19 @@ export interface RolloutMeta {
 export async function rolloutMeta(r: Resolver, file: string): Promise<RolloutMeta | null> {
   const known = r.metas.get(file);
   if (known) return known;
-  let head: Buffer;
+  let m: RolloutMeta | null;
   try {
     const fh = await r.files.openNoFollow(file);
     try {
-      head = await readHead(fh, LIMITS.metaLine);
+      m = await readMetadata(fh, LIMITS.metaLine, decodeSessionMeta);
     } finally {
       await fh.close().catch(() => {});
     }
   } catch {
     return null;
   }
-  const m = decodeSessionMeta(head);
   if (!m) return null;
-  if (r.metas.size >= LIMITS.remembered) r.metas.clear();
+  if (r.metas.size >= LIMITS.remembered) r.metas.delete(r.metas.keys().next().value!);
   r.metas.set(file, m);
   return m;
 }
@@ -386,9 +407,19 @@ function valueEnd(s: string, i: number): number {
  * rollout's name (names start with the time they were made) and how many
  * there are; while the answer is a guess, the newest one's mtime too. */
 export async function codexStamp(r: Resolver, p: Proc, last: Found, out: string[]): Promise<void> {
+  if (last.source === SessionFrom.Argv) return;
+  const homes = await codexHomesOf(r, p.pid, p.cwd);
+  if (last.source === SessionFrom.FD && r.procs.readsFiles) {
+    const sessions = await codexSessionDirs(r, homes);
+    const fds = (await r.procs.fds(fileOwners.get(last) ?? p.pid))?.filter((path) => !!openRollout(path, sessions));
+    if (fds?.length) {
+      out.push(...fds.sort());
+      return;
+    }
+  }
   const now = r.now();
   const start = (await r.startOf(p.pid)) ?? now;
-  for (const h of await codexHomesOf(r, p.pid, p.cwd))
+  for (const h of homes)
     for (const d of codexDays(start, now)) {
       const dir = posix.join(h, 'sessions', d);
       let newest = '';

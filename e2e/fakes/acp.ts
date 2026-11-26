@@ -11,6 +11,7 @@
 //     only when the user allows it. "permission <name> when <flag>" asks
 //     once the file $HOME/<flag> exists, so a test decides when.
 //   - "hold": a turn that keeps working until session/cancel.
+//   - "demo review": the fixed, rich conversation used by the screenshot generator.
 //   - anything else: "Echo #<n>: <text>", n counting the session's turns,
 //     which the session keeps across processes (session/resume), so a test
 //     can tell a resumed session from a new one.
@@ -136,8 +137,8 @@ async function turn(id: Json | undefined, s: Session, text: string, cancel: Sign
   const say = (t: string) => update(s.sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: t } });
   try {
     if (!s.title) {
-      s.title = text;
-      update(s.sessionId, { sessionUpdate: 'session_info_update', title: text });
+      s.title = text === 'demo review' ? 'Review training stability' : text;
+      update(s.sessionId, { sessionUpdate: 'session_info_update', title: s.title });
     }
     const mt = permissionPrompt.exec(text);
     if (mt) {
@@ -196,6 +197,35 @@ async function turn(id: Json | undefined, s: Session, text: string, cancel: Sign
       say('Holding until cancelled.');
       await cancel.wait;
       stop = 'cancelled';
+    } else if (text === 'demo review') {
+      update(s.sessionId, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'read-training',
+        title: 'Read train.py and configs/base.toml',
+        kind: 'read',
+        status: 'completed',
+        rawInput: { path: 'train.py' },
+        content: [{ type: 'content', content: { type: 'text', text: '400 steps · learning_rate = 0.0003 · eval_interval = 20' } }],
+      });
+      update(s.sessionId, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'edit-training',
+        title: 'Update train.py',
+        kind: 'edit',
+        status: 'completed',
+        rawInput: { path: 'train.py' },
+        content: [
+          {
+            type: 'diff',
+            path: 'train.py',
+            oldText: 'if log_interval(step):\n    print(f"step={step:03d} loss={loss:.4f}")\n',
+            newText: 'if log_interval(step):\n    print(f"step={step:03d} loss={loss:.4f} lr={metrics.learning_rate:.1e}")\n',
+          },
+        ],
+      });
+      say(
+        '## Training review\n\nThe run is stable: validation loss tracks the training curve without divergence.\n\n- Log the learning rate beside every loss value.\n- Keep the ten-step warmup before cosine decay.\n- The schedule is $\\eta_t = \\frac{\\eta_0}{1 + \\gamma t}$.\n\n**Next step:** approve the small logging change, then rerun the 400-step smoke test.',
+      );
     } else {
       say(`Echo #${s.turns + 1}`);
       say(': ' + text);

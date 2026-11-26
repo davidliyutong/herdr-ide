@@ -196,11 +196,6 @@ export function mountFrame(k: string, el: HTMLElement): () => void {
 /** The element of a frame, if it is mounted. */
 export const frameElement = (k: string): HTMLElement | undefined => elements.get(k);
 
-/** Gives a frame's element the keyboard. */
-export function focusFrame(k: string) {
-  elements.get(k)?.focus();
-}
-
 /** The frame of the element that has the keyboard, when the page has it. */
 export function focusedFrame(): string | undefined {
   if (typeof document === 'undefined' || !document.hasFocus()) return undefined;

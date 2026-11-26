@@ -12,13 +12,19 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { CHAT_HOST_NAME, HIDDEN_CHAT_HOST, HIDDEN_LABEL, Op } from '#shared/proto/agentproto/index.ts';
+import { dataDir } from '#shared/lib/brand.ts';
 import { discard } from '#shared/lib/log.ts';
 import { REPO_ROOT } from '#shared/lib/repo.ts';
+import { call } from '#kernel/agent.ts';
 import { dialNode, localPlatform } from '#kernel/machines/transport/local.ts';
 import { bareName, machineKey, type MachineBuild } from '#kernel/machines/transport/builds.ts';
 import { localSpec, running, testHub, testMachines, waitFor, type TestHub } from '#kernel/testing.ts';
 import type { Machines } from '#kernel/machines/manager.ts';
+import { historyProtocol } from '#features/history/protocol.ts';
+import { loadCache } from '#features/usage/machine/cache.ts';
+import { usageProtocol } from '#features/usage/protocol.ts';
 import { terminalsFeature, type TerminalsFeature } from './hub.ts';
+import { ensure } from './lifecycle.ts';
 import { FrameKind } from './messages.ts';
 import { errKind, TestClient } from './testing.ts';
 
@@ -119,6 +125,55 @@ describe.skipIf(!HC)('a real herdr-core', () => {
     expect(m.error).toBeUndefined();
     return (m.result as { address: string }).address;
   };
+
+  test('the compiled node serves history and persists usage from its embedded workers', async () => {
+    const m = machines.get(M)!;
+    expect((await call(m, historyProtocol, 'list', {})).terminals).toEqual([]);
+    const projects = join(home, '.claude', 'projects', '-work');
+    mkdirSync(projects, { recursive: true });
+    const path = join(projects, 'sample.jsonl');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: new Date().toISOString(),
+        cwd: '/work',
+        message: { role: 'assistant', id: 'msg_1', model: 'claude-opus-5-5', usage: { input_tokens: 10, output_tokens: 20 } },
+      }) + '\n',
+    );
+    const result = await call(m, usageProtocol, 'cost', { since: 0, providers: ['claude'] });
+    expect(result.rows).toHaveLength(1);
+    expect((await loadCache(join(home, dataDir(INSTANCE)))).files.has(path)).toBe(true);
+  }, 30_000);
+
+  test('concurrent ensures share a single terminal core upload and start', async () => {
+    const exe = readFileSync(HC);
+    const artifact = { gz: gzipSync(exe), digest: createHash('sha256').update(exe).digest('hex') };
+    const m = machines.get(M)!;
+    let waiting = 0;
+    const ready = Promise.withResolvers<void>();
+    const hc = async () => {
+      if (++waiting === 2) ready.resolve();
+      await ready.promise;
+      return artifact;
+    };
+    const signal = AbortSignal.timeout(30_000);
+    const request = () =>
+      ensure(
+        m,
+        { restart: false, stopped: () => false, id: M, signal, timeoutMs: 30_000 },
+        {
+          audit: tc.audit.audit,
+          logger: discard,
+          readOnly: false,
+          hc,
+        },
+      );
+    expect(await Promise.all([request(), request()])).toEqual(['', '']);
+    const events = tc.audit.records().map((x) => x.event);
+    expect(events.filter((x) => x === 'term.install')).toHaveLength(1);
+    expect(events.filter((x) => x === 'term.start')).toHaveLength(1);
+  }, 35_000);
 
   test('a shell, typed into and read, watched, killed', async () => {
     const c = await client();

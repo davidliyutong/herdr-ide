@@ -4,7 +4,8 @@
 //
 //   - run, host-local and private: sockets, locks, pid files, the display's
 //     files. In /run/user/<uid> (tmpfs, one per host) where the system has
-//     it, else <data>/run-<hostid.id>.
+//     it, else <data>/run-<hostid.id>. Long paths use a short private
+//     directory directly under /tmp.
 //   - host, <data>/hosts/<hostid.key>: this host's persistent files that
 //     must not be shared (executables replaced while another host runs
 //     them, code-server's state, logs).
@@ -31,6 +32,10 @@ export interface Dirs {
 
 /** The directory of the data directory holding the hosts' directories. */
 export const HOSTS_DIR = 'hosts';
+/** The usable address bytes, with space for the terminating NUL. */
+export const UNIX_PATH_BYTES = process.platform === 'darwin' ? 103 : 107;
+/** The longest final socket name in the runtime directory is bridge.sock. */
+const SOCKET_NAME_BYTES = 11;
 
 /** The directories of instance, without creating them. */
 export function dirsFor(instance: string): Dirs {
@@ -85,8 +90,9 @@ export function makeRun(dir: string): void {
  * name. */
 export function runDir(base: string): string {
   const dir = userRuntime();
-  if (dir !== null) return join(dir, runName(base));
-  return join(base, 'run-' + hostid.id());
+  const run = dir === null ? join(base, 'run-' + hostid.id()) : join(dir, runName(base));
+  if (process.platform === 'win32' || Buffer.byteLength(run) + 1 + SOCKET_NAME_BYTES <= UNIX_PATH_BYTES) return run;
+  return join('/tmp', `.${brand.SLUG}-${process.getuid!()}-${hostid.id()}-${baseHash(base).slice(0, 20)}`);
 }
 
 /** The name of base's directory in the user's runtime directory: base's
@@ -94,15 +100,18 @@ export function runDir(base: string): string {
  * parent's links resolved (the parent, the home, exists before base
  * does). */
 function runName(base: string): string {
+  const name = basename(base);
+  return (name.startsWith('.') ? name.slice(1) : name) + '-' + baseHash(base).slice(0, 8);
+}
+
+function baseHash(base: string): string {
   let real = base;
   try {
     real = join(realpathSync(dirname(base)), basename(base));
   } catch {
     // base as it is
   }
-  const sum = createHash('sha256').update(real).digest('hex').slice(0, 8);
-  const name = basename(base);
-  return (name.startsWith('.') ? name.slice(1) : name) + '-' + sum;
+  return createHash('sha256').update(real).digest('hex');
 }
 
 /** Holds the users' runtime directories (systemd-logind's, elogind's):

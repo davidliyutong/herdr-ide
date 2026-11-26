@@ -11,7 +11,8 @@
 // upgrades: <data dir>/bin/<slug>-mcp, a script running the link of the
 // host's system and architecture beside it, which the agent points at its
 // own executable when it starts (linkMCP), as the Go agent does.
-import { lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { machine, type } from 'node:os';
 import { posix } from 'node:path';
 import type { Socket } from 'node:net';
@@ -266,19 +267,32 @@ export function mcpSocketPath(argv0: string, home: string, instance: string): st
  * replaced atomically (a file beside it renamed into place). */
 export async function linkMCP(dir: string, exe: string): Promise<void> {
   await mkdir(dir, { recursive: true, mode: 0o700 });
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  for (const name of await readdir(dir).catch(() => [])) {
+    if (!name.startsWith(MCP_LINK_NAME) || !/\.\d+\.[0-9a-f-]{36}\.new$/.test(name)) continue;
+    const p = posix.join(dir, name);
+    const st = await lstat(p).catch(() => null);
+    if (st && st.mtimeMs < cutoff) await rm(p, { force: true }).catch(() => {});
+  }
   const link = posix.join(dir, platformLink(type(), machine()));
   const cur = await readlink(link).catch(() => null);
   if (cur !== exe) {
-    const tmp = link + '.new';
-    await rm(tmp, { force: true });
-    await symlink(exe, tmp);
-    await rename(tmp, link);
+    const tmp = `${link}.${process.pid}.${randomUUID()}.new`;
+    try {
+      await symlink(exe, tmp);
+      await rename(tmp, link);
+    } finally {
+      await rm(tmp, { force: true });
+    }
   }
   const script = posix.join(dir, MCP_LINK_NAME);
   const st = await lstat(script).catch(() => null);
   if (st?.isFile() && (await readFile(script, 'utf8').catch(() => '')) === MCP_LINK_SCRIPT) return;
-  const tmp = script + '.new';
-  await rm(tmp, { force: true });
-  await writeFile(tmp, MCP_LINK_SCRIPT, { mode: 0o700, flag: 'wx' });
-  await rename(tmp, script);
+  const tmp = `${script}.${process.pid}.${randomUUID()}.new`;
+  try {
+    await writeFile(tmp, MCP_LINK_SCRIPT, { mode: 0o700, flag: 'wx' });
+    await rename(tmp, script);
+  } finally {
+    await rm(tmp, { force: true });
+  }
 }

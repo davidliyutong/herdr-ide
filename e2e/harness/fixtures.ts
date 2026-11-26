@@ -12,11 +12,15 @@ import { TermClient } from './term';
 
 interface Fixtures {
   instance: Instance;
+  /** What the instance fixture launches with (test.use). */
+  instanceOptions: { settings?: Record<string, unknown>; codeServerSeed?: string };
   term: TermClient;
   app: Page;
   /** An SSH machine in a container for the instance (harness/sshd.ts);
    * the test skips without Docker. */
   sshd: SSHMachine;
+  /** What the SSH fixture launches (test.use). */
+  sshdOptions: { image?: string };
   /** What the desktop fixture launches the app with (test.use). */
   desktopOptions: DesktopOptions;
   /** The desktop app on an instance of its own (harness/desktop.ts); the
@@ -25,9 +29,9 @@ interface Fixtures {
 }
 
 export const test = base.extend<Fixtures>({
-  // eslint-disable-next-line no-empty-pattern
-  instance: async ({}, use, info) => {
-    const inst = await Instance.start();
+  instanceOptions: [{}, { option: true }],
+  instance: async ({ instanceOptions }, use, info) => {
+    const inst = await Instance.start(instanceOptions);
     try {
       await use(inst);
     } finally {
@@ -38,10 +42,11 @@ export const test = base.extend<Fixtures>({
       await inst.stop();
     }
   },
-  sshd: async ({ instance }, use, info) => {
+  sshdOptions: [{}, { option: true }],
+  sshd: async ({ instance, sshdOptions }, use, info) => {
     const why = sshUnavailable();
     info.skip(!!why, why);
-    const m = await SSHMachine.start(instance);
+    const m = await SSHMachine.start(instance, sshdOptions);
     try {
       await use(m);
     } finally {

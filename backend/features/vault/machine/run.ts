@@ -84,11 +84,12 @@ export function maskOutput(s: Buffer, values: Record<string, string>, cut: boole
   let spans: Array<{ from: number; to: number }> = [];
   for (const v of vs) {
     const found: Array<{ from: number; to: number }> = [];
+    let k = 0;
     for (let at = 0; at < s.length;) {
       const i = s.indexOf(v, at);
       if (i < 0) break;
-      const k = spans.findIndex((sp) => sp.to > i);
-      if (k >= 0 && spans[k].from < i + v.length) {
+      while (k < spans.length && spans[k].to <= i) k++;
+      if (k < spans.length && spans[k].from < i + v.length) {
         at = spans[k].to; // every start before it overlaps it too
         continue;
       }

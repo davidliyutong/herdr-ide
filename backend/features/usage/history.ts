@@ -138,7 +138,7 @@ export class History {
   /** Adds what stored, read back from the hub's database, has that this
    * history (recorded since the hub started) has not: each window's
    * points before its first, and the alerts not fired since. */
-  merge(stored: History): void {
+  merge(stored: Pick<History, 'windows' | 'alerts'>): void {
     for (const [k, ws] of stored.windows) {
       let mine = this.windows.get(k);
       if (!mine) this.windows.set(k, (mine = new Map()));

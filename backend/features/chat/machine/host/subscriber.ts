@@ -38,6 +38,7 @@ export class Subscriber {
   /** The log before the queue; not counted. */
   replay: Replay | null = null;
   private queue: string[] = [];
+  private queueHead = 0;
   private queued = 0;
   /** Nothing more comes: run ends once all is written. */
   private closing = false;
@@ -72,7 +73,8 @@ export class Subscriber {
   push(line: string): boolean {
     if (this.dead || this.closing) return true;
     const n = Buffer.byteLength(line);
-    if (this.queue.length >= this.limits.events || (this.queue.length > 0 && this.queued + n > this.limits.bytes)) {
+    const count = this.queue.length - this.queueHead;
+    if (count >= this.limits.events || (count > 0 && this.queued + n > this.limits.bytes)) {
       this.drop();
       return false;
     }
@@ -99,6 +101,7 @@ export class Subscriber {
     this.head = [];
     this.replay = null;
     this.queue = [];
+    this.queueHead = 0;
     this.queued = 0;
     this.sock.destroy();
     this.signal();
@@ -190,14 +193,21 @@ export class Subscriber {
         return page.lines.join('');
       }
     }
-    while (this.queue.length > 0) {
-      const l = this.queue[0]!;
+    while (this.queueHead < this.queue.length) {
+      const l = this.queue[this.queueHead]!;
       const b = Buffer.byteLength(l);
       if (n > 0 && n + b > this.limits.batch) break;
       buf += l;
       n += b;
-      this.queue.shift();
+      this.queue[this.queueHead++] = '';
       this.queued -= b;
+    }
+    if (this.queueHead === this.queue.length) {
+      this.queue = [];
+      this.queueHead = 0;
+    } else if (this.queueHead >= 1024 && this.queueHead * 2 >= this.queue.length) {
+      this.queue = this.queue.slice(this.queueHead);
+      this.queueHead = 0;
     }
     if (n > 0) return buf;
     return this.closing ? null : '';

@@ -117,6 +117,7 @@ export class Session {
       throw new AgentError(`agent ${h.op}: ${(e as Error).message}`);
     };
     try {
+      if (signal?.aborted) failed(signal.reason);
       await writeLine(st, h).catch(failed);
       if (opts.body?.length) await write(st, opts.body).catch(failed);
       const rep = await readLine<Reply>(reader).catch(failed);

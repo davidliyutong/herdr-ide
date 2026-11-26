@@ -45,7 +45,7 @@ A kind of `backend/shared/agents/kinds.ts` has a chat when its row has a `chat` 
 
 The terminal core does not read shell startup files, where agents' programs are usually put on the PATH. So the host takes the environment of an interactive login shell (`$SHELL -l -i -c env`, 10 s, 1 MiB), cached 6 hours or until a startup file changes. Agents get it without the host terminal's, ssh's and other agent sessions' variables, with `PWD` the chat's directory; `HC_SESSION`, `HC_SOCKET` and `HC_SCOPE` stay so the terminal core's crash sweep finds them. The host logs to `chat-host-<host>.log` (0600, rotated at 1 MiB once).
 
-The host shares the same socket, lock, wire protocol, journal tables and log across releases, so a newer build takes over from an earlier host with its chats. Its journal's statements run in a worker thread, and a chat's events reach its clients once they are stored, in the order made ([42](42-typescript-backend.md#the-chat-host)).
+The host shares the same socket, lock, wire protocol, journal tables and log across releases, so a newer build takes over from an earlier host with its chats. A worker thread opens and migrates the journal, runs its statements and prunes other hosts' unused journals. A chat's events reach its clients once they are stored, in the order made ([42](42-typescript-backend.md#the-chat-host)).
 
 ### Starting the host, and handover (`backend/features/chat/machine.ts`)
 
@@ -97,6 +97,8 @@ An attached connection sends commands answered by `ack`: `prompt`, `cancel`, `pe
 
 `chat-<host>.db` in the data directory, the host's own SQLite database ([38](38-sqlite-state.md)): chats, their stored events, trusted folders and settings.
 
+Startup loads chats and their first kept sequence numbers together. A chat loads its saved prompt identifiers on its first identified prompt after recovery. Bounds enforcement reclaims free pages in limited batches. Live increments waiting behind journal writes have a per-chat byte and event limit. Stored events still provide the complete item.
+
 | Bound | Setting | Default | Range |
 | --- | --- | --- | --- |
 | Bytes of a chat's events | `chat.maxChatMB` | 64 MB | 8–256 |
@@ -110,6 +112,8 @@ A chat over its bytes loses its oldest events; past the other bounds closed chat
 ### Adapters (`backend/features/chat/machine/{claude,codex,acp}`)
 
 The host owns chats, logs, clients, bounds and process decisions; an adapter owns one agent process and turns its protocol into events. The rules: argv and environment as given; unserved requests answered "method not found"; unknown members passed over; the user's configuration never written; the agent in its own process group, ended gracefully before SIGKILL; output never blocked; increments live, complete items stored; a prompt recorded once; full-access values marked; a session another process runs neither resumed nor imported (`in_terminal`).
+
+Claude Code keeps at most 16 pending prompt records. A queued prompt releases its stored content when the SDK confirms it was taken, and a settled turn retires its prompt records even if the SDK omits completion events. Codex catch-up keeps page cursors and the newest page while locating the anchor, then reads newer pages one at a time in chronological order.
 
 - **Claude Code** (`claude/`, on `@anthropic-ai/claude-agent-sdk`): the protocol spoken by Anthropic's Agent SDK ([42](42-typescript-backend.md#claude-code)), the program run through the host's processes, the user's own `claude`; recorded with Claude Code 2.1.330. Full access needs `--allow-dangerously-skip-permissions`, so switching to it restarts the program on the same session. `CLAUDE_CODE_ENTRYPOINT` marks its sessions as the SDK's. `can_use_tool`, `AskUserQuestion` and `ExitPlanMode` become permission, question and plan; tool results are mapped by `backend/shared/agents/transcript`. A permission the program cancelled (an interrupt) is answered with a denial, as the SDK answers every request it hands on; a mode set is the one asked for, the SDK passing on no answer of the program's; lines that are no JSON objects and `keep_alive` the SDK drops itself. A session with a live `<claude dir>/sessions/<pid>.json` record is `in_terminal`. Sessions and imports read `~/.claude/projects`. The SDK is Anthropic's, all rights reserved, so no executable carries it: a machine gets the pinned npm tarball when a Claude Code chat needs it, downloading it itself or from the hub, checked against the pinned integrity, into `<data>/claude-agent-sdk/<version>`, which the chat host loads; a machine that cannot refuses the chat with `sdk_unavailable` ([42](42-typescript-backend.md#claude-code)).
 - **Codex** (`codex/`): `codex app-server`, protocol v2, one per live chat. It is written against TypeScript types generated from the JSON schema Codex prints of the version pinned (`appserver.gen.ts`, by `backend/scripts/codex-schema.ts` from `spec/codex-app-server`, which `make check` holds them to): the typecheck holds the adapter to the protocol, and its tests validate the recordings and what it sends against the schema itself (`appserver.test.ts`). A thread started writable records its directory in `~/.codex/config.toml`, so threads start read-only and each turn carries the mode as policy:
@@ -156,7 +160,7 @@ The host gets its adapters by name from its composition root (`backend/hosts/mac
 
 - **Import.** The Chats panel lists the sessions each agent kept for the directory; opening one makes a chat that resumes the session with its earlier conversation imported first (`new` with `resume` and `import`) and the agent's title. A session that already is a chat opens that chat. A terminal whose agent quit offers **Continue in Chat** in its header ([33](33-workspace-restore.md)). Two processes never write one session: the page refuses one a terminal's agent runs, the host one another process runs (`in_terminal`).
 - **Handoff.** **Continue in Terminal** (Claude Code, Codex; no turn running) ends the chat's agent, marks the chat handed off, and opens a terminal tab in its directory that resumes the session by the kind's command, as a restore does ([33](33-workspace-restore.md)). A terminal already running the session is shown instead.
-- **Catch-up.** When a handed-off chat is used again, the host first imports what the session did in the terminal since the last imported item, never twice.
+- **Catch-up.** When a handed-off chat is used again, the host first imports what the session did in the terminal since the last imported item. Claude Code catch-up finds that item's last occurrence and resumes at its line with the transcript state from that point.
 
 ### After the terminal core starts again
 
