@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import test from 'node:test';
 import { APP_NAME } from '../../web/src/brand';
 import kek from '../../spec/vectors/vault-unlock/kek.json';
@@ -25,14 +26,10 @@ const line = (v: object) => JSON.stringify(v) + '\n';
 
 test('the helper is an app bundle named for the app, in Contents/Helpers or the development build', () => {
   assert.equal(HELPER_NAME, `${APP_NAME} Enclave`);
-  assert.equal(
-    helperPath('/Applications/X.app/Contents/Resources', '/ignored'),
-    `/Applications/X.app/Contents/Helpers/${APP_NAME} Enclave.app/Contents/MacOS/${APP_NAME} Enclave`,
-  );
-  assert.equal(
-    helperPath(undefined, '/repo/desktop'),
-    `/repo/desktop/dist/helper/${APP_NAME} Enclave.app/Contents/MacOS/${APP_NAME} Enclave`,
-  );
+  // The system's own separators (the shell's tests run on Windows, too).
+  const exe = join(`${APP_NAME} Enclave.app`, 'Contents', 'MacOS', `${APP_NAME} Enclave`);
+  assert.equal(helperPath('/Applications/X.app/Contents/Resources', '/ignored'), join('/Applications/X.app/Contents/Helpers', exe));
+  assert.equal(helperPath(undefined, '/repo/desktop'), join('/repo/desktop/dist/helper', exe));
   assert.equal(HELPER_TIMEOUT_MS, 120_000);
   assert.equal(HELPER_MAX_OUTPUT, 65_536);
 });
