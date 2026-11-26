@@ -4,7 +4,6 @@
 // volume's container, and the GPUs are the IOAccelerator registry's.
 import { availableParallelism } from 'node:os';
 import { posix } from 'node:path';
-import { runCmd } from './io.ts';
 import { clampPct, fields, parseInt10, parseNum, parseUint, round1, truncateBytes } from './num.ts';
 import { parseBatteryTemp } from './sensors.ts';
 import { MAX_COMMAND, baseMetrics, normalizeState, type Sampling } from './sample.ts';
@@ -312,7 +311,7 @@ export function parsePS(metaRaw: string, argsRaw: string): Process[] {
 export async function darwinMetrics(s: Sampling): Promise<Metrics> {
   const now = Date.now();
   const m = baseMetrics(now, 'darwin');
-  const run = (file: string, ...args: string[]) => runCmd(file, args, { env: s.env, ms: s.o.cmdTimeoutMs, signal: s.signal });
+  const run = (file: string, ...args: string[]) => s.io.cmd(file, args, { env: s.env, ms: s.o.cmdTimeoutMs, signal: s.signal });
   const [sysctl, vmStat, top, netstat, gpu, block, df, battery] = await Promise.all([
     run('sysctl', '-n', 'vm.loadavg', 'hw.memsize', 'vm.swapusage', 'kern.boottime'),
     run('vm_stat'),
@@ -359,7 +358,7 @@ export async function darwinMetrics(s: Sampling): Promise<Metrics> {
 /** The Mac's processes, as ps lists them. */
 export async function darwinProcesses(s: Sampling): Promise<Processes> {
   const now = Date.now();
-  const run = (file: string, ...args: string[]) => runCmd(file, args, { env: s.env, ms: s.o.cmdTimeoutMs, signal: s.signal });
+  const run = (file: string, ...args: string[]) => s.io.cmd(file, args, { env: s.env, ms: s.o.cmdTimeoutMs, signal: s.signal });
   const [meta, args, mem] = await Promise.all([
     run('ps', '-axww', '-o', 'pid=,ppid=,user=,%cpu=,%mem=,rss=,state=,etime=,comm='),
     run('ps', '-axww', '-o', 'pid=,args='),

@@ -67,6 +67,13 @@ export class Bounded {
       return { bsize: Number(s.bsize), blocks: Number(s.blocks), bfree: Number(s.bfree), bavail: Number(s.bavail) };
     });
   }
+
+  /** A helper program's standard output, null when it fails or does not
+   * answer within ms (even if a setuid binary such as macOS `/usr/bin/top`
+   * or a process in uninterruptible sleep cannot be killed immediately). */
+  cmd(file: string, args: string[], o: { env: Record<string, string>; ms: number; signal?: AbortSignal }): Promise<string | null> {
+    return this.run(`cmd:${file}\0${args.join('\0')}`, o.ms, () => runCmd(file, args, o));
+  }
 }
 
 /** Runs f on each item, at most n at a time; the results in order. */

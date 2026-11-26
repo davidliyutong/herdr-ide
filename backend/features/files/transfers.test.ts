@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { SLUG } from '#shared/lib/brand.ts';
 import { AgentError } from '#kernel/machines/transport/session.ts';
 import { sleep, TEST_INFO, waitFor } from '#kernel/testing.ts';
@@ -13,6 +13,9 @@ import { statStatus } from './hub.ts';
 import { serveFile, TransferFail } from './serve.ts';
 import { filesHub, testPage, type FilesHub } from './testdata/hub.ts';
 
+// Machines speak POSIX paths even when the hub runs on Windows; fsAgent maps
+// REMOTE onto the temporary host directory `dir`.
+const REMOTE = '/test-files';
 let dir: string;
 let fc: FilesHub;
 
@@ -29,7 +32,7 @@ beforeAll(async () => {
   writeFileSync(join(dir, 'bigdir', 'big.bin'), '');
   truncateSync(join(dir, 'bigdir', 'big.bin'), 64 << 20);
   mkdirSync(join(dir, 'uploads'));
-  fc = await filesHub({ info: { ...TEST_INFO, upload_dir: join(dir, 'uploads') } });
+  fc = await filesHub({ root: { posix: REMOTE, local: dir }, info: { ...TEST_INFO, upload_dir: `${REMOTE}/uploads` } });
 });
 
 afterAll(async () => {
@@ -42,7 +45,9 @@ const query = (o: Record<string, string | string[]>) => {
   for (const [k, v] of Object.entries(o)) for (const x of [v].flat()) q.append(k, x);
   return q.toString();
 };
-const at = (path: string) => join(dir, path);
+const at = (path: string) => posix.join(REMOTE, path);
+const diskAt = (path: string) => join(dir, ...path.split('/'));
+const fromRemote = (remotePath: string) => join(dir, ...remotePath.slice(REMOTE.length + 1).split('/'));
 
 const bodyReader = (res: Response) => res.body!.getReader();
 type BodyReader = ReturnType<typeof bodyReader>;
@@ -116,7 +121,7 @@ describe('download', () => {
   });
 
   test('read-only mode downloads, as it shows files', async () => {
-    const ro = await filesHub({ readOnly: true });
+    const ro = await filesHub({ root: { posix: REMOTE, local: dir }, readOnly: true });
     try {
       const res = await fetch(`${ro.url}/api/m/local/download?${query({ path: at('proj/a.txt') })}`);
       expect([res.status, await res.text()]).toEqual([200, 'alpha']);
@@ -138,7 +143,7 @@ describe('file', () => {
   // another reason is not taken for a new one (the editor would offer to
   // create it).
   test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('stat failures', async () => {
-    const locked = at('locked');
+    const locked = diskAt('locked');
     mkdirSync(locked, { mode: 0o700 });
     writeFileSync(join(locked, 'f'), 'f');
     chmodSync(locked, 0);
@@ -197,10 +202,11 @@ describe('file', () => {
 // an empty list.
 test('list', async () => {
   const big = at('many');
-  mkdirSync(big);
-  mkdirSync(at('empty'));
+  const diskBig = diskAt('many');
+  mkdirSync(diskBig);
+  mkdirSync(diskAt('empty'));
   const prefix = 'extracted-file-with-a-long-name-'.repeat(7);
-  for (let i = 0; i < 300; i++) writeFileSync(join(big, `${prefix}${String(i).padStart(6, '0')}.txt`), '');
+  for (let i = 0; i < 300; i++) writeFileSync(join(diskBig, `${prefix}${String(i).padStart(6, '0')}.txt`), '');
   const list = async (p: string) => {
     const res = await fetch(`${fc.url}/api/m/local/list?${query({ path: p })}`);
     return { status: res.status, body: (await res.json()) as { entries: Array<{ name: string }>; dir: { path: string }; error?: string } };
@@ -220,17 +226,17 @@ describe('upload', () => {
     fetch(`${fc.url}/api/m/local/upload?${query(q)}`, { method: 'POST', body });
 
   test('into a directory and into the upload directory', async () => {
-    mkdirSync(at('up'));
+    mkdirSync(diskAt('up'));
     let res = await upload({ name: 'shot.png', dir: at('up') }, 'whole');
     expect([res.status, ((await res.json()) as { path: string }).path]).toEqual([200, at('up/shot.png')]);
     res = await upload({ name: 'shot.png', dir: at('up') }, 'again');
     expect(((await res.json()) as { path: string }).path).toBe(at('up/shot-1.png'));
-    expect([readFileSync(at('up/shot.png'), 'utf8'), readFileSync(at('up/shot-1.png'), 'utf8')]).toEqual(['whole', 'again']);
+    expect([readFileSync(diskAt('up/shot.png'), 'utf8'), readFileSync(diskAt('up/shot-1.png'), 'utf8')]).toEqual(['whole', 'again']);
 
     res = await upload({ name: 'image.png' }, 'pasted');
     const st = (await res.json()) as { path: string };
     expect(st.path).toMatch(new RegExp(`^${at('uploads')}/\\d{8}-\\d{6}-[0-9a-f]{8}-image\\.png$`));
-    expect(readFileSync(st.path, 'utf8')).toBe('pasted');
+    expect(readFileSync(fromRemote(st.path), 'utf8')).toBe('pasted');
     expect(fc.tc.audit.records()).toContainEqual(
       expect.objectContaining({ event: 'file.upload', machine: 'local', path: st.path, size: 6 }),
     );
@@ -241,27 +247,28 @@ describe('upload', () => {
 
   test('a cancelled upload leaves no file', async () => {
     const into = at('cancel');
-    mkdirSync(into);
+    const diskInto = diskAt('cancel');
+    mkdirSync(diskInto);
     const target = `/api/m/local/upload?${query({ name: 'big.bin', dir: into })}`;
     const s = connect(Number(new URL(fc.url).port), '127.0.0.1');
     s.on('error', () => {});
     s.write(`POST ${target} HTTP/1.1\r\nHost: ${new URL(fc.url).host}\r\nContent-Length: ${1 << 20}\r\n\r\n`);
     s.write(Buffer.alloc(64 << 10));
-    await waitFor('the private file of the upload', () => readdirSync(into).some((n) => n.startsWith(`.${SLUG}-upload-`)));
-    expect(readdirSync(into)).toHaveLength(1);
+    await waitFor('the private file of the upload', () => readdirSync(diskInto).some((n) => n.startsWith(`.${SLUG}-upload-`)));
+    expect(readdirSync(diskInto)).toHaveLength(1);
     s.destroy();
-    await waitFor('no file left', () => readdirSync(into).length === 0);
+    await waitFor('no file left', () => readdirSync(diskInto).length === 0);
 
     const res = await fetch(`${fc.url}${target}`, { method: 'POST', body: 'whole' });
-    expect([res.status, readFileSync(join(into, 'big.bin'), 'utf8')]).toEqual([200, 'whole']);
+    expect([res.status, readFileSync(join(diskInto, 'big.bin'), 'utf8')]).toEqual([200, 'whole']);
   });
 
   test('refused in read-only mode', async () => {
-    const ro = await filesHub({ readOnly: true });
+    const ro = await filesHub({ root: { posix: REMOTE, local: dir }, readOnly: true });
     try {
       const res = await fetch(`${ro.url}/api/m/local/upload?${query({ name: 'x', dir: at('up') })}`, { method: 'POST', body: 'x' });
       expect([res.status, ((await res.json()) as { error: string }).error]).toEqual([403, 'read_only']);
-      expect(existsSync(at('up/x'))).toBe(false);
+      expect(existsSync(diskAt('up/x'))).toBe(false);
     } finally {
       await ro.stop();
     }

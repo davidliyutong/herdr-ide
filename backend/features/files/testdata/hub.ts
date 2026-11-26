@@ -11,10 +11,11 @@ import type { Machines } from '#kernel/machines/manager.ts';
 import type { Info } from '#shared/proto/agentproto/index.ts';
 import { fileTransfersFeature, filesFeature } from '../hub.ts';
 import { Downloads, type DownloadEvent } from '../downloads.ts';
-import { fsAgent, type PluginHandler } from './agent.ts';
+import { fsAgent, type FsRootMap, type PluginHandler } from './agent.ts';
 
 export interface FilesHubOptions {
   plugin?: PluginHandler;
+  root?: FsRootMap;
   readOnly?: boolean;
   specs?: Spec[];
   info?: Info;
@@ -35,7 +36,7 @@ export interface FilesHub {
 
 export async function filesHub(o: FilesHubOptions = {}): Promise<FilesHub> {
   const downloads = new Downloads({ everyMs: 0 });
-  const dial = agentDialer({ serve: fsAgent(o.plugin), ...(o.info ? { info: o.info } : {}) });
+  const dial = agentDialer({ serve: fsAgent(o.plugin, o.root), ...(o.info ? { info: o.info } : {}) });
   const machines = testMachines(o.specs ?? [localSpec()], { dial });
   const tc = testHub({
     features: [fileTransfersFeature({ downloads }), filesFeature({ platform: o.platform ?? 'linux' })],

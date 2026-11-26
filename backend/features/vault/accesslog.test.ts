@@ -22,7 +22,7 @@ const rec = (result: string, names = ['A']): Omit<Access, 'id'> => ({
 const add = (l: AccessLog, r: Omit<Access, 'id'>) => l.add(r, noisy(r.result), released(r.result));
 
 test("the hub's database beside the vault's file, per host", () => {
-  expect(hubDBBeside('/c/vault-dev.json')).toMatch(/^\/c\/hub-dev-.+\.db$/);
+  expect(hubDBBeside('/c/vault-dev.json').replaceAll('\\', '/')).toMatch(/^\/c\/hub-dev-.+\.db$/);
   expect(hubDBBeside('')).toBe('');
 });
 

@@ -7,7 +7,7 @@
 import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, posix, sep } from 'node:path';
 import { SLUG } from '#shared/lib/brand.ts';
 import { write } from '#shared/lib/streamio.ts';
 import {
@@ -44,7 +44,7 @@ function failure(e: unknown): Reply {
 }
 
 const statOf = (path: string, fi: Stats, link = false): Stat => ({
-  name: basename(path),
+  name: posix.basename(path),
   path,
   size: fi.size,
   mode: fi.mode & 0o777,
@@ -81,8 +81,27 @@ async function* walk(root: string, name: string): AsyncGenerator<{ path: string;
   for (const e of (await readdir(root)).sort()) yield* walk(join(root, e), `${name}/${e}`);
 }
 
+export interface FsRootMap {
+  /** Virtual POSIX prefix exposed to the hub (e.g. `/test-root`). */
+  posix: string;
+  /** Backing directory on the host's local file system. */
+  local: string;
+}
+
 /** Serves the streams of the hub (the fake agent's serve). */
-export function fsAgent(plugin?: PluginHandler) {
+export function fsAgent(plugin?: PluginHandler, root?: FsRootMap) {
+  const toLocal = (p: string): string => {
+    if (!root) return p;
+    if (p === root.posix) return root.local;
+    if (p.startsWith(`${root.posix}/`)) return join(root.local, ...p.slice(root.posix.length + 1).split('/'));
+    return p;
+  };
+  const toPosix = (lp: string): string => {
+    if (!root) return lp;
+    if (lp === root.local) return root.posix;
+    if (lp.startsWith(root.local + sep)) return `${root.posix}/${lp.slice(root.local.length + 1).replaceAll('\\', '/')}`;
+    return lp;
+  };
   return async (h: Header, conn: AgentStream): Promise<void> => {
     const st = conn.stream;
     const reply = (r: Reply) => writeLine(st, r).catch(() => {});
@@ -90,21 +109,23 @@ export function fsAgent(plugin?: PluginHandler) {
       switch (h.op) {
         case Op.FsStat: {
           const p = h.path ?? '';
-          const l = await lstat(p);
-          const fi = l.isSymbolicLink() ? await stat(p).catch(() => l) : l;
+          const lp = toLocal(p);
+          const l = await lstat(lp);
+          const fi = l.isSymbolicLink() ? await stat(lp).catch(() => l) : l;
           await reply({ ok: true, stat: statOf(p, fi, l.isSymbolicLink()) });
           break;
         }
         case Op.FsList: {
           const p = h.path ?? '';
+          const lp = toLocal(p);
           const entries: Stat[] = [];
-          for (const name of await readdir(p)) {
-            const s = statOf(name, await stat(join(p, name)));
+          for (const name of await readdir(lp)) {
+            const s = statOf(name, await stat(join(lp, name)));
             delete s.path;
             entries.push(s);
           }
           entries.sort((a, b) => (a.is_dir !== b.is_dir ? (a.is_dir ? -1 : 1) : a.name < b.name ? -1 : 1));
-          const dir: Stat = { name: basename(p), path: p, size: 0, mode: 0, mtime: 0, is_dir: true };
+          const dir: Stat = { name: posix.basename(p), path: p, size: 0, mode: 0, mtime: 0, is_dir: true };
           const json = JSON.stringify(entries);
           if (json.length <= MAX_INLINE) await reply({ ok: true, stat: dir, entries });
           else {
@@ -115,7 +136,8 @@ export function fsAgent(plugin?: PluginHandler) {
         }
         case Op.FsRead: {
           const p = h.path ?? '';
-          const f = await open(p);
+          const lp = toLocal(p);
+          const f = await open(lp);
           try {
             const fi = await f.stat();
             if (fi.isDirectory()) throw new Error(`${p} is a directory`);
@@ -137,8 +159,9 @@ export function fsAgent(plugin?: PluginHandler) {
         }
         case Op.FsWrite: {
           const p = h.path ?? '';
-          if (h.mkdirs) await mkdir(dirname(p), { recursive: true });
-          const tmp = join(dirname(p), `.${SLUG}-upload-${randomBytes(4).toString('hex')}`);
+          const lp = toLocal(p);
+          if (h.mkdirs) await mkdir(dirname(lp), { recursive: true });
+          const tmp = join(dirname(lp), `.${SLUG}-upload-${randomBytes(4).toString('hex')}`);
           const f = await open(tmp, 'wx');
           await reply({ ok: true });
           try {
@@ -151,17 +174,17 @@ export function fsAgent(plugin?: PluginHandler) {
             break;
           }
           await f.close();
-          const to = h.unique ? await freeName(p) : p;
+          const to = h.unique ? await freeName(lp) : lp;
           await rename(tmp, to);
-          await reply({ ok: true, stat: statOf(to, await stat(to)) });
+          await reply({ ok: true, stat: statOf(toPosix(to), await stat(to)) });
           break;
         }
         case Op.FsArchive: {
-          for (const p of h.paths ?? []) await stat(p);
+          for (const p of h.paths ?? []) await stat(toLocal(p));
           await reply({ ok: true });
           const cw = new ChunkWriter(st);
-          for (const root of h.paths ?? [])
-            for await (const f of walk(root, basename(root))) {
+          for (const r of h.paths ?? [])
+            for await (const f of walk(toLocal(r), posix.basename(r))) {
               await cw.write(Buffer.from(`${f.name}\n`));
               const fh = await open(f.path);
               try {

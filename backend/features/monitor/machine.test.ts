@@ -27,8 +27,8 @@ async function start(o: Partial<MonitorOptions> = {}) {
   r = await rig({ features: [monitorMachine(o)] });
   const m = machineOf(r.session);
   return {
-    metrics: () => call(m, monitorProtocol, 'metrics', {}),
-    processes: () => call(m, monitorProtocol, 'processes', {}),
+    metrics: (timeoutMs?: number) => call(m, monitorProtocol, 'metrics', {}, { timeoutMs }),
+    processes: (timeoutMs?: number) => call(m, monitorProtocol, 'processes', {}, { timeoutMs }),
     signal: (pid: number, signal: string) => call(m, monitorProtocol, 'signal', { pid, signal }),
     /** The machine's own answer to any pid (the hub's schema bounds it
      * before it sends). */
@@ -70,7 +70,7 @@ describe('on this machine', () => {
     'metrics and processes as the hub reads them; the second sample has rates',
     async () => {
       const a = await start();
-      const m = await a.metrics();
+      const m = await a.metrics(25_000);
       expect(m.os).toBe(process.platform);
       expect(m.cpu.cores).toBeGreaterThan(0);
       expect(m.memory.totalBytes).toBeGreaterThan(0);
@@ -78,10 +78,10 @@ describe('on this machine', () => {
       expect(m.memory.usedPct).toBeLessThanOrEqual(100);
       expect(m.disks?.length).toBeGreaterThan(0);
       expect(m.uptimeSec).toBeGreaterThan(0);
-      const m2 = await a.metrics();
+      const m2 = await a.metrics(25_000);
       expect(m2.timestampMs).toBeGreaterThanOrEqual(m.timestampMs);
       expect(m2.network.rxBytes).toBeGreaterThanOrEqual(0);
-      const p = await a.processes();
+      const p = await a.processes(25_000);
       expect(p.total).toBeGreaterThan(0);
       const me = p.processes?.find((x) => x.pid === process.pid);
       expect(me?.user).toBe(execFileSync('id', ['-un'], { encoding: 'utf8' }).trim());

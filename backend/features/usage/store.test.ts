@@ -85,7 +85,7 @@ test('the rows are Go’s', () => {
       '"key":"claude:acc-1","machines":["local"],"fetchedAt":1800000000,"seenAt":1800000000}',
   );
   expect(hubDBFile('')).toBe('');
-  expect(hubDBFile('/x/settings-dev.json')).toMatch(/^\/x\/hub-dev-.+\.db$/);
+  expect(hubDBFile('/x/settings-dev.json').replaceAll('\\', '/')).toMatch(/^\/x\/hub-dev-.+\.db$/);
 });
 
 // A save before the history was read back (the read failed) does not
